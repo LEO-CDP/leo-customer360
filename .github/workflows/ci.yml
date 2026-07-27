@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  unit-tests:
+    name: Run customer360-api unit tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: customer360-api
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Make test runner executable
+        run: chmod +x run_unit_tests.sh
+
+      - name: Run unit tests
+        run: |
+          mkdir -p logs
+          ./run_unit_tests.sh --junitxml=logs/test-results.xml --tb=short 2>&1 | tee logs/test-output.log
+
+      - name: Upload test logs and results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer360-api-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            customer360-api/logs/test-output.log
+            customer360-api/logs/test-results.xml
+          retention-days: 30
+
+      - name: Publish test summary
+        if: always()
+        uses: test-summary/action@v2
+        with:
+          paths: customer360-api/logs/test-results.xml
