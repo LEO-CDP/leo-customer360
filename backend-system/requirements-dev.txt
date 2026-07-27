@@ -1,0 +1,5 @@
+# Extra local-dev-only dependency for `start.sh`/`dagster dev` (the Dagster
+# webserver UI + daemon). Not needed by any service in production/containers
+# (each service's own requirements.txt is what actually ships), only for
+# running the combined Dagster UI on a dev machine -- see start.sh/README.md.
+dagster-webserver>=1.9,<2

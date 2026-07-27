@@ -1,0 +1,33 @@
+# Dagster workspace for the backend-system services.
+#
+# Loads each service's `dagster_defs.py` as its own code location so they
+# all show up together in the Dagster UI / CLI:
+#
+#   cd backend-system
+#   pip install -r identity_resolution/requirements.txt   # (or a venv per service)
+#   dagster dev -w workspace.yaml
+#
+# Each `python_file` entry is loaded like `python <relative_path>`, with
+# that file's directory added to sys.path -- so e.g.
+# identity_resolution/dagster_defs.py can `import identity_resolution`
+# (its nested package) without any extra path config.
+#
+# NOTE: identity_resolution/scoring/segmentation/analytics each ship their
+# own requirements.txt (they're independent services). Running `dagster
+# dev` against this workspace from a single environment requires every
+# service's requirements installed there; once services diverge more, give
+# each location its own venv and add `executable_path: <path-to-venv-python>`
+# under that entry.
+load_from:
+  - python_file:
+      relative_path: identity_resolution/dagster_defs.py
+      location_name: identity_resolution
+  - python_file:
+      relative_path: scoring/dagster_defs.py
+      location_name: scoring
+  - python_file:
+      relative_path: segmentation/dagster_defs.py
+      location_name: segmentation
+  - python_file:
+      relative_path: analytics/dagster_defs.py
+      location_name: analytics

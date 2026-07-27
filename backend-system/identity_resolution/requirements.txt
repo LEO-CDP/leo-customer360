@@ -4,3 +4,4 @@ pytest-cov>=4.1,<6
 python-dotenv>=1.0,<2
 google-genai>=2.14.0
 pydantic>=2,<3
+dagster>=1.9,<2

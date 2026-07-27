@@ -20,8 +20,10 @@ It ships as three independently runnable pieces:
 | Component | Role | Tech |
 |---|---|---|
 | [`database-schema.sql`](database-schema.sql) | Single source of truth for the `customer360` schema | PostgreSQL 16, `pgvector`, `postgis`, `uuid-ossp`, `pgcrypto` |
-| [`backend-system/identity_resolution/`](backend-system/identity_resolution) | **Customer Identity Resolution (CIR)** engine — links/merges raw profiles into master (golden) profiles | Python + psycopg2 |
+| [`backend-system/identity_resolution/`](backend-system/identity_resolution) | **Customer Identity Resolution (CIR)** engine — links/merges raw profiles into master (golden) profiles | Python + psycopg2, orchestrated by **[Dagster](https://dagster.io)** |
 | [`customer360-api/`](customer360-api) | REST API (CRUD + reporting) over the whole schema | FastAPI + SQLAlchemy 2 ORM |
+
+> **Backend pipelines run on Dagster.** [`backend-system/`](backend-system) is a Dagster workspace: `identity_resolution` (above) plus the (in-progress) `scoring`/`segmentation`/`analytics` services each register as a Dagster job, giving them shared scheduling, retries, and one run-history UI instead of separate ad-hoc scripts. Full architecture, why it scales, and how to add a new service: **[`backend-system/README.md`](backend-system/README.md)**.
 
 ## Repository core services (full)
 
@@ -32,6 +34,7 @@ In this Git repository, the end-to-end platform is organized as the following co
 | Database schema | [`database-schema.sql`](database-schema.sql) | Canonical DDL for `customer360` schema: `cdp_*`, `crm_*`, graph, relations, partitions, RLS policies. |
 | Customer 360 API | [`customer360-api/`](customer360-api) | FastAPI service exposing CRUD, profile360 analytics, segmentation execution, reporting, auth middleware, and cache integration. |
 | Identity Resolution worker | [`backend-system/identity_resolution/`](backend-system/identity_resolution) | CIR engine that matches and merges raw profiles into master profiles; supports batch and continuous worker modes. |
+| Backend orchestration (Dagster) | [`backend-system/`](backend-system) | Dagster workspace (jobs, sensors, run monitoring) tying `identity_resolution` together with the (placeholder, for now) `scoring`/`segmentation`/`analytics` services -- see [`backend-system/README.md`](backend-system/README.md) for the architecture/scaling writeup and how to add a new service. |
 | Frontend admin UI | [`frontend-admin/`](frontend-admin) | Admin and profile UI service for dashboard pages, templates, static assets, and API-driven interaction. |
 | PostgreSQL container image | [`postgres/`](postgres) | Local/runtime PostgreSQL image customization and init SQL scripts (`pgvector`, `postgis`, Keycloak DB bootstrap). |
 | Redis container image | [`redis/`](redis) | Redis runtime config for API response cache and token/identity cache. |
@@ -131,6 +134,7 @@ flowchart TB
 - **One golden record, many sources** — AppsFlyer/MoEngage/Web/POS/Core Banking all land in a single staging table; nothing is siloed per channel.
 - **Identity resolution is a separate, swappable worker** ([`backend-system/identity_resolution/`](backend-system/identity_resolution)), not baked into the API — consistent with the composable-CDP principle of replaceable components.
 - **One API contract** ([`customer360-api/`](customer360-api)) governs all reads/writes to the schema, backed by Redis for latency and Keycloak for SSO/authorization — no application talks to Postgres directly except the CIR worker and the API itself.
+- **Backend pipelines are Dagster-orchestrated** ([`backend-system/`](backend-system)) — one UI for run history, retries, and (as `scoring`/`segmentation`/`analytics` come online) scaling out beyond a single worker loop.
 - **Everything here is open-source infrastructure** (PostgreSQL, Redis, Keycloak) — no proprietary/black-box CDP vendor in the data path.
 
 ---
@@ -235,6 +239,26 @@ cd backend-system/identity_resolution
 
 ## Getting started
 
+Two ways to run the stack locally — pick one.
+
+### Option A — Docker Compose (recommended; closest to production)
+
+```bash
+./manage-c360.sh start        # first run: interactively creates .env (random
+                               # DB/Redis/Keycloak passwords), then builds +
+                               # starts postgres, redis, keycloak, cir, api
+./manage-c360.sh seed-demo    # optional: seed full CIR + CRM/relations/events demo data
+```
+
+- API: http://localhost:8000/docs
+- `.env`'s `SSO_LOGIN=true` default means every endpoint except `/health` requires a Keycloak bearer token — see [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md) §9 for the one-time Keycloak realm/client setup, or set `SSO_LOGIN=false` in `.env` (then `./manage-c360.sh restart api`) to skip auth for local testing.
+- Frontend admin UI: `cd frontend-admin && ./start.sh` — http://localhost:8890
+- Dagster UI for `backend-system/` jobs (CIR today, `scoring`/`segmentation`/`analytics` next): `cd backend-system && ./start.sh` — http://localhost:3000 (see [backend-system/README.md](backend-system/README.md))
+
+Full reference (ports, `--profile dev`, resets, Keycloak setup): [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md).
+
+### Option B — run each Python service directly on the host (no Docker for the apps)
+
 ```bash
 # 1. Start PostgreSQL 16 + pgvector + PostGIS and apply database-schema.sql
 ./dev-start-pgsql.sh            # first run: creates container + applies schema
@@ -243,7 +267,7 @@ cd backend-system/identity_resolution
 # 2. Run the CIR demo (seeds data + resolves identities)
 cd backend-system/identity_resolution && ./run-demo.sh
 
-# 3. Run the REST API
+# 3. Run the REST API (no .env needed here -- SSO_LOGIN defaults to false)
 cd ../customer360-api && ./start.sh   # docs at http://localhost:8000/docs
 ```
 
