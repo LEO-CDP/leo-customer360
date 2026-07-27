@@ -287,8 +287,9 @@ See [ROADMAP.md](ROADMAP.md) for near/mid/long-term plans: tenant-scoped authori
 
 ## References
 
+* [LEOCDP.com](https://leocdp.com) 
 * Salesforce Customer 360 Graph Model (adapted) — inspiration for the Lead/Campaign/Contact/Account/Opportunity journey graph.
-* [LEO CDP 1.0](../core-leo-cdp) (ArangoDB 3.11-based) — the sibling CDP module in this monorepo; `cdp_event_catalog`'s event vocabulary is adapted from its [`BehavioralEvent`](../core-leo-cdp/src/main/java/leotech/cdp/domain/schema/BehavioralEvent.java) taxonomy so events stay consistent whether they land in ArangoDB or here in Postgres.
+* [LEO CDP 1.0](https://github.com/trieu/leo-cdp) (ArangoDB 3.11-based) — the sibling CDP module in this monorepo; `cdp_event_catalog`'s event vocabulary is adapted from its [`TrackingEvent`](https://github.com/trieu/leo-cdp/blob/master/core-leo-cdp/src/main/java/leotech/cdp/model/analytics/TrackingEvent.java) taxonomy so events stay consistent whether they land in ArangoDB or here in Postgres.
 * [pgvector](https://github.com/pgvector/pgvector) / [PostGIS](https://postgis.net/)
 * Google Customer Match / Enhanced Conversions (hashed-PII matching pattern)
 
