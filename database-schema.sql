@@ -691,7 +691,8 @@ COMMENT ON TABLE customer360.cdp_profile_links IS 'Join table recording every ra
 -- session_id) are carried directly on the event row -- NOT only reachable via
 -- master_profile_id/raw_profile_id -- so high-throughput ingestion never
 -- blocks waiting for Customer Identity Resolution (CIR) to link the event to
--- a resolved profile first. master_profile_id/raw_profile_id are expected to
+-- a resolved profile first. raw_profile_id is required at ingest time (event
+-- must link to cdp_raw_profiles_stage), while master_profile_id is expected to
 -- be backfilled asynchronously once CIR resolves the identity.
 -- ============================================================================
 CREATE TABLE customer360.cdp_raw_events (
@@ -705,9 +706,10 @@ CREATE TABLE customer360.cdp_raw_events (
     -- rows/entity_type values are relevant).
     domain TEXT NOT NULL DEFAULT 'retail' CHECK (domain IN ('retail', 'banking', 'real_estate', 'travel')),
 
-    -- Lineage to resolved/staged profiles. Nullable + backfilled -- see note above.
+    -- Lineage to resolved/staged profiles. raw_profile_id is required and points to
+    -- cdp_raw_profiles_stage; master_profile_id remains nullable/backfilled.
     master_profile_id UUID REFERENCES customer360.cdp_master_profiles (master_profile_id),
-    raw_profile_id UUID REFERENCES customer360.cdp_raw_profiles_stage (raw_profile_id),
+    raw_profile_id UUID NOT NULL REFERENCES customer360.cdp_raw_profiles_stage (raw_profile_id),
 
     -- Direct identity carry, available at ingest time even before/without CIR.
     external_customer_id TEXT,
@@ -718,6 +720,9 @@ CREATE TABLE customer360.cdp_raw_events (
 
     -- Source & channel of the event.
     source_system TEXT NOT NULL, -- 'AppsFlyer' | 'MoEngage' | 'WebTracking' | 'CoreBanking' | 'POS' | 'PMS' | 'GDS' | ...
+    -- Optional idempotency key from ingestion caller; when present it is
+    -- unique per (tenant_id, source_system) to make repeated retries safe.
+    event_dedup_key TEXT,
     channel TEXT, -- 'mobile_app' | 'web' | 'pos' | 'call_center' | 'branch' | 'agent' | 'ivr' | ...
     platform TEXT, -- ios | android | web
     ip_address INET,
@@ -768,7 +773,7 @@ CREATE TABLE customer360.cdp_raw_events (
     PRIMARY KEY (event_id, event_time)
 ) PARTITION BY RANGE (event_time);
 
-COMMENT ON TABLE customer360.cdp_raw_events IS 'High-volume behavioral/transactional event fact table, range-partitioned monthly by event_time. Identity columns are carried directly on the row so ingestion never blocks on CIR; master_profile_id/raw_profile_id are backfilled asynchronously. See cdp_event_catalog for the governed event_category/event_name vocabulary.';
+COMMENT ON TABLE customer360.cdp_raw_events IS 'High-volume behavioral/transactional event fact table, range-partitioned monthly by event_time. Identity columns are carried directly on the row so ingestion never blocks on CIR; raw_profile_id is mandatory (linked to cdp_raw_profiles_stage) while master_profile_id is backfilled asynchronously. See cdp_event_catalog for the governed event_category/event_name vocabulary.';
 
 -- Creates (idempotently) the monthly partition covering for_date, e.g.
 -- customer360.cdp_raw_events_2026_07 for FOR VALUES FROM ('2026-07-01') TO ('2026-08-01').
@@ -1448,6 +1453,14 @@ WHERE
 -- cdp_raw_events indexes: created on the partitioned parent, Postgres
 -- propagates each of these automatically to every monthly partition (current
 -- + future ones created via ensure_cdp_raw_events_partition()).
+-- Optional idempotency key per source-system ingestion stream.
+CREATE UNIQUE INDEX ux_cdp_raw_events_tenant_source_dedup ON customer360.cdp_raw_events (
+    tenant_id,
+    source_system,
+    event_dedup_key
+)
+WHERE
+    event_dedup_key IS NOT NULL;
 -- Tenant timeline queries (most common access pattern for a Customer 360 view).
 CREATE INDEX idx_cdp_raw_events_tenant_time ON customer360.cdp_raw_events (tenant_id, event_time DESC);
 -- Event taxonomy / funnel analysis per tenant+domain.

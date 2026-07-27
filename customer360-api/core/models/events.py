@@ -45,8 +45,8 @@ class CdpRawEvent(Base):
     master_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("cdp_master_profiles.master_profile_id")
     )
-    raw_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("cdp_raw_profiles_stage.raw_profile_id")
+    raw_profile_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_raw_profiles_stage.raw_profile_id"), nullable=False
     )
 
     external_customer_id: Mapped[Optional[str]] = mapped_column(Text)
@@ -56,6 +56,7 @@ class CdpRawEvent(Base):
     session_id: Mapped[Optional[str]] = mapped_column(Text)
 
     source_system: Mapped[str] = mapped_column(Text, nullable=False)
+    event_dedup_key: Mapped[Optional[str]] = mapped_column(Text)
     channel: Mapped[Optional[str]] = mapped_column(Text)
     platform: Mapped[Optional[str]] = mapped_column(Text)
     ip_address: Mapped[Optional[str]] = mapped_column(INET)

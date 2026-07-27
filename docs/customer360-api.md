@@ -183,14 +183,23 @@ Both use the common CRUD pattern.
 
 ## Events APIs
 
-Read-only high-volume stream endpoints.
+High-volume stream endpoints with direct event ingestion support.
 
 ### How To Use
 
-1. List events with optional filters
+1. Create one event (auto-links to raw profile)
+- `POST /api/v1/events/`
+- If `raw_profile_id` is omitted, provide at least one identity hint (`email`, `phone_number`, `external_customer_id`, `device_id`, `advertising_id`, `cookie_id`, or `session_id`) and the API will find/create a `cdp_raw_profiles_stage` row before inserting `cdp_raw_events`.
+- Optional idempotency: send `event_dedup_key`; re-sending the same key for the same `(tenant_id, source_system)` returns the existing event instead of creating a duplicate row.
+
+2. Bulk create events (small/medium batches)
+- `POST /api/v1/events/bulk`
+- Body is an array of event payloads (same shape as `POST /api/v1/events/`).
+
+3. List events with optional filters
 - `GET /api/v1/events/?tenant_id=<tenant-uuid>&master_profile_id=<master-profile-uuid>&domain=retail&channel=web&event_category=engagement&event_name=page_view&event_time_from=2026-01-01T00:00:00&event_time_to=2026-01-31T23:59:59&skip=0&limit=50`
 
-2. Get one event
+4. Get one event
 - `GET /api/v1/events/<event-uuid>`
 
 ## Personalized Content APIs
@@ -397,7 +406,7 @@ This matrix is the complete endpoint coverage for core data entities.
 | Content Items | `GET /api/v1/content-items/` | `GET /api/v1/content-items/{id}` | `POST /api/v1/content-items/` | `PATCH /api/v1/content-items/{id}` | `DELETE /api/v1/content-items/{id}` | `GET /api/v1/content-items/count` | includes `/recommended` endpoint |
 | Segments | `GET /api/v1/segments/` | `GET /api/v1/segments/{id}` | `POST /api/v1/segments/` | `PATCH /api/v1/segments/{id}` | `DELETE /api/v1/segments/{id}` | `GET /api/v1/segments/count` | includes matched-profiles endpoints |
 | Graph Edges | `GET /api/v1/graph-edges/` | `GET /api/v1/graph-edges/{id}` | `POST /api/v1/graph-edges/` | N/A | `DELETE /api/v1/graph-edges/{id}` | `GET /api/v1/graph-edges/count` | custom router, no patch |
-| Events | `GET /api/v1/events/` | `GET /api/v1/events/{id}` | N/A | N/A | N/A | N/A | read-only stream |
+| Events | `GET /api/v1/events/` | `GET /api/v1/events/{id}` | `POST /api/v1/events/`, `POST /api/v1/events/bulk` | N/A | N/A | N/A | supports direct ingest + auto raw-profile linking + idempotency via `event_dedup_key` |
 | Resolution Status | `GET /api/v1/resolution-status/` | N/A | N/A | N/A | N/A | N/A | read-only status singleton |
 
 ### QA Smoke Sequence (Minimal)
