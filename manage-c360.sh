@@ -167,7 +167,7 @@ bootstrap_env_interactive() {
   local hostname
   hostname="$(prompt_value 'Public hostname/domain for this server (used by Keycloak + frontend)' 'localhost')"
   set_env_value KEYCLOAK_HOSTNAME "$hostname"
-  set_env_value FRONTEND_API_HOSTNAME "http://${hostname}:$(get_env_value API_HOST_PORT || echo 8000)"
+  set_env_value FRONTEND_API_HOSTNAME "http://${hostname}:$(get_env_value API_HOST_PORT || echo 8008)"
   local real_prod
   real_prod="$(prompt_value "Run Keycloak in production mode ('start', requires TLS/reverse proxy) instead of 'start-dev'? [y/N]" 'N')"
   case "$real_prod" in
@@ -331,7 +331,7 @@ cmd_start() {
 
   echo ""
   echo "✅ Production stack is up."
-  echo "   API:      http://${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-8000}  (docs: /docs)"
+  echo "   API:      http://${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-8008}  (docs: /docs)"
   echo "   Keycloak: http://${KEYCLOAK_HOST_BIND:-127.0.0.1}:${KEYCLOAK_HOST_PORT:-8080}"
 }
 

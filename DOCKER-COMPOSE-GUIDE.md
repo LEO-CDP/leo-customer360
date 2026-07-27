@@ -20,7 +20,7 @@ containerized deployment.
 | `keycloak-db-init` | reuses `customer360-postgres:local` | **One-shot** job that creates the dedicated `db_keycloak` database on the shared `postgres` instance, then exits | none |
 | `keycloak` | `keycloak/keycloak:latest` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
 | `cir` | `customer360-cir:local` (Python 3.11-slim) | Customer Identity Resolution worker — continuously drains `cdp_raw_profiles_stage` | none (background worker, no HTTP) |
-| `api` | `customer360-api:local` (Python 3.11-slim) | Customer 360 / CIR REST API (FastAPI), Keycloak-secured | `${API_HOST_PORT:-8000}` → 8000 |
+| `api` | `customer360-api:local` (Python 3.11-slim) | Customer 360 / CIR REST API (FastAPI), Keycloak-secured | `${API_HOST_PORT:-8008}` → 8008 |
 | `cir-demo-seed` | reuses `customer360-cir:local` | **Dev only** one-shot job that seeds demo data, then exits | none |
 
 All services share one bridge network, `customer360-network`, and are isolated
@@ -42,7 +42,7 @@ flowchart LR
     API -->|redis-py: cache + token cache| RD
     API -->|introspect Bearer token| KC
     KC -->|db_keycloak| PG
-    Client -->|HTTP :8000 + Authorization: Bearer| API
+    Client -->|HTTP :8008 + Authorization: Bearer| API
     Seed[cir-demo-seed\nprofile: dev] -.->|one-shot| PG
 ```
 
@@ -53,7 +53,7 @@ flowchart LR
 - Docker Engine + Docker Compose v2 (the `docker compose` plugin, not the
   legacy standalone `docker-compose` v1 binary — `depends_on.condition:
   service_healthy` requires the Compose Specification).
-- Ports `5432` / `6379` / `8000` free on the host, **or** override them (see
+- Ports `5432` / `6379` / `8008` free on the host, **or** override them (see
   §4) — this matters on dev machines that already run `pgsql16_vector` /
   another Redis via [`dev-start-pgsql.sh`](dev-start-pgsql.sh).
 
@@ -153,7 +153,7 @@ API_HOST_PORT=18000
 ```
 
 Containers still talk to each other over `customer360-network` on the
-standard internal ports (5432/6379/8000) — only the host-published mapping
+standard internal ports (5432/6379/8008) — only the host-published mapping
 changes.
 
 ### Building without starting, or rebuilding a single service
@@ -176,7 +176,7 @@ docker inspect -f '{{.State.Health.Status}}' customer360-postgres
 docker inspect -f '{{.State.Health.Status}}' customer360-redis
 docker inspect -f '{{.State.Health.Status}}' customer360-cir
 docker inspect -f '{{.State.Health.Status}}' customer360-api
-curl -s http://localhost:${API_HOST_PORT:-8000}/health
+curl -s http://localhost:${API_HOST_PORT:-8008}/health
 ```
 
 | Service | Healthcheck mechanism |
@@ -185,7 +185,7 @@ curl -s http://localhost:${API_HOST_PORT:-8000}/health
 | `redis` | `redis-cli -a $REDIS_PASSWORD ping` |
 | `keycloak` | `GET /health/ready` (`KC_HEALTH_ENABLED=true`) |
 | `cir` | `python healthcheck.py` — raw psycopg2 connection test (no HTTP surface on this worker) |
-| `api` | `python -c "urllib.request.urlopen('http://localhost:8000/health')"` |
+| `api` | `python -c "urllib.request.urlopen('http://localhost:8008/health')"` |
 
 All 4 use `restart: unless-stopped` — a crashed container (or one killed by
 `docker restart`) comes back automatically; a deliberate `docker compose stop`
@@ -296,7 +296,7 @@ volume — see above.)
 
 | Symptom | Likely cause / fix |
 |---|---|
-| `failed to bind host port ... address already in use` | Another process (e.g. `pgsql16_vector`, a host Redis) already owns 5432/6379/8000. Set `POSTGRES_HOST_PORT`/`REDIS_HOST_PORT`/`API_HOST_PORT` in `.env` to unused ports. |
+| `failed to bind host port ... address already in use` | Another process (e.g. `pgsql16_vector`, a host Redis) already owns 5432/6379/8008. Set `POSTGRES_HOST_PORT`/`REDIS_HOST_PORT`/`API_HOST_PORT` in `.env` to unused ports. |
 | `api`/`cir` stuck "waiting" / never healthy | Check `docker compose logs postgres` — if it never reaches healthy, the DB init script likely failed (bad `.env` values, or a non-idempotent manual schema edit). |
 | `psycopg2.errors.UndefinedColumn` after editing `database-schema.sql` | Schema drift — the running volume was provisioned before your edit. See §7. |
 | `NOAUTH Authentication required` from Redis | `REDIS_PASSWORD` mismatch between `.env` and what `api`/`redis` were started with — restart both after changing it (`docker compose up -d --force-recreate redis api`). |
@@ -345,7 +345,7 @@ TOKEN=$(curl -s -X POST \
   -d "username=<test-user>" \
   -d "password=<test-user-password>" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
-curl -s http://localhost:${API_HOST_PORT:-8000}/api/v1/reporting/summary \
+curl -s http://localhost:${API_HOST_PORT:-8008}/api/v1/reporting/summary \
   -H "Authorization: Bearer $TOKEN"
 ```
 

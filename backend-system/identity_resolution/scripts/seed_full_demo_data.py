@@ -515,7 +515,40 @@ UNRESOLVED_EVENTS = [
 ]
 
 
-def seed_raw_events(cursor, master_profiles: list) -> None:
+def seed_raw_profiles_for_anonymous_events(cursor) -> dict:
+    """Creates raw profiles for anonymous/unresolved events (travel/real_estate domains).
+    
+    Returns a dict mapping (domain, device_id) to raw_profile_id so events can reference them.
+    """
+    logger.info("Seeding raw profiles for anonymous events (travel/real_estate)...")
+    raw_profile_map = {}
+    rng = stable_rng("anonymous_raw_profiles")
+    
+    # Create raw profiles for travel and real_estate domains
+    for domain, _, _, _, _, _ in UNRESOLVED_EVENTS:
+        # Create a few raw profiles per domain for variety
+        for i in range(3):
+            device_id = f"demo-anon-device-{domain}-{i}-{rng.randint(1000, 9999)}"
+            raw_profile_id = str(uuid.uuid4())
+            
+            cursor.execute(
+                f"""
+                INSERT INTO {_table('cdp_raw_profiles_stage')}
+                    (raw_profile_id, tenant_id, domain, source_system, channel, device_id,
+                     event_name, status_code)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+                """,
+                (
+                    raw_profile_id, DEMO_TENANT_ID, domain, "WebTracking", "web",
+                    device_id, "page-view", 1,
+                ),
+            )
+            raw_profile_map[(domain, device_id)] = raw_profile_id
+    
+    return raw_profile_map
+
+
+def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict = None) -> None:
     logger.info(
         "Seeding cdp_raw_events for all master profiles (minimum %d events/profile)...",
         MIN_EVENTS_PER_MASTER_PROFILE,
@@ -527,12 +560,12 @@ def seed_raw_events(cursor, master_profiles: list) -> None:
             cursor.execute(
                 f"""
                 INSERT INTO {_table('cdp_raw_events')}
-                    (tenant_id, domain, master_profile_id, source_system, channel, event_category,
+                    (tenant_id, domain, master_profile_id, raw_profile_id, source_system, channel, event_category,
                      event_name, is_conversion, entity_type, event_value, currency, event_time)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                 """,
                 (
-                    DEMO_TENANT_ID, m["domain"], m["master_profile_id"],
+                    DEMO_TENANT_ID, m["domain"], m["master_profile_id"], m["first_seen_raw_profile_id"],
                     "AppsFlyer" if m["domain"] == "retail" else "CoreBanking",
                     "mobile_app", category, event_name, is_conversion, entity_type,
                     rng.randint(*value_range) if value_range else None, "VND",
@@ -547,12 +580,12 @@ def seed_raw_events(cursor, master_profiles: list) -> None:
             cursor.execute(
                 f"""
                 INSERT INTO {_table('cdp_raw_events')}
-                    (tenant_id, domain, master_profile_id, source_system, channel, event_category,
+                    (tenant_id, domain, master_profile_id, raw_profile_id, source_system, channel, event_category,
                      event_name, is_conversion, entity_type, event_value, currency, event_time)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                 """,
                 (
-                    DEMO_TENANT_ID, m["domain"], m["master_profile_id"],
+                    DEMO_TENANT_ID, m["domain"], m["master_profile_id"], m["first_seen_raw_profile_id"],
                     "AppsFlyer" if m["domain"] == "retail" else "CoreBanking",
                     "mobile_app", category, event_name, is_conversion, entity_type,
                     rng.randint(*value_range) if value_range else None, "VND",
@@ -561,17 +594,29 @@ def seed_raw_events(cursor, master_profiles: list) -> None:
             )
 
     logger.info("Seeding anonymous cdp_raw_events for travel/real_estate domains (no resolved profile yet)...")
+    if raw_profile_map is None:
+        raw_profile_map = {}
+    
     rng = stable_rng("unresolved_events")
     for domain, category, event_name, value_range, entity_type, is_conversion in UNRESOLVED_EVENTS:
+        # Use device_ids from our raw_profile_map to ensure FK constraint is satisfied
+        raw_profile_keys = [(d, dev_id) for (d, dev_id) in raw_profile_map.keys() if d == domain]
+        if raw_profile_keys:
+            domain_to_use, device_id = rng.choice(raw_profile_keys)
+            raw_profile_id = raw_profile_map[(domain_to_use, device_id)]
+        else:
+            # Fallback: should not happen if raw_profile_map was properly populated
+            continue
+        
         cursor.execute(
             f"""
             INSERT INTO {_table('cdp_raw_events')}
-                (tenant_id, domain, device_id, source_system, channel, event_category, event_name,
+                (tenant_id, domain, device_id, raw_profile_id, source_system, channel, event_category, event_name,
                  is_conversion, entity_type, event_value, currency, event_time)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """,
             (
-                DEMO_TENANT_ID, domain, f"demo-anon-device-{rng.randint(1000, 9999)}", "WebTracking", "web",
+                DEMO_TENANT_ID, domain, device_id, raw_profile_id, "WebTracking", "web",
                 category, event_name, is_conversion, entity_type,
                 rng.randint(*value_range) if value_range else None, "VND",
                 datetime.now() - timedelta(days=rng.randint(1, 30)),
@@ -958,7 +1003,8 @@ def main() -> None:
             seed_relations(cursor, detail_profiles)
             seed_customer_contacts(cursor, detail_profiles)
             seed_transactions(cursor, detail_profiles)
-            seed_raw_events(cursor, master_profiles)
+            raw_profile_map = seed_raw_profiles_for_anonymous_events(cursor)
+            seed_raw_events(cursor, master_profiles, raw_profile_map)
             validate_min_events_per_master_profile(cursor)
             seed_graph_edges(cursor, crm_ids, detail_profiles)
             enrich_master_profiles(cursor, master_profiles)

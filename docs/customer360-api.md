@@ -297,7 +297,7 @@ Use this section for fast copy/paste during UI integration and test execution.
 ### Environment Template
 
 ```bash
-BASE_URL="http://localhost:8000/api/v1"
+BASE_URL="http://localhost:8008/api/v1"
 TOKEN="<bearer-token>"
 TENANT_ID="<tenant-uuid>"
 MASTER_PROFILE_ID="<master-profile-uuid>"
@@ -413,7 +413,7 @@ This matrix is the complete endpoint coverage for core data entities.
 
 1. Check service health.
 ```bash
-curl -X GET "http://localhost:8000/health"
+curl -X GET "http://localhost:8008/health"
 ```
 
 2. Validate auth + tenant-scoped list endpoint.

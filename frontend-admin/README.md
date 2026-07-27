@@ -213,7 +213,7 @@ is the entire mechanism.
 ## Run
 
 1. Start `customer360-api` (see `../customer360-api/start.sh`) so it's listening on
-   `http://localhost:8000`.
+   `http://localhost:8008`.
 2. Start this app with `./start.sh` (installs/reuses a venv, then runs
    `uvicorn app:app` on `http://localhost:8890`, backgrounded; logs to
    `logs/app.log`, PID in `.uvicorn.pid`). Stop it with `./stop.sh`, or

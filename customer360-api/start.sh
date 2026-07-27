@@ -99,7 +99,7 @@ else
 fi
 
 HOST="${API_HOST:-0.0.0.0}"
-PORT="${API_PORT:-8000}"
+PORT="${API_PORT:-8008}"
 RELOAD_FLAG=""
 if [ "${UVICORN_RELOAD:-false}" = "true" ]; then
     RELOAD_FLAG="--reload"

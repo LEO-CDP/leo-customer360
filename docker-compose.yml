@@ -251,7 +251,7 @@ services:
       keycloak:
         condition: service_healthy
     ports:
-      - "${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-8000}:8000"
+      - "${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-8008}:8008"
     networks:
       - customer360-network
     deploy:
@@ -265,7 +265,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8008/health', timeout=3)",
         ]
       interval: 15s
       timeout: 5s

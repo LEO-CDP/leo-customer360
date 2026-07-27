@@ -153,7 +153,7 @@ Mỗi bảng đều có `description`, `keywords TEXT[]`, `embedding vector(1536
 
 ## 6. API Reference (`customer360-api`)
 
-Base URL mặc định: `http://localhost:8000`. Toàn bộ route nghiệp vụ nằm dưới tiền tố `/api/v1`. Tài liệu tương tác: `GET /docs` (Swagger UI), `GET /openapi.json`.
+Base URL mặc định: `http://localhost:8008`. Toàn bộ route nghiệp vụ nằm dưới tiền tố `/api/v1`. Tài liệu tương tác: `GET /docs` (Swagger UI), `GET /openapi.json`.
 
 ### 6.0. Health & Root
 
@@ -296,7 +296,7 @@ cd backend-system/identity_resolution
 # 3. Chạy REST API
 cd ../customer360-api
 ./start.sh              # uvicorn (KHÔNG --reload theo mặc định — phải stop/start lại sau khi sửa code)
-# Swagger UI: http://localhost:8000/docs
+# Swagger UI: http://localhost:8008/docs
 ```
 
 Test tự động cho engine CIR: `backend-system/identity_resolution/run_tests.sh` (pytest, mock hoàn toàn psycopg2, không cần DB thật).

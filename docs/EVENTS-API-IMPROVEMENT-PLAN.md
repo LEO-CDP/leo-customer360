@@ -55,7 +55,7 @@ API gap:
 - [x] Keep user_id optional and default null for non-interactive ingestion.
 
 ### Phase C - File import APIs (local + S3)
-- [ ] Add POST /api/v1/events/import/file (multipart upload: csv/json/jsonl). Uploaded must less than 10MB
+- [ ] Add POST /api/v1/events/import/file (multipart upload: csv/json/jsonl). Uploaded file must be less than 10MB
 - [ ] Add POST /api/v1/events/import/uri (s3://..., file://..., absolute local path if enabled).
 - [ ] Add GET /api/v1/events/import-jobs/{job_id} (status/progress/errors).
 - [ ] Add validation and normalization pipeline:

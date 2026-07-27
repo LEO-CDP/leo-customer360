@@ -37,7 +37,7 @@ BASE_DIR = Path(__file__).resolve().parent
 # `environment:`/`-e`, not a file (no .env is copied into the image).
 load_dotenv(BASE_DIR / ".env")
 
-API_HOSTNAME = os.getenv("FRONTEND_API_HOSTNAME", "http://localhost:8000").rstrip("/")
+API_HOSTNAME = os.getenv("FRONTEND_API_HOSTNAME", "http://localhost:8008").rstrip("/")
 API_BASE = f"{API_HOSTNAME}/api/v1"
 TENANT_ID = os.getenv("FRONTEND_TENANT_ID", "11111111-1111-1111-1111-111111111111")
 

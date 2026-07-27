@@ -250,7 +250,7 @@ Two ways to run the stack locally — pick one.
 ./manage-c360.sh seed-demo    # optional: seed full CIR + CRM/relations/events demo data
 ```
 
-- API: http://localhost:8000/docs
+- API: http://localhost:8008/docs
 - `.env`'s `SSO_LOGIN=true` default means every endpoint except `/health` requires a Keycloak bearer token — see [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md) §9 for the one-time Keycloak realm/client setup, or set `SSO_LOGIN=false` in `.env` (then `./manage-c360.sh restart api`) to skip auth for local testing.
 - Frontend admin UI: `cd frontend-admin && ./start.sh` — http://localhost:8890
 - Dagster UI for `backend-system/` jobs (CIR today, `scoring`/`segmentation`/`analytics` next): `cd backend-system && ./start.sh` — http://localhost:3000 (see [backend-system/README.md](backend-system/README.md))
@@ -268,7 +268,7 @@ Full reference (ports, `--profile dev`, resets, Keycloak setup): [DOCKER-COMPOSE
 cd backend-system/identity_resolution && ./run-demo.sh
 
 # 3. Run the REST API (no .env needed here -- SSO_LOGIN defaults to false)
-cd ../customer360-api && ./start.sh   # docs at http://localhost:8000/docs
+cd ../customer360-api && ./start.sh   # docs at http://localhost:8008/docs
 ```
 
 `customer360-api` exposes CRUD for every table above plus reporting endpoints:

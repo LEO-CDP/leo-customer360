@@ -79,7 +79,7 @@ GOOGLE_GENAI_MODEL = os.getenv("GOOGLE_GENAI_MODEL", "gemini-3.5-flash")
 # Bounds the worst-case latency of a single Gemini call (milliseconds) so a
 # slow/unreachable API can never stall the CIR resolution batch -- on
 # timeout the call raises and generate_persona_name() falls back offline.
-_GENAI_TIMEOUT_MS = int(os.getenv("GOOGLE_GENAI_TIMEOUT_MS", "8000"))
+_GENAI_TIMEOUT_MS = int(os.getenv("GOOGLE_GENAI_TIMEOUT_MS", "9000"))  # 9s default, same as the default Uvicorn timeout
 
 
 def _has_configured_api_key(api_key: Optional[str]) -> bool:

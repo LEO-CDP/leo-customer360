@@ -990,7 +990,7 @@ Tối ưu cấu hình Server (dù là Managed hay Self-hosted):
 ### 🔧 **1. Database Setup & Config**
 
 * [ ] Khởi tạo Managed PostgreSQL (Version 16+ để tận hưởng tối ưu index JSON/B-Tree).
-* [ ] Ổ cứng SSD High-IOPS (Provisioned từ 8000+ IOPS).
+* [ ] Ổ cứng SSD High-IOPS (Provisioned từ 9000+ IOPS).
 * [ ] Tuning `shared_buffers`, `work_mem`, `max_connections`.
 
 ### 🧩 **2. Thiết kế bảng & phân vùng**

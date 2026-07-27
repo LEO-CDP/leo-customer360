@@ -13,7 +13,7 @@ window.C360 = window.C360 || {};
   "use strict";
 
   var DEFAULTS = {
-    apiBase: "http://localhost:8000/api/v1",
+    apiBase: "http://localhost:8008/api/v1",
     tenantId: "11111111-1111-1111-1111-111111111111"
   };
 

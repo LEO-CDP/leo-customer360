@@ -47,7 +47,7 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
-log "API hostname for the browser: ${FRONTEND_API_HOSTNAME:-http://localhost:8000}"
+log "API hostname for the browser: ${FRONTEND_API_HOSTNAME:-http://localhost:8008}"
 log "${GREEN}Restarting frontend-admin...${NC}"
 "$PROJECT_HOME/stop.sh"
 "$PROJECT_HOME/start.sh"

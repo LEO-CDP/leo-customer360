@@ -78,7 +78,7 @@ fi
 # on every request -- see app.py. Must be reachable from the BROWSER (not
 # just this container), so a docker-network service name won't work here.
 ###############################################################################
-log "API hostname for the browser: ${FRONTEND_API_HOSTNAME:-http://localhost:8000}"
+log "API hostname for the browser: ${FRONTEND_API_HOSTNAME:-http://localhost:8008}"
 
 HOST="${FRONTEND_HOST:-0.0.0.0}"
 PORT="${FRONTEND_PORT:-8890}"
