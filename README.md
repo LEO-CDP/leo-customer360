@@ -20,7 +20,7 @@ It ships as three independently runnable pieces:
 | Component | Role | Tech |
 |---|---|---|
 | [`database-schema.sql`](database-schema.sql) | Single source of truth for the `customer360` schema | PostgreSQL 16, `pgvector`, `postgis`, `uuid-ossp`, `pgcrypto` |
-| [`identity-resolution-service/`](identity-resolution-service) | **Customer Identity Resolution (CIR)** engine — links/merges raw profiles into master (golden) profiles | Python + psycopg2 |
+| [`backend-system/identity_resolution/`](backend-system/identity_resolution) | **Customer Identity Resolution (CIR)** engine — links/merges raw profiles into master (golden) profiles | Python + psycopg2 |
 | [`customer360-api/`](customer360-api) | REST API (CRUD + reporting) over the whole schema | FastAPI + SQLAlchemy 2 ORM |
 
 ## Repository core services (full)
@@ -31,7 +31,7 @@ In this Git repository, the end-to-end platform is organized as the following co
 |---|---|---|
 | Database schema | [`database-schema.sql`](database-schema.sql) | Canonical DDL for `customer360` schema: `cdp_*`, `crm_*`, graph, relations, partitions, RLS policies. |
 | Customer 360 API | [`customer360-api/`](customer360-api) | FastAPI service exposing CRUD, profile360 analytics, segmentation execution, reporting, auth middleware, and cache integration. |
-| Identity Resolution worker | [`identity-resolution-service/`](identity-resolution-service) | CIR engine that matches and merges raw profiles into master profiles; supports batch and continuous worker modes. |
+| Identity Resolution worker | [`backend-system/identity_resolution/`](backend-system/identity_resolution) | CIR engine that matches and merges raw profiles into master profiles; supports batch and continuous worker modes. |
 | Frontend admin UI | [`frontend-admin/`](frontend-admin) | Admin and profile UI service for dashboard pages, templates, static assets, and API-driven interaction. |
 | PostgreSQL container image | [`postgres/`](postgres) | Local/runtime PostgreSQL image customization and init SQL scripts (`pgvector`, `postgis`, Keycloak DB bootstrap). |
 | Redis container image | [`redis/`](redis) | Redis runtime config for API response cache and token/identity cache. |
@@ -55,19 +55,19 @@ The API code is intentionally split into small, focused modules under [`customer
 | Routers | [`core/routers/`](customer360-api/core/routers) | Endpoint modules for identity, CRM, events, relations, graph, reporting, segment, and content. |
 | SQL safety | [`core/utils/sql_safety.py`](customer360-api/core/utils/sql_safety.py) | Validation guardrails for admin-authored SQL fragments used by segmentation. |
 
-## `identity-resolution-service` core module map
+## `backend-system/identity_resolution` core module map
 
-The CIR service logic is split under [`identity-resolution-service/identity_resolution/`](identity-resolution-service/identity_resolution):
+The CIR service logic is split under [`backend-system/identity_resolution/identity_resolution/`](backend-system/identity_resolution/identity_resolution):
 
 | Module | Path | Purpose |
 |---|---|---|
-| Resolver engine | [`resolver.py`](identity-resolution-service/identity_resolution/resolver.py) | Core matching/merge logic against active matching metadata and per-domain scope. |
-| Persona generation | [`persona.py`](identity-resolution-service/identity_resolution/persona.py) | Human-readable persona name generation for hashed PII profiles. |
-| Trigger control | [`trigger_controller.py`](identity-resolution-service/identity_resolution/trigger_controller.py) | Throttled near-real-time processing controller. |
-| Batch runner | [`daily_job.py`](identity-resolution-service/identity_resolution/daily_job.py) | Batch processing entrypoint (cron/Airflow compatible). |
-| Data models/config | [`models.py`](identity-resolution-service/identity_resolution/models.py) | Internal dataclasses/types used by CIR pipelines. |
-| Worker loop | [`worker.py`](identity-resolution-service/worker.py) | Long-running polling worker for containerized runtime. |
-| Seed/demo scripts | [`scripts/`](identity-resolution-service/scripts) | Sample data initialization and end-to-end demo data generation. |
+| Resolver engine | [`resolver.py`](backend-system/identity_resolution/identity_resolution/resolver.py) | Core matching/merge logic against active matching metadata and per-domain scope. |
+| Persona generation | [`persona.py`](backend-system/identity_resolution/identity_resolution/persona.py) | Human-readable persona name generation for hashed PII profiles. |
+| Trigger control | [`trigger_controller.py`](backend-system/identity_resolution/identity_resolution/trigger_controller.py) | Throttled near-real-time processing controller. |
+| Batch runner | [`daily_job.py`](backend-system/identity_resolution/identity_resolution/daily_job.py) | Batch processing entrypoint (cron/Airflow compatible). |
+| Data models/config | [`models.py`](backend-system/identity_resolution/identity_resolution/models.py) | Internal dataclasses/types used by CIR pipelines. |
+| Worker loop | [`worker.py`](backend-system/identity_resolution/worker.py) | Long-running polling worker for containerized runtime. |
+| Seed/demo scripts | [`scripts/`](backend-system/identity_resolution/scripts) | Sample data initialization and end-to-end demo data generation. |
 
 `dev-start-pgsql.sh` stands up a local Docker container (`pgsql16_vector`, port 5432, db `customer360`) and applies `database-schema.sql`. Deeper docs: [TECHNICAL-DOCUMENTATION.md](TECHNICAL-DOCUMENTATION.md) (as-built architecture), [ROADMAP.md](ROADMAP.md), [identity-resolution.md](identity-resolution.md), and the [CIR tech talk slides](CIR-Tech-Slides-VN.md) (Vietnamese).
 
@@ -96,7 +96,7 @@ flowchart TB
     end
 
     subgraph SERVICES["Application services"]
-        CIR["identity-resolution-service/\nCIR worker + daily batch job"]
+        CIR["backend-system/identity_resolution/\nCIR worker + daily batch job"]
         API["customer360-api/\nFastAPI REST + reporting"]
         UI["frontend-admin/\nAdmin & Customer 360 profile UI"]
     end
@@ -129,7 +129,7 @@ flowchart TB
 
 **How to read this for an executive audience:**
 - **One golden record, many sources** — AppsFlyer/MoEngage/Web/POS/Core Banking all land in a single staging table; nothing is siloed per channel.
-- **Identity resolution is a separate, swappable worker** ([`identity-resolution-service/`](identity-resolution-service)), not baked into the API — consistent with the composable-CDP principle of replaceable components.
+- **Identity resolution is a separate, swappable worker** ([`backend-system/identity_resolution/`](backend-system/identity_resolution)), not baked into the API — consistent with the composable-CDP principle of replaceable components.
 - **One API contract** ([`customer360-api/`](customer360-api)) governs all reads/writes to the schema, backed by Redis for latency and Keycloak for SSO/authorization — no application talks to Postgres directly except the CIR worker and the API itself.
 - **Everything here is open-source infrastructure** (PostgreSQL, Redis, Keycloak) — no proprietary/black-box CDP vendor in the data path.
 
@@ -224,10 +224,10 @@ graph TD
 4. **Mark processed** (`status_code = 3`) and commit — idempotent/safe to retry via the unique `(tenant_id, raw_profile_id)` constraint.
 5. Runs both **throttled real-time** (`IdentityResolutionTrigger`, called explicitly by the ingestion worker, not a real DB trigger) and as a **daily drain-loop batch** (`daily_job.py`) so nothing is missed if real-time was throttled.
 
-Run the end-to-end demo (seeds 1,000 synthetic AppsFlyer-driven raw profiles across 6 ad channels/retail+banking domains with a controlled ~30% duplicate rate, resolves them, then runs [`scripts/seed_full_demo_data.py`](identity-resolution-service/scripts/seed_full_demo_data.py) to populate **every other table and column** in the schema — CRM journey graph, `cdp_relations`, `crm_customer_contacts`, `crm_transactions` (incl. not-yet-resolved rows), `cdp_raw_events` across every event category/domain, `graph_edges`, and the full lifecycle/ML-scoring/retail-banking enrichment on `cdp_master_profiles`):
+Run the end-to-end demo (seeds 1,000 synthetic AppsFlyer-driven raw profiles across 6 ad channels/retail+banking domains with a controlled ~30% duplicate rate, resolves them, then runs [`scripts/seed_full_demo_data.py`](backend-system/identity_resolution/scripts/seed_full_demo_data.py) to populate **every other table and column** in the schema — CRM journey graph, `cdp_relations`, `crm_customer_contacts`, `crm_transactions` (incl. not-yet-resolved rows), `cdp_raw_events` across every event category/domain, `graph_edges`, and the full lifecycle/ML-scoring/retail-banking enrichment on `cdp_master_profiles`):
 
 ```bash
-cd identity-resolution-service
+cd backend-system/identity_resolution
 ./run-demo.sh
 ```
 
@@ -241,7 +241,7 @@ cd identity-resolution-service
 ./dev-start-pgsql.sh reset -y   # destructive: drop/recreate customer360 DB from scratch (dev only)
 
 # 2. Run the CIR demo (seeds data + resolves identities)
-cd identity-resolution-service && ./run-demo.sh
+cd backend-system/identity_resolution && ./run-demo.sh
 
 # 3. Run the REST API
 cd ../customer360-api && ./start.sh   # docs at http://localhost:8000/docs

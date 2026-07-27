@@ -8,8 +8,8 @@ name: customer360
 #   docker compose -f dev-docker-compose.yml up -d
 #
 # Starts only postgres + redis + keycloak. Use this when you run
-# customer360-api and identity-resolution-service (CIR) directly on the host
-# (see customer360-api/start.sh, identity-resolution-service/run-demo.sh,
+# customer360-api and backend-system/identity_resolution (CIR) directly on the host
+# (see customer360-api/start.sh, backend-system/identity_resolution/run-demo.sh,
 # and DOCKER-COMPOSE-GUIDE.md section 10) instead of the fully containerized
 # `cir`/`api` services in docker-compose.yml. Prefer `./dev-start-all.sh`
 # over calling this file directly -- it also bootstraps `.env` and health

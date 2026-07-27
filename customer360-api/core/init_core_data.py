@@ -88,7 +88,7 @@ def seed_default_segments(db: Session) -> int:
     for tenant_id in tenant_ids:
         # Scope this connection to the tenant being seeded before touching
         # any tenant-scoped/RLS-protected table -- same pattern as
-        # identity-resolution-service's per-row set_config (see resolver.py).
+        # backend-system/identity_resolution's per-row set_config (see resolver.py).
         db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": str(tenant_id)})
 
         existing_count = db.execute(

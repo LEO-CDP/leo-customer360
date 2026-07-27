@@ -1,6 +1,6 @@
 # Tài Liệu Kỹ Thuật — Customer 360 Platform
 
-> Phạm vi tài liệu: mô tả **hiện trạng** (as-built) của module `core-customer360` trong monorepo `leo-cdp-framework` — kiến trúc, mô hình dữ liệu, tính năng, API, và các use case đang được hỗ trợ. Tài liệu được viết dựa trên mã nguồn thực tế (`database-schema.sql`, `identity-resolution-service/`, `customer360-api/`), không phải kế hoạch (Roadmap hiện tại chưa có nội dung — xem mục 9).
+> Phạm vi tài liệu: mô tả **hiện trạng** (as-built) của module `core-customer360` trong monorepo `leo-cdp-framework` — kiến trúc, mô hình dữ liệu, tính năng, API, và các use case đang được hỗ trợ. Tài liệu được viết dựa trên mã nguồn thực tế (`database-schema.sql`, `backend-system/identity_resolution/`, `customer360-api/`), không phải kế hoạch (Roadmap hiện tại chưa có nội dung — xem mục 9).
 
 ---
 
@@ -11,7 +11,7 @@
 | Thành phần | Vai trò | Công nghệ |
 |---|---|---|
 | `database-schema.sql` | Schema PostgreSQL trung tâm (nguồn sự thật duy nhất — *single source of truth*) | PostgreSQL 16, pgvector, uuid-ossp, pgcrypto |
-| `identity-resolution-service/` | Engine **Customer Identity Resolution (CIR)** — hợp nhất hồ sơ thô thành hồ sơ master | Python (psycopg2, OOP) |
+| `backend-system/identity_resolution/` | Engine **Customer Identity Resolution (CIR)** — hợp nhất hồ sơ thô thành hồ sơ master | Python (psycopg2, OOP) |
 | `customer360-api/` | REST API (CRUD + reporting) trên toàn bộ schema | FastAPI + SQLAlchemy 2 ORM |
 
 Hai domain nghiệp vụ được hỗ trợ song song trên cùng schema: **`retail`** (bán lẻ/e‑commerce) và **`banking`** (ngân hàng số), phân biệt qua cột `domain` và cách ly dữ liệu theo `tenant_id` (multi-tenant).
@@ -46,7 +46,7 @@ graph TD
 - **PostgreSQL 16** — cơ sở dữ liệu trung tâm, multi-model (quan hệ + JSONB + array + graph qua bảng partition).
 - **pgvector** — lưu embedding (`vector(768)` cho `persona_embedding` hồ sơ khách hàng, `vector(1536)` cho các thực thể CRM và `graph_edges`) phục vụ semantic search / lookalike.
 - **Extensions**: `uuid-ossp`, `pgcrypto` (schema chính); `citext`, `fuzzystrmatch`, `pg_trgm` (được tài liệu hoá cho fuzzy matching trong CIR, xem [identity-resolution.md](identity-resolution.md)).
-- **Python 3 (psycopg2 + RealDictCursor)** — engine CIR (`identity-resolution-service/`), không phụ thuộc ORM để tối ưu hiệu năng batch.
+- **Python 3 (psycopg2 + RealDictCursor)** — engine CIR (`backend-system/identity_resolution/`), không phụ thuộc ORM để tối ưu hiệu năng batch.
 - **FastAPI + SQLAlchemy 2 (typed ORM: `Mapped`/`mapped_column`) + Pydantic** — `customer360-api/`, expose REST API cho toàn bộ schema.
 - **Docker** — `dev-start-pgsql.sh` khởi tạo container `pgsql16_vector` (port 5432, db `customer360`, user/pass `postgres`/`password`) và apply `database-schema.sql`.
 
@@ -102,7 +102,7 @@ Mỗi bảng đều có `description`, `keywords TEXT[]`, `embedding vector(1536
 **4.2.2. `is_hashed` / `persona_name` — nhãn thay thế khi PII đã bị hash:**
 
 - `is_hashed BOOLEAN` đánh dấu `full_name`/`email`/`phone_number`/`national_id` của hồ sơ đã bị **SHA-256 hash** (không còn đọc được) hay chưa.
-- **Ràng buộc nghiệp vụ**: khi `is_hashed = TRUE` thì `persona_name` **bắt buộc phải khác NULL** — được ép ở **2 tầng**: (1) CHECK constraint `chk_cdp_mp_hashed_requires_persona_name` trên bảng `cdp_master_profiles`, và (2) tầng ứng dụng — `identity-resolution-service/identity_resolution/persona.py` tự phát hiện PII trông giống hash (regex 64 ký tự hex) và **tự sinh `persona_name`** (nhãn dễ đọc, không PII, ví dụ `"Savvy Retail Shopper (TikTok Ads) #4f2a9c"`) một cách **xác định (deterministic)** dựa trên `domain` + kênh acquisition + một định danh không-PII ổn định (`device_id`/`advertising_id`/…), *không bao giờ* dùng lại/giải mã giá trị PII gốc.
+- **Ràng buộc nghiệp vụ**: khi `is_hashed = TRUE` thì `persona_name` **bắt buộc phải khác NULL** — được ép ở **2 tầng**: (1) CHECK constraint `chk_cdp_mp_hashed_requires_persona_name` trên bảng `cdp_master_profiles`, và (2) tầng ứng dụng — `backend-system/identity_resolution/identity_resolution/persona.py` tự phát hiện PII trông giống hash (regex 64 ký tự hex) và **tự sinh `persona_name`** (nhãn dễ đọc, không PII, ví dụ `"Savvy Retail Shopper (TikTok Ads) #4f2a9c"`) một cách **xác định (deterministic)** dựa trên `domain` + kênh acquisition + một định danh không-PII ổn định (`device_id`/`advertising_id`/…), *không bao giờ* dùng lại/giải mã giá trị PII gốc.
 - Lý do: một khi PII đã hash, `full_name` không còn giá trị hiển thị/tìm kiếm ngữ nghĩa (semantic search/admin UI) — `persona_name` lấp khoảng trống đó.
 - `resolver.py` gọi lại logic này ở **cả 2 nơi** tạo/cập nhật master profile (`_create_master_and_link` và `_link_and_update`), nên `persona_name` luôn được điền ngay khi có bất kỳ raw profile nào mang PII trông giống hash được hợp nhất vào.
 - **Tùy chọn Google Gemini**: nếu `GOOGLE_GENAI_API_KEY` được cấu hình (`.env`), `persona.py` gọi Gemini (`google-genai` SDK) để sinh nhãn sáng tạo hơn, chỉ gửi `domain` + kênh acquisition trong prompt (không bao giờ gửi PII/hash giá trị thật). Nếu không cấu hình key, không cài SDK, hoặc gọi API lỗi/timeout (giới hạn `GOOGLE_GENAI_TIMEOUT_MS`, mặc định 8s) — hàm tự động chuyển sang bộ sinh nhãn **offline, xác định (deterministic)**, không bao giờ raise exception hay chặn batch CIR.
@@ -290,7 +290,7 @@ cd core-customer360
 ./dev-start-pgsql.sh
 
 # 2. Sinh dữ liệu mẫu + chạy Identity Resolution demo (1000 raw → ~700 master profiles)
-cd identity-resolution-service
+cd backend-system/identity_resolution
 ./run-demo.sh          # tự load .env, tạo venv, seed data, resolve, in kết quả
 
 # 3. Chạy REST API
@@ -299,7 +299,7 @@ cd ../customer360-api
 # Swagger UI: http://localhost:8000/docs
 ```
 
-Test tự động cho engine CIR: `identity-resolution-service/run_tests.sh` (pytest, mock hoàn toàn psycopg2, không cần DB thật).
+Test tự động cho engine CIR: `backend-system/identity_resolution/run_tests.sh` (pytest, mock hoàn toàn psycopg2, không cần DB thật).
 
 ---
 

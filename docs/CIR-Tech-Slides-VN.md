@@ -260,7 +260,7 @@ Cho mỗi batch (tối đa `batch_size` bản ghi, `status_code = 1`):
 
 ## Kịch bản demo
 
-`identity-resolution-service/run-demo.sh` — một lệnh, chạy toàn bộ pipeline:
+`backend-system/identity_resolution/run-demo.sh` — một lệnh, chạy toàn bộ pipeline:
 
 1. Nạp cấu hình DB từ `.env`, dựng virtualenv, cài `requirements.txt`
 2. **`init_sample_data.py`** — sinh **1.000 raw profile** AppsFlyer giả lập:

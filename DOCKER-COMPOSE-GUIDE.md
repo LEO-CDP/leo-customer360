@@ -86,13 +86,13 @@ credentials. `.env.example` is the committed template.
 > 1. `docker-compose.yml` uses `${VAR}` substitution to seed the official
 >    Postgres/Redis image bootstrap variables (`POSTGRES_USER`, `--requirepass`, etc.).
 > 2. Every service also gets the whole file injected via `env_file:`, exactly
->    like `customer360-api`/`identity-resolution-service` read it for non-Docker
+>    like `customer360-api`/`backend-system/identity_resolution` read it for non-Docker
 >    local dev (`pydantic-settings` / `python-dotenv`).
 > 3. **`DB_HOST` / `REDIS_HOST` in `.env` are overridden by `docker-compose.yml`**
 >    to the in-network service names (`postgres` / `redis`) for the
 >    `api`/`cir`/`cir-demo-seed` containers, regardless of what's in the file.
 >    The `localhost` defaults in `.env.example` are only correct when you run
->    `customer360-api`/`identity-resolution-service` directly on the host
+>    `customer360-api`/`backend-system/identity_resolution` directly on the host
 >    (`./start.sh`, `./run-demo.sh`) against the dockerized Postgres/Redis via
 >    their published host ports.
 
@@ -363,7 +363,7 @@ non-Docker dev scripts:
 
 - [`dev-start-pgsql.sh`](dev-start-pgsql.sh) → container `pgsql16_vector`
 - `customer360-api/start.sh` / `stop.sh` → runs uvicorn directly on the host
-- `identity-resolution-service/run-demo.sh` → runs the CIR scripts directly on the host
+- `backend-system/identity_resolution/run-demo.sh` → runs the CIR scripts directly on the host
 
 They use different container names and (by default) the same host ports, so
 only run one Postgres/Redis path at a time on a given port — or remap ports

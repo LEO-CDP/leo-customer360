@@ -1,6 +1,6 @@
 # PostgreSQL 16 with PostGIS + pgvector + contrib extensions (uuid-ossp,
 # pgcrypto, pg_trgm, fuzzystrmatch) needed by core-customer360/database-schema.sql
-# and by identity-resolution-service's fuzzy-matching rules.
+# and by backend-system/identity_resolution's fuzzy-matching rules.
 #
 # Build context is the core-customer360/ directory (see docker-compose.yml)
 # so this Dockerfile can COPY the top-level database-schema.sql file.

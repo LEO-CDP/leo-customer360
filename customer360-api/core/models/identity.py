@@ -9,10 +9,10 @@ zone) and ``cdp_profile_links`` (raw -> master links).
 ``cdp_master_profiles`` (identity / demographic / retail / banking /
 marketing / lineage columns plus Lead / Churn / CLV / CX / Data Quality
 scoring-model metadata) and also carries the CIR matching-rule metadata
-consumed by identity-resolution-service's ``CustomerIdentityResolver``.
+consumed by backend-system/identity_resolution's ``CustomerIdentityResolver``.
 ``CdpIdResolutionStatus`` (real-time throttle state) remains a CIR
 *runtime-only* table, created idempotently by
-identity-resolution-service/scripts/init_sample_data.py
+backend-system/identity_resolution/scripts/init_sample_data.py
 (``CREATE TABLE IF NOT EXISTS``).
 """
 

@@ -1,6 +1,6 @@
 """Pydantic schemas for the Customer Identity Resolution (CIR) core models:
 master profiles, raw profile staging, profile links, and the matching-rule
-metadata / throttle-status tables consumed by identity-resolution-service.
+metadata / throttle-status tables consumed by backend-system/identity_resolution.
 """
 
 import uuid

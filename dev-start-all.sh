@@ -4,9 +4,9 @@
 # Customer 360 Platform - local DEV bootstrap (infra-only)
 #
 # Starts the infra-only stack in dev-docker-compose.yml (postgres + redis +
-# keycloak) so customer360-api and identity-resolution-service (CIR) can be
+# keycloak) so customer360-api and backend-system/identity_resolution (CIR) can be
 # run directly on the host against dockerized Postgres/Redis -- see
-# customer360-api/start.sh and identity-resolution-service/run-demo.sh, and
+# customer360-api/start.sh and backend-system/identity_resolution/run-demo.sh, and
 # "non-Docker local dev workflow" in DOCKER-COMPOSE-GUIDE.md section 10.
 #
 # What it does, in order:
@@ -19,7 +19,7 @@
 #      automated realm/client seed script in this repo, so it prints manual
 #      setup instructions (DOCKER-COMPOSE-GUIDE.md section 9) when missing.
 #   5. Checks whether core demo tables are empty; if empty, runs the
-#      seed-demo workflow via identity-resolution-service/run-demo.sh.
+#      seed-demo workflow via backend-system/identity_resolution/run-demo.sh.
 #      If not empty, prints current DB row-count status for key tables.
 #
 # Usage:
@@ -42,7 +42,7 @@ cd "$SCRIPT_DIR"
 COMPOSE_FILE="dev-docker-compose.yml"
 ENV_FILE=".env"
 ENV_EXAMPLE_FILE=".env.example"
-CIR_DIR="identity-resolution-service"
+CIR_DIR="backend-system/identity_resolution"
 POSTGRES_CONTAINER="customer360-postgres"
 REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
@@ -130,7 +130,7 @@ source "$ENV_FILE"
 set +a
 
 # DB_PORT/REDIS_PORT are what host-run apps (customer360-api/start.sh,
-# identity-resolution-service/run-demo.sh) connect through; *_HOST_PORT is
+# backend-system/identity_resolution/run-demo.sh) connect through; *_HOST_PORT is
 # what docker-compose publishes. They must match when running against the
 # dockerized services from the host.
 if [ "${DB_PORT:-5432}" != "${POSTGRES_HOST_PORT:-5432}" ]; then

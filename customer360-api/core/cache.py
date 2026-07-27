@@ -19,7 +19,7 @@ Customer 360 API. Design goals:
   ``invalidate_prefix(<entity prefix>)`` after a successful create/update/
   delete, which SCAN+DELETEs every cache key stored under that prefix.
 
-CAVEAT: identity-resolution-service (the CIR worker) writes to
+CAVEAT: backend-system/identity_resolution (the CIR worker) writes to
 ``cdp_raw_profiles_stage`` / ``cdp_master_profiles`` / etc. directly via
 psycopg2, bypassing this API entirely -- those writes do NOT trigger cache
 invalidation here. Staleness from that path is bounded by ``CACHE_TTL_SECONDS``
