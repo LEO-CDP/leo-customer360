@@ -20,6 +20,7 @@
 #   ./manage-c360.sh logs [service]  Follow logs (all services, or one).
 #   ./manage-c360.sh build           Rebuild images without starting anything.
 #   ./manage-c360.sh down            Stop + remove containers/network (volumes kept).
+#   ./manage-c360.sh seed-demo       Seed full POC/UAT demo data (CIR + content).
 #   ./manage-c360.sh help            Show this usage.
 #
 # Flags:
@@ -61,6 +62,9 @@ for arg in "$@"; do
   case "$arg" in
     start|stop|restart|status|ps|logs|build|down|help|-h|--help)
       [ "$arg" = "-h" ] || [ "$arg" = "--help" ] && arg="help"
+      COMMAND="$arg"
+      ;;
+    seed-demo)
       COMMAND="$arg"
       ;;
     --force) FORCE="true" ;;
@@ -380,6 +384,50 @@ cmd_down() {
   "${DC_CMD[@]}" down
 }
 
+cmd_seed_demo() {
+  local cir_dir="${SCRIPT_DIR}/identity-resolution-service"
+  local venv_dir="${cir_dir}/.venv"
+  local recreate_venv="0"
+
+  if [ ! -d "$cir_dir" ]; then
+    echo "❌ Error: '${cir_dir}' not found." >&2
+    exit 1
+  fi
+
+  if [ ! -d "$venv_dir" ] || [ ! -x "$venv_dir/bin/python" ]; then
+    recreate_venv="1"
+  else
+    local venv_prefix
+    venv_prefix="$($venv_dir/bin/python -c 'import os, sys; print(os.path.realpath(sys.prefix))' 2>/dev/null || true)"
+    if [ "$venv_prefix" != "$venv_dir" ]; then
+      echo "♻️  Detected stale CIR virtual environment (prefix: ${venv_prefix}). Recreating..."
+      recreate_venv="1"
+    fi
+  fi
+
+  if [ "$recreate_venv" -eq 1 ]; then
+    rm -rf "$venv_dir"
+    echo "📦 Creating CIR virtual environment at ${venv_dir}..."
+    python3 -m venv "$venv_dir"
+  fi
+
+  local venv_python="${venv_dir}/bin/python"
+
+  echo "📥 Installing CIR requirements..."
+  "$venv_python" -m pip install -q -r "${cir_dir}/requirements.txt"
+
+  echo "🌱 Seeding base raw profiles for demo..."
+  (cd "$cir_dir" && "$venv_python" scripts/init_sample_data.py)
+
+  echo "⚙️  Running Customer Identity Resolution for demo..."
+  (cd "$cir_dir" && "$venv_python" scripts/run_demo_resolution.py)
+
+  echo "🌐 Seeding full POC/UAT demo data (including cdp_content_items)..."
+  (cd "$cir_dir" && "$venv_python" scripts/seed_full_demo_data.py)
+
+  echo "✅ POC/UAT demo data seeding complete."
+}
+
 # Every command below invokes 'docker compose', and docker-compose.yml
 # requires DB_PASSWORD/REDIS_PASSWORD/KEYCLOAK_ADMIN_PASSWORD just to parse
 # (${VAR:?...} guards) -- so .env must exist and be sourced first, regardless
@@ -399,4 +447,5 @@ case "$COMMAND" in
   logs) cmd_logs ;;
   build) cmd_build ;;
   down) cmd_down ;;
+  seed-demo) cmd_seed_demo ;;
 esac

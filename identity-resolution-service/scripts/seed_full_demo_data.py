@@ -125,6 +125,8 @@ DEMO_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
 DETAIL_PROFILE_LIMIT = 60
 EMBEDDING_PROFILE_LIMIT = 30
 PERSONA_EMBEDDING_DIM = 768
+# Demo invariant: every resolved master profile must have >10 behavioral events.
+MIN_EVENTS_PER_MASTER_PROFILE = 11
 
 
 def _table(name: str) -> str:
@@ -375,11 +377,12 @@ def seed_crm_entities(cursor) -> dict:
 # --------------------------------------------------------------------------
 
 def reset_tenant_scoped_demo_tables(cursor) -> None:
-    logger.info("Resetting previous demo rows in tenant-scoped tables (relations/contacts/transactions/events)...")
+    logger.info("Resetting previous demo rows in tenant-scoped tables (relations/contacts/transactions/events/content)...")
     cursor.execute(f"DELETE FROM {_table('cdp_relations')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('crm_customer_contacts')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('crm_transactions')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('cdp_raw_events')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
+    cursor.execute(f"DELETE FROM {_table('cdp_content_items')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('graph_edges')} WHERE metadata->>'demo_tenant' = %s;", (DEMO_TENANT_ID,))
 
 
@@ -513,11 +516,34 @@ UNRESOLVED_EVENTS = [
 
 
 def seed_raw_events(cursor, master_profiles: list) -> None:
-    logger.info("Seeding cdp_raw_events (behavioral events across GENERAL/COMMERCE/FINANCE/STOCK_TRADING/FEEDBACK)...")
+    logger.info(
+        "Seeding cdp_raw_events for all master profiles (minimum %d events/profile)...",
+        MIN_EVENTS_PER_MASTER_PROFILE,
+    )
     for m in master_profiles:
         rng = stable_rng(f"events:{m['master_profile_id']}")
         catalog = RETAIL_EVENTS if m["domain"] == "retail" else BANKING_EVENTS
         for category, event_name, value_range, entity_type, is_conversion in catalog:
+            cursor.execute(
+                f"""
+                INSERT INTO {_table('cdp_raw_events')}
+                    (tenant_id, domain, master_profile_id, source_system, channel, event_category,
+                     event_name, is_conversion, entity_type, event_value, currency, event_time)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                """,
+                (
+                    DEMO_TENANT_ID, m["domain"], m["master_profile_id"],
+                    "AppsFlyer" if m["domain"] == "retail" else "CoreBanking",
+                    "mobile_app", category, event_name, is_conversion, entity_type,
+                    rng.randint(*value_range) if value_range else None, "VND",
+                    datetime.now() - timedelta(days=rng.randint(1, 60), hours=rng.randint(0, 23)),
+                ),
+            )
+
+        # Add deterministic extra events so every master profile has >10 rows.
+        extra_events_needed = max(0, MIN_EVENTS_PER_MASTER_PROFILE - len(catalog))
+        for _ in range(extra_events_needed):
+            category, event_name, value_range, entity_type, is_conversion = rng.choice(catalog)
             cursor.execute(
                 f"""
                 INSERT INTO {_table('cdp_raw_events')}
@@ -551,6 +577,101 @@ def seed_raw_events(cursor, master_profiles: list) -> None:
                 datetime.now() - timedelta(days=rng.randint(1, 30)),
             ),
         )
+
+
+def validate_min_events_per_master_profile(cursor, min_events: int = MIN_EVENTS_PER_MASTER_PROFILE) -> None:
+    """Raises if any resolved demo master profile has fewer than ``min_events`` rows in cdp_raw_events."""
+    cursor.execute(
+        f"""
+        SELECT mp.master_profile_id, COUNT(e.event_id) AS event_count
+        FROM {_table('cdp_master_profiles')} mp
+        LEFT JOIN {_table('cdp_raw_events')} e
+          ON e.tenant_id = mp.tenant_id AND e.master_profile_id = mp.master_profile_id
+        WHERE mp.tenant_id = %s
+        GROUP BY mp.master_profile_id
+        HAVING COUNT(e.event_id) < %s
+        ORDER BY event_count ASC, mp.master_profile_id
+        LIMIT 10;
+        """,
+        (DEMO_TENANT_ID, min_events),
+    )
+    violations = cursor.fetchall()
+    if violations:
+        sample = ", ".join(f"{row['master_profile_id']}({row['event_count']})" for row in violations)
+        raise RuntimeError(
+            f"Demo invariant failed: each master profile must have >= {min_events} events in "
+            f"{_table('cdp_raw_events')}. Sample violations: {sample}"
+        )
+
+
+CONTENT_ITEM_TYPES = ("news", "video", "product", "article")
+CONTENT_ITEMS_PER_TYPE_PER_PROFILE = 6
+
+CONTENT_TYPE_DEFAULTS = {
+    "news": {
+        "cta_label": "Read now",
+        "url_path": "insights",
+        "summary": "Concise market and customer intelligence tailored to this audience.",
+    },
+    "video": {
+        "cta_label": "Watch now",
+        "url_path": "videos",
+        "summary": "Short-form educational and promotional video content.",
+    },
+    "product": {
+        "cta_label": "View offer",
+        "url_path": "offers",
+        "summary": "Product or service recommendations aligned to current behavior.",
+    },
+    "article": {
+        "cta_label": "Explore",
+        "url_path": "articles",
+        "summary": "Long-form explainers and best-practice guides for this segment.",
+    },
+}
+
+
+def seed_content_items(cursor, master_profiles: list) -> None:
+    logger.info(
+        "Seeding cdp_content_items (%d items/type/profile across %d profile(s))...",
+        CONTENT_ITEMS_PER_TYPE_PER_PROFILE,
+        len(master_profiles),
+    )
+    for m in master_profiles:
+        master_id = m["master_profile_id"]
+        domain = m["domain"]
+        rng = stable_rng(f"content:{master_id}")
+        base_tags = list(m.get("segmentation_tags") or [])
+        if not base_tags:
+            base_tags = [domain, "all_profiles"]
+        profile_tag = f"profile_{str(master_id).replace('-', '')[:12]}"
+        tags = list(dict.fromkeys(base_tags + [profile_tag]))
+
+        for item_type in CONTENT_ITEM_TYPES:
+            defaults = CONTENT_TYPE_DEFAULTS[item_type]
+            for idx in range(CONTENT_ITEMS_PER_TYPE_PER_PROFILE):
+                position = idx + 1
+                title = f"{domain.replace('_', ' ').title()} {item_type.title()} {position} for {str(master_id)[:8]}"
+                cursor.execute(
+                    f"""
+                    INSERT INTO {_table('cdp_content_items')}
+                        (tenant_id, domain, item_type, title, summary, image_url, cta_label, cta_url,
+                         segment_tags, published_at, status_code)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1);
+                    """,
+                    (
+                        DEMO_TENANT_ID,
+                        domain,
+                        item_type,
+                        title,
+                        defaults["summary"],
+                        f"https://picsum.photos/seed/{str(master_id)[:8]}-{item_type}-{position}/640/360",
+                        defaults["cta_label"],
+                        f"https://demo.customer360.local/{defaults['url_path']}/{str(master_id)[:8]}-{item_type}-{position}",
+                        tags,
+                        datetime.now() - timedelta(days=rng.randint(0, 45), hours=rng.randint(0, 23)),
+                    ),
+                )
 
 
 def seed_graph_edges(cursor, crm_ids: dict, master_profiles: list) -> None:
@@ -806,7 +927,7 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
 def fetch_master_profiles(cursor) -> list:
     cursor.execute(
         f"""
-        SELECT master_profile_id, domain, source_systems, first_seen_raw_profile_id, created_at
+        SELECT master_profile_id, domain, segmentation_tags, source_systems, first_seen_raw_profile_id, created_at
         FROM {_table('cdp_master_profiles')}
         WHERE tenant_id = %s
         ORDER BY created_at;
@@ -837,18 +958,23 @@ def main() -> None:
             seed_relations(cursor, detail_profiles)
             seed_customer_contacts(cursor, detail_profiles)
             seed_transactions(cursor, detail_profiles)
-            seed_raw_events(cursor, detail_profiles)
+            seed_raw_events(cursor, master_profiles)
+            validate_min_events_per_master_profile(cursor)
             seed_graph_edges(cursor, crm_ids, detail_profiles)
             enrich_master_profiles(cursor, master_profiles)
+            master_profiles = fetch_master_profiles(cursor)
+            seed_content_items(cursor, master_profiles)
             link_crm_contacts_to_master_profiles(cursor, crm_ids, master_profiles)
 
         conn.commit()
         logger.info(
             "Full demo data seeded: %d master profiles enriched (%d with a persona_embedding), "
-            "%d got detail rows (relations/contacts/transactions/events); CRM journey graph + "
+            "%d got detail rows (relations/contacts/transactions); all master profiles got >= %d events; "
+            "content items: %d/profile/type; CRM journey graph + "
             "graph_edges + cdp_relation_types seeded; crm_contact <-> cdp_master_profiles linked "
             "via graph_edges ('is_active_as') + cross-referenced attributes/metadata.",
             len(master_profiles), min(len(master_profiles), EMBEDDING_PROFILE_LIMIT), len(detail_profiles),
+            MIN_EVENTS_PER_MASTER_PROFILE, CONTENT_ITEMS_PER_TYPE_PER_PROFILE,
         )
     except Exception:
         conn.rollback()

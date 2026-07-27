@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 
 from core.auth import auth_middleware
@@ -36,6 +37,18 @@ def _build_app():
     return app
 
 
+def _build_app_with_cors():
+    app = _build_app()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    return app
+
+
 class AuthMiddlewareTests(unittest.TestCase):
     def test_rejects_requests_without_bearer_token(self):
         client = TestClient(_build_app())
@@ -53,6 +66,17 @@ class AuthMiddlewareTests(unittest.TestCase):
             response = client.get("/secure", headers={"Authorization": "Basic abc123"})
 
         self.assertEqual(response.status_code, 401)
+
+    def test_unauthorized_cross_origin_response_contains_cors_header(self):
+        """Auth-generated 401 responses must still carry CORS headers so
+        browsers expose the real 401 instead of reporting a generic CORS error."""
+        client = TestClient(_build_app_with_cors())
+
+        with patch("core.auth.SSO_LOGIN", True):
+            response = client.get("/secure", headers={"Origin": "http://localhost:8890"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "*")
 
     def test_rejects_inactive_or_expired_token(self):
         client = TestClient(_build_app())

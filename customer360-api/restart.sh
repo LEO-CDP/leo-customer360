@@ -8,7 +8,9 @@ set -Eeuo pipefail
 PROJECT_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_HOME"
 
-ENV_FILE="$PROJECT_HOME/.env"
+ROOT_ENV_FILE="$PROJECT_HOME/../.env"
+LOCAL_ENV_FILE="$PROJECT_HOME/.env"
+ENV_FILE=""
 LOG_DIR="$PROJECT_HOME/logs"
 LOG_FILE="$LOG_DIR/app.log"
 
@@ -27,20 +29,19 @@ log() {
 }
 
 ###############################################################################
-# Ensure .env exists (symlink to ../.env if missing) -- dev mode only, skip
-# when running inside a Docker container.
+# Resolve .env source. Prefer repo-root .env so this script reports the same
+# settings that start.sh actually uses.
 ###############################################################################
-if [ ! -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] && [ ! -f /.dockerenv ]; then
-    if [ -f "$PROJECT_HOME/../.env" ]; then
-        log "${YELLOW}${ENV_FILE} not found. Creating symlink to ../.env...${NC}"
-        ln -s ../.env "$ENV_FILE"
-    fi
+if [ -f "$ROOT_ENV_FILE" ]; then
+    ENV_FILE="$ROOT_ENV_FILE"
+elif [ -f "$LOCAL_ENV_FILE" ]; then
+    ENV_FILE="$LOCAL_ENV_FILE"
 fi
 
 ###############################################################################
 # Load .env so SSO_LOGIN (and other settings) can be reported before restart.
 ###############################################################################
-if [ -f "$ENV_FILE" ]; then
+if [ -n "$ENV_FILE" ]; then
     set -a
     # shellcheck disable=SC1090
     source "$ENV_FILE"

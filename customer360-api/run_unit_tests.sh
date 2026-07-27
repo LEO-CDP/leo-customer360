@@ -26,16 +26,28 @@ VENV_DIR="$PROJECT_HOME/.venv"
 ###############################################################################
 # Virtual environment (create on first run, then reuse)
 ###############################################################################
-if [ ! -d "$VENV_DIR" ]; then
+RECREATE_VENV=0
+if [ ! -d "$VENV_DIR" ] || [ ! -x "$VENV_DIR/bin/python" ]; then
+    RECREATE_VENV=1
+else
+    # A moved/copied venv can keep stale paths; recreate if sys.prefix no longer matches.
+    VENV_PREFIX="$($VENV_DIR/bin/python -c 'import os, sys; print(os.path.realpath(sys.prefix))' 2>/dev/null || true)"
+    if [ "$VENV_PREFIX" != "$VENV_DIR" ]; then
+        echo -e "${YELLOW}Detected stale virtual environment (prefix: ${VENV_PREFIX}). Recreating...${NC}"
+        RECREATE_VENV=1
+    fi
+fi
+
+if [ "$RECREATE_VENV" -eq 1 ]; then
+    rm -rf "$VENV_DIR"
     echo -e "${GREEN}Creating virtual environment at ${VENV_DIR}...${NC}"
     python3 -m venv "$VENV_DIR"
 fi
 
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
+VENV_PYTHON="$VENV_DIR/bin/python"
 
 echo -e "${GREEN}Installing requirements...${NC}"
-pip install -q -r requirements.txt
+"$VENV_PYTHON" -m pip install -q -r requirements.txt
 
 ###############################################################################
 # These are pure unit tests: no DB/Redis/Keycloak connection is required
@@ -46,4 +58,4 @@ pip install -q -r requirements.txt
 export SSO_LOGIN=true
 
 echo -e "${YELLOW}Running customer360-api unit tests...${NC}"
-python -m pytest tests/ -v "$@"
+"$VENV_PYTHON" -m pytest tests/ -v "$@"

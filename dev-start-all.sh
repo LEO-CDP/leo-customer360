@@ -18,12 +18,14 @@
 #   4. Checks whether the Keycloak 'leocdp' realm exists yet; there is no
 #      automated realm/client seed script in this repo, so it prints manual
 #      setup instructions (DOCKER-COMPOSE-GUIDE.md section 9) when missing.
-#   5. Checks whether customer360.cdp_master_profiles is empty and, if so,
-#      seeds CIR demo data via identity-resolution-service/run-demo.sh.
+#   5. Checks whether core demo tables are empty; if empty, runs the
+#      seed-demo workflow via identity-resolution-service/run-demo.sh.
+#      If not empty, prints current DB row-count status for key tables.
 #
 # Usage:
-#   ./dev-start-all.sh              Start/create services, sync .env, seed
-#                                    CIR demo data if the DB looks empty.
+#   ./dev-start-all.sh              Start/create services, sync .env, run
+#                                    seed-demo only when DB is empty; otherwise
+#                                    print DB status counts.
 #   ./dev-start-all.sh --no-seed    Same, but skip the CIR demo data seed step.
 #   ./dev-start-all.sh reset        DESTRUCTIVE: `docker compose down -v`
 #                                    (drops the postgres/redis volumes -- this
@@ -209,35 +211,74 @@ EOF
 check_keycloak_realm
 
 # =============================================================================
-# 5) Seed identity-resolution (CIR) demo data if the DB looks empty
+# 5) Check DB status, seed demo data if empty, otherwise print DB status
 # =============================================================================
-seed_cir_if_empty() {
+print_database_status() {
   local db_name="${DB_NAME:-customer360}"
   local db_schema="${DB_SCHEMA:-customer360}"
-  echo "🔎 Checking whether '${db_schema}.cdp_master_profiles' has any data..."
-  local count
-  count="$(docker exec -u postgres "$POSTGRES_CONTAINER" psql -U "${DB_USER:-postgres}" -d "$db_name" -tAc \
-    "SELECT COUNT(*) FROM ${db_schema}.cdp_master_profiles" 2>/dev/null || true)"
-  if [ -z "$count" ]; then
-    echo "⚠️  Could not query '${db_schema}.cdp_master_profiles' (schema not applied yet?) -- skipping CIR seed." >&2
+  echo "📊 Database status (${db_schema}):"
+  docker exec -u postgres "$POSTGRES_CONTAINER" psql -U "${DB_USER:-postgres}" -d "$db_name" -P pager=off -c \
+    "SELECT 'cdp_master_profiles' AS table_name, COUNT(*) AS row_count FROM ${db_schema}.cdp_master_profiles
+     UNION ALL
+     SELECT 'cdp_raw_events', COUNT(*) FROM ${db_schema}.cdp_raw_events
+     UNION ALL
+     SELECT 'cdp_content_items', COUNT(*) FROM ${db_schema}.cdp_content_items
+     UNION ALL
+     SELECT 'crm_transactions', COUNT(*) FROM ${db_schema}.crm_transactions;"
+}
+
+seed_demo_if_empty() {
+  local db_name="${DB_NAME:-customer360}"
+  local db_schema="${DB_SCHEMA:-customer360}"
+
+  echo "🔎 Checking whether demo tables are empty..."
+  local status_line
+  status_line="$(docker exec -u postgres "$POSTGRES_CONTAINER" psql -U "${DB_USER:-postgres}" -d "$db_name" -tAc \
+    "SELECT
+       CASE WHEN
+         (SELECT COUNT(*) FROM ${db_schema}.cdp_master_profiles) = 0
+         AND (SELECT COUNT(*) FROM ${db_schema}.cdp_raw_events) = 0
+         AND (SELECT COUNT(*) FROM ${db_schema}.cdp_content_items) = 0
+       THEN 'empty' ELSE 'not_empty' END" 2>/dev/null || true)"
+
+  if [ -z "$status_line" ]; then
+    echo "⚠️  Could not query demo tables (schema not applied yet?) -- skipping seed step." >&2
     return
   fi
-  if [ "$count" -eq 0 ]; then
+
+  if [ "$status_line" = "empty" ]; then
     if [ ! -f "${CIR_DIR}/run-demo.sh" ]; then
-      echo "⚠️  '${CIR_DIR}/run-demo.sh' not found -- skipping CIR seed." >&2
+      echo "⚠️  '${CIR_DIR}/run-demo.sh' not found -- cannot start seed-demo workflow." >&2
       return
     fi
-    echo "🌱 '${db_schema}.cdp_master_profiles' is empty -- seeding CIR demo data via ${CIR_DIR}/run-demo.sh..."
+    echo "🌱 Demo tables are empty -- starting seed-demo workflow via ${CIR_DIR}/run-demo.sh..."
     (cd "$CIR_DIR" && bash run-demo.sh)
+    print_database_status
   else
-    echo "🟢 '${db_schema}.cdp_master_profiles' already has ${count} row(s) -- skipping CIR seed."
+    echo "🟢 Demo tables already contain data -- skipping seed-demo workflow."
+    print_database_status
   fi
 }
 
 if [ "$SKIP_SEED" = "true" ]; then
   echo "⏭️  --no-seed set -- skipping CIR demo data seed check."
 else
-  seed_cir_if_empty
+  seed_demo_if_empty
 fi
 
-echo "✅ Done. postgres (:${POSTGRES_HOST_PORT:-5432}) + redis (:${REDIS_HOST_PORT:-6379}) + keycloak (:${KEYCLOAK_HOST_PORT:-8080}) are up."
+print_final_service_table() {
+  local postgres_status redis_status keycloak_status
+  postgres_status="$(docker inspect -f '{{.State.Health.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || echo "unknown")"
+  redis_status="$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER" 2>/dev/null || echo "unknown")"
+  keycloak_status="$(docker inspect -f '{{.State.Health.Status}}' "$KEYCLOAK_CONTAINER" 2>/dev/null || echo "unknown")"
+
+  echo ""
+  echo "✅ Core services status"
+  printf '%-12s | %-10s | %-18s\n' "Service" "Status" "Host:Port"
+  printf '%-12s-+-%-10s-+-%-18s\n' "------------" "----------" "------------------"
+  printf '%-12s | %-10s | %-18s\n' "postgres" "$postgres_status" "localhost:${POSTGRES_HOST_PORT:-5432}"
+  printf '%-12s | %-10s | %-18s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6379}"
+  printf '%-12s | %-10s | %-18s\n' "keycloak" "$keycloak_status" "localhost:${KEYCLOAK_HOST_PORT:-8080}"
+}
+
+print_final_service_table

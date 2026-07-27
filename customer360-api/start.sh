@@ -9,7 +9,9 @@ PROJECT_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_HOME"
 
 VENV_DIR="$PROJECT_HOME/.venv"
-ENV_FILE="$PROJECT_HOME/.env"
+ROOT_ENV_FILE="$PROJECT_HOME/../.env"
+LOCAL_ENV_FILE="$PROJECT_HOME/.env"
+ENV_FILE=""
 LOG_DIR="$PROJECT_HOME/logs"
 PID_FILE="$PROJECT_HOME/.uvicorn.pid"
 LOG_FILE="$LOG_DIR/app.log"
@@ -39,39 +41,51 @@ fi
 ###############################################################################
 # Virtual environment (create on first run, then reuse)
 ###############################################################################
-if [ ! -d "$VENV_DIR" ]; then
+RECREATE_VENV=0
+if [ ! -d "$VENV_DIR" ] || [ ! -x "$VENV_DIR/bin/python" ]; then
+    RECREATE_VENV=1
+else
+    # A moved/copied venv can keep stale paths; recreate if sys.prefix no longer matches.
+    VENV_PREFIX="$($VENV_DIR/bin/python -c 'import os, sys; print(os.path.realpath(sys.prefix))' 2>/dev/null || true)"
+    if [ "$VENV_PREFIX" != "$VENV_DIR" ]; then
+        log "${YELLOW}Detected stale virtual environment (prefix: ${VENV_PREFIX}). Recreating...${NC}"
+        RECREATE_VENV=1
+    fi
+fi
+
+if [ "$RECREATE_VENV" -eq 1 ]; then
+    rm -rf "$VENV_DIR"
     log "${GREEN}Creating virtual environment at ${VENV_DIR}...${NC}"
     python3 -m venv "$VENV_DIR"
 fi
 
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
+VENV_PYTHON="$VENV_DIR/bin/python"
 
 log "Installing requirements..."
-pip install -q -r requirements.txt
+"$VENV_PYTHON" -m pip install -q -r requirements.txt
 
 ###############################################################################
-# Ensure .env exists (symlink to ../.env if missing) -- dev mode only, skip
-# when running inside a Docker container.
+# Resolve .env source. Prefer repo-root .env so this script uses the same
+# credentials/settings as dev-start-all.sh and docker compose. Fall back to
+# service-local .env for backward compatibility.
 ###############################################################################
-if [ ! -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] && [ ! -f /.dockerenv ]; then
-    if [ -f "$PROJECT_HOME/../.env" ]; then
-        log "${YELLOW}${ENV_FILE} not found. Creating symlink to ../.env...${NC}"
-        ln -s ../.env "$ENV_FILE"
-    fi
+if [ -f "$ROOT_ENV_FILE" ]; then
+    ENV_FILE="$ROOT_ENV_FILE"
+elif [ -f "$LOCAL_ENV_FILE" ]; then
+    ENV_FILE="$LOCAL_ENV_FILE"
 fi
 
 ###############################################################################
 # Load .env
 ###############################################################################
-if [ -f "$ENV_FILE" ]; then
+if [ -n "$ENV_FILE" ]; then
     log "${GREEN}Loading ${ENV_FILE}...${NC}"
     set -a
     # shellcheck disable=SC1090
     source "$ENV_FILE"
     set +a
 else
-    log "${YELLOW}Warning: ${ENV_FILE} not found. Using default environment variables.${NC}"
+    log "${YELLOW}Warning: no .env file found at ${ROOT_ENV_FILE} or ${LOCAL_ENV_FILE}. Using default environment variables.${NC}"
 fi
 
 ###############################################################################
@@ -95,7 +109,7 @@ fi
 # Start uvicorn in the background
 ###############################################################################
 log "Starting Customer 360 API on http://${HOST}:${PORT} ..."
-nohup uvicorn app:app --host "$HOST" --port "$PORT" $RELOAD_FLAG >>"$LOG_FILE" 2>&1 &
+nohup "$VENV_PYTHON" -m uvicorn app:app --host "$HOST" --port "$PORT" $RELOAD_FLAG >>"$LOG_FILE" 2>&1 &
 echo $! >"$PID_FILE"
 
 sleep 2

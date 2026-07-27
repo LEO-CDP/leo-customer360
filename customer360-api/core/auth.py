@@ -271,6 +271,19 @@ def _apply_dev_tenant_headers(request: Request) -> None:
         request.state.user_id = user_id
 
 
+def _unauthorized_response(request: Request, detail: str) -> JSONResponse:
+    """Return a 401 JSON response that still includes CORS headers.
+
+    Browsers enforce CORS checks before exposing response details. If auth
+    rejects a cross-origin request without CORS headers, frontend callers get a
+    generic CORS error instead of the real 401 payload.
+    """
+    headers: dict[str, str] = {}
+    if request.headers.get("origin"):
+        headers["Access-Control-Allow-Origin"] = "*"
+    return JSONResponse(status_code=401, content={"detail": detail}, headers=headers)
+
+
 async def auth_middleware(request: Request, call_next):
     """Ensure API requests present a valid Keycloak bearer token before continuing."""
     if request.method == "OPTIONS":
@@ -282,17 +295,17 @@ async def auth_middleware(request: Request, call_next):
 
     authorization = request.headers.get("Authorization", "")
     if not authorization.startswith("Bearer "):
-        return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+        return _unauthorized_response(request, "Authentication required")
 
     token = authorization[len("Bearer "):].strip()
     if not token:
-        return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+        return _unauthorized_response(request, "Authentication required")
 
     payload = _load_cached_token(token)
     if payload is None:
         payload = _introspect_with_keycloak(token)
         if not payload or not payload.get("active"):
-            return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+            return _unauthorized_response(request, "Invalid or expired token")
         _cache_token(token, payload)
 
     request.state.user = payload
