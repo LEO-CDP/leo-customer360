@@ -161,5 +161,12 @@ window.C360 = window.C360 || {};
     });
   }
 
+  // Owns the "/overview" route (see router.js).
+  C360.router.define("/overview", {
+    section: "view-overview",
+    tab: "overview",
+    mount: load
+  });
+
   C360.overviewView = { load: load };
 })(window.C360);

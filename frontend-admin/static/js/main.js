@@ -1,5 +1,13 @@
 /* Customer 360 Admin -- app bootstrap: injects static partials, wires up
- * tab/view switching, the settings modal, and kicks off the initial load. */
+ * the settings modal, and kicks off the initial load.
+ *
+ * View routing itself lives in static/js/router.js (a small React-Router
+ * style hash router). This file does NOT know about individual views --
+ * every listing/detail/editor view (profiles, segments, journeys, scoring
+ * models, analytics reports, data source connectors/importers, identity
+ * resolution rules, admin users, ...) registers its own route(s) with
+ * C360.router from its own file. Adding a new view is therefore a change
+ * to that view's file only, never to this bootstrap. */
 window.C360 = window.C360 || {};
 
 (function (C360) {
@@ -7,99 +15,26 @@ window.C360 = window.C360 || {};
 
   Handlebars.registerHelper("json", function (v) { return JSON.stringify(v); });
 
-  // Every nav tab is addressable via location.hash (e.g. #overview, #profiles)
-  // so the current view survives reloads/back-forward navigation. A profile
-  // detail view is addressable as #master_profile-<id> (set by
-  // profile-detail-view.js when it loads).
-  var TAB_NAMES = ["overview", "profiles", "segments", "journeys", "scoring", "analytics", "datasources", "admin"];
-  var DEFAULT_TAB = "profiles";
-  var PROFILE_HASH_RE = /^master_profile-(.+)$/;
-  var lastRoutedProfileId = null;
-
-  function currentHashTab() {
-    var tab = (location.hash || "").replace(/^#/, "").split("/")[0];
-    return TAB_NAMES.indexOf(tab) !== -1 ? tab : DEFAULT_TAB;
-  }
-
-  function setActiveTab(tab) {
-    $(".tab-btn").removeClass("active");
-    $(".tab-btn[data-tab='" + tab + "']").addClass("active");
-  }
-
-  function showListView() {
-    $("#view-overview, #view-detail, #view-placeholder, #view-segments").addClass("hidden");
-    $("#view-list").removeClass("hidden");
-    setActiveTab("profiles");
-  }
-
-  function showOverviewView() {
-    $("#view-list, #view-detail, #view-placeholder, #view-segments").addClass("hidden");
-    $("#view-overview").removeClass("hidden");
-    setActiveTab("overview");
-    C360.overviewView.load();
-  }
-
-  function showDetailView(masterProfileId) {
-    $("#view-list, #view-overview, #view-placeholder, #view-segments").addClass("hidden");
-    $("#view-detail").removeClass("hidden");
-    setActiveTab("profiles");
-    lastRoutedProfileId = masterProfileId;
-    C360.detailView.load(masterProfileId);
-  }
-
-  // Dispatches on the current location.hash: routes to a profile detail view
-  // for #master_profile-<id>, otherwise falls back to tab-based routing.
-  // Skips re-loading the detail view if it's already showing that profile
-  // (e.g. when profile-detail-view.js itself set the hash after loading).
-  function route() {
-    var hash = (location.hash || "").replace(/^#/, "");
-    var profileMatch = hash.match(PROFILE_HASH_RE);
-    if (profileMatch) {
-      var masterProfileId = decodeURIComponent(profileMatch[1]);
-      if (masterProfileId !== lastRoutedProfileId) showDetailView(masterProfileId);
-      return;
-    }
-    lastRoutedProfileId = null;
-    routeToTab(currentHashTab());
-  }
-
-  function showSegmentsView() {
-    $("#view-list, #view-overview, #view-detail, #view-placeholder").addClass("hidden");
-    $("#view-segments").removeClass("hidden");
-    setActiveTab("segments");
-    C360.segmentsView.load();
-  }
-
-  function showPlaceholder(tab) {
-    $("#view-list, #view-overview, #view-detail, #view-segments").addClass("hidden");
-    $("#view-placeholder").removeClass("hidden");
-    $("#placeholder-title").text(C360.fmt.titleCase(tab));
-    setActiveTab(tab);
-  }
-
-  // Renders the view for a tab name without touching location.hash. Always
-  // reuses the cached partials already injected into the DOM from
-  // static/templates/ (see the $(function(){...}) bootstrap below) rather
-  // than re-fetching or rebuilding markup.
-  function routeToTab(tab) {
-    if (tab === "profiles") { showListView(); } else if (tab === "overview") { showOverviewView(); } else if (tab === "segments") { showSegmentsView(); } else { showPlaceholder(tab); }
-  }
+  // Nav tab -> the path it navigates to. Each of these paths (and any
+  // sub-routes registered under it, e.g. /segments/:id or
+  // /datasources/connectors) is owned by the corresponding view module.
+  var TAB_DEFAULT_PATH = {
+    overview: "/overview",
+    profiles: "/profiles",
+    segments: "/segments",
+    journeys: "/journeys",
+    scoring: "/scoring",
+    analytics: "/analytics",
+    datasources: "/datasources",
+    admin: "/admin"
+  };
 
   function bindChrome() {
-    $("#btn-back-to-profiles").on("click", function () { location.hash = DEFAULT_TAB; });
+    $("#btn-back-to-profiles").on("click", function () { C360.router.navigate("/profiles"); });
 
     $(".tab-btn").on("click", function () {
-      var tab = $(this).data("tab");
-      var newHash = "#" + tab;
-      if (location.hash === newHash) {
-        // hashchange won't fire if the hash didn't actually change.
-        routeToTab(tab);
-      } else {
-        location.hash = tab;
-      }
+      C360.router.navigate(TAB_DEFAULT_PATH[$(this).data("tab")] || "/profiles");
     });
-
-    $(window).on("hashchange", route);
 
     $("#btn-export-pdf").on("click", function () { window.print(); });
 
@@ -127,14 +62,21 @@ window.C360 = window.C360 || {};
       $("#footer-api-base").text(C360.config.current.apiBase);
 
       bindChrome();
-      C360.listView.bindEvents(showDetailView);
+      C360.listView.bindEvents();
       C360.detailView.bindEvents();
       C360.segmentsView.bindEvents();
 
       C360.config.pingHealth();
       setInterval(C360.config.pingHealth, 30000);
 
-      route();
+      // Every view module has already registered its routes by this point
+      // (script load order in index.html puts router.js before them).
+      // Starting the router matches the current location.hash (or falls
+      // back to /profiles) and mounts exactly one view.
+      C360.router.start("/profiles");
+
+      // Pre-fetch the profiles list in the background even if we didn't
+      // land on the Profiles tab, so switching to it feels instant.
       C360.listView.load(false);
     }).fail(function () {
       $("#alert-banner").removeClass("hidden").text(

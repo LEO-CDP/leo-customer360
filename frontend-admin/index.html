@@ -104,10 +104,14 @@
   <script src="static/js/config.js"></script>
   <script src="static/js/formatters.js"></script>
   <script src="static/js/templates.js"></script>
+  <!-- router.js must load before any view module below, since each of them
+       registers its routes with C360.router at load time. -->
+  <script src="static/js/router.js"></script>
   <script src="static/js/list-view.js"></script>
   <script src="static/js/profile-detail-view.js"></script>
   <script src="static/js/overview-view.js"></script>
   <script src="static/js/segments-view.js"></script>
+  <script src="static/js/placeholder-view.js"></script>
   <script src="static/js/main.js"></script>
 </body>
 

@@ -51,8 +51,8 @@ window.C360 = window.C360 || {};
       .fail(function (xhr) { $("#list-loading").addClass("hidden"); showApiError("loading profiles", xhr); });
   }
 
-  function bindEvents(onRowSelected) {
-    $(document).on("click", ".profile-row", function () { onRowSelected($(this).data("id")); });
+  function bindEvents() {
+    $(document).on("click", ".profile-row", function () { C360.router.navigate("/profiles/" + $(this).data("id")); });
 
     $("#search-input").on("input", function () {
       var val = $(this).val();
@@ -63,6 +63,15 @@ window.C360 = window.C360 || {};
     $("#lifecycle-filter").on("change", function () { state.lifecycle_stage = $(this).val(); load(false); });
     $("#btn-load-more").on("click", function () { load(true); });
   }
+
+  // Owns the "/profiles" listing route (see router.js). The row-click
+  // handler above navigates to "/profiles/:id", which profile-detail-view.js
+  // owns.
+  C360.router.define("/profiles", {
+    section: "view-list",
+    tab: "profiles",
+    mount: function () { load(false); }
+  });
 
   C360.listView = { load: load, bindEvents: bindEvents, rowVm: rowVm };
 })(window.C360);

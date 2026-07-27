@@ -119,11 +119,26 @@ window.C360 = window.C360 || {};
   }
 
   function bindEvents() {
-    $(document).on("click", ".segment-row", function () { showDetail($(this).data("id")); });
+    $(document).on("click", ".segment-row", function () { C360.router.navigate("/segments/" + $(this).data("id")); });
     $(document).on("click", "#btn-segments-load-more", function () { loadList(true); });
     $(document).on("click", "#btn-segment-matched-load-more", function () { loadMatchedProfiles(currentSegmentId, true); });
-    $(document).on("click", "#btn-back-to-segments", showList);
+    $(document).on("click", "#btn-back-to-segments", function () { C360.router.navigate("/segments"); });
   }
+
+  // Owns the "/segments" (list) and "/segments/:id" (detail) routes (see
+  // router.js). Both share the single "view-segments" section; showList()/
+  // showDetail() toggle the two sub-panels nested inside it, the same way a
+  // React Router layout route renders a child <Outlet/>.
+  C360.router.define("/segments", {
+    section: "view-segments",
+    tab: "segments",
+    mount: function () { load(); }
+  });
+  C360.router.define("/segments/:id", {
+    section: "view-segments",
+    tab: "segments",
+    mount: function (params) { showDetail(params.id); }
+  });
 
   C360.segmentsView = { load: load, bindEvents: bindEvents };
 })(window.C360);

@@ -137,9 +137,6 @@ window.C360 = window.C360 || {};
     $("#detail-content").empty();
     $("#detail-loading").removeClass("hidden");
 
-    var profileHash = "#master_profile-" + masterProfileId;
-    if (location.hash !== profileHash) location.hash = profileHash;
-
     var days = periodDays();
     $.when(
       api("/master-profiles/" + masterProfileId),
@@ -180,6 +177,15 @@ window.C360 = window.C360 || {};
 
     $("#period-select").on("change", reload);
   }
+
+  // Owns the "/profiles/:id" detail route (see router.js). navigate()
+  // already updates location.hash before mount() runs, so `load` no
+  // longer needs to write location.hash itself.
+  C360.router.define("/profiles/:id", {
+    section: "view-detail",
+    tab: "profiles",
+    mount: function (params) { load(params.id); }
+  });
 
   C360.detailView = { load: load, reload: reload, bindEvents: bindEvents };
 })(window.C360);
