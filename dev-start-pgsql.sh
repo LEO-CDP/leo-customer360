@@ -1,15 +1,16 @@
 #!/bin/bash
 
 # --- Config for local DEV only ---
-CONTAINER_NAME="pgsql16_vector"
+CONTAINER_NAME="customer360-postgres"
 POSTGRES_USER="postgres"
 POSTGRES_PASSWORD="password"
 DEFAULT_DB="postgres"
 TARGET_DB="customer360"
 HOST_PORT=5432
-DATA_VOLUME="pgdata_vector"
-SCHEMA_VERSION=1   # Increment this whenever you change schema.sql
+DATA_VOLUME="customer360-pgdata"
+SCHEMA_VERSION=2   # Increment this whenever you change the bootstrap SQL files
 SCHEMA_FILE="database-schema.sql"
+SEED_FILE="database-init/init-core-database.sql"
 
 # --- Usage ---
 # ./dev-start-pgsql.sh            Start (or create) the container/database and
@@ -88,10 +89,20 @@ echo "🔧 Refreshing collation versions..."
 docker exec -u postgres $CONTAINER_NAME psql -d $DEFAULT_DB -c "ALTER DATABASE postgres REFRESH COLLATION VERSION;" || true
 docker exec -u postgres $CONTAINER_NAME psql -d template1 -c "ALTER DATABASE template1 REFRESH COLLATION VERSION;" || true
 
+apply_sql_file() {
+  local src="$1"
+  local dest="/tmp/$(basename "$src")"
+  docker cp "$src" "$CONTAINER_NAME":"$dest"
+  docker exec -u postgres "$CONTAINER_NAME" psql -d "$TARGET_DB" -v ON_ERROR_STOP=1 -f "$dest" || {
+    echo "❌ Error: Failed to apply SQL file '$src'."
+    exit 1
+  }
+}
+
 # --- Reset action: DESTRUCTIVE, drops and recreates the target database, then
-# fully re-applies database-schema.sql. For local dev / unit testing only, so
-# schema changes never rely on the fragile SCHEMA_VERSION/ALTER TABLE upgrade
-# path against a stale already-provisioned database.
+# fully re-applies the schema and bootstrap seed files. For local dev / unit
+# testing only, so schema changes never rely on the fragile SCHEMA_VERSION/
+# ALTER TABLE upgrade path against a stale already-provisioned database.
 if [[ "$ACTION" == "reset" ]]; then
   if [[ "$SKIP_CONFIRM" != "true" ]]; then
     echo "⚠️  This will PERMANENTLY DROP database '${TARGET_DB}' in container '${CONTAINER_NAME}' and all its data."
@@ -140,6 +151,11 @@ if [[ "$ACTION" == "reset" ]]; then
     exit 1
   fi
 
+  if [ ! -f "$SEED_FILE" ]; then
+    echo "❌ Error: Seed file '$SEED_FILE' not found."
+    exit 1
+  fi
+
   echo "📜 Recreating schema_migrations tracking table..."
   docker exec -u postgres $CONTAINER_NAME psql -d $TARGET_DB -c "
   CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -148,12 +164,9 @@ if [[ "$ACTION" == "reset" ]]; then
   );
   "
 
-  echo "⚡ Applying '$SCHEMA_FILE' fresh (full reset)..."
-  docker cp "$SCHEMA_FILE" $CONTAINER_NAME:/tmp/database-schema.sql
-  docker exec -u postgres $CONTAINER_NAME psql -d $TARGET_DB -v ON_ERROR_STOP=1 -f /tmp/database-schema.sql || {
-    echo "❌ Error: Failed to apply schema during reset."
-    exit 1
-  }
+  echo "⚡ Applying '$SCHEMA_FILE' and '$SEED_FILE' fresh (full reset)..."
+  apply_sql_file "$SCHEMA_FILE"
+  apply_sql_file "$SEED_FILE"
   docker exec -u postgres $CONTAINER_NAME psql -d $TARGET_DB -c "INSERT INTO schema_migrations(version) VALUES ($SCHEMA_VERSION) ON CONFLICT (version) DO NOTHING;"
 
   echo "✅ Database '${TARGET_DB}' reset complete and schema v$SCHEMA_VERSION applied fresh."
@@ -199,22 +212,19 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 "
 
-# --- Run schema migration only if needed ---
-if [ -f "$SCHEMA_FILE" ]; then
+# --- Run schema/bootstrap migration only if needed ---
+if [ -f "$SCHEMA_FILE" ] && [ -f "$SEED_FILE" ]; then
   applied=$(docker exec -u postgres $CONTAINER_NAME psql -d $TARGET_DB -tAc "SELECT 1 FROM schema_migrations WHERE version = $SCHEMA_VERSION;")
 
   if [ "$applied" != "1" ]; then
-    echo "⚡ Running schema migration v$SCHEMA_VERSION..."
-    docker cp "$SCHEMA_FILE" $CONTAINER_NAME:/tmp/database-schema.sql
-    docker exec -u postgres $CONTAINER_NAME psql -d $TARGET_DB -v ON_ERROR_STOP=1 -f /tmp/database-schema.sql || {
-      echo "❌ Error: Failed to run schema migration."
-      exit 1
-    }
+    echo "⚡ Running schema/bootstrap migration v$SCHEMA_VERSION..."
+    apply_sql_file "$SCHEMA_FILE"
+    apply_sql_file "$SEED_FILE"
     docker exec -u postgres $CONTAINER_NAME psql -d $TARGET_DB -c "INSERT INTO schema_migrations(version) VALUES ($SCHEMA_VERSION);"
     echo "✅ Migration v$SCHEMA_VERSION applied."
   else
-    echo "🟢 Schema migration v$SCHEMA_VERSION already applied. Skipping."
+    echo "🟢 Schema/bootstrap migration v$SCHEMA_VERSION already applied. Skipping."
   fi
 else
-  echo "⚠️ Warning: Schema file '$SCHEMA_FILE' not found."
+  echo "⚠️ Warning: One or more bootstrap SQL files were not found."
 fi

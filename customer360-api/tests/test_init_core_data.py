@@ -10,8 +10,13 @@ from unittest.mock import patch
 
 from sqlalchemy.exc import IntegrityError
 
-from core.init_core_data import DEFAULT_SEGMENTS, _final_generated_sql, init_core_data, seed_default_segments
-from core.models.segmentation import CdpSegment
+from core.init_core_data import (
+    DEFAULT_SEGMENTS,
+    _final_generated_sql,
+    init_core_data,
+    seed_default_segments,
+    seed_default_segments_with_breakdown,
+)
 from tests.conftest import FakeDBSession
 
 
@@ -54,21 +59,14 @@ class SeedDefaultSegmentsTests(unittest.TestCase):
             script=[
                 _AllResult([(tenant_id,)]),  # SELECT tenant_id FROM sys_tenant
                 None,  # SELECT set_config('app.tenant_id', ...)
-                _ScalarResult(0),  # existing cdp_segments count for tenant
+                _AllResult([]),  # existing cdp_segments tags for tenant
+                _ScalarResult(len(DEFAULT_SEGMENTS)),  # INSERT ... ON CONFLICT DO NOTHING rowcount
             ]
         )
 
         inserted = seed_default_segments(session)
 
         self.assertEqual(inserted, len(DEFAULT_SEGMENTS))
-        self.assertEqual(len(session.added), len(DEFAULT_SEGMENTS))
-        self.assertTrue(all(isinstance(obj, CdpSegment) for obj in session.added))
-        self.assertEqual({obj.tenant_id for obj in session.added}, {tenant_id})
-        self.assertEqual(
-            {obj.segment_tag for obj in session.added},
-            {seg["segment_tag"] for seg in DEFAULT_SEGMENTS},
-        )
-        self.assertTrue(all(obj.processed_by == "human" for obj in session.added))
         self.assertTrue(session.committed)
 
     def test_sets_tenant_guc_before_touching_cdp_segments(self):
@@ -80,7 +78,8 @@ class SeedDefaultSegmentsTests(unittest.TestCase):
             script=[
                 _AllResult([(tenant_id,)]),
                 None,
-                _ScalarResult(0),
+                _AllResult([]),
+                _ScalarResult(len(DEFAULT_SEGMENTS)),
             ]
         )
 
@@ -90,21 +89,21 @@ class SeedDefaultSegmentsTests(unittest.TestCase):
         self.assertIn("app.tenant_id", guc_sql)
         self.assertEqual(guc_params["tenant_id"], str(tenant_id))
 
-    def test_skips_tenant_that_already_has_segments(self):
+    def test_backfills_missing_when_tenant_already_has_some_segments(self):
         tenant_id = uuid.uuid4()
         session = FakeDBSession(
             script=[
                 _AllResult([(tenant_id,)]),
                 None,
-                _ScalarResult(3),  # tenant already has 3 segments
+                _AllResult([("new_customer",), ("high_value",), ("churn_risk",)]),
+                _ScalarResult(len(DEFAULT_SEGMENTS) - 3),
             ]
         )
 
         inserted = seed_default_segments(session)
 
-        self.assertEqual(inserted, 0)
-        self.assertEqual(session.added, [])
-        self.assertFalse(session.committed)
+        self.assertEqual(inserted, len(DEFAULT_SEGMENTS) - 3)
+        self.assertTrue(session.committed)
 
     def test_multiple_tenants_only_seeds_the_ones_without_segments(self):
         seeded_tenant = uuid.uuid4()
@@ -113,16 +112,17 @@ class SeedDefaultSegmentsTests(unittest.TestCase):
             script=[
                 _AllResult([(seeded_tenant,), (skipped_tenant,)]),
                 None,
-                _ScalarResult(0),  # seeded_tenant has none yet
+                _AllResult([]),  # seeded_tenant has none yet
+                _ScalarResult(len(DEFAULT_SEGMENTS)),
                 None,
-                _ScalarResult(1),  # skipped_tenant already has one
+                _AllResult([(DEFAULT_SEGMENTS[0]["segment_tag"],)]),  # skipped_tenant has one existing default tag
+                _ScalarResult(len(DEFAULT_SEGMENTS) - 1),
             ]
         )
 
         inserted = seed_default_segments(session)
 
-        self.assertEqual(inserted, len(DEFAULT_SEGMENTS))
-        self.assertEqual({obj.tenant_id for obj in session.added}, {seeded_tenant})
+        self.assertEqual(inserted, (len(DEFAULT_SEGMENTS) * 2) - 1)
 
     def test_concurrent_integrity_error_is_swallowed_and_rolled_back(self):
         """A concurrent process seeding the same tenant should surface as a
@@ -133,7 +133,7 @@ class SeedDefaultSegmentsTests(unittest.TestCase):
             script=[
                 _AllResult([(tenant_id,)]),
                 None,
-                _ScalarResult(0),
+                _AllResult([]),
             ]
         )
         session.commit_side_effect = IntegrityError("INSERT", {}, Exception("dup key"))
@@ -142,6 +142,26 @@ class SeedDefaultSegmentsTests(unittest.TestCase):
 
         self.assertEqual(inserted, 0)
         self.assertTrue(session.rolled_back)
+
+    def test_backfills_only_missing_default_tags_for_existing_tenant(self):
+        tenant_id = uuid.uuid4()
+        already_present = {DEFAULT_SEGMENTS[0]["segment_tag"], DEFAULT_SEGMENTS[1]["segment_tag"]}
+        session = FakeDBSession(
+            script=[
+                _AllResult([(tenant_id,)]),
+                None,
+                _AllResult([(tag,) for tag in already_present]),
+                _ScalarResult(len(DEFAULT_SEGMENTS) - len(already_present)),
+            ]
+        )
+
+        inserted, breakdown = seed_default_segments_with_breakdown(session)
+
+        self.assertEqual(inserted, len(DEFAULT_SEGMENTS) - len(already_present))
+        self.assertEqual(
+            breakdown,
+            {tenant_id: len(DEFAULT_SEGMENTS) - len(already_present)},
+        )
 
     def test_final_generated_sql_wraps_where_clause(self):
         sql = _final_generated_sql("churn_risk_tier IN ('high', 'critical')")
@@ -158,14 +178,14 @@ class InitCoreDataTests(unittest.TestCase):
             script=[
                 _AllResult([(tenant_id,)]),
                 None,
-                _ScalarResult(0),
+                _AllResult([]),
+                _ScalarResult(len(DEFAULT_SEGMENTS)),
             ]
         )
 
         with patch("core.init_core_data.SessionLocal", return_value=session):
             init_core_data()
 
-        self.assertEqual(len(session.added), len(DEFAULT_SEGMENTS))
         self.assertTrue(session.closed)
 
     def test_init_core_data_swallows_unexpected_seeding_errors(self):

@@ -47,7 +47,7 @@ volumes:
 services:
   # ---------------------------------------------------------------------------
   # 1) PostgreSQL 16 + PostGIS + pgvector + contrib, auto-provisioned with
-  #    database-schema.sql on first start.
+  #    database-schema.sql and database-init/init-core-database.sql on first start.
   # ---------------------------------------------------------------------------
   postgres:
     build:

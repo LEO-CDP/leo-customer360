@@ -388,5 +388,109 @@ class SegmentMatchedProfilesTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
 
+class SegmentAdminSeedDefaultsTests(unittest.TestCase):
+    def setUp(self):
+        import core.routers.segment as segment_router_module
+
+        self.segment_router_module = segment_router_module
+        self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
+        self._cache_patcher.start()
+        self.addCleanup(self._cache_patcher.stop)
+
+    def _client_with_state(
+        self,
+        *,
+        tenant_id: Optional[str],
+        user_payload: Optional[dict[str, Any]],
+    ) -> TestClient:
+        app = FastAPI()
+
+        @app.middleware("http")
+        async def _inject_state(request, call_next):
+            if tenant_id is not None:
+                request.state.tenant_id = tenant_id
+            if user_payload is not None:
+                request.state.user = user_payload
+            return await call_next(request)
+
+        app.include_router(self.segment_router_module.segments_router)
+        app.dependency_overrides[get_db] = lambda: None
+        return TestClient(app)
+
+    def test_seed_defaults_rejects_tenant_and_all_tenants_together(self):
+        client = self._client_with_state(tenant_id=str(uuid.uuid4()), user_payload={"realm_access": {"roles": ["admin"]}})
+
+        response = client.post(f"/segments/admin/defaults/seed?tenant_id={uuid.uuid4()}&all_tenants=true")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_seed_defaults_for_all_tenants_requires_platform_admin(self):
+        client = self._client_with_state(tenant_id=str(uuid.uuid4()), user_payload={"realm_access": {"roles": ["admin"]}})
+
+        with patch("core.routers.segment.settings.sso_login", True):
+            response = client.post("/segments/admin/defaults/seed?all_tenants=true")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_seed_defaults_for_caller_tenant_requires_tenant_admin(self):
+        client = self._client_with_state(tenant_id=str(uuid.uuid4()), user_payload={"realm_access": {"roles": ["analyst"]}})
+
+        with patch("core.routers.segment.settings.sso_login", True):
+            response = client.post("/segments/admin/defaults/seed")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_seed_defaults_for_current_tenant_returns_insert_breakdown(self):
+        caller_tenant_id = uuid.uuid4()
+        client = self._client_with_state(
+            tenant_id=str(caller_tenant_id),
+            user_payload={"realm_access": {"roles": ["tenant_admin"]}},
+        )
+
+        with patch("core.routers.segment.settings.sso_login", True), patch(
+            "core.routers.segment.seed_default_segments_with_breakdown",
+            return_value=(3, {caller_tenant_id: 3}),
+        ) as mock_seed:
+            response = client.post("/segments/admin/defaults/seed")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["requested_all_tenants"], False)
+        self.assertEqual(body["seeded_tenants"], 1)
+        self.assertEqual(body["inserted_segments"], 3)
+        self.assertEqual(body["results"], [{"tenant_id": str(caller_tenant_id), "inserted": 3}])
+        mock_seed.assert_called_once()
+
+    def test_seed_defaults_for_all_tenants_as_platform_admin(self):
+        tenant_a = uuid.uuid4()
+        tenant_b = uuid.uuid4()
+        client = self._client_with_state(
+            tenant_id=str(uuid.uuid4()),
+            user_payload={"realm_access": {"roles": ["platform_admin"]}},
+        )
+
+        with patch("core.routers.segment.settings.sso_login", True), patch(
+            "core.routers.segment.list_tenant_ids",
+            return_value=[tenant_a, tenant_b],
+        ), patch(
+            "core.routers.segment.seed_default_segments_with_breakdown",
+            return_value=(5, {tenant_a: 2, tenant_b: 3}),
+        ):
+            response = client.post("/segments/admin/defaults/seed?all_tenants=true")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["requested_all_tenants"], True)
+        self.assertEqual(body["seeded_tenants"], 2)
+        self.assertEqual(body["inserted_segments"], 5)
+        self.assertEqual(
+            body["results"],
+            [
+                {"tenant_id": str(tenant_a), "inserted": 2},
+                {"tenant_id": str(tenant_b), "inserted": 3},
+            ],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
