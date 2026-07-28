@@ -142,7 +142,7 @@ graph TD
     T -- "FOR UPDATE NOWAIT<br/>throttle N giây" --> ST["cdp_id_resolution_status"]
     T -- "nếu qua throttle" --> R["CustomerIdentityResolver<br/>.run_resolution_batch()"]
 
-    S["Lịch trình hàng ngày<br/>(Cron/Airflow, drain-loop)"] --> R
+    S["Lịch trình hàng ngày<br/>(Cron/Dagster, drain-loop)"] --> R
 
     M["cdp_profile_attributes<br/>(matching rules)"] --> R
     C -- "đọc status_code=1" --> R
