@@ -62,7 +62,7 @@ Một khách hàng thực tế "chạm" vào doanh nghiệp qua **nhiều hệ t
 > **CIR** là quá trình **liên kết (link)** các bản ghi hồ sơ thô (raw profile) từ nhiều nguồn khác nhau, xác định chúng có **cùng thuộc về một khách hàng thực** hay không, và **hợp nhất (merge)** thành **một hồ sơ "vàng" duy nhất** (Golden/Master Profile).
 
 **Mục tiêu trong Customer 360:**
-- Một khách hàng = **một `master_profile_id`** duy nhất, xuyên suốt mọi kênh, mọi domain (retail/banking/travel)
+- Một khách hàng = **một `master_profile_id`** duy nhất, xuyên suốt mọi kênh, mọi domain (retail/banking/real_estate/travel)
 - Nền tảng cho: personalization, chấm điểm (lead/churn/CLV), segmentation, báo cáo
 
 ---
@@ -89,7 +89,7 @@ Một khách hàng thực tế "chạm" vào doanh nghiệp qua **nhiều hệ t
 | **Core Banking / KYC** | Core Banking | `phone_number`, `national_id`, `device_id` |
 
 Tất cả đổ về **một bảng staging duy nhất**: `cdp_raw_profiles_stage`
-(đa tenant – `tenant_id`, đa domain – `bán lẻ`/`banking`/`du lịch`)
+(đa tenant – `tenant_id`, đa domain – `bán lẻ`/`banking`/`bất động sản`/`du lịch`)
 
 ---
 
@@ -123,7 +123,7 @@ graph LR
 **Nhóm định danh theo hệ thống nguồn (hợp nhất thành JSONB theo `source_system`):**
 `external_customer_id → external_ids{}`, `push_token → push_tokens{}`
 
-**Metadata mô tả tất cả attribute:** bảng `cdp_profile_attributes` — 54 thuộc tính, gồm cả cấu hình *matching_rule*, *matching_threshold*, *consolidation_rule*, *is_pii*, *attribute_group* (SYSTEM/IDENTITY/RETAIL/BANKING/SCORING…)
+**Metadata mô tả tất cả attribute:** bảng `cdp_profile_attributes` — schema hỗ trợ mô tả toàn bộ ~60 cột của `cdp_master_profiles` (cấu hình *matching_rule*, *matching_threshold*, *consolidation_rule*, *is_pii*, *attribute_group*: SYSTEM/IDENTITY/RETAIL/BANKING/SCORING…). Bản seed demo hiện tại (`scripts/init_sample_data.py`) chỉ nạp **8 thuộc tính** dùng trực tiếp cho identity resolution (`email`, `phone_number`, `national_id`, `device_id`, `advertising_id`, `cookie_id`, `external_customer_id`, `full_name`) — phần metadata mô tả đầy đủ các thuộc tính còn lại chưa được seed.
 
 ---
 

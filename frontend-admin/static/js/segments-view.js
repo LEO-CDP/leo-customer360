@@ -21,6 +21,8 @@ window.C360 = window.C360 || {};
   function segmentRowVm(s) {
     return $.extend({}, s, {
       domainLabel: domainLabel(s.domain),
+      domainIcon: fmt.domainIcon(s.domain),
+      domainIconBg: fmt.domainIconBg(s.domain),
       processedByLabel: processedByLabel(s.processed_by),
       processedByBadgeClass: processedByBadgeClass(s.processed_by),
       activeLabel: activeLabel(s.is_active),

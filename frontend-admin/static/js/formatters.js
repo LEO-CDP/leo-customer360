@@ -41,6 +41,13 @@ window.C360 = window.C360 || {};
   var DOMAIN_LABELS = { banking: "Retail Banking", retail: "Retail Commerce", real_estate: "Real Estate", travel: "Travel" };
   var CHANNEL_ICONS = { mobile_app: "📱", web: "💻", internet_banking: "🏦", pos: "🛍️", call_center: "☎️", live_chat: "💬", branch_visit: "🏢", email: "✉️" };
   var CATEGORY_ICONS = { FINANCE: "💰", STOCK_TRADING: "📈", FEEDBACK: "⭐", GENERAL: "🔑", COMMERCE: "🛒", TRAVEL: "✈️", REAL_ESTATE: "🏠", EDUCATION: "🎓", SERVICE_INDUSTRY: "🛎️" };
+  var DOMAIN_ICONS = { banking: "💰", retail: "🛒", real_estate: "🏠", travel: "✈️", all: "🌐" };
+  var DOMAIN_ICON_BG = {
+    banking: "bg-blue-100", retail: "bg-amber-100", real_estate: "bg-emerald-100", travel: "bg-sky-100", all: "bg-indigo-100"
+  };
+
+  function domainIcon(domain) { return DOMAIN_ICONS[domain] || "🏷️"; }
+  function domainIconBg(domain) { return DOMAIN_ICON_BG[domain] || "bg-slate-100"; }
 
   function lifecycleBadgeClass(stage) {
     var map = {
@@ -69,6 +76,8 @@ window.C360 = window.C360 || {};
     DOMAIN_LABELS: DOMAIN_LABELS,
     CHANNEL_ICONS: CHANNEL_ICONS,
     CATEGORY_ICONS: CATEGORY_ICONS,
+    domainIcon: domainIcon,
+    domainIconBg: domainIconBg,
     lifecycleBadgeClass: lifecycleBadgeClass,
     churnBadgeClass: churnBadgeClass
   };
