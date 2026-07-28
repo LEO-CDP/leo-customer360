@@ -12,9 +12,11 @@
 # What it does, in order:
 #   1. Ensures '.env' exists (created from '.env.example' if missing) and
 #      contains every key currently in '.env.example'.
-#   2. Starts (or resets) postgres/redis/keycloak via
+#   2. Starts (or resets) postgres/redis/keycloak/minio via
 #      `docker compose -f dev-docker-compose.yml`.
-#   3. Waits for all three containers to report healthy.
+#   3. Waits for postgres/redis/keycloak/minio containers to report healthy,
+#      then waits for the one-shot `minio-init` bucket-bootstrap job to
+#      complete.
 #   4. Checks whether the Keycloak 'leocdp' realm exists yet; there is no
 #      automated realm/client seed script in this repo, so it prints manual
 #      setup instructions (DOCKER-COMPOSE-GUIDE.md section 9) when missing.
@@ -28,9 +30,10 @@
 #                                    print DB status counts.
 #   ./dev-start-all.sh --no-seed    Same, but skip the CIR demo data seed step.
 #   ./dev-start-all.sh reset        DESTRUCTIVE: `docker compose down -v`
-#                                    (drops the postgres/redis volumes -- this
-#                                    also wipes Keycloak's db_keycloak) then
-#                                    starts fresh and reseeds.
+#                                    (drops the postgres/redis/minio volumes
+#                                    -- this also wipes Keycloak's
+#                                    db_keycloak and the MinIO dev bucket)
+#                                    then starts fresh and reseeds.
 #   ./dev-start-all.sh reset -y     Same as 'reset' but skips the confirmation
 #                                    prompt (CI / automation).
 # =============================================================================
@@ -46,6 +49,8 @@ CIR_DIR="backend-system/identity_resolution"
 POSTGRES_CONTAINER="customer360-postgres"
 REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
+MINIO_CONTAINER="customer360-minio"
+MINIO_INIT_CONTAINER="customer360-minio-init"
 
 # --- Parse args (order-independent) ---
 ACTION="up"
@@ -57,7 +62,7 @@ for arg in "$@"; do
     -y|--yes) SKIP_CONFIRM="true" ;;
     --no-seed) SKIP_SEED="true" ;;
     -h|--help)
-      sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -144,7 +149,7 @@ fi
 # 2) Start / reset postgres + redis + keycloak
 # =============================================================================
 if [ "$ACTION" = "reset" ]; then
-  echo "⚠️  This will run '${DC[*]} -f ${COMPOSE_FILE} down -v', PERMANENTLY DELETING the customer360-pgdata and customer360-redisdata volumes (all Postgres + Redis data, including Keycloak's db_keycloak)."
+  echo "⚠️  This will run '${DC[*]} -f ${COMPOSE_FILE} down -v', PERMANENTLY DELETING the customer360-pgdata, customer360-redisdata and customer360-miniodata volumes (all Postgres + Redis + MinIO data, including Keycloak's db_keycloak)."
   if [ "$SKIP_CONFIRM" != "true" ]; then
     read -r -p "Type 'yes' to confirm: " CONFIRM_ANSWER
     if [ "$CONFIRM_ANSWER" != "yes" ]; then
@@ -156,11 +161,12 @@ if [ "$ACTION" = "reset" ]; then
   "${DC_CMD[@]}" down -v
 fi
 
-echo "🚀 Starting postgres + redis + keycloak (${COMPOSE_FILE})..."
+echo "🚀 Starting postgres + redis + keycloak + minio (${COMPOSE_FILE})..."
 "${DC_CMD[@]}" up -d --build
 
 # =============================================================================
-# 3) Wait for all three services to report healthy
+# 3) Wait for the healthchecked services, then for the one-shot minio-init
+#    bucket-bootstrap job to finish.
 # =============================================================================
 wait_for_healthy() {
   local container="$1"
@@ -179,9 +185,35 @@ wait_for_healthy() {
   echo "🟢 '${container}' is healthy."
 }
 
+wait_for_completed() {
+  local container="$1"
+  local max_attempts=30
+  local attempt=1
+  echo "⏳ Waiting for '${container}' to finish..."
+  until [ "$(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null)" = "exited" ]; do
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      echo "❌ Error: '${container}' did not finish after ${max_attempts} attempts." >&2
+      "${DC_CMD[@]}" logs --tail=50 "$container" || true
+      exit 1
+    fi
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+  local exit_code
+  exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$container" 2>/dev/null || echo "1")"
+  if [ "$exit_code" != "0" ]; then
+    echo "❌ Error: '${container}' exited with code ${exit_code}." >&2
+    "${DC_CMD[@]}" logs --tail=50 "$container" || true
+    exit 1
+  fi
+  echo "🟢 '${container}' completed successfully."
+}
+
 wait_for_healthy "$POSTGRES_CONTAINER"
 wait_for_healthy "$REDIS_CONTAINER"
 wait_for_healthy "$KEYCLOAK_CONTAINER"
+wait_for_healthy "$MINIO_CONTAINER"
+wait_for_completed "$MINIO_INIT_CONTAINER"
 
 # =============================================================================
 # 4) Keycloak realm check -- no automated realm/client seed script exists in
@@ -267,18 +299,20 @@ else
 fi
 
 print_final_service_table() {
-  local postgres_status redis_status keycloak_status
+  local postgres_status redis_status keycloak_status minio_status
   postgres_status="$(docker inspect -f '{{.State.Health.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || echo "unknown")"
   redis_status="$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER" 2>/dev/null || echo "unknown")"
   keycloak_status="$(docker inspect -f '{{.State.Health.Status}}' "$KEYCLOAK_CONTAINER" 2>/dev/null || echo "unknown")"
+  minio_status="$(docker inspect -f '{{.State.Health.Status}}' "$MINIO_CONTAINER" 2>/dev/null || echo "unknown")"
 
   echo ""
   echo "✅ Core services status"
-  printf '%-12s | %-10s | %-18s\n' "Service" "Status" "Host:Port"
-  printf '%-12s-+-%-10s-+-%-18s\n' "------------" "----------" "------------------"
-  printf '%-12s | %-10s | %-18s\n' "postgres" "$postgres_status" "localhost:${POSTGRES_HOST_PORT:-5432}"
-  printf '%-12s | %-10s | %-18s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6379}"
-  printf '%-12s | %-10s | %-18s\n' "keycloak" "$keycloak_status" "localhost:${KEYCLOAK_HOST_PORT:-8080}"
+  printf '%-12s | %-10s | %-25s\n' "Service" "Status" "Host:Port"
+  printf '%-12s-+-%-10s-+-%-25s\n' "------------" "----------" "-------------------------"
+  printf '%-12s | %-10s | %-25s\n' "postgres" "$postgres_status" "localhost:${POSTGRES_HOST_PORT:-5432}"
+  printf '%-12s | %-10s | %-25s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6379}"
+  printf '%-12s | %-10s | %-25s\n' "keycloak" "$keycloak_status" "localhost:${KEYCLOAK_HOST_PORT:-8080}"
+  printf '%-12s | %-10s | %-25s\n' "minio" "$minio_status" "localhost:${MINIO_API_HOST_PORT:-9000} (console ${MINIO_CONSOLE_HOST_PORT:-9001})"
 }
 
 print_final_service_table

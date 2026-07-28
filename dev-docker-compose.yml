@@ -15,6 +15,11 @@ name: customer360
 # over calling this file directly -- it also bootstraps `.env` and health
 # checks, and seeds CIR demo data.
 #
+# Also starts MinIO (S3-compatible object storage), DEV ONLY, so file-based
+# event ingestion can be tested locally against a real S3 API. MinIO is
+# intentionally NOT part of docker-compose.yml -- production uses the real
+# S3 bucket instead.
+#
 # Config: copy .env.example -> .env in this directory before first run.
 #
 # NOTE: this file intentionally shares the same project `name`, container
@@ -46,6 +51,8 @@ volumes:
     name: customer360-pgdata
   customer360-redisdata:
     name: customer360-redisdata
+  customer360-miniodata:
+    name: customer360-miniodata
 
 services:
   # ---------------------------------------------------------------------------
@@ -189,4 +196,68 @@ services:
       timeout: 10s
       retries: 10
       start_period: 60s
+
+  # ---------------------------------------------------------------------------
+  # 5) MinIO - local S3-compatible object storage, DEV ONLY. Lets you test
+  #    file-based event ingestion (e.g. importing events from CSV/JSON dropped
+  #    into a bucket, see docs/PLAN-EVENTS-API-IMPROVEMENTmd "Import from S3")
+  #    against a real S3 API without touching production S3. NOT present in
+  #    docker-compose.yml -- production uses the real S3 bucket instead.
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:${MINIO_VERSION:-RELEASE.2025-09-07T16-13-09Z}
+    container_name: customer360-minio
+    restart: unless-stopped
+    <<: *default-hardening
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      # S3 API port.
+      - "${MINIO_HOST_BIND:-127.0.0.1}:${MINIO_API_HOST_PORT:-9000}:9000"
+      # Web console port (login with MINIO_ROOT_USER/MINIO_ROOT_PASSWORD).
+      - "${MINIO_HOST_BIND:-127.0.0.1}:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    volumes:
+      - customer360-miniodata:/data
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # 6) MinIO bucket bootstrap - one-shot: creates the default dev bucket
+  #    (MINIO_BUCKET) used for testing file-based event ingestion, so it
+  #    exists as soon as the stack comes up.
+  # ---------------------------------------------------------------------------
+  minio-init:
+    image: minio/mc:${MINIO_MC_VERSION:-RELEASE.2025-08-13T08-35-41Z}
+    container_name: customer360-minio-init
+    restart: "no"
+    <<: *default-hardening
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      MINIO_BUCKET: ${MINIO_BUCKET:-customer360-events-dev}
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - customer360-network
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb -p "local/$$MINIO_BUCKET"
+        mc anonymous set none "local/$$MINIO_BUCKET"
+        echo "Bucket $$MINIO_BUCKET ready."
 
