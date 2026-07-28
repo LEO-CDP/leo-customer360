@@ -17,10 +17,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -35,7 +35,7 @@ jobs:
 
       - name: Upload test logs and results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: customer360-api-test-results-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -48,3 +48,27 @@ jobs:
         uses: test-summary/action@v2
         with:
           paths: customer360-api/logs/test-results.xml
+
+      - name: Send email notification
+        if: always()
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: smtp-relay.brevo.com
+          server_port: 587
+          secure: false
+          username: ${{ secrets.BREVO_SMTP_LOGIN }}
+          password: ${{ secrets.BREVO_SMTP_KEY }}
+          subject: "CI ${{ job.status }}: customer360-api unit tests (run #${{ github.run_number }})"
+          to: trieu@leocdp.com
+          from: ${{ secrets.BREVO_SENDER_EMAIL }}
+          body: |
+            Workflow: ${{ github.workflow }}
+            Job status: ${{ job.status }}
+            Repository: ${{ github.repository }}
+            Branch/ref: ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Triggered by: ${{ github.actor }}
+            Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          attachments: |
+            customer360-api/logs/test-output.log
+            customer360-api/logs/test-results.xml
