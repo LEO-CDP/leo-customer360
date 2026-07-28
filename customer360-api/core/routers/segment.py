@@ -14,9 +14,10 @@ from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from core.cache import cache_response
+from core.cache import cache_response, invalidate_prefix
 from core.config import settings
 from core.crud.base import CRUDBase
+from core.crud.segmentation import recompute_segment_membership
 from core.database import get_db
 from core.init_core_data import list_tenant_ids, seed_default_segments_with_breakdown
 from core.models.segmentation import CdpSegment
@@ -187,6 +188,34 @@ def count_segment_matched_profiles(segment_id: uuid.UUID, db: Session = Depends(
     )
     count = db.execute(stmt, {"tenant_id": str(segment.tenant_id)}).scalar_one()
     return {"count": count}
+
+
+@segments_router.post("/{segment_id}/recompute")
+def recompute_segment(segment_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Re-runs the segment's ``sql_rules`` against ``cdp_master_profiles``
+    (see core.crud.segmentation.recompute_segment_membership), updating
+    ``member_count``/``last_computed_at`` and syncing ``segment_tag`` into/out
+    of ``cdp_master_profiles.segmentation_tags`` for matching/non-matching
+    profiles."""
+    segment = _get_segment_or_404(db, segment_id)
+    if not segment.sql_rules:
+        raise HTTPException(status_code=400, detail="Segment has no sql_rules to compute")
+
+    try:
+        recompute_segment_membership(db, segment)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Recomputed membership/tags can change the result of the read-only
+    # matched-profiles endpoints, so their cached responses are now stale.
+    invalidate_prefix("segments/matched_profiles")
+    invalidate_prefix("segments/matched_profiles_count")
+
+    return {
+        "segment_id": str(segment.segment_id),
+        "member_count": segment.member_count,
+        "last_computed_at": segment.last_computed_at,
+    }
 
 
 @segments_router.post("/admin/defaults/seed")

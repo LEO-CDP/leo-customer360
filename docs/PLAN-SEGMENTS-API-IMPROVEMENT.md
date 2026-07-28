@@ -33,12 +33,17 @@ Most of the Segments API surface **already exists** (`core/routers/segment.py`),
 | **member_count / last_computed_at never populated** | Columns exist, default to 0/NULL, never updated | `POST /segments/{id}/recompute` updates both after running `sql_rules` | High |
 | **No tag write-back to master profiles** | `segmentation_tags` read by `content.py` but nothing writes segment membership into it | Recompute syncs `segment_tag` into/out of `cdp_master_profiles.segmentation_tags` for matching/non-matching profiles | High |
 | **No dry-run/preview of unsaved rules** | Rules must be saved as a segment row before they can be tested | `POST /segments/dry-run` validates + executes an ad-hoc fragment, returns count + sample, no persistence | Medium |
-| **No scheduled recompute** | Fully on-demand; segments go stale if no admin recomputes them | `backend-system/segmentation` Dagster job periodically recomputes all active segments | Medium |
+| **No scheduled recompute** | ~~Fully on-demand; segments go stale if no admin recomputes them~~ **Done** — `backend-system/segmentation` now has a real `segmentation_job` + `segmentation_poll_sensor` (polls every `SEGMENTATION_POLL_INTERVAL_SECONDS`, default 10s, only running when `cdp_master_profiles` changed) | `backend-system/segmentation` Dagster job periodically recomputes all active segments | Medium |
 | **No tests for recompute/dry-run** | `tests/test_segment_router.py` covers CRUD + matched-profiles + seed-defaults only | Add unit tests for recompute (count/tag updates) and dry-run (validation + execution) | High |
 
 ## 4) Implementation (recommended sequence)
 
-### Phase 1: Recompute endpoint (2–3 hours)
+### Phase 1: Recompute endpoint (2–3 hours) — ✅ DONE
+> Implemented: `core/crud/segmentation.py::recompute_segment_membership`,
+> `POST /api/v1/segments/{segment_id}/recompute` in `core/routers/segment.py`,
+> cache invalidation, and unit tests in `tests/test_segmentation_crud.py` +
+> `tests/test_segment_router.py::SegmentRecomputeTests`. Verified end-to-end
+> against a live dev PostgreSQL instance.
 1. Add `recompute_segment_membership(db, segment)` to `core/crud/` (new `core/crud/segmentation.py` or alongside `_segment_crud` in `segment.py`):
    - Re-validates `sql_rules` via `validate_sql_where_fragment` (same helper already used in `_validated_where_fragment`).
    - Runs a tenant-scoped `SELECT master_profile_id FROM cdp_master_profiles WHERE tenant_id = :tenant_id AND status_code = 1 AND (<where_fragment>)`.
@@ -60,7 +65,20 @@ Most of the Segments API surface **already exists** (`core/routers/segment.py`),
 1. Add `DryRunRequest`/`DryRunResult` schemas to `core/schemas/segmentation.py` (`tenant_id`, `domain`, `sql_rules`, optional `limit` for sample size).
 2. Add `POST /segments/dry-run` route reusing `_validated_where_fragment` + a read-only query identical in shape to `get_segment_matched_profiles`, but against the request body instead of a stored segment row. No DB write.
 
-### Phase 3: Scheduled recompute job (2–3 hours)
+### Phase 3: Scheduled recompute job (2–3 hours) — ✅ DONE
+> Implemented: `backend-system/segmentation/segmentation/recompute.py`
+> (`recompute_all_active_segments`, `count_recently_changed_master_profiles`)
+> + `backend-system/segmentation/dagster_defs.py` (`recompute_segments_op` /
+> `segmentation_job` / `segmentation_poll_sensor`). The sensor polls every
+> `SEGMENTATION_POLL_INTERVAL_SECONDS` (default **10s**, env-configurable)
+> and only requests a `segmentation_job` run when at least one
+> `cdp_master_profiles` row was created/updated since its last check (via a
+> Dagster sensor cursor) — not real-time, but every profile create/update is
+> picked up within one poll interval. RUNNING by default (unlike
+> `identity_resolution_poll_sensor`, since no `worker.py` loop drives this
+> job today). Verified end-to-end against a live dev PostgreSQL instance
+> (`segmentation_job.execute_in_process()`), plus unit tests in
+> `backend-system/segmentation/tests/test_dagster_defs.py`.
 1. Replace the placeholder single-op job in `backend-system/segmentation/dagster_defs.py` with an op that queries all `is_active = true` segments across tenants and calls the same `recompute_segment_membership` logic (import shared code or duplicate the SQL, matching the existing `identity_resolution` Dagster job style).
 2. Optionally add a schedule (e.g. every 6 hours) analogous to `identity_resolution`'s sensor, documented in `backend-system/README.md`.
 
@@ -109,12 +127,13 @@ Response: {
 
 ## 7) Definition of done
 
-- [ ] `recompute_segment_membership` logic implemented, updates `member_count`, `last_computed_at`, and syncs `segment_tag` into/out of `cdp_master_profiles.segmentation_tags`
-- [ ] `POST /api/v1/segments/{segment_id}/recompute` endpoint wired, 400 when no `sql_rules`, 404 for missing segment
+- [x] `recompute_segment_membership` logic implemented, updates `member_count`, `last_computed_at`, and syncs `segment_tag` into/out of `cdp_master_profiles.segmentation_tags`
+- [x] `POST /api/v1/segments/{segment_id}/recompute` endpoint wired, 400 when no `sql_rules`, 404 for missing segment
 - [ ] `POST /api/v1/segments/dry-run` endpoint wired, validates fragment, executes read-only, no persistence
-- [ ] Cache invalidation on recompute for `segments/matched_profiles*` prefixes
-- [ ] `backend-system/segmentation/dagster_defs.py` replaced with real recompute-all-active-segments job
-- [ ] Unit tests added for recompute (count/tag sync/error cases) and dry-run (valid/invalid fragment)
+- [x] Cache invalidation on recompute for `segments/matched_profiles*` prefixes
+- [x] `backend-system/segmentation/dagster_defs.py` replaced with real recompute-all-active-segments job + `segmentation_poll_sensor` (default 10s poll, gated on actual `cdp_master_profiles` changes)
+- [x] Unit tests added for recompute (count/tag sync/error cases) — dry-run tests still pending (Phase 2 not yet implemented)
 - [ ] `docs/customer360-api.md` updated with `/segments/{id}/recompute` and `/segments/dry-run` sections
 - [ ] Code review + team sign-off
-- [ ] Validated in staging (manual recompute + scheduled job) before production rollout
+- [x] Validated against a live dev PostgreSQL instance (manual recompute + `segmentation_job.execute_in_process()`) — staging rollout still pending
+

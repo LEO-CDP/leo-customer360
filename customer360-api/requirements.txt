@@ -9,6 +9,9 @@ python-dotenv>=1.0,<2
 pgvector>=0.3,<1
 redis>=5.0,<6
 
+# submit job execution into Dagster server
+dagster-graphql
+
 # Test-only dependencies (see ./run_unit_tests.sh)
 pytest>=7.4,<9
 httpx2>=2.9.1

@@ -20,15 +20,24 @@ backend-system/
 │   └── tests/
 │
 ├── scoring/                  # score every profile for every metric (PLACEHOLDER)
-├── segmentation/             # build segments via an AI service (PLACEHOLDER)
+├── segmentation/             # recomputes cdp_segments membership (implemented)
+│   ├── dagster_defs.py       #   -> segmentation_job, segmentation_poll_sensor
+│   ├── segmentation/         #   the actual business-logic package (recompute.py)
+│   ├── requirements.txt
+│   └── tests/
 └── analytics/                # build reporting & refresh report tables (PLACEHOLDER)
-    └── dagster_defs.py       #   each: one op that logs started -> sleep -> done
+    └── dagster_defs.py       #   one op that logs started -> sleep -> done
 ```
 
-`scoring/`, `segmentation/`, and `analytics/` don't have real business logic
-yet — they exist so the Dagster workspace, local scripts, and UI already
-have a slot for each service, ready for real code to be dropped in (see
-["Adding a new backend service"](#adding-a-new-backend-service) below).
+`scoring/` and `analytics/` don't have real business logic yet — they exist
+so the Dagster workspace, local scripts, and UI already have a slot for each
+service, ready for real code to be dropped in (see ["Adding a new backend
+service"](#adding-a-new-backend-service) below). `segmentation/` recomputes
+`cdp_segments.member_count` and syncs `cdp_master_profiles.segmentation_tags`
+for every active segment (see
+[docs/PLAN-SEGMENTS-API-IMPROVEMENT.md](../docs/PLAN-SEGMENTS-API-IMPROVEMENT.md)),
+the scheduled/batch counterpart to customer360-api's on-demand
+`POST /api/v1/segments/{id}/recompute`.
 
 ---
 
@@ -84,14 +93,19 @@ flowchart TB
     subgraph SC["scoring code location (placeholder)"]
         SCJob["scoring_job\n(started -> sleep -> done)"]
     end
-    subgraph SG["segmentation code location (placeholder)"]
-        SGJob["segmentation_job\n(started -> sleep -> done)"]
+    subgraph SG["segmentation code location (implemented)"]
+        SGOp["recompute_segments_op\n(recompute_all_active_segments)"]
+        SGJob["segmentation_job"]
+        SGSensor["segmentation_poll_sensor\n(poll every SEGMENTATION_POLL_INTERVAL_SECONDS,\nonly runs if cdp_master_profiles changed)"]
+        SGOp --> SGJob
+        SGSensor -. RunRequest .-> SGJob
     end
     subgraph AN["analytics code location (placeholder)"]
         ANJob["analytics_job\n(started -> sleep -> done)"]
     end
 
     Sensors --> IRSensor
+    Sensors --> SGSensor
     RunCoord --> IRJob
     RunCoord --> SCJob
     RunCoord --> SGJob
@@ -100,6 +114,7 @@ flowchart TB
     Daemon --> WS
 
     IRJob --> DB[(PostgreSQL\ncustomer360 schema)]
+    SGJob --> DB
 ```
 
 - **Local dev** (`./start.sh`): one shared Python venv installs every
@@ -112,7 +127,9 @@ flowchart TB
   `worker.py` runs `identity_resolution_job.execute_in_process()` in a
   timed loop — every cycle is still a real, trackable Dagster run (with
   per-step logs/timing/retries), it's just launched by a simple loop
-  instead of a full daemon. `scoring`/`segmentation`/`analytics` don't have
+  instead of a full daemon. `segmentation` runs via its own
+  `segmentation_poll_sensor` (RUNNING by default, no worker.py loop needed)
+  once the Dagster daemon is up. `scoring`/`analytics` don't have
   containers yet since they're placeholders.
 - **Containerized production** (target end-state): a `dagster-daemon`
   deployment + one gRPC code-server container per service, all pointed at a
@@ -120,8 +137,7 @@ flowchart TB
   local-dev SQLite files under `.dagster_home/`). At that point,
   `identity_resolution_poll_sensor` (already defined, just `STOPPED` by
   default) gets turned on instead of `worker.py`'s loop, and the same
-  pattern applies to `scoring`/`segmentation`/`analytics` once they have
-  real ops.
+  pattern applies to `scoring`/`analytics` once they have real ops.
 
 ### Why this scales
 
@@ -143,13 +159,16 @@ flowchart TB
   (default daemon config) enforces run concurrency limits so, e.g., 100
   queued `scoring_job` runs don't all hit Postgres at once.
 - **Sensors decouple "when" from "how"** — `identity_resolution_poll_sensor`
-  requests a new run every `CIR_POLL_INTERVAL_SECONDS`; the daemon (not a
-  single long-lived process) launches each one. That means scaling out is
-  "add more run workers", not "rewrite the polling loop".
-- **One pane of glass from day one** — even though `scoring`/`segmentation`/
-  `analytics` are placeholders, they already show up in the same Dagster UI
-  as `identity_resolution`, with the same run history, logs, and retry
-  semantics — so when real logic lands, there's no separate monitoring
+  requests a new run every `CIR_POLL_INTERVAL_SECONDS`; `segmentation_poll_sensor`
+  does the same every `SEGMENTATION_POLL_INTERVAL_SECONDS` (default 10s), but
+  only when it detects at least one `cdp_master_profiles` row created/updated
+  since its last check — the daemon (not a single long-lived process) launches
+  each resulting run. That means scaling out is "add more run workers", not
+  "rewrite the polling loop".
+- **One pane of glass from day one** — even though `scoring`/`analytics` are
+  placeholders, they already show up in the same Dagster UI as
+  `identity_resolution`/`segmentation`, with the same run history, logs, and
+  retry semantics — so when real logic lands, there's no separate monitoring
   story to build.
 
 ---
@@ -164,10 +183,14 @@ cd backend-system
 
 Then open **http://localhost:3000** — you should see 4 code locations
 (`identity_resolution`, `scoring`, `segmentation`, `analytics`), each with
-one job. Click a job → **Launchpad** → **Launch Run** to try one (the
-placeholders finish in a couple seconds and log `started` then `done`; try
-`identity_resolution_job` too — it will attempt a real Postgres connection,
-so have `./dev-start-all.sh` or `docker compose up postgres` running first).
+one job. `scoring`/`analytics` are placeholders that finish in a couple
+seconds and log `started` then `done`. `identity_resolution_job` and
+`segmentation_job` both attempt a real Postgres connection, so have
+`./dev-start-all.sh` or `docker compose up postgres` running first;
+`segmentation_poll_sensor` is RUNNING by default and will launch
+`segmentation_job` on its own within `SEGMENTATION_POLL_INTERVAL_SECONDS`
+(default 10s) of any `cdp_master_profiles` change, or click a job →
+**Launchpad** → **Launch Run** to try one manually.
 
 ```bash
 ./stop.sh       # stop the webserver + daemon (and any leftover child processes)
@@ -185,6 +208,8 @@ Config (see `.env.example`, loaded from the repo-root `.env` if present):
 | `DAGSTER_UI_HOST` | `127.0.0.1` | Bind address for the Dagster webserver |
 | `DAGSTER_UI_PORT` | `3000` | Port for the Dagster webserver |
 | `DAGSTER_HOME` | `backend-system/.dagster_home` | **Must be an absolute path.** Persistent run/event-log storage so history survives `./restart.sh`; unset it (blank) to fall back to a throwaway ephemeral instance instead. |
+| `SEGMENTATION_POLL_INTERVAL_SECONDS` | `10` | How often `segmentation_poll_sensor` checks `cdp_master_profiles` for changes (not real-time; a `segmentation_job` run is only requested if something actually changed since the last check). |
+| `CIR_POLL_INTERVAL_SECONDS` | `30` | Same idea as above, for `identity_resolution_poll_sensor` (STOPPED by default; see `worker.py`). |
 
 ---
 

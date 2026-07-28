@@ -7,6 +7,7 @@ PostgreSQL instance required.
 
 import unittest
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import patch
@@ -386,6 +387,100 @@ class SegmentMatchedProfilesTests(unittest.TestCase):
         response = client.get(f"/segments/{segment.segment_id}/matched-profiles")
 
         self.assertEqual(response.status_code, 400)
+
+
+class SegmentRecomputeTests(unittest.TestCase):
+    """Tests the hand-written POST /segments/{id}/recompute endpoint
+    (core.routers.segment.recompute_segment), mocking out
+    recompute_segment_membership so these stay unit tests (no real
+    PostgreSQL)."""
+
+    def setUp(self):
+        import core.routers.segment as segment_router_module
+
+        self.segment_router_module = segment_router_module
+        self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
+        self._cache_patcher.start()
+        self.addCleanup(self._cache_patcher.stop)
+
+        self.app = FastAPI()
+        self.app.include_router(segment_router_module.segments_router)
+        self.app.dependency_overrides[get_db] = lambda: None
+
+    def _client_for(self, fake_segment: Optional[SimpleNamespace]) -> TestClient:
+        crud_patcher = patch.object(
+            self.segment_router_module, "_segment_crud", SimpleNamespace(get=lambda db, pk: fake_segment)
+        )
+        crud_patcher.start()
+        self.addCleanup(crud_patcher.stop)
+        return TestClient(self.app)
+
+    def test_recompute_404_for_missing_segment(self):
+        client = self._client_for(None)
+
+        response = client.post(f"/segments/{uuid.uuid4()}/recompute")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_recompute_400_when_no_sql_rules(self):
+        segment = SimpleNamespace(segment_id=uuid.uuid4(), tenant_id=uuid.uuid4(), sql_rules=None)
+        client = self._client_for(segment)
+
+        response = client.post(f"/segments/{segment.segment_id}/recompute")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_recompute_400_when_membership_recompute_rejects_unsafe_rules(self):
+        segment = SimpleNamespace(
+            segment_id=uuid.uuid4(),
+            tenant_id=uuid.uuid4(),
+            sql_rules="1=1; DROP TABLE cdp_master_profiles;",
+        )
+        client = self._client_for(segment)
+
+        with patch.object(
+            self.segment_router_module,
+            "recompute_segment_membership",
+            side_effect=ValueError("sql_rules must not contain statement separators"),
+        ):
+            response = client.post(f"/segments/{segment.segment_id}/recompute")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_recompute_returns_updated_member_count_and_invalidates_cache(self):
+        segment_id = uuid.uuid4()
+        last_computed_at = datetime(2026, 7, 28, 10, 15, tzinfo=timezone.utc)
+
+        def _fake_recompute(db, segment):
+            segment.member_count = 42
+            segment.last_computed_at = last_computed_at
+            return segment
+
+        segment = SimpleNamespace(
+            segment_id=segment_id,
+            tenant_id=uuid.uuid4(),
+            sql_rules="churn_risk_tier IN ('high', 'critical')",
+            member_count=0,
+            last_computed_at=None,
+        )
+        client = self._client_for(segment)
+
+        with patch.object(
+            self.segment_router_module, "recompute_segment_membership", side_effect=_fake_recompute
+        ) as mock_recompute, patch.object(
+            self.segment_router_module, "invalidate_prefix"
+        ) as mock_invalidate:
+            response = client.post(f"/segments/{segment_id}/recompute")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["segment_id"], str(segment_id))
+        self.assertEqual(body["member_count"], 42)
+        mock_recompute.assert_called_once()
+        self.assertEqual(
+            [call.args[0] for call in mock_invalidate.call_args_list],
+            ["segments/matched_profiles", "segments/matched_profiles_count"],
+        )
 
 
 class SegmentAdminSeedDefaultsTests(unittest.TestCase):
