@@ -24,7 +24,7 @@ from core.models.segmentation import CdpSegment
 from core.routers._generic import build_crud_router
 from core.schemas.identity import MasterProfileRead
 from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
-from core.utils.dagster_client import DagsterJobTriggerError, get_job_run_status, trigger_segmentation_recompute_job
+from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 from core.utils.sql_safety import validate_sql_where_fragment
 
 segments_router = build_crud_router(
@@ -310,7 +310,7 @@ def recompute_all_segments(request: Request):
     _enforce_recompute_all_permissions(request)
 
     try:
-        run_id = trigger_segmentation_recompute_job(tenant_id=str(caller_tenant_id))
+        run_id = dagster_client.segmentation.refresh(tenant_id=str(caller_tenant_id))
     except DagsterJobTriggerError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -340,7 +340,7 @@ def get_recompute_job_status(run_id: str):
     segment list).
     """
     try:
-        result = get_job_run_status(run_id)
+        result = dagster_client.segmentation.get_status(run_id)
     except DagsterJobTriggerError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

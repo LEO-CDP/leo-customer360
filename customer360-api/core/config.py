@@ -26,9 +26,10 @@ class Settings(BaseSettings):
     api_max_page_size: int = 1000
 
     # Dagster webserver GraphQL endpoint (backend-system/, `dagster dev` /
-    # dagster-webserver deployment) -- used to submit segmentation_job runs
-    # asynchronously instead of recomputing all segments inline inside an
-    # HTTP request (see core/utils/dagster_client.py).
+    # dagster-webserver deployment) -- shared by every backend-system code
+    # location. Used to submit job runs asynchronously instead of running
+    # long batch work inline inside an HTTP request (see
+    # core/utils/dagster_client.py).
     dagster_graphql_host: str = Field(
         default="localhost",
         validation_alias=AliasChoices("DAGSTER_GRAPHQL_HOST", "dagster_graphql_host"),
@@ -37,6 +38,57 @@ class Settings(BaseSettings):
         default=3000,
         validation_alias=AliasChoices("DAGSTER_GRAPHQL_PORT", "dagster_graphql_port"),
     )
+
+    # Per-service job/location/repository names, one triplet per
+    # `backend-system/<service>/dagster_defs.py` code location registered in
+    # `backend-system/workspace.yaml`. `repository_name` defaults to
+    # `__repository__`, Dagster's auto-generated name for a module-level
+    # `Definitions(...)` object (every service here uses that pattern).
+    dagster_analytics_job_name: str = Field(
+        default="analytics_job",
+        validation_alias=AliasChoices("DAGSTER_ANALYTICS_JOB_NAME", "dagster_analytics_job_name"),
+    )
+    dagster_analytics_location_name: str = Field(
+        default="analytics",
+        validation_alias=AliasChoices("DAGSTER_ANALYTICS_LOCATION_NAME", "dagster_analytics_location_name"),
+    )
+    dagster_analytics_repository_name: str = Field(
+        default="__repository__",
+        validation_alias=AliasChoices("DAGSTER_ANALYTICS_REPOSITORY_NAME", "dagster_analytics_repository_name"),
+    )
+
+    dagster_identity_resolution_job_name: str = Field(
+        default="identity_resolution_job",
+        validation_alias=AliasChoices(
+            "DAGSTER_IDENTITY_RESOLUTION_JOB_NAME", "dagster_identity_resolution_job_name"
+        ),
+    )
+    dagster_identity_resolution_location_name: str = Field(
+        default="identity_resolution",
+        validation_alias=AliasChoices(
+            "DAGSTER_IDENTITY_RESOLUTION_LOCATION_NAME", "dagster_identity_resolution_location_name"
+        ),
+    )
+    dagster_identity_resolution_repository_name: str = Field(
+        default="__repository__",
+        validation_alias=AliasChoices(
+            "DAGSTER_IDENTITY_RESOLUTION_REPOSITORY_NAME", "dagster_identity_resolution_repository_name"
+        ),
+    )
+
+    dagster_scoring_job_name: str = Field(
+        default="scoring_job",
+        validation_alias=AliasChoices("DAGSTER_SCORING_JOB_NAME", "dagster_scoring_job_name"),
+    )
+    dagster_scoring_location_name: str = Field(
+        default="scoring",
+        validation_alias=AliasChoices("DAGSTER_SCORING_LOCATION_NAME", "dagster_scoring_location_name"),
+    )
+    dagster_scoring_repository_name: str = Field(
+        default="__repository__",
+        validation_alias=AliasChoices("DAGSTER_SCORING_REPOSITORY_NAME", "dagster_scoring_repository_name"),
+    )
+
     dagster_segmentation_job_name: str = Field(
         default="segmentation_job",
         validation_alias=AliasChoices("DAGSTER_SEGMENTATION_JOB_NAME", "dagster_segmentation_job_name"),
@@ -48,6 +100,51 @@ class Settings(BaseSettings):
     dagster_segmentation_repository_name: str = Field(
         default="__repository__",
         validation_alias=AliasChoices("DAGSTER_SEGMENTATION_REPOSITORY_NAME", "dagster_segmentation_repository_name"),
+    )
+
+    dagster_data_synch_job_name: str = Field(
+        default="data_synch_job",
+        validation_alias=AliasChoices("DAGSTER_DATA_SYNCH_JOB_NAME", "dagster_data_synch_job_name"),
+    )
+    dagster_data_synch_location_name: str = Field(
+        default="data_synch",
+        validation_alias=AliasChoices("DAGSTER_DATA_SYNCH_LOCATION_NAME", "dagster_data_synch_location_name"),
+    )
+    dagster_data_synch_repository_name: str = Field(
+        default="__repository__",
+        validation_alias=AliasChoices("DAGSTER_DATA_SYNCH_REPOSITORY_NAME", "dagster_data_synch_repository_name"),
+    )
+
+    dagster_email_engine_job_name: str = Field(
+        default="email_engine_job",
+        validation_alias=AliasChoices("DAGSTER_EMAIL_ENGINE_JOB_NAME", "dagster_email_engine_job_name"),
+    )
+    dagster_email_engine_location_name: str = Field(
+        default="email_engine",
+        validation_alias=AliasChoices("DAGSTER_EMAIL_ENGINE_LOCATION_NAME", "dagster_email_engine_location_name"),
+    )
+    dagster_email_engine_repository_name: str = Field(
+        default="__repository__",
+        validation_alias=AliasChoices("DAGSTER_EMAIL_ENGINE_REPOSITORY_NAME", "dagster_email_engine_repository_name"),
+    )
+
+    dagster_notification_engine_job_name: str = Field(
+        default="notification_engine_job",
+        validation_alias=AliasChoices(
+            "DAGSTER_NOTIFICATION_ENGINE_JOB_NAME", "dagster_notification_engine_job_name"
+        ),
+    )
+    dagster_notification_engine_location_name: str = Field(
+        default="notification_engine",
+        validation_alias=AliasChoices(
+            "DAGSTER_NOTIFICATION_ENGINE_LOCATION_NAME", "dagster_notification_engine_location_name"
+        ),
+    )
+    dagster_notification_engine_repository_name: str = Field(
+        default="__repository__",
+        validation_alias=AliasChoices(
+            "DAGSTER_NOTIFICATION_ENGINE_REPOSITORY_NAME", "dagster_notification_engine_repository_name"
+        ),
     )
 
     # Redis response cache (see core/cache.py). Disconnected/misconfigured

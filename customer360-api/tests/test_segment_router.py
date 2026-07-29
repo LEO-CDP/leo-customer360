@@ -639,7 +639,7 @@ class SegmentAdminRecomputeAllTests(unittest.TestCase):
         )
 
         with patch("core.routers.segment.settings.sso_login", True), patch(
-            "core.routers.segment.trigger_segmentation_recompute_job",
+            "core.routers.segment.dagster_client.segmentation.refresh",
             return_value="run-123",
         ) as mock_trigger:
             response = client.post("/segments/admin/recompute-all")
@@ -657,7 +657,7 @@ class SegmentAdminRecomputeAllTests(unittest.TestCase):
         )
 
         with patch("core.routers.segment.settings.sso_login", True), patch(
-            "core.routers.segment.trigger_segmentation_recompute_job",
+            "core.routers.segment.dagster_client.segmentation.refresh",
             side_effect=self.segment_router_module.DagsterJobTriggerError("boom"),
         ):
             response = client.post("/segments/admin/recompute-all")
