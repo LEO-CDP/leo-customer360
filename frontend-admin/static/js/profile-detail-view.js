@@ -346,5 +346,5 @@ window.C360 = window.C360 || {};
     },
   });
 
-  C360.detailView = { load: load, reload: reload, bindEvents: bindEvents };
+  C360.profileDetailView = { load: load, reload: reload, bindEvents: bindEvents };
 })(window.C360);

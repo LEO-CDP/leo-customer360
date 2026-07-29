@@ -3,13 +3,17 @@
 
 Recomputes ``cdp_segments`` membership (``member_count`` +
 ``cdp_master_profiles.segmentation_tags`` sync) for every ``is_active``
-segment, across all tenants -- the scheduled/batch counterpart to
-customer360-api's on-demand ``POST /api/v1/segments/{id}/recompute``
+segment, either across all tenants (scheduled) or scoped to one tenant
+(on-demand) -- the scheduled/batch counterpart to customer360-api's
+on-demand ``POST /api/v1/segments/{id}/recompute``
 (``customer360-api/core/crud/segmentation.py``). See
 ``docs/PLAN-SEGMENTS-API-IMPROVEMENT.md`` Phase 3.
 
   - ``recompute_segments_op`` / ``segmentation_job`` -- one full pass over
-    every active segment (see ``segmentation/recompute.py``).
+    every active segment (see ``segmentation/recompute.py``), scoped to
+    ``RecomputeSegmentsConfig.tenant_id`` if the run was submitted with one
+    (e.g. customer360-api's admin "Refresh" button -- see
+    ``core/utils/dagster_client.py``), otherwise ALL tenants.
   - ``segmentation_poll_sensor`` -- polls ``cdp_master_profiles`` every
     ``SEGMENTATION_POLL_INTERVAL_SECONDS`` (default 10s) and only requests a
     new ``segmentation_job`` run when at least one profile was created or
@@ -21,7 +25,8 @@ customer360-api's on-demand ``POST /api/v1/segments/{id}/recompute``
     instead of firing unconditionally every tick. Membership can therefore
     lag a real create/update by up to one poll interval. RUNNING by default
     (unlike identity_resolution's sensor) since no worker.py loop drives this
-    job today.
+    job today. Requests runs with no config, so each scheduled pass covers
+    ALL tenants.
 
 Run from `backend-system/`: `dagster dev -w workspace.yaml` to see this job
 (alongside `identity_resolution`/`scoring`/`analytics`) in the Dagster UI.
@@ -30,6 +35,7 @@ Run from `backend-system/`: `dagster dev -w workspace.yaml` to see this job
 import os
 import sys
 from datetime import datetime, timezone
+from typing import Optional
 
 # Dagster's `python_file` workspace loader does NOT add this file's own
 # directory to sys.path the way `python dagster_defs.py` directly would --
@@ -39,6 +45,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dagster import (  # noqa: E402
+    Config,
     DefaultSensorStatus,
     Definitions,
     OpExecutionContext,
@@ -59,14 +66,27 @@ from segmentation.recompute import (  # noqa: E402
 POLL_INTERVAL_SECONDS = int(os.environ.get("SEGMENTATION_POLL_INTERVAL_SECONDS", "10"))
 
 
+class RecomputeSegmentsConfig(Config):
+    """Op config for ``recompute_segments_op``. ``tenant_id`` is optional so
+    the default (no run_config, e.g. ``segmentation_poll_sensor``'s
+    ``RunRequest()``) still recomputes across ALL tenants -- customer360-api's
+    on-demand ``POST /segments/admin/recompute-all`` passes ``tenant_id`` via
+    run_config to scope a run to the caller's own tenant only (see
+    core/utils/dagster_client.py)."""
+
+    tenant_id: Optional[str] = None
+
+
 @op(retry_policy=RetryPolicy(max_retries=2, delay=10))
-def recompute_segments_op(context: OpExecutionContext) -> dict:
+def recompute_segments_op(context: OpExecutionContext, config: RecomputeSegmentsConfig) -> dict:
     """Recomputes member_count/segmentation_tags for every active segment,
-    across all tenants (see segmentation.recompute.recompute_all_active_segments)."""
-    context.log.info("segmentation job: started")
-    summary = recompute_all_active_segments()
+    scoped to ``config.tenant_id`` if provided, otherwise across all tenants
+    (see segmentation.recompute.recompute_all_active_segments)."""
+    context.log.info("segmentation job: started (tenant_id=%s)", config.tenant_id or "ALL")
+    summary = recompute_all_active_segments(tenant_id=config.tenant_id)
     context.log.info(
-        "segmentation job: done (segments_processed=%d, segments_skipped=%d, total_members=%d)",
+        "segmentation job: done (tenant_id=%s, segments_processed=%d, segments_skipped=%d, total_members=%d)",
+        summary.get("tenant_id") or "ALL",
         summary["segments_processed"],
         summary["segments_skipped"],
         summary["total_members"],

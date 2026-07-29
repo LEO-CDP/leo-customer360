@@ -16,7 +16,7 @@ from dagster import DagsterInstance, RunRequest, SkipReason, build_sensor_contex
 
 class TestSegmentationJob:
     def test_runs_successfully_and_returns_summary(self, monkeypatch):
-        summary = {"segments_processed": 3, "segments_skipped": 1, "total_members": 42}
+        summary = {"tenant_id": None, "segments_processed": 3, "segments_skipped": 1, "total_members": 42}
         monkeypatch.setattr(
             dagster_defs, "recompute_all_active_segments", MagicMock(return_value=summary)
         )
@@ -25,7 +25,22 @@ class TestSegmentationJob:
 
         assert result.success
         assert result.output_for_node("recompute_segments_op") == summary
-        dagster_defs.recompute_all_active_segments.assert_called_once_with()
+        dagster_defs.recompute_all_active_segments.assert_called_once_with(tenant_id=None)
+
+    def test_runs_scoped_to_tenant_when_run_config_provides_one(self, monkeypatch):
+        tenant_id = "11111111-1111-1111-1111-111111111111"
+        summary = {"tenant_id": tenant_id, "segments_processed": 1, "segments_skipped": 0, "total_members": 7}
+        monkeypatch.setattr(
+            dagster_defs, "recompute_all_active_segments", MagicMock(return_value=summary)
+        )
+
+        result = dagster_defs.segmentation_job.execute_in_process(
+            run_config={"ops": {"recompute_segments_op": {"config": {"tenant_id": tenant_id}}}}
+        )
+
+        assert result.success
+        assert result.output_for_node("recompute_segments_op") == summary
+        dagster_defs.recompute_all_active_segments.assert_called_once_with(tenant_id=tenant_id)
 
     def test_definitions_expose_job_and_sensor(self):
         assert dagster_defs.defs.get_job_def("segmentation_job") is not None

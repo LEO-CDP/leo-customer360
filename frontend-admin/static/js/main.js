@@ -63,7 +63,7 @@ window.C360 = window.C360 || {};
 
       bindChrome();
       C360.listView.bindEvents();
-      C360.detailView.bindEvents();
+      C360.profileDetailView.bindEvents();
       C360.segmentsView.bindEvents();
 
       C360.config.pingHealth();

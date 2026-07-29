@@ -120,14 +120,24 @@ def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_frag
     return len(matched_ids)
 
 
-def recompute_all_active_segments() -> dict[str, Any]:
+def recompute_all_active_segments(tenant_id: Optional[str] = None) -> dict[str, Any]:
     """Recomputes member_count/segmentation_tags for every ``is_active =
-    true`` segment across all tenants. This is the full-scan batch job
-    counterpart to customer360-api's on-demand
+    true`` segment, optionally scoped to a single tenant. This is the
+    full-scan batch job counterpart to customer360-api's on-demand
     ``POST /segments/{id}/recompute``.
 
+    Args:
+        tenant_id: if provided, only segments belonging to this tenant are
+            recomputed -- this is how customer360-api's on-demand
+            ``POST /segments/admin/recompute-all`` (triggered by the admin
+            UI's "Refresh" button) scopes the job to the caller's own
+            tenant instead of recomputing every tenant's segments. ``None``
+            (the default) recomputes across ALL tenants -- used by
+            ``segmentation_poll_sensor``'s scheduled full pass.
+
     Returns:
-        ``{"segments_processed": int, "segments_skipped": int, "total_members": int}``
+        ``{"tenant_id": str | None, "segments_processed": int,
+        "segments_skipped": int, "total_members": int}``
     """
     conn = _connect()
     segments_processed = 0
@@ -135,13 +145,23 @@ def recompute_all_active_segments() -> dict[str, Any]:
     total_members = 0
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                f"""
-                SELECT segment_id, tenant_id, segment_tag, sql_rules
-                FROM {DB_SCHEMA}.cdp_segments
-                WHERE is_active = true AND status_code = 1
-                """
-            )
+            if tenant_id:
+                cur.execute(
+                    f"""
+                    SELECT segment_id, tenant_id, segment_tag, sql_rules
+                    FROM {DB_SCHEMA}.cdp_segments
+                    WHERE is_active = true AND status_code = 1 AND tenant_id = %(tenant_id)s
+                    """,
+                    {"tenant_id": tenant_id},
+                )
+            else:
+                cur.execute(
+                    f"""
+                    SELECT segment_id, tenant_id, segment_tag, sql_rules
+                    FROM {DB_SCHEMA}.cdp_segments
+                    WHERE is_active = true AND status_code = 1
+                    """
+                )
             segments = cur.fetchall()
 
         for segment in segments:
@@ -170,6 +190,7 @@ def recompute_all_active_segments() -> dict[str, Any]:
         conn.close()
 
     return {
+        "tenant_id": tenant_id,
         "segments_processed": segments_processed,
         "segments_skipped": segments_skipped,
         "total_members": total_members,

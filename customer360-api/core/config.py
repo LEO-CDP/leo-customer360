@@ -25,6 +25,31 @@ class Settings(BaseSettings):
     api_default_page_size: int = 100
     api_max_page_size: int = 1000
 
+    # Dagster webserver GraphQL endpoint (backend-system/, `dagster dev` /
+    # dagster-webserver deployment) -- used to submit segmentation_job runs
+    # asynchronously instead of recomputing all segments inline inside an
+    # HTTP request (see core/utils/dagster_client.py).
+    dagster_graphql_host: str = Field(
+        default="localhost",
+        validation_alias=AliasChoices("DAGSTER_GRAPHQL_HOST", "dagster_graphql_host"),
+    )
+    dagster_graphql_port: int = Field(
+        default=3000,
+        validation_alias=AliasChoices("DAGSTER_GRAPHQL_PORT", "dagster_graphql_port"),
+    )
+    dagster_segmentation_job_name: str = Field(
+        default="segmentation_job",
+        validation_alias=AliasChoices("DAGSTER_SEGMENTATION_JOB_NAME", "dagster_segmentation_job_name"),
+    )
+    dagster_segmentation_location_name: str = Field(
+        default="segmentation",
+        validation_alias=AliasChoices("DAGSTER_SEGMENTATION_LOCATION_NAME", "dagster_segmentation_location_name"),
+    )
+    dagster_segmentation_repository_name: str = Field(
+        default="__repository__",
+        validation_alias=AliasChoices("DAGSTER_SEGMENTATION_REPOSITORY_NAME", "dagster_segmentation_repository_name"),
+    )
+
     # Redis response cache (see core/cache.py). Disconnected/misconfigured
     # Redis never breaks the API -- it just disables caching (fail open).
     redis_host: str = "localhost"

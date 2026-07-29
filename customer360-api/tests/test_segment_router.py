@@ -587,5 +587,83 @@ class SegmentAdminSeedDefaultsTests(unittest.TestCase):
         )
 
 
+class SegmentAdminRecomputeAllTests(unittest.TestCase):
+    def setUp(self):
+        import core.routers.segment as segment_router_module
+
+        self.segment_router_module = segment_router_module
+        self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
+        self._cache_patcher.start()
+        self.addCleanup(self._cache_patcher.stop)
+
+    def _client_with_state(
+        self,
+        *,
+        tenant_id: Optional[str],
+        user_payload: Optional[dict[str, Any]],
+    ) -> TestClient:
+        app = FastAPI()
+
+        @app.middleware("http")
+        async def _inject_state(request, call_next):
+            if tenant_id is not None:
+                request.state.tenant_id = tenant_id
+            if user_payload is not None:
+                request.state.user = user_payload
+            return await call_next(request)
+
+        app.include_router(self.segment_router_module.segments_router)
+        app.dependency_overrides[get_db] = lambda: None
+        return TestClient(app)
+
+    def test_recompute_all_rejects_missing_tenant_context(self):
+        client = self._client_with_state(tenant_id=None, user_payload=None)
+
+        response = client.post("/segments/admin/recompute-all")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_recompute_all_requires_tenant_admin(self):
+        client = self._client_with_state(tenant_id=str(uuid.uuid4()), user_payload={"realm_access": {"roles": ["analyst"]}})
+
+        with patch("core.routers.segment.settings.sso_login", True):
+            response = client.post("/segments/admin/recompute-all")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_recompute_all_triggers_job_scoped_to_caller_tenant_only(self):
+        caller_tenant_id = uuid.uuid4()
+        client = self._client_with_state(
+            tenant_id=str(caller_tenant_id),
+            user_payload={"realm_access": {"roles": ["tenant_admin"]}},
+        )
+
+        with patch("core.routers.segment.settings.sso_login", True), patch(
+            "core.routers.segment.trigger_segmentation_recompute_job",
+            return_value="run-123",
+        ) as mock_trigger:
+            response = client.post("/segments/admin/recompute-all")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["run_id"], "run-123")
+        self.assertEqual(body["tenant_id"], str(caller_tenant_id))
+        mock_trigger.assert_called_once_with(tenant_id=str(caller_tenant_id))
+
+    def test_recompute_all_surfaces_dagster_trigger_error_as_503(self):
+        client = self._client_with_state(
+            tenant_id=str(uuid.uuid4()),
+            user_payload={"realm_access": {"roles": ["tenant_admin"]}},
+        )
+
+        with patch("core.routers.segment.settings.sso_login", True), patch(
+            "core.routers.segment.trigger_segmentation_recompute_job",
+            side_effect=self.segment_router_module.DagsterJobTriggerError("boom"),
+        ):
+            response = client.post("/segments/admin/recompute-all")
+
+        self.assertEqual(response.status_code, 503)
+
+
 if __name__ == "__main__":
     unittest.main()

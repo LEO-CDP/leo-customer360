@@ -24,6 +24,7 @@ from core.models.segmentation import CdpSegment
 from core.routers._generic import build_crud_router
 from core.schemas.identity import MasterProfileRead
 from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
+from core.utils.dagster_client import DagsterJobTriggerError, get_job_run_status, trigger_segmentation_recompute_job
 from core.utils.sql_safety import validate_sql_where_fragment
 
 segments_router = build_crud_router(
@@ -140,6 +141,23 @@ def _enforce_seed_permissions(request: Request, tenant_id: Optional[uuid.UUID], 
 
     if not is_platform_admin:
         raise HTTPException(status_code=403, detail="Platform admin role required to seed another tenant")
+
+
+def _enforce_recompute_all_permissions(request: Request) -> None:
+    """``POST /segments/admin/recompute-all`` only ever recomputes the
+    caller's own tenant (see ``recompute_all_segments`` below), so this is a
+    tenant-scoped action, not a platform-wide one -- gate it the same way as
+    the single-tenant branches of default-segment seeding (tenant admin
+    role required, platform admin implicitly allowed)."""
+    if not settings.sso_login:
+        return
+
+    payload = getattr(request.state, "user", None)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    if not _is_tenant_admin(payload):
+        raise HTTPException(status_code=403, detail="Tenant admin role required to trigger segment recompute")
 
 
 @segments_router.get("/{segment_id}/matched-profiles", response_model=list[MasterProfileRead])
@@ -261,6 +279,78 @@ def seed_segment_defaults_for_tenants(
         "inserted_segments": inserted,
         "results": results,
     }
+
+
+@segments_router.post("/admin/recompute-all")
+def recompute_all_segments(request: Request):
+    """Triggers an async, out-of-process recompute of every active segment
+    belonging to the CALLER'S OWN TENANT (from the ``X-Tenant-Id`` header /
+    ``request.state.tenant_id``) and returns immediately. This NEVER
+    recomputes other tenants' segments -- there is no way to pass a
+    different tenant_id to this endpoint.
+
+    This does NOT run the recompute inline: ``cdp_master_profiles`` can hold
+    1M+ rows in production, and scanning it once per active segment inside
+    an HTTP request handler would block an API worker for the whole scan and
+    risk request timeouts. Instead this submits a run of
+    ``backend-system/segmentation``'s ``segmentation_job``, scoped to the
+    caller's tenant via run_config, to the Dagster webserver (see
+    core/utils/dagster_client.py) -- Dagster's daemon/run worker executes it
+    out-of-process, with its own retry policy, and the caller polls
+    ``GET /segments/admin/recompute-status/{run_id}`` for completion instead
+    of waiting on this call.
+    """
+    caller_tenant_id = getattr(request.state, "tenant_id", None)
+    if not caller_tenant_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No tenant context found (missing X-Tenant-Id); refresh requires a tenant_id",
+        )
+
+    _enforce_recompute_all_permissions(request)
+
+    try:
+        run_id = trigger_segmentation_recompute_job(tenant_id=str(caller_tenant_id))
+    except DagsterJobTriggerError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return {
+        "status": "submitted",
+        "run_id": run_id,
+        "tenant_id": str(caller_tenant_id),
+        "job_name": settings.dagster_segmentation_job_name,
+        "message": (
+            "Segment recompute job submitted to Dagster for this tenant; "
+            "membership updates asynchronously. Poll "
+            "/segments/admin/recompute-status/{run_id} for completion."
+        ),
+    }
+
+
+@segments_router.get("/admin/recompute-status/{run_id}")
+def get_recompute_job_status(run_id: str):
+    """Polls the status of a ``segmentation_job`` run previously submitted
+    via ``POST /segments/admin/recompute-all``. ``status`` is one of
+    ``running`` / ``success`` / ``failure`` (collapsed from Dagster's more
+    granular ``raw_status``, e.g. QUEUED/STARTED/SUCCESS/FAILURE).
+
+    Cache invalidation for the matched-profiles endpoints only happens once
+    the run actually reaches ``success`` (called out here since the caller,
+    not this endpoint, decides when to stop polling and refresh its own
+    segment list).
+    """
+    try:
+        result = get_job_run_status(run_id)
+    except DagsterJobTriggerError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    if result["status"] == "success":
+        # Recomputed membership/tags can change the result of the read-only
+        # matched-profiles endpoints, so their cached responses are now stale.
+        invalidate_prefix("segments/matched_profiles")
+        invalidate_prefix("segments/matched_profiles_count")
+
+    return result
 
 
 all_segment_routers = [segments_router]

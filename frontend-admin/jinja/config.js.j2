@@ -26,10 +26,10 @@ window.C360 = window.C360 || {};
 
   var CONFIG = getConfig();
 
-  function api(path, params) {
+  function api(path, params, method) {
     return $.ajax({
       url: CONFIG.apiBase + path,
-      method: "GET",
+      method: method || "GET",
       data: params || {},
       dataType: "json",
       headers: { "X-Tenant-Id": CONFIG.tenantId }
