@@ -2037,3 +2037,149 @@ SET
     refresh_frequency = EXCLUDED.refresh_frequency,
     display_order = EXCLUDED.display_order,
     updated_at = now();
+
+---------------------------------------------------
+-- SEGMENTS: SEED DATA (Audience Builder)
+---------------------------------------------------
+
+-- Default segmentation tags for demo tenant. Idempotent: safe to re-run.
+-- Each segment defines a named audience via jQuery QueryBuilder rule tree
+-- (json_rules), translated WHERE-clause fragment (sql_rules), and full
+-- executable query (final_generated_sql).
+INSERT INTO customer360.cdp_segments (
+    tenant_id,
+    segment_tag,
+    segment_name,
+    description,
+    json_rules,
+    sql_rules,
+    final_generated_sql,
+    processed_by,
+    is_active,
+    member_count,
+    status_code
+)
+VALUES
+    -- New Customers: became a paying customer in the last 30 days
+    (
+        '11111111-1111-1111-1111-111111111111'::uuid,
+        'new_customer',
+        'New Customers',
+        'Profiles that became a paying customer in the last 30 days.',
+        '{"condition": "AND", "rules": [{"field": "customer_since", "operator": "greater_or_equal", "value": "-30 days"}]}'::jsonb,
+        'customer_since >= (CURRENT_DATE - INTERVAL ''30 days'')',
+        'SELECT master_profile_id FROM customer360.cdp_master_profiles WHERE tenant_id = ''11111111-1111-1111-1111-111111111111''::uuid AND (customer_since >= (CURRENT_DATE - INTERVAL ''30 days''))',
+        'human',
+        TRUE,
+        0,
+        1
+    ),
+    -- High-Value Customers: predictive CLV above 1000
+    (
+        '11111111-1111-1111-1111-111111111111'::uuid,
+        'high_value',
+        'High-Value Customers',
+        'Profiles with predictive customer lifetime value above 1000.',
+        '{"condition": "AND", "rules": [{"field": "predictive_clv", "operator": "greater", "value": 1000}]}'::jsonb,
+        'predictive_clv > 1000',
+        'SELECT master_profile_id FROM customer360.cdp_master_profiles WHERE tenant_id = ''11111111-1111-1111-1111-111111111111''::uuid AND (predictive_clv > 1000)',
+        'human',
+        TRUE,
+        0,
+        1
+    ),
+    -- At Risk of Churn: high or critical churn risk tier
+    (
+        '11111111-1111-1111-1111-111111111111'::uuid,
+        'churn_risk',
+        'At Risk of Churn',
+        'Profiles with a high or critical churn risk tier.',
+        '{"condition": "AND", "rules": [{"field": "churn_risk_tier", "operator": "in", "value": ["high", "critical"]}]}'::jsonb,
+        'churn_risk_tier IN (''high'', ''critical'')',
+        'SELECT master_profile_id FROM customer360.cdp_master_profiles WHERE tenant_id = ''11111111-1111-1111-1111-111111111111''::uuid AND (churn_risk_tier IN (''high'', ''critical''))',
+        'human',
+        TRUE,
+        0,
+        1
+    ),
+    -- Dormant Profiles: no activity in the last 90 days
+    (
+        '11111111-1111-1111-1111-111111111111'::uuid,
+        'dormant',
+        'Dormant Profiles',
+        'Profiles with no activity in the last 90 days.',
+        '{"condition": "AND", "rules": [{"field": "last_activity_at", "operator": "less", "value": "-90 days"}]}'::jsonb,
+        'last_activity_at < (now() - INTERVAL ''90 days'')',
+        'SELECT master_profile_id FROM customer360.cdp_master_profiles WHERE tenant_id = ''11111111-1111-1111-1111-111111111111''::uuid AND (last_activity_at < (now() - INTERVAL ''90 days''))',
+        'human',
+        TRUE,
+        0,
+        1
+    ),
+    -- Recently Active: profiles active in the last 30 days
+    (
+        '11111111-1111-1111-1111-111111111111'::uuid,
+        'recently_active',
+        'Recently Active',
+        'Profiles active in the last 30 days.',
+        '{"condition": "AND", "rules": [{"field": "last_activity_at", "operator": "greater_or_equal", "value": "-30 days"}]}'::jsonb,
+        'last_activity_at >= (now() - INTERVAL ''30 days'')',
+        'SELECT master_profile_id FROM customer360.cdp_master_profiles WHERE tenant_id = ''11111111-1111-1111-1111-111111111111''::uuid AND (last_activity_at >= (now() - INTERVAL ''30 days''))',
+        'human',
+        TRUE,
+        0,
+        1
+    ),
+    -- Growth Potential: mid-value profiles (500-1000 CLV) with room to grow
+    (
+        '11111111-1111-1111-1111-111111111111'::uuid,
+        'growth_potential',
+        'Growth Potential',
+        'Mid-value profiles with room to grow into high-value customers.',
+        '{"condition": "AND", "rules": [{"field": "predictive_clv", "operator": "greater_or_equal", "value": 500}, {"field": "predictive_clv", "operator": "less", "value": 1001}]}'::jsonb,
+        'predictive_clv >= 500 AND predictive_clv < 1001',
+        'SELECT master_profile_id FROM customer360.cdp_master_profiles WHERE tenant_id = ''11111111-1111-1111-1111-111111111111''::uuid AND (predictive_clv >= 500 AND predictive_clv < 1001)',
+        'human',
+        TRUE,
+        0,
+        1
+    ),
+    -- Win-Back Candidates: inactive 30-180 days with elevated churn risk
+    (
+        '11111111-1111-1111-1111-111111111111'::uuid,
+        'win_back',
+        'Win-Back Candidates',
+        'Profiles inactive for 30-180 days with elevated churn risk.',
+        '{"condition": "AND", "rules": [{"field": "last_activity_at", "operator": "less", "value": "-30 days"}, {"field": "last_activity_at", "operator": "greater", "value": "-180 days"}, {"field": "churn_risk_tier", "operator": "in", "value": ["medium", "high", "critical"]}]}'::jsonb,
+        'last_activity_at < (now() - INTERVAL ''30 days'') AND last_activity_at > (now() - INTERVAL ''180 days'') AND churn_risk_tier IN (''medium'', ''high'', ''critical'')',
+        'SELECT master_profile_id FROM customer360.cdp_master_profiles WHERE tenant_id = ''11111111-1111-1111-1111-111111111111''::uuid AND (last_activity_at < (now() - INTERVAL ''30 days'') AND last_activity_at > (now() - INTERVAL ''180 days'') AND churn_risk_tier IN (''medium'', ''high'', ''critical''))',
+        'human',
+        TRUE,
+        0,
+        1
+    ),
+    -- Champions: long-tenure, top-value customers (CLV > 2500, tenure > 365 days)
+    (
+        '11111111-1111-1111-1111-111111111111'::uuid,
+        'champions',
+        'Champions',
+        'Long-tenure, top-value customers to prioritize for loyalty experiences.',
+        '{"condition": "AND", "rules": [{"field": "predictive_clv", "operator": "greater", "value": 2500}, {"field": "customer_since", "operator": "less", "value": "-365 days"}]}'::jsonb,
+        'predictive_clv > 2500 AND customer_since < (CURRENT_DATE - INTERVAL ''365 days'')',
+        'SELECT master_profile_id FROM customer360.cdp_master_profiles WHERE tenant_id = ''11111111-1111-1111-1111-111111111111''::uuid AND (predictive_clv > 2500 AND customer_since < (CURRENT_DATE - INTERVAL ''365 days''))',
+        'human',
+        TRUE,
+        0,
+        1
+    )
+ON CONFLICT (tenant_id, segment_tag) DO
+UPDATE SET
+    segment_name = EXCLUDED.segment_name,
+    description = EXCLUDED.description,
+    json_rules = EXCLUDED.json_rules,
+    sql_rules = EXCLUDED.sql_rules,
+    final_generated_sql = EXCLUDED.final_generated_sql,
+    processed_by = EXCLUDED.processed_by,
+    is_active = EXCLUDED.is_active,
+    status_code = EXCLUDED.status_code,
+    updated_at = now();

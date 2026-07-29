@@ -69,16 +69,16 @@ HASHED_PII_FIELDS = ("full_name", "email", "phone_number", "national_id")
 
 MATCHING_RULES = [
     # (attribute_internal_code, name, is_identity_resolution, matching_rule, matching_threshold, consolidation_rule)
-    ("email", "Email (SHA-256 hashed)", True, "exact", None, "non_null"),
-    ("phone_number", "Phone Number (SHA-256 hashed)", True, "exact", None, "non_null"),
-    ("national_id", "National ID / KYC (SHA-256 hashed)", True, "exact", None, "non_null"),
+    ("email", "Email ", True, "exact", None, "non_null"),
+    ("phone_number", "Phone Number", True, "exact", None, "non_null"),
+    ("national_id", "National ID / KYC ", True, "exact", None, "non_null"),
     ("device_id", "Device ID", True, "exact", None, "non_null"),
     ("advertising_id", "Advertising ID (IDFA/GAID)", True, "exact", None, "non_null"),
     ("cookie_id", "Web Cookie ID", True, "exact", None, "non_null"),
     ("external_customer_id", "External Customer ID", True, "exact", None, "non_null"),
     # Hashed values can only ever be compared for exact equality (fuzzy trigram
     # similarity is meaningless on hash digests), so full_name uses 'exact' here.
-    ("full_name", "Full Name (SHA-256 hashed)", True, "exact", None, "most_recent"),
+    ("full_name", "Full Name", True, "exact", None, "most_recent"),
 ]
 
 

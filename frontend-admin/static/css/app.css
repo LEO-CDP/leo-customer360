@@ -22,6 +22,8 @@
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.tab-btn:hover { color: #4338ca; border-color: #e329ba; cursor: pointer; }
+
 .tab-btn.active { color: #4338ca; border-color: #4338ca; }
 
 .bar-track { background: #e2e8f0; border-radius: 9999px; overflow: hidden; }

@@ -23,7 +23,7 @@ CREATE SCHEMA IF NOT EXISTS customer360;
 -- ==========================================================
 -- Tenant table
 -- ==========================================================
-CREATE TABLE customer360.sys_tenant (
+CREATE TABLE IF NOT EXISTS customer360.sys_tenant (
     tenant_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_code VARCHAR(50) UNIQUE NOT NULL,
     tenant_name TEXT NOT NULL,
@@ -37,7 +37,7 @@ CREATE TABLE customer360.sys_tenant (
 
 COMMENT ON TABLE customer360.sys_tenant IS 'Top-level workspace/tenant record. Every tenant-scoped table in this schema carries a NOT NULL tenant_id FK to this table, enforced additionally via Row-Level Security (see the ROW LEVEL SECURITY section at the end of this file).';
 
-CREATE TABLE customer360.sys_organization (
+CREATE TABLE IF NOT EXISTS customer360.sys_organization (
     organization_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
     parent_organization_id UUID NULL REFERENCES customer360.sys_organization (organization_id),
@@ -61,7 +61,7 @@ CREATE INDEX idx_org_parent ON customer360.sys_organization (parent_organization
 -- ==========================================================
 -- Application User table
 -- ==========================================================
-CREATE TABLE customer360.sys_user (
+CREATE TABLE IF NOT EXISTS customer360.sys_user (
     user_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
     organization_id UUID NULL REFERENCES customer360.sys_organization (organization_id),
@@ -91,7 +91,7 @@ CREATE INDEX idx_user_org ON customer360.sys_user (organization_id);
 
 CREATE INDEX idx_user_keycloak ON customer360.sys_user (keycloak_user_id);
 
-CREATE TABLE customer360.sys_role (
+CREATE TABLE IF NOT EXISTS customer360.sys_role (
     role_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
     role_code VARCHAR(100) NOT NULL,
@@ -109,7 +109,7 @@ COMMENT ON TABLE customer360.sys_role IS 'RBAC role definition scoped to a tenan
 
 CREATE INDEX idx_role_tenant ON customer360.sys_role (tenant_id);
 
-CREATE TABLE customer360.sys_permission (
+CREATE TABLE IF NOT EXISTS customer360.sys_permission (
     permission_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     permission_code VARCHAR(150) UNIQUE NOT NULL,
     resource VARCHAR(100) NOT NULL,
@@ -121,7 +121,7 @@ CREATE TABLE customer360.sys_permission (
 
 COMMENT ON TABLE customer360.sys_permission IS 'Global RBAC permission dictionary (resource + action pair, e.g. profile/read, campaign/write). Shared vocabulary across all tenants -- no tenant_id, same pattern as the other reference dictionaries in this schema.';
 
-CREATE TABLE customer360.sys_role_permission (
+CREATE TABLE IF NOT EXISTS customer360.sys_role_permission (
     role_id UUID NOT NULL REFERENCES customer360.sys_role (role_id) ON DELETE CASCADE,
     permission_id UUID NOT NULL REFERENCES customer360.sys_permission (permission_id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT now(),
@@ -130,7 +130,7 @@ CREATE TABLE customer360.sys_role_permission (
 
 COMMENT ON TABLE customer360.sys_role_permission IS 'Join table granting permissions (sys_permission) to roles (sys_role) -- many-to-many.';
 
-CREATE TABLE customer360.sys_user_role (
+CREATE TABLE IF NOT EXISTS customer360.sys_user_role (
     user_id UUID NOT NULL REFERENCES customer360.sys_user (user_id) ON DELETE CASCADE,
     role_id UUID NOT NULL REFERENCES customer360.sys_role (role_id) ON DELETE CASCADE,
     assigned_at TIMESTAMP DEFAULT now(),
@@ -145,7 +145,7 @@ COMMENT ON TABLE customer360.sys_user_role IS 'Join table assigning roles (sys_r
 -- Enterprise Multi-Tenant CDP
 -- ==========================================================
 
-CREATE TABLE customer360.sys_audit_log (
+CREATE TABLE IF NOT EXISTS customer360.sys_audit_log (
     audit_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
 
     -- Multi-tenant
@@ -206,7 +206,7 @@ CREATE TABLE customer360.sys_audit_log (
 COMMENT ON TABLE customer360.sys_audit_log IS 'Compliance/audit trail: one row per user or API action (CREATE/UPDATE/DELETE/LOGIN/EXPORT/...) with before/after JSONB snapshots, auth provenance, request tracing IDs, and success/error outcome.';
 
 -- Campaign
-CREATE TABLE customer360.crm_campaign (
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign (
     campaign_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
@@ -224,7 +224,7 @@ CREATE TABLE customer360.crm_campaign (
 COMMENT ON TABLE customer360.crm_campaign IS 'CRM journey-graph entity: a marketing initiative (part of the Lead -> Contact -> Opportunity B2B journey). Responders are tracked via crm_campaign_member.';
 
 -- CampaignMember
-CREATE TABLE customer360.crm_campaign_member (
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_member (
     campaign_member_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
@@ -242,7 +242,7 @@ CREATE TABLE customer360.crm_campaign_member (
 COMMENT ON TABLE customer360.crm_campaign_member IS 'A person who responded to / joined a crm_campaign, optionally already linked to a crm_contact.';
 
 -- Lead
-CREATE TABLE customer360.crm_lead (
+CREATE TABLE IF NOT EXISTS customer360.crm_lead (
     lead_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
@@ -261,7 +261,7 @@ CREATE TABLE customer360.crm_lead (
 COMMENT ON TABLE customer360.crm_lead IS 'CRM journey-graph entity: a potential buyer not yet tied to a crm_opportunity, sourced via crm_lead_source.';
 
 -- Lead Source
-CREATE TABLE customer360.crm_lead_source (
+CREATE TABLE IF NOT EXISTS customer360.crm_lead_source (
     lead_source_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
@@ -276,7 +276,7 @@ CREATE TABLE customer360.crm_lead_source (
 COMMENT ON TABLE customer360.crm_lead_source IS 'Dictionary of channels/origins that generate crm_lead rows (e.g. web form, trade show, referral).';
 
 -- Contact
-CREATE TABLE customer360.crm_contact (
+CREATE TABLE IF NOT EXISTS customer360.crm_contact (
     contact_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
@@ -296,7 +296,7 @@ CREATE TABLE customer360.crm_contact (
 COMMENT ON TABLE customer360.crm_contact IS 'CRM journey-graph entity: a crm_lead engaged seriously by sales, belonging to a crm_account.';
 
 -- Account
-CREATE TABLE customer360.crm_account (
+CREATE TABLE IF NOT EXISTS customer360.crm_account (
     account_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
@@ -313,7 +313,7 @@ CREATE TABLE customer360.crm_account (
 COMMENT ON TABLE customer360.crm_account IS 'CRM journey-graph entity: an organization/company, classified by crm_industry, that crm_contact and crm_opportunity rows belong to.';
 
 -- Opportunity
-CREATE TABLE customer360.crm_opportunity (
+CREATE TABLE IF NOT EXISTS customer360.crm_opportunity (
     opportunity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
@@ -333,7 +333,7 @@ CREATE TABLE customer360.crm_opportunity (
 COMMENT ON TABLE customer360.crm_opportunity IS 'CRM journey-graph entity: a potential sales transaction tied to a crm_account, with monetary value/stage/close_date.';
 
 -- Industry
-CREATE TABLE customer360.crm_industry (
+CREATE TABLE IF NOT EXISTS customer360.crm_industry (
     industry_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
@@ -378,7 +378,7 @@ CREATE INDEX idx_crm_industry_tenant ON customer360.crm_industry (tenant_id);
 -- POS, Core Banking, etc.) for both retail and banking domains.
 -- ============================================================================
 
-CREATE TABLE customer360.cdp_master_profiles (
+CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- ------------------------------------------------------------------------
     -- SYSTEM & TENANT METADATA
     -- ------------------------------------------------------------------------
@@ -408,12 +408,11 @@ CREATE TABLE customer360.cdp_master_profiles (
     is_hashed BOOLEAN DEFAULT FALSE,
 
     -- Primary contact info (used for primary identity stitching and marketing)
-    email TEXT, phone_number TEXT,
+    email TEXT,
+    phone_number TEXT,
 
     -- Secondary contact info
     -- Format: [{"email": "work@abc.com", "label": "work"}, {"email": "old@xyz.com", "label": "personal"}]
-
-
     secondary_emails JSONB DEFAULT '[]'::JSONB,
     -- Format: [{"phone": "+84901234567", "label": "home"}]
     secondary_phones JSONB DEFAULT '[]'::JSONB,
@@ -601,7 +600,7 @@ COMMENT ON TABLE customer360.cdp_master_profiles IS 'The golden/resolved custome
 -- events), MoEngage (engagement/push events), Web Tracking / GA4 (browser
 -- events), and domain-specific sources like POS or Core Banking, for both the
 -- retail and banking domains.
-CREATE TABLE customer360.cdp_raw_profiles_stage (
+CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     raw_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     -- Data owner: internal sys_user who created/manages this row (nullable -- rows are
@@ -656,7 +655,7 @@ CREATE TABLE customer360.cdp_raw_profiles_stage (
 COMMENT ON TABLE customer360.cdp_raw_profiles_stage IS 'Landing zone for every inbound source (AppsFlyer, MoEngage, Web Tracking/GA4, POS, Core Banking, ...) before Customer Identity Resolution (CIR). Carries per-source identity + marketing attribution and a processing-queue status_code (1 new -> 2 in-progress -> 3 processed).';
 
 -- Links (raw → master)
-CREATE TABLE customer360.cdp_profile_links (
+CREATE TABLE IF NOT EXISTS customer360.cdp_profile_links (
     link_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
     user_id UUID REFERENCES customer360.sys_user (user_id), -- data owner (nullable, pipeline-created)
@@ -695,7 +694,7 @@ COMMENT ON TABLE customer360.cdp_profile_links IS 'Join table recording every ra
 -- must link to cdp_raw_profiles_stage), while master_profile_id is expected to
 -- be backfilled asynchronously once CIR resolves the identity.
 -- ============================================================================
-CREATE TABLE customer360.cdp_raw_events (
+CREATE TABLE IF NOT EXISTS customer360.cdp_raw_events (
     event_id UUID NOT NULL DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     -- Data owner: internal sys_user who created/manages this row (nullable -- almost
@@ -823,7 +822,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_events_default PARTITION OF custo
 -- by a missing catalog row for a brand-new event; the catalog exists for
 -- discoverability/admin-UI dropdowns/analytics governance instead.
 -- ============================================================================
-CREATE TABLE customer360.cdp_event_catalog (
+CREATE TABLE IF NOT EXISTS customer360.cdp_event_catalog (
     id BIGSERIAL PRIMARY KEY,
     event_name TEXT UNIQUE NOT NULL,
     event_category TEXT NOT NULL CHECK (
@@ -866,7 +865,7 @@ COMMENT ON TABLE customer360.cdp_event_catalog IS 'Governed vocabulary of event_
 ---------------------------------------------------
 
 -- ============================================================================
--- cdp_profile_attributes: full attribute catalog for cdp_master_profiles
+-- cdp_profile_attributes: full metadata of all attributes in cdp_master_profiles
 -- ============================================================================
 -- One row per attribute exposed anywhere on the CDP golden record: identity /
 -- demographic / retail / banking / marketing / lineage columns AND the
@@ -918,7 +917,6 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     ),
     -- Physical table(s) this attribute lives on.
     source_table VARCHAR(150) NOT NULL DEFAULT 'cdp_master_profiles',
-    data_type VARCHAR(50) NOT NULL DEFAULT 'TEXT',
     domain_scope VARCHAR(20) NOT NULL DEFAULT 'all' CHECK (
         domain_scope IN (
             'all',
@@ -947,6 +945,10 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     matching_threshold NUMERIC(5, 4),
     consolidation_rule VARCHAR(50),
 
+    -- segmentation metadata: whether this attribute can be used for audience segmentation, and its data type (TEXT, NUMERIC, DATE, TIMESTAMP, BOOLEAN, JSONB).
+    is_segmentable BOOLEAN NOT NULL DEFAULT TRUE,
+    data_type VARCHAR(50) NOT NULL DEFAULT 'TEXT',
+
     -- ------------------------------------------------------------------
     -- ML / scoring-model metadata: Lead, Churn, CLV, Customer Experience (CX)
     -- and Data Quality / Identity Resolution confidence scoring models.
@@ -971,60 +973,12 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
 
 COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog: one row per cdp_master_profiles column (plus cdp_raw_profiles_stage matching keys), grouped by attribute_group. Drives Customer Identity Resolution (CIR) matching rules (is_identity_resolution/matching_rule/matching_threshold/consolidation_rule) without hard-coding them in application code.';
 
--- Upgrade path for any pre-existing (narrower) cdp_profile_attributes table.
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS master_profile_column VARCHAR(100);
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS description TEXT;
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS attribute_group VARCHAR(50) NOT NULL DEFAULT 'GENERAL';
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS source_table VARCHAR(150) NOT NULL DEFAULT 'cdp_master_profiles';
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS domain_scope VARCHAR(20) NOT NULL DEFAULT 'all';
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS is_pii BOOLEAN NOT NULL DEFAULT FALSE;
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS is_scoring_model BOOLEAN NOT NULL DEFAULT FALSE;
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS scoring_model_name VARCHAR(100);
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS scoring_model_version VARCHAR(20);
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS value_type VARCHAR(50);
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS value_min NUMERIC;
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS value_max NUMERIC;
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS refresh_frequency VARCHAR(50);
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS display_order INT NOT NULL DEFAULT 0;
-
-ALTER TABLE customer360.cdp_profile_attributes
-ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP
-WITH
-    TIME ZONE DEFAULT now();
-
 ---------------------------------------------------
 -- RELATIONS & EVENTS
 ---------------------------------------------------
 
 -- Relation Types dictionary
-CREATE TABLE customer360.cdp_relation_types (
+CREATE TABLE IF NOT EXISTS customer360.cdp_relation_types (
     relation_type_id SERIAL PRIMARY KEY,
     code TEXT UNIQUE NOT NULL, -- e.g., 'friend', 'colleague', 'family', 'customer-contact'
     description TEXT
@@ -1033,7 +987,7 @@ CREATE TABLE customer360.cdp_relation_types (
 COMMENT ON TABLE customer360.cdp_relation_types IS 'Dictionary of relationship types (e.g. friend, colleague, family, customer-contact) usable between two cdp_master_profiles rows via cdp_relations.';
 
 -- Profile Relations
-CREATE TABLE customer360.cdp_relations (
+CREATE TABLE IF NOT EXISTS customer360.cdp_relations (
     relation_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
     user_id UUID REFERENCES customer360.sys_user (user_id), -- data owner
@@ -1052,7 +1006,7 @@ CREATE TABLE customer360.cdp_relations (
 COMMENT ON TABLE customer360.cdp_relations IS 'Typed relationship edge between two resolved master profiles (e.g. "friend", "family", "customer-contact"), typed via cdp_relation_types.';
 
 -- Customer Contacts (interactions)
-CREATE TABLE customer360.crm_customer_contacts (
+CREATE TABLE IF NOT EXISTS customer360.crm_customer_contacts (
     contact_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
     user_id UUID REFERENCES customer360.sys_user (user_id), -- data owner
@@ -1066,7 +1020,7 @@ CREATE TABLE customer360.crm_customer_contacts (
 COMMENT ON TABLE customer360.crm_customer_contacts IS 'Interaction/contact log (type/channel/content/date) recorded against a resolved master profile.';
 
 -- Customer Transactions (financial, retail, travel, etc.)
-CREATE TABLE customer360.crm_transactions (
+CREATE TABLE IF NOT EXISTS customer360.crm_transactions (
     transaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
 
@@ -1124,7 +1078,7 @@ COMMENT ON TABLE customer360.crm_transactions IS 'Source-agnostic transaction fa
 -- (core-customer360/frontend-admin). Items are ranked per master profile by
 -- segment_tags overlap with cdp_master_profiles.segmentation_tags -- see
 -- customer360-api's GET /api/v1/content-items/recommended.
-CREATE TABLE customer360.cdp_content_items (
+CREATE TABLE IF NOT EXISTS customer360.cdp_content_items (
     content_item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     domain TEXT NOT NULL DEFAULT 'all' CHECK (domain IN ('all', 'retail', 'banking', 'real_estate', 'travel')),
@@ -1157,7 +1111,7 @@ CREATE INDEX idx_cdp_content_items_tags ON customer360.cdp_content_items USING G
 -- query + sql_rules) actually executed to (re)compute segment membership.
 -- processed_by records whether the rules were authored by a human via the
 -- jQuery QueryBuilder admin UI or generated by an AI agent.
-CREATE TABLE customer360.cdp_segments (
+CREATE TABLE IF NOT EXISTS customer360.cdp_segments (
     segment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     -- Data owner: internal sys_user who created/manages this segment (nullable --
@@ -1206,7 +1160,7 @@ CREATE INDEX idx_cdp_segments_json_rules ON customer360.cdp_segments USING GIN (
 ---------------------------------------------------
 
 -- Parent
-CREATE TABLE customer360.graph_edges (
+CREATE TABLE IF NOT EXISTS customer360.graph_edges (
     edge_id BIGSERIAL NOT NULL,
     from_id UUID NOT NULL,
     to_id UUID NOT NULL,
@@ -1454,10 +1408,16 @@ WHERE
 -- propagates each of these automatically to every monthly partition (current
 -- + future ones created via ensure_cdp_raw_events_partition()).
 -- Optional idempotency key per source-system ingestion stream.
+-- NOTE: event_time must be included because Postgres requires every unique
+-- index on a partitioned table to include all partitioning columns
+-- (cdp_raw_events is PARTITION BY RANGE (event_time)) -- so this dedups
+-- (tenant_id, source_system, event_dedup_key) per event_time value rather
+-- than globally across all time.
 CREATE UNIQUE INDEX ux_cdp_raw_events_tenant_source_dedup ON customer360.cdp_raw_events (
     tenant_id,
     source_system,
-    event_dedup_key
+    event_dedup_key,
+    event_time
 )
 WHERE
     event_dedup_key IS NOT NULL;
