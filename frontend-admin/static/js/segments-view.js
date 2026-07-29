@@ -129,18 +129,23 @@ window.C360 = window.C360 || {};
   var REFRESH_POLL_INTERVAL_MS = 2000;
   var REFRESH_POLL_MAX_ATTEMPTS = 30; // ~1 minute at 2s/attempt
 
-  function showToast(message, kind) {
-    var classes = {
-      success: "bg-green-100 border-green-300 text-green-700",
-      error: "bg-red-100 border-red-300 text-red-700",
-      info: "bg-blue-100 border-blue-300 text-blue-700"
-    };
-    var $notification = $("<div></div>")
-      .addClass("fixed top-4 right-4 border px-4 py-2 rounded-lg shadow-md z-50")
-      .addClass(classes[kind] || classes.info)
-      .text(message);
-    $("body").append($notification);
-    setTimeout(function () { $notification.fadeOut(300, function () { $(this).remove(); }); }, 4000);
+
+  // Builds a short " (N of M steps failed, ran Xs)" / " (ran Xs)" suffix
+  // from the recompute-status response (see
+  // core.utils.dagster_client.DagsterService.get_status) so the toast shows
+  // more than a bare "success"/"failure" -- duration and, on failure, how
+  // many steps failed (point the user at the Dagster UI for the full stack
+  // trace rather than trying to surface it here).
+  function formatRunDetail(result) {
+    var parts = [];
+    if (result.steps_failed) {
+      var total = (result.steps_succeeded || 0) + result.steps_failed;
+      parts.push(result.steps_failed + " of " + total + " steps failed");
+    }
+    if (typeof result.duration_seconds === "number") {
+      parts.push("ran " + Math.round(result.duration_seconds) + "s");
+    }
+    return parts.length ? " (" + parts.join(", ") + ")" : "";
   }
 
   function setRefreshButtonBusy(busy, label) {
@@ -163,13 +168,13 @@ window.C360 = window.C360 || {};
       .done(function (result) {
         if (result.status === "success") {
           setRefreshButtonBusy(false);
-          showToast("✓ Segment refresh completed", "success");
+          showToast("\u2713 Segment refresh completed" + formatRunDetail(result), "success");
           loadList(false); // reload to show updated member_count values
           return;
         }
         if (result.status === "failure") {
           setRefreshButtonBusy(false);
-          showToast("✗ Segment refresh job failed (raw status: " + result.raw_status + ")", "error");
+          showToast("\u2717 Segment refresh job failed" + formatRunDetail(result), "error");
           return;
         }
         // Still running: keep polling until REFRESH_POLL_MAX_ATTEMPTS is hit.

@@ -45,6 +45,7 @@ can be dropped in behind them without any customer360-api changes.
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from dagster_graphql import DagsterGraphQLClient, DagsterGraphQLClientError
@@ -60,6 +61,48 @@ _RUNNING_STATUSES = {"QUEUED", "NOT_STARTED", "MANAGED", "STARTING", "STARTED"}
 _SUCCESS_STATUSES = {"SUCCESS"}
 _FAILURE_STATUSES = {"FAILURE", "CANCELING", "CANCELED"}
 
+# Richer run-detail query than the client library's own ``get_run_status``
+# (which only returns ``status``) -- adds start/end/update timestamps and
+# step success/failure counts in the SAME round trip, so the frontend can
+# show e.g. "Failed -- 2 of 5 steps failed, ran for 42s" instead of just
+# "failure". Deliberately does NOT walk the run's full event log (via
+# ``eventConnection``) to extract the exact failing step's exception
+# message -- for a long-running/high-volume job that would mean paging
+# through a potentially large number of events with no guarantee the
+# failure event is within a bounded page, which is a poor cost/reliability
+# trade-off for a status-poll endpoint. ``stepsFailed`` + ``status`` is
+# enough to point an operator at the Dagster UI's run page for the full
+# stack trace.
+_RUN_DETAIL_QUERY = """
+query GraphQLClientGetRunDetail($runId: ID!) {
+  pipelineRunOrError(runId: $runId) {
+    __typename
+    ... on Run {
+      status
+      startTime
+      endTime
+      updateTime
+      stats {
+        __typename
+        ... on RunStatsSnapshot {
+          stepsSucceeded
+          stepsFailed
+        }
+        ... on PythonError {
+          message
+        }
+      }
+    }
+    ... on RunNotFoundError {
+      message
+    }
+    ... on PythonError {
+      message
+    }
+  }
+}
+"""
+
 
 class DagsterJobTriggerError(Exception):
     """Raised when a job run could not be submitted to (or queried from)
@@ -70,6 +113,16 @@ class DagsterJobTriggerError(Exception):
 
 def _default_client() -> DagsterGraphQLClient:
     return DagsterGraphQLClient(settings.dagster_graphql_host, port_number=settings.dagster_graphql_port)
+
+
+def _epoch_to_iso(value: Optional[float]) -> Optional[str]:
+    """Converts a Dagster GraphQL epoch-seconds timestamp (``startTime``/
+    ``endTime``/``updateTime``) to an ISO 8601 UTC string, or ``None`` if the
+    run hasn't reached that point yet (Dagster returns ``null`` for e.g.
+    ``endTime`` on a still-running run)."""
+    if value is None:
+        return None
+    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
 
 
 class DagsterService:
@@ -127,16 +180,38 @@ class DagsterService:
         logger.info("Submitted %s to Dagster (run_id=%s, tags=%s)", self.job_name, run_id, tags)
         return run_id
 
-    def get_status(self, run_id: str) -> dict[str, str]:
-        """Returns ``{"run_id": ..., "raw_status": <DagsterRunStatus value>,
-        "status": "running"|"success"|"failure"}`` for a previously
-        submitted run_id."""
+    def get_status(self, run_id: str) -> dict[str, Any]:
+        """Returns run status/detail for a previously submitted run_id::
+
+            {
+                "run_id": str,
+                "raw_status": <DagsterRunStatus value, e.g. "STARTED">,
+                "status": "running" | "success" | "failure",
+                "start_time": <ISO 8601 UTC string, or None if not yet started>,
+                "end_time": <ISO 8601 UTC string, or None if not yet finished>,
+                "duration_seconds": <float, or None if not yet finished>,
+                "steps_succeeded": <int, or None if stats unavailable>,
+                "steps_failed": <int, or None if stats unavailable>,
+            }
+
+        Distinguishes "run not found" from generic connectivity/webserver
+        errors in the raised ``DagsterJobTriggerError`` message, so callers
+        /logs can tell a stale/typo'd run_id apart from Dagster being down.
+        """
         try:
-            raw_status = self._client().get_run_status(run_id).value
+            res_data = self._client()._execute(_RUN_DETAIL_QUERY, {"runId": run_id})
         except Exception as exc:
             logger.exception("Could not fetch Dagster run status for run_id=%s", run_id)
             raise DagsterJobTriggerError(f"Could not fetch run status for '{run_id}': {exc}") from exc
 
+        query_result = res_data["pipelineRunOrError"]
+        result_type = query_result["__typename"]
+        if result_type not in ("Run", "PipelineRun"):
+            # RunNotFoundError / PythonError -- surface Dagster's own message
+            # rather than a generic "could not fetch" wrapper.
+            raise DagsterJobTriggerError(f"{result_type} fetching status for '{run_id}': {query_result['message']}")
+
+        raw_status = query_result["status"]
         if raw_status in _SUCCESS_STATUSES:
             status = "success"
         elif raw_status in _FAILURE_STATUSES:
@@ -144,7 +219,24 @@ class DagsterService:
         else:
             status = "running"
 
-        return {"run_id": run_id, "raw_status": raw_status, "status": status}
+        start_time = query_result.get("startTime")
+        end_time = query_result.get("endTime")
+        duration_seconds = (end_time - start_time) if (start_time is not None and end_time is not None) else None
+
+        stats = query_result.get("stats") or {}
+        steps_succeeded = stats.get("stepsSucceeded") if stats.get("__typename") == "RunStatsSnapshot" else None
+        steps_failed = stats.get("stepsFailed") if stats.get("__typename") == "RunStatsSnapshot" else None
+
+        return {
+            "run_id": run_id,
+            "raw_status": raw_status,
+            "status": status,
+            "start_time": _epoch_to_iso(start_time),
+            "end_time": _epoch_to_iso(end_time),
+            "duration_seconds": duration_seconds,
+            "steps_succeeded": steps_succeeded,
+            "steps_failed": steps_failed,
+        }
 
 
 class AnalyticsDagsterService(DagsterService):

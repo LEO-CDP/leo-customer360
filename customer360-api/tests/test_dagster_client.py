@@ -65,40 +65,91 @@ class DagsterServiceSubmitTests(unittest.TestCase):
         with self.assertRaises(DagsterJobTriggerError):
             service.submit()
 
+    @staticmethod
+    def _run_detail_response(
+        status: str,
+        start_time: float | None = 100.0,
+        end_time: float | None = 142.0,
+        steps_succeeded: int = 5,
+        steps_failed: int = 0,
+    ) -> dict:
+        return {
+            "pipelineRunOrError": {
+                "__typename": "Run",
+                "status": status,
+                "startTime": start_time,
+                "endTime": end_time,
+                "updateTime": end_time or start_time,
+                "stats": {
+                    "__typename": "RunStatsSnapshot",
+                    "stepsSucceeded": steps_succeeded,
+                    "stepsFailed": steps_failed,
+                },
+            }
+        }
+
     def test_get_status_maps_success(self):
         fake_client = MagicMock()
-        fake_client.get_run_status.return_value.value = "SUCCESS"
+        fake_client._execute.return_value = self._run_detail_response("SUCCESS")
         service = self._service(fake_client)
 
         result = service.get_status("run-abc")
 
-        self.assertEqual(result, {"run_id": "run-abc", "raw_status": "SUCCESS", "status": "success"})
+        self.assertEqual(result["run_id"], "run-abc")
+        self.assertEqual(result["raw_status"], "SUCCESS")
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["duration_seconds"], 42.0)
+        self.assertEqual(result["steps_succeeded"], 5)
+        self.assertEqual(result["steps_failed"], 0)
+        self.assertIsNotNone(result["start_time"])
+        self.assertIsNotNone(result["end_time"])
 
-    def test_get_status_maps_failure(self):
+    def test_get_status_maps_failure_with_step_counts(self):
         fake_client = MagicMock()
-        fake_client.get_run_status.return_value.value = "FAILURE"
+        fake_client._execute.return_value = self._run_detail_response(
+            "FAILURE", steps_succeeded=2, steps_failed=1
+        )
         service = self._service(fake_client)
 
         result = service.get_status("run-abc")
 
         self.assertEqual(result["status"], "failure")
+        self.assertEqual(result["steps_failed"], 1)
 
-    def test_get_status_maps_running(self):
+    def test_get_status_maps_running_with_no_end_time(self):
         fake_client = MagicMock()
-        fake_client.get_run_status.return_value.value = "STARTED"
+        fake_client._execute.return_value = self._run_detail_response("STARTED", end_time=None)
         service = self._service(fake_client)
 
         result = service.get_status("run-abc")
 
         self.assertEqual(result["status"], "running")
+        self.assertIsNone(result["end_time"])
+        self.assertIsNone(result["duration_seconds"])
 
-    def test_get_status_wraps_errors(self):
+    def test_get_status_wraps_connection_errors(self):
         fake_client = MagicMock()
-        fake_client.get_run_status.side_effect = RuntimeError("boom")
+        fake_client._execute.side_effect = RuntimeError("boom")
         service = self._service(fake_client)
 
         with self.assertRaises(DagsterJobTriggerError):
             service.get_status("run-abc")
+
+    def test_get_status_surfaces_run_not_found_message(self):
+        fake_client = MagicMock()
+        fake_client._execute.return_value = {
+            "pipelineRunOrError": {
+                "__typename": "RunNotFoundError",
+                "message": "Run run-abc could not be found.",
+            }
+        }
+        service = self._service(fake_client)
+
+        with self.assertRaises(DagsterJobTriggerError) as ctx:
+            service.get_status("run-abc")
+
+        self.assertIn("RunNotFoundError", str(ctx.exception))
+        self.assertIn("could not be found", str(ctx.exception))
 
 
 class SegmentationDagsterServiceTests(unittest.TestCase):

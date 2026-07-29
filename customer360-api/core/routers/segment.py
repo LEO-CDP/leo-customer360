@@ -334,6 +334,13 @@ def get_recompute_job_status(run_id: str):
     ``running`` / ``success`` / ``failure`` (collapsed from Dagster's more
     granular ``raw_status``, e.g. QUEUED/STARTED/SUCCESS/FAILURE).
 
+    Also includes ``start_time``/``end_time`` (ISO 8601, ``None`` until the
+    run reaches that point), ``duration_seconds`` (``None`` until finished),
+    and ``steps_succeeded``/``steps_failed`` counts -- enough detail for the
+    frontend to show e.g. "Failed -- 2 of 5 steps failed, ran for 42s"
+    instead of a bare "failure" (see
+    ``core.utils.dagster_client.DagsterService.get_status``).
+
     Cache invalidation for the matched-profiles endpoints only happens once
     the run actually reaches ``success`` (called out here since the caller,
     not this endpoint, decides when to stop polling and refresh its own
