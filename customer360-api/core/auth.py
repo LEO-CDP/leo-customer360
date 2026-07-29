@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 EXEMPT_PATHS = {
     "/health",
+    "/api/v1/metadata",
+    "/api/v1/metadata/dagster",
 }
 SSO_LOGIN=settings.sso_login
 # TTL for the resolved (tenant_id, user_id) identity cache, independent of

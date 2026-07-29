@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from typing import Any, Optional
 
 from fastapi import Depends, HTTPException, Query, Request
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
@@ -20,12 +20,19 @@ from core.crud.base import CRUDBase
 from core.crud.segmentation import recompute_segment_membership
 from core.database import get_db
 from core.init_core_data import list_tenant_ids, seed_default_segments_with_breakdown
+from core.models.identity import CdpProfileAttribute
 from core.models.segmentation import CdpSegment
 from core.routers._generic import build_crud_router
 from core.schemas.identity import MasterProfileRead
 from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
 from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 from core.utils.sql_safety import validate_sql_where_fragment
+
+# Segment rules (see get_segment_matched_profiles above) only ever query
+# cdp_master_profiles, so the "field picker" endpoint below must only ever
+# offer columns that actually live on that table.
+_SEGMENTABLE_SOURCE_TABLE = "cdp_master_profiles"
+_DOMAIN_SCOPE_PATTERN = r"^(all|retail|banking|real_estate|travel)$"
 
 segments_router = build_crud_router(
     model=CdpSegment,
@@ -359,5 +366,72 @@ def get_recompute_job_status(run_id: str):
 
     return result
 
+@segments_router.get("/segmentable-profile-attributes")
+@cache_response("segments/segmentable_profile_attributes", ttl=settings.cache_ttl_seconds)
+def get_segmentable_profile_attributes(
+    domain: Optional[str] = Query(default=None, pattern=_DOMAIN_SCOPE_PATTERN),
+    db: Session = Depends(get_db),
+):
+    """Returns the catalog of ``cdp_master_profiles`` columns that are valid
+    to reference in a segment's ``sql_rules`` (Audience Builder field
+    picker), sourced from ``cdp_profile_attributes`` -- the same
+    metadata-driven catalog that also configures CIR matching rules (see
+    module docstring). This is a read-only endpoint that does not require
+    authentication, since it only returns metadata about the system and not
+    any sensitive data.
+
+    Only rows with ``is_segmentable = true``, ``status = 'ACTIVE'`` and
+    ``source_table = 'cdp_master_profiles'`` are returned -- CIR-only
+    matching keys that live on ``cdp_raw_profiles_stage`` (e.g. the raw
+    ``device_id``/``cookie_id`` staging columns) are never valid fields for
+    a segment rule, since ``sql_rules`` only ever executes against
+    ``cdp_master_profiles`` (see ``get_segment_matched_profiles`` above).
+
+    ``domain`` (optional, one of ``retail``/``banking``/``real_estate``/
+    ``travel``) additionally filters to attributes with
+    ``domain_scope IN ('all', <domain>)``, matching ``cdp_master_profiles``/
+    ``cdp_segments``'s own ``domain`` column.
+    """
+    stmt = select(CdpProfileAttribute).where(
+        CdpProfileAttribute.is_segmentable.is_(True),
+        CdpProfileAttribute.status == "ACTIVE",
+        CdpProfileAttribute.source_table == _SEGMENTABLE_SOURCE_TABLE,
+    )
+    if domain:
+        stmt = stmt.where(CdpProfileAttribute.domain_scope.in_(["all", domain]))
+    stmt = stmt.order_by(CdpProfileAttribute.attribute_group, CdpProfileAttribute.display_order)
+
+    attributes = db.execute(stmt).scalars().all()
+    return [
+        {
+            "field": attribute.master_profile_column or attribute.attribute_internal_code,
+            "name": attribute.name,
+            "description": attribute.description,
+            "attribute_group": attribute.attribute_group,
+            "data_type": attribute.data_type,
+            "domain_scope": attribute.domain_scope,
+            "is_pii": attribute.is_pii,
+        }
+        for attribute in attributes
+    ]
+
+
+# The generic CRUD router's `GET /{item_id}` (registered above, inside
+# build_crud_router()) uses an untyped path template ("/segments/{item_id}",
+# with the uuid.UUID conversion happening in the handler signature, not the
+# path itself) -- so it fully matches ANY single-segment GET path, including
+# the literal "/segmentable-profile-attributes" route just defined. Since
+# Starlette dispatches to the first fully-matching route in registration
+# order, that earlier route would otherwise shadow this one (returning a 422
+# "invalid UUID" instead of ever calling get_segmentable_profile_attributes).
+# Move this route's just-appended APIRoute ahead of the generic "/{item_id}"
+# GET route to fix that.
+_segmentable_attrs_route = segments_router.routes.pop()
+_item_id_get_index = next(
+    i
+    for i, route in enumerate(segments_router.routes)
+    if getattr(route, "path", None) == "/segments/{item_id}" and "GET" in getattr(route, "methods", set())
+)
+segments_router.routes.insert(_item_id_get_index, _segmentable_attrs_route)
 
 all_segment_routers = [segments_router]

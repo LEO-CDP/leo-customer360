@@ -9,6 +9,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    environment: str = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "environment"),
+    )
+    api_version: str = Field(
+        default="1.0.0",
+        validation_alias=AliasChoices("API_VERSION", "api_version"),
+    )
+
     db_host: str = "localhost"
     db_port: int = 5432
     db_user: str = "postgres"

@@ -665,5 +665,123 @@ class SegmentAdminRecomputeAllTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
 
 
+class _FakeScalarsResult:
+    """Stands in for a SQLAlchemy CursorResult supporting `.scalars().all()`."""
+
+    def __init__(self, rows: list[Any]):
+        self._rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeSelectSession:
+    """Minimal Session double recording every execute() call, returning a
+    single canned `.scalars().all()` result."""
+
+    def __init__(self, rows: list[Any]):
+        self.result = _FakeScalarsResult(rows)
+        self.executed: list[Any] = []
+
+    def execute(self, stmt: Any, params: Optional[dict[str, Any]] = None) -> Any:
+        self.executed.append(stmt)
+        return self.result
+
+
+def _fake_profile_attribute(**overrides) -> SimpleNamespace:
+    attrs = {
+        "master_profile_column": "churn_risk_tier",
+        "attribute_internal_code": "churn_risk_tier",
+        "name": "Churn Risk Tier",
+        "description": "Predicted churn risk bucket.",
+        "attribute_group": "CHURN_SCORING",
+        "data_type": "TEXT",
+        "domain_scope": "all",
+        "is_pii": False,
+    }
+    attrs.update(overrides)
+    return SimpleNamespace(**attrs)
+
+
+class SegmentableProfileAttributesTests(unittest.TestCase):
+    """Tests GET /segments/segmentable-profile-attributes against the REAL
+    segments_router -- in particular that it isn't shadowed by the generic
+    CRUD router's GET /{item_id} (registered earlier, on the same path
+    shape), which would otherwise swallow this literal route and return a
+    422 "invalid UUID" instead of ever running the handler."""
+
+    def setUp(self):
+        import core.routers.segment as segment_router_module
+
+        self.segment_router_module = segment_router_module
+        self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
+        self._cache_patcher.start()
+        self.addCleanup(self._cache_patcher.stop)
+
+        self.app = FastAPI()
+        self.app.include_router(segment_router_module.segments_router)
+
+    def _client_for(self, rows: list[Any]) -> tuple[TestClient, _FakeSelectSession]:
+        session = _FakeSelectSession(rows)
+        self.app.dependency_overrides[get_db] = lambda: session
+        return TestClient(self.app), session
+
+    def test_route_is_not_shadowed_by_generic_get_by_id(self):
+        client, _ = self._client_for([])
+
+        response = client.get("/segments/segmentable-profile-attributes")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+
+    def test_returns_expected_shape_preferring_master_profile_column(self):
+        attribute = _fake_profile_attribute()
+        client, _ = self._client_for([attribute])
+
+        response = client.get("/segments/segmentable-profile-attributes")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            [
+                {
+                    "field": "churn_risk_tier",
+                    "name": "Churn Risk Tier",
+                    "description": "Predicted churn risk bucket.",
+                    "attribute_group": "CHURN_SCORING",
+                    "data_type": "TEXT",
+                    "domain_scope": "all",
+                    "is_pii": False,
+                }
+            ],
+        )
+
+    def test_falls_back_to_attribute_internal_code_when_no_master_column(self):
+        attribute = _fake_profile_attribute(master_profile_column=None, attribute_internal_code="device_id")
+        client, _ = self._client_for([attribute])
+
+        response = client.get("/segments/segmentable-profile-attributes")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["field"], "device_id")
+
+    def test_accepts_valid_domain_query_param(self):
+        client, _ = self._client_for([])
+
+        response = client.get("/segments/segmentable-profile-attributes", params={"domain": "retail"})
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_rejects_invalid_domain_query_param(self):
+        client, _ = self._client_for([])
+
+        response = client.get("/segments/segmentable-profile-attributes", params={"domain": "bogus"})
+
+        self.assertEqual(response.status_code, 422)
+
+
 if __name__ == "__main__":
     unittest.main()

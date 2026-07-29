@@ -224,6 +224,7 @@ class CdpProfileAttribute(Base):
     data_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="TEXT")
     domain_scope: Mapped[str] = mapped_column(Text, nullable=False, server_default="all")
     is_pii: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    is_segmentable: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
     is_identity_resolution: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     matching_rule: Mapped[Optional[str]] = mapped_column(Text)

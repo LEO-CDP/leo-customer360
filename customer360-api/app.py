@@ -29,6 +29,7 @@ from core.routers.identity import all_identity_routers
 from core.routers.relations import all_relations_routers
 from core.routers.reporting import router as reporting_router
 from core.routers.segment import all_segment_routers
+from core.routers.metadata import all_metadata_routers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ app = FastAPI(
         "staging (AppsFlyer/MoEngage/Web Tracking/...), master profiles, "
         "profile links, matching-rule metadata, and resolution reporting."
     ),
-    version="1.0.0",
+    version=settings.api_version,
 )
 
 # Permissive CORS for local dev so the static frontend-admin HTML (opened via
@@ -73,6 +74,8 @@ app.include_router(graph_router, prefix="/api/v1")
 for r in all_crm_routers:
     app.include_router(r, prefix="/api/v1")
 for r in all_segment_routers:
+    app.include_router(r, prefix="/api/v1")
+for r in all_metadata_routers:
     app.include_router(r, prefix="/api/v1")
 
 

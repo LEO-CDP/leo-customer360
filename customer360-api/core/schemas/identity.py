@@ -255,6 +255,7 @@ class ProfileAttributeBase(BaseModel):
     data_type: str = "TEXT"
     domain_scope: str = Field(default="all", pattern="^(all|retail|banking|real_estate|travel)$")
     is_pii: bool = False
+    is_segmentable: bool = True
 
     is_identity_resolution: bool = False
     matching_rule: Optional[str] = Field(default=None, pattern="^(exact|fuzzy_trgm|fuzzy_dmetaphone|none)$")
@@ -285,6 +286,7 @@ class ProfileAttributeUpdate(BaseModel):
     data_type: Optional[str] = None
     domain_scope: Optional[str] = Field(default=None, pattern="^(all|retail|banking|real_estate|travel)$")
     is_pii: Optional[bool] = None
+    is_segmentable: Optional[bool] = None
     is_identity_resolution: Optional[bool] = None
     matching_rule: Optional[str] = Field(default=None, pattern="^(exact|fuzzy_trgm|fuzzy_dmetaphone|none)$")
     matching_threshold: Optional[Decimal] = None
