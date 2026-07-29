@@ -26,11 +26,9 @@ ON CONFLICT (tenant_id) DO NOTHING;
 -- EVENT CATALOG: SEED DATA
 ---------------------------------------------------
 
--- Core event vocabulary seed: GENERAL/FEEDBACK (cross-domain) plus the 4
--- requested verticals (retail via COMMERCE, banking via FINANCE/STOCK_TRADING,
--- real_estate via REAL_ESTATE, travel via TRAVEL). EDUCATION/SERVICE_INDUSTRY
--- categories are allowed (they exist in BehavioralEvent) but left unseeded
--- for future use. Idempotent: safe to re-run.
+-- Core event vocabulary seed: GENERAL/FEEDBACK (cross-domain) plus the
+-- requested verticals (retail, banking, real_estate, travel, media, education).
+-- Idempotent: safe to re-run.
 INSERT INTO customer360.cdp_event_catalog (
     event_name,
     event_category,
@@ -102,7 +100,24 @@ INSERT INTO customer360.cdp_event_catalog (
     ('contact-agent',          'REAL_ESTATE', 'real_estate', 'User contacted a real-estate agent.',       FALSE, NULL,           470),
     ('submit-mortgage-form',   'REAL_ESTATE', 'real_estate', 'User submitted a mortgage inquiry form.',   FALSE, 'loan_amount',  480),
     ('mortgage-pre-approval',  'REAL_ESTATE', 'real_estate', 'User received mortgage pre-approval.',      FALSE, 'loan_amount',  490),
-    ('submit-property-offer',  'REAL_ESTATE', 'real_estate', 'User submitted an offer on a property.',    TRUE,  'offer_amount', 500)
+    ('submit-property-offer',  'REAL_ESTATE', 'real_estate', 'User submitted an offer on a property.',    TRUE,  'offer_amount', 500),
+
+    -- MEDIA & CONTENT SUBSCRIPTIONS
+    ('play-video',                'GENERAL', 'media', 'User started playing a video.',                        FALSE, NULL, 510),
+    ('finish-video',              'GENERAL', 'media', 'User finished watching a video.',                      FALSE, NULL, 520),
+    ('listen-audio',              'GENERAL', 'media', 'User listened to an audio track or podcast.',          FALSE, NULL, 530),
+    ('read-article',              'GENERAL', 'media', 'User read an article or blog post.',                   FALSE, NULL, 540),
+    ('subscribe-media',           'COMMERCE', 'media', 'User subscribed to a premium media/content plan.',    TRUE,  'subscription_amount', 550),
+    ('cancel-media-subscription', 'COMMERCE', 'media', 'User cancelled their media subscription.',            FALSE, NULL, 560),
+
+    -- EDUCATION
+    ('enroll-course',     'EDUCATION', 'education', 'User enrolled in a course.',                     TRUE,  'course_fee', 570),
+    ('start-course',      'EDUCATION', 'education', 'User started a course.',                         FALSE, NULL, 580),
+    ('complete-course',   'EDUCATION', 'education', 'User completed a course.',                       FALSE, NULL, 590),
+    ('start-lesson',      'EDUCATION', 'education', 'User started a specific lesson or module.',      FALSE, NULL, 600),
+    ('complete-lesson',   'EDUCATION', 'education', 'User completed a lesson.',                       FALSE, NULL, 610),
+    ('submit-quiz',       'EDUCATION', 'education', 'User submitted a quiz or assignment.',           FALSE, 'score', 620),
+    ('download-material', 'EDUCATION', 'education', 'User downloaded course materials or syllabus.',  FALSE, NULL, 630)
 ON CONFLICT (event_name) DO UPDATE SET
     event_category        = EXCLUDED.event_category,
     domain_scope          = EXCLUDED.domain_scope,
