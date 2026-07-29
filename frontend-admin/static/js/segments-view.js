@@ -8,8 +8,6 @@ window.C360 = window.C360 || {};
   var api = C360.config.api;
   var showApiError = C360.config.showApiError;
 
-  var listState = { skip: 0, limit: 20 };
-  var matchedState = { skip: 0, limit: 20 };
   var currentSegmentId = null;
 
   function processedByLabel(v) { return v === "ai_agent" ? "AI Agent" : "Human"; }
@@ -32,6 +30,64 @@ window.C360 = window.C360 || {};
     });
   }
 
+  // Shared data-table component instance backing the segments list (see
+  // static/js/data-table-view.js + list-view.js for the same pattern).
+  var listDtv = C360.DataTableView.create({
+    columns: [
+      {
+        label: "Segment", type: "identity", nameField: "segment_name", subField: "segment_tag", subStyle: "tag",
+        avatarField: "domainIcon", avatarBgField: "domainIconBg", avatarTextClass: "text-base"
+      },
+      { label: "Domain", field: "domainLabel", capitalize: true },
+      { label: "Processed By", type: "badge", field: "processedByLabel", classField: "processedByBadgeClass" },
+      { label: "Members", field: "memberCountLabel" },
+      { label: "Status", type: "badge", field: "activeLabel", classField: "activeBadgeClass" },
+      { label: "Created", field: "createdLabel", muted: true }
+    ],
+    rowVm: segmentRowVm,
+    rowId: function (vm) { return vm.segment_id; },
+    rowSelectorClass: "segment-row",
+    resourceLabel: "segment",
+    fetch: function (params) { return api("/segments/", params); },
+    onRowClick: function (id) { C360.router.navigate("/segments/" + id); },
+    onError: function (xhr) { showApiError("loading segments", xhr); },
+    el: {
+      thead: "#segments-thead",
+      tbody: "#segments-tbody",
+      loading: "#segments-list-loading",
+      empty: "#segments-list-empty",
+      countLabel: "#segments-count-label",
+      loadMoreBtn: "#btn-segments-load-more"
+    }
+  });
+
+  // Matched-profiles sub-table on the segment detail page renders plain
+  // profile rows -- reuse list-view.js's columns/rowVm instead of
+  // duplicating that config. Re-created per segment-detail render since
+  // segment-details.html (and its #segment-matched-* ids) is itself
+  // re-rendered on every loadDetail() call.
+  var matchedDtv = null;
+  function createMatchedDtv() {
+    return C360.DataTableView.create({
+      columns: C360.listView.columns,
+      rowVm: C360.listView.rowVm,
+      rowId: function (vm) { return vm.master_profile_id; },
+      rowSelectorClass: "profile-row",
+      resourceLabel: "matched profile",
+      fetch: function (params) { return api("/segments/" + currentSegmentId + "/matched-profiles", params); },
+      onRowClick: function (id) { C360.router.navigate("/profiles/" + id); },
+      onError: function (xhr) { showApiError("loading matched profiles", xhr); },
+      el: {
+        thead: "#segment-matched-thead",
+        tbody: "#segment-matched-tbody",
+        loading: "#segment-matched-loading",
+        empty: "#segment-matched-empty",
+        countLabel: "#segment-matched-count-label",
+        loadMoreBtn: "#btn-segment-matched-load-more"
+      }
+    });
+  }
+
   function segmentDetailVm(s) {
     return $.extend({}, s, {
       domainLabel: domainLabel(s.domain),
@@ -48,47 +104,15 @@ window.C360 = window.C360 || {};
     });
   }
 
-  function loadList(append) {
-    if (!append) { listState.skip = 0; $("#segments-tbody").empty(); }
-    $("#segments-list-loading").removeClass("hidden");
-    $("#segments-list-empty").addClass("hidden");
-
-    api("/segments/", { skip: listState.skip, limit: listState.limit })
-      .done(function (segments) {
-        $("#segments-list-loading").addClass("hidden");
-        var vms = segments.map(segmentRowVm);
-        $("#segments-tbody").append(C360.templates.render("segments-rows", { segments: vms }));
-        var total = $("#segments-tbody tr").length;
-        $("#segments-count-label").text(total + " segment" + (total === 1 ? "" : "s") + " shown");
-        $("#segments-list-empty").toggleClass("hidden", total > 0);
-        $("#btn-segments-load-more").toggleClass("hidden", segments.length < listState.limit);
-        listState.skip += segments.length;
-      })
-      .fail(function (xhr) { $("#segments-list-loading").addClass("hidden"); showApiError("loading segments", xhr); });
-  }
+  function loadList(append) { return listDtv.load(append); }
 
   function loadMatchedProfiles(segmentId, append) {
-    if (!append) { matchedState.skip = 0; $("#segment-matched-tbody").empty(); }
-    $("#segment-matched-loading").removeClass("hidden");
-    $("#segment-matched-empty").addClass("hidden");
-
-    api("/segments/" + segmentId + "/matched-profiles", { skip: matchedState.skip, limit: matchedState.limit })
-      .done(function (profiles) {
-        $("#segment-matched-loading").addClass("hidden");
-        var vms = profiles.map(C360.listView.rowVm);
-        $("#segment-matched-tbody").append(C360.templates.render("profiles-rows", { profiles: vms }));
-        var total = $("#segment-matched-tbody tr").length;
-        $("#segment-matched-count-label").text(total + " matched profile" + (total === 1 ? "" : "s") + " shown");
-        $("#segment-matched-empty").toggleClass("hidden", total > 0);
-        $("#btn-segment-matched-load-more").toggleClass("hidden", profiles.length < matchedState.limit);
-        matchedState.skip += profiles.length;
-      })
-      .fail(function (xhr) { $("#segment-matched-loading").addClass("hidden"); showApiError("loading matched profiles", xhr); });
+    if (!matchedDtv) return;
+    return matchedDtv.load(append);
   }
 
   function loadDetail(segmentId) {
     currentSegmentId = segmentId;
-    matchedState.skip = 0;
     $("#segment-detail-content").empty();
     $("#segment-detail-loading").removeClass("hidden");
 
@@ -96,6 +120,8 @@ window.C360 = window.C360 || {};
       .done(function (segment) {
         $("#segment-detail-loading").addClass("hidden");
         $("#segment-detail-content").html(C360.templates.render("segment-details", segmentDetailVm(segment)));
+        matchedDtv = createMatchedDtv();
+        matchedDtv.bindLoadMore();
         loadMatchedProfiles(segmentId, false);
       })
       .fail(function (xhr) {
@@ -211,9 +237,12 @@ window.C360 = window.C360 || {};
   }
 
   function bindEvents() {
-    $(document).on("click", ".segment-row", function () { C360.router.navigate("/segments/" + $(this).data("id")); });
-    $(document).on("click", "#btn-segments-load-more", function () { loadList(true); });
-    $(document).on("click", "#btn-segment-matched-load-more", function () { loadMatchedProfiles(currentSegmentId, true); });
+    listDtv.bindRowClick();
+    listDtv.bindLoadMore();
+    // Matched-profiles rows share the ".profile-row" click delegation
+    // already bound once by C360.listView.bindEvents() (both tables render
+    // the same profile columns/rowVm) -- only "load more" needs re-binding
+    // here since #segment-matched-* is fresh DOM on every loadDetail().
     $(document).on("click", "#btn-back-to-segments", function () { C360.router.navigate("/segments"); });
     $(document).on("click", "#btn-segments-refresh", function () { refreshAllSegments(); });
   }

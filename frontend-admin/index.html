@@ -63,7 +63,8 @@
       </section>
 
       <!-- Master Profiles list. Shell markup from static/templates/profiles-list.html,
-         rows rendered from static/templates/profiles-rows.html by static/js/list-view.js -->
+         rows rendered by the shared C360.DataTableView component (see
+         static/js/data-table-view.js) from static/js/list-view.js's column config. -->
       <section id="view-list"></section>
 
       <!-- Profile detail dashboard. Content rendered from static/templates/profile-details.html
@@ -78,8 +79,9 @@
       </section>
 
       <!-- Segments (Audience Builder) tab: list + detail sub-views. List shell from
-         static/templates/segments-list.html, rows from segments-rows.html, detail
-         content from segment-details.html, all rendered by static/js/segments-view.js -->
+         static/templates/segments-list.html (rows via the shared
+         C360.DataTableView component), detail content from segment-details.html,
+         all rendered by static/js/segments-view.js -->
       <section id="view-segments" class="hidden">
         <div id="segment-view-list"></div>
         <div id="segment-view-detail" class="hidden">
@@ -91,6 +93,11 @@
           <div id="segment-detail-content"></div>
         </div>
       </section>
+
+      <!-- Attribute Catalog tab: shell from static/templates/attributes-list.html,
+         rendered by static/js/attributes-view.js (shares the same
+         C360.DataTableView component as the Profiles/Segments lists above). -->
+      <section id="view-attributes" class="hidden"></section>
 
       <!-- Populated from static/templates/placeholder.html for nav tabs that aren't implemented -->
       <section id="view-placeholder" class="hidden"></section>
@@ -111,10 +118,15 @@
   <!-- router.js must load before any view module below, since each of them
        registers its routes with C360.router at load time. -->
   <script src="static/js/router.js"></script>
+  <!-- Shared list/table component (used by list-view.js, segments-view.js,
+       attributes-view.js) -- must load before any view module that calls
+       C360.DataTableView.create(). -->
+  <script src="static/js/data-table-view.js"></script>
   <script src="static/js/list-view.js"></script>
   <script src="static/js/profile-detail-view.js"></script>
   <script src="static/js/overview-view.js"></script>
   <script src="static/js/segments-view.js"></script>
+  <script src="static/js/attributes-view.js"></script>
   <script src="static/js/placeholder-view.js"></script>
   <script src="static/js/main.js"></script>
 </body>

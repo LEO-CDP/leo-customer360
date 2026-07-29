@@ -1,0 +1,31 @@
+<div class="bg-white border border-slate-200 rounded-xl shadow-sm">
+  <div class="p-4 border-b border-slate-200 flex flex-wrap items-center gap-3">
+    <h1 class="text-lg font-semibold flex-1">
+      Attribute Catalog
+      <br><span class="text-xs text-slate-400 font-normal">Identity resolution &amp; segmentation metadata </span>
+    </h1>
+    <input id="attributes-search-input" type="search" placeholder="Search name, code, description…" class="text-sm border border-slate-300 rounded-lg px-3 py-1.5 w-64" />
+    <select id="attributes-group-filter" class="text-sm border border-slate-300 rounded-lg px-2 py-1.5">
+      <option value="">All groups</option>
+    </select>
+    <select id="attributes-domain-filter" class="text-sm border border-slate-300 rounded-lg px-2 py-1.5">
+      <option value="">All domains</option>
+      <option value="all">Global</option>
+      <option value="banking">Banking</option>
+      <option value="retail">Retail</option>
+      <option value="real_estate">Real Estate</option>
+      <option value="travel">Travel</option>
+    </select>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead id="attributes-thead" class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide"></thead>
+      <tbody id="attributes-tbody"></tbody>
+    </table>
+  </div>
+  <div id="attributes-loading" class="p-6 flex justify-center"><div class="spinner"></div></div>
+  <div id="attributes-empty" class="hidden p-8 text-center text-sm text-slate-500">No attributes matched your filters.</div>
+  <div class="p-4 border-t border-slate-200 flex items-center justify-between text-sm text-slate-500">
+    <span id="attributes-count-label"></span>
+  </div>
+</div>

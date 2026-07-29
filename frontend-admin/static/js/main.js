@@ -22,6 +22,7 @@ window.C360 = window.C360 || {};
     overview: "/overview",
     profiles: "/profiles",
     segments: "/segments",
+    attributes: "/attributes",
     journeys: "/journeys",
     scoring: "/scoring",
     analytics: "/analytics",
@@ -57,6 +58,7 @@ window.C360 = window.C360 || {};
       $("#view-list").html(C360.templates.html("profiles-list"));
       $("#view-placeholder").html(C360.templates.html("placeholder"));
       $("#segment-view-list").html(C360.templates.html("segments-list"));
+      $("#view-attributes").html(C360.templates.html("attributes-list"));
       $("body").append(C360.templates.html("settings-modal"));
 
       $("#footer-api-base").text(C360.config.current.apiBase);
@@ -65,6 +67,7 @@ window.C360 = window.C360 || {};
       C360.listView.bindEvents();
       C360.profileDetailView.bindEvents();
       C360.segmentsView.bindEvents();
+      C360.attributesView.bindEvents();
 
       C360.config.pingHealth();
       setInterval(C360.config.pingHealth, 30000);

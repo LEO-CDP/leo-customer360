@@ -1,0 +1,28 @@
+{{#each rows}}
+<tr class="{{rowClass}}"{{#if clickable}} data-id="{{id}}"{{/if}}>
+  {{#each cells}}
+  <td class="px-4 py-3 {{class}}">
+    {{#if isIdentity}}
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 shrink-0 rounded-full {{avatarBg}} {{avatarColor}} {{avatarTextClass}} flex items-center justify-center">{{avatarContent}}</div>
+      <div class="min-w-0">
+        <div class="font-medium text-slate-800 truncate">{{name}}</div>
+        {{#if sub}}
+        {{#if isTagSub}}
+        <span class="inline-block text-[11px] font-mono text-slate-400 bg-slate-50 border border-slate-100 rounded px-1.5 py-0.5 mt-0.5">{{sub}}</span>
+        {{else}}
+        <div class="text-xs text-slate-400">{{sub}}</div>
+        {{/if}}
+        {{/if}}
+      </div>
+    </div>
+    {{else if isBadge}}
+    {{#if value}}<span class="px-2 py-0.5 rounded-full text-xs font-medium {{badgeClass}}">{{value}}</span>{{else}}<span class="text-slate-300">—</span>{{/if}}
+    {{else}}
+    {{#if value}}{{value}}{{else}}<span class="text-slate-300">—</span>{{/if}}
+    {{/if}}
+  </td>
+  {{/each}}
+  {{#if clickable}}<td class="px-4 py-3 text-right"><span class="text-indigo-600 text-xs font-medium">{{actionLabel}} &rarr;</span></td>{{/if}}
+</tr>
+{{/each}}

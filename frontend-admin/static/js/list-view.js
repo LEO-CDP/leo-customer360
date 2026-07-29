@@ -1,4 +1,13 @@
-/* Customer 360 Admin -- Master Profiles list view. */
+/* Customer 360 Admin -- Master Profiles list view.
+ *
+ * This view (and segments-view.js/attributes-view.js) is a thin config
+ * layer on top of the shared C360.DataTableView component
+ * (static/js/data-table-view.js): it only supplies *what* a profile row
+ * looks like (columns, row-vm formatting, API path, DOM hooks) -- paging,
+ * filter wiring, loading/empty states and "load more" are all owned by
+ * that shared component. `columns`/`rowVm` are exported so
+ * segments-view.js's "matched profiles" sub-table can render identical
+ * profile rows without duplicating this config. */
 window.C360 = window.C360 || {};
 
 (function (C360) {
@@ -7,9 +16,6 @@ window.C360 = window.C360 || {};
   var fmt = C360.fmt;
   var api = C360.config.api;
   var showApiError = C360.config.showApiError;
-
-  var state = { skip: 0, limit: 20, q: "", domain: "", lifecycle_stage: "" };
-  var searchDebounce = null;
 
   function rowVm(p) {
     var displayName = p.persona_name || p.full_name || ("Profile " + fmt.shortId(p.master_profile_id));
@@ -27,41 +33,46 @@ window.C360 = window.C360 || {};
     });
   }
 
-  function load(append) {
-    if (!append) { state.skip = 0; $("#profiles-tbody").empty(); }
-    $("#list-loading").removeClass("hidden");
-    $("#list-empty").addClass("hidden");
+  // The declarative "flexible fields" column set for a profile row -- reused
+  // as-is by segments-view.js for the segment-detail "Matched Profiles" table.
+  var COLUMNS = [
+    { label: "Profile", type: "identity", nameField: "displayName", subField: "shortId", avatarField: "initials" },
+    { label: "Domain", field: "domain", capitalize: true },
+    { label: "Tier", field: "tierLabel" },
+    { label: "Lifecycle", type: "badge", field: "lifecycleLabel", classField: "lifecycleBadgeClass" },
+    { label: "Churn Risk", type: "badge", field: "churn_risk_tier", classField: "churnBadgeClass" },
+    { label: "Predictive CLV", field: "clvLabel" },
+    { label: "Engagement", field: "engagementLabel" },
+    { label: "Last Activity", field: "lastActivityLabel", muted: true }
+  ];
 
-    var params = { skip: state.skip, limit: state.limit };
-    if (state.domain) params.domain = state.domain;
-    if (state.lifecycle_stage) params.lifecycle_stage = state.lifecycle_stage;
-    if (state.q) params.q = state.q;
+  var dtv = C360.DataTableView.create({
+    columns: COLUMNS,
+    rowVm: rowVm,
+    rowId: function (vm) { return vm.master_profile_id; },
+    rowSelectorClass: "profile-row",
+    resourceLabel: "profile",
+    fetch: function (params) { return api("/master-profiles/", params); },
+    onRowClick: function (id) { C360.router.navigate("/profiles/" + id); },
+    onError: function (xhr) { showApiError("loading profiles", xhr); },
+    el: {
+      thead: "#profiles-thead",
+      tbody: "#profiles-tbody",
+      loading: "#list-loading",
+      empty: "#list-empty",
+      countLabel: "#list-count-label",
+      loadMoreBtn: "#btn-load-more"
+    }
+  });
 
-    api("/master-profiles/", params)
-      .done(function (profiles) {
-        $("#list-loading").addClass("hidden");
-        var vms = profiles.map(rowVm);
-        $("#profiles-tbody").append(C360.templates.render("profiles-rows", { profiles: vms }));
-        var total = $("#profiles-tbody tr").length;
-        $("#list-count-label").text(total + " profile" + (total === 1 ? "" : "s") + " shown");
-        $("#list-empty").toggleClass("hidden", total > 0);
-        $("#btn-load-more").toggleClass("hidden", profiles.length < state.limit);
-        state.skip += profiles.length;
-      })
-      .fail(function (xhr) { $("#list-loading").addClass("hidden"); showApiError("loading profiles", xhr); });
-  }
+  function load(append) { return dtv.load(append); }
 
   function bindEvents() {
-    $(document).on("click", ".profile-row", function () { C360.router.navigate("/profiles/" + $(this).data("id")); });
-
-    $("#search-input").on("input", function () {
-      var val = $(this).val();
-      clearTimeout(searchDebounce);
-      searchDebounce = setTimeout(function () { state.q = val; load(false); }, 350);
-    });
-    $("#domain-filter").on("change", function () { state.domain = $(this).val(); load(false); });
-    $("#lifecycle-filter").on("change", function () { state.lifecycle_stage = $(this).val(); load(false); });
-    $("#btn-load-more").on("click", function () { load(true); });
+    dtv.bindRowClick();
+    dtv.bindSearch("#search-input", "q", 350);
+    dtv.bindSelect("#domain-filter", "domain");
+    dtv.bindSelect("#lifecycle-filter", "lifecycle_stage");
+    dtv.bindLoadMore();
   }
 
   // Owns the "/profiles" listing route (see router.js). The row-click
@@ -73,5 +84,5 @@ window.C360 = window.C360 || {};
     mount: function () { load(false); }
   });
 
-  C360.listView = { load: load, bindEvents: bindEvents, rowVm: rowVm };
+  C360.listView = { load: load, bindEvents: bindEvents, rowVm: rowVm, columns: COLUMNS };
 })(window.C360);
