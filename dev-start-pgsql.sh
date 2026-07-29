@@ -9,7 +9,7 @@ TARGET_DB="customer360"
 HOST_PORT=5432
 DATA_VOLUME="customer360-pgdata"
 SCHEMA_VERSION=2   # Increment this whenever you change the bootstrap SQL files
-SCHEMA_FILE="database-schema.sql"
+SCHEMA_FILE="database-init/database-schema.sql"
 SEED_FILE="database-init/init-core-database.sql"
 
 # --- Usage ---

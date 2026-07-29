@@ -15,7 +15,7 @@ containerized deployment.
 
 | Service | Image (built locally) | Role | Port (host) |
 |---|---|---|---|
-| `postgres` | `customer360-postgres:local` (postgis/postgis:16-3.5 + pgvector) | Primary datastore, auto-provisioned with [`database-schema.sql`](database-schema.sql) | `${POSTGRES_HOST_PORT:-5432}` → 5432 |
+| `postgres` | `customer360-postgres:local` (postgis/postgis:16-3.5 + pgvector) | Primary datastore, auto-provisioned with [`database-schema.sql`](database-init/database-schema.sql) | `${POSTGRES_HOST_PORT:-5432}` → 5432 |
 | `redis` | `customer360-redis:local` (redis:8-alpine) | Response cache **and Keycloak token cache** for customer360-api (see [`core/cache.py`](customer360-api/core/cache.py) / [`core/auth.py`](customer360-api/core/auth.py)) | `${REDIS_HOST_PORT:-6379}` → 6379 |
 | `keycloak-db-init` | reuses `customer360-postgres:local` | **One-shot** job that creates the dedicated `db_keycloak` database on the shared `postgres` instance, then exits | none |
 | `keycloak` | `keycloak/keycloak:latest` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
@@ -272,7 +272,7 @@ the same limitation as [`dev-start-pgsql.sh`](dev-start-pgsql.sh)'s
 - **Existing environment with data to keep (staging/prod):** apply the DDL
   delta by hand against the running container, e.g.:
   ```bash
-  docker cp database-schema.sql customer360-postgres:/tmp/database-schema.sql
+  docker cp database-init/database-schema.sql customer360-postgres:/tmp/database-schema.sql
   docker exec -u postgres customer360-postgres \
     psql -d customer360 -v ON_ERROR_STOP=1 -f /tmp/database-schema.sql
   ```

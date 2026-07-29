@@ -19,7 +19,7 @@ It ships as three independently runnable pieces:
 
 | Component | Role | Tech |
 |---|---|---|
-| [`database-schema.sql`](database-schema.sql) | Single source of truth for the `customer360` schema | PostgreSQL 16, `pgvector`, `postgis`, `uuid-ossp`, `pgcrypto` |
+| [`database-schema.sql`](database-init/database-schema.sql) | Single source of truth for the `customer360` schema | PostgreSQL 16, `pgvector`, `postgis`, `uuid-ossp`, `pgcrypto` |
 | [`backend-system/identity_resolution/`](backend-system/identity_resolution) | **Customer Identity Resolution (CIR)** engine — links/merges raw profiles into master (golden) profiles | Python + psycopg2, orchestrated by **[Dagster](https://dagster.io)** |
 | [`customer360-api/`](customer360-api) | REST API (CRUD + reporting) over the whole schema | FastAPI + SQLAlchemy 2 ORM |
 
@@ -31,7 +31,7 @@ In this Git repository, the end-to-end platform is organized as the following co
 
 | Service | Main path | Responsibility |
 |---|---|---|
-| Database schema | [`database-schema.sql`](database-schema.sql) | Canonical DDL for `customer360` schema: `cdp_*`, `crm_*`, graph, relations, partitions, RLS policies. |
+| Database schema | [`database-schema.sql`](database-init/database-schema.sql) | Canonical DDL for `customer360` schema: `cdp_*`, `crm_*`, graph, relations, partitions, RLS policies. |
 | Customer 360 API | [`customer360-api/`](customer360-api) | FastAPI service exposing CRUD, profile360 analytics, segmentation execution, reporting, auth middleware, and cache integration. |
 | Identity Resolution worker | [`backend-system/identity_resolution/`](backend-system/identity_resolution) | CIR engine that matches and merges raw profiles into master profiles; supports batch and continuous worker modes. |
 | Backend orchestration (Dagster) | [`backend-system/`](backend-system) | Dagster workspace (jobs, sensors, run monitoring) tying `identity_resolution` together with the (placeholder, for now) `scoring`/`segmentation`/`analytics` services -- see [`backend-system/README.md`](backend-system/README.md) for the architecture/scaling writeup and how to add a new service. |

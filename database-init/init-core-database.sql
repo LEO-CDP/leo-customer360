@@ -1,4 +1,29 @@
 ---------------------------------------------------
+-- TENANT: SEED DATA
+---------------------------------------------------
+
+-- Default tenant required as the FK parent for the segment seed data below.
+-- Idempotent: safe to re-run.
+INSERT INTO customer360.sys_tenant (
+    tenant_id,
+    tenant_code,
+    tenant_name,
+    company_name,
+    business_type,
+    status
+)
+VALUES (
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    'Default',
+    'Default Tenant',
+    'Default Company',
+    'DEFAULT',
+    'ACTIVE'
+)
+ON CONFLICT (tenant_id) DO NOTHING;
+
+
+---------------------------------------------------
 -- EVENT CATALOG: SEED DATA
 ---------------------------------------------------
 

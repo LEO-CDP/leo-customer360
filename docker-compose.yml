@@ -75,9 +75,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360}"]
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+      timeout: 10s
+      retries: 8
+      start_period: 90s
 
   # ---------------------------------------------------------------------------
   # 2) Redis 8 - API response cache (see customer360-api/core/cache.py).
