@@ -49,7 +49,7 @@ _master_crud = CRUDBase(CdpMasterProfile)
 @cache_response("master_profiles/list", ttl=settings.cache_ttl_seconds)
 def list_master_profiles(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel)$"),
+    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
     lifecycle_stage: Optional[str] = Query(
         default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
     ),
@@ -86,7 +86,7 @@ def list_master_profiles(
 @cache_response("master_profiles/count", ttl=settings.cache_ttl_seconds)
 def count_master_profiles_endpoint(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel)$"),
+    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
     db: Session = Depends(get_db),
 ):
     return {"count": _master_crud.count(db, tenant_id=tenant_id, domain=domain)}
@@ -194,7 +194,7 @@ _raw_crud = CRUDBase(CdpRawProfileStage)
 @cache_response("raw_profiles/list", ttl=settings.cache_ttl_seconds)
 def list_raw_profiles(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel)$"),
+    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
     source_system: Optional[str] = None,
     status_code: Optional[int] = None,
     skip: int = 0,
@@ -216,7 +216,7 @@ def list_raw_profiles(
 @cache_response("raw_profiles/count", ttl=settings.cache_ttl_seconds)
 def count_raw_profiles_endpoint(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel)$"),
+    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
     source_system: Optional[str] = None,
     status_code: Optional[int] = None,
     db: Session = Depends(get_db),

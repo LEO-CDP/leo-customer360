@@ -154,7 +154,7 @@ def _resolve_raw_profile_id(db: Session, payload: EventCreate) -> uuid.UUID:
 def list_events(
     tenant_id: Optional[uuid.UUID] = None,
     master_profile_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel)$"),
+    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
     channel: Optional[str] = None,
     event_category: Optional[str] = None,
     event_name: Optional[str] = None,

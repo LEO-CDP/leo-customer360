@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class MasterProfileBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None
-    domain: str = Field(default="retail", pattern="^(retail|banking|real_estate|travel)$")
+    domain: str = Field(default="retail", pattern="^(retail|banking|real_estate|travel|media|education)$")
 
     full_name: Optional[str] = None
     first_name: Optional[str] = None
@@ -43,6 +43,16 @@ class MasterProfileBase(BaseModel):
     account_numbers: Optional[list[str]] = None
     kyc_status: Optional[str] = None
     risk_segment: Optional[str] = None
+
+    # Real estate / travel / media / education domain attributes.
+    property_types_of_interest: Optional[list[str]] = None
+    preferred_location_codes: Optional[list[str]] = None
+    travel_loyalty_program_id: Optional[str] = None
+    preferred_travel_class: Optional[str] = None
+    media_subscription_id: Optional[str] = None
+    preferred_content_genres: Optional[list[str]] = None
+    student_id: Optional[str] = None
+    institution_name: Optional[str] = None
 
     acquisition_source: Optional[str] = None
     acquisition_campaign: Optional[str] = None
@@ -85,7 +95,7 @@ class MasterProfileCreate(MasterProfileBase):
 
 class MasterProfileUpdate(BaseModel):
     user_id: Optional[uuid.UUID] = None
-    domain: Optional[str] = Field(default=None, pattern="^(retail|banking|real_estate|travel)$")
+    domain: Optional[str] = Field(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$")
     full_name: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -110,6 +120,14 @@ class MasterProfileUpdate(BaseModel):
     account_numbers: Optional[list[str]] = None
     kyc_status: Optional[str] = None
     risk_segment: Optional[str] = None
+    property_types_of_interest: Optional[list[str]] = None
+    preferred_location_codes: Optional[list[str]] = None
+    travel_loyalty_program_id: Optional[str] = None
+    preferred_travel_class: Optional[str] = None
+    media_subscription_id: Optional[str] = None
+    preferred_content_genres: Optional[list[str]] = None
+    student_id: Optional[str] = None
+    institution_name: Optional[str] = None
     acquisition_source: Optional[str] = None
     acquisition_campaign: Optional[str] = None
     persona_name: Optional[str] = None
@@ -152,7 +170,7 @@ class MasterProfileRead(MasterProfileBase):
 class RawProfileBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None
-    domain: str = Field(default="retail", pattern="^(retail|banking|real_estate|travel)$")
+    domain: str = Field(default="retail", pattern="^(retail|banking|real_estate|travel|media|education)$")
     source_system: str
     channel: Optional[str] = None
 
@@ -253,7 +271,7 @@ class ProfileAttributeBase(BaseModel):
     source_table: str = "cdp_master_profiles"
     status: str = "ACTIVE"
     data_type: str = "TEXT"
-    domain_scope: str = Field(default="all", pattern="^(all|retail|banking|real_estate|travel)$")
+    domain_scope: str = Field(default="all", pattern="^(all|retail|banking|real_estate|travel|media|education)$")
     is_pii: bool = False
     is_segmentable: bool = True
 
@@ -284,7 +302,7 @@ class ProfileAttributeUpdate(BaseModel):
     source_table: Optional[str] = None
     status: Optional[str] = None
     data_type: Optional[str] = None
-    domain_scope: Optional[str] = Field(default=None, pattern="^(all|retail|banking|real_estate|travel)$")
+    domain_scope: Optional[str] = Field(default=None, pattern="^(all|retail|banking|real_estate|travel|media|education)$")
     is_pii: Optional[bool] = None
     is_segmentable: Optional[bool] = None
     is_identity_resolution: Optional[bool] = None

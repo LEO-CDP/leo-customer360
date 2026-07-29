@@ -31,7 +31,7 @@ _crud = CRUDBase(CdpContentItem)
 @cache_response("content_items/list", ttl=settings.cache_ttl_seconds)
 def list_content_items(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(all|retail|banking|real_estate|travel)$"),
+    domain: Optional[str] = Query(default=None, pattern="^(all|retail|banking|real_estate|travel|media|education)$"),
     item_type: Optional[str] = Query(default=None, pattern="^(news|video|product|article)$"),
     skip: int = 0,
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
@@ -91,7 +91,7 @@ def get_recommended_content_items(
 @cache_response("content_items/count", ttl=settings.cache_ttl_seconds)
 def count_content_items(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(all|retail|banking|real_estate|travel)$"),
+    domain: Optional[str] = Query(default=None, pattern="^(all|retail|banking|real_estate|travel|media|education)$"),
     item_type: Optional[str] = Query(default=None, pattern="^(news|video|product|article)$"),
     db: Session = Depends(get_db),
 ):

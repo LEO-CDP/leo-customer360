@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ContentItemBase(BaseModel):
     tenant_id: uuid.UUID
-    domain: str = Field(default="all", pattern="^(all|retail|banking|real_estate|travel)$")
+    domain: str = Field(default="all", pattern="^(all|retail|banking|real_estate|travel|media|education)$")
     item_type: str = Field(pattern="^(news|video|product|article)$")
     title: str
     summary: Optional[str] = None
@@ -25,7 +25,7 @@ class ContentItemCreate(ContentItemBase):
 
 
 class ContentItemUpdate(BaseModel):
-    domain: Optional[str] = Field(default=None, pattern="^(all|retail|banking|real_estate|travel)$")
+    domain: Optional[str] = Field(default=None, pattern="^(all|retail|banking|real_estate|travel|media|education)$")
     item_type: Optional[str] = Field(default=None, pattern="^(news|video|product|article)$")
     title: Optional[str] = None
     summary: Optional[str] = None

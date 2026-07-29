@@ -389,7 +389,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- profiles are created by ingestion pipelines, not an interactive admin user).
     user_id UUID REFERENCES customer360.sys_user(user_id),
     -- Business context of the profile to drive domain-specific UI and activation logic.
-    domain TEXT NOT NULL DEFAULT 'retail' CHECK (domain IN ('retail', 'banking', 'real_estate', 'travel')),
+    domain TEXT NOT NULL DEFAULT 'retail' CHECK (domain IN ('retail', 'banking', 'real_estate', 'travel', 'media', 'education')),
 
     -- ------------------------------------------------------------------------
     -- CORE IDENTITY (PII & DEMOGRAPHICS)
@@ -461,6 +461,42 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     kyc_status TEXT CHECK (kyc_status IN ('unverified','pending','verified','rejected')),
     -- Risk categorization for AML or credit scoring.
     risk_segment TEXT,
+
+    -- ------------------------------------------------------------------------
+    -- REAL ESTATE DOMAIN ATTRIBUTES
+    -- Fields specific to property search, listings, and real-estate CRM.
+    -- ------------------------------------------------------------------------
+    -- Types of properties the prospect is interested in (e.g. apartment, villa, land).
+    property_types_of_interest TEXT[] DEFAULT ARRAY[]::TEXT[],
+    -- Preferred city/district/area codes for property search.
+    preferred_location_codes TEXT[] DEFAULT ARRAY[]::TEXT[],
+
+    -- ------------------------------------------------------------------------
+    -- TRAVEL DOMAIN ATTRIBUTES
+    -- Fields specific to airlines, hotels, and travel loyalty programs.
+    -- ------------------------------------------------------------------------
+    -- Travel loyalty program membership identifier.
+    travel_loyalty_program_id TEXT,
+    -- Preferred cabin/travel class (e.g. economy, business, first).
+    preferred_travel_class TEXT,
+
+    -- ------------------------------------------------------------------------
+    -- MEDIA DOMAIN ATTRIBUTES
+    -- Fields specific to content subscriptions and media consumption.
+    -- ------------------------------------------------------------------------
+    -- Platform subscription or account identifier.
+    media_subscription_id TEXT,
+    -- Content genres the user prefers (e.g. news, sports, entertainment).
+    preferred_content_genres TEXT[] DEFAULT ARRAY[]::TEXT[],
+
+    -- ------------------------------------------------------------------------
+    -- EDUCATION DOMAIN ATTRIBUTES
+    -- Fields specific to learners, students, and education platforms.
+    -- ------------------------------------------------------------------------
+    -- Student identifier issued by the education institution/platform.
+    student_id TEXT,
+    -- Name of the education institution or learning platform.
+    institution_name TEXT,
 
     -- ------------------------------------------------------------------------
     -- MARKETING & ENGAGEMENT
@@ -593,7 +629,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     CONSTRAINT chk_cdp_mp_hashed_requires_persona_name CHECK (is_hashed = FALSE OR persona_name IS NOT NULL)
 );
 
-COMMENT ON TABLE customer360.cdp_master_profiles IS 'The golden/resolved customer profile (identity-resolution output): consolidated demographics, cross-channel identity graph, retail/banking domain attributes, marketing/persona fields, lineage, lifecycle tracking, and the full ML scoring block (lead, churn, CLV, CX, data quality). One row per real person per tenant+domain, built by CustomerIdentityResolver from cdp_raw_profiles_stage.';
+COMMENT ON TABLE customer360.cdp_master_profiles IS 'The golden/resolved customer profile (identity-resolution output): consolidated demographics, cross-channel identity graph, retail/banking/real-estate/travel/media/education domain attributes, marketing/persona fields, lineage, lifecycle tracking, and the full ML scoring block (lead, churn, CLV, CX, data quality). One row per real person per tenant+domain, built by CustomerIdentityResolver from cdp_raw_profiles_stage.';
 
 -- Raw profiles staging
 -- Landing zone for every inbound source: AppsFlyer (mobile attribution/install
@@ -606,7 +642,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     -- Data owner: internal sys_user who created/manages this row (nullable -- rows are
     -- normally landed by ingestion pipelines, not an interactive admin user).
     user_id UUID REFERENCES customer360.sys_user(user_id),
-    domain TEXT NOT NULL DEFAULT 'retail' CHECK (domain IN ('retail', 'banking', 'real_estate', 'travel')),
+    domain TEXT NOT NULL DEFAULT 'banking' CHECK (domain IN ('retail', 'banking', 'real_estate', 'travel', 'media', 'education')),
     source_system TEXT NOT NULL,        -- 'AppsFlyer' | 'MoEngage' | 'WebTracking' | 'CoreBanking' | 'POS' | ...
     channel TEXT,                       -- 'mobile_app' | 'web' | 'pos' | 'call_center' | ...
 
@@ -703,7 +739,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_events (
     user_id UUID REFERENCES customer360.sys_user(user_id),
     -- Business vertical this event belongs to (drives which cdp_event_catalog
     -- rows/entity_type values are relevant).
-    domain TEXT NOT NULL DEFAULT 'retail' CHECK (domain IN ('retail', 'banking', 'real_estate', 'travel')),
+    domain TEXT NOT NULL DEFAULT 'retail' CHECK (domain IN ('retail', 'banking', 'real_estate', 'travel', 'media', 'education')),
 
     -- Lineage to resolved/staged profiles. raw_profile_id is required and points to
     -- cdp_raw_profiles_stage; master_profile_id remains nullable/backfilled.
@@ -844,7 +880,9 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_event_catalog (
             'retail',
             'banking',
             'real_estate',
-            'travel'
+            'travel',
+            'media',
+            'education'
         )
     ),
     description TEXT,
@@ -904,6 +942,10 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
             'IDENTITY_GRAPH',
             'RETAIL',
             'BANKING',
+            'REAL_ESTATE',
+            'TRAVEL',
+            'MEDIA',
+            'EDUCATION',
             'MARKETING',
             'LINEAGE',
             'LIFECYCLE',
@@ -923,7 +965,9 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
             'retail',
             'banking',
             'real_estate',
-            'travel'
+            'travel',
+            'media',
+            'education'
         )
     ),
     is_pii BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1081,7 +1125,7 @@ COMMENT ON TABLE customer360.crm_transactions IS 'Source-agnostic transaction fa
 CREATE TABLE IF NOT EXISTS customer360.cdp_content_items (
     content_item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
-    domain TEXT NOT NULL DEFAULT 'all' CHECK (domain IN ('all', 'retail', 'banking', 'real_estate', 'travel')),
+    domain TEXT NOT NULL DEFAULT 'all' CHECK (domain IN ('all', 'retail', 'banking', 'real_estate', 'travel', 'media', 'education')),
     item_type TEXT NOT NULL CHECK (item_type IN ('news', 'video', 'product', 'article')),
     title TEXT NOT NULL,
     summary TEXT,
@@ -1117,7 +1161,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_segments (
     -- Data owner: internal sys_user who created/manages this segment (nullable --
     -- segments generated by an ai_agent may have no interactive owner).
     user_id UUID REFERENCES customer360.sys_user(user_id),
-    domain TEXT NOT NULL DEFAULT 'all' CHECK (domain IN ('all', 'retail', 'banking', 'real_estate', 'travel')),
+    domain TEXT NOT NULL DEFAULT 'all' CHECK (domain IN ('all', 'retail', 'banking', 'real_estate', 'travel', 'media', 'education')),
 
     -- Unique short tag written into cdp_master_profiles.segmentation_tags for
     -- every profile that matches this segment (e.g. 'gen_z_shopper').
@@ -1566,7 +1610,8 @@ DECLARE
         'cdp_profile_links',
         'cdp_raw_events',
         'cdp_relations',
-        'cdp_segments'
+        'cdp_segments',
+        'cdp_content_items'
     ];
 BEGIN
     FOREACH t IN ARRAY tenant_tables LOOP

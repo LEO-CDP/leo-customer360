@@ -77,6 +77,18 @@ class CdpMasterProfile(Base):
     kyc_status: Mapped[Optional[str]] = mapped_column(Text)
     risk_segment: Mapped[Optional[str]] = mapped_column(Text)
 
+    # ------------------------------------------------------------------
+    # REAL ESTATE, TRAVEL, MEDIA, EDUCATION DOMAIN ATTRIBUTES
+    # ------------------------------------------------------------------
+    property_types_of_interest: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
+    preferred_location_codes: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
+    travel_loyalty_program_id: Mapped[Optional[str]] = mapped_column(Text)
+    preferred_travel_class: Mapped[Optional[str]] = mapped_column(Text)
+    media_subscription_id: Mapped[Optional[str]] = mapped_column(Text)
+    preferred_content_genres: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
+    student_id: Mapped[Optional[str]] = mapped_column(Text)
+    institution_name: Mapped[Optional[str]] = mapped_column(Text)
+
     acquisition_source: Mapped[Optional[str]] = mapped_column(Text)
     acquisition_campaign: Mapped[Optional[str]] = mapped_column(Text)
     # Human-readable, non-PII label required whenever is_hashed = TRUE (see persona.py).
@@ -209,7 +221,11 @@ class CdpProfileLink(Base):
 class CdpProfileAttribute(Base):
     """Full attribute catalog for cdp_master_profiles, plus CIR matching-rule
     metadata consumed by CustomerIdentityResolver and ML scoring-model
-    metadata (Lead / Churn / CLV / CX / Data Quality)."""
+    metadata (Lead / Churn / CLV / CX / Data Quality).
+
+    attribute_group values include SYSTEM, IDENTITY, IDENTITY_GRAPH, RETAIL,
+    BANKING, REAL_ESTATE, TRAVEL, MEDIA, EDUCATION, MARKETING, LINEAGE,
+    LIFECYCLE, *_SCORING, DATA_QUALITY, GENERAL."""
 
     __tablename__ = "cdp_profile_attributes"
 

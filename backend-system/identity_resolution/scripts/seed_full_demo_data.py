@@ -390,9 +390,7 @@ def seed_relations(cursor, master_profiles: list) -> None:
     if len(master_profiles) < 4:
         logger.warning("Not enough master profiles to seed cdp_relations demo rows -- skipping.")
         return
-    logger.info("Seeding cdp_relations (family/friend/customer-contact) between resolved master profiles...")
-    banking = [m for m in master_profiles if m["domain"] == "banking"]
-    retail = [m for m in master_profiles if m["domain"] == "retail"]
+    logger.info("Seeding cdp_relations between resolved master profiles...")
 
     def _link(a, b, code):
         cursor.execute(
@@ -405,12 +403,24 @@ def seed_relations(cursor, master_profiles: list) -> None:
             (DEMO_TENANT_ID, a, b, code),
         )
 
-    if len(banking) >= 2:
-        _link(banking[0]["master_profile_id"], banking[1]["master_profile_id"], "family")
-    if len(retail) >= 2:
-        _link(retail[0]["master_profile_id"], retail[1]["master_profile_id"], "friend")
-    if banking and retail:
-        _link(banking[0]["master_profile_id"], retail[0]["master_profile_id"], "customer-contact")
+    by_domain = {}
+    for m in master_profiles:
+        by_domain.setdefault(m["domain"], []).append(m)
+    domains = list(by_domain.keys())
+
+    # Link first two profiles within each domain (if enough profiles exist).
+    for domain, members in by_domain.items():
+        if len(members) >= 2:
+            relation_code = "family" if domain == "banking" else "friend"
+            _link(members[0]["master_profile_id"], members[1]["master_profile_id"], relation_code)
+
+    # Cross-domain customer-contact links between the first profile of a few domains.
+    if len(domains) >= 2 and by_domain[domains[0]] and by_domain[domains[1]]:
+        _link(
+            by_domain[domains[0]][0]["master_profile_id"],
+            by_domain[domains[1]][0]["master_profile_id"],
+            "customer-contact",
+        )
 
 
 def seed_customer_contacts(cursor, master_profiles: list) -> None:
@@ -444,14 +454,35 @@ BANKING_TRANSACTIONS = [
     ("CoreBanking", "transfer", "account", "Interbank Transfer", (500_000, 20_000_000), "mobile_app"),
     ("CoreBanking", "bill_payment", "account", "Utility Bill Payment", (100_000, 1_500_000), "internet_banking"),
 ]
+REAL_ESTATE_TRANSACTIONS = [
+    ("PropertyPortal", "property_inquiry", "property", "Property Inquiry", (1_000_000_000, 5_000_000_000), "web"),
+]
+TRAVEL_TRANSACTIONS = [
+    ("OTA", "booking", "booking", "Travel Booking", (1_000_000, 15_000_000), "mobile_app"),
+]
+MEDIA_TRANSACTIONS = [
+    ("StreamingPlatform", "subscription", "subscription", "Media Subscription", (50_000, 500_000), "mobile_app"),
+]
+EDUCATION_TRANSACTIONS = [
+    ("LearningPlatform", "course_enrollment", "course", "Course Enrollment", (500_000, 5_000_000), "web"),
+]
 
 
 def seed_transactions(cursor, master_profiles: list) -> None:
-    logger.info("Seeding crm_transactions (retail purchases + banking transfers/payments)...")
+    logger.info("Seeding crm_transactions per domain...")
     for m in master_profiles:
         rng = stable_rng(f"transactions:{m['master_profile_id']}")
-        catalog = RETAIL_TRANSACTIONS if m["domain"] == "retail" else BANKING_TRANSACTIONS
-        for _ in range(rng.randint(1, 3)):
+        domain = m["domain"]
+        catalog = {
+            "retail": RETAIL_TRANSACTIONS,
+            "banking": BANKING_TRANSACTIONS,
+            "real_estate": REAL_ESTATE_TRANSACTIONS,
+            "travel": TRAVEL_TRANSACTIONS,
+            "media": MEDIA_TRANSACTIONS,
+            "education": EDUCATION_TRANSACTIONS,
+        }.get(domain)
+        if catalog is None:
+            continue
             source_system, txn_type, entity_type, entity_name, amount_range, channel = rng.choice(catalog)
             cursor.execute(
                 f"""
@@ -500,18 +531,34 @@ RETAIL_EVENTS = [
 ]
 BANKING_EVENTS = [
     ("GENERAL", "user-login", None, None, False),
-    ("FINANCE", "transfer-money", (500_000, 5_000_000), "account", False),
-    ("FINANCE", "pay-bill", (100_000, 1_000_000), "account", False),
-    ("STOCK_TRADING", "view-portfolio", None, None, False),
-    ("FEEDBACK", "submit-nps-form", None, None, False),
+    ("GENERAL", "dashboard-view", None, None, False),
+    ("FINANCE", "fund-transfer", (500_000, 20_000_000), "account", True),
+    ("FINANCE", "bill-payment", (100_000, 1_500_000), "account", True),
+    ("STOCK_TRADING", "trade-executed", (1_000_000, 50_000_000), "security", True),
+    ("FEEDBACK", "submit-satisfaction-survey", None, None, False),
 ]
-# Anonymous (no resolved profile yet) events for the two domains not
-# otherwise represented in the AppsFlyer-only CIR demo dataset.
+MEDIA_EVENTS = [
+    ("GENERAL", "user-login", None, None, False),
+    ("GENERAL", "content-view", None, None, False),
+    ("GENERAL", "search", None, None, False),
+    ("FEEDBACK", "submit-csat-form", None, None, False),
+]
+EDUCATION_EVENTS = [
+    ("GENERAL", "user-login", None, None, False),
+    ("EDUCATION", "course-started", None, "course", False),
+    ("EDUCATION", "assignment-submitted", None, "assignment", False),
+    ("FEEDBACK", "submit-csat-form", None, None, False),
+]
+
+# Anonymous (no resolved profile yet) events for domains not otherwise
+# represented in a given CIR demo dataset.
 UNRESOLVED_EVENTS = [
     ("travel", "TRAVEL", "search-flight", None, None, False),
     ("travel", "TRAVEL", "booking", (1_000_000, 8_000_000), "booking", True),
     ("real_estate", "REAL_ESTATE", "view-property", None, "property", False),
     ("real_estate", "REAL_ESTATE", "request-property-tour", None, "property", False),
+    ("media", "GENERAL", "content-view", None, "content", False),
+    ("education", "EDUCATION", "course-started", None, "course", False),
 ]
 
 
@@ -793,8 +840,8 @@ def link_crm_contacts_to_master_profiles(cursor, crm_ids: dict, master_profiles:
     metadata = Json({"demo_tenant": DEMO_TENANT_ID})
     links = []
     for account_name, contact_index, domain, pool_index in CONTACT_MASTER_LINK_ACCOUNTS:
-        pool = domain_pools[domain]
-        if contact_index >= len(contacts) or pool_index >= len(pool):
+        pool = domain_pools.get(domain)
+        if pool is None or contact_index >= len(contacts) or pool_index >= len(pool):
             continue
         links.append((pool[pool_index], contacts[contact_index], account_name))
 
@@ -840,6 +887,10 @@ def link_crm_contacts_to_master_profiles(cursor, crm_ids: dict, master_profiles:
 
 RETAIL_CHANNELS = ("Mobile App", "Website")
 BANKING_CHANNELS = ("Internet Banking App", "Mobile App", "Branch")
+REAL_ESTATE_CHANNELS = ("Property Portal", "Mobile App", "Office Visit")
+TRAVEL_CHANNELS = ("Airline App", "OTA Website", "Mobile App")
+MEDIA_CHANNELS = ("Streaming App", "Website", "Mobile App")
+EDUCATION_CHANNELS = ("Learning Platform", "Mobile App", "Website")
 LIFECYCLE_STAGES = ("prospect", "lead", "customer", "vip", "dormant", "churn_risk")
 OCCUPATIONS = ("engineer", "teacher", "business_owner", "student", "civil_servant", "sales_professional")
 INCOME_SEGMENTS = ("low", "medium", "high")
@@ -870,7 +921,14 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
 
         lifecycle_stage = rng.choice(LIFECYCLE_STAGES)
         is_established_customer = lifecycle_stage in ("customer", "vip", "dormant", "churn_risk")
-        preferred_channel = rng.choice(RETAIL_CHANNELS if domain == "retail" else BANKING_CHANNELS)
+        preferred_channel = rng.choice(
+            RETAIL_CHANNELS if domain == "retail" else
+            BANKING_CHANNELS if domain == "banking" else
+            REAL_ESTATE_CHANNELS if domain == "real_estate" else
+            TRAVEL_CHANNELS if domain == "travel" else
+            MEDIA_CHANNELS if domain == "media" else
+            EDUCATION_CHANNELS
+        )
         customer_since = (
             (m["created_at"] - timedelta(days=rng.randint(0, 400))).date() if is_established_customer else None
         )
@@ -888,7 +946,9 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
         lead_grade = "Hot" if lead_conversion_probability >= 0.7 else "Warm" if lead_conversion_probability >= 0.4 else "Cold"
         historical_clv = round(rng.uniform(500, 5000) * (10 if domain == "banking" else 1), 2)
         predictive_clv = round(historical_clv * rng.uniform(1.0, 1.8), 2)
-        clv_segment = "high" if predictive_clv > (30000 if domain == "banking" else 3000) else "medium" if predictive_clv > (10000 if domain == "banking" else 1000) else "low"
+        clv_high_threshold = 30000 if domain == "banking" else 3000
+        clv_medium_threshold = 10000 if domain == "banking" else 1000
+        clv_segment = "high" if predictive_clv > clv_high_threshold else "medium" if predictive_clv > clv_medium_threshold else "low"
         engagement_score = round(rng.uniform(0, 100), 2)
         latest_nps_score = rng.randint(0, 10)
         average_csat = round(rng.uniform(1, 5), 2)
@@ -943,7 +1003,7 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
                 rng.choice(("Silver", "Gold", "Platinum")),
                 f"STORE-{rng.randint(1, 20):03d}",
             ]
-        else:
+        elif domain == "banking":
             set_clauses += ["cif_number = %s", "account_numbers = %s", "kyc_status = %s", "risk_segment = %s"]
             params += [
                 f"CIF{rng.randint(10_000_000, 99_999_999)}",
@@ -951,6 +1011,33 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
                 rng.choice(("unverified", "pending", "verified", "rejected")),
                 rng.choice(("low", "medium", "high")),
             ]
+        elif domain == "real_estate":
+            set_clauses += ["property_types_of_interest = %s", "preferred_location_codes = %s"]
+            params += [
+                rng.sample(["apartment", "villa", "land", "townhouse", "condo"], k=rng.randint(1, 3)),
+                [f"DIST-{rng.randint(1, 12):02d}" for _ in range(rng.randint(1, 2))],
+            ]
+        elif domain == "travel":
+            set_clauses += ["travel_loyalty_program_id = %s", "preferred_travel_class = %s"]
+            params += [
+                f"TVL-{rng.randint(100000, 999999)}",
+                rng.choice(("economy", "business", "first")),
+            ]
+        elif domain == "media":
+            set_clauses += ["media_subscription_id = %s", "preferred_content_genres = %s"]
+            params += [
+                f"SUB-{rng.randint(100000, 999999)}",
+                rng.sample(["news", "sports", "entertainment", "documentary", "music"], k=rng.randint(1, 3)),
+            ]
+        elif domain == "education":
+            set_clauses += ["student_id = %s", "institution_name = %s"]
+            params += [
+                f"STU-{rng.randint(100000, 999999)}",
+                rng.choice(("Demo University", "Demo Online Academy", "Demo Polytechnic")),
+            ]
+        else:
+            # Catch-all for any future domain; do nothing domain-specific.
+            pass
 
         if idx < EMBEDDING_PROFILE_LIMIT:
             embedding_rng = stable_rng(f"embedding:{master_id}")

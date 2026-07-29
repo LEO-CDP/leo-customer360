@@ -6,8 +6,8 @@ This is the Python OOP replacement for the PostgreSQL stored procedure
 multi-tenant ``customer360`` schema defined in
 ``core-customer360/database-schema.sql`` (``cdp_raw_profiles_stage``,
 ``cdp_master_profiles``, ``cdp_profile_links``), which stores profile data
-ingested from AppsFlyer, MoEngage and Web Tracking for both the retail and
-banking domains.
+ingested from AppsFlyer, MoEngage and Web Tracking for retail, banking,
+real_estate, travel, media, and education domains.
 
 Matching rules are read dynamically from the ``cdp_profile_attributes``
 metadata table (not part of ``database-schema.sql`` -- created on demand, see
@@ -64,7 +64,7 @@ RAW_PROFILE_COLUMNS = (
 class CustomerIdentityResolver:
     """Links raw profiles to master profiles using dynamically configured
     matching rules stored in ``cdp_profile_attributes``, scoped per tenant
-    and per domain (retail/banking).
+    and per domain (retail/banking/real_estate/travel/media/education).
     """
 
     def __init__(self, db_connection, schema: str = "customer360", batch_size: int = 1000):
@@ -206,6 +206,12 @@ class CustomerIdentityResolver:
         set_clauses = [f"{field} = COALESCE({field}, %s)" for field in SCALAR_MERGE_FIELDS]
         params: List[Any] = [raw_profile.get(field) for field in SCALAR_MERGE_FIELDS]
 
+        # Always preserve the explicitly-provided domain on the master row so
+        # that profiles stay correctly classified across retail/banking/
+        # real_estate/travel/media/education.
+        set_clauses.append("domain = %s")
+        params.append(raw_profile.get("domain", "retail"))
+
         for raw_field, master_col in ARRAY_IDENTITY_FIELDS.items():
             value = raw_profile.get(raw_field)
             if not value:
@@ -296,6 +302,8 @@ class CustomerIdentityResolver:
             insert_master_query,
             (
                 raw_profile["tenant_id"],
+                # Domain defaults to "retail" for backwards compatibility if
+                # the source omits it; valid domains now include media/education.
                 raw_profile.get("domain", "retail"),
                 raw_profile.get("full_name"),
                 raw_profile.get("email"),

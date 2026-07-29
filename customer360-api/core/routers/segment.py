@@ -32,7 +32,7 @@ from core.utils.sql_safety import validate_sql_where_fragment
 # cdp_master_profiles, so the "field picker" endpoint below must only ever
 # offer columns that actually live on that table.
 _SEGMENTABLE_SOURCE_TABLE = "cdp_master_profiles"
-_DOMAIN_SCOPE_PATTERN = r"^(all|retail|banking|real_estate|travel)$"
+_DOMAIN_SCOPE_PATTERN = r"^(all|retail|banking|real_estate|travel|media|education)$"
 
 segments_router = build_crud_router(
     model=CdpSegment,
@@ -388,7 +388,7 @@ def get_segmentable_profile_attributes(
     ``cdp_master_profiles`` (see ``get_segment_matched_profiles`` above).
 
     ``domain`` (optional, one of ``retail``/``banking``/``real_estate``/
-    ``travel``) additionally filters to attributes with
+    ``travel``/``media``/``education``) additionally filters to attributes with
     ``domain_scope IN ('all', <domain>)``, matching ``cdp_master_profiles``/
     ``cdp_segments``'s own ``domain`` column.
     """

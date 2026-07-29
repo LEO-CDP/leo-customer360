@@ -72,6 +72,10 @@ _ADJECTIVES = (
 _ROLE_BY_DOMAIN = {
     "banking": ("Banking Client", "Digital Banking User", "KYC-Verified Client", "Credit Applicant"),
     "retail": ("Retail Shopper", "Online Shopper", "Loyalty Member", "App Shopper"),
+    "real_estate": ("Property Seeker", "Real Estate Investor", "Home Buyer", "Tenant"),
+    "travel": ("Traveler", "Frequent Flyer", "Hotel Guest", "Explorer"),
+    "media": ("Content Consumer", "Subscriber", "Viewer", "Listener"),
+    "education": ("Learner", "Student", "Course Taker", "Lifelong Learner"),
 }
 
 GOOGLE_GENAI_API_KEY = os.getenv("GOOGLE_GENAI_API_KEY", None)
