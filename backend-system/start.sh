@@ -15,9 +15,7 @@ PROJECT_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_HOME"
 
 VENV_DIR="$PROJECT_HOME/.venv"
-ROOT_ENV_FILE="$PROJECT_HOME/../.env"
-LOCAL_ENV_FILE="$PROJECT_HOME/.env"
-ENV_FILE=""
+ENV_FILE="$PROJECT_HOME/.env"
 LOG_DIR="$PROJECT_HOME/logs"
 PID_FILE="$PROJECT_HOME/.dagster.pid"
 LOG_FILE="$LOG_DIR/dagster.log"
@@ -81,24 +79,26 @@ done
 "$VENV_PYTHON" -m pip install -q -r "${PROJECT_HOME}/requirements-dev.txt"
 
 ###############################################################################
-# Resolve .env source. Prefer repo-root .env so this uses the same
-# CIR_*/DB_*/etc settings as the rest of the stack (dev-start-all.sh,
-# docker compose). Fall back to a backend-system-local .env.
+# Ensure .env exists (symlink to ../.env if missing) -- dev mode only, skip
+# when running inside a Docker container. Keeps repo-root .env as the single
+# source of truth for CIR_*/DB_*/etc settings instead of a backend-system-
+# local copy that can drift.
 ###############################################################################
-if [ -f "$ROOT_ENV_FILE" ]; then
-    ENV_FILE="$ROOT_ENV_FILE"
-elif [ -f "$LOCAL_ENV_FILE" ]; then
-    ENV_FILE="$LOCAL_ENV_FILE"
+if [ ! -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] && [ ! -f /.dockerenv ]; then
+    if [ -f "$PROJECT_HOME/../.env" ]; then
+        log "${YELLOW}${ENV_FILE} not found. Creating symlink to ../.env...${NC}"
+        ln -s ../.env "$ENV_FILE"
+    fi
 fi
 
-if [ -n "$ENV_FILE" ]; then
+if [ -f "$ENV_FILE" ]; then
     log "${GREEN}Loading ${ENV_FILE}...${NC}"
     set -a
     # shellcheck disable=SC1090
     source "$ENV_FILE"
     set +a
 else
-    log "${YELLOW}Warning: no .env file found at ${ROOT_ENV_FILE} or ${LOCAL_ENV_FILE}. Using default environment variables.${NC}"
+    log "${YELLOW}Warning: ${ENV_FILE} not found. Using default environment variables.${NC}"
 fi
 
 ###############################################################################

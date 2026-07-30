@@ -183,7 +183,7 @@ bootstrap_env_interactive() {
   local expose
   expose="$(prompt_value 'Expose Postgres/Redis/Keycloak/API ports on all interfaces (0.0.0.0) instead of localhost-only? [y/N]' 'N')"
   if [[ "$expose" =~ ^[yY] ]]; then
-    for bind_var in POSTGRES_HOST_BIND REDIS_HOST_BIND API_HOST_BIND KEYCLOAK_HOST_BIND FRONTEND_HOST_BIND; do
+    for bind_var in POSTGRES_HOST_BIND REDIS_HOST_BIND API_HOST_BIND KEYCLOAK_HOST_BIND FRONTEND_HOST; do
       set_env_value "$bind_var" "0.0.0.0"
     done
     echo "   ⚠️  Ports bound to 0.0.0.0 -- make sure this host's firewall (ufw/security group) is locked down, or put a reverse proxy in front." >&2

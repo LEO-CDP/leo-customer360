@@ -251,11 +251,11 @@ Two ways to run the stack locally — pick one.
 ```
 
 - API: http://localhost:8008/docs
-- `.env`'s `SSO_LOGIN=true` default means every endpoint except `/health` requires a Keycloak bearer token — see [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md) §9 for the one-time Keycloak realm/client setup, or set `SSO_LOGIN=false` in `.env` (then `./manage-c360.sh restart api`) to skip auth for local testing.
+- `.env`'s `SSO_LOGIN=true` default means every endpoint except `/health` requires a Keycloak bearer token — see [DOCKER-COMPOSE-GUIDE.md](docs/DOCKER-COMPOSE-GUIDE.md) §9 for the one-time Keycloak realm/client setup, or set `SSO_LOGIN=false` in `.env` (then `./manage-c360.sh restart api`) to skip auth for local testing.
 - Frontend admin UI: `cd frontend-admin && ./start.sh` — http://localhost:8890
 - Dagster UI for `backend-system/` jobs (CIR today, `scoring`/`segmentation`/`analytics` next): `cd backend-system && ./start.sh` — http://localhost:3000 (see [backend-system/README.md](backend-system/README.md))
 
-Full reference (ports, `--profile dev`, resets, Keycloak setup): [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md).
+Full reference (ports, `--profile dev`, resets, Keycloak setup): [DOCKER-COMPOSE-GUIDE.md](docs/DOCKER-COMPOSE-GUIDE.md).
 
 ### Option B — run each Python service directly on the host (no Docker for the apps)
 
