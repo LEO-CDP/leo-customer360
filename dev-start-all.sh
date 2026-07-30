@@ -170,10 +170,10 @@ echo "🚀 Starting postgres + redis + keycloak + minio (${COMPOSE_FILE})..."
 # =============================================================================
 wait_for_healthy() {
   local container="$1"
-  local max_attempts=30
+  local max_attempts="${2:-30}"
   local attempt=1
-  echo "⏳ Waiting for '${container}' to become healthy..."
-  
+  echo "⏳ Waiting for '${container}' to become healthy (max ${max_attempts} attempts)..."
+
   # First, wait for container to exist
   until docker inspect "$container" >/dev/null 2>&1; do
     if [ "$attempt" -ge 10 ]; then
@@ -184,7 +184,7 @@ wait_for_healthy() {
     sleep 1
     attempt=$((attempt + 1))
   done
-  
+
   # Then wait for health status
   attempt=1
   until [ "$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null)" = "healthy" ]; do
@@ -226,7 +226,9 @@ wait_for_completed() {
 
 wait_for_healthy "$POSTGRES_CONTAINER"
 wait_for_healthy "$REDIS_CONTAINER"
-wait_for_healthy "$KEYCLOAK_CONTAINER"
+# Keycloak is slow on first boot (~40s to start + 60s Docker start_period before
+# health probes count), so give it a longer leash than the other services.
+wait_for_healthy "$KEYCLOAK_CONTAINER" 90
 wait_for_healthy "$MINIO_CONTAINER"
 wait_for_completed "$MINIO_INIT_CONTAINER"
 
