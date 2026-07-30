@@ -3,8 +3,16 @@ name: CI
 on:
   push:
     branches: ['**']
+    paths-ignore:
+      - 'ui-wireframes/**'
+      - 'docs/**'
+      - 'frontend-admin/**'
   pull_request:
     branches: [main, master]
+    paths-ignore:
+      - 'ui-wireframes/**'
+      - 'docs/**'
+      - 'frontend-admin/**'
 
 jobs:
   unit-tests:
