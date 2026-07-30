@@ -173,10 +173,25 @@ wait_for_healthy() {
   local max_attempts=30
   local attempt=1
   echo "⏳ Waiting for '${container}' to become healthy..."
+  
+  # First, wait for container to exist
+  until docker inspect "$container" >/dev/null 2>&1; do
+    if [ "$attempt" -ge 10 ]; then
+      echo "❌ Error: Container '${container}' was not created after 10 attempts." >&2
+      "${DC_CMD[@]}" logs --tail=50 "$container" 2>/dev/null || echo "(logs unavailable)"
+      exit 1
+    fi
+    sleep 1
+    attempt=$((attempt + 1))
+  done
+  
+  # Then wait for health status
+  attempt=1
   until [ "$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null)" = "healthy" ]; do
     if [ "$attempt" -ge "$max_attempts" ]; then
       echo "❌ Error: '${container}' did not become healthy after ${max_attempts} attempts." >&2
-      "${DC_CMD[@]}" logs --tail=50 "$container" || true
+      echo "Container status: $(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo 'unknown')"
+      "${DC_CMD[@]}" logs --tail=50 "$container" 2>/dev/null || true
       exit 1
     fi
     sleep 2
