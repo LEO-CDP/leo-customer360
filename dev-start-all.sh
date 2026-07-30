@@ -141,8 +141,8 @@ set +a
 if [ "${DB_PORT:-5432}" != "${POSTGRES_HOST_PORT:-5432}" ]; then
   echo "⚠️  DB_PORT (${DB_PORT:-5432}) != POSTGRES_HOST_PORT (${POSTGRES_HOST_PORT:-5432}) in '${ENV_FILE}' -- host-run apps connecting via DB_PORT may not reach the published Postgres port."
 fi
-if [ "${REDIS_PORT:-6379}" != "${REDIS_HOST_PORT:-6379}" ]; then
-  echo "⚠️  REDIS_PORT (${REDIS_PORT:-6379}) != REDIS_HOST_PORT (${REDIS_HOST_PORT:-6379}) in '${ENV_FILE}' -- host-run apps connecting via REDIS_PORT may not reach the published Redis port."
+if [ "${REDIS_PORT:-6580}" != "${REDIS_HOST_PORT:-6580}" ]; then
+  echo "⚠️  REDIS_PORT (${REDIS_PORT:-6580}) != REDIS_HOST_PORT (${REDIS_HOST_PORT:-6580}) in '${ENV_FILE}' -- host-run apps connecting via REDIS_PORT may not reach the published Redis port."
 fi
 
 # =============================================================================
@@ -310,7 +310,7 @@ print_final_service_table() {
   printf '%-12s | %-10s | %-25s\n' "Service" "Status" "Host:Port"
   printf '%-12s-+-%-10s-+-%-25s\n' "------------" "----------" "-------------------------"
   printf '%-12s | %-10s | %-25s\n' "postgres" "$postgres_status" "localhost:${POSTGRES_HOST_PORT:-5432}"
-  printf '%-12s | %-10s | %-25s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6379}"
+  printf '%-12s | %-10s | %-25s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6580}"
   printf '%-12s | %-10s | %-25s\n' "keycloak" "$keycloak_status" "localhost:${KEYCLOAK_HOST_PORT:-8080}"
   printf '%-12s | %-10s | %-25s\n' "minio" "$minio_status" "localhost:${MINIO_API_HOST_PORT:-9000} (console ${MINIO_CONSOLE_HOST_PORT:-9001})"
 }

@@ -9,7 +9,7 @@ The defaults below come from [.env.example](../.env.example). Copy that file to 
 | Service | Default host bind / port | Internal port | Notes |
 |---|---|---|---|
 | PostgreSQL | `127.0.0.1:5432` | 5432 | Main datastore; also backs Keycloak `db_keycloak` |
-| Redis | `127.0.0.1:6379` | 6379 | API response cache and auth token cache |
+| Redis | `127.0.0.1:6580` | 6580 | API response cache and auth token cache |
 | Keycloak | `127.0.0.1:8080` | 8080 | Admin console: http://localhost:8080/admin |
 | MinIO S3 API | `127.0.0.1:9000` | 9000 | Dev-only S3-compatible object storage |
 | MinIO Console | `127.0.0.1:9001` | 9001 | Web UI for the dev MinIO bucket |
@@ -65,6 +65,20 @@ docker compose --profile dev up -d --build   # production stack + demo seed job
 docker compose -f dev-docker-compose.yml up -d --build  # infra-only dev stack
 ```
 
+### Important: Building custom images on new PC or server
+
+Some Docker images must be built from Dockerfiles before running (e.g., `customer360-postgres:local`). The `--build` flag above rebuilds all images. For first-time setup or if `docker compose up` fails with missing image errors, run explicit builds:
+
+```bash
+# Build images for production stack
+docker compose build
+
+# Build images for dev-only infra stack
+docker compose -f dev-docker-compose.yml build
+```
+
+These commands can be run standalone (before `up`) or combined with `up -d --build` as shown above.
+
 ## 4. Compose and networking notes
 
 - [docker-compose.yml](../docker-compose.yml) and [dev-docker-compose.yml](../dev-docker-compose.yml) share the same project name, container names, network, and volumes. Do not run both files at the same time.
@@ -108,8 +122,11 @@ cp .env.example .env
 #   - KEYCLOAK_ADMIN_PASSWORD (a strong password)
 #   - KEYCLOAK_CLIENT_SECRET (generate a UUID or strong string)
 
-# 3. Start the full stack
-docker compose up -d --build
+# 3. Build and start the full stack
+# (custom images like customer360-postgres:local are built from Dockerfiles)
+docker compose build    # build custom images once
+docker compose up -d    # start containers
+# OR combined: docker compose up -d --build
 
 # 4. Wait for services to be healthy (watch logs)
 docker compose logs -f
@@ -141,6 +158,9 @@ Then access:
 For faster iteration, run the API and CIR worker directly on the host while keeping Postgres, Redis, and Keycloak containerized:
 
 ```bash
+# Terminal 1: First time only — build dev infra images
+docker compose -f dev-docker-compose.yml build
+
 # Terminal 1: Start infra-only
 ./dev-start-all.sh
 
@@ -153,7 +173,7 @@ cd backend-system/identity_resolution
 ./run-demo.sh  # or ./worker.py for production mode
 ```
 
-The API will use the `.env` file and connect to `localhost:5432` (Postgres), `localhost:6379` (Redis), and `localhost:8080` (Keycloak).
+The API will use the `.env` file and connect to `localhost:5432` (Postgres), `localhost:6580` (Redis), and `localhost:8080` (Keycloak).
 
 ### Development gotchas
 

@@ -3,7 +3,7 @@ FROM redis:8-alpine
 
 COPY redis.conf /usr/local/etc/redis/redis.conf
 
-EXPOSE 6379
+EXPOSE 6580
 
 # Password is supplied at container start via `--requirepass` (see
 # docker-compose.yml `command:`), sourced from REDIS_PASSWORD in .env, so it

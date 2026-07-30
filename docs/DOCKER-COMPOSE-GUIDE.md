@@ -16,7 +16,7 @@ containerized deployment.
 | Service | Image (built locally) | Role | Port (host) |
 |---|---|---|---|
 | `postgres` | `customer360-postgres:local` (postgis/postgis:16-3.5 + pgvector) | Primary datastore, auto-provisioned with [`database-schema.sql`](database-init/database-schema.sql) | `${POSTGRES_HOST_PORT:-5432}` → 5432 |
-| `redis` | `customer360-redis:local` (redis:8-alpine) | Response cache **and Keycloak token cache** for customer360-api (see [`core/cache.py`](customer360-api/core/cache.py) / [`core/auth.py`](customer360-api/core/auth.py)) | `${REDIS_HOST_PORT:-6379}` → 6379 |
+| `redis` | `customer360-redis:local` (redis:8-alpine) | Response cache **and Keycloak token cache** for customer360-api (see [`core/cache.py`](customer360-api/core/cache.py) / [`core/auth.py`](customer360-api/core/auth.py)) | `${REDIS_HOST_PORT:-6580}` → 6580 |
 | `keycloak-db-init` | reuses `customer360-postgres:local` | **One-shot** job that creates the dedicated `db_keycloak` database on the shared `postgres` instance, then exits | none |
 | `keycloak` | `keycloak/keycloak:latest` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
 | `cir` | `customer360-cir:local` (Python 3.11-slim) | Customer Identity Resolution worker — continuously drains `cdp_raw_profiles_stage` | none (background worker, no HTTP) |
@@ -53,7 +53,7 @@ flowchart LR
 - Docker Engine + Docker Compose v2 (the `docker compose` plugin, not the
   legacy standalone `docker-compose` v1 binary — `depends_on.condition:
   service_healthy` requires the Compose Specification).
-- Ports `5432` / `6379` / `8008` free on the host, **or** override them (see
+- Ports `5432` / `6580` / `8008` free on the host, **or** override them (see
   §4) — this matters on dev machines that already run `pgsql16_vector` /
   another Redis via [`dev-start-pgsql.sh`](dev-start-pgsql.sh).
 
@@ -153,7 +153,7 @@ API_HOST_PORT=18000
 ```
 
 Containers still talk to each other over `customer360-network` on the
-standard internal ports (5432/6379/8008) — only the host-published mapping
+standard internal ports (5432/6580/8008) — only the host-published mapping
 changes.
 
 ### Building without starting, or rebuilding a single service
@@ -296,7 +296,7 @@ volume — see above.)
 
 | Symptom | Likely cause / fix |
 |---|---|
-| `failed to bind host port ... address already in use` | Another process (e.g. `pgsql16_vector`, a host Redis) already owns 5432/6379/8008. Set `POSTGRES_HOST_PORT`/`REDIS_HOST_PORT`/`API_HOST_PORT` in `.env` to unused ports. |
+| `failed to bind host port ... address already in use` | Another process (e.g. `pgsql16_vector`, a host Redis) already owns 5432/6580/8008. Set `POSTGRES_HOST_PORT`/`REDIS_HOST_PORT`/`API_HOST_PORT` in `.env` to unused ports. |
 | `api`/`cir` stuck "waiting" / never healthy | Check `docker compose logs postgres` — if it never reaches healthy, the DB init script likely failed (bad `.env` values, or a non-idempotent manual schema edit). |
 | `psycopg2.errors.UndefinedColumn` after editing `database-schema.sql` | Schema drift — the running volume was provisioned before your edit. See §7. |
 | `NOAUTH Authentication required` from Redis | `REDIS_PASSWORD` mismatch between `.env` and what `api`/`redis` were started with — restart both after changing it (`docker compose up -d --force-recreate redis api`). |

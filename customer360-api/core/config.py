@@ -159,7 +159,7 @@ class Settings(BaseSettings):
     # Redis response cache (see core/cache.py). Disconnected/misconfigured
     # Redis never breaks the API -- it just disables caching (fail open).
     redis_host: str = "localhost"
-    redis_port: int = 6379
+    redis_port: int = 6580
     redis_db: int = 0
     redis_password: Optional[str] = None
     cache_enabled: bool = True
