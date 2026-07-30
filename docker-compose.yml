@@ -188,42 +188,7 @@ services:
       start_period: 60s
 
   # ---------------------------------------------------------------------------
-  # 5) CIR - Customer Identity Resolution worker (backend-system/identity_resolution).
-  #    Continuously drains cdp_raw_profiles_stage (see worker.py).
-  # ---------------------------------------------------------------------------
-  cir:
-    build:
-      context: ./backend-system/identity_resolution
-      dockerfile: Dockerfile
-    image: customer360-cir:local
-    container_name: customer360-cir
-    restart: unless-stopped
-    init: true
-    <<: *default-hardening
-    env_file:
-      - .env
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - customer360-network
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: 512m
-    healthcheck:
-      test: ["CMD", "python", "healthcheck.py"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 15s
-
-  # ---------------------------------------------------------------------------
-  # 6) Customer 360 API (FastAPI) - CRUD + reporting over the customer360
+  # 5) Customer 360 API (FastAPI) - CRUD + reporting over the customer360
   #    schema, Redis-cached reads (see customer360-api/core/cache.py).
   # ---------------------------------------------------------------------------
   api:
