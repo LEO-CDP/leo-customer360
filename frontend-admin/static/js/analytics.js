@@ -15,6 +15,7 @@ window.C360 = window.C360 || {};
   var showApiError = C360.config.showApiError;
 
   var charts = {};
+  var campaignHeatmap = null;
   var PALETTE = ["#6366f1", "#22c55e", "#3b82f6", "#f97316", "#ef4444", "#a855f7", "#14b8a6", "#eab308", "#64748b"];
 
   function renderChart(id, config) {
@@ -29,6 +30,10 @@ window.C360 = window.C360 || {};
       if (charts[id]) { charts[id].destroy(); }
       delete charts[id];
     });
+    if (campaignHeatmap) {
+      campaignHeatmap.destroy();
+      campaignHeatmap = null;
+    }
   }
 
   function utcDateString(date) {
@@ -201,6 +206,44 @@ window.C360 = window.C360 || {};
     $container.append($grid);
   }
 
+  function generateMockData(days, maxCount) {
+    var data = [];
+    var endDate = new Date();
+    var startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - days);
+
+    for (var d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      data.push({
+        date: d.toISOString().split("T")[0],
+        count: Math.floor(Math.random() * maxCount)
+      });
+    }
+    return data;
+  }
+
+  function renderCampaignHeatmap() {
+    if (campaignHeatmap) {
+      campaignHeatmap.destroy();
+      campaignHeatmap = null;
+    }
+
+    var canvas = document.getElementById("campaign-events-chart");
+    if (!canvas) return;
+
+    campaignHeatmap = new MatrixHeatmap({
+      canvasId: "campaign-events-chart",
+      entityName: "campaign triggers",
+      data: generateMockData(365, 8),
+      colorTheme: [
+        { min: 0, color: "#ebedf0" },
+        { min: 1, color: "#cbe2f9" },
+        { min: 3, color: "#79b8ff" },
+        { min: 5, color: "#2188ff" },
+        { min: 7, color: "#0366d6" }
+      ]
+    });
+  }
+
   function updateKpis(events, summary, agg) {
     $("#kpi-total-events").text(fmt.int(events.length));
     $("#kpi-active-profiles").text(fmt.int(agg.activeProfileCount));
@@ -252,6 +295,7 @@ window.C360 = window.C360 || {};
       }
 
       buildProfileHeatmap(summary.raw_profiles_by_source_system || []);
+      renderCampaignHeatmap();
     }).fail(function (xhr) {
       $("#analytics-loading").addClass("hidden");
       showApiError("loading analytics data", xhr);

@@ -58,5 +58,18 @@
       </div>
       <p id="profile-heatmap-empty" class="hidden text-sm text-slate-500 py-6 text-center">No profile source/domain breakdown available.</p>
     </div>
+
+    <!-- Campaigns heatmap -->
+    <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+      <h2 class="text-sm font-semibold mb-3">Campaign Performance Heatmap (Source System × Campaign)</h2>
+      <div class="overflow-x-auto">
+        <div id="campaign-heatmap" class="min-w-max">
+          <div class="matrix-heatmap-wrapper">
+            <canvas id="campaign-events-chart"></canvas>
+          </div>
+        </div>
+      </div>
+      <p id="campaign-heatmap-empty" class="hidden text-sm text-slate-500 py-6 text-center">No campaign source/campaign breakdown available.</p>
+    </div>
   </div>
 </div>
