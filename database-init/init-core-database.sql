@@ -302,13 +302,13 @@ SET
     END,
     consolidation_config = CASE attribute_internal_code
         WHEN 'full_name' THEN '{"mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
-        WHEN 'email' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
-        WHEN 'phone_number' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
-        WHEN 'national_id' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
-        WHEN 'external_customer_id' THEN '{"mode":"source_priority","source_priority":["core_banking","crm","web_tracking","appsflyer","moengage"]}'::jsonb
-        WHEN 'device_id' THEN '{"mode":"source_priority","source_priority":["web_tracking","appsflyer","moengage"]}'::jsonb
-        WHEN 'advertising_id' THEN '{"mode":"source_priority","source_priority":["web_tracking","appsflyer","moengage"]}'::jsonb
-        WHEN 'cookie_id' THEN '{"mode":"source_priority","source_priority":["web_tracking"]}'::jsonb
+        WHEN 'email' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"verified_event_names":["kyc-completed"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
+        WHEN 'phone_number' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"verified_event_names":["kyc-completed"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
+        WHEN 'national_id' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"verified_event_names":["kyc-completed"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
+        WHEN 'external_customer_id' THEN '{"mode":"source_priority","source_priority":["CoreBanking","POS","WebTracking","AppsFlyer","MoEngage"]}'::jsonb
+        WHEN 'device_id' THEN '{"mode":"source_priority","source_priority":["WebTracking","AppsFlyer","MoEngage"]}'::jsonb
+        WHEN 'advertising_id' THEN '{"mode":"source_priority","source_priority":["WebTracking","AppsFlyer","MoEngage"]}'::jsonb
+        WHEN 'cookie_id' THEN '{"mode":"source_priority","source_priority":["WebTracking"]}'::jsonb
         ELSE consolidation_config
     END,
     updated_at = now()

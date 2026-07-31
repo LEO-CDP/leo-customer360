@@ -26,7 +26,7 @@ style: |
 ## Trong nền tảng Customer 360
 
 Giải pháp hợp nhất danh tính khách hàng đa nguồn
-(AppsFlyer · MoEngage · Web Tracking · Core Banking)
+(AppsFlyer · MoEngage · Web Tracking · CRM · Google Analytics · Facebook)
 
 ---
 
@@ -34,7 +34,7 @@ Giải pháp hợp nhất danh tính khách hàng đa nguồn
 
 1. Giới thiệu Customer Identity Resolution trong Customer 360
 2. Nền tảng dữ liệu: nguồn dữ liệu, hành trình khách hàng, thuộc tính hồ sơ
-3. Kiến trúc chi tiết: thiết kế hệ thống, các bước xử lý, phương pháp ghép nối
+3. Kiến trúc chi tiết: thiết kế hệ thống, các bước xử lý, phương pháp ghép nối và hợp nhất dữ liệu
 4. Demo thực tế
 
 ---
@@ -63,13 +63,13 @@ Một khách hàng thực tế "chạm" vào doanh nghiệp qua **nhiều hệ t
 
 **Mục tiêu trong Customer 360:**
 - Một khách hàng = **một `master_profile_id`** duy nhất, xuyên suốt mọi kênh, mọi domain (retail/banking/real_estate/travel)
-- Nền tảng cho: personalization, chấm điểm (lead/churn/CLV), segmentation, báo cáo
+- Nền tảng cho: personalization, scoring models (lead/churn/CLV), segmentation, analytics
 
 ---
 
 ## Vì sao Customer Identity Resolution (CIR) rất quan trọng?
 
-- Người dùng VN dùng **nhiều app/thiết bị** (Zalo, app ngân hàng, app bán lẻ, web) → danh tính bị tách rời qua `device_id`, `cookie_id`, số điện thoại, email
+- Người dùng VN dùng **nhiều app/thiết bị** (Zalo, app ngân hàng, app bán lẻ, web,...) → danh tính bị tách rời qua `device_id`, `cookie_id`, số điện thoại, email, phone, social media accounts
 - Ngân hàng số & bán lẻ đa kênh cần **tuân thủ dữ liệu cá nhân** (Nghị định 13/2023/NĐ-CP về bảo vệ dữ liệu cá nhân) → CIR phải xử lý PII đã **hash/ẩn danh**
 - Chiến dịch marketing đa kênh (Facebook/TikTok/Google/Grab Ads) cần đo lường **hiệu quả thực sự trên một khách hàng**, không tính trùng theo từng thiết bị/click
 
@@ -84,12 +84,12 @@ Một khách hàng thực tế "chạm" vào doanh nghiệp qua **nhiều hệ t
 | Nguồn | Domain | Định danh mang theo |
 |---|---|---|
 | **AppsFlyer** | Mobile App | `device_id`, `advertising_id` (IDFA/GAID) |
-| **MoEngage** | Mobile App | `external_customer_id`, `email`, `push_token` |
-| **Web Tracking** | Landing Page | `cookie_id`, `email` |
+| **MoEngage** | Mobile App | `external_customer_id`, `email` /  `hashed email`, `phone` /  `hashed phone`, `push_token`, `user_id` |
+| **Web Tracking** | Landing Page | `cookie_id`, `email`  /  `hashed email`, , `phone` /  `hashed phone` |
 | **Core Banking / KYC** | Core Banking | `phone_number`, `national_id`, `device_id` |
 
 Tất cả đổ về **một bảng staging duy nhất**: `cdp_raw_profiles_stage`
-(đa tenant – `tenant_id`, đa domain – `bán lẻ`/`banking`/`bất động sản`/`du lịch`)
+(đa tenant – `tenant_id`, đa domain – `bán lẻ` / `media` /`banking`/`bất động sản`/`du lịch`/`giáo dục`)
 
 ---
 
@@ -114,16 +114,21 @@ graph LR
 
 ## Thuộc tính hồ sơ chính (Key Profile Attributes)
 
-**Nhóm định danh thông tin cá nhân (luôn hash SHA-256 trước khi lưu — không lưu PII thô):**
-`full_name`, `email`, `phone_number`, `national_id`
+* **Định danh cá nhân** *(SHA-256, không lưu PII thô)*
+  `full_name`, `email`, `phone_number`, `national_id`
 
-**Nhóm định danh thiết bị/quảng cáo (hợp nhất thành mảng trên master):**
-`device_id → device_ids[]`, `advertising_id → advertising_ids[]`, `cookie_id → cookie_ids[]`
+* **Định danh thiết bị** *(gộp thành mảng)*
+  `device_ids[]`, `advertising_ids[]`, `cookie_ids[]`
 
-**Nhóm định danh theo hệ thống nguồn (hợp nhất thành JSONB theo `source_system`):**
-`external_customer_id → external_ids{}`, `push_token → push_tokens{}`
+* **Định danh theo nguồn dữ liệu** *(JSONB theo `source_system`)*
+  `external_ids{}`, `push_tokens{}`
 
-**Metadata mô tả tất cả attribute:** bảng `cdp_profile_attributes` — schema hỗ trợ mô tả toàn bộ ~60 cột của `cdp_master_profiles` (cấu hình *matching_rule*, *matching_threshold*, *consolidation_rule*, *is_pii*, *attribute_group*: SYSTEM/IDENTITY/RETAIL/BANKING/SCORING…). Bản seed demo hiện tại (`scripts/init_sample_data.py`) chỉ nạp **8 thuộc tính** dùng trực tiếp cho identity resolution (`email`, `phone_number`, `national_id`, `device_id`, `advertising_id`, `cookie_id`, `external_customer_id`, `full_name`) — phần metadata mô tả đầy đủ các thuộc tính còn lại chưa được seed.
+* **Metadata thuộc tính** (`cdp_profile_attributes`)
+  Quản lý ~60 thuộc tính: **matching rule**, **merge rule**, **PII**, **attribute group**.
+
+* **Seed mặc định**
+  Khởi tạo **8 thuộc tính định danh** cho Identity Resolution cùng **merge policy** mặc định (recency, KYC-first, source priority).
+
 
 ---
 
@@ -157,34 +162,134 @@ graph TD
 
 ---
 
-## Nguyên tắc thiết kế: Metadata-driven
+## Nguyên tắc thiết kế CIR: Metadata-driven
 
-- Quy tắc ghép nối **không hard-code trong code** mà đọc động từ bảng `cdp_profile_attributes`
-- Mỗi thuộc tính khai báo: `is_identity_resolution`, `matching_rule`, `matching_threshold`
-- Thêm/sửa quy tắc ghép nối = **UPDATE 1 dòng metadata**, không cần deploy lại code
-- Resolver chỉ lấy các rule đang **ACTIVE** và có `matching_rule != 'none'`
+### Mọi quy tắc được cấu hình bằng Metadata
+
+* Không **hard-code** trong source code
+* Quy tắc đọc động từ bảng **`cdp_profile_attributes`**
+* Mỗi thuộc tính định nghĩa:
+  * **Matching Rule**: `matching_rule`, `matching_threshold`
+  * **Merge Policy**: `consolidation_rule`, `consolidation_config`
+* Thay đổi quy tắc chỉ cần **UPDATE metadata**, không cần deploy
+* Resolver chỉ sử dụng các rule **ACTIVE**
 
 ```sql
-SELECT attribute_internal_code, matching_rule, matching_threshold
+SELECT attribute_internal_code, matching_rule, consolidation_rule
 FROM cdp_profile_attributes
 WHERE is_identity_resolution = TRUE
-  AND status = 'ACTIVE'
-  AND matching_rule IS NOT NULL AND matching_rule != 'none';
+  AND status = 'ACTIVE';
 ```
+
+> **Lợi ích:** Linh hoạt, dễ mở rộng và dễ bảo trì.
 
 ---
 
-## Các bước xử lý (Process Steps)
+## Quy trình xử lý Identity Resolution
 
-Cho mỗi batch (tối đa `batch_size` bản ghi, `status_code = 1`):
+```text
+Raw Profile
+      │
+      ▼
+1. Load Matching & Merge Rules
+      │
+      ▼
+2. Tìm Master Profile phù hợp
+      │
+ ┌────┴────┐
+ │         │
+ ▼         ▼
+Match   Không Match
+ │         │
+ ▼         ▼
+Merge   Tạo Master mới
+ │         │
+ └────┬────┘
+      ▼
+Tạo Profile Link
+      ▼
+Đánh dấu Processed
+      ▼
+COMMIT (Idempotent)
+```
 
-1. **Lấy quy tắc ghép nối đang active** từ `cdp_profile_attributes`
-2. **Lấy batch raw profile** chưa xử lý, cùng `tenant_id`
-3. Với mỗi raw profile → **`_find_master_profile()`**: build câu `WHERE` động (OR các điều kiện match), scope theo `tenant_id` + `domain`
-4. **Có match** → `_link_and_update()`: insert `cdp_profile_links`, `UPDATE` master (COALESCE cho scalar, append-distinct cho mảng/JSONB)
-5. **Không match** → `_create_master_and_link()`: tạo `cdp_master_profiles` mới + link
-6. **Đánh dấu đã xử lý**: `status_code = 3`, `processed_at = NOW()`
-7. `COMMIT` toàn batch — an toàn để **retry** (idempotent nhờ unique constraint `(tenant_id, raw_profile_id)`)
+### Đặc điểm
+
+* **Match** → cập nhật Customer 360 theo **Merge Policy**
+* **Không Match** → tạo **Master Profile** mới
+* **An toàn khi retry** nhờ **idempotent** và **unique constraint** `(tenant_id, raw_profile_id)`
+
+
+---
+
+## CIR — Chính sách hợp nhất dữ liệu (Merge Policy)
+
+Khi nhiều nguồn cùng cập nhật một thuộc tính, **CIR** sẽ áp dụng **Merge Policy (`consolidation_rule`)** để chọn giá trị cuối cùng.
+
+| **Merge Policy**      | **Nguyên tắc**                               |
+| --------------------- | -------------------------------------------- |
+| **Most Recent**       | Ưu tiên dữ liệu mới nhất                     |
+| **Verified First**    | Ưu tiên dữ liệu đã xác thực (KYC)            |
+| **Verified → Recent** | Ưu tiên KYC, nếu bằng nhau thì chọn mới nhất |
+| **Source Priority**   | Ưu tiên theo thứ tự nguồn dữ liệu            |
+| **Non-Null**          | Chỉ cập nhật khi giá trị hiện tại rỗng       |
+| **Overwrite**         | Luôn ghi đè bằng dữ liệu mới                 |
+| **Append Distinct**   | Gộp danh sách, loại bỏ giá trị trùng         |
+
+---
+
+## CIR — Ví dụ áp dụng Merge Policy
+
+| **Thuộc tính**         | **Merge Policy**    |
+| ---------------------- | ------------------- |
+| `full_name`            | **Most Recent**     |
+| `email`                | **Verified First**  |
+| `phone_number`         | **Verified First**  |
+| `national_id`          | **Verified First**  |
+| `external_customer_id` | **Source Priority** |
+| `device_id`            | **Source Priority** |
+| `advertising_id`       | **Source Priority** |
+| `cookie_id`            | **Source Priority** |
+
+> **Lợi ích:** Dữ liệu Customer 360 luôn **chính xác, nhất quán và đáng tin cậy**, dù được đồng bộ từ nhiều hệ thống khác nhau.
+
+---
+
+## CIR — Cấu hình Merge Policy (`consolidation_config`)
+
+`consolidation_config` (JSONB) định nghĩa chi tiết cách hợp nhất dữ liệu cho từng thuộc tính.
+
+**Ví dụ cấu hình cho `email`:**
+
+```json
+{
+  "verified_field": "kyc_status",
+  "verified_event_names": ["kyc-completed"],
+  "fallback_mode": "most_recent",
+  "timestamp_field": "updated_at"
+}
+```
+
+### Ý nghĩa
+
+* **Verified First:** ưu tiên dữ liệu đã xác thực (KYC).
+* Nếu **raw profile** không có `kyc_status`, CIR sử dụng sự kiện `kyc-completed` làm bằng chứng xác thực.
+* Nếu chưa xác thực, áp dụng **fallback** (ví dụ: chọn dữ liệu mới nhất).
+
+---
+
+## CIR — Kiểm thử Merge Policy
+
+Hệ thống đã kiểm thử đầy đủ **7 Merge Policy**, bao gồm các trường hợp biên:
+
+* ✅ Sai cấu hình `fallback_mode`
+* ✅ Đệ quy vô hạn
+* ✅ Timestamp khác múi giờ
+* ✅ Khác chữ hoa/thường của `source_system`
+* ✅ Thuộc tính tùy biến chưa được SELECT
+
+> **Kết quả:** Merge Policy hoạt động ổn định, nhất quán và an toàn trong quá trình Identity Resolution.
+
 
 ---
 

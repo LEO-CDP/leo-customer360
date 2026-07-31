@@ -1,7 +1,7 @@
 """Data classes shared across the identity resolution package."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -14,8 +14,14 @@ class IdentityRule:
             (``cdp_profile_attributes.attribute_internal_code``).
         match_rule: One of ``exact``, ``fuzzy_trgm``, ``fuzzy_dmetaphone``.
         threshold: Similarity threshold used only by ``fuzzy_trgm``.
+        consolidation_rule: Merge precedence to use when updating the master
+            profile with this attribute's incoming value.
+        consolidation_config: Optional rule parameters such as timestamp_field,
+            verified_field, verified_values, or source_priority.
     """
 
     attribute_code: str
     match_rule: str
     threshold: Optional[float] = None
+    consolidation_rule: Optional[str] = None
+    consolidation_config: Optional[Dict[str, Any]] = None
