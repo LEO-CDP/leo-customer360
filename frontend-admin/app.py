@@ -102,13 +102,17 @@ app.add_middleware(SecurityHeadersMiddleware)
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def index(request: Request):
     """Serve the single-page admin UI with server-injected environment parameters."""
-    context: Dict[str, str | Request] = {
+    
+    cb = APP_START_TIME if not IS_DEV else datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    tenant_id = TENANT_ID or request.cookies.get("tenant_id") or request.headers.get("X-Tenant-ID")
+    
+    context: Dict[str, str | Request | None] = {
         "request": request,
         "api_base": API_BASE,
-        "tenant_id": TENANT_ID,
+        "tenant_id": tenant_id,
         # Force cache bust on every reload if dev, otherwise only on deployment
         # Replaced datetime.utcnow() with datetime.now(timezone.utc)
-        "cache_bust": APP_START_TIME if not IS_DEV else datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"),
+        "cache_bust": cb,
     }
     
     try:
@@ -153,3 +157,4 @@ if __name__ == "__main__":
         reload=IS_DEV,
         log_level="info",
     )
+# end of file
