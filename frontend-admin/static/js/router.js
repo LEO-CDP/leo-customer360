@@ -83,12 +83,21 @@ window.C360 = window.C360 || {};
   }
 
   function activateSection(sectionId) {
+    // hide all sections but the one for this route
     knownSections.forEach(function (id) { $("#" + id).toggleClass("hidden", id !== sectionId); });
   }
 
   function activateTab(tab) {
+    // highlight the active tab
     $(".tab-btn").removeClass("active");
     if (tab) $(".tab-btn[data-tab='" + tab + "']").addClass("active");
+
+    // The data-period-select is only relevant for the overview, profiles, and analytics tabs. Hide it for all other tabs.
+    var periodTabs = { overview: true, profiles: true, analytics: true };
+    $("#data-period-select-container").toggleClass("hidden", !periodTabs[tab]);
+
+    // The Export PDF button is only relevant for the overview, profiles, segments, attributes, journeys, scoring, and analytics tabs. Hide it for all other tabs.
+    $("#btn-export-pdf").toggleClass("hidden", tab === "admin");
   }
 
   function currentPath() {

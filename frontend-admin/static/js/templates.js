@@ -18,7 +18,7 @@ window.C360 = window.C360 || {};
   ];
 
   // Injected as static HTML once (no Handlebars variables of their own).
-  var STATIC_HTML = ["tabs", "settings-modal", "profiles-list", "placeholder", "segments-list", "attributes-list"];
+  var STATIC_HTML = ["tabs", "settings-modal", "profiles-list", "placeholder", "segments-list", "attributes-list", "analytics"];
 
   // Registered as Handlebars partials so profile-details.html can do {{> name}}.
   var PARTIALS = [

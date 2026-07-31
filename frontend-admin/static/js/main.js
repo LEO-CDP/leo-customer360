@@ -10,6 +10,7 @@
  * to that view's file only, never to this bootstrap. */
 window.C360 = window.C360 || {};
 
+const TIME_CHECK_API_HEALTH = 60000;
 (function (C360) {
   "use strict";
 
@@ -70,7 +71,7 @@ window.C360 = window.C360 || {};
       C360.attributesView.bindEvents();
 
       C360.config.pingHealth();
-      setInterval(C360.config.pingHealth, 30000);
+      setInterval(C360.config.pingHealth, TIME_CHECK_API_HEALTH);
 
       // Every view module has already registered its routes by this point
       // (script load order in index.html puts router.js before them).

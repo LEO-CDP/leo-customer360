@@ -1,0 +1,62 @@
+<div id="analytics-view" class="space-y-6">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-lg font-semibold">Unified Analytics Dashboard</h1>
+      <p class="text-xs text-slate-400">Time-series activity and profile distribution across all sources</p>
+    </div>
+    <button id="btn-analytics-refresh" class="bg-slate-100 text-slate-600 rounded-lg px-3 py-1.5 hover:bg-slate-200 transition-colors text-sm">Refresh</button>
+  </div>
+
+  <div id="analytics-empty" class="hidden bg-white border border-slate-200 rounded-xl p-10 text-center text-sm text-slate-500">
+    <div class="text-3xl mb-2">📊</div>
+    No analytics data available for the selected period.
+  </div>
+
+  <div id="analytics-dashboard" class="space-y-6">
+    <!-- KPIs -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+        <div class="text-xs text-slate-500 uppercase tracking-wide">Total Events</div>
+        <div id="kpi-total-events" class="text-2xl font-semibold mt-1">—</div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+        <div class="text-xs text-slate-500 uppercase tracking-wide">Active Profiles</div>
+        <div id="kpi-active-profiles" class="text-2xl font-semibold mt-1">—</div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+        <div class="text-xs text-slate-500 uppercase tracking-wide">Conversions</div>
+        <div id="kpi-conversions" class="text-2xl font-semibold mt-1">—</div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+        <div class="text-xs text-slate-500 uppercase tracking-wide">Master Profiles</div>
+        <div id="kpi-master-profiles" class="text-2xl font-semibold mt-1">—</div>
+      </div>
+    </div>
+
+    <!-- Charts row -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+        <h2 class="text-sm font-semibold mb-3">Event Volume Over Time</h2>
+        <div class="h-72">
+          <canvas id="chart-events-time-series"></canvas>
+        </div>
+        <p id="events-time-series-note" class="hidden text-xs text-slate-400 mt-2 text-center">Showing the most recent 1,000 events for the selected period.</p>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+        <h2 class="text-sm font-semibold mb-3">Events by Channel</h2>
+        <div class="h-72">
+          <canvas id="chart-events-channel"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Profile heatmap -->
+    <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+      <h2 class="text-sm font-semibold mb-3">Profile Distribution Heatmap (Source System × Domain)</h2>
+      <div class="overflow-x-auto">
+        <div id="profile-heatmap" class="min-w-max"></div>
+      </div>
+      <p id="profile-heatmap-empty" class="hidden text-sm text-slate-500 py-6 text-center">No profile source/domain breakdown available.</p>
+    </div>
+  </div>
+</div>

@@ -12,14 +12,17 @@
       </div>
     </div>
     <div class="flex items-center gap-2">
-      <label class="text-xs text-slate-500 hidden sm:block">Period</label>
-      <select id="data-period-select" class="text-sm border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
-        <option value="7">Last 7 days</option>
-        <option value="30">Last 30 days</option>
-        <option value="90" selected>Last 90 days</option>
-        <option value="180">Last 180 days</option>
-        <option value="365">Last 365 days</option>
-      </select>
+      <div id="data-period-select-container" class="flex items-center gap-2 hidden">
+        <label class="text-xs text-slate-500 hidden sm:block">Period</label>
+        <select id="data-period-select" class="text-sm border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
+          <option value="3">Last 3 days</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90" selected>Last 90 days</option>
+          <option value="180">Last 180 days</option>
+          <option value="365">Last 365 days</option>
+        </select>
+      </div>
       <button id="btn-export-pdf" class="text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-3 py-1.5 font-medium">Export PDF</button>
       <button id="btn-settings" title="API connection settings" class="text-sm border border-slate-300 rounded-lg px-3 py-1.5 flex items-center gap-2">
         <span id="api-status-dot" class="w-2 h-2 rounded-full bg-slate-300"></span>
@@ -28,16 +31,31 @@
     </div>
   </div>
   <nav class="max-w-[1600px] mx-auto px-4 flex gap-6 text-sm overflow-x-auto">
+    <!-- overview -->
     <button data-tab="overview" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Overview</button>
+    
+    <!-- analytics -->
+    <button data-tab="analytics" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Analytics</button>
+
+    <!-- customers -->
     <button data-tab="profiles" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap active">Profiles</button>
+    
+    <!-- segments -->
     <button data-tab="segments" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Segments</button>
     
+    <!-- journeys -->
     <button data-tab="journeys" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Journeys</button>
-    <button data-tab="scoring" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Scoring</button>
-    <button data-tab="analytics" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Analytics</button>
-    <button data-tab="datasources" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Data Sources</button>
     
+    <!-- data sources -->
+    <button data-tab="datasources" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Data Sources</button>
+
+    <!-- scoring -->
+    <button data-tab="scoring" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Scoring</button>
+    
+    <!-- attributes -->
     <button data-tab="attributes" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Attributes</button>
+    
+    <!-- admin -->
     <button data-tab="admin" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Admin</button>
   </nav>
 </header>

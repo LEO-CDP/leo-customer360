@@ -27,9 +27,6 @@ window.C360 = window.C360 || {};
     { path: "/scoring", tab: "scoring", title: "Scoring Models" },
     { path: "/scoring/:id", tab: "scoring", title: "Scoring Model Detail" },
 
-    { path: "/analytics", tab: "analytics", title: "Analytics Reports" },
-    { path: "/analytics/:id", tab: "analytics", title: "Analytics Report Detail" },
-
     { path: "/datasources/connectors", tab: "datasources", title: "Data Sources \u00b7 Connectors" },
     { path: "/datasources/connectors/:id", tab: "datasources", title: "Data Connector Detail" },
     { path: "/datasources/importers", tab: "datasources", title: "Data Sources \u00b7 Importers" },

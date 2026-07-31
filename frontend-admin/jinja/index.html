@@ -62,6 +62,15 @@
         <div id="overview-content"></div>
       </section>
 
+      <!-- Analytics dashboard (time-series + profile heatmap). Content rendered
+         from static/templates/analytics.html by static/js/analytics.js -->
+      <section id="view-analytics" class="hidden">
+        <div id="analytics-loading" class="p-10 flex justify-center">
+          <div class="spinner"></div>
+        </div>
+        <div id="analytics-content"></div>
+      </section>
+
       <!-- Master Profiles list. Shell markup from static/templates/profiles-list.html,
          rows rendered by the shared C360.DataTableView component (see
          static/js/data-table-view.js) from static/js/list-view.js's column config. -->
@@ -131,6 +140,7 @@
   <script src="static/js/list-view.js?cb={{ cache_bust }}"></script>
   <script src="static/js/profile-detail-view.js?cb={{ cache_bust }}"></script>
   <script src="static/js/overview-view.js?cb={{ cache_bust }}"></script>
+  <script src="static/js/analytics.js?cb={{ cache_bust }}"></script>
   <script src="static/js/segments-view.js?cb={{ cache_bust }}"></script>
   <script src="static/js/attributes-view.js?cb={{ cache_bust }}"></script>
   <script src="static/js/placeholder-view.js?cb={{ cache_bust }}"></script>
