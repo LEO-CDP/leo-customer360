@@ -46,13 +46,20 @@ window.C360 = window.C360 || {};
     { label: "Last Activity", field: "lastActivityLabel", muted: true }
   ];
 
+  function buildListParams(params) {
+    var query = params || {};
+    var days = C360.config.getDataPeriodDays();
+    if (days) query.days = days;
+    return query;
+  }
+
   var dtv = C360.DataTableView.create({
     columns: COLUMNS,
     rowVm: rowVm,
     rowId: function (vm) { return vm.master_profile_id; },
     rowSelectorClass: "profile-row",
     resourceLabel: "profile",
-    fetch: function (params) { return api("/master-profiles/", params); },
+    fetch: function (params) { return api("/master-profiles/", buildListParams(params)); },
     onRowClick: function (id) { C360.router.navigate("/profiles/" + id); },
     onError: function (xhr) { showApiError("loading profiles", xhr); },
     el: {
@@ -73,6 +80,7 @@ window.C360 = window.C360 || {};
     dtv.bindSelect("#domain-filter", "domain");
     dtv.bindSelect("#lifecycle-filter", "lifecycle_stage");
     dtv.bindLoadMore();
+    $("#data-period-select").on("change", function () { load(false); });
   }
 
   // Owns the "/profiles" listing route (see router.js). The row-click

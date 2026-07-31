@@ -8,6 +8,7 @@ section of core-customer360/identity-resolution.md.
 """
 
 import uuid
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -24,27 +25,45 @@ STATUS_CODE_LABELS = {
 }
 
 
+def _cutoff_for_days(days: Optional[int]) -> Optional[datetime]:
+    if days is None:
+        return None
+    return datetime.utcnow() - timedelta(days=days)
+
+
+def _filter_recent(stmt, model, days: Optional[int]):
+    cutoff = _cutoff_for_days(days)
+    if cutoff is not None:
+        stmt = stmt.where(model.created_at >= cutoff)
+    return stmt
+
+
 def _filter_tenant(stmt, model, tenant_id: Optional[uuid.UUID]):
     if tenant_id is not None:
         stmt = stmt.where(model.tenant_id == tenant_id)
     return stmt
 
 
-def count_raw_profiles(db: Session, tenant_id: Optional[uuid.UUID] = None) -> int:
-    stmt = _filter_tenant(select(func.count()).select_from(CdpRawProfileStage), CdpRawProfileStage, tenant_id)
+def count_raw_profiles(db: Session, tenant_id: Optional[uuid.UUID] = None, days: Optional[int] = None) -> int:
+    stmt = select(func.count()).select_from(CdpRawProfileStage)
+    stmt = _filter_tenant(stmt, CdpRawProfileStage, tenant_id)
+    stmt = _filter_recent(stmt, CdpRawProfileStage, days)
     return db.execute(stmt).scalar_one()
 
 
-def count_master_profiles(db: Session, tenant_id: Optional[uuid.UUID] = None) -> int:
-    stmt = _filter_tenant(select(func.count()).select_from(CdpMasterProfile), CdpMasterProfile, tenant_id)
+def count_master_profiles(db: Session, tenant_id: Optional[uuid.UUID] = None, days: Optional[int] = None) -> int:
+    stmt = select(func.count()).select_from(CdpMasterProfile)
+    stmt = _filter_tenant(stmt, CdpMasterProfile, tenant_id)
+    stmt = _filter_recent(stmt, CdpMasterProfile, days)
     return db.execute(stmt).scalar_one()
 
 
-def raw_profiles_by_status(db: Session, tenant_id: Optional[uuid.UUID] = None) -> list[dict]:
+def raw_profiles_by_status(db: Session, tenant_id: Optional[uuid.UUID] = None, days: Optional[int] = None) -> list[dict]:
     stmt = select(CdpRawProfileStage.status_code, func.count().label("count")).group_by(
         CdpRawProfileStage.status_code
     )
     stmt = _filter_tenant(stmt, CdpRawProfileStage, tenant_id)
+    stmt = _filter_recent(stmt, CdpRawProfileStage, days)
     rows = db.execute(stmt).all()
     return [
         {"status_code": code, "label": STATUS_CODE_LABELS.get(code, "unknown"), "count": count}
@@ -52,40 +71,48 @@ def raw_profiles_by_status(db: Session, tenant_id: Optional[uuid.UUID] = None) -
     ]
 
 
-def raw_profiles_by_domain(db: Session, tenant_id: Optional[uuid.UUID] = None) -> list[dict]:
+def raw_profiles_by_domain(db: Session, tenant_id: Optional[uuid.UUID] = None, days: Optional[int] = None) -> list[dict]:
     stmt = select(CdpRawProfileStage.domain, func.count().label("count")).group_by(CdpRawProfileStage.domain)
     stmt = _filter_tenant(stmt, CdpRawProfileStage, tenant_id)
+    stmt = _filter_recent(stmt, CdpRawProfileStage, days)
     return [{"domain": domain, "count": count} for domain, count in db.execute(stmt).all()]
 
 
-def master_profiles_by_domain(db: Session, tenant_id: Optional[uuid.UUID] = None) -> list[dict]:
+def master_profiles_by_domain(db: Session, tenant_id: Optional[uuid.UUID] = None, days: Optional[int] = None) -> list[dict]:
     stmt = select(CdpMasterProfile.domain, func.count().label("count")).group_by(CdpMasterProfile.domain)
     stmt = _filter_tenant(stmt, CdpMasterProfile, tenant_id)
+    stmt = _filter_recent(stmt, CdpMasterProfile, days)
     return [{"domain": domain, "count": count} for domain, count in db.execute(stmt).all()]
 
 
-def raw_profiles_by_source_system(db: Session, tenant_id: Optional[uuid.UUID] = None) -> list[dict]:
+def raw_profiles_by_source_system(db: Session, tenant_id: Optional[uuid.UUID] = None, days: Optional[int] = None) -> list[dict]:
     stmt = select(
         CdpRawProfileStage.source_system, CdpRawProfileStage.domain, func.count().label("count")
     ).group_by(CdpRawProfileStage.source_system, CdpRawProfileStage.domain)
     stmt = _filter_tenant(stmt, CdpRawProfileStage, tenant_id)
+    stmt = _filter_recent(stmt, CdpRawProfileStage, days)
     return [{"source_system": s, "domain": d, "count": c} for s, d, c in db.execute(stmt).all()]
 
 
-def count_duplicate_master_profiles(db: Session, tenant_id: Optional[uuid.UUID] = None) -> int:
+def count_duplicate_master_profiles(db: Session, tenant_id: Optional[uuid.UUID] = None, days: Optional[int] = None) -> int:
     """Counts master profiles linked to 2+ raw profiles (i.e. identity
     resolution actually merged multiple source records together)."""
     link_counts = select(CdpProfileLink.master_profile_id, func.count().label("link_count")).group_by(
         CdpProfileLink.master_profile_id
     )
     link_counts = _filter_tenant(link_counts, CdpProfileLink, tenant_id)
+    link_counts = _filter_recent(link_counts, CdpProfileLink, days)
     subq = link_counts.subquery()
     stmt = select(func.count()).select_from(subq).where(subq.c.link_count > 1)
     return db.execute(stmt).scalar_one()
 
 
 def list_duplicate_master_profiles(
-    db: Session, tenant_id: Optional[uuid.UUID] = None, skip: int = 0, limit: int = 100
+    db: Session,
+    tenant_id: Optional[uuid.UUID] = None,
+    skip: int = 0,
+    limit: int = 100,
+    days: Optional[int] = None,
 ) -> list[dict]:
     """Lists master profiles that consolidated 2+ raw profiles, most-merged first."""
     link_count_subq = (
@@ -110,6 +137,7 @@ def list_duplicate_master_profiles(
         .limit(limit)
     )
     stmt = _filter_tenant(stmt, CdpMasterProfile, tenant_id)
+    stmt = _filter_recent(stmt, CdpMasterProfile, days)
     rows = db.execute(stmt).all()
     return [
         {
@@ -125,14 +153,14 @@ def list_duplicate_master_profiles(
     ]
 
 
-def identity_graph_coverage(db: Session, tenant_id: Optional[uuid.UUID] = None) -> dict:
+def identity_graph_coverage(db: Session, tenant_id: Optional[uuid.UUID] = None, days: Optional[int] = None) -> dict:
     """Counts how many master profiles have each identity channel populated."""
-    total = count_master_profiles(db, tenant_id)
+    total = count_master_profiles(db, tenant_id, days=days)
 
     def _count(condition) -> int:
-        stmt = _filter_tenant(
-            select(func.count()).select_from(CdpMasterProfile).where(condition), CdpMasterProfile, tenant_id
-        )
+        stmt = select(func.count()).select_from(CdpMasterProfile).where(condition)
+        stmt = _filter_tenant(stmt, CdpMasterProfile, tenant_id)
+        stmt = _filter_recent(stmt, CdpMasterProfile, days)
         return db.execute(stmt).scalar_one()
 
     return {

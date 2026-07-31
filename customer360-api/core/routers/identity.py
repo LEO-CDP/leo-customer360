@@ -4,6 +4,7 @@ metadata / throttle-status tables consumed by backend-system/identity_resolution
 """
 
 import uuid
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -56,8 +57,13 @@ def list_master_profiles(
     q: Optional[str] = Query(default=None, description="Free-text search over full_name/persona_name/email"),
     skip: int = 0,
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    days: int = Query(default=90, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
+    cutoff = None
+    if days is not None:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
     if q:
         stmt = select(CdpMasterProfile)
         if tenant_id is not None:
@@ -75,11 +81,16 @@ def list_master_profiles(
                 CdpMasterProfile.phone_number.ilike(pattern),
             )
         )
+        if cutoff is not None:
+            stmt = stmt.where(CdpMasterProfile.created_at >= cutoff)
         stmt = stmt.order_by(CdpMasterProfile.last_activity_at.desc().nullslast()).offset(skip).limit(limit)
         return db.execute(stmt).scalars().all()
 
     filters = {"tenant_id": tenant_id, "domain": domain, "lifecycle_stage": lifecycle_stage}
-    return _master_crud.list(db, skip=skip, limit=limit, **filters)
+    items = _master_crud.list(db, skip=skip, limit=limit, **filters)
+    if cutoff is not None:
+        items = [item for item in items if item.created_at is not None and item.created_at >= cutoff]
+    return items
 
 
 @master_profiles_router.get("/count")

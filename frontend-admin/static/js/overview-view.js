@@ -134,13 +134,18 @@ window.C360 = window.C360 || {};
     });
   }
 
+  function periodParams() {
+    var days = C360.config.getDataPeriodDays();
+    return { days: days };
+  }
+
   function load() {
     $("#overview-loading").removeClass("hidden");
     $("#overview-content").empty();
 
     $.when(
-      api("/reporting/summary"),
-      api("/reporting/master-profiles/duplicates", { limit: 8 })
+      api("/reporting/summary", periodParams()),
+      api("/reporting/master-profiles/duplicates", $.extend({ limit: 8 }, periodParams()))
     ).done(function (summaryRes, duplicatesRes) {
       var summary = summaryRes[0];
       var duplicates = duplicatesRes[0];
@@ -152,7 +157,7 @@ window.C360 = window.C360 || {};
       renderDomainChart(summary);
       renderSourceSystemsChart(summary);
 
-      api("/reporting/identity-graph/coverage")
+      api("/reporting/identity-graph/coverage", periodParams())
         .done(function (coverage) { renderIdentityCoverageChart(coverage); })
         .fail(function (xhr) { showApiError("loading identity graph coverage", xhr); });
     }).fail(function (xhr) {
@@ -160,6 +165,12 @@ window.C360 = window.C360 || {};
       showApiError("loading reporting overview", xhr);
     });
   }
+
+  function bindEvents() {
+    $(document).on("change", "#data-period-select", load);
+  }
+
+  bindEvents();
 
   // Owns the "/overview" route (see router.js).
   C360.router.define("/overview", {

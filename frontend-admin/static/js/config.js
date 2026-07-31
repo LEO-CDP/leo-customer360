@@ -2,11 +2,10 @@
  * All profile/business data is fetched live from customer360-api (FastAPI),
  * which reads PostgreSQL. Nothing here is hardcoded demo data.
  *
- * NOTE: when served by frontend-admin/app.py (FastAPI), this file is NOT
- * used -- an explicit route renders jinja/config.js.j2 instead, injecting
- * FRONTEND_API_HOSTNAME/FRONTEND_TENANT_ID from the environment. This copy
- * is kept only as the default fallback when this folder is served by a
- * plain static file server (see README.md). Keep both files in sync. */
+ * This file is the single source of truth for the API client and helpers.
+ * When served via frontend-admin/app.py, the Jinja template (jinja/config.js.j2)
+ * renders C360_SERVER_CONFIG with environment-injected values. This file reads
+ * that global if available, otherwise falls back to defaults. */
 window.C360 = window.C360 || {};
 
 (function (C360) {
@@ -18,9 +17,11 @@ window.C360 = window.C360 || {};
   };
 
   function getConfig() {
+    // First check if Jinja rendered C360_SERVER_CONFIG (FastAPI app.py)
+    var serverConfig = window.C360_SERVER_CONFIG || {};
     return {
-      apiBase: localStorage.getItem("c360.apiBase") || DEFAULTS.apiBase,
-      tenantId: localStorage.getItem("c360.tenantId") || DEFAULTS.tenantId
+      apiBase: localStorage.getItem("c360.apiBase") || serverConfig.apiBase || DEFAULTS.apiBase,
+      tenantId: localStorage.getItem("c360.tenantId") || serverConfig.tenantId || DEFAULTS.tenantId
     };
   }
 
@@ -58,12 +59,20 @@ window.C360 = window.C360 || {};
     localStorage.setItem("c360.tenantId", tenantId.trim());
   }
 
+  function getDataPeriodDays() {
+    var value = parseInt($("#data-period-select").val(), 10);
+    return isNaN(value) ? 90 : value;
+  }
+
   C360.config = {
     get: getConfig,
     current: CONFIG,
     api: api,
     showApiError: showApiError,
     pingHealth: pingHealth,
-    save: saveConfig
+    save: saveConfig,
+    getDataPeriodDays: getDataPeriodDays
   };
+  C360.config = Object.freeze(C360.config);
+  
 })(window.C360);
