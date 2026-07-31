@@ -46,6 +46,9 @@ COMPOSE_FILE="dev-docker-compose.yml"
 ENV_FILE=".env"
 ENV_EXAMPLE_FILE=".env.example"
 CIR_DIR="backend-system/identity_resolution"
+BACKEND_SYSTEM_DIR="backend-system"
+CUSTOMER360_API_DIR="customer360-api"
+FRONTEND_ADMIN_DIR="frontend-admin"
 POSTGRES_CONTAINER="customer360-postgres"
 REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
@@ -315,21 +318,58 @@ else
   seed_demo_if_empty
 fi
 
+# =============================================================================
+# 6) Restart host-run app services so local dev stack is ready end-to-end
+# =============================================================================
+restart_host_services() {
+  echo "🔁 Restarting host services..."
+  echo "   - backend-system: ./${BACKEND_SYSTEM_DIR}/restart.sh"
+  (cd "$BACKEND_SYSTEM_DIR" && bash restart.sh)
+
+  echo "   - customer360-api: ./${CUSTOMER360_API_DIR}/restart.sh"
+  (cd "$CUSTOMER360_API_DIR" && bash restart.sh)
+
+  echo "   - frontend-admin: ./${FRONTEND_ADMIN_DIR}/restart.sh"
+  (cd "$FRONTEND_ADMIN_DIR" && bash restart.sh)
+}
+
+get_host_service_status() {
+  local pid_file="$1"
+  local pid
+  if [ -f "$pid_file" ]; then
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      echo "running"
+      return
+    fi
+  fi
+  echo "stopped"
+}
+
+restart_host_services
+
 print_final_service_table() {
   local postgres_status redis_status keycloak_status minio_status
+  local backend_status api_status frontend_status
   postgres_status="$(docker inspect -f '{{.State.Health.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || echo "unknown")"
   redis_status="$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER" 2>/dev/null || echo "unknown")"
   keycloak_status="$(docker inspect -f '{{.State.Health.Status}}' "$KEYCLOAK_CONTAINER" 2>/dev/null || echo "unknown")"
   minio_status="$(docker inspect -f '{{.State.Health.Status}}' "$MINIO_CONTAINER" 2>/dev/null || echo "unknown")"
+  backend_status="$(get_host_service_status "$SCRIPT_DIR/$BACKEND_SYSTEM_DIR/.dagster.pid")"
+  api_status="$(get_host_service_status "$SCRIPT_DIR/$CUSTOMER360_API_DIR/.uvicorn.pid")"
+  frontend_status="$(get_host_service_status "$SCRIPT_DIR/$FRONTEND_ADMIN_DIR/.uvicorn.pid")"
 
   echo ""
-  echo "✅ Core services status"
+  echo "✅ Services status"
   printf '%-12s | %-10s | %-25s\n' "Service" "Status" "Host:Port"
   printf '%-12s-+-%-10s-+-%-25s\n' "------------" "----------" "-------------------------"
   printf '%-12s | %-10s | %-25s\n' "postgres" "$postgres_status" "localhost:${POSTGRES_HOST_PORT:-5432}"
   printf '%-12s | %-10s | %-25s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6580}"
   printf '%-12s | %-10s | %-25s\n' "keycloak" "$keycloak_status" "localhost:${KEYCLOAK_HOST_PORT:-8080}"
   printf '%-12s | %-10s | %-25s\n' "minio" "$minio_status" "localhost:${MINIO_API_HOST_PORT:-9000} (console ${MINIO_CONSOLE_HOST_PORT:-9001})"
+  printf '%-12s | %-10s | %-25s\n' "backend" "$backend_status" "localhost:${DAGSTER_UI_PORT:-3000}"
+  printf '%-12s | %-10s | %-25s\n' "api" "$api_status" "localhost:${API_PORT:-8008}"
+  printf '%-12s | %-10s | %-25s\n' "frontend" "$frontend_status" "localhost:${FRONTEND_PORT:-8890}"
 }
 
 print_final_service_table

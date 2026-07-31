@@ -13,7 +13,7 @@ window.C360 = window.C360 || {};
   var timelineLimit = 8;
 
   function periodDays() {
-    return parseInt($("#period-select").val(), 10) || 90;
+    return parseInt($("#data-period-select").val(), 10) || 90;
   }
 
   function timelineEntryVm(t) {
@@ -332,7 +332,7 @@ window.C360 = window.C360 || {};
         loadContentItems(currentProfileId, currentContentType);
     });
 
-    $("#period-select").on("change", reload);
+    $("#data-period-select").on("change", reload);
   }
 
   // Owns the "/profiles/:id" detail route (see router.js). navigate()

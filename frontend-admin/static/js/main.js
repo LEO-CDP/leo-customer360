@@ -30,11 +30,11 @@ window.C360 = window.C360 || {};
     admin: "/admin"
   };
 
-  function bindChrome() {
+  function bindBrowserEvents() {
     $("#btn-back-to-profiles").on("click", function () { C360.router.navigate("/profiles"); });
 
     $(".tab-btn").on("click", function () {
-      C360.router.navigate(TAB_DEFAULT_PATH[$(this).data("tab")] || "/profiles");
+      C360.router.navigate(TAB_DEFAULT_PATH[$(this).data("tab")] || "/overview");
     });
 
     $("#btn-export-pdf").on("click", function () { window.print(); });
@@ -63,7 +63,7 @@ window.C360 = window.C360 || {};
 
       $("#footer-api-base").text(C360.config.current.apiBase);
 
-      bindChrome();
+      bindBrowserEvents();
       C360.listView.bindEvents();
       C360.profileDetailView.bindEvents();
       C360.segmentsView.bindEvents();
@@ -75,8 +75,8 @@ window.C360 = window.C360 || {};
       // Every view module has already registered its routes by this point
       // (script load order in index.html puts router.js before them).
       // Starting the router matches the current location.hash (or falls
-      // back to /profiles) and mounts exactly one view.
-      C360.router.start("/profiles");
+      // back to /overview) and mounts exactly one view.
+      C360.router.start("/overview");
 
       // Pre-fetch the profiles list in the background even if we didn't
       // land on the Profiles tab, so switching to it feels instant.
