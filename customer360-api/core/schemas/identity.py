@@ -279,6 +279,7 @@ class ProfileAttributeBase(BaseModel):
     matching_rule: Optional[str] = Field(default=None, pattern="^(exact|fuzzy_trgm|fuzzy_dmetaphone|none)$")
     matching_threshold: Optional[Decimal] = None
     consolidation_rule: Optional[str] = None
+    consolidation_config: dict = Field(default_factory=dict)
 
     is_scoring_model: bool = False
     scoring_model_name: Optional[str] = None
@@ -309,6 +310,7 @@ class ProfileAttributeUpdate(BaseModel):
     matching_rule: Optional[str] = Field(default=None, pattern="^(exact|fuzzy_trgm|fuzzy_dmetaphone|none)$")
     matching_threshold: Optional[Decimal] = None
     consolidation_rule: Optional[str] = None
+    consolidation_config: Optional[dict] = None
     is_scoring_model: Optional[bool] = None
     scoring_model_name: Optional[str] = None
     scoring_model_version: Optional[str] = None

@@ -8,8 +8,9 @@ zone) and ``cdp_profile_links`` (raw -> master links).
 ``CdpProfileAttribute`` is the full attribute catalog for
 ``cdp_master_profiles`` (identity / demographic / retail / banking /
 marketing / lineage columns plus Lead / Churn / CLV / CX / Data Quality
-scoring-model metadata) and also carries the CIR matching-rule metadata
-consumed by backend-system/identity_resolution's ``CustomerIdentityResolver``.
+scoring-model metadata) and also carries the CIR matching-rule and
+consolidation metadata consumed by backend-system/identity_resolution's
+``CustomerIdentityResolver``.
 ``CdpIdResolutionStatus`` (real-time throttle state) remains a CIR
 *runtime-only* table, created idempotently by
 backend-system/identity_resolution/scripts/init_sample_data.py
@@ -246,6 +247,7 @@ class CdpProfileAttribute(Base):
     matching_rule: Mapped[Optional[str]] = mapped_column(Text)
     matching_threshold: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
     consolidation_rule: Mapped[Optional[str]] = mapped_column(Text)
+    consolidation_config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
     is_scoring_model: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     scoring_model_name: Mapped[Optional[str]] = mapped_column(Text)

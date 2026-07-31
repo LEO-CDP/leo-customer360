@@ -67,20 +67,6 @@ DEMO_TENANT_ID = "11111111-1111-1111-1111-111111111111"
 # database -- see hash_pii() below.
 HASHED_PII_FIELDS = ("full_name", "email", "phone_number", "national_id")
 
-MATCHING_RULES = [
-    # (attribute_internal_code, name, is_identity_resolution, matching_rule, matching_threshold, consolidation_rule)
-    ("email", "Email ", True, "exact", None, "non_null"),
-    ("phone_number", "Phone Number", True, "exact", None, "non_null"),
-    ("national_id", "National ID / KYC ", True, "exact", None, "non_null"),
-    ("device_id", "Device ID", True, "exact", None, "non_null"),
-    ("advertising_id", "Advertising ID (IDFA/GAID)", True, "exact", None, "non_null"),
-    ("cookie_id", "Web Cookie ID", True, "exact", None, "non_null"),
-    ("external_customer_id", "External Customer ID", True, "exact", None, "non_null"),
-    # Hashed values can only ever be compared for exact equality (fuzzy trigram
-    # similarity is meaningless on hash digests), so full_name uses 'exact' here.
-    ("full_name", "Full Name", True, "exact", None, "most_recent"),
-]
-
 
 def hash_pii(value):
     """Returns a SHA-256 hex digest of a normalized PII value, or None.
@@ -300,83 +286,7 @@ def ensure_demo_tenant(cursor) -> None:
     )
 
 
-def ensure_cir_metadata_tables(cursor) -> None:
-    """Creates the CIR runtime tables if they don't already exist.
 
-    ``cdp_profile_attributes`` is now defined canonically in
-    core-customer360/database-schema.sql (full attribute catalog: identity /
-    demographic / retail / banking / marketing / lineage columns plus Lead /
-    Churn / CLV / CX / Data Quality scoring-model metadata). The
-    ``CREATE TABLE IF NOT EXISTS`` below only matters as a fallback for a
-    database where that schema file has not been applied yet -- it mirrors
-    the same full column set so this script keeps working standalone; it is
-    a no-op once database-schema.sql has created the table.
-    """
-    logger.info("Ensuring cdp_profile_attributes table exists...")
-    cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS {_table('cdp_profile_attributes')} (
-            id BIGSERIAL PRIMARY KEY,
-            attribute_internal_code VARCHAR(100) UNIQUE NOT NULL,
-            master_profile_column VARCHAR(100),
-            name VARCHAR(255) NOT NULL,
-            description TEXT,
-            attribute_group VARCHAR(50) NOT NULL DEFAULT 'GENERAL',
-            source_table VARCHAR(150) NOT NULL DEFAULT 'cdp_master_profiles',
-            data_type VARCHAR(50) NOT NULL DEFAULT 'TEXT',
-            domain_scope VARCHAR(20) NOT NULL DEFAULT 'all',
-            is_pii BOOLEAN NOT NULL DEFAULT FALSE,
-            status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
-            is_identity_resolution BOOLEAN NOT NULL DEFAULT FALSE,
-            matching_rule VARCHAR(50) NULL,
-            matching_threshold DECIMAL(5, 4) NULL,
-            consolidation_rule VARCHAR(50) NULL,
-            is_scoring_model BOOLEAN NOT NULL DEFAULT FALSE,
-            scoring_model_name VARCHAR(100),
-            scoring_model_version VARCHAR(20),
-            value_type VARCHAR(50),
-            value_min NUMERIC,
-            value_max NUMERIC,
-            refresh_frequency VARCHAR(50),
-            display_order INT NOT NULL DEFAULT 0,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-    """)
-
-    logger.info("Ensuring cdp_id_resolution_status table exists...")
-    cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS {_table('cdp_id_resolution_status')} (
-            id BOOLEAN PRIMARY KEY DEFAULT TRUE,
-            last_executed_at TIMESTAMP WITH TIME ZONE,
-            CONSTRAINT enforce_one_row CHECK (id = TRUE)
-        );
-    """)
-    cursor.execute(f"""
-        INSERT INTO {_table('cdp_id_resolution_status')} (id, last_executed_at)
-        VALUES (TRUE, NULL)
-        ON CONFLICT (id) DO NOTHING;
-    """)
-
-
-def seed_matching_rules(cursor) -> None:
-    logger.info("Seeding %d identity resolution matching rules...", len(MATCHING_RULES))
-    for code, name, is_ir, rule, threshold, consolidation in MATCHING_RULES:
-        cursor.execute(
-            f"""
-            INSERT INTO {_table('cdp_profile_attributes')}
-                (attribute_internal_code, name, status, is_identity_resolution,
-                 matching_rule, matching_threshold, consolidation_rule)
-            VALUES (%s, %s, 'ACTIVE', %s, %s, %s, %s)
-            ON CONFLICT (attribute_internal_code) DO UPDATE SET
-                name = EXCLUDED.name,
-                status = 'ACTIVE',
-                is_identity_resolution = EXCLUDED.is_identity_resolution,
-                matching_rule = EXCLUDED.matching_rule,
-                matching_threshold = EXCLUDED.matching_threshold,
-                consolidation_rule = EXCLUDED.consolidation_rule;
-            """,
-            (code, name, is_ir, rule, threshold, consolidation),
-        )
 
 
 def reset_demo_data(cursor) -> None:
@@ -444,9 +354,7 @@ def main() -> None:
         raw_profiles = generate_raw_profiles(count=1000, duplicate_rate=0.3)
         with conn.cursor() as cursor:
             ensure_extensions(cursor)
-            ensure_cir_metadata_tables(cursor)
             ensure_demo_tenant(cursor)
-            seed_matching_rules(cursor)
             reset_demo_data(cursor)
             seed_raw_profiles(cursor, raw_profiles)
         conn.commit()

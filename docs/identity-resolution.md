@@ -864,6 +864,74 @@ def resolve_customer_identities(pg_db: PostgresResource):
 
 ## UNIT TESTS
 
+## Quyết định khi trùng số điện thoại nhưng khác tên
+
+Tình huống: một master profile đang có 2 raw profile cùng `phone_number` nhưng tên khác nhau (ví dụ `Nguyen Van A` và `Nguyen Van B`).
+
+### Vấn đề hiện tại
+
+Trong code `resolver.py`, hàm `_find_master_profile()` đang ghép điều kiện theo kiểu **OR** giữa các rule và `LIMIT 1`. Nghĩa là chỉ cần match `phone_number` là có thể link vào một master, dù `full_name` mâu thuẫn.
+
+Điều này phù hợp khi số điện thoại là định danh mạnh (1 người dùng 1 số), nhưng có rủi ro merge nhầm khi:
+
+* Số điện thoại tái sử dụng (SIM recycle).
+* Số tổng đài/công ty được nhiều người dùng chung.
+* Lỗi nhập liệu hoặc map sai trường từ source.
+
+### Chính sách quyết định khuyến nghị
+
+Nên dùng mô hình **weighted decision** (chấm điểm theo bằng chứng) thay vì chỉ OR theo rule.
+
+1. Nhóm định danh mạnh: `national_id`, `email` verified, `external_customer_id` theo `source_system`.
+2. Nhóm định danh trung bình: `phone_number`.
+3. Nhóm hỗ trợ: `full_name` fuzzy, `device_id`, `advertising_id`, `cookie_id`.
+
+Quy tắc xử lý cho case cùng phone khác tên:
+
+1. Nếu `phone_number` match **và** có ít nhất 1 định danh mạnh khác match: merge tự động.
+2. Nếu chỉ `phone_number` match, nhưng `full_name` khác xa (similarity thấp):
+    * Không merge ngay.
+    * Tạo master mới (hoặc đưa vào hàng đợi review thủ công) với `match_method = 'PhoneConflictReview'`.
+3. Nếu chỉ `phone_number` match, tên gần giống (sai chính tả/không dấu): merge nhưng gắn cờ `low_confidence` để audit.
+
+Ngưỡng gợi ý:
+
+* `full_name` similarity >= `0.85`: coi là cùng người (khi chỉ có phone).
+* `0.70 - 0.85`: vùng nghi ngờ, cần thêm tín hiệu (`device_id`/`external_customer_id`).
+* `< 0.70`: không merge tự động.
+
+### Cách cải tiến code (khuyến nghị)
+
+1. Tách bước **candidate retrieval** và **scoring**:
+    * Bước 1: lấy danh sách candidate master theo các key mạnh (`phone`, `email`, `national_id`, identity arrays/maps).
+    * Bước 2: tính `match_score` cho từng candidate, chọn score cao nhất thay vì `LIMIT 1` ngẫu nhiên.
+2. Thêm điều kiện chặn merge khi có xung đột cứng:
+    * Ví dụ: cùng phone nhưng `national_id` khác nhau rõ ràng -> reject merge.
+3. Lưu lý do quyết định:
+    * Ghi `match_method` chi tiết như `Phone+NameHigh`, `PhoneOnlyLowConfidence`, `PhoneConflictReview` để dễ debug.
+4. Bổ sung test case bắt buộc:
+    * `same_phone + same_name` -> merge.
+    * `same_phone + similar_name` -> merge low confidence.
+    * `same_phone + different_name + no other evidence` -> không merge tự động.
+    * `same_phone + different_name + strong secondary id match` -> merge.
+
+### SQL gợi ý để giám sát xung đột tên theo phone
+
+```sql
+-- Tìm các master có cùng phone nhưng nhiều biến thể tên đáng ngờ
+SELECT
+     mp.phone_number,
+     COUNT(DISTINCT mp.master_profile_id) AS master_count,
+     COUNT(DISTINCT COALESCE(mp.full_name, '')) AS name_variants,
+     ARRAY_AGG(DISTINCT mp.full_name) AS names
+FROM customer360.cdp_master_profiles mp
+WHERE mp.phone_number IS NOT NULL
+GROUP BY mp.phone_number
+HAVING COUNT(DISTINCT COALESCE(mp.full_name, '')) > 1;
+```
+
+Kết luận ngắn: **không nên quyết định chỉ bằng `phone_number` khi tên mâu thuẫn**. Cần ít nhất một tín hiệu mạnh bổ sung hoặc cơ chế review để tránh over-merge.
+
 Bộ unit test đầy đủ (mock hoàn toàn `psycopg2`, không cần DB thật) nằm tại [core-customer360/backend-system/identity_resolution/tests/](backend-system/identity_resolution/tests/). Cách chạy:
 
 ```bash

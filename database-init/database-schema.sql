@@ -987,7 +987,24 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
         )
     ),
     matching_threshold NUMERIC(5, 4),
-    consolidation_rule VARCHAR(50),
+    -- Merge precedence for conflicting values on the same master profile.
+    -- Supported strategies include most_recent, verified_first,
+    -- verified_then_most_recent, source_priority, non_null,
+    -- append_distinct, and overwrite.
+    consolidation_rule VARCHAR(50) CHECK (
+        consolidation_rule IS NULL OR consolidation_rule IN (
+            'most_recent',
+            'verified_first',
+            'verified_then_most_recent',
+            'source_priority',
+            'non_null',
+            'append_distinct',
+            'overwrite'
+        )
+    ),
+    -- Optional rule-specific parameters such as timestamp_field,
+    -- verified_field, verified_values, or source_priority.
+    consolidation_config JSONB NOT NULL DEFAULT '{}'::JSONB,
 
     -- segmentation metadata: whether this attribute can be used for audience segmentation, and its data type (TEXT, NUMERIC, DATE, TIMESTAMP, BOOLEAN, JSONB).
     is_segmentable BOOLEAN NOT NULL DEFAULT TRUE,
@@ -1015,7 +1032,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog: one row per cdp_master_profiles column (plus cdp_raw_profiles_stage matching keys), grouped by attribute_group. Drives Customer Identity Resolution (CIR) matching rules (is_identity_resolution/matching_rule/matching_threshold/consolidation_rule) without hard-coding them in application code.';
+COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog: one row per cdp_master_profiles column (plus cdp_raw_profiles_stage matching keys), grouped by attribute_group. Drives Customer Identity Resolution (CIR) matching rules (is_identity_resolution/matching_rule/matching_threshold) and merge precedence (consolidation_rule/consolidation_config) without hard-coding them in application code.';
 
 ---------------------------------------------------
 -- RELATIONS & EVENTS

@@ -285,6 +285,44 @@ ON CONFLICT (attribute_internal_code) DO UPDATE SET
     display_order          = EXCLUDED.display_order,
     updated_at             = now();
 
+-- Default CIR merge policy seed: lets the resolver prefer recent or
+-- verified values without hard-coding a single merge strategy in Python.
+UPDATE customer360.cdp_profile_attributes
+SET
+    consolidation_rule = CASE attribute_internal_code
+        WHEN 'full_name' THEN 'most_recent'
+        WHEN 'email' THEN 'verified_first'
+        WHEN 'phone_number' THEN 'verified_first'
+        WHEN 'national_id' THEN 'verified_first'
+        WHEN 'external_customer_id' THEN 'source_priority'
+        WHEN 'device_id' THEN 'source_priority'
+        WHEN 'advertising_id' THEN 'source_priority'
+        WHEN 'cookie_id' THEN 'source_priority'
+        ELSE consolidation_rule
+    END,
+    consolidation_config = CASE attribute_internal_code
+        WHEN 'full_name' THEN '{"mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
+        WHEN 'email' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
+        WHEN 'phone_number' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
+        WHEN 'national_id' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
+        WHEN 'external_customer_id' THEN '{"mode":"source_priority","source_priority":["core_banking","crm","web_tracking","appsflyer","moengage"]}'::jsonb
+        WHEN 'device_id' THEN '{"mode":"source_priority","source_priority":["web_tracking","appsflyer","moengage"]}'::jsonb
+        WHEN 'advertising_id' THEN '{"mode":"source_priority","source_priority":["web_tracking","appsflyer","moengage"]}'::jsonb
+        WHEN 'cookie_id' THEN '{"mode":"source_priority","source_priority":["web_tracking"]}'::jsonb
+        ELSE consolidation_config
+    END,
+    updated_at = now()
+WHERE attribute_internal_code IN (
+    'full_name',
+    'email',
+    'phone_number',
+    'national_id',
+    'external_customer_id',
+    'device_id',
+    'advertising_id',
+    'cookie_id'
+);
+
 
 ---------------------------------------------------
 -- SEGMENTS: SEED DATA (Audience Builder)
