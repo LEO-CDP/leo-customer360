@@ -26,6 +26,7 @@ window.C360 = window.C360 || {};
   }
 
   var CONFIG = getConfig();
+  var DOMAINS_CACHE_KEY = "c360.domains";
 
   function api(path, params, method) {
     return $.ajax({
@@ -54,6 +55,29 @@ window.C360 = window.C360 || {};
       .fail(function (xhr) { showApiError("health check", xhr); });
   }
 
+  function applyDomainLabels(labels) {
+    if (C360.fmt && typeof C360.fmt.setDomainLabels === "function") {
+      C360.fmt.setDomainLabels(labels);
+    }
+  }
+
+  function loadDomains() {
+    var cached = null;
+    try {
+      cached = JSON.parse(localStorage.getItem(DOMAINS_CACHE_KEY));
+    } catch (e) { cached = null; }
+    if (cached) applyDomainLabels(cached);
+
+    var req = api("/metadata/domains");
+    req.done(function (labels) {
+      if (labels && typeof labels === "object") {
+        applyDomainLabels(labels);
+        try { localStorage.setItem(DOMAINS_CACHE_KEY, JSON.stringify(labels)); } catch (e) { /* ignore */ }
+      }
+    });
+    return req;
+  }
+
   function saveConfig(apiBase, tenantId) {
     localStorage.setItem("c360.apiBase", apiBase.trim());
     localStorage.setItem("c360.tenantId", tenantId.trim());
@@ -70,6 +94,7 @@ window.C360 = window.C360 || {};
     api: api,
     showApiError: showApiError,
     pingHealth: pingHealth,
+    loadDomains: loadDomains,
     save: saveConfig,
     getDataPeriodDays: getDataPeriodDays
   };

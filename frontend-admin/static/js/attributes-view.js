@@ -19,13 +19,12 @@ window.C360 = window.C360 || {};
 
   function yesNoBadgeClass(v) { return v ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"; }
   function statusBadgeClass(v) { return v === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"; }
-  function domainLabel(domain) { return fmt.DOMAIN_LABELS[domain] || (domain === "all" ? "All domains" : fmt.titleCase(domain)); }
 
   function rowVm(a) {
     return $.extend({}, a, {
       groupIcon: (fmt.CATEGORY_ICONS && fmt.CATEGORY_ICONS[a.attribute_group]) || "🔑",
       groupLabel: fmt.titleCase(a.attribute_group),
-      domainLabel: domainLabel(a.domain_scope),
+      domainLabel: fmt.domainLabel(a.domain_scope),
       dataTypeLabel: fmt.titleCase(a.data_type),
       piiLabel: a.is_pii ? "PII" : "Not PII",
       piiBadgeClass: yesNoBadgeClass(a.is_pii),

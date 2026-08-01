@@ -14,11 +14,10 @@ window.C360 = window.C360 || {};
   function processedByBadgeClass(v) { return v === "ai_agent" ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-600"; }
   function activeLabel(v) { return v ? "Active" : "Inactive"; }
   function activeBadgeClass(v) { return v ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"; }
-  function domainLabel(domain) { return fmt.DOMAIN_LABELS[domain] || (domain === "all" ? "All domains" : fmt.titleCase(domain)); }
 
   function segmentRowVm(s) {
     return $.extend({}, s, {
-      domainLabel: domainLabel(s.domain),
+      domainLabel: fmt.domainLabel(s.domain),
       domainIcon: fmt.domainIcon(s.domain),
       domainIconBg: fmt.domainIconBg(s.domain),
       processedByLabel: processedByLabel(s.processed_by),

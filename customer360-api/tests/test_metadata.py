@@ -135,6 +135,43 @@ class SysMetadataTests(unittest.TestCase):
         self.assertEqual(body["error"], "timeout")
         self.assertIn("configured_services", body)
 
+    def test_metadata_domains_returns_active_domains_from_db(self):
+        mock_db = MagicMock()
+        mock_db.execute.return_value.all.return_value = [
+            ("retail", "Retail & E-Commerce"),
+            ("banking", "Banking & Financial Services"),
+        ]
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).get("/metadata/domains")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["retail"], "Retail & E-Commerce")
+        self.assertEqual(body["banking"], "Banking & Financial Services")
+
+    def test_metadata_domains_filters_by_tenant_id_query_param(self):
+        mock_db = MagicMock()
+        mock_db.execute.return_value.all.return_value = [("retail", "Retail & E-Commerce")]
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        tenant_id = "22222222-2222-2222-2222-222222222222"
+        response = TestClient(self.app).get(f"/metadata/domains?tenant_id={tenant_id}")
+
+        self.assertEqual(response.status_code, 200)
+        executed_stmt = mock_db.execute.call_args[0][0]
+        # The WHERE clause must filter sys_tenant_domain by the tenant_id we passed in.
+        self.assertIn("sys_tenant_domain.tenant_id", str(executed_stmt))
+
+    def test_metadata_domains_surfaces_db_failure_as_503(self):
+        mock_db = MagicMock()
+        mock_db.execute.side_effect = RuntimeError("db down")
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).get("/metadata/domains")
+
+        self.assertEqual(response.status_code, 503)
+
 
 class SysMetadataAuthExemptionTests(unittest.TestCase):
     """Confirms the metadata endpoints are in core.auth.EXEMPT_PATHS when the
@@ -146,6 +183,7 @@ class SysMetadataAuthExemptionTests(unittest.TestCase):
 
         self.assertIn("/api/v1/metadata", EXEMPT_PATHS)
         self.assertIn("/api/v1/metadata/dagster", EXEMPT_PATHS)
+        self.assertIn("/api/v1/metadata/domains", EXEMPT_PATHS)
 
 
 if __name__ == "__main__":

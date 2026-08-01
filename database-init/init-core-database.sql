@@ -1,8 +1,14 @@
 ---------------------------------------------------
--- TENANT: SEED DATA
+-- SCHEMA CREATION
 ---------------------------------------------------
 
--- Default tenant required as the FK parent for the segment seed data below.
+CREATE SCHEMA IF NOT EXISTS customer360;
+
+---------------------------------------------------
+-- DEFAULT TENANT
+---------------------------------------------------
+
+-- Required parent record for all system seed data.
 -- Idempotent: safe to re-run.
 INSERT INTO customer360.sys_tenant (
     tenant_id,
@@ -11,9 +17,10 @@ INSERT INTO customer360.sys_tenant (
     company_name,
     business_type,
     status
-) VALUES (
+)
+VALUES (
     '11111111-1111-1111-1111-111111111111'::uuid,
-    'Default',
+    'DEFAULT',
     'Default Tenant',
     'Default Company',
     'DEFAULT',
@@ -21,6 +28,50 @@ INSERT INTO customer360.sys_tenant (
 )
 ON CONFLICT (tenant_id) DO NOTHING;
 
+---------------------------------------------------
+-- SYSTEM DOMAINS
+---------------------------------------------------
+
+INSERT INTO customer360.sys_domain (
+    domain_code,
+    domain_name,
+    description,
+    display_order
+)
+VALUES
+('retail',        'Retail & E-Commerce',         'Retail stores, supermarkets, online commerce',             1),
+('banking',       'Banking & Financial Services','Retail banking, digital banking and fintech',              2),
+('insurance',     'Insurance',                   'Life, health, vehicle and general insurance',              3),
+('healthcare',    'Healthcare',                  'Hospitals, clinics, pharmacies and healthcare providers',  4),
+('telecom',       'Telecommunications',          'Mobile, broadband and telecom operators',                  5),
+('travel',        'Travel & Hospitality',        'Hotels, airlines, travel agencies and tourism',            6),
+('real_estate',   'Real Estate',                 'Property developers, brokers and property portals',        7),
+('education',     'Education',                   'Schools, universities and online learning',                8),
+('manufacturing', 'Manufacturing',               'Manufacturing and industrial enterprises',                  9),
+('media',         'Media & Entertainment',       'Publishing, streaming, gaming and entertainment',         10)
+ON CONFLICT (domain_code) DO NOTHING;
+
+---------------------------------------------------
+-- DEFAULT TENANT -> ALL DOMAINS
+---------------------------------------------------
+
+-- The default tenant supports every system domain.
+INSERT INTO customer360.sys_tenant_domain (
+    tenant_id,
+    domain_id,
+    is_default,
+    is_active
+)
+SELECT
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    d.domain_id,
+    CASE
+        WHEN d.domain_code = 'retail' THEN TRUE
+        ELSE FALSE
+    END AS is_default,
+    TRUE
+FROM customer360.sys_domain d
+ON CONFLICT (tenant_id, domain_id) DO NOTHING;
 
 ---------------------------------------------------
 -- EVENT CATALOG: SEED DATA

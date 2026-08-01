@@ -37,6 +37,84 @@ CREATE TABLE IF NOT EXISTS customer360.sys_tenant (
 
 COMMENT ON TABLE customer360.sys_tenant IS 'Top-level workspace/tenant record. Every tenant-scoped table in this schema carries a NOT NULL tenant_id FK to this table, enforced additionally via Row-Level Security (see the ROW LEVEL SECURITY section at the end of this file).';
 
+-- ==========================================================
+-- Business Domain Master
+-- System-defined business domains
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS customer360.sys_domain (
+    domain_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    domain_code VARCHAR(50) NOT NULL UNIQUE,
+    domain_name VARCHAR(200) NOT NULL,
+
+    description TEXT,
+
+    icon VARCHAR(100),
+    color VARCHAR(20),
+
+    display_order SMALLINT DEFAULT 0 NOT NULL,
+
+    is_system BOOLEAN DEFAULT TRUE NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE NOT NULL,
+
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now(),
+
+    metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_sys_domain_active
+    ON customer360.sys_domain(is_active);
+
+CREATE INDEX IF NOT EXISTS idx_sys_domain_display_order
+    ON customer360.sys_domain(display_order);
+
+CREATE INDEX IF NOT EXISTS idx_sys_domain_metadata
+    ON customer360.sys_domain
+    USING GIN(metadata);
+
+COMMENT ON TABLE customer360.sys_domain IS 'System-defined business domains (e.g., retail, banking, real_estate, travel, media, education).';
+
+-- ==========================================================
+-- Tenant Business Domains
+-- A tenant can support multiple industries/domains.
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS customer360.sys_tenant_domain (
+
+    tenant_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
+
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    metadata JSONB DEFAULT '{}'::jsonb,
+
+    PRIMARY KEY (tenant_id, domain_id),
+
+    CONSTRAINT fk_sys_tenant_domain_tenant
+        FOREIGN KEY (tenant_id)
+        REFERENCES customer360.sys_tenant(tenant_id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_sys_tenant_domain_domain
+        FOREIGN KEY (domain_id)
+        REFERENCES customer360.sys_domain(domain_id)
+        ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sys_tenant_domain_tenant
+ON customer360.sys_tenant_domain(tenant_id);
+
+CREATE INDEX IF NOT EXISTS idx_sys_tenant_domain_domain
+ON customer360.sys_tenant_domain(domain_id);
+
+CREATE INDEX IF NOT EXISTS idx_sys_tenant_domain_default
+ON customer360.sys_tenant_domain(tenant_id, is_default);
+
+-- ==========================================================
+-- Organization table
+-- ==========================================================
 CREATE TABLE IF NOT EXISTS customer360.sys_organization (
     organization_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),

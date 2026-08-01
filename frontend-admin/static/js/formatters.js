@@ -38,7 +38,24 @@ window.C360 = window.C360 || {};
 
   function titleCase(s) { return (s || "").replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
 
-  var DOMAIN_LABELS = { banking: "Retail Banking", retail: "Retail Commerce", real_estate: "Real Estate", travel: "Travel", media: "Media & Entertainment", education: "Education" };
+  // Default domain labels used as a fallback until the API labels are loaded.
+  // The authoritative list is served by customer360-api at /metadata/domains.
+  var DEFAULT_DOMAIN_LABELS = { banking: "Retail Banking", retail: "Retail Commerce", real_estate: "Real Estate", travel: "Travel", media: "Media & Entertainment", education: "Education" };
+  var DOMAIN_LABELS = $.extend({}, DEFAULT_DOMAIN_LABELS);
+
+  function setDomainLabels(labels) {
+    if (labels && typeof labels === "object") {
+      $.extend(DOMAIN_LABELS, labels);
+    }
+  }
+
+  function domainLabel(domain) {
+    if (domain === undefined || domain === null || domain === "") return "—";
+    if (DOMAIN_LABELS[domain]) return DOMAIN_LABELS[domain];
+    if (domain === "all") return "All domains";
+    return titleCase(domain);
+  }
+
   var CHANNEL_ICONS = { mobile_app: "📱", web: "💻", internet_banking: "🏦", pos: "🛍️", call_center: "☎️", live_chat: "💬", branch_visit: "🏢", email: "✉️" };
   var CATEGORY_ICONS = { FINANCE: "💰", STOCK_TRADING: "📈", FEEDBACK: "⭐", GENERAL: "🔑", COMMERCE: "🛒", TRAVEL: "✈️", REAL_ESTATE: "🏠", EDUCATION: "🎓", SERVICE_INDUSTRY: "🛎️" };
   var DOMAIN_ICONS = { banking: "💰", retail: "🛒", real_estate: "🏠", travel: "✈️", media: "🎬", education: "🎓", all: "🌐" };
@@ -74,6 +91,8 @@ window.C360 = window.C360 || {};
     maskMiddle: maskMiddle,
     titleCase: titleCase,
     DOMAIN_LABELS: DOMAIN_LABELS,
+    setDomainLabels: setDomainLabels,
+    domainLabel: domainLabel,
     CHANNEL_ICONS: CHANNEL_ICONS,
     CATEGORY_ICONS: CATEGORY_ICONS,
     domainIcon: domainIcon,

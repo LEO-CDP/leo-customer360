@@ -131,14 +131,13 @@ window.C360 = window.C360 || {};
       lastSeenLabel: fmt.dateTime(profile.last_activity_at),
       tierLabel: profile.membership_tier || profile.clv_segment || "—",
       kycStatus: profile.kyc_status || "unknown",
-      domainLabel:
-        fmt.DOMAIN_LABELS[profile.domain] || fmt.titleCase(profile.domain),
+      domainLabel: fmt.domainLabel(profile.domain),
       customerSinceLabel: fmt.date(profile.customer_since),
       lifecycleLabel: fmt.titleCase(profile.lifecycle_stage) || "—",
       personaSummary:
         profile.persona_summary ||
         "Profile in the " +
-          (fmt.DOMAIN_LABELS[profile.domain] || profile.domain) +
+          fmt.domainLabel(profile.domain) +
           " domain, currently in the '" +
           fmt.titleCase(profile.lifecycle_stage) +
           "' lifecycle stage.",

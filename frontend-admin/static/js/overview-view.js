@@ -27,7 +27,7 @@ window.C360 = window.C360 || {};
     var displayName = p.persona_name || p.full_name || ("Profile " + fmt.shortId(p.master_profile_id));
     return {
       displayName: displayName,
-      domainLabel: fmt.DOMAIN_LABELS[p.domain] || fmt.titleCase(p.domain),
+      domainLabel: fmt.domainLabel(p.domain),
       linked_raw_profile_count: p.linked_raw_profile_count,
       sourceSystemsLabel: (p.source_systems || []).join(", ") || "—"
     };
@@ -73,7 +73,7 @@ window.C360 = window.C360 || {};
     renderChart("chart-domain-breakdown", {
       type: "bar",
       data: {
-        labels: domains.map(function (d) { return fmt.DOMAIN_LABELS[d] || fmt.titleCase(d); }),
+        labels: domains.map(function (d) { return fmt.domainLabel(d); }),
         datasets: [
           { label: "Raw Profiles", data: domains.map(function (d) { return rawMap[d] || 0; }), backgroundColor: PALETTE[0] },
           { label: "Master Profiles", data: domains.map(function (d) { return masterMap[d] || 0; }), backgroundColor: PALETTE[1] }

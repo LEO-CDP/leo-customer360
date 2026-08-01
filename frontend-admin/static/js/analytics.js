@@ -175,7 +175,7 @@ window.C360 = window.C360 || {};
     domains.forEach(function (d, idx) {
       var cell = $("<div></div>")
         .addClass("sticky top-0 z-10 bg-slate-50 p-2 text-xs font-semibold text-slate-500 text-center border-b border-slate-200")
-        .text(fmt.DOMAIN_LABELS[d] || fmt.titleCase(d));
+        .text(fmt.domainLabel(d));
       if (idx === domains.length - 1) cell.addClass("rounded-tr");
       $grid.append(cell);
     });

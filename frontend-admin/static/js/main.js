@@ -53,6 +53,23 @@ const TIME_CHECK_API_HEALTH = 60000;
     });
   }
 
+  function populateDomainSelects() {
+    var labels = C360.fmt && C360.fmt.DOMAIN_LABELS ? C360.fmt.DOMAIN_LABELS : {};
+    var keys = Object.keys(labels).filter(function (k) { return k !== "all"; }).sort();
+
+    $("#domain-filter, #attributes-domain-filter").each(function () {
+      var $sel = $(this);
+      var current = $sel.val();
+      $sel.find("option[value!=''][value!='all']").remove();
+      keys.forEach(function (key) {
+        $sel.append($("<option></option>").attr("value", key).text(labels[key]));
+      });
+      if (current && ($sel.find("option[value='" + current + "']").length || current === "" || current === "all")) {
+        $sel.val(current);
+      }
+    });
+  }
+
   $(function () {
     C360.templates.loadAll().done(function () {
       $("#app-header").html(C360.templates.html("tabs"));
@@ -73,15 +90,15 @@ const TIME_CHECK_API_HEALTH = 60000;
       C360.config.pingHealth();
       setInterval(C360.config.pingHealth, TIME_CHECK_API_HEALTH);
 
-      // Every view module has already registered its routes by this point
-      // (script load order in index.html puts router.js before them).
-      // Starting the router matches the current location.hash (or falls
-      // back to /overview) and mounts exactly one view.
-      C360.router.start("/overview");
-
-      // Pre-fetch the profiles list in the background even if we didn't
-      // land on the Profiles tab, so switching to it feels instant.
-      C360.listView.load(false);
+      // Load authoritative domain labels from the API and refresh any
+      // UI that depends on them (filter selects, chart axes, row labels).
+      C360.config.loadDomains().always(function () {
+        populateDomainSelects();
+        C360.router.start("/overview");
+        // Pre-fetch the profiles list in the background even if we didn't
+        // land on the Profiles tab, so switching to it feels instant.
+        C360.listView.load(false);
+      });
     }).fail(function () {
       $("#alert-banner").removeClass("hidden").text(
         "Failed to load UI templates from static/templates/. Serve this folder with a static HTTP server " +
