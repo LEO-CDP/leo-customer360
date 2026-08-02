@@ -1,67 +1,141 @@
+<!-- 
+  =============================================================================
+  UNIFIED ANALYTICS DASHBOARD VIEW
+  =============================================================================
+  Features:
+  - Polished modern card containers with rounded-2xl and hover shadows
+  - Integrated SVG icons for enhanced visual hierarchy
+  - Refined KPI metric cards with top indicators and bold typography
+  - Styled time-series charts, channel breakdowns, and heatmaps
+-->
 <div id="analytics-view" class="space-y-6">
-  <div class="flex flex-wrap items-center justify-between gap-3">
-    <div>
-      <h1 class="text-lg font-semibold">Unified Analytics Dashboard</h1>
-      <p class="text-xs text-slate-400">Time-series activity and profile distribution across all sources</p>
+  
+  <!-- Header Section -->
+  <div class="flex flex-wrap items-center justify-between gap-3 bg-white border border-slate-200/80 rounded-2xl shadow-sm p-6">
+    <div class="flex items-center gap-3">
+      <div class="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
+        <!-- Analytics / Dashboard Icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h13.5M3.75 19.5h16.5M9.75 9.75l3 3 4.5-4.5" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold text-slate-900 tracking-tight">Unified Analytics Dashboard</h1>
+        <p class="text-xs text-slate-400 mt-0.5">Time-series activity and profile distribution across all sources</p>
+      </div>
     </div>
-    <button id="btn-analytics-refresh" class="bg-slate-100 text-slate-600 rounded-lg px-3 py-1.5 hover:bg-slate-200 transition-colors text-sm">Refresh</button>
+    
+    <button id="btn-analytics-refresh" class="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-4 py-2 text-xs font-semibold hover:bg-slate-100 transition-colors shadow-sm">
+      <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+      <span>Refresh</span>
+    </button>
   </div>
 
-  <div id="analytics-empty" class="hidden bg-white border border-slate-200 rounded-xl p-10 text-center text-sm text-slate-500">
-    <div class="text-3xl mb-2">📊</div>
-    No analytics data available for the selected period.
+  <!-- Empty State -->
+  <div id="analytics-empty" class="hidden bg-white border border-slate-200/80 rounded-2xl p-12 text-center text-sm text-slate-400 shadow-sm">
+    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">📊</div>
+    <div class="font-medium text-slate-600">No analytics data available</div>
+    <p class="text-xs text-slate-400 mt-1">No analytics data available for the selected period.</p>
   </div>
 
+  <!-- Dashboard Content Container -->
   <div id="analytics-dashboard" class="space-y-6">
-    <!-- KPIs -->
+    
+    <!-- KPIs Grid -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-        <div class="text-xs text-slate-500 uppercase tracking-wide">Total Events</div>
-        <div id="kpi-total-events" class="text-2xl font-semibold mt-1">—</div>
+      
+      <!-- Total Events KPI -->
+      <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow group">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Total Events</span>
+          <div class="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg group-hover:scale-110 transition-transform">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
+          </div>
+        </div>
+        <div id="kpi-total-events" class="text-2xl font-bold text-slate-900">—</div>
       </div>
-      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-        <div class="text-xs text-slate-500 uppercase tracking-wide">Active Profiles</div>
-        <div id="kpi-active-profiles" class="text-2xl font-semibold mt-1">—</div>
+
+      <!-- Active Profiles KPI -->
+      <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow group">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Active Profiles</span>
+          <div class="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg group-hover:scale-110 transition-transform">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>
+          </div>
+        </div>
+        <div id="kpi-active-profiles" class="text-2xl font-bold text-slate-900">—</div>
       </div>
-      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-        <div class="text-xs text-slate-500 uppercase tracking-wide">Conversions</div>
-        <div id="kpi-conversions" class="text-2xl font-semibold mt-1">—</div>
+
+      <!-- Conversions KPI -->
+      <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow group">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Conversions</span>
+          <div class="p-1.5 bg-amber-50 text-amber-600 rounded-lg group-hover:scale-110 transition-transform">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941" /></svg>
+          </div>
+        </div>
+        <div id="kpi-conversions" class="text-2xl font-bold text-slate-900">—</div>
       </div>
-      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-        <div class="text-xs text-slate-500 uppercase tracking-wide">Master Profiles</div>
-        <div id="kpi-master-profiles" class="text-2xl font-semibold mt-1">—</div>
+
+      <!-- Master Profiles KPI -->
+      <div class="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow group">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Master Profiles</span>
+          <div class="p-1.5 bg-violet-50 text-violet-600 rounded-lg group-hover:scale-110 transition-transform">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.06-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>
+          </div>
+        </div>
+        <div id="kpi-master-profiles" class="text-2xl font-bold text-slate-900">—</div>
       </div>
+
     </div>
 
-    <!-- Charts row -->
+    <!-- Charts Row -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-        <h2 class="text-sm font-semibold mb-3">Event Volume Over Time</h2>
+      
+      <!-- Event Volume Over Time Chart -->
+      <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
+        <h2 class="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+          <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>
+          Event Volume Over Time
+        </h2>
         <div class="h-72">
           <canvas id="chart-events-time-series"></canvas>
         </div>
-        <p id="events-time-series-note" class="hidden text-xs text-slate-400 mt-2 text-center">Showing the most recent 1,000 events for the selected period.</p>
+        <p id="events-time-series-note" class="hidden text-xs text-slate-400 mt-3 text-center">Showing the most recent 1,000 events for the selected period.</p>
       </div>
-      <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-        <h2 class="text-sm font-semibold mb-3">Events by Channel</h2>
+
+      <!-- Events by Channel Chart -->
+      <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
+        <h2 class="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+          <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" /></svg>
+          Events by Channel
+        </h2>
         <div class="h-72">
           <canvas id="chart-events-channel"></canvas>
         </div>
       </div>
+
     </div>
 
-    <!-- Profile heatmap -->
-    <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-      <h2 class="text-sm font-semibold mb-3">Profile Distribution Heatmap (Source System × Domain)</h2>
+    <!-- Profile Heatmap -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
+      <h2 class="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
+        Profile Distribution Heatmap (Source System × Domain)
+      </h2>
       <div class="overflow-x-auto">
         <div id="profile-heatmap" class="min-w-max"></div>
       </div>
-      <p id="profile-heatmap-empty" class="hidden text-sm text-slate-500 py-6 text-center">No profile source/domain breakdown available.</p>
+      <p id="profile-heatmap-empty" class="hidden text-sm text-slate-500 py-6 text-center italic">No profile source/domain breakdown available.</p>
     </div>
 
-    <!-- Campaigns heatmap -->
-    <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-      <h2 class="text-sm font-semibold mb-3">Campaign Performance Heatmap (Source System × Campaign)</h2>
+    <!-- Campaigns Heatmap -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
+      <h2 class="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-3.102-.069m3.102.069a22.536 22.536 0 013.102.069m-3.102-.069c.56.021 1.12.04 1.68.057m-1.68-.057c-.56-.021-1.12-.04-1.68-.057m-1.68-.057a22.53 22.53 0 00-3.102-.069m3.102.069a18.03 18.03 0 003.102-.069" /></svg>
+        Campaign Performance Heatmap (Source System × Campaign)
+      </h2>
       <div class="overflow-x-auto">
         <div id="campaign-heatmap" class="min-w-max">
           <div class="matrix-heatmap-wrapper">
@@ -69,7 +143,8 @@
           </div>
         </div>
       </div>
-      <p id="campaign-heatmap-empty" class="hidden text-sm text-slate-500 py-6 text-center">No campaign source/campaign breakdown available.</p>
+      <p id="campaign-heatmap-empty" class="hidden text-sm text-slate-500 py-6 text-center italic">No campaign source/campaign breakdown available.</p>
     </div>
+
   </div>
 </div>

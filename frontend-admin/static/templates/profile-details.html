@@ -1,23 +1,36 @@
-<div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+<!-- 
+  =============================================================================
+  CUSTOMER 360 PROFILE DETAIL - 3-COLUMN DASHBOARD GRID LAYOUT
+  =============================================================================
+  Features:
+  - Responsive 12-column grid layout (automatically collapses to a single column on mobile screens)
+  - Balanced column spans: Left (3 cols), Center (6 cols), Right (3 cols)
+  - Consistent vertical rhythm (`space-y-6`) and gap spacing (`gap-6`) matching the modern card design system
+  - Centered max-width container wrapper for large screen layouts
+-->
+<div class="max-w-[1600px] mx-auto px-6 py-6">
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-  <!-- LEFT COLUMN -->
-  <div class="lg:col-span-3 space-y-4">
-    {{> identity}}
-    {{> channels}}
-  </div>
+    <!-- LEFT COLUMN: Identity & Channels -->
+    <div class="lg:col-span-3 space-y-6">
+      {{> identity}}
+      {{> channels}}
+    </div>
 
-  <!-- CENTER COLUMN -->
-  <div class="lg:col-span-6 space-y-4">
-    {{> overview}}
-    {{> segments}}
-    {{> engagement}}
-    {{> activity}}
-    {{> timeline}}
-  </div>
+    <!-- CENTER COLUMN: Overview, Segments, Engagement, Activity & Timeline -->
+    <div class="lg:col-span-6 space-y-6">
+      {{> overview}}
+      {{> segments}}
+      {{> engagement}}
+      {{> activity}}
+      {{> timeline}}
+    </div>
 
-  <!-- RIGHT COLUMN -->
-  <div class="lg:col-span-3 space-y-4">
-    {{> scoring}}
-    {{> [personalized-items]}}
+    <!-- RIGHT COLUMN: Scoring & Personalized Items -->
+    <div class="lg:col-span-3 space-y-6">
+      {{> scoring}}
+      {{> [personalized-items]}}
+    </div>
+
   </div>
 </div>

@@ -1,29 +1,121 @@
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-  <h3 class="font-semibold text-sm mb-3">Channels &amp; Identifiers</h3>
-  <ul class="space-y-2 text-sm">
+<!-- 
+  =============================================================================
+  CHANNELS & IDENTIFIERS CARD
+  =============================================================================
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-5">
+  <!-- Card Header with Icon -->
+  <div class="flex items-center gap-2 mb-4">
+    <div class="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+      </svg>
+    </div>
+    <h3 class="font-semibold text-slate-900 text-sm">Channels &amp; Identifiers</h3>
+  </div>
+
+  <!-- List Items -->
+  <ul class="space-y-3">
     {{#each channels}}
-    <li class="flex items-center justify-between">
-      <span>{{icon}} {{label}}</span>
-      <span class="text-xs text-slate-400">{{badge}}</span>
+    <li class="flex items-center justify-between group">
+      <div class="flex items-center gap-3">
+        <!-- Render the dynamic icon if passed from backend -->
+        <span class="text-slate-400 group-hover:text-indigo-500 transition-colors">
+          {{{icon}}}
+        </span>
+        <span class="text-sm font-medium text-slate-700">{{label}}</span>
+      </div>
+      <!-- Pill Badge -->
+      <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 group-hover:bg-slate-200 transition-colors">
+        {{badge}}
+      </span>
     </li>
     {{/each}}
   </ul>
 </div>
 
-{{#if hasAttributes}}
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-  <h3 class="font-semibold text-sm mb-3">Other Attributes</h3>
 
-  <ul class="divide-y divide-slate-100">
+<!-- 
+  =============================================================================
+  COMMUNICATION PREFERENCES CARD
+  =============================================================================
+-->
+{{#if hasCommunicationPreferences}}
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-5 mt-5">
+  <!-- Card Header with Icon -->
+  <div class="flex items-center gap-2 mb-4">
+    <div class="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+      </svg>
+    </div>
+    <h3 class="font-semibold text-slate-900 text-sm">Communication Preferences</h3>
+  </div>
+
+  <ul class="divide-y divide-slate-100/80">
+    {{#each communicationPreferences}}
+    <li class="flex justify-between items-center py-3 gap-4 group">
+      
+      <!-- Key Label: Capitalized and styled to look cleaner -->
+      <div class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-slate-300 group-hover:bg-emerald-400 transition-colors"></span>
+        <span class="text-sm font-medium text-slate-600 capitalize tracking-wide">
+          {{@key}}
+        </span>
+      </div>
+
+      <!-- Logic for Opted In / Opted Out Badges -->
+      {{#if this}}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60 shadow-sm">
+          <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+          Opted In
+        </span>
+      {{else}}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-50 text-slate-500 border border-slate-200/60">
+          <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          Opted Out
+        </span>
+      {{/if}}
+      
+    </li>
+    {{/each}}
+  </ul>
+</div>
+{{/if}}
+
+
+<!-- 
+  =============================================================================
+  OTHER ATTRIBUTES CARD
+  =============================================================================
+-->
+{{#if hasAttributes}}
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-5 mt-5">
+  <!-- Card Header with Icon -->
+  <div class="flex items-center gap-2 mb-4">
+    <div class="p-1.5 bg-sky-50 text-sky-600 rounded-lg">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 6h.008v.008H6V6z" />
+      </svg>
+    </div>
+    <h3 class="font-semibold text-slate-900 text-sm">Other Attributes</h3>
+  </div>
+
+  <ul class="divide-y divide-slate-100/80">
     {{#each attributeChips}}
-    <li class="flex justify-between items-start py-2 gap-4">
-      <span class="text-sm text-slate-500">
+    <li class="flex justify-between items-center py-3 gap-4 group">
+      
+      <!-- Label side -->
+      <span class="text-sm font-medium text-slate-500 whitespace-nowrap">
         {{label}}
       </span>
 
-      <span class="text-sm font-semibold text-slate-900 text-right break-all">
+      <!-- Value side: Uses right alignment and subtle highlight on hover -->
+      <span class="text-sm font-semibold text-slate-900 text-right break-words bg-slate-50 group-hover:bg-sky-50 transition-colors px-2 py-1 rounded-md">
         {{value}}
       </span>
+      
     </li>
     {{/each}}
   </ul>

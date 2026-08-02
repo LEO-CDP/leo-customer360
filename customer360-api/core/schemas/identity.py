@@ -58,6 +58,7 @@ class MasterProfileBase(BaseModel):
     acquisition_campaign: Optional[str] = None
     persona_name: Optional[str] = None
     segmentation_tags: Optional[list[str]] = None
+    communication_preferences: Optional[dict] = None
     attributes: Optional[dict] = None
     source_systems: Optional[list[str]] = None
     first_seen_raw_profile_id: Optional[uuid.UUID] = None
@@ -132,6 +133,7 @@ class MasterProfileUpdate(BaseModel):
     acquisition_campaign: Optional[str] = None
     persona_name: Optional[str] = None
     segmentation_tags: Optional[list[str]] = None
+    communication_preferences: Optional[dict] = None
     attributes: Optional[dict] = None
     source_systems: Optional[list[str]] = None
     customer_since: Optional[date] = None

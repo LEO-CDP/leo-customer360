@@ -1,12 +1,98 @@
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-  <h3 class="font-semibold mb-1">Profile Overview</h3>
-  <p class="text-sm text-slate-500 mb-4">{{personaSummary}}</p>
-  <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">Customer Tier</div><div class="font-medium">{{tierLabel}}</div></div>
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">Account Status</div><div class="font-medium">{{statusLabel}}</div></div>
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">Primary Relationship</div><div class="font-medium">{{domainLabel}}</div></div>
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">Customer Since</div><div class="font-medium">{{customerSinceLabel}}</div></div>
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">Life Stage</div><div class="font-medium">{{lifecycleLabel}}</div></div>
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">KYC Status</div><div class="font-medium capitalize">{{kycStatus}}</div></div>
+<!-- 
+  =============================================================================
+  PROFILE OVERVIEW CARD
+  =============================================================================
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
+  
+  <!-- Card Header with Icon -->
+  <div class="flex items-center gap-2 mb-4">
+    <div class="p-1.5 bg-fuchsia-50 text-fuchsia-600 rounded-lg">
+      <!-- Identification Card Icon -->
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z" />
+      </svg>
+    </div>
+    <h3 class="font-semibold text-slate-900 text-base">Profile Overview</h3>
+  </div>
+
+  <!-- Persona Summary Callout Box -->
+  <!-- Uses a left-border accent to make the narrative text stand out as a generated summary -->
+  <div class="mb-6 p-4 bg-slate-50 border-l-2 border-fuchsia-400 rounded-r-xl">
+    <p class="text-sm text-slate-600 leading-relaxed">
+      {{personaSummary}}
+    </p>
+  </div>
+
+  <!-- Details Grid -->
+  <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-6">
+    
+    <!-- Customer Tier -->
+    <div class="flex gap-3 group">
+      <div class="mt-0.5 text-slate-400 group-hover:text-yellow-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-0.5">Customer Tier</div>
+        <div class="text-sm font-semibold text-slate-800">{{tierLabel}}</div>
+      </div>
+    </div>
+
+    <!-- Account Status -->
+    <div class="flex gap-3 group">
+      <div class="mt-0.5 text-slate-400 group-hover:text-emerald-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-0.5">Account Status</div>
+        <div class="text-sm font-semibold text-slate-800">{{statusLabel}}</div>
+      </div>
+    </div>
+
+    <!-- Primary Relationship / Domain -->
+    <div class="flex gap-3 group">
+      <div class="mt-0.5 text-slate-400 group-hover:text-indigo-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" /></svg>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-0.5">Primary Relationship</div>
+        <div class="text-sm font-semibold text-slate-800">{{domainLabel}}</div>
+      </div>
+    </div>
+
+    <!-- Customer Since -->
+    <div class="flex gap-3 group">
+      <div class="mt-0.5 text-slate-400 group-hover:text-sky-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-0.5">Customer Since</div>
+        <div class="text-sm font-semibold text-slate-800">{{customerSinceLabel}}</div>
+      </div>
+    </div>
+
+    <!-- Life Stage -->
+    <div class="flex gap-3 group">
+      <div class="mt-0.5 text-slate-400 group-hover:text-rose-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941" /></svg>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-0.5">Life Stage</div>
+        <div class="text-sm font-semibold text-slate-800">{{lifecycleLabel}}</div>
+      </div>
+    </div>
+
+    <!-- KYC Status -->
+    <div class="flex gap-3 group">
+      <div class="mt-0.5 text-slate-400 group-hover:text-teal-500 transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" /></svg>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-0.5">KYC Status</div>
+        <!-- Capitalize class applied to ensure 'verified' looks like 'Verified' -->
+        <div class="text-sm font-semibold text-slate-800 capitalize">{{kycStatus}}</div>
+      </div>
+    </div>
+
   </div>
 </div>

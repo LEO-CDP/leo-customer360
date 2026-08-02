@@ -955,6 +955,13 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
         overall_sentiment_score = round(rng.uniform(-1, 1), 4)
         profile_completeness_score = round(rng.uniform(40, 100), 2)
         segmentation_tags = [domain, lifecycle_stage, clv_segment + "_value"]
+        communication_preferences = Json(
+            {
+                "email_opt_in": rng.random() < 0.7,
+                "sms_opt_in": rng.random() < 0.45,
+                "push_opt_in": rng.random() < 0.8,
+            }
+        )
         attributes = Json({"occupation": rng.choice(OCCUPATIONS), "income_segment": rng.choice(INCOME_SEGMENTS)})
         model_versions = Json({
             "churn_model": "v1", "clv_model": "v1", "lead_scoring_model": "v1",
@@ -973,7 +980,8 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             "predictive_clv = %s", "clv_segment = %s", "engagement_score = %s",
             "latest_nps_score = %s", "average_csat = %s", "overall_sentiment_score = %s",
             "profile_completeness_score = %s", "identity_confidence_score = %s",
-            "segmentation_tags = %s", "attributes = COALESCE(attributes, '{}'::jsonb) || %s",
+            "segmentation_tags = %s", "communication_preferences = COALESCE(communication_preferences, '{}'::jsonb) || %s",
+            "attributes = COALESCE(attributes, '{}'::jsonb) || %s",
             "model_versions = %s", "scores_updated_at = NOW()", "gender = %s", "address = %s",
             "profile_picture_url = %s", "persona_summary = %s",
             # acquisition_source/acquisition_campaign: genuinely derivable from the
@@ -992,7 +1000,7 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             churn_probability, churn_risk_tier, lead_conversion_probability, lead_grade,
             historical_clv, predictive_clv, clv_segment, engagement_score, latest_nps_score,
             average_csat, overall_sentiment_score, profile_completeness_score,
-            identity_confidence_score, segmentation_tags, attributes, model_versions,
+            identity_confidence_score, segmentation_tags, communication_preferences, attributes, model_versions,
             gender, address, profile_picture_url, persona_summary,
         ]
 

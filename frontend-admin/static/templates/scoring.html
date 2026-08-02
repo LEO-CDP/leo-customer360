@@ -1,12 +1,93 @@
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-  <h3 class="font-semibold mb-3">Scoring &amp; Value</h3>
-  <div class="grid grid-cols-2 gap-3 text-sm">
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Lead Score</div><div class="text-lg font-semibold">{{leadScoreLabel}}</div><div class="text-xs text-slate-400">{{lead_grade}}</div></div>
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Churn Risk</div><div class="text-lg font-semibold">{{churnScoreLabel}}</div><div class="text-xs {{churnTextClass}}">{{churn_risk_tier}}</div></div>
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Predictive CLV</div><div class="text-lg font-semibold">{{predictiveClvLabel}}</div></div>
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Historical CLV</div><div class="text-lg font-semibold">{{historicalClvLabel}}</div></div>
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Profile Completeness</div><div class="text-lg font-semibold">{{completenessLabel}}</div></div>
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Identity Confidence</div><div class="text-lg font-semibold">{{identityConfidenceLabel}}</div></div>
+<!-- 
+  =============================================================================
+  SCORING & VALUE CARD
+  =============================================================================
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
+  
+  <!-- Card Header with Icon -->
+  <div class="flex items-center gap-2 mb-5">
+    <div class="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
+      <!-- Sparkles / Scoring Icon -->
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09l2.846.813-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+      </svg>
+    </div>
+    <h3 class="font-semibold text-slate-900 text-base">Scoring &amp; Value</h3>
   </div>
-  <div class="text-xs text-slate-400 mt-3">Scores updated at: {{scoresUpdatedLabel}}</div>
+
+  <!-- Metrics Grid -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+    
+    <!-- Lead Score -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-amber-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Lead Score</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-amber-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
+      </div>
+      <div class="flex items-baseline justify-between">
+        <div class="text-lg font-bold text-slate-900">{{leadScoreLabel}}</div>
+        {{#if lead_grade}}
+        <span class="text-xs font-semibold px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md">{{lead_grade}}</span>
+        {{/if}}
+      </div>
+    </div>
+
+    <!-- Churn Risk -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-amber-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Churn Risk</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-rose-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+      </div>
+      <div class="flex items-baseline justify-between">
+        <div class="text-lg font-bold text-slate-900">{{churnScoreLabel}}</div>
+        {{#if churn_risk_tier}}
+        <span class="text-xs font-semibold px-2 py-0.5 rounded-md {{churnTextClass}}">{{churn_risk_tier}}</span>
+        {{/if}}
+      </div>
+    </div>
+
+    <!-- Predictive CLV -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-amber-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Predictive CLV</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-emerald-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941" /></svg>
+      </div>
+      <div class="text-lg font-bold text-slate-900">{{predictiveClvLabel}}</div>
+    </div>
+
+    <!-- Historical CLV -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-amber-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Historical CLV</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-emerald-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      </div>
+      <div class="text-lg font-bold text-slate-900">{{historicalClvLabel}}</div>
+    </div>
+
+    <!-- Profile Completeness -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-amber-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Profile Completeness</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-sky-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17L17.25 21A1.49 1.49 0 0115.75 22.5H8.25A1.49 1.49 0 016.75 21l5.83-5.83a1.5 1.5 0 012.12 0zM12 2.25a9.75 9.75 0 109.75 9.75A9.75 9.75 0 0012 2.25z" /></svg>
+      </div>
+      <div class="text-lg font-bold text-slate-900">{{completenessLabel}}</div>
+    </div>
+
+    <!-- Identity Confidence -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-amber-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Identity Confidence</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" /></svg>
+      </div>
+      <div class="text-lg font-bold text-slate-900">{{identityConfidenceLabel}}</div>
+    </div>
+
+  </div>
+
+  <!-- Footer Timestamp -->
+  <div class="mt-4 pt-3 border-t border-slate-100 flex items-center gap-1.5 text-xs text-slate-400">
+    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+    <span>Scores updated at: {{scoresUpdatedLabel}}</span>
+  </div>
 </div>

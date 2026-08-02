@@ -179,13 +179,14 @@ ON CONFLICT (event_name) DO UPDATE SET
     updated_at            = now();
 
 
--- #########################################################################################
--- PROFILE ATTRIBUTE METADATA REGISTRY: SEED DATA
--- #########################################################################################
 
+-- ============================================================================
+-- FULL ATTRIBUTE CATALOG SEED
+-- ============================================================================
 -- Full attribute catalog for cdp_master_profiles (every column, grouped) plus
 -- the cdp_raw_profiles_stage matching keys used by backend-system/identity_resolution.
 -- Idempotent: safe to re-run (ON CONFLICT upserts by attribute_internal_code).
+
 INSERT INTO customer360.cdp_profile_attributes (
     attribute_internal_code,
     master_profile_column,
@@ -213,14 +214,17 @@ INSERT INTO customer360.cdp_profile_attributes (
     -- SYSTEM
     ('master_profile_id', 'master_profile_id', 'Master Profile ID', 'Primary key of the golden, resolved customer record.', 'SYSTEM', 'cdp_master_profiles', 'UUID', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 10),
     ('tenant_id', 'tenant_id', 'Tenant ID', 'Workspace/tenant scope used for multi-tenant data isolation.', 'SYSTEM', 'cdp_master_profiles', 'UUID', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 20),
+    ('user_id', 'user_id', 'User ID', 'Internal system user who owns or manages this profile (nullable).', 'SYSTEM', 'cdp_master_profiles', 'UUID', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 25),
     ('domain', 'domain', 'Business Domain', 'retail, banking, real_estate, travel, media, or education; drives domain-specific UI and activation logic.', 'SYSTEM', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 30),
     ('created_at', 'created_at', 'Profile Created At', 'Timestamp the master profile was first created.', 'SYSTEM', 'cdp_master_profiles', 'TIMESTAMP', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, NULL, 40),
     ('updated_at', 'updated_at', 'Profile Updated At', 'Timestamp of the most recent update to this profile.', 'SYSTEM', 'cdp_master_profiles', 'TIMESTAMP', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, NULL, 50),
+    ('status_code', 'status_code', 'Status Code', 'Active (1), Inactive (0), or Deleted (-1) state of the profile.', 'SYSTEM', 'cdp_master_profiles', 'SMALLINT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 55),
 
     -- IDENTITY (demographics + core/secondary contact info)
     ('full_name', 'full_name', 'Full Name', 'Customer full display name; identity-resolution matching key (exact, SHA-256 hashed).', 'IDENTITY', 'cdp_master_profiles, cdp_raw_profiles_stage', 'TEXT', 'all', TRUE, 'ACTIVE', TRUE, 'exact', NULL, 'most_recent', FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 60),
     ('first_name', 'first_name', 'First Name', 'Given name.', 'IDENTITY', 'cdp_master_profiles', 'TEXT', 'all', TRUE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 70),
     ('last_name', 'last_name', 'Last Name', 'Family name.', 'IDENTITY', 'cdp_master_profiles', 'TEXT', 'all', TRUE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 80),
+    ('profile_picture_url', 'profile_picture_url', 'Profile Picture URL', 'URL to the customer avatar or profile image.', 'IDENTITY', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 82),
     ('is_hashed', 'is_hashed', 'PII Is Hashed', 'True if full_name/email/phone_number/national_id are SHA-256 hashed (hashed-match ingestion). When TRUE, persona_name is required.', 'IDENTITY', 'cdp_master_profiles', 'BOOLEAN', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 85),
     ('email', 'email', 'Email Address', 'Primary email; identity-resolution matching key (exact, SHA-256 hashed).', 'IDENTITY', 'cdp_master_profiles, cdp_raw_profiles_stage', 'TEXT', 'all', TRUE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 90),
     ('phone_number', 'phone_number', 'Phone Number', 'Primary phone; identity-resolution matching key (exact, SHA-256 hashed).', 'IDENTITY', 'cdp_master_profiles, cdp_raw_profiles_stage', 'TEXT', 'all', TRUE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 100),
@@ -240,6 +244,7 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('cookie_ids', 'cookie_ids', 'Cookie IDs', 'Consolidated array of anonymous browser cookies for web session stitching.', 'IDENTITY_GRAPH', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 220),
     ('cookie_id', 'cookie_ids', 'Cookie ID (raw)', 'Raw per-event web cookie id on cdp_raw_profiles_stage; identity-resolution matching key, consolidated into cookie_ids.', 'IDENTITY_GRAPH', 'cdp_raw_profiles_stage', 'TEXT', 'all', FALSE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 230),
     ('push_tokens', 'push_tokens', 'Push Notification Tokens', 'Stored push tokens, e.g. {"fcm":"token","apns":"token"}.', 'IDENTITY_GRAPH', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 240),
+    ('attributes', 'attributes', 'Custom Attributes', 'Schemaless payload of dynamically extracted traits (e.g. occupation, income_segment).', 'MARKETING', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 245),
 
     -- RETAIL
     ('loyalty_id', 'loyalty_id', 'Loyalty ID', 'Retail loyalty program membership identifier.', 'RETAIL', 'cdp_master_profiles', 'TEXT', 'retail', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 250),
@@ -275,7 +280,7 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('persona_name', 'persona_name', 'Persona Name', 'Human-readable, non-PII label for segmentation/marketing and semantic search (e.g. "Gen Z Shopper"). Required whenever is_hashed = TRUE; auto-generated by backend-system/identity_resolution when real PII is hashed.', 'MARKETING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 345),
     ('persona_embedding', 'persona_embedding', 'Persona Embedding', 'LLM-generated embedding used for semantic search / lookalike modeling.', 'MARKETING', 'cdp_master_profiles', 'VECTOR', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 350),
     ('segmentation_tags', 'segmentation_tags', 'Segmentation Tags', 'Computed labels for fast Audience Builder queries (e.g. gen_z, frequent_buyer).', 'MARKETING', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 360),
-    ('attributes', 'attributes', 'Custom Attributes', 'Schemaless payload of dynamically extracted traits (e.g. occupation, income_segment).', 'MARKETING', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 370),
+    ('communication_preferences', 'communication_preferences', 'Communication Preferences', 'Tracks explicit user consent across multiple channels. Essential for omnichannel marketing compliance (e.g., GDPR, PDPA) before activating campaigns. Format: {"email_opt_in": true, "sms_opt_in": false, "push_opt_in": true}', 'MARKETING', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 370),
 
     -- LINEAGE
     ('source_systems', 'source_systems', 'Source Systems', 'All external systems that have contributed data to this profile.', 'LINEAGE', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 380),
@@ -312,6 +317,8 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('identity_confidence_score', 'identity_confidence_score', 'Identity Confidence Score', 'Confidence score of the identity-stitching (CIR) algorithm.', 'DATA_QUALITY', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'identity_resolution_scoring_model', 'v1', 'probability', 0, 1, 'realtime', 520),
     ('model_versions', 'model_versions', 'Model Versions', 'Tracks which ML model versions generated the current scores, e.g. {"churn_model":"v2.1","clv_model":"v1.4"}.', 'DATA_QUALITY', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 530),
     ('scores_updated_at', 'scores_updated_at', 'Scores Updated At', 'Last time the batch or streaming pipelines updated the scoring fields.', 'DATA_QUALITY', 'cdp_master_profiles', 'TIMESTAMP', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, NULL, 540)
+
+-- Conflict handling to safely upsert existing definitions
 ON CONFLICT (attribute_internal_code) DO UPDATE SET
     master_profile_column  = EXCLUDED.master_profile_column,
     name                   = EXCLUDED.name,

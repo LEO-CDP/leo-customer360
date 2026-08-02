@@ -1,20 +1,38 @@
-<header class="bg-white border-b border-slate-200">
-  <div class="max-w-[1600px] mx-auto px-4 py-3 flex items-center justify-between gap-4">
-    <div class="flex items-center gap-3">
-      <div class="w-10 h-10 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm">
-        <a href="#/overview">C360</a>
+<!-- 
+  =============================================================================
+  MODERN DASHBOARD HEADER & NAVIGATION
+  =============================================================================
+  Features:
+  - Sticky top layout with backdrop blur for a modern SaaS header feel
+  - Clean brand logo with indigo theme and typography
+  - Modernized period selector dropdown and action buttons with crisp icons
+  - Styled navigation tabs with active states, hover transitions, and padding
+-->
+<header class="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-sm">
+  
+  <!-- Top Brand & Actions Bar -->
+  <div class="max-w-[1600px] mx-auto px-6 py-3.5 flex items-center justify-between gap-4">
+    
+    <!-- Brand / Logo Area -->
+    <div class="flex items-center gap-3.5">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-700 text-white flex items-center justify-center font-bold text-sm shadow-md shadow-indigo-200 ring-2 ring-indigo-50">
+        <a href="#/overview" class="w-full h-full flex items-center justify-center">C360</a>
       </div>
       <div>
-        <div class="text-base font-semibold leading-tight">
-           <a href="#/overview">Customer 360 Platform</a>
+        <div class="text-sm font-bold text-slate-900 leading-tight tracking-tight">
+           <a href="#/overview" class="hover:text-indigo-600 transition-colors">Customer 360 Platform</a>
         </div>
-        <div class="text-xs text-slate-500 leading-tight">Unified Customer Profile</div>
+        <div class="text-xs text-slate-400 font-medium leading-tight mt-0.5">Unified Customer Profile</div>
       </div>
     </div>
-    <div class="flex items-center gap-2">
+
+    <!-- Actions Area -->
+    <div class="flex items-center gap-3">
+      
+      <!-- Period Select Container -->
       <div id="data-period-select-container" class="flex items-center gap-2 hidden">
-        <label class="text-xs text-slate-500 hidden sm:block">Period</label>
-        <select id="data-period-select" class="text-sm border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
+        <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider hidden sm:block">Period</label>
+        <select id="data-period-select" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer font-medium">
           <option value="3">Last 3 days</option>
           <option value="7">Last 7 days</option>
           <option value="30">Last 30 days</option>
@@ -23,39 +41,33 @@
           <option value="365">Last 365 days</option>
         </select>
       </div>
-      <button id="btn-export-pdf" class="text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-3 py-1.5 font-medium">Export PDF</button>
-      <button id="btn-settings" title="API connection settings" class="text-sm border border-slate-300 rounded-lg px-3 py-1.5 flex items-center gap-2">
-        <span id="api-status-dot" class="w-2 h-2 rounded-full bg-slate-300"></span>
+
+      <!-- Export PDF Button -->
+      <button id="btn-export-pdf" class="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-3.5 py-2 text-xs font-semibold transition-all shadow-sm shadow-indigo-100">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+        <span>Export PDF</span>
+      </button>
+
+      <!-- Admin / Settings Button -->
+      <button id="btn-settings" title="API connection settings" class="inline-flex items-center gap-2 border border-slate-200/80 bg-white hover:bg-slate-50 rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-700 transition-all shadow-sm">
+        <span id="api-status-dot" class="w-2 h-2 rounded-full bg-slate-300 ring-2 ring-slate-100"></span>
         <span>Admin</span>
       </button>
+
     </div>
   </div>
-  <nav class="max-w-[1600px] mx-auto px-4 flex gap-6 text-sm overflow-x-auto">
-    <!-- overview -->
-    <button data-tab="overview" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Overview</button>
-    
-    <!-- analytics -->
-    <button data-tab="analytics" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Analytics</button>
 
-    <!-- customers -->
-    <button data-tab="profiles" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap active">Profiles</button>
-    
-    <!-- segments -->
-    <button data-tab="segments" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Segments</button>
-    
-    <!-- journeys -->
-    <button data-tab="journeys" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Journeys</button>
-    
-    <!-- data sources -->
-    <button data-tab="datasources" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Data Sources</button>
-
-    <!-- scoring -->
-    <button data-tab="scoring" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Scoring</button>
-    
-    <!-- attributes -->
-    <button data-tab="attributes" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Attributes</button>
-    
-    <!-- admin -->
-    <button data-tab="admin" class="tab-btn py-2 border-b-2 border-transparent text-slate-500 whitespace-nowrap">Admin</button>
+  <!-- Navigation Bar -->
+  <nav class="max-w-[1600px] mx-auto px-6 flex gap-8 text-xs font-semibold overflow-x-auto scrollbar-none border-t border-slate-100">
+    <button data-tab="overview" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">Overview</button>
+    <button data-tab="analytics" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">Analytics</button>
+    <button data-tab="profiles" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">Profiles</button>
+    <button data-tab="segments" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">Segments</button>
+    <button data-tab="journeys" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">Journeys</button>
+    <button data-tab="datasources" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">Data Sources</button>
+    <button data-tab="scoring" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">Scoring</button>
+    <button data-tab="attributes" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">Attributes</button>
+    <button data-tab="admin" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">Admin</button>
   </nav>
+
 </header>

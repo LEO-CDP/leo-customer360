@@ -1,28 +1,46 @@
+<!-- Table Body -->
 {{#each rows}}
-<tr class="{{rowClass}}"{{#if clickable}} data-id="{{id}}"{{/if}}>
+<tr class="hover:bg-slate-50/60 transition-colors border-b border-slate-100 last:border-0 group {{rowClass}}"{{#if clickable}} data-id="{{id}}" style="cursor: pointer;"{{/if}}>
   {{#each cells}}
-  <td class="px-4 py-3 {{class}}">
+  <td class="px-6 py-4 {{class}}">
     {{#if isIdentity}}
     <div class="flex items-center gap-3">
-      <div class="w-9 h-9 shrink-0 rounded-full {{avatarBg}} {{avatarColor}} {{avatarTextClass}} flex items-center justify-center">{{avatarContent}}</div>
+      <!-- Avatar with shadow and white ring -->
+      <div class="w-10 h-10 shrink-0 rounded-full font-bold text-sm shadow-sm ring-2 ring-white flex items-center justify-center {{avatarBg}} {{avatarColor}} {{avatarTextClass}}">{{avatarContent}}</div>
       <div class="min-w-0">
-        <div class="font-medium text-slate-800 truncate">{{name}}</div>
+        <div class="font-semibold text-slate-900 truncate group-hover:text-indigo-600 transition-colors">{{name}}</div>
         {{#if sub}}
         {{#if isTagSub}}
-        <span class="inline-block text-[11px] font-mono text-slate-400 bg-slate-50 border border-slate-100 rounded px-1.5 py-0.5 mt-0.5">{{sub}}</span>
+        <span class="inline-block text-[11px] font-mono text-slate-500 bg-slate-100 border border-slate-200/60 rounded px-1.5 py-0.5 mt-0.5">{{sub}}</span>
         {{else}}
-        <div class="text-xs text-slate-400">{{sub}}</div>
+        <div class="text-xs text-slate-400 mt-0.5">{{sub}}</div>
         {{/if}}
         {{/if}}
       </div>
     </div>
     {{else if isBadge}}
-    {{#if value}}<span class="px-2 py-0.5 rounded-full text-xs font-medium {{badgeClass}}">{{value}}</span>{{else}}<span class="text-slate-300">—</span>{{/if}}
+    {{#if value}}
+      <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold shadow-sm {{badgeClass}}">{{value}}</span>
     {{else}}
-    {{#if value}}{{value}}{{else}}<span class="text-slate-300">—</span>{{/if}}
+      <span class="text-slate-300 font-mono">—</span>
+    {{/if}}
+    {{else}}
+    {{#if value}}
+      <span class="text-sm text-slate-700 font-medium">{{value}}</span>
+    {{else}}
+      <span class="text-slate-300 font-mono">—</span>
+    {{/if}}
     {{/if}}
   </td>
   {{/each}}
-  {{#if clickable}}<td class="px-4 py-3 text-right"><span class="text-indigo-600 text-xs font-medium">{{actionLabel}} &rarr;</span></td>{{/if}}
+  
+  {{#if clickable}}
+  <td class="px-6 py-4 text-right">
+    <span class="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 group-hover:text-indigo-700 transition-colors">
+      <span>{{actionLabel}}</span>
+      <svg class="w-3.5 h-3.5 transform group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+    </span>
+  </td>
+  {{/if}}
 </tr>
 {{/each}}

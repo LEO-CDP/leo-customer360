@@ -1,11 +1,82 @@
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-  <h3 class="font-semibold mb-3">Engagement Summary <span class="text-xs font-normal text-slate-400">(last {{periodDays}} days)</span></h3>
+<!-- 
+  =============================================================================
+  ENGAGEMENT SUMMARY CARD
+  =============================================================================
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
+  
+  <!-- Card Header with Icon -->
+  <div class="flex items-center justify-between mb-5">
+    <div class="flex items-center gap-2">
+      <div class="p-1.5 bg-sky-50 text-sky-600 rounded-lg">
+        <!-- Chart/Analytics Icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+        </svg>
+      </div>
+      <h3 class="font-semibold text-slate-900 text-base">Engagement Summary</h3>
+    </div>
+    <span class="text-xs font-medium px-2.5 py-1 bg-slate-100 text-slate-500 rounded-full">
+      Last {{periodDays}} days
+    </span>
+  </div>
+
+  <!-- Metrics Grid -->
   <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Engagement Score</div><div class="text-lg font-semibold">{{engagementScoreLabel}}</div></div>
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Total Logins</div><div class="text-lg font-semibold">{{totalLogins}}</div></div>
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Total Transactions</div><div class="text-lg font-semibold">{{totalTransactions}}</div></div>
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Total Spent</div><div class="text-lg font-semibold">{{totalSpentLabel}}</div></div>
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Avg. Transaction</div><div class="text-lg font-semibold">{{avgTransactionLabel}}</div></div>
-    <div class="border border-slate-100 rounded-lg p-3"><div class="text-xs text-slate-400">Last Interaction</div><div class="text-lg font-semibold">{{lastInteractionLabel}}</div></div>
+    
+    <!-- Engagement Score -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-sky-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Engagement Score</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-sky-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" /></svg>
+      </div>
+      <div class="text-lg font-bold text-slate-900">{{engagementScoreLabel}}</div>
+    </div>
+
+    <!-- Total Logins -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-sky-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Total Logins</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-sky-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
+      </div>
+      <div class="text-lg font-bold text-slate-900">{{totalLogins}}</div>
+    </div>
+
+    <!-- Total Transactions -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-sky-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Total Transactions</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-sky-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>
+      </div>
+      <div class="text-lg font-bold text-slate-900">{{totalTransactions}}</div>
+    </div>
+
+    <!-- Total Spent -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-sky-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Total Spent</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-emerald-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      </div>
+      <div class="text-lg font-bold text-slate-900">{{totalSpentLabel}}</div>
+    </div>
+
+    <!-- Avg. Transaction -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-sky-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Avg. Transaction</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-sky-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z" /></svg>
+      </div>
+      <div class="text-lg font-bold text-slate-900">{{avgTransactionLabel}}</div>
+    </div>
+
+    <!-- Last Interaction -->
+    <div class="border border-slate-200/70 bg-slate-50/50 rounded-xl p-4 transition-all hover:bg-white hover:border-sky-200 hover:shadow-sm group">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Last Interaction</span>
+        <svg class="w-4 h-4 text-slate-300 group-hover:text-sky-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      </div>
+      <div class="text-lg font-bold text-slate-900 truncate" title="{{lastInteractionLabel}}">{{lastInteractionLabel}}</div>
+    </div>
+
   </div>
 </div>

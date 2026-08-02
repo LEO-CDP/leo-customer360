@@ -1,21 +1,136 @@
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5 text-center">
-  <div class="w-20 h-20 mx-auto rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xl">{{initials}}</div>
-  <div class="mt-3 font-semibold text-slate-800">{{displayName}}</div>
-  <span class="inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium {{statusBadgeClass}}">{{statusLabel}}</span>
+<!-- 
+  =============================================================================
+  CUSTOMER PROFILE CARD
+  =============================================================================
+  Features:
+  - Subtle top gradient background for depth
+  - Hover effects on list items to highlight rows
+  - Integrated SVG icons for better visual scanning
+  - Monospaced, highlighted container for the Master Profile ID
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 relative overflow-hidden">
+  
+  <!-- Decorative Top Gradient Blob -->
+  <div class="absolute top-0 left-0 w-full h-24 bg-gradient-to-b from-indigo-50/80 to-transparent z-0"></div>
 
-  <div class="mt-5 text-left space-y-3 text-sm">
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">Persona Name</div><div>{{personaName}}</div></div>
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">Acquisition Source</div><div>{{acquisitionSource}}</div></div>
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">First Seen</div><div>{{firstSeenLabel}}</div></div>
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">Last Seen</div><div>{{lastSeenLabel}}</div></div>
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">Domain</div><div class="capitalize">{{domain}}</div></div>
-    <div><div class="text-xs text-slate-400 uppercase tracking-wide">Customer Tier</div><div>{{tierLabel}}</div></div>
-    <div>
-      <div class="text-xs text-slate-400 uppercase tracking-wide">Master Profile ID</div>
-      <div class="flex items-center gap-2">
-        <span class="font-mono text-xs truncate">{{master_profile_id}}</span>
-        <button class="btn-copy-id text-indigo-600 text-xs" data-value="{{master_profile_id}}">copy</button>
+  <!-- Header Section (Avatar, Name, Status) -->
+  <div class="relative z-10 p-6 pb-5 text-center border-b border-slate-100">
+    
+    <!-- Avatar with gradient and outer ring -->
+    <div class="w-20 h-20 mx-auto rounded-full bg-gradient-to-br from-indigo-100 to-indigo-200 text-indigo-700 flex items-center justify-center font-bold text-2xl shadow-inner ring-4 ring-white">
+      {{initials}}
+    </div>
+    
+    <!-- Display Name -->
+    <div class="mt-4 font-bold text-lg text-slate-900 tracking-tight">
+      {{displayName}}
+    </div>
+    
+    <!-- Status Badge -->
+    <div class="mt-1.5">
+      <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold shadow-sm border border-slate-100 {{statusBadgeClass}}">
+        <!-- Optional status dot (green example, can be dynamic based on status) -->
+        <span class="w-1.5 h-1.5 rounded-full bg-current mr-1.5 opacity-70"></span>
+        {{statusLabel}}
+      </span>
+    </div>
+  </div>
+
+  <!-- Details Section -->
+  <div class="p-6 pt-5 space-y-4">
+    
+    <!-- Persona Name -->
+    <div class="flex items-start gap-3 group">
+      <div class="mt-0.5 p-1.5 rounded-lg bg-slate-50 text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-500 transition-colors">
+        <!-- User Icon -->
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Persona Name</div>
+        <div class="text-sm font-medium text-slate-800">{{personaName}}</div>
       </div>
     </div>
+
+    <!-- Acquisition Source -->
+    <div class="flex items-start gap-3 group">
+      <div class="mt-0.5 p-1.5 rounded-lg bg-slate-50 text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-500 transition-colors">
+        <!-- Megaphone Icon -->
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-3.102-.069m3.102.069a22.536 22.536 0 013.102.069m-3.102-.069c.56.021 1.12.04 1.68.057m-1.68-.057c-.56-.021-1.12-.04-1.68-.057m-1.68-.057a22.53 22.53 0 00-3.102-.069m3.102.069a18.03 18.03 0 003.102-.069" /></svg>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Acquisition Source</div>
+        <div class="text-sm font-medium text-slate-800">{{acquisitionSource}}</div>
+      </div>
+    </div>
+
+    <!-- First Seen -->
+    <div class="flex items-start gap-3 group">
+      <div class="mt-0.5 p-1.5 rounded-lg bg-slate-50 text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-500 transition-colors">
+        <!-- Calendar Plus Icon -->
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">First Seen</div>
+        <div class="text-sm font-medium text-slate-800">{{firstSeenLabel}}</div>
+      </div>
+    </div>
+
+    <!-- Last Seen -->
+    <div class="flex items-start gap-3 group">
+      <div class="mt-0.5 p-1.5 rounded-lg bg-slate-50 text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-500 transition-colors">
+        <!-- Clock Icon -->
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      </div>
+      <div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Last Seen</div>
+        <div class="text-sm font-medium text-slate-800">{{lastSeenLabel}}</div>
+      </div>
+    </div>
+
+    <!-- Domain & Tier (Grid layout for tighter spacing) -->
+    <div class="grid grid-cols-2 gap-4">
+      <!-- Domain -->
+      <div class="flex items-start gap-3 group">
+        <div class="mt-0.5 p-1.5 rounded-lg bg-slate-50 text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-500 transition-colors">
+          <!-- Globe Icon -->
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>
+        </div>
+        <div>
+          <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Domain</div>
+          <div class="text-sm font-medium text-slate-800 capitalize">{{domain}}</div>
+        </div>
+      </div>
+
+      <!-- Customer Tier -->
+      <div class="flex items-start gap-3 group">
+        <div class="mt-0.5 p-1.5 rounded-lg bg-slate-50 text-slate-400 group-hover:bg-yellow-50 group-hover:text-yellow-500 transition-colors">
+          <!-- Sparkles Icon -->
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09l2.846.813-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" /></svg>
+        </div>
+        <div>
+          <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Tier</div>
+          <div class="text-sm font-medium text-slate-800">{{tierLabel}}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Master Profile ID (Highlighted Container) -->
+    <div class="mt-4 pt-4 border-t border-slate-100">
+      <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-2">Master Profile ID</div>
+      
+      <div class="flex items-center justify-between gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg group hover:border-indigo-200 transition-colors">
+        <!-- Fingerprint Icon -->
+        <svg class="w-4 h-4 text-slate-400 flex-shrink-0 ml-1 group-hover:text-indigo-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a7.464 7.464 0 01-1.15 3.993m1.989 3.559A11.209 11.209 0 008.25 10.5a3.75 3.75 0 117.5 0c0 .527-.021 1.049-.064 1.565M12 10.5a14.94 14.94 0 01-3.6 9.75m6.633-4.596a18.666 18.666 0 01-2.485 5.33" /></svg>
+        
+        <!-- ID Text -->
+        <span class="font-mono text-[13px] text-slate-600 truncate flex-1">{{master_profile_id}}</span>
+        
+        <!-- Copy Button (Icon + Tooltip style) -->
+        <button class="btn-copy-id text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-md transition-colors" data-value="{{master_profile_id}}" title="Copy ID">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>
+        </button>
+      </div>
+    </div>
+    
   </div>
 </div>

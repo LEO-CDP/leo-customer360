@@ -96,6 +96,7 @@ class CdpMasterProfile(Base):
     persona_name: Mapped[Optional[str]] = mapped_column(Text)
     persona_embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(768))
     segmentation_tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
+    communication_preferences: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     attributes: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     source_systems: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
     first_seen_raw_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))

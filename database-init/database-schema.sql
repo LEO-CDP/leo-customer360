@@ -132,9 +132,9 @@ CREATE TABLE IF NOT EXISTS customer360.sys_organization (
 
 COMMENT ON TABLE customer360.sys_organization IS 'Hierarchical business unit within a tenant (COMPANY/DIVISION/BRANCH/DEPARTMENT), self-referencing via parent_organization_id. Used to scope sys_user membership below the tenant level.';
 
-CREATE INDEX idx_org_tenant ON customer360.sys_organization (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_org_tenant ON customer360.sys_organization (tenant_id);
 
-CREATE INDEX idx_org_parent ON customer360.sys_organization (parent_organization_id);
+CREATE INDEX IF NOT EXISTS idx_org_parent ON customer360.sys_organization (parent_organization_id);
 
 -- ==========================================================
 -- Application User table
@@ -163,11 +163,11 @@ CREATE TABLE IF NOT EXISTS customer360.sys_user (
 
 COMMENT ON TABLE customer360.sys_user IS 'Internal application user/staff account, optionally backed by a Keycloak SSO identity (keycloak_user_id). Referenced as the nullable "data owner" (user_id) on most crm_*/cdp_* tables -- NULL means the row was created by an ingestion pipeline rather than an interactive admin user.';
 
-CREATE INDEX idx_user_tenant ON customer360.sys_user (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_user_tenant ON customer360.sys_user (tenant_id);
 
-CREATE INDEX idx_user_org ON customer360.sys_user (organization_id);
+CREATE INDEX IF NOT EXISTS idx_user_org ON customer360.sys_user (organization_id);
 
-CREATE INDEX idx_user_keycloak ON customer360.sys_user (keycloak_user_id);
+CREATE INDEX IF NOT EXISTS idx_user_keycloak ON customer360.sys_user (keycloak_user_id);
 
 CREATE TABLE IF NOT EXISTS customer360.sys_role (
     role_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS customer360.sys_role (
 
 COMMENT ON TABLE customer360.sys_role IS 'RBAC role definition scoped to a tenant (e.g. Admin, Marketer, Analyst). Granted permissions via sys_role_permission and assigned to users via sys_user_role.';
 
-CREATE INDEX idx_role_tenant ON customer360.sys_role (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_role_tenant ON customer360.sys_role (tenant_id);
 
 CREATE TABLE IF NOT EXISTS customer360.sys_permission (
     permission_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
@@ -283,23 +283,148 @@ CREATE TABLE IF NOT EXISTS customer360.sys_audit_log (
 
 COMMENT ON TABLE customer360.sys_audit_log IS 'Compliance/audit trail: one row per user or API action (CREATE/UPDATE/DELETE/LOGIN/EXPORT/...) with before/after JSONB snapshots, auth provenance, request tracing IDs, and success/error outcome.';
 
--- Campaign
+-- ==========================================================
+-- Campaign & Performance Schema
+-- ==========================================================
 CREATE TABLE IF NOT EXISTS customer360.crm_campaign (
     campaign_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
+    
+    -- Dashboard Dimensions
+    campaign_code VARCHAR(100),
     name TEXT NOT NULL,
+    status VARCHAR(50) DEFAULT 'Draft',
+    channel VARCHAR(100),
+    platform VARCHAR(100),
+    objective VARCHAR(100),
+    
+    -- Core details
     description TEXT,
     keywords TEXT[],
     lang TEXT DEFAULT 'en',
     embedding vector(1536),
     start_date DATE,
     end_date DATE,
+    
+    -- Financials
+    budget_amount NUMERIC(18, 2),
+    currency CHAR(3) DEFAULT 'VND',
+    
     metadata JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    
+    CONSTRAINT uq_crm_campaign_code UNIQUE (tenant_id, campaign_code)
 );
 
-COMMENT ON TABLE customer360.crm_campaign IS 'CRM journey-graph entity: a marketing initiative (part of the Lead -> Contact -> Opportunity B2B journey). Responders are tracked via crm_campaign_member.';
+COMMENT ON TABLE customer360.crm_campaign IS 'CRM journey-graph entity: a marketing initiative. Updated to support omnichannel dashboard dimensions (channel, platform, objective, status). Responders are tracked via crm_campaign_member.';
+
+-- Campaign Performance Daily
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_performance_daily (
+    performance_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    
+    -- Time dimension for daily trend aggregation
+    report_date DATE NOT NULL,
+    
+    -- Core funnel metrics tracking
+    spend NUMERIC(18, 2) DEFAULT 0.00,
+    impressions BIGINT DEFAULT 0,
+    clicks BIGINT DEFAULT 0,
+    conversions BIGINT DEFAULT 0,
+    revenue_estimated NUMERIC(18, 2) DEFAULT 0.00,
+    
+    -- System audit fields
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    
+    -- Constraint: Only one performance record per campaign per day per tenant
+    CONSTRAINT uq_campaign_daily_performance UNIQUE (tenant_id, campaign_id, report_date)
+);
+
+COMMENT ON TABLE customer360.crm_campaign_performance_daily IS 'Daily aggregated performance metrics for omnichannel campaigns. Tracks spend, impressions, clicks, conversions, and estimated revenue over time.';
+
+-- Campaign Performance Metrics View
+CREATE OR REPLACE VIEW customer360.vw_campaign_performance_metrics AS
+SELECT 
+    c.tenant_id,
+    c.campaign_id,
+    c.campaign_code,
+    c.name,
+    c.status,
+    c.channel,
+    c.platform,
+    c.objective,
+    
+    -- Base Aggregates
+    COALESCE(SUM(p.spend), 0) AS total_spend,
+    COALESCE(SUM(p.impressions), 0) AS total_impressions,
+    COALESCE(SUM(p.clicks), 0) AS total_clicks,
+    COALESCE(SUM(p.conversions), 0) AS total_conversions,
+    COALESCE(SUM(p.revenue_estimated), 0) AS total_revenue,
+    
+    -- Derived KPI: Click-Through Rate (CTR %)
+    CASE WHEN SUM(p.impressions) > 0 
+         THEN ROUND((SUM(p.clicks)::NUMERIC / SUM(p.impressions)) * 100, 2) 
+         ELSE 0.00 END AS ctr_percentage,
+         
+    -- Derived KPI: Conversion Rate (CVR %)
+    CASE WHEN SUM(p.clicks) > 0 
+         THEN ROUND((SUM(p.conversions)::NUMERIC / SUM(p.clicks)) * 100, 2) 
+         ELSE 0.00 END AS cvr_percentage,
+         
+    -- Derived KPI: Cost Per Acquisition (CPA)
+    CASE WHEN SUM(p.conversions) > 0 
+         THEN ROUND(SUM(p.spend) / SUM(p.conversions), 0) 
+         ELSE 0.00 END AS cpa,
+         
+    -- Derived KPI: Return on Ad Spend (ROAS)
+    CASE WHEN SUM(p.spend) > 0 
+         THEN ROUND(SUM(p.revenue_estimated) / SUM(p.spend), 2) 
+         ELSE 0.00 END AS roas
+         
+FROM customer360.crm_campaign c
+LEFT JOIN customer360.crm_campaign_performance_daily p 
+    ON c.campaign_id = p.campaign_id
+GROUP BY 
+    c.tenant_id, 
+    c.campaign_id, 
+    c.campaign_code, 
+    c.name, 
+    c.status, 
+    c.channel, 
+    c.platform, 
+    c.objective;
+
+-- ----------------------------------------------------------------------------
+-- INDEXES & ROW LEVEL SECURITY
+-- ----------------------------------------------------------------------------
+
+-- Indexes for crm_campaign
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_tenant ON customer360.crm_campaign (tenant_id);
+
+-- Indexes for crm_campaign_performance_daily
+-- Optimizes time-series queries (e.g., loading the daily spend trend chart)
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_perf_tenant_date 
+    ON customer360.crm_campaign_performance_daily(tenant_id, report_date DESC);
+    
+-- Optimizes joins when fetching aggregate totals for a specific campaign list
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_perf_campaign 
+    ON customer360.crm_campaign_performance_daily(campaign_id);
+
+-- RLS policy for crm_campaign_performance_daily
+-- Note: Make sure to also add 'crm_campaign_performance_daily' to the 
+-- tenant_tables array in your DO $$ script at the bottom of the schema file.
+ALTER TABLE customer360.crm_campaign_performance_daily ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer360.crm_campaign_performance_daily FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_policy ON customer360.crm_campaign_performance_daily;
+
+CREATE POLICY tenant_policy ON customer360.crm_campaign_performance_daily
+    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
 
 -- CampaignMember
 CREATE TABLE IF NOT EXISTS customer360.crm_campaign_member (
@@ -428,21 +553,21 @@ COMMENT ON TABLE customer360.crm_industry IS 'Dictionary of industry classificat
 -- tenant_id indexes for the CRM entity tables above, used both for lookup
 -- performance and by the tenant_id RLS policies (see ROW LEVEL SECURITY
 -- section at the end of this file).
-CREATE INDEX idx_crm_campaign_tenant ON customer360.crm_campaign (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_tenant ON customer360.crm_campaign (tenant_id);
 
-CREATE INDEX idx_crm_campaign_member_tenant ON customer360.crm_campaign_member (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_member_tenant ON customer360.crm_campaign_member (tenant_id);
 
-CREATE INDEX idx_crm_lead_tenant ON customer360.crm_lead (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_lead_tenant ON customer360.crm_lead (tenant_id);
 
-CREATE INDEX idx_crm_lead_source_tenant ON customer360.crm_lead_source (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_lead_source_tenant ON customer360.crm_lead_source (tenant_id);
 
-CREATE INDEX idx_crm_contact_tenant ON customer360.crm_contact (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_contact_tenant ON customer360.crm_contact (tenant_id);
 
-CREATE INDEX idx_crm_account_tenant ON customer360.crm_account (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_account_tenant ON customer360.crm_account (tenant_id);
 
-CREATE INDEX idx_crm_opportunity_tenant ON customer360.crm_opportunity (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_opportunity_tenant ON customer360.crm_opportunity (tenant_id);
 
-CREATE INDEX idx_crm_industry_tenant ON customer360.crm_industry (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_industry_tenant ON customer360.crm_industry (tenant_id);
 
 ---------------------------------------------------
 -- MASTER PROFILES & IDENTITY RESOLUTION
@@ -597,6 +722,10 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- Schemaless payload for flexible traits extracted dynamically.
     -- Format: {"occupation": "engineer", "income_segment": "high", "preferred_category": "electronics"}
     attributes JSONB DEFAULT '{}'::JSONB,
+    -- Tracks explicit user consent across multiple channels. 
+    -- Essential for omnichannel marketing compliance (e.g., GDPR, PDPA) before activating campaigns.
+    -- Format: {"email_opt_in": true, "sms_opt_in": false, "push_opt_in": true}
+    communication_preferences JSONB DEFAULT '{}'::JSONB,
 
     -- ------------------------------------------------------------------------
     -- LINEAGE & AUDIT
@@ -1236,8 +1365,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_content_items (
 
 COMMENT ON TABLE customer360.cdp_content_items IS 'Personalized content library (news/video/product/article) for the Customer 360 profile dashboard "Personalized Items" panel; ranked per profile by segment_tags overlap with cdp_master_profiles.segmentation_tags via /api/v1/content-items/recommended.';
 
-CREATE INDEX idx_cdp_content_items_domain_type ON customer360.cdp_content_items (domain, item_type);
-CREATE INDEX idx_cdp_content_items_tags ON customer360.cdp_content_items USING GIN (segment_tags);
+CREATE INDEX IF NOT EXISTS idx_cdp_content_items_domain_type ON customer360.cdp_content_items (domain, item_type);
+CREATE INDEX IF NOT EXISTS idx_cdp_content_items_tags ON customer360.cdp_content_items USING GIN (segment_tags);
 
 -- ============================================================================
 -- cdp_segments: segmentation tag metadata (Audience Builder)
@@ -1291,8 +1420,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_segments (
 
 COMMENT ON TABLE customer360.cdp_segments IS 'Segmentation/Audience Builder metadata: one row per named segment tag (mirrored into cdp_master_profiles.segmentation_tags), storing its jQuery QueryBuilder rule tree (json_rules), translated SQL fragment (sql_rules), the full executable query (final_generated_sql), and whether it was authored by a human or an ai_agent.';
 
-CREATE INDEX idx_cdp_segments_tenant ON customer360.cdp_segments (tenant_id);
-CREATE INDEX idx_cdp_segments_json_rules ON customer360.cdp_segments USING GIN (json_rules);
+CREATE INDEX IF NOT EXISTS idx_cdp_segments_tenant ON customer360.cdp_segments (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_segments_json_rules ON customer360.cdp_segments USING GIN (json_rules);
 
 ---------------------------------------------------
 -- GRAPH EDGES (Partitioned by Relation)
@@ -1318,64 +1447,64 @@ CREATE TABLE IF NOT EXISTS customer360.graph_edges (
 COMMENT ON TABLE customer360.graph_edges IS 'General-purpose graph edge table (from_id/to_id + from_type/to_type), list-partitioned by relation (belongs_to, converted, follows, has_role, ...). Carries its own embedding vector(1536) for relationship-aware semantic search.';
 
 -- Partitions for known relations
-CREATE TABLE customer360.graph_edges_belongs_to PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_belongs_to PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('belongs_to');
 
-CREATE TABLE customer360.graph_edges_comes_from PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_comes_from PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('comes_from');
 
-CREATE TABLE customer360.graph_edges_converted PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_converted PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('converted');
 
-CREATE TABLE customer360.graph_edges_follows PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_follows PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('follows');
 
-CREATE TABLE customer360.graph_edges_is_part_of PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_part_of PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('is_part_of');
 
-CREATE TABLE customer360.graph_edges_is_active_as PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_active_as PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('is_active_as');
 
-CREATE TABLE customer360.graph_edges_is_connected_to PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_connected_to PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('is_connected_to');
 
-CREATE TABLE customer360.graph_edges_is_from PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_from PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('is_from');
 
-CREATE TABLE customer360.graph_edges_created_by PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_created_by PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('created_by');
 
-CREATE TABLE customer360.graph_edges_is_driven_by PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_driven_by PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('is_driven_by');
 
-CREATE TABLE customer360.graph_edges_has_role PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_has_role PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('has_role');
 
-CREATE TABLE customer360.graph_edges_has PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_has PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('has');
 
-CREATE TABLE customer360.graph_edges_is_for_the PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_is_for_the PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('is_for_the');
 
-CREATE TABLE customer360.graph_edges_belongs_to_industry PARTITION OF customer360.graph_edges FOR
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_belongs_to_industry PARTITION OF customer360.graph_edges FOR
 VALUES
     IN ('belongs_to_industry');
 
 -- Catch-all
-CREATE TABLE customer360.graph_edges_other PARTITION OF customer360.graph_edges DEFAULT;
+CREATE TABLE IF NOT EXISTS customer360.graph_edges_other PARTITION OF customer360.graph_edges DEFAULT;
 
 ---------------------------------------------------
 -- INDEXES
@@ -1392,25 +1521,25 @@ CREATE TABLE customer360.graph_edges_other PARTITION OF customer360.graph_edges 
 -- -------------------------------------------------------------------------
 
 -- Email is unique per workspace. Ignored if NULL (e.g., mobile-only users).
-CREATE UNIQUE INDEX ux_cdp_mp_tenant_email ON customer360.cdp_master_profiles (tenant_id, email)
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_mp_tenant_email ON customer360.cdp_master_profiles (tenant_id, email)
 WHERE
     email IS NOT NULL;
 
 -- Phone is unique per workspace. Ignored if NULL (e.g., web-only users).
-CREATE UNIQUE INDEX ux_cdp_mp_tenant_phone ON customer360.cdp_master_profiles (tenant_id, phone_number)
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_mp_tenant_phone ON customer360.cdp_master_profiles (tenant_id, phone_number)
 WHERE
     phone_number IS NOT NULL;
 
 -- Core Banking & Retail Identifiers (Must be unique per tenant)
-CREATE UNIQUE INDEX ux_cdp_mp_tenant_national_id ON customer360.cdp_master_profiles (tenant_id, national_id)
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_mp_tenant_national_id ON customer360.cdp_master_profiles (tenant_id, national_id)
 WHERE
     national_id IS NOT NULL;
 
-CREATE UNIQUE INDEX ux_cdp_mp_tenant_cif_number ON customer360.cdp_master_profiles (tenant_id, cif_number)
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_mp_tenant_cif_number ON customer360.cdp_master_profiles (tenant_id, cif_number)
 WHERE
     cif_number IS NOT NULL;
 
-CREATE UNIQUE INDEX ux_cdp_mp_tenant_loyalty_id ON customer360.cdp_master_profiles (tenant_id, loyalty_id)
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_mp_tenant_loyalty_id ON customer360.cdp_master_profiles (tenant_id, loyalty_id)
 WHERE
     loyalty_id IS NOT NULL;
 
@@ -1421,24 +1550,24 @@ WHERE
 -- -------------------------------------------------------------------------
 
 -- Fast retrieval for churn prevention campaigns (Partial index saves space)
-CREATE INDEX idx_cdp_mp_churn_tier ON customer360.cdp_master_profiles (tenant_id, churn_risk_tier)
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_churn_tier ON customer360.cdp_master_profiles (tenant_id, churn_risk_tier)
 WHERE
     churn_risk_tier IN ('high', 'critical');
 
 -- Fast retrieval for high-value customer targeting (Whales)
-CREATE INDEX idx_cdp_mp_pred_clv ON customer360.cdp_master_profiles (
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_pred_clv ON customer360.cdp_master_profiles (
     tenant_id,
     predictive_clv DESC NULLS LAST
 );
 
 -- Fast routing of high-probability leads to sales/CRM
-CREATE INDEX idx_cdp_mp_lead_prob ON customer360.cdp_master_profiles (
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_lead_prob ON customer360.cdp_master_profiles (
     tenant_id,
     lead_conversion_probability DESC NULLS LAST
 );
 
 -- Analytics lookup for profiles needing data enrichment
-CREATE INDEX idx_cdp_mp_data_quality ON customer360.cdp_master_profiles (
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_data_quality ON customer360.cdp_master_profiles (
     tenant_id,
     profile_completeness_score,
     identity_confidence_score
@@ -1455,74 +1584,74 @@ CREATE INDEX idx_cdp_mp_data_quality ON customer360.cdp_master_profiles (
 -- -------------------------------------------------------------------------
 
 -- Deterministic external IDs (e.g., {"appsflyer_id": "...", "ga_client_id": "..."})
-CREATE INDEX idx_cdp_mp_external_ids ON customer360.cdp_master_profiles USING GIN (external_ids);
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_external_ids ON customer360.cdp_master_profiles USING GIN (external_ids);
 
 -- Secondary contacts
-CREATE INDEX idx_cdp_mp_sec_emails ON customer360.cdp_master_profiles USING GIN (secondary_emails);
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_sec_emails ON customer360.cdp_master_profiles USING GIN (secondary_emails);
 
-CREATE INDEX idx_cdp_mp_sec_phones ON customer360.cdp_master_profiles USING GIN (secondary_phones);
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_sec_phones ON customer360.cdp_master_profiles USING GIN (secondary_phones);
 
 -- Device & Ad Graph (Arrays)
-CREATE INDEX idx_cdp_mp_device_ids ON customer360.cdp_master_profiles USING GIN (device_ids);
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_device_ids ON customer360.cdp_master_profiles USING GIN (device_ids);
 
-CREATE INDEX idx_cdp_mp_advertising_ids ON customer360.cdp_master_profiles USING GIN (advertising_ids);
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_advertising_ids ON customer360.cdp_master_profiles USING GIN (advertising_ids);
 
-CREATE INDEX idx_cdp_mp_cookie_ids ON customer360.cdp_master_profiles USING GIN (cookie_ids);
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_cookie_ids ON customer360.cdp_master_profiles USING GIN (cookie_ids);
 
 -- Raw staging indexes: identity fields used for matching, plus the
 -- processing-queue lookup (tenant_id, status_code).
-CREATE INDEX idx_raw_profiles_stage_tenant_status ON customer360.cdp_raw_profiles_stage (tenant_id, status_code);
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_status ON customer360.cdp_raw_profiles_stage (tenant_id, status_code);
 
-CREATE INDEX idx_raw_profiles_stage_email ON customer360.cdp_raw_profiles_stage (email)
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_email ON customer360.cdp_raw_profiles_stage (email)
 WHERE
     email IS NOT NULL;
 
-CREATE INDEX idx_raw_profiles_stage_phone ON customer360.cdp_raw_profiles_stage (phone_number)
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_phone ON customer360.cdp_raw_profiles_stage (phone_number)
 WHERE
     phone_number IS NOT NULL;
 
-CREATE INDEX idx_raw_profiles_stage_external_customer_id ON customer360.cdp_raw_profiles_stage (external_customer_id)
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_external_customer_id ON customer360.cdp_raw_profiles_stage (external_customer_id)
 WHERE
     external_customer_id IS NOT NULL;
 
-CREATE INDEX idx_raw_profiles_stage_device_id ON customer360.cdp_raw_profiles_stage (device_id)
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_device_id ON customer360.cdp_raw_profiles_stage (device_id)
 WHERE
     device_id IS NOT NULL;
 
-CREATE INDEX idx_raw_profiles_stage_advertising_id ON customer360.cdp_raw_profiles_stage (advertising_id)
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_advertising_id ON customer360.cdp_raw_profiles_stage (advertising_id)
 WHERE
     advertising_id IS NOT NULL;
 
-CREATE INDEX idx_raw_profiles_stage_cookie_id ON customer360.cdp_raw_profiles_stage (cookie_id)
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_cookie_id ON customer360.cdp_raw_profiles_stage (cookie_id)
 WHERE
     cookie_id IS NOT NULL;
 
-CREATE INDEX idx_raw_profiles_stage_national_id ON customer360.cdp_raw_profiles_stage (national_id)
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_national_id ON customer360.cdp_raw_profiles_stage (national_id)
 WHERE
     national_id IS NOT NULL;
 
-CREATE INDEX idx_contacts_date ON customer360.crm_customer_contacts (contact_date);
+CREATE INDEX IF NOT EXISTS idx_contacts_date ON customer360.crm_customer_contacts (contact_date);
 
 -- crm_transactions indexes: tenant timeline, resolved-profile timeline, generic
 -- entity lookups, and idempotent re-ingestion protection (mirrors the
 -- cdp_raw_events / cdp_profile_links index conventions above).
-CREATE INDEX idx_crm_transactions_tenant_time ON customer360.crm_transactions (
+CREATE INDEX IF NOT EXISTS idx_crm_transactions_tenant_time ON customer360.crm_transactions (
     tenant_id,
     transaction_time DESC
 );
 
-CREATE INDEX idx_crm_transactions_master_profile ON customer360.crm_transactions (
+CREATE INDEX IF NOT EXISTS idx_crm_transactions_master_profile ON customer360.crm_transactions (
     master_profile_id,
     transaction_time DESC
 )
 WHERE
     master_profile_id IS NOT NULL;
 
-CREATE INDEX idx_crm_transactions_entity ON customer360.crm_transactions (entity_type, entity_id)
+CREATE INDEX IF NOT EXISTS idx_crm_transactions_entity ON customer360.crm_transactions (entity_type, entity_id)
 WHERE
     entity_id IS NOT NULL;
 
-CREATE UNIQUE INDEX ux_crm_transactions_tenant_source ON customer360.crm_transactions (
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_transactions_tenant_source ON customer360.crm_transactions (
     tenant_id,
     source_system,
     source_transaction_id
@@ -1552,7 +1681,7 @@ WHERE
 -- (cdp_raw_events is PARTITION BY RANGE (event_time)) -- so this dedups
 -- (tenant_id, source_system, event_dedup_key) per event_time value rather
 -- than globally across all time.
-CREATE UNIQUE INDEX ux_cdp_raw_events_tenant_source_dedup ON customer360.cdp_raw_events (
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_raw_events_tenant_source_dedup ON customer360.cdp_raw_events (
     tenant_id,
     source_system,
     event_dedup_key,
@@ -1561,9 +1690,9 @@ CREATE UNIQUE INDEX ux_cdp_raw_events_tenant_source_dedup ON customer360.cdp_raw
 WHERE
     event_dedup_key IS NOT NULL;
 -- Tenant timeline queries (most common access pattern for a Customer 360 view).
-CREATE INDEX idx_cdp_raw_events_tenant_time ON customer360.cdp_raw_events (tenant_id, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_tenant_time ON customer360.cdp_raw_events (tenant_id, event_time DESC);
 -- Event taxonomy / funnel analysis per tenant+domain.
-CREATE INDEX idx_cdp_raw_events_taxonomy ON customer360.cdp_raw_events (
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_taxonomy ON customer360.cdp_raw_events (
     tenant_id,
     domain,
     event_category,
@@ -1571,73 +1700,73 @@ CREATE INDEX idx_cdp_raw_events_taxonomy ON customer360.cdp_raw_events (
     event_time DESC
 );
 -- Resolved-profile timeline (Customer 360 activity feed).
-CREATE INDEX idx_cdp_raw_events_master_profile ON customer360.cdp_raw_events (
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_master_profile ON customer360.cdp_raw_events (
     master_profile_id,
     event_time DESC
 )
 WHERE
     master_profile_id IS NOT NULL;
 -- Backfill lookups from cdp_raw_profiles_stage.
-CREATE INDEX idx_cdp_raw_events_raw_profile ON customer360.cdp_raw_events (raw_profile_id)
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_raw_profile ON customer360.cdp_raw_events (raw_profile_id)
 WHERE
     raw_profile_id IS NOT NULL;
 -- Pre-resolution identity lookups (event arrives before/without CIR linking).
-CREATE INDEX idx_cdp_raw_events_device_id ON customer360.cdp_raw_events (device_id)
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_device_id ON customer360.cdp_raw_events (device_id)
 WHERE
     device_id IS NOT NULL;
 
-CREATE INDEX idx_cdp_raw_events_advertising_id ON customer360.cdp_raw_events (advertising_id)
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_advertising_id ON customer360.cdp_raw_events (advertising_id)
 WHERE
     advertising_id IS NOT NULL;
 
-CREATE INDEX idx_cdp_raw_events_cookie_id ON customer360.cdp_raw_events (cookie_id)
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_cookie_id ON customer360.cdp_raw_events (cookie_id)
 WHERE
     cookie_id IS NOT NULL;
 
-CREATE INDEX idx_cdp_raw_events_external_customer_id ON customer360.cdp_raw_events (external_customer_id)
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_external_customer_id ON customer360.cdp_raw_events (external_customer_id)
 WHERE
     external_customer_id IS NOT NULL;
 
-CREATE INDEX idx_cdp_raw_events_session_id ON customer360.cdp_raw_events (session_id)
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_session_id ON customer360.cdp_raw_events (session_id)
 WHERE
     session_id IS NOT NULL;
 -- Generic entity lookups (all events about a given product/property/booking/...).
-CREATE INDEX idx_cdp_raw_events_entity ON customer360.cdp_raw_events (entity_type, entity_id)
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_entity ON customer360.cdp_raw_events (entity_type, entity_id)
 WHERE
     entity_id IS NOT NULL;
 -- Conversion funnel / revenue reporting.
-CREATE INDEX idx_cdp_raw_events_conversion ON customer360.cdp_raw_events (tenant_id, event_time DESC)
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_conversion ON customer360.cdp_raw_events (tenant_id, event_time DESC)
 WHERE
     is_conversion = TRUE;
 -- Point lookup by event_id alone (without needing event_time for partition pruning).
-CREATE INDEX idx_cdp_raw_events_event_id ON customer360.cdp_raw_events (event_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_event_id ON customer360.cdp_raw_events (event_id);
 -- Ad-hoc querying of the raw source payload.
-CREATE INDEX idx_cdp_raw_events_payload ON customer360.cdp_raw_events USING GIN (event_payload);
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_payload ON customer360.cdp_raw_events USING GIN (event_payload);
 -- Geo-proximity queries (property/store/destination location search).
-CREATE INDEX idx_cdp_raw_events_geo ON customer360.cdp_raw_events USING GIST (geo_location)
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_geo ON customer360.cdp_raw_events USING GIST (geo_location)
 WHERE
     geo_location IS NOT NULL;
 
 -- Event catalog: browsing by category/domain and fast active-event lookup.
-CREATE INDEX idx_cdp_event_catalog_category ON customer360.cdp_event_catalog (event_category);
+CREATE INDEX IF NOT EXISTS idx_cdp_event_catalog_category ON customer360.cdp_event_catalog (event_category);
 
-CREATE INDEX idx_cdp_event_catalog_domain_scope ON customer360.cdp_event_catalog (domain_scope)
+CREATE INDEX IF NOT EXISTS idx_cdp_event_catalog_domain_scope ON customer360.cdp_event_catalog (domain_scope)
 WHERE
     status = 'ACTIVE';
 
 -- Graph edges indexes
-CREATE INDEX ON customer360.graph_edges_belongs_to (from_id, to_id);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_belongs_to_from_to ON customer360.graph_edges_belongs_to (from_id, to_id);
 
-CREATE INDEX ON customer360.graph_edges_comes_from (from_id);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_comes_from_from_id ON customer360.graph_edges_comes_from (from_id);
 
-CREATE INDEX ON customer360.graph_edges_converted (from_id);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_converted_from_id ON customer360.graph_edges_converted (from_id);
 
-CREATE INDEX ON customer360.graph_edges_follows USING ivfflat (embedding vector_cosine_ops)
+CREATE INDEX IF NOT EXISTS idx_graph_edges_follows_embedding_ivfflat ON customer360.graph_edges_follows USING ivfflat (embedding vector_cosine_ops)
 WITH (lists = 100);
 
-CREATE INDEX ON customer360.graph_edges_is_driven_by (created_at);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_is_driven_by_created_at ON customer360.graph_edges_is_driven_by (created_at);
 
-CREATE INDEX ON customer360.graph_edges_belongs_to_industry (created_at);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_belongs_to_industry_created_at ON customer360.graph_edges_belongs_to_industry (created_at);
 
 ---------------------------------------------------
 -- ROW LEVEL SECURITY (RBAC / Multi-Tenant Isolation)

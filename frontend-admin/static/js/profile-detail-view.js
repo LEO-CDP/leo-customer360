@@ -144,6 +144,13 @@ window.C360 = window.C360 || {};
       channels: channels,
       hasAttributes: attributeChips.length > 0,
       attributeChips: attributeChips,
+
+      // Check if the communication_preferences object exists and has at least one key
+      hasCommunicationPreferences: Object.keys(profile.communication_preferences || {}).length > 0,
+
+      // Default to an empty object instead of an empty array since the data structure is JSON
+      communicationPreferences: profile.communication_preferences || {},
+
       hasTags: (profile.segmentation_tags || []).length > 0,
       segmentationTags: profile.segmentation_tags || [],
       hasInterests: (topInterests || []).length > 0,

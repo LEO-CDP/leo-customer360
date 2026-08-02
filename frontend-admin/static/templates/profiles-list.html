@@ -1,30 +1,79 @@
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm">
-  <div class="p-4 border-b border-slate-200 flex flex-wrap items-center gap-3">
-    <h1 class="text-lg font-semibold flex-1">Master Profiles</h1>
-    <input id="search-input" type="search" placeholder="Search name, persona, email, phone…" class="text-sm border border-slate-300 rounded-lg px-3 py-1.5 w-64" />
-    <select id="domain-filter" class="text-sm border border-slate-300 rounded-lg px-2 py-1.5">
-      <option value="">All domains</option>
-    </select>
-    <select id="lifecycle-filter" class="text-sm border border-slate-300 rounded-lg px-2 py-1.5">
-      <option value="">All lifecycle stages</option>
-      <option value="prospect">Prospect</option>
-      <option value="lead">Lead</option>
-      <option value="customer">Customer</option>
-      <option value="vip">VIP</option>
-      <option value="dormant">Dormant</option>
-      <option value="churn_risk">Churn risk</option>
-    </select>
+<!-- 
+  =============================================================================
+  MASTER PROFILES TABLE CARD
+  =============================================================================
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
+  
+  <!-- Header Section -->
+  <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+    
+    <!-- Title & Icon -->
+    <div class="flex items-center gap-3">
+      <div class="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+        <!-- Users Icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+        </svg>
+      </div>
+      <h1 class="text-base font-bold text-slate-900 tracking-tight">Master Profiles</h1>
+    </div>
+   
+    <!-- Filter Controls -->
+    <div class="flex flex-wrap items-center gap-2.5">
+      
+      <!-- Search Input with Icon -->
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+        </span>
+        <input id="search-input" type="search" placeholder="Search name, persona, email, phone…" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
+
+      <!-- Domain Filter -->
+      <select id="domain-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All domains</option>
+      </select>
+
+      <!-- Lifecycle Filter -->
+      <select id="lifecycle-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All lifecycle stages</option>
+        <option value="prospect">Prospect</option>
+        <option value="lead">Lead</option>
+        <option value="customer">Customer</option>
+        <option value="vip">VIP</option>
+        <option value="dormant">Dormant</option>
+        <option value="churn_risk">Churn risk</option>
+      </select>
+
+    </div>
+
   </div>
+
+  <!-- Table Container -->
   <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead id="profiles-thead" class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide"></thead>
-      <tbody id="profiles-tbody"></tbody>
+    <table class="w-full text-sm text-left">
+      <thead id="profiles-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
+      <tbody id="profiles-tbody" class="divide-y divide-slate-100"></tbody>
     </table>
   </div>
-  <div id="list-loading" class="p-6 flex justify-center"><div class="spinner"></div></div>
-  <div id="list-empty" class="hidden p-8 text-center text-sm text-slate-500">No profiles matched your filters.</div>
-  <div class="p-4 border-t border-slate-200 flex items-center justify-between text-sm text-slate-500">
-    <span id="list-count-label"></span>
-    <button id="btn-load-more" class="hidden border border-slate-300 rounded-lg px-3 py-1.5 hover:bg-slate-50">Load more</button>
+
+  <!-- Loading State -->
+  <div id="list-loading" class="p-12 flex justify-center">
+    <div class="spinner"></div>
   </div>
+
+  <!-- Empty State -->
+  <div id="list-empty" class="hidden p-12 text-center text-sm text-slate-400">
+    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">🔍</div>
+    <div class="font-medium text-slate-600">No profiles matched your filters</div>
+    <p class="text-xs text-slate-400 mt-1">Try adjusting your search query or filter criteria.</p>
+  </div>
+
+  <!-- Footer Pagination / Counts -->
+  <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
+    <span id="list-count-label" class="font-medium"></span>
+    <button id="btn-load-more" class="hidden border border-slate-200/80 bg-white rounded-lg px-3.5 py-1.5 font-semibold text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Load more</button>
+  </div>
+
 </div>

@@ -232,6 +232,19 @@ class CustomerIdentityResolver:
         compared (missing, or a naive/timezone-aware mismatch)."""
         if incoming_timestamp is None or current_timestamp is None:
             return None
+
+    @staticmethod
+    def _extract_communication_preferences(raw_profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Returns communication_preferences payload when present and valid.
+
+        Raw profiles do not have a dedicated communication_preferences column;
+        integrations can still send it inside event_payload JSON.
+        """
+        payload = raw_profile.get("event_payload")
+        if not isinstance(payload, dict):
+            return {}
+        preferences = payload.get("communication_preferences")
+        return preferences if isinstance(preferences, dict) else {}
         try:
             return incoming_timestamp >= current_timestamp
         except TypeError:
@@ -550,6 +563,13 @@ class CustomerIdentityResolver:
                 "THEN source_systems ELSE array_append(COALESCE(source_systems, ARRAY[]::TEXT[]), %s) END"
             )
             params.extend([source_system, source_system])
+
+        communication_preferences = self._extract_communication_preferences(raw_profile)
+        if communication_preferences:
+            set_clauses.append(
+                "communication_preferences = COALESCE(communication_preferences, '{}'::JSONB) || %s::JSONB"
+            )
+            params.append(Json(communication_preferences))
 
         # is_hashed/persona_name: whenever this (or an earlier) contributing
         # raw profile's PII looks SHA-256 hashed, the master profile is

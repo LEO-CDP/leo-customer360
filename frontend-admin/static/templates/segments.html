@@ -1,28 +1,81 @@
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-  <h3 class="font-semibold mb-3">Attributes &amp; Segments</h3>
-  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+<!-- 
+  =============================================================================
+  ATTRIBUTES & SEGMENTS CARD
+  =============================================================================
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
+  
+  <!-- Card Header with Icon -->
+  <div class="flex items-center gap-2 mb-6">
+    <div class="p-1.5 bg-violet-50 text-violet-600 rounded-lg">
+      <!-- Tag/Label Icon -->
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 6h.008v.008H6V6z" />
+      </svg>
+    </div>
+    <h3 class="font-semibold text-slate-900 text-base">Attributes &amp; Segments</h3>
+  </div>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-6">
+    
+    <!-- Left Column: Segmentation Tags -->
     <div>
-      <div class="text-xs text-slate-400 uppercase tracking-wide mb-2">Segmentation Tags</div>
+      <div class="flex items-center gap-2 mb-3">
+        <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" /></svg>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Segmentation Tags</div>
+      </div>
+      
       <div class="flex flex-wrap gap-2">
         {{#if hasTags}}
           {{#each segmentationTags}}
-          <span class="text-xs bg-indigo-50 text-indigo-700 rounded-full px-2 py-1">{{this}}</span>
+          <!-- Modern pill badge with a subtle inset ring -->
+          <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-600/10 hover:bg-violet-100 transition-colors cursor-default">
+            {{this}}
+          </span>
           {{/each}}
-        {{else}}<span class="text-sm text-slate-300">No tags</span>{{/if}}
+        {{else}}
+          <!-- Refined Empty State -->
+          <div class="flex items-center gap-2 px-3 py-2 w-full rounded-lg border border-dashed border-slate-200 bg-slate-50 text-slate-400 text-sm italic">
+            No tags assigned
+          </div>
+        {{/if}}
       </div>
     </div>
+
+    <!-- Right Column: Top Interests -->
     <div>
-      <div class="text-xs text-slate-400 uppercase tracking-wide mb-2">Top Interests <span class="normal-case text-slate-300">(by behavioral event category)</span></div>
+      <div class="flex items-center gap-2 mb-3">
+        <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
+          Top Interests <span class="normal-case text-slate-300 font-normal ml-1">(by category)</span>
+        </div>
+      </div>
+
       {{#if hasInterests}}
-      <div class="space-y-2">
+      <div class="space-y-4">
         {{#each topInterests}}
-        <div>
-          <div class="flex justify-between text-xs mb-1"><span>{{label}}</span><span class="text-slate-400">{{count}} events</span></div>
-          <div class="bar-track h-2"><div class="bar-fill bg-indigo-500" style="width:{{percentage}}%"></div></div>
+        <div class="group">
+          <!-- Label and Count -->
+          <div class="flex justify-between items-end text-xs mb-1.5">
+            <span class="font-medium text-slate-700 group-hover:text-indigo-600 transition-colors">{{label}}</span>
+            <span class="text-[11px] font-semibold text-slate-400">{{count}} events</span>
+          </div>
+          <!-- Progress Bar Track & Fill -->
+          <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <!-- Used indigo-500 for the fill to keep it vibrant but professional -->
+            <div class="h-full bg-indigo-500 rounded-full transition-all duration-500 ease-out" style="width:{{percentage}}%"></div>
+          </div>
         </div>
         {{/each}}
       </div>
-      {{else}}<span class="text-sm text-slate-300">No behavioral events recorded yet</span>{{/if}}
+      {{else}}
+        <!-- Refined Empty State -->
+        <div class="flex items-center gap-2 px-3 py-2 w-full rounded-lg border border-dashed border-slate-200 bg-slate-50 text-slate-400 text-sm italic">
+          No behavioral events recorded yet
+        </div>
+      {{/if}}
     </div>
+
   </div>
 </div>

@@ -89,7 +89,7 @@ window.C360 = window.C360 || {};
 
   function segmentDetailVm(s) {
     return $.extend({}, s, {
-      domainLabel: domainLabel(s.domain),
+      domainLabel: fmt.domainLabel(s.domain),
       processedByLabel: processedByLabel(s.processed_by) + (s.processed_by === "ai_agent" ? "" : " (SQL Query Builder)"),
       processedByBadgeClass: processedByBadgeClass(s.processed_by),
       activeLabel: activeLabel(s.is_active),

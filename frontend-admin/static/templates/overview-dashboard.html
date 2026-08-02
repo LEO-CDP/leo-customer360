@@ -1,86 +1,191 @@
-<div class="space-y-4">
+<!-- 
+  =============================================================================
+  IDENTITY RESOLUTION & PROFILE ANALYTICS VIEW
+  =============================================================================
+  Features:
+  - Polished 6-column KPI grid with icons and interactive hover shadow states
+  - Modernized chart containers with clear headers and visual icons
+  - Styled data table for duplicate master profiles with clean separation and badges
+-->
+<div class="space-y-6">
 
-  <!-- KPI stat cards -->
+  <!-- KPI Stat Cards Grid -->
   <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
-      <div class="text-xs text-slate-400 uppercase tracking-wide">Raw Profiles</div>
-      <div class="text-2xl font-semibold mt-1">{{totalRawProfilesLabel}}</div>
+    
+    <!-- Raw Profiles -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-4 group">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Raw Profiles</span>
+        <div class="p-1.5 bg-slate-100 text-slate-600 rounded-lg group-hover:scale-110 transition-transform">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" /></svg>
+        </div>
+      </div>
+      <div class="text-xl font-bold text-slate-900">{{totalRawProfilesLabel}}</div>
     </div>
-    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
-      <div class="text-xs text-slate-400 uppercase tracking-wide">Master Profiles</div>
-      <div class="text-2xl font-semibold mt-1">{{totalMasterProfilesLabel}}</div>
+
+    <!-- Master Profiles -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-4 group">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Master Profiles</span>
+        <div class="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg group-hover:scale-110 transition-transform">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>
+        </div>
+      </div>
+      <div class="text-xl font-bold text-slate-900">{{totalMasterProfilesLabel}}</div>
     </div>
-    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
-      <div class="text-xs text-slate-400 uppercase tracking-wide">Duplicate Masters</div>
-      <div class="text-2xl font-semibold mt-1 text-orange-600">{{duplicateCountLabel}}</div>
+
+    <!-- Duplicate Masters -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-4 group">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Duplicate Masters</span>
+        <div class="p-1.5 bg-orange-50 text-orange-600 rounded-lg group-hover:scale-110 transition-transform">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>
+        </div>
+      </div>
+      <div class="text-xl font-bold text-orange-600">{{duplicateCountLabel}}</div>
     </div>
-    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
-      <div class="text-xs text-slate-400 uppercase tracking-wide">Processed</div>
-      <div class="text-2xl font-semibold mt-1 text-green-600">{{processedLabel}}</div>
+
+    <!-- Processed -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-4 group">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Processed</span>
+        <div class="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg group-hover:scale-110 transition-transform">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        </div>
+      </div>
+      <div class="text-xl font-bold text-emerald-600">{{processedLabel}}</div>
     </div>
-    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
-      <div class="text-xs text-slate-400 uppercase tracking-wide">In Progress</div>
-      <div class="text-2xl font-semibold mt-1 text-blue-600">{{inProgressLabel}}</div>
+
+    <!-- In Progress -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-4 group">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">In Progress</span>
+        <div class="p-1.5 bg-sky-50 text-sky-600 rounded-lg group-hover:scale-110 transition-transform">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+        </div>
+      </div>
+      <div class="text-xl font-bold text-sky-600">{{inProgressLabel}}</div>
     </div>
-    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
-      <div class="text-xs text-slate-400 uppercase tracking-wide">Pending</div>
-      <div class="text-2xl font-semibold mt-1 text-slate-500">{{pendingLabel}}</div>
+
+    <!-- Pending -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-4 group">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Pending</span>
+        <div class="p-1.5 bg-slate-100 text-slate-500 rounded-lg group-hover:scale-110 transition-transform">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        </div>
+      </div>
+      <div class="text-xl font-bold text-slate-600">{{pendingLabel}}</div>
     </div>
+
   </div>
 
-  <!-- Charts row 1 -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5 lg:col-span-1">
-      <h3 class="font-semibold mb-3">Profiles by Status</h3>
-      <div class="h-56"><canvas id="chart-status-funnel"></canvas></div>
+  <!-- Charts Row 1 -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    
+    <!-- Profiles by Status -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-6 lg:col-span-1">
+      <h3 class="font-bold text-slate-900 text-sm mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" /></svg>
+        Profiles by Status
+      </h3>
+      <div class="h-56">
+        <canvas id="chart-status-funnel"></canvas>
+      </div>
     </div>
-    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5 lg:col-span-2">
-      <h3 class="font-semibold mb-3">Profiles by Domain</h3>
-      <div class="h-56"><canvas id="chart-domain-breakdown"></canvas></div>
+
+    <!-- Profiles by Domain -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-6 lg:col-span-2">
+      <h3 class="font-bold text-slate-900 text-sm mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>
+        Profiles by Domain
+      </h3>
+      <div class="h-56">
+        <canvas id="chart-domain-breakdown"></canvas>
+      </div>
     </div>
+
   </div>
 
-  <!-- Charts row 2 -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-      <h3 class="font-semibold mb-3">Raw Profiles by Source System</h3>
-      <div class="h-64"><canvas id="chart-source-systems"></canvas></div>
+  <!-- Charts Row 2 -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    
+    <!-- Raw Profiles by Source System -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-6">
+      <h3 class="font-bold text-slate-900 text-sm mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h13.5M3.75 19.5h16.5M9.75 9.75l3 3 4.5-4.5" /></svg>
+        Raw Profiles by Source System
+      </h3>
+      <div class="h-64">
+        <canvas id="chart-source-systems"></canvas>
+      </div>
     </div>
-    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-      <h3 class="font-semibold mb-3">Identity Graph Coverage</h3>
-      <div class="h-64"><canvas id="chart-identity-coverage"></canvas></div>
+
+    <!-- Identity Graph Coverage -->
+    <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-6">
+      <h3 class="font-bold text-slate-900 text-sm mb-4 flex items-center gap-2">
+        <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>
+        Identity Graph Coverage
+      </h3>
+      <div class="h-64">
+        <canvas id="chart-identity-coverage"></canvas>
+      </div>
     </div>
+
   </div>
 
-  <!-- Duplicate master profiles table -->
-  <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-    <div class="flex items-center justify-between mb-3">
-      <h3 class="font-semibold">Top Duplicate Master Profiles</h3>
-      <span class="text-xs text-slate-400">Master profiles consolidated from 2+ raw source records</span>
+  <!-- Duplicate Master Profiles Table Card -->
+  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+    
+    <!-- Header -->
+    <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="p-2 bg-orange-50 text-orange-600 rounded-xl">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+        </div>
+        <div>
+          <h3 class="font-bold text-slate-900 text-base">Top Duplicate Master Profiles</h3>
+          <p class="text-xs text-slate-400 mt-0.5">Master profiles consolidated from 2+ raw source records</p>
+        </div>
+      </div>
     </div>
-    {{#if hasDuplicates}}
-    <table class="w-full text-sm">
-      <thead>
-        <tr class="text-left text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100">
-          <th class="py-2 pr-3">Profile</th>
-          <th class="py-2 pr-3">Domain</th>
-          <th class="py-2 pr-3">Linked Raw Profiles</th>
-          <th class="py-2 pr-3">Source Systems</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{#each duplicates}}
-        <tr class="border-b border-slate-50 last:border-0">
-          <td class="py-2 pr-3 font-medium">{{displayName}}</td>
-          <td class="py-2 pr-3">{{domainLabel}}</td>
-          <td class="py-2 pr-3">{{linked_raw_profile_count}}</td>
-          <td class="py-2 pr-3 text-slate-500">{{sourceSystemsLabel}}</td>
-        </tr>
-        {{/each}}
-      </tbody>
-    </table>
-    {{else}}
-    <p class="text-sm text-slate-500">No duplicate master profiles found.</p>
-    {{/if}}
+
+    <!-- Content / Table -->
+    <div class="p-6">
+      {{#if hasDuplicates}}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100">
+              <th class="py-3 pr-4">Profile</th>
+              <th class="py-3 pr-4">Domain</th>
+              <th class="py-3 pr-4">Linked Raw Profiles</th>
+              <th class="py-3 pr-4">Source Systems</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {{#each duplicates}}
+            <tr class="hover:bg-slate-50/50 transition-colors">
+              <td class="py-3.5 pr-4 font-semibold text-slate-800">{{displayName}}</td>
+              <td class="py-3.5 pr-4 text-slate-600 capitalize">{{domainLabel}}</td>
+              <td class="py-3.5 pr-4">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-orange-50 text-orange-700">
+                  {{linked_raw_profile_count}}
+                </span>
+              </td>
+              <td class="py-3.5 pr-4 text-slate-500 text-xs">{{sourceSystemsLabel}}</td>
+            </tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <div class="flex items-center justify-center gap-2 px-3 py-8 w-full rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-slate-400 text-sm italic">
+        No duplicate master profiles found.
+      </div>
+      {{/if}}
+    </div>
+
   </div>
+
 </div>

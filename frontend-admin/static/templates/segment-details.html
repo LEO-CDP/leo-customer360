@@ -1,76 +1,164 @@
-<div class="space-y-4">
+<!-- 
+  =============================================================================
+  SEGMENT DETAIL VIEW TEMPLATE (Handlebars)
+  =============================================================================
+  Features:
+  - Polished modern container cards with rounded-2xl corners and hover shadows
+  - Integrated SVG icons for metadata, rule definitions, and matched profiles
+  - Refined typography and grid layouts for segment statistics
+  - Styled code/pre blocks for SQL and JSON query rules
+  - Modernized data table container with sticky headers and responsive states
+-->
+<div class="space-y-6">
 
-  <!-- Segment metadata -->
-  <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
-      <div>
-        <h1 class="text-lg font-semibold">{{segment_name}}</h1>
-        <div class="text-xs text-slate-400 mt-1">Tag: <code class="bg-slate-100 rounded px-1.5 py-0.5">{{segment_tag}}</code></div>
+  <!-- 1. Segment Metadata Card -->
+  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
+    
+    <!-- Top Header Row -->
+    <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
+      <div class="flex items-start gap-3">
+        <div class="p-2 bg-indigo-50 text-indigo-600 rounded-xl mt-0.5">
+          <!-- Folder / Tag Icon -->
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" /><path stroke-linecap="round" stroke-linejoin="round" d="M6 6h.008v.008H6V6z" /></svg>
+        </div>
+        <div>
+          <h1 class="text-base font-bold text-slate-900 tracking-tight">{{segment_name}}</h1>
+          <div class="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
+            <span>Tag:</span>
+            <code class="bg-slate-100 text-slate-700 font-mono text-[11px] rounded px-1.5 py-0.5 border border-slate-200/60">{{segment_tag}}</code>
+          </div>
+        </div>
       </div>
+
+      <!-- Badges -->
       <div class="flex items-center gap-2">
-        <span class="px-2 py-0.5 rounded-full text-xs font-medium {{activeBadgeClass}}">{{activeLabel}}</span>
-        <span class="px-2 py-0.5 rounded-full text-xs font-medium {{processedByBadgeClass}}">{{processedByLabel}}</span>
+        <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold shadow-sm {{activeBadgeClass}}">{{activeLabel}}</span>
+        <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold shadow-sm {{processedByBadgeClass}}">{{processedByLabel}}</span>
       </div>
     </div>
 
-    {{#if description}}<p class="text-sm text-slate-600 mb-4">{{description}}</p>{{/if}}
+    <!-- Description -->
+    {{#if description}}
+    <p class="text-sm text-slate-600 mb-6 leading-relaxed bg-slate-50/50 p-3.5 rounded-xl border border-slate-100/80">{{description}}</p>
+    {{/if}}
 
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-      <div>
-        <div class="text-xs text-slate-400 uppercase tracking-wide mb-1">Domain</div>
-        <div class="font-medium">{{domainLabel}}</div>
+    <!-- Metrics Grid -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm pt-2">
+      
+      <!-- Domain -->
+      <div class="p-3 bg-slate-50/50 rounded-xl border border-slate-100/80">
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Domain</div>
+        <div class="font-semibold text-slate-800 capitalize">{{domainLabel}}</div>
       </div>
-      <div>
-        <div class="text-xs text-slate-400 uppercase tracking-wide mb-1">Members (stored)</div>
-        <div class="font-medium">{{memberCountLabel}}</div>
+
+      <!-- Members -->
+      <div class="p-3 bg-slate-50/50 rounded-xl border border-slate-100/80">
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Members (stored)</div>
+        <div class="font-semibold text-slate-800">{{memberCountLabel}}</div>
       </div>
-      <div>
-        <div class="text-xs text-slate-400 uppercase tracking-wide mb-1">Last Computed</div>
-        <div class="font-medium">{{lastComputedLabel}}</div>
+
+      <!-- Last Computed -->
+      <div class="p-3 bg-slate-50/50 rounded-xl border border-slate-100/80">
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Last Computed</div>
+        <div class="font-semibold text-slate-800">{{lastComputedLabel}}</div>
       </div>
-      <div>
-        <div class="text-xs text-slate-400 uppercase tracking-wide mb-1">Created</div>
-        <div class="font-medium">{{createdLabel}}</div>
+
+      <!-- Created -->
+      <div class="p-3 bg-slate-50/50 rounded-xl border border-slate-100/80">
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Created</div>
+        <div class="font-semibold text-slate-800">{{createdLabel}}</div>
       </div>
+
     </div>
   </div>
 
-  <!-- Rules -->
-  <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-    <h3 class="font-semibold mb-3">Rule Definition</h3>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+  <!-- 2. Rule Definition Card -->
+  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
+    
+    <div class="flex items-center gap-2 mb-4">
+      <div class="p-1.5 bg-violet-50 text-violet-600 rounded-lg">
+        <!-- Code / Query Icon -->
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>
+      </div>
+      <h3 class="font-bold text-slate-900 text-base">Rule Definition</h3>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      
+      <!-- SQL Rules Column -->
       <div>
-        <div class="text-xs text-slate-400 uppercase tracking-wide mb-2">SQL Rules (WHERE clause)</div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-2 flex items-center gap-1.5">
+          <span>SQL Rules (WHERE clause)</span>
+        </div>
         {{#if hasSqlRules}}
-        <pre class="text-xs bg-slate-900 text-slate-100 rounded-lg p-3 overflow-x-auto">{{sql_rules}}</pre>
-        {{else}}<span class="text-sm text-slate-300">No SQL rules defined</span>{{/if}}
+        <pre class="text-xs font-mono bg-slate-900 text-slate-100 rounded-xl p-4 overflow-x-auto shadow-inner border border-slate-800 leading-relaxed">{{sql_rules}}</pre>
+        {{else}}
+        <div class="flex items-center justify-center p-6 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-slate-400 text-xs italic">
+          No SQL rules defined
+        </div>
+        {{/if}}
       </div>
+
+      <!-- JSON QueryBuilder Column -->
       <div>
-        <div class="text-xs text-slate-400 uppercase tracking-wide mb-2">jQuery QueryBuilder Rules (JSON)</div>
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-2 flex items-center gap-1.5">
+          <span>jQuery QueryBuilder Rules (JSON)</span>
+        </div>
         {{#if hasJsonRules}}
-        <pre class="text-xs bg-slate-50 border border-slate-200 rounded-lg p-3 overflow-x-auto">{{json json_rules}}</pre>
-        {{else}}<span class="text-sm text-slate-300">No structured rules defined</span>{{/if}}
+        <pre class="text-xs font-mono bg-slate-50 text-slate-700 border border-slate-200/80 rounded-xl p-4 overflow-x-auto shadow-sm leading-relaxed">{{json json_rules}}</pre>
+        {{else}}
+        <div class="flex items-center justify-center p-6 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-slate-400 text-xs italic">
+          No structured rules defined
+        </div>
+        {{/if}}
       </div>
+
     </div>
   </div>
 
-  <!-- Matched profiles -->
-  <div class="bg-white border border-slate-200 rounded-xl shadow-sm">
-    <div class="p-4 border-b border-slate-200">
-      <h3 class="font-semibold">Matched Profiles</h3>
+
+  <!-- 3. Matched Profiles Table Card -->
+  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
+    
+    <!-- Header -->
+    <div class="p-6 border-b border-slate-100 flex items-center gap-3">
+      <div class="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+        <!-- Users / Profiles Icon -->
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>
+      </div>
+      <div>
+        <h3 class="font-bold text-slate-900 text-base">Matched Profiles</h3>
+        <p class="text-xs text-slate-400 mt-0.5">Real-time evaluation against segment criteria</p>
+      </div>
     </div>
+
+    <!-- Table Container -->
     <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead id="segment-matched-thead" class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide"></thead>
-        <tbody id="segment-matched-tbody"></tbody>
+      <table class="w-full text-sm text-left">
+        <thead id="segment-matched-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
+        <tbody id="segment-matched-tbody" class="divide-y divide-slate-100"></tbody>
       </table>
     </div>
-    <div id="segment-matched-loading" class="p-6 flex justify-center"><div class="spinner"></div></div>
-    <div id="segment-matched-empty" class="hidden p-8 text-center text-sm text-slate-500">No profiles currently match this segment's rules.</div>
-    <div class="p-4 border-t border-slate-200 flex items-center justify-between text-sm text-slate-500">
-      <span id="segment-matched-count-label"></span>
-      <button id="btn-segment-matched-load-more" class="hidden border border-slate-300 rounded-lg px-3 py-1.5 hover:bg-slate-50">Load more</button>
+
+    <!-- Loading State -->
+    <div id="segment-matched-loading" class="p-12 flex justify-center">
+      <div class="spinner"></div>
     </div>
+
+    <!-- Empty State -->
+    <div id="segment-matched-empty" class="hidden p-12 text-center text-sm text-slate-400">
+      <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">👥</div>
+      <div class="font-medium text-slate-600">No profiles currently match this segment's rules</div>
+      <p class="text-xs text-slate-400 mt-1">Check rule definitions or recompute segment membership.</p>
+    </div>
+
+    <!-- Footer Pagination / Counts -->
+    <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
+      <span id="segment-matched-count-label" class="font-medium"></span>
+      <button id="btn-segment-matched-load-more" class="hidden border border-slate-200/80 bg-white rounded-lg px-3.5 py-1.5 font-semibold text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Load more</button>
+    </div>
+
   </div>
 
 </div>

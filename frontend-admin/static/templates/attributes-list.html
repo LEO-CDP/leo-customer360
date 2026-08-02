@@ -1,27 +1,82 @@
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm">
-  <div class="p-4 border-b border-slate-200 flex flex-wrap items-center gap-3">
-    <h1 class="text-lg font-semibold flex-1">
-      Attribute Catalog
-      <br><span class="text-xs text-slate-400 font-normal">Identity resolution &amp; segmentation metadata </span>
-    </h1>
-    <input id="attributes-search-input" type="search" placeholder="Search name, code, description…" class="text-sm border border-slate-300 rounded-lg px-3 py-1.5 w-64" />
-    <select id="attributes-group-filter" class="text-sm border border-slate-300 rounded-lg px-2 py-1.5">
-      <option value="">All groups</option>
-    </select>
-    <select id="attributes-domain-filter" class="text-sm border border-slate-300 rounded-lg px-2 py-1.5">
-      <option value="">All domains</option>
-      <option value="all">Global</option>
-    </select>
+<!-- 
+  =============================================================================
+  ATTRIBUTE CATALOG VIEW CARD
+  =============================================================================
+  Features:
+  - Polished container with rounded-2xl corners and hover shadow transitions
+  - Integrated header icon and structured typography for title/subtitle
+  - Modernized search and filter dropdown controls with focus states
+  - Styled data table container with sticky header and clean border dividers
+  - Refined loading state and empty state feedback
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
+  
+  <!-- Header Section -->
+  <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+    
+    <!-- Title & Icon -->
+    <div class="flex items-center gap-3">
+      <div class="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+        <!-- Database / Table Schema Icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-base font-bold text-slate-900 tracking-tight">Attribute Catalog</h1>
+        <p class="text-xs text-slate-400 mt-0.5">Identity resolution &amp; segmentation metadata</p>
+      </div>
+    </div>
+   
+    <!-- Filter Controls -->
+    <div class="flex flex-wrap items-center gap-2.5">
+      
+      <!-- Search Input with Icon -->
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+        </span>
+        <input id="attributes-search-input" type="search" placeholder="Search name, code, description…" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
+
+      <!-- Group Filter -->
+      <select id="attributes-group-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All groups</option>
+      </select>
+
+      <!-- Domain Filter -->
+      <select id="attributes-domain-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All domains</option>
+        <option value="all">Global</option>
+      </select>
+
+    </div>
+
   </div>
+
+  <!-- Table Container -->
   <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead id="attributes-thead" class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide"></thead>
-      <tbody id="attributes-tbody"></tbody>
+    <table class="w-full text-sm text-left">
+      <thead id="attributes-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
+      <tbody id="attributes-tbody" class="divide-y divide-slate-100"></tbody>
     </table>
   </div>
-  <div id="attributes-loading" class="p-6 flex justify-center"><div class="spinner"></div></div>
-  <div id="attributes-empty" class="hidden p-8 text-center text-sm text-slate-500">No attributes matched your filters.</div>
-  <div class="p-4 border-t border-slate-200 flex items-center justify-between text-sm text-slate-500">
-    <span id="attributes-count-label"></span>
+
+  <!-- Loading State -->
+  <div id="attributes-loading" class="p-12 flex justify-center">
+    <div class="spinner"></div>
   </div>
+
+  <!-- Empty State -->
+  <div id="attributes-empty" class="hidden p-12 text-center text-sm text-slate-400">
+    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">🔍</div>
+    <div class="font-medium text-slate-600">No attributes matched your filters</div>
+    <p class="text-xs text-slate-400 mt-1">Try adjusting your search query or filter selections.</p>
+  </div>
+
+  <!-- Footer Count -->
+  <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
+    <span id="attributes-count-label" class="font-medium"></span>
+  </div>
+
 </div>
