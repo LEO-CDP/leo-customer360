@@ -29,6 +29,14 @@ window.C360 = window.C360 || {};
     Zalo: "💬", AppsFlyer: "📱", YouTube: "▶️"
   };
 
+  var CHANNEL_ICONS = {
+    "Paid Search":       "🔍",
+    "Paid Social":       "📲",
+    "Push Notification": "🔔",
+    "Email":             "✉️",
+    "Video":             "▶️"
+  };
+
   var STATUS_BADGE = {
     Active:    "bg-emerald-100 text-emerald-700",
     Paused:    "bg-amber-100 text-amber-700",
@@ -89,7 +97,8 @@ window.C360 = window.C360 || {};
       avatarTextClass: "text-base"
     },
     { label: "Status",   type: "badge",  field: "status",          classField: "statusBadgeClass" },
-    { label: "Channel",  type: "identity", nameField: "channel",   subField: "platform" },
+    { label: "Channel",  type: "identity", nameField: "channel",   subField: "platform",
+      avatarField: "channelIcon", avatarBg: "bg-slate-100", avatarColor: "text-slate-600", avatarTextClass: "text-base" },
     { label: "Spend",    field: "spendLabel",       cellClass: "text-right" },
     { label: "Impr.",    field: "impressionsLabel",  cellClass: "text-right" },
     { label: "CTR",      field: "ctrLabel",          cellClass: "text-right" },
@@ -101,6 +110,7 @@ window.C360 = window.C360 || {};
   function campaignRowVm(c) {
     return $.extend({}, c, {
       platformIcon:      PLATFORM_ICONS[c.platform] || "📣",
+      channelIcon:       CHANNEL_ICONS[c.channel]   || "📢",
       statusBadgeClass:  STATUS_BADGE[c.status] || "bg-slate-100 text-slate-500",
       spendLabel:        fmtVnd(c.total_spend),
       impressionsLabel:  fmt.int(c.total_impressions),
@@ -201,9 +211,12 @@ window.C360 = window.C360 || {};
     return C360.DataTableView.create({
       columns: COLUMNS,
       rowVm: campaignRowVm,
+      rowId: function (vm) { return vm.campaign_id; },
+      rowSelectorClass: "campaign-row",
       limit: 10,
       rowClickable: true,
       resourceLabel: "campaign",
+      onRowClick: function (id) { console.log("Campaign clicked:", id); },
       extraParams: function () {
         return { tenant_id: tenantId(), sort_by: state.sortBy, sort_order: state.sortOrder };
       },
@@ -235,6 +248,7 @@ window.C360 = window.C360 || {};
     var $doc = $(document);
     $doc.off(".c360campaign");
 
+    dtv.bindRowClick();
     dtv.bindSearch("#campaign-filter-search", "search", 300);
     dtv.bindSelect("#campaign-filter-status",    "status");
     dtv.bindSelect("#campaign-filter-channel",   "channel");
