@@ -22,7 +22,7 @@ from core.config import settings
 from core.database import engine
 from core.init_core_data import init_core_data
 from core.routers.content import all_content_routers
-from core.routers.crm import all_crm_routers
+from core.routers.crm import all_crm_routers, campaign_analytics_router
 from core.routers.events import all_events_routers
 from core.routers.graph import router as graph_router
 from core.routers.identity import all_identity_routers
@@ -73,6 +73,7 @@ for r in all_content_routers:
 app.include_router(graph_router, prefix="/api/v1")
 for r in all_crm_routers:
     app.include_router(r, prefix="/api/v1")
+app.include_router(campaign_analytics_router, prefix="/api/v1")
 for r in all_segment_routers:
     app.include_router(r, prefix="/api/v1")
 for r in all_metadata_routers:

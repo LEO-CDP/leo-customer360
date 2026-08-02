@@ -9,20 +9,28 @@ query param if ever needed.
 
 import uuid
 from datetime import date, datetime
-from typing import Optional
+from decimal import Decimal
+from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CampaignBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None
+    campaign_code: Optional[str] = None
     name: str
+    status: Optional[str] = None
+    channel: Optional[str] = None
+    platform: Optional[str] = None
+    objective: Optional[str] = None
     description: Optional[str] = None
     keywords: Optional[list[str]] = None
     lang: Optional[str] = "en"
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    budget_amount: Optional[Decimal] = None
+    currency: Optional[str] = "VND"
     metadata_: Optional[dict] = None
 
 
@@ -32,12 +40,19 @@ class CampaignCreate(CampaignBase):
 
 class CampaignUpdate(BaseModel):
     user_id: Optional[uuid.UUID] = None
+    campaign_code: Optional[str] = None
     name: Optional[str] = None
+    status: Optional[str] = None
+    channel: Optional[str] = None
+    platform: Optional[str] = None
+    objective: Optional[str] = None
     description: Optional[str] = None
     keywords: Optional[list[str]] = None
     lang: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    budget_amount: Optional[Decimal] = None
+    currency: Optional[str] = None
     metadata_: Optional[dict] = None
 
 
@@ -274,3 +289,84 @@ class IndustryUpdate(BaseModel):
 class IndustryRead(IndustryBase):
     model_config = ConfigDict(from_attributes=True)
     industry_id: uuid.UUID
+
+
+# ---------------------------------------------------------------------------
+# Campaign Analytics Schemas (Dashboard / Phase 1)
+# ---------------------------------------------------------------------------
+
+class CampaignFilterParams(BaseModel):
+    """Query filters matching UI Filter Bar controls."""
+
+    search: Optional[str] = Field(None, description="Search term for campaign name or code")
+    status: Optional[str] = Field(None, description="Active, Paused, Draft, etc.")
+    channel: Optional[str] = Field(None, description="Paid Search, Paid Social, Organic, etc.")
+    platform: Optional[str] = Field(None, description="Google, Meta, TikTok, Zalo, YouTube, etc.")
+    objective: Optional[str] = Field(None, description="Leads, Conversions, App Install, Awareness, etc.")
+    sort_by: str = Field("total_spend", description="Column to sort by")
+    sort_order: str = Field("desc", description="asc or desc")
+    page: int = Field(1, ge=1)
+    page_size: int = Field(10, ge=1, le=100)
+
+
+class CampaignMetricItem(BaseModel):
+    """Table row from customer360.vw_campaign_performance_metrics."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    campaign_id: uuid.UUID
+    campaign_code: Optional[str] = None
+    name: str
+    status: Optional[str] = None
+    channel: Optional[str] = None
+    platform: Optional[str] = None
+    objective: Optional[str] = None
+    total_spend: Decimal
+    total_impressions: int
+    total_clicks: int
+    total_conversions: int
+    total_revenue: Decimal
+    ctr_percentage: Decimal
+    cvr_percentage: Decimal
+    cpa: Decimal
+    roas: Decimal
+
+
+class CampaignKPIResponse(BaseModel):
+    """Aggregate KPI cards payload."""
+
+    total_campaigns: int
+    total_spend: Decimal
+    total_impressions: int
+    total_clicks: int
+    overall_ctr: Decimal
+    total_conversions: int
+    overall_cvr: Decimal
+    total_revenue: Decimal
+    overall_roas: Decimal
+
+
+class DailySpendTrendItem(BaseModel):
+    """Chart item for Campaign Spend Trend."""
+
+    report_date: date
+    spend: Decimal
+
+
+class TopCampaignItem(BaseModel):
+    """Chart item for Top Campaigns by Conversions or ROAS."""
+
+    campaign_id: uuid.UUID
+    name: str
+    conversions: int
+    roas: Decimal
+
+
+class PaginatedCampaignResponse(BaseModel):
+    """Paginated campaign table output."""
+
+    items: List[CampaignMetricItem]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

@@ -1,17 +1,31 @@
 """CRM-style entity routers (Campaign, Lead, Contact, Account, Opportunity,
 Industry, LeadSource, CampaignMember), all built via the generic CRUD
 router factory since they share a simple single-column UUID primary key.
+
+Also exposes a campaign analytics sub-router under /campaigns/analytics/
+for the Marketing Campaign Performance Dashboard (see
+docs/PLAN-CAMPAIGNS-DEV.md Phase 2).
 """
 
+import math
 import uuid
+from datetime import date
+from typing import Optional
 
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from core.database import get_db
 from core.models.crm import Account, Campaign, CampaignMember, Contact, Industry, Lead, LeadSource, Opportunity
+from core.repositories.campaign_repository import CampaignRepository
 from core.routers._generic import build_crud_router
 from core.schemas.crm import (
     AccountCreate,
     AccountRead,
     AccountUpdate,
     CampaignCreate,
+    CampaignFilterParams,
+    CampaignKPIResponse,
     CampaignMemberCreate,
     CampaignMemberRead,
     CampaignMemberUpdate,
@@ -20,6 +34,7 @@ from core.schemas.crm import (
     ContactCreate,
     ContactRead,
     ContactUpdate,
+    DailySpendTrendItem,
     IndustryCreate,
     IndustryRead,
     IndustryUpdate,
@@ -32,6 +47,8 @@ from core.schemas.crm import (
     OpportunityCreate,
     OpportunityRead,
     OpportunityUpdate,
+    PaginatedCampaignResponse,
+    TopCampaignItem,
 )
 
 campaigns_router = build_crud_router(
@@ -132,3 +149,84 @@ all_crm_routers = [
     opportunities_router,
     industries_router,
 ]
+
+
+# ---------------------------------------------------------------------------
+# Campaign Analytics Router (Phase 2 — Dashboard endpoints)
+# ---------------------------------------------------------------------------
+
+campaign_analytics_router = APIRouter(
+    prefix="/campaigns/analytics",
+    tags=["Campaign Analytics"],
+)
+
+
+@campaign_analytics_router.get("/summary", response_model=CampaignKPIResponse)
+def get_campaign_summary(
+    tenant_id: uuid.UUID = Query(..., description="Tenant UUID"),
+    db: Session = Depends(get_db),
+):
+    """Aggregate KPI cards: total campaigns, spend, impressions, clicks, conversions, ROAS."""
+    repo = CampaignRepository(db, tenant_id)
+    return repo.get_kpi_summary()
+
+
+@campaign_analytics_router.get("", response_model=PaginatedCampaignResponse)
+def list_campaign_metrics(
+    tenant_id: uuid.UUID = Query(..., description="Tenant UUID"),
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    channel: Optional[str] = Query(None),
+    platform: Optional[str] = Query(None),
+    objective: Optional[str] = Query(None),
+    sort_by: str = Query("total_spend"),
+    sort_order: str = Query("desc"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Paginated, filtered, sorted campaign performance table rows."""
+    filters = CampaignFilterParams(
+        search=search,
+        status=status,
+        channel=channel,
+        platform=platform,
+        objective=objective,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        page=page,
+        page_size=page_size,
+    )
+    repo = CampaignRepository(db, tenant_id)
+    items, total = repo.get_filtered_campaigns(filters)
+    from core.schemas.crm import CampaignMetricItem
+    return PaginatedCampaignResponse(
+        items=[CampaignMetricItem.model_validate(i) for i in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=math.ceil(total / page_size) if page_size > 0 else 1,
+    )
+
+
+@campaign_analytics_router.get("/spend-trend", response_model=list[DailySpendTrendItem])
+def get_spend_trend(
+    tenant_id: uuid.UUID = Query(..., description="Tenant UUID"),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Daily time-series spend data for the Campaign Spend Trend chart."""
+    repo = CampaignRepository(db, tenant_id)
+    return repo.get_daily_spend_trend(start_date=start_date, end_date=end_date)
+
+
+@campaign_analytics_router.get("/top", response_model=list[TopCampaignItem])
+def get_top_campaigns(
+    tenant_id: uuid.UUID = Query(..., description="Tenant UUID"),
+    limit: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+):
+    """Top N campaigns by conversions and ROAS for the analytics charts."""
+    repo = CampaignRepository(db, tenant_id)
+    return repo.get_top_campaigns(limit=limit)

@@ -174,10 +174,96 @@ LEAD_SOURCES = [
     ("Paid Search", "Leads from Google/Bing search ads."),
 ]
 
+# (name, campaign_code, status, channel, platform, objective, budget_vnd, start_offset, end_offset, utm_source, utm_medium)
 CAMPAIGNS = [
-    ("Q4 Enterprise Banking Outreach", "banking", -60, 30),
-    ("Retail Partner Roadshow", "retail", -45, 15),
-    ("Real Estate Investor Webinar Series", "real_estate", -30, 60),
+    (
+        "Q4 Banking App Install - Google UAC",
+        "BANK-Q4-GOOG-UAC-001",
+        "Active",
+        "Paid Search",
+        "Google",
+        "App Install",
+        500_000_000,
+        -60, 30,
+        "google", "cpc",
+    ),
+    (
+        "Retail Mega Sale - Meta Retargeting",
+        "RETAIL-MEGA-META-002",
+        "Active",
+        "Paid Social",
+        "Meta",
+        "Conversions",
+        320_000_000,
+        -45, 15,
+        "meta", "paid_social",
+    ),
+    (
+        "Real Estate Awareness - TikTok",
+        "RE-AWARE-TIKTOK-003",
+        "Active",
+        "Paid Social",
+        "TikTok",
+        "Awareness",
+        180_000_000,
+        -30, 60,
+        "tiktok", "paid_social",
+    ),
+    (
+        "Travel Q1 Leads - Zalo Ads",
+        "TRAVEL-Q1-ZALO-004",
+        "Paused",
+        "Paid Social",
+        "Zalo",
+        "Leads",
+        150_000_000,
+        -90, -10,
+        "zalo", "paid_social",
+    ),
+    (
+        "Banking CLV Push - AppsFlyer Retargeting",
+        "BANK-CLV-AF-005",
+        "Active",
+        "Push Notification",
+        "AppsFlyer",
+        "Retention",
+        200_000_000,
+        -20, 40,
+        "appsflyer", "push",
+    ),
+    (
+        "Retail Email Re-engagement",
+        "RETAIL-EMAIL-006",
+        "Completed",
+        "Email",
+        "Google",
+        "Conversions",
+        80_000_000,
+        -120, -30,
+        "email", "email",
+    ),
+    (
+        "Real Estate YouTube Brand - GA4 Tracked",
+        "RE-YT-BRAND-007",
+        "Active",
+        "Video",
+        "YouTube",
+        "Awareness",
+        250_000_000,
+        -15, 75,
+        "youtube", "video",
+    ),
+    (
+        "Travel Recovery - Google Performance Max",
+        "TRAVEL-PMAX-008",
+        "Draft",
+        "Paid Search",
+        "Google",
+        "Conversions",
+        400_000_000,
+        5, 90,
+        "google", "pmax",
+    ),
 ]
 
 LEAD_FIRST_NAMES = ("Minh", "Linh", "Huy", "Trang", "Khoa", "My", "Duc", "Anh")
@@ -244,21 +330,38 @@ def seed_crm_entities(cursor) -> dict:
         )
         ids["lead_source"][name] = lead_source_id
 
-    for name, domain, start_offset, end_offset in CAMPAIGNS:
+    for (name, campaign_code, status, channel, platform, objective,
+         budget_vnd, start_offset, end_offset, utm_source, utm_medium) in CAMPAIGNS:
         campaign_id = demo_id(f"crm_campaign:{name}")
         today = datetime.now().date()
         cursor.execute(
             f"""
             INSERT INTO {_table('crm_campaign')}
-                (campaign_id, tenant_id, name, description, keywords, start_date, end_date, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (campaign_id, tenant_id, campaign_code, name, status, channel, platform,
+                 objective, description, keywords, start_date, end_date,
+                 budget_amount, currency, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (campaign_id) DO UPDATE SET
-                start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date;
+                status = EXCLUDED.status,
+                start_date = EXCLUDED.start_date,
+                end_date = EXCLUDED.end_date,
+                budget_amount = EXCLUDED.budget_amount;
             """,
             (
-                campaign_id, DEMO_TENANT_ID, name, f"Demo marketing campaign targeting the {domain} domain.",
-                [domain], today + timedelta(days=start_offset), today + timedelta(days=end_offset),
-                Json({"domain": domain}),
+                campaign_id, DEMO_TENANT_ID, campaign_code, name, status,
+                channel, platform, objective,
+                f"Demo {channel} campaign on {platform} targeting {objective}.",
+                [channel.lower().replace(" ", "_"), platform.lower(), objective.lower().replace(" ", "_")],
+                today + timedelta(days=start_offset),
+                today + timedelta(days=end_offset),
+                budget_vnd, "VND",
+                Json({
+                    "utm_source": utm_source,
+                    "utm_medium": utm_medium,
+                    "utm_campaign": campaign_code.lower(),
+                    "utm_content": f"{platform.lower()}-{objective.lower().replace(' ', '_')}",
+                    "tracking_platform": "appsflyer" if platform == "AppsFlyer" else "ga4",
+                }),
             ),
         )
         ids["campaign"][name] = campaign_id
@@ -335,10 +438,10 @@ def seed_crm_entities(cursor) -> dict:
         )
         ids["opportunity"].append(opportunity_id)
 
-    # Campaign members: some already-converted contacts responding to a
-    # campaign, plus some still-unconverted leads (contact_id left NULL,
-    # original lead tracked in metadata).
-    campaign_names = list(ids["campaign"].keys())
+    # Campaign members: attach contacts and leads to the first 3 active/completed campaigns.
+    active_campaign_names = [
+        name for (name, _code, status, *_rest) in CAMPAIGNS if status in ("Active", "Completed")
+    ][:3]
     for i, contact_id in enumerate(ids["contact"]):
         cursor.execute(
             f"""
@@ -349,7 +452,7 @@ def seed_crm_entities(cursor) -> dict:
             """,
             (
                 demo_id(f"crm_campaign_member:contact:{contact_id}"), DEMO_TENANT_ID,
-                ids["campaign"][campaign_names[i % len(campaign_names)]],
+                ids["campaign"][active_campaign_names[i % len(active_campaign_names)]],
                 contact_id, "converted", "Already-converted contact who engaged with this campaign.",
             ),
         )
@@ -363,7 +466,7 @@ def seed_crm_entities(cursor) -> dict:
             """,
             (
                 demo_id(f"crm_campaign_member:lead:{lead_id}"), DEMO_TENANT_ID,
-                ids["campaign"][campaign_names[i % len(campaign_names)]],
+                ids["campaign"][active_campaign_names[i % len(active_campaign_names)]],
                 "responded", "Lead responded to campaign but has not converted to a Contact yet.",
                 Json({"lead_id": lead_id}),
             ),
@@ -376,6 +479,75 @@ def seed_crm_entities(cursor) -> dict:
 # 2-4. Relations, interactions, transactions, behavioral events
 # --------------------------------------------------------------------------
 
+# Platform-specific realistic metric profiles for daily performance seeding.
+# (impressions_range, clicks_pct, conversions_pct, revenue_per_conversion_vnd)
+_PLATFORM_PROFILE = {
+    "Google":     ((8_000, 40_000), 0.045, 0.08, 1_200_000),
+    "Meta":       ((15_000, 60_000), 0.018, 0.05, 900_000),
+    "TikTok":     ((20_000, 80_000), 0.012, 0.03, 600_000),
+    "Zalo":       ((5_000, 25_000), 0.025, 0.06, 800_000),
+    "AppsFlyer":  ((3_000, 15_000), 0.060, 0.15, 500_000),  # re-targeting: higher CVR
+    "YouTube":    ((30_000, 120_000), 0.005, 0.015, 1_500_000),
+}
+_DEFAULT_PROFILE = ((5_000, 20_000), 0.03, 0.05, 700_000)
+
+
+def seed_campaign_performance_daily(cursor, campaign_ids: dict) -> None:
+    """Inserts daily performance rows for each seeded campaign.
+
+    Metrics are generated with a per-platform profile and a deterministic RNG
+    so the script is fully idempotent.  Only days where the campaign was
+    already running (start_date <= today) are inserted.
+    """
+    logger.info("Seeding crm_campaign_performance_daily with AppsFlyer/GA4-style metrics...")
+    today = datetime.now().date()
+
+    for (name, campaign_code, status, channel, platform, objective,
+         budget_vnd, start_offset, end_offset, utm_source, utm_medium) in CAMPAIGNS:
+        campaign_id = campaign_ids.get(name)
+        if campaign_id is None:
+            continue
+
+        run_start = today + timedelta(days=start_offset)
+        run_end = min(today, today + timedelta(days=end_offset))  # don't seed future days
+        if run_start > today:
+            continue  # Draft / future campaign — no daily data yet
+
+        imp_range, ctr, cvr, rev_per_conv = _PLATFORM_PROFILE.get(platform, _DEFAULT_PROFILE)
+        daily_budget = budget_vnd / max((run_end - run_start).days + 1, 1)
+
+        rng = stable_rng(f"perf:{campaign_code}")
+        current = run_start
+        while current <= run_end:
+            impressions = rng.randint(*imp_range)
+            clicks = int(impressions * ctr * rng.uniform(0.8, 1.2))
+            conversions = int(clicks * cvr * rng.uniform(0.7, 1.3))
+            spend = round(daily_budget * rng.uniform(0.85, 1.05), 2)
+            revenue = round(conversions * rev_per_conv * rng.uniform(0.9, 1.1), 2)
+
+            cursor.execute(
+                f"""
+                INSERT INTO {_table('crm_campaign_performance_daily')}
+                    (performance_id, tenant_id, campaign_id, report_date,
+                     spend, impressions, clicks, conversions, revenue_estimated)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (tenant_id, campaign_id, report_date) DO UPDATE SET
+                    spend = EXCLUDED.spend,
+                    impressions = EXCLUDED.impressions,
+                    clicks = EXCLUDED.clicks,
+                    conversions = EXCLUDED.conversions,
+                    revenue_estimated = EXCLUDED.revenue_estimated,
+                    updated_at = now();
+                """,
+                (
+                    demo_id(f"perf:{campaign_code}:{current.isoformat()}"),
+                    DEMO_TENANT_ID, campaign_id, current,
+                    spend, impressions, clicks, conversions, revenue,
+                ),
+            )
+            current += timedelta(days=1)
+
+
 def reset_tenant_scoped_demo_tables(cursor) -> None:
     logger.info("Resetting previous demo rows in tenant-scoped tables (relations/contacts/transactions/events/content)...")
     cursor.execute(f"DELETE FROM {_table('cdp_relations')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
@@ -383,6 +555,7 @@ def reset_tenant_scoped_demo_tables(cursor) -> None:
     cursor.execute(f"DELETE FROM {_table('crm_transactions')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('cdp_raw_events')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('cdp_content_items')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
+    cursor.execute(f"DELETE FROM {_table('crm_campaign_performance_daily')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('graph_edges')} WHERE metadata->>'demo_tenant' = %s;", (DEMO_TENANT_ID,))
 
 
@@ -1095,6 +1268,7 @@ def main() -> None:
             seed_relation_types(cursor)
             crm_ids = seed_crm_entities(cursor)
             reset_tenant_scoped_demo_tables(cursor)
+            seed_campaign_performance_daily(cursor, crm_ids["campaign"])
             seed_relations(cursor, detail_profiles)
             seed_customer_contacts(cursor, detail_profiles)
             seed_transactions(cursor, detail_profiles)
