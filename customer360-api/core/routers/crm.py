@@ -29,6 +29,7 @@ from core.schemas.crm import (
     CampaignMemberCreate,
     CampaignMemberRead,
     CampaignMemberUpdate,
+    CampaignMetricItem,
     CampaignRead,
     CampaignUpdate,
     ContactCreate,
@@ -139,20 +140,10 @@ industries_router = build_crud_router(
     tags=["CRM - Accounts"],
 )
 
-all_crm_routers = [
-    campaigns_router,
-    campaign_members_router,
-    leads_router,
-    lead_sources_router,
-    contacts_router,
-    accounts_router,
-    opportunities_router,
-    industries_router,
-]
-
 
 # ---------------------------------------------------------------------------
 # Campaign Analytics Router (Phase 2 — Dashboard endpoints)
+# Must be defined before all_crm_routers so the list reference resolves.
 # ---------------------------------------------------------------------------
 
 campaign_analytics_router = APIRouter(
@@ -199,7 +190,6 @@ def list_campaign_metrics(
     )
     repo = CampaignRepository(db, tenant_id)
     items, total = repo.get_filtered_campaigns(filters)
-    from core.schemas.crm import CampaignMetricItem
     return PaginatedCampaignResponse(
         items=[CampaignMetricItem.model_validate(i) for i in items],
         total=total,
@@ -230,3 +220,16 @@ def get_top_campaigns(
     """Top N campaigns by conversions and ROAS for the analytics charts."""
     repo = CampaignRepository(db, tenant_id)
     return repo.get_top_campaigns(limit=limit)
+
+
+all_crm_routers = [
+    campaign_analytics_router,  # must precede campaigns_router to avoid /{item_id} shadowing /analytics
+    campaigns_router,
+    campaign_members_router,
+    leads_router,
+    lead_sources_router,
+    contacts_router,
+    accounts_router,
+    opportunities_router,
+    industries_router,
+]

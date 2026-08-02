@@ -27,6 +27,7 @@ const TIME_CHECK_API_HEALTH = 60000;
     journeys: "/journeys",
     scoring: "/scoring",
     analytics: "/analytics",
+    campaigns: "/campaigns",
     datasources: "/datasources",
     admin: "/admin"
   };
