@@ -1,0 +1,56 @@
+# Dagster orchestrator (webserver + daemon via `dagster dev`, 7 code locations
+# from backend-system/workspace.yaml). Serves the GraphQL endpoint the API calls
+# to submit jobs. Needs a PVC for DAGSTER_HOME (SQLite run/event storage) and DB
+# access (envFrom).  Image built from the new backend-system/Dockerfile.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dagster-home
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dagster
+  labels: { app: dagster }
+spec:
+  replicas: 1
+  strategy: { type: Recreate } # single-writer DAGSTER_HOME on a RWO volume
+  selector:
+    matchLabels: { app: dagster }
+  template:
+    metadata:
+      labels: { app: dagster }
+    spec:
+      containers:
+        - name: dagster
+          image: customer360-dagster:local
+          command: ["dagster", "dev", "-w", "workspace.yaml", "-h", "0.0.0.0", "-p", "3000"]
+          ports:
+            - { containerPort: 3000, name: http }
+          env:
+            - { name: DAGSTER_HOME, value: /dagster_home }
+          envFrom:
+            - configMapRef: { name: c360-config }
+            - secretRef: { name: c360-secrets }
+          readinessProbe:
+            tcpSocket: { port: 3000 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          volumeMounts:
+            - { name: dagster-home, mountPath: /dagster_home }
+      volumes:
+        - name: dagster-home
+          persistentVolumeClaim: { claimName: dagster-home }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dagster
+  labels: { app: dagster }
+spec:
+  selector: { app: dagster }
+  ports:
+    - { port: 3000, targetPort: 3000, name: http }

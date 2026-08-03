@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Build all locally-built Customer360 images and load them into the kind cluster.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)" # k8s/scripts -> repo root
+CLUSTER="${KIND_CLUSTER:-customer360}"
+
+build() { # <tag> <context-dir> [dockerfile-relative-to-repo]
+  local tag="$1" ctx="$2" df="${3:-}"
+  echo "==> build $tag"
+  if [ -n "$df" ]; then
+    docker build -t "$tag" -f "$REPO/$df" "$REPO/$ctx"
+  else
+    docker build -t "$tag" "$REPO/$ctx"
+  fi
+  echo "==> load $tag into kind/$CLUSTER"
+  kind load docker-image "$tag" --name "$CLUSTER"
+}
+
+build customer360-postgres:local .                              postgres/Dockerfile
+build customer360-redis:local    redis
+build customer360-api:local      customer360-api
+build customer360-frontend:local frontend-admin
+build customer360-cir:local      backend-system/identity_resolution
+build customer360-dagster:local  backend-system
+
+echo "==> all images built and loaded"

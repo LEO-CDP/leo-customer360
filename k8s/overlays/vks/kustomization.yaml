@@ -1,0 +1,37 @@
+# GreenNode VKS overlay: app tier ONLY (no in-cluster-data component). The app
+# points at the GreenNode managed vDB (Postgres/Redis/Kafka) + vStorage you
+# provision with ../../../terraform, via patch-config.yaml. Access is through an
+# Ingress instead of NodePorts, and images come from a container registry.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: customer360
+
+resources:
+  - ../../base
+  - ingress.yaml
+
+patches:
+  - path: patch-config.yaml
+
+# Point every built image at your GreenNode container registry + tag.
+images:
+  - name: customer360-api
+    newName: REGISTRY.example/customer360-api
+    newTag: latest
+  - name: customer360-frontend
+    newName: REGISTRY.example/customer360-frontend
+    newTag: latest
+  - name: customer360-dagster
+    newName: REGISTRY.example/customer360-dagster
+    newTag: latest
+  - name: customer360-cir
+    newName: REGISTRY.example/customer360-cir
+    newTag: latest
+
+secretGenerator:
+  - name: c360-secrets
+    envs:
+      - secret.env
+
+generatorOptions:
+  disableNameSuffixHash: true

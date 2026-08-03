@@ -1,0 +1,30 @@
+# Point the app tier at the GreenNode managed data services (from ../../../terraform
+# outputs) and at public URLs. Replace every CHANGE_ME with your real values.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c360-config
+data:
+  ENVIRONMENT: "production"
+
+  # --- Managed vDB PostgreSQL (terraform output: postgres.host / .port) ---
+  DB_HOST: "CHANGE_ME-managed-pg-private-host"
+  DB_PORT: "5432"
+  KC_DB_URL: "jdbc:postgresql://CHANGE_ME-managed-pg-private-host:5432/db_keycloak"
+
+  # --- Managed vDB Redis (terraform output: redis.host / .port; NOT 6580) ---
+  REDIS_HOST: "CHANGE_ME-managed-redis-host"
+  REDIS_PORT: "CHANGE_ME-managed-redis-port"
+
+  # --- Managed vDB Kafka (terraform output: kafka broker ip + SASL port 9094) ---
+  KAFKA_BOOTSTRAP_SERVERS: "CHANGE_ME-managed-kafka:9094"
+
+  # --- vStorage (S3) instead of MinIO ---
+  S3_ENDPOINT: "https://hcm04.vstorage.vngcloud.vn"
+  MINIO_BUCKET: "CHANGE_ME-bucket"
+
+  # --- Auth on, public URLs (must be browser-reachable) ---
+  SSO_LOGIN: "true"
+  SSO_LOGIN_URL: "https://keycloak.CHANGE_ME.example"
+  KEYCLOAK_HOSTNAME: "keycloak.CHANGE_ME.example"
+  FRONTEND_API_HOSTNAME: "https://api.CHANGE_ME.example"

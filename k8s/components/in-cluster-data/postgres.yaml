@@ -1,0 +1,57 @@
+# PostgreSQL 16 + PostGIS + pgvector. Uses the locally-built image whose
+# /docker-entrypoint-initdb.d bakes extensions + schema + core seed; these run
+# only on a FRESH PVC (empty data dir). Delete the PVC to re-initialize.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels: { app: postgres }
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: customer360-postgres:local
+          ports:
+            - { containerPort: 5432, name: postgres }
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { configMapKeyRef: { name: c360-config, key: DB_USER } }
+            - name: POSTGRES_DB
+              valueFrom: { configMapKeyRef: { name: c360-config, key: DB_NAME } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: c360-secrets, key: DB_PASSWORD } }
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "postgres", "-d", "customer360"] }
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "postgres", "-d", "customer360"] }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 5Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: { app: postgres }
+spec:
+  clusterIP: None
+  selector: { app: postgres }
+  ports:
+    - { port: 5432, targetPort: 5432, name: postgres }

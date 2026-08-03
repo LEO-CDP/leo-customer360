@@ -1,0 +1,2 @@
+# Real secret env files (commit only *.example)
+overlays/*/secret.env

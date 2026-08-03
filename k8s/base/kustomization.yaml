@@ -1,0 +1,16 @@
+# Environment-agnostic app tier. Data services (postgres/redis/kafka/minio) are
+# NOT here - they come from the in-cluster-data component (local overlay only).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - config.yaml
+  - api.yaml
+  - frontend.yaml
+  - dagster.yaml
+  - cir.yaml
+  - keycloak.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: customer360
