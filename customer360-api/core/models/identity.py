@@ -61,6 +61,7 @@ class CdpMasterProfile(Base):
     date_of_birth: Mapped[Optional[date]] = mapped_column(Date)
     gender: Mapped[Optional[str]] = mapped_column(Text)
     address: Mapped[Optional[dict]] = mapped_column(JSONB)
+    company_name: Mapped[Optional[str]] = mapped_column(Text)
 
     external_ids: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     device_ids: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
@@ -163,9 +164,21 @@ class CdpRawProfileStage(Base):
 
     external_customer_id: Mapped[Optional[str]] = mapped_column(Text)
     full_name: Mapped[Optional[str]] = mapped_column(Text)
+    first_name: Mapped[Optional[str]] = mapped_column(Text)
+    last_name: Mapped[Optional[str]] = mapped_column(Text)
     email: Mapped[Optional[str]] = mapped_column(Text)
     phone_number: Mapped[Optional[str]] = mapped_column(Text)
     national_id: Mapped[Optional[str]] = mapped_column(Text)
+    date_of_birth: Mapped[Optional[date]] = mapped_column(Date)
+
+    # Address fields for physical address fuzzy matching
+    address_line1: Mapped[Optional[str]] = mapped_column(Text)
+    address_line2: Mapped[Optional[str]] = mapped_column(Text)
+    city: Mapped[Optional[str]] = mapped_column(Text)
+    state_province: Mapped[Optional[str]] = mapped_column(Text)
+    postal_code: Mapped[Optional[str]] = mapped_column(Text)
+    country: Mapped[Optional[str]] = mapped_column(Text)
+    company_name: Mapped[Optional[str]] = mapped_column(Text)
 
     device_id: Mapped[Optional[str]] = mapped_column(Text)
     advertising_id: Mapped[Optional[str]] = mapped_column(Text)

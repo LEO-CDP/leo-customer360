@@ -1,207 +1,227 @@
-## Summary Improvement for Customer Identity Resolution (CIR)
+# Readiness Review: Identity Resolution Taxonomy vs. Current Schema
 
-Your PostgreSQL schema for **Customer Identity Resolution (CIR)** and Customer 360 is **architecturally solid** and well-structured for an enterprise multi-tenant CDP.
+| Category | Item | Status | Notes |
+|---|---|---|---|
+| **Exact Matching** | Email | ✅ Ready | `cdp_profile_attributes` active rule (`exact`), unique index on `cdp_master_profiles(tenant_id, email)`, partial index on raw stage. |
+| | Phone | ✅ Ready | Same pattern as email. |
+| | User ID | ✅ Ready | `external_customer_id` (raw) → `external_ids` JSONB (master), active exact-match rule, GIN + partial indexes present. |
+| **Fuzzy Matching** | Name | ⚠️ Fixed, still disabled by policy | Mechanism exists (`matching_rule` enum, resolver.py code), but **was broken**: `pg_trgm`/`fuzzystrmatch` extensions were never created by the canonical schema (only by a demo-seed script) and there was no trigram index — `similarity()`/`dmetaphone()` would either error or full-scan. **Fixed both** (see below). `full_name` itself stays `is_identity_resolution=FALSE` by deliberate policy (Vietnamese-name collision risk). |
+| | Address | ❌ Not ready | No structured address fields exist on `cdp_raw_profiles_stage` at all — `cdp_master_profiles.address` is JSONB populated only *after* resolution, so there's nothing to compare during matching. Needs new raw-side columns. |
+| | Company | ❌ Not ready | CIR is scoped entirely to person-level `cdp_master_profiles`. `crm_account` (B2B org) has zero identity-resolution wiring. Would need a separate Account Identity Resolution pipeline. |
+| **Probabilistic Matching** | Bayesian | ❌ Not implemented | `matching_rule` only allows `exact`/`fuzzy_trgm`/`fuzzy_dmetaphone`/`none`; resolver.py is deterministic OR-across-rules + `LIMIT 1`, not a weighted/Fellegi-Sunter score. `identity_confidence_score` is just a placeholder metadata column today. This is a substantial feature, not a quick fix. |
+| **Behavioral Matching** | Cookie | ✅ Ready | Active exact-match key, GIN array index on master, partial index on raw. |
+| | Device | ✅ Ready | Same pattern as cookie. |
+| | Login | ✅ Ready by design | No special casing needed — a login event's row carries the newly-known `external_customer_id` alongside the already-matched `device_id`/`cookie_id`, so existing exact-match rules stitch anonymous→identified automatically. |
+| | Session | ✅ Ready by design | `session_id` is intentionally **not** a standalone matching key (too ephemeral, would cause false merges) — it rides along on the same row as the real matching keys. |
 
-### Key Strengths
+### Bugs found & fixed
+1. **Missing extensions** — database-schema.sql never created `pg_trgm`/`fuzzystrmatch`, even though the schema's own CHECK constraint permits `fuzzy_trgm`/`fuzzy_dmetaphone` and resolver.py unconditionally emits `similarity()`/`dmetaphone()` SQL for those rules. A fresh deploy skipping the demo-seed script would hit a hard Postgres error the moment fuzzy matching was enabled. Added both extensions.
+2. **Missing trigram index** — no GIN index backed `similarity(full_name, ...)`, meaning fuzzy matching would force a full sequential scan at any scale. Added `idx_cdp_mp_full_name_trgm`.
 
-* **Separation of Concerns:** Clean progression from landing/staging (`cdp_raw_profiles_stage`), to golden master profiles (`cdp_master_profiles`), linked via a dedicated join table (`cdp_profile_links`).
-* **Non-Blocking Event Ingestion:** `cdp_raw_events` carries raw identity parameters directly (`device_id`, `cookie_id`, `external_customer_id`), allowing high-throughput ingestion without waiting for real-time CIR linking.
-* **Metadata-Driven Matching & Consolidation:** `cdp_profile_attributes` provides a clean registry for specifying `is_identity_resolution`, `matching_rule`, `matching_threshold`, and `consolidation_rule`.
-* **Multi-Tenant Security:** Strict tenant isolation enforced at the database level via `tenant_id` and PostgreSQL Row-Level Security (RLS).
+Both verified via a throwaway sandbox DB (clean apply, `similarity()`/`dmetaphone()` now callable) and applied directly to the live dev DB. Full test suites (208 + 74) still pass.
 
-However, to support **production-grade Identity Graph rules** (such as priority ranking, sliding limits, junk value blocking, unmerging/profile splitting, and high-speed identifier point lookups), a few critical fields and auxiliary tables are missing.
+I deliberately did **not** attempt to half-implement Address/Company fuzzy matching or Bayesian probabilistic scoring — those need explicit design decisions (new columns/tables, algorithm rewrite), not a DDL patch. Let me know if you'd like me to scope out any of those as a follow-up.
 
----
+Made changes.
 
-## 1. Schema Gap Analysis for CIR
 
-### 1.1 Missing Rule Fields in `cdp_profile_attributes`
+# AI Prompt: Identity Resolution Expert
 
-While `cdp_profile_attributes` includes `matching_rule` and `consolidation_rule`, it lacks fields to configure rule constraints directly in the metadata registry:
+```text
+You are a Principal Data Architect specializing in Customer Data Platforms (CDP), Master Data Management (MDM), Identity Resolution, Entity Resolution, Record Linkage, Customer 360, and Graph Analytics.
 
-| Missing Field | Recommended Type | Purpose in CIR Strategy |
-| --- | --- | --- |
-| `priority_rank` | `INTEGER` | Defines priority hierarchy when resolving limits (e.g., Rank 1 for `user_id`, Rank 2 for `email`, Rank 3 for `device_id`). |
-| `value_limit` | `INTEGER` | Maximum allowed values per profile (e.g., `1` for `user_id`, `5` for `email`/`device_id`). |
-| `limit_timeframe` | `VARCHAR(50)` | Time window for the limit (e.g., `1_ever`, `5_weekly`, `5_annually`). |
-| `blocked_values` | `JSONB` / `TEXT[]` | Specific strings or regex patterns to block from identity promotion (e.g., `["null", "-1", "anonymous"]`, `^[0-]*$`). |
+Your knowledge combines enterprise CDPs (Salesforce Data Cloud, Adobe Experience Platform, Segment, Tealium, Treasure Data), academic research on entity resolution, and modern machine learning.
 
----
+Your objective is to design an enterprise-grade Identity Resolution engine capable of handling hundreds of millions of customer profiles while maintaining high precision, scalability, explainability, and auditability.
 
-### 1.2 Missing Lineage & State Fields in `cdp_profile_links`
+The architecture must support both batch and real-time processing.
 
-`cdp_profile_links` records which `raw_profile_id` mapped to which `master_profile_id`. However, in real-world CIR, profiles often need to be **split, unlinked, or re-stitched** when an incorrect merge occurs (e.g., shared device scenario).
+Always think like a software architect instead of just explaining concepts.
 
-| Missing Field | Recommended Type | Purpose in CIR Strategy |
-| --- | --- | --- |
-| `status` | `VARCHAR(20)` | Tracks link state (`ACTIVE`, `HISTORICAL`, `UNLINKED`, `SUPERSEDED`). |
-| `unlinked_at` | `TIMESTAMP WITH TIME ZONE` | Timestamp when a link was severed during a profile split. |
-| `unlinked_reason` | `TEXT` | Audit trail for manual or automated unlinking (e.g., "Limit exceeded demotion", "Manual split by admin"). |
+Use the following hierarchy.
 
----
+Identity Resolution
+│
+├── Exact Matching
+│     Email
+│     Phone
+│     Customer ID
+│     Loyalty ID
+│     CRM ID
+│     Government ID (optional)
+│
+├── Fuzzy Matching
+│     Name
+│     Address
+│     Company
+│     Date of Birth
+│     City
+│     Country
+│
+├── Probabilistic Matching
+│     Fellegi-Sunter
+│     Bayesian Matching
+│     Weighted Confidence Score
+│     Composite Similarity
+│
+├── Behavioral Matching
+│     Cookie
+│     Device ID
+│     Browser Fingerprint
+│     Login Events
+│     Session History
+│     Purchase History
+│     Browsing Pattern
+│
+├── Graph Identity
+│     Identity Graph
+│     Connected Components
+│     Union-Find
+│     Graph Traversal
+│     Multi-hop Relationship Discovery
+│
+├── Machine Learning Matching
+│     Feature Engineering
+│     XGBoost
+│     LightGBM
+│     Siamese Networks
+│     Sentence Transformers
+│     Embeddings
+│     Vector Similarity
+│     Active Learning
+│
+├── Survivorship
+│     Golden Record
+│     Source Priority
+│     Source Reliability
+│     Most Recent Value
+│     Most Frequent Value
+│     Highest Confidence
+│     Rule-based Consolidation
+│
+├── Identity Confidence
+│     Match Score
+│     Confidence Level
+│     Explainability
+│     Decision Trace
+│     Human Review Threshold
+│
+├── Data Quality
+│     Standardization
+│     Parsing
+│     Cleansing
+│     Validation
+│     Normalization
+│
+├── Privacy & Governance
+│     GDPR
+│     CCPA
+│     PDPA
+│     Consent
+│     Audit Log
+│     PII Encryption
+│
+└── Scalability
+      Multi-Tenant
+      Streaming
+      Batch
+      Incremental Merge
+      Distributed Processing
+      Horizontal Scaling
 
-### 1.3 Missing High-Performance Identifier Index Table
+Whenever answering:
 
-In `cdp_master_profiles`, external IDs and device identifiers are stored inside JSONB (`external_ids`) or TEXT arrays (`device_ids`, `cookie_ids`, `advertising_ids`).
+1. Explain the architecture.
+2. Describe the matching workflow.
+3. Recommend algorithms.
+4. Compare alternatives.
+5. Discuss computational complexity.
+6. Recommend database schemas.
+7. Design metadata-driven rules.
+8. Explain confidence scoring.
+9. Explain why a profile is merged.
+10. Explain why a profile is NOT merged.
+11. Consider false positives and false negatives.
+12. Optimize for enterprise-scale systems.
 
-While GIN indexes are provided, performing $O(1)$ point lookups across millions of records during streaming event resolution on composite JSON/array types creates unnecessary query overhead.
+Prefer PostgreSQL, pgvector, Redis, Kafka, Spark, DuckDB, and graph algorithms where appropriate.
 
-**Missing Component:** A dedicated, flattened **Identifier Lookup Index Table** (`cdp_identity_index`) that maps `(tenant_id, identifier_type, normalized_identifier_value) -> master_profile_id`.
-
----
-
-### 1.4 Missing Master-to-Master Merge Audit Table
-
-When two `cdp_master_profiles` merge (e.g., Profile A with `email` matches Profile B when `user_id` is supplied later), one master profile is tombstoned or merged into another.
-
-The current schema lacks a dedicated table to track **Master Profile Merges** and preserve snapshot history for data lineage and unmerge operations.
-
----
-
-## 2. Recommended SQL Enhancements & DDL Updates
-
-Below are the exact DDL statements required to update your schema for complete CIR coverage.
-
-### Update 1: Extend `cdp_profile_attributes` with CIR Rule Engine Metadata
-
-```sql
--- Add explicit priority, value limits, and blocked value configs to attribute registry
-ALTER TABLE customer360.cdp_profile_attributes
-    ADD COLUMN IF NOT EXISTS priority_rank INTEGER DEFAULT 99,
-    ADD COLUMN IF NOT EXISTS value_limit INTEGER DEFAULT 5,
-    ADD COLUMN IF NOT EXISTS limit_timeframe VARCHAR(50) DEFAULT '5_annually',
-    ADD COLUMN IF NOT EXISTS blocked_values JSONB DEFAULT '["null", "-1", "anonymous", "void", "abc123"]'::jsonb,
-    ADD COLUMN IF NOT EXISTS blocked_patterns TEXT[] DEFAULT ARRAY['^[0-]*$'];
-
-COMMENT ON COLUMN customer360.cdp_profile_attributes.priority_rank IS 'Rank hierarchy used during limit demotion (1 = highest priority, e.g. user_id).';
-COMMENT ON COLUMN customer360.cdp_profile_attributes.value_limit IS 'Maximum allowed unique values on a single master profile for this identifier.';
-COMMENT ON COLUMN customer360.cdp_profile_attributes.limit_timeframe IS 'Window for limit enforcement: 1_ever, 5_weekly, 5_monthly, 5_annually.';
-COMMENT ON COLUMN customer360.cdp_profile_attributes.blocked_values IS 'Exact string values blocked from being promoted to external identifiers.';
-
+Avoid hard-coded business rules. Prefer metadata-driven, configurable, and explainable designs.
 ```
 
 ---
 
-### Update 2: Extend `cdp_profile_links` for Unmerge & Split Lifecycle
+# AI Prompt: Identity Stitching Reviewer
 
-```sql
--- Add lifecycle status and unlinking metadata
-ALTER TABLE customer360.cdp_profile_links
-    ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'HISTORICAL', 'UNLINKED', 'SUPERSEDED')),
-    ADD COLUMN IF NOT EXISTS unlinked_at TIMESTAMP WITH TIME ZONE,
-    ADD COLUMN IF NOT EXISTS unlinked_reason TEXT,
-    ADD COLUMN IF NOT EXISTS unlinked_by UUID REFERENCES customer360.sys_user(user_id);
+```text
+Act as a Principal Identity Resolution Engineer.
 
-CREATE INDEX IF NOT EXISTS idx_cdp_profile_links_status 
-    ON customer360.cdp_profile_links (tenant_id, status) 
-    WHERE status = 'ACTIVE';
+Review my identity stitching design as if you were performing a production architecture review for an enterprise CDP.
 
+Evaluate it across these dimensions:
+
+- Accuracy
+- Precision
+- Recall
+- Scalability
+- Explainability
+- Auditability
+- Privacy
+- Performance
+- Maintainability
+- Metadata-driven design
+- False Positive Risk
+- False Negative Risk
+- ML Readiness
+- Graph Readiness
+
+For every weakness:
+
+• Explain the problem.
+• Explain why it matters.
+• Estimate its impact.
+• Recommend an improved design.
+• Provide sample algorithms or SQL if appropriate.
+
+Think critically and challenge assumptions rather than simply agreeing with the design.
 ```
 
 ---
 
-### Update 3: Create Flattened Identifier Index Table (`cdp_identity_index`)
+# AI Prompt: Identity Resolution Algorithm Designer
 
-```sql
--- Unified point-lookup index for ultra-fast streaming match resolution
-CREATE TABLE IF NOT EXISTS customer360.cdp_identity_index (
-    identity_index_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
-    master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles(master_profile_id) ON DELETE CASCADE,
-    
-    -- Identifier Classification
-    identifier_type VARCHAR(100) NOT NULL, -- e.g., 'user_id', 'email', 'phone', 'device_id', 'cookie_id', 'appsflyer_id'
-    identifier_value TEXT NOT NULL,         -- Canonical raw value
-    identifier_value_normalized TEXT NOT NULL, -- Normalized / lowercased value for exact matching
-    
-    -- Status & Governance
-    is_primary BOOLEAN DEFAULT FALSE,
-    is_blocked BOOLEAN DEFAULT FALSE,
-    first_seen_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    last_seen_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    
-    CONSTRAINT uq_cdp_identity_index UNIQUE (tenant_id, identifier_type, identifier_value_normalized)
-);
+```text
+Design an enterprise-grade identity stitching algorithm for a Customer 360 platform.
 
-COMMENT ON TABLE customer360.cdp_identity_index IS 'Flattened O(1) B-Tree lookup table for cross-channel identifier matching during streaming ingestion.';
+The solution should combine multiple layers instead of relying on a single matching method:
 
--- Fast lookup index for incoming identifier queries
-CREATE INDEX IF NOT EXISTS idx_cdp_identity_lookup 
-    ON customer360.cdp_identity_index (tenant_id, identifier_type, identifier_value_normalized) 
-    WHERE is_blocked = FALSE;
+1. Data normalization
+2. Exact matching
+3. Deterministic matching
+4. Fuzzy matching
+5. Probabilistic scoring
+6. Behavioral correlation
+7. Identity graph clustering
+8. Machine learning prediction
+9. Survivorship rules
+10. Golden Record generation
 
-CREATE INDEX IF NOT EXISTS idx_cdp_identity_master 
-    ON customer360.cdp_identity_index (master_profile_id);
+For each layer, provide:
 
--- Enable RLS for identity index
-ALTER TABLE customer360.cdp_identity_index ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customer360.cdp_identity_index FORCE ROW LEVEL SECURITY;
+- Objective
+- Inputs
+- Algorithms
+- Confidence score contribution
+- Time complexity
+- Advantages
+- Limitations
+- Failure cases
+- Example implementation
+- Suitable PostgreSQL schema
+- Metadata configuration
 
-DROP POLICY IF EXISTS tenant_policy ON customer360.cdp_identity_index;
-CREATE POLICY tenant_policy ON customer360.cdp_identity_index
-    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
-
+Finally, produce an end-to-end architecture diagram and decision flow that minimizes false positives while maintaining high recall.
 ```
 
----
+These prompts are designed to consistently elicit architectural, implementation-focused responses rather than generic explanations, making them well suited for designing an enterprise Customer 360 identity resolution engine.
 
-### Update 4: Create Master Profile Merge History Table (`cdp_profile_merge_history`)
-
-```sql
--- Audit table recording master-to-master profile consolidation
-CREATE TABLE IF NOT EXISTS customer360.cdp_profile_merge_history (
-    merge_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
-    
-    -- Merge Lineage
-    target_master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles(master_profile_id), -- Retained Profile
-    source_master_profile_id UUID NOT NULL, -- Merged / Tombstoned Profile ID
-    
-    -- Match Details
-    merge_reason TEXT NOT NULL, -- e.g., 'Deterministic email match', 'Manual admin merge'
-    matched_identifier_type VARCHAR(100),
-    matched_identifier_value TEXT,
-    match_score NUMERIC(5, 4),
-    
-    -- State Snapshots for Unmerge Rollback
-    source_profile_snapshot JSONB NOT NULL, -- Full snapshot of source profile before deletion
-    target_profile_snapshot JSONB NOT NULL, -- Full snapshot of target profile before merge
-    
-    merged_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    merged_by UUID REFERENCES customer360.sys_user(user_id) -- Nullable if automated system process
-);
-
-COMMENT ON TABLE customer360.cdp_profile_merge_history IS 'Audit log of master-to-master merges storing JSONB profile snapshots to enable profile unmerging/splitting.';
-
-CREATE INDEX IF NOT EXISTS idx_cdp_merge_history_target 
-    ON customer360.cdp_profile_merge_history (tenant_id, target_master_profile_id);
-
-CREATE INDEX IF NOT EXISTS idx_cdp_merge_history_source 
-    ON customer360.cdp_profile_merge_history (tenant_id, source_master_profile_id);
-
--- Enable RLS for merge history
-ALTER TABLE customer360.cdp_profile_merge_history ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customer360.cdp_profile_merge_history FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS tenant_policy ON customer360.cdp_profile_merge_history;
-CREATE POLICY tenant_policy ON customer360.cdp_profile_merge_history
-    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
-
-```
-
----
-
-## 3. Summary Compliance Check Matrix
-
-| Feature / Capability | Initial Schema Status | Proposed Resolution |
-| --- | --- | --- |
-| **Staging & Master Isolation** | ✅ Ready | `cdp_raw_profiles_stage` & `cdp_master_profiles` exist. |
-| **Async Raw Event Ingestion** | ✅ Ready | `cdp_raw_events` carries identity parameters directly. |
-| **Multi-Tenant Security** | ✅ Ready | `tenant_id` on all tables with explicit PostgreSQL RLS. |
-| **Identifier Priority Ranks** | ⚠️ Missing | Added `priority_rank` to `cdp_profile_attributes`. |
-| **Identifier Limits & Windows** | ⚠️ Missing | Added `value_limit` and `limit_timeframe` to `cdp_profile_attributes`. |
-| **Blocked Junk Value Filter** | ⚠️ Missing | Added `blocked_values` & `blocked_patterns` to `cdp_profile_attributes`. |
-| **Point Lookup Performance** | ⚠️ Suboptimal | Created `cdp_identity_index` table with B-Tree lookup indexes. |
-| **Unmerge & Profile Splits** | ⚠️ Missing | Extended `cdp_profile_links` status and created `cdp_profile_merge_history`. |

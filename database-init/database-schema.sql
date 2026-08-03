@@ -1,3 +1,6 @@
+-- SQLBook: Code
+-- Customer 360 Database Schema -- 
+
 -- =========================================================
 -- Extensions
 -- =========================================================
@@ -10,6 +13,10 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- retail store/POS locations, travel destinations, bank branches). Already
 -- present in the dev image (postgis/postgis:16-3.5, see dev-start-pgsql.sh).
 CREATE EXTENSION IF NOT EXISTS postgis;
+-- Required by identity_resolution/resolver.py's fuzzy_trgm (similarity())
+-- and fuzzy_dmetaphone (dmetaphone()) CIR matching_rule query builders.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
 
 -- =========================================================
 -- Schema
@@ -625,6 +632,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- Flexible JSON document for complex address storage 
     -- Format: {"street": "123 Le Loi", "city": "Ho Chi Minh", "country": "VN"}
     address JSONB,
+    -- Company/employer name for B2B matching and corporate account association
+    company_name TEXT,
 
     -- ------------------------------------------------------------------------
     -- CROSS-CHANNEL IDENTITY GRAPH
@@ -863,9 +872,21 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     ) DEFAULT 'individual',
     external_customer_id TEXT, -- AppsFlyer customer_user_id / MoEngage unique_id / core banking CIF / loyalty_id
     full_name TEXT,
+    first_name TEXT,
+    last_name TEXT,
     email TEXT,
     phone_number TEXT,
     national_id TEXT, -- banking KYC identifier (CMND/CCCD/passport)
+    date_of_birth DATE, -- for probabilistic/fuzzy matching
+
+    -- Physical address (structured for fuzzy matching on Address entity)
+    address_line1 TEXT,
+    address_line2 TEXT,
+    city TEXT,
+    state_province TEXT,
+    postal_code TEXT,
+    country TEXT,
+    company_name TEXT,
 
     -- Device & marketing identity (AppsFlyer / MoEngage / Web Tracking)
     device_id TEXT, -- IDFV / Android ID / app instance id
@@ -920,6 +941,13 @@ COMMENT ON TABLE customer360.cdp_profile_links IS 'Join table recording every ra
 CREATE INDEX IF NOT EXISTS idx_cdp_profile_links_status ON customer360.cdp_profile_links (tenant_id, status)
 WHERE
     status = 'ACTIVE';
+
+-- Backs GET /master-profiles/{id}/links (core/routers/identity.py) and the
+-- reporting duplicate-master queries (core/crud/identity.py), which both
+-- filter/group by master_profile_id -- without this, those lookups fall back
+-- to a full sequential scan of cdp_profile_links once the table reaches
+-- millions of rows (no automatic index is created for a bare FK column).
+CREATE INDEX IF NOT EXISTS idx_cdp_profile_links_master ON customer360.cdp_profile_links (tenant_id, master_profile_id);
 
 -- ============================================================================
 -- cdp_raw_events: high-volume behavioral/transactional event fact table
@@ -1063,17 +1091,6 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_events_default PARTITION OF custo
 ---------------------------------------------------
 -- EVENT CATALOG (governed cross-domain event vocabulary)
 ---------------------------------------------------
-
--- ============================================================================
--- cdp_event_catalog: the governed list of event_category/event_name pairs
--- that may be written to cdp_raw_events (and, by convention, to ArangoDB's
--- cdp_trackingevent via core-leo-cdp's BehavioralEvent constants). Mirrors
--- the same "attribute catalog" pattern already used by cdp_profile_attributes
--- above. Deliberately NOT enforced via a hard FK from cdp_raw_events.event_name
--- (event_name stays free TEXT) so high-throughput ingestion is never blocked
--- by a missing catalog row for a brand-new event; the catalog exists for
--- discoverability/admin-UI dropdowns/analytics governance instead.
--- ============================================================================
 CREATE TABLE IF NOT EXISTS customer360.cdp_event_catalog (
     id BIGSERIAL PRIMARY KEY,
     event_name TEXT UNIQUE NOT NULL,
@@ -1259,13 +1276,13 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog: one row per cdp_master_profiles column (plus cdp_raw_profiles_stage matching keys), grouped by attribute_group. Drives Customer Identity Resolution (CIR) matching rules (is_identity_resolution/matching_rule/matching_threshold) and merge precedence (consolidation_rule/consolidation_config) without hard-coding them in application code.';
+COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog: one row per cdp_master_profiles';
 
 -- ============================================================================
 -- cdp_identity_index: flattened O(1) point-lookup index for identifiers
 -- ============================================================================
 -- Unified lookup table mapping (tenant_id, identifier_type, normalized value)
--- -> master_profile_id, avoiding JSONB/array scans on cdp_master_profiles
+-- master_profile_id, avoiding JSONB/array scans on cdp_master_profiles
 -- (external_ids/device_ids/cookie_ids/advertising_ids) during high-throughput
 -- streaming CIR match resolution.
 CREATE TABLE IF NOT EXISTS customer360.cdp_identity_index (
@@ -1683,6 +1700,11 @@ CREATE INDEX IF NOT EXISTS idx_cdp_mp_advertising_ids ON customer360.cdp_master_
 
 CREATE INDEX IF NOT EXISTS idx_cdp_mp_cookie_ids ON customer360.cdp_master_profiles USING GIN (cookie_ids);
 
+-- Trigram index backing the fuzzy_trgm matching_rule's similarity(full_name, ...)
+-- lookup in resolver.py -- without it, enabling fuzzy_trgm on full_name would
+-- force a sequential scan (computing similarity() per row) at any real scale.
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_full_name_trgm ON customer360.cdp_master_profiles USING GIN (full_name gin_trgm_ops);
+
 -- Raw staging indexes: identity fields used for matching, plus the
 -- processing-queue lookup (tenant_id, status_code).
 CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_status ON customer360.cdp_raw_profiles_stage (tenant_id, status_code);
@@ -1714,6 +1736,27 @@ WHERE
 CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_national_id ON customer360.cdp_raw_profiles_stage (national_id)
 WHERE
     national_id IS NOT NULL;
+
+-- Trigram indexes for fuzzy matching on name/company/address during CIR
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_first_name_trgm ON customer360.cdp_raw_profiles_stage USING GIN (first_name gin_trgm_ops)
+WHERE
+    first_name IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_last_name_trgm ON customer360.cdp_raw_profiles_stage USING GIN (last_name gin_trgm_ops)
+WHERE
+    last_name IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_company_name_trgm ON customer360.cdp_raw_profiles_stage USING GIN (company_name gin_trgm_ops)
+WHERE
+    company_name IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_address_trgm ON customer360.cdp_raw_profiles_stage USING GIN (address_line1 gin_trgm_ops)
+WHERE
+    address_line1 IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_city ON customer360.cdp_raw_profiles_stage (city)
+WHERE
+    city IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_contacts_date ON customer360.crm_customer_contacts (contact_date);
 

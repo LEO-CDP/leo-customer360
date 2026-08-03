@@ -27,6 +27,7 @@ class MasterProfileBase(BaseModel):
     date_of_birth: Optional[date] = None
     gender: Optional[str] = None
     address: Optional[dict] = None
+    company_name: Optional[str] = None
 
     external_ids: Optional[dict] = None
     device_ids: Optional[list[str]] = None
@@ -108,6 +109,7 @@ class MasterProfileUpdate(BaseModel):
     date_of_birth: Optional[date] = None
     gender: Optional[str] = None
     address: Optional[dict] = None
+    company_name: Optional[str] = None
     external_ids: Optional[dict] = None
     device_ids: Optional[list[str]] = None
     advertising_ids: Optional[list[str]] = None
@@ -178,9 +180,21 @@ class RawProfileBase(BaseModel):
 
     external_customer_id: Optional[str] = None
     full_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     email: Optional[str] = None
     phone_number: Optional[str] = None
     national_id: Optional[str] = None
+    date_of_birth: Optional[date] = None
+
+    # Address fields for fuzzy matching
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state_province: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
+    company_name: Optional[str] = None
 
     device_id: Optional[str] = None
     advertising_id: Optional[str] = None
@@ -213,9 +227,19 @@ class RawProfileUpdate(BaseModel):
     channel: Optional[str] = None
     external_customer_id: Optional[str] = None
     full_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     email: Optional[str] = None
     phone_number: Optional[str] = None
     national_id: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state_province: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
+    company_name: Optional[str] = None
     device_id: Optional[str] = None
     advertising_id: Optional[str] = None
     platform: Optional[str] = None
