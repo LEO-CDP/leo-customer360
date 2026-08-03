@@ -20,6 +20,11 @@ window.C360 = window.C360 || {};
   function yesNoBadgeClass(v) { return v ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"; }
   function statusBadgeClass(v) { return v === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"; }
 
+  // Conversion-related attributes have no dedicated boolean column -- the
+  // LEAD_SCORING group (lead_conversion_probability/lead_grade) is what
+  // identifies them today.
+  function isConversionAttribute(a) { return a.attribute_group === "LEAD_SCORING"; }
+
   function rowVm(a) {
     return $.extend({}, a, {
       groupIcon: (fmt.CATEGORY_ICONS && fmt.CATEGORY_ICONS[a.attribute_group]) || "🔑",
@@ -30,6 +35,10 @@ window.C360 = window.C360 || {};
       piiBadgeClass: yesNoBadgeClass(a.is_pii),
       segmentableLabel: a.is_segmentable ? "Segmentable" : "Not segmentable",
       segmentableBadgeClass: yesNoBadgeClass(a.is_segmentable),
+      cirLabel: a.is_identity_resolution ? "CIR" : "—",
+      cirBadgeClass: yesNoBadgeClass(a.is_identity_resolution),
+      conversionLabel: isConversionAttribute(a) ? "Conversion" : "—",
+      conversionBadgeClass: yesNoBadgeClass(isConversionAttribute(a)),
       statusLabel: fmt.titleCase(a.status),
       statusBadgeClass: statusBadgeClass(a.status)
     });
@@ -46,6 +55,8 @@ window.C360 = window.C360 || {};
       { label: "Data Type", field: "dataTypeLabel" },
       { label: "PII", type: "badge", field: "piiLabel", classField: "piiBadgeClass" },
       { label: "Segmentable", type: "badge", field: "segmentableLabel", classField: "segmentableBadgeClass" },
+      { label: "CIR", type: "badge", field: "cirLabel", classField: "cirBadgeClass" },
+      { label: "Conversion", type: "badge", field: "conversionLabel", classField: "conversionBadgeClass" },
       { label: "Status", type: "badge", field: "statusLabel", classField: "statusBadgeClass" }
     ],
     rowVm: rowVm,
