@@ -1,1373 +1,385 @@
-# Giải Pháp Nhận Dạng Danh Tính Khách Hàng (Customer Identity Resolution)
+---
+title: "Customer Identity Resolution cho dữ liệu khách hàng đa nguồn"
+subtitle: "Thiết kế và vận hành dựa trên schema và mã nguồn hiện tại"
+author: ""
+date: 2026-08-04
+geometry: "a4paper,margin=1.7cm"
+fontsize: "9.5pt"
+linestretch: "1.0"
+mainfont: "DejaVu Serif"
+---
 
-## Bắt đầu setup infrastructure
+# Customer Identity Resolution cho dữ liệu khách hàng đa nguồn
 
-Tài liệu này mô tả giải pháp kỹ thuật để xây dựng hệ thống nhận dạng danh tính khách hàng (Customer Identity Resolution - CIR) nhằm hợp nhất dữ liệu khách hàng từ nhiều nguồn khác nhau thành một hồ sơ duy nhất. Giải pháp sử dụng các công cụ Message Broker nguồn mở cho ingestion dữ liệu và Managed PostgreSQL 16+ làm trung tâm xử lý và lưu trữ.
+## Tóm tắt
 
-Các bước thiết lập hạ tầng ban đầu bao gồm:
+Customer Identity Resolution (CIR) là quá trình liên kết các bản ghi khách hàng từ nhiều nguồn thành một hồ sơ thống nhất. Trong hệ thống này, dữ liệu đầu vào được lưu vào bảng staging, sau đó được xử lý bởi resolver Python theo các quy tắc metadata. Mục tiêu là tạo ra một master profile duy nhất cho mỗi khách hàng trong từng tenant và domain, đồng thời giữ được tính linh hoạt khi dữ liệu mới hoặc quy tắc matching thay đổi.
 
-1. **Thiết lập Database PostgreSQL 16+:**
-* Tạo một instance PostgreSQL 16 (Sử dụng Cloud SQL trên GCP, RDS trên AWS, Flexible Server trên Azure, hoặc tự host).
-* Chọn loại instance phù hợp với workload (ví dụ: các dòng Memory-Optimized có RAM lớn cho 5 triệu profile và xử lý nặng), cấu hình High Availability (HA) cho tính sẵn sàng cao.
-* Chọn loại lưu trữ SSD tốc độ cao (ví dụ: gp3/Premium SSD) với dung lượng ban đầu đủ lớn (100-200GB) và có thể mở rộng tự động.
-* Cấu hình Firewall/Security Groups để cho phép kết nối từ hệ thống Ingestion và các ứng dụng cần truy cập database.
-* Tạo người dùng database với các quyền cần thiết.
+## 1. Phạm vi
 
+Tài liệu này dựa trên các thành phần hiện có trong repository:
 
-2. **Thiết lập Hệ thống Ingestion Data:**
-* Sử dụng Message Broker hoặc Data Stream (ví dụ: Apache Kafka, RabbitMQ, Google Pub/Sub, Azure Event Hubs).
-* Cấu hình ứng dụng Worker (ví dụ: Kafka Connect, Logstash, hoặc script tự viết) để đọc dữ liệu từ luồng stream.
-* Chỉ định đích đến là instance PostgreSQL 16 đã tạo (endpoint, port, tên DB, user/password - nên lưu trong các dịch vụ Secret Manager của Cloud).
-* Cấu hình Worker đẩy dữ liệu vào bảng đích ban đầu (`cdp_raw_profiles_stage`).
-* Cấu hình xử lý lỗi (Dead Letter Queue) và lưu trữ bản sao lưu vào Object Storage (S3/GCS/Blob Storage).
+- schema PostgreSQL trong database-init/database-schema.sql
+- module resolver trong backend-system/identity_resolution/identity_resolution/resolver.py
+- trigger controller trong backend-system/identity_resolution/identity_resolution/trigger_controller.py
+- logic persona trong backend-system/identity_resolution/identity_resolution/persona.py
 
+## 2. Mô hình dữ liệu chính và Cơ cấu làm giàu dữ liệu (Data Enrichment)
 
-3. **Thiết lập Môi trường Lịch Trình Hàng Ngày:**
-* Chuẩn bị môi trường để chạy script định kỳ (ví dụ: Cronjob trên VM, Apache Airflow, hoặc Serverless Functions như Cloud Functions/Lambda).
-* Cài đặt thư viện cần thiết (ví dụ: `psycopg2` cho Python).
-* Cấu hình quyền truy cập database cho môi trường này.
+Cơ sở dữ liệu lưu trữ các thực thể và mối quan hệ để phục vụ quá trình liên kết thông tin. Dưới đây là chi tiết các bảng cốt lõi cùng các trường dữ liệu quan trọng, ý nghĩa vận hành, và cách thức làm giàu dữ liệu (data enrichment):
 
+### 2.1 Bảng `cdp_raw_profiles_stage` (Bảng staging dữ liệu thô)
+Bảng trung gian đóng vai trò là landing zone để tiếp nhận vết thông tin khách hàng thô được đẩy vào từ các nguồn khác nhau trước khi giải quyết danh tính.
 
+*   **Các trường dữ liệu quan trọng:**
+    *   `raw_profile_id` (UUID, Khóa chính): Định danh duy nhất cho mỗi sự kiện raw profile.
+    *   `tenant_id` (UUID): Phân lũy để bảo vệ an toàn dữ liệu multi-tenant.
+    *   `domain` (TEXT): Lĩnh vực nghiệp vụ chuyên biệt (ví dụ: `retail`, `banking`, `travel`).
+    *   `source_system` (TEXT): Hệ thống gốc gửi dữ liệu (ví dụ: `POS`, `AppsFlyer`, `MoEngage`, `CRM`).
+    *   `external_customer_id` (TEXT): Mã khách hàng nội bộ của hệ thống nguồn.
+    *   `email`, `phone_number`, `national_id` (TEXT): Dữ liệu định danh cá nhân (PII). Có thể là plaintext hoặc chuỗi SHA-256 hash một chiều.
+    *   `full_name`, `first_name`, `last_name` (TEXT): Thông tin họ tên tại nguồn.
+    *   `device_id`, `advertising_id`, `cookie_id`, `push_token` (TEXT): Định danh số và thiết bị phục vụ định dạng đa kênh (multi-channel resolution).
+    *   `event_name`, `event_time` (TIMESTAMP WITH TIME ZONE), `event_payload` (JSONB): Tên hành vi, mốc thời gian và toàn bộ dữ liệu thuộc tính bổ sung dạng bán cấu trúc phục vụ làm giàu thông tin (data enrichment).
+    *   `status_code` (SMALLINT, Mặc định = `1`): Quản lý vòng đời hàng đợi (`1`: Sẵn sàng xử lý, `2`: Đang xử lý, `3`: Đã xử lý hoàn tất, `4`: Thất bại).
+    *   `processed_at` (TIMESTAMP WITH TIME ZONE): Thời điểm hoàn tất giải quyết danh tính.
 
-Độ chính xác của giải pháp phụ thuộc nhiều vào **chất lượng dữ liệu** đầu vào. Cần có các quy trình tiền xử lý và chuẩn hóa dữ liệu (ví dụ: làm sạch địa chỉ, chuẩn hóa số điện thoại) trước khi dữ liệu được đẩy vào Database.
+### 2.2 Bảng `cdp_master_profiles` (Hồ sơ Master / Golden Record)
+Bản ghi duy nhất của một khách hàng sau khi đã được hợp nhất, làm sạch và làm giàu thông tin từ mọi nguồn dữ liệu.
 
-## Các Thành phần Chính
+*   **Các trường dữ liệu quan trọng:**
+    *   `master_profile_id` (UUID, Khóa chính): Định danh hồ sơ vàng của khách hàng.
+    *   `tenant_id` (UUID), `domain` (TEXT): Ràng buộc phạm vi quản trị dữ liệu.
+    *   `full_name`, `first_name`, `last_name`, `email`, `phone_number`, `national_id`, `address` (TEXT): Thông tin định danh đã được chuẩn hóa (consolidated) theo thứ tự ưu tiên hoặc thời gian.
+    *   `secondary_emails`, `secondary_phones` (JSONB): Lưu mọi email/SĐT phụ khác thu thập từ nguồn hàng ngày dưới dạng mảng để không bỏ sót kênh tiếp cận.
+    *   `external_ids` (JSONB): Bản đồ lưu (key/value) cặp `source_system` và `external_customer_id` tương ứng nâng cao khả năng đồng bộ ngược (reverse syndication).
+    *   `device_ids`, `advertising_ids`, `cookie_ids` (TEXT[]): Tập hợp duy nhất các token thiết bị để tiếp cận quảng cáo.
+    *   `push_tokens` (JSONB): Cấu trúc key-value lưu push token tương thích với các nền tảng thông báo (như FCM, APNS).
+    *   `is_hashed` (BOOLEAN, Mặc định = `FALSE`): Đánh dấu nếu hồ sơ này sử dụng các PII bị che giấu bằng hàm hash bảo mật SHA-256.
+    *   `persona_name` (TEXT): Tên danh tính ảo dạng dễ đọc (non-PII) được tự động sinh thông qua logic nghiệp vụ hoặc LLM (Gemini-3.5-Flash) để phục vụ tìm kiếm và bảo mật.
+    *   `persona_summary` (TEXT): Bản tóm tắt phong cách hành vi được cập nhật từ lịch sử tương tác đa kênh phục vụ tiếp cận cá nhân hóa sâu (data enrichment).
+    *   `persona_embedding` (VECTOR(768)): Vector nhúng nhị phân từ LLM hỗ trợ tìm kiếm ngữ nghĩa (semantic search) và đề xuất đối tượng Lookalike.
+    *   `updated_at` (TIMESTAMP WITH TIME ZONE): Thời điểm cập nhật cuối cùng của hồ sơ.
+    *   `first_seen_raw_profile_id` (UUID): Truy vết lineage về raw profile ban đầu khai sinh ra hồ sơ này.
+    *   `source_systems` (TEXT[]): Danh sách phân biệt các nguồn đóng góp dữ liệu.
 
-Giải pháp bao gồm các thành phần chính sau:
+### 2.3 Bảng `cdp_profile_links` (Bảng liên kết quan hệ)
+Mô tả bản đồ ánh xạ trạng thái quan hệ 1-N giữa hồ sơ master hoạt động và tất cả các nguồn thô đóng góp.
 
-* **Data Ingestion Layer (Kafka/PubSub/RabbitMQ):** Dịch vụ tiếp nhận luồng dữ liệu, đẩy dữ liệu thô vào bảng staging trong PostgreSQL.
-* **PostgreSQL 16+:** Cơ sở dữ liệu trung tâm, lưu trữ dữ liệu, metadata và thực thi logic xử lý.
-* **Bảng Staging (`cdp_raw_profiles_stage`):** Nơi dữ liệu thô được ghi vào.
-* **Bảng Metadata (`cdp_profile_attributes`):** Định nghĩa cấu trúc và thuộc tính của các trường dữ liệu profile, bao gồm cả cấu hình cho nhận dạng danh tính (thuộc tính nào dùng để ghép nối, quy tắc ghép nối, cách tổng hợp dữ liệu).
-* **Bảng Master Profiles (`cdp_master_profiles`):** Lưu trữ các hồ sơ khách hàng "vàng" đã được giải quyết.
-* **Bảng Profile Links (`cdp_profile_links`):** Lưu trữ mối quan hệ liên kết giữa các bản ghi thô và hồ sơ master.
-* ** Python code (`resolve_customer_identities_dynamic`):** Chứa toàn bộ logic nhận dạng danh tính, đọc cấu hình từ `cdp_profile_attributes` và xử lý dữ liệu trong bảng staging.
-* **Extensions:** `citext`, `fuzzystrmatch`, `pg_trgm` hỗ trợ so sánh chuỗi và fuzzy matching.
+*   **Các trường dữ liệu quan trọng:**
+    *   `link_id` (BIGSERIAL, Khóa chính): Định danh duy nhất cho bản ghi liên kết.
+    *   `tenant_id` (UUID): Ràng buộc tenant.
+    *   `raw_profile_id` (UUID, UNIQUE): Liên kết duy nhất tới staging. Ràng buộc `UNIQUE` đảm bảo tại một thời điểm, một bản thô chỉ ánh xạ tới duy nhất một hồ sơ master hoạt động.
+    *   `master_profile_id` (UUID): Tham chiếu tới hồ sơ master đích.
+    *   `match_score` (NUMERIC): Điểm số đánh giá độ tin cậy trùng khớp từ `0.0` đến `1.0`.
+    *   `match_method` (TEXT): Phương thức/Thuật toán kích hoạt liên kết (ví dụ: `exact_email`, `fuzzy_trgm_name`).
+    *   `status` (VARCHAR): Trạng thái liên kết (`ACTIVE`, `HISTORICAL` nếu bị gỡ bỏ sau khi unmerge hồ sơ).
 
+### 2.4 Bảng `cdp_profile_attributes` (Metadata thuộc tính)
+Registry điều khiển cho phép hệ thống mở rộng và tùy biến linh hoạt quy tắc ghép nối và làm giàu thuộc tính.
 
-* **Real-time Trigger (`cdp_trigger_process_new_raw_profiles`):** Một trigger trên bảng `cdp_raw_profiles_stage` để kích hoạt xử lý ngay khi có dữ liệu mới đến.
-* **Trigger Function (`process_new_raw_profiles_trigger_func`):** Hàm được gọi bởi real-time trigger, có nhiệm vụ gọi stored procedure chính.
-* **Lịch trình mỗi giờ  (External Scheduler):** Một quy trình bên ngoài hoặc tiện ích nội bộ được lên lịch chạy định kỳ để đảm bảo quét toàn bộ bảng staging và quản lý trạng thái của real-time trigger.
+*   **Các trường dữ liệu quan trọng:**
+    *   `attribute_internal_code` (VARCHAR, Khóa chính): Khóa nội bộ tương khớp cột ở staging.
+    *   `master_profile_column` (VARCHAR): Cột đích tương ứng trên bảng master profile.
+    *   `is_identity_resolution` (BOOLEAN): Đánh dấu trường thuộc tính này có tham gia trực tiếp vào bước tìm kiếm so khớp danh tính hay không.
+    *   `matching_rule` (VARCHAR): Thuật toán so khớp (`exact`, `fuzzy_trgm`, `fuzzy_dmetaphone`, `none`).
+    *   `matching_threshold` (NUMERIC): Mức tối thiểu chấp nhận trùng khớp khi dùng phép so sánh mờ.
+    *   `consolidation_rule` (VARCHAR): Chiến lược ghi đè, merge hành vi khi cập nhật thuộc tính master (`most_recent` - lấy mới nhất, `verified_first` - ưu tiên nguồn uy tín, `non_null` - giữ nguyên giá trị không rỗng, `append_distinct` - nối mảng bộ lọc).
 
-## Flow chính
+### 2.5 Bảng `cdp_identity_index` (Chỉ mục định danh phẳng)
+Bảng tăng tốc tra cứu khớp chính xác định danh bằng cách phẳng hóa các mảng hoặc bản đồ định danh, giúp tránh scan các cột JSONB/mảng phức tạp trong các luồng dữ liệu throughput cao.
 
-Biểu đồ sau mô tả luồng dữ liệu và các thành phần trong giải pháp:
-
-```mermaid
-graph TD
-    A["Nguồn Dữ liệu"] --> B["Message Broker<br>(Kafka / PubSub / RabbitMQ)"]
-    B --> C["Bảng Staging Raw Profiles<br>PostgreSQL 16"]
-
-    subgraph "Cơ Chế  Trigger"
-        direction TB
-        T{{Real-time Trigger<br>cdp_trigger_process_new_raw_profiles}}
-        S["Lịch Trình mỗi giờ <br>(Airflow / Script)"]
-        Status["Bảng IR Status<br>cdp_id_resolution_status"] 
-    end
-
-    C -- "AFTER INSERT/UPDATE" --> T
-    T -- "Kiểm tra & Cập nhật<br>Thời gian chạy" --> Status;
-    Status -- "Được đọc bởi" --> T; 
-
-    T -- "Kích hoạt" --> D{{Python function<br>resolve_customer_identities_dynamic}}
-    S -- "Kích hoạt<br>(Lúc 2AM)" --> D
-
-    S -- "Vô hiệu hóa Trigger" --> T
-    S -- "Kích hoạt lại Trigger" --> T
-
-    subgraph "Quá Trình Identity Resolution"
-        direction TB
-        D
-    end
-
-    C -- "Đọc dữ liệu chưa xử lý" --> D
-
-    subgraph "Kết Quả Identity Resolution"
-        direction LR
-        E["Bảng Master Profiles<br>PostgreSQL"]
-        F["Bảng Profile Links<br>PostgreSQL"]
-    end
-
-    subgraph "Metadata"
-        direction TB
-        M["Bảng Profile Attributes<br>PostgreSQL"]
-    end
-
-    D -- "Đọc Master hiện có" --> E
-    D -- "Đọc Links hiện có" --> F
-    D -- "Đọc cấu hình<br>thuộc tính IR" --> M
-
-    D -- "Logic Link các Profile<br>(theo cấu hình attribute)" --> D
-
-    D -- "Ghi/Cập nhật<br>Master Profiles" --> E
-    D -- "Ghi<br>Profile Links" --> F
-
-    D -- "Đánh dấu<br>đã xử lý" --> C
-
-    E --> G["Single Customer 360 View"]
-    F --> G
-
-    G --> H["Ứng dụng sử dụng Single Customer 360 View"]
-    G --> I["Phân tích & Báo cáo<br>(Truy vấn SQL)"]
-
-```
-
-## Thiết lập Database Schema (SQL)
-
-Phần này cung cấp các lệnh SQL để tạo cấu trúc cơ sở dữ liệu cần thiết.
-
-### Extension
-
-```sql
--- Cài đặt các Extension cần thiết cho Fuzzy Matching
-CREATE EXTENSION IF NOT EXISTS citext; -- Cho so sánh không phân biệt chữ hoa chữ thường
-CREATE EXTENSION IF NOT EXISTS fuzzystrmatch; -- Cho soundex, dmetaphone, levenshtein
-CREATE EXTENSION IF NOT EXISTS pg_trgm; -- Cho similarity based on trigrams
-
-```
-
-### Tables for meta-data
-
-Đây là một thiết kế **metadata-driven** cho hệ thống quản lý thuộc tính (attribute) của profile trong một Customer Data Platform (CDP).
-
-Mục đích và lý do:
-
-* Cho phép người dùng định nghĩa động các thuộc tính profile không cần thay đổi schema DB.
-* Cho phép triển khai hệ thống **Identity Resolution** linh hoạt theo từng trường cụ thể.
-* Hỗ trợ nhiều loại logic xử lý ETL như mapping, masking, phân nhóm, đồng bộ.
-
-Bảng `cdp_profile_attributes` là trung tâm, chứa cấu hình cho từng thuộc tính có thể xuất hiện trong một profile (ví dụ: họ tên, email, độ tuổi, v.v.).
-Phía dưới là phần **giải thích chi tiết từng bảng và cột**:
-
-#### 🔹 1. `cdp_attribute_type`
-
-**Mục đích**: Xác định loại của attribute theo hướng UI hoặc logic dữ liệu.
-
-```sql
--- Bảng Metadata: attribute_type (Placeholder - cần định nghĩa chi tiết nếu sử dụng FK)
--- Bảng này định nghĩa các loại control UI hoặc kiểu attribute chung.
-CREATE TABLE IF NOT EXISTS cdp_attribute_type (
-    id SERIAL PRIMARY KEY,
-    type_name VARCHAR(100) UNIQUE NOT NULL
-);
-
-```
-
-**Ví dụ giá trị**:
-
-* `text_field`, `dropdown`, `checkbox`, `multi-select`, `date_picker`,...
+*   **Các trường dữ liệu quan trọng:**
+    *   `identity_index_id` (UUID, Khóa chính): Định danh chỉ mục định danh phẳng.
+    *   `tenant_id` (UUID): Scoping theo tenant.
+    *   `master_profile_id` (UUID): Tham chiếu tới master profile sở hữu định danh này.
+    *   `identifier_type` (VARCHAR): Loại mã định danh (ví dụ: `email`, `phone`, `cookie_id`).
+    *   `identifier_value` (TEXT) & `identifier_value_normalized` (TEXT): Giá trị định danh gốc và giá trị định danh đã chuẩn hóa (chuyển chữ thường, cắt khoảng trắng dư) để so khớp chính xác.
+    *   `is_blocked` (BOOLEAN): Cờ chặn định danh giả lập (ví dụ: `anonymous`, `null`, `void`).
 
 ---
 
-#### 🔹 2. `cdp_objects`
+## 3. Cơ chế xử lý
 
-**Mục đích**: Xác định *loại đối tượng* mà thuộc tính này thuộc về (ví dụ: Customer, Product, Booking...).
+Quá trình giải quyết danh tính Customer Identity Resolution (CIR) được điều phối bởi module `CustomerIdentityResolver` trong `resolver.py`. Hệ thống hoạt động hoàn toàn dựa trên metadata điều khiển (`cdp_profile_attributes`), đảm bảo tính linh hoạt, mở rộng và cách ly dữ liệu đa người dùng (multi-tenant isolation).
 
-```sql
--- Bảng Metadata: objects (Placeholder - cần định nghĩa chi tiết nếu sử dụng FK)
--- Bảng này định nghĩa các loại đối tượng chính (ví dụ: Customer, Product).
-CREATE TABLE IF NOT EXISTS cdp_objects (
-    id SERIAL PRIMARY KEY,
-    object_name VARCHAR(100) UNIQUE NOT NULL
-);
+### 3.1 Quy trình xử lý chi tiết (Step-by-Step Processing)
+
+Mỗi đợt xử lý (batch) thực thi theo chuỗi 7 bước tuần tự:
+
+1. **Tải cấu hình quy tắc (Fetch Active Rules):**
+   * Quét bảng `cdp_profile_attributes` để lấy danh sách các trường được đánh dấu `is_identity_resolution = TRUE`, `status = 'ACTIVE'`, có `matching_rule` khác `none` và không rỗng.
+2. **Trích xuất dữ liệu Staging (Fetch Unprocessed Profiles):**
+   * Quét bảng `cdp_raw_profiles_stage` lấy ra các bản ghi mới chèn chưa qua xử lý (`status_code = 1`) giới hạn theo kích thước `batch_size` (mặc định 1,000 bản ghi).
+3. **Thiết lập ngữ cảnh an toàn Tenant (Set Tenant Context):**
+   * Đối với mỗi bản ghi thô, hệ thống thực thi `SELECT set_config('app.tenant_id', ...)` để kích hoạt cơ chế Row-Level Security (RLS) của PostgreSQL, đảm bảo tuyệt đối không rò rỉ dữ liệu giữa các tenant.
+4. **Xây dựng truy vấn so khớp động (Dynamic Query Building):**
+   * Dựa vào danh sách rule, hệ thống kiểm tra các thuộc tính có trong bản ghi thô để xây dựng câu lệnh SQL `OR` động:
+     * **Mảng thiết bị (`device_id`, `advertising_id`, `cookie_id`):** Dùng toán tử `= ANY(array_column)`.
+     * **Định danh nguồn (`external_customer_id`):** Dùng toán tử chứa JSONB `external_ids @> jsonb_build_object(source_system, value)`.
+     * **Thuộc tính khớp chính xác (`exact`):** Dùng toán tử `=`.
+     * **Khớp mờ chuỗi (`fuzzy_trgm`):** Dùng hàm `similarity(column, value) >= threshold`.
+     * **Khớp ngữ âm (`fuzzy_dmetaphone`):** Dùng hàm `dmetaphone(column) = dmetaphone(value)`.
+5. **So khớp Master Profile (Find Master Profile):**
+   * Thực thi câu lệnh SQL kết hợp điều kiện phân vùng bắt buộc: `WHERE tenant_id = :tenant_id AND domain = :domain AND (các_điều_kiện_động) LIMIT 1`.
+6. **Hợp nhất dữ liệu hoặc Khai sinh Hồ sơ Vàng (Merge or Create):**
+   * **Nếu TÌM THẤY Master Profile:**
+     * Tạo bản ghi liên kết mới trên `cdp_profile_links` với `match_score = 1.0` và `match_method = 'DynamicMatch'`.
+     * Hợp nhất các trường thuộc tính scalar (họ tên, email, SĐT, v.v.) theo chiến lược cấu hình `consolidation_rule` (`most_recent`, `verified_first`, `source_priority`, `non_null`, `append_distinct`, `overwrite`) hoặc `COALESCE` mặc định.
+     * Tích lũy (append/union) các mảng thiết bị, mã nguồn `source_systems` và các bản đồ JSONB (`external_ids`, `push_tokens`, `communication_preferences`).
+     * Kiểm tra định dạng PII: nếu bị hash, bật cờ `is_hashed = TRUE` và tự động sinh `persona_name`.
+   * **Nếu KHÔNG TÌM THẤY Master Profile:**
+     * Khởi tạo một Master Profile mới trên `cdp_master_profiles`, lưu vết `first_seen_raw_profile_id`.
+     * Tạo bản ghi liên kết đầu tiên trên `cdp_profile_links` với `match_method = 'NewMaster'`.
+7. **Cập nhật trạng thái Staging & Commit (Mark Processed & Commit):**
+   * Cập nhật bản ghi staging thành `status_code = 3` (hoàn tất) và ghi mốc thời gian `processed_at = NOW()`.
+   * Sau khi duyệt hết batch, thực thi `conn.commit()` để hoàn tất giao dịch atomic. Nếu gặp sự cố, thực hiện `conn.rollback()`.
+
+### 3.2 Sơ đồ luồng xử lý tổng thể (Resolution Execution Flow)
 
 ```
+[Bắt đầu Batch Resolution]
+           |
+           v
+ (1. Tải Active Rules từ cdp_profile_attributes)
+           |
+           v
+ (2. Quét cdp_raw_profiles_stage với status_code = 1)
+           |
+     +-----+-----+
+     |           |
+[Không có]     [Có bản ghi]
+     |           |
+     v           v
+  (Thoát)   Duyệt từng Raw Profile:
+                 |
+                 v
+           (3. SELECT set_config('app.tenant_id'))
+                 |
+                 v
+           (4. Xây dựng SQL điều kiện matching động)
+                 |
+                 v
+           (5. Truy vấn cdp_master_profiles theo tenant_id, domain & SQL động)
+                 |
+         +-------+-------+
+         |               |
+ [Tìm thấy Master]  [Không tìm thấy]
+         |               |
+         v               v
+  (6A. Ghi Link           (6B. Tạo Master Profile mới,
+   match_method=          lưu first_seen_raw_profile_id,
+   DynamicMatch,          ghi Link match_method=
+   Merge dữ liệu          NewMaster)
+   theo Consolidation)           |
+         |                       |
+         +-------+---------------+
+                 |
+                 v
+           (7. Cập nhật status_code = 3 & processed_at)
+                 |
+                 v
+           (Còn bản ghi trong Batch?)
+            /         \
+        [Có]           [Không]
+         /               \
+        v                 v
+ (Tiếp tục)       (Commit Giao dịch DB)
+```
 
-**Ví dụ giá trị**:
+### 3.3 Quy tắc matching và ví dụ dữ liệu
 
-* `Customer`, `Lead`, `Product`, `Transaction`,...
+Hệ thống hỗ trợ 4 cơ chế matching chính được cấu hình động qua thuộc tính `matching_rule` trong `cdp_profile_attributes`. Dưới đây là mô tả chi tiết kèm theo ví dụ dữ liệu thực tế:
+
+#### 1. Quy tắc `exact` (Khớp chính xác)
+Áp dụng cho các định danh có tính duy nhất cao và có cấu trúc ổn định. Hệ thống thực hiện so sánh bằng toán tử `=` hoặc cơ chế kiểm tra phần tử trong mảng (containment) của PostgreSQL cho trường mảng (như `email` hoặc `phone_number` lưu dạng danh sách).
+
+*   **Ví dụ dữ liệu:**
+    *   **Inbound Raw Profile (Staging):**
+        *   `email`: "nguyena@gmail.com"
+        *   `phone_number`: "+84901234567"
+    *   **Existing Master Profile (Master):**
+        *   `email`: "nguyena@gmail.com"
+        *   `phone_number`: "+84901234567"
+    *   **Kết quả:** Hệ thống tìm thấy trùng khớp hoàn toàn giá trị email và liên kết bản ghi mới vào Master Profile hiện có này.
+
+#### 2. Quy tắc `fuzzy_trgm` (Khớp mờ theo Trigram)
+Áp dụng cho các trường dữ liệu dạng chuỗi văn bản dễ sai lệch nhỏ như địa chỉ, tên tổ chức hoặc họ tên đầy đủ. Quy tắc này sử dụng extension `pg_trgm` để tính toán độ tương đồng dựa trên số lượng cụm 3 ký tự (trigrams) chung. Ngưỡng chấp nhận được kiểm tra qua `matching_threshold` (thường mặc định từ `0.6` trở lên).
+
+*   **Ví dụ dữ liệu:**
+    *   **Inbound Raw Profile (Staging):**
+        *   `full_name`: "Nguyễn Văn A" (không dấu hoặc gõ sai: "Nguyen Van A")
+        *   `address`: "123 Đường Lê Lợi, Phường 1, Quận 1, TPHCM"
+    *   **Existing Master Profile (Master):**
+        *   `full_name`: "Nguyễn Văn A"
+        *   `address`: "123 Lê Lợi, P.1, Q.1, TP. HCM"
+    *   **Kết quả:** Nhờ phép tính mờ Trigram trên địa chỉ hoặc họ tên gõ lệch nhẹ, độ trùng khớp vượt ngưỡng `matching_threshold = 0.65`, hệ thống tự động xác định đây là cùng một người.
+
+#### 3. Quy tắc `fuzzy_dmetaphone` (Khớp mờ theo ngữ âm Double Metaphone)
+Áp dụng cho việc so sánh họ tên quốc tế hoặc các ký hiệu không dấu dễ biến âm khi chuyển ngữ. Double Metaphone mã hóa mỗi từ thành một mã ngữ âm đại diện cho cách phát âm của từ đó. Đối chiếu hai mã ngữ âm này giúp ghép nối chính xác bất kể sai lệch chính tả nhỏ.
+
+*   **Ví dụ dữ liệu:**
+    *   **Inbound Raw Profile (Staging):**
+        *   `first_name`: "Smith"
+    *   **Existing Master Profile (Master):**
+        *   `first_name`: "Smyth"
+    *   **Kết quả:** Cả hai từ đều được mã hóa thành mã ngữ âm mã `SM0`. Kết quả so khớp thành công dù chính tả viết khác nhau.
+
+#### 4. Quy tắc `none` (Bỏ qua)
+Bỏ qua thuộc tính này trong việc ghép nối danh tính, thuộc tính chỉ được dùng để bổ sung thông tin bổ trợ (enrichment) sau khi đã giải quyết xong danh tính qua các khóa khác.
 
 ---
 
-#### 🔹 3. `cdp_profile_attributes`
+## 4. Xử lý dữ liệu nhạy cảm (Privacy & Hashed PII Handling)
 
-**Mục đích**: Định nghĩa đầy đủ về một attribute bao gồm:
+Để tuân thủ các quy định bảo vệ dữ liệu cá nhân (như Nghị định 13/2023/NĐ-CP) và tương thích với mô hình hashed-match trên các nền tảng quảng cáo (Google, Meta, TikTok), hệ thống hỗ trợ cơ chế tiếp nhận PII đã bị băm 1 chiều dạng SHA-256 (64 ký tự hex).
 
-* Metadata mô tả logic lưu trữ & hiển thị
-* Thông tin xử lý dữ liệu
-* Luật cho identity resolution
-* Tùy chọn hiển thị / UI / logic nghiệp vụ
+### 4.1 Quy trình nhận diện và tự động sinh Persona Name
+Khi dữ liệu PII (`full_name`, `email`, `phone_number`, `national_id`) được nạp vào ở dạng SHA-256 hash, hệ thống không thể đảo ngược để hiển thị tên thật. Do đó, tầng ứng dụng (`persona.py`) tự động kiểm tra định dạng dữ liệu và kích hoạt luồng sinh `persona_name` (danh tính thay thế non-PII):
 
-```sql
--- Bảng Metadata: cdp_profile_attributes
--- Bảng này định nghĩa *meta-data* cho từng thuộc tính (attribute) của profile.
-CREATE TABLE cdp_profile_attributes (
-    id BIGSERIAL PRIMARY KEY,
-    attribute_internal_code VARCHAR(100) UNIQUE NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    status VARCHAR(50) DEFAULT 'ACTIVE', -- vd: 'ACTIVE', 'INACTIVE', 'DELETED'
-    attribute_type_id INT NULL REFERENCES cdp_attribute_type(id), 
-    data_type VARCHAR(50) NOT NULL, -- vd: 'VARCHAR', 'INT', 'BOOLEAN', 'DATETIME', 'JSONB', 'FLOAT'
-    object_id INT NULL REFERENCES cdp_objects(id), 
-    is_required BOOLEAN DEFAULT FALSE,
-    
-    is_index BOOLEAN DEFAULT FALSE, -- Có nên tạo index cho giá trị của attribute này không?
-    is_masking BOOLEAN DEFAULT FALSE, -- Có cần che (masking) giá trị của attribute này khi hiển thị không?
-    storage_type VARCHAR(50) NULL, -- Cách lưu trữ giá trị (vd: 'COLUMN', 'JSON_FIELD')
-    attribute_size INT NULL, -- Kích thước dữ liệu (vd: max length cho VARCHAR)
-    attribute_group VARCHAR(100) NULL, -- Nhóm logic trên UI
-    parent_id BIGINT NULL REFERENCES cdp_profile_attributes(id), -- ID của attribute cha (cho cấu trúc lồng)
-    option_value JSONB NULL, -- Lưu các tùy chọn dưới dạng JSONB cho tốc độ truy xuất tốt hơn
-    process_status VARCHAR(50) NULL, -- Trạng thái liên quan đến quy trình xử lý dữ liệu
-    attribute_status VARCHAR(50) NULL, -- Trạng thái cụ thể khác
-    last_processed_on TIMESTAMP WITH TIME ZONE NULL, 
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    created_by VARCHAR(100) NULL,
-    update_at TIMESTAMP WITH TIME ZONE NULL, 
-    update_by VARCHAR(100) NULL,
+1. **Kiểm tra tự động:** Sử dụng biểu thức chính quy (`^[0-9a-f]{64}$`) để xác định xem PII có bị hash hay không, tự động bật cờ `is_hashed = TRUE` trên `cdp_master_profiles`.
+2. **Sinh danh tính ảo (Persona Generation):**
+   * **Luồng LLM (Google Gemini):** Nếu cấu hình `GOOGLE_GENAI_API_KEY`, hệ thống gửi các thuộc tính phi PII (`domain`, `media_source`, `channel`) sang Gemini để tạo tên đại diện gợi nhớ.
+   * **Luồng Offline Deterministic (Fallback):** Nếu không có internet hoặc API key, hệ thống tính `sha256` trên định danh mỏ neo (`device_id`, `advertising_id`, v.v.) để tạo tên định hình cố định kèm hậu tố hash 6 ký tự (ví dụ: `Savvy Retail Shopper (TikTok Ads) #4f2a9c`).
 
-    -- Cột bổ sung cho cấu hình Identity Resolution
-    is_identity_resolution BOOLEAN DEFAULT FALSE, -- CÓ dùng thuộc tính này để tìm và hợp nhất profile không?
-    is_synchronizable BOOLEAN DEFAULT TRUE,
-    data_quality_score INT NULL, 
-    matching_rule VARCHAR(50) NULL, -- vd: 'exact', 'fuzzy_trgm', 'fuzzy_dmetaphone', 'none'
-    matching_threshold DECIMAL(5, 4) NULL, -- Ngưỡng cho fuzzy match (vd: 0.8)
-    consolidation_rule VARCHAR(50) NULL -- Cách tổng hợp giá trị (vd: 'most_recent', 'non_null')
-);
+### 4.2 Luồng xử lý dữ liệu nhạy cảm (Sequence Flow)
 
 ```
-
-### Trigger
-
-```sql
--- Trigger để tự động cập nhật cột update_at
-CREATE OR REPLACE FUNCTION update_profile_attributes_timestamp()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.update_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER before_profile_attributes_update
-BEFORE UPDATE ON cdp_profile_attributes
-FOR EACH ROW
-EXECUTE FUNCTION update_profile_attributes_timestamp();
-
+[Inbound Raw Profile (Staging)] 
+       |
+       v
+ (Kiểm tra PII với regex ^[0-9a-f]{64}$)
+       |
+       +----> [PII Plaintext] ----------> is_hashed = FALSE (Giữ nguyên tên thật)
+       |
+       +----> [PII SHA-256 Hash] -------> is_hashed = TRUE
+                                               |
+                                               v
+                                    (Sinh persona_name)
+                                               |
+                                  +------------+------------+
+                                  v                         v
+                           [Gemini GenAI]          [Offline Local]
+                           (Nếu có API Key)        (Fallback an toàn)
+                                  |                         |
+                                  +------------+------------+
+                                               |
+                                               v
+                                   [Master Profile Output]
+                                   `persona_name` = "Digital Banking User #a1b2c3"
 ```
 
-### Table cdp_raw_profiles_stage
+### 4.3 Ví dụ dữ liệu thực tế (Hashed vs Plaintext)
 
-```sql
--- Bảng 1: cdp_raw_profiles_stage
--- Data Worker sẽ đẩy dữ liệu vào bảng này.
-CREATE TABLE cdp_raw_profiles_stage (
-    raw_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- PostgreSQL 13+ hỗ trợ native gen_random_uuid()
-    first_name VARCHAR(255),
-    last_name VARCHAR(255),
-    email citext, -- Sử dụng citext cho email (không phân biệt hoa thường)
-    phone_number VARCHAR(50),
-    address_line1 VARCHAR(255),
-    city VARCHAR(255),
-    state VARCHAR(255),
-    zip_code VARCHAR(10),
-    source_system VARCHAR(100), -- Hệ thống nguồn của bản ghi
-    received_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    processed_at TIMESTAMP WITH TIME ZONE -- Đánh dấu thời gian xử lý (NULL = chưa xử lý)
-);
+| Trường thuộc tính | Plaintext Inbound | Hashed Inbound (SHA-256) | Master Profile Lưu trữ |
+| :--- | :--- | :--- | :--- |
+| `full_name` | `"Nguyen Van An"` | `9f86d08188...15b0f00a08` | `9f86d08188...15b0f00a08` |
+| `email` | `"an.nguyen@gmail.com"` | `d081884c7d...c15b0f00a08` | `d081884c7d...c15b0f00a08` |
+| `is_hashed` | `FALSE` | `TRUE` | `TRUE` |
+| `persona_name` | `NULL` | *(Tự động sinh)* | `"Savvy Retail Shopper #4f2a9c"` |
 
--- Tạo Index cho các trường quan trọng dùng cho ghép nối
-CREATE INDEX idx_raw_profiles_stage_email ON cdp_raw_profiles_stage (email); 
-CREATE INDEX idx_raw_profiles_stage_phone ON cdp_raw_profiles_stage (phone_number); 
-CREATE INDEX idx_raw_profiles_stage_name_trgm ON cdp_raw_profiles_stage USING gin (first_name gin_trgm_ops, last_name gin_trgm_ops); 
+---
 
-```
+## 5. Kích hoạt và Giới hạn Tần suất (Trigger & Throttling)
 
-### Table cdp_master_profiles
+Để đảm bảo hiệu năng trong môi trường streaming lượng lớn bản ghi đầu vào, hệ thống kết hợp cơ chế xử lý **gần thời gian thực (Near Real-time)** và **chạy lô định kỳ (Daily Batch Job)**.
 
-```sql
--- Bảng 2: cdp_master_profiles
--- Lưu trữ các hồ sơ khách hàng đã được giải quyết (unique identities)
-CREATE TABLE cdp_master_profiles (
-    master_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    first_name VARCHAR(255),
-    last_name VARCHAR(255),
-    email citext,
-    phone_number VARCHAR(50),
-    address_line1 VARCHAR(255),
-    city VARCHAR(255),
-    state VARCHAR(255),
-    zip_code VARCHAR(10),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    first_seen_raw_profile_id UUID, -- ID của bản ghi thô đầu tiên liên kết với master này
-    source_systems TEXT[] -- Danh sách các hệ thống nguồn liên quan
-);
+### 5.1 Cơ chế Throttling khóa hàng chờ (Row-Level Lock)
+Hệ thống không sử dụng DB Trigger PL/pgSQL trực tiếp nhằm tránh gây nghẽn (lock contention) trên cơ sở dữ liệu. Thay vào đó, worker phía Ingestion chủ động gọi `IdentityResolutionTrigger.attempt_trigger()` sau mỗi đợt chèn dữ liệu thô mới:
 
--- Tạo Index tìm kiếm Master
-CREATE INDEX idx_master_profiles_email ON cdp_master_profiles (email);
-CREATE INDEX idx_master_profiles_phone ON cdp_master_profiles (phone_number);
-CREATE INDEX idx_master_profiles_name_trgm ON cdp_master_profiles USING gin (first_name gin_trgm_ops, last_name gin_trgm_ops);
+1. Trạng thái chạy được kiểm soát qua bảng trạng thái đơn dòng `cdp_id_resolution_status`.
+2. Sử dụng truy vấn `SELECT ... FOR UPDATE NOWAIT` để kiểm tra khóa:
+   * Nếu bảng đang bị khóa bởi một worker khác, lệnh trigger hiện tại sẽ **ngay lập tức bỏ qua (skip)** mà không làm tắc nghẽn thread.
+   * Nếu khoảng thời gian kể từ lần chạy trước nhỏ hơn `throttle_seconds` (mặc định `5` giây), trigger sẽ tạm hoãn để tích lũy gom lô (micro-batching).
+3. Khi đủ điều kiện, worker cập nhật mốc `last_executed_at` và thực thi hàm `run_resolution_batch()`.
+
+### 5.2 Luồng điều phối Trigger & Throttling (Control Flow)
 
 ```
-
-### Table cdp_profile_links
-
-```sql
--- Bảng 3: cdp_profile_links
--- Liên kết các hồ sơ thô với hồ hồ sơ master tương ứng
-CREATE TABLE cdp_profile_links (
-    link_id BIGSERIAL PRIMARY KEY,
-    raw_profile_id UUID NOT NULL REFERENCES cdp_raw_profiles_stage(raw_profile_id),
-    master_profile_id UUID NOT NULL REFERENCES cdp_master_profiles(master_profile_id),
-    linked_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    match_rule VARCHAR(100) -- Ghi lại quy tắc đã dẫn đến việc liên kết
-);
-
--- Tạo Index tra cứu nhanh
-CREATE INDEX idx_profile_links_raw_id ON cdp_profile_links (raw_profile_id);
-CREATE INDEX idx_profile_links_master_id ON cdp_profile_links (master_profile_id);
-
--- Ràng buộc duy nhất để tránh 1 bản ghi thô link tới nhiều master
-ALTER TABLE cdp_profile_links ADD CONSTRAINT uk_profile_links_raw_id UNIQUE (raw_profile_id);
-
+[Worker Ingestion ghi Raw Row mới vào Staging]
+                       |
+                       v
+    [GỌI: attempt_trigger(tenant_id, domain)]
+                       |
+                       v
+       (SELECT ... FOR UPDATE NOWAIT trên cdp_id_resolution_status)
+                       |
+         +-------------+-------------+
+         v                           v
+[Khóa bị giữ bởi Worker khác]    [Thành công lấy Khóa]
+         |                           |
+         v                           v
+ (Bỏ qua - Skip ngay)      (Kiểm tra: now - last_executed_at > throttle_seconds)
+                                     |
+                       +-------------+-------------+
+                       v                           v
+                [Chưa đủ thời gian]         [Đủ thời gian giãn cách]
+                       |                           |
+                       v                           v
+            (Tạm hoãn - Throttle)       1. Cập nhật last_executed_at
+                                        2. Chạy run_resolution_batch()
 ```
 
-> **Lược đồ thật (production, multi-tenant)** trong `database-init/database-schema.sql`
-> khác với ví dụ tối giản ở trên theo vài điểm quan trọng -- xem chi tiết ở
-> phần [Review `cdp_profile_links` cho production & khả năng scale 10M profile](#review-cdp_profile_links-cho-production--khả-năng-scale-10m-profile)
-> bên dưới (cột `tenant_id`/RLS, vòng đời `status`/`unlinked_*` để unmerge, và
-> index thật đang dùng).
+### 5.3 Ví dụ dữ liệu vận hành Bảng Trạng thái
 
+Bảng `cdp_id_resolution_status`:
 
-## Cơ chế "Real-time" Trigger
+| `id` | `last_executed_at` | `updated_at` | Trạng thái hệ thống |
+| :--- | :--- | :--- | :--- |
+| `TRUE` | `2026-08-04 10:00:00+07` | `2026-08-04 10:00:00+07` | Đã chạy đợt 1 thành công. Lần trigger tại `10:00:02` sẽ bị throttle (do $< 5s$). Lần trigger tại `10:00:06` sẽ được chấp nhận chạy. |
 
-Vì logic xử lý chính đã được chuyển hoàn toàn sang Python (không còn là PL/pgSQL stored procedure), "trigger real-time" ở đây **không phải là một DB trigger thật sự** (Postgres trigger không thể gọi trực tiếp Python). Thay vào đó, Data Ingestion Worker (nơi ghi dữ liệu vào `cdp_raw_profiles_stage`) sẽ chủ động gọi `IdentityResolutionTrigger.attempt_trigger()` ngay sau mỗi lần insert.
+---
 
-**Để tránh quá tải database khi stream dữ liệu với tần suất cao**, `attempt_trigger()` sẽ kiểm tra thời gian chạy gần nhất trong bảng trạng thái (`cdp_id_resolution_status`), dùng `SELECT ... FOR UPDATE NOWAIT` để khoá theo hàng (row-level lock) và phối hợp an toàn giữa nhiều worker chạy song song.
+## 6. Các điểm cần lưu ý khi vận hành (Operational Best Practices)
 
-**1. Tạo bảng trạng thái:**
+1. **Tính Toàn vẹn và Bất biến (Idempotency):**
+   * Pipeline chỉ quét các bản ghi staging có `status_code = 1`. Khi xử lý xong, hệ thống chuyển `status_code = 3` và đóng mốc `processed_at = NOW()`.
+   * Khóa duy nhất `UNIQUE(tenant_id, raw_profile_id)` trên `cdp_profile_links` đảm bảo việc chạy lại batch (retry) khi gặp sự cố không bao giờ gây nhân bản liên kết hoặc tạo dư thừa Master Profile.
 
-```sql
--- Bảng Metadata theo dõi trạng thái và thời gian chạy để tránh kích hoạt liên tục (Throttling)
-CREATE TABLE cdp_id_resolution_status (
-    id BOOLEAN PRIMARY KEY DEFAULT TRUE, 
-    last_executed_at timestamp with time zone, 
-    CONSTRAINT cdp_id_resolution_status_pkey PRIMARY KEY (id),
-    CONSTRAINT enforce_one_row CHECK (id = TRUE) -- Đảm bảo chỉ có 1 row duy nhất
-);
+2. **Bảo mật và Phân vùng đa khách hàng (Tenant & Domain Scoping):**
+   * Tất cả các câu lệnh SQL tự động sinh bởi Resolver luôn chứa điều kiện bắt buộc `WHERE tenant_id = :tenant_id AND domain = :domain`. Điều này ngăn chặn triệt để nguy cơ rò rỉ dữ liệu chéo giữa các đơn vị kinh doanh hoặc khách hàng doanh nghiệp khác nhau.
 
--- Chèn bản ghi ban đầu
-INSERT INTO cdp_id_resolution_status (id, last_executed_at) VALUES (TRUE, NULL) ON CONFLICT (id) DO NOTHING;
+3. **Tiền xử lý và Chuẩn hóa Dữ liệu (Data Cleansing):**
+   * Số điện thoại cần được đưa về chuẩn E.164 (ví dụ: `+84901234567`).
+   * Email cần chuyển thành chữ thường (`lowercase`) và cắt bỏ khoảng trắng thừa (`trim`) trước khi ghi vào staging để đảm bảo tính chính xác cho các quy tắc `exact_match`.
 
-```
+4. **Xử lý sự cố và Giám sát Hàng đợi:**
+   * Cần thiết lập cảnh báo (alerting) khi số lượng bản ghi có `status_code = 1` tồn đọng quá ngưỡng trên bảng `cdp_raw_profiles_stage` hoặc khi xuất hiện các bản ghi lỗi `status_code = 4`.
 
-**2. Python throttle controller (`identity_resolution/trigger_controller.py`):**
+---
 
-```python
+## 7. Kết luận và Đánh giá Giải pháp (Conclusion & Benchmark)
 
-import logging
-import time
-from datetime import datetime
-import psycopg2
-from psycopg2.extras import RealDictCursor
+Hệ thống Customer Identity Resolution (CIR) trong kiến trúc Customer 360 này là một pipeline xử lý dữ liệu hiện đại, tenant-aware và hoàn toàn điều khiển bởi metadata (`metadata-driven`). Kiến trúc cho phép vận hành linh hoạt ở cả hai chế độ gần thời gian thực (Near Real-time với Throttling) và chạy lô định kỳ (Daily Batch), tạo ra Golden Record duy nhất mà không làm nghẽn cơ sở dữ liệu.
 
-from identity_resolution.resolver import CustomerIdentityResolver
+### 7.1 Ma trận Đáp ứng Trường hợp Sử dụng (Use Case Application Matrix)
 
-# Set up logging
-logger = logging.getLogger(__name__)
+| Kịch bản Nghiệp vụ (Use Case) | Yêu cầu Kỹ thuật chính | Cơ chế Giải quyết trong C360 CIR Engine |
+| :--- | :--- | :--- |
+| **1. Hợp nhất Đa kênh (Cross-Channel Stitching)** | Liên kết hành vi từ Web Tracking, App, POS, CRM và Ads | Khớp chính xác hoặc mờ trên `email`/`phone`, đồng thời tích lũy mảng `device_ids`, `cookie_ids`, `advertising_ids` và JSONB `external_ids`. |
+| **2. Quản trị Đa đơn vị / Đa ngành (Multi-Tenant & Multi-Domain)** | Phân vùng dữ liệu an toàn giữa các tenant và domain (Retail, Banking, Real Estate, Travel) | Khóa cứng điều kiện SQL `WHERE tenant_id = :tenant_id AND domain = :domain` kết hợp cơ chế Row-Level Security (RLS) của PostgreSQL. |
+| **3. Xử lý PII Băm Bảo mật (Privacy-Preserving & AdTech Match)** | Nhận dữ liệu băm SHA-256 từ Meta/Google/TikTok Ads mà không lộ tên thật | Biểu thức chính quy tự động phát hiện PII băm (`^[0-9a-f]{64}$`), bật cờ `is_hashed = TRUE`, tự động sinh `persona_name` qua Gemini GenAI / Local Fallback và tạo Vector Embedding (768d). |
+| **4. Xử lý Dữ liệu Sai lệch / Nhập sai (Dirty Data & Typo Handling)** | Ghép nối khách hàng khi thu ngân POS nhập sai chính tả tên hoặc địa chỉ | Cấu hình quy tắc khớp mờ Trigram (`fuzzy_trgm`) hoặc ngữ âm (`fuzzy_dmetaphone`) với ngưỡng tin cậy tùy chỉnh (`matching_threshold`). |
+| **5. Cập nhật Thuộc tính Ưu tiên (Conflict & KYC Resolution)** | Xử lý mâu thuẫn khi dữ liệu cũ đè dữ liệu mới hoặc nguồn không tin cậy | Cấu hình chiến lược `consolidation_rule` linh hoạt: `verified_first` (ưu tiên bản ghi KYC), `most_recent` (theo timestamp), `source_priority` (theo độ uy tín hệ thống nguồn), hoặc `append_distinct`. |
 
-class IdentityResolutionTrigger:
-    """
-    Replicates the PostgreSQL trigger 'cdp_trigger_process_new_raw_profiles' 
-    and the throttle function 'process_new_raw_profiles_trigger_func'.
-    
-    This controller uses distributed row-level locking (FOR UPDATE NOWAIT) 
-    to ensure that identity resolution is throttled across multiple concurrent 
-    Python workers.
-    """
+---
 
-    def __init__(self, db_connection, schema: str = "public", throttle_seconds: int = 5):
-        """
-        Args:
-            db_connection: A psycopg2 connection object.
-            schema: The database schema containing the CDP tables.
-            throttle_seconds: Minimum time (in seconds) between resolution runs.
-        """
-        self.conn = db_connection
-        self.schema = schema
-        self.throttle_seconds = throttle_seconds
+### 7.2 So sánh Chi tiết với Giải pháp Thương mại (Twilio Segment Unify vs Native C360 CIR)
 
-    def attempt_trigger(self) -> bool:
-        """
-        Checks the throttle status and executes the resolution logic if the 
-        minimum interval has passed. 
-        
-        It catches exceptions to mimic the original SQL trigger's behavior 
-        of not blocking the main ingestion flow.
-        
-        Returns:
-            bool: True if the resolution logic was triggered, False if throttled or skipped.
-        """
-        executed = False
-        
-        try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                # 1. Acquire a row-level lock to prevent race conditions
-                # NOWAIT ensures that if another worker holds the lock, this process 
-                # skips immediately instead of waiting, behaving like a fast throttle.
-                lock_query = f"""
-                    SELECT last_executed_at 
-                    FROM {self.schema}.cdp_id_resolution_status 
-                    WHERE id = TRUE 
-                    FOR UPDATE NOWAIT;
-                """
-                
-                try:
-                    cursor.execute(lock_query)
-                    status_row = cursor.fetchone()
-                except psycopg2.errors.LockNotAvailable:
-                    logger.debug("Lock not available: Another worker is currently processing the trigger.")
-                    self.conn.rollback()
-                    return False
+Dưới đây là ma trận so sánh đối chiếu giữa hệ thống **Native C360 CIR Engine** và giải pháp CDP thương mại phổ biến **Twilio Segment Unify (Personas)**:
 
-                if not status_row:
-                    logger.warning("Status row missing. Please initialize 'cdp_id_resolution_status'.")
-                    self.conn.rollback()
-                    return False
+| Tiêu chí So sánh | Native Customer 360 CIR Engine | Twilio Segment Unify (Personas) |
+| :--- | :--- | :--- |
+| **Kiến trúc & Làm chủ Dữ liệu (Deployment & Governance)** | Native trên PostgreSQL 16 (On-Premises / Private Cloud). Làm chủ 100% dữ liệu và hạ tầng, không nguy cơ vendor lock-in. | Managed SaaS Cloud. Dữ liệu trung chuyển qua hạ tầng của Segment; tuân thủ chính sách lưu trữ của bên thứ ba. |
+| **Thuật toán So khớp (Matching Engine)** | **Hybrids:** Kết hợp Khớp chính xác (Exact), Khớp mờ Trigram (`pg_trgm`), Khớp ngữ âm Double Metaphone (`dmetaphone`) qua metadata. | **Deterministic Identity Graph:** Phụ thuộc chủ yếu vào quy tắc ghép nối cứng qua `userId` và `anonymousId`. Hạn chế khớp mờ tự động. |
+| **Bảo mật Multi-Tenant (Multi-Tenant Isolation)** | Cách ly triệt để theo cấp CSDL (PostgreSQL Row-Level Security & Tenant Scoping). Hỗ trợ chia sẻ hạ tầng hiệu quả. | Cách ly theo cấp Workspace / Source. Chi phí tăng tiến khi mở rộng nhiều Workspace cho từng tenant độc lập. |
+| **Chiến lược Hợp nhất Thuộc tính (Consolidation Strategy)** | Cấu hình linh hoạt theo từng trường (`most_recent`, `verified_first`, `source_priority`, `append_distinct`, `overwrite`). | Áp dụng chính sách mặc định Last-Write-Wins hoặc ưu tiên đơn giản dựa trên cấu hình trait cơ bản. |
+| **Quyền riêng tư & AI làm giàu (Privacy & GenAI Enrichment)** | Tự động phát hiện SHA-256 PII, sinh `persona_name` bằng LLM (Gemini 3.5 Flash) và tạo vector embedding hỗ trợ Lookalike search. | Cần cài đặt thêm các Function / Transformation tùy chỉnh bên ngoài pipeline chính để xử lý PII băm. |
+| **Chi phí Vận hành (Total Cost of Ownership - TCO)** | Tối ưu chi phí hạ tầng (chỉ chi trả cho compute DB/Worker). Không phát sinh phí bản quyền theo số lượng hồ sơ (MTU). | Tính phí dựa trên số lượng người dùng theo dõi hàng tháng (Monthly Tracked Users - MTU). Chi phí tăng rất nhanh khi quy mô mở rộng. |
+| **Thời gian Kích hoạt (Ingestion Latency & Throughput)** | Linh hoạt: Near Real-time (micro-batching với khóa `FOR UPDATE NOWAIT`) hoặc Batch định kỳ high-throughput. | Near Real-time theo kiến trúc streaming event-driven SaaS. |
 
-                last_exec_time = status_row['last_executed_at']
-                
-                # Use timezone-aware current time if the database returned a timezone-aware datetime
-                tz_info = last_exec_time.tzinfo if last_exec_time else None
-                current_time = datetime.now(tz_info)
+---
 
-                # 2. Check the time interval limit (Throttle logic)
-                should_run = False
-                if last_exec_time is None:
-                    should_run = True
-                else:
-                    time_elapsed = (current_time - last_exec_time).total_seconds()
-                    if time_elapsed >= self.throttle_seconds:
-                        should_run = True
+### 7.3 Tổng kết
 
-                # 3. Execute logic if condition is met
-                if should_run:
-                    logger.info("Throttle interval passed. Executing Customer Identity Resolution...")
-                    
-                    # Update the execution timestamp immediately
-                    update_query = f"""
-                        UPDATE {self.schema}.cdp_id_resolution_status 
-                        SET last_executed_at = NOW() 
-                        WHERE id = TRUE;
-                    """
-                    cursor.execute(update_query)
-                    
-                    # Initialize and run the main OOP resolver logic
-                    resolver = CustomerIdentityResolver(
-                        db_connection=self.conn,
-                        schema=self.schema
-                    )
-                    # run_resolution_batch() commits internally, which also commits
-                    # the last_executed_at update above (same connection/transaction).
-                    resolver.run_resolution_batch()
-                    
-                    executed = True
-                else:
-                    logger.debug(f"Throttled: Only {time_elapsed}s elapsed (limit {self.throttle_seconds}s).")
-                    self.conn.rollback() # Release the lock
-
-        except Exception as e:
-            # Equivalent to the EXCEPTION WHEN OTHERS block in PL/pgSQL
-            # Ensures we don't crash the data ingestion worker if resolution fails
-            logger.warning(f"Error in python trigger controller: {e}")
-            self.conn.rollback()
-        
-        return executed
-
-# ==========================================
-# Example Usage in a Data Ingestion Worker
-# ==========================================
-if __name__ == "__main__":
-    # In a real setup, you would use a connection pool (e.g., psycopg2.pool)
-    conn = psycopg2.connect("dbname=cdp user=postgres password=secret")
-    
-    # Instantiate the trigger controller
-    trigger_controller = IdentityResolutionTrigger(
-        db_connection=conn,
-        schema="public",
-        throttle_seconds=5
-    )
-    
-    # Simulating a Data Worker loop (like reading from Kafka or RabbitMQ)
-    while True:
-        # 1. Ingest raw profile here...
-        # insert_raw_profile_to_db(...)
-        
-        # 2. Call the trigger method after inserting data.
-        # It will only actually run the resolution if 5 seconds have passed.
-        trigger_controller.attempt_trigger()
-        
-        # Sleep to simulate message stream delay
-        time.sleep(1)
-
-```
-
-## Cơ chế Lịch Trình Hàng Ngày (Daily Trigger)
-
-Quy trình bên ngoài (Python, Node.js, Airflow...) sẽ chạy hàng ngày để dọn dẹp toàn bộ các bản ghi chưa được xử lý (`processed_at IS NULL`), phòng trường hợp `IdentityResolutionTrigger` real-time bị throttle hoặc bỏ lỡ một số bản ghi. Vì không còn DB trigger thật (xem phần trên), job này chỉ cần lặp lại `CustomerIdentityResolver.run_resolution_batch()` cho đến khi bảng staging được xử lý hết — không cần disable/enable trigger nào.
-
-### Daily Trigger using Python code (`identity_resolution/daily_job.py`)
-
-```python
-import logging
-import os
-from datetime import datetime
-
-import psycopg2
-
-from identity_resolution.resolver import CustomerIdentityResolver
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Lấy cấu hình DB từ biến môi trường của hệ thống Cloud
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_NAME = os.environ.get("DB_NAME", "cdp")
-DB_USER = os.environ.get("DB_USER", "postgres")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
-DB_PORT = os.environ.get("DB_PORT", "5432")
-DB_SCHEMA = os.environ.get("DB_SCHEMA", "public")
-BATCH_SIZE = int(os.environ.get("CIR_BATCH_SIZE", "5000"))
-
-
-def run_daily_identity_resolution() -> int:
-    """Connects to Postgres and drains the staging table until empty.
-
-    Returns the total number of raw profiles processed across all batches.
-    """
-    conn = psycopg2.connect(
-        host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
-    )
-    total_processed = 0
-    try:
-        resolver = CustomerIdentityResolver(conn, schema=DB_SCHEMA, batch_size=BATCH_SIZE)
-        logger.info("[%s] Starting daily identity resolution run.", datetime.now())
-
-        while True:
-            processed = resolver.run_resolution_batch()
-            total_processed += processed
-            if processed < BATCH_SIZE:
-                break  # staging table drained
-
-        logger.info(
-            "[%s] Daily run complete. Total profiles processed: %d",
-            datetime.now(), total_processed,
-        )
-    finally:
-        conn.close()
-
-    return total_processed
-
-
-if __name__ == "__main__":
-    run_daily_identity_resolution()
-
-```
-
-## OOP Python Implementation for Customer Identity Resolution
-
-Đây là code xử lý trung tâm, đọc rule từ MetaData và xây dựng câu lệnh SQL Dynamic. Code đầy đủ, có thể chạy được và có unit test đi kèm nằm tại
-[core-customer360/backend-system/identity_resolution/](backend-system/identity_resolution/) (package `identity_resolution`). Các cột dùng bên dưới khớp đúng với DDL đã định nghĩa ở phần *Thiết lập Database Schema* phía trên (`cdp_raw_profiles_stage`, `cdp_master_profiles`, `cdp_profile_links`, `cdp_profile_attributes`) — không có cột `tenant_id`/`full_name`/`status_code` vì các bảng này không phải multi-tenant và dùng `first_name`/`last_name` riêng biệt cùng `processed_at` để đánh dấu trạng thái xử lý.
-
-> **`is_hashed` / `persona_name` (chỉ có trong schema thật `database-schema.sql`, không xuất hiện trong ví dụ code minh hoạ bên dưới):** khi PII (`full_name`/`email`/`phone_number`/`national_id`) đã bị **SHA-256 hash**, `cdp_master_profiles.is_hashed = TRUE` và bắt buộc phải có `persona_name` — một nhãn dễ đọc, **không phải PII**, dùng để duyệt/tìm kiếm hồ sơ khi PII gốc không còn đọc được. Ràng buộc này được ép ở cả DB (CHECK constraint `chk_cdp_mp_hashed_requires_persona_name`) và ở tầng ứng dụng: module `identity_resolution/persona.py` tự phát hiện PII trông giống hash (regex 64 ký tự hex) và tự sinh `persona_name` một cách xác định (deterministic) từ `domain` + kênh acquisition + một định danh không-PII ổn định (`device_id`/`advertising_id`/…), được gọi ở cả `_create_master_and_link()` và `_link_and_update()` trong `resolver.py` thật.
-
-```python
-# backend-system/identity_resolution/identity_resolution/models.py
-from dataclasses import dataclass
-from typing import Optional
-
-@dataclass
-class IdentityRule:
-    """Represents one active matching rule read from cdp_profile_attributes."""
-    attribute_code: str
-    match_rule: str
-    threshold: Optional[float] = None
-```
-
-```python
-# backend-system/identity_resolution/identity_resolution/resolver.py
-import logging
-from typing import Any, Dict, List, Optional
-from psycopg2.extras import RealDictCursor
-from .models import IdentityRule
-
-logger = logging.getLogger(__name__)
-
-# Columns shared by cdp_raw_profiles_stage and cdp_master_profiles that get
-# merged (COALESCE'd) into the master record.
-MERGEABLE_FIELDS = (
-    "first_name", "last_name", "email", "phone_number",
-    "address_line1", "city", "state", "zip_code",
-)
-
-class CustomerIdentityResolver:
-    """
-    Handles Customer Identity Resolution (CIR) by linking raw profiles to master profiles
-    using dynamically configured matching rules.
-    """
-
-    def __init__(self, db_connection, schema: str = "public", batch_size: int = 1000):
-        """
-        Initializes the resolver with an injected database connection for easy unit testing.
-
-        Args:
-            db_connection: A psycopg2 connection object (or a connection pool).
-            schema: The database schema containing the CDP tables.
-            batch_size: Number of records to process in memory per run.
-        """
-        self.conn = db_connection
-        self.schema = schema
-        self.batch_size = batch_size
-
-    def _table(self, name: str) -> str:
-        return f"{self.schema}.{name}" if self.schema else name
-
-    def _get_active_rules(self, cursor) -> List[IdentityRule]:
-        """Fetches active identity resolution rules from the metadata table."""
-        query = f"""
-            SELECT attribute_internal_code, matching_rule, matching_threshold
-            FROM {self._table('cdp_profile_attributes')}
-            WHERE is_identity_resolution = TRUE
-              AND status = 'ACTIVE'
-              AND matching_rule IS NOT NULL
-              AND matching_rule != 'none';
-        """
-        cursor.execute(query)
-        return [
-            IdentityRule(
-                attribute_code=row['attribute_internal_code'],
-                match_rule=row['matching_rule'],
-                threshold=row['matching_threshold'],
-            )
-            for row in cursor.fetchall()
-        ]
-
-    def _fetch_unprocessed_profiles(self, cursor) -> List[Dict[str, Any]]:
-        """Fetches a batch of raw profiles not yet processed (processed_at IS NULL)."""
-        query = f"""
-            SELECT raw_profile_id, first_name, last_name, email, phone_number,
-                   address_line1, city, state, zip_code, source_system
-            FROM {self._table('cdp_raw_profiles_stage')}
-            WHERE processed_at IS NULL
-            LIMIT %s;
-        """
-        cursor.execute(query, (self.batch_size,))
-        return cursor.fetchall()
-
-    def _find_master_profile(self, cursor, raw_profile: Dict[str, Any], rules: List[IdentityRule]) -> Optional[str]:
-        """
-        Dynamically builds and executes a query to find a matching master profile
-        based on active metadata rules.
-        """
-        conditions = []
-        params = []
-
-        for rule in rules:
-            raw_value = raw_profile.get(rule.attribute_code)
-            if not raw_value:
-                continue
-
-            col_name = rule.attribute_code
-
-            # Construct parameterized conditions based on the match rule
-            if rule.match_rule == 'exact':
-                conditions.append(f"{col_name} = %s")
-                params.append(raw_value)
-            elif rule.match_rule == 'fuzzy_trgm':
-                threshold = rule.threshold if rule.threshold is not None else 0.7
-                conditions.append(f"similarity({col_name}, %s) >= %s")
-                params.extend([raw_value, threshold])
-            elif rule.match_rule == 'fuzzy_dmetaphone':
-                conditions.append(f"dmetaphone({col_name}) = dmetaphone(%s)")
-                params.append(raw_value)
-
-        if not conditions:
-            return None
-
-        where_clause = " OR ".join(f"({c})" for c in conditions)
-        query = f"""
-            SELECT master_profile_id
-            FROM {self._table('cdp_master_profiles')}
-            WHERE {where_clause}
-            LIMIT 1;
-        """
-        cursor.execute(query, tuple(params))
-        result = cursor.fetchone()
-
-        return result['master_profile_id'] if result else None
-
-    def _link_and_update(self, cursor, raw_profile: Dict[str, Any], master_id: str, match_rule: str = 'DynamicMatch'):
-        """Links the raw profile to an existing master profile and fills any gaps (COALESCE)."""
-        # Create the relationship link. Unique constraint uk_profile_links_raw_id
-        # guarantees one raw profile links to a single master profile.
-        link_query = f"""
-            INSERT INTO {self._table('cdp_profile_links')}
-                (raw_profile_id, master_profile_id, match_rule)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (raw_profile_id) DO NOTHING;
-        """
-        cursor.execute(link_query, (raw_profile['raw_profile_id'], master_id, match_rule))
-
-        # Coalesce data to preserve existing master profile data while filling gaps,
-        # and track every source system that contributed to this master profile.
-        set_clause = ", ".join(f"{f} = COALESCE({f}, %s)" for f in MERGEABLE_FIELDS)
-        update_query = f"""
-            UPDATE {self._table('cdp_master_profiles')}
-            SET {set_clause},
-                source_systems = array_append(
-                    COALESCE(source_systems, ARRAY[]::TEXT[]), %s::TEXT
-                ),
-                updated_at = NOW()
-            WHERE master_profile_id = %s
-              AND NOT (%s = ANY(COALESCE(source_systems, ARRAY[]::TEXT[])));
-        """
-        source_system = raw_profile.get('source_system')
-        params = tuple(raw_profile.get(f) for f in MERGEABLE_FIELDS) + (
-            source_system, master_id, source_system,
-        )
-        cursor.execute(update_query, params)
-
-    def _create_master_and_link(self, cursor, raw_profile: Dict[str, Any]) -> str:
-        """Creates a brand new master profile when no matches are found."""
-        insert_master_query = f"""
-            INSERT INTO {self._table('cdp_master_profiles')}
-                (first_name, last_name, email, phone_number, address_line1,
-                 city, state, zip_code, first_seen_raw_profile_id, source_systems)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, ARRAY[%s]::TEXT[])
-            RETURNING master_profile_id;
-        """
-        params = tuple(raw_profile.get(f) for f in MERGEABLE_FIELDS) + (
-            raw_profile['raw_profile_id'], raw_profile.get('source_system'),
-        )
-        cursor.execute(insert_master_query, params)
-        new_master_id = cursor.fetchone()['master_profile_id']
-
-        link_query = f"""
-            INSERT INTO {self._table('cdp_profile_links')}
-                (raw_profile_id, master_profile_id, match_rule)
-            VALUES (%s, %s, %s);
-        """
-        cursor.execute(link_query, (raw_profile['raw_profile_id'], new_master_id, 'NewMaster'))
-        return new_master_id
-
-    def _mark_as_processed(self, cursor, raw_profile_id: str):
-        """Marks a raw profile as processed by stamping processed_at."""
-        query = f"""
-            UPDATE {self._table('cdp_raw_profiles_stage')}
-            SET processed_at = NOW()
-            WHERE raw_profile_id = %s;
-        """
-        cursor.execute(query, (raw_profile_id,))
-
-    def run_resolution_batch(self) -> int:
-        """
-        Main orchestration method for a single batch run.
-        Designed to be idempotent and safe for workflow retries.
-        Returns the number of raw profiles processed in this batch.
-        """
-        try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                rules = self._get_active_rules(cursor)
-                if not rules:
-                    logger.warning("No active identity resolution rules found. Aborting.")
-                    return 0
-
-                raw_profiles = self._fetch_unprocessed_profiles(cursor)
-                if not raw_profiles:
-                    logger.info("No unprocessed profiles found in staging.")
-                    return 0
-
-                logger.info(f"Processing batch of {len(raw_profiles)} profiles.")
-
-                for profile in raw_profiles:
-                    matched_id = self._find_master_profile(cursor, profile, rules)
-
-                    if matched_id:
-                        self._link_and_update(cursor, profile, matched_id)
-                    else:
-                        self._create_master_and_link(cursor, profile)
-
-                    self._mark_as_processed(cursor, profile['raw_profile_id'])
-
-                # Commit the entire batch transaction
-                self.conn.commit()
-                logger.info("Batch processed and committed successfully.")
-                return len(raw_profiles)
-
-        except Exception:
-            self.conn.rollback()
-            logger.exception("Error during identity resolution.")
-            raise
-```
-
-## Integration with Data Pipeline Frameworks
-
-### Apache Airflow 3 Example
-
-```python
-from airflow.decorators import dag, task
-from airflow.providers.postgres.hooks.postgres import PostgresHook
-from pendulum import datetime
-
-from identity_resolution.resolver import CustomerIdentityResolver
-
-@dag(schedule="@hourly", start_date=datetime(2026, 1, 1), catchup=False)
-def cdp_identity_resolution_pipeline():
-
-    @task()
-    def resolve_identities():
-        # Utilize Airflow's connection management
-        pg_hook = PostgresHook(postgres_conn_id="cdp_postgres_db")
-        conn = pg_hook.get_conn()
-        
-        try:
-            # Instantiate the OOP resolver
-            resolver = CustomerIdentityResolver(
-                db_connection=conn, 
-                schema="public", 
-                batch_size=5000 # Configured for memory optimization
-            )
-            resolver.run_resolution_batch()
-        finally:
-            conn.close()
-
-    resolve_identities()
-
-cdp_identity_resolution_pipeline()
-
-```
-
-### Dagster Example
-
-```python
-from dagster import asset, ConfigurableResource
-import psycopg2
-
-from identity_resolution.resolver import CustomerIdentityResolver
-
-class PostgresResource(ConfigurableResource):
-    conn_uri: str
-
-    def get_connection(self):
-        return psycopg2.connect(self.conn_uri)
-
-@asset(compute_kind="python", group_name="cdp_core")
-def resolve_customer_identities(pg_db: PostgresResource):
-    """Runs the identity resolution process on staged raw profiles."""
-    conn = pg_db.get_connection()
-    
-    try:
-        resolver = CustomerIdentityResolver(
-            db_connection=conn, 
-            schema="public",
-            batch_size=2000
-        )
-        resolver.run_resolution_batch()
-    finally:
-        conn.close()
-
-```
-
-## UNIT TESTS
-
-Bộ test cho `cdp_profile_links` được chia làm 2 lớp, tương ứng 2 service đọc/ghi bảng này:
-
-* **`backend-system/identity_resolution/tests/`** (mock hoàn toàn `psycopg2`, không cần DB thật) -- test đường ghi (`_link_and_update`/`_create_new_master` trong `resolver.py`): `INSERT ... ON CONFLICT (tenant_id, raw_profile_id) DO NOTHING` để idempotent khi retry, và `match_method`/`match_score` được set đúng cho cả case "link vào master có sẵn" lẫn "tạo master mới". Chạy: `cd backend-system && source .venv/bin/activate && python -m pytest identity_resolution/tests -q` (74 tests).
-* **`customer360-api/tests/test_identity_router.py`** (mới, 17 test case, cũng mock hoàn toàn DB session -- không cần Postgres thật) -- test đường đọc/ghi qua REST API (`core/routers/identity.py`):
-    * `ProfileLinksRouterTests`: CRUD đầy đủ cho `/profile-links/` -- create (mặc định `status="ACTIVE"`, chấp nhận `status`/`unlinked_reason` tường minh, từ chối `status` không hợp lệ với `422`), list (lọc theo `tenant_id`/`raw_profile_id`/`master_profile_id`, phân trang `skip`/`limit`), get theo id (`200`/`404`), delete (`204`/`404`), và cache bị invalidate (`invalidate_prefix("profile_links")`) sau mỗi create/delete.
-    * `MasterProfileLinksEndpointTests`: test `GET /master-profiles/{id}/links` -- trả đúng danh sách link, trả `[]` khi không có link nào, và câu lệnh SQL sinh ra luôn có `LIMIT` (không bao giờ trả về tập kết quả không giới hạn dù một master bị merge từ rất nhiều raw profile).
-    * Chạy: `cd customer360-api && .venv/bin/python -m pytest tests/test_identity_router.py -v`.
-
-Kỹ thuật fake hoá đáng chú ý (không cần DB thật cho cả 2 lớp test trên): `profile_links_router` không dùng `build_crud_router` (khác với `profile_attributes_router`), nên test không patch được `core.routers._generic.CRUDBase` như các router generic khác -- thay vào đó test monkeypatch trực tiếp biến module-level `core.routers.identity._link_crud` sau khi import (an toàn vì handler tra cứu global theo tên tại thời điểm gọi, không bind tại thời điểm định nghĩa).
-
-
-
-Tình huống: một master profile đang có 2 raw profile cùng `phone_number` nhưng tên khác nhau (ví dụ `Nguyen Van A` và `Nguyen Van B`).
-
-### Vấn đề hiện tại
-
-Trong code `resolver.py`, hàm `_find_master_profile()` đang ghép điều kiện theo kiểu **OR** giữa các rule và `LIMIT 1`. Nghĩa là chỉ cần match `phone_number` là có thể link vào một master, dù `full_name` mâu thuẫn.
-
-Điều này phù hợp khi số điện thoại là định danh mạnh (1 người dùng 1 số), nhưng có rủi ro merge nhầm khi:
-
-* Số điện thoại tái sử dụng (SIM recycle).
-* Số tổng đài/công ty được nhiều người dùng chung.
-* Lỗi nhập liệu hoặc map sai trường từ source.
-
-### Chính sách quyết định khuyến nghị
-
-Nên dùng mô hình **weighted decision** (chấm điểm theo bằng chứng) thay vì chỉ OR theo rule.
-
-1. Nhóm định danh mạnh: `national_id`, `email` verified, `external_customer_id` theo `source_system`.
-2. Nhóm định danh trung bình: `phone_number`.
-3. Nhóm hỗ trợ: `full_name` fuzzy, `device_id`, `advertising_id`, `cookie_id`.
-
-Quy tắc xử lý cho case cùng phone khác tên:
-
-1. Nếu `phone_number` match **và** có ít nhất 1 định danh mạnh khác match: merge tự động.
-2. Nếu chỉ `phone_number` match, nhưng `full_name` khác xa (similarity thấp):
-    * Không merge ngay.
-    * Tạo master mới (hoặc đưa vào hàng đợi review thủ công) với `match_method = 'PhoneConflictReview'`.
-3. Nếu chỉ `phone_number` match, tên gần giống (sai chính tả/không dấu): merge nhưng gắn cờ `low_confidence` để audit.
-
-Ngưỡng gợi ý:
-
-* `full_name` similarity >= `0.85`: coi là cùng người (khi chỉ có phone).
-* `0.70 - 0.85`: vùng nghi ngờ, cần thêm tín hiệu (`device_id`/`external_customer_id`).
-* `< 0.70`: không merge tự động.
-
-### Cách cải tiến code (khuyến nghị)
-
-1. Tách bước **candidate retrieval** và **scoring**:
-    * Bước 1: lấy danh sách candidate master theo các key mạnh (`phone`, `email`, `national_id`, identity arrays/maps).
-    * Bước 2: tính `match_score` cho từng candidate, chọn score cao nhất thay vì `LIMIT 1` ngẫu nhiên.
-2. Thêm điều kiện chặn merge khi có xung đột cứng:
-    * Ví dụ: cùng phone nhưng `national_id` khác nhau rõ ràng -> reject merge.
-3. Lưu lý do quyết định:
-    * Ghi `match_method` chi tiết như `Phone+NameHigh`, `PhoneOnlyLowConfidence`, `PhoneConflictReview` để dễ debug.
-4. Bổ sung test case bắt buộc:
-    * `same_phone + same_name` -> merge.
-    * `same_phone + similar_name` -> merge low confidence.
-    * `same_phone + different_name + no other evidence` -> không merge tự động.
-    * `same_phone + different_name + strong secondary id match` -> merge.
-
-### SQL gợi ý để giám sát xung đột tên theo phone
-
-```sql
--- Tìm các master có cùng phone nhưng nhiều biến thể tên đáng ngờ
-SELECT
-     mp.phone_number,
-     COUNT(DISTINCT mp.master_profile_id) AS master_count,
-     COUNT(DISTINCT COALESCE(mp.full_name, '')) AS name_variants,
-     ARRAY_AGG(DISTINCT mp.full_name) AS names
-FROM customer360.cdp_master_profiles mp
-WHERE mp.phone_number IS NOT NULL
-GROUP BY mp.phone_number
-HAVING COUNT(DISTINCT COALESCE(mp.full_name, '')) > 1;
-```
-
-Kết luận ngắn: **không nên quyết định chỉ bằng `phone_number` khi tên mâu thuẫn**. Cần ít nhất một tín hiệu mạnh bổ sung hoặc cơ chế review để tránh over-merge.
-
-Bộ unit test đầy đủ (mock hoàn toàn `psycopg2`, không cần DB thật) nằm tại [core-customer360/backend-system/identity_resolution/tests/](backend-system/identity_resolution/tests/). Cách chạy:
-
-```bash
-cd core-customer360/backend-system/identity_resolution
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pytest -v
-```
-
-Dữ liệu SQL mẫu bên dưới dùng để test thủ công / tích hợp trên một DB Postgres thật (áp cùng schema đã tạo ở phần trên):
-
-```sql
--- Xóa data cũ
-DELETE FROM cdp_profile_attributes;
-
--- Khởi tạo metadata mẫu
--- LƯU Ý: first_name/last_name được để is_identity_resolution = FALSE, khớp với
--- chính sách thật của hệ thống (database-init/init-core-database.sql) -- tên
--- người (kể cả full_name) không được dùng làm CIR matching key vì họ tên dễ
--- trùng lặp (đặc biệt họ tên Việt Nam), rủi ro hợp nhất nhầm 2 người khác nhau.
--- Nếu bật fuzzy_dmetaphone/fuzzy_trgm cho tên như ví dụ dưới, chỉ nên dùng như
--- một tín hiệu HỖ TRỢ kết hợp với ít nhất 1 matching key mạnh khác (xem phần
--- "Quyết định khi trùng số điện thoại nhưng khác tên" bên dưới), không dùng
--- làm điều kiện OR độc lập như code resolver.py hiện tại.
-INSERT INTO cdp_profile_attributes (
-    id, name,  attribute_internal_code, data_type,
-    is_identity_resolution, matching_rule, matching_threshold,
-    consolidation_rule, status
-) VALUES
-(1, 'email', 'email', 'TEXT', TRUE, 'exact', NULL, 'non_null', 'ACTIVE'),
-(2, 'phone_number','phone_number', 'TEXT', TRUE, 'exact', NULL, 'non_null', 'ACTIVE'),
-(3,'first_name',  'first_name', 'TEXT', FALSE, 'fuzzy_dmetaphone', NULL, 'most_recent', 'ACTIVE'),
-(4,'last_name', 'last_name', 'TEXT', FALSE, 'fuzzy_trgm', 0.7, 'most_recent', 'ACTIVE');
-
-
--- Reset bản ghi
-DELETE FROM cdp_profile_links;
-DELETE FROM cdp_raw_profiles_stage;
-DELETE FROM cdp_master_profiles;
-
--- Thêm Profiles giả lập
-INSERT INTO cdp_raw_profiles_stage (
-    raw_profile_id, first_name, last_name, email, phone_number,
-    address_line1, city, state, zip_code, source_system, processed_at
-) VALUES
-(gen_random_uuid(), 'John', 'Smith', 'john@example.com', '1234567890', '123 Elm St', 'New York', 'NY', '10001', 'SystemA', NULL),
-(gen_random_uuid(), 'Jon', 'Smyth', 'john@example.com', NULL, '123 Elm Street', 'New York', 'NY', '10001', 'SystemB', NULL),
-(gen_random_uuid(), 'Jane', 'Doe', 'jane.d@example.com', '5551234567', '456 Oak Ave', 'Los Angeles', 'CA', '90001', 'SystemA', NULL);
-
-```
-
-## Phân tích & Báo cáo (SQL)
-
-```sql
--- Tổng Hồ sơ Thô (Total Raw Profiles)
-SELECT COUNT(*) FROM cdp_raw_profiles_stage;
-
--- Hồ sơ Master Duy nhất (Unique Identities)
-SELECT COUNT(*) FROM cdp_master_profiles;
-
--- Tổng Hồ sơ Thô đã xử lý
-SELECT COUNT(*) FROM cdp_raw_profiles_stage WHERE processed_at IS NOT NULL;
-
--- Hồ sơ được xem là trùng lặp (Duplicate Records)
-SELECT COUNT(*)
-FROM cdp_profile_links pl
-JOIN cdp_master_profiles mp ON pl.master_profile_id = mp.master_profile_id
-WHERE pl.raw_profile_id != mp.first_seen_raw_profile_id; 
-
--- Hoặc đếm theo Master ID
-SELECT COUNT(*) FROM (
-    SELECT master_profile_id FROM cdp_profile_links GROUP BY master_profile_id HAVING COUNT(*) > 1
-) AS duplicate_masters;
-
-```
-
-## Review cdp_profile_links cho production & khả năng scale 10M profile
-
-Phần này review bảng `cdp_profile_links` **thật** đang chạy production (định nghĩa đầy đủ ở `database-init/database-schema.sql`, khác với ví dụ tối giản ở phần "Table cdp_profile_links" phía trên).
-
-### Schema thật (multi-tenant, có vòng đời unmerge/split)
-
-```sql
-CREATE TABLE customer360.cdp_profile_links (
-    link_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
-    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
-    user_id UUID REFERENCES customer360.sys_user (user_id),
-    raw_profile_id UUID NOT NULL REFERENCES customer360.cdp_raw_profiles_stage (raw_profile_id),
-    master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles (master_profile_id),
-    match_score NUMERIC(5, 4),
-    match_method TEXT,
-    -- Vòng đời link, dùng cho kịch bản unmerge/profile-split.
-    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'HISTORICAL', 'UNLINKED', 'SUPERSEDED')),
-    unlinked_at TIMESTAMP WITH TIME ZONE,
-    unlinked_reason TEXT,
-    unlinked_by UUID REFERENCES customer360.sys_user (user_id),
-    created_at TIMESTAMP DEFAULT now(),
-    UNIQUE (tenant_id, raw_profile_id)
-);
-```
-
-So với bản tối giản: có `tenant_id` (multi-tenant + Row-Level Security -- xem phần RLS ở cuối `database-schema.sql`), và 4 cột `status`/`unlinked_at`/`unlinked_reason`/`unlinked_by` để hỗ trợ audit/rollback khi một merge bị phát hiện là sai (xem thêm `docs/CIR-improvement.md`, mục "Missing Lineage & State Fields"). Đường ghi chính (`resolver.py`) chỉ `INSERT` với `status` mặc định `'ACTIVE'` -- các trạng thái khác chỉ được set thủ công bởi một tác vụ unmerge/admin (chưa có UI riêng, dùng trực tiếp qua `PATCH /profile-links/{link_id}` nếu cần).
-
-### Index hiện có & lý do (đã đủ cho 10M profile)
-
-| Index | Cột | Phục vụ truy vấn nào |
-| --- | --- | --- |
-| `cdp_profile_links_pkey` | `link_id` | Lookup theo khoá chính (PATCH/DELETE 1 link). |
-| `cdp_profile_links_tenant_id_raw_profile_id_key` (UNIQUE) | `(tenant_id, raw_profile_id)` | `ON CONFLICT (tenant_id, raw_profile_id) DO NOTHING` trong `resolver.py` (idempotent khi CIR retry cùng raw profile); cũng là index chính cho "raw profile này đã link chưa?". |
-| `idx_cdp_profile_links_status` (partial) | `(tenant_id, status) WHERE status = 'ACTIVE'` | Liệt kê nhanh các link đang hoạt động theo tenant, bỏ qua HISTORICAL/UNLINKED/SUPERSEDED (nhỏ hơn nhiều so với index full-table). |
-| `idx_cdp_profile_links_master` (mới) | `(tenant_id, master_profile_id)` | `GET /master-profiles/{id}/links` và báo cáo "duplicate masters" (`count_duplicate_master_profiles`/`list_duplicate_master_profiles` trong `core/crud/identity.py`) -- **trước đây bảng này KHÔNG có index trên `master_profile_id`** (Postgres không tự tạo index cho cột FK), nên 2 truy vấn trên sẽ full sequential scan khi bảng đạt hàng triệu dòng. Đã bổ sung để sẵn sàng cho 10M+ profile. |
-
-Nhận định về khả năng chịu tải 10M profile: với ~1 link/raw-profile trung bình và mỗi master hợp nhất vài raw profile (theo `value_limit`/`priority_rank` trong `cdp_profile_attributes` -- xem `docs/CIR-improvement.md`), `cdp_profile_links` ở quy mô 10M master profile tương ứng khoảng 10-15M dòng link. Cả 4 index trên đều là B-Tree gọn (UUID + tối đa 1 cột phụ), tổng dung lượng index ước tính vẫn nhỏ hơn dữ liệu bảng -- không cần GIN/partitioning cho bảng này (khác với `cdp_raw_events`, vốn được range-partition theo tháng vì tăng trưởng không giới hạn). Nếu tiếp tục scale vượt 10M, ưu tiên tiếp theo là partition `cdp_profile_links` theo `tenant_id` (hash partitioning) chứ không phải thêm index, vì write pattern đã là INSERT-only/idempotent (không có UPDATE nóng ngoài thao tác unmerge hiếm gặp).
-
-### Python: đường đọc được tối ưu để tránh unbounded result
-
-`GET /master-profiles/{id}/links` (`core/routers/identity.py::get_master_profile_links`) trước đây trả về **toàn bộ** kết quả không giới hạn (`SELECT * FROM cdp_profile_links WHERE master_profile_id = :id`, không `LIMIT`). Một master profile bị merge nhầm hàng loạt (data quality issue) có thể trả về rất nhiều dòng cùng lúc, gây tốn băng thông/serialize JSON không cần thiết. Đã sửa để luôn có `ORDER BY created_at DESC LIMIT :limit` (mặc định `api_default_page_size`, tối đa `api_max_page_size`, giống các endpoint list khác trong API) -- được backing bởi `idx_cdp_profile_links_master` ở trên nên vẫn là index scan, không phải sort toàn bảng.
-
-Các đường đọc/ghi còn lại (`core/crud/identity.py`, `resolver.py::_link_and_update`) đã set-based (dùng `GROUP BY`/subquery hoặc 1 câu `INSERT ... ON CONFLICT` mỗi raw profile) -- không có N+1 query nào cần sửa thêm.
-
-## Ghi chú khi triển khai thực tế và khả năng scale cho 5 triệu profiles
-
-Triển khai giải pháp CIR (Customer Identity Resolution) cho 5 triệu profiles đòi hỏi sự cân nhắc kỹ lưỡng về **hiệu suất**, **tối ưu chi phí**, và **khả năng mở rộng**.
-
-### 1. Tối Ưu Hóa Database
-
-#### 🔍 Indexing
-
-* Đảm bảo **tất cả thuộc tính có `is_identity_resolution = TRUE**` đều có index phù hợp.
-* Sử dụng:
-* `B-tree` cho truy vấn chính xác (exact match).
-* `GIN + pg_trgm` cho khớp mờ (fuzzy matching).
-
-
-* Thường xuyên `REINDEX` để tránh bloat.
-
-#### ⚙️ Tham số PostgreSQL
-
-Tối ưu cấu hình Server (dù là Managed hay Self-hosted):
-
-* `shared_buffers`: ~25–40% RAM.
-* `work_mem`: quan trọng để SORT/JOIN trong quá trình merge data.
-* `maintenance_work_mem`: cần nhiều dung lượng để chạy index GIN mượt mà.
-
-#### 🖥️ Loại Instance & Lưu trữ
-
-* Yêu cầu **Memory-Optimized instances** (ví dụ: Cloud SQL HighMem / Azure Memory Optimized).
-* Ổ cứng: Premium SSD (AWS gp3, Azure Premium, GCP pd-ssd) được Provision IOPS nếu tần suất luồng stream cao.
-
-#### 🧩 Phân vùng (Partitioning)
-
-* Cần áp dụng Partitioning (phân vùng Native của PostgreSQL) theo ngày `received_date` cho bảng `cdp_raw_profiles_stage` để dễ xoá xoay vòng dữ liệu cũ.
-
-### 2. Tối Ưu Hóa Stored Procedure
-
-#### 📦 Xử lý theo lô (Batching)
-
-* Việc dùng `LIMIT batch_size` trong SP là bắt buộc. Cần tune số lượng tuỳ sức mạnh RAM hiện tại (Ví dụ 1000 - 5000 records/batch).
-
-#### 🧬 Tổng hợp & Hợp nhất
-
-* Ưu tiên cấu trúc `UPDATE` trên record gốc thay vì Delete/Insert. Lệnh `COALESCE` hiện tại đang tối ưu cho việc chèn thêm dữ liệu nếu record bị rỗng.
-
-### 3. Cơ chế Kích hoạt
-
-#### ⏱️ Trigger Real-time
-
-* **Lưu ý cực kỳ quan trọng:** Nếu data đổ về vài nghìn records/giây (High Throughput), việc gọi Stored Procedure trực tiếp từ Trigger sẽ lock bảng DB. Trong production thật, hãy TẮT real-time trigger và chuyển sang chạy `pg_cron` tần suất mỗi 1-2 phút một lần để xử lý an toàn hơn.
-
-### 4. Khả năng Scale
-
-* Hệ thống chịu được tải 5M Profiles với 1 Node Master cấu hình lớn. Nếu tiếp tục tăng (VD: 20-50M), bạn sẽ phải chuyển đổi logic Master Table sang mô hình **Sharding (Citus Data)**, hoặc xuất hẳn dữ liệu sang các nền tảng Data Warehouse (BigQuery, Snowflake).
-
-## 📍 Fuzzy Matching: Address & Company Fields
-
-Để cải thiện độ chính xác của Customer Identity Resolution (CIR) khi đối mặt với các biến thể địa chỉ và công ty (do lỗi nhập liệu, abbreviations, synonyms, hoặc các kiểu viết khác nhau), hệ thống được trang bị **fuzzy matching** cho các trường địa chỉ và tên công ty.
-
-### 📌 Kiến trúc Địa Chỉ
-
-Thay vì lưu trữ địa chỉ dưới dạng JSONB document đơn nhất, hệ thống chia nhỏ địa chỉ thành các thành phần riêng biệt trên bảng staging (`cdp_raw_profiles_stage`) để hỗ trợ fuzzy matching ở mức độ thành phần:
-
-| Cột | Loại | Mục đích | Ví dụ |
-|-----|------|---------|-------|
-| `address_line1` | TEXT | Đường phố chính (fuzzy matching) | "123 Le Loi Boulevard", "123 Le Loi Blvd" |
-| `address_line2` | TEXT | Suite/Apartment (hỗ trợ, không fuzzy) | "Suite 101", "Apt 5B" |
-| `city` | TEXT | Thành phố (exact matching) | "Ho Chi Minh", "Da Nang" |
-| `state_province` | TEXT | Bang/Tỉnh (hỗ trợ, không fuzzy) | "HCMC", "CA" |
-| `postal_code` | TEXT | Mã bưu điện (exact matching) | "700000", "90001" |
-| `country` | TEXT | Quốc gia (exact matching) | "Vietnam", "USA" |
-
-**Lưu ý quan trọng:** Khi dữ liệu được hợp nhất vào bảng master (`cdp_master_profiles`), các thành phần địa chỉ lẻ được gộp lại thành một JSONB document `address` duy nhất:
-
-```json
-{
-  "address_line1": "123 Le Loi Boulevard",
-  "address_line2": "Suite 101",
-  "city": "Ho Chi Minh",
-  "state_province": "HCMC",
-  "postal_code": "700000",
-  "country": "Vietnam"
-}
-```
-
-### 🔍 Fuzzy Matching Algorithm
-
-Hệ thống sử dụng **PostgreSQL's `pg_trgm` extension** với thuật toán **trigram similarity** để so sánh chuỗi:
-
-- **Trigram:** Chuỗi 3 ký tự. Ví dụ, "Boulevard" được chia thành: " bo", "bou", "oul", "ule", "lev", "eva", "var", "ard", "rd ".
-- **Similarity score:** Tính bằng công thức: `similarity(a, b) = |intersection| / (|a| + |b| - |intersection|)` 
-- **Range:** 0 (hoàn toàn khác) đến 1 (giống hệt).
-
-**SQL Example:**
-```sql
-SELECT similarity('123 Le Loi Boulevard', '123 Le Loi Blvd');
--- Result: 0.818181818... (cao hơn ngưỡng 0.60)
-
-SELECT similarity('Acme Corporation', 'Acme Corp');
--- Result: 0.769230769... (cao hơn ngưỡng 0.65)
-```
-
-### ⚙️ Fuzzy Matching Thresholds & Configuration
-
-Các ngưỡng fuzzy matching được cấu hình thông qua bảng metadata `cdp_profile_attributes` và có thể được tinh chỉnh mà không cần thay đổi code:
-
-| Thuộc tính | Matching Rule | Threshold | Consolidation Rule | Mục đích |
-|-----------|---------------|-----------|-------------------|---------|
-| `address_line1` | `fuzzy_trgm` | **0.60** | `non_null` | Fuzzy matching cho đường phố chính |
-| `city` | `exact` | NULL | `non_null` | Exact match (không fuzzy) |
-| `postal_code` | `exact` | NULL | `non_null` | Exact match (mã bưu điện phải đúng) |
-| `country` | `exact` | NULL | `non_null` | Exact match (quốc gia phải đúng) |
-| `company_name` | `fuzzy_trgm` | **0.65** | `non_null` | Fuzzy matching cho tên công ty |
-
-**Quy tắc hợp nhất:**
-
-1. **Exact fields** (`city`, `postal_code`, `country`): Phải khớp chính xác hoặc cả hai giá trị đều rỗng.
-2. **Fuzzy fields** (`address_line1`, `company_name`): Phải vượt qua ngưỡng similarity được chỉ định.
-3. **Non-matching fuzzy fields** (similarity < threshold): Bỏ qua trường đó trong quá trình so khớp.
-
-### 📊 Ví dụ Fuzzy Matching Demo
-
-Demo data được tạo ra với 10 nhóm, mỗi nhóm có 4 profiles từ các source khác nhau (AppsFlyer, MoEngage, WebTracking). Các profiles trong cùng một nhóm chia sẻ cùng `device_id` nhưng có địa chỉ/công ty khác nhau đôi chút:
-
-**Nhóm 0 - Fuzzy Address Variations:**
-
-| Source | device_id | address_line1 | city | company_name |
-|--------|-----------|---------------|------|--------------|
-| AppsFlyer | device-fuzzy-000-001 | 456 Nguyen Hue Street | Ho Chi Minh | Acme Corporation |
-| MoEngage | device-fuzzy-000-001 | 456 Nguyen Hue St | Ho Chi Minh | Acme Corp |
-
-**Kết quả similarity:**
-- `similarity('456 Nguyen Hue Street', '456 Nguyen Hue St')` = **0.869** ✅ (> 0.60)
-- `similarity('Acme Corporation', 'Acme Corp')` = **0.769** ✅ (> 0.65)
-- `city` "Ho Chi Minh" = "Ho Chi Minh" ✅ (exact match)
-
-→ **Kết luận:** 2 profiles được hợp nhất thành 1 master profile
-
-**Nhóm 2 - Abbreviation & Synonym Variations:**
-
-| Source | device_id | address_line1 | city | company_name |
-|--------|-----------|---------------|------|--------------|
-| AppsFlyer | device-fuzzy-002-001 | 789 Tran Hung Dao Avenue | Ho Chi Minh | Digital Marketing Agency |
-| MoEngage | device-fuzzy-002-001 | 789 Tran Hung Dao Ave | Ho Chi Minh | Digital Mktg Agency |
-
-**Kết quả similarity:**
-- `similarity('789 Tran Hung Dao Avenue', '789 Tran Hung Dao Ave')` = **0.769** ✅ (> 0.60)
-- `similarity('Digital Marketing Agency', 'Digital Mktg Agency')` = **0.739** ✅ (> 0.65)
-
-→ **Kết luận:** Hợp nhất thành công
-
-### 🗂️ Metadata Seed Data
-
-Các quy tắc fuzzy matching được khởi tạo trong bảng `cdp_profile_attributes` thông qua SQL seed file:
-
-```sql
--- Address Line 1: Fuzzy trigram matching with 0.60 threshold
-INSERT INTO cdp_profile_attributes 
-  (attribute_internal_code, master_profile_column, description, 
-   attribute_category, table_name, data_type, is_identity_resolution,
-   matching_rule, matching_threshold, consolidation_rule, ...)
-VALUES 
-  ('address_line1', 'address', 'Address Line 1 (raw)', 
-   'IDENTITY', 'cdp_raw_profiles_stage', 'TEXT', TRUE,
-   'fuzzy_trgm', 0.60, 'non_null', ...);
-
--- Company Name: Fuzzy trigram matching with 0.65 threshold
-INSERT INTO cdp_profile_attributes 
-  (attribute_internal_code, master_profile_column, description, 
-   attribute_category, table_name, data_type, is_identity_resolution,
-   matching_rule, matching_threshold, consolidation_rule, ...)
-VALUES 
-  ('company_name', 'company_name', 'Company Name (raw)', 
-   'IDENTITY', 'cdp_raw_profiles_stage', 'TEXT', TRUE,
-   'fuzzy_trgm', 0.65, 'non_null', ...);
-```
-
-### 📈 Performance Considerations
-
-#### GIN Trigram Indexes
-
-Để hỗ trợ fuzzy matching hiệu quả, các chỉ mục GIN trigram được tạo ra:
-
-```sql
-CREATE INDEX idx_raw_profiles_stage_address_trgm 
-  ON customer360.cdp_raw_profiles_stage 
-  USING GIN (address_line1 gin_trgm_ops) 
-  WHERE address_line1 IS NOT NULL;
-
-CREATE INDEX idx_raw_profiles_stage_company_name_trgm 
-  ON customer360.cdp_raw_profiles_stage 
-  USING GIN (company_name gin_trgm_ops) 
-  WHERE company_name IS NOT NULL;
-```
-
-**Lợi ích:**
-- Tăng tốc độ truy vấn similarity từ **O(n)** xuống **O(log n)** trong các trường hợp cơ sở.
-- Cho phép PostgreSQL lọc các ứng cử viên không phù hợp trước khi tính toán similarity chi tiết.
-
-#### Threshold Tuning
-
-Ngưỡng tối ưu phụ thuộc vào đặc điểm dữ liệu:
-
-- **Threshold quá cao** (ví dụ: 0.90): Chỉ match các chuỗi gần như giống hệt → Bỏ sót các biến thể (false negative).
-- **Threshold quá thấp** (ví dụ: 0.40): Match quá nhiều chuỗi khác nhau → Hợp nhất nhầm lẫn (false positive).
-
-**Khuyến cáo:** Bắt đầu với 0.60 cho address và 0.65 cho company, sau đó phân tích false positive/negative rate trên dữ liệu thật và điều chỉnh.
-
-### 🔧 Resolver Implementation
-
-Quá trình matching được thực hiện bởi hàm `resolver.py` trong `backend-system/identity_resolution/`, hàm này đọc metadata từ `cdp_profile_attributes` và động tạo điều kiện SQL phù hợp:
-
-```python
-# Pseudocode in resolver.py
-for rule in active_matching_rules:
-    if rule.matching_rule == "exact":
-        conditions.append(f"{rule.column} = %s")
-        params.append(raw_value)
-    
-    elif rule.matching_rule == "fuzzy_trgm":
-        threshold = rule.threshold  # 0.60 for address, 0.65 for company
-        conditions.append(f"similarity({rule.column}, %s) >= %s")
-        params.extend([raw_value, threshold])
-    
-    elif rule.matching_rule == "fuzzy_dmetaphone":
-        # Phonetic matching for names
-        conditions.append(f"dmetaphone({rule.column}) = dmetaphone(%s)")
-        params.append(raw_value)
-
-# Build final SQL
-query = f"""
-SELECT master_profile_id FROM cdp_master_profiles
-WHERE tenant_id = %s 
-  AND domain = %s 
-  AND ({' OR '.join(conditions)})
-LIMIT 1
-"""
-```
-
-### ✅ Verification Steps
-
-Để xác minh fuzzy matching hoạt động đúng:
-
-1. **Chạy demo data generation:**
-   ```bash
-   cd backend-system/identity_resolution
-   python scripts/generate_fuzzy_match_demo.py
-   ```
-   Expected output: "Total profiles: 40, Expected master profiles after resolution: 10"
-
-2. **Chạy identity resolver:**
-   ```bash
-   python backend-system/identity_resolution/worker.py  # Or via Dagster
-   ```
-
-3. **Verify master profiles:**
-   ```sql
-   SELECT COUNT(*) as master_count FROM cdp_master_profiles
-   WHERE address IS NOT NULL AND company_name IS NOT NULL;
-   -- Expected: ~10 master profiles from fuzzy demo data
-   ```
-
-4. **Examine fuzzy matches:**
-   ```sql
-   SELECT 
-     mp.master_profile_id,
-     mp.address->>'address_line1' as master_address,
-     rp.address_line1 as raw_address,
-     similarity(mp.address->>'address_line1', rp.address_line1) as similarity_score
-   FROM cdp_profile_links pl
-   JOIN cdp_master_profiles mp ON pl.master_profile_id = mp.master_profile_id
-   JOIN cdp_raw_profiles_stage rp ON pl.raw_profile_id = rp.raw_profile_id
-   WHERE rp.address_line1 IS NOT NULL
-   ORDER BY similarity_score DESC;
-   ```
-
-## ✅ CIR Implementation Checklist (5M Profiles)
-
-### 🔧 **1. Database Setup & Config**
-
-* [ ] Khởi tạo Managed PostgreSQL (Version 16+ để tận hưởng tối ưu index JSON/B-Tree).
-* [ ] Ổ cứng SSD High-IOPS (Provisioned từ 9000+ IOPS).
-* [ ] Tuning `shared_buffers`, `work_mem`, `max_connections`.
-
-### 🧩 **2. Thiết kế bảng & phân vùng**
-
-* [ ] Bảng thô có index `GIN` + `B-Tree` đầy đủ.
-* [ ] Kích hoạt Time-based Partitioning.
-
-### ⚙️ **3. Stored Procedure & Script**
-
-* [ ] Test thử `batch_size` trên môi trường Staging. Đảm bảo 1 lô chạy < 1 giây.
-* [ ] Tắt Real-time trigger nếu lượng Data Stream vượt 500 event/giây (Dùng Scheduler thay thế).
-
-### 📊 **4. Monitoring & Observability**
-
-* [ ] Bật Database Insights (Cloud SQL Insights, RDS Performance Insights).
-* [ ] Cài cảnh báo (Alert) nếu `Deadlocks` > 0 hoặc Query Duration > 5 giây.
-* [ ] Monitor số lượng record pending (`processed_at IS NULL`).
-
-### 📦 **5. DevOps & CI/CD**
-
-* [ ] Chạy backup Database tự động hàng ngày (Point-in-time recovery).
-* [ ] Lưu các file SQL vào kho lưu trữ (Git) và Deploy qua công cụ Migrations.
+Sự kết hợp giữa mô hình metadata-driven linh hoạt, khả năng xử lý PII băm bảo mật tích hợp GenAI, và cơ chế cách ly multi-tenant cấp CSDL giúp **Native C360 CIR Engine** trở thành giải pháp tối ưu cho doanh nghiệp muốn chủ động hoàn toàn về dữ liệu, đáp ứng tốt các bài toán hợp nhất danh tính phức tạp với chi phí TCO tối thiểu.
