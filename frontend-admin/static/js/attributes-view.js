@@ -64,7 +64,17 @@ window.C360 = window.C360 || {};
     resourceLabel: "attribute",
     clientSide: true,
     clientSideLimit: 500,
-    fetch: function (params) { return api("/profile-attributes/", params); },
+    // Sort priority: CIR first, then PII, then Conversion; stable sort keeps
+    // everything else in its original (display_order) sequence.
+    fetch: function (params) {
+      return api("/profile-attributes/", params).then(function (items) {
+        return items.slice().sort(function (a, b) {
+          return (b.is_identity_resolution ? 1 : 0) - (a.is_identity_resolution ? 1 : 0) ||
+            (b.is_pii ? 1 : 0) - (a.is_pii ? 1 : 0) ||
+            (isConversionAttribute(b) ? 1 : 0) - (isConversionAttribute(a) ? 1 : 0);
+        });
+      });
+    },
     clientFilters: {
       q: function (vm, value) {
         var needle = value.toLowerCase();
