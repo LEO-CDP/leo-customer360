@@ -44,6 +44,7 @@ app = FastAPI(
         "profile links, matching-rule metadata, and resolution reporting."
     ),
     version=settings.api_version,
+    root_path="/c360api"
 )
 
 # Permissive CORS for local dev so the static frontend-admin HTML (opened via

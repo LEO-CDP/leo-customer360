@@ -45,6 +45,11 @@ window.C360 = window.C360 || {};
     return cutoff.toISOString();
   }
 
+  function periodParams() {
+    var days = C360.config.getDataPeriodDays();
+    return { days: days };
+  }
+
   function aggregateEvents(events, days) {
     var now = new Date();
     var today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -255,7 +260,8 @@ window.C360 = window.C360 || {};
     var current = C360.router.current();
     if (!current || current.route.tab !== "analytics") return;
 
-    var days = C360.config.getDataPeriodDays();
+    var period = periodParams();
+    var days = period.days;
 
     $("#analytics-loading").removeClass("hidden");
     $("#analytics-dashboard").addClass("hidden");
@@ -264,8 +270,8 @@ window.C360 = window.C360 || {};
     destroyCharts();
 
     $.when(
-      api("/events", { event_time_from: eventTimeFrom(days), limit: 1000 }),
-      api("/reporting/summary", { days: days })
+      api("/events/", $.extend({ event_time_from: eventTimeFrom(days), limit: 1000 }, period)),
+      api("/reporting/summary", period)
     ).done(function (eventsRes, summaryRes) {
       var events = eventsRes[0] || [];
       var summary = summaryRes[0] || {};
