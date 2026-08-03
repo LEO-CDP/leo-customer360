@@ -323,6 +323,13 @@ ALTER TABLE cdp_profile_links ADD CONSTRAINT uk_profile_links_raw_id UNIQUE (raw
 
 ```
 
+> **Lược đồ thật (production, multi-tenant)** trong `database-init/database-schema.sql`
+> khác với ví dụ tối giản ở trên theo vài điểm quan trọng -- xem chi tiết ở
+> phần [Review `cdp_profile_links` cho production & khả năng scale 10M profile](#review-cdp_profile_links-cho-production--khả-năng-scale-10m-profile)
+> bên dưới (cột `tenant_id`/RLS, vòng đời `status`/`unlinked_*` để unmerge, và
+> index thật đang dùng).
+
+
 ## Cơ chế "Real-time" Trigger
 
 Vì logic xử lý chính đã được chuyển hoàn toàn sang Python (không còn là PL/pgSQL stored procedure), "trigger real-time" ở đây **không phải là một DB trigger thật sự** (Postgres trigger không thể gọi trực tiếp Python). Thay vào đó, Data Ingestion Worker (nơi ghi dữ liệu vào `cdp_raw_profiles_stage`) sẽ chủ động gọi `IdentityResolutionTrigger.attempt_trigger()` ngay sau mỗi lần insert.
@@ -864,7 +871,17 @@ def resolve_customer_identities(pg_db: PostgresResource):
 
 ## UNIT TESTS
 
-## Quyết định khi trùng số điện thoại nhưng khác tên
+Bộ test cho `cdp_profile_links` được chia làm 2 lớp, tương ứng 2 service đọc/ghi bảng này:
+
+* **`backend-system/identity_resolution/tests/`** (mock hoàn toàn `psycopg2`, không cần DB thật) -- test đường ghi (`_link_and_update`/`_create_new_master` trong `resolver.py`): `INSERT ... ON CONFLICT (tenant_id, raw_profile_id) DO NOTHING` để idempotent khi retry, và `match_method`/`match_score` được set đúng cho cả case "link vào master có sẵn" lẫn "tạo master mới". Chạy: `cd backend-system && source .venv/bin/activate && python -m pytest identity_resolution/tests -q` (74 tests).
+* **`customer360-api/tests/test_identity_router.py`** (mới, 17 test case, cũng mock hoàn toàn DB session -- không cần Postgres thật) -- test đường đọc/ghi qua REST API (`core/routers/identity.py`):
+    * `ProfileLinksRouterTests`: CRUD đầy đủ cho `/profile-links/` -- create (mặc định `status="ACTIVE"`, chấp nhận `status`/`unlinked_reason` tường minh, từ chối `status` không hợp lệ với `422`), list (lọc theo `tenant_id`/`raw_profile_id`/`master_profile_id`, phân trang `skip`/`limit`), get theo id (`200`/`404`), delete (`204`/`404`), và cache bị invalidate (`invalidate_prefix("profile_links")`) sau mỗi create/delete.
+    * `MasterProfileLinksEndpointTests`: test `GET /master-profiles/{id}/links` -- trả đúng danh sách link, trả `[]` khi không có link nào, và câu lệnh SQL sinh ra luôn có `LIMIT` (không bao giờ trả về tập kết quả không giới hạn dù một master bị merge từ rất nhiều raw profile).
+    * Chạy: `cd customer360-api && .venv/bin/python -m pytest tests/test_identity_router.py -v`.
+
+Kỹ thuật fake hoá đáng chú ý (không cần DB thật cho cả 2 lớp test trên): `profile_links_router` không dùng `build_crud_router` (khác với `profile_attributes_router`), nên test không patch được `core.routers._generic.CRUDBase` như các router generic khác -- thay vào đó test monkeypatch trực tiếp biến module-level `core.routers.identity._link_crud` sau khi import (an toàn vì handler tra cứu global theo tên tại thời điểm gọi, không bind tại thời điểm định nghĩa).
+
+
 
 Tình huống: một master profile đang có 2 raw profile cùng `phone_number` nhưng tên khác nhau (ví dụ `Nguyen Van A` và `Nguyen Van B`).
 
@@ -1008,6 +1025,50 @@ SELECT COUNT(*) FROM (
 
 ```
 
+## Review cdp_profile_links cho production & khả năng scale 10M profile
+
+Phần này review bảng `cdp_profile_links` **thật** đang chạy production (định nghĩa đầy đủ ở `database-init/database-schema.sql`, khác với ví dụ tối giản ở phần "Table cdp_profile_links" phía trên).
+
+### Schema thật (multi-tenant, có vòng đời unmerge/split)
+
+```sql
+CREATE TABLE customer360.cdp_profile_links (
+    link_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
+    user_id UUID REFERENCES customer360.sys_user (user_id),
+    raw_profile_id UUID NOT NULL REFERENCES customer360.cdp_raw_profiles_stage (raw_profile_id),
+    master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles (master_profile_id),
+    match_score NUMERIC(5, 4),
+    match_method TEXT,
+    -- Vòng đời link, dùng cho kịch bản unmerge/profile-split.
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'HISTORICAL', 'UNLINKED', 'SUPERSEDED')),
+    unlinked_at TIMESTAMP WITH TIME ZONE,
+    unlinked_reason TEXT,
+    unlinked_by UUID REFERENCES customer360.sys_user (user_id),
+    created_at TIMESTAMP DEFAULT now(),
+    UNIQUE (tenant_id, raw_profile_id)
+);
+```
+
+So với bản tối giản: có `tenant_id` (multi-tenant + Row-Level Security -- xem phần RLS ở cuối `database-schema.sql`), và 4 cột `status`/`unlinked_at`/`unlinked_reason`/`unlinked_by` để hỗ trợ audit/rollback khi một merge bị phát hiện là sai (xem thêm `docs/CIR-improvement.md`, mục "Missing Lineage & State Fields"). Đường ghi chính (`resolver.py`) chỉ `INSERT` với `status` mặc định `'ACTIVE'` -- các trạng thái khác chỉ được set thủ công bởi một tác vụ unmerge/admin (chưa có UI riêng, dùng trực tiếp qua `PATCH /profile-links/{link_id}` nếu cần).
+
+### Index hiện có & lý do (đã đủ cho 10M profile)
+
+| Index | Cột | Phục vụ truy vấn nào |
+| --- | --- | --- |
+| `cdp_profile_links_pkey` | `link_id` | Lookup theo khoá chính (PATCH/DELETE 1 link). |
+| `cdp_profile_links_tenant_id_raw_profile_id_key` (UNIQUE) | `(tenant_id, raw_profile_id)` | `ON CONFLICT (tenant_id, raw_profile_id) DO NOTHING` trong `resolver.py` (idempotent khi CIR retry cùng raw profile); cũng là index chính cho "raw profile này đã link chưa?". |
+| `idx_cdp_profile_links_status` (partial) | `(tenant_id, status) WHERE status = 'ACTIVE'` | Liệt kê nhanh các link đang hoạt động theo tenant, bỏ qua HISTORICAL/UNLINKED/SUPERSEDED (nhỏ hơn nhiều so với index full-table). |
+| `idx_cdp_profile_links_master` (mới) | `(tenant_id, master_profile_id)` | `GET /master-profiles/{id}/links` và báo cáo "duplicate masters" (`count_duplicate_master_profiles`/`list_duplicate_master_profiles` trong `core/crud/identity.py`) -- **trước đây bảng này KHÔNG có index trên `master_profile_id`** (Postgres không tự tạo index cho cột FK), nên 2 truy vấn trên sẽ full sequential scan khi bảng đạt hàng triệu dòng. Đã bổ sung để sẵn sàng cho 10M+ profile. |
+
+Nhận định về khả năng chịu tải 10M profile: với ~1 link/raw-profile trung bình và mỗi master hợp nhất vài raw profile (theo `value_limit`/`priority_rank` trong `cdp_profile_attributes` -- xem `docs/CIR-improvement.md`), `cdp_profile_links` ở quy mô 10M master profile tương ứng khoảng 10-15M dòng link. Cả 4 index trên đều là B-Tree gọn (UUID + tối đa 1 cột phụ), tổng dung lượng index ước tính vẫn nhỏ hơn dữ liệu bảng -- không cần GIN/partitioning cho bảng này (khác với `cdp_raw_events`, vốn được range-partition theo tháng vì tăng trưởng không giới hạn). Nếu tiếp tục scale vượt 10M, ưu tiên tiếp theo là partition `cdp_profile_links` theo `tenant_id` (hash partitioning) chứ không phải thêm index, vì write pattern đã là INSERT-only/idempotent (không có UPDATE nóng ngoài thao tác unmerge hiếm gặp).
+
+### Python: đường đọc được tối ưu để tránh unbounded result
+
+`GET /master-profiles/{id}/links` (`core/routers/identity.py::get_master_profile_links`) trước đây trả về **toàn bộ** kết quả không giới hạn (`SELECT * FROM cdp_profile_links WHERE master_profile_id = :id`, không `LIMIT`). Một master profile bị merge nhầm hàng loạt (data quality issue) có thể trả về rất nhiều dòng cùng lúc, gây tốn băng thông/serialize JSON không cần thiết. Đã sửa để luôn có `ORDER BY created_at DESC LIMIT :limit` (mặc định `api_default_page_size`, tối đa `api_max_page_size`, giống các endpoint list khác trong API) -- được backing bởi `idx_cdp_profile_links_master` ở trên nên vẫn là index scan, không phải sort toàn bảng.
+
+Các đường đọc/ghi còn lại (`core/crud/identity.py`, `resolver.py::_link_and_update`) đã set-based (dùng `GROUP BY`/subquery hoặc 1 câu `INSERT ... ON CONFLICT` mỗi raw profile) -- không có N+1 query nào cần sửa thêm.
+
 ## Ghi chú khi triển khai thực tế và khả năng scale cho 5 triệu profiles
 
 Triển khai giải pháp CIR (Customer Identity Resolution) cho 5 triệu profiles đòi hỏi sự cân nhắc kỹ lưỡng về **hiệu suất**, **tối ưu chi phí**, và **khả năng mở rộng**.
@@ -1060,6 +1121,227 @@ Tối ưu cấu hình Server (dù là Managed hay Self-hosted):
 ### 4. Khả năng Scale
 
 * Hệ thống chịu được tải 5M Profiles với 1 Node Master cấu hình lớn. Nếu tiếp tục tăng (VD: 20-50M), bạn sẽ phải chuyển đổi logic Master Table sang mô hình **Sharding (Citus Data)**, hoặc xuất hẳn dữ liệu sang các nền tảng Data Warehouse (BigQuery, Snowflake).
+
+## 📍 Fuzzy Matching: Address & Company Fields
+
+Để cải thiện độ chính xác của Customer Identity Resolution (CIR) khi đối mặt với các biến thể địa chỉ và công ty (do lỗi nhập liệu, abbreviations, synonyms, hoặc các kiểu viết khác nhau), hệ thống được trang bị **fuzzy matching** cho các trường địa chỉ và tên công ty.
+
+### 📌 Kiến trúc Địa Chỉ
+
+Thay vì lưu trữ địa chỉ dưới dạng JSONB document đơn nhất, hệ thống chia nhỏ địa chỉ thành các thành phần riêng biệt trên bảng staging (`cdp_raw_profiles_stage`) để hỗ trợ fuzzy matching ở mức độ thành phần:
+
+| Cột | Loại | Mục đích | Ví dụ |
+|-----|------|---------|-------|
+| `address_line1` | TEXT | Đường phố chính (fuzzy matching) | "123 Le Loi Boulevard", "123 Le Loi Blvd" |
+| `address_line2` | TEXT | Suite/Apartment (hỗ trợ, không fuzzy) | "Suite 101", "Apt 5B" |
+| `city` | TEXT | Thành phố (exact matching) | "Ho Chi Minh", "Da Nang" |
+| `state_province` | TEXT | Bang/Tỉnh (hỗ trợ, không fuzzy) | "HCMC", "CA" |
+| `postal_code` | TEXT | Mã bưu điện (exact matching) | "700000", "90001" |
+| `country` | TEXT | Quốc gia (exact matching) | "Vietnam", "USA" |
+
+**Lưu ý quan trọng:** Khi dữ liệu được hợp nhất vào bảng master (`cdp_master_profiles`), các thành phần địa chỉ lẻ được gộp lại thành một JSONB document `address` duy nhất:
+
+```json
+{
+  "address_line1": "123 Le Loi Boulevard",
+  "address_line2": "Suite 101",
+  "city": "Ho Chi Minh",
+  "state_province": "HCMC",
+  "postal_code": "700000",
+  "country": "Vietnam"
+}
+```
+
+### 🔍 Fuzzy Matching Algorithm
+
+Hệ thống sử dụng **PostgreSQL's `pg_trgm` extension** với thuật toán **trigram similarity** để so sánh chuỗi:
+
+- **Trigram:** Chuỗi 3 ký tự. Ví dụ, "Boulevard" được chia thành: " bo", "bou", "oul", "ule", "lev", "eva", "var", "ard", "rd ".
+- **Similarity score:** Tính bằng công thức: `similarity(a, b) = |intersection| / (|a| + |b| - |intersection|)` 
+- **Range:** 0 (hoàn toàn khác) đến 1 (giống hệt).
+
+**SQL Example:**
+```sql
+SELECT similarity('123 Le Loi Boulevard', '123 Le Loi Blvd');
+-- Result: 0.818181818... (cao hơn ngưỡng 0.60)
+
+SELECT similarity('Acme Corporation', 'Acme Corp');
+-- Result: 0.769230769... (cao hơn ngưỡng 0.65)
+```
+
+### ⚙️ Fuzzy Matching Thresholds & Configuration
+
+Các ngưỡng fuzzy matching được cấu hình thông qua bảng metadata `cdp_profile_attributes` và có thể được tinh chỉnh mà không cần thay đổi code:
+
+| Thuộc tính | Matching Rule | Threshold | Consolidation Rule | Mục đích |
+|-----------|---------------|-----------|-------------------|---------|
+| `address_line1` | `fuzzy_trgm` | **0.60** | `non_null` | Fuzzy matching cho đường phố chính |
+| `city` | `exact` | NULL | `non_null` | Exact match (không fuzzy) |
+| `postal_code` | `exact` | NULL | `non_null` | Exact match (mã bưu điện phải đúng) |
+| `country` | `exact` | NULL | `non_null` | Exact match (quốc gia phải đúng) |
+| `company_name` | `fuzzy_trgm` | **0.65** | `non_null` | Fuzzy matching cho tên công ty |
+
+**Quy tắc hợp nhất:**
+
+1. **Exact fields** (`city`, `postal_code`, `country`): Phải khớp chính xác hoặc cả hai giá trị đều rỗng.
+2. **Fuzzy fields** (`address_line1`, `company_name`): Phải vượt qua ngưỡng similarity được chỉ định.
+3. **Non-matching fuzzy fields** (similarity < threshold): Bỏ qua trường đó trong quá trình so khớp.
+
+### 📊 Ví dụ Fuzzy Matching Demo
+
+Demo data được tạo ra với 10 nhóm, mỗi nhóm có 4 profiles từ các source khác nhau (AppsFlyer, MoEngage, WebTracking). Các profiles trong cùng một nhóm chia sẻ cùng `device_id` nhưng có địa chỉ/công ty khác nhau đôi chút:
+
+**Nhóm 0 - Fuzzy Address Variations:**
+
+| Source | device_id | address_line1 | city | company_name |
+|--------|-----------|---------------|------|--------------|
+| AppsFlyer | device-fuzzy-000-001 | 456 Nguyen Hue Street | Ho Chi Minh | Acme Corporation |
+| MoEngage | device-fuzzy-000-001 | 456 Nguyen Hue St | Ho Chi Minh | Acme Corp |
+
+**Kết quả similarity:**
+- `similarity('456 Nguyen Hue Street', '456 Nguyen Hue St')` = **0.869** ✅ (> 0.60)
+- `similarity('Acme Corporation', 'Acme Corp')` = **0.769** ✅ (> 0.65)
+- `city` "Ho Chi Minh" = "Ho Chi Minh" ✅ (exact match)
+
+→ **Kết luận:** 2 profiles được hợp nhất thành 1 master profile
+
+**Nhóm 2 - Abbreviation & Synonym Variations:**
+
+| Source | device_id | address_line1 | city | company_name |
+|--------|-----------|---------------|------|--------------|
+| AppsFlyer | device-fuzzy-002-001 | 789 Tran Hung Dao Avenue | Ho Chi Minh | Digital Marketing Agency |
+| MoEngage | device-fuzzy-002-001 | 789 Tran Hung Dao Ave | Ho Chi Minh | Digital Mktg Agency |
+
+**Kết quả similarity:**
+- `similarity('789 Tran Hung Dao Avenue', '789 Tran Hung Dao Ave')` = **0.769** ✅ (> 0.60)
+- `similarity('Digital Marketing Agency', 'Digital Mktg Agency')` = **0.739** ✅ (> 0.65)
+
+→ **Kết luận:** Hợp nhất thành công
+
+### 🗂️ Metadata Seed Data
+
+Các quy tắc fuzzy matching được khởi tạo trong bảng `cdp_profile_attributes` thông qua SQL seed file:
+
+```sql
+-- Address Line 1: Fuzzy trigram matching with 0.60 threshold
+INSERT INTO cdp_profile_attributes 
+  (attribute_internal_code, master_profile_column, description, 
+   attribute_category, table_name, data_type, is_identity_resolution,
+   matching_rule, matching_threshold, consolidation_rule, ...)
+VALUES 
+  ('address_line1', 'address', 'Address Line 1 (raw)', 
+   'IDENTITY', 'cdp_raw_profiles_stage', 'TEXT', TRUE,
+   'fuzzy_trgm', 0.60, 'non_null', ...);
+
+-- Company Name: Fuzzy trigram matching with 0.65 threshold
+INSERT INTO cdp_profile_attributes 
+  (attribute_internal_code, master_profile_column, description, 
+   attribute_category, table_name, data_type, is_identity_resolution,
+   matching_rule, matching_threshold, consolidation_rule, ...)
+VALUES 
+  ('company_name', 'company_name', 'Company Name (raw)', 
+   'IDENTITY', 'cdp_raw_profiles_stage', 'TEXT', TRUE,
+   'fuzzy_trgm', 0.65, 'non_null', ...);
+```
+
+### 📈 Performance Considerations
+
+#### GIN Trigram Indexes
+
+Để hỗ trợ fuzzy matching hiệu quả, các chỉ mục GIN trigram được tạo ra:
+
+```sql
+CREATE INDEX idx_raw_profiles_stage_address_trgm 
+  ON customer360.cdp_raw_profiles_stage 
+  USING GIN (address_line1 gin_trgm_ops) 
+  WHERE address_line1 IS NOT NULL;
+
+CREATE INDEX idx_raw_profiles_stage_company_name_trgm 
+  ON customer360.cdp_raw_profiles_stage 
+  USING GIN (company_name gin_trgm_ops) 
+  WHERE company_name IS NOT NULL;
+```
+
+**Lợi ích:**
+- Tăng tốc độ truy vấn similarity từ **O(n)** xuống **O(log n)** trong các trường hợp cơ sở.
+- Cho phép PostgreSQL lọc các ứng cử viên không phù hợp trước khi tính toán similarity chi tiết.
+
+#### Threshold Tuning
+
+Ngưỡng tối ưu phụ thuộc vào đặc điểm dữ liệu:
+
+- **Threshold quá cao** (ví dụ: 0.90): Chỉ match các chuỗi gần như giống hệt → Bỏ sót các biến thể (false negative).
+- **Threshold quá thấp** (ví dụ: 0.40): Match quá nhiều chuỗi khác nhau → Hợp nhất nhầm lẫn (false positive).
+
+**Khuyến cáo:** Bắt đầu với 0.60 cho address và 0.65 cho company, sau đó phân tích false positive/negative rate trên dữ liệu thật và điều chỉnh.
+
+### 🔧 Resolver Implementation
+
+Quá trình matching được thực hiện bởi hàm `resolver.py` trong `backend-system/identity_resolution/`, hàm này đọc metadata từ `cdp_profile_attributes` và động tạo điều kiện SQL phù hợp:
+
+```python
+# Pseudocode in resolver.py
+for rule in active_matching_rules:
+    if rule.matching_rule == "exact":
+        conditions.append(f"{rule.column} = %s")
+        params.append(raw_value)
+    
+    elif rule.matching_rule == "fuzzy_trgm":
+        threshold = rule.threshold  # 0.60 for address, 0.65 for company
+        conditions.append(f"similarity({rule.column}, %s) >= %s")
+        params.extend([raw_value, threshold])
+    
+    elif rule.matching_rule == "fuzzy_dmetaphone":
+        # Phonetic matching for names
+        conditions.append(f"dmetaphone({rule.column}) = dmetaphone(%s)")
+        params.append(raw_value)
+
+# Build final SQL
+query = f"""
+SELECT master_profile_id FROM cdp_master_profiles
+WHERE tenant_id = %s 
+  AND domain = %s 
+  AND ({' OR '.join(conditions)})
+LIMIT 1
+"""
+```
+
+### ✅ Verification Steps
+
+Để xác minh fuzzy matching hoạt động đúng:
+
+1. **Chạy demo data generation:**
+   ```bash
+   cd backend-system/identity_resolution
+   python scripts/generate_fuzzy_match_demo.py
+   ```
+   Expected output: "Total profiles: 40, Expected master profiles after resolution: 10"
+
+2. **Chạy identity resolver:**
+   ```bash
+   python backend-system/identity_resolution/worker.py  # Or via Dagster
+   ```
+
+3. **Verify master profiles:**
+   ```sql
+   SELECT COUNT(*) as master_count FROM cdp_master_profiles
+   WHERE address IS NOT NULL AND company_name IS NOT NULL;
+   -- Expected: ~10 master profiles from fuzzy demo data
+   ```
+
+4. **Examine fuzzy matches:**
+   ```sql
+   SELECT 
+     mp.master_profile_id,
+     mp.address->>'address_line1' as master_address,
+     rp.address_line1 as raw_address,
+     similarity(mp.address->>'address_line1', rp.address_line1) as similarity_score
+   FROM cdp_profile_links pl
+   JOIN cdp_master_profiles mp ON pl.master_profile_id = mp.master_profile_id
+   JOIN cdp_raw_profiles_stage rp ON pl.raw_profile_id = rp.raw_profile_id
+   WHERE rp.address_line1 IS NOT NULL
+   ORDER BY similarity_score DESC;
+   ```
 
 ## ✅ CIR Implementation Checklist (5M Profiles)
 

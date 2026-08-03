@@ -121,9 +121,20 @@ def get_master_profile(master_profile_id: uuid.UUID, db: Session = Depends(get_d
 
 @master_profiles_router.get("/{master_profile_id}/links", response_model=list[ProfileLinkRead])
 @cache_response("master_profiles/links", ttl=settings.cache_ttl_seconds)
-def get_master_profile_links(master_profile_id: uuid.UUID, db: Session = Depends(get_db)):
-    """All raw profiles that were resolved/merged into this master profile."""
-    stmt = select(CdpProfileLink).where(CdpProfileLink.master_profile_id == master_profile_id)
+def get_master_profile_links(
+    master_profile_id: uuid.UUID,
+    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    db: Session = Depends(get_db),
+):
+    """All raw profiles that were resolved/merged into this master profile.
+    Bounded by `limit` (backed by idx_cdp_profile_links_master) so a single
+    heavily-merged master profile can never return an unbounded result set."""
+    stmt = (
+        select(CdpProfileLink)
+        .where(CdpProfileLink.master_profile_id == master_profile_id)
+        .order_by(CdpProfileLink.created_at.desc())
+        .limit(limit)
+    )
     return db.execute(stmt).scalars().all()
 
 
