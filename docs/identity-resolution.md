@@ -948,6 +948,14 @@ Dữ liệu SQL mẫu bên dưới dùng để test thủ công / tích hợp tr
 DELETE FROM cdp_profile_attributes;
 
 -- Khởi tạo metadata mẫu
+-- LƯU Ý: first_name/last_name được để is_identity_resolution = FALSE, khớp với
+-- chính sách thật của hệ thống (database-init/init-core-database.sql) -- tên
+-- người (kể cả full_name) không được dùng làm CIR matching key vì họ tên dễ
+-- trùng lặp (đặc biệt họ tên Việt Nam), rủi ro hợp nhất nhầm 2 người khác nhau.
+-- Nếu bật fuzzy_dmetaphone/fuzzy_trgm cho tên như ví dụ dưới, chỉ nên dùng như
+-- một tín hiệu HỖ TRỢ kết hợp với ít nhất 1 matching key mạnh khác (xem phần
+-- "Quyết định khi trùng số điện thoại nhưng khác tên" bên dưới), không dùng
+-- làm điều kiện OR độc lập như code resolver.py hiện tại.
 INSERT INTO cdp_profile_attributes (
     id, name,  attribute_internal_code, data_type,
     is_identity_resolution, matching_rule, matching_threshold,
@@ -955,8 +963,8 @@ INSERT INTO cdp_profile_attributes (
 ) VALUES
 (1, 'email', 'email', 'TEXT', TRUE, 'exact', NULL, 'non_null', 'ACTIVE'),
 (2, 'phone_number','phone_number', 'TEXT', TRUE, 'exact', NULL, 'non_null', 'ACTIVE'),
-(3,'first_name',  'first_name', 'TEXT', TRUE, 'fuzzy_dmetaphone', NULL, 'most_recent', 'ACTIVE'),
-(4,'last_name', 'last_name', 'TEXT', TRUE, 'fuzzy_trgm', 0.7, 'most_recent', 'ACTIVE');
+(3,'first_name',  'first_name', 'TEXT', FALSE, 'fuzzy_dmetaphone', NULL, 'most_recent', 'ACTIVE'),
+(4,'last_name', 'last_name', 'TEXT', FALSE, 'fuzzy_trgm', 0.7, 'most_recent', 'ACTIVE');
 
 
 -- Reset bản ghi

@@ -115,7 +115,8 @@ graph LR
 ## Thuộc tính hồ sơ chính (Key Profile Attributes)
 
 * **Định danh cá nhân** *(SHA-256, không lưu PII thô)*
-  `full_name`, `email`, `phone_number`, `national_id`
+  `email`, `phone_number`, `national_id` — **các matching key CIR**
+  `full_name` — cũng được hash/lưu để hiển thị, nhưng **không dùng để matching** (tên trùng rất phổ biến → rủi ro merge nhầm 2 người khác nhau)
 
 * **Định danh thiết bị** *(gộp thành mảng)*
   `device_ids[]`, `advertising_ids[]`, `cookie_ids[]`
@@ -124,10 +125,10 @@ graph LR
   `external_ids{}`, `push_tokens{}`
 
 * **Metadata thuộc tính** (`cdp_profile_attributes`)
-  Quản lý ~60 thuộc tính: **matching rule**, **merge rule**, **PII**, **attribute group**.
+  Quản lý ~70 thuộc tính: **matching rule**, **merge rule**, **PII**, **attribute group**.
 
 * **Seed mặc định**
-  Khởi tạo **8 thuộc tính định danh** cho Identity Resolution cùng **merge policy** mặc định (recency, KYC-first, source priority).
+  Khởi tạo **7 thuộc tính định danh** (`email`/`phone_number`/`national_id`/`external_customer_id`/`device_id`/`advertising_id`/`cookie_id`) cho Identity Resolution cùng **merge policy** mặc định (recency, KYC-first, source priority). `full_name` **không** nằm trong 7 thuộc tính này.
 
 
 ---
@@ -242,7 +243,6 @@ Khi nhiều nguồn cùng cập nhật một thuộc tính, **CIR** sẽ áp d�
 
 | **Thuộc tính**         | **Merge Policy**    |
 | ---------------------- | ------------------- |
-| `full_name`            | **Most Recent**     |
 | `email`                | **Verified First**  |
 | `phone_number`         | **Verified First**  |
 | `national_id`          | **Verified First**  |
@@ -252,6 +252,8 @@ Khi nhiều nguồn cùng cập nhật một thuộc tính, **CIR** sẽ áp d�
 | `cookie_id`            | **Source Priority** |
 
 > **Lợi ích:** Dữ liệu Customer 360 luôn **chính xác, nhất quán và đáng tin cậy**, dù được đồng bộ từ nhiều hệ thống khác nhau.
+>
+> **Lưu ý:** bảng trên là **merge policy** (chọn giá trị nào để hiển thị/lưu) — khác với **matching rule** (dùng để xác định 2 raw profile có cùng 1 người hay không). `full_name` không có mặt ở cả 2 bảng: không phải matching key, và cũng không có merge policy riêng (chỉ giữ giá trị non-null đầu tiên, kiểu `COALESCE`) — vì `is_identity_resolution = FALSE` khiến resolver không load bất kỳ config nào cho thuộc tính này.
 
 ---
 
@@ -297,9 +299,9 @@ Hệ thống đã kiểm thử đầy đủ **7 Merge Policy**, bao gồm các t
 
 | Phương pháp | Dùng cho | Điều kiện |
 | --- | --- | --- |
-| **Exact Match** | `email`, `phone`, `national_id`, `full_name` (hash), `external_customer_id` | `col = value` |
-| **Fuzzy (Trigram)** | Văn bản thô | `similarity >= threshold` |
-| **Double Metaphone** | Họ tên phát âm gần giống | `dmetaphone(col) = dmetaphone(value)` |
+| **Exact Match** | `email`, `phone`, `national_id`, `external_customer_id` | `col = value` |
+| **Fuzzy (Trigram)** | Văn bản thô *(chưa active cho thuộc tính nào trong seed hiện tại)* | `similarity >= threshold` |
+| **Double Metaphone** | Họ tên phát âm gần giống *(chưa active cho thuộc tính nào trong seed hiện tại)* | `dmetaphone(col) = dmetaphone(value)` |
 | **Array Match** | `device_id`, `advertising_id`, `cookie_id` | `value = ANY(array)` |
 | **JSONB Match** | `external_customer_id` theo từng nguồn | `external_ids @> {...}` |
 
@@ -368,12 +370,13 @@ Hệ thống đã kiểm thử đầy đủ **7 Merge Policy**, bao gồm các t
 `backend-system/identity_resolution/run-demo.sh` — một lệnh, chạy toàn bộ pipeline:
 
 1. Nạp cấu hình DB từ `.env`, dựng virtualenv, cài `requirements.txt`
-2. **`init_sample_data.py`** — sinh **1.000 raw profile** AppsFlyer giả lập:
-   - 6 kênh quảng cáo (Facebook/TikTok/Google/Grab/FPT Play Ads, PR offline)
+2. **`init_sample_data.py`** — sinh **1.000 raw profile** giả lập cho retail/banking, trải trên **cả 3 nguồn** (AppsFlyer/MoEngage/Web Tracking):
+   - Điểm chạm đầu (`install`) luôn ẩn danh qua **AppsFlyer**, qua 6 kênh quảng cáo (Facebook/TikTok/Google/Grab/FPT Play Ads, PR offline)
    - Trộn domain retail/banking (40% banking)
-   - ~30% là **"duplicate" có chủ đích**: sự kiện `login/purchase/kyc_completed` trên **cùng device** của một `install` ẩn danh trước đó
+   - ~30% là **"duplicate" có chủ đích**: các touch tiếp theo (`login`/`purchase`/`kyc_completed`) round-robin qua **AppsFlyer/MoEngage/Web Tracking** — mỗi touch mang định danh riêng của nguồn (`push_token`, `cookie_id`/`ga_client_id`, `utm_*`…) nhưng luôn **chia sẻ cùng `device_id`** với `install` ban đầu, để CIR ghép đúng vào 1 master profile bất kể thứ tự xử lý (batch bị xáo trộn)
    - PII được **hash SHA-256** trước khi insert (không lưu dữ liệu thật)
 3. **`run_demo_resolution.py`** — chạy `CustomerIdentityResolver` cho đến khi hết batch, in kết quả master profile
+4. **`seed_full_demo_data.py`** — làm giàu 700 master profile (CRM journey graph, quan hệ, giao dịch, `cdp_raw_events` hành vi, content items…) cho demo Customer 360 đầy đủ, không chỉ riêng CIR
 
 ---
 
@@ -382,13 +385,16 @@ Hệ thống đã kiểm thử đầy đủ **7 Merge Policy**, bao gồm các t
 | Chỉ số | Giá trị |
 |---|---|
 | Raw profiles đầu vào | **1.000** |
+| Nguồn raw profile | AppsFlyer 800 · MoEngage 100 · Web Tracking 100 |
 | Master profiles tạo ra | **700** |
-| Master profile được hợp nhất (≥2 raw) | **243** |
+| Master profile được hợp nhất (≥2 raw) | **234** |
 | Tỷ lệ trùng chủ đích | 30% (`duplicate_rate`) |
 
-➡️ Chuỗi `install (device_id)` → `login/kyc_completed (phone/email/national_id)` được **CIR nối lại đúng qua `device_id`**, dù `install` ban đầu hoàn toàn ẩn danh.
+➡️ Chuỗi `install (device_id, AppsFlyer)` → `login/kyc_completed` trên **bất kỳ nguồn nào trong 3 nguồn** được **CIR nối lại đúng qua `device_id`** dùng chung, dù `install` ban đầu hoàn toàn ẩn danh.
 
-**Lưu ý kỹ thuật đã gặp:** phải đảm bảo `full_name`/`phone_number` sinh ngẫu nhiên **không trùng lặp giữa các khách hàng khác nhau** (rejection-sampling), nếu không resolver sẽ hợp nhất nhầm 2 người thật thành 1.
+**Lưu ý kỹ thuật đã gặp:**
+- Phải đảm bảo `phone_number` sinh ngẫu nhiên **không trùng lặp giữa các khách hàng khác nhau** (rejection-sampling) vì đây là một CIR matching key thật sự — trùng lặp sẽ khiến resolver hợp nhất nhầm 2 người thật thành 1. `full_name` cũng được sinh không trùng lặp cho demo dễ đọc, nhưng **không ảnh hưởng đến kết quả CIR** vì `full_name` không phải là matching key.
+- Một touch chỉ chia sẻ **PII** (không chia sẻ `device_id`) với `install` ban đầu có thể bị xử lý **trước** touch AppsFlyer cùng `device_id` (thứ tự batch bị xáo trộn) → resolver tạo nhầm **2 master profile** cho cùng 1 người, rồi va lỗi `UniqueViolation` khi một trong hai sau đó cùng cập nhật một `email`. Khắc phục: mọi touch — kể cả MoEngage/Web Tracking — đều phải mang theo `device_id` dùng chung của khách hàng.
 
 ---
 

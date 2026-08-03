@@ -221,7 +221,12 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('status_code', 'status_code', 'Status Code', 'Active (1), Inactive (0), or Deleted (-1) state of the profile.', 'SYSTEM', 'cdp_master_profiles', 'SMALLINT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 55),
 
     -- IDENTITY (demographics + core/secondary contact info)
-    ('full_name', 'full_name', 'Full Name', 'Customer full display name; identity-resolution matching key (exact, SHA-256 hashed).', 'IDENTITY', 'cdp_master_profiles, cdp_raw_profiles_stage', 'TEXT', 'all', TRUE, 'ACTIVE', TRUE, 'exact', NULL, 'most_recent', FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 60),
+    -- full_name: is_identity_resolution=FALSE, matching_rule/consolidation_rule=NULL --
+    -- resolver.py's _get_active_rules() only loads BOTH matching AND consolidation
+    -- config for rows with is_identity_resolution=TRUE, so a 'most_recent' merge
+    -- policy here would be silently dead/unreachable config. Kept simple/NULL
+    -- instead of implying a merge behavior that never actually runs.
+    ('full_name', 'full_name', 'Full Name', 'Customer full display name (SHA-256 hashed). NOT used as an identity-resolution matching key -- common/shared names (especially Vietnamese given+family names) create false-positive merge risk; use device_id/email/phone_number/national_id instead.', 'IDENTITY', 'cdp_master_profiles, cdp_raw_profiles_stage', 'TEXT', 'all', TRUE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 60),
     ('first_name', 'first_name', 'First Name', 'Given name.', 'IDENTITY', 'cdp_master_profiles', 'TEXT', 'all', TRUE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 70),
     ('last_name', 'last_name', 'Last Name', 'Family name.', 'IDENTITY', 'cdp_master_profiles', 'TEXT', 'all', TRUE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 80),
     ('profile_picture_url', 'profile_picture_url', 'Profile Picture URL', 'URL to the customer avatar or profile image.', 'IDENTITY', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 82),
@@ -345,10 +350,12 @@ ON CONFLICT (attribute_internal_code) DO UPDATE SET
 
 -- Default CIR merge policy seed: lets the resolver prefer recent or
 -- verified values without hard-coding a single merge strategy in Python.
+-- full_name is intentionally excluded (is_identity_resolution=FALSE means
+-- resolver.py never loads a consolidation_rule for it either -- see the
+-- comment on its INSERT row above).
 UPDATE customer360.cdp_profile_attributes
 SET
     consolidation_rule = CASE attribute_internal_code
-        WHEN 'full_name' THEN 'most_recent'
         WHEN 'email' THEN 'verified_first'
         WHEN 'phone_number' THEN 'verified_first'
         WHEN 'national_id' THEN 'verified_first'
@@ -359,7 +366,6 @@ SET
         ELSE consolidation_rule
     END,
     consolidation_config = CASE attribute_internal_code
-        WHEN 'full_name' THEN '{"mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
         WHEN 'email' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"verified_event_names":["kyc-completed"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
         WHEN 'phone_number' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"verified_event_names":["kyc-completed"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
         WHEN 'national_id' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"verified_event_names":["kyc-completed"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
@@ -371,7 +377,6 @@ SET
     END,
     updated_at = now()
 WHERE attribute_internal_code IN (
-    'full_name',
     'email',
     'phone_number',
     'national_id',

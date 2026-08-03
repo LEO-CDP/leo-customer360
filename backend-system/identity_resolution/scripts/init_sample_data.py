@@ -33,8 +33,10 @@ No Personal Data (PII) is ever written to the database: ``full_name``,
 (normalized/trimmed/lowercased first) before insertion -- the same pattern
 used by real-world hashed-match integrations (e.g. Meta/Google Customer
 Match). Matching still works because identical inputs always hash to the
-same value; only the ``full_name`` rule switches from fuzzy to exact
-matching since hashes can't be fuzzy-compared.
+same value. ``full_name`` is hashed/stored for display like the other PII
+fields but is NOT an identity-resolution matching key (``is_identity_resolution
+= FALSE`` in ``init-core-database.sql``) -- common/shared names are too
+collision-prone to safely decide two raw profiles are the same person.
 
 Safe to re-run: every step is idempotent / scoped to ``DEMO_TENANT_ID``.
 """
@@ -144,10 +146,13 @@ def _build_customer(rng: random.Random, index: int, used_names: set, used_phones
     """Creates one synthetic person's stable identity (device + PII), shared
     across every raw-profile row generated for that person.
 
-    full_name and phone_number are regenerated on collision so two different
-    synthetic customers never accidentally share one -- both are active
-    matching rules, so a coincidental collision would make identity
-    resolution incorrectly merge two distinct people into one profile.
+    phone_number is regenerated on collision since it IS an active CIR
+    matching rule -- a coincidental collision would make identity resolution
+    incorrectly merge two distinct people into one profile. full_name is also
+    kept collision-free purely for demo realism/readability; it is NOT a CIR
+    matching key (common/shared names are too collision-prone to trust for
+    identity matching -- see init-core-database.sql's is_identity_resolution
+    seed for full_name).
     """
     domain = "banking" if rng.random() < BANKING_DOMAIN_SHARE else "retail"
     platform = "ios" if rng.random() < 0.5 else "android"
@@ -222,9 +227,11 @@ def _touch_event(rng: random.Random, customer: dict, event_time: datetime, sourc
     init-core-database.sql's device_id source_priority list, which already
     names WebTracking/AppsFlyer/MoEngage) is what guarantees every touch
     matches back to the SAME master profile regardless of the (shuffled)
-    processing order; relying on PII alone would let a WebTracking/MoEngage
-    touch reach a still-anonymous install row's master profile out of order
-    and fragment into a second master profile that later collides on email.
+    processing order; relying on the matching-key PII fields alone (email/
+    phone_number/national_id -- full_name is NOT a matching key) would let a
+    WebTracking/MoEngage touch reach a still-anonymous install row's master
+    profile out of order and fragment into a second master profile that
+    later collides on email.
     """
     events = BANKING_TOUCH_EVENTS if customer["domain"] == "banking" else RETAIL_TOUCH_EVENTS
     base = {
