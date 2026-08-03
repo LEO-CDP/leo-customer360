@@ -44,7 +44,20 @@ window.C360 = window.C360 || {};
       profile.full_name ||
       "Profile " + fmt.shortId(profile.master_profile_id);
 
+    // Ordered contact-first, then digital/technical identifiers, for CIR review flow.
     var channels = [];
+    if (profile.email)
+      channels.push({
+        icon: "✉️",
+        label: "Email",
+        badge: fmt.maskMiddle(profile.email),
+      });
+    if (profile.phone_number)
+      channels.push({
+        icon: "☎️",
+        label: "Phone",
+        badge: fmt.maskMiddle(profile.phone_number),
+      });
     if ((profile.device_ids || []).length)
       channels.push({
         icon: "📱",
@@ -62,18 +75,6 @@ window.C360 = window.C360 || {};
         icon: "📣",
         label: "Advertising IDs",
         badge: profile.advertising_ids.length,
-      });
-    if (profile.email)
-      channels.push({
-        icon: "✉️",
-        label: "Email",
-        badge: fmt.maskMiddle(profile.email),
-      });
-    if (profile.phone_number)
-      channels.push({
-        icon: "☎️",
-        label: "Phone",
-        badge: fmt.maskMiddle(profile.phone_number),
       });
     if (profile.external_ids && Object.keys(profile.external_ids).length)
       channels.push({
@@ -112,6 +113,76 @@ window.C360 = window.C360 || {};
       });
     }
 
+    // Identity Details (CIR) surfaces resolution-relevant identity attributes
+    // only. Contact channels/technical IDs already live in the Channels &
+    // Identifiers card above, so they are intentionally excluded here to
+    // avoid duplicate rows. Long/sensitive values are masked or shortened.
+    var identityDetailChips = [];
+    function addIdentityChip(label, value) {
+      if (value === null || value === undefined || value === "") return;
+      identityDetailChips.push({ label: label, value: String(value) });
+    }
+
+    addIdentityChip(
+      "Profile Type",
+      profile.is_hashed ? "Hashed (Privacy-Safe)" : "Plain (Direct PII)",
+    );
+    addIdentityChip("Date of Birth", fmt.date(profile.date_of_birth));
+    addIdentityChip("Gender", fmt.titleCase(profile.gender));
+    addIdentityChip(
+      "National ID",
+      profile.national_id ? fmt.maskMiddle(profile.national_id) : null,
+    );
+    addIdentityChip("Loyalty ID", profile.loyalty_id);
+    if ((profile.secondary_emails || []).length)
+      addIdentityChip(
+        "Secondary Emails",
+        profile.secondary_emails.length + " additional",
+      );
+    if ((profile.secondary_phones || []).length)
+      addIdentityChip(
+        "Secondary Phones",
+        profile.secondary_phones.length + " additional",
+      );
+    if ((profile.source_systems || []).length)
+      addIdentityChip(
+        "Source Systems",
+        profile.source_systems.map(fmt.titleCase).join(", "),
+      );
+    if (profile.first_seen_raw_profile_id)
+      addIdentityChip(
+        "First Seen Raw Profile ID",
+        fmt.shortId(profile.first_seen_raw_profile_id),
+      );
+
+    var workingDetailChips = [];
+    if (profile.company_name) {
+      workingDetailChips.push({
+        label: "Company Name",
+        value: profile.company_name,
+      });
+    }
+    if (profile.institution_name) {
+      workingDetailChips.push({
+        label: "Institution",
+        value: profile.institution_name,
+      });
+    }
+
+    var addressDetailChips = [];
+    if (profile.address && typeof profile.address === "object") {
+      Object.entries(profile.address).forEach(function ([key, value]) {
+        if (value === null || value === undefined || value === "") {
+          return;
+        }
+
+        addressDetailChips.push({
+          label: fmt.titleCase(key),
+          value: String(value),
+        });
+      });
+    }
+
     var timelineVms = (timeline || []).map(timelineEntryVm);
 
     return {
@@ -142,8 +213,14 @@ window.C360 = window.C360 || {};
           fmt.titleCase(profile.lifecycle_stage) +
           "' lifecycle stage.",
       channels: channels,
+      hasIdentityDetails: identityDetailChips.length > 0,
+      identityDetailChips: identityDetailChips,
       hasAttributes: attributeChips.length > 0,
       attributeChips: attributeChips,
+      hasWorkingInfo: workingDetailChips.length > 0,
+      workingDetailChips: workingDetailChips,
+      hasAddressDetails: addressDetailChips.length > 0,
+      addressDetailChips: addressDetailChips,
 
       // Check if the communication_preferences object exists and has at least one key
       hasCommunicationPreferences: Object.keys(profile.communication_preferences || {}).length > 0,
@@ -329,13 +406,24 @@ window.C360 = window.C360 || {};
     $(document).on("click", "#btn-timeline-more", loadMoreTimeline);
 
     $(document).on("click", ".content-tab-btn", function () {
+      // 1. Reset all tabs to the INACTIVE state
+      // Removes the active white background/blue text and adds the gray text with hover effects
       $(".content-tab-btn")
-        .removeClass("bg-indigo-600 text-white")
-        .addClass("bg-slate-100");
-      $(this).removeClass("bg-slate-100").addClass("bg-indigo-600 text-white");
+        .removeClass("bg-white text-indigo-600 shadow-sm font-semibold")
+        .addClass("text-slate-500 font-medium hover:text-slate-700 hover:bg-slate-200/50");
+
+      // 2. Set the clicked tab to the ACTIVE state
+      // Removes the gray text/hover effects and adds the active white background/blue text
+      $(this)
+        .removeClass("text-slate-500 font-medium hover:text-slate-700 hover:bg-slate-200/50")
+        .addClass("bg-white text-indigo-600 shadow-sm font-semibold");
+
+      // 3. Execute your existing content loading logic
       currentContentType = $(this).data("type") || "";
-      if (currentProfileId)
+      
+      if (currentProfileId) {
         loadContentItems(currentProfileId, currentContentType);
+      }
     });
 
     $("#data-period-select").on("change", reload);

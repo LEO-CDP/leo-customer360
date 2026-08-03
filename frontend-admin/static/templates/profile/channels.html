@@ -34,6 +34,38 @@
   </ul>
 </div>
 
+<!-- 
+  =============================================================================
+  Identity Details Card for Customer Identitty Resolution (CIR) 
+  =============================================================================
+-->
+{{#if hasIdentityDetails}}
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-5 mt-5">
+  <!-- Card Header with Icon -->
+  <div class="flex items-center gap-2 mb-4">
+    <div class="p-1.5 bg-cyan-50 text-cyan-600 rounded-lg">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75l2.25 2.25L15 9.75m6 2.25a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    </div>
+    <h3 class="font-semibold text-slate-900 text-sm">Identity Details </h3>
+  </div>
+
+  <ul class="divide-y divide-slate-100/80">
+    {{#each identityDetailChips}}
+    <li class="flex justify-between items-center py-3 gap-4 group">
+      <span class="text-sm font-medium text-slate-500 whitespace-nowrap">
+        {{label}}
+      </span>
+      <span class="text-sm font-semibold text-slate-900 text-right break-words bg-slate-50 group-hover:bg-cyan-50 transition-colors px-2 py-1 rounded-md">
+        {{value}}
+      </span>
+    </li>
+    {{/each}}
+  </ul>
+</div>
+{{/if}}
+
 
 <!-- 
   =============================================================================
@@ -77,6 +109,73 @@
         </span>
       {{/if}}
       
+    </li>
+    {{/each}}
+  </ul>
+</div>
+{{/if}}
+
+
+<!-- 
+  =============================================================================
+  Working Details Card
+  =============================================================================
+-->
+{{#if hasWorkingInfo}}
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-5 mt-5">
+  <!-- Card Header with Icon -->
+  <div class="flex items-center gap-2 mb-4">
+    <div class="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 21h16.5M4.5 3h15A1.5 1.5 0 0121 4.5V21H3V4.5A1.5 1.5 0 014.5 3z" />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 7.5h9m-9 3h9m-9 3h4.5" />
+      </svg>
+    </div>
+    <h3 class="font-semibold text-slate-900 text-sm">Working Details</h3>
+  </div>
+
+  <ul class="divide-y divide-slate-100/80">
+    {{#each workingDetailChips}}
+    <li class="flex justify-between items-center py-3 gap-4 group">
+      <span class="text-sm font-medium text-slate-500 whitespace-nowrap">
+        {{label}}
+      </span>
+      <span class="text-sm font-semibold text-slate-900 text-right break-words bg-slate-50 group-hover:bg-amber-50 transition-colors px-2 py-1 rounded-md">
+        {{value}}
+      </span>
+    </li>
+    {{/each}}
+  </ul>
+</div>
+{{/if}}
+
+<!-- 
+  =============================================================================
+  Address Details Card
+  =============================================================================
+-->
+{{#if hasAddressDetails}}
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-5 mt-5">
+  <!-- Card Header with Icon -->
+  <div class="flex items-center gap-2 mb-4">
+    <div class="p-1.5 bg-rose-50 text-rose-600 rounded-lg">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 21s7.5-6.27 7.5-11.25a7.5 7.5 0 10-15 0C4.5 14.73 12 21 12 21z" />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 11.25a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
+      </svg>
+    </div>
+    <h3 class="font-semibold text-slate-900 text-sm">Address Details</h3>
+  </div>
+
+  <ul class="divide-y divide-slate-100/80">
+    {{#each addressDetailChips}}
+    <li class="flex justify-between items-center py-3 gap-4 group">
+      <span class="text-sm font-medium text-slate-500 whitespace-nowrap">
+        {{label}}
+      </span>
+      <span class="text-sm font-semibold text-slate-900 text-right break-words bg-slate-50 group-hover:bg-rose-50 transition-colors px-2 py-1 rounded-md">
+        {{value}}
+      </span>
     </li>
     {{/each}}
   </ul>

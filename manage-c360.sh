@@ -419,6 +419,9 @@ cmd_seed_demo() {
   echo "🌱 Seeding base raw profiles for demo..."
   (cd "$cir_dir" && "$venv_python" scripts/init_sample_data.py)
 
+  echo "🧬 Seeding fuzzy-match demo data (Address & Company variations)..."
+  (cd "$cir_dir" && "$venv_python" scripts/generate_fuzzy_match_demo.py)
+
   echo "⚙️  Running Customer Identity Resolution for demo..."
   (cd "$cir_dir" && "$venv_python" scripts/run_demo_resolution.py)
 

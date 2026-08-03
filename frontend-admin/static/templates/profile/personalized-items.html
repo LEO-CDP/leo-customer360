@@ -16,13 +16,24 @@
     <h3 class="font-semibold text-slate-900 text-base">Personalized Items</h3>
   </div>
 
-  <!-- Modern Filter Tabs -->
-  <div class="flex flex-wrap gap-1.5 mb-5 text-xs">
-    <button class="content-tab-btn px-3 py-1.5 rounded-lg font-medium bg-indigo-600 text-white shadow-sm transition-all" data-type="">All</button>
-    <button class="content-tab-btn px-3 py-1.5 rounded-lg font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all" data-type="news">News</button>
-    <button class="content-tab-btn px-3 py-1.5 rounded-lg font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all" data-type="video">Videos</button>
-    <button class="content-tab-btn px-3 py-1.5 rounded-lg font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all" data-type="product">Products</button>
-    <button class="content-tab-btn px-3 py-1.5 rounded-lg font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all" data-type="article">Articles</button>
+  <!-- 
+    Better Solution: Segmented Control Layout 
+    - Text shrunk to text-[11px].
+    - Tighter padding (px-2.5 py-1).
+    - Shared background (bg-slate-100) instead of individual button blocks.
+    - Added Tailwind arbitrary values to completely hide scrollbars if it ever overflows on extremely small screens.
+  -->
+  <div class="flex overflow-x-auto bg-slate-100 p-1 rounded-lg mb-5 gap-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+    
+    <!-- Active Tab (White background, shadow, colored text) -->
+    <button class="content-tab-btn shrink-0 whitespace-nowrap px-2.5 py-1 rounded-md text-[12px] font-semibold bg-white text-indigo-600 shadow-sm transition-all" data-type="">All</button>
+    
+    <!-- Inactive Tabs (Transparent background, subtle hover effect) -->
+    <button class="content-tab-btn shrink-0 whitespace-nowrap px-2.5 py-1 rounded-md text-[12px] font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-200/50 transition-all" data-type="news">News</button>
+    <button class="content-tab-btn shrink-0 whitespace-nowrap px-2.5 py-1 rounded-md text-[12px] font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-200/50 transition-all" data-type="video">Videos</button>
+    <button class="content-tab-btn shrink-0 whitespace-nowrap px-2.5 py-1 rounded-md text-[12px] font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-200/50 transition-all" data-type="product">Products</button>
+    <button class="content-tab-btn shrink-0 whitespace-nowrap px-2.5 py-1 rounded-md text-[12px] font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-200/50 transition-all" data-type="article">Articles</button>
+    
   </div>
 
   <!-- Dynamic Content Container -->
