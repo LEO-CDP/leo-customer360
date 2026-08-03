@@ -217,6 +217,11 @@ class CdpProfileLink(Base):
     )
     match_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
     match_method: Mapped[Optional[str]] = mapped_column(Text)
+    # Link lifecycle state: ACTIVE | HISTORICAL | UNLINKED | SUPERSEDED (unmerge/profile-split).
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="ACTIVE")
+    unlinked_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    unlinked_reason: Mapped[Optional[str]] = mapped_column(Text)
+    unlinked_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
     created_at: Mapped[Optional[datetime]] = mapped_column(server_default=text("now()"))
 
 
@@ -250,6 +255,21 @@ class CdpProfileAttribute(Base):
     consolidation_rule: Mapped[Optional[str]] = mapped_column(Text)
     consolidation_config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
+    # Rank hierarchy used during limit demotion (1 = highest priority, e.g. external_customer_id).
+    priority_rank: Mapped[int] = mapped_column(Integer, nullable=False, server_default="99")
+    # Maximum allowed unique values on a single master profile for this identifier.
+    value_limit: Mapped[int] = mapped_column(Integer, nullable=False, server_default="5")
+    # Window for limit enforcement: 1_ever, 5_weekly, 5_monthly, 5_annually.
+    limit_timeframe: Mapped[str] = mapped_column(Text, nullable=False, server_default="5_annually")
+    # Exact string values blocked from being promoted to external identifiers.
+    blocked_values: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text('\'["null", "-1", "anonymous", "void", "abc123"]\'::jsonb')
+    )
+    # Regex patterns blocked from being promoted to external identifiers.
+    blocked_patterns: Mapped[Optional[list[str]]] = mapped_column(
+        ARRAY(Text), server_default=text("ARRAY['^[0-]*$']")
+    )
+
     is_scoring_model: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     scoring_model_name: Mapped[Optional[str]] = mapped_column(Text)
     scoring_model_version: Mapped[Optional[str]] = mapped_column(Text)
@@ -261,6 +281,63 @@ class CdpProfileAttribute(Base):
     display_order: Mapped[int] = mapped_column(server_default="0")
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CdpIdentityIndex(Base):
+    """Flattened O(1) lookup table mapping (tenant_id, identifier_type,
+    identifier_value_normalized) -> master_profile_id, avoiding JSONB/array
+    scans on cdp_master_profiles during streaming CIR match resolution."""
+
+    __tablename__ = "cdp_identity_index"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "identifier_type", "identifier_value_normalized", name="uq_cdp_identity_index"
+        ),
+    )
+
+    identity_index_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False
+    )
+    master_profile_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_master_profiles.master_profile_id"), nullable=False
+    )
+    identifier_type: Mapped[str] = mapped_column(Text, nullable=False)
+    identifier_value: Mapped[str] = mapped_column(Text, nullable=False)
+    identifier_value_normalized: Mapped[str] = mapped_column(Text, nullable=False)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    first_seen_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CdpProfileMergeHistory(Base):
+    """Audit log of master-to-master profile merges, storing JSONB snapshots
+    of both sides so a bad merge can be unmerged/rolled back later."""
+
+    __tablename__ = "cdp_profile_merge_history"
+
+    merge_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False
+    )
+    target_master_profile_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_master_profiles.master_profile_id"), nullable=False
+    )
+    # Merged/tombstoned profile id -- no FK, the row no longer exists after the merge.
+    source_master_profile_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    merge_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    matched_identifier_type: Mapped[Optional[str]] = mapped_column(Text)
+    matched_identifier_value: Mapped[Optional[str]] = mapped_column(Text)
+    match_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    source_profile_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    target_profile_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    merged_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    merged_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
 
 
 class CdpIdResolutionStatus(Base):

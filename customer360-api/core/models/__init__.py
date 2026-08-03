@@ -15,10 +15,12 @@ from core.models.crm import (
 )
 from core.models.graph import GraphEdge
 from core.models.identity import (
+    CdpIdentityIndex,
     CdpIdResolutionStatus,
     CdpMasterProfile,
     CdpProfileAttribute,
     CdpProfileLink,
+    CdpProfileMergeHistory,
     CdpRawProfileStage,
 )
 from core.models.relations import CdpRelation, CustomerContact, RelationType, Transaction
@@ -37,10 +39,12 @@ __all__ = [
     "LeadSource",
     "Opportunity",
     "GraphEdge",
+    "CdpIdentityIndex",
     "CdpIdResolutionStatus",
     "CdpMasterProfile",
     "CdpProfileAttribute",
     "CdpProfileLink",
+    "CdpProfileMergeHistory",
     "CdpRawProfileStage",
     "CdpRelation",
     "CdpSegment",

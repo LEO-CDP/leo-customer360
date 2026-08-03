@@ -18,21 +18,25 @@ Connects to the PostgreSQL database configured via environment variables /
    upsert-if-missing) -- ``database-schema.sql`` never seeds tenants, and
    every tenant-scoped table has a NOT NULL FK to ``sys_tenant.tenant_id``.
 5. Clears any previous demo data (scoped to ``DEMO_TENANT_ID`` only, so it
-   never touches other tenants) and inserts 1,000 generated raw profiles
-   simulating AppsFlyer mobile attribution across multiple acquisition
-   channels (Facebook Ads, TikTok Ads, Google Ads, Grab Ads, FPT Play Ads,
-   and offline PR events at shopping malls), for both the banking and
-   retail domains. ~30% of the rows are deliberate duplicates (a later
-   touch on a device that already appears earlier in the batch) for
-   identity resolution to merge back together -- see generate_raw_profiles().
+   never touches other tenants) and inserts 1,000 generated raw profiles for
+   both the banking and retail domains: each customer's anonymous first
+   touch is an AppsFlyer install (across Facebook Ads, TikTok Ads, Google
+   Ads, Grab Ads, FPT Play Ads, and offline PR events at shopping malls),
+   and ~30% of the rows are additional PII-revealing duplicate touches
+   round-robined across all 3 documented source systems -- AppsFlyer,
+   MoEngage (push engagement), and Web Tracking (browser/GA4-style) -- for
+   identity resolution to merge back into a single master profile per
+   customer. See generate_raw_profiles().
 
 No Personal Data (PII) is ever written to the database: ``full_name``,
 ``email``, ``phone_number`` and ``national_id`` are one-way SHA-256 hashed
 (normalized/trimmed/lowercased first) before insertion -- the same pattern
 used by real-world hashed-match integrations (e.g. Meta/Google Customer
 Match). Matching still works because identical inputs always hash to the
-same value; only the ``full_name`` rule switches from fuzzy to exact
-matching since hashes can't be fuzzy-compared.
+same value. ``full_name`` is hashed/stored for display like the other PII
+fields but is NOT an identity-resolution matching key (``is_identity_resolution
+= FALSE`` in ``init-core-database.sql``) -- common/shared names are too
+collision-prone to safely decide two raw profiles are the same person.
 
 Safe to re-run: every step is idempotent / scoped to ``DEMO_TENANT_ID``.
 """
@@ -82,7 +86,7 @@ def hash_pii(value):
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
-# --- Synthetic AppsFlyer data generation ------------------------------------
+# --- Synthetic multi-source (AppsFlyer / MoEngage / Web Tracking) data ------
 #
 # AppsFlyer channel/media_source configuration: Facebook Ads, TikTok Ads,
 # Google Ads, Grab Ads, FPT Play Ads (video/OTT), and offline PR events
@@ -96,6 +100,24 @@ APPSFLYER_CHANNELS = [
     {"media_source": "FPT Play Ads", "campaigns": ["vn_fptplay_video_preroll", "vn_fptplay_channel_sponsorship"]},
     {"media_source": "Offline PR Event", "campaigns": ["hcmc_shopping_mall_roadshow", "hanoi_mall_activation_day"]},
 ]
+
+# MoEngage push/engagement campaigns (mobile app engagement touches).
+MOENGAGE_CAMPAIGNS = [
+    "push_flash_sale_reminder", "push_cart_abandonment", "push_loyalty_points_expiry", "push_kyc_reminder",
+]
+
+# Web Tracking (browser/GA4-style) UTM sources for the same customers logging
+# in / browsing on the web instead of the mobile app.
+WEBTRACKING_UTM_SOURCES = [
+    {"utm_source": "google", "utm_medium": "cpc", "utm_campaign": "vn_google_search_brand"},
+    {"utm_source": "facebook", "utm_medium": "social", "utm_campaign": "vn_retail_fb_flash_sale"},
+    {"utm_source": "newsletter", "utm_medium": "email", "utm_campaign": "vn_retail_email_promo"},
+    {"utm_source": "direct", "utm_medium": "none", "utm_campaign": None},
+]
+
+# The 3 documented ingestion source systems (see resolver.py's module
+# docstring / README) that raw touch events are spread across.
+TOUCH_SOURCE_SYSTEMS = ("AppsFlyer", "MoEngage", "WebTracking")
 
 VIETNAMESE_FAMILY_NAMES = (
     "Nguyen", "Tran", "Le", "Pham", "Hoang", "Huynh", "Phan", "Vu", "Vo", "Dang", "Bui", "Do", "Ho", "Ngo", "Duong",
@@ -124,10 +146,13 @@ def _build_customer(rng: random.Random, index: int, used_names: set, used_phones
     """Creates one synthetic person's stable identity (device + PII), shared
     across every raw-profile row generated for that person.
 
-    full_name and phone_number are regenerated on collision so two different
-    synthetic customers never accidentally share one -- both are active
-    matching rules, so a coincidental collision would make identity
-    resolution incorrectly merge two distinct people into one profile.
+    phone_number is regenerated on collision since it IS an active CIR
+    matching rule -- a coincidental collision would make identity resolution
+    incorrectly merge two distinct people into one profile. full_name is also
+    kept collision-free purely for demo realism/readability; it is NOT a CIR
+    matching key (common/shared names are too collision-prone to trust for
+    identity matching -- see init-core-database.sql's is_identity_resolution
+    seed for full_name).
     """
     domain = "banking" if rng.random() < BANKING_DOMAIN_SHARE else "retail"
     platform = "ios" if rng.random() < 0.5 else "android"
@@ -153,6 +178,17 @@ def _build_customer(rng: random.Random, index: int, used_names: set, used_phones
         "device_id": f"device-{index:05d}-{rng.randint(1000, 9999)}",
         "advertising_id": f"af-{'idfa' if platform == 'ios' else 'gaid'}-{index:05d}",
         "external_customer_id": f"appsflyer_cust_{index:05d}",
+        # MoEngage: same person's push-engagement identity (own per-source
+        # customer id + push token; matched back via shared PII/device_id).
+        "moengage_customer_id": f"moengage_cust_{index:05d}",
+        "push_token": f"fcm-push-{index:05d}-{rng.randint(1000, 9999)}",
+        "moengage_campaign": rng.choice(MOENGAGE_CAMPAIGNS),
+        # Web Tracking: same person's browser identity (own visitor id,
+        # cookie/GA client id, UTM attribution; matched back via shared PII).
+        "webtracking_visitor_id": f"webtracking_visitor_{index:05d}",
+        "cookie_id": f"cookie-{index:05d}-{rng.randint(1000, 9999)}",
+        "ga_client_id": f"GA1.2.{rng.randint(1_000_000_000, 9_999_999_999)}.{rng.randint(1_000_000_000, 9_999_999_999)}",
+        "utm": rng.choice(WEBTRACKING_UTM_SOURCES),
         "full_name": full_name,
         "email": f"{email_slug}{index}@example.com",
         "phone_number": phone_number,
@@ -180,43 +216,81 @@ def _install_event(customer: dict, event_time: datetime) -> dict:
     }
 
 
-def _touch_event(rng: random.Random, customer: dict, event_time: datetime) -> dict:
-    """A later AppsFlyer touch (login/purchase/kyc/...) on the SAME device
-    that reveals the customer's PII. This is the duplicate row identity
-    resolution is expected to merge back into the install event's profile
-    (matched via the shared device_id/advertising_id)."""
+def _touch_event(rng: random.Random, customer: dict, event_time: datetime, source_system: str) -> dict:
+    """A later touch (login/purchase/kyc/...) on the SAME customer that
+    reveals PII, attributed to one of the 3 ingested source systems
+    (AppsFlyer / MoEngage / WebTracking -- see TOUCH_SOURCE_SYSTEMS). Each
+    source contributes its own per-source identifier (device_id/
+    advertising_id, push_token, cookie_id/ga_client_id respectively), but
+    shares the SAME full_name/email/phone_number/national_id AND device_id --
+    the shared device_id (a valid cross-source identity-graph key per
+    init-core-database.sql's device_id source_priority list, which already
+    names WebTracking/AppsFlyer/MoEngage) is what guarantees every touch
+    matches back to the SAME master profile regardless of the (shuffled)
+    processing order; relying on the matching-key PII fields alone (email/
+    phone_number/national_id -- full_name is NOT a matching key) would let a
+    WebTracking/MoEngage touch reach a still-anonymous install row's master
+    profile out of order and fragment into a second master profile that
+    later collides on email.
+    """
     events = BANKING_TOUCH_EVENTS if customer["domain"] == "banking" else RETAIL_TOUCH_EVENTS
-    return {
+    base = {
         "domain": customer["domain"],
-        "source_system": "AppsFlyer",
-        "channel": "mobile_app",
-        "external_customer_id": customer["external_customer_id"],
+        "source_system": source_system,
         "full_name": customer["full_name"],
         "email": customer["email"],
         "phone_number": customer["phone_number"],
         "national_id": customer["national_id"],
         "device_id": customer["device_id"],
-        "advertising_id": customer["advertising_id"],
-        "platform": customer["platform"],
-        "app_version": "3.4.2",
-        "media_source": customer["media_source"],
-        "campaign": customer["campaign"],
         "event_name": rng.choice(events),
         "event_time": event_time,
     }
+    if source_system == "AppsFlyer":
+        base.update({
+            "channel": "mobile_app",
+            "external_customer_id": customer["external_customer_id"],
+            "advertising_id": customer["advertising_id"],
+            "platform": customer["platform"],
+            "app_version": "3.4.2",
+            "media_source": customer["media_source"],
+            "campaign": customer["campaign"],
+        })
+    elif source_system == "MoEngage":
+        base.update({
+            "channel": "push",
+            "external_customer_id": customer["moengage_customer_id"],
+            "push_token": customer["push_token"],
+            "platform": customer["platform"],
+            "campaign": customer["moengage_campaign"],
+        })
+    else:  # WebTracking
+        utm = customer["utm"]
+        base.update({
+            "channel": "web",
+            "external_customer_id": customer["webtracking_visitor_id"],
+            "cookie_id": customer["cookie_id"],
+            "ga_client_id": customer["ga_client_id"],
+            "utm_source": utm["utm_source"],
+            "utm_medium": utm["utm_medium"],
+            "utm_campaign": utm["utm_campaign"],
+        })
+    return base
 
 
 def generate_raw_profiles(count: int = 1000, duplicate_rate: float = 0.3, seed: int = 42) -> list[dict]:
-    """Generates ``count`` synthetic AppsFlyer raw-profile events spread
-    across Facebook Ads, TikTok Ads, Google Ads, Grab Ads, FPT Play Ads and
-    offline PR events at shopping malls, for both the retail and banking
-    domains.
+    """Generates ``count`` synthetic raw-profile events for the retail and
+    banking domains, spread across all 3 documented ingestion source systems
+    (AppsFlyer mobile attribution, MoEngage push engagement, Web Tracking/
+    GA4-style browsing -- see TOUCH_SOURCE_SYSTEMS).
 
-    ~``duplicate_rate`` of the rows are a second (or third, ...) touch on a
-    device that already appears earlier in the batch (same device_id /
-    advertising_id, revealing full_name/email/phone_number/national_id) --
+    Every customer's anonymous first touch is an AppsFlyer ``install`` event
+    (device/advertising id only, no PII yet). ~``duplicate_rate`` of the rows
+    are additional PII-revealing touches on that same customer, round-robined
+    across AppsFlyer/MoEngage/WebTracking (own per-source identifier each,
+    e.g. device_id/advertising_id, push_token, cookie_id/ga_client_id) --
     real duplicate profiles that identity resolution is expected to merge
-    back into a single master profile.
+    back into a single master profile whose ``source_systems`` ends up
+    containing all 3 values.
 
     Uses a fixed ``seed`` so re-running this script produces the exact same
     dataset (consistent with the rest of this script being idempotent).
@@ -231,15 +305,20 @@ def generate_raw_profiles(count: int = 1000, duplicate_rate: float = 0.3, seed: 
     customers = [_build_customer(rng, i, used_names, used_phones) for i in range(num_unique)]
     profiles = [_install_event(customer, base_time + timedelta(minutes=i)) for i, customer in enumerate(customers)]
 
-    for _ in range(num_duplicates):
+    for i in range(num_duplicates):
         customer = rng.choice(customers)
         touch_time = base_time + timedelta(days=rng.randint(1, 45), hours=rng.randint(0, 23), minutes=rng.randint(0, 59))
-        profiles.append(_touch_event(rng, customer, touch_time))
+        # Round-robin (not rng.choice) guarantees all 3 source systems are
+        # actually represented in the seeded data, not just "likely".
+        source_system = TOUCH_SOURCE_SYSTEMS[i % len(TOUCH_SOURCE_SYSTEMS)]
+        profiles.append(_touch_event(rng, customer, touch_time, source_system))
 
     rng.shuffle(profiles)
+    source_counts = {s: sum(1 for p in profiles if p["source_system"] == s) for s in ("AppsFlyer", "MoEngage", "WebTracking")}
     logger.info(
-        "Generated %d raw profiles (%d unique customers, %d duplicate touches, ~%.0f%% duplicate rate).",
-        len(profiles), num_unique, num_duplicates, duplicate_rate * 100,
+        "Generated %d raw profiles (%d unique customers, %d duplicate touches, ~%.0f%% duplicate rate). "
+        "Per-source counts: %s",
+        len(profiles), num_unique, num_duplicates, duplicate_rate * 100, source_counts,
     )
     return profiles
 
@@ -328,7 +407,7 @@ def seed_raw_profiles(cursor, raw_profiles: list[dict]) -> None:
     """Inserts the sample raw profiles, SHA-256 hashing every PII field
     (see HASHED_PII_FIELDS) so no plaintext name/email/phone/national_id is
     ever written to the database."""
-    logger.info("Inserting %d sample raw profiles (AppsFlyer)...", len(raw_profiles))
+    logger.info("Inserting %d sample raw profiles (AppsFlyer / MoEngage / WebTracking)...", len(raw_profiles))
     columns = ", ".join(RAW_COLUMNS)
     placeholders = ", ".join(["%s"] * len(RAW_COLUMNS))
     insert_query = f"""

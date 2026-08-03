@@ -114,8 +114,8 @@ flowchart TB
 2. **Identity Resolution (CIR)** — [`backend-system/identity_resolution/`](../backend-system/identity_resolution)
    - **Trigger:** the long-running `worker.py` polling loop, which drives `identity_resolution_job` in-process via Dagster's `execute_in_process()`, plus a `daily_job.py` batch entrypoint (cron/Airflow compatible) for scheduled full runs.
    - **Matching engine** (`identity_resolution/resolver.py`): loads active matching rules at runtime from `cdp_profile_attributes` (rows with `is_identity_resolution=true`).
-     - **Exact match**: `national_id`, `email`, `phone_number`.
-     - **Fuzzy match**: Levenshtein-style comparison on `full_name`.
+     - **Exact match**: `national_id`, `email`, `phone_number` (SHA-256 hashed), plus `external_customer_id`/`device_id`/`advertising_id`/`cookie_id` (identity-graph fields).
+     - **Not a matching key**: `full_name` is hashed/stored like the other PII but has `is_identity_resolution=false` — common/shared names are too collision-prone to safely decide two raw profiles are the same person. Fuzzy matching (`fuzzy_trgm`/`fuzzy_dmetaphone`) is implemented in the resolver but not enabled for any attribute in the current seed.
    - **Persona naming** (`identity_resolution/persona.py`): generates a human-readable `persona_name` for each merged, PII-hashed profile. If `GOOGLE_GENAI_API_KEY` is configured, it calls the Google Gemini API (`google-genai` SDK) to produce a natural-sounding label; otherwise (or if the call fails for any reason) it falls back to a deterministic, offline name generator — the pipeline never blocks on an external LLM call being available.
    - **Merge**: collects matched raw profiles into one `cdp_master_profiles` record.
 

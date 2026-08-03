@@ -906,11 +906,20 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_links (
     master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles (master_profile_id),
     match_score NUMERIC(5, 4),
     match_method TEXT,
+    -- Link lifecycle state, e.g. for unmerge/profile-split scenarios.
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'HISTORICAL', 'UNLINKED', 'SUPERSEDED')),
+    unlinked_at TIMESTAMP WITH TIME ZONE,
+    unlinked_reason TEXT,
+    unlinked_by UUID REFERENCES customer360.sys_user (user_id),
     created_at TIMESTAMP DEFAULT now(),
     UNIQUE (tenant_id, raw_profile_id)
 );
 
-COMMENT ON TABLE customer360.cdp_profile_links IS 'Join table recording every raw_profile_id -> master_profile_id link made by CIR, with match_score/match_method. Unique per (tenant_id, raw_profile_id).';
+COMMENT ON TABLE customer360.cdp_profile_links IS 'Join table recording every raw_profile_id -> master_profile_id link made by CIR, with match_score/match_method. Unique per (tenant_id, raw_profile_id). status/unlinked_* track unmerge/profile-split lifecycle.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_profile_links_status ON customer360.cdp_profile_links (tenant_id, status)
+WHERE
+    status = 'ACTIVE';
 
 -- ============================================================================
 -- cdp_raw_events: high-volume behavioral/transactional event fact table
@@ -1213,6 +1222,17 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     -- verified_field, verified_values, or source_priority.
     consolidation_config JSONB NOT NULL DEFAULT '{}'::JSONB,
 
+    -- Rank hierarchy used during limit demotion (1 = highest priority, e.g. user_id).
+    priority_rank INTEGER NOT NULL DEFAULT 99,
+    -- Maximum allowed unique values on a single master profile for this identifier.
+    value_limit INTEGER NOT NULL DEFAULT 5,
+    -- Window for limit enforcement: 1_ever, 5_weekly, 5_monthly, 5_annually.
+    limit_timeframe VARCHAR(50) NOT NULL DEFAULT '5_annually',
+    -- Exact string values blocked from being promoted to external identifiers.
+    blocked_values JSONB NOT NULL DEFAULT '["null", "-1", "anonymous", "void", "abc123"]'::JSONB,
+    -- Regex patterns blocked from being promoted to external identifiers.
+    blocked_patterns TEXT[] NOT NULL DEFAULT ARRAY['^[0-]*$'],
+
     -- segmentation metadata: whether this attribute can be used for audience segmentation, and its data type (TEXT, NUMERIC, DATE, TIMESTAMP, BOOLEAN, JSONB).
     is_segmentable BOOLEAN NOT NULL DEFAULT TRUE,
     data_type VARCHAR(50) NOT NULL DEFAULT 'TEXT',
@@ -1240,6 +1260,71 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
 );
 
 COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog: one row per cdp_master_profiles column (plus cdp_raw_profiles_stage matching keys), grouped by attribute_group. Drives Customer Identity Resolution (CIR) matching rules (is_identity_resolution/matching_rule/matching_threshold) and merge precedence (consolidation_rule/consolidation_config) without hard-coding them in application code.';
+
+-- ============================================================================
+-- cdp_identity_index: flattened O(1) point-lookup index for identifiers
+-- ============================================================================
+-- Unified lookup table mapping (tenant_id, identifier_type, normalized value)
+-- -> master_profile_id, avoiding JSONB/array scans on cdp_master_profiles
+-- (external_ids/device_ids/cookie_ids/advertising_ids) during high-throughput
+-- streaming CIR match resolution.
+CREATE TABLE IF NOT EXISTS customer360.cdp_identity_index (
+    identity_index_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
+    master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles (master_profile_id) ON DELETE CASCADE,
+
+    -- Identifier classification, e.g. 'user_id', 'email', 'phone', 'device_id', 'cookie_id', 'advertising_id'.
+    identifier_type VARCHAR(100) NOT NULL,
+    identifier_value TEXT NOT NULL,
+    -- Normalized / lowercased value used for exact-match lookups.
+    identifier_value_normalized TEXT NOT NULL,
+
+    is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+    is_blocked BOOLEAN NOT NULL DEFAULT FALSE,
+    first_seen_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    last_seen_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+
+    CONSTRAINT uq_cdp_identity_index UNIQUE (tenant_id, identifier_type, identifier_value_normalized)
+);
+
+COMMENT ON TABLE customer360.cdp_identity_index IS 'Flattened O(1) lookup table for cross-channel identifier matching during streaming ingestion, keyed by (tenant_id, identifier_type, identifier_value_normalized).';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_identity_lookup ON customer360.cdp_identity_index (tenant_id, identifier_type, identifier_value_normalized)
+WHERE
+    is_blocked = FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_cdp_identity_master ON customer360.cdp_identity_index (master_profile_id);
+
+-- ============================================================================
+-- cdp_profile_merge_history: audit trail of master-to-master profile merges
+-- ============================================================================
+-- Records every time one cdp_master_profiles row is merged/tombstoned into
+-- another, storing full JSONB snapshots of both sides so a bad merge can be
+-- unmerged/rolled back later.
+CREATE TABLE IF NOT EXISTS customer360.cdp_profile_merge_history (
+    merge_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
+
+    target_master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles (master_profile_id), -- retained profile
+    source_master_profile_id UUID NOT NULL, -- merged/tombstoned profile id (no FK: row no longer exists after merge)
+
+    merge_reason TEXT NOT NULL, -- e.g. 'Deterministic email match', 'Manual admin merge'
+    matched_identifier_type VARCHAR(100),
+    matched_identifier_value TEXT,
+    match_score NUMERIC(5, 4),
+
+    source_profile_snapshot JSONB NOT NULL,
+    target_profile_snapshot JSONB NOT NULL,
+
+    merged_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    merged_by UUID REFERENCES customer360.sys_user (user_id) -- NULL if automated system process
+);
+
+COMMENT ON TABLE customer360.cdp_profile_merge_history IS 'Audit log of master-to-master profile merges storing JSONB profile snapshots to enable profile unmerging/splitting.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_merge_history_target ON customer360.cdp_profile_merge_history (tenant_id, target_master_profile_id);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_merge_history_source ON customer360.cdp_profile_merge_history (tenant_id, source_master_profile_id);
 
 ---------------------------------------------------
 -- RELATIONS & EVENTS
@@ -1832,6 +1917,8 @@ DECLARE
         'cdp_master_profiles',
         'cdp_raw_profiles_stage',
         'cdp_profile_links',
+        'cdp_identity_index',
+        'cdp_profile_merge_history',
         'cdp_raw_events',
         'cdp_relations',
         'cdp_segments',

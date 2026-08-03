@@ -17,14 +17,19 @@ from core.crud import profile360 as profile360_crud
 from core.crud.base import CRUDBase
 from core.database import get_db
 from core.models.identity import (
+    CdpIdentityIndex,
     CdpIdResolutionStatus,
     CdpMasterProfile,
     CdpProfileAttribute,
     CdpProfileLink,
+    CdpProfileMergeHistory,
     CdpRawProfileStage,
 )
 from core.routers._generic import build_crud_router
 from core.schemas.identity import (
+    IdentityIndexCreate,
+    IdentityIndexRead,
+    IdentityIndexUpdate,
     IdResolutionStatusRead,
     MasterProfileCreate,
     MasterProfileRead,
@@ -34,6 +39,8 @@ from core.schemas.identity import (
     ProfileAttributeUpdate,
     ProfileLinkCreate,
     ProfileLinkRead,
+    ProfileMergeHistoryCreate,
+    ProfileMergeHistoryRead,
     RawProfileCreate,
     RawProfileRead,
     RawProfileUpdate,
@@ -341,6 +348,64 @@ profile_attributes_router = build_crud_router(
 )
 
 
+# --- Identity Index (flattened O(1) identifier lookup) --------------------------
+
+identity_index_router = build_crud_router(
+    model=CdpIdentityIndex,
+    pk_field="identity_index_id",
+    pk_type=uuid.UUID,
+    create_schema=IdentityIndexCreate,
+    update_schema=IdentityIndexUpdate,
+    read_schema=IdentityIndexRead,
+    prefix="/identity-index",
+    tags=["Identity Resolution - Identity Index"],
+)
+
+
+# --- Profile Merge History (append-only audit log; no update/delete) -----------
+
+profile_merge_history_router = APIRouter(
+    prefix="/profile-merge-history", tags=["Identity Resolution - Merge History"]
+)
+_merge_history_crud = CRUDBase(CdpProfileMergeHistory)
+
+
+@profile_merge_history_router.get("/", response_model=list[ProfileMergeHistoryRead])
+@cache_response("profile_merge_history/list", ttl=settings.cache_ttl_seconds)
+def list_profile_merge_history(
+    tenant_id: Optional[uuid.UUID] = None,
+    target_master_profile_id: Optional[uuid.UUID] = None,
+    source_master_profile_id: Optional[uuid.UUID] = None,
+    skip: int = 0,
+    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    db: Session = Depends(get_db),
+):
+    return _merge_history_crud.list(
+        db,
+        skip=skip,
+        limit=limit,
+        tenant_id=tenant_id,
+        target_master_profile_id=target_master_profile_id,
+        source_master_profile_id=source_master_profile_id,
+    )
+
+
+@profile_merge_history_router.get("/{merge_id}", response_model=ProfileMergeHistoryRead)
+@cache_response("profile_merge_history/item", ttl=settings.cache_ttl_seconds)
+def get_profile_merge_history(merge_id: uuid.UUID, db: Session = Depends(get_db)):
+    obj = _merge_history_crud.get(db, merge_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpProfileMergeHistory '{merge_id}' not found")
+    return obj
+
+
+@profile_merge_history_router.post("/", response_model=ProfileMergeHistoryRead, status_code=201)
+def create_profile_merge_history(payload: ProfileMergeHistoryCreate, db: Session = Depends(get_db)):
+    obj = _merge_history_crud.create(db, payload.model_dump())
+    invalidate_prefix("profile_merge_history")
+    return obj
+
+
 # --- Resolution status (real-time throttle state) -------------------------------
 
 resolution_status_router = APIRouter(prefix="/resolution-status", tags=["Identity Resolution - Matching Rules"])
@@ -363,5 +428,7 @@ all_identity_routers = [
     raw_profiles_router,
     profile_links_router,
     profile_attributes_router,
+    identity_index_router,
+    profile_merge_history_router,
     resolution_status_router,
 ]

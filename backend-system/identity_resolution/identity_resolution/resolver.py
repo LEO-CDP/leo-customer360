@@ -26,7 +26,10 @@ from .persona import generate_persona_name, profile_looks_hashed
 logger = logging.getLogger(__name__)
 
 # Scalar columns present with the same name/type on both cdp_raw_profiles_stage
-# and cdp_master_profiles, merged with simple COALESCE semantics.
+# and cdp_master_profiles, merged with simple COALESCE semantics. Merging here
+# is independent of matching: full_name is deliberately NOT an active
+# is_identity_resolution rule (see init-core-database.sql) since common/shared
+# names are an unreliable/false-positive-prone match signal on their own.
 SCALAR_MERGE_FIELDS = ("full_name", "email", "phone_number", "national_id")
 
 # Base cdp_master_profiles columns needed to evaluate merge precedence;
@@ -232,6 +235,15 @@ class CustomerIdentityResolver:
         compared (missing, or a naive/timezone-aware mismatch)."""
         if incoming_timestamp is None or current_timestamp is None:
             return None
+        try:
+            return incoming_timestamp >= current_timestamp
+        except TypeError:
+            logger.warning(
+                "Could not compare timestamps %r and %r for most_recent consolidation.",
+                incoming_timestamp,
+                current_timestamp,
+            )
+            return None
 
     @staticmethod
     def _extract_communication_preferences(raw_profile: Dict[str, Any]) -> Dict[str, Any]:
@@ -245,15 +257,6 @@ class CustomerIdentityResolver:
             return {}
         preferences = payload.get("communication_preferences")
         return preferences if isinstance(preferences, dict) else {}
-        try:
-            return incoming_timestamp >= current_timestamp
-        except TypeError:
-            logger.warning(
-                "Could not compare timestamps %r and %r for most_recent consolidation.",
-                incoming_timestamp,
-                current_timestamp,
-            )
-            return None
 
     def _raw_profile_is_verified(
         self,

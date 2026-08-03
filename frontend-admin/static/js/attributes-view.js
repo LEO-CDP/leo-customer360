@@ -20,6 +20,11 @@ window.C360 = window.C360 || {};
   function yesNoBadgeClass(v) { return v ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"; }
   function statusBadgeClass(v) { return v === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"; }
 
+  // Conversion-related attributes have no dedicated boolean column -- the
+  // LEAD_SCORING group (lead_conversion_probability/lead_grade) is what
+  // identifies them today.
+  function isConversionAttribute(a) { return a.attribute_group === "LEAD_SCORING"; }
+
   function rowVm(a) {
     return $.extend({}, a, {
       groupIcon: (fmt.CATEGORY_ICONS && fmt.CATEGORY_ICONS[a.attribute_group]) || "🔑",
@@ -30,6 +35,13 @@ window.C360 = window.C360 || {};
       piiBadgeClass: yesNoBadgeClass(a.is_pii),
       segmentableLabel: a.is_segmentable ? "Segmentable" : "Not segmentable",
       segmentableBadgeClass: yesNoBadgeClass(a.is_segmentable),
+      cirLabel: a.is_identity_resolution ? "CIR" : "—",
+      cirBadgeClass: yesNoBadgeClass(a.is_identity_resolution),
+      // Priority rank only matters for active CIR matching keys (see database-schema.sql
+      // cdp_profile_attributes.priority_rank); non-CIR attributes show a dash.
+      priorityLabel: a.is_identity_resolution ? ("Rank " + a.priority_rank) : "—",
+      conversionLabel: isConversionAttribute(a) ? "Conversion" : "—",
+      conversionBadgeClass: yesNoBadgeClass(isConversionAttribute(a)),
       statusLabel: fmt.titleCase(a.status),
       statusBadgeClass: statusBadgeClass(a.status)
     });
@@ -46,6 +58,9 @@ window.C360 = window.C360 || {};
       { label: "Data Type", field: "dataTypeLabel" },
       { label: "PII", type: "badge", field: "piiLabel", classField: "piiBadgeClass" },
       { label: "Segmentable", type: "badge", field: "segmentableLabel", classField: "segmentableBadgeClass" },
+      { label: "CIR", type: "badge", field: "cirLabel", classField: "cirBadgeClass" },
+      { label: "Priority", field: "priorityLabel" },
+      { label: "Conversion", type: "badge", field: "conversionLabel", classField: "conversionBadgeClass" },
       { label: "Status", type: "badge", field: "statusLabel", classField: "statusBadgeClass" }
     ],
     rowVm: rowVm,
@@ -53,7 +68,18 @@ window.C360 = window.C360 || {};
     resourceLabel: "attribute",
     clientSide: true,
     clientSideLimit: 500,
-    fetch: function (params) { return api("/profile-attributes/", params); },
+    // Sort priority: CIR first (by priority_rank), then PII, then Conversion;
+    // stable sort keeps everything else in its original (display_order) sequence.
+    fetch: function (params) {
+      return api("/profile-attributes/", params).then(function (items) {
+        return items.slice().sort(function (a, b) {
+          return (b.is_identity_resolution ? 1 : 0) - (a.is_identity_resolution ? 1 : 0) ||
+            (a.priority_rank || 99) - (b.priority_rank || 99) ||
+            (b.is_pii ? 1 : 0) - (a.is_pii ? 1 : 0) ||
+            (isConversionAttribute(b) ? 1 : 0) - (isConversionAttribute(a) ? 1 : 0);
+        });
+      });
+    },
     clientFilters: {
       q: function (vm, value) {
         var needle = value.toLowerCase();
