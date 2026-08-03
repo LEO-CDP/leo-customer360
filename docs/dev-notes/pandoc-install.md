@@ -25,22 +25,33 @@ Tài liệu này hướng dẫn cách cài đặt, cấu hình và sử dụng *
 Mở terminal trên Ubuntu và chạy các lệnh sau:
 
 ```bash
-# 1. Cập nhật danh sách gói hệ thống
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "==> Updating package index..."
 sudo apt update
 
-# 2. Cài đặt Pandoc, XeLaTeX và bộ phông chữ hệ thống
-sudo apt install -y \
-    pandoc \
-    texlive-xetex \
-    texlive-fonts-recommended \
-    texlive-plain-generic \
-    texlive-lang-other \
-    fonts-dejavu \
-    fonts-noto
+echo "==> Upgrading installed packages..."
+sudo apt full-upgrade -y
 
-# 3. Kiểm tra cài đặt thành công
-pandoc --version
-xelatex --version
+echo "==> Installing XeLaTeX + Fonts..."
+sudo apt install -y \
+    texlive-xetex \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    texlive-fonts-extra \
+    texlive-plain-generic \
+    texlive-bibtex-extra \
+    lmodern \
+    fonts-dejavu \
+    fonts-noto \
+    fonts-noto-cjk 
+
+echo
+echo "==> Versions"
+pandoc --version | head -n 2
+echo
+xelatex --version | head -n 2
 ```
 
 ---
