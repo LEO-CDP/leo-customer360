@@ -252,6 +252,10 @@ class ProfileLinkBase(BaseModel):
     master_profile_id: uuid.UUID
     match_score: Optional[Decimal] = None
     match_method: Optional[str] = None
+    status: str = Field(default="ACTIVE", pattern="^(ACTIVE|HISTORICAL|UNLINKED|SUPERSEDED)$")
+    unlinked_at: Optional[datetime] = None
+    unlinked_reason: Optional[str] = None
+    unlinked_by: Optional[uuid.UUID] = None
 
 
 class ProfileLinkCreate(ProfileLinkBase):
@@ -282,6 +286,11 @@ class ProfileAttributeBase(BaseModel):
     matching_threshold: Optional[Decimal] = None
     consolidation_rule: Optional[str] = None
     consolidation_config: dict = Field(default_factory=dict)
+    priority_rank: int = 99
+    value_limit: int = 5
+    limit_timeframe: str = "5_annually"
+    blocked_values: list = Field(default_factory=lambda: ["null", "-1", "anonymous", "void", "abc123"])
+    blocked_patterns: Optional[list[str]] = Field(default_factory=lambda: ["^[0-]*$"])
 
     is_scoring_model: bool = False
     scoring_model_name: Optional[str] = None
@@ -313,6 +322,11 @@ class ProfileAttributeUpdate(BaseModel):
     matching_threshold: Optional[Decimal] = None
     consolidation_rule: Optional[str] = None
     consolidation_config: Optional[dict] = None
+    priority_rank: Optional[int] = None
+    value_limit: Optional[int] = None
+    limit_timeframe: Optional[str] = None
+    blocked_values: Optional[list] = None
+    blocked_patterns: Optional[list[str]] = None
     is_scoring_model: Optional[bool] = None
     scoring_model_name: Optional[str] = None
     scoring_model_version: Optional[str] = None
@@ -334,3 +348,53 @@ class IdResolutionStatusRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: bool
     last_executed_at: Optional[datetime] = None
+
+
+class IdentityIndexBase(BaseModel):
+    tenant_id: uuid.UUID
+    master_profile_id: uuid.UUID
+    identifier_type: str
+    identifier_value: str
+    identifier_value_normalized: str
+    is_primary: bool = False
+    is_blocked: bool = False
+
+
+class IdentityIndexCreate(IdentityIndexBase):
+    pass
+
+
+class IdentityIndexUpdate(BaseModel):
+    is_primary: Optional[bool] = None
+    is_blocked: Optional[bool] = None
+    last_seen_at: Optional[datetime] = None
+
+
+class IdentityIndexRead(IdentityIndexBase):
+    model_config = ConfigDict(from_attributes=True)
+    identity_index_id: uuid.UUID
+    first_seen_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+
+
+class ProfileMergeHistoryBase(BaseModel):
+    tenant_id: uuid.UUID
+    target_master_profile_id: uuid.UUID
+    source_master_profile_id: uuid.UUID
+    merge_reason: str
+    matched_identifier_type: Optional[str] = None
+    matched_identifier_value: Optional[str] = None
+    match_score: Optional[Decimal] = None
+    source_profile_snapshot: dict
+    target_profile_snapshot: dict
+    merged_by: Optional[uuid.UUID] = None
+
+
+class ProfileMergeHistoryCreate(ProfileMergeHistoryBase):
+    pass
+
+
+class ProfileMergeHistoryRead(ProfileMergeHistoryBase):
+    model_config = ConfigDict(from_attributes=True)
+    merge_id: uuid.UUID
+    merged_at: Optional[datetime] = None

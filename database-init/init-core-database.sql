@@ -386,6 +386,50 @@ WHERE attribute_internal_code IN (
     'cookie_id'
 );
 
+-- CIR rule-engine seed: priority ranking (used for limit-demotion), max
+-- allowed values per master profile, and their enforcement window. Higher-
+-- assurance/lower-churn identifiers (KYC id, per-source customer id) get
+-- rank 1 and a tight value_limit; loosely-scoped/high-churn identifiers
+-- (cookies) get a lower rank and a shorter, weekly-refreshed window.
+UPDATE customer360.cdp_profile_attributes
+SET
+    priority_rank = CASE attribute_internal_code
+        WHEN 'external_customer_id' THEN 1
+        WHEN 'national_id' THEN 1
+        WHEN 'email' THEN 2
+        WHEN 'phone_number' THEN 2
+        WHEN 'device_id' THEN 3
+        WHEN 'advertising_id' THEN 3
+        WHEN 'cookie_id' THEN 4
+        ELSE priority_rank
+    END,
+    value_limit = CASE attribute_internal_code
+        WHEN 'external_customer_id' THEN 1
+        WHEN 'national_id' THEN 1
+        WHEN 'email' THEN 5
+        WHEN 'phone_number' THEN 5
+        WHEN 'device_id' THEN 5
+        WHEN 'advertising_id' THEN 5
+        WHEN 'cookie_id' THEN 10
+        ELSE value_limit
+    END,
+    limit_timeframe = CASE attribute_internal_code
+        WHEN 'external_customer_id' THEN '1_ever'
+        WHEN 'national_id' THEN '1_ever'
+        WHEN 'cookie_id' THEN '5_weekly'
+        ELSE '5_annually'
+    END,
+    updated_at = now()
+WHERE attribute_internal_code IN (
+    'email',
+    'phone_number',
+    'national_id',
+    'external_customer_id',
+    'device_id',
+    'advertising_id',
+    'cookie_id'
+);
+
 
 ---------------------------------------------------
 -- SEGMENTS: SEED DATA (Audience Builder)
