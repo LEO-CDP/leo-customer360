@@ -15,6 +15,7 @@ components:
 
 patches:
   - path: patch-nodeports.yaml
+  - path: patch-resources.yaml
 
 secretGenerator:
   - name: c360-secrets

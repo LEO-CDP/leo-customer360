@@ -71,13 +71,17 @@ spec:
             - { name: KEYCLOAK_ADMIN, value: admin }
             - name: KEYCLOAK_ADMIN_PASSWORD
               valueFrom: { secretKeyRef: { name: c360-secrets, key: KEYCLOAK_ADMIN_PASSWORD } }
+# start-dev re-runs Quarkus augmentation on every boot (~60-90s, slower under a
+          # CPU limit); a startupProbe gives it time before liveness/readiness kick in.
+          startupProbe:
+            httpGet: { path: /health/started, port: 9000 }
+            periodSeconds: 5
+            failureThreshold: 40 # up to ~200s to finish augmentation + start
           readinessProbe:
             httpGet: { path: /health/ready, port: 9000 }
-            initialDelaySeconds: 20
             periodSeconds: 10
           livenessProbe:
             httpGet: { path: /health/live, port: 9000 }
-            initialDelaySeconds: 60
             periodSeconds: 15
 ---
 apiVersion: v1
