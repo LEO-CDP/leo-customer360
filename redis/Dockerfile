@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # Redis 8 used as the customer360-api response cache.
 FROM redis:8-alpine
 
