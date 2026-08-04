@@ -50,6 +50,33 @@ k8s/
     └── vks/                     # base + managed endpoints + Ingress + registry images
 ```
 
+## Diagrams
+
+### How Kustomize builds each environment
+
+![Kustomize composition — one base, an optional data-tier component, and a per-env overlay merged by `kubectl apply -k`](docs/kustomize-flow.svg)
+
+`base/` (the env-agnostic **app tier**) is reused by both overlays. `overlays/local`
+additionally pulls in the `in-cluster-data` **component** and patches in NodePorts +
+`:local` images; `overlays/vks` omits that component, adds an Ingress, and repoints
+the images at a registry. `kubectl apply -k overlays/<env>` merges base (+ patches +
+images + secret) and applies the rendered manifests to the target cluster.
+*(Source: [`docs/kustomize-flow.excalidraw`](docs/kustomize-flow.excalidraw) — drop it into [excalidraw.com](https://excalidraw.com) to edit.)*
+
+### Runtime (pod) view — local overlay
+
+![Pod view of the customer360 namespace — app tier over data tier, one-shot Jobs, and the shared ConfigMap/Secret](docs/pod-view.svg)
+
+Inside the `customer360` namespace, the **app tier** (Deployments, `replicas: 1`)
+sits above the **data tier** (StatefulSets + MinIO). `api` is the hub — it reaches
+Postgres, Redis, Kafka and Dagster's GraphQL; `cir`, `dagster` and `keycloak` all
+share **Postgres** as the system of record. `c360-config` + `c360-secrets` are
+injected into every pod via `envFrom`. The host reaches Services through kind's
+port-map → NodePort chain, and three one-shot **Jobs** create `db_keycloak`, the
+MinIO bucket, and the demo data. The data tier and Jobs exist **only** in the local
+overlay — `vks` drops them and points the app at the managed vDB + vStorage.
+*(Source: [`docs/pod-view.excalidraw`](docs/pod-view.excalidraw).)*
+
 ## local vs vks
 
 | | `overlays/local` | `overlays/vks` |
