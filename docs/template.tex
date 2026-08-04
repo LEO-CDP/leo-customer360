@@ -1,0 +1,68 @@
+\documentclass[9pt]{article}
+\usepackage{ifxetex,ifluatex}
+\usepackage[a4paper,margin=1.2cm]{geometry}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{calc}
+\usepackage{color}
+\usepackage{fancyvrb}
+\usepackage{etoolbox}
+
+\ifxetex
+  \usepackage{fontspec}
+  \usepackage{polyglossia}
+  \setmainlanguage{english}
+  \setotherlanguage{vietnamese}
+  \setmainfont{DejaVu Serif}[Scale=0.85]
+  \setsansfont{DejaVu Sans}[Scale=0.85]
+  \setmonofont{DejaVu Sans Mono}[Scale=0.80]
+\fi
+\ifluatex
+  \usepackage{fontspec}
+  \usepackage{polyglossia}
+  \setmainlanguage{english}
+  \setotherlanguage{vietnamese}
+  \setmainfont{DejaVu Serif}
+  \setsansfont{DejaVu Sans}
+  \setmonofont{DejaVu Sans Mono}
+\fi
+
+\usepackage{hyperref}
+\usepackage{array}
+
+% Fix for Pandoc longtable @{}llll@{} counter issue
+\makeatletter
+\@ifundefined{c@none}{\newcounter{none}}{}
+\makeatother
+
+$highlighting-macros$
+
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+\setlength{\parskip}{0.3pt}
+\setlength{\parindent}{0pt}
+
+\begin{document}
+
+$if(title)$
+\noindent{\textbf{$title$}}
+
+$if(subtitle)$
+\smallskip
+\noindent{\small $subtitle$}
+$endif$
+
+$if(date)$
+\smallskip
+\noindent{\footnotesize $date$}
+$endif$
+
+\vspace{0.3em}
+\hrule
+\vspace{0.3em}
+$endif$
+
+$body$
+
+\end{document}

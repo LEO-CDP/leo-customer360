@@ -1147,6 +1147,97 @@ COMMENT ON TABLE customer360.cdp_persona_history IS 'Audit trail of material per
 CREATE INDEX IF NOT EXISTS idx_cdp_persona_history_persona ON customer360.cdp_persona_history (persona_id);
 
 -- ============================================================================
+-- cdp_persona_config: persona-engine scoring/config registry
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS customer360.cdp_persona_config
+(
+    config_key          VARCHAR(120) PRIMARY KEY,
+    config_value        TEXT NOT NULL,
+    data_type           VARCHAR(20) NOT NULL CHECK (data_type IN ('INTEGER', 'NUMERIC', 'BOOLEAN', 'VARCHAR', 'JSONB')),
+    config_description  TEXT,
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_by          VARCHAR(100),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE customer360.cdp_persona_config IS 'Typed runtime config registry for PersonaResolutionEngine constants (thresholds, weights, caps, bonuses, and history delta).';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_config_active ON customer360.cdp_persona_config (is_active);
+
+INSERT INTO customer360.cdp_persona_config (config_key, config_value, data_type, config_description, is_active, updated_by)
+VALUES
+    ('RISK_LEVEL_CRITICAL_THRESHOLD', '80.0', 'NUMERIC', 'Risk level threshold: critical', TRUE, 'system_seed'),
+    ('RISK_LEVEL_HIGH_THRESHOLD', '60.0', 'NUMERIC', 'Risk level threshold: high', TRUE, 'system_seed'),
+    ('RISK_LEVEL_MEDIUM_THRESHOLD', '40.0', 'NUMERIC', 'Risk level threshold: medium', TRUE, 'system_seed'),
+
+    ('LIFECYCLE_BEHAVIOR_PROSPECT_BASE', '20.0', 'NUMERIC', 'Behavior base score for prospect', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_LEAD_BASE', '40.0', 'NUMERIC', 'Behavior base score for lead', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_CUSTOMER_BASE', '65.0', 'NUMERIC', 'Behavior base score for customer', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_VIP_BASE', '95.0', 'NUMERIC', 'Behavior base score for VIP', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_DORMANT_BASE', '30.0', 'NUMERIC', 'Behavior base score for dormant', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_CHURN_RISK_BASE', '35.0', 'NUMERIC', 'Behavior base score for churn_risk', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_DEFAULT_BASE', '30.0', 'NUMERIC', 'Behavior base score default fallback', TRUE, 'system_seed'),
+
+    ('ENGAGEMENT_RECENCY_UNKNOWN_SCORE', '30.0', 'NUMERIC', 'Engagement recency score when unknown', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_7D_SCORE', '100.0', 'NUMERIC', 'Engagement recency score <= 7 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_30D_SCORE', '80.0', 'NUMERIC', 'Engagement recency score <= 30 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_90D_SCORE', '50.0', 'NUMERIC', 'Engagement recency score <= 90 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_180D_SCORE', '25.0', 'NUMERIC', 'Engagement recency score <= 180 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_STALE_SCORE', '10.0', 'NUMERIC', 'Engagement recency score stale', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_7D', '7', 'INTEGER', 'Engagement recency threshold 7 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_30D', '30', 'INTEGER', 'Engagement recency threshold 30 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_90D', '90', 'INTEGER', 'Engagement recency threshold 90 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_180D', '180', 'INTEGER', 'Engagement recency threshold 180 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_CHANNEL_WEIGHT_PER_SYSTEM', '10.0', 'NUMERIC', 'Engagement bonus per source system', TRUE, 'system_seed'),
+    ('ENGAGEMENT_CHANNEL_BONUS_CAP', '30.0', 'NUMERIC', 'Engagement channel bonus cap', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_WEIGHT', '0.7', 'NUMERIC', 'Engagement recency blend weight', TRUE, 'system_seed'),
+
+    ('FINANCIAL_CLV_REFERENCE_DEFAULT', '5000.0', 'NUMERIC', 'Financial score CLV reference', TRUE, 'system_seed'),
+    ('FINANCIAL_SCORE_MULTIPLIER', '100.0', 'NUMERIC', 'Financial score multiplier', TRUE, 'system_seed'),
+
+    ('LOYALTY_TIER_PLATINUM_BASE', '100.0', 'NUMERIC', 'Loyalty tier base platinum', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_GOLD_BASE', '80.0', 'NUMERIC', 'Loyalty tier base gold', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_SILVER_BASE', '60.0', 'NUMERIC', 'Loyalty tier base silver', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_BRONZE_BASE', '40.0', 'NUMERIC', 'Loyalty tier base bronze', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_DEFAULT_BASE', '20.0', 'NUMERIC', 'Loyalty tier base default', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_WEIGHT', '0.8', 'NUMERIC', 'Loyalty tier blend weight', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_BONUS_PER_YEAR', '20.0', 'NUMERIC', 'Loyalty tenure bonus per year', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_BONUS_CAP', '20.0', 'NUMERIC', 'Loyalty tenure bonus cap', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_REFERENCE_DAYS', '365.0', 'NUMERIC', 'Loyalty tenure days reference', TRUE, 'system_seed'),
+
+    ('RELATIONSHIP_CHANNEL_WEIGHT_PER_SYSTEM', '20.0', 'NUMERIC', 'Relationship bonus per source system', TRUE, 'system_seed'),
+    ('RELATIONSHIP_CHANNEL_BONUS_CAP', '60.0', 'NUMERIC', 'Relationship channel bonus cap', TRUE, 'system_seed'),
+    ('RELATIONSHIP_CONTACT_WEIGHT_PER_CONTACT', '10.0', 'NUMERIC', 'Relationship bonus per contact', TRUE, 'system_seed'),
+    ('RELATIONSHIP_CONTACT_BONUS_CAP', '40.0', 'NUMERIC', 'Relationship contact bonus cap', TRUE, 'system_seed'),
+
+    ('RISK_SCORE_CHURN_MULTIPLIER', '100.0', 'NUMERIC', 'Risk scoring multiplier for churn probability', TRUE, 'system_seed'),
+    ('RISK_SCORE_DEFAULT_CHURN_BASE', '20.0', 'NUMERIC', 'Risk scoring default base if churn is missing', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_LOW', '0.0', 'NUMERIC', 'Risk segment bonus low', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_MEDIUM', '15.0', 'NUMERIC', 'Risk segment bonus medium', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_HIGH', '30.0', 'NUMERIC', 'Risk segment bonus high', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_CRITICAL', '45.0', 'NUMERIC', 'Risk segment bonus critical', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_VERIFIED', '0.0', 'NUMERIC', 'KYC status bonus verified', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_PENDING', '10.0', 'NUMERIC', 'KYC status bonus pending', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_UNVERIFIED', '20.0', 'NUMERIC', 'KYC status bonus unverified', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_REJECTED', '40.0', 'NUMERIC', 'KYC status bonus rejected', TRUE, 'system_seed'),
+
+    ('VALUE_TIER_CHAMPION_THRESHOLD', '80.0', 'NUMERIC', 'Customer value tier threshold champion', TRUE, 'system_seed'),
+    ('VALUE_TIER_HIGH_VALUE_THRESHOLD', '60.0', 'NUMERIC', 'Customer value tier threshold high_value', TRUE, 'system_seed'),
+    ('VALUE_TIER_GROWTH_POTENTIAL_THRESHOLD', '35.0', 'NUMERIC', 'Customer value tier threshold growth_potential', TRUE, 'system_seed'),
+
+    ('SCORE_WEIGHT_BEHAVIOR', '0.20', 'NUMERIC', 'Persona score weight behavior', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_ENGAGEMENT', '0.20', 'NUMERIC', 'Persona score weight engagement', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_FINANCIAL', '0.20', 'NUMERIC', 'Persona score weight financial', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_LOYALTY', '0.15', 'NUMERIC', 'Persona score weight loyalty', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_RELATIONSHIP', '0.10', 'NUMERIC', 'Persona score weight relationship', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_RISK', '0.15', 'NUMERIC', 'Persona score weight risk inverse component', TRUE, 'system_seed'),
+    ('SCORE_WEIGHTS_POSITIVE_SUM', '0.85', 'NUMERIC', 'Sanity helper for positive score weights', TRUE, 'system_seed'),
+
+    ('PERSONA_HISTORY_SCORE_DELTA_THRESHOLD', '5.0', 'NUMERIC', 'Minimum absolute score delta for history record', TRUE, 'system_seed')
+ON CONFLICT (config_key) DO NOTHING;
+
+-- ============================================================================
 -- cdp_raw_events: high-volume behavioral/transactional event fact table
 -- ============================================================================
 -- Range-partitioned by event_time (monthly) so a single tenant's event volume

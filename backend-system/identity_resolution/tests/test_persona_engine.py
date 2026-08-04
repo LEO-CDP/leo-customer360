@@ -11,9 +11,13 @@ fixtures in conftest.py.
 
 from datetime import date, datetime, timedelta
 
+import pytest
+
 from identity_resolution import persona
 from identity_resolution.persona_engine import (
+    PERSONA_CONFIG_DEFAULTS,
     PersonaResolutionEngine,
+    apply_persona_config,
     compute_behavior_score,
     compute_customer_value_tier,
     compute_engagement_score,
@@ -27,6 +31,7 @@ from identity_resolution.persona_engine import (
     compute_relationship_score,
     compute_risk_level,
     compute_risk_score,
+    load_persona_config,
 )
 
 
@@ -55,6 +60,14 @@ def _profile(**overrides):
     }
     base.update(overrides)
     return base
+
+
+@pytest.fixture(autouse=True)
+def _reset_persona_engine_config():
+    # Ensure test isolation since apply_persona_config mutates module-level constants.
+    apply_persona_config(PERSONA_CONFIG_DEFAULTS)
+    yield
+    apply_persona_config(PERSONA_CONFIG_DEFAULTS)
 
 
 class TestComponentScores:
@@ -130,6 +143,50 @@ class TestComponentScores:
     def test_risk_score_defaults_when_no_churn_probability(self):
         score = compute_risk_score(_profile(churn_probability=None, risk_segment=None, kyc_status=None))
         assert score == 20.0
+
+
+class TestPersonaConfigLoader:
+    def test_load_persona_config_falls_back_to_defaults_when_query_fails(self, mock_cursor):
+        mock_cursor.execute.side_effect = RuntimeError("db unavailable")
+
+        config = load_persona_config(mock_cursor, schema="customer360")
+
+        assert config["RISK_LEVEL_HIGH_THRESHOLD"] == 60.0
+        assert config["PERSONA_HISTORY_SCORE_DELTA_THRESHOLD"] == 5.0
+
+    def test_load_persona_config_overrides_defaults_from_db_rows(self, mock_cursor):
+        mock_cursor.fetchall.return_value = [
+            {
+                "config_key": "RISK_LEVEL_HIGH_THRESHOLD",
+                "config_value": "55.5",
+                "data_type": "NUMERIC",
+            },
+            {
+                "config_key": "ENGAGEMENT_RECENCY_THRESHOLD_30D",
+                "config_value": "45",
+                "data_type": "INTEGER",
+            },
+            {
+                "config_key": "UNKNOWN_KEY_SHOULD_BE_IGNORED",
+                "config_value": "999",
+                "data_type": "NUMERIC",
+            },
+        ]
+
+        config = load_persona_config(mock_cursor, schema="customer360")
+
+        assert config["RISK_LEVEL_HIGH_THRESHOLD"] == 55.5
+        assert config["ENGAGEMENT_RECENCY_THRESHOLD_30D"] == 45
+        assert "UNKNOWN_KEY_SHOULD_BE_IGNORED" not in config
+
+    def test_apply_persona_config_updates_runtime_thresholds(self):
+        config = dict(PERSONA_CONFIG_DEFAULTS)
+        config["RISK_LEVEL_HIGH_THRESHOLD"] = 55.0
+
+        apply_persona_config(config)
+
+        assert compute_risk_level(59.0) == "high"
+        assert compute_risk_level(54.0) == "medium"
 
 
 class TestPersonaScoreAggregation:
@@ -255,6 +312,7 @@ class TestPersonaResolutionEngine:
     def test_resolve_persona_inserts_persona_and_updates_master(self, mock_cursor, mock_conn, monkeypatch):
         monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
         master_row = _profile()
+        mock_cursor.fetchall.return_value = []
         # fetchone is called in order: _fetch_master_profile, _fetch_current_persona,
         # _next_computed_version, _insert_persona (RETURNING persona_id)
         mock_cursor.fetchone.side_effect = [
@@ -283,6 +341,7 @@ class TestPersonaResolutionEngine:
         monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
         master_row = _profile()
         computation = compute_persona(master_row)
+        mock_cursor.fetchall.return_value = []
         mock_cursor.fetchone.side_effect = [
             master_row,
             {"persona_id": "old-persona", "persona_name": computation.persona_name, "persona_score": computation.persona_score},
@@ -299,6 +358,7 @@ class TestPersonaResolutionEngine:
     def test_resolve_persona_records_history_when_score_changes_materially(self, mock_cursor, mock_conn, monkeypatch):
         monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
         master_row = _profile()
+        mock_cursor.fetchall.return_value = []
         mock_cursor.fetchone.side_effect = [
             master_row,
             {"persona_id": "old-persona", "persona_name": "Some Old Persona #abc123", "persona_score": 1.0},
@@ -319,3 +379,26 @@ class TestPersonaResolutionEngine:
         result = engine.resolve_persona(mock_cursor, "t1", "some-master")
 
         assert result is None
+
+    def test_resolve_persona_applies_db_config_override(self, mock_cursor, mock_conn, monkeypatch):
+        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        master_row = _profile()
+        mock_cursor.fetchall.return_value = [
+            {
+                "config_key": "RISK_LEVEL_HIGH_THRESHOLD",
+                "config_value": "55",
+                "data_type": "INTEGER",
+            }
+        ]
+        mock_cursor.fetchone.side_effect = [
+            master_row,
+            None,
+            {"next_version": 1},
+            {"persona_id": "persona-9"},
+        ]
+        engine = self.make_engine()
+
+        result = engine.resolve_persona(mock_cursor, "t1", master_row["master_profile_id"])
+
+        assert result is not None
+        assert compute_risk_level(56.0) == "high"

@@ -1,444 +1,422 @@
 ---
-title: "Customer Identity Resolution cho dữ liệu khách hàng đa nguồn"
-subtitle: "Thiết kế và vận hành dựa trên schema và mã nguồn hiện tại"
-author: ""
+title: "Customer Identity Resolution for Multi-Source Customer Data"
+subtitle: "Design and operations based on the current schema and source code"
+author: "Trieu at trieu@leocdp.com"
 date: 2026-08-04
-geometry: "a4paper,margin=1.7cm"
+geometry: "a4paper,margin=1.5cm"
 fontsize: "9.5pt"
 linestretch: "1.0"
 mainfont: "DejaVu Serif"
 ---
 
-# Customer Identity Resolution cho dữ liệu khách hàng đa nguồn
+## Abstract
 
-## Tóm tắt
+Customer Identity Resolution (CIR) is the process of linking customer records from multiple systems into a single unified profile. In this implementation, inbound data is first written to a staging table and then processed by a Python resolver driven by metadata rules. The objective is to maintain exactly one master profile per customer within each tenant and domain, while preserving flexibility when new data sources or matching rules are introduced.
 
-Customer Identity Resolution (CIR) là quá trình liên kết các bản ghi khách hàng từ nhiều nguồn thành một hồ sơ thống nhất. Trong hệ thống này, dữ liệu đầu vào được lưu vào bảng staging, sau đó được xử lý bởi resolver Python theo các quy tắc metadata. Mục tiêu là tạo ra một master profile duy nhất cho mỗi khách hàng trong từng tenant và domain, đồng thời giữ được tính linh hoạt khi dữ liệu mới hoặc quy tắc matching thay đổi.
+## 1. Scope
 
-## 1. Phạm vi
+This paper is based on components that already exist in the repository:
 
-Tài liệu này dựa trên các thành phần hiện có trong repository:
+- PostgreSQL schema in `database-init/database-schema.sql`
+- Resolver module in `backend-system/identity_resolution/identity_resolution/resolver.py`
+- Trigger controller in `backend-system/identity_resolution/identity_resolution/trigger_controller.py`
+- Persona logic in `backend-system/identity_resolution/identity_resolution/persona.py`
 
-- schema PostgreSQL trong database-init/database-schema.sql
-- module resolver trong backend-system/identity_resolution/identity_resolution/resolver.py
-- trigger controller trong backend-system/identity_resolution/identity_resolution/trigger_controller.py
-- logic persona trong backend-system/identity_resolution/identity_resolution/persona.py
+### Main Flow (Identity Resolution Context)
 
-## 2. Mô hình dữ liệu chính và Cơ cấu làm giàu dữ liệu (Data Enrichment)
+```text
+Raw Profiles
+  -> Staging and Validation
+  -> Identity Resolution Engine (this paper)
+       -> Rule Loading from Metadata
+       -> Candidate Matching (exact/fuzzy)
+       -> Master Profile Merge or Create
+       -> Link and Audit Updates
+  -> Unified Customer Profile
+  -> Persona Resolution Engine (downstream)
+  -> Customer360 Master Profile
+```
 
-Cơ sở dữ liệu lưu trữ các thực thể và mối quan hệ để phục vụ quá trình liên kết thông tin. Dưới đây là chi tiết các bảng cốt lõi cùng các trường dữ liệu quan trọng, ý nghĩa vận hành, và cách thức làm giàu dữ liệu (data enrichment):
+| Stage | Purpose | Output |
+| --- | --- | --- |
+| Raw Profiles | Ingest events and profile traces from source systems | Staging-ready records |
+| Identity Resolution | Match, merge, and link records per tenant/domain | Unified customer profile |
+| Downstream Persona Resolution | Enrich profile with persona intelligence | Persona fields, scores, and embeddings |
+| Customer360 Master Profile | Persist durable customer truth for activation | Single customer view for operations |
 
-### 2.1 Bảng `cdp_raw_profiles_stage` (Bảng staging dữ liệu thô)
-Bảng trung gian đóng vai trò là landing zone để tiếp nhận vết thông tin khách hàng thô được đẩy vào từ các nguồn khác nhau trước khi giải quyết danh tính.
+## 2. Core Data Model and Data Enrichment Structure
 
-*   **Các trường dữ liệu quan trọng:**
-    *   `raw_profile_id` (UUID, Khóa chính): Định danh duy nhất cho mỗi sự kiện raw profile.
-    *   `tenant_id` (UUID): Phân lũy để bảo vệ an toàn dữ liệu multi-tenant.
-    *   `domain` (TEXT): Lĩnh vực nghiệp vụ chuyên biệt (ví dụ: `retail`, `banking`, `travel`).
-    *   `source_system` (TEXT): Hệ thống gốc gửi dữ liệu (ví dụ: `POS`, `AppsFlyer`, `MoEngage`, `CRM`).
-    *   `external_customer_id` (TEXT): Mã khách hàng nội bộ của hệ thống nguồn.
-    *   `email`, `phone_number`, `national_id` (TEXT): Dữ liệu định danh cá nhân (PII). Có thể là plaintext hoặc chuỗi SHA-256 hash một chiều.
-    *   `full_name`, `first_name`, `last_name` (TEXT): Thông tin họ tên tại nguồn.
-    *   `device_id`, `advertising_id`, `cookie_id`, `push_token` (TEXT): Định danh số và thiết bị phục vụ định dạng đa kênh (multi-channel resolution).
-    *   `event_name`, `event_time` (TIMESTAMP WITH TIME ZONE), `event_payload` (JSONB): Tên hành vi, mốc thời gian và toàn bộ dữ liệu thuộc tính bổ sung dạng bán cấu trúc phục vụ làm giàu thông tin (data enrichment).
-    *   `status_code` (SMALLINT, Mặc định = `1`): Quản lý vòng đời hàng đợi (`1`: Sẵn sàng xử lý, `2`: Đang xử lý, `3`: Đã xử lý hoàn tất, `4`: Thất bại).
-    *   `processed_at` (TIMESTAMP WITH TIME ZONE): Thời điểm hoàn tất giải quyết danh tính.
+The database stores entities and relationships required by the resolution lifecycle. This section summarizes the core tables, key fields, and their operational role in enrichment.
 
-### 2.2 Bảng `cdp_master_profiles` (Hồ sơ Master / Golden Record)
-Bản ghi duy nhất của một khách hàng sau khi đã được hợp nhất, làm sạch và làm giàu thông tin từ mọi nguồn dữ liệu.
+### 2.1 Table `cdp_raw_profiles_stage` (Raw staging table)
 
-*   **Các trường dữ liệu quan trọng:**
-    *   `master_profile_id` (UUID, Khóa chính): Định danh hồ sơ vàng của khách hàng.
-    *   `tenant_id` (UUID), `domain` (TEXT): Ràng buộc phạm vi quản trị dữ liệu.
-    *   `full_name`, `first_name`, `last_name`, `email`, `phone_number`, `national_id`, `address` (TEXT): Thông tin định danh đã được chuẩn hóa (consolidated) theo thứ tự ưu tiên hoặc thời gian.
-    *   `secondary_emails`, `secondary_phones` (JSONB): Lưu mọi email/SĐT phụ khác thu thập từ nguồn hàng ngày dưới dạng mảng để không bỏ sót kênh tiếp cận.
-    *   `external_ids` (JSONB): Bản đồ lưu (key/value) cặp `source_system` và `external_customer_id` tương ứng nâng cao khả năng đồng bộ ngược (reverse syndication).
-    *   `device_ids`, `advertising_ids`, `cookie_ids` (TEXT[]): Tập hợp duy nhất các token thiết bị để tiếp cận quảng cáo.
-    *   `push_tokens` (JSONB): Cấu trúc key-value lưu push token tương thích với các nền tảng thông báo (như FCM, APNS).
-    *   `is_hashed` (BOOLEAN, Mặc định = `FALSE`): Đánh dấu nếu hồ sơ này sử dụng các PII bị che giấu bằng hàm hash bảo mật SHA-256.
-    *   `persona_name` (TEXT): Tên danh tính ảo dạng dễ đọc (non-PII) được tự động sinh thông qua logic nghiệp vụ hoặc LLM (Gemini-3.5-Flash) để phục vụ tìm kiếm và bảo mật.
-    *   `persona_summary` (TEXT): Bản tóm tắt phong cách hành vi được cập nhật từ lịch sử tương tác đa kênh phục vụ tiếp cận cá nhân hóa sâu (data enrichment).
-    *   `persona_embedding` (VECTOR(768)): Vector nhúng nhị phân từ LLM hỗ trợ tìm kiếm ngữ nghĩa (semantic search) và đề xuất đối tượng Lookalike.
-    *   `updated_at` (TIMESTAMP WITH TIME ZONE): Thời điểm cập nhật cuối cùng của hồ sơ.
-    *   `first_seen_raw_profile_id` (UUID): Truy vết lineage về raw profile ban đầu khai sinh ra hồ sơ này.
-    *   `source_systems` (TEXT[]): Danh sách phân biệt các nguồn đóng góp dữ liệu.
+This intermediate table acts as the landing zone for raw customer traces from heterogeneous source systems before identity resolution.
 
-### 2.3 Bảng `cdp_profile_links` (Bảng liên kết quan hệ)
-Mô tả bản đồ ánh xạ trạng thái quan hệ 1-N giữa hồ sơ master hoạt động và tất cả các nguồn thô đóng góp.
+**Important fields:**
 
-*   **Các trường dữ liệu quan trọng:**
-    *   `link_id` (BIGSERIAL, Khóa chính): Định danh duy nhất cho bản ghi liên kết.
-    *   `tenant_id` (UUID): Ràng buộc tenant.
-    *   `raw_profile_id` (UUID, UNIQUE): Liên kết duy nhất tới staging. Ràng buộc `UNIQUE` đảm bảo tại một thời điểm, một bản thô chỉ ánh xạ tới duy nhất một hồ sơ master hoạt động.
-    *   `master_profile_id` (UUID): Tham chiếu tới hồ sơ master đích.
-    *   `match_score` (NUMERIC): Điểm số đánh giá độ tin cậy trùng khớp từ `0.0` đến `1.0`.
-    *   `match_method` (TEXT): Phương thức/Thuật toán kích hoạt liên kết (ví dụ: `exact_email`, `fuzzy_trgm_name`).
-    *   `status` (VARCHAR): Trạng thái liên kết (`ACTIVE`, `HISTORICAL` nếu bị gỡ bỏ sau khi unmerge hồ sơ).
+- `raw_profile_id` (UUID, primary key): unique identifier for each raw profile event.
+- `tenant_id` (UUID): tenant partitioning key for multi-tenant isolation.
+- `domain` (TEXT): business domain context (for example: `retail`, `banking`, `travel`).
+- `source_system` (TEXT): upstream origin system (for example: `POS`, `AppsFlyer`, `MoEngage`, `CRM`).
+- `external_customer_id` (TEXT): source-local customer identifier.
+- `email`, `phone_number`, `national_id` (TEXT): personal identifiers; values can be plaintext or one-way SHA-256 hashes.
+- `full_name`, `first_name`, `last_name` (TEXT): source name fields.
+- `device_id`, `advertising_id`, `cookie_id`, `push_token` (TEXT): digital/device identifiers for cross-channel resolution.
+- `event_name`, `event_time` (TIMESTAMPTZ), `event_payload` (JSONB): event semantics, timestamp, and extensible attributes for enrichment.
+- `status_code` (SMALLINT, default `1`): queue lifecycle (`1` ready, `2` processing, `3` processed, `4` failed).
+- `processed_at` (TIMESTAMPTZ): completion timestamp.
 
-### 2.4 Bảng `cdp_profile_attributes` (Metadata thuộc tính)
-Registry điều khiển cho phép hệ thống mở rộng và tùy biến linh hoạt quy tắc ghép nối và làm giàu thuộc tính.
+### 2.2 Table `cdp_master_profiles` (Master/Golden profile)
 
-*   **Các trường dữ liệu quan trọng:**
-    *   `attribute_internal_code` (VARCHAR, Khóa chính): Khóa nội bộ tương khớp cột ở staging.
-    *   `master_profile_column` (VARCHAR): Cột đích tương ứng trên bảng master profile.
-    *   `is_identity_resolution` (BOOLEAN): Đánh dấu trường thuộc tính này có tham gia trực tiếp vào bước tìm kiếm so khớp danh tính hay không.
-    *   `matching_rule` (VARCHAR): Thuật toán so khớp (`exact`, `fuzzy_trgm`, `fuzzy_dmetaphone`, `none`).
-    *   `matching_threshold` (NUMERIC): Mức tối thiểu chấp nhận trùng khớp khi dùng phép so sánh mờ.
-    *   `consolidation_rule` (VARCHAR): Chiến lược ghi đè, merge hành vi khi cập nhật thuộc tính master (`most_recent` - lấy mới nhất, `verified_first` - ưu tiên nguồn uy tín, `non_null` - giữ nguyên giá trị không rỗng, `append_distinct` - nối mảng bộ lọc).
+This table stores the canonical customer profile after merge, normalization, and enrichment across all sources.
 
-### 2.5 Bảng `cdp_identity_index` (Chỉ mục định danh phẳng)
-Bảng tăng tốc tra cứu khớp chính xác định danh bằng cách phẳng hóa các mảng hoặc bản đồ định danh, giúp tránh scan các cột JSONB/mảng phức tạp trong các luồng dữ liệu throughput cao.
+**Important fields:**
 
-*   **Các trường dữ liệu quan trọng:**
-    *   `identity_index_id` (UUID, Khóa chính): Định danh chỉ mục định danh phẳng.
-    *   `tenant_id` (UUID): Scoping theo tenant.
-    *   `master_profile_id` (UUID): Tham chiếu tới master profile sở hữu định danh này.
-    *   `identifier_type` (VARCHAR): Loại mã định danh (ví dụ: `email`, `phone`, `cookie_id`).
-    *   `identifier_value` (TEXT) & `identifier_value_normalized` (TEXT): Giá trị định danh gốc và giá trị định danh đã chuẩn hóa (chuyển chữ thường, cắt khoảng trắng dư) để so khớp chính xác.
-    *   `is_blocked` (BOOLEAN): Cờ chặn định danh giả lập (ví dụ: `anonymous`, `null`, `void`).
+- `master_profile_id` (UUID, primary key): golden profile identifier.
+- `tenant_id` (UUID), `domain` (TEXT): strict data scoping dimensions.
+- `full_name`, `first_name`, `last_name`, `email`, `phone_number`, `national_id`, `address` (TEXT): consolidated identity fields.
+- `secondary_emails`, `secondary_phones` (JSONB): retained alternate contact points to preserve channel reach.
+- `external_ids` (JSONB): source-to-external ID map to support reverse synchronization.
+- `device_ids`, `advertising_ids`, `cookie_ids` (TEXT[]): deduplicated device identity arrays.
+- `push_tokens` (JSONB): push-token map for notification platforms.
+- `is_hashed` (BOOLEAN, default `FALSE`): indicates that sensitive PII values are hashed.
+- `persona_name` (TEXT): non-PII identity label generated by deterministic logic or LLM.
+- `persona_summary` (TEXT): short behavior narrative used in personalization workflows.
+- `persona_embedding` (VECTOR(768)): embedding vector for semantic retrieval and lookalike targeting.
+- `updated_at` (TIMESTAMPTZ): last update timestamp.
+- `first_seen_raw_profile_id` (UUID): lineage reference to the first raw record that created this master profile.
+- `source_systems` (TEXT[]): set of contributing source systems.
+
+### 2.3 Table `cdp_profile_links` (Profile-link table)
+
+This table stores the active 1-to-N relationship between a master profile and its contributing raw profiles.
+
+**Important fields:**
+
+- `link_id` (BIGSERIAL, primary key): unique link record identifier.
+- `tenant_id` (UUID): tenant partition key.
+- `raw_profile_id` (UUID, UNIQUE): one raw profile maps to one active master profile at a time.
+- `master_profile_id` (UUID): target master profile.
+- `match_score` (NUMERIC): confidence score in range [0.0, 1.0].
+- `match_method` (TEXT): algorithm/method label (for example: `exact_email`, `fuzzy_trgm_name`).
+- `status` (VARCHAR): link state (`ACTIVE`, `HISTORICAL`).
+
+### 2.4 Table `cdp_profile_attributes` (Attribute metadata registry)
+
+This registry controls matching and consolidation behavior at the attribute level.
+
+**Important fields:**
+
+- `attribute_internal_code` (VARCHAR, primary key): internal key aligned with staging columns.
+- `master_profile_column` (VARCHAR): target column on `cdp_master_profiles`.
+- `is_identity_resolution` (BOOLEAN): whether the attribute participates in identity matching.
+- `matching_rule` (VARCHAR): matching method (`exact`, `fuzzy_trgm`, `fuzzy_dmetaphone`, `none`).
+- `matching_threshold` (NUMERIC): threshold for fuzzy matching.
+- `consolidation_rule` (VARCHAR): merge strategy (`most_recent`, `verified_first`, `source_priority`, `non_null`, `append_distinct`, `overwrite`).
+
+### 2.5 Table `cdp_identity_index` (Flattened identity index)
+
+This index accelerates exact-match lookups by flattening JSON/array identifiers, reducing scans over complex nested fields under high throughput.
+
+**Important fields:**
+
+- `identity_index_id` (UUID, primary key): identity index record identifier.
+- `tenant_id` (UUID): tenant scope.
+- `master_profile_id` (UUID): owner master profile.
+- `identifier_type` (VARCHAR): identifier type (for example: `email`, `phone`, `cookie_id`).
+- `identifier_value` (TEXT), `identifier_value_normalized` (TEXT): raw and normalized forms for stable exact matching.
+- `is_blocked` (BOOLEAN): blocks invalid/synthetic values (for example: `anonymous`, `null`, `void`).
 
 ---
 
-## 3. Cơ chế xử lý
+## 3. Processing Mechanism
 
-Quá trình giải quyết danh tính Customer Identity Resolution (CIR) được điều phối bởi module `CustomerIdentityResolver` trong `resolver.py`. Hệ thống hoạt động hoàn toàn dựa trên metadata điều khiển (`cdp_profile_attributes`), đảm bảo tính linh hoạt, mở rộng và cách ly dữ liệu đa người dùng (multi-tenant isolation).
+Customer Identity Resolution is orchestrated by `CustomerIdentityResolver` in `resolver.py`. The pipeline is metadata-driven through `cdp_profile_attributes`, which provides strong flexibility and maintainability while preserving strict multi-tenant isolation.
 
-### 3.1 Quy trình xử lý chi tiết (Step-by-Step Processing)
+### 3.1 Detailed Step-by-Step Processing
 
-Mỗi đợt xử lý (batch) thực thi theo chuỗi 7 bước tuần tự:
+Each batch executes a sequential seven-step flow:
 
-1. **Tải cấu hình quy tắc (Fetch Active Rules):**
-   * Quét bảng `cdp_profile_attributes` để lấy danh sách các trường được đánh dấu `is_identity_resolution = TRUE`, `status = 'ACTIVE'`, có `matching_rule` khác `none` và không rỗng.
-2. **Trích xuất dữ liệu Staging (Fetch Unprocessed Profiles):**
-   * Quét bảng `cdp_raw_profiles_stage` lấy ra các bản ghi mới chèn chưa qua xử lý (`status_code = 1`) giới hạn theo kích thước `batch_size` (mặc định 1,000 bản ghi).
-3. **Thiết lập ngữ cảnh an toàn Tenant (Set Tenant Context):**
-   * Đối với mỗi bản ghi thô, hệ thống thực thi `SELECT set_config('app.tenant_id', ...)` để kích hoạt cơ chế Row-Level Security (RLS) của PostgreSQL, đảm bảo tuyệt đối không rò rỉ dữ liệu giữa các tenant.
-4. **Xây dựng truy vấn so khớp động (Dynamic Query Building):**
-   * Dựa vào danh sách rule, hệ thống kiểm tra các thuộc tính có trong bản ghi thô để xây dựng câu lệnh SQL `OR` động:
-     * **Mảng thiết bị (`device_id`, `advertising_id`, `cookie_id`):** Dùng toán tử `= ANY(array_column)`.
-     * **Định danh nguồn (`external_customer_id`):** Dùng toán tử chứa JSONB `external_ids @> jsonb_build_object(source_system, value)`.
-     * **Thuộc tính khớp chính xác (`exact`):** Dùng toán tử `=`.
-     * **Khớp mờ chuỗi (`fuzzy_trgm`):** Dùng hàm `similarity(column, value) >= threshold`.
-     * **Khớp ngữ âm (`fuzzy_dmetaphone`):** Dùng hàm `dmetaphone(column) = dmetaphone(value)`.
-5. **So khớp Master Profile (Find Master Profile):**
-   * Thực thi câu lệnh SQL kết hợp điều kiện phân vùng bắt buộc: `WHERE tenant_id = :tenant_id AND domain = :domain AND (các_điều_kiện_động) LIMIT 1`.
-6. **Hợp nhất dữ liệu hoặc Khai sinh Hồ sơ Vàng (Merge or Create):**
-   * **Nếu TÌM THẤY Master Profile:**
-     * Tạo bản ghi liên kết mới trên `cdp_profile_links` với `match_score = 1.0` và `match_method = 'DynamicMatch'`.
-     * Hợp nhất các trường thuộc tính scalar (họ tên, email, SĐT, v.v.) theo chiến lược cấu hình `consolidation_rule` (`most_recent`, `verified_first`, `source_priority`, `non_null`, `append_distinct`, `overwrite`) hoặc `COALESCE` mặc định.
-     * Tích lũy (append/union) các mảng thiết bị, mã nguồn `source_systems` và các bản đồ JSONB (`external_ids`, `push_tokens`, `communication_preferences`).
-     * Kiểm tra định dạng PII: nếu bị hash, bật cờ `is_hashed = TRUE` và tự động sinh `persona_name`.
-   * **Nếu KHÔNG TÌM THẤY Master Profile:**
-     * Khởi tạo một Master Profile mới trên `cdp_master_profiles`, lưu vết `first_seen_raw_profile_id`.
-     * Tạo bản ghi liên kết đầu tiên trên `cdp_profile_links` với `match_method = 'NewMaster'`.
-7. **Cập nhật trạng thái Staging & Commit (Mark Processed & Commit):**
-   * Cập nhật bản ghi staging thành `status_code = 3` (hoàn tất) và ghi mốc thời gian `processed_at = NOW()`.
-   * Sau khi duyệt hết batch, thực thi `conn.commit()` để hoàn tất giao dịch atomic. Nếu gặp sự cố, thực hiện `conn.rollback()`.
+1. **Load active rules**
+   - Query `cdp_profile_attributes` for attributes where `is_identity_resolution = TRUE`, `status = 'ACTIVE'`, and `matching_rule` is defined and not `none`.
 
-### 3.2 Sơ đồ luồng xử lý tổng thể (Resolution Execution Flow)
+2. **Fetch unprocessed staging records**
+   - Query `cdp_raw_profiles_stage` with `status_code = 1`, limited by configured `batch_size` (default: 1,000 records).
 
-```
-[Bắt đầu Batch Resolution]
+3. **Set secure tenant context**
+   - For each raw row, execute `SELECT set_config('app.tenant_id', ...)` to activate PostgreSQL RLS and prevent cross-tenant leakage.
+
+4. **Build dynamic matching query**
+   - Construct SQL `OR` conditions from available staged attributes:
+     - Device arrays (`device_id`, `advertising_id`, `cookie_id`): `= ANY(array_column)`
+     - Source-keyed IDs (`external_customer_id`): `external_ids @> jsonb_build_object(source_system, value)`
+     - Exact match: `=`
+     - Trigram fuzzy match: `similarity(column, value) >= threshold`
+     - Phonetic fuzzy match: `dmetaphone(column) = dmetaphone(value)`
+
+5. **Find candidate master profile**
+   - Execute scoped SQL with mandatory partition filters:
+     - `WHERE tenant_id = :tenant_id AND domain = :domain AND (dynamic_conditions) LIMIT 1`
+
+6. **Merge or create master profile**
+   - **If a master profile is found:**
+     - Insert link in `cdp_profile_links` with `match_score = 1.0`, `match_method = 'DynamicMatch'`
+     - Merge scalar attributes according to configured `consolidation_rule`
+     - Union/append arrays and JSON maps (`source_systems`, `external_ids`, `push_tokens`, and related fields)
+     - Detect hashed PII and, when needed, set `is_hashed = TRUE` and generate `persona_name`
+   - **If no master profile is found:**
+     - Create new row in `cdp_master_profiles`, preserving `first_seen_raw_profile_id`
+     - Insert first link with `match_method = 'NewMaster'`
+
+7. **Mark processed and commit**
+   - Update staging row to `status_code = 3` and set `processed_at = NOW()`
+   - Commit transaction at batch end; on failure, rollback
+
+### 3.2 Resolution Execution Flow
+
+```text
+[Start Batch Resolution]
            |
            v
- (1. Tải Active Rules từ cdp_profile_attributes)
+(1) Load active rules from cdp_profile_attributes
            |
            v
- (2. Quét cdp_raw_profiles_stage với status_code = 1)
+(2) Fetch cdp_raw_profiles_stage where status_code = 1
            |
-     +-----+-----+
-     |           |
-[Không có]     [Có bản ghi]
-     |           |
-     v           v
-  (Thoát)   Duyệt từng Raw Profile:
-                 |
-                 v
-           (3. SELECT set_config('app.tenant_id'))
-                 |
-                 v
-           (4. Xây dựng SQL điều kiện matching động)
-                 |
-                 v
-           (5. Truy vấn cdp_master_profiles theo tenant_id, domain & SQL động)
-                 |
-         +-------+-------+
-         |               |
- [Tìm thấy Master]  [Không tìm thấy]
-         |               |
-         v               v
-  (6A. Ghi Link           (6B. Tạo Master Profile mới,
-   match_method=          lưu first_seen_raw_profile_id,
-   DynamicMatch,          ghi Link match_method=
-   Merge dữ liệu          NewMaster)
-   theo Consolidation)           |
-         |                       |
-         +-------+---------------+
-                 |
-                 v
-           (7. Cập nhật status_code = 3 & processed_at)
-                 |
-                 v
-           (Còn bản ghi trong Batch?)
-            /         \
-        [Có]           [Không]
-         /               \
-        v                 v
- (Tiếp tục)       (Commit Giao dịch DB)
+      +----+----+
+      |         |
+ [No rows]   [Rows found]
+      |         |
+      v         v
+   (Exit)   Iterate each raw profile
+                |
+                v
+          (3) SELECT set_config('app.tenant_id', ...)
+                |
+                v
+          (4) Build dynamic matching SQL
+                |
+                v
+          (5) Query cdp_master_profiles (tenant/domain scoped)
+                |
+          +-----+-----+
+          |           |
+      [Matched]   [No match]
+          |           |
+          v           v
+ (6A) Insert link and merge   (6B) Create master profile,
+      using consolidation           set first_seen_raw_profile_id,
+      rules                         insert first link
+          \           /
+           +---------+
+                |
+                v
+          (7) Update status_code = 3 and processed_at
+                |
+                v
+          More rows in batch?
+            /        \
+          Yes        No
+          /           \
+       Continue      Commit transaction
 ```
 
-### 3.3 Quy tắc matching và ví dụ dữ liệu
+### 3.3 Matching Rules and Data Examples
 
-Hệ thống hỗ trợ 4 cơ chế matching chính được cấu hình động qua thuộc tính `matching_rule` trong `cdp_profile_attributes`. Dưới đây là mô tả chi tiết kèm theo ví dụ dữ liệu thực tế:
+The system supports four rule families controlled by `matching_rule` in `cdp_profile_attributes`.
 
-#### 1. Quy tắc `exact` (Khớp chính xác)
-Áp dụng cho các định danh có tính duy nhất cao và có cấu trúc ổn định. Hệ thống thực hiện so sánh bằng toán tử `=` hoặc cơ chế kiểm tra phần tử trong mảng (containment) của PostgreSQL cho trường mảng (như `email` hoặc `phone_number` lưu dạng danh sách).
+#### 1. `exact` rule
 
-*   **Ví dụ dữ liệu:**
-    *   **Inbound Raw Profile (Staging):**
-        *   `email`: "nguyena@gmail.com"
-        *   `phone_number`: "+84901234567"
-    *   **Existing Master Profile (Master):**
-        *   `email`: "nguyena@gmail.com"
-        *   `phone_number`: "+84901234567"
-    *   **Kết quả:** Hệ thống tìm thấy trùng khớp hoàn toàn giá trị email và liên kết bản ghi mới vào Master Profile hiện có này.
+Used for stable high-precision identifiers. Matching uses `=` or array containment semantics where applicable.
 
-#### 2. Quy tắc `fuzzy_trgm` (Khớp mờ theo Trigram)
-Áp dụng cho các trường dữ liệu dạng chuỗi văn bản dễ sai lệch nhỏ như địa chỉ, tên tổ chức hoặc họ tên đầy đủ. Quy tắc này sử dụng extension `pg_trgm` để tính toán độ tương đồng dựa trên số lượng cụm 3 ký tự (trigrams) chung. Ngưỡng chấp nhận được kiểm tra qua `matching_threshold` (thường mặc định từ `0.6` trở lên).
+- **Inbound staging:**
+  - `email`: `nguyena@gmail.com`
+  - `phone_number`: `+84901234567`
+- **Existing master:**
+  - `email`: `nguyena@gmail.com`
+  - `phone_number`: `+84901234567`
+- **Outcome:** deterministic match; row is linked to existing master profile.
 
-*   **Ví dụ dữ liệu:**
-    *   **Inbound Raw Profile (Staging):**
-        *   `full_name`: "Nguyễn Văn A" (không dấu hoặc gõ sai: "Nguyen Van A")
-        *   `address`: "123 Đường Lê Lợi, Phường 1, Quận 1, TPHCM"
-    *   **Existing Master Profile (Master):**
-        *   `full_name`: "Nguyễn Văn A"
-        *   `address`: "123 Lê Lợi, P.1, Q.1, TP. HCM"
-    *   **Kết quả:** Nhờ phép tính mờ Trigram trên địa chỉ hoặc họ tên gõ lệch nhẹ, độ trùng khớp vượt ngưỡng `matching_threshold = 0.65`, hệ thống tự động xác định đây là cùng một người.
+#### 2. `fuzzy_trgm` rule
 
-#### 3. Quy tắc `fuzzy_dmetaphone` (Khớp mờ theo ngữ âm Double Metaphone)
-Áp dụng cho việc so sánh họ tên quốc tế hoặc các ký hiệu không dấu dễ biến âm khi chuyển ngữ. Double Metaphone mã hóa mỗi từ thành một mã ngữ âm đại diện cho cách phát âm của từ đó. Đối chiếu hai mã ngữ âm này giúp ghép nối chính xác bất kể sai lệch chính tả nhỏ.
+Used for typo-tolerant text fields such as names or addresses. It relies on PostgreSQL `pg_trgm` similarity with configurable threshold.
 
-*   **Ví dụ dữ liệu:**
-    *   **Inbound Raw Profile (Staging):**
-        *   `first_name`: "Smith"
-    *   **Existing Master Profile (Master):**
-        *   `first_name`: "Smyth"
-    *   **Kết quả:** Cả hai từ đều được mã hóa thành mã ngữ âm mã `SM0`. Kết quả so khớp thành công dù chính tả viết khác nhau.
+- **Inbound staging:**
+  - `full_name`: `Nguyen Van A`
+  - `address`: `123 Duong Le Loi, Phuong 1, Quan 1, TPHCM`
+- **Existing master:**
+  - `full_name`: `Nguyen Van A`
+  - `address`: `123 Le Loi, P.1, Q.1, TP HCM`
+- **Outcome:** similarity exceeds threshold (for example, 0.65), so records are treated as same customer.
 
-#### 4. Quy tắc `none` (Bỏ qua)
-Bỏ qua thuộc tính này trong việc ghép nối danh tính, thuộc tính chỉ được dùng để bổ sung thông tin bổ trợ (enrichment) sau khi đã giải quyết xong danh tính qua các khóa khác.
+#### 3. `fuzzy_dmetaphone` rule
+
+Used for phonetic matching of names with small spelling variations.
+
+- **Inbound staging:** `first_name = Smith`
+- **Existing master:** `first_name = Smyth`
+- **Outcome:** both map to equivalent phonetic code, producing a successful match.
+
+#### 4. `none` rule
+
+Attribute is excluded from identity matching and used only for post-match enrichment.
 
 ---
 
-## 4. Xử lý dữ liệu nhạy cảm (Privacy & Hashed PII Handling)
+## 4. Sensitive Data Handling (Privacy and Hashed PII)
 
-Để tuân thủ các quy định bảo vệ dữ liệu cá nhân (như Nghị định 13/2023/NĐ-CP) và tương thích với mô hình hashed-match trên các nền tảng quảng cáo (Google, Meta, TikTok), hệ thống hỗ trợ cơ chế tiếp nhận PII đã bị băm 1 chiều dạng SHA-256 (64 ký tự hex).
+To align with personal-data regulations and ad-tech hashed matching patterns, the engine supports one-way SHA-256 PII payloads (64 hex characters).
 
-### 4.1 Quy trình nhận diện và tự động sinh Persona Name
-Khi dữ liệu PII (`full_name`, `email`, `phone_number`, `national_id`) được nạp vào ở dạng SHA-256 hash, hệ thống không thể đảo ngược để hiển thị tên thật. Do đó, tầng ứng dụng (`persona.py`) tự động kiểm tra định dạng dữ liệu và kích hoạt luồng sinh `persona_name` (danh tính thay thế non-PII):
+### 4.1 Detection and Persona Name Generation
 
-1. **Kiểm tra tự động:** Sử dụng biểu thức chính quy (`^[0-9a-f]{64}$`) để xác định xem PII có bị hash hay không, tự động bật cờ `is_hashed = TRUE` trên `cdp_master_profiles`.
-2. **Sinh danh tính ảo (Persona Generation):**
-   * **Luồng LLM (Google Gemini):** Nếu cấu hình `GOOGLE_GENAI_API_KEY`, hệ thống gửi các thuộc tính phi PII (`domain`, `media_source`, `channel`) sang Gemini để tạo tên đại diện gợi nhớ.
-   * **Luồng Offline Deterministic (Fallback):** Nếu không có internet hoặc API key, hệ thống tính `sha256` trên định danh mỏ neo (`device_id`, `advertising_id`, v.v.) để tạo tên định hình cố định kèm hậu tố hash 6 ký tự (ví dụ: `Savvy Retail Shopper (TikTok Ads) #4f2a9c`).
+When PII fields (`full_name`, `email`, `phone_number`, `national_id`) arrive as hashes, plaintext display is impossible. Therefore, `persona.py` triggers a non-PII naming path:
 
-### 4.2 Luồng xử lý dữ liệu nhạy cảm (Sequence Flow)
+1. **Automatic detection**
+   - Regex `^[0-9a-f]{64}$` identifies hashed values
+   - `is_hashed = TRUE` is set on `cdp_master_profiles`
 
-```
-[Inbound Raw Profile (Staging)] 
+2. **Persona generation**
+   - **LLM path (Gemini):** if `GOOGLE_GENAI_API_KEY` is configured, generate memorable non-PII names from non-sensitive context (domain, channel, source)
+   - **Deterministic offline fallback:** if no API key/network, derive a stable label from anchor identifiers (`device_id`, `advertising_id`, and similar), with a 6-character hash suffix
+
+### 4.2 Sensitive Data Sequence Flow
+
+```text
+[Inbound Raw Profile]
        |
        v
- (Kiểm tra PII với regex ^[0-9a-f]{64}$)
+(Validate PII using ^[0-9a-f]{64}$)
        |
-       +----> [PII Plaintext] ----------> is_hashed = FALSE (Giữ nguyên tên thật)
+       +--> [Plaintext PII] --> is_hashed = FALSE (retain normal naming path)
        |
-       +----> [PII SHA-256 Hash] -------> is_hashed = TRUE
-                                               |
-                                               v
-                                    (Sinh persona_name)
-                                               |
-                                  +------------+------------+
-                                  v                         v
-                           [Gemini GenAI]          [Offline Local]
-                           (Nếu có API Key)        (Fallback an toàn)
-                                  |                         |
-                                  +------------+------------+
-                                               |
-                                               v
-                                   [Master Profile Output]
-                                   `persona_name` = "Digital Banking User #a1b2c3"
+       +--> [SHA-256 PII] --> is_hashed = TRUE
+                               |
+                               v
+                       Generate persona_name
+                               |
+                        +------+------+
+                        |             |
+                    [Gemini]      [Local fallback]
+                        |             |
+                        +------+------+
+                               |
+                               v
+                       [Master Profile Output]
+                       persona_name = "Digital Banking User #a1b2c3"
 ```
 
-### 4.3 Ví dụ dữ liệu thực tế (Hashed vs Plaintext)
+### 4.3 Example Data (Hashed vs Plaintext)
 
-| Trường thuộc tính | Plaintext Inbound | Hashed Inbound (SHA-256) | Master Profile Lưu trữ |
-| :--- | :--- | :--- | :--- |
-| `full_name` | `"Nguyen Van An"` | `9f86d08188...15b0f00a08` | `9f86d08188...15b0f00a08` |
-| `email` | `"an.nguyen@gmail.com"` | `d081884c7d...c15b0f00a08` | `d081884c7d...c15b0f00a08` |
+| Attribute | Plaintext Input | Hashed Input (SHA-256) | Stored in Master |
+| --- | --- | --- | --- |
+| `full_name` | `Nguyen Van An` | `9f86d08188...15b0f00a08` | `9f86d08188...15b0f00a08` |
+| `email` | `an.nguyen@gmail.com` | `d081884c7d...c15b0f00a08` | `d081884c7d...c15b0f00a08` |
 | `is_hashed` | `FALSE` | `TRUE` | `TRUE` |
-| `persona_name` | `NULL` | *(Tự động sinh)* | `"Savvy Retail Shopper #4f2a9c"` |
+| `persona_name` | `NULL` | auto-generated | `Savvy Retail Shopper #4f2a9c` |
 
 ---
 
-## 5. Kích hoạt và Giới hạn Tần suất (Trigger & Throttling)
+## 5. Triggering and Throttling
 
-Để đảm bảo hiệu năng trong môi trường streaming lượng lớn bản ghi đầu vào, hệ thống kết hợp cơ chế xử lý **gần thời gian thực (Near Real-time)** và **chạy lô định kỳ (Daily Batch Job)**.
+To sustain performance under continuous ingestion, the architecture combines near-real-time triggering with periodic batch processing.
 
-### 5.1 Cơ chế Throttling khóa hàng chờ (Row-Level Lock)
-Hệ thống không sử dụng DB Trigger PL/pgSQL trực tiếp nhằm tránh gây nghẽn (lock contention) trên cơ sở dữ liệu. Thay vào đó, worker phía Ingestion chủ động gọi `IdentityResolutionTrigger.attempt_trigger()` sau mỗi đợt chèn dữ liệu thô mới:
+### 5.1 Row-Lock Throttling Mechanism
 
-1. Trạng thái chạy được kiểm soát qua bảng trạng thái đơn dòng `cdp_id_resolution_status`.
-2. Sử dụng truy vấn `SELECT ... FOR UPDATE NOWAIT` để kiểm tra khóa:
-   * Nếu bảng đang bị khóa bởi một worker khác, lệnh trigger hiện tại sẽ **ngay lập tức bỏ qua (skip)** mà không làm tắc nghẽn thread.
-   * Nếu khoảng thời gian kể từ lần chạy trước nhỏ hơn `throttle_seconds` (mặc định `5` giây), trigger sẽ tạm hoãn để tích lũy gom lô (micro-batching).
-3. Khi đủ điều kiện, worker cập nhật mốc `last_executed_at` và thực thi hàm `run_resolution_batch()`.
+The system avoids direct PL/pgSQL triggers to reduce lock contention. Instead, the ingestion worker invokes `IdentityResolutionTrigger.attempt_trigger()` after writes:
 
-### 5.2 Luồng điều phối Trigger & Throttling (Control Flow)
+1. Runtime state is controlled by single-row table `cdp_id_resolution_status`.
+2. `SELECT ... FOR UPDATE NOWAIT` is used:
+   - If lock is held by another worker, current trigger call exits immediately (no blocking).
+   - If elapsed time from prior run is below `throttle_seconds` (default: 5 seconds), trigger is deferred for micro-batching.
+3. If conditions pass, worker updates `last_executed_at` and runs `run_resolution_batch()`.
 
+### 5.2 Trigger and Throttling Control Flow
+
+```text
+[Ingestion worker inserts staging rows]
+                 |
+                 v
+      attempt_trigger(tenant_id, domain)
+                 |
+                 v
+SELECT ... FOR UPDATE NOWAIT on cdp_id_resolution_status
+          +---------------+----------------+
+          |                                |
+ [Lock held by other worker]      [Lock acquired]
+          |                                |
+          v                                v
+      Skip immediately            Check elapsed interval
+                                          |
+                              +-----------+-----------+
+                              |                       |
+                       [Below threshold]      [Threshold passed]
+                              |                       |
+                              v                       v
+                           Defer             Update last_executed_at
+                                             Run run_resolution_batch()
 ```
-[Worker Ingestion ghi Raw Row mới vào Staging]
-                       |
-                       v
-    [GỌI: attempt_trigger(tenant_id, domain)]
-                       |
-                       v
-       (SELECT ... FOR UPDATE NOWAIT trên cdp_id_resolution_status)
-                       |
-         +-------------+-------------+
-         v                           v
-[Khóa bị giữ bởi Worker khác]    [Thành công lấy Khóa]
-         |                           |
-         v                           v
- (Bỏ qua - Skip ngay)      (Kiểm tra: now - last_executed_at > throttle_seconds)
-                                     |
-                       +-------------+-------------+
-                       v                           v
-                [Chưa đủ thời gian]         [Đủ thời gian giãn cách]
-                       |                           |
-                       v                           v
-            (Tạm hoãn - Throttle)       1. Cập nhật last_executed_at
-                                        2. Chạy run_resolution_batch()
-```
 
-### 5.3 Ví dụ dữ liệu vận hành Bảng Trạng thái
+### 5.3 Operational Status Example
 
-Bảng `cdp_id_resolution_status`:
+Table `cdp_id_resolution_status`:
 
-| `id` | `last_executed_at` | `updated_at` | Trạng thái hệ thống |
-| :--- | :--- | :--- | :--- |
-| `TRUE` | `2026-08-04 10:00:00+07` | `2026-08-04 10:00:00+07` | Đã chạy đợt 1 thành công. Lần trigger tại `10:00:02` sẽ bị throttle (do $< 5s$). Lần trigger tại `10:00:06` sẽ được chấp nhận chạy. |
+| `id` | `last_executed_at` | `updated_at` | Runtime Interpretation |
+| --- | --- | --- | --- |
+| `TRUE` | `2026-08-04 10:00:00+07` | `2026-08-04 10:00:00+07` | Run at `10:00:02` is throttled (`< 5s`), run at `10:00:06` is accepted |
 
 ---
 
-## 6. Các điểm cần lưu ý khi vận hành (Operational Best Practices)
+## 6. Operational Best Practices
 
-1. **Tính Toàn vẹn và Bất biến (Idempotency):**
-   * Pipeline chỉ quét các bản ghi staging có `status_code = 1`. Khi xử lý xong, hệ thống chuyển `status_code = 3` và đóng mốc `processed_at = NOW()`.
-   * Khóa duy nhất `UNIQUE(tenant_id, raw_profile_id)` trên `cdp_profile_links` đảm bảo việc chạy lại batch (retry) khi gặp sự cố không bao giờ gây nhân bản liên kết hoặc tạo dư thừa Master Profile.
+1. **Idempotency and integrity**
+   - Process only staging rows with `status_code = 1`
+   - Move processed rows to `status_code = 3` with `processed_at = NOW()`
+   - `UNIQUE(tenant_id, raw_profile_id)` on `cdp_profile_links` prevents duplicate links on retries
 
-2. **Bảo mật và Phân vùng đa khách hàng (Tenant & Domain Scoping):**
-   * Tất cả các câu lệnh SQL tự động sinh bởi Resolver luôn chứa điều kiện bắt buộc `WHERE tenant_id = :tenant_id AND domain = :domain`. Điều này ngăn chặn triệt để nguy cơ rò rỉ dữ liệu chéo giữa các đơn vị kinh doanh hoặc khách hàng doanh nghiệp khác nhau.
+2. **Tenant and domain security boundaries**
+   - All generated SQL enforces `WHERE tenant_id = :tenant_id AND domain = :domain`
+   - This prevents cross-tenant and cross-domain leakage
 
-3. **Tiền xử lý và Chuẩn hóa Dữ liệu (Data Cleansing):**
-   * Số điện thoại cần được đưa về chuẩn E.164 (ví dụ: `+84901234567`).
-   * Email cần chuyển thành chữ thường (`lowercase`) và cắt bỏ khoảng trắng thừa (`trim`) trước khi ghi vào staging để đảm bảo tính chính xác cho các quy tắc `exact_match`.
+3. **Data normalization before matching**
+   - Phone values should follow E.164 format (for example, `+84901234567`)
+   - Email values should be lowercased and trimmed before staging
 
-4. **Xử lý sự cố và Giám sát Hàng đợi:**
-   * Cần thiết lập cảnh báo (alerting) khi số lượng bản ghi có `status_code = 1` tồn đọng quá ngưỡng trên bảng `cdp_raw_profiles_stage` hoặc khi xuất hiện các bản ghi lỗi `status_code = 4`.
-
----
-
-## 7. Kết luận và Đánh giá Giải pháp (Conclusion & Benchmark)
-
-Hệ thống Customer Identity Resolution (CIR) trong kiến trúc Customer 360 này là một pipeline xử lý dữ liệu hiện đại, tenant-aware và hoàn toàn điều khiển bởi metadata (`metadata-driven`). Kiến trúc cho phép vận hành linh hoạt ở cả hai chế độ gần thời gian thực (Near Real-time với Throttling) và chạy lô định kỳ (Daily Batch), tạo ra Golden Record duy nhất mà không làm nghẽn cơ sở dữ liệu.
-
-### 7.1 Ma trận Đáp ứng Trường hợp Sử dụng (Use Case Application Matrix)
-
-| Kịch bản Nghiệp vụ (Use Case) | Yêu cầu Kỹ thuật chính | Cơ chế Giải quyết trong C360 CIR Engine |
-| :--- | :--- | :--- |
-| **1. Hợp nhất Đa kênh (Cross-Channel Stitching)** | Liên kết hành vi từ Web Tracking, App, POS, CRM và Ads | Khớp chính xác hoặc mờ trên `email`/`phone`, đồng thời tích lũy mảng `device_ids`, `cookie_ids`, `advertising_ids` và JSONB `external_ids`. |
-| **2. Quản trị Đa đơn vị / Đa ngành (Multi-Tenant & Multi-Domain)** | Phân vùng dữ liệu an toàn giữa các tenant và domain (Retail, Banking, Real Estate, Travel) | Khóa cứng điều kiện SQL `WHERE tenant_id = :tenant_id AND domain = :domain` kết hợp cơ chế Row-Level Security (RLS) của PostgreSQL. |
-| **3. Xử lý PII Băm Bảo mật (Privacy-Preserving & AdTech Match)** | Nhận dữ liệu băm SHA-256 từ Meta/Google/TikTok Ads mà không lộ tên thật | Biểu thức chính quy tự động phát hiện PII băm (`^[0-9a-f]{64}$`), bật cờ `is_hashed = TRUE`, tự động sinh `persona_name` qua Gemini GenAI / Local Fallback và tạo Vector Embedding (768d). |
-| **4. Xử lý Dữ liệu Sai lệch / Nhập sai (Dirty Data & Typo Handling)** | Ghép nối khách hàng khi thu ngân POS nhập sai chính tả tên hoặc địa chỉ | Cấu hình quy tắc khớp mờ Trigram (`fuzzy_trgm`) hoặc ngữ âm (`fuzzy_dmetaphone`) với ngưỡng tin cậy tùy chỉnh (`matching_threshold`). |
-| **5. Cập nhật Thuộc tính Ưu tiên (Conflict & KYC Resolution)** | Xử lý mâu thuẫn khi dữ liệu cũ đè dữ liệu mới hoặc nguồn không tin cậy | Cấu hình chiến lược `consolidation_rule` linh hoạt: `verified_first` (ưu tiên bản ghi KYC), `most_recent` (theo timestamp), `source_priority` (theo độ uy tín hệ thống nguồn), hoặc `append_distinct`. |
+4. **Failure handling and queue monitoring**
+   - Alert on excessive `status_code = 1` backlog
+   - Alert on recurrent `status_code = 4` failures
 
 ---
 
-### 7.2 So sánh Chi tiết với Giải pháp Thương mại (Twilio Segment Unify vs Native C360 CIR)
+## 7. Conclusion and Solution Evaluation
 
-Dưới đây là ma trận so sánh đối chiếu giữa hệ thống **Native C360 CIR Engine** và giải pháp CDP thương mại phổ biến **Twilio Segment Unify (Personas)**:
+The Customer Identity Resolution implementation in this Customer 360 architecture is metadata-driven, tenant-aware, and operationally practical. It supports both near-real-time micro-batching and scheduled high-throughput batch execution, while producing stable golden profiles without introducing database bottlenecks.
 
-| Tiêu chí So sánh | Native Customer 360 CIR Engine | Twilio Segment Unify (Personas) |
-| :--- | :--- | :--- |
-| **Kiến trúc & Làm chủ Dữ liệu (Deployment & Governance)** | Native trên PostgreSQL 16 (On-Premises / Private Cloud). Làm chủ 100% dữ liệu và hạ tầng, không nguy cơ vendor lock-in. | Managed SaaS Cloud. Dữ liệu trung chuyển qua hạ tầng của Segment; tuân thủ chính sách lưu trữ của bên thứ ba. |
-| **Thuật toán So khớp (Matching Engine)** | **Hybrids:** Kết hợp Khớp chính xác (Exact), Khớp mờ Trigram (`pg_trgm`), Khớp ngữ âm Double Metaphone (`dmetaphone`) qua metadata. | **Deterministic Identity Graph:** Phụ thuộc chủ yếu vào quy tắc ghép nối cứng qua `userId` và `anonymousId`. Hạn chế khớp mờ tự động. |
-| **Bảo mật Multi-Tenant (Multi-Tenant Isolation)** | Cách ly triệt để theo cấp CSDL (PostgreSQL Row-Level Security & Tenant Scoping). Hỗ trợ chia sẻ hạ tầng hiệu quả. | Cách ly theo cấp Workspace / Source. Chi phí tăng tiến khi mở rộng nhiều Workspace cho từng tenant độc lập. |
-| **Chiến lược Hợp nhất Thuộc tính (Consolidation Strategy)** | Cấu hình linh hoạt theo từng trường (`most_recent`, `verified_first`, `source_priority`, `append_distinct`, `overwrite`). | Áp dụng chính sách mặc định Last-Write-Wins hoặc ưu tiên đơn giản dựa trên cấu hình trait cơ bản. |
-| **Quyền riêng tư & AI làm giàu (Privacy & GenAI Enrichment)** | Tự động phát hiện SHA-256 PII, sinh `persona_name` bằng LLM (Gemini 3.5 Flash) và tạo vector embedding hỗ trợ Lookalike search. | Cần cài đặt thêm các Function / Transformation tùy chỉnh bên ngoài pipeline chính để xử lý PII băm. |
-| **Chi phí Vận hành (Total Cost of Ownership - TCO)** | Tối ưu chi phí hạ tầng (chỉ chi trả cho compute DB/Worker). Không phát sinh phí bản quyền theo số lượng hồ sơ (MTU). | Tính phí dựa trên số lượng người dùng theo dõi hàng tháng (Monthly Tracked Users - MTU). Chi phí tăng rất nhanh khi quy mô mở rộng. |
-| **Thời gian Kích hoạt (Ingestion Latency & Throughput)** | Linh hoạt: Near Real-time (micro-batching với khóa `FOR UPDATE NOWAIT`) hoặc Batch định kỳ high-throughput. | Near Real-time theo kiến trúc streaming event-driven SaaS. |
+### 7.1 Use Case Application Matrix
 
----
-
-### 7.3 Tổng kết
-
-Sự kết hợp giữa mô hình metadata-driven linh hoạt, khả năng xử lý PII băm bảo mật tích hợp GenAI, và cơ chế cách ly multi-tenant cấp CSDL giúp **Native C360 CIR Engine** trở thành giải pháp tối ưu cho doanh nghiệp muốn chủ động hoàn toàn về dữ liệu, đáp ứng tốt các bài toán hợp nhất danh tính phức tạp với chi phí TCO tối thiểu.
-
-
-# NOTES to update for AI-native Customer Persona Resolution Engine
-
-from identity matching to identity understanding
-
-https://chatgpt.com/c/6a7145e5-1a24-83ec-9835-d3617eed7bb5
+| Business Use Case | Core Technical Requirement | C360 CIR Resolution Mechanism |
+| --- | --- | --- |
+| Cross-channel identity stitching | Link Web/App/POS/CRM/Ads records | Exact/fuzzy matching on contact identifiers plus accumulation of `device_ids`, `cookie_ids`, `advertising_ids`, and `external_ids` |
+| Multi-tenant and multi-domain governance | Strict data partition by tenant/domain | Hard SQL scope filters and PostgreSQL RLS |
+| Privacy-preserving hashed PII and ad-tech matching | Support SHA-256 payloads without plaintext exposure | Hash detection, `is_hashed` flagging, non-PII persona naming via Gemini/local fallback, optional embedding enrichment |
+| Dirty data and typo tolerance | Resolve identities under spelling variations | `fuzzy_trgm` and `fuzzy_dmetaphone` rules with configurable thresholds |
+| Attribute conflict handling | Resolve contradictory source values | Field-level `consolidation_rule`: `verified_first`, `most_recent`, `source_priority`, `append_distinct`, and others |
 
 ---
 
-Raw Profile
-        │
-        ▼
-Identity Resolution
-        │
-        ▼
-Unified Customer Profile
-        │
-        ▼
-Customer Persona Resolution Engine
-        │
-        ├── Feature Engineering
-        ├── Persona Scoring
-        ├── Persona Classification
-        ├── LLM Persona Summary
-        ├── Vector Embedding
-        └── Confidence Estimation
-        │
-        ▼
-Customer360 Master Profile
+### 7.2 Detailed Comparison with Commercial Alternative (Twilio Segment Unify vs Native C360 CIR)
 
---- 
+| Comparison Dimension | Native Customer 360 CIR Engine | Twilio Segment Unify (Personas) |
+| --- | --- | --- |
+| Deployment and governance | Native PostgreSQL 16 (on-prem/private cloud), full infrastructure and data control, no vendor lock-in | Managed SaaS, data traverses vendor infrastructure and governance model |
+| Matching engine | Hybrid matching: exact + trigram fuzzy + phonetic fuzzy, metadata-driven | Primarily deterministic identity graph around `userId`/`anonymousId`; limited native fuzzy matching |
+| Multi-tenant isolation | Database-level isolation with RLS and strict tenant/domain scoping | Workspace/source-level separation; can become costly at large tenant counts |
+| Consolidation strategy | Per-field configurable merge policies (`most_recent`, `verified_first`, `source_priority`, `append_distinct`, `overwrite`) | Simpler trait-priority/last-write defaults |
+| Privacy and AI enrichment | Native SHA-256 handling, persona name generation with Gemini, embedding generation for semantic use cases | Usually requires extra custom transformations/functions outside core flow |
+| Total cost of ownership | Primarily infra and worker cost; no MTU licensing growth curve | MTU-based pricing; cost scales rapidly with user volume |
+| Ingestion latency and throughput | Flexible near-real-time micro-batching or scheduled batch | Strong event-driven SaaS near-real-time model |
 
-                Raw Profiles
-                     │
-                     ▼
-      Customer Identity Resolution Engine
-                     │
-                     ▼
-         Unified Customer Master Profile
-                     │
-                     ▼
-      Customer Persona Resolution Engine
-                     │
-        ┌────────────┼────────────┐
-        │            │            │
-        ▼            ▼            ▼
- Feature Store   AI Scoring   LLM Reasoning
-        │            │            │
-        └────────────┼────────────┘
-                     ▼
-         Customer Persona Repository
-                     │
-                     ▼
-          Customer 360 Master Profile
-                     │
-                     ▼
-       Next Best Action / Marketing AI
+---
 
+### 7.3 Final Summary
+
+By combining metadata-driven flexibility, secure hashed-PII handling, and strict tenant isolation at the database layer, the Native C360 CIR Engine provides a strong and cost-efficient foundation for large-scale identity unification. The design is particularly suitable for organizations that require full data ownership, transparent matching logic, and low long-term TCO while still supporting advanced personalization and analytics workflows.

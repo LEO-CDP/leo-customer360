@@ -490,3 +490,22 @@ class CdpPersonaHistory(Base):
     change_reason: Mapped[Optional[str]] = mapped_column(Text)
     model_version: Mapped[Optional[str]] = mapped_column(Text)
     changed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CdpPersonaConfig(Base):
+    """Runtime config registry for PersonaResolutionEngine constants.
+
+    Stores typed key-value config used to override in-code defaults for
+    thresholds, weights, caps, and history-delta behavior.
+    """
+
+    __tablename__ = "cdp_persona_config"
+
+    config_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    config_value: Mapped[str] = mapped_column(Text, nullable=False)
+    data_type: Mapped[str] = mapped_column(Text, nullable=False)
+    config_description: Mapped[Optional[str]] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    updated_by: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("now()"))
