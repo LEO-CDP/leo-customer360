@@ -249,3 +249,100 @@ def _generate_with_genai(profile: Dict[str, Any], suffix: str) -> Optional[str]:
             exc_info=True,
         )
         return None
+
+
+def primary_role_label(domain: str) -> str:
+    """Returns the primary (first) human-readable role label for a domain,
+    e.g. ``"Retail Shopper"``, ``"Banking Client"`` -- used by
+    persona_engine.py to build persona_category. Public wrapper over
+    ``_ROLE_BY_DOMAIN`` so persona_engine.py doesn't reach into a private
+    module attribute."""
+    roles = _ROLE_BY_DOMAIN.get((domain or "retail").lower(), _ROLE_BY_DOMAIN["retail"])
+    return roles[0]
+
+
+class _PersonaSummary(BaseModel):
+    """Structured Gemini output for one persona narrative summary."""
+
+    persona_summary: str = Field(
+        description=(
+            "A short (1-3 sentence) narrative summary of a customer persona for a "
+            "marketing/CRM dashboard, describing only the archetype/behavior implied "
+            "by the provided scores. Must NEVER contain a real person's name, email, "
+            "phone number, or any other personal identifier."
+        )
+    )
+
+
+def generate_persona_summary(stats: Dict[str, Any]) -> str:
+    """Builds a short narrative ``persona_summary`` from already-computed,
+    non-PII persona statistics (domain, lifecycle_stage, customer_value_tier,
+    risk_level, component scores, next_best_action -- see
+    ``persona_engine.compute_persona``). Never receives raw profile PII.
+
+    Same two-path strategy as ``generate_persona_name``: tries Google Gemini
+    first (if configured), falls back to a deterministic offline template on
+    any failure. Never raises.
+    """
+    if _has_configured_api_key(GOOGLE_GENAI_API_KEY):
+        ai_summary = _generate_summary_with_genai(stats)
+        if ai_summary:
+            return ai_summary
+    return _generate_offline_summary(stats)
+
+
+def _generate_offline_summary(stats: Dict[str, Any]) -> str:
+    """Fully offline, deterministic persona_summary generator (no network calls)."""
+    domain = (stats.get("domain") or "retail").replace("_", " ")
+    lifecycle_stage = (stats.get("lifecycle_stage") or "unscored").replace("_", " ")
+    value_tier = (stats.get("customer_value_tier") or "standard").replace("_", " ")
+    risk_level = stats.get("risk_level") or "low"
+    next_best_action = stats.get("next_best_action") or "Continue standard engagement cadence."
+    engagement_score = stats.get("engagement_score") or 0
+    loyalty_score = stats.get("loyalty_score") or 0
+    return (
+        f"A {value_tier} {domain} {lifecycle_stage} with a {risk_level}-risk profile. "
+        f"Engagement score {engagement_score:.0f}/100, loyalty score {loyalty_score:.0f}/100. "
+        f"Recommended next action: {next_best_action}"
+    )
+
+
+def _generate_summary_with_genai(stats: Dict[str, Any]) -> Optional[str]:
+    """Asks Google Gemini for a short narrative persona_summary, sending only
+    non-PII, already-computed statistics. Returns ``None`` on any failure so
+    the caller falls back to the offline generator -- this never raises."""
+    client = _get_genai_client()
+    if client is None:
+        return None
+
+    prompt = (
+        "You are summarizing an anonymized customer persona for a Customer Data "
+        f"Platform dashboard. Domain: {stats.get('domain')}. Lifecycle stage: "
+        f"{stats.get('lifecycle_stage')}. Customer value tier: {stats.get('customer_value_tier')}. "
+        f"Risk level: {stats.get('risk_level')}. Behavior score: {stats.get('behavior_score')}/100. "
+        f"Engagement score: {stats.get('engagement_score')}/100. Financial score: "
+        f"{stats.get('financial_score')}/100. Loyalty score: {stats.get('loyalty_score')}/100. "
+        f"Relationship score: {stats.get('relationship_score')}/100. Recommended next best "
+        f"action: {stats.get('next_best_action')}. Write a short (1-3 sentence) narrative "
+        "summary of this customer persona for a marketing dashboard. Never invent or include "
+        "a specific person's name, email, phone number, or any other personal identifier."
+    )
+    try:
+        response = client.models.generate_content(
+            model=GOOGLE_GENAI_MODEL,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=_PersonaSummary,
+                temperature=0.7,
+            ),
+        )
+        summary = (response.parsed.persona_summary or "").strip()
+        return summary or None
+    except Exception:
+        logger.warning(
+            "Google GenAI persona_summary generation failed; falling back to the offline "
+            "deterministic generator.",
+            exc_info=True,
+        )
+        return None

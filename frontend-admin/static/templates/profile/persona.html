@@ -1,0 +1,207 @@
+<!--
+  =============================================================================
+  CUSTOMER PERSONA CARD (AI-native Persona Resolution Engine)
+  "From identity matching to identity understanding"
+  =============================================================================
+-->
+<!-- Card Container: Added larger border radius, subtle backdrop blur, and smooth shadow transitions -->
+<div class="relative bg-white border border-slate-200/80 rounded-[1.5rem] shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden p-6 sm:p-7">
+
+  <!-- Subtle AI Glow Effect in the top right background -->
+  <div class="absolute -top-12 -right-12 w-40 h-40 bg-violet-400/10 rounded-full blur-3xl pointer-events-none"></div>
+
+  <!-- Card Header -->
+  <div class="relative flex items-center justify-between mb-6">
+    <div class="flex items-center gap-2.5">
+      <!-- AI Icon Container: Enhanced with gradient and subtle shadow -->
+      <div class="p-2 bg-gradient-to-br from-violet-50 to-fuchsia-50 text-violet-600 rounded-xl border border-violet-100 shadow-sm">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09l2.846.813-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+        </svg>
+      </div>
+      <h3 class="font-bold text-slate-900 text-lg tracking-tight">Customer Persona</h3>
+    </div>
+    <!-- AI-Native Badge: Upgraded to a sleek gradient pill -->
+    <span class="text-[10px] font-bold uppercase tracking-widest text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full px-3 py-1 shadow-sm shadow-violet-200">
+      AI-native
+    </span>
+  </div>
+
+  {{#if hasPersona}}
+
+  <!-- Persona Identity Section -->
+  <div class="relative flex items-start justify-between gap-4 mb-6 pb-5 border-b border-slate-100">
+    <div>
+      <!-- Persona Name: Made larger and more prominent -->
+      <div class="font-bold text-slate-900 tracking-tight">{{personaName}}</div>
+      <div class="flex items-center gap-2 mt-1.5">
+        <span class="text-sm font-medium text-slate-600">{{personaCategory}}</span>
+        <span class="w-1 h-1 rounded-full bg-slate-300"></span>
+        <span class="text-xs font-mono text-slate-400">v{{computedVersion}}</span>
+      </div>
+    </div>
+    <div class="flex flex-col items-end gap-2">
+      <!-- Risk Badge: Added ring border for a crisper UI -->
+      <span class="text-xs font-semibold px-2.5 py-1 rounded-md ring-1 ring-inset {{riskLevelBadgeClass}} capitalize shadow-sm">
+        {{riskLevelLabel}} risk
+      </span>
+      <span class="text-xs font-medium text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
+        {{customerValueTierLabel}}
+      </span>
+    </div>
+  </div>
+
+  <!-- Next Best Action Callout: Elevated with a softer, friendlier AI recommendation feel -->
+  <div class="mb-6 p-4.5 bg-gradient-to-r from-violet-50/80 to-slate-50/50 rounded-2xl border border-violet-100/50 relative overflow-hidden">
+    <div class="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-violet-400 to-fuchsia-400"></div>
+    <div class="pl-4 pr-2 py-1">
+      <div class="flex items-center gap-1.5 mb-1.5">
+        <svg class="w-3.5 h-3.5 text-violet-500" fill="currentColor" viewBox="0 0 20 20"><path d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z"/></svg>
+        <span class="text-[11px] text-violet-600 uppercase tracking-widest font-bold">Next Best Action</span>
+      </div>
+      <p class="text-sm text-slate-700 leading-relaxed font-medium">{{nextBestAction}}</p>
+    </div>
+  </div>
+
+  <!-- Score Breakdown Section -->
+  <div class="mb-6">
+    <!-- Overall Score: Kept full width for hierarchy -->
+    <div class="mb-5">
+      <div class="flex items-center justify-between text-sm mb-2">
+        <span class="font-semibold text-slate-800">Overall Persona Match</span>
+        <span class="font-bold text-violet-600">{{personaScoreLabel}}<span class="text-slate-400 text-xs font-normal"> / 100</span></span>
+      </div>
+      <div class="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+        <div class="h-full bg-gradient-to-r from-violet-500 to-fuchsia-400 rounded-full transition-all duration-500" style="width: {{personaScoreWidth}}"></div>
+      </div>
+    </div>
+
+    <!-- Sub-scores: Moved to a 2-column grid to save vertical space and improve dashboard readability -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+      
+      <!-- Behavior -->
+      <div>
+        <div class="flex items-center justify-between text-xs mb-1.5">
+          <span class="text-slate-500 font-medium">Behavior</span>
+          <span class="font-semibold text-slate-700">{{behaviorScoreLabel}}</span>
+        </div>
+        <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div class="h-full bg-indigo-400 rounded-full" style="width: {{behaviorScoreWidth}}"></div>
+        </div>
+      </div>
+
+      <!-- Engagement -->
+      <div>
+        <div class="flex items-center justify-between text-xs mb-1.5">
+          <span class="text-slate-500 font-medium">Engagement</span>
+          <span class="font-semibold text-slate-700">{{engagementScoreLabel}}</span>
+        </div>
+        <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div class="h-full bg-sky-400 rounded-full" style="width: {{engagementScoreWidth}}"></div>
+        </div>
+      </div>
+
+      <!-- Financial -->
+      <div>
+        <div class="flex items-center justify-between text-xs mb-1.5">
+          <span class="text-slate-500 font-medium">Financial</span>
+          <span class="font-semibold text-slate-700">{{financialScoreLabel}}</span>
+        </div>
+        <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div class="h-full bg-emerald-400 rounded-full" style="width: {{financialScoreWidth}}"></div>
+        </div>
+      </div>
+
+      <!-- Loyalty -->
+      <div>
+        <div class="flex items-center justify-between text-xs mb-1.5">
+          <span class="text-slate-500 font-medium">Loyalty</span>
+          <span class="font-semibold text-slate-700">{{loyaltyScoreLabel}}</span>
+        </div>
+        <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div class="h-full bg-amber-400 rounded-full" style="width: {{loyaltyScoreWidth}}"></div>
+        </div>
+      </div>
+
+      <!-- Relationship -->
+      <div>
+        <div class="flex items-center justify-between text-xs mb-1.5">
+          <span class="text-slate-500 font-medium">Relationship</span>
+          <span class="font-semibold text-slate-700">{{relationshipScoreLabel}}</span>
+        </div>
+        <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div class="h-full bg-fuchsia-400 rounded-full" style="width: {{relationshipScoreWidth}}"></div>
+        </div>
+      </div>
+
+      <!-- Risk -->
+      <div>
+        <div class="flex items-center justify-between text-xs mb-1.5">
+          <span class="text-slate-500 font-medium">Risk Factor</span>
+          <span class="font-semibold text-slate-700">{{riskScoreLabel}}</span>
+        </div>
+        <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div class="h-full bg-rose-400 rounded-full" style="width: {{riskScoreWidth}}"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Footer Metadata: Cleaned up spacing and layout -->
+  <div class="pt-4 border-t border-slate-100 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-slate-400 font-medium">
+    <div class="flex items-center gap-1.5">
+      <div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
+      <span>Confidence: {{confidenceScoreLabel}}</span>
+    </div>
+    <div class="flex items-center gap-1.5">
+      <svg class="w-3.5 h-3.5 opacity-70" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      <span>{{computedAtLabel}}</span>
+    </div>
+    <div class="ml-auto text-slate-300">
+      {{llmProviderLabel}}
+    </div>
+  </div>
+
+  {{#if hasHistory}}
+  <!-- History Section: Converted to a sleek mini-timeline -->
+  <div class="mt-6 pt-5 border-t border-slate-100">
+    <div class="flex items-center gap-2 mb-4">
+      <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+      <h4 class="text-[11px] text-slate-500 uppercase tracking-widest font-bold">Recent Transitions</h4>
+    </div>
+    
+    <ul class="space-y-4 pl-1.5 border-l-2 border-slate-100">
+      {{#each history}}
+      <li class="relative pl-4">
+        <!-- Timeline Dot -->
+        <span class="absolute -left-[5px] top-1.5 w-2 h-2 rounded-full bg-slate-200 border-2 border-white ring-1 ring-slate-100"></span>
+        
+        <div class="flex flex-wrap items-baseline gap-x-2">
+          <span class="text-sm font-semibold text-slate-800">{{newPersonaName}}</span>
+          <span class="text-[11px] text-slate-400 font-medium">{{changedAtLabel}}</span>
+        </div>
+        
+        {{#if changeReason}}
+        <div class="text-xs text-slate-500 mt-1 bg-slate-50 px-2.5 py-1.5 rounded-md inline-block border border-slate-100">
+          {{changeReason}}
+        </div>
+        {{/if}}
+      </li>
+      {{/each}}
+    </ul>
+  </div>
+  {{/if}}
+
+  {{else}}
+  <!-- Empty State -->
+  <div class="py-10 text-center flex flex-col items-center justify-center">
+    <div class="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3">
+      <svg class="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2m8-10a4 4 0 100-8 4 4 0 000 8z" /></svg>
+    </div>
+    <p class="text-sm font-medium text-slate-500">No persona computed yet</p>
+    <p class="text-xs text-slate-400 mt-1.5 max-w-[200px] mx-auto leading-relaxed">Personas are resolved automatically by the AI pipeline.</p>
+  </div>
+  {{/if}}
+
+</div>

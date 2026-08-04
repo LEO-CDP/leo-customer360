@@ -93,9 +93,15 @@ class CdpMasterProfile(Base):
 
     acquisition_source: Mapped[Optional[str]] = mapped_column(Text)
     acquisition_campaign: Mapped[Optional[str]] = mapped_column(Text)
+    # Points at the latest (is_active=TRUE) cdp_customer_personas row for this
+    # profile. Nullable + ON DELETE SET NULL: computed asynchronously by
+    # backend-system/identity_resolution's PersonaResolutionEngine
+    # (persona_engine.py), never required at profile-creation time.
+    current_persona_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_customer_personas.persona_id", ondelete="SET NULL")
+    )
     # Human-readable, non-PII label required whenever is_hashed = TRUE (see persona.py).
     persona_name: Mapped[Optional[str]] = mapped_column(Text)
-    persona_embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(768))
     segmentation_tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
     communication_preferences: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     attributes: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
@@ -360,3 +366,127 @@ class CdpIdResolutionStatus(Base):
 
     id: Mapped[bool] = mapped_column(Boolean, primary_key=True, server_default=text("true"))
     last_executed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+
+
+class CdpCustomerPersona(Base):
+    """Versioned, explainable "customer persona" computed from a resolved
+    cdp_master_profiles row by backend-system/identity_resolution's
+    PersonaResolutionEngine -- identity *understanding*, built on top of the
+    identity *matching* output above. Each recomputation inserts a new row
+    (computed_version increments per tenant/master_profile/persona_code);
+    only the latest row per master profile has is_active = True, and that is
+    the row cdp_master_profiles.current_persona_id points at."""
+
+    __tablename__ = "cdp_customer_personas"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "master_profile_id", "persona_code", "computed_version",
+            name="cdp_customer_personas_tenant_id_master_profile_id_persona_c_key",
+        ),
+    )
+
+    persona_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("uuid_generate_v4()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False
+    )
+    domain: Mapped[str] = mapped_column(Text, nullable=False)
+    master_profile_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_master_profiles.master_profile_id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Stable grouping key for this "family" of persona (e.g.
+    # domain+value-tier+lifecycle slug) -- the (tenant_id, master_profile_id,
+    # persona_code) tuple is what computed_version increments within.
+    persona_code: Mapped[str] = mapped_column(Text, nullable=False)
+    persona_name: Mapped[str] = mapped_column(Text, nullable=False)
+    persona_category: Mapped[Optional[str]] = mapped_column(Text)
+    persona_summary: Mapped[Optional[str]] = mapped_column(Text)
+
+    persona_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), server_default="0")
+    confidence_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4), server_default="0")
+    behavior_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2), server_default="0")
+    engagement_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2), server_default="0")
+    financial_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2), server_default="0")
+    loyalty_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2), server_default="0")
+    relationship_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2), server_default="0")
+    risk_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2), server_default="0")
+
+    lifecycle_stage: Mapped[Optional[str]] = mapped_column(Text)
+    customer_value_tier: Mapped[Optional[str]] = mapped_column(Text)
+    risk_level: Mapped[Optional[str]] = mapped_column(Text)
+    next_best_action: Mapped[Optional[str]] = mapped_column(Text)
+
+    llm_provider: Mapped[Optional[str]] = mapped_column(Text)
+    llm_model: Mapped[Optional[str]] = mapped_column(Text)
+    persona_embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(768))
+
+    computed_version: Mapped[int] = mapped_column(Integer, server_default="1")
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    computed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    expires_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CdpPersonaFeature(Base):
+    """One raw/derived signal (tenure, channel breadth, CLV, churn
+    probability, KYC status, ...) that fed a cdp_customer_personas
+    computation -- the explainability input side of the persona engine."""
+
+    __tablename__ = "cdp_persona_features"
+
+    feature_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    persona_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_customer_personas.persona_id", ondelete="CASCADE"), nullable=False
+    )
+    feature_code: Mapped[str] = mapped_column(Text, nullable=False)
+    feature_name: Mapped[Optional[str]] = mapped_column(Text)
+    feature_type: Mapped[Optional[str]] = mapped_column(Text)
+    numeric_value: Mapped[Optional[Decimal]] = mapped_column(Numeric)
+    text_value: Mapped[Optional[str]] = mapped_column(Text)
+    boolean_value: Mapped[Optional[bool]] = mapped_column(Boolean)
+    source_system: Mapped[Optional[str]] = mapped_column(Text)
+    confidence_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
+    computed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CdpPersonaScoreDetail(Base):
+    """Per-component score breakdown (behavior/engagement/financial/loyalty/
+    relationship/risk) for one cdp_customer_personas row, with the
+    weight/formula/explanation behind each -- the explainability output side
+    of the persona engine."""
+
+    __tablename__ = "cdp_persona_score_details"
+
+    score_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    persona_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_customer_personas.persona_id", ondelete="CASCADE"), nullable=False
+    )
+    score_type: Mapped[Optional[str]] = mapped_column(Text)
+    score_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
+    score_weight: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
+    score_formula: Mapped[Optional[str]] = mapped_column(Text)
+    explanation: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CdpPersonaHistory(Base):
+    """Audit trail of material persona changes over time (persona_name
+    and/or persona_score delta above a configured threshold), one row per
+    change, linked to the NEW cdp_customer_personas row that triggered it."""
+
+    __tablename__ = "cdp_persona_history"
+
+    history_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    persona_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_customer_personas.persona_id", ondelete="CASCADE"), nullable=False
+    )
+    old_persona_name: Mapped[Optional[str]] = mapped_column(Text)
+    new_persona_name: Mapped[Optional[str]] = mapped_column(Text)
+    old_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
+    new_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
+    change_reason: Mapped[Optional[str]] = mapped_column(Text)
+    model_version: Mapped[Optional[str]] = mapped_column(Text)
+    changed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))

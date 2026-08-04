@@ -22,6 +22,7 @@ from psycopg2.extras import Json, RealDictCursor
 
 from .models import IdentityRule
 from .persona import generate_persona_name, profile_looks_hashed
+from .persona_engine import PersonaResolutionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -94,17 +95,32 @@ class CustomerIdentityResolver:
     and per domain (retail/banking/real_estate/travel/media/education).
     """
 
-    def __init__(self, db_connection, schema: str = "customer360", batch_size: int = 1000):
+    def __init__(
+        self,
+        db_connection,
+        schema: str = "customer360",
+        batch_size: int = 1000,
+        enable_persona_resolution: bool = True,
+    ):
         """
         Args:
             db_connection: A psycopg2 connection object (or a connection pool
                 checkout), injected for easy unit testing.
             schema: The database schema containing the CDP tables.
             batch_size: Number of records to process per batch/run.
+            enable_persona_resolution: When True (default), every raw profile
+                processed by run_resolution_batch also gets its master
+                profile's persona recomputed via PersonaResolutionEngine
+                (identity *understanding* on top of identity *matching*).
+                PersonaResolutionEngine.resolve_persona() never raises, so
+                this can never abort/rollback the surrounding CIR batch --
+                disable only for tests that want to assert on the matching
+                logic in isolation without persona-engine side effects.
         """
         self.conn = db_connection
         self.schema = schema
         self.batch_size = batch_size
+        self.persona_engine = PersonaResolutionEngine(schema=schema) if enable_persona_resolution else None
 
     def _table(self, name: str) -> str:
         return f"{self.schema}.{name}" if self.schema else name
@@ -710,7 +726,14 @@ class CustomerIdentityResolver:
                     if matched_id:
                         self._link_and_update(cursor, profile, matched_id, rules=rules)
                     else:
-                        self._create_master_and_link(cursor, profile)
+                        matched_id = self._create_master_and_link(cursor, profile)
+
+                    # Identity *understanding*: recompute the resolved master
+                    # profile's persona (persona_engine.py never raises, so
+                    # this can't abort/rollback the identity *matching* work
+                    # done above for this batch).
+                    if self.persona_engine is not None:
+                        self.persona_engine.resolve_persona(cursor, profile["tenant_id"], matched_id)
 
                     self._mark_as_processed(cursor, profile["raw_profile_id"])
 

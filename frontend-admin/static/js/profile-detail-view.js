@@ -38,6 +38,8 @@ window.C360 = window.C360 || {};
     channelActivity,
     topInterests,
     timeline,
+    persona,
+    personaHistory,
   ) {
     var displayName =
       profile.persona_name ||
@@ -185,6 +187,19 @@ window.C360 = window.C360 || {};
 
     var timelineVms = (timeline || []).map(timelineEntryVm);
 
+    var historyVms = (personaHistory || []).map(function (h) {
+      return {
+        newPersonaName: h.new_persona_name || "—",
+        changeReason: h.change_reason || "",
+        changedAtLabel: fmt.dateTime(h.changed_at),
+      };
+    });
+
+    function scoreWidth(v) {
+      var n = Number(v);
+      return (isNaN(n) ? 0 : Math.max(0, Math.min(100, n))) + "%";
+    }
+
     return {
       master_profile_id: profile.master_profile_id,
       domain: profile.domain,
@@ -272,7 +287,64 @@ window.C360 = window.C360 || {};
           : "—",
       identityConfidenceLabel: fmt.score(profile.identity_confidence_score),
       scoresUpdatedLabel: fmt.dateTime(profile.scores_updated_at),
+
+      // Customer Persona card (AI-native Persona Resolution Engine).
+      hasPersona: !!persona,
+      personaId: persona ? persona.persona_id : null,
+      personaName: (persona && persona.persona_name) || displayName,
+      personaCategory: (persona && persona.persona_category) || fmt.domainLabel(profile.domain),
+      computedVersion: persona ? persona.computed_version : null,
+      customerValueTierLabel: persona ? fmt.titleCase(persona.customer_value_tier) : "—",
+      riskLevelLabel: persona ? fmt.titleCase(persona.risk_level) : "—",
+      riskLevelBadgeClass: persona ? fmt.churnBadgeClass(persona.risk_level) : "bg-slate-100 text-slate-600",
+      nextBestAction: (persona && persona.next_best_action) || "—",
+      personaScoreLabel: persona ? fmt.score(persona.persona_score) : "—",
+      personaScoreWidth: scoreWidth(persona && persona.persona_score),
+      behaviorScoreLabel: persona ? fmt.score(persona.behavior_score) : "—",
+      behaviorScoreWidth: scoreWidth(persona && persona.behavior_score),
+      engagementScoreLabel: persona ? fmt.score(persona.engagement_score) : "—",
+      engagementScoreWidth: scoreWidth(persona && persona.engagement_score),
+      financialScoreLabel: persona ? fmt.score(persona.financial_score) : "—",
+      financialScoreWidth: scoreWidth(persona && persona.financial_score),
+      loyaltyScoreLabel: persona ? fmt.score(persona.loyalty_score) : "—",
+      loyaltyScoreWidth: scoreWidth(persona && persona.loyalty_score),
+      relationshipScoreLabel: persona ? fmt.score(persona.relationship_score) : "—",
+      relationshipScoreWidth: scoreWidth(persona && persona.relationship_score),
+      riskScoreLabel: persona ? fmt.score(persona.risk_score) : "—",
+      riskScoreWidth: scoreWidth(persona && persona.risk_score),
+      confidenceScoreLabel: persona ? fmt.percent(persona.confidence_score) : "—",
+      llmProviderLabel: persona ? fmt.titleCase(persona.llm_provider) : "—",
+      computedAtLabel: persona ? fmt.dateTime(persona.computed_at) : "—",
+      hasHistory: historyVms.length > 0,
+      history: historyVms,
     };
+  }
+
+  // Persona endpoints 404 when no persona has been computed yet for this
+  // profile -- treat that as "no persona" (null/[]) rather than a hard
+  // failure so it never blocks the rest of the profile detail page load.
+  function loadPersona(masterProfileId) {
+    return api("/master-profiles/" + masterProfileId + "/persona").then(
+      function (persona) {
+        return persona;
+      },
+      function () {
+        return null;
+      },
+    );
+  }
+
+  function loadPersonaHistory(masterProfileId) {
+    return api("/master-profiles/" + masterProfileId + "/persona-history", {
+      limit: 5,
+    }).then(
+      function (history) {
+        return history;
+      },
+      function () {
+        return [];
+      },
+    );
   }
 
   function loadContentItems(masterProfileId, itemType) {
@@ -359,6 +431,8 @@ window.C360 = window.C360 || {};
       api("/master-profiles/" + masterProfileId + "/timeline", {
         limit: timelineLimit,
       }),
+      loadPersona(masterProfileId),
+      loadPersonaHistory(masterProfileId),
     )
       .done(
         function (
@@ -367,6 +441,8 @@ window.C360 = window.C360 || {};
           channelRes,
           interestsRes,
           timelineRes,
+          persona,
+          personaHistory,
         ) {
           var vm = buildDetailVm(
             profileRes[0],
@@ -374,6 +450,8 @@ window.C360 = window.C360 || {};
             channelRes[0],
             interestsRes[0],
             timelineRes[0],
+            persona,
+            personaHistory,
           );
           $("#detail-loading").addClass("hidden");
           $("#detail-content").html(

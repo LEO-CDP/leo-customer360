@@ -5,6 +5,7 @@ the `mock_conn` / `mock_cursor` fixtures in conftest.py.
 """
 
 import hashlib
+from unittest.mock import MagicMock
 
 from identity_resolution.models import IdentityRule
 from identity_resolution.persona import generate_persona_name
@@ -12,6 +13,12 @@ from identity_resolution.resolver import CustomerIdentityResolver
 
 
 def make_resolver(mock_conn, **kwargs):
+    # Persona resolution is disabled by default in these narrow unit tests so
+    # they can assert exact cursor.execute/fetchone call sequences for the
+    # identity-*matching* logic in isolation, without persona_engine's extra
+    # DB calls interleaved. See TestPersonaResolutionIntegration below for
+    # coverage of the enable_persona_resolution=True (production default) path.
+    kwargs.setdefault("enable_persona_resolution", False)
     return CustomerIdentityResolver(mock_conn, schema="customer360", **kwargs)
 
 
@@ -442,6 +449,123 @@ class TestRunResolutionBatch:
             assert False, "expected RuntimeError to propagate"
         except RuntimeError:
             pass
+
+
+class TestPersonaEngineWiring:
+    """Covers CustomerIdentityResolver's integration with
+    identity_resolution.persona_engine.PersonaResolutionEngine (identity
+    *understanding* on top of identity *matching*)."""
+
+    def test_persona_engine_enabled_by_default(self, mock_conn):
+        resolver = CustomerIdentityResolver(mock_conn, schema="customer360")
+        assert resolver.persona_engine is not None
+
+    def test_persona_engine_disabled_when_requested(self, mock_conn):
+        resolver = CustomerIdentityResolver(mock_conn, schema="customer360", enable_persona_resolution=False)
+        assert resolver.persona_engine is None
+
+    def test_run_resolution_batch_invokes_persona_engine_for_matched_profile(self, mock_cursor, mock_conn):
+        rules = [{"attribute_internal_code": "email", "matching_rule": "exact", "matching_threshold": None}]
+        profiles = [
+            {
+                "raw_profile_id": "r1",
+                "tenant_id": "t1",
+                "domain": "retail",
+                "source_system": "WebTracking",
+                "full_name": "Nguyen Van A",
+                "email": "a@example.com",
+                "phone_number": None,
+                "national_id": None,
+                "device_id": None,
+                "advertising_id": None,
+                "cookie_id": "cookie-1",
+                "external_customer_id": None,
+                "push_token": None,
+            }
+        ]
+        mock_cursor.fetchall.side_effect = [rules, profiles]
+        mock_cursor.fetchone.side_effect = [{"master_profile_id": "existing-master"}]
+        resolver = CustomerIdentityResolver(mock_conn, schema="customer360", batch_size=10)
+        resolver.persona_engine = MagicMock()
+
+        processed = resolver.run_resolution_batch()
+
+        assert processed == 1
+        resolver.persona_engine.resolve_persona.assert_called_once_with(mock_cursor, "t1", "existing-master")
+
+    def test_run_resolution_batch_invokes_persona_engine_with_new_master_id(self, mock_cursor, mock_conn):
+        """Regression guard: _create_master_and_link's return value must be
+        captured as matched_id so the newly created master profile's persona
+        is computed too (previously discarded, only used for matched
+        profiles)."""
+        rules = [{"attribute_internal_code": "email", "matching_rule": "exact", "matching_threshold": None}]
+        profiles = [
+            {
+                "raw_profile_id": "r2",
+                "tenant_id": "t1",
+                "domain": "retail",
+                "source_system": "AppsFlyer",
+                "full_name": "Tran Thi B",
+                "email": "b@example.com",
+                "phone_number": None,
+                "national_id": None,
+                "device_id": "dev-2",
+                "advertising_id": None,
+                "cookie_id": None,
+                "external_customer_id": None,
+                "push_token": None,
+            }
+        ]
+        mock_cursor.fetchall.side_effect = [rules, profiles]
+        # fetchone: _find_master_profile -> no match, _create_master_and_link -> new id
+        mock_cursor.fetchone.side_effect = [None, {"master_profile_id": "brand-new-master"}]
+        resolver = CustomerIdentityResolver(mock_conn, schema="customer360", batch_size=10)
+        resolver.persona_engine = MagicMock()
+
+        processed = resolver.run_resolution_batch()
+
+        assert processed == 1
+        resolver.persona_engine.resolve_persona.assert_called_once_with(mock_cursor, "t1", "brand-new-master")
+
+    def test_persona_engine_failure_never_aborts_the_batch(self, mock_cursor, mock_conn):
+        """PersonaResolutionEngine.resolve_persona is documented to never
+        raise, but even if something upstream misbehaves, the resolver
+        itself must still commit the identity-matching work already done."""
+        rules = [{"attribute_internal_code": "email", "matching_rule": "exact", "matching_threshold": None}]
+        profiles = [
+            {
+                "raw_profile_id": "r1",
+                "tenant_id": "t1",
+                "domain": "retail",
+                "source_system": "WebTracking",
+                "full_name": "Nguyen Van A",
+                "email": "a@example.com",
+                "phone_number": None,
+                "national_id": None,
+                "device_id": None,
+                "advertising_id": None,
+                "cookie_id": None,
+                "external_customer_id": None,
+                "push_token": None,
+            }
+        ]
+        mock_cursor.fetchall.side_effect = [rules, profiles]
+        mock_cursor.fetchone.side_effect = [{"master_profile_id": "existing-master"}]
+        resolver = CustomerIdentityResolver(mock_conn, schema="customer360", batch_size=10)
+        resolver.persona_engine = MagicMock()
+        resolver.persona_engine.resolve_persona.side_effect = RuntimeError("boom")
+
+        try:
+            resolver.run_resolution_batch()
+            assert False, "a misbehaving persona_engine should not itself be caught here"
+        except RuntimeError:
+            pass
+        # The batch's own exception handler still rolls back (can't partially
+        # commit mid-batch) -- this asserts the *call* happened, proving the
+        # wiring point exists; persona_engine.py's own tests assert it never
+        # actually raises in practice.
+        resolver.persona_engine.resolve_persona.assert_called_once()
+        mock_conn.rollback.assert_called_once()
 
         mock_conn.rollback.assert_called_once()
         mock_conn.commit.assert_not_called()

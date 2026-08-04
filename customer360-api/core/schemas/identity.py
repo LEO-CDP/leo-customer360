@@ -57,6 +57,7 @@ class MasterProfileBase(BaseModel):
 
     acquisition_source: Optional[str] = None
     acquisition_campaign: Optional[str] = None
+    current_persona_id: Optional[uuid.UUID] = None
     persona_name: Optional[str] = None
     segmentation_tags: Optional[list[str]] = None
     communication_preferences: Optional[dict] = None
@@ -133,6 +134,7 @@ class MasterProfileUpdate(BaseModel):
     institution_name: Optional[str] = None
     acquisition_source: Optional[str] = None
     acquisition_campaign: Optional[str] = None
+    current_persona_id: Optional[uuid.UUID] = None
     persona_name: Optional[str] = None
     segmentation_tags: Optional[list[str]] = None
     communication_preferences: Optional[dict] = None
@@ -422,3 +424,136 @@ class ProfileMergeHistoryRead(ProfileMergeHistoryBase):
     model_config = ConfigDict(from_attributes=True)
     merge_id: uuid.UUID
     merged_at: Optional[datetime] = None
+
+
+# --- Customer Persona Resolution ("identity understanding") -------------------
+
+
+class CustomerPersonaBase(BaseModel):
+    tenant_id: uuid.UUID
+    domain: str = Field(default="retail", pattern="^(retail|banking|real_estate|travel|media|education)$")
+    master_profile_id: uuid.UUID
+
+    persona_code: str
+    persona_name: str
+    persona_category: Optional[str] = None
+    persona_summary: Optional[str] = None
+
+    persona_score: Optional[Decimal] = None
+    confidence_score: Optional[Decimal] = None
+    behavior_score: Optional[Decimal] = None
+    engagement_score: Optional[Decimal] = None
+    financial_score: Optional[Decimal] = None
+    loyalty_score: Optional[Decimal] = None
+    relationship_score: Optional[Decimal] = None
+    risk_score: Optional[Decimal] = None
+
+    lifecycle_stage: Optional[str] = Field(
+        default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
+    )
+    customer_value_tier: Optional[str] = None
+    risk_level: Optional[str] = Field(default=None, pattern="^(low|medium|high|critical)$")
+    next_best_action: Optional[str] = None
+
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+
+    computed_version: int = 1
+    is_active: bool = True
+    expires_at: Optional[datetime] = None
+
+
+class CustomerPersonaCreate(CustomerPersonaBase):
+    pass
+
+
+class CustomerPersonaUpdate(BaseModel):
+    persona_category: Optional[str] = None
+    persona_summary: Optional[str] = None
+    persona_score: Optional[Decimal] = None
+    confidence_score: Optional[Decimal] = None
+    behavior_score: Optional[Decimal] = None
+    engagement_score: Optional[Decimal] = None
+    financial_score: Optional[Decimal] = None
+    loyalty_score: Optional[Decimal] = None
+    relationship_score: Optional[Decimal] = None
+    risk_score: Optional[Decimal] = None
+    lifecycle_stage: Optional[str] = Field(
+        default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
+    )
+    customer_value_tier: Optional[str] = None
+    risk_level: Optional[str] = Field(default=None, pattern="^(low|medium|high|critical)$")
+    next_best_action: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    is_active: Optional[bool] = None
+    expires_at: Optional[datetime] = None
+
+
+class CustomerPersonaRead(CustomerPersonaBase):
+    model_config = ConfigDict(from_attributes=True)
+    persona_id: uuid.UUID
+    computed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PersonaFeatureBase(BaseModel):
+    persona_id: uuid.UUID
+    feature_code: str
+    feature_name: Optional[str] = None
+    feature_type: Optional[str] = Field(default=None, pattern="^(numeric|text|boolean)$")
+    numeric_value: Optional[Decimal] = None
+    text_value: Optional[str] = None
+    boolean_value: Optional[bool] = None
+    source_system: Optional[str] = None
+    confidence_score: Optional[Decimal] = None
+
+
+class PersonaFeatureCreate(PersonaFeatureBase):
+    pass
+
+
+class PersonaFeatureRead(PersonaFeatureBase):
+    model_config = ConfigDict(from_attributes=True)
+    feature_id: int
+    computed_at: Optional[datetime] = None
+
+
+class PersonaScoreDetailBase(BaseModel):
+    persona_id: uuid.UUID
+    score_type: str
+    score_value: Optional[Decimal] = None
+    score_weight: Optional[Decimal] = None
+    score_formula: Optional[str] = None
+    explanation: Optional[str] = None
+
+
+class PersonaScoreDetailCreate(PersonaScoreDetailBase):
+    pass
+
+
+class PersonaScoreDetailRead(PersonaScoreDetailBase):
+    model_config = ConfigDict(from_attributes=True)
+    score_id: int
+    created_at: Optional[datetime] = None
+
+
+class PersonaHistoryBase(BaseModel):
+    persona_id: uuid.UUID
+    old_persona_name: Optional[str] = None
+    new_persona_name: Optional[str] = None
+    old_score: Optional[Decimal] = None
+    new_score: Optional[Decimal] = None
+    change_reason: Optional[str] = None
+    model_version: Optional[str] = None
+
+
+class PersonaHistoryCreate(PersonaHistoryBase):
+    pass
+
+
+class PersonaHistoryRead(PersonaHistoryBase):
+    model_config = ConfigDict(from_attributes=True)
+    history_id: int
+    changed_at: Optional[datetime] = None
