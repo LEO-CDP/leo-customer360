@@ -150,8 +150,8 @@ class TestPersonaScoreAggregation:
     def test_risk_level_thresholds(self):
         assert compute_risk_level(80) == "critical"
         assert compute_risk_level(60) == "high"
-        assert compute_risk_level(30) == "medium"
-        assert compute_risk_level(10) == "low"
+        assert compute_risk_level(40) == "medium"
+        assert compute_risk_level(30) == "low"
 
     def test_next_best_action_prioritizes_churn_retention(self):
         action = compute_next_best_action(lifecycle_stage="customer", value_tier="high_value", risk_level="high")

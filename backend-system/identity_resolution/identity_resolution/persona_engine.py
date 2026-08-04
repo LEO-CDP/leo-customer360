@@ -33,6 +33,104 @@ logger = logging.getLogger(__name__)
 
 MODEL_VERSION = "persona-engine-v1"
 
+# =============================================================================
+# RISK LEVEL THRESHOLDS
+# =============================================================================
+RISK_LEVEL_CRITICAL_THRESHOLD = 80.0
+RISK_LEVEL_HIGH_THRESHOLD = 60.0
+RISK_LEVEL_MEDIUM_THRESHOLD = 40.0
+
+# =============================================================================
+# LIFECYCLE BEHAVIOR SCORE BASELINES
+# =============================================================================
+LIFECYCLE_BEHAVIOR_PROSPECT_BASE = 20.0
+LIFECYCLE_BEHAVIOR_LEAD_BASE = 40.0
+LIFECYCLE_BEHAVIOR_CUSTOMER_BASE = 65.0
+LIFECYCLE_BEHAVIOR_VIP_BASE = 95.0
+LIFECYCLE_BEHAVIOR_DORMANT_BASE = 30.0
+LIFECYCLE_BEHAVIOR_CHURN_RISK_BASE = 35.0
+LIFECYCLE_BEHAVIOR_DEFAULT_BASE = 30.0
+
+# =============================================================================
+# ENGAGEMENT SCORE CONFIGURATION
+# =============================================================================
+ENGAGEMENT_RECENCY_UNKNOWN_SCORE = 30.0
+ENGAGEMENT_RECENCY_RECENT_7D_SCORE = 100.0
+ENGAGEMENT_RECENCY_RECENT_30D_SCORE = 80.0
+ENGAGEMENT_RECENCY_RECENT_90D_SCORE = 50.0
+ENGAGEMENT_RECENCY_RECENT_180D_SCORE = 25.0
+ENGAGEMENT_RECENCY_STALE_SCORE = 10.0
+ENGAGEMENT_RECENCY_THRESHOLD_7D = 7
+ENGAGEMENT_RECENCY_THRESHOLD_30D = 30
+ENGAGEMENT_RECENCY_THRESHOLD_90D = 90
+ENGAGEMENT_RECENCY_THRESHOLD_180D = 180
+ENGAGEMENT_CHANNEL_WEIGHT_PER_SYSTEM = 10.0
+ENGAGEMENT_CHANNEL_BONUS_CAP = 30.0
+ENGAGEMENT_RECENCY_WEIGHT = 0.7
+
+# =============================================================================
+# FINANCIAL SCORE CONFIGURATION
+# =============================================================================
+FINANCIAL_CLV_REFERENCE_DEFAULT = 5000.0
+FINANCIAL_SCORE_MULTIPLIER = 100.0
+
+# =============================================================================
+# LOYALTY SCORE CONFIGURATION
+# =============================================================================
+LOYALTY_TIER_PLATINUM_BASE = 100.0
+LOYALTY_TIER_GOLD_BASE = 80.0
+LOYALTY_TIER_SILVER_BASE = 60.0
+LOYALTY_TIER_BRONZE_BASE = 40.0
+LOYALTY_TIER_DEFAULT_BASE = 20.0
+LOYALTY_TENURE_WEIGHT = 0.8
+LOYALTY_TENURE_BONUS_PER_YEAR = 20.0
+LOYALTY_TENURE_BONUS_CAP = 20.0
+LOYALTY_TENURE_REFERENCE_DAYS = 365.0
+
+# =============================================================================
+# RELATIONSHIP SCORE CONFIGURATION
+# =============================================================================
+RELATIONSHIP_CHANNEL_WEIGHT_PER_SYSTEM = 20.0
+RELATIONSHIP_CHANNEL_BONUS_CAP = 60.0
+RELATIONSHIP_CONTACT_WEIGHT_PER_CONTACT = 10.0
+RELATIONSHIP_CONTACT_BONUS_CAP = 40.0
+
+# =============================================================================
+# RISK SCORING CONFIGURATION
+# =============================================================================
+RISK_SCORE_CHURN_MULTIPLIER = 100.0
+RISK_SCORE_DEFAULT_CHURN_BASE = 20.0
+
+# =============================================================================
+# CUSTOMER VALUE TIER THRESHOLDS
+# =============================================================================
+VALUE_TIER_CHAMPION_THRESHOLD = 80.0
+VALUE_TIER_HIGH_VALUE_THRESHOLD = 60.0
+VALUE_TIER_GROWTH_POTENTIAL_THRESHOLD = 35.0
+
+# =============================================================================
+# PERSONA SCORING WEIGHTS
+# =============================================================================
+# Positive component weights sum to 0.85; the remaining 0.15 is applied
+# to (100 - risk_score) so a risk_score of 0 contributes its full 15 points
+# and a risk_score of 100 contributes 0, keeping the overall persona_score
+# bounded to [0, 100].
+SCORE_WEIGHT_BEHAVIOR = 0.20
+SCORE_WEIGHT_ENGAGEMENT = 0.20
+SCORE_WEIGHT_FINANCIAL = 0.20
+SCORE_WEIGHT_LOYALTY = 0.15
+SCORE_WEIGHT_RELATIONSHIP = 0.10
+SCORE_WEIGHT_RISK = 0.15
+SCORE_WEIGHTS_POSITIVE_SUM = 0.85
+
+# =============================================================================
+# PERSONA HISTORY TRACKING
+# =============================================================================
+# Minimum |old_score - new_score| delta (0-100 scale) that counts as a
+# "material" persona change worth recording in cdp_persona_history.
+# Avoids flooding the history table with noise from tiny score wobbles.
+PERSONA_HISTORY_SCORE_DELTA_THRESHOLD = 5.0
+
 # Master profile columns needed to compute a persona. Deliberately excludes
 # any raw PII (full_name/email/phone_number/national_id) -- persona_name is
 # seeded from master_profile_id itself (see compute_persona), never from PII.
@@ -95,18 +193,18 @@ def _days_since(dt: Optional[datetime]) -> Optional[float]:
 # ---------------------------------------------------------------------------
 
 _LIFECYCLE_BEHAVIOR_BASE = {
-    "prospect": 20.0,
-    "lead": 40.0,
-    "customer": 65.0,
-    "vip": 95.0,
-    "dormant": 30.0,
-    "churn_risk": 35.0,
+    "prospect": LIFECYCLE_BEHAVIOR_PROSPECT_BASE,
+    "lead": LIFECYCLE_BEHAVIOR_LEAD_BASE,
+    "customer": LIFECYCLE_BEHAVIOR_CUSTOMER_BASE,
+    "vip": LIFECYCLE_BEHAVIOR_VIP_BASE,
+    "dormant": LIFECYCLE_BEHAVIOR_DORMANT_BASE,
+    "churn_risk": LIFECYCLE_BEHAVIOR_CHURN_RISK_BASE,
 }
 
 
 def compute_behavior_score(master_profile: Dict[str, Any]) -> float:
     lifecycle_stage = (master_profile.get("lifecycle_stage") or "").lower()
-    base = _LIFECYCLE_BEHAVIOR_BASE.get(lifecycle_stage, 30.0)
+    base = _LIFECYCLE_BEHAVIOR_BASE.get(lifecycle_stage, LIFECYCLE_BEHAVIOR_DEFAULT_BASE)
     existing_engagement = master_profile.get("engagement_score")
     if existing_engagement is not None:
         base = (base + _to_float(existing_engagement)) / 2.0
@@ -116,49 +214,63 @@ def compute_behavior_score(master_profile: Dict[str, Any]) -> float:
 def compute_engagement_score(master_profile: Dict[str, Any]) -> float:
     recency_days = _days_since(master_profile.get("last_activity_at"))
     if recency_days is None:
-        recency_component = 30.0
-    elif recency_days <= 7:
-        recency_component = 100.0
-    elif recency_days <= 30:
-        recency_component = 80.0
-    elif recency_days <= 90:
-        recency_component = 50.0
-    elif recency_days <= 180:
-        recency_component = 25.0
+        recency_component = ENGAGEMENT_RECENCY_UNKNOWN_SCORE
+    elif recency_days <= ENGAGEMENT_RECENCY_THRESHOLD_7D:
+        recency_component = ENGAGEMENT_RECENCY_RECENT_7D_SCORE
+    elif recency_days <= ENGAGEMENT_RECENCY_THRESHOLD_30D:
+        recency_component = ENGAGEMENT_RECENCY_RECENT_30D_SCORE
+    elif recency_days <= ENGAGEMENT_RECENCY_THRESHOLD_90D:
+        recency_component = ENGAGEMENT_RECENCY_RECENT_90D_SCORE
+    elif recency_days <= ENGAGEMENT_RECENCY_THRESHOLD_180D:
+        recency_component = ENGAGEMENT_RECENCY_RECENT_180D_SCORE
     else:
-        recency_component = 10.0
-    channel_bonus = min(len(master_profile.get("source_systems") or []) * 10.0, 30.0)
-    return _clip(recency_component * 0.7 + channel_bonus)
+        recency_component = ENGAGEMENT_RECENCY_STALE_SCORE
+    channel_bonus = min(
+        len(master_profile.get("source_systems") or []) * ENGAGEMENT_CHANNEL_WEIGHT_PER_SYSTEM,
+        ENGAGEMENT_CHANNEL_BONUS_CAP,
+    )
+    return _clip(recency_component * ENGAGEMENT_RECENCY_WEIGHT + channel_bonus)
 
 
-def compute_financial_score(master_profile: Dict[str, Any], clv_reference: float = 5000.0) -> float:
+def compute_financial_score(master_profile: Dict[str, Any], clv_reference: float = FINANCIAL_CLV_REFERENCE_DEFAULT) -> float:
     clv = master_profile.get("predictive_clv")
     if clv is None:
         clv = master_profile.get("historical_clv")
     clv = _to_float(clv)
     if clv_reference <= 0:
         return 0.0
-    return _clip((clv / clv_reference) * 100.0)
+    return _clip((clv / clv_reference) * FINANCIAL_SCORE_MULTIPLIER)
 
 
-_MEMBERSHIP_TIER_BASE = {"platinum": 100.0, "gold": 80.0, "silver": 60.0, "bronze": 40.0}
+_MEMBERSHIP_TIER_BASE = {
+    "platinum": LOYALTY_TIER_PLATINUM_BASE,
+    "gold": LOYALTY_TIER_GOLD_BASE,
+    "silver": LOYALTY_TIER_SILVER_BASE,
+    "bronze": LOYALTY_TIER_BRONZE_BASE,
+}
 
 
 def compute_loyalty_score(master_profile: Dict[str, Any]) -> float:
     tier = (master_profile.get("membership_tier") or "").lower()
-    base = _MEMBERSHIP_TIER_BASE.get(tier, 20.0)
+    base = _MEMBERSHIP_TIER_BASE.get(tier, LOYALTY_TIER_DEFAULT_BASE)
     customer_since = master_profile.get("customer_since")
     tenure_days = (date.today() - customer_since).days if customer_since is not None else 0
-    tenure_bonus = min(max(tenure_days, 0) / 365.0 * 20.0, 20.0)
-    return _clip(base * 0.8 + tenure_bonus)
+    tenure_bonus = min(
+        max(tenure_days, 0) / LOYALTY_TENURE_REFERENCE_DAYS * LOYALTY_TENURE_BONUS_PER_YEAR,
+        LOYALTY_TENURE_BONUS_CAP,
+    )
+    return _clip(base * LOYALTY_TENURE_WEIGHT + tenure_bonus)
 
 
 def compute_relationship_score(master_profile: Dict[str, Any]) -> float:
-    channel_component = min(len(master_profile.get("source_systems") or []) * 20.0, 60.0)
+    channel_component = min(
+        len(master_profile.get("source_systems") or []) * RELATIONSHIP_CHANNEL_WEIGHT_PER_SYSTEM,
+        RELATIONSHIP_CHANNEL_BONUS_CAP,
+    )
     secondary_contacts = len(master_profile.get("secondary_emails") or []) + len(
         master_profile.get("secondary_phones") or []
     )
-    contact_component = min(secondary_contacts * 10.0, 40.0)
+    contact_component = min(secondary_contacts * RELATIONSHIP_CONTACT_WEIGHT_PER_CONTACT, RELATIONSHIP_CONTACT_BONUS_CAP)
     return _clip(channel_component + contact_component)
 
 
@@ -168,7 +280,11 @@ _KYC_STATUS_BONUS = {"verified": 0.0, "pending": 10.0, "unverified": 20.0, "reje
 
 def compute_risk_score(master_profile: Dict[str, Any]) -> float:
     churn_probability = master_profile.get("churn_probability")
-    base = _to_float(churn_probability) * 100.0 if churn_probability is not None else 20.0
+    base = (
+        _to_float(churn_probability) * RISK_SCORE_CHURN_MULTIPLIER
+        if churn_probability is not None
+        else RISK_SCORE_DEFAULT_CHURN_BASE
+    )
     base += _RISK_SEGMENT_BONUS.get((master_profile.get("risk_segment") or "").lower(), 0.0)
     base += _KYC_STATUS_BONUS.get((master_profile.get("kyc_status") or "").lower(), 0.0)
     return _clip(base)
@@ -179,12 +295,12 @@ def compute_risk_score(master_profile: Dict[str, Any]) -> float:
 # risk_score of 0 contributes its full 15 points and a risk_score of 100
 # contributes 0 -- keeping the overall persona_score bounded to [0, 100].
 _SCORE_WEIGHTS = {
-    "behavior": 0.20,
-    "engagement": 0.20,
-    "financial": 0.20,
-    "loyalty": 0.15,
-    "relationship": 0.10,
-    "risk": 0.15,
+    "behavior": SCORE_WEIGHT_BEHAVIOR,
+    "engagement": SCORE_WEIGHT_ENGAGEMENT,
+    "financial": SCORE_WEIGHT_FINANCIAL,
+    "loyalty": SCORE_WEIGHT_LOYALTY,
+    "relationship": SCORE_WEIGHT_RELATIONSHIP,
+    "risk": SCORE_WEIGHT_RISK,
 }
 
 
@@ -192,27 +308,27 @@ def compute_persona_score(scores: Dict[str, float]) -> float:
     positive_weighted = sum(
         scores[key] * _SCORE_WEIGHTS[key] for key in ("behavior", "engagement", "financial", "loyalty", "relationship")
     )
-    risk_weighted = (100.0 - scores["risk"]) * _SCORE_WEIGHTS["risk"]
+    risk_weighted = (100.0 - scores["risk"]) * SCORE_WEIGHT_RISK
     return _clip(positive_weighted + risk_weighted)
 
 
 def compute_customer_value_tier(scores: Dict[str, float]) -> str:
     value_index = (scores["financial"] + scores["loyalty"]) / 2.0
-    if value_index >= 80:
+    if value_index >= VALUE_TIER_CHAMPION_THRESHOLD:
         return "champion"
-    if value_index >= 60:
+    if value_index >= VALUE_TIER_HIGH_VALUE_THRESHOLD:
         return "high_value"
-    if value_index >= 35:
+    if value_index >= VALUE_TIER_GROWTH_POTENTIAL_THRESHOLD:
         return "growth_potential"
     return "standard"
 
 
 def compute_risk_level(risk_score: float) -> str:
-    if risk_score >= 75:
+    if risk_score >= RISK_LEVEL_CRITICAL_THRESHOLD:
         return "critical"
-    if risk_score >= 50:
+    if risk_score >= RISK_LEVEL_HIGH_THRESHOLD:
         return "high"
-    if risk_score >= 25:
+    if risk_score >= RISK_LEVEL_MEDIUM_THRESHOLD:
         return "medium"
     return "low"
 
@@ -478,7 +594,7 @@ class PersonaResolutionEngine:
     # Minimum |old_score - new_score| delta (0-100 scale) that counts as a
     # "material" persona change worth recording in cdp_persona_history --
     # avoids flooding the history table with noise from tiny score wobbles.
-    HISTORY_SCORE_DELTA_THRESHOLD = 5.0
+    HISTORY_SCORE_DELTA_THRESHOLD = PERSONA_HISTORY_SCORE_DELTA_THRESHOLD
 
     def __init__(self, schema: str = "customer360"):
         self.schema = schema

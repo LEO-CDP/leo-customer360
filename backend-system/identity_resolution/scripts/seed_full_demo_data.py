@@ -1119,7 +1119,16 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
 
         num_sources = len(m.get("source_systems") or [])
         identity_confidence_score = min(1.0, round(0.5 + 0.15 * num_sources, 4))
-        churn_probability = round(rng.uniform(0, 1), 4)
+        # More realistic churn distribution: ~65% low, ~20% medium, ~10% high, ~5% critical
+        churn_rand = rng.random()
+        if churn_rand < 0.65:
+            churn_probability = round(rng.uniform(0.0, 0.25), 4)  # Low risk: 0-25%
+        elif churn_rand < 0.85:
+            churn_probability = round(rng.uniform(0.25, 0.55), 4)  # Medium risk: 25-55%
+        elif churn_rand < 0.95:
+            churn_probability = round(rng.uniform(0.55, 0.80), 4)  # High risk: 55-80%
+        else:
+            churn_probability = round(rng.uniform(0.80, 1.0), 4)   # Critical risk: 80-100%
         churn_risk_tier = (
             "critical" if churn_probability >= 0.85 else
             "high" if churn_probability >= 0.6 else
@@ -1196,11 +1205,29 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             ]
         elif domain == "banking":
             set_clauses += ["cif_number = %s", "account_numbers = %s", "kyc_status = %s", "risk_segment = %s"]
+            # Realistic KYC distribution: ~70% verified, ~15% pending, ~10% unverified, ~5% rejected
+            kyc_rand = rng.random()
+            if kyc_rand < 0.70:
+                kyc_status = "verified"
+            elif kyc_rand < 0.85:
+                kyc_status = "pending"
+            elif kyc_rand < 0.95:
+                kyc_status = "unverified"
+            else:
+                kyc_status = "rejected"
+            # Risk segment reflects compliance/operational risk: ~60% low, ~30% medium, ~10% high
+            risk_segment_rand = rng.random()
+            if risk_segment_rand < 0.60:
+                risk_segment = "low"
+            elif risk_segment_rand < 0.90:
+                risk_segment = "medium"
+            else:
+                risk_segment = "high"
             params += [
                 f"CIF{rng.randint(10_000_000, 99_999_999)}",
                 [f"{rng.randint(1000000000, 9999999999)}" for _ in range(rng.randint(1, 2))],
-                rng.choice(("unverified", "pending", "verified", "rejected")),
-                rng.choice(("low", "medium", "high")),
+                kyc_status,
+                risk_segment,
             ]
         elif domain == "real_estate":
             set_clauses += ["property_types_of_interest = %s", "preferred_location_codes = %s"]
