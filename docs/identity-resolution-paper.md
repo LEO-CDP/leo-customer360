@@ -383,3 +383,62 @@ Dưới đây là ma trận so sánh đối chiếu giữa hệ thống **Native
 ### 7.3 Tổng kết
 
 Sự kết hợp giữa mô hình metadata-driven linh hoạt, khả năng xử lý PII băm bảo mật tích hợp GenAI, và cơ chế cách ly multi-tenant cấp CSDL giúp **Native C360 CIR Engine** trở thành giải pháp tối ưu cho doanh nghiệp muốn chủ động hoàn toàn về dữ liệu, đáp ứng tốt các bài toán hợp nhất danh tính phức tạp với chi phí TCO tối thiểu.
+
+
+# NOTES to update for AI-native Customer Persona Resolution Engine
+
+from identity matching to identity understanding
+
+https://chatgpt.com/c/6a7145e5-1a24-83ec-9835-d3617eed7bb5
+
+---
+
+Raw Profile
+        │
+        ▼
+Identity Resolution
+        │
+        ▼
+Unified Customer Profile
+        │
+        ▼
+Customer Persona Resolution Engine
+        │
+        ├── Feature Engineering
+        ├── Persona Scoring
+        ├── Persona Classification
+        ├── LLM Persona Summary
+        ├── Vector Embedding
+        └── Confidence Estimation
+        │
+        ▼
+Customer360 Master Profile
+
+--- 
+
+                Raw Profiles
+                     │
+                     ▼
+      Customer Identity Resolution Engine
+                     │
+                     ▼
+         Unified Customer Master Profile
+                     │
+                     ▼
+      Customer Persona Resolution Engine
+                     │
+        ┌────────────┼────────────┐
+        │            │            │
+        ▼            ▼            ▼
+ Feature Store   AI Scoring   LLM Reasoning
+        │            │            │
+        └────────────┼────────────┘
+                     ▼
+         Customer Persona Repository
+                     │
+                     ▼
+          Customer 360 Master Profile
+                     │
+                     ▼
+       Next Best Action / Marketing AI
+
