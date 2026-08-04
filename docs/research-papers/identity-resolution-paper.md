@@ -1,7 +1,7 @@
 ---
 title: "Customer Identity Resolution for Multi-Source Customer Data"
 subtitle: "Design and operations based on the current schema and source code"
-author: "Trieu at trieu@leocdp.com"
+author: "Trieu Nguyen"
 date: 2026-08-04
 geometry: "a4paper,margin=1.5cm"
 fontsize: "9.5pt"
