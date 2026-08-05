@@ -15,7 +15,7 @@ from typing import Optional
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from core.models.identity import CdpMasterProfile, CdpProfileLink, CdpRawProfileStage
+from core.models.identity import CdpCustomerPersona, CdpMasterProfile, CdpProfileLink, CdpRawProfileStage
 
 STATUS_CODE_LABELS = {
     3: "processed",
@@ -282,4 +282,65 @@ def identity_graph_coverage(db: Session, tenant_id: Optional[uuid.UUID] = None, 
         "with_cookie_id": _count(func.cardinality(CdpMasterProfile.cookie_ids) > 0),
         "with_external_id": _count(CdpMasterProfile.external_ids != {}),
         "with_national_id": _count(CdpMasterProfile.national_id.isnot(None)),
+    }
+
+
+def persona_analytics_summary(
+    db: Session,
+    *,
+    tenant_id: Optional[uuid.UUID] = None,
+    domain: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    days: Optional[int] = None,
+) -> dict:
+    """Aggregate analytics for customer personas used by Persona Management UI."""
+
+    where_clauses = []
+    if tenant_id is not None:
+        where_clauses.append(CdpCustomerPersona.tenant_id == tenant_id)
+    if domain is not None:
+        where_clauses.append(CdpCustomerPersona.domain == domain)
+    if is_active is not None:
+        where_clauses.append(CdpCustomerPersona.is_active == is_active)
+
+    cutoff = _cutoff_for_days(days)
+    if cutoff is not None:
+        where_clauses.append(CdpCustomerPersona.computed_at >= cutoff)
+
+    base = select(CdpCustomerPersona).where(*where_clauses).subquery()
+
+    total_personas = db.execute(select(func.count()).select_from(base)).scalar_one()
+    active_personas = db.execute(
+        select(func.count()).select_from(base).where(base.c.is_active.is_(True))
+    ).scalar_one()
+    inactive_personas = max(0, total_personas - active_personas)
+    unique_master_profiles = db.execute(
+        select(func.count(func.distinct(base.c.master_profile_id))).select_from(base)
+    ).scalar_one()
+
+    avg_persona_score_raw, avg_confidence_score_raw = db.execute(
+        select(func.avg(base.c.persona_score), func.avg(base.c.confidence_score)).select_from(base)
+    ).one()
+
+    def _bucket_rows(column_name: str) -> list[dict]:
+        col = getattr(base.c, column_name)
+        rows = db.execute(
+            select(col, func.count().label("count"))
+            .select_from(base)
+            .group_by(col)
+            .order_by(func.count().desc())
+        ).all()
+        return [{"value": (value or "unknown"), "count": count} for value, count in rows]
+
+    return {
+        "total_personas": total_personas,
+        "active_personas": active_personas,
+        "inactive_personas": inactive_personas,
+        "unique_master_profiles": unique_master_profiles,
+        "avg_persona_score": round(float(avg_persona_score_raw or 0), 2),
+        "avg_confidence_score": round(float(avg_confidence_score_raw or 0), 4),
+        "by_domain": _bucket_rows("domain"),
+        "by_category": _bucket_rows("persona_category"),
+        "by_risk_level": _bucket_rows("risk_level"),
+        "by_value_tier": _bucket_rows("customer_value_tier"),
     }

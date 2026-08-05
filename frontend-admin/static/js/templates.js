@@ -43,6 +43,8 @@ window.C360 = window.C360 || {};
     "segment-details": "segment/segment-details",
     "segments-list": "segment/segments-list",
 
+    "persona-list": "persona/persona-list",
+
     "campaign-dashboard": "campaign/campaign-dashboard"
   };
 
@@ -53,7 +55,7 @@ window.C360 = window.C360 || {};
   ];
 
   // Injected as static HTML once (no Handlebars variables of their own).
-  var STATIC_HTML = ["tabs", "settings-modal", "profiles-list", "placeholder", "segments-list", "attributes-list", "analytics", "campaign-dashboard"];
+  var STATIC_HTML = ["tabs", "settings-modal", "profiles-list", "placeholder", "segments-list", "attributes-list", "analytics", "campaign-dashboard", "persona-list"];
 
   // Registered as Handlebars partials so profile/profile-details.html can do {{> name}}.
   var PARTIALS = [

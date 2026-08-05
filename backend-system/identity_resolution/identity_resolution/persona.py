@@ -71,6 +71,7 @@ _ADJECTIVES = (
 
 _ROLE_BY_DOMAIN = {
     "banking": ("Banking Client", "Digital Banking User", "KYC-Verified Client", "Credit Applicant"),
+    "healthcare": ("Healthcare Patient", "Care Member", "Wellness Patient", "Clinic Visitor"),
     "retail": ("Retail Shopper", "Online Shopper", "Loyalty Member", "App Shopper"),
     "real_estate": ("Property Seeker", "Real Estate Investor", "Home Buyer", "Tenant"),
     "travel": ("Traveler", "Frequent Flyer", "Hotel Guest", "Explorer"),

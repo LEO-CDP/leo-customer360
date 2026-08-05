@@ -12,7 +12,7 @@ from core.utils.sql_safety import validate_readonly_sql_statement, validate_sql_
 class SegmentBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None
-    domain: str = Field(default="all", pattern="^(all|retail|banking|real_estate|travel|media|education)$")
+    domain: str = Field(default="all")
     segment_tag: str
     segment_name: str
     description: Optional[str] = None
@@ -39,7 +39,7 @@ class SegmentCreate(SegmentBase):
 
 class SegmentUpdate(BaseModel):
     user_id: Optional[uuid.UUID] = None
-    domain: Optional[str] = Field(default=None, pattern="^(all|retail|banking|real_estate|travel|media|education)$")
+    domain: Optional[str] = Field(default=None)
     segment_tag: Optional[str] = None
     segment_name: Optional[str] = None
     description: Optional[str] = None

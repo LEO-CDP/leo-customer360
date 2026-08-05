@@ -26,6 +26,7 @@ from core.routers._generic import build_crud_router
 from core.schemas.identity import MasterProfileRead
 from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
 from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
+from core.utils.domains import validate_domain_value
 from core.utils.sql_safety import validate_sql_where_fragment
 
 # Segment rules (see get_segment_matched_profiles above) only ever query
@@ -43,6 +44,8 @@ segments_router = build_crud_router(
     read_schema=SegmentRead,
     prefix="/segments",
     tags=["Segmentation"],
+    create_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
+    update_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
 )
 
 _segment_crud = CRUDBase(CdpSegment)

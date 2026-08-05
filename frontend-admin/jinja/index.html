@@ -118,6 +118,12 @@
         <div id="campaign-content"></div>
       </section>
 
+      <!-- Persona Management tab: list + analytics dashboard rendered by
+         static/js/persona-list-view.js -->
+      <section id="view-personas" class="hidden">
+        <div id="persona-list-content"></div>
+      </section>
+
       <!-- Populated from static/templates/placeholder.html for nav tabs that aren't implemented -->
       <section id="view-placeholder" class="hidden"></section>
     </main>
@@ -155,6 +161,7 @@
   <script src="static/js/analytics.js?cb={{ cache_bust }}"></script>
   <script src="static/js/segments-view.js?cb={{ cache_bust }}"></script>
   <script src="static/js/campaign-view.js?cb={{ cache_bust }}"></script>
+  <script src="static/js/persona-list-view.js?cb={{ cache_bust }}"></script>
   <script src="static/js/attributes-view.js?cb={{ cache_bust }}"></script>
   <script src="static/js/placeholder-view.js?cb={{ cache_bust }}"></script>
   <script src="static/js/main.js?cb={{ cache_bust }}"></script>

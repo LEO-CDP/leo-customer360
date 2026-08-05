@@ -93,10 +93,10 @@ window.C360 = window.C360 || {};
     if (tab) $(".tab-btn[data-tab='" + tab + "']").addClass("active");
 
     // The data-period-select is only relevant for the overview, profiles, and analytics tabs. Hide it for all other tabs.
-    var periodTabs = { overview: true, profiles: true, analytics: true };
+    var periodTabs = { overview: true, profiles: true, analytics: true, personas: true };
     $("#data-period-select-container").toggleClass("hidden", !periodTabs[tab]);
 
-    // The Export PDF button is only relevant for the overview, profiles, segments, attributes, journeys, scoring, and analytics tabs. Hide it for all other tabs.
+    // The Export PDF button is only relevant for the overview, profiles, segments, attributes, personas, scoring, and analytics tabs. Hide it for all other tabs.
     $("#btn-export-pdf").toggleClass("hidden", tab === "admin");
   }
 

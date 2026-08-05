@@ -27,8 +27,10 @@ def build_crud_router(
     read_schema: type[BaseModel],
     prefix: str,
     tags: list[str],
+    create_validator: Optional[Callable[[Session, dict[str, Any]], None]] = None,
+    update_validator: Optional[Callable[[Session, dict[str, Any]], None]] = None,
 ) -> APIRouter:
-    router = APIRouter(prefix=prefix, tags=tags)
+    router = APIRouter(prefix=prefix, tags=tags)  # type: ignore[arg-type]
     crud = CRUDBase(model)
     cache_prefix = model.__tablename__
     # Most crm_*/cdp_* models carry a tenant_id column (see database-schema.sql's
@@ -61,29 +63,40 @@ def build_crud_router(
 
     @router.get("/{item_id}", response_model=read_schema)
     @cache_response(f"{cache_prefix}/item", ttl=settings.cache_ttl_seconds)
-    def get_item(item_id: pk_type, db: Session = Depends(get_db)):
+    def get_item(item_id: pk_type, db: Session = Depends(get_db)):  # type: ignore[valid-type]
         obj = crud.get(db, item_id)
         if obj is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")
         return obj
 
     @router.post("/", response_model=read_schema, status_code=201)
-    def create_item(payload: create_schema, db: Session = Depends(get_db)):
+    def create_item(payload: create_schema, db: Session = Depends(get_db)):  # type: ignore[valid-type]
+        if create_validator is not None:
+            try:
+                create_validator(db, payload.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         obj = crud.create(db, payload.model_dump())
         invalidate_prefix(cache_prefix)
         return obj
 
     @router.patch("/{item_id}", response_model=read_schema)
-    def update_item(item_id: pk_type, payload: update_schema, db: Session = Depends(get_db)):
+    def update_item(item_id: pk_type, payload: update_schema, db: Session = Depends(get_db)):  # type: ignore[valid-type]
         obj = crud.get(db, item_id)
         if obj is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")
-        obj = crud.update(db, obj, payload.model_dump(exclude_unset=True))
+        obj_in = payload.model_dump(exclude_unset=True)
+        if update_validator is not None:
+            try:
+                update_validator(db, obj_in)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        obj = crud.update(db, obj, obj_in)
         invalidate_prefix(cache_prefix)
         return obj
 
     @router.delete("/{item_id}", status_code=204)
-    def delete_item(item_id: pk_type, db: Session = Depends(get_db)):
+    def delete_item(item_id: pk_type, db: Session = Depends(get_db)):  # type: ignore[valid-type]
         obj = crud.get(db, item_id)
         if obj is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")

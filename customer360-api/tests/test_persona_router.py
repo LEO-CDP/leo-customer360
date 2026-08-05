@@ -209,6 +209,13 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
         self._cache_patcher.start()
         self.addCleanup(self._cache_patcher.stop)
+
+        self._domain_patcher = patch(
+            "core.utils.domains.get_active_domain_codes",
+            return_value={"retail", "banking", "healthcare", "real_estate", "travel", "media", "education"},
+        )
+        self._domain_patcher.start()
+        self.addCleanup(self._domain_patcher.stop)
         self.addCleanup(self._restore_crud)
 
         app = FastAPI()
@@ -229,6 +236,10 @@ class CustomerPersonasRouterTests(unittest.TestCase):
 
     def test_create_persona_rejects_invalid_risk_level(self):
         response = self.client.post("/customer-personas/", json=_persona_payload(risk_level="extreme"))
+        self.assertEqual(response.status_code, 422)
+
+    def test_create_persona_rejects_invalid_domain(self):
+        response = self.client.post("/customer-personas/", json=_persona_payload(domain="finance"))
         self.assertEqual(response.status_code, 422)
 
     def test_create_persona_invalidates_cache(self):
@@ -264,6 +275,25 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self.assertEqual(len(body), 1)
         self.assertEqual(body[0]["persona_id"], str(active.persona_id))
 
+    def test_list_filters_by_domain(self):
+        retail_persona = _fake_persona(domain="retail")
+        banking_persona = _fake_persona(domain="banking")
+        healthcare_persona = _fake_persona(domain="healthcare")
+        FakePersonaCRUD.store[retail_persona.persona_id] = retail_persona
+        FakePersonaCRUD.store[banking_persona.persona_id] = banking_persona
+        FakePersonaCRUD.store[healthcare_persona.persona_id] = healthcare_persona
+
+        response = self.client.get("/customer-personas/?domain=healthcare")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body), 1)
+        self.assertEqual(body[0]["persona_id"], str(healthcare_persona.persona_id))
+
+    def test_list_rejects_invalid_domain(self):
+        response = self.client.get("/customer-personas/?domain=finance")
+        self.assertEqual(response.status_code, 422)
+
     def test_get_persona_not_found(self):
         response = self.client.get(f"/customer-personas/{uuid.uuid4()}")
         self.assertEqual(response.status_code, 404)
@@ -297,6 +327,38 @@ class CustomerPersonasRouterTests(unittest.TestCase):
     def test_delete_persona_not_found(self):
         response = self.client.delete(f"/customer-personas/{uuid.uuid4()}")
         self.assertEqual(response.status_code, 404)
+
+    def test_get_persona_analytics_summary(self):
+        payload = {
+            "total_personas": 10,
+            "active_personas": 8,
+            "inactive_personas": 2,
+            "unique_master_profiles": 7,
+            "avg_persona_score": 65.2,
+            "avg_confidence_score": 0.8123,
+            "by_domain": [{"value": "retail", "count": 6}],
+            "by_category": [{"value": "High Value", "count": 4}],
+            "by_risk_level": [{"value": "low", "count": 5}],
+            "by_value_tier": [{"value": "gold", "count": 3}],
+        }
+
+        with patch("core.routers.identity.identity_crud.persona_analytics_summary", return_value=payload) as mock_summary:
+            response = self.client.get("/customer-personas/analytics/summary?domain=healthcare&is_active=true&days=30")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["total_personas"], 10)
+        self.assertEqual(body["active_personas"], 8)
+        self.assertEqual(body["avg_confidence_score"], 0.8123)
+        mock_summary.assert_called_once()
+        _, kwargs = mock_summary.call_args
+        self.assertEqual(kwargs["domain"], "healthcare")
+        self.assertTrue(kwargs["is_active"])
+        self.assertEqual(kwargs["days"], 30)
+
+    def test_get_persona_analytics_summary_rejects_invalid_domain(self):
+        response = self.client.get("/customer-personas/analytics/summary?domain=finance")
+        self.assertEqual(response.status_code, 422)
 
 
 class PersonaFeaturesRouterTests(unittest.TestCase):

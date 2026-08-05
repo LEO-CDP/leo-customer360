@@ -9,7 +9,7 @@ jQuery, and Handlebars templates. It renders multiple API-backed views:
 - Attribute catalog (`/attributes`)
 - Analytics dashboard (`/analytics`)
 - Campaign dashboard (`/campaigns`)
-- Placeholders for not-yet-implemented routes (journeys/scoring/datasources/admin)
+- Persona Management (`/personas`) and placeholders for not-yet-implemented routes (scoring/datasources/admin)
 
 All business data is loaded from `customer360-api` via AJAX (`static/js/config.js`).
 `app.py` in this folder only serves static assets and server-injected config.
@@ -50,12 +50,14 @@ static/js/attributes-view.js       attributes route (/attributes)
 static/js/overview-view.js         overview route (/overview)
 static/js/analytics.js             analytics route (/analytics)
 static/js/campaign-view.js         campaigns route (/campaigns)
+static/js/persona-list-view.js personas route (/personas)
 static/js/placeholder-view.js      placeholder routes for unimplemented tabs
 
 static/templates/tabs.html
 static/templates/common/*          data-table head/rows, settings modal, placeholder
 static/templates/dashboard/*       overview + analytics templates
 static/templates/profile/*         profiles list + profile detail partials
+static/templates/persona/*         persona management template
 static/templates/segment/*         segments list + detail templates
 static/templates/metadata/*        attributes list template
 static/templates/campaign/*        campaign dashboard template

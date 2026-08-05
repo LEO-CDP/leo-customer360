@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class MasterProfileBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None
-    domain: str = Field(default="retail", pattern="^(retail|banking|real_estate|travel|media|education)$")
+    domain: str = Field(default="retail")
 
     full_name: Optional[str] = None
     first_name: Optional[str] = None
@@ -98,7 +98,7 @@ class MasterProfileCreate(MasterProfileBase):
 
 class MasterProfileUpdate(BaseModel):
     user_id: Optional[uuid.UUID] = None
-    domain: Optional[str] = Field(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$")
+    domain: Optional[str] = Field(default=None)
     full_name: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -191,7 +191,7 @@ class MasterProfileListResponse(BaseModel):
 class RawProfileBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None
-    domain: str = Field(default="retail", pattern="^(retail|banking|real_estate|travel|media|education)$")
+    domain: str = Field(default="retail")
     source_system: str
     channel: Optional[str] = None
 
@@ -451,7 +451,7 @@ class ProfileMergeHistoryRead(ProfileMergeHistoryBase):
 
 class CustomerPersonaBase(BaseModel):
     tenant_id: uuid.UUID
-    domain: str = Field(default="retail", pattern="^(retail|banking|real_estate|travel|media|education)$")
+    domain: str = Field(default="retail")
     master_profile_id: uuid.UUID
 
     persona_code: str
@@ -516,6 +516,24 @@ class CustomerPersonaRead(CustomerPersonaBase):
     computed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+class PersonaAnalyticsBucket(BaseModel):
+    value: str
+    count: int
+
+
+class PersonaAnalyticsSummary(BaseModel):
+    total_personas: int
+    active_personas: int
+    inactive_personas: int
+    unique_master_profiles: int
+    avg_persona_score: float
+    avg_confidence_score: float
+    by_domain: list[PersonaAnalyticsBucket]
+    by_category: list[PersonaAnalyticsBucket]
+    by_risk_level: list[PersonaAnalyticsBucket]
+    by_value_tier: list[PersonaAnalyticsBucket]
 
 
 class PersonaFeatureBase(BaseModel):

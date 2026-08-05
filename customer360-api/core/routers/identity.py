@@ -47,6 +47,7 @@ from core.schemas.identity import (
     PersonaFeatureRead,
     PersonaHistoryCreate,
     PersonaHistoryRead,
+    PersonaAnalyticsSummary,
     PersonaScoreDetailCreate,
     PersonaScoreDetailRead,
     ProfileAttributeCreate,
@@ -61,6 +62,7 @@ from core.schemas.identity import (
     RawProfileUpdate,
 )
 from core.schemas.profile360 import ChannelActivity, EngagementSummary, TimelineEntry, TopInterest
+from core.utils.domains import validate_domain_value
 
 # --- Master Profiles ---------------------------------------------------------
 
@@ -72,7 +74,7 @@ _master_crud = CRUDBase(CdpMasterProfile)
 @cache_response("master_profiles/list", ttl=settings.cache_ttl_seconds)
 def list_master_profiles(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None),
     lifecycle_stage: Optional[str] = Query(
         default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
     ),
@@ -85,6 +87,10 @@ def list_master_profiles(
     days: int = Query(default=90, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return identity_crud.list_master_profiles_page(
         db,
         tenant_id=tenant_id,
@@ -104,9 +110,13 @@ def list_master_profiles(
 @cache_response("master_profiles/count", ttl=settings.cache_ttl_seconds)
 def count_master_profiles_endpoint(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"count": _master_crud.count(db, tenant_id=tenant_id, domain=domain)}
 
 
@@ -274,6 +284,10 @@ def get_master_profile_timeline(
 
 @master_profiles_router.post("/", response_model=MasterProfileRead, status_code=201)
 def create_master_profile(payload: MasterProfileCreate, db: Session = Depends(get_db)):
+    try:
+        validate_domain_value(db, payload.domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     obj = _master_crud.create(db, payload.model_dump())
     invalidate_prefix("master_profiles")
     return obj
@@ -284,7 +298,13 @@ def update_master_profile(master_profile_id: uuid.UUID, payload: MasterProfileUp
     obj = _master_crud.get(db, master_profile_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    obj = _master_crud.update(db, obj, payload.model_dump(exclude_unset=True))
+    obj_in = payload.model_dump(exclude_unset=True)
+    if "domain" in obj_in:
+        try:
+            validate_domain_value(db, obj_in.get("domain"))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    obj = _master_crud.update(db, obj, obj_in)
     invalidate_prefix("master_profiles")
     return obj
 
@@ -308,7 +328,7 @@ _raw_crud = CRUDBase(CdpRawProfileStage)
 @cache_response("raw_profiles/list", ttl=settings.cache_ttl_seconds)
 def list_raw_profiles(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|healthcare|real_estate|travel|media|education)$"),
     source_system: Optional[str] = None,
     status_code: Optional[int] = None,
     skip: int = 0,
@@ -330,7 +350,7 @@ def list_raw_profiles(
 @cache_response("raw_profiles/count", ttl=settings.cache_ttl_seconds)
 def count_raw_profiles_endpoint(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|healthcare|real_estate|travel|media|education)$"),
     source_system: Optional[str] = None,
     status_code: Optional[int] = None,
     db: Session = Depends(get_db),
@@ -513,6 +533,7 @@ _persona_crud = CRUDBase(CdpCustomerPersona)
 @cache_response("customer_personas/list", ttl=settings.cache_ttl_seconds)
 def list_customer_personas(
     tenant_id: Optional[uuid.UUID] = None,
+    domain: Optional[str] = Query(default=None),
     master_profile_id: Optional[uuid.UUID] = None,
     persona_code: Optional[str] = None,
     is_active: Optional[bool] = None,
@@ -520,14 +541,41 @@ def list_customer_personas(
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
     db: Session = Depends(get_db),
 ):
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _persona_crud.list(
         db,
         skip=skip,
         limit=limit,
         tenant_id=tenant_id,
+        domain=domain,
         master_profile_id=master_profile_id,
         persona_code=persona_code,
         is_active=is_active,
+    )
+
+
+@customer_personas_router.get("/analytics/summary", response_model=PersonaAnalyticsSummary)
+@cache_response("customer_personas/analytics_summary", ttl=settings.cache_ttl_seconds)
+def get_customer_persona_analytics_summary(
+    tenant_id: Optional[uuid.UUID] = None,
+    domain: Optional[str] = Query(default=None),
+    is_active: Optional[bool] = None,
+    days: int = Query(default=90, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return identity_crud.persona_analytics_summary(
+        db,
+        tenant_id=tenant_id,
+        domain=domain,
+        is_active=is_active,
+        days=days,
     )
 
 
@@ -558,6 +606,10 @@ def get_customer_persona_score_details(persona_id: uuid.UUID, db: Session = Depe
 
 @customer_personas_router.post("/", response_model=CustomerPersonaRead, status_code=201)
 def create_customer_persona(payload: CustomerPersonaCreate, db: Session = Depends(get_db)):
+    try:
+        validate_domain_value(db, payload.domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     obj = _persona_crud.create(db, payload.model_dump())
     invalidate_prefix("customer_personas")
     return obj

@@ -490,6 +490,13 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
         self._cache_patcher.start()
         self.addCleanup(self._cache_patcher.stop)
 
+        self._domain_patcher = patch(
+            "core.utils.domains.get_active_domain_codes",
+            return_value={"retail", "banking", "healthcare", "real_estate", "travel", "media", "education"},
+        )
+        self._domain_patcher.start()
+        self.addCleanup(self._domain_patcher.stop)
+
         app = FastAPI()
         app.include_router(identity_router.master_profiles_router)
         self.session = object()
@@ -543,7 +550,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
         }}) as mock_list:
             response = self.client.get(
                 "/master-profiles/?tenant_id=11111111-1111-1111-1111-111111111111"
-                "&domain=retail&lifecycle_stage=customer&membership_tier=Gold"
+                "&domain=healthcare&lifecycle_stage=customer&membership_tier=Gold"
                 "&churn_risk_tier=high&linked_raw_profile_count_min=2"
                 "&q=nguyen&page=3&page_size=15&days=30"
             )
@@ -552,7 +559,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
         mock_list.assert_called_once_with(
             self.session,
             tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
-            domain="retail",
+            domain="healthcare",
             lifecycle_stage="customer",
             membership_tier="Gold",
             churn_risk_tier="high",
@@ -562,6 +569,11 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             page=3,
             page_size=15,
         )
+
+    def test_rejects_invalid_domain(self):
+        response = self.client.get("/master-profiles/?domain=finance")
+
+        self.assertEqual(response.status_code, 422)
 
 
 if __name__ == "__main__":
