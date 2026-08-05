@@ -8,10 +8,11 @@ section of core-customer360/identity-resolution.md.
 """
 
 import uuid
+from math import ceil
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from core.models.identity import CdpMasterProfile, CdpProfileLink, CdpRawProfileStage
@@ -23,6 +24,76 @@ STATUS_CODE_LABELS = {
     0: "inactive",
     -1: "deleted",
 }
+
+
+def list_master_profiles_page(
+    db: Session,
+    *,
+    tenant_id: Optional[uuid.UUID] = None,
+    domain: Optional[str] = None,
+    lifecycle_stage: Optional[str] = None,
+    q: Optional[str] = None,
+    days: Optional[int] = None,
+    page: int = 1,
+    page_size: int = 100,
+) -> dict:
+    """Returns a page of master profiles plus pagination metadata.
+
+    This keeps filtering and pagination logic in the ORM layer so routers can
+    stay thin and return a consistent envelope to clients.
+    """
+    where_clauses = []
+
+    if tenant_id is not None:
+        where_clauses.append(CdpMasterProfile.tenant_id == tenant_id)
+    if domain is not None:
+        where_clauses.append(CdpMasterProfile.domain == domain)
+    if lifecycle_stage is not None:
+        where_clauses.append(CdpMasterProfile.lifecycle_stage == lifecycle_stage)
+
+    cutoff = _cutoff_for_days(days)
+    if cutoff is not None:
+        where_clauses.append(CdpMasterProfile.created_at >= cutoff)
+
+    if q:
+        pattern = f"%{q}%"
+        where_clauses.append(
+            or_(
+                CdpMasterProfile.full_name.ilike(pattern),
+                CdpMasterProfile.persona_name.ilike(pattern),
+                CdpMasterProfile.email.ilike(pattern),
+                CdpMasterProfile.phone_number.ilike(pattern),
+            )
+        )
+
+    page = max(1, page)
+    page_size = max(1, page_size)
+    offset = (page - 1) * page_size
+
+    list_stmt = (
+        select(CdpMasterProfile)
+        .where(*where_clauses)
+        .order_by(CdpMasterProfile.last_activity_at.desc().nullslast(), CdpMasterProfile.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    count_stmt = select(func.count()).select_from(CdpMasterProfile).where(*where_clauses)
+
+    items = list(db.execute(list_stmt).scalars().all())
+    total = db.execute(count_stmt).scalar_one()
+    total_pages = ceil(total / page_size) if total > 0 else 1
+
+    return {
+        "items": items,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+            "has_prev": page > 1,
+            "has_next": page < total_pages,
+        },
+    }
 
 
 def _cutoff_for_days(days: Optional[int]) -> Optional[datetime]:

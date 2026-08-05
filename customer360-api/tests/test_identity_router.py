@@ -336,5 +336,80 @@ class MasterProfileLinksEndpointTests(unittest.TestCase):
         self.assertIn("LIMIT", compiled.upper())
 
 
+class MasterProfilesPaginationEndpointTests(unittest.TestCase):
+    """Covers GET /master-profiles/ paginated response envelope."""
+
+    def setUp(self):
+        self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
+        self._cache_patcher.start()
+        self.addCleanup(self._cache_patcher.stop)
+
+        app = FastAPI()
+        app.include_router(identity_router.master_profiles_router)
+        self.session = object()
+        app.dependency_overrides[get_db] = lambda: self.session
+        self.client = TestClient(app)
+
+    def test_returns_paginated_envelope(self):
+        master_profile_id = uuid.uuid4()
+        tenant_id = uuid.uuid4()
+        fake_payload = {
+            "items": [
+                {
+                    "master_profile_id": master_profile_id,
+                    "tenant_id": tenant_id,
+                    "domain": "retail",
+                    "status_code": 1,
+                }
+            ],
+            "pagination": {
+                "page": 2,
+                "page_size": 25,
+                "total": 120,
+                "total_pages": 5,
+                "has_prev": True,
+                "has_next": True,
+            },
+        }
+
+        with patch("core.routers.identity.identity_crud.list_master_profiles_page", return_value=fake_payload):
+            response = self.client.get("/master-profiles/?page=2&page_size=25")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("items", body)
+        self.assertIn("pagination", body)
+        self.assertEqual(body["pagination"]["page"], 2)
+        self.assertEqual(body["pagination"]["page_size"], 25)
+        self.assertEqual(body["pagination"]["total"], 120)
+        self.assertEqual(len(body["items"]), 1)
+
+    def test_forwards_filters_and_pagination_params_to_crud(self):
+        with patch("core.routers.identity.identity_crud.list_master_profiles_page", return_value={"items": [], "pagination": {
+            "page": 1,
+            "page_size": 100,
+            "total": 0,
+            "total_pages": 1,
+            "has_prev": False,
+            "has_next": False,
+        }}) as mock_list:
+            response = self.client.get(
+                "/master-profiles/?tenant_id=11111111-1111-1111-1111-111111111111"
+                "&domain=retail&lifecycle_stage=customer&q=nguyen&page=3&page_size=15&days=30"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_list.assert_called_once_with(
+            self.session,
+            tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            domain="retail",
+            lifecycle_stage="customer",
+            q="nguyen",
+            days=30,
+            page=3,
+            page_size=15,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

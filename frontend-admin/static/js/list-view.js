@@ -55,6 +55,7 @@ window.C360 = window.C360 || {};
 
   var dtv = C360.DataTableView.create({
     columns: COLUMNS,
+    pagination: true,
     rowVm: rowVm,
     rowId: function (vm) { return vm.master_profile_id; },
     rowSelectorClass: "profile-row",
@@ -68,7 +69,10 @@ window.C360 = window.C360 || {};
       loading: "#list-loading",
       empty: "#list-empty",
       countLabel: "#list-count-label",
-      loadMoreBtn: "#btn-load-more"
+      loadMoreBtn: "#btn-load-more",
+      prevBtn: "#btn-page-prev",
+      nextBtn: "#btn-page-next",
+      pageLabel: "#list-page-label"
     }
   });
 
@@ -79,7 +83,7 @@ window.C360 = window.C360 || {};
     dtv.bindSearch("#search-input", "q", 350);
     dtv.bindSelect("#domain-filter", "domain");
     dtv.bindSelect("#lifecycle-filter", "lifecycle_stage");
-    dtv.bindLoadMore();
+    dtv.bindPagination();
     $("#data-period-select").on("change", function () { load(false); });
   }
 

@@ -173,6 +173,20 @@ class MasterProfileRead(MasterProfileBase):
     updated_at: Optional[datetime] = None
 
 
+class PaginationMeta(BaseModel):
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+    has_prev: bool
+    has_next: bool
+
+
+class MasterProfileListResponse(BaseModel):
+    items: list[MasterProfileRead]
+    pagination: PaginationMeta
+
+
 class RawProfileBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None

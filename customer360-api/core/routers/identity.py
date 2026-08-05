@@ -4,15 +4,15 @@ metadata / throttle-status tables consumed by backend-system/identity_resolution
 """
 
 import uuid
-from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
 from core.config import settings
+from core.crud import identity as identity_crud
 from core.crud import profile360 as profile360_crud
 from core.crud.base import CRUDBase
 from core.database import get_db
@@ -39,6 +39,7 @@ from core.schemas.identity import (
     IdentityIndexUpdate,
     IdResolutionStatusRead,
     MasterProfileCreate,
+    MasterProfileListResponse,
     MasterProfileRead,
     MasterProfileUpdate,
     PersonaFeatureCreate,
@@ -66,7 +67,7 @@ master_profiles_router = APIRouter(prefix="/master-profiles", tags=["Identity Re
 _master_crud = CRUDBase(CdpMasterProfile)
 
 
-@master_profiles_router.get("/", response_model=list[MasterProfileRead])
+@master_profiles_router.get("/", response_model=MasterProfileListResponse)
 @cache_response("master_profiles/list", ttl=settings.cache_ttl_seconds)
 def list_master_profiles(
     tenant_id: Optional[uuid.UUID] = None,
@@ -75,42 +76,21 @@ def list_master_profiles(
         default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
     ),
     q: Optional[str] = Query(default=None, description="Free-text search over full_name/persona_name/email"),
-    skip: int = 0,
-    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=settings.api_default_page_size, ge=1, le=settings.api_max_page_size),
     days: int = Query(default=90, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
-    cutoff = None
-    if days is not None:
-        cutoff = datetime.utcnow() - timedelta(days=days)
-
-    if q:
-        stmt = select(CdpMasterProfile)
-        if tenant_id is not None:
-            stmt = stmt.where(CdpMasterProfile.tenant_id == tenant_id)
-        if domain is not None:
-            stmt = stmt.where(CdpMasterProfile.domain == domain)
-        if lifecycle_stage is not None:
-            stmt = stmt.where(CdpMasterProfile.lifecycle_stage == lifecycle_stage)
-        pattern = f"%{q}%"
-        stmt = stmt.where(
-            or_(
-                CdpMasterProfile.full_name.ilike(pattern),
-                CdpMasterProfile.persona_name.ilike(pattern),
-                CdpMasterProfile.email.ilike(pattern),
-                CdpMasterProfile.phone_number.ilike(pattern),
-            )
-        )
-        if cutoff is not None:
-            stmt = stmt.where(CdpMasterProfile.created_at >= cutoff)
-        stmt = stmt.order_by(CdpMasterProfile.last_activity_at.desc().nullslast()).offset(skip).limit(limit)
-        return db.execute(stmt).scalars().all()
-
-    filters = {"tenant_id": tenant_id, "domain": domain, "lifecycle_stage": lifecycle_stage}
-    items = _master_crud.list(db, skip=skip, limit=limit, **filters)
-    if cutoff is not None:
-        items = [item for item in items if item.created_at is not None and item.created_at >= cutoff]
-    return items
+    return identity_crud.list_master_profiles_page(
+        db,
+        tenant_id=tenant_id,
+        domain=domain,
+        lifecycle_stage=lifecycle_stage,
+        q=q,
+        days=days,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @master_profiles_router.get("/count")

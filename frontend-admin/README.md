@@ -1,72 +1,84 @@
-# Customer 360 frontend (static HTML)
+# Customer 360 frontend-admin
 
-`index.html` is a slim shell for a single-page admin (Tailwind CSS + jQuery 3 +
-Handlebars templates, all via CDN) that mirrors
-`../ui-wireframes/customer-360-profile-details.png`: a searchable master-profile
-list and a profile detail dashboard (overview, attributes/segments, engagement
-summary, cross-channel activity, timeline, scoring, personalized items). All
-data is fetched live from `customer360-api` (FastAPI) which reads PostgreSQL --
-nothing is hardcoded in the HTML.
+`frontend-admin` is a FastAPI-served SPA shell built with Tailwind CSS (CDN),
+jQuery, and Handlebars templates. It renders multiple API-backed views:
 
-`app.py` is a tiny FastAPI app that just serves this static site (see
-[Run](#run) below); it does not talk to the database itself.
+- Overview dashboard (`/overview`)
+- Master profiles list + profile detail (`/profiles`, `/profiles/:id`)
+- Segments list + segment detail (`/segments`, `/segments/:id`)
+- Attribute catalog (`/attributes`)
+- Analytics dashboard (`/analytics`)
+- Campaign dashboard (`/campaigns`)
+- Placeholders for not-yet-implemented routes (journeys/scoring/datasources/admin)
+
+All business data is loaded from `customer360-api` via AJAX (`static/js/config.js`).
+`app.py` in this folder only serves static assets and server-injected config.
+
+## Recent change (important)
+
+- Master profiles list pagination moved from `skip/limit + Load more` to
+  `page/page_size + Previous/Next`.
+- API contract for `GET /api/v1/master-profiles/` is now:
+  - request params: `page`, `page_size` (plus existing filters)
+  - response shape: `{ items: [...], pagination: {...} }`
+- `static/js/data-table-view.js` now supports both:
+  - legacy skip/limit list endpoints (default mode)
+  - page-based envelope endpoints (`pagination: true`)
+
+This was implemented in `static/js/list-view.js` only; other views continue to
+work with existing endpoint shapes.
 
 ## Structure
 
 ```
-app.py                      FastAPI app that serves index.html + static/ (see Run)
-jinja/config.js.j2          Jinja2 template for static/js/config.js, rendered by app.py so
-                            FRONTEND_API_HOSTNAME/FRONTEND_TENANT_ID (.env) are baked in
-index.html                 slim shell: CDN <script>/<link> tags + empty mount points
-static/css/app.css          small CSS additions on top of the Tailwind CDN build
-static/js/config.js          API base/tenant config (localStorage) + ajax client
-static/js/formatters.js      display formatters, label maps, badge-class helpers
-static/js/templates.js       fetches + compiles every static/templates/*.html file
-static/js/router.js          small React-Router-style hash router (path patterns, params, redirects)
-static/js/list-view.js       Master Profiles list (search/filter/pagination); owns "/profiles"
-static/js/profile-detail-view.js Profile detail dashboard (view-model building + loads); owns "/profiles/:id"
-static/js/overview-view.js   Reporting overview dashboard; owns "/overview"
-static/js/segments-view.js   Segments (Audience Builder) list + detail; owns "/segments", "/segments/:id"
-static/js/placeholder-view.js "not implemented yet" routes for journeys, scoring, analytics, data sources, admin
-static/js/main.js            bootstraps templates, chrome (tabs/settings modal), starts the router
-static/templates/tabs.html               header + nav bar (static)
-static/templates/settings-modal.html     API base/tenant settings dialog (static)
-static/templates/profiles-list.html      Master Profiles list shell (static)
-static/templates/placeholder.html        "not implemented" shell for other nav tabs
-static/templates/profiles-rows.html      Handlebars: list <tr> rows
-static/templates/profile-details.html    Handlebars: detail grid, includes the partials below
-static/templates/identity.html           partial: left profile identity card
-static/templates/channels.html           partial: channels & identifiers card
-static/templates/overview.html           partial: Profile Overview card
-static/templates/segments.html           partial: Attributes & Segments card
-static/templates/engagement.html         partial: Engagement Summary card
-static/templates/activity.html           partial: Cross-Channel Activity card
-static/templates/timeline.html           partial: Timeline card
-static/templates/scoring.html            partial: Scoring & Value card
-static/templates/personalized-items.html partial: Personalized Items card shell
-static/templates/content-items.html      Handlebars: personalized item cards list
+app.py                             FastAPI app serving index + static files
+jinja/index.html                   main HTML shell
+jinja/config.js.j2                 server-rendered config payload
+
+static/css/app.css                 frontend styles
+
+static/js/config.js                API base/tenant config + ajax helper
+static/js/data-table-view.js       shared list/table component (load-more + page mode)
+static/js/templates.js             template loader + Handlebars registration
+static/js/router.js                hash router
+static/js/main.js                  bootstrap + route startup
+
+static/js/list-view.js             profiles list route (/profiles)
+static/js/profile-detail-view.js   profile detail route (/profiles/:id)
+static/js/segments-view.js         segments routes (/segments, /segments/:id)
+static/js/attributes-view.js       attributes route (/attributes)
+static/js/overview-view.js         overview route (/overview)
+static/js/analytics.js             analytics route (/analytics)
+static/js/campaign-view.js         campaigns route (/campaigns)
+static/js/placeholder-view.js      placeholder routes for unimplemented tabs
+
+static/templates/tabs.html
+static/templates/common/*          data-table head/rows, settings modal, placeholder
+static/templates/dashboard/*       overview + analytics templates
+static/templates/profile/*         profiles list + profile detail partials
+static/templates/segment/*         segments list + detail templates
+static/templates/metadata/*        attributes list template
+static/templates/campaign/*        campaign dashboard template
 ```
 
-Each card in the profile detail dashboard is its own template file (registered
-as a Handlebars partial by `static/js/templates.js` and included from
-`profile-details.html` via `{{> name}}`), so adding/editing a single card never
-requires touching the others.
+Each profile detail card is its own partial, registered by
+`static/js/templates.js` and included by `static/templates/profile/profile-details.html`.
 
 ## Admin & API session / auth flow
 
-This UI is a thin, unauthenticated static client -- **it does not implement a
+This UI is a thin, unauthenticated static client - **it does not implement a
 login screen itself**. All session/auth handling actually happens in
 `customer360-api` (see `../customer360-api/core/auth.py`), gated by that
 service's `SSO_LOGIN` setting (`../customer360-api/.env` /
 `core/config.py`):
 
-- **`SSO_LOGIN=false` (local/dev -- the repo default).** There is no login.
+- **`SSO_LOGIN=false` (local/dev - repo default).** There is no login.
   Every request this UI makes just carries an `X-Tenant-Id` header (see the
   `api()` helper in `static/js/config.js`), which `customer360-api` trusts
   directly (`core/auth.py::_apply_dev_tenant_headers`) to set the Postgres
   `app.tenant_id` session variable that Row-Level Security policies key off
   (see `database-schema.sql`). The "Admin" button (top right) opens
-  `static/templates/settings-modal.html`, where you edit the API base URL and
+  `static/templates/common/settings-modal.html`, where you edit the API base URL and
   tenant id; `C360.config.save()` persists them to `localStorage`
   (`c360.apiBase` / `c360.tenantId`) and reloads the page. That's the entire
   "session management" this frontend has today -- a tenant selector, not a
@@ -81,7 +93,7 @@ service's `SSO_LOGIN` setting (`../customer360-api/.env` /
   auto-provisioning a `sys_user` row keyed by the token's `sub` claim
   (`_get_or_create_user_on_login`); that resolved identity is itself cached
   in Redis for 5 minutes (`auth:identity:<sub>`) so it isn't re-derived on
-  every call. **This frontend does not yet drive that flow** -- there's no
+  every call. **This frontend does not yet drive that flow** - there's no
   Keycloak redirect/login page and no bearer-token storage here. Wiring it
   up means: adding a login step (redirect to Keycloak, handle the callback,
   store the access token), then adding an `Authorization` header next to
@@ -131,7 +143,7 @@ sequenceDiagram
 ## Routing: how it works, and how to add a new view
 
 The whole UI is one `index.html` page; navigation is a small,
-React-Router-inspired hash router (`static/js/router.js`) -- same idea as
+React-Router-inspired hash router (`static/js/router.js`) - same idea as
 `<Route path="...">` + params, just implemented with plain jQuery and no
 build step.
 
@@ -190,8 +202,8 @@ currently owns `/scoring` and `/scoring/:id` as placeholders):
 1. Create `static/js/scoring-view.js` modeled on `segments-view.js`: a
    `load()`/`loadList()` that calls `C360.config.api(...)` and renders a
    Handlebars template into a new `<section id="view-scoring">` in
-   `index.html` (add the section + its shell template under
-   `static/templates/`, same pattern as `view-segments`/`segments-list.html`).
+  `index.html` (add the section + its shell template under
+  `static/templates/`, same pattern as `view-segments`/`segment/segments-list.html`).
 2. At the bottom of that file, register its routes:
    ```js
    C360.router.define("/scoring", { section: "view-scoring", tab: "scoring", mount: load });
@@ -222,12 +234,12 @@ is the entire mechanism.
    request by `app.py` (via `jinja/config.js.j2`) -- must be a hostname
    reachable from the **browser**, not just this container.
 
-   Alternatively, serve the folder with any plain static file server (opening
+    Alternatively, serve the folder with any plain static file server (opening
    via `file://` will be blocked by the browser's CORS policy for the
    `static/templates/*.html` and API `fetch`/XHR calls); `static/js/config.js`
    on disk has hardcoded defaults for exactly this case:
    ```bash
-   cd core-customer360/frontend-admin
+    cd frontend-admin
    python3 -m http.server 8890
    ```
 3. Open `http://localhost:8890/index.html`, then click the "Admin" button
@@ -235,4 +247,29 @@ is the entire mechanism.
    (used for Postgres Row-Level Security when `SSO_LOGIN=false`) if your
    setup differs from the defaults -- see
    [Admin & API session / auth flow](#admin--api-session--auth-flow) above.
+
+## DataTableView integration notes
+
+`static/js/data-table-view.js` is intentionally shared by multiple features.
+Current usage patterns:
+
+- Profiles (`static/js/list-view.js`): `pagination: true`
+  - sends `page` + `page_size`
+  - expects `{ items, pagination }`
+  - uses `bindPagination()` with Previous/Next buttons
+
+- Segments (`static/js/segments-view.js`): default mode
+  - sends `skip` + `limit`
+  - expects a plain list
+  - uses `bindLoadMore()`
+
+- Attributes (`static/js/attributes-view.js`): `clientSide: true`
+  - fetches one list and filters/searches locally
+
+- Campaign dashboard table (`static/js/campaign-view.js`): default mode
+  - internally translates `skip/limit` to campaign API `page/page_size`
+  - unwraps API response to a plain `items` array before returning to the shared component
+
+When adding or changing a table view, choose one mode explicitly and keep
+request/response shape consistent with that mode.
 
