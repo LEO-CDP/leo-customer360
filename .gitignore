@@ -5,3 +5,12 @@ graphify-out
 .github
 
 GEMINI.md
+
+.vscode
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+logs/
