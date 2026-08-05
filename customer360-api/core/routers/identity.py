@@ -38,6 +38,7 @@ from core.schemas.identity import (
     IdentityIndexRead,
     IdentityIndexUpdate,
     IdResolutionStatusRead,
+    LinkedRawProfileDetailRead,
     MasterProfileCreate,
     MasterProfileListResponse,
     MasterProfileRead,
@@ -77,6 +78,7 @@ def list_master_profiles(
     ),
     membership_tier: Optional[str] = Query(default=None),
     churn_risk_tier: Optional[str] = Query(default=None, pattern="^(low|medium|high|critical)$"),
+    linked_raw_profile_count_min: Optional[int] = Query(default=None, ge=0),
     q: Optional[str] = Query(default=None, description="Free-text search over full_name/persona_name/email"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=settings.api_default_page_size, ge=1, le=settings.api_max_page_size),
@@ -90,6 +92,7 @@ def list_master_profiles(
         lifecycle_stage=lifecycle_stage,
         membership_tier=membership_tier,
         churn_risk_tier=churn_risk_tier,
+        linked_raw_profile_count_min=linked_raw_profile_count_min,
         q=q,
         days=days,
         page=page,
@@ -133,6 +136,49 @@ def get_master_profile_links(
         .limit(limit)
     )
     return db.execute(stmt).scalars().all()
+
+
+@master_profiles_router.get(
+    "/{master_profile_id}/linked-raw-profiles/{raw_profile_id}", response_model=LinkedRawProfileDetailRead
+)
+@cache_response("master_profiles/linked_raw_profile_detail", ttl=settings.cache_ttl_seconds)
+def get_master_profile_linked_raw_profile_detail(
+    master_profile_id: uuid.UUID,
+    raw_profile_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    """Detailed view of a linked raw profile scoped to a single master profile.
+
+    Uses master_profile_id + raw_profile_id and enforces tenant-scoped joins so
+    linked-raw detail cannot be fetched across tenants.
+    """
+    master_profile = _master_crud.get(db, master_profile_id)
+    if master_profile is None:
+        raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
+
+    stmt = (
+        select(CdpProfileLink, CdpRawProfileStage)
+        .join(CdpRawProfileStage, CdpRawProfileStage.raw_profile_id == CdpProfileLink.raw_profile_id)
+        .where(
+            CdpProfileLink.master_profile_id == master_profile_id,
+            CdpProfileLink.raw_profile_id == raw_profile_id,
+            CdpProfileLink.tenant_id == master_profile.tenant_id,
+            CdpRawProfileStage.tenant_id == master_profile.tenant_id,
+        )
+        .limit(1)
+    )
+    row = db.execute(stmt).first()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Raw profile '{raw_profile_id}' is not linked to master profile "
+                f"'{master_profile_id}'"
+            ),
+        )
+
+    link, raw_profile = row
+    return {"link": link, "raw_profile": raw_profile}
 
 
 @master_profiles_router.get("/{master_profile_id}/persona", response_model=CustomerPersonaRead)

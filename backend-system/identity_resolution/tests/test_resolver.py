@@ -207,6 +207,30 @@ class TestFindMasterProfile:
         assert result is None
         mock_cursor.execute.assert_not_called()
 
+    def test_return_details_includes_score_and_matched_fields(self, mock_cursor, mock_conn):
+        mock_cursor.fetchone.return_value = {
+            "master_profile_id": "master-6",
+            "match_score": 0.5,
+            "m_0": 1,
+            "m_1": 0,
+        }
+        resolver = make_resolver(mock_conn)
+        raw_profile = {
+            "raw_profile_id": "r1",
+            "tenant_id": "t1",
+            "domain": "retail",
+            "email": "a@example.com",
+            "phone_number": "5551112222",
+        }
+        rules = [IdentityRule("email", "exact"), IdentityRule("phone_number", "exact")]
+
+        result = resolver._find_master_profile(mock_cursor, raw_profile, rules, return_details=True)
+
+        assert result["master_profile_id"] == "master-6"
+        assert result["match_score"] == 0.5
+        assert result["matched_fields"] == ["email"]
+        assert result["match_method"] == "DynamicMatch:email"
+
 
 class TestLinkAndUpdate:
     def test_inserts_link_and_updates_master(self, mock_cursor, mock_conn):
@@ -333,7 +357,7 @@ class TestCreateMasterAndLink:
 
         link_query, link_params = mock_cursor.execute.call_args_list[1][0]
         assert "INSERT INTO customer360.cdp_profile_links" in link_query
-        assert link_params == ("t1", "r2", "new-master-1", 1.0, "NewMaster")
+        assert link_params == ("t1", "r2", "new-master-1", None, "NewMaster")
 
     def test_sets_is_hashed_and_persona_name_when_pii_looks_hashed(self, mock_cursor, mock_conn):
         mock_cursor.fetchone.return_value = {"master_profile_id": "new-master-2"}

@@ -423,13 +423,18 @@ class CustomerIdentityResolver:
         return cursor.fetchall()
 
     def _find_master_profile(
-        self, cursor, raw_profile: Dict[str, Any], rules: List[IdentityRule]
-    ) -> Optional[str]:
+        self,
+        cursor,
+        raw_profile: Dict[str, Any],
+        rules: List[IdentityRule],
+        return_details: bool = False,
+    ) -> Optional[Any]:
         """Dynamically builds and executes a query to find a matching master
         profile, scoped to the same tenant and domain, based on the active
         metadata rules."""
         conditions = []
         params: List[Any] = []
+        condition_fields: List[str] = []
         source_system = raw_profile.get("source_system")
 
         for rule in rules:
@@ -443,6 +448,7 @@ class CustomerIdentityResolver:
                 # master's consolidated identity array.
                 conditions.append(f"%s = ANY({ARRAY_IDENTITY_FIELDS[code]})")
                 params.append(raw_value)
+                condition_fields.append(code)
             elif code in JSONB_KEYED_IDENTITY_FIELDS:
                 # e.g. external_customer_id: match if the master's
                 # external_ids map has this exact {source_system: value} pair.
@@ -451,16 +457,20 @@ class CustomerIdentityResolver:
                 column = JSONB_KEYED_IDENTITY_FIELDS[code]
                 conditions.append(f"{column} @> jsonb_build_object(%s::text, %s::text)")
                 params.extend([source_system, raw_value])
+                condition_fields.append(code)
             elif rule.match_rule == "exact":
                 conditions.append(f"{code} = %s")
                 params.append(raw_value)
+                condition_fields.append(code)
             elif rule.match_rule == "fuzzy_trgm":
                 threshold = rule.threshold if rule.threshold is not None else 0.7
                 conditions.append(f"similarity({code}, %s) >= %s")
                 params.extend([raw_value, threshold])
+                condition_fields.append(code)
             elif rule.match_rule == "fuzzy_dmetaphone":
                 conditions.append(f"dmetaphone({code}) = dmetaphone(%s)")
                 params.append(raw_value)
+                condition_fields.append(code)
             else:
                 logger.warning(
                     "Unknown matching_rule '%s' for attribute '%s' - skipping.",
@@ -472,16 +482,64 @@ class CustomerIdentityResolver:
             return None
 
         where_clause = " OR ".join(f"({c})" for c in conditions)
+
+        if not return_details:
+            query = f"""
+                SELECT master_profile_id
+                FROM {self._table('cdp_master_profiles')}
+                WHERE tenant_id = %s AND domain = %s AND ({where_clause})
+                LIMIT 1;
+            """
+            query_params = [raw_profile["tenant_id"], raw_profile.get("domain", "retail")] + params
+            cursor.execute(query, tuple(query_params))
+            result = cursor.fetchone()
+            return result["master_profile_id"] if result else None
+
+        # Each condition is also projected as m_<idx> so we can compute an
+        # actual per-link score and preserve the exact fields that matched.
+        match_case_columns = [
+            f"CASE WHEN ({condition}) THEN 1 ELSE 0 END AS m_{idx}"
+            for idx, condition in enumerate(conditions)
+        ]
+        score_expr = " + ".join(f"m_{idx}" for idx in range(len(conditions)))
+        score_denominator = float(len(conditions))
+
         query = f"""
-            SELECT master_profile_id
-            FROM {self._table('cdp_master_profiles')}
-            WHERE tenant_id = %s AND domain = %s AND ({where_clause})
+            SELECT
+                master_profile_id,
+                ({score_expr})::DOUBLE PRECISION / %s AS match_score,
+                {", ".join(f"m_{idx}" for idx in range(len(conditions)))}
+            FROM (
+                SELECT
+                    master_profile_id,
+                    {", ".join(match_case_columns)}
+                FROM {self._table('cdp_master_profiles')}
+                WHERE tenant_id = %s AND domain = %s AND ({where_clause})
+            ) candidates
+            ORDER BY ({score_expr}) DESC
             LIMIT 1;
         """
-        query_params = [raw_profile["tenant_id"], raw_profile.get("domain", "retail")] + params
+        query_params = [score_denominator] + params + [raw_profile["tenant_id"], raw_profile.get("domain", "retail")] + params
         cursor.execute(query, tuple(query_params))
         result = cursor.fetchone()
-        return result["master_profile_id"] if result else None
+        if not result:
+            return None
+
+        matched_fields: List[str] = []
+        for idx, field in enumerate(condition_fields):
+            if result.get(f"m_{idx}") == 1 and field not in matched_fields:
+                matched_fields.append(field)
+
+        score = result.get("match_score")
+        method_suffix = ",".join(matched_fields)
+        match_method = f"DynamicMatch:{method_suffix}" if method_suffix else "DynamicMatch"
+
+        return {
+            "master_profile_id": result["master_profile_id"],
+            "match_score": float(score) if score is not None else None,
+            "matched_fields": matched_fields,
+            "match_method": match_method,
+        }
 
     def _link_and_update(
         self,
@@ -489,6 +547,7 @@ class CustomerIdentityResolver:
         raw_profile: Dict[str, Any],
         master_id: str,
         match_method: str = "DynamicMatch",
+        match_score: Optional[float] = 1.0,
         rules: Optional[List[IdentityRule]] = None,
     ) -> None:
         """Links the raw profile to an existing master profile and merges any
@@ -506,7 +565,7 @@ class CustomerIdentityResolver:
                 raw_profile["tenant_id"],
                 raw_profile["raw_profile_id"],
                 master_id,
-                1.0,
+                match_score,
                 match_method,
             ),
         )
@@ -672,7 +731,7 @@ class CustomerIdentityResolver:
         """
         cursor.execute(
             link_query,
-            (raw_profile["tenant_id"], raw_profile["raw_profile_id"], new_master_id, 1.0, "NewMaster"),
+            (raw_profile["tenant_id"], raw_profile["raw_profile_id"], new_master_id, None, "NewMaster"),
         )
         return new_master_id
 
@@ -721,10 +780,18 @@ class CustomerIdentityResolver:
                         (str(profile["tenant_id"]),),
                     )
 
-                    matched_id = self._find_master_profile(cursor, profile, rules)
+                    matched = self._find_master_profile(cursor, profile, rules, return_details=True)
 
-                    if matched_id:
-                        self._link_and_update(cursor, profile, matched_id, rules=rules)
+                    if matched:
+                        self._link_and_update(
+                            cursor,
+                            profile,
+                            matched["master_profile_id"],
+                            match_method=matched.get("match_method", "DynamicMatch"),
+                            match_score=matched.get("match_score"),
+                            rules=rules,
+                        )
+                        matched_id = matched["master_profile_id"]
                     else:
                         matched_id = self._create_master_and_link(cursor, profile)
 

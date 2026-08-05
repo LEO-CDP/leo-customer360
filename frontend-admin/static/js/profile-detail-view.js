@@ -38,6 +38,7 @@ window.C360 = window.C360 || {};
     channelActivity,
     topInterests,
     timeline,
+    profileLinks,
     persona,
     personaHistory,
   ) {
@@ -46,7 +47,7 @@ window.C360 = window.C360 || {};
       profile.full_name ||
       "Profile " + fmt.shortId(profile.master_profile_id);
 
-    // Ordered contact-first, then digital/technical identifiers, for CIR review flow.
+    // Channels & Identifiers card now focuses on activation-reachable channels only.
     var channels = [];
     if (profile.email)
       channels.push({
@@ -60,40 +61,34 @@ window.C360 = window.C360 || {};
         label: "Phone",
         badge: fmt.maskMiddle(profile.phone_number),
       });
+    if (profile.push_tokens && Object.keys(profile.push_tokens).length)
+      channels.push({
+        icon: "🔔",
+        label: "Push Notifications",
+        badge: Object.keys(profile.push_tokens).length + " token(s)",
+      });
     if ((profile.device_ids || []).length)
       channels.push({
         icon: "📱",
-        label: "Mobile App",
+        label: "Mobile App (In-App)",
         badge: profile.device_ids.length + " device(s)",
       });
     if ((profile.cookie_ids || []).length)
       channels.push({
         icon: "💻",
-        label: "Web / Cookies",
+        label: "Web",
         badge: profile.cookie_ids.length,
       });
-    if ((profile.advertising_ids || []).length)
+    if (profile.preferred_channel)
       channels.push({
-        icon: "📣",
-        label: "Advertising IDs",
-        badge: profile.advertising_ids.length,
-      });
-    if (profile.external_ids && Object.keys(profile.external_ids).length)
-      channels.push({
-        icon: "🔗",
-        label: "External IDs",
-        badge: Object.keys(profile.external_ids).length,
-      });
-    if (profile.account_numbers && profile.account_numbers.length)
-      channels.push({
-        icon: "🏦",
-        label: "Bank Accounts",
-        badge: profile.account_numbers.length,
+        icon: "🎯",
+        label: "Preferred Channel",
+        badge: fmt.titleCase(profile.preferred_channel),
       });
     if (!channels.length)
       channels.push({
         icon: "—",
-        label: "No identifiers captured yet",
+        label: "No activation channels available",
         badge: "",
       });
 
@@ -195,6 +190,280 @@ window.C360 = window.C360 || {};
       };
     });
 
+    function linkScorePercent(v) {
+      if (v === null || v === undefined || v === "") return 0;
+      var n = Number(v);
+      if (isNaN(n)) return 0;
+      var pct = n <= 1 ? n * 100 : n;
+      return Math.max(0, Math.min(100, pct));
+    }
+
+    function linkScoreLabel(v) {
+      var pct = linkScorePercent(v);
+      return pct ? Math.round(pct) + "%" : "N/A";
+    }
+
+    function linkHasConfidenceScore(link) {
+      var method = String(link && link.match_method ? link.match_method : "")
+        .trim()
+        .toLowerCase();
+      if (method === "newmaster" || method === "none") return false;
+
+      var raw = link && link.match_score;
+      if (raw === null || raw === undefined || raw === "") return false;
+
+      var n = Number(raw);
+      return !isNaN(n);
+    }
+
+    function linkStatusBadgeClass(status) {
+      var normalized = (status || "").toUpperCase();
+      if (normalized === "ACTIVE") return "bg-emerald-100 text-emerald-700";
+      if (normalized === "HISTORICAL") return "bg-slate-100 text-slate-700";
+      if (normalized === "SUPERSEDED") return "bg-amber-100 text-amber-700";
+      if (normalized === "UNLINKED") return "bg-rose-100 text-rose-700";
+      return "bg-slate-100 text-slate-700";
+    }
+
+    var MATCHING_FIELDS = [
+      "email",
+      "phone_number",
+      "national_id",
+      "external_customer_id",
+      "device_id",
+      "advertising_id",
+      "cookie_id",
+    ];
+
+    var MATCHING_FIELD_LABELS = {
+      email: "Email",
+      phone_number: "Phone Number",
+      national_id: "National ID",
+      external_customer_id: "External Customer ID",
+      device_id: "Device ID",
+      advertising_id: "Advertising ID",
+      cookie_id: "Cookie ID",
+    };
+
+    function parseMatchFieldsFromMethod(methodRaw) {
+      var raw = String(methodRaw || "").trim();
+      if (!raw) return [];
+
+      var spec = "";
+      var colonIdx = raw.indexOf(":");
+      var openIdx = raw.indexOf("(");
+      var closeIdx = raw.lastIndexOf(")");
+
+      if (colonIdx >= 0 && colonIdx < raw.length - 1) {
+        spec = raw.slice(colonIdx + 1);
+      } else if (openIdx >= 0 && closeIdx > openIdx) {
+        spec = raw.slice(openIdx + 1, closeIdx);
+      }
+
+      if (!spec) return [];
+
+      var allowed = {};
+      MATCHING_FIELDS.forEach(function (f) {
+        allowed[f] = true;
+      });
+
+      var fields = spec
+        .split(/[|,;+\s]+/)
+        .map(function (f) {
+          return f.trim().toLowerCase();
+        })
+        .filter(function (f) {
+          return !!f && allowed[f];
+        });
+
+      return fields.filter(function (f, i) {
+        return fields.indexOf(f) === i;
+      });
+    }
+
+    function fieldsListLabel(fields) {
+      return fields.length ? fields.join(", ") : MATCHING_FIELDS.join(", ");
+    }
+
+    function formatIdentifierArray(values) {
+      var arr = Array.isArray(values) ? values.filter(Boolean) : [];
+      if (!arr.length) return "—";
+      return arr
+        .slice(0, 3)
+        .map(function (v) {
+          return fmt.maskMiddle(String(v), 4, 3);
+        })
+        .join(", ");
+    }
+
+    function externalCustomerIdEvidenceValue(externalIds) {
+      if (!externalIds || typeof externalIds !== "object") return "—";
+      if (externalIds.external_customer_id)
+        return String(externalIds.external_customer_id);
+
+      var entries = Object.entries(externalIds).filter(function (pair) {
+        return pair[1] !== null && pair[1] !== undefined && pair[1] !== "";
+      });
+      if (!entries.length) return "—";
+
+      return entries
+        .slice(0, 3)
+        .map(function (pair) {
+          return pair[0] + ": " + pair[1];
+        })
+        .join(", ");
+    }
+
+    function matchingFieldValue(field) {
+      if (field === "email")
+        return profile.email ? fmt.maskMiddle(profile.email) : "—";
+      if (field === "phone_number")
+        return profile.phone_number
+          ? fmt.maskMiddle(profile.phone_number)
+          : "—";
+      if (field === "national_id")
+        return profile.national_id ? fmt.maskMiddle(profile.national_id) : "—";
+      if (field === "external_customer_id")
+        return externalCustomerIdEvidenceValue(profile.external_ids);
+      if (field === "device_id") return formatIdentifierArray(profile.device_ids);
+      if (field === "advertising_id")
+        return formatIdentifierArray(profile.advertising_ids);
+      if (field === "cookie_id") return formatIdentifierArray(profile.cookie_ids);
+      return "—";
+    }
+
+    function normalizedMethod(link) {
+      return String((link && link.match_method) || "")
+        .trim()
+        .toLowerCase();
+    }
+
+    function inferredFieldsForLink(link) {
+      var parsed = parseMatchFieldsFromMethod(link && link.match_method);
+      if (parsed.length) return parsed;
+
+      var method = normalizedMethod(link);
+      if (method === "dynamicmatch" || method === "newmaster") {
+        return MATCHING_FIELDS.slice();
+      }
+      return [];
+    }
+
+    function linkReasonLabel(link) {
+      var status = (link.status || "").toUpperCase();
+      var methodRaw = String(link.match_method || "");
+      var method = methodRaw.toLowerCase();
+      var parsedFields = parseMatchFieldsFromMethod(methodRaw);
+
+      if (status === "UNLINKED" && link.unlinked_reason) {
+        return "Unlinked: " + link.unlinked_reason;
+      }
+      if (status === "SUPERSEDED") {
+        return "Superseded by a newer identity resolution pass";
+      }
+      if (method === "newmaster") {
+        return "Created a new master profile as the best identity resolution outcome";
+      }
+      if (method === "dynamicmatch") {
+        return "Matched using fields: " + fieldsListLabel(MATCHING_FIELDS);
+      }
+      if (parsedFields.length) {
+        return "Matched using fields: " + fieldsListLabel(parsedFields);
+      }
+      if (method === "exact") {
+        return "Exact identifier match";
+      }
+      if (method === "fuzzy_trgm") {
+        return "Fuzzy text similarity match (trigram)";
+      }
+      if (method === "fuzzy_dmetaphone") {
+        return "Phonetic similarity match (double metaphone)";
+      }
+      if (method === "none") {
+        return "Linked by resolver policy";
+      }
+      if (link.match_score !== null && link.match_score !== undefined) {
+        return "Matched using fields: " + fieldsListLabel(MATCHING_FIELDS);
+      }
+      return "Matched using fields: " + fieldsListLabel(MATCHING_FIELDS);
+    }
+
+    var linkedRawProfiles = (profileLinks || []).map(function (l) {
+      var scorePct = linkScorePercent(l.match_score);
+      var showConfidence = linkHasConfidenceScore(l);
+      return {
+        linkId: l.link_id,
+        rawProfileId: l.raw_profile_id,
+        rawProfileIdShort: fmt.shortId(l.raw_profile_id),
+        masterProfileId: l.master_profile_id,
+        matchMethodLabel: fmt.titleCase(l.match_method || "unknown"),
+        matchReasonLabel: linkReasonLabel(l),
+        matchScoreLabel: showConfidence ? linkScoreLabel(l.match_score) : "Not applicable",
+        matchScoreWidth: scorePct + "%",
+        hasMatchConfidence: showConfidence,
+        statusLabel: fmt.titleCase(l.status || "unknown"),
+        statusBadgeClass: linkStatusBadgeClass(l.status),
+        createdAtLabel: fmt.dateTime(l.created_at),
+      };
+    });
+
+    var fieldUsageCounts = {};
+    var fieldImpactScores = {};
+    MATCHING_FIELDS.forEach(function (field) {
+      fieldUsageCounts[field] = 0;
+      fieldImpactScores[field] = 0;
+    });
+
+    (profileLinks || []).forEach(function (link) {
+      var fields = inferredFieldsForLink(link);
+      var linkImpact = linkScorePercent(link && link.match_score);
+      if (!linkImpact) linkImpact = 1;
+
+      fields.forEach(function (field) {
+        if (fieldUsageCounts[field] !== undefined) fieldUsageCounts[field] += 1;
+        if (fieldImpactScores[field] !== undefined)
+          fieldImpactScores[field] += linkImpact;
+      });
+    });
+
+    var matchingEvidenceChips = MATCHING_FIELDS.map(function (field) {
+      var count = fieldUsageCounts[field];
+      var value = matchingFieldValue(field);
+      return {
+        field: field,
+        label: MATCHING_FIELD_LABELS[field] || fmt.titleCase(field),
+        value: value,
+        showValue: true,
+        isValueMissing: value === "—",
+        duplicateHint: null,
+        confidenceImpactScore: fieldImpactScores[field] || 0,
+        usageLabel:
+          count > 0
+            ? "Used in " + count + " linked profile" + (count > 1 ? "s" : "")
+            : "Not used in current links",
+      };
+    }).sort(function (a, b) {
+      if (b.confidenceImpactScore !== a.confidenceImpactScore) {
+        return b.confidenceImpactScore - a.confidenceImpactScore;
+      }
+      var usageA = fieldUsageCounts[a.field] || 0;
+      var usageB = fieldUsageCounts[b.field] || 0;
+      if (usageB !== usageA) return usageB - usageA;
+      return a.label.localeCompare(b.label);
+    });
+
+    var topLinkScore = 0;
+    linkedRawProfiles.forEach(function (l) {
+      var score = Number(String(l.matchScoreWidth).replace("%", ""));
+      if (!isNaN(score) && score > topLinkScore) topLinkScore = score;
+    });
+    var latestLinkAtLabel = linkedRawProfiles.length
+      ? linkedRawProfiles[0].createdAtLabel
+      : "—";
+    var activeLinkedRawProfileCount = linkedRawProfiles.filter(function (l) {
+      return (l.statusLabel || "").toLowerCase() === "active";
+    }).length;
+
     function scoreWidth(v) {
       var n = Number(v);
       return (isNaN(n) ? 0 : Math.max(0, Math.min(100, n))) + "%";
@@ -230,6 +499,8 @@ window.C360 = window.C360 || {};
       channels: channels,
       hasIdentityDetails: identityDetailChips.length > 0,
       identityDetailChips: identityDetailChips,
+      hasMatchingEvidence: matchingEvidenceChips.length > 0,
+      matchingEvidenceChips: matchingEvidenceChips,
       hasAttributes: attributeChips.length > 0,
       attributeChips: attributeChips,
       hasWorkingInfo: workingDetailChips.length > 0,
@@ -268,6 +539,13 @@ window.C360 = window.C360 || {};
 
       hasTimeline: timelineVms.length > 0,
       timeline: timelineVms,
+
+      hasLinkedRawProfiles: linkedRawProfiles.length > 0,
+      linkedRawProfiles: linkedRawProfiles,
+      linkedRawProfileCount: linkedRawProfiles.length,
+      activeLinkedRawProfileCount: activeLinkedRawProfileCount,
+      topLinkScoreLabel: topLinkScore ? Math.round(topLinkScore) + "%" : "N/A",
+      latestLinkAtLabel: latestLinkAtLabel,
 
       lead_grade: profile.lead_grade || "—",
       leadScoreLabel: fmt.percent(profile.lead_conversion_probability),
@@ -347,6 +625,154 @@ window.C360 = window.C360 || {};
     );
   }
 
+  function loadProfileLinks(masterProfileId) {
+    return api("/master-profiles/" + masterProfileId + "/links", {
+      limit: 12,
+    }).then(
+      function (links) {
+        return links || [];
+      },
+      function () {
+        return [];
+      },
+    );
+  }
+
+  function escapeHtml(value) {
+    return $("<div>").text(String(value)).html();
+  }
+
+  function modalValue(value) {
+    if (value === null || value === undefined || value === "") return "—";
+    if (Array.isArray(value)) return value.length ? value.join(", ") : "—";
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+  }
+
+  function modalRow(label, value) {
+    return (
+      '<div class="flex items-start justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">' +
+      '<span class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">' +
+      escapeHtml(label) +
+      "</span>" +
+      '<span class="text-xs font-medium text-slate-800 text-right break-all">' +
+      escapeHtml(modalValue(value)) +
+      "</span></div>"
+    );
+  }
+
+  function setModalLoading() {
+    $("#linked-raw-modal-loading").removeClass("hidden");
+    $("#linked-raw-modal-error").addClass("hidden").text("");
+    $("#linked-raw-modal-content").addClass("hidden");
+    $("#linked-raw-modal-title").text("Raw Profile Detail");
+    $("#linked-raw-modal-subtitle").text("Fetching latest linked profile data...");
+  }
+
+  function showLinkedRawModalError(message) {
+    $("#linked-raw-modal-loading").addClass("hidden");
+    $("#linked-raw-modal-content").addClass("hidden");
+    $("#linked-raw-modal-error").removeClass("hidden").text(message);
+  }
+
+  function renderLinkedRawModal(detail) {
+    var link = detail && detail.link ? detail.link : {};
+    var raw = detail && detail.raw_profile ? detail.raw_profile : {};
+    var method = String(link.match_method || "").trim().toLowerCase();
+    var hasNumericScore =
+      link.match_score !== null && link.match_score !== undefined && link.match_score !== "" && !isNaN(Number(link.match_score));
+    var showConfidence = hasNumericScore && method !== "newmaster" && method !== "none";
+
+    $("#linked-raw-modal-loading").addClass("hidden");
+    $("#linked-raw-modal-error").addClass("hidden").text("");
+
+    $("#linked-raw-modal-title").text(
+      "Raw Profile " + (raw.raw_profile_id ? fmt.shortId(raw.raw_profile_id) : "—"),
+    );
+    $("#linked-raw-modal-subtitle").text(
+      "Linked at " + fmt.dateTime(link.created_at) + " via " + fmt.titleCase(link.match_method || "unknown"),
+    );
+
+    $("#linked-raw-modal-status").text(fmt.titleCase(link.status || "unknown"));
+    $("#linked-raw-modal-score").text(
+      showConfidence
+        ? Math.round((Number(link.match_score) <= 1 ? Number(link.match_score) * 100 : Number(link.match_score))) + "%"
+        : "Not applicable",
+    );
+    $("#linked-raw-modal-source").text(fmt.titleCase(raw.source_system || "unknown"));
+
+    var identityFieldsHtml = [
+      modalRow("Raw Profile ID", raw.raw_profile_id),
+      modalRow("External Customer ID", raw.external_customer_id),
+      modalRow("Full Name", raw.full_name),
+      modalRow("Email", raw.email),
+      modalRow("Phone Number", raw.phone_number),
+      modalRow("National ID", raw.national_id),
+      modalRow("Date of Birth", fmt.date(raw.date_of_birth)),
+      modalRow("Address", [raw.address_line1, raw.address_line2, raw.city, raw.state_province, raw.postal_code, raw.country].filter(Boolean).join(", ")),
+      modalRow("Created At", fmt.dateTime(raw.created_at)),
+      modalRow("Processed At", fmt.dateTime(raw.processed_at)),
+    ].join("");
+
+    var technicalFieldsHtml = [
+      modalRow("Domain", fmt.domainLabel(raw.domain)),
+      modalRow("Channel", fmt.titleCase(raw.channel)),
+      modalRow("Device ID", raw.device_id),
+      modalRow("Advertising ID", raw.advertising_id),
+      modalRow("Cookie ID", raw.cookie_id),
+      modalRow("Session ID", raw.session_id),
+      modalRow("GA Client ID", raw.ga_client_id),
+      modalRow("IP Address", raw.ip_address),
+      modalRow("UTM Source", raw.utm_source),
+      modalRow("UTM Medium", raw.utm_medium),
+      modalRow("UTM Campaign", raw.utm_campaign),
+      modalRow("Event Name", raw.event_name),
+      modalRow("Event Time", fmt.dateTime(raw.event_time)),
+    ].join("");
+
+    $("#linked-raw-modal-identity-fields").html(identityFieldsHtml);
+    $("#linked-raw-modal-technical-fields").html(technicalFieldsHtml);
+
+    var payloadText = raw.event_payload
+      ? JSON.stringify(raw.event_payload, null, 2)
+      : "{}";
+    $("#linked-raw-modal-event-payload").text(payloadText);
+
+    $("#linked-raw-modal-content").removeClass("hidden");
+  }
+
+  function openLinkedRawModal(rawProfileId) {
+    if (!currentProfileId || !rawProfileId) return;
+
+    var $modal = $("#linked-raw-profile-modal");
+    if (!$modal.length) return;
+
+    setModalLoading();
+    $modal.removeClass("hidden");
+    $("body").addClass("overflow-hidden");
+
+    api(
+      "/master-profiles/" +
+        currentProfileId +
+        "/linked-raw-profiles/" +
+        rawProfileId,
+    )
+      .done(function (detail) {
+        renderLinkedRawModal(detail || {});
+      })
+      .fail(function (xhr) {
+        showLinkedRawModalError(
+          "Could not load linked raw profile details for this identity link.",
+        );
+        showApiError("loading linked raw profile detail", xhr);
+      });
+  }
+
+  function closeLinkedRawModal() {
+    $("#linked-raw-profile-modal").addClass("hidden");
+    $("body").removeClass("overflow-hidden");
+  }
+
   function loadContentItems(masterProfileId, itemType) {
     var params = { master_profile_id: masterProfileId, limit: 8 };
     if (itemType) params.item_type = itemType;
@@ -404,6 +830,7 @@ window.C360 = window.C360 || {};
   }
 
   function load(masterProfileId) {
+    closeLinkedRawModal();
     currentProfileId = masterProfileId;
     currentContentType = "";
     timelineLimit = 8;
@@ -431,6 +858,7 @@ window.C360 = window.C360 || {};
       api("/master-profiles/" + masterProfileId + "/timeline", {
         limit: timelineLimit,
       }),
+      loadProfileLinks(masterProfileId),
       loadPersona(masterProfileId),
       loadPersonaHistory(masterProfileId),
     )
@@ -441,6 +869,7 @@ window.C360 = window.C360 || {};
           channelRes,
           interestsRes,
           timelineRes,
+          profileLinks,
           persona,
           personaHistory,
         ) {
@@ -450,6 +879,7 @@ window.C360 = window.C360 || {};
             channelRes[0],
             interestsRes[0],
             timelineRes[0],
+            profileLinks,
             persona,
             personaHistory,
           );
@@ -482,6 +912,22 @@ window.C360 = window.C360 || {};
     });
 
     $(document).on("click", "#btn-timeline-more", loadMoreTimeline);
+
+    $(document).on("click", ".btn-linked-raw-detail", function () {
+      openLinkedRawModal($(this).data("raw-profile-id"));
+    });
+
+    $(document).on("click", "#btn-close-linked-raw-modal", closeLinkedRawModal);
+
+    $(document).on("click", "#linked-raw-profile-modal", function (e) {
+      if (e.target === this) closeLinkedRawModal();
+    });
+
+    $(document).on("keydown", function (e) {
+      if (e.key === "Escape" && !$("#linked-raw-profile-modal").hasClass("hidden")) {
+        closeLinkedRawModal();
+      }
+    });
 
     $(document).on("click", ".content-tab-btn", function () {
       // 1. Reset all tabs to the INACTIVE state

@@ -34,6 +34,7 @@ def list_master_profiles_page(
     lifecycle_stage: Optional[str] = None,
     membership_tier: Optional[str] = None,
     churn_risk_tier: Optional[str] = None,
+    linked_raw_profile_count_min: Optional[int] = None,
     q: Optional[str] = None,
     days: Optional[int] = None,
     page: int = 1,
@@ -76,16 +77,48 @@ def list_master_profiles_page(
     page_size = max(1, page_size)
     offset = (page - 1) * page_size
 
+    link_count_subq = (
+        select(
+            CdpProfileLink.tenant_id.label("tenant_id"),
+            CdpProfileLink.master_profile_id.label("master_profile_id"),
+            func.count().label("linked_raw_profile_count"),
+        )
+        .group_by(CdpProfileLink.tenant_id, CdpProfileLink.master_profile_id)
+        .subquery()
+    )
+
+    linked_count_col = func.coalesce(link_count_subq.c.linked_raw_profile_count, 0)
+    if linked_raw_profile_count_min is not None:
+        where_clauses.append(linked_count_col >= linked_raw_profile_count_min)
+
     list_stmt = (
-        select(CdpMasterProfile)
+        select(CdpMasterProfile, linked_count_col.label("linked_raw_profile_count"))
+        .outerjoin(
+            link_count_subq,
+            (link_count_subq.c.master_profile_id == CdpMasterProfile.master_profile_id)
+            & (link_count_subq.c.tenant_id == CdpMasterProfile.tenant_id),
+        )
         .where(*where_clauses)
         .order_by(CdpMasterProfile.last_activity_at.desc().nullslast(), CdpMasterProfile.created_at.desc())
         .offset(offset)
         .limit(page_size)
     )
-    count_stmt = select(func.count()).select_from(CdpMasterProfile).where(*where_clauses)
+    count_stmt = (
+        select(func.count())
+        .select_from(CdpMasterProfile)
+        .outerjoin(
+            link_count_subq,
+            (link_count_subq.c.master_profile_id == CdpMasterProfile.master_profile_id)
+            & (link_count_subq.c.tenant_id == CdpMasterProfile.tenant_id),
+        )
+        .where(*where_clauses)
+    )
 
-    items = list(db.execute(list_stmt).scalars().all())
+    rows = db.execute(list_stmt).all()
+    items = []
+    for profile, linked_raw_profile_count in rows:
+        profile.linked_raw_profile_count = int(linked_raw_profile_count or 0)
+        items.append(profile)
     total = db.execute(count_stmt).scalar_one()
     total_pages = ceil(total / page_size) if total > 0 else 1
 

@@ -82,6 +82,16 @@ class _FakeScalarsResult:
         return self._rows
 
 
+class _FakeFirstResult:
+    """Stands in for a SQLAlchemy CursorResult supporting `.first()`."""
+
+    def __init__(self, row: Any):
+        self._row = row
+
+    def first(self):
+        return self._row
+
+
 class _FakeSelectSession:
     """Minimal Session double recording every execute() call, returning a
     single canned `.scalars().all()` result."""
@@ -120,6 +130,68 @@ def _fake_link(**overrides) -> SimpleNamespace:
         "unlinked_at": None,
         "unlinked_reason": None,
         "unlinked_by": None,
+        "created_at": datetime.now(timezone.utc),
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def _fake_master_profile(**overrides) -> SimpleNamespace:
+    defaults = {
+        "master_profile_id": uuid.uuid4(),
+        "tenant_id": DEMO_TENANT_ID,
+        "domain": "retail",
+        "status_code": 1,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def _fake_raw_profile(**overrides) -> SimpleNamespace:
+    defaults = {
+        "raw_profile_id": uuid.uuid4(),
+        "tenant_id": DEMO_TENANT_ID,
+        "user_id": None,
+        "domain": "retail",
+        "source_system": "moengage",
+        "channel": "mobile_app",
+        "external_customer_id": None,
+        "full_name": None,
+        "first_name": None,
+        "last_name": None,
+        "email": None,
+        "phone_number": None,
+        "national_id": None,
+        "date_of_birth": None,
+        "address_line1": None,
+        "address_line2": None,
+        "city": None,
+        "state_province": None,
+        "postal_code": None,
+        "country": None,
+        "company_name": None,
+        "device_id": None,
+        "advertising_id": None,
+        "platform": None,
+        "app_version": None,
+        "push_token": None,
+        "cookie_id": None,
+        "ga_client_id": None,
+        "session_id": None,
+        "ip_address": None,
+        "user_agent": None,
+        "media_source": None,
+        "campaign": None,
+        "utm_source": None,
+        "utm_medium": None,
+        "utm_campaign": None,
+        "event_name": None,
+        "event_time": None,
+        "event_payload": None,
+        "status_code": 1,
+        "processed_at": None,
         "created_at": datetime.now(timezone.utc),
     }
     defaults.update(overrides)
@@ -336,6 +408,80 @@ class MasterProfileLinksEndpointTests(unittest.TestCase):
         self.assertIn("LIMIT", compiled.upper())
 
 
+class MasterProfileLinkedRawDetailEndpointTests(unittest.TestCase):
+    """Covers GET /master-profiles/{id}/linked-raw-profiles/{raw_profile_id}."""
+
+    def setUp(self):
+        self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
+        self._cache_patcher.start()
+        self.addCleanup(self._cache_patcher.stop)
+
+        self._original_master_crud = identity_router._master_crud
+        self.master_profile = _fake_master_profile()
+        identity_router._master_crud = SimpleNamespace(
+            get=lambda db, pk: self.master_profile if pk == self.master_profile.master_profile_id else None
+        )
+        self.addCleanup(self._restore_master_crud)
+
+        app = FastAPI()
+        app.include_router(identity_router.master_profiles_router)
+        self.app = app
+
+    def _restore_master_crud(self):
+        identity_router._master_crud = self._original_master_crud
+
+    def test_returns_linked_raw_profile_detail(self):
+        link = _fake_link(
+            tenant_id=self.master_profile.tenant_id,
+            master_profile_id=self.master_profile.master_profile_id,
+        )
+        raw_profile = _fake_raw_profile(
+            raw_profile_id=link.raw_profile_id,
+            tenant_id=self.master_profile.tenant_id,
+            source_system="web_tracking",
+            event_name="checkout_started",
+            event_payload={"cart_value": 129.9},
+        )
+
+        session = SimpleNamespace(execute=lambda stmt: _FakeFirstResult((link, raw_profile)))
+        self.app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(self.app)
+
+        response = client.get(
+            f"/master-profiles/{self.master_profile.master_profile_id}/linked-raw-profiles/{link.raw_profile_id}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["link"]["link_id"], str(link.link_id))
+        self.assertEqual(body["raw_profile"]["raw_profile_id"], str(raw_profile.raw_profile_id))
+        self.assertEqual(body["raw_profile"]["source_system"], "web_tracking")
+
+    def test_returns_404_when_master_profile_not_found(self):
+        session = SimpleNamespace(execute=lambda stmt: _FakeFirstResult(None))
+        self.app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(self.app)
+
+        response = client.get(
+            f"/master-profiles/{uuid.uuid4()}/linked-raw-profiles/{uuid.uuid4()}"
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("not found", response.json()["detail"].lower())
+
+    def test_returns_404_when_raw_profile_is_not_linked(self):
+        session = SimpleNamespace(execute=lambda stmt: _FakeFirstResult(None))
+        self.app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(self.app)
+
+        response = client.get(
+            f"/master-profiles/{self.master_profile.master_profile_id}/linked-raw-profiles/{uuid.uuid4()}"
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("not linked", response.json()["detail"].lower())
+
+
 class MasterProfilesPaginationEndpointTests(unittest.TestCase):
     """Covers GET /master-profiles/ paginated response envelope."""
 
@@ -359,6 +505,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
                     "master_profile_id": master_profile_id,
                     "tenant_id": tenant_id,
                     "domain": "retail",
+                    "linked_raw_profile_count": 4,
                     "status_code": 1,
                 }
             ],
@@ -383,6 +530,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
         self.assertEqual(body["pagination"]["page_size"], 25)
         self.assertEqual(body["pagination"]["total"], 120)
         self.assertEqual(len(body["items"]), 1)
+        self.assertEqual(body["items"][0]["linked_raw_profile_count"], 4)
 
     def test_forwards_filters_and_pagination_params_to_crud(self):
         with patch("core.routers.identity.identity_crud.list_master_profiles_page", return_value={"items": [], "pagination": {
@@ -396,7 +544,8 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             response = self.client.get(
                 "/master-profiles/?tenant_id=11111111-1111-1111-1111-111111111111"
                 "&domain=retail&lifecycle_stage=customer&membership_tier=Gold"
-                "&churn_risk_tier=high&q=nguyen&page=3&page_size=15&days=30"
+                "&churn_risk_tier=high&linked_raw_profile_count_min=2"
+                "&q=nguyen&page=3&page_size=15&days=30"
             )
 
         self.assertEqual(response.status_code, 200)
@@ -407,6 +556,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             lifecycle_stage="customer",
             membership_tier="Gold",
             churn_risk_tier="high",
+            linked_raw_profile_count_min=2,
             q="nguyen",
             days=30,
             page=3,

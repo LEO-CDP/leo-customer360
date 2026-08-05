@@ -168,6 +168,7 @@ class MasterProfileUpdate(BaseModel):
 class MasterProfileRead(MasterProfileBase):
     model_config = ConfigDict(from_attributes=True)
     master_profile_id: uuid.UUID
+    linked_raw_profile_count: int = 0
     status_code: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -306,6 +307,11 @@ class ProfileLinkRead(ProfileLinkBase):
     model_config = ConfigDict(from_attributes=True)
     link_id: uuid.UUID
     created_at: Optional[datetime] = None
+
+
+class LinkedRawProfileDetailRead(BaseModel):
+    link: ProfileLinkRead
+    raw_profile: RawProfileRead
 
 
 class ProfileAttributeBase(BaseModel):
