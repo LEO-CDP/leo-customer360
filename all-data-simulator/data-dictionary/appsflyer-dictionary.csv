@@ -1,0 +1,169 @@
+Field group,Field name,API name,Field class,Description,Sample Data,Format,Part of main raw data report schema,Report delivery method,,
+,,,,,,,,Push API,Data Locker,Export data/Pull API
+Device Info,Ad Personalization Enabled,ad_personalization_enabled,SDK,Cho biết người dùng đã đồng ý cho Google sử dụng dữ liệu cho quảng cáo cá nhân hóa hay chưa.,true,Boolean,No,Yes,Yes,Yes
+Attribution,Ad placement,ad_placement,Link,Vị trí quảng cáo trên CTV.,Banner 1,String 64,Yes,N/A,Yes,Yes
+Ad revenue,Ad unit,ad_unit,Ad revenue API,Tên phân đoạn quảng cáo khi thực hiện kiểm thử A/B.,Banner 1,String 1024,Yes,N/R,Yes,Yes
+Device Info,Ad User Data Enabled,ad_user_data_enabled,SDK,Cho biết người dùng đã đồng ý cho Google sử dụng dữ liệu cho đo lường và quảng cáo cá nhân hóa hay chưa.,true,Boolean,No,Yes,Yes,Yes
+Device info,Advertising ID for Android devices,advertising_id,SDK,"Mã quảng cáo có thể đặt lại của người dùng, còn gọi là GAID; với CTV là CTV ID, ví dụ RIDA hoặc VIDA.",123456789,String 40,Yes,Yes,Yes,Yes
+Attribution,Ad,af_ad,Link,Tên quảng cáo.,Summer Promo,String 100,Yes,Yes,Yes,Yes
+Attribution,Ad ID,af_ad_id,Link,ID quảng cáo.,1234567890,String 24,Yes,Yes,Yes,Yes
+Attribution,Ad type,af_ad_type,Link,"Loại quảng cáo, ví dụ banner hoặc footer.",banner,String 24,Yes,Yes,Yes,Yes
+Attribution,Adset,af_adset,Link,"Tên adset, xác định một nhóm chứa một hoặc nhiều quảng cáo.",Prospecting iOS,String 100,Yes,Yes,Yes,Yes
+Attribution,Adset ID,af_adset_id,Link,"ID adset, xác định một nhóm chứa một hoặc nhiều quảng cáo.",9876543210,String 24,Yes,Yes,Yes,Yes
+Attribution,Attribution lookback window,af_attribution_lookback,Link,Khoảng thời gian tối đa để một install có thể được gán cho một quảng cáo cụ thể.,7d,3 char max,Yes,Yes,Yes,Yes
+Attribution,Campaign ID,af_c_id,Link,ID chiến dịch.,123456789,String,Yes,Yes,Yes,Yes
+IAP,,af_cancelation_date_ms,AppsFlyer purchase SDK connector,Ngày hủy.,2026-08-05 14:30:00,,No,,,
+Attribution,Channel,af_channel,Link,"Kênh nguồn truyền thông; ví dụ YouTube cho Google, Instagram cho Meta Ads.",YouTube,Dynamic Enum String 20,Yes,Yes,Yes,Yes
+Attribution,Cost currency,af_cost_currency,Link,"Mã tiền tệ 3 ký tự (USD, EUR) theo chuẩn ISO-4217; mặc định là USD.",USD,String 3 char,Yes,Yes,Yes,Yes
+Attribution,Cost model,af_cost_model,Link,Mô hình chi phí được báo trên attribution link; CPC/CPI/CPM/khác.,CPI,String 20,Yes,Yes,Yes,Yes
+Attribution,Cost value,af_cost_value,Link,Giá trị chi phí với tối đa 4 chữ số sau dấu thập phân.,3.2500,String 20,Yes,Yes,Yes,Yes
+Subscription,CUIDs,af_cuids,AppsFlyer purchase SDK connector,Mảng CUID trong ngữ cảnh ARS; cùng một CUID có thể xuất hiện trên nhiều device ID.,"[""cuid_123"",""cuid_456""]",,No,N/R,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Discount ID,af_discount_id,AppsFlyer purchase SDK connector,ID ưu đãi hiển thị cho người dùng trong lần mua đầu tiên; chỉ có khi có mã giảm giá.,OFFER10,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+Subscription,Discount type,af_discount_type,AppsFlyer purchase SDK connector,"Loại giảm giá người dùng nhận được; có thể là IOS introductory subscription, Android intro price, one_time_code hoặc vanity_code.",introductory,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+Attribution,Engagement Destination,af_engagement_destination,,"Cho biết loại đích mà quảng cáo dẫn tới, như trang web, ứng dụng di động hoặc các đích khác như CTV, PC, Console.",app,String,Yes,Yes,Yes,Yes
+"IAP
+Subscription",Environment,af_environment,AppsFlyer purchase SDK connector,"Môi trường nhận dữ liệu, có thể là production hoặc sandbox.",production,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+Subscription,Subscription expiration date,af_expires_date_ms,,Ngày hết hạn của chu kỳ thanh toán subscription hiện tại.,2026-12-31,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+Attribution,Keywords,af_keywords,Link,"Từ khóa người dùng đã tìm kiếm trực tuyến, theo báo cáo của ad network.",running shoes,String 100,Yes,Yes,Yes,Yes
+"IAP
+Subscription",Net revenue,af_net_revenue,True Revenue API,Doanh thu ròng được tính dựa trên tất cả yếu tố đã được tính vào.,8.75,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Net revenue country,af_net_revenue_country,True Revenue API,Mã quốc gia ISO 3166 hai ký tự để áp dụng thuế; ví dụ GB.,VN,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Net revenue factors,af_net_revenue_factors,True Revenue API,Mảng mô tả các yếu tố tạo ra giá trị net revenue được báo cáo.,"[""store_commission""]",,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Net revenue postal code,af_net_revenue_postal_code,True Revenue API,Chuỗi chữ và/hoặc số; ví dụ L4J8E3.,700000,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Net revenue subdivision,af_net_revenue_subdivision,True Revenue API,"Mã tiểu bang/tỉnh theo ISO 3166-2, gồm mã quốc gia và mã phân vùng; ví dụ US-CA.",VN-HCM,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Net revenue tax exclusive,af_net_revenue_tax_exclusive,True Revenue API,Tham số boolean cho biết thuế đã được tính vào doanh thu tổng hay chưa.,false,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Net revenue tax name,af_net_revenue_tax_name,True Revenue API,"Tên loại thuế hiển thị trên hóa đơn khách hàng; ví dụ Sales, VAT, GST.",VAT,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Net revenue tax rate,af_net_revenue_tax_rate,True Revenue API,"Tỷ lệ thuế, tối đa 4 chữ số thập phân; ví dụ 7.25.",10,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Order ID,af_order_id,AppsFlyer purchase SDK connector,ID đơn hàng của giao dịch trên Android.,ORDER-20260805-001,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Original transaction ID,af_original_transaction_id,AppsFlyer purchase SDK connector,ID giao dịch gốc trên iOS.,1000001234567890,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+Subscription,Subscription period type,af_period_type,AppsFlyer purchase SDK connector,"Loại kỳ subscription hoặc trial; có thể là trial, intro hoặc normal.",normal,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Product ID,af_product_id,AppsFlyer purchase SDK connector,ID sản phẩm subscription.,premium_monthly,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+Attribution,Partner,af_prt,Link,Mã agency; với SKAN có thể không được điền.,agency_name,String,Yes,Yes,Yes,Yes
+"IAP
+Subscription",Purchase date,af_purchase_date_ms,AppsFlyer purchase SDK connector,Ngày mua của sản phẩm được báo trong sự kiện in-app.,2026-08-05,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+IAP,Purchase state,af_purchase_state,AppsFlyer purchase SDK connector,"Trạng thái mua; có thể là Purchased, Canceled hoặc Pending.",Purchased,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Purchase token,af_purchase_token,AppsFlyer purchase SDK connector,Mã token mua hàng của giao dịch trên Android.,tok_abc123,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Reason,af_reason,AppsFlyer purchase SDK connector,"Lý do người dùng hủy, quay lại, tiếp tục subscription hoặc được hoàn tiền, tùy ngữ cảnh sự kiện.",billing_issue,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+Attribution,Reengagement window,af_reengagement_window,Link,Khoảng thời gian mà sự kiện được gán cho chiến dịch retargeting; không điền trong các chiến dịch retargeting.,30d,String 3 char max,Yes,Yes,Yes,Yes
+"IAP
+Subscription",Refund ransaction ID,af_refunded_transaction_ids,AppsFlyer purchase SDK connector,Mảng tất cả ID giao dịch đã được hoàn tiền trên iOS.,"[""1000001234567890""]",,No,,,
+Attribution,Site ID,af_siteid,Link,ID publisher.,publisher_123,String 24,Yes,Yes,Yes,Yes
+"IAP
+Subscription",Store,af_store,AppsFlyer purchase SDK connector,Cửa hàng ứng dụng nơi sản phẩm subscription được mua.,app_store,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+Attribution,Sub param [n],af_sub[n] (n=1-5),Link,Tham số do advertiser đặt trong attribution link.,sample,String 100,Yes,Yes,Yes,Yes
+Attribution,Sub site ID,af_sub_siteid,Link,ID sub-publisher.,sub_pub_456,String 50,Yes,Yes,Yes,Yes
+Subscription,Subscription ownership type,af_subscription_ownership_type,AppsFlyer purchase SDK connector,FAMILY_SHARED nghĩa là người dùng truy cập qua Family Sharing. PURCHASED nghĩa là người trả tiền đã mua.,PURCHASED,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+"IAP
+Subscription",Transaction ID,af_transaction_id,AppsFlyer purchase SDK connector,ID của giao dịch trên iOS.,1000001234567890,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+Device info,Amazon Fire ID,amazon_aid,SDK,Mã quảng cáo có thể đặt lại của người dùng trên thiết bị Amazon.,amz-1234567890,String 100,Yes,Yes,Yes,Export only
+Device info,Android ID,android_id,SDK,Mã thiết bị cố định.,a1b2c3d4e5f6a7b8,String 20,Yes,Yes,Yes,Yes
+App,App ID,app_id,SDK,"Mã ứng dụng duy nhất trong AppsFlyer; iOS có dạng id123456789, Android có dạng com.appsflyer.referrersender.",com.example.app,"iOS: String 12
+Android: String 100",Yes,Yes,Yes,Yes
+App,App name,app_name,SDK,Tên ứng dụng do advertiser đặt.,Sample App,String 100,Yes,Yes,Yes,Yes
+App,App type,app_type,App clip,Giá trị app_clip hoặc full_app.,full_app,String,Yes,Yes,Yes,Yes
+App,App version,app_version,SDK,Phiên bản ứng dụng do advertiser đặt.,1.2.3,8 char max,Yes,Yes,Yes,Yes
+Device info,AppsFlyer ID,appsflyer_id,SDK,ID duy nhất do SDK tạo khi ứng dụng được cài trên thiết bị; ID mới được tạo khi app bị xóa và cài lại.,12345678901234567890123456789012,"iOS: String 24
+Android: String 33",Yes,Yes,Yes,Yes
+Device info,ATT,att,SDK,"Cho biết trạng thái ATT trên iOS 14+; giá trị có thể là not_determined, restricted, denied, authorized, af_unknown, af_authorized hoặc af_unavailable.",authorized,String 20,,Yes,Yes,Yes
+Attribution,Attributed touch time,attributed_touch_time,AF,Thời điểm của lượt chạm mà AppsFlyer gán cho conversion.,2026-08-05 14:30:00,Date Time,Yes,Yes,Yes,Yes
+Attribution,Attributed touch type,attributed_touch_type,AF,"Loại lượt chạm; có thể là click, impression hoặc pre-installed.",click,Enum 10 char max,Yes,Yes,Yes,Yes
+Protect360,Blocked reason,blocked_reason,AF,Lý do install bị chặn trong Protect360; ví dụ install_hijacking hoặc bots.,install_hijacking,String 100,Yes,N/R,Yes,Yes
+Protect360,Blocked reason rule (deprecated),blocked_reason_rule,AF,Đã ngừng dùng.,validation_rule_1,String 100,Yes,N/R,Yes,Yes
+Protect360,Blocked reason value,blocked_reason_value,AF,Thông tin bổ sung về lý do chặn; ví dụ Site ID hoặc tên rule xác minh.,site_id_123,String 100,Yes,N/R,Yes,Yes
+Protect360,Blocked sub reason,blocked_sub_reason,AF,"Lý do phụ cụ thể của install bị chặn; ví dụ referer hijack, CTIT_anomalies hoặc validation_rules.",referer_hijack,String 100,Yes,N/R,Yes,Yes
+App,Bundle ID,bundle_id,SDK,Định danh bundle trên iOS hoặc App ID trên Android; không liên quan tới AppsFlyer PBA.,com.example.app,String 100,Yes,Yes,Yes,Yes
+Attribution,Campaign,campaign,Link,Tên chiến dịch.,Summer Sale 2026,String 100,Yes,Yes,Yes,Yes
+Attribution,Campaign type,campaign_type,AF,"Nguồn mang người dùng: UA, Organic, Retargeting hoặc Unknown.",UA,String,Yes,Yes,Yes,Yes
+Device info,Carrier,carrier,SDK,Tên nhà mạng di động do Android cung cấp qua getSimCarrierIdName(); xem thêm mapping nhà mạng.,Viettel,String 50,Yes,Yes,Yes,Yes
+Device location,City,city,AF,Khu vực địa lý chi tiết nhất của người dùng dựa trên IP thiết bị; thường là tên thành phố.,Ho Chi Minh City,String 100,Yes,Yes,Yes,Yes
+Attribution,Contributor[n] partner,contributor[n]_af_prt(n=1-3),AF,"Agency hoặc PMD, luôn chuyển về chữ thường.",agency_name,String 50,Yes,Yes,Yes,Yes
+Attribution,Contributor[n] campaign,contributor[n]_campaign(n=1-3),AF,Chiến dịch của contributor.,Summer Sale 2026,String 100,Yes,Yes,Yes,Yes
+Attribution,Contributor[n] match type,contributor[n]_match_type(n=1-3),AF,Các giá trị có thể giống match type.,id_matching,String 50,Yes,Yes,Yes,Yes
+Attribution,Contributor[n] media source,contributor[n]_media_source(n=1-3),AF,Nguồn truyền thông của contributor.,google_ads,"String 50
+",Yes,Yes,Yes,Yes
+Attribution,Contributor[n] touch time,contributor[n]_touch_time(n=1-3),AF,Thời điểm chạm của contributor.,2026-08-05 14:30:00,Date Time,Yes,Yes,Yes,Yes
+Attribution,Contributor[n] touch type,contributor[n]_touch_type(n=1-3),AF,Giá trị có thể là click hoặc impression.,click,Enum 10 char max,Yes,Yes,Yes,Yes
+Attribution,Contributor engagement type,contributor_[n]_engagement_type,AF,Loại tương tác của contributor.,click,Enum,Yes,Yes,Yes,Yes
+Attribution,Conversion type,conversion_type,AF,"Loại chuyển đổi: install, reinstall, re-engagement hoặc unknown.",Install,String,Yes,Yes,Yes,Yes
+Device location,Country code,country_code,AF,"Mã quốc gia ISO 3166 alpha-2; ví dụ US, CN. Mã Vương quốc Anh là UK, không phải GB.",VN,Enum String 2,Yes,Yes,Yes,Yes
+Attribution,Custom data,custom_data,SDK,"Dữ liệu do advertiser đặt trong SDK hoặc S2S, thường dùng cho tích hợp bên thứ ba, Audiences, v.v.","{""plan"":""premium"",""price"":12.34}",String | Object,Yes,Yes,Yes,Yes
+Device info,Customer user ID,customer_user_id,SDK,ID người dùng ứng dụng do chủ app đặt.,user_12345,String | Integer,No,Yes,Yes,Yes
+Device info,Deeplink URL,deeplink_url,SDK,Đường dẫn tới activity nội bộ mà người dùng được deep link vào; chứa giá trị af_dp từ attribution link.,myapp://product/123,String 1024,Yes,Yes,Yes,Yes
+Protect360,Detection date,detection_date,AF,Ngày fraud được phát hiện sau attribution.,2026-08-05,String 100,Yes,N/R,Yes,Yes
+Device info,Device category,device_category,SDK,"Các giá trị có thể gồm phone, tablet hoặc other.",phone,String 20,Yes,Yes,Yes,Yes
+Device info,Device download Time,device_download_time,SDK,Thời điểm hoàn tất tải ứng dụng theo đồng hồ Android/iOS của thiết bị và được đổi sang UTC.,2026-08-05 14:30:00,Date Time,Yes,Yes,Yes,Yes
+Device info,Device ID type,device_id_type,SDK,Được điền cho CTV với loại platform ID của CTV; ví dụ RIDA cho Roku.,RIDA,Enum 4,Yes,,,
+Device info,Device model,device_model,SDK,Tên model thương mại của thiết bị; ví dụ xiaomi::Redmi hoặc iPhone7.,iPhone 15,String 100,Yes,Yes,Yes,Yes
+Device location,DMA,dma,AF,Khu vực thị trường được chỉ định theo Nielsen để xác định vị trí người dùng.,501,String 10,Yes,Yes,Yes,Yes
+Attribution,Engagement type,engagement_type,AF/SDK,"Loại tương tác như preload, click_to_download, click_to_app, engaged_click, engaged_view, view hoặc listening; nếu không báo thì để trống.",click_to_app,String,No,Yes,Yes,Yes
+Event,Event name,event_name,AF/SDK,Loại sự kiện attribution hoặc tên in-app event do ứng dụng gửi.,purchase,"String 100
+",Yes,Yes,Yes,Yes
+Event,Event revenue,event_revenue,SDK,Giá trị doanh thu dùng đơn vị tiền tệ của Event Revenue.,12.34,String 20,Yes,Yes,Yes,Yes
+Event,Event revenue currency,event_revenue_currency,SDK,Mã tiền tệ của doanh thu sự kiện được báo từ SDK.,USD,String 20,Yes,Yes,Yes,Yes
+Event,Event revenue USD,event_revenue_usd*,AF,Giá trị doanh thu; đơn vị tiền tệ phụ thuộc vào công cụ báo cáo đang dùng.,12.34,String | Decimal,Yes,Yes,Yes,Yes
+Event,Event revenue selected currency,event_revenue_xxx,,Giá trị doanh thu theo tiền tệ được chọn hoặc mặc định.,12.34,String 20,Yes,Yes,N/R,Yes
+Attribution,Event source,event_source,AF,Nguồn sự kiện: SDK hoặc S2S.,SDK,Enum 3 char max,Yes,Yes,Yes,Yes
+Event,Event hour,event_time,Postback,Thời điểm sự kiện được làm tròn xuống theo giờ gần nhất.,2026-08-05 14:30:00,Date Time,Yes,Yes,Yes,Yes
+Event,Event time,event_time,SDK,Thời điểm sự kiện xảy ra.,2026-08-05 14:30:00,Date Time,Yes,Yes,Yes,Yes
+Event,Event value,event_value,SDK,Dữ liệu chi tiết của sự kiện do SDK gửi; không nên vượt quá 1000 ký tự.,"{""price"":12.34,""currency"":""USD""}",String 1000,Yes,Yes,Yes,Yes
+Protect360,Fraud reason,fraud_reason,AF,Xem blocked reason.,bots,String 100,Yes,N/R,Yes,Yes
+Protect360,Fraud sub reason,fraud_sub_reason,AF,Xem blocked sub reason.,referer_hijack,String 100,Yes,N/R,Yes,Yes
+Device Info,GDPR Applies,gdpr_applies,SDK,Cho biết người dùng có thuộc phạm vi GDPR hay không.,false,Boolean,No,Yes,Yes,Yes
+Attribution,Google Play broadcast referrer,gp_broadcast_referrer,Google Play store,Google Play Broadcast Referrer.,utm_source=google,String 1024,Yes,Yes,Yes,Yes
+Attribution,Google Play click time,gp_click_time,Google Play field,Thời điểm mở trang ứng dụng trên Google Play sau khi nhấp vào quảng cáo.,2026-08-05 14:00:00,Timestamp,Yes,Yes,Yes,Yes
+Attribution,Google Play install begin time,gp_install_begin,Google Play store,Thời điểm bắt đầu cài đặt theo dữ liệu từ Google API.,2026-08-05 13:55:00,Timestamp,Yes,Yes,Yes,Yes
+Attribution,Google Play referrer,gp_referrer,Google Play store,URL referrer của gói đã cài đặt.,utm_source=google,String 1024,Yes,Yes,Yes,Yes
+Attribution,HTTP referrer,http_referrer,AF,Địa chỉ trang web đã dẫn tới AppsFlyer click URL; dùng để biết nguồn request.,https://example.com/referrer,"String 10,000 char max",Yes,Yes,Yes,Yes
+Device info,IDFA,idfa,SDK,ID quảng cáo có thể đặt lại của người dùng trên iOS; nếu không có thường là giá trị 0.,00000000-0000-0000-0000-000000000000,40 char max,Yes,Yes,Yes,Yes
+Device info,IDFV,idfv,SDK,Vendor ID do iOS cung cấp.,A1B2C3D4-E5F6-7890-1234-56789ABCDEFF,40 char max,Yes,Yes,Yes,Yes
+Device info,IMEI,imei,SDK,Mã thiết bị cố định.,490154203237518,14 char max,Yes,Yes,Yes,Yes
+Ad revenue,Impressions,impressions,Ad revenue API,Số lần người dùng nhìn thấy quảng cáo.,42,String 1024,Yes,N/A,Yes,Yes
+Attribution,Install App Store,install_app_store,SDK,Cửa hàng Android nơi app được tải xuống.,Google Play,String 50,Yes,Yes,Yes,Yes
+Attribution,Install time,install_time,Postback,Lần mở đầu tiên sau khi cài đặt hoặc re-attribution.,2026-08-05 14:30:00,Date Time,Yes,Yes,Yes,Yes
+Device location,IP,ip,AF,Địa chỉ IP IPv4 hoặc IPv6; AppsFlyer dùng để xác định vị trí người dùng.,203.0.113.10,String,Yes,Yes,Yes,Yes
+Device info,Limit ad tracking,is_lat,SDK,Cho biết người dùng đã bật Limit Ad Tracking hay chưa.,false,Enum 5 char boolean,Yes,Yes,Yes,Yes
+Protect360,Is organic,is_organic,AF,Cho biết sự kiện in-app có liên quan tới install organic hay không.,true,String 100,Yes,N/R,Yes,Yes
+Attribution,Is primary attribution,is_primary_attribution,AF,"UA: True. Retargeting: trong cửa sổ re-engagement, nguồn gốc ban đầu là FALSE còn nguồn re-engagement là TRUE.",true,Enum | Boolean,Yes,Yes,Yes,Yes
+Event,Is receipt validated,is_receipt_validated,AF,TRUE/FALSE/NULL khi triển khai trong SDK; nếu không thì để trống.,true,Enum | Boolean,Yes,Yes,Yes,Yes
+Attribution,Is retargeting,is_retargeting,Link,UA: False. Retargeting: True cho các conversion và event retargeting.,false,Enum | Boolean,Yes,Yes,Yes,Yes
+Attribution,Keyword ID,keyword_id,Link,ID từ khóa do ad network trả về; chính là ID của af_keyword.,kw_12345,String 100,Yes,Yes,Yes,Yes
+Attribution,Keyword match type,keyword_match_type,AF,Kiểu khớp từ khóa do Google AdWords cung cấp; từ 15/02/2021 không còn được điền cho Apple Search Ads.,broad,String 100,Yes,Yes,Yes,Yes
+Device info,Language,language,SDK,"Ngôn ngữ/locale do thiết bị báo, thường có dạng ll-DD; ví dụ en-ZA.",vi-VN,String 20,Yes,Yes,Yes,Yes
+Attribution,Match type,match_type,AF,"Loại phương thức attribution; có thể là SRN, id_matching, probabilistic, deeplink, preinstall, gp_referrer, fb_referrer, ig_referrer hoặc referrer từ store bên thứ ba.",id_matching,String 50,Yes,Yes,Yes,Yes
+Attribution,Media source,media_source,Link,Nguồn truyền thông được gán cho sự kiện hoặc bị giới hạn.,google_ads,String 150,Yes,Yes,Yes,Yes
+Ad revenue,Mediation network,mediation_network,Ad revenue API,Mạng mediation quảng cáo báo sự kiện tới AppsFlyer.,admob,String 1024,Yes,N/R,Yes,Yes
+Ad revenue,Monetization network,monetization_network,Ad revenue API,Mạng quảng cáo kiếm tiền gửi quảng cáo.,admob,String 1024,Yes,N/R,Yes,Yes
+Attribution,Network account ID,network_account_id,Link,ID tài khoản advertiser trên ad network.,acct_12345,String | Integer,Yes,Yes,Yes,Yes
+Device info,OAID,oaid,SDK,"ID có thể đặt lại của người dùng trên một số thiết bị Android, thường dùng thay cho GAID.",8f0b6f28-4f21-4f1d-9e9c-1f3e0a2b7c10,40 char max,Yes,Yes,Yes,Yes
+Device info,Operator,operator,SDK,Tên nhà mạng di động lấy từ SIM MCCMNC; có trên Android qua getNetworkOperatorName().,Viettel,String 50,Yes,Yes,Yes,Yes
+Attribution,Original URL,original_url,Link,URL click/impression đã dùng; với Branded Link sẽ là branded link.,https://example.com/landing?utm_source=google,"String 10,000 (URL)",Yes,Yes,Yes,Yes
+Device info,OS version,os_version,SDK,Phiên bản hệ điều hành của thiết bị.,18.5,String 8,Yes,Yes,Yes,Yes
+Ad revenue,Placement,placement,Ad revenue API,Vị trí hiển thị quảng cáo trong ứng dụng.,home_screen,String 1024,Yes,N/R,Yes,Yes
+Device info,Platform,platform,SDK,"Nền tảng thiết bị: iOS, Android hoặc Windows Mobile.",iOS,Enum string 12,Yes,Yes,Yes,Yes
+Device location,Postal code,postal_code,AF,Mã bưu chính lấy từ IP thiết bị; với SKAN từ 30/08/2021 luôn là null.,700000,String 10 char max,Yes,Yes,Yes,Yes
+Device location,Region,region,AF,Vùng/bang lấy từ IP thiết bị; với SKAN được xác định theo country_code.,Southern Vietnam,String 100,Yes,Yes,Yes,Yes
+Protect360,Rejected reason,rejected_reason,AF,Hiện đang chứa blocked reason; dự kiến sẽ ngừng dùng.,install_hijacking,String 100,Yes,N/R,Yes,Yes
+Protect360,Rejected reason value,rejected_reason_value,AF,Hiển thị contributor hợp lệ cho các install/in-app event bị hijack; trong Data Locker hiển thị là validation_reason_value.,organic,String 100,Yes,N/R,Yes,Yes
+Attribution,Retargeting conversion type,retargeting_conversion_type,AF,"UA: Re-install. Re-targeting: Re-engagement, Re-attribution. Sẽ bị ngừng dùng; nên dùng conversion_type và campaign_type để xác định ngữ cảnh.",Re-engagement,Enum 14 char max,Yes,Yes,Yes,Yes
+App,SDK version,sdk_version,SDK,Phiên bản SDK AppsFlyer.,6.14.1,String 8,Yes,Yes,Yes,Yes
+Ad revenue,Segment,segment,Ad revenue API,Tên phân đoạn quảng cáo.,video_rewards,String 1024,Yes,N/R,Yes,Yes
+Device location,State,state,AF,Bang/tỉnh lấy từ IP thiết bị.,Ho Chi Minh,String 100,Yes,Yes,Yes,Yes
+"IAP
+Subscription",Store commission,store_commission,True Revenue API,Phần trăm hoa hồng mà cửa hàng nhận từ sản phẩm đã mua.,30,,No,N/R,Yes,Included as part of an array under event_value. May be truncated if event_value exceeds 1000 characters.
+Attribution,Store product page,store_product_page,AF,Trang sản phẩm tùy chỉnh trong Apple App Store mà người dùng được chuyển tới; có trên iOS 15+.,custom_page_1,String 100,Yes,Yes,Yes,Yes
+Device info,Store reinstall,store_reinstall,SDK,Apple App Store xác định người dùng do Apple Search Ads mang tới có phải là reinstall hay không bằng Apple user ID.,false,Boolean | String,Yes,Yes,No,Yes
+Device info,User agent,user_agent,Link,User agent của URL/thiết bị.,Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X),String 1024,Yes,Yes,Yes,Yes
+Device info,WIFI,wifi,SDK,Được đặt là TRUE hoặc FALSE.,true,Enum 5 char boolean,Yes,Yes,Yes,Yes
