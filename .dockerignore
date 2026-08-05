@@ -14,3 +14,7 @@ logs/
 **/*.pyc
 **/.pytest_cache/
 **/.venv/
+
+# Exclude documentation from Docker build context.
+**/*.md
+**/README.md

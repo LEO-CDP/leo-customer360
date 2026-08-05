@@ -83,6 +83,8 @@ window.C360 = window.C360 || {};
     dtv.bindSearch("#search-input", "q", 350);
     dtv.bindSelect("#domain-filter", "domain");
     dtv.bindSelect("#lifecycle-filter", "lifecycle_stage");
+    dtv.bindSelect("#tier-filter", "membership_tier");
+    dtv.bindSelect("#churn-risk-filter", "churn_risk_tier");
     dtv.bindPagination();
     $("#data-period-select").on("change", function () { load(false); });
   }

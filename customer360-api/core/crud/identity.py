@@ -32,6 +32,8 @@ def list_master_profiles_page(
     tenant_id: Optional[uuid.UUID] = None,
     domain: Optional[str] = None,
     lifecycle_stage: Optional[str] = None,
+    membership_tier: Optional[str] = None,
+    churn_risk_tier: Optional[str] = None,
     q: Optional[str] = None,
     days: Optional[int] = None,
     page: int = 1,
@@ -50,6 +52,10 @@ def list_master_profiles_page(
         where_clauses.append(CdpMasterProfile.domain == domain)
     if lifecycle_stage is not None:
         where_clauses.append(CdpMasterProfile.lifecycle_stage == lifecycle_stage)
+    if membership_tier is not None:
+        where_clauses.append(func.lower(CdpMasterProfile.membership_tier) == membership_tier.lower())
+    if churn_risk_tier is not None:
+        where_clauses.append(CdpMasterProfile.churn_risk_tier == churn_risk_tier)
 
     cutoff = _cutoff_for_days(days)
     if cutoff is not None:

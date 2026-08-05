@@ -395,7 +395,8 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
         }}) as mock_list:
             response = self.client.get(
                 "/master-profiles/?tenant_id=11111111-1111-1111-1111-111111111111"
-                "&domain=retail&lifecycle_stage=customer&q=nguyen&page=3&page_size=15&days=30"
+                "&domain=retail&lifecycle_stage=customer&membership_tier=Gold"
+                "&churn_risk_tier=high&q=nguyen&page=3&page_size=15&days=30"
             )
 
         self.assertEqual(response.status_code, 200)
@@ -404,6 +405,8 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
             domain="retail",
             lifecycle_stage="customer",
+            membership_tier="Gold",
+            churn_risk_tier="high",
             q="nguyen",
             days=30,
             page=3,

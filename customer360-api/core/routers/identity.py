@@ -75,6 +75,8 @@ def list_master_profiles(
     lifecycle_stage: Optional[str] = Query(
         default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
     ),
+    membership_tier: Optional[str] = Query(default=None),
+    churn_risk_tier: Optional[str] = Query(default=None, pattern="^(low|medium|high|critical)$"),
     q: Optional[str] = Query(default=None, description="Free-text search over full_name/persona_name/email"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=settings.api_default_page_size, ge=1, le=settings.api_max_page_size),
@@ -86,6 +88,8 @@ def list_master_profiles(
         tenant_id=tenant_id,
         domain=domain,
         lifecycle_stage=lifecycle_stage,
+        membership_tier=membership_tier,
+        churn_risk_tier=churn_risk_tier,
         q=q,
         days=days,
         page=page,
