@@ -84,6 +84,12 @@ def _build_test_app() -> FastAPI:
             read_schema=SegmentRead,
             prefix="/segments",
             tags=["Segmentation"],
+            create_validator=lambda db, payload: __import__("core.utils.domains", fromlist=["validate_domain_value"]).validate_domain_value(
+                db, payload.get("domain"), allow_all=True
+            ),
+            update_validator=lambda db, payload: __import__("core.utils.domains", fromlist=["validate_domain_value"]).validate_domain_value(
+                db, payload.get("domain"), allow_all=True
+            ),
         )
     app = FastAPI()
     app.include_router(router)
@@ -113,6 +119,13 @@ class SegmentCrudTests(unittest.TestCase):
         self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
         self._cache_patcher.start()
         self.addCleanup(self._cache_patcher.stop)
+
+        self._domain_patcher = patch(
+            "core.utils.domains.get_active_domain_codes",
+            return_value={"retail", "banking", "healthcare", "real_estate", "travel", "media", "education"},
+        )
+        self._domain_patcher.start()
+        self.addCleanup(self._domain_patcher.stop)
         self.client = TestClient(_build_test_app())
 
     def test_create_segment_returns_201_with_generated_id(self):
@@ -140,6 +153,12 @@ class SegmentCrudTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["processed_by"], "ai_agent")
+
+    def test_create_segment_accepts_healthcare_domain(self):
+        response = self.client.post("/segments/", json=_segment_payload(domain="healthcare"))
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["domain"], "healthcare")
 
     def test_create_segment_rejects_invalid_processed_by(self):
         response = self.client.post("/segments/", json=_segment_payload(processed_by="robot"))
@@ -337,6 +356,7 @@ class SegmentMatchedProfilesTests(unittest.TestCase):
         self.assertEqual(response.json(), {"count": 7})
         sql, params = fake_session.executed[0]
         self.assertIn("cdp_master_profiles", sql)
+        self.assertIn("cdp_domain_profiles", sql)
         self.assertIn("churn_risk_tier IN ('high', 'critical')", sql)
         self.assertEqual(params["tenant_id"], str(tenant_id))
 
@@ -701,6 +721,7 @@ def _fake_profile_attribute(**overrides) -> SimpleNamespace:
         "data_type": "TEXT",
         "domain_scope": "all",
         "is_pii": False,
+        "source_table": "cdp_master_profiles",
     }
     attrs.update(overrides)
     return SimpleNamespace(**attrs)
@@ -767,6 +788,19 @@ class SegmentableProfileAttributesTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()[0]["field"], "device_id")
+
+    def test_domain_profile_attribute_returns_jsonb_path_field(self):
+        attribute = _fake_profile_attribute(
+            master_profile_column=None,
+            attribute_internal_code="risk_segment",
+            source_table="cdp_domain_profiles",
+        )
+        client, _ = self._client_for([attribute])
+
+        response = client.get("/segments/segmentable-profile-attributes")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["field"], "dp.domain_attributes->>'risk_segment'")
 
     def test_accepts_valid_domain_query_param(self):
         client, _ = self._client_for([])

@@ -36,6 +36,9 @@ Most entities follow this common pattern:
 6. Delete item
 - `DELETE /api/v1/<resource>/<id>`
 
+Exception:
+- `GET /api/v1/master-profiles/` uses `page` and `page_size` and returns a paginated envelope (`items` + `pagination`) rather than a bare list.
+
 ## CRM APIs
 
 These resources use the common CRUD pattern above:
@@ -68,10 +71,32 @@ These resources use the common CRUD pattern above:
 ### Master Profiles (`/master-profiles`)
 
 1. List master profiles
-- `GET /api/v1/master-profiles/?tenant_id=<tenant-uuid>&domain=retail&lifecycle_stage=customer&skip=0&limit=50`
+- `GET /api/v1/master-profiles/?tenant_id=<tenant-uuid>&domain=retail&lifecycle_stage=customer&page=1&page_size=50`
+
+Response shape:
+```json
+{
+	"items": [
+		{
+			"master_profile_id": "...",
+			"tenant_id": "...",
+			"domain": "retail",
+			"status_code": 1
+		}
+	],
+	"pagination": {
+		"page": 1,
+		"page_size": 50,
+		"total": 120,
+		"total_pages": 3,
+		"has_prev": false,
+		"has_next": true
+	}
+}
+```
 
 2. Search master profiles by text (`q`)
-- `GET /api/v1/master-profiles/?q=nguyen&tenant_id=<tenant-uuid>`
+- `GET /api/v1/master-profiles/?q=nguyen&tenant_id=<tenant-uuid>&page=1&page_size=50`
 
 3. Count master profiles
 - `GET /api/v1/master-profiles/count?tenant_id=<tenant-uuid>&domain=retail`
@@ -323,7 +348,7 @@ SEGMENT_ID="<segment-uuid>"
 
 | Module | Method | Endpoint | Copy/Paste Example |
 |---|---|---|---|
-| Master Profiles List | GET | `/master-profiles/` | `curl -X GET "$BASE_URL/master-profiles/?tenant_id=$TENANT_ID&domain=retail&skip=0&limit=50" -H "Authorization: Bearer $TOKEN"` |
+| Master Profiles List | GET | `/master-profiles/` | `curl -X GET "$BASE_URL/master-profiles/?tenant_id=$TENANT_ID&domain=retail&page=1&page_size=50" -H "Authorization: Bearer $TOKEN"` |
 | Master Profiles Search | GET | `/master-profiles/?q=...` | `curl -X GET "$BASE_URL/master-profiles/?tenant_id=$TENANT_ID&q=nguyen" -H "Authorization: Bearer $TOKEN"` |
 | Master Profile Timeline | GET | `/master-profiles/{id}/timeline` | `curl -X GET "$BASE_URL/master-profiles/$MASTER_PROFILE_ID/timeline?limit=20" -H "Authorization: Bearer $TOKEN"` |
 | Raw Profiles List | GET | `/raw-profiles/` | `curl -X GET "$BASE_URL/raw-profiles/?tenant_id=$TENANT_ID&status_code=1&skip=0&limit=50" -H "Authorization: Bearer $TOKEN"` |
@@ -395,7 +420,7 @@ This matrix is the complete endpoint coverage for core data entities.
 | Accounts | `GET /api/v1/accounts/` | `GET /api/v1/accounts/{id}` | `POST /api/v1/accounts/` | `PATCH /api/v1/accounts/{id}` | `DELETE /api/v1/accounts/{id}` | `GET /api/v1/accounts/count` | tenant filter supported |
 | Opportunities | `GET /api/v1/opportunities/` | `GET /api/v1/opportunities/{id}` | `POST /api/v1/opportunities/` | `PATCH /api/v1/opportunities/{id}` | `DELETE /api/v1/opportunities/{id}` | `GET /api/v1/opportunities/count` | tenant filter supported |
 | Industries | `GET /api/v1/industries/` | `GET /api/v1/industries/{id}` | `POST /api/v1/industries/` | `PATCH /api/v1/industries/{id}` | `DELETE /api/v1/industries/{id}` | `GET /api/v1/industries/count` | tenant filter supported |
-| Master Profiles | `GET /api/v1/master-profiles/` | `GET /api/v1/master-profiles/{id}` | `POST /api/v1/master-profiles/` | `PATCH /api/v1/master-profiles/{id}` | `DELETE /api/v1/master-profiles/{id}` | `GET /api/v1/master-profiles/count` | supports `q`, domain, lifecycle_stage |
+| Master Profiles | `GET /api/v1/master-profiles/` | `GET /api/v1/master-profiles/{id}` | `POST /api/v1/master-profiles/` | `PATCH /api/v1/master-profiles/{id}` | `DELETE /api/v1/master-profiles/{id}` | `GET /api/v1/master-profiles/count` | supports `q`, domain, lifecycle_stage, `page`, `page_size` (list returns paginated envelope) |
 | Raw Profiles | `GET /api/v1/raw-profiles/` | `GET /api/v1/raw-profiles/{id}` | `POST /api/v1/raw-profiles/` | `PATCH /api/v1/raw-profiles/{id}` | `DELETE /api/v1/raw-profiles/{id}` | `GET /api/v1/raw-profiles/count` | supports source_system, status_code |
 | Profile Links | `GET /api/v1/profile-links/` | `GET /api/v1/profile-links/{id}` | `POST /api/v1/profile-links/` | N/A | `DELETE /api/v1/profile-links/{id}` | N/A | list supports raw/master profile filters |
 | Profile Attributes | `GET /api/v1/profile-attributes/` | `GET /api/v1/profile-attributes/{id}` | `POST /api/v1/profile-attributes/` | `PATCH /api/v1/profile-attributes/{id}` | `DELETE /api/v1/profile-attributes/{id}` | `GET /api/v1/profile-attributes/count` | matching-rule metadata |
@@ -418,7 +443,7 @@ curl -X GET "http://localhost:8008/health"
 
 2. Validate auth + tenant-scoped list endpoint.
 ```bash
-curl -X GET "$BASE_URL/master-profiles/?tenant_id=$TENANT_ID&skip=0&limit=5" -H "Authorization: Bearer $TOKEN"
+curl -X GET "$BASE_URL/master-profiles/?tenant_id=$TENANT_ID&page=1&page_size=5" -H "Authorization: Bearer $TOKEN"
 ```
 
 3. Validate reporting endpoint.
@@ -430,3 +455,98 @@ curl -X GET "$BASE_URL/reporting/summary?tenant_id=$TENANT_ID" -H "Authorization
 ```bash
 curl -X GET "$BASE_URL/segments/$SEGMENT_ID/matched-profiles/count" -H "Authorization: Bearer $TOKEN"
 ```
+
+## Complete Endpoint Catalog (100% Coverage)
+
+The following list covers every endpoint currently implemented in the Python routers for the Customer 360 API. Paths below are written relative to the API base; the app also exposes root health endpoints at `/` and `/health`.
+
+### Core and Health
+
+- `GET /` — service root, returns basic service metadata and docs link.
+- `GET /health` — liveness check that verifies PostgreSQL connectivity.
+- `GET /api/v1/metadata/` — system metadata overview (API version, environment, service status).
+- `GET /api/v1/metadata/dagster` — Dagster connectivity and configured job metadata.
+- `GET /api/v1/metadata/domains` — domain vocabulary map for a tenant.
+
+### CRM and Campaign Analytics
+
+- `GET /api/v1/campaigns/` / `GET /api/v1/campaigns/count` / `GET /api/v1/campaigns/{campaign_id}` / `POST /api/v1/campaigns/` / `PATCH /api/v1/campaigns/{campaign_id}` / `DELETE /api/v1/campaigns/{campaign_id}`
+- `GET /api/v1/campaign-members/` / `GET /api/v1/campaign-members/count` / `GET /api/v1/campaign-members/{campaign_member_id}` / `POST /api/v1/campaign-members/` / `PATCH /api/v1/campaign-members/{campaign_member_id}` / `DELETE /api/v1/campaign-members/{campaign_member_id}`
+- `GET /api/v1/leads/` / `GET /api/v1/leads/count` / `GET /api/v1/leads/{lead_id}` / `POST /api/v1/leads/` / `PATCH /api/v1/leads/{lead_id}` / `DELETE /api/v1/leads/{lead_id}`
+- `GET /api/v1/lead-sources/` / `GET /api/v1/lead-sources/count` / `GET /api/v1/lead-sources/{lead_source_id}` / `POST /api/v1/lead-sources/` / `PATCH /api/v1/lead-sources/{lead_source_id}` / `DELETE /api/v1/lead-sources/{lead_source_id}`
+- `GET /api/v1/contacts/` / `GET /api/v1/contacts/count` / `GET /api/v1/contacts/{contact_id}` / `POST /api/v1/contacts/` / `PATCH /api/v1/contacts/{contact_id}` / `DELETE /api/v1/contacts/{contact_id}`
+- `GET /api/v1/accounts/` / `GET /api/v1/accounts/count` / `GET /api/v1/accounts/{account_id}` / `POST /api/v1/accounts/` / `PATCH /api/v1/accounts/{account_id}` / `DELETE /api/v1/accounts/{account_id}`
+- `GET /api/v1/opportunities/` / `GET /api/v1/opportunities/count` / `GET /api/v1/opportunities/{opportunity_id}` / `POST /api/v1/opportunities/` / `PATCH /api/v1/opportunities/{opportunity_id}` / `DELETE /api/v1/opportunities/{opportunity_id}`
+- `GET /api/v1/industries/` / `GET /api/v1/industries/count` / `GET /api/v1/industries/{industry_id}` / `POST /api/v1/industries/` / `PATCH /api/v1/industries/{industry_id}` / `DELETE /api/v1/industries/{industry_id}`
+- `GET /api/v1/campaigns/analytics/summary` — campaign KPI summary.
+- `GET /api/v1/campaigns/analytics` — paginated campaign performance rows.
+- `GET /api/v1/campaigns/analytics/spend-trend` — daily spend trend series.
+- `GET /api/v1/campaigns/analytics/top` — top campaigns ranking.
+
+### Identity Resolution
+
+- `GET /api/v1/master-profiles/` / `GET /api/v1/master-profiles/count` / `GET /api/v1/master-profiles/{master_profile_id}` / `POST /api/v1/master-profiles/` / `PATCH /api/v1/master-profiles/{master_profile_id}` / `DELETE /api/v1/master-profiles/{master_profile_id}`
+- `GET /api/v1/master-profiles/{master_profile_id}/links`
+- `GET /api/v1/master-profiles/{master_profile_id}/persona`
+- `GET /api/v1/master-profiles/{master_profile_id}/persona-history`
+- `GET /api/v1/master-profiles/{master_profile_id}/engagement-summary`
+- `GET /api/v1/master-profiles/{master_profile_id}/channel-activity`
+- `GET /api/v1/master-profiles/{master_profile_id}/top-interests`
+- `GET /api/v1/master-profiles/{master_profile_id}/timeline`
+- `GET /api/v1/raw-profiles/` / `GET /api/v1/raw-profiles/count` / `GET /api/v1/raw-profiles/{raw_profile_id}` / `POST /api/v1/raw-profiles/` / `PATCH /api/v1/raw-profiles/{raw_profile_id}` / `DELETE /api/v1/raw-profiles/{raw_profile_id}`
+- `GET /api/v1/profile-links/` / `GET /api/v1/profile-links/{link_id}` / `POST /api/v1/profile-links/` / `DELETE /api/v1/profile-links/{link_id}`
+- `GET /api/v1/profile-attributes/` / `GET /api/v1/profile-attributes/count` / `GET /api/v1/profile-attributes/{id}` / `POST /api/v1/profile-attributes/` / `PATCH /api/v1/profile-attributes/{id}` / `DELETE /api/v1/profile-attributes/{id}`
+- `GET /api/v1/identity-index/` / `GET /api/v1/identity-index/count` / `GET /api/v1/identity-index/{identity_index_id}` / `POST /api/v1/identity-index/` / `PATCH /api/v1/identity-index/{identity_index_id}` / `DELETE /api/v1/identity-index/{identity_index_id}`
+- `GET /api/v1/profile-merge-history/` / `GET /api/v1/profile-merge-history/{merge_id}` / `POST /api/v1/profile-merge-history/`
+- `GET /api/v1/customer-personas/` / `GET /api/v1/customer-personas/{persona_id}` / `POST /api/v1/customer-personas/` / `PATCH /api/v1/customer-personas/{persona_id}` / `DELETE /api/v1/customer-personas/{persona_id}`
+- `GET /api/v1/customer-personas/{persona_id}/features`
+- `GET /api/v1/customer-personas/{persona_id}/score-details`
+- `GET /api/v1/persona-features/` / `GET /api/v1/persona-features/{feature_id}` / `POST /api/v1/persona-features/`
+- `GET /api/v1/persona-score-details/` / `GET /api/v1/persona-score-details/{score_id}` / `POST /api/v1/persona-score-details/`
+- `GET /api/v1/persona-history/` / `GET /api/v1/persona-history/{history_id}` / `POST /api/v1/persona-history/`
+- `GET /api/v1/resolution-status/` — identity-resolution worker status.
+
+### Reporting
+
+- `GET /api/v1/reporting/summary`
+- `GET /api/v1/reporting/master-profiles/duplicates`
+- `GET /api/v1/reporting/identity-graph/coverage`
+
+### Relations and Customer Interactions
+
+- `GET /api/v1/relation-types/` / `GET /api/v1/relation-types/count` / `GET /api/v1/relation-types/{relation_type_id}` / `POST /api/v1/relation-types/` / `PATCH /api/v1/relation-types/{relation_type_id}` / `DELETE /api/v1/relation-types/{relation_type_id}`
+- `GET /api/v1/relations/` / `GET /api/v1/relations/count` / `GET /api/v1/relations/{relation_id}` / `POST /api/v1/relations/` / `PATCH /api/v1/relations/{relation_id}` / `DELETE /api/v1/relations/{relation_id}`
+- `GET /api/v1/customer-contacts/` / `GET /api/v1/customer-contacts/count` / `GET /api/v1/customer-contacts/{contact_id}` / `POST /api/v1/customer-contacts/` / `PATCH /api/v1/customer-contacts/{contact_id}` / `DELETE /api/v1/customer-contacts/{contact_id}`
+- `GET /api/v1/transactions/` / `GET /api/v1/transactions/count` / `GET /api/v1/transactions/{transaction_id}` / `POST /api/v1/transactions/` / `PATCH /api/v1/transactions/{transaction_id}` / `DELETE /api/v1/transactions/{transaction_id}`
+
+### Behavioral Events
+
+- `GET /api/v1/events/`
+- `GET /api/v1/events/{event_id}`
+- `POST /api/v1/events/` — one event ingest with auto raw-profile resolution.
+- `POST /api/v1/events/bulk` — batch ingest for multiple events.
+
+### Personalized Content
+
+- `GET /api/v1/content-items/` / `GET /api/v1/content-items/count` / `GET /api/v1/content-items/{content_item_id}` / `POST /api/v1/content-items/` / `PATCH /api/v1/content-items/{content_item_id}` / `DELETE /api/v1/content-items/{content_item_id}`
+- `GET /api/v1/content-items/recommended` — recommended content for a master profile.
+
+### Graph
+
+- `GET /api/v1/graph-edges/` / `GET /api/v1/graph-edges/count` / `GET /api/v1/graph-edges/{edge_id}` / `POST /api/v1/graph-edges/` / `DELETE /api/v1/graph-edges/{edge_id}`
+
+### Segmentation
+
+- `GET /api/v1/segments/` / `GET /api/v1/segments/count` / `GET /api/v1/segments/{segment_id}` / `POST /api/v1/segments/` / `PATCH /api/v1/segments/{segment_id}` / `DELETE /api/v1/segments/{segment_id}`
+- `GET /api/v1/segments/{segment_id}/matched-profiles`
+- `GET /api/v1/segments/{segment_id}/matched-profiles/count`
+- `POST /api/v1/segments/{segment_id}/recompute`
+- `POST /api/v1/segments/admin/defaults/seed`
+- `POST /api/v1/segments/admin/recompute-all`
+- `GET /api/v1/segments/admin/recompute-status/{run_id}`
+- `GET /api/v1/segments/segmentable-profile-attributes`
+
+### Documentation Notes
+
+- The interactive OpenAPI docs are available at `/docs` (and `/c360api/docs` when the app is served behind the configured reverse-proxy prefix).
+- For local development, the base URL usually becomes `http://localhost:8008/api/v1`.

@@ -3,7 +3,7 @@
  *
  * View routing itself lives in static/js/router.js (a small React-Router
  * style hash router). This file does NOT know about individual views --
- * every listing/detail/editor view (profiles, segments, journeys, scoring
+ * every listing/detail/editor view (profiles, segments, personas, scoring
  * models, analytics reports, data source connectors/importers, identity
  * resolution rules, admin users, ...) registers its own route(s) with
  * C360.router from its own file. Adding a new view is therefore a change
@@ -24,7 +24,7 @@ const TIME_CHECK_API_HEALTH = 60000;
     profiles: "/profiles",
     segments: "/segments",
     attributes: "/attributes",
-    journeys: "/journeys",
+    personas: "/personas",
     scoring: "/scoring",
     analytics: "/analytics",
     campaigns: "/campaigns",
@@ -58,7 +58,7 @@ const TIME_CHECK_API_HEALTH = 60000;
     var labels = C360.fmt && C360.fmt.DOMAIN_LABELS ? C360.fmt.DOMAIN_LABELS : {};
     var keys = Object.keys(labels).filter(function (k) { return k !== "all"; }).sort();
 
-    $("#domain-filter, #attributes-domain-filter").each(function () {
+    $("#domain-filter, #attributes-domain-filter, #persona-domain-filter, #attribute-add-domain-scope").each(function () {
       var $sel = $(this);
       var current = $sel.val();
       $sel.find("option[value!=''][value!='all']").remove();
@@ -78,6 +78,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       $("#view-placeholder").html(C360.templates.html("placeholder"));
       $("#segment-view-list").html(C360.templates.html("segments-list"));
       $("#view-attributes").html(C360.templates.html("attributes-list"));
+      $("#persona-list-content").html(C360.templates.html("persona-list"));
       $("body").append(C360.templates.html("settings-modal"));
 
       $("#footer-api-base").text(C360.config.current.apiBase);
@@ -86,6 +87,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       C360.listView.bindEvents();
       C360.profileDetailView.bindEvents();
       C360.segmentsView.bindEvents();
+      C360.personaManagementView.bindEvents();
       C360.attributesView.bindEvents();
 
       C360.config.pingHealth();

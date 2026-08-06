@@ -56,6 +56,11 @@ window.C360 = window.C360 || {};
   function createDataTableView(options) {
     var o = $.extend({
       limit: 20,
+      pagination: false,
+      pageParam: "page",
+      pageSizeParam: "page_size",
+      itemsField: "items",
+      paginationField: "pagination",
       clientSide: false,
       clientSideLimit: 500,
       rowClickable: true,
@@ -65,14 +70,23 @@ window.C360 = window.C360 || {};
       extraParams: function () { return {}; }
     }, options);
 
-    var state = { skip: 0, filters: {}, allItems: null };
+    var state = {
+      skip: 0,
+      page: 1,
+      totalPages: 1,
+      totalItems: 0,
+      hasNext: false,
+      hasPrev: false,
+      filters: {},
+      allItems: null
+    };
     var headRendered = false;
 
     function renderHead() {
       if (!o.el.thead) return;
       $(o.el.thead).html(C360.templates.render("data-table-head", {
         columns: o.columns,
-        showActionColumn: o.rowClickable
+        showActionColumn: o.rowClickable || !!o.onEdit
       }));
     }
 
@@ -93,6 +107,8 @@ window.C360 = window.C360 || {};
           rowClass: o.rowClass + rowSelectorClass,
           clickable: o.rowClickable,
           actionLabel: o.actionLabel,
+          editable: !o.rowClickable && !!o.onEdit,
+          editLabel: o.editLabel || "Edit",
           cells: o.columns.map(function (col) { return buildCellVm(col, vm); })
         };
       });
@@ -104,14 +120,48 @@ window.C360 = window.C360 || {};
 
     function updateCountLabel(count) {
       if (!o.el.countLabel) return;
+      if (o.pagination) {
+        var shownFrom = count > 0 ? ((state.page - 1) * o.limit + 1) : 0;
+        var shownTo = count > 0 ? shownFrom + count - 1 : 0;
+        $(o.el.countLabel).text(
+          "Showing " + shownFrom + "-" + shownTo + " of " + state.totalItems + " " + o.resourceLabel + (state.totalItems === 1 ? "" : "s")
+        );
+        return;
+      }
       $(o.el.countLabel).text(count + " " + o.resourceLabel + (count === 1 ? "" : "s") + " shown");
     }
 
+    function renderPaginationUi() {
+      if (!o.pagination) return;
+
+      if (o.el.pageLabel) {
+        $(o.el.pageLabel).text("Page " + state.page + " of " + state.totalPages);
+      }
+
+      if (o.el.prevBtn) {
+        $(o.el.prevBtn)
+          .prop("disabled", !state.hasPrev)
+          .toggleClass("opacity-50 cursor-not-allowed", !state.hasPrev);
+      }
+
+      if (o.el.nextBtn) {
+        $(o.el.nextBtn)
+          .prop("disabled", !state.hasNext)
+          .toggleClass("opacity-50 cursor-not-allowed", !state.hasNext);
+      }
+
+      if (o.el.loadMoreBtn) {
+        $(o.el.loadMoreBtn).addClass("hidden");
+      }
+    }
+
     function appendItems(items, append) {
-      if (!append && o.el.tbody) $(o.el.tbody).empty();
+      var shouldAppend = append && !o.pagination;
+      if (!shouldAppend && o.el.tbody) $(o.el.tbody).empty();
       if (o.el.tbody) $(o.el.tbody).append(rowsHtml(items));
       var total = o.el.tbody ? $(o.el.tbody).children().length : items.length;
-      updateCountLabel(total);
+      var countForLabel = o.pagination ? items.length : total;
+      updateCountLabel(countForLabel);
       setEmpty(total === 0);
       return total;
     }
@@ -152,27 +202,74 @@ window.C360 = window.C360 || {};
         return loadClientSide();
       }
 
-      if (!append) { state.skip = 0; if (o.el.tbody) $(o.el.tbody).empty(); }
+      if (!append) {
+        if (o.pagination) {
+          state.page = 1;
+          state.totalPages = 1;
+          state.totalItems = 0;
+          state.hasPrev = false;
+          state.hasNext = false;
+        } else {
+          state.skip = 0;
+        }
+        if (o.el.tbody) $(o.el.tbody).empty();
+      }
       setLoading(true);
       setEmpty(false);
 
-      var params = $.extend({ skip: state.skip, limit: o.limit }, o.extraParams());
+      var params = $.extend({}, o.extraParams());
+      if (o.pagination) {
+        params[o.pageParam] = state.page;
+        params[o.pageSizeParam] = o.limit;
+      } else {
+        params.skip = state.skip;
+        params.limit = o.limit;
+      }
       Object.keys(state.filters).forEach(function (key) {
         if (state.filters[key]) params[key] = state.filters[key];
       });
 
       return o.fetch(params)
-        .done(function (items) {
+        .done(function (response) {
+          var items = response;
           setLoading(false);
+
+          if (o.pagination) {
+            var pagination = response && response[o.paginationField] ? response[o.paginationField] : null;
+            items = response && response[o.itemsField] ? response[o.itemsField] : [];
+
+            if (!pagination) {
+              pagination = {
+                page: state.page,
+                page_size: o.limit,
+                total: items.length,
+                total_pages: 1,
+                has_prev: state.page > 1,
+                has_next: false
+              };
+            }
+
+            state.page = pagination.page || state.page;
+            state.totalPages = Math.max(1, pagination.total_pages || 1);
+            state.totalItems = pagination.total || 0;
+            state.hasPrev = !!pagination.has_prev;
+            state.hasNext = !!pagination.has_next;
+          }
+
           appendItems(items, append);
-          if (o.el.loadMoreBtn) $(o.el.loadMoreBtn).toggleClass("hidden", items.length < o.limit);
-          state.skip += items.length;
+          if (o.pagination) {
+            renderPaginationUi();
+          } else {
+            if (o.el.loadMoreBtn) $(o.el.loadMoreBtn).toggleClass("hidden", items.length < o.limit);
+            state.skip += items.length;
+          }
         })
         .fail(function (xhr) { setLoading(false); if (o.onError) o.onError(xhr); });
     }
 
     function setFilter(name, value) {
       state.filters[name] = value;
+      if (o.pagination) state.page = 1;
       load(false);
     }
 
@@ -195,6 +292,24 @@ window.C360 = window.C360 || {};
       if (o.el.loadMoreBtn) $(o.el.loadMoreBtn).on("click", function () { load(true); });
     }
 
+    function bindPagination() {
+      if (!o.pagination) return;
+      if (o.el.prevBtn) {
+        $(o.el.prevBtn).on("click", function () {
+          if (!state.hasPrev) return;
+          state.page = Math.max(1, state.page - 1);
+          load(true);
+        });
+      }
+      if (o.el.nextBtn) {
+        $(o.el.nextBtn).on("click", function () {
+          if (!state.hasNext) return;
+          state.page = state.page + 1;
+          load(true);
+        });
+      }
+    }
+
     // Rows are rendered dynamically, so their click handler must be
     // delegated from a stable ancestor (document), same as before.
     function bindRowClick() {
@@ -203,13 +318,26 @@ window.C360 = window.C360 || {};
       }
     }
 
+    // Per-row "Edit" button (used instead of whole-row navigation for
+    // catalog-style views, e.g. the Attribute Catalog) -- delegated the
+    // same way since rows are re-rendered on every load.
+    function bindRowEdit() {
+      if (!o.onEdit) return;
+      $(document).on("click", ".dtv-edit-btn", function (e) {
+        e.stopPropagation();
+        o.onEdit($(this).data("id"));
+      });
+    }
+
     return {
       load: load,
       setFilter: setFilter,
       bindSearch: bindSearch,
       bindSelect: bindSelect,
       bindLoadMore: bindLoadMore,
+      bindPagination: bindPagination,
       bindRowClick: bindRowClick,
+      bindRowEdit: bindRowEdit,
       rowVm: rowVm
     };
   }

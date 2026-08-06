@@ -4,36 +4,58 @@ metadata / throttle-status tables consumed by backend-system/identity_resolution
 """
 
 import uuid
-from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
 from core.config import settings
+from core.crud import identity as identity_crud
 from core.crud import profile360 as profile360_crud
 from core.crud.base import CRUDBase
 from core.database import get_db
 from core.models.identity import (
+    CdpCustomerPersona,
+    CdpDomainProfile,
     CdpIdentityIndex,
     CdpIdResolutionStatus,
     CdpMasterProfile,
+    CdpPersonaFeature,
+    CdpPersonaHistory,
+    CdpPersonaScoreDetail,
     CdpProfileAttribute,
     CdpProfileLink,
     CdpProfileMergeHistory,
     CdpRawProfileStage,
 )
+from core.models.system import SysDomain
 from core.routers._generic import build_crud_router
 from core.schemas.identity import (
+    CustomerPersonaCreate,
+    CustomerPersonaRead,
+    CustomerPersonaUpdate,
+    DomainAttributeUpsert,
+    DomainProfileCreate,
+    DomainProfileRead,
+    DomainProfileUpdate,
     IdentityIndexCreate,
     IdentityIndexRead,
     IdentityIndexUpdate,
     IdResolutionStatusRead,
+    LinkedRawProfileDetailRead,
     MasterProfileCreate,
+    MasterProfileListResponse,
     MasterProfileRead,
     MasterProfileUpdate,
+    PersonaFeatureCreate,
+    PersonaFeatureRead,
+    PersonaHistoryCreate,
+    PersonaHistoryRead,
+    PersonaAnalyticsSummary,
+    PersonaScoreDetailCreate,
+    PersonaScoreDetailRead,
     ProfileAttributeCreate,
     ProfileAttributeRead,
     ProfileAttributeUpdate,
@@ -46,6 +68,7 @@ from core.schemas.identity import (
     RawProfileUpdate,
 )
 from core.schemas.profile360 import ChannelActivity, EngagementSummary, TimelineEntry, TopInterest
+from core.utils.domains import validate_domain_value
 
 # --- Master Profiles ---------------------------------------------------------
 
@@ -53,60 +76,65 @@ master_profiles_router = APIRouter(prefix="/master-profiles", tags=["Identity Re
 _master_crud = CRUDBase(CdpMasterProfile)
 
 
-@master_profiles_router.get("/", response_model=list[MasterProfileRead])
+@master_profiles_router.get("/", response_model=MasterProfileListResponse)
 @cache_response("master_profiles/list", ttl=settings.cache_ttl_seconds)
 def list_master_profiles(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None),
     lifecycle_stage: Optional[str] = Query(
         default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
     ),
+    domain_attribute_key: Optional[str] = Query(
+        default=None,
+        description="Generic key in cdp_domain_profiles.domain_attributes used for filtering.",
+    ),
+    domain_attribute_value: Optional[str] = Query(
+        default=None,
+        description="Expected value for domain_attribute_key in cdp_domain_profiles.domain_attributes.",
+    ),
+    membership_tier: Optional[str] = Query(default=None),
+    clv_segment: Optional[str] = Query(default=None),
+    churn_risk_tier: Optional[str] = Query(default=None, pattern="^(low|medium|high|critical)$"),
+    linked_raw_profile_count_min: Optional[int] = Query(default=None, ge=0),
     q: Optional[str] = Query(default=None, description="Free-text search over full_name/persona_name/email"),
-    skip: int = 0,
-    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=settings.api_default_page_size, ge=1, le=settings.api_max_page_size),
     days: int = Query(default=90, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
-    cutoff = None
-    if days is not None:
-        cutoff = datetime.utcnow() - timedelta(days=days)
-
-    if q:
-        stmt = select(CdpMasterProfile)
-        if tenant_id is not None:
-            stmt = stmt.where(CdpMasterProfile.tenant_id == tenant_id)
-        if domain is not None:
-            stmt = stmt.where(CdpMasterProfile.domain == domain)
-        if lifecycle_stage is not None:
-            stmt = stmt.where(CdpMasterProfile.lifecycle_stage == lifecycle_stage)
-        pattern = f"%{q}%"
-        stmt = stmt.where(
-            or_(
-                CdpMasterProfile.full_name.ilike(pattern),
-                CdpMasterProfile.persona_name.ilike(pattern),
-                CdpMasterProfile.email.ilike(pattern),
-                CdpMasterProfile.phone_number.ilike(pattern),
-            )
-        )
-        if cutoff is not None:
-            stmt = stmt.where(CdpMasterProfile.created_at >= cutoff)
-        stmt = stmt.order_by(CdpMasterProfile.last_activity_at.desc().nullslast()).offset(skip).limit(limit)
-        return db.execute(stmt).scalars().all()
-
-    filters = {"tenant_id": tenant_id, "domain": domain, "lifecycle_stage": lifecycle_stage}
-    items = _master_crud.list(db, skip=skip, limit=limit, **filters)
-    if cutoff is not None:
-        items = [item for item in items if item.created_at is not None and item.created_at >= cutoff]
-    return items
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return identity_crud.list_master_profiles_page(
+        db,
+        tenant_id=tenant_id,
+        domain=domain,
+        lifecycle_stage=lifecycle_stage,
+        domain_attribute_key=domain_attribute_key,
+        domain_attribute_value=domain_attribute_value,
+        membership_tier=membership_tier,
+        clv_segment=clv_segment,
+        churn_risk_tier=churn_risk_tier,
+        linked_raw_profile_count_min=linked_raw_profile_count_min,
+        q=q,
+        days=days,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @master_profiles_router.get("/count")
 @cache_response("master_profiles/count", ttl=settings.cache_ttl_seconds)
 def count_master_profiles_endpoint(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"count": _master_crud.count(db, tenant_id=tenant_id, domain=domain)}
 
 
@@ -133,6 +161,170 @@ def get_master_profile_links(
         select(CdpProfileLink)
         .where(CdpProfileLink.master_profile_id == master_profile_id)
         .order_by(CdpProfileLink.created_at.desc())
+        .limit(limit)
+    )
+    return db.execute(stmt).scalars().all()
+
+
+@master_profiles_router.get("/{master_profile_id}/domain-profiles", response_model=list[DomainProfileRead])
+@cache_response("master_profiles/domain_profiles", ttl=settings.cache_ttl_seconds)
+def get_master_profile_domain_profiles(master_profile_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Every cdp_domain_profiles row for this master profile (one per business
+    domain the person has activity in, e.g. banking + retail), each carrying
+    its own domain_attributes JSONB bag."""
+    if _master_crud.get(db, master_profile_id) is None:
+        raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
+    stmt = select(CdpDomainProfile).where(CdpDomainProfile.master_profile_id == master_profile_id)
+    domain_profiles = db.execute(stmt).scalars().all()
+
+    # domain_id is a raw FK on cdp_domain_profiles -- resolve it to the
+    # human-readable domain_code here so the UI doesn't need a second call.
+    domain_ids = {dp.domain_id for dp in domain_profiles}
+    code_by_id = {}
+    if domain_ids:
+        code_by_id = dict(
+            db.execute(
+                select(SysDomain.domain_id, SysDomain.domain_code).where(SysDomain.domain_id.in_(domain_ids))
+            ).all()
+        )
+    for dp in domain_profiles:
+        dp.domain_code = code_by_id.get(dp.domain_id)
+    return domain_profiles
+
+
+@master_profiles_router.post("/{master_profile_id}/domain-attributes", response_model=DomainProfileRead, status_code=201)
+def upsert_master_profile_domain_attribute(
+    master_profile_id: uuid.UUID, payload: DomainAttributeUpsert, db: Session = Depends(get_db)
+):
+    """Adds/overwrites one ``domain_attributes`` key for this profile in the
+    given ``domain``, creating the ``cdp_domain_profiles`` row for that
+    (master_profile_id, domain) pair if it doesn't exist yet. Merges into the
+    existing JSONB (never replaces the whole bag), so this is a safe way for
+    the UI/API to "add a new attribute" without needing to resend every
+    existing key. The write fires customer360.sync_domain_attribute_catalog()
+    (see database-schema.sql), which auto-registers a brand-new attribute_key
+    into cdp_profile_attributes if one doesn't already exist there."""
+    master = _master_crud.get(db, master_profile_id)
+    if master is None:
+        raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
+    try:
+        validate_domain_value(db, payload.domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    domain_id = db.execute(
+        select(SysDomain.domain_id).where(SysDomain.domain_code == payload.domain)
+    ).scalar_one_or_none()
+    if domain_id is None:
+        raise HTTPException(status_code=422, detail=f"Unknown domain '{payload.domain}'")
+
+    domain_profile = db.execute(
+        select(CdpDomainProfile).where(
+            CdpDomainProfile.master_profile_id == master_profile_id,
+            CdpDomainProfile.domain_id == domain_id,
+        )
+    ).scalar_one_or_none()
+
+    if domain_profile is None:
+        domain_profile = CdpDomainProfile(
+            tenant_id=master.tenant_id,
+            master_profile_id=master_profile_id,
+            domain_id=domain_id,
+            domain_attributes={payload.attribute_key: payload.attribute_value},
+        )
+        db.add(domain_profile)
+    else:
+        merged = dict(domain_profile.domain_attributes or {})
+        merged[payload.attribute_key] = payload.attribute_value
+        domain_profile.domain_attributes = merged
+
+    db.commit()
+    db.refresh(domain_profile)
+    invalidate_prefix("master_profiles/domain_profiles")
+    invalidate_prefix("profile_attributes")
+    return domain_profile
+
+
+@master_profiles_router.get(
+    "/{master_profile_id}/linked-raw-profiles/{raw_profile_id}", response_model=LinkedRawProfileDetailRead
+)
+@cache_response("master_profiles/linked_raw_profile_detail", ttl=settings.cache_ttl_seconds)
+def get_master_profile_linked_raw_profile_detail(
+    master_profile_id: uuid.UUID,
+    raw_profile_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    """Detailed view of a linked raw profile scoped to a single master profile.
+
+    Uses master_profile_id + raw_profile_id and enforces tenant-scoped joins so
+    linked-raw detail cannot be fetched across tenants.
+    """
+    master_profile = _master_crud.get(db, master_profile_id)
+    if master_profile is None:
+        raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
+
+    stmt = (
+        select(CdpProfileLink, CdpRawProfileStage)
+        .join(CdpRawProfileStage, CdpRawProfileStage.raw_profile_id == CdpProfileLink.raw_profile_id)
+        .where(
+            CdpProfileLink.master_profile_id == master_profile_id,
+            CdpProfileLink.raw_profile_id == raw_profile_id,
+            CdpProfileLink.tenant_id == master_profile.tenant_id,
+            CdpRawProfileStage.tenant_id == master_profile.tenant_id,
+        )
+        .limit(1)
+    )
+    row = db.execute(stmt).first()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Raw profile '{raw_profile_id}' is not linked to master profile "
+                f"'{master_profile_id}'"
+            ),
+        )
+
+    link, raw_profile = row
+    return {"link": link, "raw_profile": raw_profile}
+
+
+@master_profiles_router.get("/{master_profile_id}/persona", response_model=CustomerPersonaRead)
+@cache_response("master_profiles/persona", ttl=settings.cache_ttl_seconds)
+def get_master_profile_current_persona(master_profile_id: uuid.UUID, db: Session = Depends(get_db)):
+    """The profile's CURRENT persona (identity *understanding*, computed from
+    the resolved identity by backend-system/identity_resolution's
+    PersonaResolutionEngine), resolved via current_persona_id. 404 if the
+    profile has no persona computed yet."""
+    profile = _master_crud.get(db, master_profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
+    if profile.current_persona_id is None:
+        raise HTTPException(
+            status_code=404, detail=f"No persona has been computed yet for master profile '{master_profile_id}'"
+        )
+    persona = db.get(CdpCustomerPersona, profile.current_persona_id)
+    if persona is None:
+        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{profile.current_persona_id}' not found")
+    return persona
+
+
+@master_profiles_router.get("/{master_profile_id}/persona-history", response_model=list[PersonaHistoryRead])
+@cache_response("master_profiles/persona_history", ttl=settings.cache_ttl_seconds)
+def get_master_profile_persona_history(
+    master_profile_id: uuid.UUID,
+    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    db: Session = Depends(get_db),
+):
+    """Audit trail of material persona changes for this profile, most-recent
+    first (joins cdp_persona_history -> cdp_customer_personas by
+    master_profile_id, since history rows only carry persona_id)."""
+    if _master_crud.get(db, master_profile_id) is None:
+        raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
+    stmt = (
+        select(CdpPersonaHistory)
+        .join(CdpCustomerPersona, CdpPersonaHistory.persona_id == CdpCustomerPersona.persona_id)
+        .where(CdpCustomerPersona.master_profile_id == master_profile_id)
+        .order_by(CdpPersonaHistory.changed_at.desc())
         .limit(limit)
     )
     return db.execute(stmt).scalars().all()
@@ -189,6 +381,10 @@ def get_master_profile_timeline(
 
 @master_profiles_router.post("/", response_model=MasterProfileRead, status_code=201)
 def create_master_profile(payload: MasterProfileCreate, db: Session = Depends(get_db)):
+    try:
+        validate_domain_value(db, payload.domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     obj = _master_crud.create(db, payload.model_dump())
     invalidate_prefix("master_profiles")
     return obj
@@ -199,7 +395,13 @@ def update_master_profile(master_profile_id: uuid.UUID, payload: MasterProfileUp
     obj = _master_crud.get(db, master_profile_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    obj = _master_crud.update(db, obj, payload.model_dump(exclude_unset=True))
+    obj_in = payload.model_dump(exclude_unset=True)
+    if "domain" in obj_in:
+        try:
+            validate_domain_value(db, obj_in.get("domain"))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    obj = _master_crud.update(db, obj, obj_in)
     invalidate_prefix("master_profiles")
     return obj
 
@@ -223,7 +425,7 @@ _raw_crud = CRUDBase(CdpRawProfileStage)
 @cache_response("raw_profiles/list", ttl=settings.cache_ttl_seconds)
 def list_raw_profiles(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|healthcare|real_estate|travel|media|education)$"),
     source_system: Optional[str] = None,
     status_code: Optional[int] = None,
     skip: int = 0,
@@ -245,7 +447,7 @@ def list_raw_profiles(
 @cache_response("raw_profiles/count", ttl=settings.cache_ttl_seconds)
 def count_raw_profiles_endpoint(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|healthcare|real_estate|travel|media|education)$"),
     source_system: Optional[str] = None,
     status_code: Optional[int] = None,
     db: Session = Depends(get_db),
@@ -345,6 +547,20 @@ def delete_profile_link(link_id: uuid.UUID, db: Session = Depends(get_db)):
     invalidate_prefix("profile_links")
 
 
+# --- Domain Profiles (per-domain persona/engagement/domain_attributes) ----------
+
+domain_profiles_router = build_crud_router(
+    model=CdpDomainProfile,
+    pk_field="domain_profile_id",
+    pk_type=uuid.UUID,
+    create_schema=DomainProfileCreate,
+    update_schema=DomainProfileUpdate,
+    read_schema=DomainProfileRead,
+    prefix="/domain-profiles",
+    tags=["Identity Resolution - Domain Profiles"],
+)
+
+
 # --- Profile Attributes (matching-rule metadata) --------------------------------
 
 profile_attributes_router = build_crud_router(
@@ -417,6 +633,219 @@ def create_profile_merge_history(payload: ProfileMergeHistoryCreate, db: Session
     return obj
 
 
+# --- Customer Personas ("identity understanding", computed by backend-system/identity_resolution's
+# PersonaResolutionEngine) -------------------------------------------------------
+
+customer_personas_router = APIRouter(prefix="/customer-personas", tags=["Identity Resolution - Customer Personas"])
+_persona_crud = CRUDBase(CdpCustomerPersona)
+
+
+@customer_personas_router.get("/", response_model=list[CustomerPersonaRead])
+@cache_response("customer_personas/list", ttl=settings.cache_ttl_seconds)
+def list_customer_personas(
+    tenant_id: Optional[uuid.UUID] = None,
+    domain: Optional[str] = Query(default=None),
+    master_profile_id: Optional[uuid.UUID] = None,
+    persona_code: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    skip: int = 0,
+    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    db: Session = Depends(get_db),
+):
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _persona_crud.list(
+        db,
+        skip=skip,
+        limit=limit,
+        tenant_id=tenant_id,
+        domain=domain,
+        master_profile_id=master_profile_id,
+        persona_code=persona_code,
+        is_active=is_active,
+    )
+
+
+@customer_personas_router.get("/analytics/summary", response_model=PersonaAnalyticsSummary)
+@cache_response("customer_personas/analytics_summary", ttl=settings.cache_ttl_seconds)
+def get_customer_persona_analytics_summary(
+    tenant_id: Optional[uuid.UUID] = None,
+    domain: Optional[str] = Query(default=None),
+    is_active: Optional[bool] = None,
+    days: int = Query(default=90, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return identity_crud.persona_analytics_summary(
+        db,
+        tenant_id=tenant_id,
+        domain=domain,
+        is_active=is_active,
+        days=days,
+    )
+
+
+@customer_personas_router.get("/{persona_id}", response_model=CustomerPersonaRead)
+@cache_response("customer_personas/item", ttl=settings.cache_ttl_seconds)
+def get_customer_persona(persona_id: uuid.UUID, db: Session = Depends(get_db)):
+    obj = _persona_crud.get(db, persona_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
+    return obj
+
+
+@customer_personas_router.get("/{persona_id}/features", response_model=list[PersonaFeatureRead])
+@cache_response("customer_personas/features", ttl=settings.cache_ttl_seconds)
+def get_customer_persona_features(persona_id: uuid.UUID, db: Session = Depends(get_db)):
+    if _persona_crud.get(db, persona_id) is None:
+        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
+    return _persona_feature_crud.list(db, skip=0, limit=settings.api_max_page_size, persona_id=persona_id)
+
+
+@customer_personas_router.get("/{persona_id}/score-details", response_model=list[PersonaScoreDetailRead])
+@cache_response("customer_personas/score_details", ttl=settings.cache_ttl_seconds)
+def get_customer_persona_score_details(persona_id: uuid.UUID, db: Session = Depends(get_db)):
+    if _persona_crud.get(db, persona_id) is None:
+        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
+    return _persona_score_detail_crud.list(db, skip=0, limit=settings.api_max_page_size, persona_id=persona_id)
+
+
+@customer_personas_router.post("/", response_model=CustomerPersonaRead, status_code=201)
+def create_customer_persona(payload: CustomerPersonaCreate, db: Session = Depends(get_db)):
+    try:
+        validate_domain_value(db, payload.domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    obj = _persona_crud.create(db, payload.model_dump())
+    invalidate_prefix("customer_personas")
+    return obj
+
+
+@customer_personas_router.patch("/{persona_id}", response_model=CustomerPersonaRead)
+def update_customer_persona(persona_id: uuid.UUID, payload: CustomerPersonaUpdate, db: Session = Depends(get_db)):
+    obj = _persona_crud.get(db, persona_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
+    obj = _persona_crud.update(db, obj, payload.model_dump(exclude_unset=True))
+    invalidate_prefix("customer_personas")
+    return obj
+
+
+@customer_personas_router.delete("/{persona_id}", status_code=204)
+def delete_customer_persona(persona_id: uuid.UUID, db: Session = Depends(get_db)):
+    obj = _persona_crud.get(db, persona_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
+    _persona_crud.delete(db, obj)
+    invalidate_prefix("customer_personas")
+
+
+# --- Persona Features (explainability input signals; append-only) --------------
+
+persona_features_router = APIRouter(prefix="/persona-features", tags=["Identity Resolution - Customer Personas"])
+_persona_feature_crud = CRUDBase(CdpPersonaFeature)
+
+
+@persona_features_router.get("/", response_model=list[PersonaFeatureRead])
+@cache_response("persona_features/list", ttl=settings.cache_ttl_seconds)
+def list_persona_features(
+    persona_id: Optional[uuid.UUID] = None,
+    skip: int = 0,
+    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    db: Session = Depends(get_db),
+):
+    return _persona_feature_crud.list(db, skip=skip, limit=limit, persona_id=persona_id)
+
+
+@persona_features_router.get("/{feature_id}", response_model=PersonaFeatureRead)
+@cache_response("persona_features/item", ttl=settings.cache_ttl_seconds)
+def get_persona_feature(feature_id: uuid.UUID, db: Session = Depends(get_db)):
+    obj = _persona_feature_crud.get(db, feature_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpPersonaFeature '{feature_id}' not found")
+    return obj
+
+
+@persona_features_router.post("/", response_model=PersonaFeatureRead, status_code=201)
+def create_persona_feature(payload: PersonaFeatureCreate, db: Session = Depends(get_db)):
+    obj = _persona_feature_crud.create(db, payload.model_dump())
+    invalidate_prefix("persona_features")
+    return obj
+
+
+# --- Persona Score Details (explainability score breakdown; append-only) -------
+
+persona_score_details_router = APIRouter(
+    prefix="/persona-score-details", tags=["Identity Resolution - Customer Personas"]
+)
+_persona_score_detail_crud = CRUDBase(CdpPersonaScoreDetail)
+
+
+@persona_score_details_router.get("/", response_model=list[PersonaScoreDetailRead])
+@cache_response("persona_score_details/list", ttl=settings.cache_ttl_seconds)
+def list_persona_score_details(
+    persona_id: Optional[uuid.UUID] = None,
+    skip: int = 0,
+    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    db: Session = Depends(get_db),
+):
+    return _persona_score_detail_crud.list(db, skip=skip, limit=limit, persona_id=persona_id)
+
+
+@persona_score_details_router.get("/{score_id}", response_model=PersonaScoreDetailRead)
+@cache_response("persona_score_details/item", ttl=settings.cache_ttl_seconds)
+def get_persona_score_detail(score_id: uuid.UUID, db: Session = Depends(get_db)):
+    obj = _persona_score_detail_crud.get(db, score_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpPersonaScoreDetail '{score_id}' not found")
+    return obj
+
+
+@persona_score_details_router.post("/", response_model=PersonaScoreDetailRead, status_code=201)
+def create_persona_score_detail(payload: PersonaScoreDetailCreate, db: Session = Depends(get_db)):
+    obj = _persona_score_detail_crud.create(db, payload.model_dump())
+    invalidate_prefix("persona_score_details")
+    return obj
+
+
+# --- Persona History (audit trail of material persona changes; append-only) ----
+
+persona_history_router = APIRouter(prefix="/persona-history", tags=["Identity Resolution - Customer Personas"])
+_persona_history_crud = CRUDBase(CdpPersonaHistory)
+
+
+@persona_history_router.get("/", response_model=list[PersonaHistoryRead])
+@cache_response("persona_history/list", ttl=settings.cache_ttl_seconds)
+def list_persona_history(
+    persona_id: Optional[uuid.UUID] = None,
+    skip: int = 0,
+    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    db: Session = Depends(get_db),
+):
+    return _persona_history_crud.list(db, skip=skip, limit=limit, persona_id=persona_id)
+
+
+@persona_history_router.get("/{history_id}", response_model=PersonaHistoryRead)
+@cache_response("persona_history/item", ttl=settings.cache_ttl_seconds)
+def get_persona_history_entry(history_id: uuid.UUID, db: Session = Depends(get_db)):
+    obj = _persona_history_crud.get(db, history_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpPersonaHistory '{history_id}' not found")
+    return obj
+
+
+@persona_history_router.post("/", response_model=PersonaHistoryRead, status_code=201)
+def create_persona_history_entry(payload: PersonaHistoryCreate, db: Session = Depends(get_db)):
+    obj = _persona_history_crud.create(db, payload.model_dump())
+    invalidate_prefix("persona_history")
+    return obj
+
+
 # --- Resolution status (real-time throttle state) -------------------------------
 
 resolution_status_router = APIRouter(prefix="/resolution-status", tags=["Identity Resolution - Matching Rules"])
@@ -438,8 +867,13 @@ all_identity_routers = [
     master_profiles_router,
     raw_profiles_router,
     profile_links_router,
+    domain_profiles_router,
     profile_attributes_router,
     identity_index_router,
     profile_merge_history_router,
+    customer_personas_router,
+    persona_features_router,
+    persona_score_details_router,
+    persona_history_router,
     resolution_status_router,
 ]

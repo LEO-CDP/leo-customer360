@@ -22,6 +22,7 @@ from psycopg2.extras import Json, RealDictCursor
 
 from .models import IdentityRule
 from .persona import generate_persona_name, profile_looks_hashed
+from .persona_engine import PersonaResolutionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 # is independent of matching: full_name is deliberately NOT an active
 # is_identity_resolution rule (see init-core-database.sql) since common/shared
 # names are an unreliable/false-positive-prone match signal on their own.
-SCALAR_MERGE_FIELDS = ("full_name", "email", "phone_number", "national_id")
+SCALAR_MERGE_FIELDS = ("full_name", "email", "phone_number")
 
 # Base cdp_master_profiles columns needed to evaluate merge precedence;
 # extended dynamically with any extra verified_field/timestamp_field named by
@@ -39,11 +40,16 @@ BASE_MASTER_STATE_COLUMNS = (
     "full_name",
     "email",
     "phone_number",
-    "national_id",
-    "kyc_status",
     "source_systems",
     "updated_at",
 )
+
+# Domain-scoped attributes moved from cdp_master_profiles to
+# cdp_domain_profiles.domain_attributes.
+DOMAIN_ATTRIBUTE_FIELDS = {
+    "national_id",
+    "kyc_status",
+}
 
 # Whitelist for column names pulled from consolidation_config (verified_field/
 # timestamp_field) before they are interpolated into a dynamic SELECT --
@@ -94,17 +100,32 @@ class CustomerIdentityResolver:
     and per domain (retail/banking/real_estate/travel/media/education).
     """
 
-    def __init__(self, db_connection, schema: str = "customer360", batch_size: int = 1000):
+    def __init__(
+        self,
+        db_connection,
+        schema: str = "customer360",
+        batch_size: int = 1000,
+        enable_persona_resolution: bool = True,
+    ):
         """
         Args:
             db_connection: A psycopg2 connection object (or a connection pool
                 checkout), injected for easy unit testing.
             schema: The database schema containing the CDP tables.
             batch_size: Number of records to process per batch/run.
+            enable_persona_resolution: When True (default), every raw profile
+                processed by run_resolution_batch also gets its master
+                profile's persona recomputed via PersonaResolutionEngine
+                (identity *understanding* on top of identity *matching*).
+                PersonaResolutionEngine.resolve_persona() never raises, so
+                this can never abort/rollback the surrounding CIR batch --
+                disable only for tests that want to assert on the matching
+                logic in isolation without persona-engine side effects.
         """
         self.conn = db_connection
         self.schema = schema
         self.batch_size = batch_size
+        self.persona_engine = PersonaResolutionEngine(schema=schema) if enable_persona_resolution else None
 
     def _table(self, name: str) -> str:
         return f"{self.schema}.{name}" if self.schema else name
@@ -166,6 +187,10 @@ class CustomerIdentityResolver:
                 value = config.get(key)
                 if not isinstance(value, str) or value in columns:
                     continue
+                # Domain attributes live in cdp_domain_profiles.domain_attributes,
+                # not as scalar columns on cdp_master_profiles.
+                if value in DOMAIN_ATTRIBUTE_FIELDS:
+                    continue
                 if _SAFE_IDENTIFIER_RE.match(value):
                     columns.append(value)
                 else:
@@ -173,6 +198,62 @@ class CustomerIdentityResolver:
                         "Ignoring unsafe consolidation_config column name '%s' for '%s'.", value, key
                     )
         return columns
+
+    def _fetch_domain_attributes(
+        self,
+        cursor,
+        tenant_id: str,
+        master_id: str,
+        domain_code: Optional[str],
+    ) -> Dict[str, Any]:
+        query = f"""
+            SELECT dp.domain_attributes
+            FROM {self._table('cdp_domain_profiles')} dp
+            JOIN {self._table('sys_domain')} d
+              ON d.domain_id = dp.domain_id
+            WHERE dp.tenant_id = %s
+              AND dp.master_profile_id = %s
+              AND d.domain_code = %s
+            LIMIT 1;
+        """
+        cursor.execute(query, (tenant_id, master_id, domain_code or "retail"))
+        row = cursor.fetchone() or {}
+        attrs = row.get("domain_attributes")
+        return attrs if isinstance(attrs, dict) else {}
+
+    def _upsert_domain_attributes(
+        self,
+        cursor,
+        tenant_id: str,
+        master_id: str,
+        domain_code: Optional[str],
+        attrs: Dict[str, Any],
+    ) -> None:
+        if not attrs:
+            return
+        query = f"""
+            INSERT INTO {self._table('cdp_domain_profiles')} (
+                tenant_id,
+                master_profile_id,
+                domain_id,
+                domain_attributes,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                %s,
+                %s,
+                (SELECT domain_id FROM {self._table('sys_domain')} WHERE domain_code = %s LIMIT 1),
+                %s,
+                NOW(),
+                NOW()
+            )
+            ON CONFLICT (master_profile_id, domain_id)
+            DO UPDATE SET
+                domain_attributes = COALESCE(cdp_domain_profiles.domain_attributes, '{{}}'::jsonb) || EXCLUDED.domain_attributes,
+                updated_at = NOW();
+        """
+        cursor.execute(query, (tenant_id, master_id, domain_code or "retail", Json(attrs)))
 
     @staticmethod
     def _has_value(value: Any) -> bool:
@@ -228,6 +309,128 @@ class CustomerIdentityResolver:
         if isinstance(payload, dict):
             return payload.get(field)
         return None
+
+    # =========================================================================
+    # CONSOLIDATION STRATEGY IMPLEMENTATIONS
+    # =========================================================================
+    # Each strategy method handles one consolidation_rule type, returning the
+    # merged value to be used. These are called from _resolve_scalar_consolidation
+    # to reduce method complexity and improve testability.
+
+    def _consolidate_overwrite(self, current_value: Any, incoming_value: Any) -> Any:
+        """Overwrite: always take incoming value."""
+        return incoming_value
+
+    def _consolidate_non_null(self, current_value: Any, incoming_value: Any) -> Any:
+        """Non-null: prefer current if it has a value, else take incoming."""
+        return current_value if self._has_value(current_value) else incoming_value
+
+    def _consolidate_most_recent(
+        self,
+        current_value: Any,
+        incoming_value: Any,
+        raw_profile: Dict[str, Any],
+        current_master: Dict[str, Any],
+        config: Dict[str, Any],
+    ) -> Any:
+        """Most-recent: compare timestamps and prefer the more recent value."""
+        timestamp_field = config.get("timestamp_field", "updated_at")
+        incoming_timestamp = (
+            raw_profile.get(timestamp_field)
+            or raw_profile.get("event_time")
+            or raw_profile.get("created_at")
+        )
+        current_timestamp = current_master.get(timestamp_field) or current_master.get("updated_at")
+        comparison = self._is_incoming_more_recent(incoming_timestamp, current_timestamp)
+        if comparison is not None:
+            return incoming_value if comparison else current_value
+        return incoming_value if not self._has_value(current_value) else current_value
+
+    def _consolidate_verified_first(
+        self,
+        current_value: Any,
+        incoming_value: Any,
+        raw_profile: Dict[str, Any],
+        current_master: Dict[str, Any],
+        config: Dict[str, Any],
+        rule: IdentityRule,
+    ) -> Any:
+        """Verified-first: prefer verified values; on tie, use fallback strategy."""
+        verified_field = config.get("verified_field", "kyc_status")
+        verified_values = config.get("verified_values", ["verified"])
+        if not isinstance(verified_values, list):
+            verified_values = [verified_values]
+
+        current_is_verified = self._lookup_field(current_master, verified_field) in verified_values
+        incoming_is_verified = self._raw_profile_is_verified(
+            raw_profile, verified_field, verified_values, config
+        )
+
+        if current_is_verified and not incoming_is_verified:
+            return current_value
+        if incoming_is_verified and not current_is_verified:
+            return incoming_value
+
+        # Both verified or both unverified: use fallback strategy
+        fallback_mode = config.get("fallback_mode")
+        # For verified_then_most_recent with no explicit fallback, use most_recent
+        if not fallback_mode and rule.consolidation_rule == "verified_then_most_recent":
+            fallback_mode = "most_recent"
+        # Otherwise, verify fallback_mode isn't recursive and use non_null default
+        elif fallback_mode in {"verified_first", "verified_then_most_recent"}:
+            logger.warning(
+                "Invalid fallback_mode '%s' - using 'non_null' instead.",
+                fallback_mode,
+            )
+            fallback_mode = "non_null"
+        elif not fallback_mode:
+            fallback_mode = "non_null"
+
+        return self._resolve_scalar_consolidation(
+            rule.attribute_code,
+            current_value,
+            incoming_value,
+            IdentityRule(
+                attribute_code=rule.attribute_code,
+                match_rule=rule.match_rule,
+                threshold=rule.threshold,
+                consolidation_rule=fallback_mode,
+                consolidation_config=config,
+            ),
+            raw_profile,
+            current_master,
+        )
+
+    def _consolidate_source_priority(
+        self,
+        current_value: Any,
+        incoming_value: Any,
+        raw_profile: Dict[str, Any],
+        current_master: Dict[str, Any],
+        config: Dict[str, Any],
+    ) -> Any:
+        """Source-priority: prefer values from higher-priority source systems."""
+        priority = config.get("source_priority", [])
+        if not isinstance(priority, list):
+            priority = [priority]
+        incoming_rank = self._source_priority_rank(raw_profile.get("source_system"), priority)
+        current_sources = current_master.get("source_systems") or []
+        current_rank = (
+            min(self._source_priority_rank(source, priority) for source in current_sources)
+            if current_sources
+            else len(priority)
+        )
+
+        if incoming_rank < current_rank:
+            return incoming_value
+        if current_rank < incoming_rank:
+            return current_value
+
+        return incoming_value if not self._has_value(current_value) else current_value
+
+    def _consolidate_append_distinct(self, current_value: Any, incoming_value: Any) -> Any:
+        """Append-distinct: merge into unique list."""
+        return self._merge_append_distinct(current_value, incoming_value)
 
     @staticmethod
     def _is_incoming_more_recent(incoming_timestamp: Any, current_timestamp: Any) -> Optional[bool]:
@@ -286,6 +489,8 @@ class CustomerIdentityResolver:
         raw_profile: Dict[str, Any],
         current_master: Dict[str, Any],
     ) -> Any:
+        """Resolve which value to keep based on consolidation strategy.
+        Delegates to strategy-specific methods for cleaner separation."""
         if not self._has_value(incoming_value):
             return current_value
 
@@ -297,95 +502,28 @@ class CustomerIdentityResolver:
             config = {}
 
         strategy = rule.consolidation_rule
-        if strategy == "overwrite":
-            return incoming_value
 
-        if strategy == "non_null":
-            return current_value if self._has_value(current_value) else incoming_value
+        # Dispatch to strategy-specific handler methods for cleaner code structure
+        strategy_handlers = {
+            "overwrite": lambda: self._consolidate_overwrite(current_value, incoming_value),
+            "non_null": lambda: self._consolidate_non_null(current_value, incoming_value),
+            "most_recent": lambda: self._consolidate_most_recent(
+                current_value, incoming_value, raw_profile, current_master, config
+            ),
+            "verified_first": lambda: self._consolidate_verified_first(
+                current_value, incoming_value, raw_profile, current_master, config, rule
+            ),
+            "verified_then_most_recent": lambda: self._consolidate_verified_first(
+                current_value, incoming_value, raw_profile, current_master, config, rule
+            ),
+            "source_priority": lambda: self._consolidate_source_priority(
+                current_value, incoming_value, raw_profile, current_master, config
+            ),
+            "append_distinct": lambda: self._consolidate_append_distinct(current_value, incoming_value),
+        }
 
-        if strategy == "most_recent":
-            timestamp_field = config.get("timestamp_field", "updated_at")
-            incoming_timestamp = (
-                raw_profile.get(timestamp_field) or raw_profile.get("event_time") or raw_profile.get("created_at")
-            )
-            current_timestamp = current_master.get(timestamp_field) or current_master.get("updated_at")
-            comparison = self._is_incoming_more_recent(incoming_timestamp, current_timestamp)
-            if comparison is not None:
-                return incoming_value if comparison else current_value
-            return incoming_value if not self._has_value(current_value) else current_value
-
-        if strategy in {"verified_then_most_recent", "verified_first"}:
-            verified_field = config.get("verified_field", "kyc_status")
-            verified_values = config.get("verified_values", ["verified"])
-            if not isinstance(verified_values, list):
-                verified_values = [verified_values]
-
-            current_is_verified = self._lookup_field(current_master, verified_field) in verified_values
-            incoming_is_verified = self._raw_profile_is_verified(
-                raw_profile, verified_field, verified_values, config
-            )
-
-            if current_is_verified and not incoming_is_verified:
-                return current_value
-            if incoming_is_verified and not current_is_verified:
-                return incoming_value
-
-            if strategy == "verified_first":
-                fallback_mode = config.get("fallback_mode", "non_null")
-                if fallback_mode in {"verified_first", "verified_then_most_recent"}:
-                    logger.warning(
-                        "Invalid fallback_mode '%s' for attribute '%s' - using 'non_null' instead.",
-                        fallback_mode,
-                        field_name,
-                    )
-                    fallback_mode = "non_null"
-                return self._resolve_scalar_consolidation(
-                    field_name,
-                    current_value,
-                    incoming_value,
-                    IdentityRule(
-                        attribute_code=field_name,
-                        match_rule=rule.match_rule,
-                        threshold=rule.threshold,
-                        consolidation_rule=fallback_mode,
-                        consolidation_config=config,
-                    ),
-                    raw_profile,
-                    current_master,
-                )
-
-            timestamp_field = config.get("timestamp_field", "updated_at")
-            incoming_timestamp = (
-                raw_profile.get(timestamp_field) or raw_profile.get("event_time") or raw_profile.get("created_at")
-            )
-            current_timestamp = current_master.get(timestamp_field) or current_master.get("updated_at")
-            comparison = self._is_incoming_more_recent(incoming_timestamp, current_timestamp)
-            if comparison is not None:
-                return incoming_value if comparison else current_value
-
-            return incoming_value if not self._has_value(current_value) else current_value
-
-        if strategy == "source_priority":
-            priority = config.get("source_priority", [])
-            if not isinstance(priority, list):
-                priority = [priority]
-            incoming_rank = self._source_priority_rank(raw_profile.get("source_system"), priority)
-            current_sources = current_master.get("source_systems") or []
-            current_rank = (
-                min(self._source_priority_rank(source, priority) for source in current_sources)
-                if current_sources
-                else len(priority)
-            )
-
-            if incoming_rank < current_rank:
-                return incoming_value
-            if current_rank < incoming_rank:
-                return current_value
-
-            return incoming_value if not self._has_value(current_value) else current_value
-
-        if strategy == "append_distinct":
-            return self._merge_append_distinct(current_value, incoming_value)
+        if strategy in strategy_handlers:
+            return strategy_handlers[strategy]()
 
         logger.warning(
             "Unknown consolidation_rule '%s' for attribute '%s' - falling back to non_null.",
@@ -393,6 +531,104 @@ class CustomerIdentityResolver:
             field_name,
         )
         return current_value if self._has_value(current_value) else incoming_value
+
+    # =========================================================================
+    # MATCH CONDITION BUILDING
+    # =========================================================================
+
+    def _build_match_condition(
+        self,
+        rule: IdentityRule,
+        raw_profile: Dict[str, Any],
+        code: str,
+        raw_value: Any,
+    ) -> Optional[tuple]:
+        """Build a single match condition for a given rule.
+        
+        Returns:
+            Tuple of (condition_sql, params, field_code) or None if condition can't be built.
+            Centralizes condition building logic for exact, fuzzy_trgm, fuzzy_dmetaphone,
+            array, and JSONB field matching to reduce duplication in _find_master_profile.
+        """
+        source_system = raw_profile.get("source_system")
+
+        # Array/JSONB identity field matching
+        if code in ARRAY_IDENTITY_FIELDS:
+            return (
+                f"%s = ANY({ARRAY_IDENTITY_FIELDS[code]})",
+                [raw_value],
+                code,
+            )
+        if code in JSONB_KEYED_IDENTITY_FIELDS:
+            if not source_system:
+                return None
+            column = JSONB_KEYED_IDENTITY_FIELDS[code]
+            return (
+                f"{column} @> jsonb_build_object(%s::text, %s::text)",
+                [source_system, raw_value],
+                code,
+            )
+
+        # Exact match (scalar or domain attribute)
+        if rule.match_rule == "exact":
+            if code in DOMAIN_ATTRIBUTE_FIELDS:
+                domain_code = raw_profile.get("domain", "retail")
+                return (
+                    f"EXISTS (SELECT 1 FROM {self._table('cdp_domain_profiles')} dp "
+                    f"JOIN {self._table('sys_domain')} sd ON sd.domain_id = dp.domain_id "
+                    "WHERE dp.master_profile_id = cdp_master_profiles.master_profile_id "
+                    "AND dp.tenant_id = cdp_master_profiles.tenant_id "
+                    "AND sd.domain_code = %s AND dp.domain_attributes ->> %s = %s)",
+                    [domain_code, code, raw_value],
+                    code,
+                )
+            return (f"{code} = %s", [raw_value], code)
+
+        # Fuzzy matching (trgm similarity)
+        if rule.match_rule == "fuzzy_trgm":
+            threshold = rule.threshold if rule.threshold is not None else 0.7
+            if code in DOMAIN_ATTRIBUTE_FIELDS:
+                domain_code = raw_profile.get("domain", "retail")
+                return (
+                    f"EXISTS (SELECT 1 FROM {self._table('cdp_domain_profiles')} dp "
+                    f"JOIN {self._table('sys_domain')} sd ON sd.domain_id = dp.domain_id "
+                    "WHERE dp.master_profile_id = cdp_master_profiles.master_profile_id "
+                    "AND dp.tenant_id = cdp_master_profiles.tenant_id "
+                    "AND sd.domain_code = %s AND similarity(dp.domain_attributes ->> %s, %s) >= %s)",
+                    [domain_code, code, raw_value, threshold],
+                    code,
+                )
+            return (
+                f"similarity({code}, %s) >= %s",
+                [raw_value, threshold],
+                code,
+            )
+
+        # Fuzzy matching (dmetaphone)
+        if rule.match_rule == "fuzzy_dmetaphone":
+            if code in DOMAIN_ATTRIBUTE_FIELDS:
+                domain_code = raw_profile.get("domain", "retail")
+                return (
+                    f"EXISTS (SELECT 1 FROM {self._table('cdp_domain_profiles')} dp "
+                    f"JOIN {self._table('sys_domain')} sd ON sd.domain_id = dp.domain_id "
+                    "WHERE dp.master_profile_id = cdp_master_profiles.master_profile_id "
+                    "AND dp.tenant_id = cdp_master_profiles.tenant_id "
+                    "AND sd.domain_code = %s AND dmetaphone(dp.domain_attributes ->> %s) = dmetaphone(%s))",
+                    [domain_code, code, raw_value],
+                    code,
+                )
+            return (
+                f"dmetaphone({code}) = dmetaphone(%s)",
+                [raw_value],
+                code,
+            )
+
+        logger.warning(
+            "Unknown matching_rule '%s' for attribute '%s' - skipping.",
+            rule.match_rule,
+            code,
+        )
+        return None
 
     def _fetch_unprocessed_profiles(self, cursor) -> List[Dict[str, Any]]:
         """Fetches a batch of raw profiles not yet processed (status_code = 1)."""
@@ -407,14 +643,19 @@ class CustomerIdentityResolver:
         return cursor.fetchall()
 
     def _find_master_profile(
-        self, cursor, raw_profile: Dict[str, Any], rules: List[IdentityRule]
-    ) -> Optional[str]:
+        self,
+        cursor,
+        raw_profile: Dict[str, Any],
+        rules: List[IdentityRule],
+        return_details: bool = False,
+    ) -> Optional[Any]:
         """Dynamically builds and executes a query to find a matching master
         profile, scoped to the same tenant and domain, based on the active
-        metadata rules."""
+        metadata rules. Delegates condition building to _build_match_condition
+        to reduce duplication and improve readability."""
         conditions = []
         params: List[Any] = []
-        source_system = raw_profile.get("source_system")
+        condition_fields: List[str] = []
 
         for rule in rules:
             code = rule.attribute_code
@@ -422,50 +663,76 @@ class CustomerIdentityResolver:
             if not raw_value:
                 continue
 
-            if code in ARRAY_IDENTITY_FIELDS:
-                # Device/advertising/cookie ids: match if present in the
-                # master's consolidated identity array.
-                conditions.append(f"%s = ANY({ARRAY_IDENTITY_FIELDS[code]})")
-                params.append(raw_value)
-            elif code in JSONB_KEYED_IDENTITY_FIELDS:
-                # e.g. external_customer_id: match if the master's
-                # external_ids map has this exact {source_system: value} pair.
-                if not source_system:
-                    continue
-                column = JSONB_KEYED_IDENTITY_FIELDS[code]
-                conditions.append(f"{column} @> jsonb_build_object(%s::text, %s::text)")
-                params.extend([source_system, raw_value])
-            elif rule.match_rule == "exact":
-                conditions.append(f"{code} = %s")
-                params.append(raw_value)
-            elif rule.match_rule == "fuzzy_trgm":
-                threshold = rule.threshold if rule.threshold is not None else 0.7
-                conditions.append(f"similarity({code}, %s) >= %s")
-                params.extend([raw_value, threshold])
-            elif rule.match_rule == "fuzzy_dmetaphone":
-                conditions.append(f"dmetaphone({code}) = dmetaphone(%s)")
-                params.append(raw_value)
-            else:
-                logger.warning(
-                    "Unknown matching_rule '%s' for attribute '%s' - skipping.",
-                    rule.match_rule,
-                    code,
-                )
+            # Build condition using centralized builder method
+            condition_result = self._build_match_condition(rule, raw_profile, code, raw_value)
+            if condition_result:
+                condition_sql, condition_params, field_code = condition_result
+                conditions.append(condition_sql)
+                params.extend(condition_params)
+                condition_fields.append(field_code)
 
         if not conditions:
             return None
 
         where_clause = " OR ".join(f"({c})" for c in conditions)
+
+        if not return_details:
+            query = f"""
+                SELECT master_profile_id
+                FROM {self._table('cdp_master_profiles')}
+                WHERE tenant_id = %s AND domain = %s AND ({where_clause})
+                LIMIT 1;
+            """
+            query_params = [raw_profile["tenant_id"], raw_profile.get("domain", "retail")] + params
+            cursor.execute(query, tuple(query_params))
+            result = cursor.fetchone()
+            return result["master_profile_id"] if result else None
+
+        # Each condition is also projected as m_<idx> so we can compute an
+        # actual per-link score and preserve the exact fields that matched.
+        match_case_columns = [
+            f"CASE WHEN ({condition}) THEN 1 ELSE 0 END AS m_{idx}"
+            for idx, condition in enumerate(conditions)
+        ]
+        score_expr = " + ".join(f"m_{idx}" for idx in range(len(conditions)))
+        score_denominator = float(len(conditions))
+
         query = f"""
-            SELECT master_profile_id
-            FROM {self._table('cdp_master_profiles')}
-            WHERE tenant_id = %s AND domain = %s AND ({where_clause})
+            SELECT
+                master_profile_id,
+                ({score_expr})::DOUBLE PRECISION / %s AS match_score,
+                {", ".join(f"m_{idx}" for idx in range(len(conditions)))}
+            FROM (
+                SELECT
+                    master_profile_id,
+                    {", ".join(match_case_columns)}
+                FROM {self._table('cdp_master_profiles')}
+                WHERE tenant_id = %s AND domain = %s AND ({where_clause})
+            ) candidates
+            ORDER BY ({score_expr}) DESC
             LIMIT 1;
         """
-        query_params = [raw_profile["tenant_id"], raw_profile.get("domain", "retail")] + params
+        query_params = [score_denominator] + params + [raw_profile["tenant_id"], raw_profile.get("domain", "retail")] + params
         cursor.execute(query, tuple(query_params))
         result = cursor.fetchone()
-        return result["master_profile_id"] if result else None
+        if not result:
+            return None
+
+        matched_fields: List[str] = []
+        for idx, field in enumerate(condition_fields):
+            if result.get(f"m_{idx}") == 1 and field not in matched_fields:
+                matched_fields.append(field)
+
+        score = result.get("match_score")
+        method_suffix = ",".join(matched_fields)
+        match_method = f"DynamicMatch:{method_suffix}" if method_suffix else "DynamicMatch"
+
+        return {
+            "master_profile_id": result["master_profile_id"],
+            "match_score": float(score) if score is not None else None,
+            "matched_fields": matched_fields,
+            "match_method": match_method,
+        }
 
     def _link_and_update(
         self,
@@ -473,6 +740,7 @@ class CustomerIdentityResolver:
         raw_profile: Dict[str, Any],
         master_id: str,
         match_method: str = "DynamicMatch",
+        match_score: Optional[float] = 1.0,
         rules: Optional[List[IdentityRule]] = None,
     ) -> None:
         """Links the raw profile to an existing master profile and merges any
@@ -490,7 +758,7 @@ class CustomerIdentityResolver:
                 raw_profile["tenant_id"],
                 raw_profile["raw_profile_id"],
                 master_id,
-                1.0,
+                match_score,
                 match_method,
             ),
         )
@@ -501,9 +769,18 @@ class CustomerIdentityResolver:
             rule.consolidation_rule or rule.consolidation_config for rule in rule_map.values()
         )
 
+        current_master: Dict[str, Any] = {}
+        current_domain_attrs: Dict[str, Any] = {}
         if has_consolidation_metadata:
             columns = self._collect_master_state_columns(rule_map)
             current_master = self._fetch_master_profile_state(cursor, master_id, columns)
+            current_domain_attrs = self._fetch_domain_attributes(
+                cursor,
+                str(raw_profile["tenant_id"]),
+                str(master_id),
+                raw_profile.get("domain", "retail"),
+            )
+            current_master.update(current_domain_attrs)
             set_clauses = []
             params = []
             for field in SCALAR_MERGE_FIELDS:
@@ -595,6 +872,45 @@ class CustomerIdentityResolver:
         """
         cursor.execute(update_query, tuple(params))
 
+        incoming_domain_values: Dict[str, Any] = {}
+        for field in DOMAIN_ATTRIBUTE_FIELDS:
+            field_value = self._lookup_field(raw_profile, field)
+            if self._has_value(field_value):
+                incoming_domain_values[field] = field_value
+        if not incoming_domain_values:
+            return
+
+        domain_attr_updates: Dict[str, Any] = {}
+        if not has_consolidation_metadata:
+            current_domain_attrs = self._fetch_domain_attributes(
+                cursor,
+                str(raw_profile["tenant_id"]),
+                str(master_id),
+                raw_profile.get("domain", "retail"),
+            )
+
+        current_master_with_domain = dict(current_master) if has_consolidation_metadata else {}
+        current_master_with_domain.update(current_domain_attrs)
+        for field, incoming_value in incoming_domain_values.items():
+            merged_value = self._resolve_scalar_consolidation(
+                field,
+                current_domain_attrs.get(field),
+                incoming_value,
+                rule_map.get(field),
+                raw_profile,
+                current_master_with_domain,
+            )
+            if self._has_value(merged_value):
+                domain_attr_updates[field] = merged_value
+        if domain_attr_updates:
+            self._upsert_domain_attributes(
+                cursor,
+                str(raw_profile["tenant_id"]),
+                str(master_id),
+                raw_profile.get("domain", "retail"),
+                domain_attr_updates,
+            )
+
     def _create_master_and_link(self, cursor, raw_profile: Dict[str, Any]) -> str:
         """Creates a brand new master profile when no match was found and
         links the raw profile to it. Returns the new master_profile_id."""
@@ -619,10 +935,10 @@ class CustomerIdentityResolver:
 
         insert_master_query = f"""
             INSERT INTO {self._table('cdp_master_profiles')}
-                (tenant_id, domain, full_name, email, phone_number, national_id,
+                (tenant_id, domain, full_name, email, phone_number,
                  external_ids, device_ids, advertising_ids, cookie_ids, push_tokens,
                  source_systems, first_seen_raw_profile_id, is_hashed, persona_name)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING master_profile_id;
         """
         cursor.execute(
@@ -635,7 +951,6 @@ class CustomerIdentityResolver:
                 raw_profile.get("full_name"),
                 raw_profile.get("email"),
                 raw_profile.get("phone_number"),
-                raw_profile.get("national_id"),
                 Json(external_ids),
                 device_ids,
                 advertising_ids,
@@ -649,6 +964,16 @@ class CustomerIdentityResolver:
         )
         new_master_id = cursor.fetchone()["master_profile_id"]
 
+        national_id = raw_profile.get("national_id")
+        if national_id:
+            self._upsert_domain_attributes(
+                cursor,
+                str(raw_profile["tenant_id"]),
+                str(new_master_id),
+                raw_profile.get("domain", "retail"),
+                {"national_id": national_id},
+            )
+
         link_query = f"""
             INSERT INTO {self._table('cdp_profile_links')}
                 (tenant_id, raw_profile_id, master_profile_id, match_score, match_method)
@@ -656,7 +981,7 @@ class CustomerIdentityResolver:
         """
         cursor.execute(
             link_query,
-            (raw_profile["tenant_id"], raw_profile["raw_profile_id"], new_master_id, 1.0, "NewMaster"),
+            (raw_profile["tenant_id"], raw_profile["raw_profile_id"], new_master_id, None, "NewMaster"),
         )
         return new_master_id
 
@@ -705,12 +1030,27 @@ class CustomerIdentityResolver:
                         (str(profile["tenant_id"]),),
                     )
 
-                    matched_id = self._find_master_profile(cursor, profile, rules)
+                    matched = self._find_master_profile(cursor, profile, rules, return_details=True)
 
-                    if matched_id:
-                        self._link_and_update(cursor, profile, matched_id, rules=rules)
+                    if matched:
+                        self._link_and_update(
+                            cursor,
+                            profile,
+                            matched["master_profile_id"],
+                            match_method=matched.get("match_method", "DynamicMatch"),
+                            match_score=matched.get("match_score"),
+                            rules=rules,
+                        )
+                        matched_id = matched["master_profile_id"]
                     else:
-                        self._create_master_and_link(cursor, profile)
+                        matched_id = self._create_master_and_link(cursor, profile)
+
+                    # Identity *understanding*: recompute the resolved master
+                    # profile's persona (persona_engine.py never raises, so
+                    # this can't abort/rollback the identity *matching* work
+                    # done above for this batch).
+                    if self.persona_engine is not None:
+                        self.persona_engine.resolve_persona(cursor, profile["tenant_id"], matched_id)
 
                     self._mark_as_processed(cursor, profile["raw_profile_id"])
 

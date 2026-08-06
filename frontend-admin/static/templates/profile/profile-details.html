@@ -14,21 +14,25 @@
     <!-- LEFT COLUMN: Identity & Channels -->
     <div class="lg:col-span-3 space-y-6">
       {{> identity}}
+      {{> persona}}
       {{> channels}}
     </div>
 
     <!-- CENTER COLUMN: Overview, Segments, Engagement, Activity & Timeline -->
     <div class="lg:col-span-6 space-y-6">
-      {{> overview}}
+      {{> overview}}     
       {{> segments}}
       {{> engagement}}
       {{> activity}}
+       {{> domain-attributes}}
+      {{> [linked-raw-profiles]}}
       {{> timeline}}
     </div>
 
     <!-- RIGHT COLUMN: Scoring & Personalized Items -->
     <div class="lg:col-span-3 space-y-6">
       {{> scoring}}
+
       {{> [personalized-items]}}
     </div>
 

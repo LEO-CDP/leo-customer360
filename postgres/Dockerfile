@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # PostgreSQL 16 with PostGIS + pgvector + contrib extensions (uuid-ossp,
 # pgcrypto, pg_trgm, fuzzystrmatch) needed by core-customer360/database-schema.sql
 # and by backend-system/identity_resolution's fuzzy-matching rules.
@@ -9,8 +11,21 @@ FROM postgis/postgis:16-3.5
 # Prevent apt-get from throwing interactive prompts during build
 ARG DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-16-pgvector \
+# Force HTTPS for Debian + PGDG apt sources and make apt more resilient to
+# transient network failures during image builds.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    set -eux; \
+        find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -print0 \
+            | xargs -0 sed -i 's|http://|https://|g'; \
+        printf '%s\n' \
+            'Acquire::Retries "8";' \
+            'Acquire::http::Timeout "30";' \
+            'Acquire::https::Timeout "30";' \
+            'Acquire::ForceIPv4 "true";' \
+            > /etc/apt/apt.conf.d/80-retries-and-timeouts; \
+        apt-get update \
+        && apt-get install -y --no-install-recommends postgresql-16-pgvector \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

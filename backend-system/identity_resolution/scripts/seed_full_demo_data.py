@@ -93,12 +93,22 @@ import hashlib
 import logging
 import os
 import random
+import sys
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import Json, RealDictCursor
+
+# Make the identity_resolution package importable when this script is run
+# directly (python scripts/seed_full_demo_data.py) rather than as a module --
+# needed to reuse the real PersonaResolutionEngine (persona_engine.py) below
+# instead of re-implementing its SQL inline.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from identity_resolution.persona_engine import PersonaResolutionEngine  # noqa: E402
 
 load_dotenv()
 
@@ -1087,7 +1097,7 @@ def _make_persona_summary(domain: str, lifecycle_stage: str, preferred_channel: 
 
 def enrich_master_profiles(cursor, master_profiles: list) -> None:
     logger.info("Enriching %d master profiles with lifecycle/ML-scoring/domain-specific fields...", len(master_profiles))
-    for idx, m in enumerate(master_profiles):
+    for m in master_profiles:
         master_id = m["master_profile_id"]
         domain = m["domain"]
         rng = stable_rng(f"enrich:{master_id}")
@@ -1109,7 +1119,16 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
 
         num_sources = len(m.get("source_systems") or [])
         identity_confidence_score = min(1.0, round(0.5 + 0.15 * num_sources, 4))
-        churn_probability = round(rng.uniform(0, 1), 4)
+        # More realistic churn distribution: ~65% low, ~20% medium, ~10% high, ~5% critical
+        churn_rand = rng.random()
+        if churn_rand < 0.65:
+            churn_probability = round(rng.uniform(0.0, 0.25), 4)  # Low risk: 0-25%
+        elif churn_rand < 0.85:
+            churn_probability = round(rng.uniform(0.25, 0.55), 4)  # Medium risk: 25-55%
+        elif churn_rand < 0.95:
+            churn_probability = round(rng.uniform(0.55, 0.80), 4)  # High risk: 55-80%
+        else:
+            churn_probability = round(rng.uniform(0.80, 1.0), 4)   # Critical risk: 80-100%
         churn_risk_tier = (
             "critical" if churn_probability >= 0.85 else
             "high" if churn_probability >= 0.6 else
@@ -1176,61 +1195,187 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             identity_confidence_score, segmentation_tags, communication_preferences, attributes, model_versions,
             gender, address, profile_picture_url, persona_summary,
         ]
+        domain_attributes: dict[str, object] = {}
 
         if domain == "retail":
-            set_clauses += ["loyalty_id = %s", "membership_tier = %s", "preferred_store_code = %s"]
-            params += [
-                f"LOY-{master_id[:8]}",
-                rng.choice(("Silver", "Gold", "Platinum")),
-                f"STORE-{rng.randint(1, 20):03d}",
-            ]
+            domain_attributes = {
+                "loyalty_id": f"LOY-{master_id[:8]}",
+                "membership_tier": rng.choice(("Silver", "Gold", "Platinum")),
+                "preferred_store_code": f"STORE-{rng.randint(1, 20):03d}",
+            }
         elif domain == "banking":
-            set_clauses += ["cif_number = %s", "account_numbers = %s", "kyc_status = %s", "risk_segment = %s"]
-            params += [
-                f"CIF{rng.randint(10_000_000, 99_999_999)}",
-                [f"{rng.randint(1000000000, 9999999999)}" for _ in range(rng.randint(1, 2))],
-                rng.choice(("unverified", "pending", "verified", "rejected")),
-                rng.choice(("low", "medium", "high")),
-            ]
+            # Realistic KYC distribution: ~70% verified, ~15% pending, ~10% unverified, ~5% rejected
+            kyc_rand = rng.random()
+            if kyc_rand < 0.70:
+                kyc_status = "verified"
+            elif kyc_rand < 0.85:
+                kyc_status = "pending"
+            elif kyc_rand < 0.95:
+                kyc_status = "unverified"
+            else:
+                kyc_status = "rejected"
+            # Risk segment reflects compliance/operational risk: ~60% low, ~30% medium, ~10% high
+            risk_segment_rand = rng.random()
+            if risk_segment_rand < 0.60:
+                risk_segment = "low"
+            elif risk_segment_rand < 0.90:
+                risk_segment = "medium"
+            else:
+                risk_segment = "high"
+            domain_attributes = {
+                "cif_number": f"CIF{rng.randint(10_000_000, 99_999_999)}",
+                "account_numbers": [f"{rng.randint(1000000000, 9999999999)}" for _ in range(rng.randint(1, 2))],
+                "kyc_status": kyc_status,
+                "risk_segment": risk_segment,
+            }
         elif domain == "real_estate":
-            set_clauses += ["property_types_of_interest = %s", "preferred_location_codes = %s"]
-            params += [
-                rng.sample(["apartment", "villa", "land", "townhouse", "condo"], k=rng.randint(1, 3)),
-                [f"DIST-{rng.randint(1, 12):02d}" for _ in range(rng.randint(1, 2))],
-            ]
+            domain_attributes = {
+                "property_types_of_interest": rng.sample(
+                    ["apartment", "villa", "land", "townhouse", "condo"],
+                    k=rng.randint(1, 3),
+                ),
+                "preferred_location_codes": [f"DIST-{rng.randint(1, 12):02d}" for _ in range(rng.randint(1, 2))],
+            }
         elif domain == "travel":
-            set_clauses += ["travel_loyalty_program_id = %s", "preferred_travel_class = %s"]
-            params += [
-                f"TVL-{rng.randint(100000, 999999)}",
-                rng.choice(("economy", "business", "first")),
-            ]
+            domain_attributes = {
+                "travel_loyalty_program_id": f"TVL-{rng.randint(100000, 999999)}",
+                "preferred_travel_class": rng.choice(("economy", "business", "first")),
+            }
         elif domain == "media":
-            set_clauses += ["media_subscription_id = %s", "preferred_content_genres = %s"]
-            params += [
-                f"SUB-{rng.randint(100000, 999999)}",
-                rng.sample(["news", "sports", "entertainment", "documentary", "music"], k=rng.randint(1, 3)),
-            ]
+            domain_attributes = {
+                "media_subscription_id": f"SUB-{rng.randint(100000, 999999)}",
+                "preferred_content_genres": rng.sample(
+                    ["news", "sports", "entertainment", "documentary", "music"],
+                    k=rng.randint(1, 3),
+                ),
+            }
         elif domain == "education":
-            set_clauses += ["student_id = %s", "institution_name = %s"]
-            params += [
-                f"STU-{rng.randint(100000, 999999)}",
-                rng.choice(("Demo University", "Demo Online Academy", "Demo Polytechnic")),
-            ]
+            domain_attributes = {
+                "student_id": f"STU-{rng.randint(100000, 999999)}",
+                "institution_name": rng.choice(("Demo University", "Demo Online Academy", "Demo Polytechnic")),
+            }
         else:
             # Catch-all for any future domain; do nothing domain-specific.
             pass
 
-        if idx < EMBEDDING_PROFILE_LIMIT:
-            embedding_rng = stable_rng(f"embedding:{master_id}")
-            vector_literal = "[" + ",".join(f"{embedding_rng.uniform(-1, 1):.6f}" for _ in range(PERSONA_EMBEDDING_DIM)) + "]"
-            set_clauses.append(f"persona_embedding = %s::vector({PERSONA_EMBEDDING_DIM})")
-            params.append(vector_literal)
+        # NOTE: persona_embedding lives on cdp_customer_personas (not
+        # cdp_master_profiles) -- see seed_customer_personas() below, which
+        # sets it for a representative subset of computed personas.
 
         params.append(master_id)
         cursor.execute(
             f"UPDATE {_table('cdp_master_profiles')} SET {', '.join(set_clauses)} WHERE master_profile_id = %s;",
             tuple(params),
         )
+
+        if domain_attributes:
+            cursor.execute(
+                f"""
+                INSERT INTO {_table('cdp_domain_profiles')} (
+                    tenant_id,
+                    master_profile_id,
+                    domain_id,
+                    profile_name,
+                    lifecycle_stage,
+                    persona_name,
+                    persona_summary,
+                    engagement_score,
+                    domain_attributes,
+                    first_activity_at,
+                    last_activity_at,
+                    status_code,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    (SELECT domain_id FROM {_table('sys_domain')} WHERE domain_code = %s LIMIT 1),
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    1,
+                    NOW(),
+                    NOW()
+                )
+                ON CONFLICT (master_profile_id, domain_id)
+                DO UPDATE SET
+                    profile_name = EXCLUDED.profile_name,
+                    lifecycle_stage = EXCLUDED.lifecycle_stage,
+                    persona_name = EXCLUDED.persona_name,
+                    persona_summary = EXCLUDED.persona_summary,
+                    engagement_score = EXCLUDED.engagement_score,
+                    domain_attributes = COALESCE(cdp_domain_profiles.domain_attributes, '{{}}'::jsonb) || EXCLUDED.domain_attributes,
+                    first_activity_at = EXCLUDED.first_activity_at,
+                    last_activity_at = EXCLUDED.last_activity_at,
+                    status_code = EXCLUDED.status_code,
+                    updated_at = NOW();
+                """,
+                (
+                    DEMO_TENANT_ID,
+                    master_id,
+                    domain,
+                    f"{domain.title()} Profile",
+                    lifecycle_stage,
+                    None,
+                    None,
+                    engagement_score,
+                    Json(domain_attributes),
+                    customer_since,
+                    last_activity_at,
+                ),
+            )
+
+
+def seed_customer_personas(cursor, master_profiles: list) -> int:
+    """Computes and persists a real customer persona (cdp_customer_personas +
+    cdp_persona_features + cdp_persona_score_details + cdp_persona_history)
+    for every enriched master profile, via the SAME PersonaResolutionEngine
+    backend-system/identity_resolution's CIR pipeline uses in production
+    (resolver.py) -- proves the "AI-native Customer Persona Resolution
+    Engine" actually works end-to-end against real seeded data, instead of
+    duplicating its SQL here. Must run AFTER enrich_master_profiles() (needs
+    lifecycle_stage/membership_tier/CLV/etc. already populated) and after
+    master_profiles has been refetched to include tenant_id.
+
+    Idempotent / safe to re-run: resolve_persona() always inserts a fresh
+    version (deactivating the previous one), so re-running this just adds
+    another computed_version rather than erroring.
+    """
+    logger.info("Computing customer personas for %d master profiles via PersonaResolutionEngine...", len(master_profiles))
+    engine = PersonaResolutionEngine(schema=DB_SCHEMA)
+    computed = 0
+    embedded = 0
+    for m in master_profiles:
+        result = engine.resolve_persona(cursor, DEMO_TENANT_ID, m["master_profile_id"])
+        if result is None:
+            continue
+        computed += 1
+
+        # persona_embedding lives on cdp_customer_personas (identity
+        # *understanding*), not cdp_master_profiles -- only seeded for a
+        # representative subset of profiles, same convention as the master
+        # profile enrichment step used before this table existed.
+        if embedded < EMBEDDING_PROFILE_LIMIT:
+            embedding_rng = stable_rng(f"persona_embedding:{result['persona_id']}")
+            vector_literal = (
+                "[" + ",".join(f"{embedding_rng.uniform(-1, 1):.6f}" for _ in range(PERSONA_EMBEDDING_DIM)) + "]"
+            )
+            cursor.execute(
+                f"UPDATE {_table('cdp_customer_personas')} SET persona_embedding = %s::vector({PERSONA_EMBEDDING_DIM}) "
+                "WHERE persona_id = %s;",
+                (vector_literal, result["persona_id"]),
+            )
+            embedded += 1
+
+    logger.info("Computed %d personas (%d with a persona_embedding).", computed, embedded)
+    return computed
+
 
 
 # --------------------------------------------------------------------------
@@ -1278,6 +1423,7 @@ def main() -> None:
             seed_graph_edges(cursor, crm_ids, detail_profiles)
             enrich_master_profiles(cursor, master_profiles)
             master_profiles = fetch_master_profiles(cursor)
+            personas_computed = seed_customer_personas(cursor, master_profiles)
             seed_content_items(cursor, master_profiles)
             link_crm_contacts_to_master_profiles(cursor, crm_ids, master_profiles)
 
@@ -1285,11 +1431,12 @@ def main() -> None:
         logger.info(
             "Full demo data seeded: %d master profiles enriched (%d with a persona_embedding), "
             "%d got detail rows (relations/contacts/transactions); all master profiles got >= %d events; "
-            "content items: %d/profile/type; CRM journey graph + "
+            "content items: %d/profile/type; %d customer personas computed via PersonaResolutionEngine; "
+            "CRM journey graph + "
             "graph_edges + cdp_relation_types seeded; crm_contact <-> cdp_master_profiles linked "
             "via graph_edges ('is_active_as') + cross-referenced attributes/metadata.",
             len(master_profiles), min(len(master_profiles), EMBEDDING_PROFILE_LIMIT), len(detail_profiles),
-            MIN_EVENTS_PER_MASTER_PROFILE, CONTENT_ITEMS_PER_TYPE_PER_PROFILE,
+            MIN_EVENTS_PER_MASTER_PROFILE, CONTENT_ITEMS_PER_TYPE_PER_PROFILE, personas_computed,
         )
     except Exception:
         conn.rollback()

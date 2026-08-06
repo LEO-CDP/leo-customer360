@@ -107,6 +107,7 @@ class RecomputeSegmentMembershipTests(unittest.TestCase):
 
         select_sql, select_params = session.executed[0]
         self.assertIn("cdp_master_profiles", select_sql)
+        self.assertIn("cdp_domain_profiles", select_sql)
         self.assertIn("age < 25", select_sql)
         self.assertEqual(select_params["tenant_id"], str(segment.tenant_id))
 

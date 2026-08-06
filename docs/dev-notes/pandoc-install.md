@@ -34,10 +34,13 @@ sudo apt update
 echo "==> Upgrading installed packages..."
 sudo apt full-upgrade -y
 
-echo "==> Installing XeLaTeX + Fonts..."
+echo "==> Installing Pandoc, XeLaTeX, required LaTeX packages, and system fonts..."
 sudo apt install -y \
+    pandoc \
     texlive-xetex \
+    texlive-latex-recommended \
     texlive-latex-extra \
+    texlive-science \
     texlive-fonts-recommended \
     texlive-fonts-extra \
     texlive-plain-generic \
@@ -45,7 +48,10 @@ sudo apt install -y \
     lmodern \
     fonts-dejavu \
     fonts-noto \
-    fonts-noto-cjk 
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    fonts-symbola
+    
 
 echo
 echo "==> Versions"

@@ -6,7 +6,7 @@ metadata / throttle-status tables consumed by backend-system/identity_resolution
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class MasterProfileBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None
-    domain: str = Field(default="retail", pattern="^(retail|banking|real_estate|travel|media|education)$")
+    domain: str = Field(default="retail")
 
     full_name: Optional[str] = None
     first_name: Optional[str] = None
@@ -35,28 +35,9 @@ class MasterProfileBase(BaseModel):
     cookie_ids: Optional[list[str]] = None
     push_tokens: Optional[dict] = None
 
-    loyalty_id: Optional[str] = None
-    membership_tier: Optional[str] = None
-    preferred_store_code: Optional[str] = None
-
-    national_id: Optional[str] = None
-    cif_number: Optional[str] = None
-    account_numbers: Optional[list[str]] = None
-    kyc_status: Optional[str] = None
-    risk_segment: Optional[str] = None
-
-    # Real estate / travel / media / education domain attributes.
-    property_types_of_interest: Optional[list[str]] = None
-    preferred_location_codes: Optional[list[str]] = None
-    travel_loyalty_program_id: Optional[str] = None
-    preferred_travel_class: Optional[str] = None
-    media_subscription_id: Optional[str] = None
-    preferred_content_genres: Optional[list[str]] = None
-    student_id: Optional[str] = None
-    institution_name: Optional[str] = None
-
     acquisition_source: Optional[str] = None
     acquisition_campaign: Optional[str] = None
+    current_persona_id: Optional[uuid.UUID] = None
     persona_name: Optional[str] = None
     segmentation_tags: Optional[list[str]] = None
     communication_preferences: Optional[dict] = None
@@ -97,7 +78,7 @@ class MasterProfileCreate(MasterProfileBase):
 
 class MasterProfileUpdate(BaseModel):
     user_id: Optional[uuid.UUID] = None
-    domain: Optional[str] = Field(default=None, pattern="^(retail|banking|real_estate|travel|media|education)$")
+    domain: Optional[str] = Field(default=None)
     full_name: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -115,24 +96,9 @@ class MasterProfileUpdate(BaseModel):
     advertising_ids: Optional[list[str]] = None
     cookie_ids: Optional[list[str]] = None
     push_tokens: Optional[dict] = None
-    loyalty_id: Optional[str] = None
-    membership_tier: Optional[str] = None
-    preferred_store_code: Optional[str] = None
-    national_id: Optional[str] = None
-    cif_number: Optional[str] = None
-    account_numbers: Optional[list[str]] = None
-    kyc_status: Optional[str] = None
-    risk_segment: Optional[str] = None
-    property_types_of_interest: Optional[list[str]] = None
-    preferred_location_codes: Optional[list[str]] = None
-    travel_loyalty_program_id: Optional[str] = None
-    preferred_travel_class: Optional[str] = None
-    media_subscription_id: Optional[str] = None
-    preferred_content_genres: Optional[list[str]] = None
-    student_id: Optional[str] = None
-    institution_name: Optional[str] = None
     acquisition_source: Optional[str] = None
     acquisition_campaign: Optional[str] = None
+    current_persona_id: Optional[uuid.UUID] = None
     persona_name: Optional[str] = None
     segmentation_tags: Optional[list[str]] = None
     communication_preferences: Optional[dict] = None
@@ -166,15 +132,30 @@ class MasterProfileUpdate(BaseModel):
 class MasterProfileRead(MasterProfileBase):
     model_config = ConfigDict(from_attributes=True)
     master_profile_id: uuid.UUID
+    linked_raw_profile_count: int = 0
     status_code: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
 
+class PaginationMeta(BaseModel):
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+    has_prev: bool
+    has_next: bool
+
+
+class MasterProfileListResponse(BaseModel):
+    items: list[MasterProfileRead]
+    pagination: PaginationMeta
+
+
 class RawProfileBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None
-    domain: str = Field(default="retail", pattern="^(retail|banking|real_estate|travel|media|education)$")
+    domain: str = Field(default="retail")
     source_system: str
     channel: Optional[str] = None
 
@@ -290,6 +271,65 @@ class ProfileLinkRead(ProfileLinkBase):
     model_config = ConfigDict(from_attributes=True)
     link_id: uuid.UUID
     created_at: Optional[datetime] = None
+
+
+class LinkedRawProfileDetailRead(BaseModel):
+    link: ProfileLinkRead
+    raw_profile: RawProfileRead
+
+
+class DomainProfileBase(BaseModel):
+    tenant_id: uuid.UUID
+    master_profile_id: uuid.UUID
+    domain_id: uuid.UUID
+    profile_name: Optional[str] = None
+    lifecycle_stage: Optional[str] = None
+    persona_name: Optional[str] = None
+    persona_summary: Optional[str] = None
+    engagement_score: Optional[Decimal] = None
+    domain_attributes: dict[str, Any] = Field(default_factory=dict)
+    analytics: Optional[dict[str, Any]] = Field(default_factory=dict)
+    first_activity_at: Optional[datetime] = None
+    last_activity_at: Optional[datetime] = None
+    status_code: int = 1
+
+
+class DomainProfileCreate(DomainProfileBase):
+    pass
+
+
+class DomainProfileUpdate(BaseModel):
+    profile_name: Optional[str] = None
+    lifecycle_stage: Optional[str] = None
+    persona_name: Optional[str] = None
+    persona_summary: Optional[str] = None
+    engagement_score: Optional[Decimal] = None
+    domain_attributes: Optional[dict[str, Any]] = None
+    analytics: Optional[dict[str, Any]] = None
+    first_activity_at: Optional[datetime] = None
+    last_activity_at: Optional[datetime] = None
+    status_code: Optional[int] = None
+
+
+class DomainProfileRead(DomainProfileBase):
+    model_config = ConfigDict(from_attributes=True)
+    domain_profile_id: uuid.UUID
+    # Resolved from sys_domain by the router (not a column on cdp_domain_profiles
+    # itself) so the UI can render a domain label without a second round-trip.
+    domain_code: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class DomainAttributeUpsert(BaseModel):
+    """Adds/overwrites a single key in a master profile's per-domain
+    ``domain_attributes`` (creating the ``cdp_domain_profiles`` row for that
+    domain if it doesn't exist yet). Merges into the existing JSONB rather
+    than replacing it, so unrelated attributes are never lost."""
+
+    domain: str = Field(description="Business domain owning this attribute, e.g. 'banking', 'retail'.")
+    attribute_key: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+    attribute_value: Any
 
 
 class ProfileAttributeBase(BaseModel):
@@ -422,3 +462,154 @@ class ProfileMergeHistoryRead(ProfileMergeHistoryBase):
     model_config = ConfigDict(from_attributes=True)
     merge_id: uuid.UUID
     merged_at: Optional[datetime] = None
+
+
+# --- Customer Persona Resolution ("identity understanding") -------------------
+
+
+class CustomerPersonaBase(BaseModel):
+    tenant_id: uuid.UUID
+    domain: str = Field(default="retail")
+    master_profile_id: uuid.UUID
+
+    persona_code: str
+    persona_name: str
+    persona_category: Optional[str] = None
+    persona_summary: Optional[str] = None
+
+    persona_score: Optional[Decimal] = None
+    confidence_score: Optional[Decimal] = None
+    behavior_score: Optional[Decimal] = None
+    engagement_score: Optional[Decimal] = None
+    financial_score: Optional[Decimal] = None
+    loyalty_score: Optional[Decimal] = None
+    relationship_score: Optional[Decimal] = None
+    risk_score: Optional[Decimal] = None
+
+    lifecycle_stage: Optional[str] = Field(
+        default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
+    )
+    customer_value_tier: Optional[str] = None
+    risk_level: Optional[str] = Field(default=None, pattern="^(low|medium|high|critical)$")
+    next_best_action: Optional[str] = None
+
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+
+    computed_version: int = 1
+    is_active: bool = True
+    expires_at: Optional[datetime] = None
+
+
+class CustomerPersonaCreate(CustomerPersonaBase):
+    pass
+
+
+class CustomerPersonaUpdate(BaseModel):
+    persona_category: Optional[str] = None
+    persona_summary: Optional[str] = None
+    persona_score: Optional[Decimal] = None
+    confidence_score: Optional[Decimal] = None
+    behavior_score: Optional[Decimal] = None
+    engagement_score: Optional[Decimal] = None
+    financial_score: Optional[Decimal] = None
+    loyalty_score: Optional[Decimal] = None
+    relationship_score: Optional[Decimal] = None
+    risk_score: Optional[Decimal] = None
+    lifecycle_stage: Optional[str] = Field(
+        default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
+    )
+    customer_value_tier: Optional[str] = None
+    risk_level: Optional[str] = Field(default=None, pattern="^(low|medium|high|critical)$")
+    next_best_action: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    is_active: Optional[bool] = None
+    expires_at: Optional[datetime] = None
+
+
+class CustomerPersonaRead(CustomerPersonaBase):
+    model_config = ConfigDict(from_attributes=True)
+    persona_id: uuid.UUID
+    computed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PersonaAnalyticsBucket(BaseModel):
+    value: str
+    count: int
+
+
+class PersonaAnalyticsSummary(BaseModel):
+    total_personas: int
+    active_personas: int
+    inactive_personas: int
+    unique_master_profiles: int
+    avg_persona_score: float
+    avg_confidence_score: float
+    by_domain: list[PersonaAnalyticsBucket]
+    by_category: list[PersonaAnalyticsBucket]
+    by_risk_level: list[PersonaAnalyticsBucket]
+    by_value_tier: list[PersonaAnalyticsBucket]
+
+
+class PersonaFeatureBase(BaseModel):
+    persona_id: uuid.UUID
+    feature_code: str
+    feature_name: Optional[str] = None
+    feature_type: Optional[str] = Field(default=None, pattern="^(numeric|text|boolean)$")
+    numeric_value: Optional[Decimal] = None
+    text_value: Optional[str] = None
+    boolean_value: Optional[bool] = None
+    source_system: Optional[str] = None
+    confidence_score: Optional[Decimal] = None
+
+
+class PersonaFeatureCreate(PersonaFeatureBase):
+    pass
+
+
+class PersonaFeatureRead(PersonaFeatureBase):
+    model_config = ConfigDict(from_attributes=True)
+    feature_id: uuid.UUID
+    computed_at: Optional[datetime] = None
+
+
+class PersonaScoreDetailBase(BaseModel):
+    persona_id: uuid.UUID
+    score_type: str
+    score_value: Optional[Decimal] = None
+    score_weight: Optional[Decimal] = None
+    score_formula: Optional[str] = None
+    explanation: Optional[str] = None
+
+
+class PersonaScoreDetailCreate(PersonaScoreDetailBase):
+    pass
+
+
+class PersonaScoreDetailRead(PersonaScoreDetailBase):
+    model_config = ConfigDict(from_attributes=True)
+    score_id: uuid.UUID
+    created_at: Optional[datetime] = None
+
+
+class PersonaHistoryBase(BaseModel):
+    persona_id: uuid.UUID
+    old_persona_name: Optional[str] = None
+    new_persona_name: Optional[str] = None
+    old_score: Optional[Decimal] = None
+    new_score: Optional[Decimal] = None
+    change_reason: Optional[str] = None
+    model_version: Optional[str] = None
+
+
+class PersonaHistoryCreate(PersonaHistoryBase):
+    pass
+
+
+class PersonaHistoryRead(PersonaHistoryBase):
+    model_config = ConfigDict(from_attributes=True)
+    history_id: uuid.UUID
+    changed_at: Optional[datetime] = None

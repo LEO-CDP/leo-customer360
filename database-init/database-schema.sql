@@ -609,11 +609,13 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     first_name TEXT,
     last_name TEXT,
     profile_picture_url TEXT,
-    -- True if full_name/email/phone_number/national_id are SHA-256 hashed for privacy
+    -- True if full_name/email/phone_number and any domain-level PII identifier
+    -- (e.g. national_id stored in cdp_domain_profiles.domain_attributes) are
+    -- SHA-256 hashed for privacy
     -- (e.g. hashed-match ingestion a la Meta/Google Customer Match). Whenever TRUE,
-    -- persona_name (below) MUST be populated -- see the CHECK constraint at the end of
+    -- current_persona_id (below) MUST be populated -- see the CHECK constraint at the end of
     -- this table -- since hashed PII can no longer be used as a human-readable label for
-    -- browsing/semantic search. persona_name is computed by application code (see
+    -- browsing/semantic search. current_persona_id is computed by application code (see
     -- backend-system/identity_resolution/identity_resolution/persona.py), never by the DB.
     is_hashed BOOLEAN DEFAULT FALSE,
 
@@ -640,6 +642,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- Identifiers resolved and merged from cdp_raw_profiles_stage.
     -- ------------------------------------------------------------------------
     -- Maps a source_system to its own customer identifier (Deterministic matching).
+    -- e.g: appsflyer_id, google_ads_id, zalo_user_id, moengage_id, firebase_id, etc.
     external_ids JSONB DEFAULT '{}'::JSONB,
     -- Hardware or app-specific identifiers for mobile attribution (IDFV, Android ID).
     device_ids TEXT[] DEFAULT ARRAY[]::TEXT[],
@@ -651,81 +654,30 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- Format: {"fcm": "token_string", "apns": "token_string"}
     push_tokens JSONB DEFAULT '{}'::JSONB,
 
-    -- ------------------------------------------------------------------------
-    -- RETAIL DOMAIN ATTRIBUTES
-    -- Fields specific to e-commerce, POS, and physical retail operations.
-    -- ------------------------------------------------------------------------
-    loyalty_id TEXT,
-    membership_tier TEXT,
-    preferred_store_code TEXT,
-
-    -- ------------------------------------------------------------------------
-    -- BANKING DOMAIN ATTRIBUTES
-    -- Highly regulated fields specific to Fintech and Core Banking systems.
-    -- ------------------------------------------------------------------------
-    -- National Identification (CMND/CCCD in Vietnam, or Passport number).
-    national_id TEXT,
-    -- Core Banking Customer Information File number. The golden record ID in legacy banking.
-    cif_number TEXT,
-    -- Array of active account numbers associated with this CIF.
-    account_numbers TEXT[] DEFAULT ARRAY[]::TEXT[],
-    -- Know Your Customer (eKYC/KYC) progression state.
-    kyc_status TEXT CHECK (kyc_status IN ('unverified','pending','verified','rejected')),
-    -- Risk categorization for AML or credit scoring.
-    risk_segment TEXT,
-
-    -- ------------------------------------------------------------------------
-    -- REAL ESTATE DOMAIN ATTRIBUTES
-    -- Fields specific to property search, listings, and real-estate CRM.
-    -- ------------------------------------------------------------------------
-    -- Types of properties the prospect is interested in (e.g. apartment, villa, land).
-    property_types_of_interest TEXT[] DEFAULT ARRAY[]::TEXT[],
-    -- Preferred city/district/area codes for property search.
-    preferred_location_codes TEXT[] DEFAULT ARRAY[]::TEXT[],
-
-    -- ------------------------------------------------------------------------
-    -- TRAVEL DOMAIN ATTRIBUTES
-    -- Fields specific to airlines, hotels, and travel loyalty programs.
-    -- ------------------------------------------------------------------------
-    -- Travel loyalty program membership identifier.
-    travel_loyalty_program_id TEXT,
-    -- Preferred cabin/travel class (e.g. economy, business, first).
-    preferred_travel_class TEXT,
-
-    -- ------------------------------------------------------------------------
-    -- MEDIA DOMAIN ATTRIBUTES
-    -- Fields specific to content subscriptions and media consumption.
-    -- ------------------------------------------------------------------------
-    -- Platform subscription or account identifier.
-    media_subscription_id TEXT,
-    -- Content genres the user prefers (e.g. news, sports, entertainment).
-    preferred_content_genres TEXT[] DEFAULT ARRAY[]::TEXT[],
-
-    -- ------------------------------------------------------------------------
-    -- EDUCATION DOMAIN ATTRIBUTES
-    -- Fields specific to learners, students, and education platforms.
-    -- ------------------------------------------------------------------------
-    -- Student identifier issued by the education institution/platform.
-    student_id TEXT,
-    -- Name of the education institution or learning platform.
-    institution_name TEXT,
+    -- NOTE: Domain-specific attributes are saved in cdp_domain_profiles.domain_attributes .
 
     -- ------------------------------------------------------------------------
     -- MARKETING & ENGAGEMENT
     -- Attribution data and computed fields used for audience building.
     -- ------------------------------------------------------------------------
-    -- Persona Name for segmentation, marketing campaigns and semantic search (e.g., "Gen Z
-    -- Shopper", "High-Value Investor"). REQUIRED whenever is_hashed = TRUE: once real PII is
-    -- SHA-256 hashed, persona_name is the only human-readable label left to browse/search
-    -- profiles by, so it is auto-generated by backend-system/identity_resolution (see persona.py)
-    -- for every profile whose PII looks hashed.
-    persona_name TEXT default 'anonymous_user',
+    -- current_persona_id for tracking profile's persona because 1 person can change persona over time,
+    --  but we want to keep a history of all personas the person has been assigned to.
+    -- NOTE: NOT declared inline here -- cdp_customer_personas (below) itself
+    -- has a NOT NULL FK back to cdp_master_profiles.master_profile_id, so this
+    -- is a genuine circular table dependency. cdp_customer_personas does not
+    -- exist yet at this point in the script, so current_persona_id is added
+    -- via ALTER TABLE immediately after cdp_customer_personas is created
+    -- (see the "MASTER PROFILES & IDENTITY RESOLUTION" section below).
+    persona_name TEXT, -- keep to ADD a short label for the persona (e.g., "Gen Z Shopper", "High-Value Investor") for quick filtering and segmentation in dashboards and queries.
+    -- Longer, human-readable narrative summary of the customer (behavior,
+    -- preferences, notable traits) usually generated by an LLM or the
+    -- segmentation pipeline -- complements the short persona_name label above.
+    persona_summary TEXT,
+
     -- First-touch channel attribution (e.g., 'organic_search', 'paid_social').
     acquisition_source TEXT,
     -- First-touch campaign attribution.
     acquisition_campaign TEXT,
-    -- Stored embeddings generated by LLMs for semantic search/lookalike modeling.
-    persona_embedding vector(768),
     -- Computed labels for fast Audience Builder queries (e.g., 'gen_z', 'frequent_buyer').
     segmentation_tags TEXT[],
     -- Schemaless payload for flexible traits extracted dynamically.
@@ -743,6 +695,15 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     source_systems TEXT[] DEFAULT ARRAY[]::TEXT[],
     -- Lineage pointer back to the raw_profile_id that initiated this profile.
     first_seen_raw_profile_id UUID,
+    -- Denormalized count of raw profiles (cdp_profile_links, status='ACTIVE')
+    -- merged into this golden record -- a CIR match-volume/confidence signal
+    -- distinct from source_systems (which only tracks distinct SYSTEMS, not
+    -- distinct raw touches).
+    linked_raw_profile_count INTEGER NOT NULL DEFAULT 0,
+    -- Timestamp Customer Identity Resolution (CIR) last (re)computed/updated
+    -- this profile's identity graph; distinct from updated_at (any row touch)
+    -- and scores_updated_at (ML scores only).
+    last_identity_resolved_at TIMESTAMP WITH TIME ZONE,
 
     -- ------------------------------------------------------------------------
     -- CUSTOMER LIFECYCLE & ENGAGEMENT TRACKING
@@ -770,10 +731,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
             'churn_risk'
         )
     ),
-    -- Longer, human-readable narrative summary of the customer (behavior,
-    -- preferences, notable traits) usually generated by an LLM or the
-    -- segmentation pipeline -- complements the short persona_name label above.
-    persona_summary TEXT,
+
 
     -- ------------------------------------------------------------------------
     -- 🚀 ML & ANALYTICS SCORING MODELS
@@ -847,6 +805,305 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
 
 COMMENT ON TABLE customer360.cdp_master_profiles IS 'The golden/resolved customer profile (identity-resolution output): consolidated demographics, cross-channel identity graph, retail/banking/real-estate/travel/media/education domain attributes, marketing/persona fields, lineage, lifecycle tracking, and the full ML scoring block (lead, churn, CLV, CX, data quality). One row per real person per tenant+domain, built by CustomerIdentityResolver from cdp_raw_profiles_stage.';
 
+
+-- ============================================================================
+-- CUSTOMER DOMAIN PROFILES
+-- ----------------------------------------------------------------------------
+-- One Master Customer Profile may have multiple Domain Profiles.
+--
+-- Examples
+-- --------
+-- Thomas
+--   ├── Retail Profile
+--   ├── Banking Profile
+--   ├── Travel Profile
+--   ├── Education Profile
+--   └── Media Profile
+--
+-- Each domain owns its own metadata, engagement score and AI persona.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_domain_profiles (
+
+    -- ========================================================================
+    -- PRIMARY KEYS
+    -- ========================================================================
+
+    domain_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Tenant
+    tenant_id UUID NOT NULL
+        REFERENCES customer360.sys_tenant(tenant_id),
+
+    -- Parent Customer 360 profile
+    master_profile_id UUID NOT NULL
+        REFERENCES customer360.cdp_master_profiles(master_profile_id)
+        ON DELETE CASCADE,
+
+    -- Business Domain
+    domain_id UUID NOT NULL
+        REFERENCES customer360.sys_domain(domain_id),
+
+    -- ========================================================================
+    -- DOMAIN PROFILE
+    -- ========================================================================
+
+    -- Human friendly display name inside this domain.
+    -- Example:
+    --   Retail : "VIP Shopper"
+    --   Banking: "Priority Customer"
+    profile_name TEXT,
+
+    -- Current lifecycle inside this business domain.
+    --
+    -- Example:
+    -- prospect
+    -- active
+    -- inactive
+    -- suspended
+    -- closed
+    lifecycle_stage TEXT,
+
+    -- ========================================================================
+    -- AI PROFILE
+    -- ========================================================================
+
+    -- AI generated customer persona for THIS domain only.
+    persona_name TEXT,
+
+    -- AI generated explanation.
+    persona_summary TEXT,
+
+    -- AI-computed engagement score (0-100).
+    --
+    -- Retail:
+    -- purchase frequency
+    -- store visits
+    --
+    -- Banking:
+    -- transaction activity
+    -- product usage
+    --
+    -- Travel:
+    -- bookings
+    -- trips
+    --
+    -- Media:
+    -- reading
+    -- watch time
+    --
+    -- Education:
+    -- lesson completion
+    -- study time
+    engagement_score NUMERIC(5,2),
+
+    -- ========================================================================
+    -- DOMAIN METADATA
+    -- ========================================================================
+
+    -- Flexible business metadata.
+    --
+    -- Retail
+    -- {
+    --   "loyalty_id":"VIP001",
+    --   "membership_tier":"Gold",
+    --   "preferred_store":"HCM001"
+    -- }
+    --
+    -- Banking
+    -- {
+    --   "cif_number":"1000001",
+    --   "kyc_status":"verified",
+    --   "risk_segment":"Low"
+    -- }
+    --
+    -- Travel
+    -- {
+    --   "loyalty_program":"SkyTeam",
+    --   "preferred_class":"Business"
+    -- }
+    --
+    -- Education
+    -- {
+    --   "student_id":"ST100",
+    --   "institution":"MIT"
+    -- }
+    --
+    -- Media
+    -- {
+    --   "subscription_id":"NETFLIX001",
+    --   "preferred_genres":["Technology","AI"]
+    -- }
+    -- Generic bag of domain-specific attributes.
+    -- Example keys (not exhaustive):
+    -- retail: loyalty_id, membership_tier, preferred_store_code
+    -- banking: national_id, cif_number, account_numbers, kyc_status, risk_segment
+    -- real_estate: property_types_of_interest, preferred_location_codes
+    -- travel: travel_loyalty_program_id, preferred_travel_class
+    -- media: media_subscription_id, preferred_content_genres
+    -- education: student_id, institution_name
+    domain_attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+    -- ========================================================================
+    -- DOMAIN ANALYTICS
+    -- ========================================================================
+
+    -- Flexible AI output
+    --
+    -- Examples
+    --
+    -- propensity scores
+    -- churn prediction
+    -- recommendation vectors
+    -- CLV
+    -- next best action
+    analytics JSONB DEFAULT '{}'::jsonb,
+
+    -- ========================================================================
+    -- ACTIVITY
+    -- ========================================================================
+
+    first_activity_at TIMESTAMP,
+
+    last_activity_at TIMESTAMP,
+
+    -- ========================================================================
+    -- AUDIT
+    -- ========================================================================
+
+    status_code SMALLINT NOT NULL DEFAULT 1,
+
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+
+    updated_at TIMESTAMP NOT NULL DEFAULT now(),
+
+    -- One profile per domain
+    CONSTRAINT uq_cdp_domain_profiles
+        UNIQUE(master_profile_id, domain_id),
+
+    CONSTRAINT chk_cdp_domain_profiles_domain_attributes_object
+        CHECK (jsonb_typeof(domain_attributes) = 'object'),
+
+    CONSTRAINT chk_cdp_domain_profiles_analytics_object
+        CHECK (analytics IS NULL OR jsonb_typeof(analytics) = 'object')
+
+);
+
+COMMENT ON TABLE customer360.cdp_domain_profiles IS
+'Business-domain-specific customer profile attached to a Customer 360 Master Profile. Stores AI persona, engagement score and flexible domain metadata.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_domain_profiles_tenant_domain
+    ON customer360.cdp_domain_profiles (tenant_id, domain_id);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_domain_profiles_tenant_master
+    ON customer360.cdp_domain_profiles (tenant_id, master_profile_id);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_domain_profiles_attributes
+    ON customer360.cdp_domain_profiles
+    USING GIN(domain_attributes);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_domain_profiles_analytics
+    ON customer360.cdp_domain_profiles
+    USING GIN(analytics);
+
+-- ============================================================================
+-- Auto-catalog trigger: every domain_attributes JSONB key gets registered
+-- into cdp_profile_attributes automatically.
+-- ============================================================================
+-- Deliberately NOT one btree expression index per domain_attributes key
+-- (((domain_attributes ->> 'some_key'))): in production a Customer 360 tenant
+-- can introduce arbitrarily many domain-specific keys over time (per
+-- tenant/domain), and one physical index per key does not scale -- every new
+-- key would require a manual ALTER/migration, bloats pg_class/autovacuum
+-- work, and most keys are never queried at all. Instead:
+--   1. The single existing GIN index above (idx_cdp_domain_profiles_attributes)
+--      already accelerates arbitrary-key containment/existence queries
+--      (`domain_attributes @> '{"key":"value"}'`, `domain_attributes ? 'key'`)
+--      for ANY key, present or future, with zero per-key maintenance.
+--   2. The segmentation JOIN (core/crud/segmentation.py::DOMAIN_ATTRIBUTES_JOIN_SQL)
+--      always starts FROM cdp_master_profiles and narrows to a single
+--      cdp_domain_profiles row via idx_cdp_domain_profiles_tenant_master
+--      (tenant_id, master_profile_id) BEFORE ever touching domain_attributes --
+--      the ->>'key' = 'value' filter is then evaluated in-memory on that one
+--      already-fetched row, not via an index scan on cdp_domain_profiles. So
+--      per-key indexes were never actually load-bearing for that query shape.
+--   3. If a SPECIFIC key becomes hot enough to need its own index (proven by
+--      real query plans, not speculation), promote it to a real scalar column
+--      instead of adding yet another expression index -- see the discussion
+--      in this session's notes on when to graduate a JSONB key to a column.
+CREATE OR REPLACE FUNCTION customer360.sync_domain_attribute_catalog()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_domain_code TEXT;
+    v_attribute_group TEXT;
+    v_key TEXT;
+    v_value JSONB;
+    v_data_type TEXT;
+BEGIN
+    IF NEW.domain_attributes IS NULL OR jsonb_typeof(NEW.domain_attributes) <> 'object' THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT domain_code INTO v_domain_code
+    FROM customer360.sys_domain
+    WHERE domain_id = NEW.domain_id;
+
+    -- attribute_group has a fixed CHECK-constraint enum; fall back to
+    -- GENERAL for any domain_code that doesn't map onto it 1:1.
+    v_attribute_group := UPPER(COALESCE(v_domain_code, 'general'));
+    IF v_attribute_group NOT IN (
+        'SYSTEM', 'IDENTITY', 'IDENTITY_GRAPH', 'RETAIL', 'BANKING', 'REAL_ESTATE',
+        'TRAVEL', 'MEDIA', 'EDUCATION', 'MARKETING', 'LINEAGE', 'LIFECYCLE',
+        'LEAD_SCORING', 'CHURN_SCORING', 'CLV_SCORING', 'CX_SCORING', 'DATA_QUALITY', 'GENERAL'
+    ) THEN
+        v_attribute_group := 'GENERAL';
+    END IF;
+
+    FOR v_key, v_value IN SELECT * FROM jsonb_each(NEW.domain_attributes) LOOP
+        v_data_type := CASE jsonb_typeof(v_value)
+            WHEN 'array' THEN 'ARRAY'
+            WHEN 'object' THEN 'JSONB'
+            WHEN 'number' THEN 'NUMERIC'
+            WHEN 'boolean' THEN 'BOOLEAN'
+            ELSE 'TEXT'
+        END;
+
+        -- ON CONFLICT DO NOTHING is deliberate: this trigger only discovers
+        -- brand-new keys. Once a key exists in the catalog (whether seeded
+        -- or auto-discovered), a human curator may have since refined its
+        -- name/description/is_pii/is_identity_resolution/is_segmentable --
+        -- the trigger must never clobber that curation on a later write that
+        -- merely reuses the same key.
+        INSERT INTO customer360.cdp_profile_attributes (
+            attribute_internal_code, master_profile_column, name, description,
+            attribute_group, source_table, data_type, domain_scope,
+            is_pii, status, is_segmentable, is_scoring_model, value_type, display_order
+        ) VALUES (
+            v_key, NULL, initcap(replace(v_key, '_', ' ')),
+            'Auto-discovered from customer360.cdp_domain_profiles.domain_attributes by sync_domain_attribute_catalog().',
+            v_attribute_group, 'cdp_domain_profiles', v_data_type,
+            COALESCE(v_domain_code, 'all'),
+            FALSE, 'ACTIVE',
+            v_data_type NOT IN ('ARRAY', 'JSONB'), FALSE, 'metadata', 999
+        )
+        ON CONFLICT (attribute_internal_code) DO NOTHING;
+    END LOOP;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION customer360.sync_domain_attribute_catalog() IS
+'Auto-registers every JSONB key seen in cdp_domain_profiles.domain_attributes as a row in cdp_profile_attributes (source_table=cdp_domain_profiles), so the attribute catalog never silently drifts from what application code actually writes. Never overwrites an existing catalog row (ON CONFLICT DO NOTHING) -- curated metadata always wins over auto-discovery.';
+
+DROP TRIGGER IF EXISTS trg_sync_domain_attribute_catalog ON customer360.cdp_domain_profiles;
+
+CREATE TRIGGER trg_sync_domain_attribute_catalog
+    AFTER INSERT OR UPDATE OF domain_attributes ON customer360.cdp_domain_profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION customer360.sync_domain_attribute_catalog();
+
+
 -- Raw profiles staging
 -- Landing zone for every inbound source: AppsFlyer (mobile attribution/install
 -- events), MoEngage (engagement/push events), Web Tracking / GA4 (browser
@@ -900,12 +1157,74 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     ip_address INET,
     user_agent TEXT,
 
-    -- Marketing attribution (AppsFlyer install/campaign touch + Web UTM)
+    -- Granular AppsFlyer device/app identifiers and metadata (see
+    -- all-data-simulator/data-dictionary/appsflyer-metadata.md sections 3.2/3.4).
+    -- idfa/idfv/android_id/imei are the raw per-platform values that ingestion
+    -- maps onto device_id/advertising_id above for CIR matching; kept here too
+    -- for lineage/audit and as a fallback if the mapping needs to be redone.
+    idfa TEXT, -- iOS advertising id; all-zero when ATT is not authorized (see att below)
+    idfv TEXT, -- iOS vendor id
+    android_id TEXT,
+    imei TEXT, -- legacy Android device id, restricted on modern OS versions -- do not use as a matching key
+    att TEXT, -- iOS 14+ ATT status: not_determined | denied | authorized | restricted
+    device_type TEXT, -- phone | tablet | other
+    os_version TEXT,
+    sdk_version TEXT, -- AppsFlyer SDK version
+    app_id TEXT,
+    app_name TEXT,
+    bundle_id TEXT,
+    operator TEXT, -- SIM MCCMNC carrier name
+    carrier TEXT, -- Android carrier name (getSimCarrierIdName)
+    network_type TEXT, -- e.g. wifi | cellular
+    wifi BOOLEAN,
+    language TEXT, -- device locale, e.g. vi-VN
+    gp_broadcast_referrer TEXT,
+
+    -- Marketing attribution (AppsFlyer install/campaign touch + Web UTM).
+    -- See appsflyer-metadata.md section 3.1; sub_param_1..5 and other rarely
+    -- used custom link params are intentionally not broken out into columns
+    -- here -- they land in event_payload instead.
     media_source TEXT,
     campaign TEXT,
+    campaign_id TEXT, -- af_c_id
+    campaign_type TEXT, -- UA | Organic | Retargeting | Unknown
+    match_type TEXT, -- SRN | id_matching | probabilistic | deeplink | ...
+    conversion_type TEXT, -- install | reinstall | re-engagement | unknown
+    is_organic BOOLEAN,
+    is_retargeting BOOLEAN,
+    is_primary_attribution BOOLEAN,
+    attributed_touch_type TEXT, -- click | impression | pre-installed
+    attributed_touch_time TIMESTAMP WITH TIME ZONE,
+    click_time TIMESTAMP WITH TIME ZONE,
+    install_time TIMESTAMP WITH TIME ZONE,
+    reattributed_touch_time TIMESTAMP WITH TIME ZONE,
+    reattributed_touch_type TEXT,
+    media_channel TEXT, -- af_channel traffic sub-channel (e.g. YouTube, Instagram) -- distinct from the distribution `channel` column above
+    agency TEXT, -- af_prt
+    adset TEXT,
+    adset_id TEXT,
+    ad_name TEXT,
+    ad_id TEXT,
+    ad_type TEXT,
+    keywords TEXT,
+    site_id TEXT, -- af_siteid (publisher)
+    sub_site_id TEXT,
+    cost_model TEXT,
+    cost_value NUMERIC(12, 4),
+    cost_currency CHAR(3),
+    http_referrer TEXT,
+    fb_campaign_id TEXT,
+    fb_adset_id TEXT,
+    fb_adset_name TEXT,
+    fb_ad_id TEXT,
+    fb_ad_name TEXT,
     utm_source TEXT,
     utm_medium TEXT,
     utm_campaign TEXT,
+
+    -- Protect360 fraud signals (see appsflyer-metadata.md section 3.8)
+    blocked_reason TEXT,
+    blocked_reason_value TEXT,
 
     event_name TEXT,                    -- e.g. install, login, page_view, purchase
     event_time TIMESTAMP WITH TIME ZONE,
@@ -916,7 +1235,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     created_at TIMESTAMP DEFAULT now()
 );
 
-COMMENT ON TABLE customer360.cdp_raw_profiles_stage IS 'Landing zone for every inbound source (AppsFlyer, MoEngage, Web Tracking/GA4, POS, Core Banking, ...) before Customer Identity Resolution (CIR). Carries per-source identity + marketing attribution and a processing-queue status_code (1 new -> 2 in-progress -> 3 processed).';
+COMMENT ON TABLE customer360.cdp_raw_profiles_stage IS 'Landing zone for every inbound source (AppsFlyer, MoEngage, Web Tracking/GA4, POS, Core Banking, ...) before Customer Identity Resolution (CIR). Carries per-source identity + marketing attribution (including granular AppsFlyer device/attribution/Protect360 fields, see appsflyer-metadata.md) and a processing-queue status_code (1 new -> 2 in-progress -> 3 processed).';
 
 -- Links (raw → master)
 CREATE TABLE IF NOT EXISTS customer360.cdp_profile_links (
@@ -948,6 +1267,291 @@ WHERE
 -- to a full sequential scan of cdp_profile_links once the table reaches
 -- millions of rows (no automatic index is created for a bare FK column).
 CREATE INDEX IF NOT EXISTS idx_cdp_profile_links_master ON customer360.cdp_profile_links (tenant_id, master_profile_id);
+
+
+-- ============================================================================
+-- CUSTOMER PERSONA RESOLUTION ("from identity matching to identity
+-- understanding"): cdp_customer_personas is a versioned, explainable
+-- "who is this person" record computed FROM an already-resolved
+-- cdp_master_profiles row by backend-system/identity_resolution's
+-- PersonaResolutionEngine (identity_resolution/persona_engine.py). Every
+-- (re)computation inserts a NEW row (computed_version increments per
+-- (tenant_id, master_profile_id, persona_code)) rather than overwriting, so
+-- the full history of how a person's persona evolved is preserved; only the
+-- latest row per master_profile_id has is_active = TRUE, and
+-- cdp_master_profiles.current_persona_id always points at it.
+-- cdp_persona_features / cdp_persona_score_details / cdp_persona_history are
+-- the supporting explainability tables: the raw signals that fed the
+-- computation, the per-component score breakdown, and an audit trail of
+-- material persona changes over time, respectively.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS customer360.cdp_customer_personas
+(
+    persona_id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+
+    tenant_id               UUID NOT NULL
+        REFERENCES customer360.sys_tenant(tenant_id),
+    domain                  TEXT NOT NULL,
+
+    master_profile_id        UUID NOT NULL
+        REFERENCES customer360.cdp_master_profiles(master_profile_id)
+        ON DELETE CASCADE,
+
+    persona_code            VARCHAR(50) NOT NULL,
+    persona_name            VARCHAR(255) NOT NULL,
+
+    persona_category        VARCHAR(100),
+
+    persona_summary         TEXT,
+
+    persona_score           NUMERIC(8,2) DEFAULT 0,
+
+    confidence_score        NUMERIC(5,4) DEFAULT 0,
+
+    behavior_score          NUMERIC(6,2) DEFAULT 0,
+
+    engagement_score        NUMERIC(6,2) DEFAULT 0,
+
+    financial_score         NUMERIC(6,2) DEFAULT 0,
+
+    loyalty_score           NUMERIC(6,2) DEFAULT 0,
+
+    relationship_score      NUMERIC(6,2) DEFAULT 0,
+
+    risk_score              NUMERIC(6,2) DEFAULT 0,
+
+    lifecycle_stage         VARCHAR(50),
+
+    customer_value_tier     VARCHAR(50),
+
+    risk_level              VARCHAR(30),
+
+    next_best_action        TEXT,
+
+    llm_provider            VARCHAR(50),
+
+    llm_model               VARCHAR(100),
+
+    persona_embedding       VECTOR(768),
+
+    computed_version        INTEGER DEFAULT 1,
+
+    is_active               BOOLEAN DEFAULT TRUE,
+
+    computed_at             TIMESTAMPTZ DEFAULT NOW(),
+
+    expires_at              TIMESTAMPTZ,
+
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(tenant_id,
+           master_profile_id,
+           persona_code,
+           computed_version)
+);
+
+COMMENT ON TABLE customer360.cdp_customer_personas IS 'Versioned, explainable "customer persona" computed from a resolved cdp_master_profiles row by backend-system/identity_resolution''s PersonaResolutionEngine: behavior/engagement/financial/loyalty/relationship/risk component scores, an overall persona_score, customer_value_tier/risk_level/next_best_action, and an LLM-assisted persona_name/persona_summary. Each recomputation inserts a new row (computed_version); only the latest row per master_profile_id has is_active = TRUE.';
+
+-- current_persona_id has a circular FK relationship with cdp_customer_personas
+-- (which itself has a NOT NULL FK back to cdp_master_profiles above), so it
+-- cannot be declared inline on the cdp_master_profiles CREATE TABLE -- added
+-- here via ALTER TABLE instead, now that cdp_customer_personas exists.
+ALTER TABLE customer360.cdp_master_profiles
+    ADD COLUMN IF NOT EXISTS current_persona_id UUID REFERENCES customer360.cdp_customer_personas(persona_id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_current_persona ON customer360.cdp_master_profiles (current_persona_id)
+WHERE
+    current_persona_id IS NOT NULL;
+
+-- Primary access pattern: "all persona versions for this master profile" /
+-- "the current persona for this master profile" (partial index, since most
+-- queries only care about the single is_active = TRUE row).
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_personas_master ON customer360.cdp_customer_personas (tenant_id, master_profile_id, computed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_personas_active ON customer360.cdp_customer_personas (tenant_id, master_profile_id)
+WHERE
+    is_active = TRUE;
+
+-- Audience-builder-style lookups/analytics grouped by persona archetype.
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_personas_code ON customer360.cdp_customer_personas (tenant_id, persona_code)
+WHERE
+    is_active = TRUE;
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_persona_features
+(
+    feature_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    persona_id          UUID NOT NULL
+        REFERENCES customer360.cdp_customer_personas(persona_id)
+        ON DELETE CASCADE,
+
+    feature_code        VARCHAR(100) NOT NULL,
+
+    feature_name        VARCHAR(255),
+
+    feature_type        VARCHAR(50),
+
+    numeric_value       NUMERIC,
+
+    text_value          TEXT,
+
+    boolean_value       BOOLEAN,
+
+    source_system       TEXT,
+
+    confidence_score    NUMERIC(5,4),
+
+    computed_at         TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE customer360.cdp_persona_features IS 'Raw/derived signals (tenure, channel breadth, CLV, churn probability, KYC status, ...) that fed one cdp_customer_personas computation -- the explainability input side of the persona engine.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_features_persona ON customer360.cdp_persona_features (persona_id);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_persona_score_details
+(
+    score_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    persona_id          UUID NOT NULL
+        REFERENCES customer360.cdp_customer_personas(persona_id)
+        ON DELETE CASCADE,
+
+    score_type          VARCHAR(100),
+
+    score_value         NUMERIC(8,2),
+
+    score_weight        NUMERIC(5,2),
+
+    score_formula       TEXT,
+
+    explanation         TEXT,
+
+    created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE customer360.cdp_persona_score_details IS 'Per-component score breakdown (behavior/engagement/financial/loyalty/relationship/risk) for one cdp_customer_personas row, with the weight/formula/explanation behind each -- the explainability output side of the persona engine.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_score_details_persona ON customer360.cdp_persona_score_details (persona_id);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_persona_history
+(
+    history_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    persona_id          UUID NOT NULL
+        REFERENCES customer360.cdp_customer_personas(persona_id)
+        ON DELETE CASCADE,
+
+    old_persona_name    TEXT,
+
+    new_persona_name    TEXT,
+
+    old_score           NUMERIC(8,2),
+
+    new_score           NUMERIC(8,2),
+
+    change_reason       TEXT,
+
+    model_version       VARCHAR(50),
+
+    changed_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE customer360.cdp_persona_history IS 'Audit trail of material persona changes over time (persona_name and/or persona_score delta above PersonaResolutionEngine.HISTORY_SCORE_DELTA_THRESHOLD), one row per change, linked to the NEW cdp_customer_personas row that triggered it.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_history_persona ON customer360.cdp_persona_history (persona_id);
+
+-- ============================================================================
+-- cdp_persona_config: persona-engine scoring/config registry
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS customer360.cdp_persona_config
+(
+    config_key          VARCHAR(120) PRIMARY KEY,
+    config_value        TEXT NOT NULL,
+    data_type           VARCHAR(20) NOT NULL CHECK (data_type IN ('INTEGER', 'NUMERIC', 'BOOLEAN', 'VARCHAR', 'JSONB')),
+    config_description  TEXT,
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_by          VARCHAR(100),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE customer360.cdp_persona_config IS 'Typed runtime config registry for PersonaResolutionEngine constants (thresholds, weights, caps, bonuses, and history delta).';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_config_active ON customer360.cdp_persona_config (is_active);
+
+INSERT INTO customer360.cdp_persona_config (config_key, config_value, data_type, config_description, is_active, updated_by)
+VALUES
+    ('RISK_LEVEL_CRITICAL_THRESHOLD', '80.0', 'NUMERIC', 'Risk level threshold: critical', TRUE, 'system_seed'),
+    ('RISK_LEVEL_HIGH_THRESHOLD', '60.0', 'NUMERIC', 'Risk level threshold: high', TRUE, 'system_seed'),
+    ('RISK_LEVEL_MEDIUM_THRESHOLD', '40.0', 'NUMERIC', 'Risk level threshold: medium', TRUE, 'system_seed'),
+
+    ('LIFECYCLE_BEHAVIOR_PROSPECT_BASE', '20.0', 'NUMERIC', 'Behavior base score for prospect', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_LEAD_BASE', '40.0', 'NUMERIC', 'Behavior base score for lead', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_CUSTOMER_BASE', '65.0', 'NUMERIC', 'Behavior base score for customer', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_VIP_BASE', '95.0', 'NUMERIC', 'Behavior base score for VIP', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_DORMANT_BASE', '30.0', 'NUMERIC', 'Behavior base score for dormant', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_CHURN_RISK_BASE', '35.0', 'NUMERIC', 'Behavior base score for churn_risk', TRUE, 'system_seed'),
+    ('LIFECYCLE_BEHAVIOR_DEFAULT_BASE', '30.0', 'NUMERIC', 'Behavior base score default fallback', TRUE, 'system_seed'),
+
+    ('ENGAGEMENT_RECENCY_UNKNOWN_SCORE', '30.0', 'NUMERIC', 'Engagement recency score when unknown', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_7D_SCORE', '100.0', 'NUMERIC', 'Engagement recency score <= 7 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_30D_SCORE', '80.0', 'NUMERIC', 'Engagement recency score <= 30 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_90D_SCORE', '50.0', 'NUMERIC', 'Engagement recency score <= 90 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_RECENT_180D_SCORE', '25.0', 'NUMERIC', 'Engagement recency score <= 180 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_STALE_SCORE', '10.0', 'NUMERIC', 'Engagement recency score stale', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_7D', '7', 'INTEGER', 'Engagement recency threshold 7 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_30D', '30', 'INTEGER', 'Engagement recency threshold 30 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_90D', '90', 'INTEGER', 'Engagement recency threshold 90 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_THRESHOLD_180D', '180', 'INTEGER', 'Engagement recency threshold 180 days', TRUE, 'system_seed'),
+    ('ENGAGEMENT_CHANNEL_WEIGHT_PER_SYSTEM', '10.0', 'NUMERIC', 'Engagement bonus per source system', TRUE, 'system_seed'),
+    ('ENGAGEMENT_CHANNEL_BONUS_CAP', '30.0', 'NUMERIC', 'Engagement channel bonus cap', TRUE, 'system_seed'),
+    ('ENGAGEMENT_RECENCY_WEIGHT', '0.7', 'NUMERIC', 'Engagement recency blend weight', TRUE, 'system_seed'),
+
+    ('FINANCIAL_CLV_REFERENCE_DEFAULT', '5000.0', 'NUMERIC', 'Financial score CLV reference', TRUE, 'system_seed'),
+    ('FINANCIAL_SCORE_MULTIPLIER', '100.0', 'NUMERIC', 'Financial score multiplier', TRUE, 'system_seed'),
+
+    ('LOYALTY_TIER_PLATINUM_BASE', '100.0', 'NUMERIC', 'Loyalty tier base platinum', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_GOLD_BASE', '80.0', 'NUMERIC', 'Loyalty tier base gold', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_SILVER_BASE', '60.0', 'NUMERIC', 'Loyalty tier base silver', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_BRONZE_BASE', '40.0', 'NUMERIC', 'Loyalty tier base bronze', TRUE, 'system_seed'),
+    ('LOYALTY_TIER_DEFAULT_BASE', '20.0', 'NUMERIC', 'Loyalty tier base default', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_WEIGHT', '0.8', 'NUMERIC', 'Loyalty tier blend weight', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_BONUS_PER_YEAR', '20.0', 'NUMERIC', 'Loyalty tenure bonus per year', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_BONUS_CAP', '20.0', 'NUMERIC', 'Loyalty tenure bonus cap', TRUE, 'system_seed'),
+    ('LOYALTY_TENURE_REFERENCE_DAYS', '365.0', 'NUMERIC', 'Loyalty tenure days reference', TRUE, 'system_seed'),
+
+    ('RELATIONSHIP_CHANNEL_WEIGHT_PER_SYSTEM', '20.0', 'NUMERIC', 'Relationship bonus per source system', TRUE, 'system_seed'),
+    ('RELATIONSHIP_CHANNEL_BONUS_CAP', '60.0', 'NUMERIC', 'Relationship channel bonus cap', TRUE, 'system_seed'),
+    ('RELATIONSHIP_CONTACT_WEIGHT_PER_CONTACT', '10.0', 'NUMERIC', 'Relationship bonus per contact', TRUE, 'system_seed'),
+    ('RELATIONSHIP_CONTACT_BONUS_CAP', '40.0', 'NUMERIC', 'Relationship contact bonus cap', TRUE, 'system_seed'),
+
+    ('RISK_SCORE_CHURN_MULTIPLIER', '100.0', 'NUMERIC', 'Risk scoring multiplier for churn probability', TRUE, 'system_seed'),
+    ('RISK_SCORE_DEFAULT_CHURN_BASE', '20.0', 'NUMERIC', 'Risk scoring default base if churn is missing', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_LOW', '0.0', 'NUMERIC', 'Risk segment bonus low', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_MEDIUM', '15.0', 'NUMERIC', 'Risk segment bonus medium', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_HIGH', '30.0', 'NUMERIC', 'Risk segment bonus high', TRUE, 'system_seed'),
+    ('RISK_SEGMENT_BONUS_CRITICAL', '45.0', 'NUMERIC', 'Risk segment bonus critical', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_VERIFIED', '0.0', 'NUMERIC', 'KYC status bonus verified', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_PENDING', '10.0', 'NUMERIC', 'KYC status bonus pending', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_UNVERIFIED', '20.0', 'NUMERIC', 'KYC status bonus unverified', TRUE, 'system_seed'),
+    ('KYC_STATUS_BONUS_REJECTED', '40.0', 'NUMERIC', 'KYC status bonus rejected', TRUE, 'system_seed'),
+
+    ('VALUE_TIER_CHAMPION_THRESHOLD', '80.0', 'NUMERIC', 'Customer value tier threshold champion', TRUE, 'system_seed'),
+    ('VALUE_TIER_HIGH_VALUE_THRESHOLD', '60.0', 'NUMERIC', 'Customer value tier threshold high_value', TRUE, 'system_seed'),
+    ('VALUE_TIER_GROWTH_POTENTIAL_THRESHOLD', '35.0', 'NUMERIC', 'Customer value tier threshold growth_potential', TRUE, 'system_seed'),
+
+    ('SCORE_WEIGHT_BEHAVIOR', '0.20', 'NUMERIC', 'Persona score weight behavior', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_ENGAGEMENT', '0.20', 'NUMERIC', 'Persona score weight engagement', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_FINANCIAL', '0.20', 'NUMERIC', 'Persona score weight financial', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_LOYALTY', '0.15', 'NUMERIC', 'Persona score weight loyalty', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_RELATIONSHIP', '0.10', 'NUMERIC', 'Persona score weight relationship', TRUE, 'system_seed'),
+    ('SCORE_WEIGHT_RISK', '0.15', 'NUMERIC', 'Persona score weight risk inverse component', TRUE, 'system_seed'),
+    ('SCORE_WEIGHTS_POSITIVE_SUM', '0.85', 'NUMERIC', 'Sanity helper for positive score weights', TRUE, 'system_seed'),
+
+    ('PERSONA_HISTORY_SCORE_DELTA_THRESHOLD', '5.0', 'NUMERIC', 'Minimum absolute score delta for history record', TRUE, 'system_seed')
+ON CONFLICT (config_key) DO NOTHING;
 
 -- ============================================================================
 -- cdp_raw_events: high-volume behavioral/transactional event fact table
@@ -1006,6 +1610,13 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_events (
     platform TEXT, -- ios | android | web
     ip_address INET,
     user_agent TEXT,
+
+    -- Marketing attribution snapshot (AppsFlyer/Web Tracking), carried directly
+    -- on the event row -- same rationale as the identity columns above -- so
+    -- campaign/revenue reporting never needs to join back to
+    -- cdp_raw_profiles_stage. Full attribution detail lives there.
+    media_source TEXT,
+    campaign TEXT,
 
     -- Event taxonomy (see cdp_event_catalog for the governed event_name list per category).
     event_category TEXT NOT NULL DEFAULT 'GENERAL' CHECK (
@@ -1276,7 +1887,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog: one row per cdp_master_profiles';
+COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog for cdp_master_profiles schema columns used by identity-resolution engine (CIR). One row per master-profile column (email, phone_number, device_id, etc.) with consolidation rules, matching strategies, and schema hints. Domain-specific attributes (national_id, kyc_status, loyalty_id, etc.) must be included; they live as JSONB keys in cdp_domain_profiles.domain_attributes.';
 
 -- ============================================================================
 -- cdp_identity_index: flattened O(1) point-lookup index for identifiers
@@ -1632,18 +2243,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_mp_tenant_phone ON customer360.cdp_mast
 WHERE
     phone_number IS NOT NULL;
 
--- Core Banking & Retail Identifiers (Must be unique per tenant)
-CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_mp_tenant_national_id ON customer360.cdp_master_profiles (tenant_id, national_id)
-WHERE
-    national_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_mp_tenant_cif_number ON customer360.cdp_master_profiles (tenant_id, cif_number)
-WHERE
-    cif_number IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_mp_tenant_loyalty_id ON customer360.cdp_master_profiles (tenant_id, loyalty_id)
-WHERE
-    loyalty_id IS NOT NULL;
+-- Core banking/retail identifiers are now domain-scoped in
+-- cdp_domain_profiles.domain_attributes and should be indexed/looked up via
+-- cdp_identity_index for normalized, cross-source matching.
 
 -- -------------------------------------------------------------------------
 -- 2. ML, SCORING & SEGMENTATION INDEXES (B-TREE)
@@ -1736,6 +2338,25 @@ WHERE
 CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_national_id ON customer360.cdp_raw_profiles_stage (national_id)
 WHERE
     national_id IS NOT NULL;
+
+-- Granular AppsFlyer device identifiers (fallback lookups / lineage; not
+-- active CIR matching keys -- see device_id/advertising_id above for those).
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_idfa ON customer360.cdp_raw_profiles_stage (idfa)
+WHERE
+    idfa IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_idfv ON customer360.cdp_raw_profiles_stage (idfv)
+WHERE
+    idfv IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_android_id ON customer360.cdp_raw_profiles_stage (android_id)
+WHERE
+    android_id IS NOT NULL;
+
+-- Attribution reporting: rollups of installs/events by campaign.
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_campaign_id ON customer360.cdp_raw_profiles_stage (tenant_id, media_source, campaign_id)
+WHERE
+    campaign_id IS NOT NULL;
 
 -- Trigram indexes for fuzzy matching on name/company/address during CIR
 CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_first_name_trgm ON customer360.cdp_raw_profiles_stage USING GIN (first_name gin_trgm_ops)
@@ -1866,6 +2487,10 @@ WHERE
 CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_conversion ON customer360.cdp_raw_events (tenant_id, event_time DESC)
 WHERE
     is_conversion = TRUE;
+-- Campaign performance reporting (events/conversions by media_source+campaign).
+CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_campaign ON customer360.cdp_raw_events (tenant_id, media_source, campaign)
+WHERE
+    campaign IS NOT NULL;
 -- Point lookup by event_id alone (without needing event_time for partition pruning).
 CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_event_id ON customer360.cdp_raw_events (event_id);
 -- Ad-hoc querying of the raw source payload.
@@ -1964,8 +2589,10 @@ DECLARE
         'cdp_profile_merge_history',
         'cdp_raw_events',
         'cdp_relations',
+        'cdp_domain_profiles',
         'cdp_segments',
-        'cdp_content_items'
+        'cdp_content_items',
+        'cdp_customer_personas'
     ];
 BEGIN
     FOREACH t IN ARRAY tenant_tables LOOP

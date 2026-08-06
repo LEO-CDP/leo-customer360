@@ -17,6 +17,29 @@ from core.config import settings
 from core.models.segmentation import CdpSegment
 from core.utils.sql_safety import validate_sql_where_fragment
 
+# Exposes ONLY cdp_domain_profiles.domain_attributes, aliased as "dp", scoped
+# to the current cdp_master_profiles row's own (tenant_id, master_profile_id,
+# domain). Deliberately does NOT expose any other cdp_domain_profiles column
+# (several share names with cdp_master_profiles -- tenant_id, lifecycle_stage,
+# persona_summary, engagement_score, status_code, created_at, updated_at) so
+# existing bare-column sql_rules fragments (e.g. "last_activity_at < ...")
+# keep resolving unambiguously against cdp_master_profiles. New domain-scoped
+# rules reference it explicitly, e.g. dp.domain_attributes->>'risk_segment'
+# (see GET /segments/segmentable-profile-attributes in core/routers/segment.py).
+# Duplicated in backend-system/segmentation/segmentation/recompute.py (separately
+# deployed service) -- keep both in sync if this SQL changes.
+DOMAIN_ATTRIBUTES_JOIN_SQL = """
+    LEFT JOIN LATERAL (
+        SELECT dom.domain_attributes
+        FROM {schema}.cdp_domain_profiles dom
+        JOIN {schema}.sys_domain sd ON sd.domain_id = dom.domain_id
+        WHERE dom.tenant_id = cdp_master_profiles.tenant_id
+          AND dom.master_profile_id = cdp_master_profiles.master_profile_id
+          AND sd.domain_code = cdp_master_profiles.domain
+        LIMIT 1
+    ) dp ON TRUE
+"""
+
 
 def recompute_segment_membership(db: Session, segment: CdpSegment) -> CdpSegment:
     """Re-runs ``segment.sql_rules`` against ``cdp_master_profiles`` (scoped
@@ -44,6 +67,7 @@ def recompute_segment_membership(db: Session, segment: CdpSegment) -> CdpSegment
         text(
             f"""
             SELECT master_profile_id FROM {schema}.cdp_master_profiles
+            {DOMAIN_ATTRIBUTES_JOIN_SQL.format(schema=schema)}
             WHERE tenant_id = :tenant_id AND status_code = 1 AND ({where_fragment})
             """
         ),

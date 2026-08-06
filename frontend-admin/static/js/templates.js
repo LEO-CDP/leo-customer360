@@ -31,15 +31,20 @@ window.C360 = window.C360 || {};
     "identity": "profile/identity",
     "channels": "profile/channels",
     "overview": "profile/overview",
+    "domain-attributes": "profile/domain-attributes",
     "segments": "profile/segments",
     "engagement": "profile/engagement",
     "activity": "profile/activity",
     "timeline": "profile/timeline",
     "scoring": "profile/scoring",
+    "persona": "profile/persona",
+    "linked-raw-profiles": "profile/linked-raw-profiles",
     "personalized-items": "profile/personalized-items",
 
     "segment-details": "segment/segment-details",
     "segments-list": "segment/segments-list",
+
+    "persona-list": "persona/persona-list",
 
     "campaign-dashboard": "campaign/campaign-dashboard"
   };
@@ -51,12 +56,12 @@ window.C360 = window.C360 || {};
   ];
 
   // Injected as static HTML once (no Handlebars variables of their own).
-  var STATIC_HTML = ["tabs", "settings-modal", "profiles-list", "placeholder", "segments-list", "attributes-list", "analytics", "campaign-dashboard"];
+  var STATIC_HTML = ["tabs", "settings-modal", "profiles-list", "placeholder", "segments-list", "attributes-list", "analytics", "campaign-dashboard", "persona-list"];
 
   // Registered as Handlebars partials so profile/profile-details.html can do {{> name}}.
   var PARTIALS = [
-    "identity", "channels", "overview", "segments",
-    "engagement", "activity", "timeline", "scoring", "personalized-items"
+    "identity", "channels", "overview", "domain-attributes", "segments",
+    "engagement", "activity", "timeline", "scoring", "persona", "linked-raw-profiles", "personalized-items"
   ];
 
   var ALL_NAMES = STANDALONE.concat(STATIC_HTML, PARTIALS);

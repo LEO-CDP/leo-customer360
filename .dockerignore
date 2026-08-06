@@ -1,0 +1,20 @@
+.git/
+.github/
+
+# Large directories not needed by the postgres image build context.
+backend-system/
+customer360-api/
+frontend-admin/
+docs/
+ui-wireframes/
+logs/
+
+# Local runtime artifacts.
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.venv/
+
+# Exclude documentation from Docker build context.
+**/*.md
+**/README.md

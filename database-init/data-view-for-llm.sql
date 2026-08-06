@@ -31,7 +31,10 @@ SELECT
     mp.churn_probability,
     mp.churn_risk_tier,
     mp.segmentation_tags,
-    mp.persona_embedding,
+    -- persona_embedding now lives on cdp_customer_personas (identity
+    -- *understanding*, computed by PersonaResolutionEngine), not on
+    -- cdp_master_profiles directly -- joined via current_persona_id.
+    cp.persona_embedding,
     -- Transaction summary fields, aggregated from crm_transactions
     COALESCE(tx.total_transactions, 0) AS total_transactions,
     tx.total_amount,
@@ -39,6 +42,7 @@ SELECT
     tx.last_transaction_at
 FROM
     customer360.cdp_master_profiles mp
+LEFT JOIN customer360.cdp_customer_personas cp ON cp.persona_id = mp.current_persona_id
 LEFT JOIN (
     SELECT
         master_profile_id,
@@ -80,12 +84,15 @@ SELECT
     mp.churn_probability,
     mp.churn_risk_tier,
     mp.segmentation_tags,
-    mp.persona_embedding,
+    -- persona_embedding now lives on cdp_customer_personas -- see the
+    -- matching note in mv_customer_transactions above.
+    cp.persona_embedding,
     -- Engagement summary fields, aggregated from crm_customer_contacts
     COALESCE(cc.total_contacts, 0) AS total_contacts,
     cc.last_contact_at
 FROM
     customer360.cdp_master_profiles mp
+LEFT JOIN customer360.cdp_customer_personas cp ON cp.persona_id = mp.current_persona_id
 LEFT JOIN (
     SELECT
         master_profile_id,

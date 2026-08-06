@@ -27,6 +27,7 @@ window.C360 = window.C360 || {};
       lifecycleLabel: fmt.titleCase(p.lifecycle_stage) || "—",
       lifecycleBadgeClass: fmt.lifecycleBadgeClass(p.lifecycle_stage),
       churnBadgeClass: fmt.churnBadgeClass(p.churn_risk_tier),
+      linkedRawProfileCountLabel: fmt.int(p.linked_raw_profile_count || 0),
       clvLabel: (p.predictive_clv !== null && p.predictive_clv !== undefined) ? fmt.money(p.predictive_clv, "") : "—",
       engagementLabel: (p.engagement_score !== null && p.engagement_score !== undefined) ? fmt.score(p.engagement_score) : "—",
       lastActivityLabel: p.last_activity_at ? fmt.date(p.last_activity_at) : "—"
@@ -41,6 +42,7 @@ window.C360 = window.C360 || {};
     { label: "Tier", field: "tierLabel" },
     { label: "Lifecycle", type: "badge", field: "lifecycleLabel", classField: "lifecycleBadgeClass" },
     { label: "Churn Risk", type: "badge", field: "churn_risk_tier", classField: "churnBadgeClass" },
+    { label: "Linked Raw Profiles", field: "linkedRawProfileCountLabel" },
     { label: "Predictive CLV", field: "clvLabel" },
     { label: "Engagement", field: "engagementLabel" },
     { label: "Last Activity", field: "lastActivityLabel", muted: true }
@@ -55,6 +57,7 @@ window.C360 = window.C360 || {};
 
   var dtv = C360.DataTableView.create({
     columns: COLUMNS,
+    pagination: true,
     rowVm: rowVm,
     rowId: function (vm) { return vm.master_profile_id; },
     rowSelectorClass: "profile-row",
@@ -68,7 +71,10 @@ window.C360 = window.C360 || {};
       loading: "#list-loading",
       empty: "#list-empty",
       countLabel: "#list-count-label",
-      loadMoreBtn: "#btn-load-more"
+      loadMoreBtn: "#btn-load-more",
+      prevBtn: "#btn-page-prev",
+      nextBtn: "#btn-page-next",
+      pageLabel: "#list-page-label"
     }
   });
 
@@ -79,7 +85,18 @@ window.C360 = window.C360 || {};
     dtv.bindSearch("#search-input", "q", 350);
     dtv.bindSelect("#domain-filter", "domain");
     dtv.bindSelect("#lifecycle-filter", "lifecycle_stage");
-    dtv.bindLoadMore();
+    dtv.bindSelect("#tier-filter", "clv_segment");
+    dtv.bindSelect("#churn-risk-filter", "churn_risk_tier");
+    $("#linked-raw-profile-count-input").on("input change", function () {
+      var raw = $(this).val();
+      if (raw === "" || raw === null || raw === undefined) {
+        dtv.setFilter("linked_raw_profile_count_min", "");
+        return;
+      }
+      var n = parseInt(raw, 10);
+      dtv.setFilter("linked_raw_profile_count_min", isNaN(n) ? "" : String(Math.max(0, n)));
+    });
+    dtv.bindPagination();
     $("#data-period-select").on("change", function () { load(false); });
   }
 

@@ -6,4 +6,12 @@ graphify-out
 
 GEMINI.md
 
+.vscode
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+logs/
 /.idea

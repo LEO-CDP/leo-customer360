@@ -16,46 +16,46 @@ on:
 
 jobs:
   unit-tests:
-    name: Run customer360-api unit tests
+    name: Run all unit tests
     runs-on: ubuntu-latest
 
     defaults:
       run:
-        working-directory: customer360-api
+        working-directory: .
 
     steps:
       - name: Checkout code
+        # FIX: Ensure this is the absolute latest version. 
+        # If v7 still throws the warning, check the actions/checkout repo for a v8+.
         uses: actions/checkout@v7
 
       - name: Set up Python 3.11
+        # FIX: Ensure this is the absolute latest version.
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
 
       - name: Make test runner executable
-        run: chmod +x run_unit_tests.sh
+        run: chmod +x run_all_tests.sh
 
-      - name: Run unit tests
+      - name: Run all unit tests
         run: |
+          # Create the 'logs' directory so 'tee' has a place to write the file.
           mkdir -p logs
-          ./run_unit_tests.sh --junitxml=logs/test-results.xml --tb=short 2>&1 | tee logs/test-output.log
+          
+          # Run the script and pipe the output
+          ./run_all_tests.sh 2>&1 | tee logs/test-output.log
 
-      - name: Upload test logs and results
+      - name: Upload test logs
         if: always()
+        # FIX: Check actions/upload-artifact for the latest tag if the warning persists.
         uses: actions/upload-artifact@v7
         with:
-          name: customer360-api-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          name: all-unit-test-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            customer360-api/logs/test-output.log
-            customer360-api/logs/test-results.xml
+            logs/test-output.log
           retention-days: 30
-
-      - name: Publish test summary
-        if: always()
-        uses: test-summary/action@v2
-        with:
-          paths: customer360-api/logs/test-results.xml
 
       - name: Send email notification
         if: always()
@@ -66,7 +66,7 @@ jobs:
           secure: false
           username: ${{ secrets.BREVO_SMTP_LOGIN }}
           password: ${{ secrets.BREVO_SMTP_KEY }}
-          subject: "CI ${{ job.status }}: customer360-api unit tests (run #${{ github.run_number }})"
+          subject: "CI ${{ job.status }}: all unit tests (run #${{ github.run_number }})"
           to: trieu@leocdp.com
           from: ${{ secrets.BREVO_SENDER_EMAIL }}
           body: |
@@ -78,5 +78,4 @@ jobs:
             Triggered by: ${{ github.actor }}
             Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           attachments: |
-            customer360-api/logs/test-output.log
-            customer360-api/logs/test-results.xml
+            logs/test-output.log

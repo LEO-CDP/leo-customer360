@@ -183,8 +183,13 @@ ON CONFLICT (event_name) DO UPDATE SET
 -- ============================================================================
 -- FULL ATTRIBUTE CATALOG SEED
 -- ============================================================================
--- Full attribute catalog for cdp_master_profiles (every column, grouped) plus
--- the cdp_raw_profiles_stage matching keys used by backend-system/identity_resolution.
+-- Catalog of cdp_master_profiles columns and cdp_raw_profiles_stage matching
+-- keys used by backend-system/identity_resolution for dynamic CIR matching.
+-- Domain-specific attributes (national_id, kyc_status, loyalty_id, etc.) are
+-- seeded separately below, right after this block -- they are stored as
+-- JSONB keys in cdp_domain_profiles.domain_attributes (source_table =
+-- 'cdp_domain_profiles', master_profile_column = NULL), not as scalar
+-- cdp_master_profiles columns.
 -- Idempotent: safe to re-run (ON CONFLICT upserts by attribute_internal_code).
 
 INSERT INTO customer360.cdp_profile_attributes (
@@ -230,7 +235,7 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('first_name', 'first_name', 'First Name', 'Given name.', 'IDENTITY', 'cdp_master_profiles', 'TEXT', 'all', TRUE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 70),
     ('last_name', 'last_name', 'Last Name', 'Family name.', 'IDENTITY', 'cdp_master_profiles', 'TEXT', 'all', TRUE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 80),
     ('profile_picture_url', 'profile_picture_url', 'Profile Picture URL', 'URL to the customer avatar or profile image.', 'IDENTITY', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 82),
-    ('is_hashed', 'is_hashed', 'PII Is Hashed', 'True if full_name/email/phone_number/national_id are SHA-256 hashed (hashed-match ingestion). When TRUE, persona_name is required.', 'IDENTITY', 'cdp_master_profiles', 'BOOLEAN', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 85),
+    ('is_hashed', 'is_hashed', 'PII Is Hashed', 'True if full_name/email/phone_number are SHA-256 hashed (hashed-match ingestion). When TRUE, persona_name is required.', 'IDENTITY', 'cdp_master_profiles', 'BOOLEAN', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 85),
     ('email', 'email', 'Email Address', 'Primary email; identity-resolution matching key (exact, SHA-256 hashed).', 'IDENTITY', 'cdp_master_profiles, cdp_raw_profiles_stage', 'TEXT', 'all', TRUE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 90),
     ('phone_number', 'phone_number', 'Phone Number', 'Primary phone; identity-resolution matching key (exact, SHA-256 hashed).', 'IDENTITY', 'cdp_master_profiles, cdp_raw_profiles_stage', 'TEXT', 'all', TRUE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 100),
     ('secondary_emails', 'secondary_emails', 'Secondary Emails', 'Additional emails, e.g. [{"email":"work@abc.com","label":"work"}].', 'IDENTITY', 'cdp_master_profiles', 'JSONB', 'all', TRUE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 110),
@@ -250,7 +255,7 @@ INSERT INTO customer360.cdp_profile_attributes (
 
     -- IDENTITY_GRAPH (cross-channel device/ad/cookie/external identifiers)
     ('external_ids', 'external_ids', 'External System IDs', 'Map of source_system to that source external customer id (deterministic matching).', 'IDENTITY_GRAPH', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 160),
-    ('external_customer_id', 'external_ids', 'External Customer ID (raw)', 'Per-source customer id on cdp_raw_profiles_stage (AppsFlyer customer_user_id / core banking CIF / loyalty_id); identity-resolution matching key, consolidated into external_ids.', 'IDENTITY_GRAPH', 'cdp_raw_profiles_stage', 'TEXT', 'all', FALSE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 170),
+    ('external_customer_id', 'external_ids', 'External Customer ID (raw)', 'Per-source customer id on cdp_raw_profiles_stage (AppsFlyer customer_user_id / core banking CIF / MoEngage unique_id); identity-resolution matching key, consolidated into external_ids.', 'IDENTITY_GRAPH', 'cdp_raw_profiles_stage', 'TEXT', 'all', FALSE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 170),
     ('device_ids', 'device_ids', 'Device IDs', 'Consolidated array of device identifiers (IDFV/Android ID/app instance id).', 'IDENTITY_GRAPH', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 180),
     ('device_id', 'device_ids', 'Device ID (raw)', 'Raw per-event device id on cdp_raw_profiles_stage; identity-resolution matching key, consolidated into device_ids.', 'IDENTITY_GRAPH', 'cdp_raw_profiles_stage', 'TEXT', 'all', FALSE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 190),
     ('advertising_ids', 'advertising_ids', 'Advertising IDs', 'Consolidated array of mobile advertising identifiers (IDFA/GAID) for retargeting.', 'IDENTITY_GRAPH', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 200),
@@ -260,45 +265,21 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('push_tokens', 'push_tokens', 'Push Notification Tokens', 'Stored push tokens, e.g. {"fcm":"token","apns":"token"}.', 'IDENTITY_GRAPH', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 240),
     ('attributes', 'attributes', 'Custom Attributes', 'Schemaless payload of dynamically extracted traits (e.g. occupation, income_segment).', 'MARKETING', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 245),
 
-    -- RETAIL
-    ('loyalty_id', 'loyalty_id', 'Loyalty ID', 'Retail loyalty program membership identifier.', 'RETAIL', 'cdp_master_profiles', 'TEXT', 'retail', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 250),
-    ('membership_tier', 'membership_tier', 'Membership Tier', 'Loyalty program tier (e.g. Silver/Gold/Platinum).', 'RETAIL', 'cdp_master_profiles', 'TEXT', 'retail', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'tier', NULL, NULL, NULL, 260),
-    ('preferred_store_code', 'preferred_store_code', 'Preferred Store Code', 'Physical store the customer shops at most often.', 'RETAIL', 'cdp_master_profiles', 'TEXT', 'retail', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 270),
-
-    -- BANKING
-    ('national_id', 'national_id', 'National ID / KYC ID', 'CMND/CCCD/passport number; identity-resolution matching key (exact, SHA-256 hashed).', 'BANKING', 'cdp_master_profiles, cdp_raw_profiles_stage', 'TEXT', 'banking', TRUE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 280),
-    ('cif_number', 'cif_number', 'Core Banking CIF Number', 'Customer Information File number; the golden record id in legacy core banking.', 'BANKING', 'cdp_master_profiles', 'TEXT', 'banking', TRUE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 290),
-    ('account_numbers', 'account_numbers', 'Account Numbers', 'Array of active bank account numbers associated with this CIF.', 'BANKING', 'cdp_master_profiles', 'ARRAY', 'banking', TRUE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 300),
-    ('kyc_status', 'kyc_status', 'KYC Status', 'unverified, pending, verified, or rejected.', 'BANKING', 'cdp_master_profiles', 'TEXT', 'banking', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 310),
-    ('risk_segment', 'risk_segment', 'Risk Segment', 'AML/credit risk categorization.', 'BANKING', 'cdp_master_profiles', 'TEXT', 'banking', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 320),
-
-    -- REAL ESTATE
-    ('property_types_of_interest', 'property_types_of_interest', 'Property Types of Interest', 'Real-estate property types the prospect is interested in (e.g. apartment, villa, land).', 'REAL_ESTATE', 'cdp_master_profiles', 'ARRAY', 'real_estate', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 321),
-    ('preferred_location_codes', 'preferred_location_codes', 'Preferred Location Codes', 'Preferred city/district/area codes for property search.', 'REAL_ESTATE', 'cdp_master_profiles', 'ARRAY', 'real_estate', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 322),
-
-    -- TRAVEL
-    ('travel_loyalty_program_id', 'travel_loyalty_program_id', 'Travel Loyalty Program ID', 'Travel loyalty program membership identifier.', 'TRAVEL', 'cdp_master_profiles', 'TEXT', 'travel', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 323),
-    ('preferred_travel_class', 'preferred_travel_class', 'Preferred Travel Class', 'Preferred cabin/travel class (e.g. economy, business, first).', 'TRAVEL', 'cdp_master_profiles', 'TEXT', 'travel', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 324),
-
-    -- MEDIA
-    ('media_subscription_id', 'media_subscription_id', 'Media Subscription ID', 'Media platform subscription or account identifier.', 'MEDIA', 'cdp_master_profiles', 'TEXT', 'media', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 325),
-    ('preferred_content_genres', 'preferred_content_genres', 'Preferred Content Genres', 'Content genres the user prefers (e.g. news, sports, entertainment).', 'MEDIA', 'cdp_master_profiles', 'ARRAY', 'media', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 326),
-
-    -- EDUCATION
-    ('student_id', 'student_id', 'Student ID', 'Student identifier issued by the education institution or learning platform.', 'EDUCATION', 'cdp_master_profiles', 'TEXT', 'education', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 327),
-    ('institution_name', 'institution_name', 'Institution Name', 'Name of the education institution or learning platform.', 'EDUCATION', 'cdp_master_profiles', 'TEXT', 'education', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 328),
-
+   
     -- MARKETING
     ('acquisition_source', 'acquisition_source', 'Acquisition Source', 'First-touch channel attribution (e.g. organic_search, paid_social).', 'MARKETING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 330),
     ('acquisition_campaign', 'acquisition_campaign', 'Acquisition Campaign', 'First-touch campaign attribution.', 'MARKETING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 340),
     ('persona_name', 'persona_name', 'Persona Name', 'Human-readable, non-PII label for segmentation/marketing and semantic search (e.g. "Gen Z Shopper"). Required whenever is_hashed = TRUE; auto-generated by backend-system/identity_resolution when real PII is hashed.', 'MARKETING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 345),
-    ('persona_embedding', 'persona_embedding', 'Persona Embedding', 'LLM-generated embedding used for semantic search / lookalike modeling.', 'MARKETING', 'cdp_master_profiles', 'VECTOR', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 350),
+    ('current_persona_id', 'current_persona_id', 'Current Persona ID', 'Pointer to the latest is_active=TRUE row in cdp_customer_personas for this profile.', 'MARKETING', 'cdp_master_profiles', 'UUID', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 347),
+    ('persona_embedding', NULL, 'Persona Embedding', 'LLM-generated embedding used for semantic search / lookalike modeling. Lives on cdp_customer_personas (joined via cdp_master_profiles.current_persona_id), not on cdp_master_profiles directly.', 'MARKETING', 'cdp_customer_personas', 'VECTOR', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 350),
     ('segmentation_tags', 'segmentation_tags', 'Segmentation Tags', 'Computed labels for fast Audience Builder queries (e.g. gen_z, frequent_buyer).', 'MARKETING', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 360),
     ('communication_preferences', 'communication_preferences', 'Communication Preferences', 'Tracks explicit user consent across multiple channels. Essential for omnichannel marketing compliance (e.g., GDPR, PDPA) before activating campaigns. Format: {"email_opt_in": true, "sms_opt_in": false, "push_opt_in": true}', 'MARKETING', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 370),
 
     -- LINEAGE
     ('source_systems', 'source_systems', 'Source Systems', 'All external systems that have contributed data to this profile.', 'LINEAGE', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 380),
     ('first_seen_raw_profile_id', 'first_seen_raw_profile_id', 'First Seen Raw Profile ID', 'Lineage pointer back to the raw_profile_id that initiated this profile.', 'LINEAGE', 'cdp_master_profiles', 'UUID', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 390),
+    ('linked_raw_profile_count', 'linked_raw_profile_count', 'Linked Raw Profile Count', 'Denormalized count of raw profiles (cdp_profile_links, status=ACTIVE) merged into this golden record -- a CIR match-volume/confidence signal distinct from source_systems (distinct SYSTEMS, not distinct raw touches).', 'LINEAGE', 'cdp_master_profiles', 'INTEGER', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'count', 0, NULL, 'event_driven', 605),
+    ('last_identity_resolved_at', 'last_identity_resolved_at', 'Last Identity Resolved At', 'Timestamp Customer Identity Resolution (CIR) last (re)computed/updated this profile''s identity graph; distinct from updated_at (any row touch) and scores_updated_at (ML scores only).', 'LINEAGE', 'cdp_master_profiles', 'TIMESTAMP', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, 'event_driven', 606),
 
     -- LIFECYCLE (prospect -> lead -> customer journey tracking)
     ('customer_since', 'customer_since', 'Customer Since', 'Date the profile first converted from lead/prospect to paying customer.', 'LIFECYCLE', 'cdp_master_profiles', 'DATE', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, NULL, 391),
@@ -357,17 +338,127 @@ ON CONFLICT (attribute_internal_code) DO UPDATE SET
     display_order          = EXCLUDED.display_order,
     updated_at             = now();
 
+-- ============================================================================
+-- Domain-specific attributes: JSONB keys living in
+-- cdp_domain_profiles.domain_attributes (see database-schema.sql's
+-- cdp_domain_profiles comment block for the canonical per-domain key list).
+-- source_table='cdp_domain_profiles' and master_profile_column=NULL (there is
+-- no scalar cdp_master_profiles column to consolidate into -- same NULL
+-- convention used by the 'persona_embedding' row above for cdp_customer_personas).
+-- national_id/kyc_status/membership_tier/risk_segment are the only ones
+-- actually read by backend-system/identity_resolution today:
+--   - national_id: CIR exact-match key (resolver.py's DOMAIN_ATTRIBUTE_FIELDS +
+--     _build_match_condition() EXISTS-subquery matching against this table).
+--   - kyc_status: verified_field for email/phone_number's verified_first
+--     consolidation policy (see below), plus a persona risk-score input.
+--   - membership_tier/risk_segment: persona_engine.py loyalty/risk score inputs.
+-- The rest (cif_number, account_numbers, loyalty_id, preferred_store_code,
+-- property_types_of_interest, preferred_location_codes,
+-- travel_loyalty_program_id, preferred_travel_class, media_subscription_id,
+-- preferred_content_genres, student_id, institution_name) are catalog-only
+-- metadata today (is_identity_resolution=FALSE, is_scoring_model=FALSE) --
+-- not yet wired into any CIR matching or scoring logic.
+-- is_segmentable=TRUE for scalar (non-array, non-raw-PII-identifier)
+-- attributes only: the Audience Builder field picker (GET /segments/
+-- segmentable-profile-attributes) now also returns source_table=
+-- 'cdp_domain_profiles' rows, exposed as dp.domain_attributes->>'key' via
+-- the LATERAL join added to every cdp_segments query -- see
+-- core/routers/segment.py and core/crud/segmentation.py. Array-valued keys
+-- and raw PII identifiers (national_id, cif_number, account_numbers,
+-- property_types_of_interest, preferred_location_codes,
+-- preferred_content_genres) stay is_segmentable=FALSE: arrays need a
+-- containment operator the QueryBuilder doesn't emit yet, and raw
+-- identifiers aren't meaningful audience criteria.
+INSERT INTO customer360.cdp_profile_attributes (
+    attribute_internal_code,
+    master_profile_column,
+    name,
+    description,
+    attribute_group,
+    source_table,
+    data_type,
+    domain_scope,
+    is_pii,
+    status,
+    is_segmentable,
+    is_identity_resolution,
+    matching_rule,
+    matching_threshold,
+    consolidation_rule,
+    is_scoring_model,
+    scoring_model_name,
+    scoring_model_version,
+    value_type,
+    value_min,
+    value_max,
+    refresh_frequency,
+    display_order
+) VALUES
+    -- BANKING
+    ('national_id', NULL, 'National ID (KYC)', 'Government-issued national identity/passport number (SHA-256 hashed); identity-resolution matching key stored as a JSONB key in cdp_domain_profiles.domain_attributes (banking domain).', 'BANKING', 'cdp_domain_profiles', 'TEXT', 'banking', TRUE, 'ACTIVE', FALSE, TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 550),
+    ('kyc_status', NULL, 'KYC Status', 'Know-Your-Customer verification status (verified/pending/unverified/rejected); the verified_field for the email/phone_number verified_first consolidation policy and a persona risk-score input. Not itself a CIR matching key.', 'BANKING', 'cdp_domain_profiles', 'TEXT', 'banking', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, TRUE, 'persona_risk_score', 'v1', 'label', NULL, NULL, 'event_driven', 551),
+    ('cif_number', NULL, 'Core Banking CIF Number', 'Customer Information File number assigned by the core banking system.', 'BANKING', 'cdp_domain_profiles', 'TEXT', 'banking', TRUE, 'ACTIVE', FALSE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 552),
+    ('account_numbers', NULL, 'Account Numbers', 'Array of bank account numbers held by the customer.', 'BANKING', 'cdp_domain_profiles', 'ARRAY', 'banking', TRUE, 'ACTIVE', FALSE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 553),
+    ('risk_segment', NULL, 'Risk Segment', 'Banking risk classification (low/medium/high/critical); a persona risk-score input.', 'BANKING', 'cdp_domain_profiles', 'TEXT', 'banking', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, TRUE, 'persona_risk_score', 'v1', 'tier', NULL, NULL, 'daily', 554),
+
+    -- RETAIL
+    ('loyalty_id', NULL, 'Loyalty ID', 'Retail loyalty program membership identifier.', 'RETAIL', 'cdp_domain_profiles', 'TEXT', 'retail', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 560),
+    ('membership_tier', NULL, 'Membership Tier', 'Retail loyalty tier (bronze/silver/gold/platinum); a persona loyalty-score input.', 'RETAIL', 'cdp_domain_profiles', 'TEXT', 'retail', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, TRUE, 'persona_loyalty_score', 'v1', 'tier', NULL, NULL, 'event_driven', 561),
+    ('preferred_store_code', NULL, 'Preferred Store Code', 'Store code of the customer''s preferred physical location.', 'RETAIL', 'cdp_domain_profiles', 'TEXT', 'retail', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 562),
+
+    -- REAL_ESTATE
+    ('property_types_of_interest', NULL, 'Property Types of Interest', 'Array of property types the customer has shown interest in.', 'REAL_ESTATE', 'cdp_domain_profiles', 'ARRAY', 'real_estate', FALSE, 'ACTIVE', FALSE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 570),
+    ('preferred_location_codes', NULL, 'Preferred Location Codes', 'Array of location codes the customer has shown interest in.', 'REAL_ESTATE', 'cdp_domain_profiles', 'ARRAY', 'real_estate', FALSE, 'ACTIVE', FALSE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 571),
+
+    -- TRAVEL
+    ('travel_loyalty_program_id', NULL, 'Travel Loyalty Program ID', 'Airline/hotel loyalty program membership identifier.', 'TRAVEL', 'cdp_domain_profiles', 'TEXT', 'travel', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 580),
+    ('preferred_travel_class', NULL, 'Preferred Travel Class', 'Preferred cabin/travel class (e.g. Economy/Business).', 'TRAVEL', 'cdp_domain_profiles', 'TEXT', 'travel', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 581),
+
+    -- MEDIA
+    ('media_subscription_id', NULL, 'Media Subscription ID', 'Media/streaming subscription account identifier.', 'MEDIA', 'cdp_domain_profiles', 'TEXT', 'media', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 590),
+    ('preferred_content_genres', NULL, 'Preferred Content Genres', 'Array of preferred content genres.', 'MEDIA', 'cdp_domain_profiles', 'ARRAY', 'media', FALSE, 'ACTIVE', FALSE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 591),
+
+    -- EDUCATION
+    ('student_id', NULL, 'Student ID', 'Institution-issued student identifier.', 'EDUCATION', 'cdp_domain_profiles', 'TEXT', 'education', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 600),
+    ('institution_name', NULL, 'Institution Name', 'Name of the educational institution.', 'EDUCATION', 'cdp_domain_profiles', 'TEXT', 'education', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, NULL, 601)
+
+ON CONFLICT (attribute_internal_code) DO UPDATE SET
+    master_profile_column  = EXCLUDED.master_profile_column,
+    name                   = EXCLUDED.name,
+    description            = EXCLUDED.description,
+    attribute_group        = EXCLUDED.attribute_group,
+    source_table           = EXCLUDED.source_table,
+    data_type              = EXCLUDED.data_type,
+    domain_scope           = EXCLUDED.domain_scope,
+    is_pii                 = EXCLUDED.is_pii,
+    status                 = EXCLUDED.status,
+    is_segmentable         = EXCLUDED.is_segmentable,
+    is_identity_resolution = EXCLUDED.is_identity_resolution,
+    matching_rule          = EXCLUDED.matching_rule,
+    matching_threshold     = EXCLUDED.matching_threshold,
+    consolidation_rule     = EXCLUDED.consolidation_rule,
+    is_scoring_model       = EXCLUDED.is_scoring_model,
+    scoring_model_name     = EXCLUDED.scoring_model_name,
+    scoring_model_version  = EXCLUDED.scoring_model_version,
+    value_type             = EXCLUDED.value_type,
+    value_min              = EXCLUDED.value_min,
+    value_max              = EXCLUDED.value_max,
+    refresh_frequency      = EXCLUDED.refresh_frequency,
+    display_order          = EXCLUDED.display_order,
+    updated_at             = now();
+
 -- Default CIR merge policy seed: lets the resolver prefer recent or
 -- verified values without hard-coding a single merge strategy in Python.
 -- full_name is intentionally excluded (is_identity_resolution=FALSE means
 -- resolver.py never loads a consolidation_rule for it either -- see the
--- comment on its INSERT row above).
+-- comment on its INSERT row above). national_id already got its
+-- consolidation_rule='non_null' set directly on INSERT above (domain-attribute
+-- rows aren't part of this scalar-column merge-policy block).
 UPDATE customer360.cdp_profile_attributes
 SET
     consolidation_rule = CASE attribute_internal_code
         WHEN 'email' THEN 'verified_first'
         WHEN 'phone_number' THEN 'verified_first'
-        WHEN 'national_id' THEN 'verified_first'
         WHEN 'external_customer_id' THEN 'source_priority'
         WHEN 'device_id' THEN 'source_priority'
         WHEN 'advertising_id' THEN 'source_priority'
@@ -377,7 +468,6 @@ SET
     consolidation_config = CASE attribute_internal_code
         WHEN 'email' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"verified_event_names":["kyc-completed"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
         WHEN 'phone_number' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"verified_event_names":["kyc-completed"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
-        WHEN 'national_id' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"verified_event_names":["kyc-completed"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
         WHEN 'external_customer_id' THEN '{"mode":"source_priority","source_priority":["CoreBanking","POS","WebTracking","AppsFlyer","MoEngage"]}'::jsonb
         WHEN 'device_id' THEN '{"mode":"source_priority","source_priority":["WebTracking","AppsFlyer","MoEngage"]}'::jsonb
         WHEN 'advertising_id' THEN '{"mode":"source_priority","source_priority":["WebTracking","AppsFlyer","MoEngage"]}'::jsonb
@@ -388,7 +478,6 @@ SET
 WHERE attribute_internal_code IN (
     'email',
     'phone_number',
-    'national_id',
     'external_customer_id',
     'device_id',
     'advertising_id',
@@ -400,6 +489,8 @@ WHERE attribute_internal_code IN (
 -- assurance/lower-churn identifiers (KYC id, per-source customer id) get
 -- rank 1 and a tight value_limit; loosely-scoped/high-churn identifiers
 -- (cookies) get a lower rank and a shorter, weekly-refreshed window.
+-- national_id (domain-scoped KYC id) is ranked alongside external_customer_id
+-- -- both are 1-per-person, source-verified identifiers.
 UPDATE customer360.cdp_profile_attributes
 SET
     priority_rank = CASE attribute_internal_code
@@ -432,8 +523,8 @@ SET
 WHERE attribute_internal_code IN (
     'email',
     'phone_number',
-    'national_id',
     'external_customer_id',
+    'national_id',
     'device_id',
     'advertising_id',
     'cookie_id'

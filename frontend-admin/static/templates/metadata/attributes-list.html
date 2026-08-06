@@ -50,6 +50,19 @@
         <option value="all">Global</option>
       </select>
 
+      <!-- Source Filter: cdp_master_profiles vs cdp_domain_profiles (see attributes-view.js sourceLabel) -->
+      <select id="attributes-source-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All sources</option>
+        <option value="cdp_master_profiles">Master Profile</option>
+        <option value="cdp_domain_profiles">Domain Profile</option>
+      </select>
+
+      <!-- Add Attribute -->
+      <button id="btn-attributes-add" class="inline-flex items-center gap-1.5 bg-indigo-600 text-white rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-100">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+        <span>Add Attribute</span>
+      </button>
+
     </div>
 
   </div>
@@ -79,4 +92,124 @@
     <span id="attributes-count-label" class="font-medium"></span>
   </div>
 
+</div>
+
+<!--
+  =============================================================================
+  ATTRIBUTE FORM MODAL
+  Creates a new customer360.cdp_profile_attributes catalog row via
+  POST /profile-attributes/ (see attributes-view.js).
+  =============================================================================
+-->
+<div id="attribute-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-100 max-h-[90vh] overflow-y-auto">
+
+    <!-- Modal Header -->
+    <div class="flex items-center gap-3 mb-5 pb-3 border-b border-slate-100">
+      <div class="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+      </div>
+      <div>
+        <h2 id="attribute-form-title" class="text-base font-bold text-slate-900 tracking-tight">Add Attribute</h2>
+        <p id="attribute-form-subtitle" class="text-xs text-slate-400">Registers a new row in the cdp_profile_attributes catalog</p>
+      </div>
+    </div>
+
+    <!-- Form Fields -->
+    <div class="space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Attribute Code *</label>
+          <input id="attribute-add-code" type="text" placeholder="e.g. preferred_language" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Display Name *</label>
+          <input id="attribute-add-name" type="text" placeholder="e.g. Preferred Language" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Description</label>
+        <textarea id="attribute-add-description" rows="2" placeholder="What this attribute represents..." class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none resize-none"></textarea>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Group</label>
+          <select id="attribute-add-group" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
+            <option value="GENERAL">General</option>
+            <option value="IDENTITY">Identity</option>
+            <option value="IDENTITY_GRAPH">Identity Graph</option>
+            <option value="RETAIL">Retail</option>
+            <option value="BANKING">Banking</option>
+            <option value="REAL_ESTATE">Real Estate</option>
+            <option value="TRAVEL">Travel</option>
+            <option value="MEDIA">Media</option>
+            <option value="EDUCATION">Education</option>
+            <option value="MARKETING">Marketing</option>
+            <option value="LINEAGE">Lineage</option>
+            <option value="LIFECYCLE">Lifecycle</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Source Table</label>
+          <select id="attribute-add-source" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
+            <option value="cdp_domain_profiles" selected>Domain Profile</option>
+            <option value="cdp_master_profiles">Master Profile</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Domain Scope</label>
+          <select id="attribute-add-domain-scope" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
+            <option value="all">All (Global)</option>
+            <option value="retail">Retail</option>
+            <option value="banking">Banking</option>
+            <option value="real_estate">Real Estate</option>
+            <option value="travel">Travel</option>
+            <option value="media">Media</option>
+            <option value="education">Education</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Data Type</label>
+          <select id="attribute-add-data-type" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
+            <option value="TEXT">Text</option>
+            <option value="NUMERIC">Numeric</option>
+            <option value="BOOLEAN">Boolean</option>
+            <option value="DATE">Date</option>
+            <option value="TIMESTAMP">Timestamp</option>
+            <option value="ARRAY">Array</option>
+            <option value="JSONB">JSONB</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-5">
+        <label class="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+          <input id="attribute-add-is-pii" type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/30" />
+          Contains PII
+        </label>
+        <label class="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+          <input id="attribute-add-is-segmentable" type="checkbox" checked class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/30" />
+          Segmentable
+        </label>
+      </div>
+
+      <div id="attribute-add-error" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5"></div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="flex items-center justify-end gap-2.5 mt-6 pt-4 border-t border-slate-100">
+      <button id="btn-attribute-add-cancel" class="border border-slate-200/80 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">
+        Cancel
+      </button>
+      <button id="btn-attribute-add-save" class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-4 py-2 text-xs font-semibold transition-colors shadow-sm shadow-indigo-100">
+        <span id="attribute-form-save-label">Save Attribute</span>
+      </button>
+    </div>
+
+  </div>
 </div>

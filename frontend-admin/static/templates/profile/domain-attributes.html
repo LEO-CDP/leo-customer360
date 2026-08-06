@@ -1,0 +1,55 @@
+<!--
+  =============================================================================
+  DOMAIN ATTRIBUTES CARD
+  One block per cdp_domain_profiles row (banking/retail/travel/...) belonging
+  to this master profile, listing its domain_attributes JSONB as key/value
+  rows, plus a small form to add a new attribute (POST
+  /master-profiles/{id}/domain-attributes).
+  =============================================================================
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-5">
+  <div class="flex items-center gap-2 mb-4">
+    <div class="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375" />
+      </svg>
+    </div>
+    <h3 class="font-semibold text-slate-900 text-sm">Domain Attributes</h3>
+  </div>
+
+  {{#if hasDomainProfiles}}
+  <div class="space-y-4">
+    {{#each domainProfiles}}
+    <div class="rounded-xl border border-slate-100 p-3">
+      <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">{{domainLabel}}</div>
+      {{#if hasAttributes}}
+      <ul class="space-y-1.5">
+        {{#each attributes}}
+        <li class="flex items-center justify-between gap-3 text-xs">
+          <span class="text-slate-500">{{label}}</span>
+          <span class="font-medium text-slate-800 text-right break-all">{{value}}</span>
+        </li>
+        {{/each}}
+      </ul>
+      {{else}}
+      <div class="text-xs text-slate-400 italic">No attributes set yet.</div>
+      {{/if}}
+    </div>
+    {{/each}}
+  </div>
+  {{else}}
+  <div class="text-xs text-slate-400 italic mb-4">No domain profile exists for this person yet -- adding an attribute below will create one.</div>
+  {{/if}}
+
+  <!-- Add Attribute Form -->
+  <form id="domain-attribute-form" class="mt-4 pt-4 border-t border-slate-100 space-y-2">
+    <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Add Attribute</div>
+    <div class="grid grid-cols-3 gap-2">
+      <select id="domain-attribute-domain" class="col-span-1 text-xs border border-slate-200/80 bg-slate-50/50 rounded-lg px-2 py-2 text-slate-700 outline-none"></select>
+      <input id="domain-attribute-key" type="text" placeholder="key (e.g. risk_segment)" class="col-span-1 text-xs border border-slate-200/80 bg-slate-50/50 rounded-lg px-2 py-2 text-slate-700 outline-none" />
+      <input id="domain-attribute-value" type="text" placeholder="value" class="col-span-1 text-xs border border-slate-200/80 bg-slate-50/50 rounded-lg px-2 py-2 text-slate-700 outline-none" />
+    </div>
+    <button type="submit" class="w-full text-xs font-semibold bg-indigo-600 text-white rounded-lg px-3 py-2 hover:bg-indigo-700 transition-colors">Add Attribute</button>
+    <div id="domain-attribute-form-error" class="hidden text-[11px] text-red-600"></div>
+  </form>
+</div>

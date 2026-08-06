@@ -12,6 +12,49 @@ window.C360 = window.C360 || {};
   var currentContentType = "";
   var timelineLimit = 8;
 
+  // Mirrors the sys_domain / validate_domain_value fixed dictionary
+  // (customer360-api/core/utils/domains.py) -- used to populate the "Add
+  // Attribute" domain <select> without a dedicated /domains endpoint.
+  var DOMAIN_CODES = ["retail", "banking", "real_estate", "travel", "media", "education"];
+
+  function populateDomainAttributeDomainSelect(defaultDomain) {
+    var $select = $("#domain-attribute-domain");
+    if (!$select.length) return;
+    $select.empty();
+    DOMAIN_CODES.forEach(function (code) {
+      $select.append($("<option>").val(code).text(fmt.domainLabel(code)));
+    });
+    if (defaultDomain) $select.val(defaultDomain);
+  }
+
+  function submitDomainAttributeForm() {
+    var domain = $("#domain-attribute-domain").val();
+    var key = $.trim($("#domain-attribute-key").val());
+    var value = $.trim($("#domain-attribute-value").val());
+    var $error = $("#domain-attribute-form-error");
+    $error.addClass("hidden").text("");
+
+    if (!key) {
+      $error.removeClass("hidden").text("Attribute key is required.");
+      return;
+    }
+
+    api("/master-profiles/" + currentProfileId + "/domain-attributes", {
+      domain: domain,
+      attribute_key: key,
+      attribute_value: value,
+    }, "POST")
+      .done(function () {
+        $("#domain-attribute-key").val("");
+        $("#domain-attribute-value").val("");
+        reload();
+      })
+      .fail(function (xhr) {
+        var detail = (xhr.responseJSON && xhr.responseJSON.detail) || "Could not add attribute.";
+        $error.removeClass("hidden").text(typeof detail === "string" ? detail : JSON.stringify(detail));
+      });
+  }
+
   function periodDays() {
     return parseInt($("#data-period-select").val(), 10) || 90;
   }
@@ -38,13 +81,17 @@ window.C360 = window.C360 || {};
     channelActivity,
     topInterests,
     timeline,
+    profileLinks,
+    persona,
+    personaHistory,
+    domainProfiles,
   ) {
     var displayName =
       profile.persona_name ||
       profile.full_name ||
       "Profile " + fmt.shortId(profile.master_profile_id);
 
-    // Ordered contact-first, then digital/technical identifiers, for CIR review flow.
+    // Channels & Identifiers card now focuses on activation-reachable channels only.
     var channels = [];
     if (profile.email)
       channels.push({
@@ -58,40 +105,34 @@ window.C360 = window.C360 || {};
         label: "Phone",
         badge: fmt.maskMiddle(profile.phone_number),
       });
+    if (profile.push_tokens && Object.keys(profile.push_tokens).length)
+      channels.push({
+        icon: "🔔",
+        label: "Push Notifications",
+        badge: Object.keys(profile.push_tokens).length + " token(s)",
+      });
     if ((profile.device_ids || []).length)
       channels.push({
         icon: "📱",
-        label: "Mobile App",
+        label: "Mobile App (In-App)",
         badge: profile.device_ids.length + " device(s)",
       });
     if ((profile.cookie_ids || []).length)
       channels.push({
         icon: "💻",
-        label: "Web / Cookies",
+        label: "Web",
         badge: profile.cookie_ids.length,
       });
-    if ((profile.advertising_ids || []).length)
+    if (profile.preferred_channel)
       channels.push({
-        icon: "📣",
-        label: "Advertising IDs",
-        badge: profile.advertising_ids.length,
-      });
-    if (profile.external_ids && Object.keys(profile.external_ids).length)
-      channels.push({
-        icon: "🔗",
-        label: "External IDs",
-        badge: Object.keys(profile.external_ids).length,
-      });
-    if (profile.account_numbers && profile.account_numbers.length)
-      channels.push({
-        icon: "🏦",
-        label: "Bank Accounts",
-        badge: profile.account_numbers.length,
+        icon: "🎯",
+        label: "Preferred Channel",
+        badge: fmt.titleCase(profile.preferred_channel),
       });
     if (!channels.length)
       channels.push({
         icon: "—",
-        label: "No identifiers captured yet",
+        label: "No activation channels available",
         badge: "",
       });
 
@@ -185,6 +226,293 @@ window.C360 = window.C360 || {};
 
     var timelineVms = (timeline || []).map(timelineEntryVm);
 
+    var historyVms = (personaHistory || []).map(function (h) {
+      return {
+        newPersonaName: h.new_persona_name || "—",
+        changeReason: h.change_reason || "",
+        changedAtLabel: fmt.dateTime(h.changed_at),
+      };
+    });
+
+    function linkScorePercent(v) {
+      if (v === null || v === undefined || v === "") return 0;
+      var n = Number(v);
+      if (isNaN(n)) return 0;
+      var pct = n <= 1 ? n * 100 : n;
+      return Math.max(0, Math.min(100, pct));
+    }
+
+    function linkScoreLabel(v) {
+      var pct = linkScorePercent(v);
+      return pct ? Math.round(pct) + "%" : "N/A";
+    }
+
+    function linkHasConfidenceScore(link) {
+      var method = String(link && link.match_method ? link.match_method : "")
+        .trim()
+        .toLowerCase();
+      if (method === "newmaster" || method === "none") return false;
+
+      var raw = link && link.match_score;
+      if (raw === null || raw === undefined || raw === "") return false;
+
+      var n = Number(raw);
+      return !isNaN(n);
+    }
+
+    function linkStatusBadgeClass(status) {
+      var normalized = (status || "").toUpperCase();
+      if (normalized === "ACTIVE") return "bg-emerald-100 text-emerald-700";
+      if (normalized === "HISTORICAL") return "bg-slate-100 text-slate-700";
+      if (normalized === "SUPERSEDED") return "bg-amber-100 text-amber-700";
+      if (normalized === "UNLINKED") return "bg-rose-100 text-rose-700";
+      return "bg-slate-100 text-slate-700";
+    }
+
+    var MATCHING_FIELDS = [
+      "email",
+      "phone_number",
+      "national_id",
+      "external_customer_id",
+      "device_id",
+      "advertising_id",
+      "cookie_id",
+    ];
+
+    var MATCHING_FIELD_LABELS = {
+      email: "Email",
+      phone_number: "Phone Number",
+      national_id: "National ID",
+      external_customer_id: "External Customer ID",
+      device_id: "Device ID",
+      advertising_id: "Advertising ID",
+      cookie_id: "Cookie ID",
+    };
+
+    function parseMatchFieldsFromMethod(methodRaw) {
+      var raw = String(methodRaw || "").trim();
+      if (!raw) return [];
+
+      var spec = "";
+      var colonIdx = raw.indexOf(":");
+      var openIdx = raw.indexOf("(");
+      var closeIdx = raw.lastIndexOf(")");
+
+      if (colonIdx >= 0 && colonIdx < raw.length - 1) {
+        spec = raw.slice(colonIdx + 1);
+      } else if (openIdx >= 0 && closeIdx > openIdx) {
+        spec = raw.slice(openIdx + 1, closeIdx);
+      }
+
+      if (!spec) return [];
+
+      var allowed = {};
+      MATCHING_FIELDS.forEach(function (f) {
+        allowed[f] = true;
+      });
+
+      var fields = spec
+        .split(/[|,;+\s]+/)
+        .map(function (f) {
+          return f.trim().toLowerCase();
+        })
+        .filter(function (f) {
+          return !!f && allowed[f];
+        });
+
+      return fields.filter(function (f, i) {
+        return fields.indexOf(f) === i;
+      });
+    }
+
+    function fieldsListLabel(fields) {
+      return fields.length ? fields.join(", ") : MATCHING_FIELDS.join(", ");
+    }
+
+    function formatIdentifierArray(values) {
+      var arr = Array.isArray(values) ? values.filter(Boolean) : [];
+      if (!arr.length) return "—";
+      return arr
+        .slice(0, 3)
+        .map(function (v) {
+          return fmt.maskMiddle(String(v), 4, 3);
+        })
+        .join(", ");
+    }
+
+    function externalCustomerIdEvidenceValue(externalIds) {
+      if (!externalIds || typeof externalIds !== "object") return "—";
+      if (externalIds.external_customer_id)
+        return String(externalIds.external_customer_id);
+
+      var entries = Object.entries(externalIds).filter(function (pair) {
+        return pair[1] !== null && pair[1] !== undefined && pair[1] !== "";
+      });
+      if (!entries.length) return "—";
+
+      return entries
+        .slice(0, 3)
+        .map(function (pair) {
+          return pair[0] + ": " + pair[1];
+        })
+        .join(", ");
+    }
+
+    function matchingFieldValue(field) {
+      if (field === "email")
+        return profile.email ? fmt.maskMiddle(profile.email) : "—";
+      if (field === "phone_number")
+        return profile.phone_number
+          ? fmt.maskMiddle(profile.phone_number)
+          : "—";
+      if (field === "national_id")
+        return profile.national_id ? fmt.maskMiddle(profile.national_id) : "—";
+      if (field === "external_customer_id")
+        return externalCustomerIdEvidenceValue(profile.external_ids);
+      if (field === "device_id") return formatIdentifierArray(profile.device_ids);
+      if (field === "advertising_id")
+        return formatIdentifierArray(profile.advertising_ids);
+      if (field === "cookie_id") return formatIdentifierArray(profile.cookie_ids);
+      return "—";
+    }
+
+    function normalizedMethod(link) {
+      return String((link && link.match_method) || "")
+        .trim()
+        .toLowerCase();
+    }
+
+    function inferredFieldsForLink(link) {
+      var parsed = parseMatchFieldsFromMethod(link && link.match_method);
+      if (parsed.length) return parsed;
+
+      var method = normalizedMethod(link);
+      if (method === "dynamicmatch" || method === "newmaster") {
+        return MATCHING_FIELDS.slice();
+      }
+      return [];
+    }
+
+    function linkReasonLabel(link) {
+      var status = (link.status || "").toUpperCase();
+      var methodRaw = String(link.match_method || "");
+      var method = methodRaw.toLowerCase();
+      var parsedFields = parseMatchFieldsFromMethod(methodRaw);
+
+      if (status === "UNLINKED" && link.unlinked_reason) {
+        return "Unlinked: " + link.unlinked_reason;
+      }
+      if (status === "SUPERSEDED") {
+        return "Superseded by a newer identity resolution pass";
+      }
+      if (method === "newmaster") {
+        return "Created a new master profile as the best identity resolution outcome";
+      }
+      if (method === "dynamicmatch") {
+        return "Matched using fields: " + fieldsListLabel(MATCHING_FIELDS);
+      }
+      if (parsedFields.length) {
+        return "Matched using fields: " + fieldsListLabel(parsedFields);
+      }
+      if (method === "exact") {
+        return "Exact identifier match";
+      }
+      if (method === "fuzzy_trgm") {
+        return "Fuzzy text similarity match (trigram)";
+      }
+      if (method === "fuzzy_dmetaphone") {
+        return "Phonetic similarity match (double metaphone)";
+      }
+      if (method === "none") {
+        return "Linked by resolver policy";
+      }
+      if (link.match_score !== null && link.match_score !== undefined) {
+        return "Matched using fields: " + fieldsListLabel(MATCHING_FIELDS);
+      }
+      return "Matched using fields: " + fieldsListLabel(MATCHING_FIELDS);
+    }
+
+    var linkedRawProfiles = (profileLinks || []).map(function (l) {
+      var scorePct = linkScorePercent(l.match_score);
+      var showConfidence = linkHasConfidenceScore(l);
+      return {
+        linkId: l.link_id,
+        rawProfileId: l.raw_profile_id,
+        rawProfileIdShort: fmt.shortId(l.raw_profile_id),
+        masterProfileId: l.master_profile_id,
+        matchMethodLabel: fmt.titleCase(l.match_method || "unknown"),
+        matchReasonLabel: linkReasonLabel(l),
+        matchScoreLabel: showConfidence ? linkScoreLabel(l.match_score) : "Not applicable",
+        matchScoreWidth: scorePct + "%",
+        hasMatchConfidence: showConfidence,
+        statusLabel: fmt.titleCase(l.status || "unknown"),
+        statusBadgeClass: linkStatusBadgeClass(l.status),
+        createdAtLabel: fmt.dateTime(l.created_at),
+      };
+    });
+
+    var fieldUsageCounts = {};
+    var fieldImpactScores = {};
+    MATCHING_FIELDS.forEach(function (field) {
+      fieldUsageCounts[field] = 0;
+      fieldImpactScores[field] = 0;
+    });
+
+    (profileLinks || []).forEach(function (link) {
+      var fields = inferredFieldsForLink(link);
+      var linkImpact = linkScorePercent(link && link.match_score);
+      if (!linkImpact) linkImpact = 1;
+
+      fields.forEach(function (field) {
+        if (fieldUsageCounts[field] !== undefined) fieldUsageCounts[field] += 1;
+        if (fieldImpactScores[field] !== undefined)
+          fieldImpactScores[field] += linkImpact;
+      });
+    });
+
+    var matchingEvidenceChips = MATCHING_FIELDS.map(function (field) {
+      var count = fieldUsageCounts[field];
+      var value = matchingFieldValue(field);
+      return {
+        field: field,
+        label: MATCHING_FIELD_LABELS[field] || fmt.titleCase(field),
+        value: value,
+        showValue: true,
+        isValueMissing: value === "—",
+        duplicateHint: null,
+        confidenceImpactScore: fieldImpactScores[field] || 0,
+        usageLabel:
+          count > 0
+            ? "Used in " + count + " linked profile" + (count > 1 ? "s" : "")
+            : "Not used in current links",
+      };
+    }).sort(function (a, b) {
+      if (b.confidenceImpactScore !== a.confidenceImpactScore) {
+        return b.confidenceImpactScore - a.confidenceImpactScore;
+      }
+      var usageA = fieldUsageCounts[a.field] || 0;
+      var usageB = fieldUsageCounts[b.field] || 0;
+      if (usageB !== usageA) return usageB - usageA;
+      return a.label.localeCompare(b.label);
+    });
+
+    var topLinkScore = 0;
+    linkedRawProfiles.forEach(function (l) {
+      var score = Number(String(l.matchScoreWidth).replace("%", ""));
+      if (!isNaN(score) && score > topLinkScore) topLinkScore = score;
+    });
+    var latestLinkAtLabel = linkedRawProfiles.length
+      ? linkedRawProfiles[0].createdAtLabel
+      : "—";
+    var activeLinkedRawProfileCount = linkedRawProfiles.filter(function (l) {
+      return (l.statusLabel || "").toLowerCase() === "active";
+    }).length;
+
+    function scoreWidth(v) {
+      var n = Number(v);
+      return (isNaN(n) ? 0 : Math.max(0, Math.min(100, n))) + "%";
+    }
+
     return {
       master_profile_id: profile.master_profile_id,
       domain: profile.domain,
@@ -215,6 +543,8 @@ window.C360 = window.C360 || {};
       channels: channels,
       hasIdentityDetails: identityDetailChips.length > 0,
       identityDetailChips: identityDetailChips,
+      hasMatchingEvidence: matchingEvidenceChips.length > 0,
+      matchingEvidenceChips: matchingEvidenceChips,
       hasAttributes: attributeChips.length > 0,
       attributeChips: attributeChips,
       hasWorkingInfo: workingDetailChips.length > 0,
@@ -254,6 +584,13 @@ window.C360 = window.C360 || {};
       hasTimeline: timelineVms.length > 0,
       timeline: timelineVms,
 
+      hasLinkedRawProfiles: linkedRawProfiles.length > 0,
+      linkedRawProfiles: linkedRawProfiles,
+      linkedRawProfileCount: linkedRawProfiles.length,
+      activeLinkedRawProfileCount: activeLinkedRawProfileCount,
+      topLinkScoreLabel: topLinkScore ? Math.round(topLinkScore) + "%" : "N/A",
+      latestLinkAtLabel: latestLinkAtLabel,
+
       lead_grade: profile.lead_grade || "—",
       leadScoreLabel: fmt.percent(profile.lead_conversion_probability),
       churn_risk_tier: profile.churn_risk_tier || "—",
@@ -272,7 +609,246 @@ window.C360 = window.C360 || {};
           : "—",
       identityConfidenceLabel: fmt.score(profile.identity_confidence_score),
       scoresUpdatedLabel: fmt.dateTime(profile.scores_updated_at),
+
+      // Customer Persona card (AI-native Persona Resolution Engine).
+      hasPersona: !!persona,
+      personaId: persona ? persona.persona_id : null,
+      personaName: (persona && persona.persona_name) || displayName,
+      personaCategory: (persona && persona.persona_category) || fmt.domainLabel(profile.domain),
+      computedVersion: persona ? persona.computed_version : null,
+      customerValueTierLabel: persona ? fmt.titleCase(persona.customer_value_tier) : "—",
+      riskLevelLabel: persona ? fmt.titleCase(persona.risk_level) : "—",
+      riskLevelBadgeClass: persona ? fmt.churnBadgeClass(persona.risk_level) : "bg-slate-100 text-slate-600",
+      nextBestAction: (persona && persona.next_best_action) || "—",
+      personaScoreLabel: persona ? fmt.score(persona.persona_score) : "—",
+      personaScoreWidth: scoreWidth(persona && persona.persona_score),
+      behaviorScoreLabel: persona ? fmt.score(persona.behavior_score) : "—",
+      behaviorScoreWidth: scoreWidth(persona && persona.behavior_score),
+      engagementScoreLabel: persona ? fmt.score(persona.engagement_score) : "—",
+      engagementScoreWidth: scoreWidth(persona && persona.engagement_score),
+      financialScoreLabel: persona ? fmt.score(persona.financial_score) : "—",
+      financialScoreWidth: scoreWidth(persona && persona.financial_score),
+      loyaltyScoreLabel: persona ? fmt.score(persona.loyalty_score) : "—",
+      loyaltyScoreWidth: scoreWidth(persona && persona.loyalty_score),
+      relationshipScoreLabel: persona ? fmt.score(persona.relationship_score) : "—",
+      relationshipScoreWidth: scoreWidth(persona && persona.relationship_score),
+      riskScoreLabel: persona ? fmt.score(persona.risk_score) : "—",
+      riskScoreWidth: scoreWidth(persona && persona.risk_score),
+      confidenceScoreLabel: persona ? fmt.percent(persona.confidence_score) : "—",
+      llmProviderLabel: persona ? fmt.titleCase(persona.llm_provider) : "—",
+      computedAtLabel: persona ? fmt.dateTime(persona.computed_at) : "—",
+      hasHistory: historyVms.length > 0,
+      history: historyVms,
+
+      hasDomainProfiles: (domainProfiles || []).length > 0,
+      domainProfiles: domainAttributesVm(domainProfiles || []),
     };
+  }
+
+  // Flattens each cdp_domain_profiles row's domain_attributes JSONB into
+  // display-ready {label, value} rows for the Domain Attributes card.
+  function domainAttributesVm(domainProfiles) {
+    return domainProfiles.map(function (dp) {
+      var entries = Object.keys(dp.domain_attributes || {}).map(function (key) {
+        var value = dp.domain_attributes[key];
+        return {
+          label: fmt.titleCase(key.replace(/_/g, " ")),
+          value: Array.isArray(value) ? value.join(", ") : String(value),
+        };
+      });
+      return {
+        domain_profile_id: dp.domain_profile_id,
+        domainLabel: fmt.domainLabel(dp.domain_code),
+        hasAttributes: entries.length > 0,
+        attributes: entries,
+      };
+    });
+  }
+
+  // Persona endpoints 404 when no persona has been computed yet for this
+  // profile -- treat that as "no persona" (null/[]) rather than a hard
+  // failure so it never blocks the rest of the profile detail page load.
+  function loadPersona(masterProfileId) {
+    return api("/master-profiles/" + masterProfileId + "/persona").then(
+      function (persona) {
+        return persona;
+      },
+      function () {
+        return null;
+      },
+    );
+  }
+
+  function loadPersonaHistory(masterProfileId) {
+    return api("/master-profiles/" + masterProfileId + "/persona-history", {
+      limit: 5,
+    }).then(
+      function (history) {
+        return history;
+      },
+      function () {
+        return [];
+      },
+    );
+  }
+
+  function loadProfileLinks(masterProfileId) {
+    return api("/master-profiles/" + masterProfileId + "/links", {
+      limit: 12,
+    }).then(
+      function (links) {
+        return links || [];
+      },
+      function () {
+        return [];
+      },
+    );
+  }
+
+  function loadDomainProfiles(masterProfileId) {
+    return api("/master-profiles/" + masterProfileId + "/domain-profiles").then(
+      function (domainProfiles) {
+        return domainProfiles || [];
+      },
+      function () {
+        return [];
+      },
+    );
+  }
+
+  function escapeHtml(value) {
+    return $("<div>").text(String(value)).html();
+  }
+
+  function modalValue(value) {
+    if (value === null || value === undefined || value === "") return "—";
+    if (Array.isArray(value)) return value.length ? value.join(", ") : "—";
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+  }
+
+  function modalRow(label, value) {
+    return (
+      '<div class="flex items-start justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">' +
+      '<span class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">' +
+      escapeHtml(label) +
+      "</span>" +
+      '<span class="text-xs font-medium text-slate-800 text-right break-all">' +
+      escapeHtml(modalValue(value)) +
+      "</span></div>"
+    );
+  }
+
+  function setModalLoading() {
+    $("#linked-raw-modal-loading").removeClass("hidden");
+    $("#linked-raw-modal-error").addClass("hidden").text("");
+    $("#linked-raw-modal-content").addClass("hidden");
+    $("#linked-raw-modal-title").text("Raw Profile Detail");
+    $("#linked-raw-modal-subtitle").text("Fetching latest linked profile data...");
+  }
+
+  function showLinkedRawModalError(message) {
+    $("#linked-raw-modal-loading").addClass("hidden");
+    $("#linked-raw-modal-content").addClass("hidden");
+    $("#linked-raw-modal-error").removeClass("hidden").text(message);
+  }
+
+  function renderLinkedRawModal(detail) {
+    var link = detail && detail.link ? detail.link : {};
+    var raw = detail && detail.raw_profile ? detail.raw_profile : {};
+    var method = String(link.match_method || "").trim().toLowerCase();
+    var hasNumericScore =
+      link.match_score !== null && link.match_score !== undefined && link.match_score !== "" && !isNaN(Number(link.match_score));
+    var showConfidence = hasNumericScore && method !== "newmaster" && method !== "none";
+
+    $("#linked-raw-modal-loading").addClass("hidden");
+    $("#linked-raw-modal-error").addClass("hidden").text("");
+
+    $("#linked-raw-modal-title").text(
+      "Raw Profile " + (raw.raw_profile_id ? fmt.shortId(raw.raw_profile_id) : "—"),
+    );
+    $("#linked-raw-modal-subtitle").text(
+      "Linked at " + fmt.dateTime(link.created_at) + " via " + fmt.titleCase(link.match_method || "unknown"),
+    );
+
+    $("#linked-raw-modal-status").text(fmt.titleCase(link.status || "unknown"));
+    $("#linked-raw-modal-score").text(
+      showConfidence
+        ? Math.round((Number(link.match_score) <= 1 ? Number(link.match_score) * 100 : Number(link.match_score))) + "%"
+        : "Not applicable",
+    );
+    $("#linked-raw-modal-source").text(fmt.titleCase(raw.source_system || "unknown"));
+
+    var identityFieldsHtml = [
+      modalRow("Raw Profile ID", raw.raw_profile_id),
+      modalRow("External Customer ID", raw.external_customer_id),
+      modalRow("Full Name", raw.full_name),
+      modalRow("Email", raw.email),
+      modalRow("Phone Number", raw.phone_number),
+      modalRow("National ID", raw.national_id),
+      modalRow("Date of Birth", fmt.date(raw.date_of_birth)),
+      modalRow("Address", [raw.address_line1, raw.address_line2, raw.city, raw.state_province, raw.postal_code, raw.country].filter(Boolean).join(", ")),
+      modalRow("Created At", fmt.dateTime(raw.created_at)),
+      modalRow("Processed At", fmt.dateTime(raw.processed_at)),
+    ].join("");
+
+    var technicalFieldsHtml = [
+      modalRow("Domain", fmt.domainLabel(raw.domain)),
+      modalRow("Channel", fmt.titleCase(raw.channel)),
+      modalRow("Device ID", raw.device_id),
+      modalRow("Advertising ID", raw.advertising_id),
+      modalRow("Cookie ID", raw.cookie_id),
+      modalRow("Session ID", raw.session_id),
+      modalRow("GA Client ID", raw.ga_client_id),
+      modalRow("IP Address", raw.ip_address),
+      modalRow("UTM Source", raw.utm_source),
+      modalRow("UTM Medium", raw.utm_medium),
+      modalRow("UTM Campaign", raw.utm_campaign),
+      modalRow("Event Name", raw.event_name),
+      modalRow("Event Time", fmt.dateTime(raw.event_time)),
+    ].join("");
+
+    $("#linked-raw-modal-identity-fields").html(identityFieldsHtml);
+    $("#linked-raw-modal-technical-fields").html(technicalFieldsHtml);
+
+    var payloadText = raw.event_payload
+      ? JSON.stringify(raw.event_payload, null, 2)
+      : "{}";
+    $("#linked-raw-modal-event-payload").text(payloadText);
+
+    $("#linked-raw-modal-content").removeClass("hidden");
+  }
+
+  function openLinkedRawModal(rawProfileId) {
+    if (!currentProfileId || !rawProfileId) return;
+
+    var $modal = $("#linked-raw-profile-modal");
+    if (!$modal.length) return;
+
+    setModalLoading();
+    $modal.removeClass("hidden");
+    $("body").addClass("overflow-hidden");
+
+    api(
+      "/master-profiles/" +
+        currentProfileId +
+        "/linked-raw-profiles/" +
+        rawProfileId,
+    )
+      .done(function (detail) {
+        renderLinkedRawModal(detail || {});
+      })
+      .fail(function (xhr) {
+        showLinkedRawModalError(
+          "Could not load linked raw profile details for this identity link.",
+        );
+        showApiError("loading linked raw profile detail", xhr);
+      });
+  }
+
+  function closeLinkedRawModal() {
+    $("#linked-raw-profile-modal").addClass("hidden");
+    $("body").removeClass("overflow-hidden");
   }
 
   function loadContentItems(masterProfileId, itemType) {
@@ -332,6 +908,7 @@ window.C360 = window.C360 || {};
   }
 
   function load(masterProfileId) {
+    closeLinkedRawModal();
     currentProfileId = masterProfileId;
     currentContentType = "";
     timelineLimit = 8;
@@ -359,6 +936,10 @@ window.C360 = window.C360 || {};
       api("/master-profiles/" + masterProfileId + "/timeline", {
         limit: timelineLimit,
       }),
+      loadProfileLinks(masterProfileId),
+      loadPersona(masterProfileId),
+      loadPersonaHistory(masterProfileId),
+      loadDomainProfiles(masterProfileId),
     )
       .done(
         function (
@@ -367,6 +948,10 @@ window.C360 = window.C360 || {};
           channelRes,
           interestsRes,
           timelineRes,
+          profileLinks,
+          persona,
+          personaHistory,
+          domainProfiles,
         ) {
           var vm = buildDetailVm(
             profileRes[0],
@@ -374,11 +959,16 @@ window.C360 = window.C360 || {};
             channelRes[0],
             interestsRes[0],
             timelineRes[0],
+            profileLinks,
+            persona,
+            personaHistory,
+            domainProfiles,
           );
           $("#detail-loading").addClass("hidden");
           $("#detail-content").html(
             C360.templates.render("profile-details", vm),
           );
+          populateDomainAttributeDomainSelect(profileRes[0].domain);
           loadContentItems(masterProfileId, "");
         },
       )
@@ -404,6 +994,27 @@ window.C360 = window.C360 || {};
     });
 
     $(document).on("click", "#btn-timeline-more", loadMoreTimeline);
+
+    $(document).on("submit", "#domain-attribute-form", function (e) {
+      e.preventDefault();
+      submitDomainAttributeForm();
+    });
+
+    $(document).on("click", ".btn-linked-raw-detail", function () {
+      openLinkedRawModal($(this).data("raw-profile-id"));
+    });
+
+    $(document).on("click", "#btn-close-linked-raw-modal", closeLinkedRawModal);
+
+    $(document).on("click", "#linked-raw-profile-modal", function (e) {
+      if (e.target === this) closeLinkedRawModal();
+    });
+
+    $(document).on("keydown", function (e) {
+      if (e.key === "Escape" && !$("#linked-raw-profile-modal").hasClass("hidden")) {
+        closeLinkedRawModal();
+      }
+    });
 
     $(document).on("click", ".content-tab-btn", function () {
       // 1. Reset all tabs to the INACTIVE state
