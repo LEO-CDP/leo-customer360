@@ -26,11 +26,11 @@ cp overlays/local/secret.env.example overlays/local/secret.env   # edit if you l
 
 | Service | URL | Notes |
 |---|---|---|
-| API (FastAPI) | http://localhost:8008/docs | health `/health` |
-| Frontend admin | http://localhost:8890 | |
-| Keycloak | http://localhost:8080 | admin console |
-| Dagster | http://localhost:3000 | UI + GraphQL |
-| MinIO | http://localhost:9000 / :9001 | S3 API / console |
+| API (FastAPI) | http://localhost:18008/docs | health `/health` |
+| Frontend admin | http://localhost:18890 | |
+| Keycloak | http://localhost:18080 | admin console |
+| Dagster | http://localhost:13000 | UI + GraphQL |
+| MinIO | http://localhost:19000 / :19001 | S3 API / console |
 
 Tear down (destroys local data): `./scripts/down.sh`.
 
