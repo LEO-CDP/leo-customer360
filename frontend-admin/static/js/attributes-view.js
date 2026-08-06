@@ -25,8 +25,14 @@ window.C360 = window.C360 || {};
   // join added to every cdp_segments query (see core/crud/segmentation.py's
   // DOMAIN_ATTRIBUTES_JOIN_SQL) -- shown here as a short "Domain Profile"
   // label so it's obvious a given row isn't a plain cdp_master_profiles column.
-  function sourceLabel(v) { return v === "cdp_domain_profiles" ? "Domain Profile" : "Master Profile"; }
-  function sourceBadgeClass(v) { return v === "cdp_domain_profiles" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"; }
+  // cdp_raw_profiles_stage-sourced attributes (e.g. external_customer_id, see
+  // init-core-database.sql) are raw per-source identifiers consolidated onto
+  // cdp_master_profiles.external_ids during CIR -- labeled "Raw Profile" to
+  // distinguish them from the two consolidated-column sources above.
+  var SOURCE_LABELS = { cdp_domain_profiles: "Domain Profile", cdp_raw_profiles_stage: "Raw Profile" };
+  var SOURCE_BADGE_CLASSES = { cdp_domain_profiles: "bg-amber-100 text-amber-700", cdp_raw_profiles_stage: "bg-sky-100 text-sky-700" };
+  function sourceLabel(v) { return SOURCE_LABELS[v] || "Master Profile"; }
+  function sourceBadgeClass(v) { return SOURCE_BADGE_CLASSES[v] || "bg-slate-100 text-slate-500"; }
 
   // Conversion-related attributes have no dedicated boolean column -- the
   // LEAD_SCORING group (lead_conversion_probability/lead_grade) is what
