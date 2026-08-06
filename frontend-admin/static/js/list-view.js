@@ -42,7 +42,7 @@ window.C360 = window.C360 || {};
     { label: "Tier", field: "tierLabel" },
     { label: "Lifecycle", type: "badge", field: "lifecycleLabel", classField: "lifecycleBadgeClass" },
     { label: "Churn Risk", type: "badge", field: "churn_risk_tier", classField: "churnBadgeClass" },
-    { label: "Linked Raw Profiles", field: "linkedRawProfileCountLabel" },
+    { label: "Linked Profiles", field: "linkedRawProfileCountLabel" },
     { label: "Predictive CLV", field: "clvLabel" },
     { label: "Engagement", field: "engagementLabel" },
     { label: "Last Activity", field: "lastActivityLabel", muted: true }
