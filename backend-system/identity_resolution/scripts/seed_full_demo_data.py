@@ -1195,16 +1195,15 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             identity_confidence_score, segmentation_tags, communication_preferences, attributes, model_versions,
             gender, address, profile_picture_url, persona_summary,
         ]
+        domain_attributes: dict[str, object] = {}
 
         if domain == "retail":
-            set_clauses += ["loyalty_id = %s", "membership_tier = %s", "preferred_store_code = %s"]
-            params += [
-                f"LOY-{master_id[:8]}",
-                rng.choice(("Silver", "Gold", "Platinum")),
-                f"STORE-{rng.randint(1, 20):03d}",
-            ]
+            domain_attributes = {
+                "loyalty_id": f"LOY-{master_id[:8]}",
+                "membership_tier": rng.choice(("Silver", "Gold", "Platinum")),
+                "preferred_store_code": f"STORE-{rng.randint(1, 20):03d}",
+            }
         elif domain == "banking":
-            set_clauses += ["cif_number = %s", "account_numbers = %s", "kyc_status = %s", "risk_segment = %s"]
             # Realistic KYC distribution: ~70% verified, ~15% pending, ~10% unverified, ~5% rejected
             kyc_rand = rng.random()
             if kyc_rand < 0.70:
@@ -1223,36 +1222,38 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
                 risk_segment = "medium"
             else:
                 risk_segment = "high"
-            params += [
-                f"CIF{rng.randint(10_000_000, 99_999_999)}",
-                [f"{rng.randint(1000000000, 9999999999)}" for _ in range(rng.randint(1, 2))],
-                kyc_status,
-                risk_segment,
-            ]
+            domain_attributes = {
+                "cif_number": f"CIF{rng.randint(10_000_000, 99_999_999)}",
+                "account_numbers": [f"{rng.randint(1000000000, 9999999999)}" for _ in range(rng.randint(1, 2))],
+                "kyc_status": kyc_status,
+                "risk_segment": risk_segment,
+            }
         elif domain == "real_estate":
-            set_clauses += ["property_types_of_interest = %s", "preferred_location_codes = %s"]
-            params += [
-                rng.sample(["apartment", "villa", "land", "townhouse", "condo"], k=rng.randint(1, 3)),
-                [f"DIST-{rng.randint(1, 12):02d}" for _ in range(rng.randint(1, 2))],
-            ]
+            domain_attributes = {
+                "property_types_of_interest": rng.sample(
+                    ["apartment", "villa", "land", "townhouse", "condo"],
+                    k=rng.randint(1, 3),
+                ),
+                "preferred_location_codes": [f"DIST-{rng.randint(1, 12):02d}" for _ in range(rng.randint(1, 2))],
+            }
         elif domain == "travel":
-            set_clauses += ["travel_loyalty_program_id = %s", "preferred_travel_class = %s"]
-            params += [
-                f"TVL-{rng.randint(100000, 999999)}",
-                rng.choice(("economy", "business", "first")),
-            ]
+            domain_attributes = {
+                "travel_loyalty_program_id": f"TVL-{rng.randint(100000, 999999)}",
+                "preferred_travel_class": rng.choice(("economy", "business", "first")),
+            }
         elif domain == "media":
-            set_clauses += ["media_subscription_id = %s", "preferred_content_genres = %s"]
-            params += [
-                f"SUB-{rng.randint(100000, 999999)}",
-                rng.sample(["news", "sports", "entertainment", "documentary", "music"], k=rng.randint(1, 3)),
-            ]
+            domain_attributes = {
+                "media_subscription_id": f"SUB-{rng.randint(100000, 999999)}",
+                "preferred_content_genres": rng.sample(
+                    ["news", "sports", "entertainment", "documentary", "music"],
+                    k=rng.randint(1, 3),
+                ),
+            }
         elif domain == "education":
-            set_clauses += ["student_id = %s", "institution_name = %s"]
-            params += [
-                f"STU-{rng.randint(100000, 999999)}",
-                rng.choice(("Demo University", "Demo Online Academy", "Demo Polytechnic")),
-            ]
+            domain_attributes = {
+                "student_id": f"STU-{rng.randint(100000, 999999)}",
+                "institution_name": rng.choice(("Demo University", "Demo Online Academy", "Demo Polytechnic")),
+            }
         else:
             # Catch-all for any future domain; do nothing domain-specific.
             pass
@@ -1266,6 +1267,69 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             f"UPDATE {_table('cdp_master_profiles')} SET {', '.join(set_clauses)} WHERE master_profile_id = %s;",
             tuple(params),
         )
+
+        if domain_attributes:
+            cursor.execute(
+                f"""
+                INSERT INTO {_table('cdp_domain_profiles')} (
+                    tenant_id,
+                    master_profile_id,
+                    domain_id,
+                    profile_name,
+                    lifecycle_stage,
+                    persona_name,
+                    persona_summary,
+                    engagement_score,
+                    domain_attributes,
+                    first_activity_at,
+                    last_activity_at,
+                    status_code,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    (SELECT domain_id FROM {_table('sys_domain')} WHERE domain_code = %s LIMIT 1),
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    1,
+                    NOW(),
+                    NOW()
+                )
+                ON CONFLICT (master_profile_id, domain_id)
+                DO UPDATE SET
+                    profile_name = EXCLUDED.profile_name,
+                    lifecycle_stage = EXCLUDED.lifecycle_stage,
+                    persona_name = EXCLUDED.persona_name,
+                    persona_summary = EXCLUDED.persona_summary,
+                    engagement_score = EXCLUDED.engagement_score,
+                    domain_attributes = COALESCE(cdp_domain_profiles.domain_attributes, '{{}}'::jsonb) || EXCLUDED.domain_attributes,
+                    first_activity_at = EXCLUDED.first_activity_at,
+                    last_activity_at = EXCLUDED.last_activity_at,
+                    status_code = EXCLUDED.status_code,
+                    updated_at = NOW();
+                """,
+                (
+                    DEMO_TENANT_ID,
+                    master_id,
+                    domain,
+                    f"{domain.title()} Profile",
+                    lifecycle_stage,
+                    None,
+                    None,
+                    engagement_score,
+                    Json(domain_attributes),
+                    customer_since,
+                    last_activity_at,
+                ),
+            )
 
 
 def seed_customer_personas(cursor, master_profiles: list) -> int:

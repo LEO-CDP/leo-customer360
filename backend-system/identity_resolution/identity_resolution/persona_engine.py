@@ -457,7 +457,6 @@ MASTER_PROFILE_SELECT_COLUMNS = (
     "master_profile_id",
     "domain",
     "lifecycle_stage",
-    "membership_tier",
     "customer_since",
     "last_activity_at",
     "preferred_channel",
@@ -469,8 +468,6 @@ MASTER_PROFILE_SELECT_COLUMNS = (
     "engagement_score",
     "churn_probability",
     "churn_risk_tier",
-    "risk_segment",
-    "kyc_status",
     "identity_confidence_score",
     "profile_completeness_score",
     "is_hashed",
@@ -928,18 +925,61 @@ class PersonaResolutionEngine:
     # avoids flooding the history table with noise from tiny score wobbles.
     HISTORY_SCORE_DELTA_THRESHOLD = PERSONA_HISTORY_SCORE_DELTA_THRESHOLD
 
-    def __init__(self, schema: str = "customer360"):
+    def __init__(
+        self,
+        schema: str = "customer360",
+        config_cache_ttl_seconds: int = 60,
+    ):
         self.schema = schema
+        # Avoid re-querying cdp_persona_config for every single profile in a
+        # CIR batch while still allowing periodic runtime refresh.
+        self._config_cache_ttl_seconds = max(config_cache_ttl_seconds, 0)
+        self._cached_persona_config: Optional[Dict[str, Any]] = None
+        self._cached_persona_config_loaded_at: Optional[datetime] = None
 
     def _table(self, name: str) -> str:
         return f"{self.schema}.{name}" if self.schema else name
 
+    def invalidate_config_cache(self) -> None:
+        """Clears in-memory persona config cache (useful for tests/debugging)."""
+        self._cached_persona_config = None
+        self._cached_persona_config_loaded_at = None
+
+    def _config_cache_is_fresh(self) -> bool:
+        if self._cached_persona_config is None or self._cached_persona_config_loaded_at is None:
+            return False
+        if self._config_cache_ttl_seconds == 0:
+            return False
+        age_seconds = (datetime.now(timezone.utc) - self._cached_persona_config_loaded_at).total_seconds()
+        return age_seconds < self._config_cache_ttl_seconds
+
+    def _ensure_runtime_persona_config(self, cursor) -> None:
+        """Loads and applies persona runtime config with TTL-based caching."""
+        if self._config_cache_is_fresh():
+            apply_persona_config(self._cached_persona_config or PERSONA_CONFIG_DEFAULTS)
+            return
+
+        config = load_persona_config(cursor, schema=self.schema)
+        apply_persona_config(config)
+        self._cached_persona_config = config
+        self._cached_persona_config_loaded_at = datetime.now(timezone.utc)
+
     def _fetch_master_profile(self, cursor, tenant_id, master_profile_id) -> Optional[Dict[str, Any]]:
-        columns = ", ".join(MASTER_PROFILE_SELECT_COLUMNS)
+        columns = ", ".join(f"m.{col}" for col in MASTER_PROFILE_SELECT_COLUMNS)
         query = f"""
-            SELECT {columns}
-            FROM {self._table('cdp_master_profiles')}
-            WHERE master_profile_id = %s AND tenant_id = %s;
+            SELECT
+                {columns},
+                dp.domain_attributes ->> 'membership_tier' AS membership_tier,
+                dp.domain_attributes ->> 'risk_segment' AS risk_segment,
+                dp.domain_attributes ->> 'kyc_status' AS kyc_status
+            FROM {self._table('cdp_master_profiles')} m
+            LEFT JOIN {self._table('sys_domain')} d
+                ON d.domain_code = m.domain
+            LEFT JOIN {self._table('cdp_domain_profiles')} dp
+                ON dp.tenant_id = m.tenant_id
+               AND dp.master_profile_id = m.master_profile_id
+               AND dp.domain_id = d.domain_id
+            WHERE m.master_profile_id = %s AND m.tenant_id = %s;
         """
         cursor.execute(query, (master_profile_id, tenant_id))
         return cursor.fetchone()
@@ -1081,6 +1121,19 @@ class PersonaResolutionEngine:
             query, (persona_id, computation.persona_name, computation.persona_summary, master_profile_id, tenant_id)
         )
 
+    def _should_insert_history(
+        self,
+        old_persona: Optional[Dict[str, Any]],
+        computation: PersonaComputation,
+    ) -> bool:
+        if old_persona is None:
+            return True
+
+        old_score = _to_float(old_persona.get("persona_score"))
+        score_delta = abs(old_score - computation.persona_score)
+        name_changed = old_persona.get("persona_name") != computation.persona_name
+        return name_changed or score_delta >= self.HISTORY_SCORE_DELTA_THRESHOLD
+
     def resolve_persona(self, cursor, tenant_id, master_profile_id) -> Optional[Dict[str, Any]]:
         """Computes and persists a fresh persona snapshot for one master
         profile. Returns a small summary dict on success, or ``None`` if the
@@ -1089,9 +1142,20 @@ class PersonaResolutionEngine:
         resolver.py's per-tenant transaction without risking a rollback of
         otherwise-successful identity matching work."""
         try:
-            apply_persona_config(load_persona_config(cursor, schema=self.schema))
+            logger.debug(
+                "Resolving persona for tenant_id=%s master_profile_id=%s",
+                tenant_id,
+                master_profile_id,
+            )
+
+            self._ensure_runtime_persona_config(cursor)
             master_profile = self._fetch_master_profile(cursor, tenant_id, master_profile_id)
             if master_profile is None:
+                logger.debug(
+                    "Skipped persona resolution: master profile not found for tenant_id=%s master_profile_id=%s",
+                    tenant_id,
+                    master_profile_id,
+                )
                 return None
 
             computation = compute_persona(master_profile)
@@ -1108,20 +1172,20 @@ class PersonaResolutionEngine:
             self._insert_features(cursor, persona_id, computation.features)
             self._insert_score_details(cursor, persona_id, computation)
 
-            score_delta = None
-            name_changed = True
-            if old_persona is not None:
-                old_score = _to_float(old_persona.get("persona_score"))
-                score_delta = abs(old_score - computation.persona_score)
-                name_changed = old_persona.get("persona_name") != computation.persona_name
-            if (
-                old_persona is None
-                or name_changed
-                or (score_delta is not None and score_delta >= self.HISTORY_SCORE_DELTA_THRESHOLD)
-            ):
+            if self._should_insert_history(old_persona, computation):
                 self._insert_history(cursor, persona_id, old_persona, computation)
 
             self._update_master_profile(cursor, tenant_id, master_profile_id, persona_id, computation)
+
+            logger.debug(
+                "Persona resolved: tenant_id=%s master_profile_id=%s persona_id=%s code=%s score=%.2f version=%s",
+                tenant_id,
+                master_profile_id,
+                persona_id,
+                computation.persona_code,
+                computation.persona_score,
+                computed_version,
+            )
 
             return {
                 "persona_id": persona_id,

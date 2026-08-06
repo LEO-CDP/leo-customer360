@@ -12,10 +12,10 @@ from math import ceil
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from core.models.identity import CdpCustomerPersona, CdpMasterProfile, CdpProfileLink, CdpRawProfileStage
+from core.models.identity import CdpCustomerPersona, CdpDomainProfile, CdpMasterProfile, CdpProfileLink, CdpRawProfileStage
 
 STATUS_CODE_LABELS = {
     3: "processed",
@@ -32,7 +32,10 @@ def list_master_profiles_page(
     tenant_id: Optional[uuid.UUID] = None,
     domain: Optional[str] = None,
     lifecycle_stage: Optional[str] = None,
+    domain_attribute_key: Optional[str] = None,
+    domain_attribute_value: Optional[str] = None,
     membership_tier: Optional[str] = None,
+    clv_segment: Optional[str] = None,
     churn_risk_tier: Optional[str] = None,
     linked_raw_profile_count_min: Optional[int] = None,
     q: Optional[str] = None,
@@ -53,8 +56,26 @@ def list_master_profiles_page(
         where_clauses.append(CdpMasterProfile.domain == domain)
     if lifecycle_stage is not None:
         where_clauses.append(CdpMasterProfile.lifecycle_stage == lifecycle_stage)
+    attr_key = domain_attribute_key
+    attr_value = domain_attribute_value
+    # Backward compatibility: membership_tier is now a domain attribute.
     if membership_tier is not None:
-        where_clauses.append(func.lower(CdpMasterProfile.membership_tier) == membership_tier.lower())
+        attr_key = attr_key or "membership_tier"
+        attr_value = attr_value or membership_tier
+    if attr_key is not None and attr_value is not None:
+        where_clauses.append(
+            exists(
+                select(1)
+                .select_from(CdpDomainProfile)
+                .where(
+                    CdpDomainProfile.master_profile_id == CdpMasterProfile.master_profile_id,
+                    CdpDomainProfile.tenant_id == CdpMasterProfile.tenant_id,
+                    func.lower(CdpDomainProfile.domain_attributes[attr_key].astext) == attr_value.lower(),
+                )
+            )
+        )
+    if clv_segment is not None:
+        where_clauses.append(CdpMasterProfile.clv_segment == clv_segment)
     if churn_risk_tier is not None:
         where_clauses.append(CdpMasterProfile.churn_risk_tier == churn_risk_tier)
 
@@ -281,7 +302,18 @@ def identity_graph_coverage(db: Session, tenant_id: Optional[uuid.UUID] = None, 
         "with_advertising_id": _count(func.cardinality(CdpMasterProfile.advertising_ids) > 0),
         "with_cookie_id": _count(func.cardinality(CdpMasterProfile.cookie_ids) > 0),
         "with_external_id": _count(CdpMasterProfile.external_ids != {}),
-        "with_national_id": _count(CdpMasterProfile.national_id.isnot(None)),
+        "with_national_id": _count(
+            exists(
+                select(1)
+                .select_from(CdpDomainProfile)
+                .where(
+                    CdpDomainProfile.master_profile_id == CdpMasterProfile.master_profile_id,
+                    CdpDomainProfile.tenant_id == CdpMasterProfile.tenant_id,
+                    CdpDomainProfile.domain_attributes["national_id"].astext.isnot(None),
+                    CdpDomainProfile.domain_attributes["national_id"].astext != "",
+                )
+            )
+        ),
     }
 
 

@@ -47,12 +47,20 @@
     <div class="flex flex-wrap items-center gap-3">
       
       <!-- Domain Filter -->
-      <select id="domain-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[140px]">
+      <select id="domain-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[140px]" title="Filter by business domain">
         <option value="">All domains</option>
       </select>
 
+      <!-- Customer Value Tier Filter -->
+      <select id="tier-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[140px]" title="Filter by customer lifetime value tier">
+        <option value="">All value tiers</option>
+        <option value="low">Low Value</option>
+        <option value="medium">Medium Value</option>
+        <option value="high">High Value</option>
+      </select>
+
       <!-- Lifecycle Filter -->
-      <select id="lifecycle-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[160px]">
+      <select id="lifecycle-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[160px]" title="Filter by customer lifecycle stage">
         <option value="">All lifecycle stages</option>
         <option value="prospect">Prospect</option>
         <option value="lead">Lead</option>
@@ -62,21 +70,13 @@
         <option value="churn_risk">Churn risk</option>
       </select>
 
-      <!-- Tier Filter -->
-      <select id="tier-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[120px]">
-        <option value="">All tiers</option>
-        <option value="Silver">Silver</option>
-        <option value="Gold">Gold</option>
-        <option value="Platinum">Platinum</option>
-      </select>
-
       <!-- Churn Risk Filter -->
-      <select id="churn-risk-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[140px]">
+      <select id="churn-risk-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[140px]" title="Filter by churn risk level">
         <option value="">All churn risks</option>
-        <option value="low">Low</option>
-        <option value="medium">Medium</option>
-        <option value="high">High</option>
-        <option value="critical">Critical</option>
+        <option value="low">Low Risk</option>
+        <option value="medium">Medium Risk</option>
+        <option value="high">High Risk</option>
+        <option value="critical">Critical Risk</option>
       </select>
 
       <!-- Linked Raw Profile Count -->

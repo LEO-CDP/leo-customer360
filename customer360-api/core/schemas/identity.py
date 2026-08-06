@@ -35,26 +35,6 @@ class MasterProfileBase(BaseModel):
     cookie_ids: Optional[list[str]] = None
     push_tokens: Optional[dict] = None
 
-    loyalty_id: Optional[str] = None
-    membership_tier: Optional[str] = None
-    preferred_store_code: Optional[str] = None
-
-    national_id: Optional[str] = None
-    cif_number: Optional[str] = None
-    account_numbers: Optional[list[str]] = None
-    kyc_status: Optional[str] = None
-    risk_segment: Optional[str] = None
-
-    # Real estate / travel / media / education domain attributes.
-    property_types_of_interest: Optional[list[str]] = None
-    preferred_location_codes: Optional[list[str]] = None
-    travel_loyalty_program_id: Optional[str] = None
-    preferred_travel_class: Optional[str] = None
-    media_subscription_id: Optional[str] = None
-    preferred_content_genres: Optional[list[str]] = None
-    student_id: Optional[str] = None
-    institution_name: Optional[str] = None
-
     acquisition_source: Optional[str] = None
     acquisition_campaign: Optional[str] = None
     current_persona_id: Optional[uuid.UUID] = None
@@ -116,22 +96,6 @@ class MasterProfileUpdate(BaseModel):
     advertising_ids: Optional[list[str]] = None
     cookie_ids: Optional[list[str]] = None
     push_tokens: Optional[dict] = None
-    loyalty_id: Optional[str] = None
-    membership_tier: Optional[str] = None
-    preferred_store_code: Optional[str] = None
-    national_id: Optional[str] = None
-    cif_number: Optional[str] = None
-    account_numbers: Optional[list[str]] = None
-    kyc_status: Optional[str] = None
-    risk_segment: Optional[str] = None
-    property_types_of_interest: Optional[list[str]] = None
-    preferred_location_codes: Optional[list[str]] = None
-    travel_loyalty_program_id: Optional[str] = None
-    preferred_travel_class: Optional[str] = None
-    media_subscription_id: Optional[str] = None
-    preferred_content_genres: Optional[list[str]] = None
-    student_id: Optional[str] = None
-    institution_name: Optional[str] = None
     acquisition_source: Optional[str] = None
     acquisition_campaign: Optional[str] = None
     current_persona_id: Optional[uuid.UUID] = None

@@ -78,7 +78,16 @@ def list_master_profiles(
     lifecycle_stage: Optional[str] = Query(
         default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
     ),
+    domain_attribute_key: Optional[str] = Query(
+        default=None,
+        description="Generic key in cdp_domain_profiles.domain_attributes used for filtering.",
+    ),
+    domain_attribute_value: Optional[str] = Query(
+        default=None,
+        description="Expected value for domain_attribute_key in cdp_domain_profiles.domain_attributes.",
+    ),
     membership_tier: Optional[str] = Query(default=None),
+    clv_segment: Optional[str] = Query(default=None),
     churn_risk_tier: Optional[str] = Query(default=None, pattern="^(low|medium|high|critical)$"),
     linked_raw_profile_count_min: Optional[int] = Query(default=None, ge=0),
     q: Optional[str] = Query(default=None, description="Free-text search over full_name/persona_name/email"),
@@ -96,7 +105,10 @@ def list_master_profiles(
         tenant_id=tenant_id,
         domain=domain,
         lifecycle_stage=lifecycle_stage,
+        domain_attribute_key=domain_attribute_key,
+        domain_attribute_value=domain_attribute_value,
         membership_tier=membership_tier,
+        clv_segment=clv_segment,
         churn_risk_tier=churn_risk_tier,
         linked_raw_profile_count_min=linked_raw_profile_count_min,
         q=q,

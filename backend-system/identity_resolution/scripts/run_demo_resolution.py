@@ -53,12 +53,19 @@ def _short_hash(value):
 def print_summary(cursor) -> None:
     cursor.execute(
         f"""
-        SELECT master_profile_id, domain, full_name, email, phone_number,
-               national_id, device_ids, advertising_ids, cookie_ids,
-               external_ids, source_systems, status_code, is_hashed, persona_name
-        FROM {_table('cdp_master_profiles')}
-        WHERE tenant_id = %s
-        ORDER BY domain, created_at;
+        SELECT m.master_profile_id, m.domain, m.full_name, m.email, m.phone_number,
+               dp.domain_attributes ->> 'national_id' AS national_id,
+               m.device_ids, m.advertising_ids, m.cookie_ids,
+               m.external_ids, m.source_systems, m.status_code, m.is_hashed, m.persona_name
+        FROM {_table('cdp_master_profiles')} m
+        LEFT JOIN {_table('sys_domain')} d
+            ON d.domain_code = m.domain
+        LEFT JOIN {_table('cdp_domain_profiles')} dp
+            ON dp.tenant_id = m.tenant_id
+           AND dp.master_profile_id = m.master_profile_id
+           AND dp.domain_id = d.domain_id
+        WHERE m.tenant_id = %s
+        ORDER BY m.domain, m.created_at;
         """,
         (DEMO_TENANT_ID,),
     )

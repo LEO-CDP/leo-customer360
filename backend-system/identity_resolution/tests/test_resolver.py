@@ -207,6 +207,26 @@ class TestFindMasterProfile:
         assert result is None
         mock_cursor.execute.assert_not_called()
 
+    def test_exact_domain_attribute_match_uses_domain_profiles_exists(self, mock_cursor, mock_conn):
+        mock_cursor.fetchone.return_value = {"master_profile_id": "master-domain-1"}
+        resolver = make_resolver(mock_conn)
+        raw_profile = {
+            "raw_profile_id": "r1",
+            "tenant_id": "t1",
+            "domain": "banking",
+            "national_id": "079123456789",
+        }
+        rules = [IdentityRule("national_id", "exact")]
+
+        result = resolver._find_master_profile(mock_cursor, raw_profile, rules)
+
+        assert result == "master-domain-1"
+        query, params = mock_cursor.execute.call_args[0]
+        assert "EXISTS (" in query
+        assert "cdp_domain_profiles" in query
+        assert "dp.domain_attributes ->> %s = %s" in query
+        assert params == ("t1", "banking", "banking", "national_id", "079123456789")
+
     def test_return_details_includes_score_and_matched_fields(self, mock_cursor, mock_conn):
         mock_cursor.fetchone.return_value = {
             "master_profile_id": "master-6",
@@ -253,7 +273,7 @@ class TestLinkAndUpdate:
 
         resolver._link_and_update(mock_cursor, raw_profile, "master-1")
 
-        assert mock_cursor.execute.call_count == 2
+        assert mock_cursor.execute.call_count == 4
         link_query, link_params = mock_cursor.execute.call_args_list[0][0]
         assert "INSERT INTO customer360.cdp_profile_links" in link_query
         assert "ON CONFLICT (tenant_id, raw_profile_id) DO NOTHING" in link_query
@@ -273,6 +293,17 @@ class TestLinkAndUpdate:
         )
         # Plaintext full_name here (not a SHA-256 hex digest) -> not flagged hashed, no persona_name.
         assert update_params[-4:] == (False, None, "master-1", "t1")
+
+        domain_select_query, domain_select_params = mock_cursor.execute.call_args_list[2][0]
+        assert "SELECT dp.domain_attributes" in domain_select_query
+        assert domain_select_params == ("t1", "master-1", "banking")
+
+        upsert_query, upsert_params = mock_cursor.execute.call_args_list[3][0]
+        assert "INSERT INTO customer360.cdp_domain_profiles" in upsert_query
+        assert upsert_params[0] == "t1"
+        assert upsert_params[1] == "master-1"
+        assert upsert_params[2] == "banking"
+        assert upsert_params[3].adapted == {"national_id": "079123456789"}
 
     def test_skips_identity_graph_merges_without_source_system(self, mock_cursor, mock_conn):
         resolver = make_resolver(mock_conn)
@@ -344,16 +375,16 @@ class TestCreateMasterAndLink:
         assert "RETURNING master_profile_id" in insert_query
         assert insert_params[0] == "t1"
         assert insert_params[1] == "retail"
-        assert insert_params[6].adapted == {"MoEngage": "moe-2"}  # external_ids
-        assert insert_params[7] == ["dev-2"]  # device_ids
-        assert insert_params[8] == ["adv-2"]  # advertising_ids
-        assert insert_params[9] == ["cookie-2"]  # cookie_ids
-        assert insert_params[10].adapted == {"MoEngage": "push-2"}  # push_tokens
-        assert insert_params[11] == ["MoEngage"]  # source_systems
-        assert insert_params[12] == "r2"  # first_seen_raw_profile_id
+        assert insert_params[5].adapted == {"MoEngage": "moe-2"}  # external_ids
+        assert insert_params[6] == ["dev-2"]  # device_ids
+        assert insert_params[7] == ["adv-2"]  # advertising_ids
+        assert insert_params[8] == ["cookie-2"]  # cookie_ids
+        assert insert_params[9].adapted == {"MoEngage": "push-2"}  # push_tokens
+        assert insert_params[10] == ["MoEngage"]  # source_systems
+        assert insert_params[11] == "r2"  # first_seen_raw_profile_id
         # Plaintext full_name here (not a SHA-256 hex digest) -> not flagged hashed, no persona_name.
-        assert insert_params[13] is False  # is_hashed
-        assert insert_params[14] is None  # persona_name
+        assert insert_params[12] is False  # is_hashed
+        assert insert_params[13] is None  # persona_name
 
         link_query, link_params = mock_cursor.execute.call_args_list[1][0]
         assert "INSERT INTO customer360.cdp_profile_links" in link_query
@@ -378,8 +409,37 @@ class TestCreateMasterAndLink:
         resolver._create_master_and_link(mock_cursor, raw_profile)
 
         _, insert_params = mock_cursor.execute.call_args_list[0][0]
-        assert insert_params[13] is True  # is_hashed
-        assert insert_params[14] == generate_persona_name(raw_profile)  # persona_name
+        assert insert_params[12] is True  # is_hashed
+        assert insert_params[13] == generate_persona_name(raw_profile)  # persona_name
+
+    def test_creates_master_with_national_id_upserts_domain_profile(self, mock_cursor, mock_conn):
+        mock_cursor.fetchone.return_value = {"master_profile_id": "new-master-3"}
+        resolver = make_resolver(mock_conn)
+        raw_profile = {
+            "raw_profile_id": "r4",
+            "tenant_id": "t1",
+            "domain": "banking",
+            "full_name": "Le Van C",
+            "email": None,
+            "phone_number": None,
+            "national_id": "079111222333",
+            "source_system": "CoreBanking",
+            "external_customer_id": None,
+            "device_id": None,
+            "advertising_id": None,
+            "cookie_id": None,
+            "push_token": None,
+        }
+
+        resolver._create_master_and_link(mock_cursor, raw_profile)
+
+        assert mock_cursor.execute.call_count == 3
+        upsert_query, upsert_params = mock_cursor.execute.call_args_list[1][0]
+        assert "INSERT INTO customer360.cdp_domain_profiles" in upsert_query
+        assert upsert_params[0] == "t1"
+        assert upsert_params[1] == "new-master-3"
+        assert upsert_params[2] == "banking"
+        assert upsert_params[3].adapted == {"national_id": "079111222333"}
 
 
 class TestMarkAsProcessed:

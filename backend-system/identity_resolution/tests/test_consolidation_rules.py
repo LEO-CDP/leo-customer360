@@ -393,9 +393,14 @@ class TestConsolidationInLinkUpdate:
 
         resolver._link_and_update(mock_cursor, raw_profile, "master-1", rules=rules)
 
-        assert mock_cursor.execute.call_count == 3
-        _, update_params = mock_cursor.execute.call_args_list[2][0]
-        assert update_params[:4] == ("New Name", "old@example.com", "old-phone", "new-id")
+        assert mock_cursor.execute.call_count == 5
+        _, update_params = mock_cursor.execute.call_args_list[3][0]
+        assert update_params[:3] == ("New Name", "old@example.com", "old-phone")
+        _, upsert_params = mock_cursor.execute.call_args_list[4][0]
+        assert upsert_params[0] == "t1"
+        assert upsert_params[1] == "master-1"
+        assert upsert_params[2] == "banking"
+        assert upsert_params[3].adapted == {"national_id": "new-id"}
 
     def test_link_and_update_joins_append_distinct_list_into_string_for_scalar_field(
         self, mock_cursor, mock_conn
@@ -433,7 +438,7 @@ class TestConsolidationInLinkUpdate:
 
         resolver._link_and_update(mock_cursor, raw_profile, "master-1", rules=rules)
 
-        _, update_params = mock_cursor.execute.call_args_list[2][0]
+        _, update_params = mock_cursor.execute.call_args_list[3][0]
         assert update_params[0] == "First Name, Second Name"
 
     def test_link_and_update_fetches_custom_verified_field_column(self, mock_cursor, mock_conn):

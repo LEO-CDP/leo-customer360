@@ -6,9 +6,10 @@ record), ``cdp_raw_profiles_stage`` (AppsFlyer/MoEngage/Web Tracking landing
 zone) and ``cdp_profile_links`` (raw -> master links).
 
 ``CdpProfileAttribute`` is the full attribute catalog for
-``cdp_master_profiles`` (identity / demographic / retail / banking /
-marketing / lineage columns plus Lead / Churn / CLV / CX / Data Quality
-scoring-model metadata) and also carries the CIR matching-rule and
+``cdp_master_profiles`` + ``cdp_domain_profiles`` (identity / demographic /
+cross-channel graph / marketing / lineage columns plus Lead / Churn / CLV /
+CX / Data Quality scoring-model metadata) and also carries the CIR
+matching-rule and
 consolidation metadata consumed by backend-system/identity_resolution's
 ``CustomerIdentityResolver``.
 ``CdpIdResolutionStatus`` (real-time throttle state) remains a CIR
@@ -50,7 +51,9 @@ class CdpMasterProfile(Base):
     full_name: Mapped[Optional[str]] = mapped_column(Text)
     first_name: Mapped[Optional[str]] = mapped_column(Text)
     last_name: Mapped[Optional[str]] = mapped_column(Text)
-    # True if full_name/email/phone_number/national_id are SHA-256 hashed. Whenever TRUE,
+    # True if full_name/email/phone_number and any domain-level identifier (for
+    # example national_id in cdp_domain_profiles.domain_attributes) are SHA-256
+    # hashed. Whenever TRUE,
     # persona_name must be populated (enforced by a DB CHECK constraint + identity-resolution-
     # service's persona.py, which auto-generates persona_name for hashed profiles).
     is_hashed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
@@ -68,28 +71,6 @@ class CdpMasterProfile(Base):
     advertising_ids: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
     cookie_ids: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
     push_tokens: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
-
-    loyalty_id: Mapped[Optional[str]] = mapped_column(Text)
-    membership_tier: Mapped[Optional[str]] = mapped_column(Text)
-    preferred_store_code: Mapped[Optional[str]] = mapped_column(Text)
-
-    national_id: Mapped[Optional[str]] = mapped_column(Text)
-    cif_number: Mapped[Optional[str]] = mapped_column(Text)
-    account_numbers: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
-    kyc_status: Mapped[Optional[str]] = mapped_column(Text)
-    risk_segment: Mapped[Optional[str]] = mapped_column(Text)
-
-    # ------------------------------------------------------------------
-    # REAL ESTATE, TRAVEL, MEDIA, EDUCATION DOMAIN ATTRIBUTES
-    # ------------------------------------------------------------------
-    property_types_of_interest: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
-    preferred_location_codes: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
-    travel_loyalty_program_id: Mapped[Optional[str]] = mapped_column(Text)
-    preferred_travel_class: Mapped[Optional[str]] = mapped_column(Text)
-    media_subscription_id: Mapped[Optional[str]] = mapped_column(Text)
-    preferred_content_genres: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
-    student_id: Mapped[Optional[str]] = mapped_column(Text)
-    institution_name: Mapped[Optional[str]] = mapped_column(Text)
 
     acquisition_source: Mapped[Optional[str]] = mapped_column(Text)
     acquisition_campaign: Mapped[Optional[str]] = mapped_column(Text)
@@ -210,6 +191,43 @@ class CdpRawProfileStage(Base):
     status_code: Mapped[int] = mapped_column(SmallInteger, server_default="1")
     processed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
     created_at: Mapped[Optional[datetime]] = mapped_column(server_default=text("now()"))
+
+
+class CdpDomainProfile(Base):
+    """Business-domain-specific attributes/persona attached to a master profile."""
+
+    __tablename__ = "cdp_domain_profiles"
+    __table_args__ = (
+        UniqueConstraint("master_profile_id", "domain_id", name="uq_cdp_domain_profiles"),
+    )
+
+    domain_profile_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False
+    )
+    master_profile_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_master_profiles.master_profile_id", ondelete="CASCADE"), nullable=False
+    )
+    domain_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_domain.domain_id"), nullable=False
+    )
+
+    profile_name: Mapped[Optional[str]] = mapped_column(Text)
+    lifecycle_stage: Mapped[Optional[str]] = mapped_column(Text)
+    persona_name: Mapped[Optional[str]] = mapped_column(Text)
+    persona_summary: Mapped[Optional[str]] = mapped_column(Text)
+    engagement_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
+
+    domain_attributes: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    analytics: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+
+    first_activity_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=False))
+    last_activity_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=False))
+    status_code: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), nullable=False, server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), nullable=False, server_default=text("now()"))
 
 
 class CdpProfileLink(Base):
