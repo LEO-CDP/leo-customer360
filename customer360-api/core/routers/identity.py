@@ -572,6 +572,12 @@ profile_attributes_router = build_crud_router(
     read_schema=ProfileAttributeRead,
     prefix="/profile-attributes",
     tags=["Identity Resolution - Matching Rules"],
+    create_validator=lambda db, payload: validate_domain_value(
+        db, payload.get("domain_scope"), field_name="domain_scope", allow_all=True
+    ),
+    update_validator=lambda db, payload: validate_domain_value(
+        db, payload.get("domain_scope"), field_name="domain_scope", allow_all=True
+    ),
 )
 
 

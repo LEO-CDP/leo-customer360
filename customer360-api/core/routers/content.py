@@ -22,6 +22,7 @@ from core.schemas.content import (
     ContentItemUpdate,
     RecommendedContentItem,
 )
+from core.utils.domains import validate_domain_value
 
 router = APIRouter(prefix="/content-items", tags=["Personalized Content"])
 _crud = CRUDBase(CdpContentItem)
@@ -31,7 +32,7 @@ _crud = CRUDBase(CdpContentItem)
 @cache_response("content_items/list", ttl=settings.cache_ttl_seconds)
 def list_content_items(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(all|retail|banking|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None),
     item_type: Optional[str] = Query(default=None, pattern="^(news|video|product|article)$"),
     skip: int = 0,
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
@@ -91,7 +92,7 @@ def get_recommended_content_items(
 @cache_response("content_items/count", ttl=settings.cache_ttl_seconds)
 def count_content_items(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(all|retail|banking|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None),
     item_type: Optional[str] = Query(default=None, pattern="^(news|video|product|article)$"),
     db: Session = Depends(get_db),
 ):
@@ -109,6 +110,10 @@ def get_content_item(content_item_id: uuid.UUID, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=ContentItemRead, status_code=201)
 def create_content_item(payload: ContentItemCreate, db: Session = Depends(get_db)):
+    try:
+        validate_domain_value(db, payload.domain, allow_all=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     obj = _crud.create(db, payload.model_dump())
     invalidate_prefix("content_items")
     return obj
@@ -119,7 +124,13 @@ def update_content_item(content_item_id: uuid.UUID, payload: ContentItemUpdate, 
     obj = _crud.get(db, content_item_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpContentItem '{content_item_id}' not found")
-    obj = _crud.update(db, obj, payload.model_dump(exclude_unset=True))
+    obj_in = payload.model_dump(exclude_unset=True)
+    if "domain" in obj_in:
+        try:
+            validate_domain_value(db, obj_in.get("domain"), allow_all=True)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    obj = _crud.update(db, obj, obj_in)
     invalidate_prefix("content_items")
     return obj
 
