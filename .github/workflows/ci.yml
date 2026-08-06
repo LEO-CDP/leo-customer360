@@ -38,6 +38,11 @@ jobs:
 
       - name: Run all unit tests
         run: |
+          # Create the 'logs' directory so 'tee' has a place to write the file.
+          # The -p flag ensures no error is thrown if the directory already exists.
+          mkdir -p logs
+          
+          # Run the script and pipe the output
           ./run_all_tests.sh 2>&1 | tee logs/test-output.log
 
       - name: Upload test logs
