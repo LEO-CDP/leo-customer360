@@ -455,7 +455,9 @@ class CdpPersonaFeature(Base):
 
     __tablename__ = "cdp_persona_features"
 
-    feature_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    feature_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
     persona_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("cdp_customer_personas.persona_id", ondelete="CASCADE"), nullable=False
     )
@@ -478,7 +480,9 @@ class CdpPersonaScoreDetail(Base):
 
     __tablename__ = "cdp_persona_score_details"
 
-    score_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    score_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
     persona_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("cdp_customer_personas.persona_id", ondelete="CASCADE"), nullable=False
     )
@@ -497,7 +501,9 @@ class CdpPersonaHistory(Base):
 
     __tablename__ = "cdp_persona_history"
 
-    history_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    history_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
     persona_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("cdp_customer_personas.persona_id", ondelete="CASCADE"), nullable=False
     )

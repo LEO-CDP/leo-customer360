@@ -107,9 +107,9 @@ def _make_child_crud(pk_field: str, pk_factory):
     return _FakeChildCRUD
 
 
-FakeFeatureCRUD = _make_child_crud("feature_id", lambda: len(FakeFeatureCRUD.store) + 1)
-FakeScoreDetailCRUD = _make_child_crud("score_id", lambda: len(FakeScoreDetailCRUD.store) + 1)
-FakeHistoryCRUD = _make_child_crud("history_id", lambda: len(FakeHistoryCRUD.store) + 1)
+FakeFeatureCRUD = _make_child_crud("feature_id", lambda: uuid.uuid4())
+FakeScoreDetailCRUD = _make_child_crud("score_id", lambda: uuid.uuid4())
+FakeHistoryCRUD = _make_child_crud("history_id", lambda: uuid.uuid4())
 
 
 class _FakeScalarsResult:
@@ -408,8 +408,9 @@ class PersonaFeaturesRouterTests(unittest.TestCase):
     def test_get_features_for_persona_via_customer_personas_endpoint(self):
         persona = _fake_persona()
         FakePersonaCRUD.store[persona.persona_id] = persona
+        feature_id = uuid.uuid4()
         feature = SimpleNamespace(
-            feature_id=1,
+            feature_id=feature_id,
             persona_id=persona.persona_id,
             feature_code="source_system_count",
             feature_name="Number of Source Systems",
@@ -421,7 +422,7 @@ class PersonaFeaturesRouterTests(unittest.TestCase):
             confidence_score=None,
             computed_at=datetime.now(timezone.utc),
         )
-        FakeFeatureCRUD.store[1] = feature
+        FakeFeatureCRUD.store[feature_id] = feature
 
         response = self.client.get(f"/customer-personas/{persona.persona_id}/features")
 
@@ -542,8 +543,9 @@ class MasterProfilePersonaEndpointTests(unittest.TestCase):
     def test_persona_history_returns_rows(self):
         master_id = uuid.uuid4()
         profile = SimpleNamespace(master_profile_id=master_id, current_persona_id=None)
+        history_id = uuid.uuid4()
         history_row = SimpleNamespace(
-            history_id=1,
+            history_id=history_id,
             persona_id=uuid.uuid4(),
             old_persona_name="Cautious Retail Shopper #aaa111",
             new_persona_name="Savvy Retail Shopper #4f2a9c",

@@ -25,9 +25,12 @@ jobs:
 
     steps:
       - name: Checkout code
+        # FIX: Ensure this is the absolute latest version. 
+        # If v7 still throws the warning, check the actions/checkout repo for a v8+.
         uses: actions/checkout@v7
 
       - name: Set up Python 3.11
+        # FIX: Ensure this is the absolute latest version.
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
@@ -39,7 +42,6 @@ jobs:
       - name: Run all unit tests
         run: |
           # Create the 'logs' directory so 'tee' has a place to write the file.
-          # The -p flag ensures no error is thrown if the directory already exists.
           mkdir -p logs
           
           # Run the script and pipe the output
@@ -47,6 +49,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
+        # FIX: Check actions/upload-artifact for the latest tag if the warning persists.
         uses: actions/upload-artifact@v7
         with:
           name: all-unit-test-logs-${{ github.run_id }}-${{ github.run_attempt }}

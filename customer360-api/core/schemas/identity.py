@@ -518,7 +518,7 @@ class PersonaFeatureCreate(PersonaFeatureBase):
 
 class PersonaFeatureRead(PersonaFeatureBase):
     model_config = ConfigDict(from_attributes=True)
-    feature_id: int
+    feature_id: uuid.UUID
     computed_at: Optional[datetime] = None
 
 
@@ -537,7 +537,7 @@ class PersonaScoreDetailCreate(PersonaScoreDetailBase):
 
 class PersonaScoreDetailRead(PersonaScoreDetailBase):
     model_config = ConfigDict(from_attributes=True)
-    score_id: int
+    score_id: uuid.UUID
     created_at: Optional[datetime] = None
 
 
@@ -557,5 +557,5 @@ class PersonaHistoryCreate(PersonaHistoryBase):
 
 class PersonaHistoryRead(PersonaHistoryBase):
     model_config = ConfigDict(from_attributes=True)
-    history_id: int
+    history_id: uuid.UUID
     changed_at: Optional[datetime] = None

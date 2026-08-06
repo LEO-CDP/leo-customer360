@@ -1284,7 +1284,7 @@ WHERE
 
 CREATE TABLE IF NOT EXISTS customer360.cdp_persona_features
 (
-    feature_id          BIGSERIAL PRIMARY KEY,
+    feature_id          UUID PRIMARY KEY,
 
     persona_id          UUID NOT NULL
         REFERENCES customer360.cdp_customer_personas(persona_id)
@@ -1315,7 +1315,7 @@ CREATE INDEX IF NOT EXISTS idx_cdp_persona_features_persona ON customer360.cdp_p
 
 CREATE TABLE IF NOT EXISTS customer360.cdp_persona_score_details
 (
-    score_id            BIGSERIAL PRIMARY KEY,
+    score_id            UUID PRIMARY KEY,
 
     persona_id          UUID NOT NULL
         REFERENCES customer360.cdp_customer_personas(persona_id)
@@ -1340,7 +1340,7 @@ CREATE INDEX IF NOT EXISTS idx_cdp_persona_score_details_persona ON customer360.
 
 CREATE TABLE IF NOT EXISTS customer360.cdp_persona_history
 (
-    history_id          BIGSERIAL PRIMARY KEY,
+    history_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     persona_id          UUID NOT NULL
         REFERENCES customer360.cdp_customer_personas(persona_id)

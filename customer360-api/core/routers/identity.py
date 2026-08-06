@@ -665,7 +665,7 @@ def list_persona_features(
 
 @persona_features_router.get("/{feature_id}", response_model=PersonaFeatureRead)
 @cache_response("persona_features/item", ttl=settings.cache_ttl_seconds)
-def get_persona_feature(feature_id: int, db: Session = Depends(get_db)):
+def get_persona_feature(feature_id: uuid.UUID, db: Session = Depends(get_db)):
     obj = _persona_feature_crud.get(db, feature_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpPersonaFeature '{feature_id}' not found")
@@ -700,7 +700,7 @@ def list_persona_score_details(
 
 @persona_score_details_router.get("/{score_id}", response_model=PersonaScoreDetailRead)
 @cache_response("persona_score_details/item", ttl=settings.cache_ttl_seconds)
-def get_persona_score_detail(score_id: int, db: Session = Depends(get_db)):
+def get_persona_score_detail(score_id: uuid.UUID, db: Session = Depends(get_db)):
     obj = _persona_score_detail_crud.get(db, score_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpPersonaScoreDetail '{score_id}' not found")
@@ -733,7 +733,7 @@ def list_persona_history(
 
 @persona_history_router.get("/{history_id}", response_model=PersonaHistoryRead)
 @cache_response("persona_history/item", ttl=settings.cache_ttl_seconds)
-def get_persona_history_entry(history_id: int, db: Session = Depends(get_db)):
+def get_persona_history_entry(history_id: uuid.UUID, db: Session = Depends(get_db)):
     obj = _persona_history_crud.get(db, history_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpPersonaHistory '{history_id}' not found")
