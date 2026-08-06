@@ -6,9 +6,9 @@ name: customer360
 nodes:
   - role: control-plane
     extraPortMappings:
-      - { containerPort: 30008, hostPort: 8008, protocol: TCP } # api
-      - { containerPort: 30890, hostPort: 8890, protocol: TCP } # frontend
-      - { containerPort: 30080, hostPort: 8080, protocol: TCP } # keycloak
-      - { containerPort: 30300, hostPort: 3000, protocol: TCP } # dagster
-      - { containerPort: 30900, hostPort: 9000, protocol: TCP } # minio api
-      - { containerPort: 30901, hostPort: 9001, protocol: TCP } # minio console
+      - { containerPort: 30008, hostPort: 18008, protocol: TCP } # api
+      - { containerPort: 30890, hostPort: 18890, protocol: TCP } # frontend
+      - { containerPort: 30080, hostPort: 18080, protocol: TCP } # keycloak
+      - { containerPort: 30300, hostPort: 13000, protocol: TCP } # dagster
+      - { containerPort: 30900, hostPort: 19000, protocol: TCP } # minio api
+      - { containerPort: 30901, hostPort: 19001, protocol: TCP } # minio console

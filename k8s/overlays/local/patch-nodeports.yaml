@@ -1,7 +1,7 @@
 # Expose the host-facing services as NodePorts. kind maps these node ports to
-# localhost via kind/cluster.yaml extraPortMappings:
-#   api 8008->30008, frontend 8890->30890, keycloak 8080->30080,
-#   dagster 3000->30300, minio api 9000->30900, console 9001->30901
+# localhost via kind/cluster.yaml extraPortMappings (host port -> nodePort):
+#   api 18008->30008, frontend 18890->30890, keycloak 18080->30080,
+#   dagster 13000->30300, minio api 19000->30900, console 19001->30901
 apiVersion: v1
 kind: Service
 metadata:

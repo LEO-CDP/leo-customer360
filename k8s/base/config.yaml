@@ -42,7 +42,7 @@ data:
   DAGSTER_GRAPHQL_PORT: "3000"
 
   # --- Frontend (FRONTEND_API_HOSTNAME is called from the BROWSER -> must be host-reachable) ---
-  FRONTEND_API_HOSTNAME: "http://localhost:8008"
+  FRONTEND_API_HOSTNAME: "http://localhost:18008"
   FRONTEND_TENANT_ID: "11111111-1111-1111-1111-111111111111"
 
   # --- Kafka / object storage ---

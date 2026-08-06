@@ -35,11 +35,11 @@ kubectl -n customer360 get pods
 cat <<'EOF'
 
 ==> Customer360 is up on kind. URLs (once pods are Ready):
-      API        http://localhost:8008/docs
-      Frontend   http://localhost:8890
-      Keycloak   http://localhost:8080
-      Dagster    http://localhost:3000
-      MinIO      http://localhost:9000  (console http://localhost:9001)
+      API        http://localhost:18008/docs
+      Frontend   http://localhost:18890
+      Keycloak   http://localhost:18080
+      Dagster    http://localhost:13000
+      MinIO      http://localhost:19000  (console http://localhost:19001)
     Tail a service:   kubectl -n customer360 logs -f deploy/api
     Tear down:        k8s/scripts/down.sh
 EOF
