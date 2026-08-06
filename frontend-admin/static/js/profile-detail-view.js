@@ -12,6 +12,49 @@ window.C360 = window.C360 || {};
   var currentContentType = "";
   var timelineLimit = 8;
 
+  // Mirrors the sys_domain / validate_domain_value fixed dictionary
+  // (customer360-api/core/utils/domains.py) -- used to populate the "Add
+  // Attribute" domain <select> without a dedicated /domains endpoint.
+  var DOMAIN_CODES = ["retail", "banking", "real_estate", "travel", "media", "education"];
+
+  function populateDomainAttributeDomainSelect(defaultDomain) {
+    var $select = $("#domain-attribute-domain");
+    if (!$select.length) return;
+    $select.empty();
+    DOMAIN_CODES.forEach(function (code) {
+      $select.append($("<option>").val(code).text(fmt.domainLabel(code)));
+    });
+    if (defaultDomain) $select.val(defaultDomain);
+  }
+
+  function submitDomainAttributeForm() {
+    var domain = $("#domain-attribute-domain").val();
+    var key = $.trim($("#domain-attribute-key").val());
+    var value = $.trim($("#domain-attribute-value").val());
+    var $error = $("#domain-attribute-form-error");
+    $error.addClass("hidden").text("");
+
+    if (!key) {
+      $error.removeClass("hidden").text("Attribute key is required.");
+      return;
+    }
+
+    api("/master-profiles/" + currentProfileId + "/domain-attributes", {
+      domain: domain,
+      attribute_key: key,
+      attribute_value: value,
+    }, "POST")
+      .done(function () {
+        $("#domain-attribute-key").val("");
+        $("#domain-attribute-value").val("");
+        reload();
+      })
+      .fail(function (xhr) {
+        var detail = (xhr.responseJSON && xhr.responseJSON.detail) || "Could not add attribute.";
+        $error.removeClass("hidden").text(typeof detail === "string" ? detail : JSON.stringify(detail));
+      });
+  }
+
   function periodDays() {
     return parseInt($("#data-period-select").val(), 10) || 90;
   }
@@ -41,6 +84,7 @@ window.C360 = window.C360 || {};
     profileLinks,
     persona,
     personaHistory,
+    domainProfiles,
   ) {
     var displayName =
       profile.persona_name ||
@@ -595,7 +639,30 @@ window.C360 = window.C360 || {};
       computedAtLabel: persona ? fmt.dateTime(persona.computed_at) : "—",
       hasHistory: historyVms.length > 0,
       history: historyVms,
+
+      hasDomainProfiles: (domainProfiles || []).length > 0,
+      domainProfiles: domainAttributesVm(domainProfiles || []),
     };
+  }
+
+  // Flattens each cdp_domain_profiles row's domain_attributes JSONB into
+  // display-ready {label, value} rows for the Domain Attributes card.
+  function domainAttributesVm(domainProfiles) {
+    return domainProfiles.map(function (dp) {
+      var entries = Object.keys(dp.domain_attributes || {}).map(function (key) {
+        var value = dp.domain_attributes[key];
+        return {
+          label: fmt.titleCase(key.replace(/_/g, " ")),
+          value: Array.isArray(value) ? value.join(", ") : String(value),
+        };
+      });
+      return {
+        domain_profile_id: dp.domain_profile_id,
+        domainLabel: fmt.domainLabel(dp.domain_code),
+        hasAttributes: entries.length > 0,
+        attributes: entries,
+      };
+    });
   }
 
   // Persona endpoints 404 when no persona has been computed yet for this
@@ -631,6 +698,17 @@ window.C360 = window.C360 || {};
     }).then(
       function (links) {
         return links || [];
+      },
+      function () {
+        return [];
+      },
+    );
+  }
+
+  function loadDomainProfiles(masterProfileId) {
+    return api("/master-profiles/" + masterProfileId + "/domain-profiles").then(
+      function (domainProfiles) {
+        return domainProfiles || [];
       },
       function () {
         return [];
@@ -861,6 +939,7 @@ window.C360 = window.C360 || {};
       loadProfileLinks(masterProfileId),
       loadPersona(masterProfileId),
       loadPersonaHistory(masterProfileId),
+      loadDomainProfiles(masterProfileId),
     )
       .done(
         function (
@@ -872,6 +951,7 @@ window.C360 = window.C360 || {};
           profileLinks,
           persona,
           personaHistory,
+          domainProfiles,
         ) {
           var vm = buildDetailVm(
             profileRes[0],
@@ -882,11 +962,13 @@ window.C360 = window.C360 || {};
             profileLinks,
             persona,
             personaHistory,
+            domainProfiles,
           );
           $("#detail-loading").addClass("hidden");
           $("#detail-content").html(
             C360.templates.render("profile-details", vm),
           );
+          populateDomainAttributeDomainSelect(profileRes[0].domain);
           loadContentItems(masterProfileId, "");
         },
       )
@@ -912,6 +994,11 @@ window.C360 = window.C360 || {};
     });
 
     $(document).on("click", "#btn-timeline-more", loadMoreTimeline);
+
+    $(document).on("submit", "#domain-attribute-form", function (e) {
+      e.preventDefault();
+      submitDomainAttributeForm();
+    });
 
     $(document).on("click", ".btn-linked-raw-detail", function () {
       openLinkedRawModal($(this).data("raw-profile-id"));

@@ -16,6 +16,7 @@ from core.models.crm import (
 from core.models.graph import GraphEdge
 from core.models.identity import (
     CdpCustomerPersona,
+    CdpDomainProfile,
     CdpIdentityIndex,
     CdpIdResolutionStatus,
     CdpMasterProfile,
@@ -44,6 +45,7 @@ __all__ = [
     "Opportunity",
     "GraphEdge",
     "CdpCustomerPersona",
+    "CdpDomainProfile",
     "CdpIdentityIndex",
     "CdpIdResolutionStatus",
     "CdpMasterProfile",

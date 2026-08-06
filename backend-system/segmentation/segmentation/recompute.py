@@ -50,6 +50,27 @@ _DML_DDL_PATTERN = re.compile(
 )
 _QUERY_KEYWORDS_PATTERN = re.compile(r"\b(select|from|join|union|into|with)\b", re.IGNORECASE)
 
+# Exposes ONLY cdp_domain_profiles.domain_attributes, aliased as "dp", scoped
+# to the current cdp_master_profiles row's own (tenant_id, master_profile_id,
+# domain) -- no other cdp_domain_profiles column is exposed (several share
+# names with cdp_master_profiles: tenant_id, lifecycle_stage, persona_summary,
+# engagement_score, status_code, created_at, updated_at), so existing
+# bare-column sql_rules fragments keep resolving unambiguously against
+# cdp_master_profiles. New domain-scoped rules reference it explicitly, e.g.
+# dp.domain_attributes->>'risk_segment'. Mirrors customer360-api's
+# core/crud/segmentation.py::DOMAIN_ATTRIBUTES_JOIN_SQL -- keep both in sync.
+_DOMAIN_ATTRIBUTES_JOIN_SQL = """
+    LEFT JOIN LATERAL (
+        SELECT dom.domain_attributes
+        FROM {schema}.cdp_domain_profiles dom
+        JOIN {schema}.sys_domain sd ON sd.domain_id = dom.domain_id
+        WHERE dom.tenant_id = cdp_master_profiles.tenant_id
+          AND dom.master_profile_id = cdp_master_profiles.master_profile_id
+          AND sd.domain_code = cdp_master_profiles.domain
+        LIMIT 1
+    ) dp ON TRUE
+"""
+
 
 def _is_safe_where_fragment(fragment: Optional[str]) -> bool:
     if not fragment or not fragment.strip():
@@ -76,6 +97,7 @@ def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_frag
         cur.execute(
             f"""
             SELECT master_profile_id FROM {DB_SCHEMA}.cdp_master_profiles
+            {_DOMAIN_ATTRIBUTES_JOIN_SQL.format(schema=DB_SCHEMA)}
             WHERE tenant_id = %(tenant_id)s AND status_code = 1 AND ({where_fragment})
             """,
             {"tenant_id": tenant_id},

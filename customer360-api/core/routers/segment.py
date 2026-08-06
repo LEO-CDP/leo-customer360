@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from core.cache import cache_response, invalidate_prefix
 from core.config import settings
 from core.crud.base import CRUDBase
-from core.crud.segmentation import recompute_segment_membership
+from core.crud.segmentation import DOMAIN_ATTRIBUTES_JOIN_SQL, recompute_segment_membership
 from core.database import get_db
 from core.init_core_data import list_tenant_ids, seed_default_segments_with_breakdown
 from core.models.identity import CdpProfileAttribute
@@ -29,10 +29,11 @@ from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 from core.utils.domains import validate_domain_value
 from core.utils.sql_safety import validate_sql_where_fragment
 
-# Segment rules (see get_segment_matched_profiles above) only ever query
-# cdp_master_profiles, so the "field picker" endpoint below must only ever
-# offer columns that actually live on that table.
-_SEGMENTABLE_SOURCE_TABLE = "cdp_master_profiles"
+# Segment rules (see get_segment_matched_profiles below) query cdp_master_profiles
+# LEFT JOINed to cdp_domain_profiles (via DOMAIN_ATTRIBUTES_JOIN_SQL, aliased as
+# "dp"), so the "field picker" endpoint below offers both plain cdp_master_profiles
+# columns and cdp_domain_profiles.domain_attributes JSONB keys (as dp.domain_attributes->>'key').
+_SEGMENTABLE_SOURCE_TABLES = ("cdp_master_profiles", "cdp_domain_profiles")
 _DOMAIN_SCOPE_PATTERN = r"^(all|retail|banking|real_estate|travel|media|education)$"
 
 segments_router = build_crud_router(
@@ -189,6 +190,7 @@ def get_segment_matched_profiles(
     stmt = text(
         f"""
         SELECT * FROM {settings.db_schema}.cdp_master_profiles
+        {DOMAIN_ATTRIBUTES_JOIN_SQL.format(schema=settings.db_schema)}
         WHERE tenant_id = :tenant_id AND status_code = 1 AND ({where_fragment})
         ORDER BY created_at DESC
         LIMIT :limit OFFSET :skip
@@ -211,6 +213,7 @@ def count_segment_matched_profiles(segment_id: uuid.UUID, db: Session = Depends(
     stmt = text(
         f"""
         SELECT count(*) FROM {settings.db_schema}.cdp_master_profiles
+        {DOMAIN_ATTRIBUTES_JOIN_SQL.format(schema=settings.db_schema)}
         WHERE tenant_id = :tenant_id AND status_code = 1 AND ({where_fragment})
         """
     )
@@ -369,26 +372,41 @@ def get_recompute_job_status(run_id: str):
 
     return result
 
+
+def _segmentable_field(attribute: CdpProfileAttribute) -> str:
+    """SQL-safe field reference for the Audience Builder field picker: a bare
+    cdp_master_profiles column, or the dp.domain_attributes->>'key' JSONB path
+    (see DOMAIN_ATTRIBUTES_JOIN_SQL) for cdp_domain_profiles-sourced attributes."""
+    if getattr(attribute, "source_table", None) == "cdp_domain_profiles":
+        return f"dp.domain_attributes->>'{attribute.attribute_internal_code}'"
+    return attribute.master_profile_column or attribute.attribute_internal_code
+
+
 @segments_router.get("/segmentable-profile-attributes")
 @cache_response("segments/segmentable_profile_attributes", ttl=settings.cache_ttl_seconds)
 def get_segmentable_profile_attributes(
     domain: Optional[str] = Query(default=None, pattern=_DOMAIN_SCOPE_PATTERN),
     db: Session = Depends(get_db),
 ):
-    """Returns the catalog of ``cdp_master_profiles`` columns that are valid
-    to reference in a segment's ``sql_rules`` (Audience Builder field
-    picker), sourced from ``cdp_profile_attributes`` -- the same
-    metadata-driven catalog that also configures CIR matching rules (see
-    module docstring). This is a read-only endpoint that does not require
-    authentication, since it only returns metadata about the system and not
-    any sensitive data.
+    """Returns the catalog of attributes that are valid to reference in a
+    segment's ``sql_rules`` (Audience Builder field picker), sourced from
+    ``cdp_profile_attributes`` -- the same metadata-driven catalog that also
+    configures CIR matching rules (see module docstring). This is a
+    read-only endpoint that does not require authentication, since it only
+    returns metadata about the system and not any sensitive data.
 
     Only rows with ``is_segmentable = true``, ``status = 'ACTIVE'`` and
-    ``source_table = 'cdp_master_profiles'`` are returned -- CIR-only
-    matching keys that live on ``cdp_raw_profiles_stage`` (e.g. the raw
-    ``device_id``/``cookie_id`` staging columns) are never valid fields for
-    a segment rule, since ``sql_rules`` only ever executes against
-    ``cdp_master_profiles`` (see ``get_segment_matched_profiles`` above).
+    ``source_table IN ('cdp_master_profiles', 'cdp_domain_profiles')`` are
+    returned. ``cdp_master_profiles`` rows return their bare column name as
+    ``field``; ``cdp_domain_profiles`` rows (JSONB keys in
+    ``domain_attributes``, e.g. ``risk_segment``/``membership_tier``) return
+    ``dp.domain_attributes->>'<key>'`` -- the alias exposed by
+    ``DOMAIN_ATTRIBUTES_JOIN_SQL``, which every ``sql_rules`` execution site
+    (``get_segment_matched_profiles``/``count_segment_matched_profiles``/
+    ``recompute_segment_membership``) LEFT JOINs in. CIR-only matching keys
+    that live on ``cdp_raw_profiles_stage`` (e.g. the raw ``device_id``/
+    ``cookie_id`` staging columns) are never valid fields for a segment
+    rule.
 
     ``domain`` (optional, one of ``retail``/``banking``/``real_estate``/
     ``travel``/``media``/``education``) additionally filters to attributes with
@@ -398,7 +416,7 @@ def get_segmentable_profile_attributes(
     stmt = select(CdpProfileAttribute).where(
         CdpProfileAttribute.is_segmentable.is_(True),
         CdpProfileAttribute.status == "ACTIVE",
-        CdpProfileAttribute.source_table == _SEGMENTABLE_SOURCE_TABLE,
+        CdpProfileAttribute.source_table.in_(_SEGMENTABLE_SOURCE_TABLES),
     )
     if domain:
         stmt = stmt.where(CdpProfileAttribute.domain_scope.in_(["all", domain]))
@@ -407,7 +425,7 @@ def get_segmentable_profile_attributes(
     attributes = db.execute(stmt).scalars().all()
     return [
         {
-            "field": attribute.master_profile_column or attribute.attribute_internal_code,
+            "field": _segmentable_field(attribute),
             "name": attribute.name,
             "description": attribute.description,
             "attribute_group": attribute.attribute_group,

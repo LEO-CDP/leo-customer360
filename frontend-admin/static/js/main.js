@@ -58,7 +58,7 @@ const TIME_CHECK_API_HEALTH = 60000;
     var labels = C360.fmt && C360.fmt.DOMAIN_LABELS ? C360.fmt.DOMAIN_LABELS : {};
     var keys = Object.keys(labels).filter(function (k) { return k !== "all"; }).sort();
 
-    $("#domain-filter, #attributes-domain-filter, #persona-domain-filter").each(function () {
+    $("#domain-filter, #attributes-domain-filter, #persona-domain-filter, #attribute-add-domain-scope").each(function () {
       var $sel = $(this);
       var current = $sel.val();
       $sel.find("option[value!=''][value!='all']").remove();

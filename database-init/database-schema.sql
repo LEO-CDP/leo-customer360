@@ -1006,6 +1006,103 @@ CREATE INDEX IF NOT EXISTS idx_cdp_domain_profiles_analytics
     ON customer360.cdp_domain_profiles
     USING GIN(analytics);
 
+-- ============================================================================
+-- Auto-catalog trigger: every domain_attributes JSONB key gets registered
+-- into cdp_profile_attributes automatically.
+-- ============================================================================
+-- Deliberately NOT one btree expression index per domain_attributes key
+-- (((domain_attributes ->> 'some_key'))): in production a Customer 360 tenant
+-- can introduce arbitrarily many domain-specific keys over time (per
+-- tenant/domain), and one physical index per key does not scale -- every new
+-- key would require a manual ALTER/migration, bloats pg_class/autovacuum
+-- work, and most keys are never queried at all. Instead:
+--   1. The single existing GIN index above (idx_cdp_domain_profiles_attributes)
+--      already accelerates arbitrary-key containment/existence queries
+--      (`domain_attributes @> '{"key":"value"}'`, `domain_attributes ? 'key'`)
+--      for ANY key, present or future, with zero per-key maintenance.
+--   2. The segmentation JOIN (core/crud/segmentation.py::DOMAIN_ATTRIBUTES_JOIN_SQL)
+--      always starts FROM cdp_master_profiles and narrows to a single
+--      cdp_domain_profiles row via idx_cdp_domain_profiles_tenant_master
+--      (tenant_id, master_profile_id) BEFORE ever touching domain_attributes --
+--      the ->>'key' = 'value' filter is then evaluated in-memory on that one
+--      already-fetched row, not via an index scan on cdp_domain_profiles. So
+--      per-key indexes were never actually load-bearing for that query shape.
+--   3. If a SPECIFIC key becomes hot enough to need its own index (proven by
+--      real query plans, not speculation), promote it to a real scalar column
+--      instead of adding yet another expression index -- see the discussion
+--      in this session's notes on when to graduate a JSONB key to a column.
+CREATE OR REPLACE FUNCTION customer360.sync_domain_attribute_catalog()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_domain_code TEXT;
+    v_attribute_group TEXT;
+    v_key TEXT;
+    v_value JSONB;
+    v_data_type TEXT;
+BEGIN
+    IF NEW.domain_attributes IS NULL OR jsonb_typeof(NEW.domain_attributes) <> 'object' THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT domain_code INTO v_domain_code
+    FROM customer360.sys_domain
+    WHERE domain_id = NEW.domain_id;
+
+    -- attribute_group has a fixed CHECK-constraint enum; fall back to
+    -- GENERAL for any domain_code that doesn't map onto it 1:1.
+    v_attribute_group := UPPER(COALESCE(v_domain_code, 'general'));
+    IF v_attribute_group NOT IN (
+        'SYSTEM', 'IDENTITY', 'IDENTITY_GRAPH', 'RETAIL', 'BANKING', 'REAL_ESTATE',
+        'TRAVEL', 'MEDIA', 'EDUCATION', 'MARKETING', 'LINEAGE', 'LIFECYCLE',
+        'LEAD_SCORING', 'CHURN_SCORING', 'CLV_SCORING', 'CX_SCORING', 'DATA_QUALITY', 'GENERAL'
+    ) THEN
+        v_attribute_group := 'GENERAL';
+    END IF;
+
+    FOR v_key, v_value IN SELECT * FROM jsonb_each(NEW.domain_attributes) LOOP
+        v_data_type := CASE jsonb_typeof(v_value)
+            WHEN 'array' THEN 'ARRAY'
+            WHEN 'object' THEN 'JSONB'
+            WHEN 'number' THEN 'NUMERIC'
+            WHEN 'boolean' THEN 'BOOLEAN'
+            ELSE 'TEXT'
+        END;
+
+        -- ON CONFLICT DO NOTHING is deliberate: this trigger only discovers
+        -- brand-new keys. Once a key exists in the catalog (whether seeded
+        -- or auto-discovered), a human curator may have since refined its
+        -- name/description/is_pii/is_identity_resolution/is_segmentable --
+        -- the trigger must never clobber that curation on a later write that
+        -- merely reuses the same key.
+        INSERT INTO customer360.cdp_profile_attributes (
+            attribute_internal_code, master_profile_column, name, description,
+            attribute_group, source_table, data_type, domain_scope,
+            is_pii, status, is_segmentable, is_scoring_model, value_type, display_order
+        ) VALUES (
+            v_key, NULL, initcap(replace(v_key, '_', ' ')),
+            'Auto-discovered from customer360.cdp_domain_profiles.domain_attributes by sync_domain_attribute_catalog().',
+            v_attribute_group, 'cdp_domain_profiles', v_data_type,
+            COALESCE(v_domain_code, 'all'),
+            FALSE, 'ACTIVE',
+            v_data_type NOT IN ('ARRAY', 'JSONB'), FALSE, 'metadata', 999
+        )
+        ON CONFLICT (attribute_internal_code) DO NOTHING;
+    END LOOP;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION customer360.sync_domain_attribute_catalog() IS
+'Auto-registers every JSONB key seen in cdp_domain_profiles.domain_attributes as a row in cdp_profile_attributes (source_table=cdp_domain_profiles), so the attribute catalog never silently drifts from what application code actually writes. Never overwrites an existing catalog row (ON CONFLICT DO NOTHING) -- curated metadata always wins over auto-discovery.';
+
+DROP TRIGGER IF EXISTS trg_sync_domain_attribute_catalog ON customer360.cdp_domain_profiles;
+
+CREATE TRIGGER trg_sync_domain_attribute_catalog
+    AFTER INSERT OR UPDATE OF domain_attributes ON customer360.cdp_domain_profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION customer360.sync_domain_attribute_catalog();
+
 
 -- Raw profiles staging
 -- Landing zone for every inbound source: AppsFlyer (mobile attribution/install
@@ -1284,7 +1381,7 @@ WHERE
 
 CREATE TABLE IF NOT EXISTS customer360.cdp_persona_features
 (
-    feature_id          UUID PRIMARY KEY,
+    feature_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     persona_id          UUID NOT NULL
         REFERENCES customer360.cdp_customer_personas(persona_id)
@@ -1315,7 +1412,7 @@ CREATE INDEX IF NOT EXISTS idx_cdp_persona_features_persona ON customer360.cdp_p
 
 CREATE TABLE IF NOT EXISTS customer360.cdp_persona_score_details
 (
-    score_id            UUID PRIMARY KEY,
+    score_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     persona_id          UUID NOT NULL
         REFERENCES customer360.cdp_customer_personas(persona_id)
@@ -1790,7 +1887,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog for cdp_master_profiles schema columns used by identity-resolution engine (CIR). One row per master-profile column (email, phone_number, device_id, etc.) with consolidation rules, matching strategies, and schema hints. Domain-specific attributes (national_id, kyc_status, loyalty_id, etc.) are NOT included; they live as JSONB keys in cdp_domain_profiles.domain_attributes.';
+COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog for cdp_master_profiles schema columns used by identity-resolution engine (CIR). One row per master-profile column (email, phone_number, device_id, etc.) with consolidation rules, matching strategies, and schema hints. Domain-specific attributes (national_id, kyc_status, loyalty_id, etc.) must be included; they live as JSONB keys in cdp_domain_profiles.domain_attributes.';
 
 -- ============================================================================
 -- cdp_identity_index: flattened O(1) point-lookup index for identifiers

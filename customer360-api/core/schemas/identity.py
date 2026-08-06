@@ -6,7 +6,7 @@ metadata / throttle-status tables consumed by backend-system/identity_resolution
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -276,6 +276,60 @@ class ProfileLinkRead(ProfileLinkBase):
 class LinkedRawProfileDetailRead(BaseModel):
     link: ProfileLinkRead
     raw_profile: RawProfileRead
+
+
+class DomainProfileBase(BaseModel):
+    tenant_id: uuid.UUID
+    master_profile_id: uuid.UUID
+    domain_id: uuid.UUID
+    profile_name: Optional[str] = None
+    lifecycle_stage: Optional[str] = None
+    persona_name: Optional[str] = None
+    persona_summary: Optional[str] = None
+    engagement_score: Optional[Decimal] = None
+    domain_attributes: dict[str, Any] = Field(default_factory=dict)
+    analytics: Optional[dict[str, Any]] = Field(default_factory=dict)
+    first_activity_at: Optional[datetime] = None
+    last_activity_at: Optional[datetime] = None
+    status_code: int = 1
+
+
+class DomainProfileCreate(DomainProfileBase):
+    pass
+
+
+class DomainProfileUpdate(BaseModel):
+    profile_name: Optional[str] = None
+    lifecycle_stage: Optional[str] = None
+    persona_name: Optional[str] = None
+    persona_summary: Optional[str] = None
+    engagement_score: Optional[Decimal] = None
+    domain_attributes: Optional[dict[str, Any]] = None
+    analytics: Optional[dict[str, Any]] = None
+    first_activity_at: Optional[datetime] = None
+    last_activity_at: Optional[datetime] = None
+    status_code: Optional[int] = None
+
+
+class DomainProfileRead(DomainProfileBase):
+    model_config = ConfigDict(from_attributes=True)
+    domain_profile_id: uuid.UUID
+    # Resolved from sys_domain by the router (not a column on cdp_domain_profiles
+    # itself) so the UI can render a domain label without a second round-trip.
+    domain_code: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class DomainAttributeUpsert(BaseModel):
+    """Adds/overwrites a single key in a master profile's per-domain
+    ``domain_attributes`` (creating the ``cdp_domain_profiles`` row for that
+    domain if it doesn't exist yet). Merges into the existing JSONB rather
+    than replacing it, so unrelated attributes are never lost."""
+
+    domain: str = Field(description="Business domain owning this attribute, e.g. 'banking', 'retail'.")
+    attribute_key: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+    attribute_value: Any
 
 
 class ProfileAttributeBase(BaseModel):

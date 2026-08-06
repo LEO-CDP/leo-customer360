@@ -475,7 +475,7 @@ class PersonaHistoryRouterTests(unittest.TestCase):
         self.assertEqual(response.json()["new_persona_name"], "Savvy Retail Shopper #4f2a9c")
 
     def test_get_history_entry_not_found(self):
-        response = self.client.get("/persona-history/999")
+        response = self.client.get(f"/persona-history/{uuid.uuid4()}")
         self.assertEqual(response.status_code, 404)
 
 

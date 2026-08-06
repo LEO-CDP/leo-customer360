@@ -263,9 +263,12 @@ class CdpProfileLink(Base):
 
 
 class CdpProfileAttribute(Base):
-    """Full attribute catalog for cdp_master_profiles, plus CIR matching-rule
-    metadata consumed by CustomerIdentityResolver and ML scoring-model
-    metadata (Lead / Churn / CLV / CX / Data Quality).
+    """Full attribute catalog for cdp_master_profiles PLUS domain-specific
+    attributes stored as JSONB keys in cdp_domain_profiles.domain_attributes
+    (source_table='cdp_domain_profiles', master_profile_column=NULL -- e.g.
+    national_id, kyc_status, loyalty_id), plus CIR matching-rule metadata
+    consumed by CustomerIdentityResolver and ML scoring-model metadata
+    (Lead / Churn / CLV / CX / Data Quality / persona risk & loyalty scores).
 
     attribute_group values include SYSTEM, IDENTITY, IDENTITY_GRAPH, RETAIL,
     BANKING, REAL_ESTATE, TRAVEL, MEDIA, EDUCATION, MARKETING, LINEAGE,

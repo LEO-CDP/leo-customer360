@@ -29,13 +29,25 @@ window.C360 = window.C360 || {};
   var DOMAINS_CACHE_KEY = "c360.domains";
 
   function api(path, params, method) {
-    return $.ajax({
+    var httpMethod = method || "GET";
+    var options = {
       url: CONFIG.apiBase + path,
-      method: method || "GET",
-      data: params || {},
+      method: httpMethod,
       dataType: "json",
       headers: { "X-Tenant-Id": CONFIG.tenantId }
-    });
+    };
+    // GET/DELETE: serialize params as a query string (unchanged behavior).
+    // POST/PATCH/PUT: send as a JSON request body so FastAPI Pydantic
+    // "payload" body params can actually be parsed -- previously these were
+    // sent as application/x-www-form-urlencoded, which only happened to
+    // work for POST calls that pass no params at all (e.g. recompute-all).
+    if (httpMethod === "GET" || httpMethod === "DELETE") {
+      options.data = params || {};
+    } else {
+      options.contentType = "application/json";
+      options.data = JSON.stringify(params || {});
+    }
+    return $.ajax(options);
   }
 
   function showApiError(context, xhr) {

@@ -579,5 +579,240 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
 
 
+class _ScalarsAllResult:
+    def __init__(self, rows: list[Any]):
+        self._rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _ScalarOneOrNoneResult:
+    def __init__(self, value: Any):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
+class _RowsResult:
+    """Result double for plain (non-scalar) column-tuple selects, e.g.
+    ``select(Model.id, Model.code)`` -- returns raw tuples from ``.all()``."""
+
+    def __init__(self, rows: list[Any]):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _FakeMultiExecSession:
+    """Session double for endpoints that issue several db.execute() calls in
+    sequence (e.g. domain validation, then a lookup, then a write) -- returns
+    one canned result per call, in order."""
+
+    def __init__(self, results: list[Any]):
+        self._results = list(results)
+        self.executed: list[Any] = []
+        self.added: list[Any] = []
+        self.committed = False
+        self.refreshed: list[Any] = []
+
+    def execute(self, stmt: Any) -> Any:
+        self.executed.append(stmt)
+        return self._results.pop(0)
+
+    def add(self, obj: Any) -> None:
+        self.added.append(obj)
+
+    def commit(self) -> None:
+        self.committed = True
+
+    def refresh(self, obj: Any) -> None:
+        # Simulates the server_default values Postgres would have assigned
+        # on the real INSERT this fake never actually performs.
+        self.refreshed.append(obj)
+        if getattr(obj, "domain_profile_id", None) is None:
+            obj.domain_profile_id = uuid.uuid4()
+        if getattr(obj, "status_code", None) is None:
+            obj.status_code = 1
+        if getattr(obj, "created_at", None) is None:
+            obj.created_at = datetime.now(timezone.utc)
+        if getattr(obj, "updated_at", None) is None:
+            obj.updated_at = datetime.now(timezone.utc)
+
+
+class MasterProfileDomainProfilesEndpointTests(unittest.TestCase):
+    """Covers GET /master-profiles/{id}/domain-profiles."""
+
+    def setUp(self):
+        self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
+        self._cache_patcher.start()
+        self.addCleanup(self._cache_patcher.stop)
+
+        self._original_master_crud = identity_router._master_crud
+        self.master_profile = _fake_master_profile()
+        identity_router._master_crud = SimpleNamespace(
+            get=lambda db, pk: self.master_profile if pk == self.master_profile.master_profile_id else None
+        )
+        self.addCleanup(lambda: setattr(identity_router, "_master_crud", self._original_master_crud))
+
+        self.app = FastAPI()
+        self.app.include_router(identity_router.master_profiles_router)
+
+    def test_returns_404_for_missing_master_profile(self):
+        session = _FakeMultiExecSession([])
+        self.app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(self.app)
+
+        response = client.get(f"/master-profiles/{uuid.uuid4()}/domain-profiles")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_returns_domain_profiles_for_master_profile(self):
+        domain_id = uuid.uuid4()
+        domain_profile = SimpleNamespace(
+            domain_profile_id=uuid.uuid4(),
+            tenant_id=self.master_profile.tenant_id,
+            master_profile_id=self.master_profile.master_profile_id,
+            domain_id=domain_id,
+            profile_name=None,
+            lifecycle_stage=None,
+            persona_name=None,
+            persona_summary=None,
+            engagement_score=None,
+            domain_attributes={"loyalty_id": "LOY-1"},
+            analytics={},
+            first_activity_at=None,
+            last_activity_at=None,
+            status_code=1,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session = _FakeMultiExecSession(
+            [_ScalarsAllResult([domain_profile]), _RowsResult([(domain_id, "retail")])]
+        )
+        self.app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(self.app)
+
+        response = client.get(f"/master-profiles/{self.master_profile.master_profile_id}/domain-profiles")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body), 1)
+        self.assertEqual(body[0]["domain_attributes"], {"loyalty_id": "LOY-1"})
+        self.assertEqual(body[0]["domain_code"], "retail")
+
+
+class MasterProfileDomainAttributeUpsertEndpointTests(unittest.TestCase):
+    """Covers POST /master-profiles/{id}/domain-attributes."""
+
+    def setUp(self):
+        self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
+        self._cache_patcher.start()
+        self.addCleanup(self._cache_patcher.stop)
+
+        self._original_master_crud = identity_router._master_crud
+        self.master_profile = _fake_master_profile()
+        identity_router._master_crud = SimpleNamespace(
+            get=lambda db, pk: self.master_profile if pk == self.master_profile.master_profile_id else None
+        )
+        self.addCleanup(lambda: setattr(identity_router, "_master_crud", self._original_master_crud))
+
+        self.app = FastAPI()
+        self.app.include_router(identity_router.master_profiles_router)
+
+    def test_returns_404_for_missing_master_profile(self):
+        session = _FakeMultiExecSession([])
+        self.app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(self.app)
+
+        response = client.post(
+            f"/master-profiles/{uuid.uuid4()}/domain-attributes",
+            json={"domain": "banking", "attribute_key": "risk_segment", "attribute_value": "high"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_returns_422_for_unknown_domain(self):
+        session = _FakeMultiExecSession([_ScalarsAllResult(["banking", "retail"])])
+        self.app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(self.app)
+
+        response = client.post(
+            f"/master-profiles/{self.master_profile.master_profile_id}/domain-attributes",
+            json={"domain": "bogus_domain", "attribute_key": "risk_segment", "attribute_value": "high"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_creates_new_domain_profile_when_none_exists(self):
+        domain_id = uuid.uuid4()
+        session = _FakeMultiExecSession(
+            [
+                _ScalarsAllResult(["banking", "retail"]),  # validate_domain_value
+                _ScalarOneOrNoneResult(domain_id),  # domain_id lookup
+                _ScalarOneOrNoneResult(None),  # no existing domain profile
+            ]
+        )
+        self.app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(self.app)
+
+        response = client.post(
+            f"/master-profiles/{self.master_profile.master_profile_id}/domain-attributes",
+            json={"domain": "banking", "attribute_key": "risk_segment", "attribute_value": "high"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body["domain_attributes"], {"risk_segment": "high"})
+        self.assertTrue(session.committed)
+        self.assertEqual(len(session.added), 1)
+
+    def test_merges_into_existing_domain_profile_without_dropping_other_keys(self):
+        domain_id = uuid.uuid4()
+        existing = SimpleNamespace(
+            domain_profile_id=uuid.uuid4(),
+            tenant_id=self.master_profile.tenant_id,
+            master_profile_id=self.master_profile.master_profile_id,
+            domain_id=domain_id,
+            profile_name=None,
+            lifecycle_stage=None,
+            persona_name=None,
+            persona_summary=None,
+            engagement_score=None,
+            domain_attributes={"loyalty_id": "LOY-1"},
+            analytics={},
+            first_activity_at=None,
+            last_activity_at=None,
+            status_code=1,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session = _FakeMultiExecSession(
+            [
+                _ScalarsAllResult(["banking", "retail"]),
+                _ScalarOneOrNoneResult(domain_id),
+                _ScalarOneOrNoneResult(existing),
+            ]
+        )
+        self.app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(self.app)
+
+        response = client.post(
+            f"/master-profiles/{self.master_profile.master_profile_id}/domain-attributes",
+            json={"domain": "banking", "attribute_key": "risk_segment", "attribute_value": "high"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body["domain_attributes"], {"loyalty_id": "LOY-1", "risk_segment": "high"})
+        self.assertTrue(session.committed)
+        self.assertEqual(len(session.added), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

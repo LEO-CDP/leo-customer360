@@ -356,6 +356,7 @@ class SegmentMatchedProfilesTests(unittest.TestCase):
         self.assertEqual(response.json(), {"count": 7})
         sql, params = fake_session.executed[0]
         self.assertIn("cdp_master_profiles", sql)
+        self.assertIn("cdp_domain_profiles", sql)
         self.assertIn("churn_risk_tier IN ('high', 'critical')", sql)
         self.assertEqual(params["tenant_id"], str(tenant_id))
 
@@ -720,6 +721,7 @@ def _fake_profile_attribute(**overrides) -> SimpleNamespace:
         "data_type": "TEXT",
         "domain_scope": "all",
         "is_pii": False,
+        "source_table": "cdp_master_profiles",
     }
     attrs.update(overrides)
     return SimpleNamespace(**attrs)
@@ -786,6 +788,19 @@ class SegmentableProfileAttributesTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()[0]["field"], "device_id")
+
+    def test_domain_profile_attribute_returns_jsonb_path_field(self):
+        attribute = _fake_profile_attribute(
+            master_profile_column=None,
+            attribute_internal_code="risk_segment",
+            source_table="cdp_domain_profiles",
+        )
+        client, _ = self._client_for([attribute])
+
+        response = client.get("/segments/segmentable-profile-attributes")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["field"], "dp.domain_attributes->>'risk_segment'")
 
     def test_accepts_valid_domain_query_param(self):
         client, _ = self._client_for([])

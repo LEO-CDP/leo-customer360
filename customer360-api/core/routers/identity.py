@@ -18,6 +18,7 @@ from core.crud.base import CRUDBase
 from core.database import get_db
 from core.models.identity import (
     CdpCustomerPersona,
+    CdpDomainProfile,
     CdpIdentityIndex,
     CdpIdResolutionStatus,
     CdpMasterProfile,
@@ -29,11 +30,16 @@ from core.models.identity import (
     CdpProfileMergeHistory,
     CdpRawProfileStage,
 )
+from core.models.system import SysDomain
 from core.routers._generic import build_crud_router
 from core.schemas.identity import (
     CustomerPersonaCreate,
     CustomerPersonaRead,
     CustomerPersonaUpdate,
+    DomainAttributeUpsert,
+    DomainProfileCreate,
+    DomainProfileRead,
+    DomainProfileUpdate,
     IdentityIndexCreate,
     IdentityIndexRead,
     IdentityIndexUpdate,
@@ -158,6 +164,85 @@ def get_master_profile_links(
         .limit(limit)
     )
     return db.execute(stmt).scalars().all()
+
+
+@master_profiles_router.get("/{master_profile_id}/domain-profiles", response_model=list[DomainProfileRead])
+@cache_response("master_profiles/domain_profiles", ttl=settings.cache_ttl_seconds)
+def get_master_profile_domain_profiles(master_profile_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Every cdp_domain_profiles row for this master profile (one per business
+    domain the person has activity in, e.g. banking + retail), each carrying
+    its own domain_attributes JSONB bag."""
+    if _master_crud.get(db, master_profile_id) is None:
+        raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
+    stmt = select(CdpDomainProfile).where(CdpDomainProfile.master_profile_id == master_profile_id)
+    domain_profiles = db.execute(stmt).scalars().all()
+
+    # domain_id is a raw FK on cdp_domain_profiles -- resolve it to the
+    # human-readable domain_code here so the UI doesn't need a second call.
+    domain_ids = {dp.domain_id for dp in domain_profiles}
+    code_by_id = {}
+    if domain_ids:
+        code_by_id = dict(
+            db.execute(
+                select(SysDomain.domain_id, SysDomain.domain_code).where(SysDomain.domain_id.in_(domain_ids))
+            ).all()
+        )
+    for dp in domain_profiles:
+        dp.domain_code = code_by_id.get(dp.domain_id)
+    return domain_profiles
+
+
+@master_profiles_router.post("/{master_profile_id}/domain-attributes", response_model=DomainProfileRead, status_code=201)
+def upsert_master_profile_domain_attribute(
+    master_profile_id: uuid.UUID, payload: DomainAttributeUpsert, db: Session = Depends(get_db)
+):
+    """Adds/overwrites one ``domain_attributes`` key for this profile in the
+    given ``domain``, creating the ``cdp_domain_profiles`` row for that
+    (master_profile_id, domain) pair if it doesn't exist yet. Merges into the
+    existing JSONB (never replaces the whole bag), so this is a safe way for
+    the UI/API to "add a new attribute" without needing to resend every
+    existing key. The write fires customer360.sync_domain_attribute_catalog()
+    (see database-schema.sql), which auto-registers a brand-new attribute_key
+    into cdp_profile_attributes if one doesn't already exist there."""
+    master = _master_crud.get(db, master_profile_id)
+    if master is None:
+        raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
+    try:
+        validate_domain_value(db, payload.domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    domain_id = db.execute(
+        select(SysDomain.domain_id).where(SysDomain.domain_code == payload.domain)
+    ).scalar_one_or_none()
+    if domain_id is None:
+        raise HTTPException(status_code=422, detail=f"Unknown domain '{payload.domain}'")
+
+    domain_profile = db.execute(
+        select(CdpDomainProfile).where(
+            CdpDomainProfile.master_profile_id == master_profile_id,
+            CdpDomainProfile.domain_id == domain_id,
+        )
+    ).scalar_one_or_none()
+
+    if domain_profile is None:
+        domain_profile = CdpDomainProfile(
+            tenant_id=master.tenant_id,
+            master_profile_id=master_profile_id,
+            domain_id=domain_id,
+            domain_attributes={payload.attribute_key: payload.attribute_value},
+        )
+        db.add(domain_profile)
+    else:
+        merged = dict(domain_profile.domain_attributes or {})
+        merged[payload.attribute_key] = payload.attribute_value
+        domain_profile.domain_attributes = merged
+
+    db.commit()
+    db.refresh(domain_profile)
+    invalidate_prefix("master_profiles/domain_profiles")
+    invalidate_prefix("profile_attributes")
+    return domain_profile
 
 
 @master_profiles_router.get(
@@ -460,6 +545,20 @@ def delete_profile_link(link_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"CdpProfileLink '{link_id}' not found")
     _link_crud.delete(db, obj)
     invalidate_prefix("profile_links")
+
+
+# --- Domain Profiles (per-domain persona/engagement/domain_attributes) ----------
+
+domain_profiles_router = build_crud_router(
+    model=CdpDomainProfile,
+    pk_field="domain_profile_id",
+    pk_type=uuid.UUID,
+    create_schema=DomainProfileCreate,
+    update_schema=DomainProfileUpdate,
+    read_schema=DomainProfileRead,
+    prefix="/domain-profiles",
+    tags=["Identity Resolution - Domain Profiles"],
+)
 
 
 # --- Profile Attributes (matching-rule metadata) --------------------------------
@@ -768,6 +867,7 @@ all_identity_routers = [
     master_profiles_router,
     raw_profiles_router,
     profile_links_router,
+    domain_profiles_router,
     profile_attributes_router,
     identity_index_router,
     profile_merge_history_router,

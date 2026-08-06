@@ -31,6 +31,7 @@ window.C360 = window.C360 || {};
     "identity": "profile/identity",
     "channels": "profile/channels",
     "overview": "profile/overview",
+    "domain-attributes": "profile/domain-attributes",
     "segments": "profile/segments",
     "engagement": "profile/engagement",
     "activity": "profile/activity",
@@ -59,7 +60,7 @@ window.C360 = window.C360 || {};
 
   // Registered as Handlebars partials so profile/profile-details.html can do {{> name}}.
   var PARTIALS = [
-    "identity", "channels", "overview", "segments",
+    "identity", "channels", "overview", "domain-attributes", "segments",
     "engagement", "activity", "timeline", "scoring", "persona", "linked-raw-profiles", "personalized-items"
   ];
 

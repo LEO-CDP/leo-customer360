@@ -86,7 +86,7 @@ window.C360 = window.C360 || {};
       if (!o.el.thead) return;
       $(o.el.thead).html(C360.templates.render("data-table-head", {
         columns: o.columns,
-        showActionColumn: o.rowClickable
+        showActionColumn: o.rowClickable || !!o.onEdit
       }));
     }
 
@@ -107,6 +107,8 @@ window.C360 = window.C360 || {};
           rowClass: o.rowClass + rowSelectorClass,
           clickable: o.rowClickable,
           actionLabel: o.actionLabel,
+          editable: !o.rowClickable && !!o.onEdit,
+          editLabel: o.editLabel || "Edit",
           cells: o.columns.map(function (col) { return buildCellVm(col, vm); })
         };
       });
@@ -316,6 +318,17 @@ window.C360 = window.C360 || {};
       }
     }
 
+    // Per-row "Edit" button (used instead of whole-row navigation for
+    // catalog-style views, e.g. the Attribute Catalog) -- delegated the
+    // same way since rows are re-rendered on every load.
+    function bindRowEdit() {
+      if (!o.onEdit) return;
+      $(document).on("click", ".dtv-edit-btn", function (e) {
+        e.stopPropagation();
+        o.onEdit($(this).data("id"));
+      });
+    }
+
     return {
       load: load,
       setFilter: setFilter,
@@ -324,6 +337,7 @@ window.C360 = window.C360 || {};
       bindLoadMore: bindLoadMore,
       bindPagination: bindPagination,
       bindRowClick: bindRowClick,
+      bindRowEdit: bindRowEdit,
       rowVm: rowVm
     };
   }
