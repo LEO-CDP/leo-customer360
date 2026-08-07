@@ -2,9 +2,9 @@
 
 import uuid
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 SourceTypeValue = Literal[1, 2, 3, 4, 5]
 
@@ -62,5 +62,47 @@ class DataSourceRead(DataSourceBase):
     model_config = ConfigDict(from_attributes=True)
 
     data_source_id: uuid.UUID
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+ModelTypeValue = Literal[
+    "classification",
+    "regression",
+    "clustering",
+    "rules_engine",
+    "generative_llm",
+]
+ModelStatusValue = Literal["ACTIVE", "INACTIVE", "TRAINING", "DEPRECATED", "FAILED"]
+
+
+class ScoringModelBase(BaseModel):
+    scoring_model_name: str = Field(..., max_length=100)
+    display_name: str = Field(..., max_length=255)
+    description: Optional[str] = None
+    model_type: ModelTypeValue
+    status: ModelStatusValue = "ACTIVE"
+    schedule_definition: Optional[str] = Field(default=None, max_length=100)
+    input_features: Optional[list[str]] = Field(default_factory=list)
+    hyperparameters: Optional[dict[str, Any]] = Field(default_factory=dict)
+
+
+class ScoringModelCreate(ScoringModelBase):
+    pass
+
+
+class ScoringModelUpdate(BaseModel):
+    display_name: Optional[str] = Field(default=None, max_length=255)
+    description: Optional[str] = None
+    model_type: Optional[ModelTypeValue] = None
+    status: Optional[ModelStatusValue] = None
+    schedule_definition: Optional[str] = Field(default=None, max_length=100)
+    input_features: Optional[list[str]] = None
+    hyperparameters: Optional[dict[str, Any]] = None
+
+
+class ScoringModelRead(ScoringModelBase):
+    model_config = ConfigDict(from_attributes=True)
+
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

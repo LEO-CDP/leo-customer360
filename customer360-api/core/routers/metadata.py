@@ -26,8 +26,16 @@ from core.cache import get_redis_client
 from core.config import settings
 from core.crud.base import CRUDBase
 from core.database import engine, get_db
+from core.models.identity import CdpScoringModel
 from core.models.system import SysDataSource, SysDomain, SysTenantDomain
-from core.schemas.system import DataSourceCreate, DataSourceRead, DataSourceUpdate
+from core.schemas.system import (
+    DataSourceCreate,
+    DataSourceRead,
+    DataSourceUpdate,
+    ScoringModelCreate,
+    ScoringModelRead,
+    ScoringModelUpdate,
+)
 from core.utils.dagster_client import DagsterClient
 
 logger = logging.getLogger(__name__)
@@ -41,6 +49,7 @@ _CONNECTIVITY_TIMEOUT_SECONDS = 2
 # the default tenant created by database-init/init-core-database.sql
 DEFAULT_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 _data_source_crud = CRUDBase(SysDataSource)
+_scoring_model_crud = CRUDBase(CdpScoringModel)
 
 def _check_postgres() -> dict[str, Any]:
     """Checks that the pooled SQLAlchemy engine can reach PostgreSQL."""
@@ -295,6 +304,80 @@ def delete_metadata_data_source(
         raise HTTPException(status_code=404, detail=f"SysDataSource '{data_source_id}' not found")
     _data_source_crud.delete(db, obj)
 
+
+@metadata_router.get("/scoring-models", response_model=list[ScoringModelRead])
+def list_metadata_scoring_models(
+    status: str | None = None,
+    model_type: str | None = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+) -> list[CdpScoringModel]:
+    """Returns catalog rows from ``cdp_scoring_models``."""
+    try:
+        return _scoring_model_crud.list(
+            db,
+            status=status,
+            model_type=model_type,
+            skip=skip,
+            limit=limit,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to load scoring model metadata from PostgreSQL", exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Scoring model metadata unavailable: {exc}",
+        ) from exc
+
+
+@metadata_router.get("/scoring-models/{scoring_model_name}", response_model=ScoringModelRead)
+def get_metadata_scoring_model(
+    scoring_model_name: str,
+    db: Session = Depends(get_db),
+) -> CdpScoringModel:
+    obj = _scoring_model_crud.get(db, scoring_model_name)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpScoringModel '{scoring_model_name}' not found")
+    return obj
+
+
+@metadata_router.post("/scoring-models", response_model=ScoringModelRead, status_code=201)
+def create_metadata_scoring_model(
+    payload: ScoringModelCreate,
+    db: Session = Depends(get_db),
+) -> CdpScoringModel:
+    existing = _scoring_model_crud.get(db, payload.scoring_model_name)
+    if existing is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"CdpScoringModel '{payload.scoring_model_name}' already exists",
+        )
+    data = payload.model_dump()
+    return _scoring_model_crud.create(db, data)
+
+
+@metadata_router.patch("/scoring-models/{scoring_model_name}", response_model=ScoringModelRead)
+def update_metadata_scoring_model(
+    scoring_model_name: str,
+    payload: ScoringModelUpdate,
+    db: Session = Depends(get_db),
+) -> CdpScoringModel:
+    obj = _scoring_model_crud.get(db, scoring_model_name)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpScoringModel '{scoring_model_name}' not found")
+    data = payload.model_dump(exclude_unset=True)
+    return _scoring_model_crud.update(db, obj, data)
+
+
+@metadata_router.delete("/scoring-models/{scoring_model_name}", status_code=204)
+def delete_metadata_scoring_model(
+    scoring_model_name: str,
+    db: Session = Depends(get_db),
+) -> None:
+    obj = _scoring_model_crud.get(db, scoring_model_name)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpScoringModel '{scoring_model_name}' not found")
+    _scoring_model_crud.delete(db, obj)
 
 
 all_metadata_routers = [metadata_router]

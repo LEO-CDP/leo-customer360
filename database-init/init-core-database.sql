@@ -191,6 +191,37 @@ ON CONFLICT (event_name) DO UPDATE SET
     updated_at            = now();
 
 
+---------------------------------------------------
+-- SCORING MODELS REGISTRY: SEED DATA
+---------------------------------------------------
+-- Must run before the cdp_profile_attributes seeds below: any row there with
+-- is_scoring_model=TRUE sets scoring_model_name, which is enforced by
+-- fk_cdp_pa_scoring_model (database-schema.sql) to reference a real row here
+-- -- an unseeded model name would make that whole INSERT fail.
+INSERT INTO customer360.cdp_scoring_models (
+    scoring_model_name, display_name, description, model_type, status,
+    schedule_definition, input_features, hyperparameters
+) VALUES
+    ('lead_scoring_model', 'Lead Conversion Scoring Model', 'Predicts lead_conversion_probability/lead_grade for prospect-to-customer conversion.', 'classification', 'ACTIVE', '0 1 * * *', ARRAY['last_activity_at', 'source_systems', 'segmentation_tags'], '{}'::jsonb),
+    ('churn_scoring_model', 'Churn Risk Scoring Model', 'Predicts churn_probability/churn_risk_tier from engagement drop-offs.', 'classification', 'ACTIVE', '0 2 * * *', ARRAY['last_activity_at', 'historical_clv'], '{}'::jsonb),
+    ('clv_scoring_model', 'Customer Lifetime Value Model', 'Predicts predictive_clv/clv_segment.', 'regression', 'ACTIVE', '0 3 * * 0', ARRAY['historical_clv'], '{}'::jsonb),
+    ('cx_scoring_model', 'Customer Experience Scoring Model', 'Computes engagement_score/latest_nps_score/average_csat/overall_sentiment_score.', 'regression', 'ACTIVE', '0 * * * *', ARRAY['latest_nps_score', 'average_csat'], '{}'::jsonb),
+    ('data_quality_model', 'Profile Data Quality Model', 'Computes profile_completeness_score for data-quality monitoring.', 'rules_engine', 'ACTIVE', '0 1 * * *', ARRAY['email', 'phone_number', 'device_ids'], '{}'::jsonb),
+    ('identity_resolution_scoring_model', 'Identity Resolution Confidence Model', 'Computes identity_confidence_score for CIR match quality.', 'classification', 'ACTIVE', NULL, ARRAY['email', 'phone_number', 'device_ids'], '{}'::jsonb),
+    ('lifecycle_stage_model', 'Lifecycle Stage Model', 'Derives lifecycle_stage (prospect/lead/customer/vip/dormant/churn_risk).', 'rules_engine', 'ACTIVE', '0 1 * * *', ARRAY['customer_since', 'last_activity_at', 'churn_risk_tier'], '{}'::jsonb),
+    ('persona_summary_generator', 'Persona Summary Generator', 'LLM-generated narrative persona_summary for each profile.', 'generative_llm', 'ACTIVE', NULL, ARRAY['attributes', 'segmentation_tags'], '{}'::jsonb),
+    ('persona_risk_score', 'Persona Risk Score Model', 'Banking risk-persona input derived from kyc_status/risk_segment.', 'classification', 'ACTIVE', '0 4 * * *', ARRAY['kyc_status', 'risk_segment'], '{}'::jsonb),
+    ('persona_loyalty_score', 'Persona Loyalty Score Model', 'Retail loyalty-persona input derived from membership_tier.', 'classification', 'ACTIVE', NULL, ARRAY['membership_tier'], '{}'::jsonb)
+ON CONFLICT (scoring_model_name) DO UPDATE SET
+    display_name         = EXCLUDED.display_name,
+    description          = EXCLUDED.description,
+    model_type           = EXCLUDED.model_type,
+    status               = EXCLUDED.status,
+    schedule_definition  = EXCLUDED.schedule_definition,
+    input_features       = EXCLUDED.input_features,
+    hyperparameters      = EXCLUDED.hyperparameters,
+    updated_at           = now();
+
 
 -- ============================================================================
 -- FULL ATTRIBUTE CATALOG SEED

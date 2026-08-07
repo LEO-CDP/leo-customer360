@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.database import get_db
+from core.models.identity import CdpScoringModel
 from core.models.system import SysDataSource
 from core.routers.metadata import all_metadata_routers
 
@@ -251,6 +252,104 @@ class SysMetadataTests(unittest.TestCase):
 
         delete_response = TestClient(self.app).delete(f"/metadata/data-sources/{data_source.data_source_id}")
         self.assertEqual(delete_response.status_code, 204)
+
+    def test_metadata_scoring_models_list(self):
+        mock_db = MagicMock()
+        mock_db.execute.return_value.scalars.return_value.all.return_value = [
+            CdpScoringModel(
+                scoring_model_name="churn_prediction_v2",
+                display_name="XGBoost Churn Predictor",
+                model_type="classification",
+                status="ACTIVE",
+            )
+        ]
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).get("/metadata/scoring-models")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body), 1)
+        self.assertEqual(body[0]["scoring_model_name"], "churn_prediction_v2")
+        self.assertEqual(body[0]["display_name"], "XGBoost Churn Predictor")
+        self.assertEqual(body[0]["model_type"], "classification")
+
+    def test_metadata_scoring_model_get_success_and_not_found(self):
+        model = CdpScoringModel(
+            scoring_model_name="clv_regression_v1",
+            display_name="Customer Lifetime Value",
+            model_type="regression",
+            status="ACTIVE",
+        )
+        mock_db = MagicMock()
+        mock_db.get.side_effect = lambda model_cls, pk: model if pk == "clv_regression_v1" else None
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        res = TestClient(self.app).get("/metadata/scoring-models/clv_regression_v1")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["display_name"], "Customer Lifetime Value")
+
+        res_404 = TestClient(self.app).get("/metadata/scoring-models/non_existent")
+        self.assertEqual(res_404.status_code, 404)
+
+    def test_metadata_scoring_models_create_success_and_duplicate(self):
+        mock_db = MagicMock()
+        mock_db.get.return_value = None
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        payload = {
+            "scoring_model_name": "new_model_v1",
+            "display_name": "New Scoring Model",
+            "model_type": "classification",
+            "status": "ACTIVE",
+            "schedule_definition": "0 0 * * *",
+            "input_features": ["feature_1", "feature_2"],
+            "hyperparameters": {"learning_rate": 0.05},
+        }
+
+        response = TestClient(self.app).post("/metadata/scoring-models", json=payload)
+        self.assertEqual(response.status_code, 201)
+        res_json = response.json()
+        self.assertEqual(res_json["scoring_model_name"], "new_model_v1")
+        self.assertEqual(res_json["display_name"], "New Scoring Model")
+        self.assertEqual(res_json["input_features"], ["feature_1", "feature_2"])
+        self.assertEqual(res_json["hyperparameters"], {"learning_rate": 0.05})
+
+        # Test duplicate creation
+        mock_db.get.return_value = CdpScoringModel(
+            scoring_model_name="new_model_v1",
+            display_name="Existing Model",
+            model_type="classification",
+        )
+        dup_response = TestClient(self.app).post("/metadata/scoring-models", json=payload)
+        self.assertEqual(dup_response.status_code, 400)
+
+    def test_metadata_scoring_models_update_and_delete(self):
+        model = CdpScoringModel(
+            scoring_model_name="churn_prediction_v2",
+            display_name="Old Name",
+            model_type="classification",
+            status="ACTIVE",
+        )
+        mock_db = MagicMock()
+        mock_db.get.return_value = model
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        patch_response = TestClient(self.app).patch(
+            "/metadata/scoring-models/churn_prediction_v2",
+            json={"display_name": "Updated Name", "status": "INACTIVE"},
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.json()["display_name"], "Updated Name")
+        self.assertEqual(patch_response.json()["status"], "INACTIVE")
+
+        del_response = TestClient(self.app).delete("/metadata/scoring-models/churn_prediction_v2")
+        self.assertEqual(del_response.status_code, 204)
+
+        # Delete non-existent model
+        mock_db.get.return_value = None
+        del_404 = TestClient(self.app).delete("/metadata/scoring-models/non_existent")
+        self.assertEqual(del_404.status_code, 404)
 
     def test_metadata_data_sources_create_rejects_invalid_source_type(self):
         mock_db = MagicMock()

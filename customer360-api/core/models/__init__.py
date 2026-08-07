@@ -27,6 +27,7 @@ from core.models.identity import (
     CdpProfileLink,
     CdpProfileMergeHistory,
     CdpRawProfileStage,
+    CdpScoringModel,
 )
 from core.models.relations import CdpRelation, CustomerContact, RelationType, Transaction
 from core.models.segmentation import CdpSegment
@@ -57,6 +58,7 @@ __all__ = [
     "CdpProfileMergeHistory",
     "CdpRawProfileStage",
     "CdpRelation",
+    "CdpScoringModel",
     "CdpSegment",
     "CustomerContact",
     "Transaction",

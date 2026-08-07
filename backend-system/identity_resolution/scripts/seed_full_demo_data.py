@@ -572,6 +572,59 @@ DATA_SOURCES = [
     },
 ]
 
+SCORING_MODELS = [
+    {
+        "scoring_model_name": "churn_prediction_v2",
+        "display_name": "XGBoost Churn Predictor",
+        "description": "Calculates the probability of a customer churning in the next 30 days based on engagement drop-offs.",
+        "model_type": "classification",
+        "status": "ACTIVE",
+        "schedule_definition": "0 2 * * *",
+        "input_features": ["last_activity_at", "total_spend", "support_tickets_count"],
+        "hyperparameters": {"max_depth": 6, "learning_rate": 0.1, "objective": "binary:logistic"},
+    },
+    {
+        "scoring_model_name": "clv_regression_v1",
+        "display_name": "Customer Lifetime Value (90-Day)",
+        "description": "Predicts total revenue a customer will generate over the next 90 days.",
+        "model_type": "regression",
+        "status": "ACTIVE",
+        "schedule_definition": "0 3 * * 0",
+        "input_features": ["historical_clv", "average_order_value", "purchase_frequency"],
+        "hyperparameters": {"algorithm": "random_forest_regressor", "n_estimators": 100},
+    },
+    {
+        "scoring_model_name": "b2b_lead_scoring_rules",
+        "display_name": "B2B Lead Scoring Engine",
+        "description": "Rule-based engine assigning points for email opens, website visits, and job titles.",
+        "model_type": "rules_engine",
+        "status": "ACTIVE",
+        "schedule_definition": "*/15 * * * *",
+        "input_features": ["email_opens", "website_visits", "job_title"],
+        "hyperparameters": {"weights": {"email_opens": 2, "website_visits": 5, "c_level_title": 20}},
+    },
+    {
+        "scoring_model_name": "cx_sentiment_llm_v1",
+        "display_name": "Customer Experience & Sentiment Analyzer",
+        "description": "Generative LLM pipeline scoring customer sentiment and feedback risk from interaction logs.",
+        "model_type": "generative_llm",
+        "status": "ACTIVE",
+        "schedule_definition": "0 * * * *",
+        "input_features": ["feedback_text", "support_notes", "chat_transcripts"],
+        "hyperparameters": {"temperature": 0.2, "model_name": "gpt-4o-mini"},
+    },
+    {
+        "scoring_model_name": "data_quality_cir_confidence",
+        "display_name": "Identity Resolution Confidence Model",
+        "description": "Evaluates profile completeness, identifier uniqueness, and CIR resolution confidence.",
+        "model_type": "classification",
+        "status": "ACTIVE",
+        "schedule_definition": "0 1 * * *",
+        "input_features": ["email_normalized", "phone_normalized", "device_count"],
+        "hyperparameters": {"threshold": 0.85},
+    },
+]
+
 
 def seed_campaign_performance_daily(cursor, campaign_ids: dict) -> None:
     """Inserts daily performance rows for each seeded campaign.
@@ -687,6 +740,39 @@ def seed_data_sources(cursor) -> None:
                 data_source["data_source_hosts"],
                 data_source["javascript_tags"],
                 Json(data_source["qr_code_data"]),
+            ),
+        )
+
+
+def seed_scoring_models(cursor) -> None:
+    """Seeds central catalog rows in cdp_scoring_models."""
+    logger.info("Seeding cdp_scoring_models catalog...")
+    for model in SCORING_MODELS:
+        cursor.execute(
+            f"""
+            INSERT INTO {_table('cdp_scoring_models')}
+                (scoring_model_name, display_name, description, model_type, status,
+                 schedule_definition, input_features, hyperparameters)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (scoring_model_name) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                description = EXCLUDED.description,
+                model_type = EXCLUDED.model_type,
+                status = EXCLUDED.status,
+                schedule_definition = EXCLUDED.schedule_definition,
+                input_features = EXCLUDED.input_features,
+                hyperparameters = EXCLUDED.hyperparameters,
+                updated_at = now();
+            """,
+            (
+                model["scoring_model_name"],
+                model["display_name"],
+                model["description"],
+                model["model_type"],
+                model["status"],
+                model["schedule_definition"],
+                model["input_features"],
+                Json(model["hyperparameters"]),
             ),
         )
 
@@ -1546,6 +1632,7 @@ def main() -> None:
             seed_relation_types(cursor)
             crm_ids = seed_crm_entities(cursor)
             seed_data_sources(cursor)
+            seed_scoring_models(cursor)
             reset_tenant_scoped_demo_tables(cursor)
             seed_campaign_performance_daily(cursor, crm_ids["campaign"])
             seed_relations(cursor, detail_profiles)

@@ -1878,6 +1878,80 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
 
 COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog for cdp_master_profiles schema columns used by identity-resolution engine (CIR). One row per master-profile column (email, phone_number, device_id, etc.) with consolidation rules, matching strategies, and schema hints. Domain-specific attributes (national_id, kyc_status, loyalty_id, etc.) must be included; they live as JSONB keys in cdp_domain_profiles.domain_attributes.';
 
+-- ==========================================================
+-- Scoring Models Registry
+-- ==========================================================
+-- This table acts as the central dictionary for all AI, ML, 
+-- and rule-based models that output computed fields (like Churn, CLV, 
+-- or Lead Scores) into the customer profiles.
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_scoring_models (
+    -- The user-requested primary key. This exact string must match 
+    -- the 'scoring_model_name' in cdp_profile_attributes.
+    scoring_model_name VARCHAR(100) PRIMARY KEY,
+    
+    -- Display and organizational metadata
+    display_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    
+    -- Identifies the algorithmic approach
+    model_type VARCHAR(50) NOT NULL CHECK (
+        model_type IN (
+            'classification', 
+            'regression', 
+            'clustering', 
+            'rules_engine', 
+            'generative_llm'
+        )
+    ),
+    
+    -- Execution and orchestration parameters
+    status VARCHAR(20) DEFAULT 'ACTIVE' CHECK (
+        status IN ('ACTIVE', 'INACTIVE', 'TRAINING', 'DEPRECATED', 'FAILED')
+    ),
+    -- E.g., '0 0 * * *' for a daily midnight batch run
+    schedule_definition VARCHAR(100), 
+    
+    -- Model lineage and configurations
+    -- Tracks which profile attributes are fed into this model as training/inference features
+    input_features TEXT[] DEFAULT ARRAY[]::TEXT[], 
+    -- Stores dynamic model configurations, thresholds, or LLM prompts (e.g., LangGraph agent configs)
+    hyperparameters JSONB DEFAULT '{}'::jsonb,
+    
+    -- Audit fields
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+COMMENT ON TABLE customer360.cdp_scoring_models IS 'Central registry for all ML and rule-based models. Acts as the parent table for cdp_profile_attributes where is_scoring_model = true.';
+
+-- ----------------------------------------------------------------------------
+-- Foreign Key Enforcement
+-- ----------------------------------------------------------------------------
+-- This constraint ensures that any computed attribute claiming to be generated 
+-- by a model actually references a valid model in the registry.
+
+DO $$
+BEGIN
+    ALTER TABLE customer360.cdp_profile_attributes
+    ADD CONSTRAINT fk_cdp_pa_scoring_model 
+    FOREIGN KEY (scoring_model_name) 
+    REFERENCES customer360.cdp_scoring_models(scoring_model_name)
+    ON DELETE RESTRICT; 
+    -- ON DELETE RESTRICT prevents accidentally deleting a model 
+    -- if attributes are still mapped to it.
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'Foreign key fk_cdp_pa_scoring_model already exists.';
+END $$;
+
+-- ----------------------------------------------------------------------------
+-- Indexes
+-- ----------------------------------------------------------------------------
+-- Optimizes queries filtering for active models in the admin UI
+CREATE INDEX IF NOT EXISTS idx_cdp_scoring_models_status ON customer360.cdp_scoring_models (status);
+
+
 -- ============================================================================
 -- cdp_identity_index: flattened O(1) point-lookup index for identifiers
 -- ============================================================================
