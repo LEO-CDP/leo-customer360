@@ -1,0 +1,14 @@
+# kind cluster for local Customer360. Maps NodePorts (set in overlays/local/
+# patch-nodeports.yaml) to localhost so services are reachable from the host.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: customer360
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - { containerPort: 30008, hostPort: 18008, protocol: TCP } # api
+      - { containerPort: 30890, hostPort: 18890, protocol: TCP } # frontend
+      - { containerPort: 30080, hostPort: 18080, protocol: TCP } # keycloak
+      - { containerPort: 30300, hostPort: 13000, protocol: TCP } # dagster
+      - { containerPort: 30900, hostPort: 19000, protocol: TCP } # minio api
+      - { containerPort: 30901, hostPort: 19001, protocol: TCP } # minio console

@@ -1,0 +1,37 @@
+# One-shot demo data seed (local only): sample raw profiles -> identity
+# resolution -> full CRM/relations/events/content demo data, into the
+# customer360 schema. Idempotent-ish; safe to re-run on a fresh DB.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cir-demo-seed
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        # Wait for Postgres to finish first-boot init (schema+seed) before seeding.
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - 'until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER"; do echo "waiting for postgres..."; sleep 3; done'
+          env:
+            - name: DB_HOST
+              valueFrom: { configMapKeyRef: { name: c360-config, key: DB_HOST } }
+            - name: DB_PORT
+              valueFrom: { configMapKeyRef: { name: c360-config, key: DB_PORT } }
+            - name: DB_USER
+              valueFrom: { configMapKeyRef: { name: c360-config, key: DB_USER } }
+      containers:
+        - name: cir-demo-seed
+          image: customer360-cir:local
+          command:
+            - sh
+            - -c
+            - "python scripts/init_sample_data.py && python scripts/run_demo_resolution.py && python scripts/seed_full_demo_data.py"
+          envFrom:
+            - configMapRef: { name: c360-config }
+            - secretRef: { name: c360-secrets }

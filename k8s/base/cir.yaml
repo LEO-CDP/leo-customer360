@@ -1,0 +1,28 @@
+# Continuous Customer Identity Resolution worker (worker.py loop). No HTTP port;
+# liveness = DB reachability via healthcheck.py.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cir
+  labels: { app: cir }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: cir }
+  template:
+    metadata:
+      labels: { app: cir }
+    spec:
+      containers:
+        - name: cir
+          image: customer360-cir:local
+          envFrom:
+            - configMapRef: { name: c360-config }
+            - secretRef: { name: c360-secrets }
+          livenessProbe:
+            exec: { command: ["python", "healthcheck.py"] }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            # healthcheck.py cold-starts a Python interpreter + does a DB check,
+            # which regularly exceeds the 1s default timeout; give it headroom.
+            timeoutSeconds: 5

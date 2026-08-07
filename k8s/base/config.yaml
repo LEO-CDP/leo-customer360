@@ -1,0 +1,51 @@
+# Shared non-secret environment for all app services. Overlays patch the
+# environment-specific values (endpoints, SSO, browser-facing URLs).
+# Secrets live in the `c360-secrets` Secret, generated per-overlay from secret.env.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c360-config
+data:
+  ENVIRONMENT: "local"
+  API_VERSION: "v1"
+
+  # --- PostgreSQL (in-cluster service name in local; managed host in vks) ---
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  DB_USER: "postgres"
+  DB_NAME: "customer360"
+  DB_SCHEMA: "customer360"
+  DB_POOL_SIZE: "10"
+  DB_MAX_OVERFLOW: "20"
+  DB_POOL_RECYCLE_SECONDS: "1800"
+  DB_POOL_PRE_PING: "true"
+  DB_ECHO_SQL: "false"
+
+  # --- Redis ---
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6580"
+  REDIS_DB: "0"
+  CACHE_ENABLED: "true"
+  CACHE_TTL_SECONDS: "60"
+
+  # --- Auth / Keycloak (SSO off by default -> API trusts X-Tenant-Id/X-User-Id) ---
+  SSO_LOGIN: "false"
+  SSO_LOGIN_URL: "http://keycloak:8080"
+  KEYCLOAK_REALM: "leocdp"
+  KEYCLOAK_CLIENT_ID: "leocdp"
+  KEYCLOAK_VERIFY_SSL: "false"
+  KEYCLOAK_HOSTNAME: "localhost"
+  KC_DB_URL: "jdbc:postgresql://postgres:5432/db_keycloak"
+
+  # --- Dagster (API submits jobs to this GraphQL endpoint) ---
+  DAGSTER_GRAPHQL_HOST: "dagster"
+  DAGSTER_GRAPHQL_PORT: "3000"
+
+  # --- Frontend (FRONTEND_API_HOSTNAME is called from the BROWSER -> must be host-reachable) ---
+  FRONTEND_API_HOSTNAME: "http://localhost:18008"
+  FRONTEND_TENANT_ID: "11111111-1111-1111-1111-111111111111"
+
+  # --- Kafka / object storage ---
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  S3_ENDPOINT: "http://minio:9000"
+  MINIO_BUCKET: "customer360-events-dev"

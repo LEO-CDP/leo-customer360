@@ -1,0 +1,129 @@
+# Minimal resource footprint for the local cluster: small requests + modest
+# limits on every workload, plus JVM heap caps on the two Java services
+# (Keycloak, Kafka) which otherwise size their heap to a % of node RAM.
+# Total requests land around ~0.75 vCPU / ~2Gi so the whole stack fits a laptop.
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  template:
+    spec:
+      containers:
+        - name: postgres
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+spec:
+  template:
+    spec:
+      containers:
+        - name: redis
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 320Mi } # maxmemory is 256mb + overhead
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  template:
+    spec:
+      containers:
+        - name: kafka
+          env:
+            - { name: KAFKA_HEAP_OPTS, value: "-Xmx512m -Xms256m" }
+          resources:
+            requests: { cpu: 150m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+spec:
+  template:
+    spec:
+      containers:
+        - name: keycloak
+          env:
+            - { name: JAVA_OPTS_KC_HEAP, value: "-Xms256m -Xmx512m" }
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+spec:
+  template:
+    spec:
+      containers:
+        - name: minio
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 300m, memory: 512Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  template:
+    spec:
+      containers:
+        - name: frontend
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 256Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dagster
+spec:
+  template:
+    spec:
+      containers:
+        - name: dagster
+          # dagster dev spawns a gRPC subprocess per code location (7), so it
+          # needs more headroom than the other Python services.
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            # Heaviest workload: dagster dev + 7 gRPC code-location subprocesses
+            # peak ~2Gi while loading. Right-sized rather than truly "minimal".
+            limits: { cpu: "1", memory: 2560Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cir
+spec:
+  template:
+    spec:
+      containers:
+        - name: cir
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 256Mi }

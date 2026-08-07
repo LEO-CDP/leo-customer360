@@ -1,0 +1,38 @@
+# frontend-admin (FastAPI-served admin SPA). NOTE: FRONTEND_API_HOSTNAME is
+# called from the user's BROWSER, so it must be a host/public URL, not the
+# in-cluster "api" service name (set per overlay).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  labels: { app: frontend }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: frontend }
+  template:
+    metadata:
+      labels: { app: frontend }
+    spec:
+      containers:
+        - name: frontend
+          image: customer360-frontend:local
+          ports:
+            - { containerPort: 8890, name: http }
+          envFrom:
+            - configMapRef: { name: c360-config }
+            - secretRef: { name: c360-secrets }
+          readinessProbe:
+            httpGet: { path: /health, port: 8890 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  labels: { app: frontend }
+spec:
+  selector: { app: frontend }
+  ports:
+    - { port: 8890, targetPort: 8890, name: http }

@@ -1,0 +1,26 @@
+# LOCAL overlay (kind): base app tier + in-cluster data component, exposed via
+# NodePorts that the kind cluster maps to host ports. Uses the :local images
+# built by scripts/build-load.sh. Base config is already local-appropriate
+# (localhost URLs, in-cluster service names, SSO off), so only NodePorts + the
+# secret are added here.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: customer360
+
+resources:
+  - ../../base
+
+components:
+  - ../../components/in-cluster-data
+
+patches:
+  - path: patch-nodeports.yaml
+  - path: patch-resources.yaml
+
+secretGenerator:
+  - name: c360-secrets
+    envs:
+      - secret.env
+
+generatorOptions:
+  disableNameSuffixHash: true

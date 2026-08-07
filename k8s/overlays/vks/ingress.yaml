@@ -1,0 +1,35 @@
+# Public access on VKS via Ingress (replaces the local NodePorts). Set your
+# ingressClassName, real hostnames, and TLS. Keycloak and the API must be on the
+# hostnames referenced in patch-config.yaml (KEYCLOAK_HOSTNAME / FRONTEND_API_HOSTNAME).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: customer360
+  annotations:
+    # e.g. cert-manager for TLS:
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    {}
+spec:
+  ingressClassName: nginx # CHANGE_ME to your VKS ingress class
+  # tls:
+  #   - hosts: [api.CHANGE_ME.example, app.CHANGE_ME.example, keycloak.CHANGE_ME.example]
+  #     secretName: customer360-tls
+  rules:
+    - host: api.CHANGE_ME.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: api, port: { number: 8008 } } }
+    - host: app.CHANGE_ME.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: frontend, port: { number: 8890 } } }
+    - host: keycloak.CHANGE_ME.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: keycloak, port: { number: 8080 } } }

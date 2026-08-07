@@ -1,0 +1,50 @@
+# Redis 8 (cache). Listens on 6580 (baked into redis.conf). Password via
+# --requirepass from the secret.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  labels: { app: redis }
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels: { app: redis }
+  template:
+    metadata:
+      labels: { app: redis }
+    spec:
+      containers:
+        - name: redis
+          image: customer360-redis:local
+# redis.conf ships without a `port` directive, so the server would default to
+          # 6379; force 6580 to match the Service, probe and the app's REDIS_PORT.
+          args: ["--port", "6580", "--requirepass", "$(REDIS_PASSWORD)"]
+          ports:
+            - { containerPort: 6580, name: redis }
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: c360-secrets, key: REDIS_PASSWORD } }
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", 'redis-cli -p 6580 -a "$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG']
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - { name: data, mountPath: /data }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels: { app: redis }
+spec:
+  clusterIP: None
+  selector: { app: redis }
+  ports:
+    - { port: 6580, targetPort: 6580, name: redis }

@@ -1,0 +1,44 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+# Secrets can also be supplied via TF_VAR_* env vars instead of this file.
+
+# --- vngcloud IAM (from the GreenNode/VNG IAM console) ---
+vng_client_id     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+vng_client_secret = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# --- vStorage S3 key (IAM console -> Service Account -> Create S3 key) ---
+vstorage_access_key  = "xxxxxxxxxxxxxxxxxxxx"
+vstorage_secret_key  = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+vstorage_region      = "hcm03"
+vstorage_s3_endpoint = "https://hcm03.vstorage.vngcloud.vn"
+
+# --- Account / project ---
+vserver_project_id = "pro-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+zone_id            = "HCM03-1A"
+
+# --- Networking (reference existing VNG VPC) ---
+# Set create_network = true to have Terraform create these instead.
+network_id = "net-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+subnet_id  = "sub-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# --- Service credentials (choose strong values) ---
+pg_password    = "CHANGE_ME_strong_pg_password"
+redis_password = "CHANGE_ME_strong_redis_password"
+
+# --- Tenants (id must match sys_tenant.tenant_id; code is a dns/kafka-safe slug) ---
+tenants = [
+  { id = "11111111-1111-1111-1111-111111111111", code = "default" },
+]
+
+# --- Optional: run schema/role/seed from here (needs psql + reachable DB) ---
+# pg_public_access  = true
+# run_db_bootstrap  = true
+# app_role_password = "CHANGE_ME_strong_app_role_password"
+# db_bootstrap_extra_sql = ["../../../database-init/data-view-for-llm.sql"]
+
+# --- Sizing overrides (confirm exact package names in the vDB console) ---
+# pg_package_name    = "db.new.s-general-2x4"
+# redis_package_name = "db.new.s-general-1x2"
+# kafka_package_name = "db-kafka.s-general-2x4-n10"
+
+# --- vStorage bucket names are globally unique; keep this prefix distinctive ---
+vstorage_bucket_prefix = "c360-dev-"

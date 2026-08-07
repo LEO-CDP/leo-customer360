@@ -1,0 +1,11 @@
+# Kustomize COMPONENT: the self-contained data tier (Postgres, Redis, Kafka,
+# MinIO) plus the demo-data seed. Included by the `local` overlay only; the
+# `vks` overlay omits it and points the app at GreenNode managed vDB + vStorage.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - postgres.yaml
+  - redis.yaml
+  - kafka.yaml
+  - minio.yaml
+  - cir-demo-seed.job.yaml

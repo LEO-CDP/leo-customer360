@@ -1,0 +1,57 @@
+# Single-node Kafka (KRaft, no ZooKeeper) for local dev. Auto-creates topics
+# since no producers/consumers exist yet. Swap for a real cluster / managed vDB
+# Kafka in the vks overlay.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels: { app: kafka }
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels: { app: kafka }
+  template:
+    metadata:
+      labels: { app: kafka }
+    spec:
+      containers:
+        - name: kafka
+# Bitnami removed old version tags from bitnami/kafka in their 2025 catalog
+          # reorg; the frozen legacy namespace still serves 3.7 (same KAFKA_CFG_* config).
+          image: bitnamilegacy/kafka:3.7
+          ports:
+            - { containerPort: 9092, name: kafka }
+          env:
+            - { name: KAFKA_CFG_NODE_ID, value: "0" }
+            - { name: KAFKA_CFG_PROCESS_ROLES, value: "controller,broker" }
+            - { name: KAFKA_CFG_CONTROLLER_QUORUM_VOTERS, value: "0@localhost:9093" }
+            - { name: KAFKA_CFG_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093" }
+            - { name: KAFKA_CFG_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka:9092" }
+            - { name: KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP, value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT" }
+            - { name: KAFKA_CFG_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
+            - { name: KAFKA_CFG_INTER_BROKER_LISTENER_NAME, value: "PLAINTEXT" }
+            - { name: KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE, value: "true" }
+            - { name: ALLOW_PLAINTEXT_LISTENER, value: "yes" }
+          readinessProbe:
+            tcpSocket: { port: 9092 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          volumeMounts:
+            - { name: data, mountPath: /bitnami/kafka }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels: { app: kafka }
+spec:
+  clusterIP: None
+  selector: { app: kafka }
+  ports:
+    - { port: 9092, targetPort: 9092, name: kafka }
