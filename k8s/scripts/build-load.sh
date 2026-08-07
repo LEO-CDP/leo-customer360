@@ -24,4 +24,20 @@ build customer360-frontend:local frontend-admin
 build customer360-cir:local      backend-system/identity_resolution
 build customer360-dagster:local  backend-system
 
+# Preload third-party images (everything referenced by the overlay that we do
+# NOT build locally) onto the kind node, so pods don't pull them from the
+# internet on first start -- slow/flaky on poor connections (minio can take
+# >8 min). Derived from the rendered overlay so it never drifts from manifests.
+echo "==> preloading third-party images"
+kubectl kustomize "$REPO/k8s/overlays/local" 2>/dev/null \
+  | grep -oE 'image:[[:space:]]*[^[:space:]]+' | awk '{print $2}' | sort -u \
+  | grep -v ':local$' \
+  | while read -r img; do
+      echo "==> preload $img"
+      docker image inspect "$img" >/dev/null 2>&1 \
+        || docker pull "$img" \
+        || { echo "   (pull failed; pod will pull $img at runtime)"; continue; }
+      kind load docker-image "$img" --name "$CLUSTER"
+    done || true
+
 echo "==> all images built and loaded"

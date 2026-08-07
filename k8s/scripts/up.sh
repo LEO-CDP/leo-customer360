@@ -39,8 +39,12 @@ bash "$DIR/build-load.sh"
 echo "==> applying overlays/local"
 kubectl --context "$KCTX" apply -k "$K8S/overlays/local"
 
-echo "==> waiting for the API to roll out (up to 5 min; other pods continue in background)"
-kubectl --context "$KCTX" -n customer360 rollout status deploy/api --timeout=300s || true
+echo "==> waiting for all core workloads to become ready (up to 8 min)"
+kubectl --context "$KCTX" -n customer360 wait --for=condition=Available \
+  deploy --all --timeout=480s || true
+for s in kafka postgres redis; do
+  kubectl --context "$KCTX" -n customer360 rollout status "statefulset/$s" --timeout=180s || true
+done
 kubectl --context "$KCTX" -n customer360 get pods
 
 cat <<'EOF'
