@@ -35,7 +35,8 @@ window.C360 = window.C360 || {};
     var cell = {
       class: [col.cellClass || "", col.muted ? "text-slate-500" : "", col.capitalize ? "capitalize" : ""].join(" ").trim(),
       isBadge: col.type === "badge",
-      isIdentity: col.type === "identity"
+      isIdentity: col.type === "identity",
+      isMetrics: col.type === "metrics"
     };
 
     if (col.type === "identity") {
@@ -46,6 +47,9 @@ window.C360 = window.C360 || {};
       cell.avatarBg = (col.avatarBgField ? vm[col.avatarBgField] : null) || col.avatarBg || "bg-indigo-100";
       cell.avatarColor = (col.avatarColorField ? vm[col.avatarColorField] : null) || col.avatarColor || "text-indigo-700";
       cell.avatarTextClass = col.avatarTextClass || "font-semibold text-xs";
+    } else if (col.type === "metrics") {
+      // rows of { label, value } stacked vertically, e.g. Volume Metrics
+      cell.metrics = (col.field ? vm[col.field] : null) || [];
     } else {
       cell.value = col.field ? vm[col.field] : "";
       if (col.type === "badge") cell.badgeClass = (col.classField ? vm[col.classField] : null) || col.badgeClass || "";

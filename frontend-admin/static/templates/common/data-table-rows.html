@@ -24,6 +24,15 @@
     {{else}}
       <span class="text-slate-300 font-mono">—</span>
     {{/if}}
+    {{else if isMetrics}}
+    <div class="space-y-0.5">
+      {{#each metrics}}
+      <div class="flex items-baseline gap-1.5 text-xs">
+        <span class="text-slate-400">{{this.label}}:</span>
+        <span class="text-slate-700 font-semibold font-mono">{{this.value}}</span>
+      </div>
+      {{/each}}
+    </div>
     {{else}}
     {{#if value}}
       <span class="text-sm text-slate-700 font-medium">{{value}}</span>

@@ -1,7 +1,13 @@
 /* Customer 360 Admin -- Data Sources view (sys_data_source).
  *
  * Owns /datasources route and renders list/create/detail/delete interactions
- * via the metadata endpoints implemented in customer360-api.
+ * via the metadata endpoints implemented in customer360-api. Refactored onto
+ * the shared C360.DataTableView component (see data-table-view.js and its
+ * other consumers: attributes-view.js, scoring-model-view.js) for style
+ * consistency across all metadata table views -- client-side filtering
+ * (the generic list endpoint only supports tenant_id/status/skip/limit) plus
+ * a per-row "View" action (opens the read-only detail modal, which now also
+ * hosts the Delete button, mirroring scoring-model-view.js's Edit modal).
  */
 window.C360 = window.C360 || {};
 
@@ -12,9 +18,6 @@ window.C360 = window.C360 || {};
   var showApiError = C360.config.showApiError;
   var fmt = C360.fmt;
 
-  var allItems = [];
-  var filteredItems = [];
-  var loadedOnce = false;
   var SOURCE_TYPE_OPTIONS = {
     1: "Web JavaScript Code (Client-side tracking)",
     2: "Data Connector API (Server-side Pull/Sync)",
@@ -23,17 +26,31 @@ window.C360 = window.C360 || {};
     5: "Mobile SDK Code (iOS/Android/Flutter tracking)"
   };
 
-  function statusBadge(status) {
-    if (Number(status) === 1) return '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-green-100 text-green-700">Active</span>';
-    return '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-slate-100 text-slate-600">Inactive</span>';
-  }
+  var SOURCE_TYPE_SHORT_LABELS = {
+    1: "Web JS",
+    2: "API Pull",
+    3: "Webhook",
+    4: "S3 File",
+    5: "Mobile SDK"
+  };
 
-  function modeBadge(item) {
-    var collectDirectly = item.collect_directly !== false;
-    var firstParty = item.first_party_data !== false;
-    var text = (collectDirectly ? "Direct" : "Indirect") + " / " + (firstParty ? "1P" : "3P");
-    return '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-cyan-50 text-cyan-700">' + text + '</span>';
-  }
+  var TYPE_BADGE_CLASSES = {
+    1: "bg-indigo-100 text-indigo-700",
+    2: "bg-cyan-100 text-cyan-700",
+    3: "bg-fuchsia-100 text-fuchsia-700",
+    4: "bg-amber-100 text-amber-700",
+    5: "bg-violet-100 text-violet-700"
+  };
+  function typeBadgeClass(t) { return TYPE_BADGE_CLASSES[t] || "bg-slate-100 text-slate-500"; }
+
+  var TYPE_ICONS = {
+    1: "\ud83c\udf10",
+    2: "\ud83d\udd17",
+    3: "\ud83d\udce1",
+    4: "\ud83d\udce6",
+    5: "\ud83d\udcf1"
+  };
+  function typeIcon(t) { return TYPE_ICONS[t] || "\ud83e\udde9"; }
 
   function esc(value) {
     return $("<div>").text(value == null ? "" : String(value)).html();
@@ -45,81 +62,79 @@ window.C360 = window.C360 || {};
     return "Unknown Type (" + t + ")";
   }
 
-  function renderRows(items) {
-    var rows = items.map(function (item) {
-      var id = esc(item.data_source_id);
-      var name = esc(item.name || "(Unnamed)");
-      var slug = esc(item.slug || "-");
-      var type = esc(typeLabel(item.source_type));
-      var totalEvents = fmt && fmt.int ? fmt.int(item.total_tracked_event || 0) : String(item.total_tracked_event || 0);
-      var avgDailyEvents = fmt && fmt.int ? fmt.int(item.avg_daily_event || 0) : String(item.avg_daily_event || 0);
-      var avgPerProfile = Number(item.avg_events_per_profile || 0).toFixed(2);
-      return [
-        '<tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors">',
-        '  <td class="px-6 py-3.5">',
-        '    <div class="font-semibold text-slate-900">' + name + '</div>',
-        '    <div class="text-[11px] text-slate-500 font-mono mt-0.5">' + slug + '</div>',
-        '  </td>',
-        '  <td class="px-6 py-3.5 text-slate-700">' + type + '</td>',
-        '  <td class="px-6 py-3.5">' + statusBadge(item.status) + '</td>',
-        '  <td class="px-6 py-3.5">' + modeBadge(item) + '</td>',
-        '  <td class="px-6 py-3.5 text-slate-700">',
-        '    <div class="font-medium">Total: ' + totalEvents + '</div>',
-        '    <div class="text-[11px] text-slate-500 mt-0.5">Daily avg: ' + avgDailyEvents + ' · Per profile: ' + avgPerProfile + '</div>',
-        '  </td>',
-        '  <td class="px-6 py-3.5">',
-        '    <div class="flex items-center justify-end gap-1.5">',
-        '      <button class="btn-datasource-view border border-slate-200 bg-white rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50" data-id="' + id + '">View</button>',
-        '      <button class="btn-datasource-delete border border-red-200 bg-white rounded-lg px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50" data-id="' + id + '">Delete</button>',
-        '    </div>',
-        '  </td>',
-        '</tr>'
-      ].join("");
-    }).join("");
-
-    $("#datasources-tbody").html(rows);
-    $("#datasources-empty").toggleClass("hidden", items.length !== 0);
-    $("#datasources-count-label").text(items.length + " data source" + (items.length === 1 ? "" : "s") + " shown");
+  function volumeMetrics(item) {
+    var total = fmt && fmt.int ? fmt.int(item.total_tracked_event || 0) : String(item.total_tracked_event || 0);
+    var daily = fmt && fmt.int ? fmt.int(item.avg_daily_event || 0) : String(item.avg_daily_event || 0);
+    var perProfile = Number(item.avg_events_per_profile || 0).toFixed(2);
+    return [
+      { label: "Total", value: total },
+      { label: "Daily Event", value: daily },
+      { label: "AVG event / profile", value: perProfile }
+    ];
   }
 
-  function applyFilters() {
-    var q = String($("#datasources-search-input").val() || "").trim().toLowerCase();
-    var status = String($("#datasources-status-filter").val() || "").trim();
-
-    filteredItems = allItems.filter(function (item) {
-      if (status !== "" && String(item.status) !== status) return false;
-      if (!q) return true;
-      var hay = [item.name, item.slug, item.data_source_url, item.thumbnail_url].map(function (v) {
-        return String(v || "").toLowerCase();
-      }).join(" ");
-      return hay.indexOf(q) !== -1;
+  function rowVm(item) {
+    var t = Number(item.source_type);
+    return $.extend({}, item, {
+      nameLabel: item.name || "(Unnamed)",
+      slugLabel: item.slug || "-",
+      typeIcon: typeIcon(t),
+      typeShortLabel: SOURCE_TYPE_SHORT_LABELS[t] || ("Type " + t),
+      typeBadgeClass: typeBadgeClass(t),
+      statusLabel: Number(item.status) === 1 ? "Active" : "Inactive",
+      statusBadgeClass: Number(item.status) === 1 ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500",
+      modeLabel: (item.collect_directly !== false ? "Direct" : "Indirect") + " / " + (item.first_party_data !== false ? "1P" : "3P"),
+      modeBadgeClass: "bg-cyan-50 text-cyan-700",
+      volumeMetrics: volumeMetrics(item)
     });
-
-    renderRows(filteredItems);
   }
 
-  function setLoading(loading) {
-    $("#datasources-loading").toggleClass("hidden", !loading);
-  }
+  var dataSourcesById = {}; // last-fetched rows, keyed by data_source_id -- backs the detail modal's Delete action
 
-  function load() {
-    setLoading(true);
-    return api("/metadata/data-sources", {
-      tenant_id: C360.config.current.tenantId,
-      skip: 0,
-      limit: 500
-    })
-      .done(function (items) {
-        allItems = Array.isArray(items) ? items : [];
-        loadedOnce = true;
-        setLoading(false);
-        applyFilters();
-      })
-      .fail(function (xhr) {
-        setLoading(false);
-        showApiError("loading data sources", xhr);
-      });
-  }
+  var dtv = C360.DataTableView.create({
+    columns: [
+      {
+        label: "Data Source", type: "identity", nameField: "nameLabel", subField: "slugLabel", subStyle: "tag",
+        avatarField: "typeIcon", avatarBg: "bg-cyan-100", avatarColor: "text-cyan-700", avatarTextClass: "text-base"
+      },
+      { label: "Type", type: "badge", field: "typeShortLabel", classField: "typeBadgeClass" },
+      { label: "Status", type: "badge", field: "statusLabel", classField: "statusBadgeClass" },
+      { label: "Mode", type: "badge", field: "modeLabel", classField: "modeBadgeClass" },
+      { label: "Volume Metrics", type: "metrics", field: "volumeMetrics" }
+    ],
+    rowVm: rowVm,
+    rowId: function (vm) { return vm.data_source_id; },
+    rowClickable: false, // detail/delete live behind the View modal, not row navigation
+    onEdit: function (id) { viewDataSource(id); },
+    editLabel: "View",
+    resourceLabel: "data source",
+    clientSide: true,
+    clientSideLimit: 500,
+    fetch: function (params) {
+      return api("/metadata/data-sources", $.extend({ tenant_id: C360.config.current.tenantId }, params));
+    },
+    clientFilters: {
+      q: function (vm, value) {
+        var needle = value.toLowerCase();
+        return (vm.name || "").toLowerCase().indexOf(needle) !== -1 ||
+          (vm.slug || "").toLowerCase().indexOf(needle) !== -1 ||
+          (vm.data_source_url || "").toLowerCase().indexOf(needle) !== -1 ||
+          (vm.thumbnail_url || "").toLowerCase().indexOf(needle) !== -1;
+      },
+      status: function (vm, value) { return String(vm.status) === value; }
+    },
+    onFetched: function (items) { dataSourcesById = {}; items.forEach(function (i) { dataSourcesById[i.data_source_id] = i; }); },
+    onError: function (xhr) { showApiError("loading data sources", xhr); },
+    el: {
+      thead: "#datasources-thead",
+      tbody: "#datasources-tbody",
+      loading: "#datasources-loading",
+      empty: "#datasources-empty",
+      countLabel: "#datasources-count-label"
+    }
+  });
+
+  function load() { return dtv.load(false); }
 
   function field(label, value) {
     return [
@@ -335,7 +350,12 @@ window.C360 = window.C360 || {};
       });
   }
 
+  // Non-null while the detail modal is showing a row -- backs the modal's
+  // Delete button (mirrors editingScoringModelName in scoring-model-view.js).
+  var currentDetailId = null;
+
   function viewDataSource(id) {
+    currentDetailId = id;
     api("/metadata/data-sources/" + id)
       .done(function (item) {
         openDetailModal(item);
@@ -345,13 +365,15 @@ window.C360 = window.C360 || {};
       });
   }
 
-  function deleteDataSource(id) {
-    var found = allItems.find(function (item) { return item.data_source_id === id; });
-    var label = found && found.name ? found.name : id;
+  function deleteDataSource() {
+    if (!currentDetailId) return;
+    var found = dataSourcesById[currentDetailId];
+    var label = found && found.name ? found.name : currentDetailId;
     if (!window.confirm("Delete data source '" + label + "'?")) return;
 
-    api("/metadata/data-sources/" + id, {}, "DELETE")
+    api("/metadata/data-sources/" + currentDetailId, {}, "DELETE")
       .done(function () {
+        closeDetailModal();
         load();
       })
       .fail(function (xhr) {
@@ -360,13 +382,9 @@ window.C360 = window.C360 || {};
   }
 
   function bindEvents() {
-    $(document).on("input", "#datasources-search-input", function () {
-      applyFilters();
-    });
-
-    $(document).on("change", "#datasources-status-filter", function () {
-      applyFilters();
-    });
+    dtv.bindSearch("#datasources-search-input", "q", 300);
+    dtv.bindSelect("#datasources-status-filter", "status");
+    dtv.bindRowEdit();
 
     $(document).on("click", "#btn-datasource-add", openCreateModal);
     $(document).on("click", "#btn-datasource-add-cancel", closeCreateModal);
@@ -377,16 +395,9 @@ window.C360 = window.C360 || {};
     });
 
     $(document).on("click", "#btn-datasource-detail-close, #btn-datasource-detail-done", closeDetailModal);
+    $(document).on("click", "#btn-datasource-detail-delete", deleteDataSource);
     $(document).on("click", "#datasource-detail-modal", function (e) {
       if (e.target === this) closeDetailModal();
-    });
-
-    $(document).on("click", ".btn-datasource-view", function () {
-      viewDataSource(String($(this).data("id") || ""));
-    });
-
-    $(document).on("click", ".btn-datasource-delete", function () {
-      deleteDataSource(String($(this).data("id") || ""));
     });
   }
 
