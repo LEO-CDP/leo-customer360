@@ -23,3 +23,6 @@ spec:
             exec: { command: ["python", "healthcheck.py"] }
             initialDelaySeconds: 30
             periodSeconds: 30
+            # healthcheck.py cold-starts a Python interpreter + does a DB check,
+            # which regularly exceeds the 1s default timeout; give it headroom.
+            timeoutSeconds: 5
