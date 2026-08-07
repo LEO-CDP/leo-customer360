@@ -162,7 +162,6 @@ const TIME_CHECK_API_HEALTH = 60000;
   }
 
   $(function () {
-    C360.themeLoader(C360.config.current.theme, false);
 
     C360.templates.loadAll().done(function () {
       $("#app-header").html(C360.templates.html("tabs"));
@@ -172,6 +171,9 @@ const TIME_CHECK_API_HEALTH = 60000;
       $("#view-attributes").html(C360.templates.html("attributes-list"));
       $("#persona-list-content").html(C360.templates.html("persona-list"));
       $("body").append(C360.templates.html("settings-modal"));
+
+      // apply the current theme (light/dark/system) to the page, and re-apply it
+      C360.themeLoader(C360.config.current.theme, false);
 
       $("#footer-api-base").text(C360.config.current.apiBase);
 

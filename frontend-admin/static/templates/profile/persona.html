@@ -51,15 +51,29 @@
     </div>
   </div>
 
-  <!-- Next Best Action Callout: Elevated with a softer, friendlier AI recommendation feel -->
-  <div class="mb-6 p-4.5 bg-gradient-to-r from-violet-50/80 to-slate-50/50 rounded-2xl border border-violet-100/50 relative overflow-hidden">
-    <div class="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-violet-400 to-fuchsia-400"></div>
-    <div class="pl-4 pr-2 py-1">
-      <div class="flex items-center gap-1.5 mb-1.5">
-        <svg class="w-3.5 h-3.5 text-violet-500" fill="currentColor" viewBox="0 0 20 20"><path d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z"/></svg>
-        <span class="text-[11px] text-violet-600 uppercase tracking-widest font-bold">Next Best Action</span>
+  <!-- 
+    =============================================================================
+    Next Best Action Callout
+    Same solid-card + id-scoped theme override pattern as the
+    "Identity Matching Data & Evidence" card (see profile/channels.html).
+    =============================================================================
+  -->
+  <div id="next-best-action-card" class="mb-6 rounded-xl border border-violet-100 bg-violet-50/60 p-3 relative overflow-hidden">
+
+    <!-- Left Accent Bar -->
+    <div class="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-violet-500 to-fuchsia-500"></div>
+
+    <div class="pl-3">
+      <div class="flex items-center gap-1.5 mb-2">
+        <svg class="w-3.5 h-3.5 text-violet-700" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z"/>
+        </svg>
+        <span class="text-[11px] font-bold uppercase tracking-wider text-violet-700">Next Best Action</span>
       </div>
-      <p class="text-sm text-slate-700 leading-relaxed font-medium">{{nextBestAction}}</p>
+
+      <div class="rounded-lg border border-violet-100/70 bg-white px-3 py-2">
+        <p class="text-sm font-medium text-slate-900 leading-relaxed">{{nextBestAction}}</p>
+      </div>
     </div>
   </div>
 

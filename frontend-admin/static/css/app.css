@@ -40,6 +40,71 @@ body {
  * These overrides remap the shared utility palette when html.dark is active.
  */
 html.dark .bg-white { background-color: var(--c360-card) !important; }
+html.c360-theme-dark #identity-details-card {
+  background-color: var(--c360-card) !important;
+  border-color: var(--c360-border) !important;
+}
+html.c360-theme-dark #identity-details-card .bg-cyan-50 {
+  background-color: rgb(8 47 73 / 0.65) !important;
+}
+html.c360-theme-dark #identity-details-card .text-cyan-600 {
+  color: rgb(125 211 252) !important;
+}
+html.c360-theme-dark #identity-details-card .border-cyan-100 {
+  border-color: rgb(14 116 144 / 0.55) !important;
+}
+html.c360-theme-dark #identity-details-card .border-cyan-100\/70 {
+  border-color: rgb(14 116 144 / 0.45) !important;
+}
+html.c360-theme-dark #identity-details-card .bg-cyan-50\/60 {
+  background-color: rgb(8 47 73 / 0.35) !important;
+}
+html.c360-theme-dark #identity-details-card .bg-white {
+  background-color: rgb(15 23 42) !important;
+}
+html.c360-theme-dark #identity-details-card .bg-slate-50 {
+  background-color: rgb(30 41 59) !important;
+}
+html.c360-theme-dark #identity-details-card .text-slate-900 {
+  color: #f8fafc !important;
+}
+html.c360-theme-dark #identity-details-card .text-slate-700 {
+  color: #e2e8f0 !important;
+}
+html.c360-theme-dark #identity-details-card .text-slate-500 {
+  color: #94a3b8 !important;
+}
+html.c360-theme-dark #identity-details-card .text-cyan-700 {
+  color: rgb(125 211 252) !important;
+}
+html.c360-theme-dark #identity-details-card .bg-cyan-100 {
+  background-color: rgb(22 78 99) !important;
+}
+html.c360-theme-dark #identity-details-card .group:hover .group-hover\:bg-cyan-50 {
+  background-color: rgb(8 47 73 / 0.35) !important;
+}
+html.c360-theme-dark #identity-details-card .group:hover .group-hover\:bg-cyan-900\/40 {
+  background-color: rgb(8 47 73 / 0.7) !important;
+}
+html.c360-theme-dark #identity-details-card .divide-slate-100\/80 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgb(51 65 85 / 0.85) !important;
+}
+html.c360-theme-dark #next-best-action-card {
+  background-color: rgb(76 29 149 / 0.25) !important;
+  border-color: rgb(139 92 246 / 0.35) !important;
+}
+html.c360-theme-dark #next-best-action-card .text-violet-700 {
+  color: rgb(196 181 253) !important;
+}
+html.c360-theme-dark #next-best-action-card .border-violet-100\/70 {
+  border-color: rgb(139 92 246 / 0.3) !important;
+}
+html.c360-theme-dark #next-best-action-card .bg-white {
+  background-color: rgb(15 23 42) !important;
+}
+html.c360-theme-dark #next-best-action-card .text-slate-900 {
+  color: #f8fafc !important;
+}
 html.dark .bg-white\/90 { background-color: rgb(17 24 39 / 0.9) !important; }
 html.dark .bg-slate-50,
 html.dark .bg-slate-50\/30,
@@ -132,6 +197,12 @@ html.dark code {
 .tab-btn:hover { color: #4338ca; border-color: #e329ba; cursor: pointer; }
 
 .tab-btn.active { color: #4338ca; border-color: #4338ca; }
+
+html.c360-theme-dark .tab-btn.active { border-color: #f8fafc; }
+html.c360-theme-dark .tab-btn:hover { color: #00d32a; border-color: #00d32a; }
+
+html.c360-theme-dark #btn-back-to-profiles { color: #f8fafc; cursor: pointer; }
+html.c360-theme-dark #btn-back-to-profiles:hover { color: #00d32a; }
 
 .bar-track { background: var(--c360-border); border-radius: 9999px; overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 9999px; }
