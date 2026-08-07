@@ -711,6 +711,20 @@ class _FakeSelectSession:
         return self.result
 
 
+class _FakeMultiSelectSession:
+    """Session double for endpoints issuing several sequential db.execute()
+    calls (e.g. a sys_domain validation lookup, then a data query) --
+    returns one canned `.scalars().all()` result per call, in order."""
+
+    def __init__(self, row_sets: list[list[Any]]):
+        self._results = [_FakeScalarsResult(rows) for rows in row_sets]
+        self.executed: list[Any] = []
+
+    def execute(self, stmt: Any, params: Optional[dict[str, Any]] = None) -> Any:
+        self.executed.append(stmt)
+        return self._results.pop(0)
+
+
 def _fake_profile_attribute(**overrides) -> SimpleNamespace:
     attrs = {
         "master_profile_column": "churn_risk_tier",
@@ -803,14 +817,20 @@ class SegmentableProfileAttributesTests(unittest.TestCase):
         self.assertEqual(response.json()[0]["field"], "dp.domain_attributes->>'risk_segment'")
 
     def test_accepts_valid_domain_query_param(self):
-        client, _ = self._client_for([])
+        # Two sequential db.execute() calls now: validate_domain_value's
+        # sys_domain lookup, then the main attributes select.
+        session = _FakeMultiSelectSession([["retail"], []])
+        self.app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(self.app)
 
         response = client.get("/segments/segmentable-profile-attributes", params={"domain": "retail"})
 
         self.assertEqual(response.status_code, 200)
 
     def test_rejects_invalid_domain_query_param(self):
-        client, _ = self._client_for([])
+        session = _FakeMultiSelectSession([["retail"], []])
+        self.app.dependency_overrides[get_db] = lambda: session
+        client = TestClient(self.app)
 
         response = client.get("/segments/segmentable-profile-attributes", params={"domain": "bogus"})
 

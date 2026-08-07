@@ -34,7 +34,6 @@ from core.utils.sql_safety import validate_sql_where_fragment
 # "dp"), so the "field picker" endpoint below offers both plain cdp_master_profiles
 # columns and cdp_domain_profiles.domain_attributes JSONB keys (as dp.domain_attributes->>'key').
 _SEGMENTABLE_SOURCE_TABLES = ("cdp_master_profiles", "cdp_domain_profiles")
-_DOMAIN_SCOPE_PATTERN = r"^(all|retail|banking|real_estate|travel|media|education)$"
 
 segments_router = build_crud_router(
     model=CdpSegment,
@@ -385,7 +384,7 @@ def _segmentable_field(attribute: CdpProfileAttribute) -> str:
 @segments_router.get("/segmentable-profile-attributes")
 @cache_response("segments/segmentable_profile_attributes", ttl=settings.cache_ttl_seconds)
 def get_segmentable_profile_attributes(
-    domain: Optional[str] = Query(default=None, pattern=_DOMAIN_SCOPE_PATTERN),
+    domain: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """Returns the catalog of attributes that are valid to reference in a
@@ -408,11 +407,17 @@ def get_segmentable_profile_attributes(
     ``cookie_id`` staging columns) are never valid fields for a segment
     rule.
 
-    ``domain`` (optional, one of ``retail``/``banking``/``real_estate``/
-    ``travel``/``media``/``education``) additionally filters to attributes with
+    ``domain`` (optional) additionally filters to attributes with
     ``domain_scope IN ('all', <domain>)``, matching ``cdp_master_profiles``/
-    ``cdp_segments``'s own ``domain`` column.
+    ``cdp_segments``'s own ``domain`` column. Validated against active
+    ``sys_domain`` codes rather than a hardcoded list.
     """
+    if domain:
+        try:
+            validate_domain_value(db, domain)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     stmt = select(CdpProfileAttribute).where(
         CdpProfileAttribute.is_segmentable.is_(True),
         CdpProfileAttribute.status == "ACTIVE",

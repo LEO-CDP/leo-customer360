@@ -341,7 +341,9 @@ class ProfileAttributeBase(BaseModel):
     source_table: str = "cdp_master_profiles"
     status: str = "ACTIVE"
     data_type: str = "TEXT"
-    domain_scope: str = Field(default="all", pattern="^(all|retail|banking|real_estate|travel|media|education)$")
+    # Validated against sys_domain ('all' + active domain codes) via
+    # core.utils.domains.validate_domain_value in the router, not a static pattern.
+    domain_scope: str = "all"
     is_pii: bool = False
     is_segmentable: bool = True
 
@@ -378,7 +380,7 @@ class ProfileAttributeUpdate(BaseModel):
     source_table: Optional[str] = None
     status: Optional[str] = None
     data_type: Optional[str] = None
-    domain_scope: Optional[str] = Field(default=None, pattern="^(all|retail|banking|real_estate|travel|media|education)$")
+    domain_scope: Optional[str] = None
     is_pii: Optional[bool] = None
     is_segmentable: Optional[bool] = None
     is_identity_resolution: Optional[bool] = None

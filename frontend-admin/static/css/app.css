@@ -1,18 +1,125 @@
 /* Customer 360 Admin -- small CSS additions on top of the Tailwind CDN build.
  * Kept separate from index.html so styling tweaks don't require touching markup. */
 
+:root {
+  --c360-bg: #f8fafc;
+  --c360-text: #1e293b;
+  --c360-muted: #64748b;
+  --c360-card: #ffffff;
+  --c360-border: #e2e8f0;
+  --c360-scroll-thumb: #cbd5e1;
+}
+
+html.dark {
+  --c360-bg: #0f172a;
+  --c360-text: #e2e8f0;
+  --c360-muted: #94a3b8;
+  --c360-card: #111827;
+  --c360-border: #334155;
+  --c360-scroll-thumb: #475569;
+  color-scheme: dark;
+}
+
+html:not(.dark) {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--c360-bg);
+  color: var(--c360-text);
+}
+
+#app {
+  background: linear-gradient(180deg, var(--c360-bg) 0%, color-mix(in srgb, var(--c360-bg) 88%, #ffffff 12%) 100%);
+}
+
+/*
+ * Dark-theme compatibility layer:
+ * most templates currently use light-only Tailwind utility classes.
+ * These overrides remap the shared utility palette when html.dark is active.
+ */
+html.dark .bg-white { background-color: var(--c360-card) !important; }
+html.dark .bg-white\/90 { background-color: rgb(17 24 39 / 0.9) !important; }
+html.dark .bg-slate-50,
+html.dark .bg-slate-50\/30,
+html.dark .bg-slate-50\/40,
+html.dark .bg-slate-50\/50,
+html.dark .bg-slate-50\/60,
+html.dark .bg-slate-50\/80,
+html.dark .bg-slate-100 { background-color: #1f2937 !important; }
+
+html.dark .text-slate-900 { color: #f8fafc !important; }
+html.dark .text-slate-800,
+html.dark .text-slate-700 { color: #e2e8f0 !important; }
+html.dark .text-slate-600,
+html.dark .text-slate-500 { color: #cbd5e1 !important; }
+html.dark .text-slate-400,
+html.dark .text-slate-300 { color: #94a3b8 !important; }
+
+html.dark .border-slate-50,
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-200\/60,
+html.dark .border-slate-200\/80,
+html.dark .border-slate-300 { border-color: var(--c360-border) !important; }
+
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--c360-border) !important;
+}
+
+html.dark .divide-slate-100\/80 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgb(51 65 85 / 0.85) !important;
+}
+
+html.dark .ring-white { --tw-ring-color: rgb(51 65 85 / 0.6) !important; }
+html.dark .ring-slate-100,
+html.dark .ring-indigo-50 { --tw-ring-color: rgb(51 65 85 / 0.55) !important; }
+
+html.dark .hover\:bg-white:hover,
+html.dark .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-slate-100:hover,
+html.dark .hover\:bg-slate-50\/60:hover {
+  background-color: #334155 !important;
+}
+
+html.dark .hover\:border-slate-300:hover {
+  border-color: #475569 !important;
+}
+
+html.dark input,
+html.dark select,
+html.dark textarea {
+  color: #e2e8f0;
+  background-color: #111827;
+  border-color: #334155;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #94a3b8;
+}
+
+html.dark code {
+  color: #cbd5e1;
+  background-color: rgb(15 23 42 / 0.75);
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.25rem;
+}
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+::-webkit-scrollbar-thumb { background: var(--c360-scroll-thumb); border-radius: 9999px; }
 
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
 .spinner {
-  border: 3px solid #e2e8f0;
+  border: 3px solid var(--c360-border);
   border-top-color: #4f46e5;
   border-radius: 9999px;
   width: 1.5rem;
@@ -26,7 +133,7 @@
 
 .tab-btn.active { color: #4338ca; border-color: #4338ca; }
 
-.bar-track { background: #e2e8f0; border-radius: 9999px; overflow: hidden; }
+.bar-track { background: var(--c360-border); border-radius: 9999px; overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 9999px; }
 
 /* 

@@ -50,11 +50,12 @@
         <option value="all">Global</option>
       </select>
 
-      <!-- Source Filter: cdp_master_profiles vs cdp_domain_profiles (see attributes-view.js sourceLabel) -->
+      <!-- Source Filter: cdp_master_profiles vs cdp_domain_profiles vs cdp_raw_profiles_stage (see attributes-view.js sourceLabel) -->
       <select id="attributes-source-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
         <option value="">All sources</option>
         <option value="cdp_master_profiles">Master Profile</option>
         <option value="cdp_domain_profiles">Domain Profile</option>
+        <option value="cdp_raw_profiles_stage">Raw Profile</option>
       </select>
 
       <!-- Add Attribute -->
@@ -156,6 +157,7 @@
           <select id="attribute-add-source" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
             <option value="cdp_domain_profiles" selected>Domain Profile</option>
             <option value="cdp_master_profiles">Master Profile</option>
+            <option value="cdp_raw_profiles_stage">Raw Profile</option>
           </select>
         </div>
       </div>

@@ -11,30 +11,179 @@ window.C360 = window.C360 || {};
 (function (C360) {
   "use strict";
 
+  var STORAGE_KEYS = {
+    apiBase: "c360.apiBase",
+    tenantId: "c360.tenantId",
+    accessToken: "c360.accessToken",
+    theme: "c360.theme",
+    multiTenantEnabled: "c360.multiTenantEnabled",
+    tenantOptions: "c360.tenantOptions"
+  };
+
   var DEFAULTS = {
     apiBase: "http://localhost:8008/api/v1",
-    tenantId: "11111111-1111-1111-1111-111111111111"
+    tenantId: "11111111-1111-1111-1111-111111111111",
+    accessToken: "",
+    theme: "system",
+    multiTenantEnabled: false,
+    tenantOptions: []
   };
+
+  function readBool(value, fallback) {
+    if (value === null || typeof value === "undefined") return fallback;
+    return value === "true";
+  }
+
+  function parseTenantOptions(raw) {
+    var parts = [];
+    if (Array.isArray(raw)) {
+      parts = raw;
+    } else if (typeof raw === "string") {
+      parts = raw.split(/[\n,]/g);
+    }
+    var unique = {};
+    return parts
+      .map(function (item) { return String(item || "").trim(); })
+      .filter(function (item) {
+        if (!item || unique[item]) return false;
+        unique[item] = true;
+        return true;
+      });
+  }
+
+  function decodeJwtPayload(token) {
+    if (!token || token.split(".").length < 2) return null;
+    try {
+      var base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+      var json = decodeURIComponent(atob(base64).split("").map(function (ch) {
+        return "%" + ("00" + ch.charCodeAt(0).toString(16)).slice(-2);
+      }).join(""));
+      var payload = JSON.parse(json);
+      return payload && typeof payload === "object" ? payload : null;
+    } catch (e) {
+      return null;
+    }
+  }
 
   function getConfig() {
     // First check if Jinja rendered C360_SERVER_CONFIG (FastAPI app.py)
     var serverConfig = window.C360_SERVER_CONFIG || {};
+    var storedTenantOptions = [];
+    try {
+      storedTenantOptions = parseTenantOptions(JSON.parse(localStorage.getItem(STORAGE_KEYS.tenantOptions) || "[]"));
+    } catch (e) {
+      storedTenantOptions = [];
+    }
+    var tenantId = localStorage.getItem(STORAGE_KEYS.tenantId) || serverConfig.tenantId || DEFAULTS.tenantId;
+    var tenantOptions = storedTenantOptions.length ? storedTenantOptions : [tenantId];
     return {
-      apiBase: localStorage.getItem("c360.apiBase") || serverConfig.apiBase || DEFAULTS.apiBase,
-      tenantId: localStorage.getItem("c360.tenantId") || serverConfig.tenantId || DEFAULTS.tenantId
+      apiBase: localStorage.getItem(STORAGE_KEYS.apiBase) || serverConfig.apiBase || DEFAULTS.apiBase,
+      tenantId: tenantId,
+      accessToken: localStorage.getItem(STORAGE_KEYS.accessToken) || DEFAULTS.accessToken,
+      theme: localStorage.getItem(STORAGE_KEYS.theme) || DEFAULTS.theme,
+      multiTenantEnabled: readBool(localStorage.getItem(STORAGE_KEYS.multiTenantEnabled), DEFAULTS.multiTenantEnabled),
+      tenantOptions: tenantOptions
     };
   }
 
   var CONFIG = getConfig();
   var DOMAINS_CACHE_KEY = "c360.domains";
+  var mediaDark = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  var isThemeListenerBound = false;
+
+  function apiRootFromBase(apiBase) {
+    return String(apiBase || "").replace(/\/api\/v1\/?$/, "");
+  }
+
+  function applyTheme(theme, persist) {
+    var selected = theme || "system";
+    var prefersDark = mediaDark ? mediaDark.matches : false;
+    var shouldUseDark = selected === "dark" || (selected === "system" && prefersDark);
+    document.documentElement.classList.toggle("dark", shouldUseDark);
+    document.documentElement.setAttribute("data-c360-theme", selected);
+    if (persist !== false) {
+      localStorage.setItem(STORAGE_KEYS.theme, selected);
+      CONFIG.theme = selected;
+    }
+  }
+
+  function onSystemThemeChanged() {
+    if ((CONFIG.theme || "system") === "system") {
+      applyTheme("system", false);
+    }
+  }
+
+  function bindSystemThemeListener() {
+    if (!mediaDark || isThemeListenerBound) return;
+    if (typeof mediaDark.addEventListener === "function") {
+      mediaDark.addEventListener("change", onSystemThemeChanged);
+      isThemeListenerBound = true;
+      return;
+    }
+    if (typeof mediaDark.addListener === "function") {
+      mediaDark.addListener(onSystemThemeChanged);
+      isThemeListenerBound = true;
+    }
+  }
+
+  function unbindSystemThemeListener() {
+    if (!mediaDark || !isThemeListenerBound) return;
+    if (typeof mediaDark.removeEventListener === "function") {
+      mediaDark.removeEventListener("change", onSystemThemeChanged);
+      isThemeListenerBound = false;
+      return;
+    }
+    if (typeof mediaDark.removeListener === "function") {
+      mediaDark.removeListener(onSystemThemeChanged);
+      isThemeListenerBound = false;
+    }
+  }
+
+  function themeLoader(theme, persist) {
+    var selected = theme || CONFIG.theme || "system";
+    applyTheme(selected, persist);
+    if (selected === "system") {
+      bindSystemThemeListener();
+    } else {
+      unbindSystemThemeListener();
+    }
+    return selected;
+  }
+
+  function currentUserFromConfig() {
+    var payload = decodeJwtPayload(CONFIG.accessToken);
+    var roles = [];
+    if (payload && payload.realm_access && Array.isArray(payload.realm_access.roles)) {
+      roles = roles.concat(payload.realm_access.roles);
+    }
+    if (payload && payload.resource_access && typeof payload.resource_access === "object") {
+      Object.keys(payload.resource_access).forEach(function (clientKey) {
+        var client = payload.resource_access[clientKey];
+        if (client && Array.isArray(client.roles)) {
+          roles = roles.concat(client.roles);
+        }
+      });
+    }
+    roles = parseTenantOptions(roles);
+    return {
+      username: payload ? (payload.preferred_username || payload.name || payload.email || payload.sub || "Authenticated User") : "Developer",
+      email: payload ? (payload.email || "-") : "-",
+      roles: roles.length ? roles : [CONFIG.accessToken ? "user" : "developer"],
+      authMode: CONFIG.accessToken ? "SSO Token" : "Dev Header"
+    };
+  }
 
   function api(path, params, method) {
     var httpMethod = method || "GET";
+    var headers = { "X-Tenant-Id": CONFIG.tenantId };
+    if (CONFIG.accessToken) {
+      headers.Authorization = "Bearer " + CONFIG.accessToken;
+    }
     var options = {
       url: CONFIG.apiBase + path,
       method: httpMethod,
       dataType: "json",
-      headers: { "X-Tenant-Id": CONFIG.tenantId }
+      headers: headers
     };
     // GET/DELETE: serialize params as a query string (unchanged behavior).
     // POST/PATCH/PUT: send as a JSON request body so FastAPI Pydantic
@@ -59,12 +208,20 @@ window.C360 = window.C360 || {};
   }
 
   function pingHealth() {
-    $.ajax({ url: CONFIG.apiBase.replace(/\/api\/v1$/, "") + "/health", method: "GET", dataType: "json", timeout: 4000 })
+    $.ajax({ url: apiRootFromBase(CONFIG.apiBase) + "/health", method: "GET", dataType: "json", timeout: 4000 })
       .done(function () {
         $("#api-status-dot").removeClass("bg-red-500 bg-slate-300").addClass("bg-green-500");
         $("#alert-banner").addClass("hidden");
       })
       .fail(function (xhr) { showApiError("health check", xhr); });
+  }
+
+  function loadSystemMetadata() {
+    return $.ajax({
+      url: apiRootFromBase(CONFIG.apiBase) + "/api/v1/metadata",
+      method: "GET",
+      dataType: "json"
+    });
   }
 
   function applyDomainLabels(labels) {
@@ -90,9 +247,50 @@ window.C360 = window.C360 || {};
     return req;
   }
 
-  function saveConfig(apiBase, tenantId) {
-    localStorage.setItem("c360.apiBase", apiBase.trim());
-    localStorage.setItem("c360.tenantId", tenantId.trim());
+  function saveConfig(apiBaseOrConfig, maybeTenantId) {
+    var next = (typeof apiBaseOrConfig === "object" && apiBaseOrConfig !== null)
+      ? apiBaseOrConfig
+      : {
+          apiBase: apiBaseOrConfig,
+          tenantId: maybeTenantId
+        };
+
+    var apiBase = String(next.apiBase || "").trim();
+    var tenantId = String(next.tenantId || "").trim();
+    var accessToken = String(next.accessToken || "").trim();
+    var theme = String(next.theme || "system").trim() || "system";
+    var multiTenantEnabled = !!next.multiTenantEnabled;
+    var tenantOptions = parseTenantOptions(next.tenantOptions || [tenantId]);
+    if (tenantId && tenantOptions.indexOf(tenantId) === -1) tenantOptions.unshift(tenantId);
+
+    localStorage.setItem(STORAGE_KEYS.apiBase, apiBase || DEFAULTS.apiBase);
+    localStorage.setItem(STORAGE_KEYS.tenantId, tenantId || DEFAULTS.tenantId);
+    localStorage.setItem(STORAGE_KEYS.accessToken, accessToken);
+    localStorage.setItem(STORAGE_KEYS.theme, theme);
+    localStorage.setItem(STORAGE_KEYS.multiTenantEnabled, String(multiTenantEnabled));
+    localStorage.setItem(STORAGE_KEYS.tenantOptions, JSON.stringify(tenantOptions));
+
+    CONFIG = getConfig();
+    C360.config.current = CONFIG;
+  }
+
+  function switchTenant(tenantId) {
+    var selected = String(tenantId || "").trim();
+    if (!selected) return;
+    saveConfig({
+      apiBase: CONFIG.apiBase,
+      tenantId: selected,
+      accessToken: CONFIG.accessToken,
+      theme: CONFIG.theme,
+      multiTenantEnabled: CONFIG.multiTenantEnabled,
+      tenantOptions: parseTenantOptions((CONFIG.tenantOptions || []).concat([selected]))
+    });
+  }
+
+  function logout() {
+    localStorage.removeItem(STORAGE_KEYS.accessToken);
+    CONFIG.accessToken = "";
+    C360.config.current = CONFIG;
   }
 
   function getDataPeriodDays() {
@@ -106,10 +304,19 @@ window.C360 = window.C360 || {};
     api: api,
     showApiError: showApiError,
     pingHealth: pingHealth,
+    loadSystemMetadata: loadSystemMetadata,
     loadDomains: loadDomains,
     save: saveConfig,
+    switchTenant: switchTenant,
+    logout: logout,
+    parseTenantOptions: parseTenantOptions,
+    currentUser: currentUserFromConfig,
+    decodeJwtPayload: decodeJwtPayload,
+    applyTheme: applyTheme,
+    themeLoader: themeLoader,
     getDataPeriodDays: getDataPeriodDays
   };
-  C360.config = Object.freeze(C360.config);
-  
+
+  C360.themeLoader = themeLoader;
+
 })(window.C360);
