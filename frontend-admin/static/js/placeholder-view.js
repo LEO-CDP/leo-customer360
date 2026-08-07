@@ -20,9 +20,6 @@ window.C360 = window.C360 || {};
 
   // path -> { tab, title } for every not-yet-implemented listing/detail/editor view.
   var ENTRIES = [
-    { path: "/scoring", tab: "scoring", title: "Scoring Models" },
-    { path: "/scoring/:id", tab: "scoring", title: "Scoring Model Detail" },
-
     { path: "/admin/users", tab: "admin", title: "Admin \u00b7 User Logins" },
     { path: "/admin/users/:id", tab: "admin", title: "User Login Detail" }
   ];
