@@ -32,6 +32,48 @@ const TIME_CHECK_API_HEALTH = 60000;
     admin: "/admin"
   };
 
+  function toggleSettingsModal(visible) {
+    var $modal = $("#user-settings-modal");
+    if (!$modal.length) return;
+    $modal.toggleClass("hidden", !visible);
+  }
+
+  function fillTenantSwitcher(cfg) {
+    var options = cfg.tenantOptions && cfg.tenantOptions.length ? cfg.tenantOptions.slice() : [cfg.tenantId];
+    var $select = $("#settings-tenant-select");
+    $select.empty();
+    options.forEach(function (tenantId) {
+      $select.append($("<option></option>").attr("value", tenantId).text(tenantId));
+    });
+    if (cfg.tenantId) {
+      $select.val(cfg.tenantId);
+    }
+    $select.prop("disabled", !cfg.multiTenantEnabled);
+  }
+
+  function populateSettingsModal() {
+    var cfg = C360.config.current;
+    var user = C360.config.currentUser();
+    $("#settings-api-base").val(cfg.apiBase);
+    $("#settings-tenant-id").val(cfg.tenantId);
+    $("#settings-access-token").val(cfg.accessToken || "");
+    $("#settings-theme").val(cfg.theme || "system");
+    $("#settings-multi-tenant-enabled").prop("checked", !!cfg.multiTenantEnabled);
+    $("#settings-tenant-options").val((cfg.tenantOptions || []).join(", "));
+    fillTenantSwitcher(cfg);
+
+    $("#settings-user-username").text(user.username || "-");
+    $("#settings-user-email").text(user.email || "-");
+    $("#settings-user-roles").text((user.roles || []).join(", ") || "-");
+    $("#settings-auth-mode").text(user.authMode || "-");
+
+    C360.config.loadSystemMetadata().done(function (metadata) {
+      if (metadata && typeof metadata.sso_login !== "undefined") {
+        $("#settings-auth-mode").text(metadata.sso_login ? "SSO (token required)" : "Dev Header (SSO disabled)");
+      }
+    });
+  }
+
   function bindBrowserEvents() {
     $("#btn-back-to-profiles").on("click", function () { C360.router.navigate("/profiles"); });
 
@@ -42,15 +84,63 @@ const TIME_CHECK_API_HEALTH = 60000;
     $("#btn-export-pdf").on("click", function () { window.print(); });
 
     $("#btn-settings").on("click", function () {
-      var cfg = C360.config.current;
-      $("#settings-api-base").val(cfg.apiBase);
-      $("#settings-tenant-id").val(cfg.tenantId);
-      $("#settings-modal").removeClass("hidden");
+      populateSettingsModal();
+      toggleSettingsModal(true);
     });
-    $("#btn-settings-cancel").on("click", function () { $("#settings-modal").addClass("hidden"); });
+
+    $("#btn-settings-cancel, #btn-settings-close").on("click", function () { toggleSettingsModal(false); });
+    $(document).on("click", "#user-settings-modal", function (e) {
+      if (e.target.id === "user-settings-modal") {
+        toggleSettingsModal(false);
+      }
+    });
+
+    $("#settings-tenant-select").on("change", function () {
+      var selected = String($(this).val() || "").trim();
+      if (selected) $("#settings-tenant-id").val(selected);
+    });
+
+    $("#settings-multi-tenant-enabled").on("change", function () {
+      var enabled = $(this).is(":checked");
+      $("#settings-tenant-select").prop("disabled", !enabled);
+      if (enabled) {
+        var selected = String($("#settings-tenant-select").val() || "").trim();
+        if (selected) $("#settings-tenant-id").val(selected);
+      }
+    });
+
     $("#btn-settings-save").on("click", function () {
-      C360.config.save($("#settings-api-base").val(), $("#settings-tenant-id").val());
+      var tenantOptions = C360.config.parseTenantOptions($("#settings-tenant-options").val());
+      var multiTenantEnabled = $("#settings-multi-tenant-enabled").is(":checked");
+      var selectedTenant = String($("#settings-tenant-id").val() || "").trim();
+
+      if (multiTenantEnabled) {
+        var fromSelect = String($("#settings-tenant-select").val() || "").trim();
+        if (fromSelect) selectedTenant = fromSelect;
+      }
+
+      C360.config.save({
+        apiBase: $("#settings-api-base").val(),
+        tenantId: selectedTenant,
+        accessToken: $("#settings-access-token").val(),
+        theme: $("#settings-theme").val(),
+        multiTenantEnabled: multiTenantEnabled,
+        tenantOptions: tenantOptions
+      });
+      C360.themeLoader($("#settings-theme").val(), false);
       location.reload();
+    });
+
+    $("#btn-settings-logout").on("click", function () {
+      C360.config.logout();
+      toggleSettingsModal(false);
+      location.reload();
+    });
+
+    $(document).on("keydown", function (e) {
+      if (e.key === "Escape") {
+        toggleSettingsModal(false);
+      }
     });
   }
 
@@ -72,6 +162,8 @@ const TIME_CHECK_API_HEALTH = 60000;
   }
 
   $(function () {
+    C360.themeLoader(C360.config.current.theme, false);
+
     C360.templates.loadAll().done(function () {
       $("#app-header").html(C360.templates.html("tabs"));
       $("#view-list").html(C360.templates.html("profiles-list"));

@@ -42,7 +42,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-COMPOSE_FILE="dev-docker-compose.yml"
+COMPOSE_FILE=""
 ENV_FILE=".env"
 ENV_EXAMPLE_FILE=".env.example"
 CIR_DIR="backend-system/identity_resolution"
@@ -85,8 +85,6 @@ else
   echo "❌ Error: neither 'docker compose' (v2 plugin) nor 'docker-compose' found on PATH." >&2
   exit 1
 fi
-DC_CMD=("${DC[@]}" -f "$COMPOSE_FILE")
-
 # =============================================================================
 # 1) .env bootstrap: create from .env.example if missing, then add any keys
 #    present in .env.example but missing from .env (without touching values
@@ -136,6 +134,24 @@ sync_env_keys
 set -a
 source "$ENV_FILE"
 set +a
+
+# Choose compose file based on SSO_LOGIN.
+# - SSO_LOGIN=true  => dev-docker-compose.yml
+# - SSO_LOGIN=false => dev-no-sso-docker-compose.yml
+case "${SSO_LOGIN:-true}" in
+  true)
+    COMPOSE_FILE="dev-docker-compose.yml"
+    ;;
+  false)
+    COMPOSE_FILE="dev-no-sso-docker-compose.yml"
+    ;;
+  *)
+    echo "❌ Error: SSO_LOGIN must be 'true' or 'false' in '${ENV_FILE}' (current: '${SSO_LOGIN:-}')." >&2
+    exit 1
+    ;;
+esac
+DC_CMD=("${DC[@]}" -f "$COMPOSE_FILE")
+echo "🔧 SSO_LOGIN=${SSO_LOGIN:-true} -> using compose file '${COMPOSE_FILE}'."
 
 # DB_PORT/REDIS_PORT are what host-run apps (customer360-api/start.sh,
 # backend-system/identity_resolution/run-demo.sh) connect through; *_HOST_PORT is
@@ -365,11 +381,23 @@ print_final_service_table() {
   printf '%-12s-+-%-10s-+-%-25s\n' "------------" "----------" "-------------------------"
   printf '%-12s | %-10s | %-25s\n' "postgres" "$postgres_status" "localhost:${POSTGRES_HOST_PORT:-5432}"
   printf '%-12s | %-10s | %-25s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6580}"
-  printf '%-12s | %-10s | %-25s\n' "keycloak" "$keycloak_status" "localhost:${KEYCLOAK_HOST_PORT:-8080}"
   printf '%-12s | %-10s | %-25s\n' "minio" "$minio_status" "localhost:${MINIO_API_HOST_PORT:-9000} (console ${MINIO_CONSOLE_HOST_PORT:-9001})"
   printf '%-12s | %-10s | %-25s\n' "backend" "$backend_status" "localhost:${DAGSTER_UI_PORT:-3000}"
   printf '%-12s | %-10s | %-25s\n' "api" "$api_status" "localhost:${API_PORT:-8008}"
   printf '%-12s | %-10s | %-25s\n' "frontend" "$frontend_status" "localhost:${FRONTEND_PORT:-8890}"
+
+  case "${SSO_LOGIN:-true}" in
+    true)
+      printf '%-12s | %-10s | %-25s\n' "keycloak" "$keycloak_status" "localhost:${KEYCLOAK_HOST_PORT:-8080}"
+      ;;
+    false)
+      printf '%-12s | %-10s | %-25s\n' "keycloak" "$keycloak_status" "SSO disabled"
+      ;;
+    *)
+      echo "❌ Error: SSO_LOGIN must be 'true' or 'false' in '${ENV_FILE}' (current: '${SSO_LOGIN:-}')." >&2
+      exit 1
+      ;;
+  esac
 }
 
 print_final_service_table
