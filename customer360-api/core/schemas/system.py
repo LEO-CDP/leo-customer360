@@ -2,16 +2,18 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
+
+SourceTypeValue = Literal[1, 2, 3, 4, 5]
 
 
 class DataSourceBase(BaseModel):
     tenant_id: uuid.UUID
     name: str
     slug: str
-    source_type: Optional[int] = 2
+    source_type: SourceTypeValue = 2
     status: Optional[int] = 1
     data_source_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
@@ -21,7 +23,9 @@ class DataSourceBase(BaseModel):
     journey_map_id: Optional[str] = None
     touchpoint_hub_id: Optional[str] = None
     security_code: Optional[str] = None
-    estimated_total_event: Optional[int] = 0
+    total_tracked_event: Optional[int] = 0
+    avg_daily_event: Optional[int] = 0
+    avg_events_per_profile: Optional[float] = 0
     access_tokens: Optional[dict] = None
     data_source_hosts: Optional[list[str]] = None
     javascript_tags: Optional[list[str]] = None
@@ -35,7 +39,7 @@ class DataSourceCreate(DataSourceBase):
 class DataSourceUpdate(BaseModel):
     name: Optional[str] = None
     slug: Optional[str] = None
-    source_type: Optional[int] = None
+    source_type: Optional[SourceTypeValue] = None
     status: Optional[int] = None
     data_source_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
@@ -45,7 +49,9 @@ class DataSourceUpdate(BaseModel):
     journey_map_id: Optional[str] = None
     touchpoint_hub_id: Optional[str] = None
     security_code: Optional[str] = None
-    estimated_total_event: Optional[int] = None
+    total_tracked_event: Optional[int] = None
+    avg_daily_event: Optional[int] = None
+    avg_events_per_profile: Optional[float] = None
     access_tokens: Optional[dict] = None
     data_source_hosts: Optional[list[str]] = None
     javascript_tags: Optional[list[str]] = None

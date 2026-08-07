@@ -169,6 +169,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       $("#view-placeholder").html(C360.templates.html("placeholder"));
       $("#segment-view-list").html(C360.templates.html("segments-list"));
       $("#view-attributes").html(C360.templates.html("attributes-list"));
+      $("#view-datasources").html(C360.templates.html("data-source-list"));
       $("#persona-list-content").html(C360.templates.html("persona-list"));
       $("body").append(C360.templates.html("settings-modal"));
 
@@ -183,6 +184,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       C360.segmentsView.bindEvents();
       C360.personaManagementView.bindEvents();
       C360.attributesView.bindEvents();
+      C360.dataSourceView.bindEvents();
 
       C360.config.pingHealth();
       setInterval(C360.config.pingHealth, TIME_CHECK_API_HEALTH);

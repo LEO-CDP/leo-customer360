@@ -2,8 +2,7 @@
  *
  * Registers a full listing+detail route pair for every tab/entity that
  * doesn't have a real API-backed view yet: scoring models,
- * analytics reports, data source connectors/importers, identity
- * resolution rules, and admin user logins. Each is wired into
+ * analytics reports and admin user logins. Each is wired into
  * C360.router exactly like the real views in list-view.js/segments-view.js
  * are, so replacing a placeholder with a real view later is just a matter
  * of swapping its `mount` function for a real loader in its own file --
@@ -24,13 +23,6 @@ window.C360 = window.C360 || {};
     { path: "/scoring", tab: "scoring", title: "Scoring Models" },
     { path: "/scoring/:id", tab: "scoring", title: "Scoring Model Detail" },
 
-    { path: "/datasources/connectors", tab: "datasources", title: "Data Sources \u00b7 Connectors" },
-    { path: "/datasources/connectors/:id", tab: "datasources", title: "Data Connector Detail" },
-    { path: "/datasources/importers", tab: "datasources", title: "Data Sources \u00b7 Importers" },
-    { path: "/datasources/importers/:id", tab: "datasources", title: "Data Importer Detail" },
-    { path: "/datasources/identity-rules", tab: "datasources", title: "Identity Resolution Rules" },
-    { path: "/datasources/identity-rules/:id", tab: "datasources", title: "Identity Resolution Rule Editor" },
-
     { path: "/admin/users", tab: "admin", title: "Admin \u00b7 User Logins" },
     { path: "/admin/users/:id", tab: "admin", title: "User Login Detail" }
   ];
@@ -44,6 +36,5 @@ window.C360 = window.C360 || {};
   });
 
   // Tabs whose primary content lives under a sub-resource default to it.
-  C360.router.redirect("/datasources", "/datasources/connectors");
   C360.router.redirect("/admin", "/admin/users");
 })(window.C360);

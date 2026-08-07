@@ -14,7 +14,9 @@ tenant-scoped data.
 import logging
 import socket
 import uuid
+from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, text
@@ -231,6 +233,20 @@ def list_metadata_data_sources(
         ) from exc
 
 
+def _generate_qr_code_data(data_source_url: str, slug: str) -> dict[str, Any]:
+    tracking_url = (
+        f"{data_source_url}?utm_source={slug}&utm_medium=qr_code&utm_campaign=c360_datasource"
+        if "?" not in data_source_url
+        else f"{data_source_url}&utm_source={slug}&utm_medium=qr_code&utm_campaign=c360_datasource"
+    )
+    return {
+        "target_url": data_source_url,
+        "tracking_url": tracking_url,
+        "qr_code_url": f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={quote_plus(tracking_url)}",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @metadata_router.get("/data-sources/{data_source_id}", response_model=DataSourceRead)
 def get_metadata_data_source(
     data_source_id: uuid.UUID,
@@ -247,7 +263,10 @@ def create_metadata_data_source(
     payload: DataSourceCreate,
     db: Session = Depends(get_db),
 ) -> SysDataSource:
-    return _data_source_crud.create(db, payload.model_dump())
+    data = payload.model_dump()
+    if data.get("data_source_url") and not data.get("qr_code_data"):
+        data["qr_code_data"] = _generate_qr_code_data(data["data_source_url"], data.get("slug", "datasource"))
+    return _data_source_crud.create(db, data)
 
 
 @metadata_router.patch("/data-sources/{data_source_id}", response_model=DataSourceRead)
@@ -259,7 +278,11 @@ def update_metadata_data_source(
     obj = _data_source_crud.get(db, data_source_id)
     if obj is None:
         raise HTTPException(status_code=404, detail=f"SysDataSource '{data_source_id}' not found")
-    return _data_source_crud.update(db, obj, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    if "data_source_url" in data and data["data_source_url"] and "qr_code_data" not in data:
+        slug = data.get("slug") or obj.slug or "datasource"
+        data["qr_code_data"] = _generate_qr_code_data(data["data_source_url"], slug)
+    return _data_source_crud.update(db, obj, data)
 
 
 @metadata_router.delete("/data-sources/{data_source_id}", status_code=204)

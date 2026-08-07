@@ -1947,7 +1947,9 @@ CREATE TABLE IF NOT EXISTS customer360.sys_data_source (
     
     -- Security and volume metrics
     security_code TEXT,
-    estimated_total_event BIGINT DEFAULT 0,
+    total_tracked_event BIGINT DEFAULT 0,
+    avg_daily_event BIGINT DEFAULT 0,
+    avg_events_per_profile NUMERIC(10, 2) DEFAULT 0.0,
     
     -- JSON and Array configurations
     -- Stores dynamic mapping like "1hgb91dmV1BhyoW9YMEKnb": "1148041_..."
@@ -1964,7 +1966,12 @@ CREATE TABLE IF NOT EXISTS customer360.sys_data_source (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
     
     -- Ensure slugs are unique per workspace/tenant
-    CONSTRAINT uq_sys_data_source_slug UNIQUE (tenant_id, slug)
+    CONSTRAINT uq_sys_data_source_slug UNIQUE (tenant_id, slug),
+
+    -- Allowed source types:
+    -- 1 Web JavaScript Code, 2 Data Connector API, 3 Data Webhook API,
+    -- 4 S3 File Connector, 5 Mobile SDK Code
+    CONSTRAINT ck_sys_data_source_source_type CHECK (source_type IN (1, 2, 3, 4, 5))
 );
 
 COMMENT ON TABLE customer360.sys_data_source IS 'Stores metadata and configuration for Data Sources/Connectors (e.g., access tokens, QR code data, webhook configs, journey routing) for data ingestion pipelines.';

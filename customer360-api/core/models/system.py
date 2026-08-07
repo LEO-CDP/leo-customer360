@@ -22,7 +22,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BIGINT, Boolean, Column, ForeignKey, SmallInteger, Table, Text, text
+from sqlalchemy import BIGINT, Boolean, CheckConstraint, Column, ForeignKey, SmallInteger, Table, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -88,6 +88,9 @@ class SysDataSource(Base):
     """Stores metadata and configuration for Data Sources/Connectors (e.g., access tokens, QR code data, webhook configs, journey routing) for data ingestion pipelines."""
 
     __tablename__ = "sys_data_source"
+    __table_args__ = (
+        CheckConstraint("source_type IN (1, 2, 3, 4, 5)", name="ck_sys_data_source_source_type"),
+    )
 
     data_source_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
@@ -107,7 +110,9 @@ class SysDataSource(Base):
     journey_map_id: Mapped[Optional[str]] = mapped_column(Text)
     touchpoint_hub_id: Mapped[Optional[str]] = mapped_column(Text)
     security_code: Mapped[Optional[str]] = mapped_column(Text)
-    estimated_total_event: Mapped[int] = mapped_column(BIGINT, server_default="0")
+    total_tracked_event: Mapped[int] = mapped_column(BIGINT, server_default="0")
+    avg_daily_event: Mapped[int] = mapped_column(BIGINT, server_default="0")
+    avg_events_per_profile: Mapped[float] = mapped_column(server_default="0.0")
     access_tokens: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     data_source_hosts: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
     javascript_tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))

@@ -212,12 +212,19 @@ class SysMetadataTests(unittest.TestCase):
                 "name": "GA4",
                 "slug": "ga4",
                 "status": 1,
+                "data_source_url": "https://analytics.google.com",
+                "access_tokens": {"measurement_id": "G-TEST"},
             },
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["name"], "GA4")
-        self.assertEqual(response.json()["slug"], "ga4")
+        res_json = response.json()
+        self.assertEqual(res_json["name"], "GA4")
+        self.assertEqual(res_json["slug"], "ga4")
+        self.assertEqual(res_json["access_tokens"], {"measurement_id": "G-TEST"})
+        self.assertIsNotNone(res_json["qr_code_data"])
+        self.assertEqual(res_json["qr_code_data"]["target_url"], "https://analytics.google.com")
+        self.assertIn("utm_source=ga4", res_json["qr_code_data"]["tracking_url"])
         self.assertTrue(mock_db.add.called)
         self.assertTrue(mock_db.commit.called)
 
@@ -228,6 +235,7 @@ class SysMetadataTests(unittest.TestCase):
             tenant_id=tenant_id,
             name="Old Name",
             slug="old-name",
+            source_type=2,
             status=0,
         )
         mock_db = MagicMock()
@@ -243,6 +251,43 @@ class SysMetadataTests(unittest.TestCase):
 
         delete_response = TestClient(self.app).delete(f"/metadata/data-sources/{data_source.data_source_id}")
         self.assertEqual(delete_response.status_code, 204)
+
+    def test_metadata_data_sources_create_rejects_invalid_source_type(self):
+        mock_db = MagicMock()
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).post(
+            "/metadata/data-sources",
+            json={
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "name": "Invalid Source Type",
+                "slug": "invalid-source-type",
+                "source_type": 9,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_metadata_data_sources_update_rejects_invalid_source_type(self):
+        tenant_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+        data_source = SysDataSource(
+            data_source_id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            name="AppsFlyer",
+            slug="appsflyer",
+            source_type=2,
+            status=1,
+        )
+        mock_db = MagicMock()
+        mock_db.get.return_value = data_source
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).patch(
+            f"/metadata/data-sources/{data_source.data_source_id}",
+            json={"source_type": 0},
+        )
+
+        self.assertEqual(response.status_code, 422)
 
     def test_metadata_data_sources_surfaces_db_failure_as_503(self):
         mock_db = MagicMock()
