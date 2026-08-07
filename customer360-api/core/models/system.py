@@ -22,8 +22,8 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, ForeignKey, SmallInteger, Table, Text, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BIGINT, Boolean, Column, ForeignKey, SmallInteger, Table, Text, text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,7 +41,7 @@ sys_user_table = Table(
     Column("user_id", PG_UUID(as_uuid=True), primary_key=True),
 )
 
-
+# sys_domain for business domain catalog (e.g. retail, banking, travel)
 class SysDomain(Base):
     """System-defined business domain catalog (e.g. retail, banking, travel)."""
 
@@ -65,6 +65,7 @@ class SysDomain(Base):
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, server_default=text("'{}'::jsonb"))
 
 
+# sys_tenant_domain: which sys_domain rows a given tenant has enabled
 class SysTenantDomain(Base):
     """Join table: which sys_domain rows a given tenant has enabled."""
 
@@ -80,3 +81,36 @@ class SysTenantDomain(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[Optional[datetime]] = mapped_column(server_default=text("now()"))
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, server_default=text("'{}'::jsonb"))
+
+
+# sys_data_source: metadata/configuration for Data Sources/Connectors (e.g., access tokens, QR code data, webhook configs, journey routing) for data ingestion pipelines
+class SysDataSource(Base):
+    """Stores metadata and configuration for Data Sources/Connectors (e.g., access tokens, QR code data, webhook configs, journey routing) for data ingestion pipelines."""
+
+    __tablename__ = "sys_data_source"
+
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    slug: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[int] = mapped_column(SmallInteger, server_default="2")
+    status: Mapped[int] = mapped_column(SmallInteger, server_default="1")
+    data_source_url: Mapped[Optional[str]] = mapped_column(Text)
+    thumbnail_url: Mapped[Optional[str]] = mapped_column(Text)
+    collect_directly: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    first_party_data: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    journey_level: Mapped[int] = mapped_column(SmallInteger, server_default="3")
+    journey_map_id: Mapped[Optional[str]] = mapped_column(Text)
+    touchpoint_hub_id: Mapped[Optional[str]] = mapped_column(Text)
+    security_code: Mapped[Optional[str]] = mapped_column(Text)
+    estimated_total_event: Mapped[int] = mapped_column(BIGINT, server_default="0")
+    access_tokens: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    data_source_hosts: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
+    javascript_tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
+    qr_code_data: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[Optional[datetime]] = mapped_column(server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(server_default=text("now()"))

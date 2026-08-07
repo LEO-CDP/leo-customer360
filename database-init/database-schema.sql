@@ -1912,6 +1912,84 @@ WHERE
 
 CREATE INDEX IF NOT EXISTS idx_cdp_identity_master ON customer360.cdp_identity_index (master_profile_id);
 
+
+-- ==========================================================
+-- Data Source / Connectors Table
+-- ==========================================================
+-- This table stores metadata, access tokens, and configurations 
+-- for external data sources and ingestion connectors.
+CREATE TABLE IF NOT EXISTS customer360.sys_data_source (
+    data_source_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    
+    -- Multi-tenant isolation (mandatory for all sys/cdp tables)
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    
+    -- Core identification
+    name TEXT NOT NULL,
+    slug VARCHAR(255) NOT NULL,
+    
+    -- Configuration status and type identifiers
+    source_type SMALLINT NOT NULL DEFAULT 2, -- Maps to "type" (e.g., 2)
+    status SMALLINT NOT NULL DEFAULT 1,      -- 1: active, 0: inactive
+    
+    -- Endpoints and URLs
+    data_source_url TEXT,
+    thumbnail_url TEXT,
+    
+    -- Data collection flags
+    collect_directly BOOLEAN DEFAULT true,
+    first_party_data BOOLEAN DEFAULT true,
+    
+    -- Journey mapping configuration
+    journey_level SMALLINT DEFAULT 3,
+    journey_map_id VARCHAR(255),
+    touchpoint_hub_id VARCHAR(255),
+    
+    -- Security and volume metrics
+    security_code TEXT,
+    estimated_total_event BIGINT DEFAULT 0,
+    
+    -- JSON and Array configurations
+    -- Stores dynamic mapping like "1hgb91dmV1BhyoW9YMEKnb": "1148041_..."
+    access_tokens JSONB DEFAULT '{}'::jsonb,
+    -- List of allowed hosts for the connector
+    data_source_hosts TEXT[] DEFAULT ARRAY[]::TEXT[],
+    -- Stored JS tags for web tracking integration
+    javascript_tags TEXT[] DEFAULT ARRAY[]::TEXT[],
+    -- Landing page and tracking URLs for offline-to-online bridging
+    qr_code_data JSONB DEFAULT '{}'::jsonb,
+    
+    -- Audit timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    
+    -- Ensure slugs are unique per workspace/tenant
+    CONSTRAINT uq_sys_data_source_slug UNIQUE (tenant_id, slug)
+);
+
+COMMENT ON TABLE customer360.sys_data_source IS 'Stores metadata and configuration for Data Sources/Connectors (e.g., access tokens, QR code data, webhook configs, journey routing) for data ingestion pipelines.';
+
+-- ----------------------------------------------------------------------------
+-- INDEXES & ROW LEVEL SECURITY
+-- ----------------------------------------------------------------------------
+
+-- Fast tenant-level lookup index
+CREATE INDEX IF NOT EXISTS idx_sys_data_source_tenant ON customer360.sys_data_source(tenant_id);
+
+-- Optimized index for filtering active data sources in the UI
+CREATE INDEX IF NOT EXISTS idx_sys_data_source_status ON customer360.sys_data_source(tenant_id, status);
+
+-- Enable RLS to maintain strict tenant isolation matching the existing schema pattern
+ALTER TABLE customer360.sys_data_source ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer360.sys_data_source FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_policy ON customer360.sys_data_source;
+
+-- Policy ensures queries only return rows matching the current connection's tenant_id
+CREATE POLICY tenant_policy ON customer360.sys_data_source
+    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
 -- ============================================================================
 -- cdp_profile_merge_history: audit trail of master-to-master profile merges
 -- ============================================================================

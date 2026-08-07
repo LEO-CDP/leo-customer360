@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.database import get_db
+from core.models.system import SysDataSource
 from core.routers.metadata import all_metadata_routers
 
 
@@ -172,6 +173,86 @@ class SysMetadataTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
 
+    def test_metadata_data_sources_returns_sources_from_db(self):
+        mock_db = MagicMock()
+        tenant_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+        mock_db.execute.return_value.scalars.return_value.all.return_value = [
+            SysDataSource(
+                data_source_id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                name="AppsFlyer",
+                slug="appsflyer",
+                source_type=2,
+                status=1,
+            )
+        ]
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).get("/metadata/data-sources")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body), 1)
+        self.assertEqual(body[0]["name"], "AppsFlyer")
+        self.assertEqual(body[0]["slug"], "appsflyer")
+
+    def test_metadata_data_sources_create_returns_created_resource(self):
+        mock_db = MagicMock()
+        def _refresh_with_defaults(obj):
+            if getattr(obj, "data_source_id", None) is None:
+                obj.data_source_id = uuid.uuid4()
+
+        mock_db.refresh.side_effect = _refresh_with_defaults
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).post(
+            "/metadata/data-sources",
+            json={
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "name": "GA4",
+                "slug": "ga4",
+                "status": 1,
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["name"], "GA4")
+        self.assertEqual(response.json()["slug"], "ga4")
+        self.assertTrue(mock_db.add.called)
+        self.assertTrue(mock_db.commit.called)
+
+    def test_metadata_data_sources_update_and_delete(self):
+        tenant_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+        data_source = SysDataSource(
+            data_source_id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            name="Old Name",
+            slug="old-name",
+            status=0,
+        )
+        mock_db = MagicMock()
+        mock_db.get.return_value = data_source
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        patch_response = TestClient(self.app).patch(
+            f"/metadata/data-sources/{data_source.data_source_id}",
+            json={"name": "Updated Name"},
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.json()["name"], "Updated Name")
+
+        delete_response = TestClient(self.app).delete(f"/metadata/data-sources/{data_source.data_source_id}")
+        self.assertEqual(delete_response.status_code, 204)
+
+    def test_metadata_data_sources_surfaces_db_failure_as_503(self):
+        mock_db = MagicMock()
+        mock_db.execute.side_effect = RuntimeError("db down")
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).get("/metadata/data-sources")
+
+        self.assertEqual(response.status_code, 503)
+
 
 class SysMetadataAuthExemptionTests(unittest.TestCase):
     """Confirms the metadata endpoints are in core.auth.EXEMPT_PATHS when the
@@ -184,6 +265,7 @@ class SysMetadataAuthExemptionTests(unittest.TestCase):
         self.assertIn("/api/v1/metadata", EXEMPT_PATHS)
         self.assertIn("/api/v1/metadata/dagster", EXEMPT_PATHS)
         self.assertIn("/api/v1/metadata/domains", EXEMPT_PATHS)
+        self.assertIn("/api/v1/metadata/data-sources", EXEMPT_PATHS)
 
 
 if __name__ == "__main__":

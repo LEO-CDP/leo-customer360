@@ -30,6 +30,7 @@ EXEMPT_PATHS = {
     "/api/v1/metadata",
     "/api/v1/metadata/dagster",
     "/api/v1/metadata/domains",
+    "/api/v1/metadata/data-sources",
 }
 SSO_LOGIN=settings.sso_login
 # TTL for the resolved (tenant_id, user_id) identity cache, independent of

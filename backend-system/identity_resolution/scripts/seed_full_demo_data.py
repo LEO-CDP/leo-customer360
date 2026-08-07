@@ -501,6 +501,66 @@ _PLATFORM_PROFILE = {
 }
 _DEFAULT_PROFILE = ((5_000, 20_000), 0.03, 0.05, 700_000)
 
+DATA_SOURCES = [
+    {
+        "name": "AppsFlyer Mobile Attribution",
+        "slug": "appsflyer-mobile-attribution",
+        "source_type": 2,
+        "status": 1,
+        "data_source_url": "https://hq1.appsflyer.com",
+        "thumbnail_url": "https://cdn.example.com/connectors/appsflyer.png",
+        "collect_directly": True,
+        "first_party_data": True,
+        "journey_level": 3,
+        "journey_map_id": "journey-mobile-attribution",
+        "touchpoint_hub_id": "touchpoint-mobile-ads",
+        "security_code": "AF-DEMO-SECURE",
+        "estimated_total_event": 120000,
+        "access_tokens": {"default": "appsflyer_demo_token"},
+        "data_source_hosts": ["hq1.appsflyer.com", "events.appsflyer.com"],
+        "javascript_tags": [],
+        "qr_code_data": {},
+    },
+    {
+        "name": "Google Analytics 4",
+        "slug": "google-analytics-4",
+        "source_type": 2,
+        "status": 1,
+        "data_source_url": "https://analytics.google.com",
+        "thumbnail_url": "https://cdn.example.com/connectors/ga4.png",
+        "collect_directly": True,
+        "first_party_data": True,
+        "journey_level": 3,
+        "journey_map_id": "journey-web-analytics",
+        "touchpoint_hub_id": "touchpoint-web",
+        "security_code": "GA4-DEMO-SECURE",
+        "estimated_total_event": 98000,
+        "access_tokens": {"measurement_id": "G-DEMO360"},
+        "data_source_hosts": ["www.google-analytics.com", "analytics.google.com"],
+        "javascript_tags": ["gtag('config', 'G-DEMO360')"],
+        "qr_code_data": {},
+    },
+    {
+        "name": "MoEngage Journey Events",
+        "slug": "moengage-journey-events",
+        "source_type": 2,
+        "status": 1,
+        "data_source_url": "https://dashboard-01.moengage.com",
+        "thumbnail_url": "https://cdn.example.com/connectors/moengage.png",
+        "collect_directly": True,
+        "first_party_data": False,
+        "journey_level": 2,
+        "journey_map_id": "journey-engagement",
+        "touchpoint_hub_id": "touchpoint-push",
+        "security_code": "MOE-DEMO-SECURE",
+        "estimated_total_event": 64000,
+        "access_tokens": {"workspace": "moengage_demo_workspace"},
+        "data_source_hosts": ["api-01.moengage.com"],
+        "javascript_tags": [],
+        "qr_code_data": {},
+    },
+]
+
 
 def seed_campaign_performance_daily(cursor, campaign_ids: dict) -> None:
     """Inserts daily performance rows for each seeded campaign.
@@ -556,6 +616,63 @@ def seed_campaign_performance_daily(cursor, campaign_ids: dict) -> None:
                 ),
             )
             current += timedelta(days=1)
+
+
+def seed_data_sources(cursor) -> None:
+    """Seeds tenant-scoped rows in sys_data_source used by metadata/data-sources."""
+    logger.info("Seeding sys_data_source catalog for demo tenant...")
+    for data_source in DATA_SOURCES:
+        data_source_id = demo_id(f"sys_data_source:{data_source['slug']}")
+        cursor.execute(
+            f"""
+            INSERT INTO {_table('sys_data_source')}
+                (data_source_id, tenant_id, name, slug, source_type, status,
+                 data_source_url, thumbnail_url, collect_directly, first_party_data,
+                 journey_level, journey_map_id, touchpoint_hub_id, security_code,
+                 estimated_total_event, access_tokens, data_source_hosts,
+                 javascript_tags, qr_code_data)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, slug) DO UPDATE SET
+                name = EXCLUDED.name,
+                source_type = EXCLUDED.source_type,
+                status = EXCLUDED.status,
+                data_source_url = EXCLUDED.data_source_url,
+                thumbnail_url = EXCLUDED.thumbnail_url,
+                collect_directly = EXCLUDED.collect_directly,
+                first_party_data = EXCLUDED.first_party_data,
+                journey_level = EXCLUDED.journey_level,
+                journey_map_id = EXCLUDED.journey_map_id,
+                touchpoint_hub_id = EXCLUDED.touchpoint_hub_id,
+                security_code = EXCLUDED.security_code,
+                estimated_total_event = EXCLUDED.estimated_total_event,
+                access_tokens = EXCLUDED.access_tokens,
+                data_source_hosts = EXCLUDED.data_source_hosts,
+                javascript_tags = EXCLUDED.javascript_tags,
+                qr_code_data = EXCLUDED.qr_code_data,
+                updated_at = now();
+            """,
+            (
+                data_source_id,
+                DEMO_TENANT_ID,
+                data_source["name"],
+                data_source["slug"],
+                data_source["source_type"],
+                data_source["status"],
+                data_source["data_source_url"],
+                data_source["thumbnail_url"],
+                data_source["collect_directly"],
+                data_source["first_party_data"],
+                data_source["journey_level"],
+                data_source["journey_map_id"],
+                data_source["touchpoint_hub_id"],
+                data_source["security_code"],
+                data_source["estimated_total_event"],
+                Json(data_source["access_tokens"]),
+                data_source["data_source_hosts"],
+                data_source["javascript_tags"],
+                Json(data_source["qr_code_data"]),
+            ),
+        )
 
 
 def reset_tenant_scoped_demo_tables(cursor) -> None:
@@ -1412,6 +1529,7 @@ def main() -> None:
 
             seed_relation_types(cursor)
             crm_ids = seed_crm_entities(cursor)
+            seed_data_sources(cursor)
             reset_tenant_scoped_demo_tables(cursor)
             seed_campaign_performance_daily(cursor, crm_ids["campaign"])
             seed_relations(cursor, detail_profiles)

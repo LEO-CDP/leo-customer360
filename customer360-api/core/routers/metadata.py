@@ -22,8 +22,10 @@ from sqlalchemy.orm import Session
 
 from core.cache import get_redis_client
 from core.config import settings
+from core.crud.base import CRUDBase
 from core.database import engine, get_db
-from core.models.system import SysDomain, SysTenantDomain
+from core.models.system import SysDataSource, SysDomain, SysTenantDomain
+from core.schemas.system import DataSourceCreate, DataSourceRead, DataSourceUpdate
 from core.utils.dagster_client import DagsterClient
 
 logger = logging.getLogger(__name__)
@@ -36,6 +38,7 @@ _CONNECTIVITY_TIMEOUT_SECONDS = 2
 
 # the default tenant created by database-init/init-core-database.sql
 DEFAULT_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+_data_source_crud = CRUDBase(SysDataSource)
 
 def _check_postgres() -> dict[str, Any]:
     """Checks that the pooled SQLAlchemy engine can reach PostgreSQL."""
@@ -201,6 +204,74 @@ def get_metadata_domains(
             detail=f"Domain metadata unavailable: {exc}"
         ) from exc
     return {domain_code: domain_name for domain_code, domain_name in rows}
+
+
+@metadata_router.get("/data-sources", response_model=list[DataSourceRead])
+def list_metadata_data_sources(
+    tenant_id: uuid.UUID = DEFAULT_TENANT_ID,
+    status: int | None = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+) -> list[SysDataSource]:
+    """Returns tenant-scoped rows from ``sys_data_source`` for connector setup UIs."""
+    try:
+        return _data_source_crud.list(
+            db,
+            tenant_id=tenant_id,
+            status=status,
+            skip=skip,
+            limit=limit,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to load data-source metadata from PostgreSQL", exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Data-source metadata unavailable: {exc}",
+        ) from exc
+
+
+@metadata_router.get("/data-sources/{data_source_id}", response_model=DataSourceRead)
+def get_metadata_data_source(
+    data_source_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> SysDataSource:
+    obj = _data_source_crud.get(db, data_source_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"SysDataSource '{data_source_id}' not found")
+    return obj
+
+
+@metadata_router.post("/data-sources", response_model=DataSourceRead, status_code=201)
+def create_metadata_data_source(
+    payload: DataSourceCreate,
+    db: Session = Depends(get_db),
+) -> SysDataSource:
+    return _data_source_crud.create(db, payload.model_dump())
+
+
+@metadata_router.patch("/data-sources/{data_source_id}", response_model=DataSourceRead)
+def update_metadata_data_source(
+    data_source_id: uuid.UUID,
+    payload: DataSourceUpdate,
+    db: Session = Depends(get_db),
+) -> SysDataSource:
+    obj = _data_source_crud.get(db, data_source_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"SysDataSource '{data_source_id}' not found")
+    return _data_source_crud.update(db, obj, payload.model_dump(exclude_unset=True))
+
+
+@metadata_router.delete("/data-sources/{data_source_id}", status_code=204)
+def delete_metadata_data_source(
+    data_source_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> None:
+    obj = _data_source_crud.get(db, data_source_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"SysDataSource '{data_source_id}' not found")
+    _data_source_crud.delete(db, obj)
+
 
 
 all_metadata_routers = [metadata_router]
