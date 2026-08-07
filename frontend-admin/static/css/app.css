@@ -204,6 +204,12 @@ html.c360-theme-dark .tab-btn:hover { color: #00d32a; border-color: #00d32a; }
 html.c360-theme-dark #btn-back-to-profiles { color: #f8fafc; cursor: pointer; }
 html.c360-theme-dark #btn-back-to-profiles:hover { color: #00d32a; }
 
+html.c360-theme-dark .dtv-action-label { color: #00d32a; }
+html.c360-theme-dark tr.group:hover .dtv-action-label { color: #00d32a; }
+
+html.c360-theme-dark .dtv-edit-btn,
+html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
+
 .bar-track { background: var(--c360-border); border-radius: 9999px; overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 9999px; }
 
