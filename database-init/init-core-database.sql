@@ -5,6 +5,18 @@
 CREATE SCHEMA IF NOT EXISTS customer360;
 
 ---------------------------------------------------
+-- SYSTEM TABLE HARDENING
+---------------------------------------------------
+
+-- Keep source_type domain in sync with API validation for sys_data_source.
+ALTER TABLE IF EXISTS customer360.sys_data_source
+    DROP CONSTRAINT IF EXISTS ck_sys_data_source_source_type;
+
+ALTER TABLE IF EXISTS customer360.sys_data_source
+    ADD CONSTRAINT ck_sys_data_source_source_type
+    CHECK (source_type IN (1, 2, 3, 4, 5));
+
+---------------------------------------------------
 -- DEFAULT TENANT
 ---------------------------------------------------
 
@@ -178,6 +190,37 @@ ON CONFLICT (event_name) DO UPDATE SET
     display_order         = EXCLUDED.display_order,
     updated_at            = now();
 
+
+---------------------------------------------------
+-- SCORING MODELS REGISTRY: SEED DATA
+---------------------------------------------------
+-- Must run before the cdp_profile_attributes seeds below: any row there with
+-- is_scoring_model=TRUE sets scoring_model_name, which is enforced by
+-- fk_cdp_pa_scoring_model (database-schema.sql) to reference a real row here
+-- -- an unseeded model name would make that whole INSERT fail.
+INSERT INTO customer360.cdp_scoring_models (
+    scoring_model_name, display_name, description, model_type, status,
+    schedule_definition, input_features, hyperparameters
+) VALUES
+    ('lead_scoring_model', 'Lead Conversion Scoring Model', 'Predicts lead_conversion_probability/lead_grade for prospect-to-customer conversion.', 'classification', 'ACTIVE', '0 1 * * *', ARRAY['last_activity_at', 'source_systems', 'segmentation_tags'], '{}'::jsonb),
+    ('churn_scoring_model', 'Churn Risk Scoring Model', 'Predicts churn_probability/churn_risk_tier from engagement drop-offs.', 'classification', 'ACTIVE', '0 2 * * *', ARRAY['last_activity_at', 'historical_clv'], '{}'::jsonb),
+    ('clv_scoring_model', 'Customer Lifetime Value Model', 'Predicts predictive_clv/clv_segment.', 'regression', 'ACTIVE', '0 3 * * 0', ARRAY['historical_clv'], '{}'::jsonb),
+    ('cx_scoring_model', 'Customer Experience Scoring Model', 'Computes engagement_score/latest_nps_score/average_csat/overall_sentiment_score.', 'regression', 'ACTIVE', '0 * * * *', ARRAY['latest_nps_score', 'average_csat'], '{}'::jsonb),
+    ('data_quality_model', 'Profile Data Quality Model', 'Computes profile_completeness_score for data-quality monitoring.', 'rules_engine', 'ACTIVE', '0 1 * * *', ARRAY['email', 'phone_number', 'device_ids'], '{}'::jsonb),
+    ('identity_resolution_scoring_model', 'Identity Resolution Confidence Model', 'Computes identity_confidence_score for CIR match quality.', 'classification', 'ACTIVE', NULL, ARRAY['email', 'phone_number', 'device_ids'], '{}'::jsonb),
+    ('lifecycle_stage_model', 'Lifecycle Stage Model', 'Derives lifecycle_stage (prospect/lead/customer/vip/dormant/churn_risk).', 'rules_engine', 'ACTIVE', '0 1 * * *', ARRAY['customer_since', 'last_activity_at', 'churn_risk_tier'], '{}'::jsonb),
+    ('persona_summary_generator', 'Persona Summary Generator', 'LLM-generated narrative persona_summary for each profile.', 'generative_llm', 'ACTIVE', NULL, ARRAY['attributes', 'segmentation_tags'], '{}'::jsonb),
+    ('persona_risk_score', 'Persona Risk Score Model', 'Banking risk-persona input derived from kyc_status/risk_segment.', 'classification', 'ACTIVE', '0 4 * * *', ARRAY['kyc_status', 'risk_segment'], '{}'::jsonb),
+    ('persona_loyalty_score', 'Persona Loyalty Score Model', 'Retail loyalty-persona input derived from membership_tier.', 'classification', 'ACTIVE', NULL, ARRAY['membership_tier'], '{}'::jsonb)
+ON CONFLICT (scoring_model_name) DO UPDATE SET
+    display_name         = EXCLUDED.display_name,
+    description          = EXCLUDED.description,
+    model_type           = EXCLUDED.model_type,
+    status               = EXCLUDED.status,
+    schedule_definition  = EXCLUDED.schedule_definition,
+    input_features       = EXCLUDED.input_features,
+    hyperparameters      = EXCLUDED.hyperparameters,
+    updated_at           = now();
 
 
 -- ============================================================================
@@ -674,3 +717,116 @@ ON CONFLICT (tenant_id, segment_tag) DO UPDATE SET
     is_active           = EXCLUDED.is_active,
     status_code         = EXCLUDED.status_code,
     updated_at          = now();
+
+
+---------------------------------------------------
+-- SYSTEM DATA SOURCES SEED
+---------------------------------------------------
+
+INSERT INTO customer360.sys_data_source (
+    data_source_id,
+    tenant_id,
+    name,
+    slug,
+    source_type,
+    status,
+    data_source_url,
+    thumbnail_url,
+    collect_directly,
+    first_party_data,
+    journey_level,
+    touchpoint_hub_id,
+    security_code,
+    total_tracked_event,
+    avg_daily_event,
+    avg_events_per_profile,
+    access_tokens,
+    data_source_hosts,
+    javascript_tags,
+    qr_code_data
+) VALUES
+(
+    'a1111111-1111-1111-1111-111111111111'::uuid,
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    'Google Analytics 4',
+    'google-analytics-4',
+    1,
+    1,
+    'https://analytics.google.com',
+    'https://cdn.example.com/connectors/ga4.png',
+    TRUE,
+    TRUE,
+    3,
+    'touchpoint-web',
+    'GA4-DEMO-SECURE',
+    98000,
+    2400,
+    18.90,
+    '{"measurement_id": "G-DEMO360"}'::jsonb,
+    ARRAY['www.google-analytics.com', 'analytics.google.com'],
+    ARRAY['gtag(''config'', ''G-DEMO360'')'],
+    '{"target_url": "https://analytics.google.com", "tracking_url": "https://analytics.google.com?utm_source=google-analytics-4&utm_medium=qr_code&utm_campaign=c360_datasource", "qr_code_url": "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=https%3A%2F%2Fanalytics.google.com%3Futm_source%3Dgoogle-analytics-4%26utm_medium%3Dqr_code%26utm_campaign%3Dc360_datasource", "generated_at": "2026-08-07T00:00:00Z"}'::jsonb
+),
+(
+    'a2222222-2222-2222-2222-222222222222'::uuid,
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    'AppsFlyer Mobile Attribution',
+    'appsflyer-mobile-attribution',
+    5,
+    1,
+    'https://hq1.appsflyer.com',
+    'https://cdn.example.com/connectors/appsflyer.png',
+    TRUE,
+    TRUE,
+    3,
+    'touchpoint-mobile-ads',
+    'AF-DEMO-SECURE',
+    120000,
+    3200,
+    26.75,
+    '{"default": "appsflyer_demo_token"}'::jsonb,
+    ARRAY['hq1.appsflyer.com', 'events.appsflyer.com'],
+    ARRAY[]::text[],
+    '{}'::jsonb
+),
+(
+    'a3333333-3333-3333-3333-333333333333'::uuid,
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    'MoEngage Journey Events',
+    'moengage-journey-events',
+    3,
+    1,
+    'https://dashboard-01.moengage.com',
+    'https://cdn.example.com/connectors/moengage.png',
+    TRUE,
+    FALSE,
+    2,
+    'touchpoint-push',
+    'MOE-DEMO-SECURE',
+    64000,
+    1700,
+    14.20,
+    '{"workspace": "moengage_demo_workspace"}'::jsonb,
+    ARRAY['api-01.moengage.com'],
+    ARRAY[]::text[],
+    '{}'::jsonb
+)
+ON CONFLICT (tenant_id, slug) DO UPDATE SET
+    name = EXCLUDED.name,
+    source_type = EXCLUDED.source_type,
+    status = EXCLUDED.status,
+    data_source_url = EXCLUDED.data_source_url,
+    thumbnail_url = EXCLUDED.thumbnail_url,
+    collect_directly = EXCLUDED.collect_directly,
+    first_party_data = EXCLUDED.first_party_data,
+    journey_level = EXCLUDED.journey_level,
+    touchpoint_hub_id = EXCLUDED.touchpoint_hub_id,
+    security_code = EXCLUDED.security_code,
+    total_tracked_event = EXCLUDED.total_tracked_event,
+    avg_daily_event = EXCLUDED.avg_daily_event,
+    avg_events_per_profile = EXCLUDED.avg_events_per_profile,
+    access_tokens = EXCLUDED.access_tokens,
+    data_source_hosts = EXCLUDED.data_source_hosts,
+    javascript_tags = EXCLUDED.javascript_tags,
+    qr_code_data = EXCLUDED.qr_code_data,
+    updated_at = now();

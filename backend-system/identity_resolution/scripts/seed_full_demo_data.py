@@ -501,6 +501,130 @@ _PLATFORM_PROFILE = {
 }
 _DEFAULT_PROFILE = ((5_000, 20_000), 0.03, 0.05, 700_000)
 
+DATA_SOURCES = [
+    {
+        "name": "AppsFlyer Mobile Attribution",
+        "slug": "appsflyer-mobile-attribution",
+        "source_type": 5,
+        "status": 1,
+        "data_source_url": "https://hq1.appsflyer.com",
+        "thumbnail_url": "https://cdn.example.com/connectors/appsflyer.png",
+        "collect_directly": True,
+        "first_party_data": True,
+        "journey_level": 3,
+        "journey_map_id": "journey-mobile-attribution",
+        "touchpoint_hub_id": "touchpoint-mobile-ads",
+        "security_code": "AF-DEMO-SECURE",
+        "total_tracked_event": 120000,
+        "avg_daily_event": 3200,
+        "avg_events_per_profile": 26.75,
+        "access_tokens": {"default": "appsflyer_demo_token"},
+        "data_source_hosts": ["hq1.appsflyer.com", "events.appsflyer.com"],
+        "javascript_tags": [],
+        "qr_code_data": {},
+    },
+    {
+        "name": "Google Analytics 4",
+        "slug": "google-analytics-4",
+        "source_type": 1,
+        "status": 1,
+        "data_source_url": "https://analytics.google.com",
+        "thumbnail_url": "https://cdn.example.com/connectors/ga4.png",
+        "collect_directly": True,
+        "first_party_data": True,
+        "journey_level": 3,
+        "journey_map_id": "journey-web-analytics",
+        "touchpoint_hub_id": "touchpoint-web",
+        "security_code": "GA4-DEMO-SECURE",
+        "total_tracked_event": 98000,
+        "avg_daily_event": 2400,
+        "avg_events_per_profile": 18.90,
+        "access_tokens": {"measurement_id": "G-DEMO360"},
+        "data_source_hosts": ["www.google-analytics.com", "analytics.google.com"],
+        "javascript_tags": ["gtag('config', 'G-DEMO360')"],
+        "qr_code_data": {
+            "target_url": "https://analytics.google.com",
+            "tracking_url": "https://analytics.google.com?utm_source=google-analytics-4&utm_medium=qr_code&utm_campaign=c360_datasource",
+            "qr_code_url": "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=https%3A%2F%2Fanalytics.google.com%3Futm_source%3Dgoogle-analytics-4%26utm_medium%3Dqr_code%26utm_campaign%3Dc360_datasource",
+            "generated_at": "2026-08-07T00:00:00Z",
+        },
+    },
+    {
+        "name": "MoEngage Journey Events",
+        "slug": "moengage-journey-events",
+        "source_type": 3,
+        "status": 1,
+        "data_source_url": "https://dashboard-01.moengage.com",
+        "thumbnail_url": "https://cdn.example.com/connectors/moengage.png",
+        "collect_directly": True,
+        "first_party_data": False,
+        "journey_level": 2,
+        "journey_map_id": "journey-engagement",
+        "touchpoint_hub_id": "touchpoint-push",
+        "security_code": "MOE-DEMO-SECURE",
+        "total_tracked_event": 64000,
+        "avg_daily_event": 1700,
+        "avg_events_per_profile": 14.20,
+        "access_tokens": {"workspace": "moengage_demo_workspace"},
+        "data_source_hosts": ["api-01.moengage.com"],
+        "javascript_tags": [],
+        "qr_code_data": {},
+    },
+]
+
+SCORING_MODELS = [
+    {
+        "scoring_model_name": "churn_prediction_v2",
+        "display_name": "XGBoost Churn Predictor",
+        "description": "Calculates the probability of a customer churning in the next 30 days based on engagement drop-offs.",
+        "model_type": "classification",
+        "status": "ACTIVE",
+        "schedule_definition": "0 2 * * *",
+        "input_features": ["last_activity_at", "total_spend", "support_tickets_count"],
+        "hyperparameters": {"max_depth": 6, "learning_rate": 0.1, "objective": "binary:logistic"},
+    },
+    {
+        "scoring_model_name": "clv_regression_v1",
+        "display_name": "Customer Lifetime Value (90-Day)",
+        "description": "Predicts total revenue a customer will generate over the next 90 days.",
+        "model_type": "regression",
+        "status": "ACTIVE",
+        "schedule_definition": "0 3 * * 0",
+        "input_features": ["historical_clv", "average_order_value", "purchase_frequency"],
+        "hyperparameters": {"algorithm": "random_forest_regressor", "n_estimators": 100},
+    },
+    {
+        "scoring_model_name": "b2b_lead_scoring_rules",
+        "display_name": "B2B Lead Scoring Engine",
+        "description": "Rule-based engine assigning points for email opens, website visits, and job titles.",
+        "model_type": "rules_engine",
+        "status": "ACTIVE",
+        "schedule_definition": "*/15 * * * *",
+        "input_features": ["email_opens", "website_visits", "job_title"],
+        "hyperparameters": {"weights": {"email_opens": 2, "website_visits": 5, "c_level_title": 20}},
+    },
+    {
+        "scoring_model_name": "cx_sentiment_llm_v1",
+        "display_name": "Customer Experience & Sentiment Analyzer",
+        "description": "Generative LLM pipeline scoring customer sentiment and feedback risk from interaction logs.",
+        "model_type": "generative_llm",
+        "status": "ACTIVE",
+        "schedule_definition": "0 * * * *",
+        "input_features": ["feedback_text", "support_notes", "chat_transcripts"],
+        "hyperparameters": {"temperature": 0.2, "model_name": "gpt-4o-mini"},
+    },
+    {
+        "scoring_model_name": "data_quality_cir_confidence",
+        "display_name": "Identity Resolution Confidence Model",
+        "description": "Evaluates profile completeness, identifier uniqueness, and CIR resolution confidence.",
+        "model_type": "classification",
+        "status": "ACTIVE",
+        "schedule_definition": "0 1 * * *",
+        "input_features": ["email_normalized", "phone_normalized", "device_count"],
+        "hyperparameters": {"threshold": 0.85},
+    },
+]
+
 
 def seed_campaign_performance_daily(cursor, campaign_ids: dict) -> None:
     """Inserts daily performance rows for each seeded campaign.
@@ -556,6 +680,101 @@ def seed_campaign_performance_daily(cursor, campaign_ids: dict) -> None:
                 ),
             )
             current += timedelta(days=1)
+
+
+def seed_data_sources(cursor) -> None:
+    """Seeds tenant-scoped rows in sys_data_source used by metadata/data-sources."""
+    logger.info("Seeding sys_data_source catalog for demo tenant...")
+    for data_source in DATA_SOURCES:
+        data_source_id = demo_id(f"sys_data_source:{data_source['slug']}")
+        cursor.execute(
+            f"""
+            INSERT INTO {_table('sys_data_source')}
+                (data_source_id, tenant_id, name, slug, source_type, status,
+                 data_source_url, thumbnail_url, collect_directly, first_party_data,
+                 journey_level, journey_map_id, touchpoint_hub_id, security_code,
+                 total_tracked_event, avg_daily_event, avg_events_per_profile,
+                 access_tokens, data_source_hosts,
+                 javascript_tags, qr_code_data)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, slug) DO UPDATE SET
+                name = EXCLUDED.name,
+                source_type = EXCLUDED.source_type,
+                status = EXCLUDED.status,
+                data_source_url = EXCLUDED.data_source_url,
+                thumbnail_url = EXCLUDED.thumbnail_url,
+                collect_directly = EXCLUDED.collect_directly,
+                first_party_data = EXCLUDED.first_party_data,
+                journey_level = EXCLUDED.journey_level,
+                journey_map_id = EXCLUDED.journey_map_id,
+                touchpoint_hub_id = EXCLUDED.touchpoint_hub_id,
+                security_code = EXCLUDED.security_code,
+                total_tracked_event = EXCLUDED.total_tracked_event,
+                avg_daily_event = EXCLUDED.avg_daily_event,
+                avg_events_per_profile = EXCLUDED.avg_events_per_profile,
+                access_tokens = EXCLUDED.access_tokens,
+                data_source_hosts = EXCLUDED.data_source_hosts,
+                javascript_tags = EXCLUDED.javascript_tags,
+                qr_code_data = EXCLUDED.qr_code_data,
+                updated_at = now();
+            """,
+            (
+                data_source_id,
+                DEMO_TENANT_ID,
+                data_source["name"],
+                data_source["slug"],
+                data_source["source_type"],
+                data_source["status"],
+                data_source["data_source_url"],
+                data_source["thumbnail_url"],
+                data_source["collect_directly"],
+                data_source["first_party_data"],
+                data_source["journey_level"],
+                data_source["journey_map_id"],
+                data_source["touchpoint_hub_id"],
+                data_source["security_code"],
+                data_source["total_tracked_event"],
+                data_source["avg_daily_event"],
+                data_source["avg_events_per_profile"],
+                Json(data_source["access_tokens"]),
+                data_source["data_source_hosts"],
+                data_source["javascript_tags"],
+                Json(data_source["qr_code_data"]),
+            ),
+        )
+
+
+def seed_scoring_models(cursor) -> None:
+    """Seeds central catalog rows in cdp_scoring_models."""
+    logger.info("Seeding cdp_scoring_models catalog...")
+    for model in SCORING_MODELS:
+        cursor.execute(
+            f"""
+            INSERT INTO {_table('cdp_scoring_models')}
+                (scoring_model_name, display_name, description, model_type, status,
+                 schedule_definition, input_features, hyperparameters)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (scoring_model_name) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                description = EXCLUDED.description,
+                model_type = EXCLUDED.model_type,
+                status = EXCLUDED.status,
+                schedule_definition = EXCLUDED.schedule_definition,
+                input_features = EXCLUDED.input_features,
+                hyperparameters = EXCLUDED.hyperparameters,
+                updated_at = now();
+            """,
+            (
+                model["scoring_model_name"],
+                model["display_name"],
+                model["description"],
+                model["model_type"],
+                model["status"],
+                model["schedule_definition"],
+                model["input_features"],
+                Json(model["hyperparameters"]),
+            ),
+        )
 
 
 def reset_tenant_scoped_demo_tables(cursor) -> None:
@@ -1412,6 +1631,8 @@ def main() -> None:
 
             seed_relation_types(cursor)
             crm_ids = seed_crm_entities(cursor)
+            seed_data_sources(cursor)
+            seed_scoring_models(cursor)
             reset_tenant_scoped_demo_tables(cursor)
             seed_campaign_performance_daily(cursor, crm_ids["campaign"])
             seed_relations(cursor, detail_profiles)

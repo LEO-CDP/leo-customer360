@@ -1,0 +1,173 @@
+<!--
+	=============================================================================
+	DATA SOURCE CATALOG VIEW CARD
+	=============================================================================
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
+
+	<div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+		<div class="flex items-center gap-3">
+			<div class="p-2 bg-cyan-50 text-cyan-600 rounded-xl">
+				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M3 7.5h18M3 12h18M3 16.5h18M4.5 7.5v9a1.5 1.5 0 001.5 1.5h12a1.5 1.5 0 001.5-1.5v-9" />
+				</svg>
+			</div>
+			<div>
+				<h1 class="text-base font-bold text-slate-900 tracking-tight">Data Sources</h1>
+				<p class="text-xs text-slate-400 mt-0.5">Connector metadata and ingestion configuration</p>
+			</div>
+		</div>
+
+		<div class="flex flex-wrap items-center gap-2.5">
+			<div class="relative">
+				<span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+					<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+				</span>
+				<input id="datasources-search-input" type="search" name="datasource_search"
+					placeholder="Search name, slug, url..." autocomplete="off" autocorrect="off" spellcheck="false" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+			</div>
+
+			<select id="datasources-status-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+				<option value="">All status</option>
+				<option value="1">Active</option>
+				<option value="0">Inactive</option>
+			</select>
+
+			<button id="btn-datasource-add" class="inline-flex items-center gap-1.5 bg-cyan-600 text-white rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-cyan-700 transition-colors shadow-sm shadow-cyan-100">
+				<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+				<span>Add Data Source</span>
+			</button>
+		</div>
+	</div>
+
+	<div class="overflow-x-auto">
+		<table class="w-full text-sm text-left">
+			<thead id="datasources-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
+			<tbody id="datasources-tbody" class="divide-y divide-slate-100"></tbody>
+		</table>
+	</div>
+
+	<div id="datasources-loading" class="p-12 flex justify-center">
+		<div class="spinner"></div>
+	</div>
+
+	<div id="datasources-empty" class="hidden p-12 text-center text-sm text-slate-400">
+		<div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">🧩</div>
+		<div class="font-medium text-slate-600">No data sources found</div>
+		<p class="text-xs text-slate-400 mt-1">Create a connector to start tracking ingest sources.</p>
+	</div>
+
+	<div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
+		<span id="datasources-count-label" class="font-medium"></span>
+	</div>
+</div>
+
+<div id="datasource-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+	<div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 border border-slate-100 max-h-[90vh] overflow-y-auto">
+		<div class="flex items-center gap-3 mb-5 pb-3 border-b border-slate-100">
+			<div class="p-2 bg-cyan-50 text-cyan-600 rounded-xl">
+				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+			</div>
+			<div>
+				<h2 class="text-base font-bold text-slate-900 tracking-tight">Create Data Source</h2>
+				<p class="text-xs text-slate-400">Creates a sys_data_source record for this tenant</p>
+			</div>
+		</div>
+
+		<div class="space-y-4">
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Name *</label>
+					<input id="datasource-add-name" type="text" placeholder="e.g. Google Analytics 4" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+				</div>
+				<div>
+					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Slug *</label>
+					<input id="datasource-add-slug" type="text" placeholder="e.g. google-analytics-4" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+				</div>
+			</div>
+
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Source Type</label>
+					<select id="datasource-add-source-type" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
+						<option value="1">1 - Web JavaScript Code (Client-side tracking)</option>
+						<option value="2" selected>2 - Data Connector API (Server-side Pull/Sync)</option>
+						<option value="3">3 - Data Webhook API (Server-side Push)</option>
+						<option value="4">4 - S3 File Connector (Batch File Processing)</option>
+						<option value="5">5 - Mobile SDK Code (iOS/Android/Flutter tracking)</option>
+					</select>
+				</div>
+				<div>
+					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Status</label>
+					<select id="datasource-add-status" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
+						<option value="1">Active</option>
+						<option value="0">Inactive</option>
+					</select>
+				</div>
+			</div>
+
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Data Source URL</label>
+					<input id="datasource-add-url" type="text" placeholder="https://..." class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+				</div>
+				<div>
+					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Thumbnail URL</label>
+					<input id="datasource-add-thumbnail-url" type="text" placeholder="https://..." class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+				</div>
+			</div>
+
+			<div class="grid grid-cols-2 gap-3 items-end">
+					<label class="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+						<input id="datasource-add-collect-directly" type="checkbox" checked class="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500/30" />
+						Collect Directly
+					</label>
+					<label class="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+						<input id="datasource-add-first-party-data" type="checkbox" checked class="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500/30" />
+						First-Party Data
+					</label>
+				</div>
+
+			<div>
+				<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Data Source Hosts (comma-separated)</label>
+				<input id="datasource-add-hosts" type="text" placeholder="api.example.com, events.example.com" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+			</div>
+
+			<div>
+				<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Access Tokens (JSON Object)</label>
+				<textarea id="datasource-add-access-tokens" rows="2" placeholder='{"measurement_id": "G-DEMO360"}' class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none"></textarea>
+			</div>
+
+			<div id="datasource-add-error" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5"></div>
+		</div>
+
+		<div class="flex items-center justify-end gap-2.5 mt-6 pt-4 border-t border-slate-100">
+			<button id="btn-datasource-add-cancel" class="border border-slate-200/80 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Cancel</button>
+			<button id="btn-datasource-add-save" class="bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl px-4 py-2 text-xs font-semibold transition-colors shadow-sm shadow-cyan-100">Save Data Source</button>
+		</div>
+	</div>
+</div>
+
+<div id="datasource-detail-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+	<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6 border border-slate-100 max-h-[90vh] overflow-y-auto">
+		<div class="flex items-center justify-between mb-5 pb-3 border-b border-slate-100">
+			<div class="flex items-center gap-3">
+				<div class="p-2 bg-cyan-50 text-cyan-600 rounded-xl">
+					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H20.25m0 0v6.75m0-6.75L12 14.25l-3.75-3.75L3.75 15" /></svg>
+				</div>
+				<div>
+					<h2 class="text-base font-bold text-slate-900 tracking-tight">Data Source Detail</h2>
+					<p class="text-xs text-slate-400">Metadata snapshot from sys_data_source</p>
+				</div>
+			</div>
+			<button id="btn-datasource-detail-close" class="text-slate-500 hover:text-slate-700 transition-colors">✕</button>
+		</div>
+
+		<div id="datasource-detail-body" class="text-xs text-slate-700 grid grid-cols-2 gap-3"></div>
+
+		<div class="flex items-center justify-between mt-6 pt-4 border-t border-slate-100">
+			<button id="btn-datasource-detail-delete" class="border border-red-200 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors shadow-sm">Delete</button>
+			<button id="btn-datasource-detail-done" class="border border-slate-200/80 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Close</button>
+		</div>
+	</div>
+</div>

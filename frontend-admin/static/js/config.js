@@ -90,17 +90,121 @@ window.C360 = window.C360 || {};
   var DOMAINS_CACHE_KEY = "c360.domains";
   var mediaDark = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   var isThemeListenerBound = false;
+  var CHART_THEME = {
+    dark: {
+      text: "#f8fafc",
+      grid: "rgba(148, 163, 184, 0.28)",
+      border: "rgba(148, 163, 184, 0.38)",
+      tooltipBg: "rgba(15, 23, 42, 0.95)",
+      tooltipText: "#f8fafc"
+    },
+    light: {
+      text: "#334155",
+      grid: "rgba(100, 116, 139, 0.22)",
+      border: "rgba(100, 116, 139, 0.32)",
+      tooltipBg: "rgba(255, 255, 255, 0.98)",
+      tooltipText: "#0f172a"
+    }
+  };
+  var THEME_CLASSES = ["c360-theme-dark", "c360-theme-light", "c360-theme-system"];
+  var PROFILE_CARD_IDS = [
+    "identity-details-card",
+    "communication-preferences-card",
+    "working-details-card",
+    "address-details-card",
+    "other-attributes-card",
+    "next-best-action-card"
+  ];
 
   function apiRootFromBase(apiBase) {
     return String(apiBase || "").replace(/\/api\/v1\/?$/, "");
+  }
+
+  function ensureObject(parent, key) {
+    if (!parent[key] || typeof parent[key] !== "object") {
+      parent[key] = {};
+    }
+    return parent[key];
+  }
+
+  function applyChartTheme(shouldUseDark) {
+    if (typeof Chart === "undefined") return;
+
+    var palette = shouldUseDark ? CHART_THEME.dark : CHART_THEME.light;
+
+    Chart.defaults.color = palette.text;
+    Chart.defaults.borderColor = palette.grid;
+    Chart.defaults.plugins = Chart.defaults.plugins || {};
+    Chart.defaults.plugins.legend = Chart.defaults.plugins.legend || {};
+    Chart.defaults.plugins.legend.labels = Chart.defaults.plugins.legend.labels || {};
+    Chart.defaults.plugins.legend.labels.color = palette.text;
+    Chart.defaults.plugins.title = Chart.defaults.plugins.title || {};
+    Chart.defaults.plugins.title.color = palette.text;
+    Chart.defaults.plugins.tooltip = Chart.defaults.plugins.tooltip || {};
+    Chart.defaults.plugins.tooltip.backgroundColor = palette.tooltipBg;
+    Chart.defaults.plugins.tooltip.titleColor = palette.tooltipText;
+    Chart.defaults.plugins.tooltip.bodyColor = palette.tooltipText;
+    Chart.defaults.plugins.tooltip.footerColor = palette.tooltipText;
+
+    var instances = Chart.instances || {};
+    Object.keys(instances).forEach(function (key) {
+      var chart = instances[key];
+      if (!chart || !chart.options) return;
+
+      var plugins = ensureObject(chart.options, "plugins");
+      var legend = ensureObject(plugins, "legend");
+      var legendLabels = ensureObject(legend, "labels");
+      legendLabels.color = palette.text;
+
+      var title = ensureObject(plugins, "title");
+      title.color = palette.text;
+
+      var tooltip = ensureObject(plugins, "tooltip");
+      tooltip.backgroundColor = palette.tooltipBg;
+      tooltip.titleColor = palette.tooltipText;
+      tooltip.bodyColor = palette.tooltipText;
+      tooltip.footerColor = palette.tooltipText;
+
+      var scales = chart.options.scales || {};
+      Object.keys(scales).forEach(function (axisKey) {
+        var axis = scales[axisKey];
+        if (!axis || typeof axis !== "object") return;
+        var ticks = ensureObject(axis, "ticks");
+        ticks.color = palette.text;
+        var grid = ensureObject(axis, "grid");
+        grid.color = palette.grid;
+        var border = ensureObject(axis, "border");
+        border.color = palette.border;
+      });
+
+      chart.update("none");
+    });
   }
 
   function applyTheme(theme, persist) {
     var selected = theme || "system";
     var prefersDark = mediaDark ? mediaDark.matches : false;
     var shouldUseDark = selected === "dark" || (selected === "system" && prefersDark);
+    var root = document.documentElement;
+
+    THEME_CLASSES.forEach(function (className) {
+      root.classList.remove(className);
+    });
+
+    root.classList.add("c360-theme-" + selected);
     document.documentElement.classList.toggle("dark", shouldUseDark);
     document.documentElement.setAttribute("data-c360-theme", selected);
+    applyChartTheme(shouldUseDark);
+
+    PROFILE_CARD_IDS.forEach(function (id) {
+      var element = document.getElementById(id);
+      if (!element) return;
+      THEME_CLASSES.forEach(function (className) {
+        element.classList.remove(className);
+      });
+      element.classList.add("c360-theme-" + selected);
+    });
+
     if (persist !== false) {
       localStorage.setItem(STORAGE_KEYS.theme, selected);
       CONFIG.theme = selected;

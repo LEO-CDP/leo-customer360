@@ -1878,6 +1878,80 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
 
 COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog for cdp_master_profiles schema columns used by identity-resolution engine (CIR). One row per master-profile column (email, phone_number, device_id, etc.) with consolidation rules, matching strategies, and schema hints. Domain-specific attributes (national_id, kyc_status, loyalty_id, etc.) must be included; they live as JSONB keys in cdp_domain_profiles.domain_attributes.';
 
+-- ==========================================================
+-- Scoring Models Registry
+-- ==========================================================
+-- This table acts as the central dictionary for all AI, ML, 
+-- and rule-based models that output computed fields (like Churn, CLV, 
+-- or Lead Scores) into the customer profiles.
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_scoring_models (
+    -- The user-requested primary key. This exact string must match 
+    -- the 'scoring_model_name' in cdp_profile_attributes.
+    scoring_model_name VARCHAR(100) PRIMARY KEY,
+    
+    -- Display and organizational metadata
+    display_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    
+    -- Identifies the algorithmic approach
+    model_type VARCHAR(50) NOT NULL CHECK (
+        model_type IN (
+            'classification', 
+            'regression', 
+            'clustering', 
+            'rules_engine', 
+            'generative_llm'
+        )
+    ),
+    
+    -- Execution and orchestration parameters
+    status VARCHAR(20) DEFAULT 'ACTIVE' CHECK (
+        status IN ('ACTIVE', 'INACTIVE', 'TRAINING', 'DEPRECATED', 'FAILED')
+    ),
+    -- E.g., '0 0 * * *' for a daily midnight batch run
+    schedule_definition VARCHAR(100), 
+    
+    -- Model lineage and configurations
+    -- Tracks which profile attributes are fed into this model as training/inference features
+    input_features TEXT[] DEFAULT ARRAY[]::TEXT[], 
+    -- Stores dynamic model configurations, thresholds, or LLM prompts (e.g., LangGraph agent configs)
+    hyperparameters JSONB DEFAULT '{}'::jsonb,
+    
+    -- Audit fields
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+COMMENT ON TABLE customer360.cdp_scoring_models IS 'Central registry for all ML and rule-based models. Acts as the parent table for cdp_profile_attributes where is_scoring_model = true.';
+
+-- ----------------------------------------------------------------------------
+-- Foreign Key Enforcement
+-- ----------------------------------------------------------------------------
+-- This constraint ensures that any computed attribute claiming to be generated 
+-- by a model actually references a valid model in the registry.
+
+DO $$
+BEGIN
+    ALTER TABLE customer360.cdp_profile_attributes
+    ADD CONSTRAINT fk_cdp_pa_scoring_model 
+    FOREIGN KEY (scoring_model_name) 
+    REFERENCES customer360.cdp_scoring_models(scoring_model_name)
+    ON DELETE RESTRICT; 
+    -- ON DELETE RESTRICT prevents accidentally deleting a model 
+    -- if attributes are still mapped to it.
+EXCEPTION
+    WHEN duplicate_object THEN
+        RAISE NOTICE 'Foreign key fk_cdp_pa_scoring_model already exists.';
+END $$;
+
+-- ----------------------------------------------------------------------------
+-- Indexes
+-- ----------------------------------------------------------------------------
+-- Optimizes queries filtering for active models in the admin UI
+CREATE INDEX IF NOT EXISTS idx_cdp_scoring_models_status ON customer360.cdp_scoring_models (status);
+
+
 -- ============================================================================
 -- cdp_identity_index: flattened O(1) point-lookup index for identifiers
 -- ============================================================================
@@ -1911,6 +1985,91 @@ WHERE
     is_blocked = FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_cdp_identity_master ON customer360.cdp_identity_index (master_profile_id);
+
+
+-- ==========================================================
+-- Data Source / Connectors Table
+-- ==========================================================
+-- This table stores metadata, access tokens, and configurations 
+-- for external data sources and ingestion connectors.
+CREATE TABLE IF NOT EXISTS customer360.sys_data_source (
+    data_source_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    
+    -- Multi-tenant isolation (mandatory for all sys/cdp tables)
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    
+    -- Core identification
+    name TEXT NOT NULL,
+    slug VARCHAR(255) NOT NULL,
+    
+    -- Configuration status and type identifiers
+    source_type SMALLINT NOT NULL DEFAULT 2, -- Maps to "type" (e.g., 2)
+    status SMALLINT NOT NULL DEFAULT 1,      -- 1: active, 0: inactive
+    
+    -- Endpoints and URLs
+    data_source_url TEXT,
+    thumbnail_url TEXT,
+    
+    -- Data collection flags
+    collect_directly BOOLEAN DEFAULT true,
+    first_party_data BOOLEAN DEFAULT true,
+    
+    -- Journey mapping configuration
+    journey_level SMALLINT DEFAULT 3,
+    journey_map_id VARCHAR(255),
+    touchpoint_hub_id VARCHAR(255),
+    
+    -- Security and volume metrics
+    security_code TEXT,
+    total_tracked_event BIGINT DEFAULT 0,
+    avg_daily_event BIGINT DEFAULT 0,
+    avg_events_per_profile NUMERIC(10, 2) DEFAULT 0.0,
+    
+    -- JSON and Array configurations
+    -- Stores dynamic mapping like "1hgb91dmV1BhyoW9YMEKnb": "1148041_..."
+    access_tokens JSONB DEFAULT '{}'::jsonb,
+    -- List of allowed hosts for the connector
+    data_source_hosts TEXT[] DEFAULT ARRAY[]::TEXT[],
+    -- Stored JS tags for web tracking integration
+    javascript_tags TEXT[] DEFAULT ARRAY[]::TEXT[],
+    -- Landing page and tracking URLs for offline-to-online bridging
+    qr_code_data JSONB DEFAULT '{}'::jsonb,
+    
+    -- Audit timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    
+    -- Ensure slugs are unique per workspace/tenant
+    CONSTRAINT uq_sys_data_source_slug UNIQUE (tenant_id, slug),
+
+    -- Allowed source types:
+    -- 1 Web JavaScript Code, 2 Data Connector API, 3 Data Webhook API,
+    -- 4 S3 File Connector, 5 Mobile SDK Code
+    CONSTRAINT ck_sys_data_source_source_type CHECK (source_type IN (1, 2, 3, 4, 5))
+);
+
+COMMENT ON TABLE customer360.sys_data_source IS 'Stores metadata and configuration for Data Sources/Connectors (e.g., access tokens, QR code data, webhook configs, journey routing) for data ingestion pipelines.';
+
+-- ----------------------------------------------------------------------------
+-- INDEXES & ROW LEVEL SECURITY
+-- ----------------------------------------------------------------------------
+
+-- Fast tenant-level lookup index
+CREATE INDEX IF NOT EXISTS idx_sys_data_source_tenant ON customer360.sys_data_source(tenant_id);
+
+-- Optimized index for filtering active data sources in the UI
+CREATE INDEX IF NOT EXISTS idx_sys_data_source_status ON customer360.sys_data_source(tenant_id, status);
+
+-- Enable RLS to maintain strict tenant isolation matching the existing schema pattern
+ALTER TABLE customer360.sys_data_source ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer360.sys_data_source FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_policy ON customer360.sys_data_source;
+
+-- Policy ensures queries only return rows matching the current connection's tenant_id
+CREATE POLICY tenant_policy ON customer360.sys_data_source
+    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
 
 -- ============================================================================
 -- cdp_profile_merge_history: audit trail of master-to-master profile merges

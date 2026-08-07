@@ -1,0 +1,193 @@
+<!--
+  =============================================================================
+  SCORING MODELS REGISTRY VIEW CARD (cdp_scoring_models)
+  =============================================================================
+  Modeled directly on metadata/attributes-list.html: same header/search/filter
+  layout, same shared C360.DataTableView component for the table, same
+  Add/Edit modal pattern -- rendered by static/js/scoring-model-view.js.
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
+
+  <!-- Header Section -->
+  <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+
+    <!-- Title & Icon -->
+    <div class="flex items-center gap-3">
+      <div class="p-2 bg-violet-50 text-violet-600 rounded-xl">
+        <!-- Beaker / ML Experiment Icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-base font-bold text-slate-900 tracking-tight">Scoring Models</h1>
+        <p class="text-xs text-slate-400 mt-0.5">ML &amp; rule-based model registry (Lead, Churn, CLV, CX, Data Quality)</p>
+      </div>
+    </div>
+
+    <!-- Filter Controls -->
+    <div class="flex flex-wrap items-center gap-2.5">
+
+      <!-- Search Input with Icon -->
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+        </span>
+        <input id="scoring-models-search-input" type="search" name="scoring_model_search"
+            placeholder="Search name, model, description…" autocomplete="off" autocorrect="off" spellcheck="false" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
+
+      <!-- Model Type Filter -->
+      <select id="scoring-models-type-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All types</option>
+        <option value="classification">Classification</option>
+        <option value="regression">Regression</option>
+        <option value="clustering">Clustering</option>
+        <option value="rules_engine">Rules Engine</option>
+        <option value="generative_llm">Generative LLM</option>
+      </select>
+
+      <!-- Status Filter -->
+      <select id="scoring-models-status-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All status</option>
+        <option value="ACTIVE">Active</option>
+        <option value="INACTIVE">Inactive</option>
+        <option value="TRAINING">Training</option>
+        <option value="DEPRECATED">Deprecated</option>
+        <option value="FAILED">Failed</option>
+      </select>
+
+      <!-- Add Scoring Model -->
+      <button id="btn-scoring-model-add" class="inline-flex items-center gap-1.5 bg-violet-600 text-white rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-violet-700 transition-colors shadow-sm shadow-violet-100">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+        <span>Add Scoring Model</span>
+      </button>
+
+    </div>
+
+  </div>
+
+  <!-- Table Container -->
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm text-left">
+      <thead id="scoring-models-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
+      <tbody id="scoring-models-tbody" class="divide-y divide-slate-100"></tbody>
+    </table>
+  </div>
+
+  <!-- Loading State -->
+  <div id="scoring-models-loading" class="p-12 flex justify-center">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- Empty State -->
+  <div id="scoring-models-empty" class="hidden p-12 text-center text-sm text-slate-400">
+    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">🔍</div>
+    <div class="font-medium text-slate-600">No scoring models matched your filters</div>
+    <p class="text-xs text-slate-400 mt-1">Try adjusting your search query or filter selections.</p>
+  </div>
+
+  <!-- Footer Count -->
+  <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
+    <span id="scoring-models-count-label" class="font-medium"></span>
+  </div>
+
+</div>
+
+<!--
+  =============================================================================
+  SCORING MODEL FORM MODAL
+  Creates/updates a customer360.cdp_scoring_models row via
+  POST/PATCH /metadata/scoring-models (see scoring-model-view.js).
+  =============================================================================
+-->
+<div id="scoring-model-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-100 max-h-[90vh] overflow-y-auto">
+
+    <!-- Modal Header -->
+    <div class="flex items-center gap-3 mb-5 pb-3 border-b border-slate-100">
+      <div class="p-2 bg-violet-50 text-violet-600 rounded-xl">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+      </div>
+      <div>
+        <h2 id="scoring-model-form-title" class="text-base font-bold text-slate-900 tracking-tight">Add Scoring Model</h2>
+        <p id="scoring-model-form-subtitle" class="text-xs text-slate-400">Registers a new row in the cdp_scoring_models registry</p>
+      </div>
+    </div>
+
+    <!-- Form Fields -->
+    <div class="space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Model Name *</label>
+          <input id="scoring-model-add-name" type="text" placeholder="e.g. churn_prediction_v2" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Display Name *</label>
+          <input id="scoring-model-add-display-name" type="text" placeholder="e.g. XGBoost Churn Predictor" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Description</label>
+        <textarea id="scoring-model-add-description" rows="2" placeholder="What this model predicts/computes..." class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none resize-none"></textarea>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Model Type *</label>
+          <select id="scoring-model-add-type" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
+            <option value="classification">Classification</option>
+            <option value="regression">Regression</option>
+            <option value="clustering">Clustering</option>
+            <option value="rules_engine">Rules Engine</option>
+            <option value="generative_llm">Generative LLM</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Status</label>
+          <select id="scoring-model-add-status" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
+            <option value="ACTIVE">Active</option>
+            <option value="INACTIVE">Inactive</option>
+            <option value="TRAINING">Training</option>
+            <option value="DEPRECATED">Deprecated</option>
+            <option value="FAILED">Failed</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Schedule Definition (cron)</label>
+        <input id="scoring-model-add-schedule" type="text" placeholder="e.g. 0 2 * * *" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
+
+      <div>
+        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Input Features (comma-separated)</label>
+        <input id="scoring-model-add-features" type="text" placeholder="last_activity_at, total_spend, support_tickets_count" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
+
+      <div>
+        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Hyperparameters (JSON Object)</label>
+        <textarea id="scoring-model-add-hyperparameters" rows="2" placeholder='{"max_depth": 6, "learning_rate": 0.1}' class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none resize-none"></textarea>
+      </div>
+
+      <div id="scoring-model-add-error" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5"></div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="flex items-center justify-between gap-2.5 mt-6 pt-4 border-t border-slate-100">
+      <button id="btn-scoring-model-delete" class="hidden border border-red-200 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors shadow-sm">
+        Delete
+      </button>
+      <div class="flex items-center gap-2.5 ml-auto">
+        <button id="btn-scoring-model-add-cancel" class="border border-slate-200/80 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">
+          Cancel
+        </button>
+        <button id="btn-scoring-model-add-save" class="bg-violet-600 hover:bg-violet-700 text-white rounded-xl px-4 py-2 text-xs font-semibold transition-colors shadow-sm shadow-violet-100">
+          <span id="scoring-model-form-save-label">Save Model</span>
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>

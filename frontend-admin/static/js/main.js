@@ -162,7 +162,6 @@ const TIME_CHECK_API_HEALTH = 60000;
   }
 
   $(function () {
-    C360.themeLoader(C360.config.current.theme, false);
 
     C360.templates.loadAll().done(function () {
       $("#app-header").html(C360.templates.html("tabs"));
@@ -170,8 +169,13 @@ const TIME_CHECK_API_HEALTH = 60000;
       $("#view-placeholder").html(C360.templates.html("placeholder"));
       $("#segment-view-list").html(C360.templates.html("segments-list"));
       $("#view-attributes").html(C360.templates.html("attributes-list"));
+      $("#view-datasources").html(C360.templates.html("data-source-list"));
+      $("#view-scoring").html(C360.templates.html("scoring-model-list"));
       $("#persona-list-content").html(C360.templates.html("persona-list"));
       $("body").append(C360.templates.html("settings-modal"));
+
+      // apply the current theme (light/dark/system) to the page, and re-apply it
+      C360.themeLoader(C360.config.current.theme, false);
 
       $("#footer-api-base").text(C360.config.current.apiBase);
 
@@ -181,6 +185,8 @@ const TIME_CHECK_API_HEALTH = 60000;
       C360.segmentsView.bindEvents();
       C360.personaManagementView.bindEvents();
       C360.attributesView.bindEvents();
+      C360.dataSourceView.bindEvents();
+      C360.scoringModelView.bindEvents();
 
       C360.config.pingHealth();
       setInterval(C360.config.pingHealth, TIME_CHECK_API_HEALTH);

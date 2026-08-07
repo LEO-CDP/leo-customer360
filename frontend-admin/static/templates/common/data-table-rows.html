@@ -24,6 +24,15 @@
     {{else}}
       <span class="text-slate-300 font-mono">—</span>
     {{/if}}
+    {{else if isMetrics}}
+    <div class="space-y-0.5">
+      {{#each metrics}}
+      <div class="flex items-baseline gap-1.5 text-xs">
+        <span class="text-slate-400">{{this.label}}:</span>
+        <span class="text-slate-700 font-semibold font-mono">{{this.value}}</span>
+      </div>
+      {{/each}}
+    </div>
     {{else}}
     {{#if value}}
       <span class="text-sm text-slate-700 font-medium">{{value}}</span>
@@ -36,7 +45,7 @@
   
   {{#if clickable}}
   <td class="px-6 py-4 text-right">
-    <span class="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 group-hover:text-indigo-700 transition-colors">
+    <span class="dtv-action-label inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 group-hover:text-indigo-700 transition-colors">
       <span>{{actionLabel}}</span>
       <svg class="w-3.5 h-3.5 transform group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
     </span>

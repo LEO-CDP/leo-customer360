@@ -21,7 +21,7 @@ backend-system/identity_resolution/scripts/init_sample_data.py
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, SmallInteger, Text, UniqueConstraint, text
@@ -536,3 +536,20 @@ class CdpPersonaConfig(Base):
     updated_by: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("now()"))
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("now()"))
+
+
+class CdpScoringModel(Base):
+    """Registry of scoring models (Lead, Churn, CLV, CX, Data Quality, persona risk/loyalty)."""
+
+    __tablename__ = "cdp_scoring_models"
+
+    scoring_model_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    model_type: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'ACTIVE'"))
+    schedule_definition: Mapped[Optional[str]] = mapped_column(Text)
+    input_features: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
+    hyperparameters: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()")) 
