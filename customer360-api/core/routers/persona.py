@@ -48,8 +48,10 @@ _persona_score_detail_crud = CRUDBase(CdpPersonaScoreDetail)
 _persona_history_crud = CRUDBase(CdpPersonaHistory)
 
 # --- Customer Personas ---
-
-customer_personas_router = APIRouter(tags=["Identity Resolution - Customer Personas"])
+# Primary CRUD + analytics for resolved personas. Mounted at "/persona" so
+# every route below (and every other router in this module) resolves under
+# .../api/v1/persona/*, independent of how app.py wires the top-level prefix.
+customer_personas_router = APIRouter(prefix="/persona", tags=["Identity Resolution - Customer Personas"])
 
 
 @customer_personas_router.get("/list", response_model=list[CustomerPersonaRead])
@@ -164,8 +166,9 @@ def delete_customer_persona(persona_id: uuid.UUID, db: Session = Depends(get_db)
 
 
 # --- Persona Features (explainability input signals; append-only) ------
-
-persona_features_router = APIRouter(prefix="/persona-features", tags=["Identity Resolution - Customer Personas"])
+# Nested under "/persona/features" (rather than a flat "persona-features")
+# so the resource hierarchy reads as: persona -> features.
+persona_features_router = APIRouter(prefix="/persona/features", tags=["Identity Resolution - Customer Personas"])
 
 
 @persona_features_router.get("/", response_model=list[PersonaFeatureRead])
@@ -199,9 +202,9 @@ def create_persona_feature(payload: PersonaFeatureCreate, db: Session = Depends(
 
 
 # --- Persona Score Details (explainability score breakdown; append-only) ---
-
+# Nested under "/persona/score-details": persona -> score-details.
 persona_score_details_router = APIRouter(
-    prefix="/persona-score-details", tags=["Identity Resolution - Customer Personas"]
+    prefix="/persona/score-details", tags=["Identity Resolution - Customer Personas"]
 )
 
 
@@ -236,8 +239,8 @@ def create_persona_score_detail(payload: PersonaScoreDetailCreate, db: Session =
 
 
 # --- Persona History (audit trail of material persona changes; append-only) ---
-
-persona_history_router = APIRouter(prefix="/persona-history", tags=["Identity Resolution - Customer Personas"])
+# Nested under "/persona/history": persona -> history.
+persona_history_router = APIRouter(prefix="/persona/history", tags=["Identity Resolution - Customer Personas"])
 
 
 @persona_history_router.get("/", response_model=list[PersonaHistoryRead])
@@ -270,7 +273,9 @@ def create_persona_history_entry(payload: PersonaHistoryCreate, db: Session = De
     return obj
 
 
-# Export all routers
+# Export all routers. Each router already carries its own "/persona..."
+# prefix above, so app.py only needs to add the shared "/api/v1" root -
+# every URL below therefore begins with /api/v1/persona.
 all_persona_routers = [
     customer_personas_router,
     persona_features_router,

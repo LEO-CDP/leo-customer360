@@ -283,7 +283,7 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self.client = TestClient(app)
 
     def test_create_persona(self):
-        response = self.client.post("/", json=_persona_payload())
+        response = self.client.post("/persona/", json=_persona_payload())
         self.assertEqual(response.status_code, 201)
         body = response.json()
         self.assertEqual(body["persona_code"], "retail_high_value_customer")
@@ -291,16 +291,16 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self.assertEqual(body["computed_version"], 1)
 
     def test_create_persona_rejects_invalid_risk_level(self):
-        response = self.client.post("/", json=_persona_payload(risk_level="extreme"))
+        response = self.client.post("/persona/", json=_persona_payload(risk_level="extreme"))
         self.assertEqual(response.status_code, 422)
 
     def test_create_persona_rejects_invalid_domain(self):
-        response = self.client.post("/", json=_persona_payload(domain="finance"))
+        response = self.client.post("/persona/", json=_persona_payload(domain="finance"))
         self.assertEqual(response.status_code, 422)
 
     def test_create_persona_invalidates_cache(self):
         with patch("core.routers.persona.invalidate_prefix") as mock_invalidate:
-            response = self.client.post("/", json=_persona_payload())
+            response = self.client.post("/persona/", json=_persona_payload())
         self.assertEqual(response.status_code, 201)
         mock_invalidate.assert_called_once_with("customer_personas")
 
@@ -311,7 +311,7 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         FakePersonaRepository.persona_store[matching.persona_id] = matching
         FakePersonaRepository.persona_store[other.persona_id] = other
 
-        response = self.client.get(f"/list?master_profile_id={master_id}")
+        response = self.client.get(f"/persona/list?master_profile_id={master_id}")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -324,7 +324,7 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         FakePersonaRepository.persona_store[active.persona_id] = active
         FakePersonaRepository.persona_store[inactive.persona_id] = inactive
 
-        response = self.client.get("/list?is_active=true")
+        response = self.client.get("/persona/list?is_active=true")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -339,7 +339,7 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         FakePersonaRepository.persona_store[banking_persona.persona_id] = banking_persona
         FakePersonaRepository.persona_store[healthcare_persona.persona_id] = healthcare_persona
 
-        response = self.client.get("/list?domain=healthcare")
+        response = self.client.get("/persona/list?domain=healthcare")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -347,11 +347,11 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self.assertEqual(body[0]["persona_id"], str(healthcare_persona.persona_id))
 
     def test_list_rejects_invalid_domain(self):
-        response = self.client.get("/list?domain=finance")
+        response = self.client.get("/persona/list?domain=finance")
         self.assertEqual(response.status_code, 422)
 
     def test_get_persona_not_found(self):
-        response = self.client.get(f"/{uuid.uuid4()}")
+        response = self.client.get(f"/persona/{uuid.uuid4()}")
         self.assertEqual(response.status_code, 404)
 
     def test_patch_persona(self):
@@ -359,7 +359,7 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         FakePersonaRepository.persona_store[persona.persona_id] = persona
 
         response = self.client.patch(
-            f"/{persona.persona_id}", json={"is_active": False, "risk_level": "high"}
+            f"/persona/{persona.persona_id}", json={"is_active": False, "risk_level": "high"}
         )
 
         self.assertEqual(response.status_code, 200)
@@ -368,20 +368,20 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self.assertEqual(body["risk_level"], "high")
 
     def test_patch_persona_not_found(self):
-        response = self.client.patch(f"/{uuid.uuid4()}", json={"is_active": False})
+        response = self.client.patch(f"/persona/{uuid.uuid4()}", json={"is_active": False})
         self.assertEqual(response.status_code, 404)
 
     def test_delete_persona(self):
         persona = _fake_persona()
         FakePersonaRepository.persona_store[persona.persona_id] = persona
 
-        response = self.client.delete(f"/{persona.persona_id}")
+        response = self.client.delete(f"/persona/{persona.persona_id}")
 
         self.assertEqual(response.status_code, 204)
         self.assertNotIn(persona.persona_id, FakePersonaRepository.persona_store)
 
     def test_delete_persona_not_found(self):
-        response = self.client.delete(f"/{uuid.uuid4()}")
+        response = self.client.delete(f"/persona/{uuid.uuid4()}")
         self.assertEqual(response.status_code, 404)
 
     def test_get_persona_analytics_summary(self):
@@ -398,7 +398,7 @@ class CustomerPersonasRouterTests(unittest.TestCase):
             "by_value_tier": [{"value": "gold", "count": 3}],
         }
 
-        response = self.client.get("/analytics/summary?domain=healthcare&is_active=true&days=30")
+        response = self.client.get("/persona/analytics/summary?domain=healthcare&is_active=true&days=30")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -410,13 +410,13 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self.assertEqual(FakePersonaRepository.last_analytics_kwargs["days"], 30)
 
     def test_get_persona_analytics_summary_rejects_invalid_domain(self):
-        response = self.client.get("/analytics/summary?domain=finance")
+        response = self.client.get("/persona/analytics/summary?domain=finance")
         self.assertEqual(response.status_code, 422)
 
 
 class PersonaFeaturesRouterTests(unittest.TestCase):
-    """Covers /persona-features/ list/get/create plus the
-    /{persona_id}/features convenience endpoint."""
+    """Covers /persona/features/ list/get/create plus the
+    /persona/{persona_id}/features convenience endpoint."""
 
     def setUp(self):
         _patch_persona_repository(self)
@@ -438,10 +438,10 @@ class PersonaFeaturesRouterTests(unittest.TestCase):
             "feature_type": "numeric",
             "numeric_value": "180",
         }
-        response = self.client.post("/persona-features/", json=payload)
+        response = self.client.post("/persona/features/", json=payload)
         self.assertEqual(response.status_code, 201)
 
-        response = self.client.get(f"/persona-features/?persona_id={persona.persona_id}")
+        response = self.client.get(f"/persona/features/?persona_id={persona.persona_id}")
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(len(body), 1)
@@ -466,7 +466,7 @@ class PersonaFeaturesRouterTests(unittest.TestCase):
         )
         FakePersonaRepository.feature_store[feature_id] = feature
 
-        response = self.client.get(f"/{persona.persona_id}/features")
+        response = self.client.get(f"/persona/{persona.persona_id}/features")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -474,12 +474,12 @@ class PersonaFeaturesRouterTests(unittest.TestCase):
         self.assertEqual(body[0]["feature_code"], "source_system_count")
 
     def test_get_features_404_when_persona_missing(self):
-        response = self.client.get(f"/{uuid.uuid4()}/features")
+        response = self.client.get(f"/persona/{uuid.uuid4()}/features")
         self.assertEqual(response.status_code, 404)
 
 
 class PersonaHistoryRouterTests(unittest.TestCase):
-    """Covers /persona-history/ create/get."""
+    """Covers /persona/history/ create/get."""
 
     def setUp(self):
         _patch_persona_repository(self)
@@ -500,16 +500,16 @@ class PersonaHistoryRouterTests(unittest.TestCase):
             "change_reason": "Recomputed after CIR resolution batch",
             "model_version": "persona-engine-v1",
         }
-        response = self.client.post("/persona-history/", json=payload)
+        response = self.client.post("/persona/history/", json=payload)
         self.assertEqual(response.status_code, 201)
         history_id = response.json()["history_id"]
 
-        response = self.client.get(f"/persona-history/{history_id}")
+        response = self.client.get(f"/persona/history/{history_id}")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["new_persona_name"], "Savvy Retail Shopper #4f2a9c")
 
     def test_get_history_entry_not_found(self):
-        response = self.client.get(f"/persona-history/{uuid.uuid4()}")
+        response = self.client.get(f"/persona/history/{uuid.uuid4()}")
         self.assertEqual(response.status_code, 404)
 
 

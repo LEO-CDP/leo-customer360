@@ -80,7 +80,7 @@ for r in all_segment_routers:
 for r in all_metadata_routers:
     app.include_router(r, prefix="/api/v1")
 for r in all_persona_routers:
-    app.include_router(r, prefix="/api/v1/persona")
+    app.include_router(r, prefix="/api/v1")
 
 @app.on_event("startup")
 def _seed_core_data_on_startup() -> None:
