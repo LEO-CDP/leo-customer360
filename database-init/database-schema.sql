@@ -1708,7 +1708,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_events_default PARTITION OF custo
 -- EVENT CATALOG (governed cross-domain event vocabulary)
 ---------------------------------------------------
 CREATE TABLE IF NOT EXISTS customer360.cdp_event_catalog (
-    id BIGSERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_name TEXT UNIQUE NOT NULL,
     event_category TEXT NOT NULL CHECK (
         event_category IN (
@@ -1763,7 +1763,7 @@ COMMENT ON TABLE customer360.cdp_event_catalog IS 'Governed vocabulary of event_
 -- backend-system/identity_resolution/scripts/init_sample_data.py).
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
-    id BIGSERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Attribute identity. Matches the cdp_raw_profiles_stage column name when
     -- used as an identity-resolution matching key, otherwise matches the
@@ -2294,7 +2294,7 @@ CREATE INDEX IF NOT EXISTS idx_cdp_segments_json_rules ON customer360.cdp_segmen
 
 -- Parent
 CREATE TABLE IF NOT EXISTS customer360.graph_edges (
-    edge_id BIGSERIAL NOT NULL,
+    edge_id UUID NOT NULL DEFAULT gen_random_uuid(),
     from_id UUID NOT NULL,
     to_id UUID NOT NULL,
     from_type TEXT NOT NULL,

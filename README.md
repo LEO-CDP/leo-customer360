@@ -53,7 +53,7 @@ operations reference (ports, services, Keycloak realm/client setup).
 **Local development (infra in Docker, services run on the host):**
 
 ```bash
-./dev-start-all.sh   # postgres + redis + keycloak + MinIO; auto-seeds demo data if the DB is empty
+./dev-c360.sh   # postgres + redis + keycloak + MinIO; auto-seeds demo data if the DB is empty
 ```
 
 Then run `customer360-api` (`customer360-api/start.sh`) and the CIR worker

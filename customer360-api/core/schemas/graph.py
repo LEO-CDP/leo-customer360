@@ -25,5 +25,5 @@ class GraphEdgeCreate(GraphEdgeBase):
 
 class GraphEdgeRead(GraphEdgeBase):
     model_config = ConfigDict(from_attributes=True)
-    edge_id: int
+    edge_id: uuid.UUID
     created_at: Optional[datetime] = None

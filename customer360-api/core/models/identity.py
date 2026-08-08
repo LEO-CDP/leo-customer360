@@ -276,7 +276,9 @@ class CdpProfileAttribute(Base):
 
     __tablename__ = "cdp_profile_attributes"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
     attribute_internal_code: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     master_profile_column: Mapped[Optional[str]] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text, nullable=False)

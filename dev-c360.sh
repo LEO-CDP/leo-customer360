@@ -25,16 +25,18 @@
 #      If not empty, prints current DB row-count status for key tables.
 #
 # Usage:
-#   ./dev-start-all.sh              Start/create services, sync .env, run
+#   ./dev-c360.sh                   Start/create services, sync .env, run
 #                                    seed-demo only when DB is empty; otherwise
 #                                    print DB status counts.
-#   ./dev-start-all.sh --no-seed    Same, but skip the CIR demo data seed step.
-#   ./dev-start-all.sh reset        DESTRUCTIVE: `docker compose down -v`
+#   ./dev-c360.sh --no-seed         Same, but skip the CIR demo data seed step.
+#   ./dev-c360.sh restart           Restart only customer360-api,
+#                                    backend-system, and frontend-admin.
+#   ./dev-c360.sh reset             DESTRUCTIVE: `docker compose down -v`
 #                                    (drops the postgres/redis/minio volumes
 #                                    -- this also wipes Keycloak's
 #                                    db_keycloak and the MinIO dev bucket)
 #                                    then starts fresh and reseeds.
-#   ./dev-start-all.sh reset -y     Same as 'reset' but skips the confirmation
+#   ./dev-c360.sh reset -y          Same as 'reset' but skips the confirmation
 #                                    prompt (CI / automation).
 # =============================================================================
 set -euo pipefail
@@ -61,6 +63,7 @@ SKIP_CONFIRM="false"
 SKIP_SEED="false"
 for arg in "$@"; do
   case "$arg" in
+    restart) ACTION="restart" ;;
     reset) ACTION="reset" ;;
     -y|--yes) SKIP_CONFIRM="true" ;;
     --no-seed) SKIP_SEED="true" ;;
@@ -74,6 +77,19 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [ "$ACTION" = "restart" ]; then
+  echo "🔁 Restarting host services..."
+  echo "   - backend-system: ./${BACKEND_SYSTEM_DIR}/restart.sh"
+  (cd "$BACKEND_SYSTEM_DIR" && bash restart.sh)
+
+  echo "   - customer360-api: ./${CUSTOMER360_API_DIR}/restart.sh"
+  (cd "$CUSTOMER360_API_DIR" && bash restart.sh)
+
+  echo "   - frontend-admin: ./${FRONTEND_ADMIN_DIR}/restart.sh"
+  (cd "$FRONTEND_ADMIN_DIR" && bash restart.sh)
+  exit 0
+fi
 
 # --- docker compose v2 required (depends_on: condition: service_healthy) ---
 if docker compose version >/dev/null 2>&1; then
@@ -114,7 +130,7 @@ sync_env_keys() {
       if [ "$added" -eq 0 ]; then
         {
           echo ""
-          echo "# --- Added by dev-start-all.sh on $(date +%Y-%m-%d) from ${ENV_EXAMPLE_FILE} ---"
+          echo "# --- Added by dev-c360.sh on $(date +%Y-%m-%d) from ${ENV_EXAMPLE_FILE} ---"
         } >> "$ENV_FILE"
       fi
       echo "$line" >> "$ENV_FILE"
@@ -245,11 +261,14 @@ wait_for_completed() {
 
 wait_for_healthy "$POSTGRES_CONTAINER"
 wait_for_healthy "$REDIS_CONTAINER"
-# Keycloak is slow on first boot (~40s to start + 60s Docker start_period before
-# health probes count), so give it a longer leash than the other services.
-wait_for_healthy "$KEYCLOAK_CONTAINER" 90
 wait_for_healthy "$MINIO_CONTAINER"
 wait_for_completed "$MINIO_INIT_CONTAINER"
+
+if [[ "${SSO_LOGIN:-true}" == "true" ]]; then
+  # Keycloak is slow on first boot (~40s to start + 60s Docker start_period before
+  # health probes count), so give it a longer leash than the other services.
+  wait_for_healthy "$KEYCLOAK_CONTAINER" 90
+fi
 
 # =============================================================================
 # 4) Keycloak realm check -- no automated realm/client seed script exists in
@@ -365,11 +384,10 @@ get_host_service_status() {
 restart_host_services
 
 print_final_service_table() {
-  local postgres_status redis_status keycloak_status minio_status
+  local postgres_status redis_status minio_status
   local backend_status api_status frontend_status
   postgres_status="$(docker inspect -f '{{.State.Health.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || echo "unknown")"
   redis_status="$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER" 2>/dev/null || echo "unknown")"
-  keycloak_status="$(docker inspect -f '{{.State.Health.Status}}' "$KEYCLOAK_CONTAINER" 2>/dev/null || echo "unknown")"
   minio_status="$(docker inspect -f '{{.State.Health.Status}}' "$MINIO_CONTAINER" 2>/dev/null || echo "unknown")"
   backend_status="$(get_host_service_status "$SCRIPT_DIR/$BACKEND_SYSTEM_DIR/.dagster.pid")"
   api_status="$(get_host_service_status "$SCRIPT_DIR/$CUSTOMER360_API_DIR/.uvicorn.pid")"
@@ -386,18 +404,12 @@ print_final_service_table() {
   printf '%-12s | %-10s | %-25s\n' "api" "$api_status" "localhost:${API_PORT:-8008}"
   printf '%-12s | %-10s | %-25s\n' "frontend" "$frontend_status" "localhost:${FRONTEND_PORT:-8890}"
 
-  case "${SSO_LOGIN:-true}" in
-    true)
-      printf '%-12s | %-10s | %-25s\n' "keycloak" "$keycloak_status" "localhost:${KEYCLOAK_HOST_PORT:-8080}"
-      ;;
-    false)
-      printf '%-12s | %-10s | %-25s\n' "keycloak" "$keycloak_status" "SSO disabled"
-      ;;
-    *)
-      echo "❌ Error: SSO_LOGIN must be 'true' or 'false' in '${ENV_FILE}' (current: '${SSO_LOGIN:-}')." >&2
-      exit 1
-      ;;
-  esac
+  if [[ "${SSO_LOGIN:-true}" == "true" ]]; then
+    # Keycloak is optional when SSO_LOGIN=false, so only print its status when SSO_LOGIN=true.
+    local keycloak_status
+    keycloak_status="$(docker inspect -f '{{.State.Health.Status}}' "$KEYCLOAK_CONTAINER" 2>/dev/null || echo "unknown")"
+    printf '%-12s | %-10s | %-25s\n' "keycloak" "$keycloak_status" "localhost:${KEYCLOAK_HOST_PORT:-8080}"
+  fi
 }
 
 print_final_service_table

@@ -186,7 +186,7 @@ Then open **http://localhost:3000** — you should see 4 code locations
 one job. `scoring`/`analytics` are placeholders that finish in a couple
 seconds and log `started` then `done`. `identity_resolution_job` and
 `segmentation_job` both attempt a real Postgres connection, so have
-`./dev-start-all.sh` or `docker compose up postgres` running first;
+`./dev-c360.sh` or `docker compose up postgres` running first;
 `segmentation_poll_sensor` is RUNNING by default and will launch
 `segmentation_job` on its own within `SEGMENTATION_POLL_INTERVAL_SECONDS`
 (default 10s) of any `cdp_master_profiles` change, or click a job →

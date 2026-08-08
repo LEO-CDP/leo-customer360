@@ -295,8 +295,8 @@ ORDER BY opp.close_date ASC;
 
 **One-command startup:**
 ```bash
-./dev-start-all.sh            # bring up the full stack
-./dev-start-all.sh reset -y   # reset volumes and re-seed demo data
+./dev-c360.sh            # bring up the full stack
+./dev-c360.sh reset -y   # reset volumes and re-seed demo data
 ```
 
 **Real service ports** (verified from `docker-compose.yml` / `dev-docker-compose.yml`; do not assume common defaults):
