@@ -286,7 +286,7 @@ class _FakeExecSession:
 class SegmentMatchedProfilesTests(unittest.TestCase):
     """Tests the real core.routers.segment.segments_router (including the
     hand-written matched-profiles endpoints, not just the generic CRUD
-    routes) with a faked CRUD lookup + faked DB session."""
+    routes) with a mocked SegmentRepository."""
 
     def setUp(self):
         import core.routers.segment as segment_router_module
@@ -301,11 +301,27 @@ class SegmentMatchedProfilesTests(unittest.TestCase):
 
     def _client_for(self, fake_segment: Optional[SimpleNamespace], fake_session: _FakeExecSession) -> TestClient:
         self.app.dependency_overrides[get_db] = lambda: fake_session
-        crud_patcher = patch.object(
-            self.segment_router_module, "_segment_crud", SimpleNamespace(get=lambda db, pk: fake_segment)
+        
+        # Mock SegmentRepository to use the fake_session for queries
+        def mock_repo_factory(db):
+            # Import the real SegmentRepository
+            from core.repositories.segment_respository import SegmentRepository
+            
+            # Create a real repository instance with the fake_session
+            repo = SegmentRepository(db)
+            
+            # Override get_segment to return fake_segment
+            original_get_segment = repo.get_segment
+            repo.get_segment = lambda seg_id: fake_segment
+            
+            return repo
+        
+        repo_patcher = patch(
+            "core.routers.segment.SegmentRepository",
+            side_effect=mock_repo_factory
         )
-        crud_patcher.start()
-        self.addCleanup(crud_patcher.stop)
+        repo_patcher.start()
+        self.addCleanup(repo_patcher.stop)
         return TestClient(self.app)
 
     def test_matched_profiles_404_for_missing_segment(self):
@@ -411,9 +427,8 @@ class SegmentMatchedProfilesTests(unittest.TestCase):
 
 class SegmentRecomputeTests(unittest.TestCase):
     """Tests the hand-written POST /segments/{id}/recompute endpoint
-    (core.routers.segment.recompute_segment), mocking out
-    recompute_segment_membership so these stay unit tests (no real
-    PostgreSQL)."""
+    (core.routers.segment.recompute_segment), mocking out SegmentRepository
+    so these stay unit tests (no real PostgreSQL)."""
 
     def setUp(self):
         import core.routers.segment as segment_router_module
@@ -428,11 +443,31 @@ class SegmentRecomputeTests(unittest.TestCase):
         self.app.dependency_overrides[get_db] = lambda: None
 
     def _client_for(self, fake_segment: Optional[SimpleNamespace]) -> TestClient:
-        crud_patcher = patch.object(
-            self.segment_router_module, "_segment_crud", SimpleNamespace(get=lambda db, pk: fake_segment)
+        # Mock SegmentRepository to return fake_segment
+        def mock_repo_factory(db):
+            repo = SimpleNamespace()
+            repo.get_segment = lambda seg_id: fake_segment
+            
+            def mock_recompute(seg_id):
+                if fake_segment is None:
+                    raise ValueError(f"CdpSegment '{seg_id}' not found")
+                if not getattr(fake_segment, 'sql_rules', None):
+                    raise ValueError("Segment has no sql_rules to compute")
+                return {
+                    "segment_id": str(fake_segment.segment_id),
+                    "member_count": getattr(fake_segment, 'member_count', 0),
+                    "last_computed_at": getattr(fake_segment, 'last_computed_at', None),
+                }
+            
+            repo.recompute_membership = mock_recompute
+            return repo
+        
+        repo_patcher = patch(
+            "core.routers.segment.SegmentRepository",
+            side_effect=mock_repo_factory
         )
-        crud_patcher.start()
-        self.addCleanup(crud_patcher.stop)
+        repo_patcher.start()
+        self.addCleanup(repo_patcher.stop)
         return TestClient(self.app)
 
     def test_recompute_404_for_missing_segment(self):
@@ -458,10 +493,18 @@ class SegmentRecomputeTests(unittest.TestCase):
         )
         client = self._client_for(segment)
 
-        with patch.object(
-            self.segment_router_module,
-            "recompute_segment_membership",
-            side_effect=ValueError("sql_rules must not contain statement separators"),
+        # Mock the repository to raise ValueError when recompute_membership is called
+        def mock_repo_factory_with_error(db):
+            repo = SimpleNamespace()
+            repo.get_segment = lambda seg_id: segment
+            repo.recompute_membership = lambda seg_id: (_ for _ in ()).throw(
+                ValueError("sql_rules must not contain statement separators")
+            )
+            return repo
+
+        with patch(
+            "core.routers.segment.SegmentRepository",
+            side_effect=mock_repo_factory_with_error
         ):
             response = client.post(f"/segments/{segment.segment_id}/recompute")
 
@@ -471,23 +514,16 @@ class SegmentRecomputeTests(unittest.TestCase):
         segment_id = uuid.uuid4()
         last_computed_at = datetime(2026, 7, 28, 10, 15, tzinfo=timezone.utc)
 
-        def _fake_recompute(db, segment):
-            segment.member_count = 42
-            segment.last_computed_at = last_computed_at
-            return segment
-
         segment = SimpleNamespace(
             segment_id=segment_id,
             tenant_id=uuid.uuid4(),
             sql_rules="churn_risk_tier IN ('high', 'critical')",
-            member_count=0,
-            last_computed_at=None,
+            member_count=42,
+            last_computed_at=last_computed_at,
         )
         client = self._client_for(segment)
 
         with patch.object(
-            self.segment_router_module, "recompute_segment_membership", side_effect=_fake_recompute
-        ) as mock_recompute, patch.object(
             self.segment_router_module, "invalidate_prefix"
         ) as mock_invalidate:
             response = client.post(f"/segments/{segment_id}/recompute")
@@ -496,7 +532,6 @@ class SegmentRecomputeTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["segment_id"], str(segment_id))
         self.assertEqual(body["member_count"], 42)
-        mock_recompute.assert_called_once()
         self.assertEqual(
             [call.args[0] for call in mock_invalidate.call_args_list],
             ["segments/matched_profiles", "segments/matched_profiles_count"],

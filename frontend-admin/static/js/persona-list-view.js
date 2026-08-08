@@ -57,7 +57,7 @@ window.C360 = window.C360 || {};
     rowClickable: false,
     resourceLabel: "persona",
     fetch: function (params) {
-      return api("/customer-personas/", params);
+      return api("/persona/list", params);
     },
     onError: function (xhr) { showApiError("loading personas", xhr); },
     el: {
@@ -120,7 +120,7 @@ window.C360 = window.C360 || {};
   }
 
   function loadAnalytics() {
-    return api("/customer-personas/analytics/summary", analyticsParams())
+    return api("/persona/analytics/summary", analyticsParams())
       .done(function (summary) {
         updateKpis(summary || {});
         renderCategoryChart(summary || {});

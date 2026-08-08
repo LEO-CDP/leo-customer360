@@ -1,12 +1,11 @@
 """Unit tests for the Customer Persona Resolution ("identity understanding")
-endpoints in core.routers.identity: customer_personas_router,
+endpoints in core.routers.persona: customer_personas_router,
 persona_features_router, persona_score_details_router, persona_history_router,
 plus master_profiles_router's GET /{id}/persona and GET /{id}/persona-history.
 
-All hand-written routers here are tested the same way as
-test_identity_router.py's profile_links_router coverage: monkeypatch the
-module-level CRUD singleton(s) on core.routers.identity with in-memory
-fakes, no real PostgreSQL instance required.
+All CRUD routers here are tested by mocking core.routers.persona.PersonaRepository
+with an in-memory fake (same pattern as test_segment_router.py's
+SegmentMatchedProfilesTests), no real PostgreSQL instance required.
 """
 
 import unittest
@@ -20,96 +19,149 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import core.routers.identity as identity_router
+import core.routers.persona as persona_router
 from core.database import get_db
 
 DEMO_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 
 # ---------------------------------------------------------------------------
-# In-memory CRUD fakes (mirrors test_identity_router.py's FakeLinkCRUD)
+# In-memory PersonaRepository fake
 # ---------------------------------------------------------------------------
 
 
-class FakePersonaCRUD:
-    store: dict[uuid.UUID, SimpleNamespace] = {}
-    last_list_kwargs: dict[str, Any] = {}
-    last_list_skip_limit: tuple[int, int] = (0, 0)
+class FakePersonaRepository:
+    """Stands in for core.repositories.persona_repository.PersonaRepository:
+    an in-memory dict-backed store instead of a real database, so the
+    persona routers' HTTP-level wiring (status codes, request/response
+    schemas, filters) can be tested without SQLAlchemy/PostgreSQL."""
 
-    def __init__(self, model):
-        self.model = model
+    persona_store: dict[uuid.UUID, SimpleNamespace] = {}
+    feature_store: dict[uuid.UUID, SimpleNamespace] = {}
+    score_detail_store: dict[uuid.UUID, SimpleNamespace] = {}
+    history_store: dict[uuid.UUID, SimpleNamespace] = {}
+    last_list_kwargs: dict[str, Any] = {}
+    last_analytics_kwargs: dict[str, Any] = {}
+    analytics_summary_return: dict[str, Any] = {}
+
+    def __init__(self, session=None):
+        self.session = session
 
     @classmethod
     def reset(cls):
-        cls.store = {}
+        cls.persona_store = {}
+        cls.feature_store = {}
+        cls.score_detail_store = {}
+        cls.history_store = {}
         cls.last_list_kwargs = {}
-        cls.last_list_skip_limit = (0, 0)
+        cls.last_analytics_kwargs = {}
+        cls.analytics_summary_return = {}
 
-    def list(self, db, *, skip=0, limit=100, **filters):
-        FakePersonaCRUD.last_list_kwargs = filters
-        FakePersonaCRUD.last_list_skip_limit = (skip, limit)
-        results = list(FakePersonaCRUD.store.values())
+    # --- Customer Personas ---
+
+    def list_personas(
+        self,
+        tenant_id=None,
+        domain=None,
+        master_profile_id=None,
+        persona_code=None,
+        is_active=None,
+        skip=0,
+        limit=100,
+    ):
+        filters = {
+            "tenant_id": tenant_id,
+            "domain": domain,
+            "master_profile_id": master_profile_id,
+            "persona_code": persona_code,
+            "is_active": is_active,
+        }
+        FakePersonaRepository.last_list_kwargs = {k: v for k, v in filters.items() if v is not None}
+        results = list(FakePersonaRepository.persona_store.values())
         for field, value in filters.items():
             if value is not None:
                 results = [r for r in results if getattr(r, field, None) == value]
         return results[skip : skip + limit]
 
-    def get(self, db, pk: uuid.UUID) -> Optional[SimpleNamespace]:
-        return FakePersonaCRUD.store.get(pk)
+    def get_persona(self, persona_id: uuid.UUID) -> Optional[SimpleNamespace]:
+        return FakePersonaRepository.persona_store.get(persona_id)
 
-    def create(self, db, obj_in: dict[str, Any]) -> SimpleNamespace:
-        obj = SimpleNamespace(persona_id=uuid.uuid4(), computed_at=datetime.now(timezone.utc), **obj_in)
-        FakePersonaCRUD.store[obj.persona_id] = obj
+    def create_persona(self, payload: dict[str, Any]) -> SimpleNamespace:
+        obj = SimpleNamespace(
+            persona_id=uuid.uuid4(),
+            computed_at=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            **payload,
+        )
+        FakePersonaRepository.persona_store[obj.persona_id] = obj
         return obj
 
-    def update(self, db, db_obj: SimpleNamespace, obj_in: dict[str, Any]) -> SimpleNamespace:
-        for field, value in obj_in.items():
-            setattr(db_obj, field, value)
-        return db_obj
+    def update_persona(self, persona_id: uuid.UUID, updates: dict[str, Any]) -> SimpleNamespace:
+        obj = FakePersonaRepository.persona_store[persona_id]
+        for field, value in updates.items():
+            setattr(obj, field, value)
+        return obj
 
-    def delete(self, db, db_obj: SimpleNamespace) -> None:
-        FakePersonaCRUD.store.pop(db_obj.persona_id, None)
+    def delete_persona(self, persona_id: uuid.UUID) -> None:
+        FakePersonaRepository.persona_store.pop(persona_id, None)
 
+    def get_analytics_summary(self, tenant_id=None, domain=None, is_active=None, days=90) -> dict[str, Any]:
+        FakePersonaRepository.last_analytics_kwargs = {
+            "tenant_id": tenant_id,
+            "domain": domain,
+            "is_active": is_active,
+            "days": days,
+        }
+        return FakePersonaRepository.analytics_summary_return
 
-def _make_child_crud(pk_field: str, pk_factory):
-    """Builds a small in-memory CRUD fake class for the append-only
-    persona-features/score-details/history child tables (list/get/create
-    only -- no update/delete on these, matching the real routers)."""
+    # --- Persona Features ---
 
-    class _FakeChildCRUD:
-        store: dict[Any, SimpleNamespace] = {}
-        last_list_kwargs: dict[str, Any] = {}
+    def list_persona_features(self, persona_id=None, skip=0, limit=100):
+        results = list(FakePersonaRepository.feature_store.values())
+        if persona_id is not None:
+            results = [r for r in results if r.persona_id == persona_id]
+        return results[skip : skip + limit]
 
-        def __init__(self, model):
-            self.model = model
+    def get_persona_feature(self, feature_id: uuid.UUID) -> Optional[SimpleNamespace]:
+        return FakePersonaRepository.feature_store.get(feature_id)
 
-        @classmethod
-        def reset(cls):
-            cls.store = {}
-            cls.last_list_kwargs = {}
+    def create_persona_feature(self, payload: dict[str, Any]) -> SimpleNamespace:
+        obj = SimpleNamespace(feature_id=uuid.uuid4(), computed_at=datetime.now(timezone.utc), **payload)
+        FakePersonaRepository.feature_store[obj.feature_id] = obj
+        return obj
 
-        def list(self, db, *, skip=0, limit=100, **filters):
-            _FakeChildCRUD.last_list_kwargs = filters
-            results = list(_FakeChildCRUD.store.values())
-            for field, value in filters.items():
-                if value is not None:
-                    results = [r for r in results if getattr(r, field, None) == value]
-            return results[skip : skip + limit]
+    # --- Persona Score Details ---
 
-        def get(self, db, pk) -> Optional[SimpleNamespace]:
-            return _FakeChildCRUD.store.get(pk)
+    def list_persona_score_details(self, persona_id=None, skip=0, limit=100):
+        results = list(FakePersonaRepository.score_detail_store.values())
+        if persona_id is not None:
+            results = [r for r in results if r.persona_id == persona_id]
+        return results[skip : skip + limit]
 
-        def create(self, db, obj_in: dict[str, Any]) -> SimpleNamespace:
-            pk_value = obj_in.get(pk_field) or pk_factory()
-            obj = SimpleNamespace(**{pk_field: pk_value}, **{k: v for k, v in obj_in.items() if k != pk_field})
-            _FakeChildCRUD.store[pk_value] = obj
-            return obj
+    def get_persona_score_detail(self, score_id: uuid.UUID) -> Optional[SimpleNamespace]:
+        return FakePersonaRepository.score_detail_store.get(score_id)
 
-    return _FakeChildCRUD
+    def create_persona_score_detail(self, payload: dict[str, Any]) -> SimpleNamespace:
+        obj = SimpleNamespace(score_id=uuid.uuid4(), created_at=datetime.now(timezone.utc), **payload)
+        FakePersonaRepository.score_detail_store[obj.score_id] = obj
+        return obj
 
+    # --- Persona History ---
 
-FakeFeatureCRUD = _make_child_crud("feature_id", lambda: uuid.uuid4())
-FakeScoreDetailCRUD = _make_child_crud("score_id", lambda: uuid.uuid4())
-FakeHistoryCRUD = _make_child_crud("history_id", lambda: uuid.uuid4())
+    def list_persona_history(self, persona_id=None, skip=0, limit=100):
+        results = list(FakePersonaRepository.history_store.values())
+        if persona_id is not None:
+            results = [r for r in results if r.persona_id == persona_id]
+        return results[skip : skip + limit]
+
+    def get_persona_history(self, history_id: uuid.UUID) -> Optional[SimpleNamespace]:
+        return FakePersonaRepository.history_store.get(history_id)
+
+    def create_persona_history(self, payload: dict[str, Any]) -> SimpleNamespace:
+        obj = SimpleNamespace(history_id=uuid.uuid4(), changed_at=datetime.now(timezone.utc), **payload)
+        FakePersonaRepository.history_store[obj.history_id] = obj
+        return obj
 
 
 class _FakeScalarsResult:
@@ -197,18 +249,26 @@ def _fake_persona(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
+def _patch_persona_repository(test_case: unittest.TestCase) -> None:
+    """Shared setUp helper: resets the fake store and patches
+    core.routers.persona.PersonaRepository so every `PersonaRepository(db)`
+    call site in the router returns a FakePersonaRepository instance."""
+    FakePersonaRepository.reset()
+    repo_patcher = patch("core.routers.persona.PersonaRepository", side_effect=FakePersonaRepository)
+    repo_patcher.start()
+    test_case.addCleanup(repo_patcher.stop)
+
+    cache_patcher = patch("core.cache.get_redis_client", return_value=None)
+    cache_patcher.start()
+    test_case.addCleanup(cache_patcher.stop)
+
+
 class CustomerPersonasRouterTests(unittest.TestCase):
-    """Covers /customer-personas/ CRUD (list filters, get 200/404, create,
-    patch, delete 204/404, cache invalidation)."""
+    """Covers the customer personas CRUD (list filters, get 200/404, create,
+    patch, delete 204/404, cache invalidation, analytics summary)."""
 
     def setUp(self):
-        FakePersonaCRUD.reset()
-        self._original_crud = identity_router._persona_crud
-        identity_router._persona_crud = FakePersonaCRUD(identity_router.CdpCustomerPersona)
-
-        self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
-        self._cache_patcher.start()
-        self.addCleanup(self._cache_patcher.stop)
+        _patch_persona_repository(self)
 
         self._domain_patcher = patch(
             "core.utils.domains.get_active_domain_codes",
@@ -216,18 +276,14 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         )
         self._domain_patcher.start()
         self.addCleanup(self._domain_patcher.stop)
-        self.addCleanup(self._restore_crud)
 
         app = FastAPI()
-        app.include_router(identity_router.customer_personas_router)
+        app.include_router(persona_router.customer_personas_router)
         app.dependency_overrides[get_db] = lambda: None
         self.client = TestClient(app)
 
-    def _restore_crud(self):
-        identity_router._persona_crud = self._original_crud
-
     def test_create_persona(self):
-        response = self.client.post("/customer-personas/", json=_persona_payload())
+        response = self.client.post("/", json=_persona_payload())
         self.assertEqual(response.status_code, 201)
         body = response.json()
         self.assertEqual(body["persona_code"], "retail_high_value_customer")
@@ -235,16 +291,16 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self.assertEqual(body["computed_version"], 1)
 
     def test_create_persona_rejects_invalid_risk_level(self):
-        response = self.client.post("/customer-personas/", json=_persona_payload(risk_level="extreme"))
+        response = self.client.post("/", json=_persona_payload(risk_level="extreme"))
         self.assertEqual(response.status_code, 422)
 
     def test_create_persona_rejects_invalid_domain(self):
-        response = self.client.post("/customer-personas/", json=_persona_payload(domain="finance"))
+        response = self.client.post("/", json=_persona_payload(domain="finance"))
         self.assertEqual(response.status_code, 422)
 
     def test_create_persona_invalidates_cache(self):
-        with patch("core.routers.identity.invalidate_prefix") as mock_invalidate:
-            response = self.client.post("/customer-personas/", json=_persona_payload())
+        with patch("core.routers.persona.invalidate_prefix") as mock_invalidate:
+            response = self.client.post("/", json=_persona_payload())
         self.assertEqual(response.status_code, 201)
         mock_invalidate.assert_called_once_with("customer_personas")
 
@@ -252,10 +308,10 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         master_id = uuid.uuid4()
         matching = _fake_persona(master_profile_id=master_id)
         other = _fake_persona()
-        FakePersonaCRUD.store[matching.persona_id] = matching
-        FakePersonaCRUD.store[other.persona_id] = other
+        FakePersonaRepository.persona_store[matching.persona_id] = matching
+        FakePersonaRepository.persona_store[other.persona_id] = other
 
-        response = self.client.get(f"/customer-personas/?master_profile_id={master_id}")
+        response = self.client.get(f"/list?master_profile_id={master_id}")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -265,10 +321,10 @@ class CustomerPersonasRouterTests(unittest.TestCase):
     def test_list_filters_by_is_active(self):
         active = _fake_persona(is_active=True)
         inactive = _fake_persona(is_active=False)
-        FakePersonaCRUD.store[active.persona_id] = active
-        FakePersonaCRUD.store[inactive.persona_id] = inactive
+        FakePersonaRepository.persona_store[active.persona_id] = active
+        FakePersonaRepository.persona_store[inactive.persona_id] = inactive
 
-        response = self.client.get("/customer-personas/?is_active=true")
+        response = self.client.get("/list?is_active=true")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -279,11 +335,11 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         retail_persona = _fake_persona(domain="retail")
         banking_persona = _fake_persona(domain="banking")
         healthcare_persona = _fake_persona(domain="healthcare")
-        FakePersonaCRUD.store[retail_persona.persona_id] = retail_persona
-        FakePersonaCRUD.store[banking_persona.persona_id] = banking_persona
-        FakePersonaCRUD.store[healthcare_persona.persona_id] = healthcare_persona
+        FakePersonaRepository.persona_store[retail_persona.persona_id] = retail_persona
+        FakePersonaRepository.persona_store[banking_persona.persona_id] = banking_persona
+        FakePersonaRepository.persona_store[healthcare_persona.persona_id] = healthcare_persona
 
-        response = self.client.get("/customer-personas/?domain=healthcare")
+        response = self.client.get("/list?domain=healthcare")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -291,19 +347,19 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self.assertEqual(body[0]["persona_id"], str(healthcare_persona.persona_id))
 
     def test_list_rejects_invalid_domain(self):
-        response = self.client.get("/customer-personas/?domain=finance")
+        response = self.client.get("/list?domain=finance")
         self.assertEqual(response.status_code, 422)
 
     def test_get_persona_not_found(self):
-        response = self.client.get(f"/customer-personas/{uuid.uuid4()}")
+        response = self.client.get(f"/{uuid.uuid4()}")
         self.assertEqual(response.status_code, 404)
 
     def test_patch_persona(self):
         persona = _fake_persona()
-        FakePersonaCRUD.store[persona.persona_id] = persona
+        FakePersonaRepository.persona_store[persona.persona_id] = persona
 
         response = self.client.patch(
-            f"/customer-personas/{persona.persona_id}", json={"is_active": False, "risk_level": "high"}
+            f"/{persona.persona_id}", json={"is_active": False, "risk_level": "high"}
         )
 
         self.assertEqual(response.status_code, 200)
@@ -312,24 +368,24 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self.assertEqual(body["risk_level"], "high")
 
     def test_patch_persona_not_found(self):
-        response = self.client.patch(f"/customer-personas/{uuid.uuid4()}", json={"is_active": False})
+        response = self.client.patch(f"/{uuid.uuid4()}", json={"is_active": False})
         self.assertEqual(response.status_code, 404)
 
     def test_delete_persona(self):
         persona = _fake_persona()
-        FakePersonaCRUD.store[persona.persona_id] = persona
+        FakePersonaRepository.persona_store[persona.persona_id] = persona
 
-        response = self.client.delete(f"/customer-personas/{persona.persona_id}")
+        response = self.client.delete(f"/{persona.persona_id}")
 
         self.assertEqual(response.status_code, 204)
-        self.assertNotIn(persona.persona_id, FakePersonaCRUD.store)
+        self.assertNotIn(persona.persona_id, FakePersonaRepository.persona_store)
 
     def test_delete_persona_not_found(self):
-        response = self.client.delete(f"/customer-personas/{uuid.uuid4()}")
+        response = self.client.delete(f"/{uuid.uuid4()}")
         self.assertEqual(response.status_code, 404)
 
     def test_get_persona_analytics_summary(self):
-        payload = {
+        FakePersonaRepository.analytics_summary_return = {
             "total_personas": 10,
             "active_personas": 8,
             "inactive_personas": 2,
@@ -342,52 +398,38 @@ class CustomerPersonasRouterTests(unittest.TestCase):
             "by_value_tier": [{"value": "gold", "count": 3}],
         }
 
-        with patch("core.routers.identity.identity_crud.persona_analytics_summary", return_value=payload) as mock_summary:
-            response = self.client.get("/customer-personas/analytics/summary?domain=healthcare&is_active=true&days=30")
+        response = self.client.get("/analytics/summary?domain=healthcare&is_active=true&days=30")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["total_personas"], 10)
         self.assertEqual(body["active_personas"], 8)
         self.assertEqual(body["avg_confidence_score"], 0.8123)
-        mock_summary.assert_called_once()
-        _, kwargs = mock_summary.call_args
-        self.assertEqual(kwargs["domain"], "healthcare")
-        self.assertTrue(kwargs["is_active"])
-        self.assertEqual(kwargs["days"], 30)
+        self.assertEqual(FakePersonaRepository.last_analytics_kwargs["domain"], "healthcare")
+        self.assertTrue(FakePersonaRepository.last_analytics_kwargs["is_active"])
+        self.assertEqual(FakePersonaRepository.last_analytics_kwargs["days"], 30)
 
     def test_get_persona_analytics_summary_rejects_invalid_domain(self):
-        response = self.client.get("/customer-personas/analytics/summary?domain=finance")
+        response = self.client.get("/analytics/summary?domain=finance")
         self.assertEqual(response.status_code, 422)
 
 
 class PersonaFeaturesRouterTests(unittest.TestCase):
-    def setUp(self):
-        FakePersonaCRUD.reset()
-        FakeFeatureCRUD.reset()
-        self._original_persona_crud = identity_router._persona_crud
-        self._original_feature_crud = identity_router._persona_feature_crud
-        identity_router._persona_crud = FakePersonaCRUD(identity_router.CdpCustomerPersona)
-        identity_router._persona_feature_crud = FakeFeatureCRUD(identity_router.CdpPersonaFeature)
+    """Covers /persona-features/ list/get/create plus the
+    /{persona_id}/features convenience endpoint."""
 
-        self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
-        self._cache_patcher.start()
-        self.addCleanup(self._cache_patcher.stop)
-        self.addCleanup(self._restore)
+    def setUp(self):
+        _patch_persona_repository(self)
 
         app = FastAPI()
-        app.include_router(identity_router.customer_personas_router)
-        app.include_router(identity_router.persona_features_router)
+        app.include_router(persona_router.customer_personas_router)
+        app.include_router(persona_router.persona_features_router)
         app.dependency_overrides[get_db] = lambda: None
         self.client = TestClient(app)
 
-    def _restore(self):
-        identity_router._persona_crud = self._original_persona_crud
-        identity_router._persona_feature_crud = self._original_feature_crud
-
     def test_create_and_list_feature(self):
         persona = _fake_persona()
-        FakePersonaCRUD.store[persona.persona_id] = persona
+        FakePersonaRepository.persona_store[persona.persona_id] = persona
 
         payload = {
             "persona_id": str(persona.persona_id),
@@ -407,7 +449,7 @@ class PersonaFeaturesRouterTests(unittest.TestCase):
 
     def test_get_features_for_persona_via_customer_personas_endpoint(self):
         persona = _fake_persona()
-        FakePersonaCRUD.store[persona.persona_id] = persona
+        FakePersonaRepository.persona_store[persona.persona_id] = persona
         feature_id = uuid.uuid4()
         feature = SimpleNamespace(
             feature_id=feature_id,
@@ -422,9 +464,9 @@ class PersonaFeaturesRouterTests(unittest.TestCase):
             confidence_score=None,
             computed_at=datetime.now(timezone.utc),
         )
-        FakeFeatureCRUD.store[feature_id] = feature
+        FakePersonaRepository.feature_store[feature_id] = feature
 
-        response = self.client.get(f"/customer-personas/{persona.persona_id}/features")
+        response = self.client.get(f"/{persona.persona_id}/features")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -432,28 +474,20 @@ class PersonaFeaturesRouterTests(unittest.TestCase):
         self.assertEqual(body[0]["feature_code"], "source_system_count")
 
     def test_get_features_404_when_persona_missing(self):
-        response = self.client.get(f"/customer-personas/{uuid.uuid4()}/features")
+        response = self.client.get(f"/{uuid.uuid4()}/features")
         self.assertEqual(response.status_code, 404)
 
 
 class PersonaHistoryRouterTests(unittest.TestCase):
-    def setUp(self):
-        FakeHistoryCRUD.reset()
-        self._original_crud = identity_router._persona_history_crud
-        identity_router._persona_history_crud = FakeHistoryCRUD(identity_router.CdpPersonaHistory)
+    """Covers /persona-history/ create/get."""
 
-        self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
-        self._cache_patcher.start()
-        self.addCleanup(self._cache_patcher.stop)
-        self.addCleanup(self._restore)
+    def setUp(self):
+        _patch_persona_repository(self)
 
         app = FastAPI()
-        app.include_router(identity_router.persona_history_router)
+        app.include_router(persona_router.persona_history_router)
         app.dependency_overrides[get_db] = lambda: None
         self.client = TestClient(app)
-
-    def _restore(self):
-        identity_router._persona_history_crud = self._original_crud
 
     def test_create_and_get_history_entry(self):
         persona_id = uuid.uuid4()
@@ -481,7 +515,9 @@ class PersonaHistoryRouterTests(unittest.TestCase):
 
 class MasterProfilePersonaEndpointTests(unittest.TestCase):
     """Covers GET /master-profiles/{id}/persona and
-    GET /master-profiles/{id}/persona-history."""
+    GET /master-profiles/{id}/persona-history. These hand-written endpoints
+    query the DB session directly (db.get/db.execute), not via
+    PersonaRepository, so they're exercised with a fake Session instead."""
 
     def setUp(self):
         self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)

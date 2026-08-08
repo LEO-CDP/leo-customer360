@@ -11,7 +11,6 @@ from collections.abc import Iterable
 from typing import Any, Optional
 
 from fastapi import Depends, HTTPException, Query, Request
-from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
@@ -20,14 +19,17 @@ from core.crud.base import CRUDBase
 from core.crud.segmentation import DOMAIN_ATTRIBUTES_JOIN_SQL, recompute_segment_membership
 from core.database import get_db
 from core.init_core_data import list_tenant_ids, seed_default_segments_with_breakdown
-from core.models.identity import CdpProfileAttribute
 from core.models.segmentation import CdpSegment
+from core.repositories.segment_respository import SegmentRepository
 from core.routers._generic import build_crud_router
 from core.schemas.identity import MasterProfileRead
 from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
 from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 from core.utils.domains import validate_domain_value
 from core.utils.sql_safety import validate_sql_where_fragment
+
+# Exposed for test mocking
+_segment_crud = CRUDBase(CdpSegment)
 
 # Segment rules (see get_segment_matched_profiles below) query cdp_master_profiles
 # LEFT JOINed to cdp_domain_profiles (via DOMAIN_ATTRIBUTES_JOIN_SQL, aliased as
@@ -181,22 +183,20 @@ def get_segment_matched_profiles(
     """Runs the segment's ``sql_rules`` (validated as a safe WHERE-clause
     fragment) against ``cdp_master_profiles``, scoped to the segment's own
     tenant, and returns the currently-matching active profiles."""
-    segment = _get_segment_or_404(db, segment_id)
+    repo = SegmentRepository(db)
+    segment = repo.get_segment(segment_id)
+    if segment is None:
+        raise HTTPException(status_code=404, detail=f"CdpSegment '{segment_id}' not found")
+
     if not segment.sql_rules:
         return []
 
     where_fragment = _validated_where_fragment(segment.sql_rules)
-    stmt = text(
-        f"""
-        SELECT * FROM {settings.db_schema}.cdp_master_profiles
-        {DOMAIN_ATTRIBUTES_JOIN_SQL.format(schema=settings.db_schema)}
-        WHERE tenant_id = :tenant_id AND status_code = 1 AND ({where_fragment})
-        ORDER BY created_at DESC
-        LIMIT :limit OFFSET :skip
-        """
-    )
-    rows = db.execute(stmt, {"tenant_id": str(segment.tenant_id), "limit": limit, "skip": skip}).mappings().all()
-    return [dict(row) for row in rows]
+    try:
+        rows = repo.get_matched_profiles(segment_id, where_fragment, skip=skip, limit=limit)
+        return [dict(row) for row in rows]
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @segments_router.get("/{segment_id}/matched-profiles/count")
@@ -204,20 +204,20 @@ def get_segment_matched_profiles(
 def count_segment_matched_profiles(segment_id: uuid.UUID, db: Session = Depends(get_db)):
     """Same matching logic as ``get_segment_matched_profiles`` above, but
     returns just the total count (for pagination / summary display)."""
-    segment = _get_segment_or_404(db, segment_id)
+    repo = SegmentRepository(db)
+    segment = repo.get_segment(segment_id)
+    if segment is None:
+        raise HTTPException(status_code=404, detail=f"CdpSegment '{segment_id}' not found")
+
     if not segment.sql_rules:
         return {"count": 0}
 
     where_fragment = _validated_where_fragment(segment.sql_rules)
-    stmt = text(
-        f"""
-        SELECT count(*) FROM {settings.db_schema}.cdp_master_profiles
-        {DOMAIN_ATTRIBUTES_JOIN_SQL.format(schema=settings.db_schema)}
-        WHERE tenant_id = :tenant_id AND status_code = 1 AND ({where_fragment})
-        """
-    )
-    count = db.execute(stmt, {"tenant_id": str(segment.tenant_id)}).scalar_one()
-    return {"count": count}
+    try:
+        count = repo.count_matched_profiles(segment_id, where_fragment)
+        return {"count": count}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @segments_router.post("/{segment_id}/recompute")
@@ -227,25 +227,21 @@ def recompute_segment(segment_id: uuid.UUID, db: Session = Depends(get_db)):
     ``member_count``/``last_computed_at`` and syncing ``segment_tag`` into/out
     of ``cdp_master_profiles.segmentation_tags`` for matching/non-matching
     profiles."""
-    segment = _get_segment_or_404(db, segment_id)
-    if not segment.sql_rules:
-        raise HTTPException(status_code=400, detail="Segment has no sql_rules to compute")
-
+    repo = SegmentRepository(db)
     try:
-        recompute_segment_membership(db, segment)
+        result = repo.recompute_membership(segment_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        error_msg = str(exc)
+        if "not found" in error_msg:
+            raise HTTPException(status_code=404, detail=error_msg) from exc
+        raise HTTPException(status_code=400, detail=error_msg) from exc
 
     # Recomputed membership/tags can change the result of the read-only
     # matched-profiles endpoints, so their cached responses are now stale.
     invalidate_prefix("segments/matched_profiles")
     invalidate_prefix("segments/matched_profiles_count")
 
-    return {
-        "segment_id": str(segment.segment_id),
-        "member_count": segment.member_count,
-        "last_computed_at": segment.last_computed_at,
-    }
+    return result
 
 
 @segments_router.post("/admin/defaults/seed")
@@ -372,15 +368,6 @@ def get_recompute_job_status(run_id: str):
     return result
 
 
-def _segmentable_field(attribute: CdpProfileAttribute) -> str:
-    """SQL-safe field reference for the Audience Builder field picker: a bare
-    cdp_master_profiles column, or the dp.domain_attributes->>'key' JSONB path
-    (see DOMAIN_ATTRIBUTES_JOIN_SQL) for cdp_domain_profiles-sourced attributes."""
-    if getattr(attribute, "source_table", None) == "cdp_domain_profiles":
-        return f"dp.domain_attributes->>'{attribute.attribute_internal_code}'"
-    return attribute.master_profile_column or attribute.attribute_internal_code
-
-
 @segments_router.get("/segmentable-profile-attributes")
 @cache_response("segments/segmentable_profile_attributes", ttl=settings.cache_ttl_seconds)
 def get_segmentable_profile_attributes(
@@ -418,28 +405,8 @@ def get_segmentable_profile_attributes(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    stmt = select(CdpProfileAttribute).where(
-        CdpProfileAttribute.is_segmentable.is_(True),
-        CdpProfileAttribute.status == "ACTIVE",
-        CdpProfileAttribute.source_table.in_(_SEGMENTABLE_SOURCE_TABLES),
-    )
-    if domain:
-        stmt = stmt.where(CdpProfileAttribute.domain_scope.in_(["all", domain]))
-    stmt = stmt.order_by(CdpProfileAttribute.attribute_group, CdpProfileAttribute.display_order)
-
-    attributes = db.execute(stmt).scalars().all()
-    return [
-        {
-            "field": _segmentable_field(attribute),
-            "name": attribute.name,
-            "description": attribute.description,
-            "attribute_group": attribute.attribute_group,
-            "data_type": attribute.data_type,
-            "domain_scope": attribute.domain_scope,
-            "is_pii": attribute.is_pii,
-        }
-        for attribute in attributes
-    ]
+    repo = SegmentRepository(db)
+    return repo.get_segmentable_attributes(domain=domain)
 
 
 # The generic CRUD router's `GET /{item_id}` (registered above, inside

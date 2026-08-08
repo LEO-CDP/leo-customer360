@@ -22,9 +22,7 @@ from core.models.identity import (
     CdpIdentityIndex,
     CdpIdResolutionStatus,
     CdpMasterProfile,
-    CdpPersonaFeature,
     CdpPersonaHistory,
-    CdpPersonaScoreDetail,
     CdpProfileAttribute,
     CdpProfileLink,
     CdpProfileMergeHistory,
@@ -33,9 +31,6 @@ from core.models.identity import (
 from core.models.system import SysDomain
 from core.routers._generic import build_crud_router
 from core.schemas.identity import (
-    CustomerPersonaCreate,
-    CustomerPersonaRead,
-    CustomerPersonaUpdate,
     DomainAttributeUpsert,
     DomainProfileCreate,
     DomainProfileRead,
@@ -49,13 +44,9 @@ from core.schemas.identity import (
     MasterProfileListResponse,
     MasterProfileRead,
     MasterProfileUpdate,
-    PersonaFeatureCreate,
-    PersonaFeatureRead,
-    PersonaHistoryCreate,
-    PersonaHistoryRead,
     PersonaAnalyticsSummary,
-    PersonaScoreDetailCreate,
-    PersonaScoreDetailRead,
+    PersonaHistoryRead,
+    CustomerPersonaRead,
     ProfileAttributeCreate,
     ProfileAttributeRead,
     ProfileAttributeUpdate,
@@ -639,219 +630,6 @@ def create_profile_merge_history(payload: ProfileMergeHistoryCreate, db: Session
     return obj
 
 
-# --- Customer Personas ("identity understanding", computed by backend-system/identity_resolution's
-# PersonaResolutionEngine) -------------------------------------------------------
-
-customer_personas_router = APIRouter(prefix="/customer-personas", tags=["Identity Resolution - Customer Personas"])
-_persona_crud = CRUDBase(CdpCustomerPersona)
-
-
-@customer_personas_router.get("/", response_model=list[CustomerPersonaRead])
-@cache_response("customer_personas/list", ttl=settings.cache_ttl_seconds)
-def list_customer_personas(
-    tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None),
-    master_profile_id: Optional[uuid.UUID] = None,
-    persona_code: Optional[str] = None,
-    is_active: Optional[bool] = None,
-    skip: int = 0,
-    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
-    db: Session = Depends(get_db),
-):
-    try:
-        validate_domain_value(db, domain)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _persona_crud.list(
-        db,
-        skip=skip,
-        limit=limit,
-        tenant_id=tenant_id,
-        domain=domain,
-        master_profile_id=master_profile_id,
-        persona_code=persona_code,
-        is_active=is_active,
-    )
-
-
-@customer_personas_router.get("/analytics/summary", response_model=PersonaAnalyticsSummary)
-@cache_response("customer_personas/analytics_summary", ttl=settings.cache_ttl_seconds)
-def get_customer_persona_analytics_summary(
-    tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None),
-    is_active: Optional[bool] = None,
-    days: int = Query(default=90, ge=1, le=365),
-    db: Session = Depends(get_db),
-):
-    try:
-        validate_domain_value(db, domain)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return identity_crud.persona_analytics_summary(
-        db,
-        tenant_id=tenant_id,
-        domain=domain,
-        is_active=is_active,
-        days=days,
-    )
-
-
-@customer_personas_router.get("/{persona_id}", response_model=CustomerPersonaRead)
-@cache_response("customer_personas/item", ttl=settings.cache_ttl_seconds)
-def get_customer_persona(persona_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _persona_crud.get(db, persona_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
-    return obj
-
-
-@customer_personas_router.get("/{persona_id}/features", response_model=list[PersonaFeatureRead])
-@cache_response("customer_personas/features", ttl=settings.cache_ttl_seconds)
-def get_customer_persona_features(persona_id: uuid.UUID, db: Session = Depends(get_db)):
-    if _persona_crud.get(db, persona_id) is None:
-        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
-    return _persona_feature_crud.list(db, skip=0, limit=settings.api_max_page_size, persona_id=persona_id)
-
-
-@customer_personas_router.get("/{persona_id}/score-details", response_model=list[PersonaScoreDetailRead])
-@cache_response("customer_personas/score_details", ttl=settings.cache_ttl_seconds)
-def get_customer_persona_score_details(persona_id: uuid.UUID, db: Session = Depends(get_db)):
-    if _persona_crud.get(db, persona_id) is None:
-        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
-    return _persona_score_detail_crud.list(db, skip=0, limit=settings.api_max_page_size, persona_id=persona_id)
-
-
-@customer_personas_router.post("/", response_model=CustomerPersonaRead, status_code=201)
-def create_customer_persona(payload: CustomerPersonaCreate, db: Session = Depends(get_db)):
-    try:
-        validate_domain_value(db, payload.domain)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    obj = _persona_crud.create(db, payload.model_dump())
-    invalidate_prefix("customer_personas")
-    return obj
-
-
-@customer_personas_router.patch("/{persona_id}", response_model=CustomerPersonaRead)
-def update_customer_persona(persona_id: uuid.UUID, payload: CustomerPersonaUpdate, db: Session = Depends(get_db)):
-    obj = _persona_crud.get(db, persona_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
-    obj = _persona_crud.update(db, obj, payload.model_dump(exclude_unset=True))
-    invalidate_prefix("customer_personas")
-    return obj
-
-
-@customer_personas_router.delete("/{persona_id}", status_code=204)
-def delete_customer_persona(persona_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _persona_crud.get(db, persona_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
-    _persona_crud.delete(db, obj)
-    invalidate_prefix("customer_personas")
-
-
-# --- Persona Features (explainability input signals; append-only) --------------
-
-persona_features_router = APIRouter(prefix="/persona-features", tags=["Identity Resolution - Customer Personas"])
-_persona_feature_crud = CRUDBase(CdpPersonaFeature)
-
-
-@persona_features_router.get("/", response_model=list[PersonaFeatureRead])
-@cache_response("persona_features/list", ttl=settings.cache_ttl_seconds)
-def list_persona_features(
-    persona_id: Optional[uuid.UUID] = None,
-    skip: int = 0,
-    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
-    db: Session = Depends(get_db),
-):
-    return _persona_feature_crud.list(db, skip=skip, limit=limit, persona_id=persona_id)
-
-
-@persona_features_router.get("/{feature_id}", response_model=PersonaFeatureRead)
-@cache_response("persona_features/item", ttl=settings.cache_ttl_seconds)
-def get_persona_feature(feature_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _persona_feature_crud.get(db, feature_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail=f"CdpPersonaFeature '{feature_id}' not found")
-    return obj
-
-
-@persona_features_router.post("/", response_model=PersonaFeatureRead, status_code=201)
-def create_persona_feature(payload: PersonaFeatureCreate, db: Session = Depends(get_db)):
-    obj = _persona_feature_crud.create(db, payload.model_dump())
-    invalidate_prefix("persona_features")
-    return obj
-
-
-# --- Persona Score Details (explainability score breakdown; append-only) -------
-
-persona_score_details_router = APIRouter(
-    prefix="/persona-score-details", tags=["Identity Resolution - Customer Personas"]
-)
-_persona_score_detail_crud = CRUDBase(CdpPersonaScoreDetail)
-
-
-@persona_score_details_router.get("/", response_model=list[PersonaScoreDetailRead])
-@cache_response("persona_score_details/list", ttl=settings.cache_ttl_seconds)
-def list_persona_score_details(
-    persona_id: Optional[uuid.UUID] = None,
-    skip: int = 0,
-    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
-    db: Session = Depends(get_db),
-):
-    return _persona_score_detail_crud.list(db, skip=skip, limit=limit, persona_id=persona_id)
-
-
-@persona_score_details_router.get("/{score_id}", response_model=PersonaScoreDetailRead)
-@cache_response("persona_score_details/item", ttl=settings.cache_ttl_seconds)
-def get_persona_score_detail(score_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _persona_score_detail_crud.get(db, score_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail=f"CdpPersonaScoreDetail '{score_id}' not found")
-    return obj
-
-
-@persona_score_details_router.post("/", response_model=PersonaScoreDetailRead, status_code=201)
-def create_persona_score_detail(payload: PersonaScoreDetailCreate, db: Session = Depends(get_db)):
-    obj = _persona_score_detail_crud.create(db, payload.model_dump())
-    invalidate_prefix("persona_score_details")
-    return obj
-
-
-# --- Persona History (audit trail of material persona changes; append-only) ----
-
-persona_history_router = APIRouter(prefix="/persona-history", tags=["Identity Resolution - Customer Personas"])
-_persona_history_crud = CRUDBase(CdpPersonaHistory)
-
-
-@persona_history_router.get("/", response_model=list[PersonaHistoryRead])
-@cache_response("persona_history/list", ttl=settings.cache_ttl_seconds)
-def list_persona_history(
-    persona_id: Optional[uuid.UUID] = None,
-    skip: int = 0,
-    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
-    db: Session = Depends(get_db),
-):
-    return _persona_history_crud.list(db, skip=skip, limit=limit, persona_id=persona_id)
-
-
-@persona_history_router.get("/{history_id}", response_model=PersonaHistoryRead)
-@cache_response("persona_history/item", ttl=settings.cache_ttl_seconds)
-def get_persona_history_entry(history_id: uuid.UUID, db: Session = Depends(get_db)):
-    obj = _persona_history_crud.get(db, history_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail=f"CdpPersonaHistory '{history_id}' not found")
-    return obj
-
-
-@persona_history_router.post("/", response_model=PersonaHistoryRead, status_code=201)
-def create_persona_history_entry(payload: PersonaHistoryCreate, db: Session = Depends(get_db)):
-    obj = _persona_history_crud.create(db, payload.model_dump())
-    invalidate_prefix("persona_history")
-    return obj
-
-
 # --- Resolution status (real-time throttle state) -------------------------------
 
 resolution_status_router = APIRouter(prefix="/resolution-status", tags=["Identity Resolution - Matching Rules"])
@@ -877,9 +655,5 @@ all_identity_routers = [
     profile_attributes_router,
     identity_index_router,
     profile_merge_history_router,
-    customer_personas_router,
-    persona_features_router,
-    persona_score_details_router,
-    persona_history_router,
     resolution_status_router,
 ]
