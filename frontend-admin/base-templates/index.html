@@ -53,7 +53,7 @@
   <script src="https://unpkg.com/tippy.js@6"></script>
 
   <!-- App CSS -->
-  <link rel="stylesheet" href="static/css/app.css" />
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}" />
 </head>
 
 <body class="h-full text-slate-800 antialiased">
@@ -151,9 +151,7 @@
     </footer>
   </div>
 
-
-  <!-- Settings modal is appended to <body> from static/templates/settings-modal.html by static/js/main.js -->
-
+  <!-- Main configs for Customer 360 Admin -->
   <script>
     /* Customer 360 Admin -- Server-rendered config constants only */
     window.C360_SERVER_CONFIG = Object.freeze({
@@ -161,30 +159,32 @@
       apiBase: "{{ api_base }}",
       tenantId: "{{ tenant_id }}"
     });
-  </script>    
-  <script src="static/js/config.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/formatters.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/templates.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/utils.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/matrix-heatmap.js?cb={{ cache_bust }}"></script>
+  </script>
+  <script src="{{ url_for('static', path='js/common/config.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/common/formatters.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/common/templates.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/common/utils.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/common/matrix-heatmap.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/common/data-table-view.js') }}?cb={{ cache_bust }}"></script>
 
   <!-- load router.js first -->
-  <script src="static/js/router.js?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/common/router.js') }}?cb={{ cache_bust }}"></script>
 
   <!-- load all view modules -->
-  <script src="static/js/data-table-view.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/list-view.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/profile-detail-view.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/overview-view.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/analytics.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/segments-view.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/campaign-view.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/persona-list-view.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/attributes-view.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/data-source-view.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/scoring-model-view.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/placeholder-view.js?cb={{ cache_bust }}"></script>
-  <script src="static/js/main.js?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/profile-list-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/profile-detail-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/overview-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/analytics.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/segments-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/campaign-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/persona-list-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/attributes-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/data-source-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/scoring-model-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/placeholder-view.js') }}?cb={{ cache_bust }}"></script>
+
+  <!-- load main.js last -->
+  <script src="{{ url_for('static', path='js/main.js') }}?cb={{ cache_bust }}"></script>
 </body>
 
 </html>

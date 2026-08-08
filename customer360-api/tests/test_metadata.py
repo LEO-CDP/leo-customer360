@@ -6,6 +6,7 @@ so the tests are fast and hermetic.
 
 import unittest
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -31,7 +32,7 @@ class SysMetadataTests(unittest.TestCase):
         stack = ExitStack()
         stack.enter_context(
             patch(
-                "core.routers.metadata.engine.connect",
+                "core.repositories.metadata_repository.engine.connect",
                 MagicMock(
                     __enter__=MagicMock(return_value=MagicMock(execute=MagicMock())),
                     __exit__=MagicMock(),
@@ -39,10 +40,10 @@ class SysMetadataTests(unittest.TestCase):
             )
         )
         stack.enter_context(
-            patch("core.routers.metadata.get_redis_client", return_value=MagicMock(ping=MagicMock()))
+            patch("core.repositories.metadata_repository.get_redis_client", return_value=MagicMock(ping=MagicMock()))
         )
         stack.enter_context(
-            patch("core.routers.metadata.socket.create_connection", return_value=MagicMock(close=MagicMock()))
+            patch("core.repositories.metadata_repository.socket.create_connection", return_value=MagicMock(close=MagicMock()))
         )
         return stack
 
@@ -63,7 +64,7 @@ class SysMetadataTests(unittest.TestCase):
         self.assertEqual(body["services"]["dagster"]["status"], "reachable")
 
     def test_metadata_postgres_unreachable_marks_degraded(self):
-        with patch("core.routers.metadata.engine.connect", side_effect=RuntimeError("db down")):
+        with patch("core.repositories.metadata_repository.engine.connect", side_effect=RuntimeError("db down")):
             response = TestClient(self.app).get("/metadata/")
 
         self.assertEqual(response.status_code, 200)
@@ -74,11 +75,11 @@ class SysMetadataTests(unittest.TestCase):
     def test_metadata_redis_disabled_is_healthy(self):
         with (
             patch(
-                "core.routers.metadata.engine.connect",
+                "core.repositories.metadata_repository.engine.connect",
                 MagicMock(__enter__=MagicMock(return_value=MagicMock(execute=MagicMock())), __exit__=MagicMock()),
             ),
-            patch("core.routers.metadata.get_redis_client", return_value=None),
-            patch("core.routers.metadata.socket.create_connection", return_value=MagicMock(close=MagicMock())),
+            patch("core.repositories.metadata_repository.get_redis_client", return_value=None),
+            patch("core.repositories.metadata_repository.socket.create_connection", return_value=MagicMock(close=MagicMock())),
         ):
             response = TestClient(self.app).get("/metadata/")
 
@@ -90,11 +91,11 @@ class SysMetadataTests(unittest.TestCase):
     def test_metadata_dagster_unreachable(self):
         with (
             patch(
-                "core.routers.metadata.engine.connect",
+                "core.repositories.metadata_repository.engine.connect",
                 MagicMock(__enter__=MagicMock(return_value=MagicMock(execute=MagicMock())), __exit__=MagicMock()),
             ),
-            patch("core.routers.metadata.get_redis_client", return_value=MagicMock(ping=MagicMock())),
-            patch("core.routers.metadata.socket.create_connection", side_effect=OSError("refused")),
+            patch("core.repositories.metadata_repository.get_redis_client", return_value=MagicMock(ping=MagicMock())),
+            patch("core.repositories.metadata_repository.socket.create_connection", side_effect=OSError("refused")),
         ):
             response = TestClient(self.app).get("/metadata/")
 
@@ -105,7 +106,7 @@ class SysMetadataTests(unittest.TestCase):
 
     def test_dagster_metadata_returns_configured_services(self):
         with patch(
-            "core.routers.metadata.socket.create_connection",
+            "core.repositories.metadata_repository.socket.create_connection",
             return_value=MagicMock(close=MagicMock()),
         ):
             response = TestClient(self.app).get("/metadata/dagster")
@@ -126,7 +127,7 @@ class SysMetadataTests(unittest.TestCase):
 
     def test_dagster_metadata_surfaces_unreachable_status(self):
         with patch(
-            "core.routers.metadata.socket.create_connection",
+            "core.repositories.metadata_repository.socket.create_connection",
             side_effect=OSError("timeout"),
         ):
             response = TestClient(self.app).get("/metadata/dagster")
@@ -241,6 +242,7 @@ class SysMetadataTests(unittest.TestCase):
         )
         mock_db = MagicMock()
         mock_db.get.return_value = data_source
+        mock_db.refresh.side_effect = lambda obj: setattr(obj, "updated_at", datetime.now(timezone.utc))
         self.app.dependency_overrides[get_db] = lambda: mock_db
 
         patch_response = TestClient(self.app).patch(
@@ -273,6 +275,11 @@ class SysMetadataTests(unittest.TestCase):
         self.assertEqual(body[0]["scoring_model_name"], "churn_prediction_v2")
         self.assertEqual(body[0]["display_name"], "XGBoost Churn Predictor")
         self.assertEqual(body[0]["model_type"], "classification")
+
+        executed_stmt = mock_db.execute.call_args.args[0]
+        rendered_sql = str(executed_stmt)
+        self.assertIn("ORDER BY", rendered_sql)
+        self.assertIn("cdp_scoring_models.updated_at DESC", rendered_sql)
 
     def test_metadata_scoring_model_get_success_and_not_found(self):
         model = CdpScoringModel(
@@ -333,6 +340,7 @@ class SysMetadataTests(unittest.TestCase):
         )
         mock_db = MagicMock()
         mock_db.get.return_value = model
+        mock_db.refresh.side_effect = lambda obj: setattr(obj, "updated_at", datetime.now(timezone.utc))
         self.app.dependency_overrides[get_db] = lambda: mock_db
 
         patch_response = TestClient(self.app).patch(

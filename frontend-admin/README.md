@@ -14,6 +14,21 @@ jQuery, and Handlebars templates. It renders multiple API-backed views:
 All business data is loaded from `customer360-api` via AJAX (`static/js/config.js`).
 `app.py` in this folder only serves static assets and server-injected config.
 
+## Static asset loading
+
+The SPA shell in `base-templates/index.html` loads CSS and JavaScript through
+FastAPI's `url_for('static', ...)` helper. This ensures assets resolve
+correctly from `/static/` when the app is served from the root, behind a proxy,
+or from a non-root deployment path.
+
+When adding a new script or stylesheet, prefer a pattern like:
+
+```html
+<script src="{{ url_for('static', path='js/new-module.js') }}?cb={{ cache_bust }}"></script>
+```
+
+Avoid hard-coded relative paths such as `static/js/...`.
+
 ## Recent change (important)
 
 - Master profiles list pagination moved from `skip/limit + Load more` to
@@ -32,8 +47,7 @@ work with existing endpoint shapes.
 
 ```
 app.py                             FastAPI app serving index + static files
-jinja/index.html                   main HTML shell
-jinja/config.js.j2                 server-rendered config payload
+base-templates/index.html          main HTML shell
 
 static/css/app.css                 frontend styles
 

@@ -3,7 +3,6 @@
  * which reads PostgreSQL. Nothing here is hardcoded demo data.
  *
  * This file is the single source of truth for the API client and helpers.
- * When served via frontend-admin/app.py, the Jinja template (jinja/config.js.j2)
  * renders C360_SERVER_CONFIG with environment-injected values. This file reads
  * that global if available, otherwise falls back to defaults. */
 window.C360 = window.C360 || {};
