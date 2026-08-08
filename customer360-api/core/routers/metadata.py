@@ -8,9 +8,10 @@ core.repositories.metadata_repository.
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from core.database import get_db
 from core.models.identity import CdpScoringModel
 from core.models.system import SysDataSource
@@ -84,7 +85,7 @@ def list_metadata_data_sources(
     tenant_id: uuid.UUID = DEFAULT_TENANT_ID,
     status: int | None = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
     repository: MetadataRepository = Depends(get_metadata_repository),
 ) -> list[SysDataSource]:
     """Returns tenant-scoped rows from ``sys_data_source`` for connector setup UIs."""
@@ -146,7 +147,7 @@ def list_metadata_scoring_models(
     status: str | None = None,
     model_type: str | None = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
     repository: MetadataRepository = Depends(get_metadata_repository),
 ) -> list[CdpScoringModel]:
     """Returns catalog rows from ``cdp_scoring_models``."""

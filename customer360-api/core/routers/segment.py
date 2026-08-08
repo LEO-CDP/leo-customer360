@@ -21,7 +21,7 @@ from core.database import get_db
 from core.init_core_data import list_tenant_ids, seed_default_segments_with_breakdown
 from core.models.segmentation import CdpSegment
 from core.repositories.segment_respository import SegmentRepository
-from core.routers._generic import build_crud_router
+from core.routers._generic import build_crud_router, insert_before_item_routes
 from core.schemas.identity import MasterProfileRead
 from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
 from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
@@ -50,14 +50,12 @@ segments_router = build_crud_router(
     update_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
 )
 
-_segment_crud = CRUDBase(CdpSegment)
-
 PLATFORM_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin"}
 TENANT_ADMIN_ROLES = PLATFORM_ADMIN_ROLES | {"tenant_admin", "admin"}
 
 
-def _get_segment_or_404(db: Session, segment_id: uuid.UUID) -> CdpSegment:
-    segment = _segment_crud.get(db, segment_id)
+def _get_segment_or_404(repo: SegmentRepository, segment_id: uuid.UUID) -> CdpSegment:
+    segment = repo.get_segment(segment_id)
     if segment is None:
         raise HTTPException(status_code=404, detail=f"CdpSegment '{segment_id}' not found")
     return segment
@@ -184,9 +182,7 @@ def get_segment_matched_profiles(
     fragment) against ``cdp_master_profiles``, scoped to the segment's own
     tenant, and returns the currently-matching active profiles."""
     repo = SegmentRepository(db)
-    segment = repo.get_segment(segment_id)
-    if segment is None:
-        raise HTTPException(status_code=404, detail=f"CdpSegment '{segment_id}' not found")
+    segment = _get_segment_or_404(repo, segment_id)
 
     if not segment.sql_rules:
         return []
@@ -205,9 +201,7 @@ def count_segment_matched_profiles(segment_id: uuid.UUID, db: Session = Depends(
     """Same matching logic as ``get_segment_matched_profiles`` above, but
     returns just the total count (for pagination / summary display)."""
     repo = SegmentRepository(db)
-    segment = repo.get_segment(segment_id)
-    if segment is None:
-        raise HTTPException(status_code=404, detail=f"CdpSegment '{segment_id}' not found")
+    segment = _get_segment_or_404(repo, segment_id)
 
     if not segment.sql_rules:
         return {"count": 0}
@@ -409,22 +403,9 @@ def get_segmentable_profile_attributes(
     return repo.get_segmentable_attributes(domain=domain)
 
 
-# The generic CRUD router's `GET /{item_id}` (registered above, inside
-# build_crud_router()) uses an untyped path template ("/segments/{item_id}",
-# with the uuid.UUID conversion happening in the handler signature, not the
-# path itself) -- so it fully matches ANY single-segment GET path, including
-# the literal "/segmentable-profile-attributes" route just defined. Since
-# Starlette dispatches to the first fully-matching route in registration
-# order, that earlier route would otherwise shadow this one (returning a 422
-# "invalid UUID" instead of ever calling get_segmentable_profile_attributes).
-# Move this route's just-appended APIRoute ahead of the generic "/{item_id}"
-# GET route to fix that.
-_segmentable_attrs_route = segments_router.routes.pop()
-_item_id_get_index = next(
-    i
-    for i, route in enumerate(segments_router.routes)
-    if getattr(route, "path", None) == "/segments/{item_id}" and "GET" in getattr(route, "methods", set())
-)
-segments_router.routes.insert(_item_id_get_index, _segmentable_attrs_route)
+# Static sub-path added after build_crud_router(); must be reordered ahead of
+# the generic "/{item_id}" routes or it'd be shadowed by them (see
+# insert_before_item_routes docstring).
+insert_before_item_routes(segments_router)
 
 all_segment_routers = [segments_router]

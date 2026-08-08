@@ -416,13 +416,19 @@ _raw_crud = CRUDBase(CdpRawProfileStage)
 @cache_response("raw_profiles/list", ttl=settings.cache_ttl_seconds)
 def list_raw_profiles(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|healthcare|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None),
     source_system: Optional[str] = None,
     status_code: Optional[int] = None,
     skip: int = 0,
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
     db: Session = Depends(get_db),
 ):
+    # DB-backed validation (sys_domain) instead of a hardcoded regex, matching
+    # every other domain-filtered endpoint (master-profiles, personas, content).
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _raw_crud.list(
         db,
         skip=skip,
@@ -438,11 +444,15 @@ def list_raw_profiles(
 @cache_response("raw_profiles/count", ttl=settings.cache_ttl_seconds)
 def count_raw_profiles_endpoint(
     tenant_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|healthcare|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None),
     source_system: Optional[str] = None,
     status_code: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "count": _raw_crud.count(
             db, tenant_id=tenant_id, domain=domain, source_system=source_system, status_code=status_code
