@@ -24,8 +24,8 @@ window.C360 = window.C360 || {};
     "analytics": "dashboard/analytics",
 
     "attributes-list": "metadata/attributes-list",
-    "data-source-list": "metadata/data-source-list",
-    "scoring-model-list": "metadata/scoring-model-list",
+    "data-source-list": "data-source/data-source-list",
+    "scoring-model-list": "scoring/scoring-model-list",
 
     "profile-details": "profile/profile-details",
     "profiles-list": "profile/profiles-list",
@@ -38,7 +38,7 @@ window.C360 = window.C360 || {};
     "engagement": "profile/engagement",
     "activity": "profile/activity",
     "timeline": "profile/timeline",
-    "scoring": "profile/scoring",
+    "scoring": "profile/profile-scoring",
     "persona": "profile/persona",
     "linked-raw-profiles": "profile/linked-raw-profiles",
     "personalized-items": "profile/personalized-items",
