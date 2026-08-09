@@ -1,6 +1,6 @@
 /* Customer 360 Admin -- Reporting Overview dashboard.
  * Fetches core-customer360-api /reporting/* endpoints (see
- * customer360-api/core/routers/reporting.py) and renders KPI cards plus
+ * customer360-api/core/routers/reporting_api.py) and renders KPI cards plus
  * Chart.js visualizations: processing funnel, profile counts by domain,
  * raw profiles by source system, identity graph channel coverage, and a
  * list of the top duplicate (merged) master profiles. */

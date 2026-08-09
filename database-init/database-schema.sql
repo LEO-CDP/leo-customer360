@@ -1380,7 +1380,7 @@ CREATE INDEX IF NOT EXISTS idx_cdp_profile_links_status ON customer360.cdp_profi
 WHERE
     status = 'ACTIVE';
 
--- Backs GET /master-profiles/{id}/links (core/routers/identity.py) and the
+-- Backs GET /master-profiles/{id}/links (core/routers/identity_api.py) and the
 -- reporting duplicate-master queries (core/crud/identity.py), which both
 -- filter/group by master_profile_id -- without this, those lookups fall back
 -- to a full sequential scan of cdp_profile_links once the table reaches

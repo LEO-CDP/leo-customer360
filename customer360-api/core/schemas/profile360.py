@@ -1,6 +1,6 @@
 """Response schemas for the Customer 360 profile dashboard aggregate
 endpoints (see core/crud/profile360.py and the ``/master-profiles/{id}/...``
-routes in core/routers/identity.py)."""
+routes in core/routers/identity_api.py)."""
 
 from datetime import datetime
 from decimal import Decimal

@@ -7,7 +7,7 @@ Current behavior is intentional in this codebase:
 - API docs mark Events endpoints as read-only.
 
 Evidence:
-- customer360-api/core/routers/events.py: read-only docstring and list/get-only intent.
+- customer360-api/core/routers/events_api.py: read-only docstring and list/get-only intent.
 - docs/customer360-api.md: Events documented as read-only stream.
 
 ## 2) Target behavior you want

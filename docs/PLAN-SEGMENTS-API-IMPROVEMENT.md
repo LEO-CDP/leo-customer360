@@ -2,11 +2,11 @@
 
 ## 1) Why Segments APIs are missing currently
 
-Most of the Segments API surface **already exists** (`core/routers/segment.py`), so this is a gap-filling plan, not a from-scratch build:
+Most of the Segments API surface **already exists** (`core/routers/segment_api.py`), so this is a gap-filling plan, not a from-scratch build:
 
 - **Existing today**: full CRUD (`/api/v1/segments/`) via the generic router factory, plus two read-only endpoints that execute a segment's `sql_rules` live against `cdp_master_profiles` (`GET /{id}/matched-profiles`, `GET /{id}/matched-profiles/count`), plus an admin `POST /segments/admin/defaults/seed` to seed system-default segments per tenant. Rule-fragment safety is enforced both at write time (`core/schemas/segmentation.py` validators) and again immediately before every execution (`core/utils/sql_safety.py`), defending against rows written outside the API (e.g. `core/init_core_data.py`'s direct ORM inserts).
 
-- **What's missing**: `cdp_segments` has `member_count` and `last_computed_at` columns, but **nothing ever populates them** — `matched-profiles`/`matched-profiles/count` run a live query but never write the result back onto the segment row. There is also no mechanism that writes the segment's `segment_tag` into `cdp_master_profiles.segmentation_tags` for matching profiles, even though `core/routers/content.py` already reads `segmentation_tags` to drive content recommendations — i.e., the consumer of segment membership exists, but nothing produces the data it depends on.
+- **What's missing**: `cdp_segments` has `member_count` and `last_computed_at` columns, but **nothing ever populates them** — `matched-profiles`/`matched-profiles/count` run a live query but never write the result back onto the segment row. There is also no mechanism that writes the segment's `segment_tag` into `cdp_master_profiles.segmentation_tags` for matching profiles, even though `core/routers/content_api.py` already reads `segmentation_tags` to drive content recommendations — i.e., the consumer of segment membership exists, but nothing produces the data it depends on.
 
 - **No dry-run rule validation**: Admins/AI agents building a segment in the jQuery QueryBuilder UI have no way to preview match count/sample profiles for a rule tree *before* saving it as a segment row — `sql_rules` must already be persisted to test it.
 
@@ -40,7 +40,7 @@ Most of the Segments API surface **already exists** (`core/routers/segment.py`),
 
 ### Phase 1: Recompute endpoint (2–3 hours) — ✅ DONE
 > Implemented: `core/crud/segmentation.py::recompute_segment_membership`,
-> `POST /api/v1/segments/{segment_id}/recompute` in `core/routers/segment.py`,
+> `POST /api/v1/segments/{segment_id}/recompute` in `core/routers/segment_api.py`,
 > cache invalidation, and unit tests in `tests/test_segmentation_crud.py` +
 > `tests/test_segment_router.py::SegmentRecomputeTests`. Verified end-to-end
 > against a live dev PostgreSQL instance.
@@ -49,7 +49,7 @@ Most of the Segments API surface **already exists** (`core/routers/segment.py`),
    - Runs a tenant-scoped `SELECT master_profile_id FROM cdp_master_profiles WHERE tenant_id = :tenant_id AND status_code = 1 AND (<where_fragment>)`.
    - In one transaction: `UPDATE cdp_master_profiles SET segmentation_tags = array_append(...)` for newly-matching rows lacking the tag, and `array_remove(...)` for rows that have the tag but no longer match.
    - Updates the segment's `member_count` (matched row count) and `last_computed_at = now()`.
-2. Add route in `core/routers/segment.py`:
+2. Add route in `core/routers/segment_api.py`:
    ```python
    @segments_router.post("/{segment_id}/recompute")
    def recompute_segment(segment_id: uuid.UUID, db: Session = Depends(get_db)):

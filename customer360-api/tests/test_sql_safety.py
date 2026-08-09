@@ -1,7 +1,7 @@
 """Unit tests for core.utils.sql_safety -- the injection-safety validation
 applied to CdpSegment.sql_rules / final_generated_sql, both at write time
 (core/schemas/segmentation.py) and again immediately before every execution
-(core/routers/segment.py).
+(core/routers/segment_api.py).
 """
 
 import unittest

@@ -1,9 +1,9 @@
 """Unit tests for the Customer Persona Resolution ("identity understanding")
-endpoints in core.routers.persona: customer_personas_router,
+endpoints in core.routers.persona_api: customer_personas_router,
 persona_features_router, persona_score_details_router, persona_history_router,
 plus master_profiles_router's GET /{id}/persona and GET /{id}/persona-history.
 
-All CRUD routers here are tested by mocking core.routers.persona.PersonaRepository
+All CRUD routers here are tested by mocking core.routers.persona_api.PersonaRepository
 with an in-memory fake (same pattern as test_segment_router.py's
 SegmentMatchedProfilesTests), no real PostgreSQL instance required.
 """
@@ -18,8 +18,8 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import core.routers.identity as identity_router
-import core.routers.persona as persona_router
+import core.routers.identity_api as identity_router
+import core.routers.persona_api as persona_router
 from core.database import get_db
 
 DEMO_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -251,10 +251,10 @@ def _fake_persona(**overrides) -> SimpleNamespace:
 
 def _patch_persona_repository(test_case: unittest.TestCase) -> None:
     """Shared setUp helper: resets the fake store and patches
-    core.routers.persona.PersonaRepository so every `PersonaRepository(db)`
+    core.routers.persona_api.PersonaRepository so every `PersonaRepository(db)`
     call site in the router returns a FakePersonaRepository instance."""
     FakePersonaRepository.reset()
-    repo_patcher = patch("core.routers.persona.PersonaRepository", side_effect=FakePersonaRepository)
+    repo_patcher = patch("core.routers.persona_api.PersonaRepository", side_effect=FakePersonaRepository)
     repo_patcher.start()
     test_case.addCleanup(repo_patcher.stop)
 
@@ -299,7 +299,7 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
 
     def test_create_persona_invalidates_cache(self):
-        with patch("core.routers.persona.invalidate_prefix") as mock_invalidate:
+        with patch("core.routers.persona_api.invalidate_prefix") as mock_invalidate:
             response = self.client.post("/persona/", json=_persona_payload())
         self.assertEqual(response.status_code, 201)
         mock_invalidate.assert_called_once_with("customer_personas")

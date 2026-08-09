@@ -90,11 +90,11 @@ class FakeProfileAttributeCRUD:
 
 class ProfileAttributesUUIDRouterTests(unittest.TestCase):
     def _build_client(self):
-        sys.modules.pop("core.routers.identity", None)
+        sys.modules.pop("core.routers.identity_api", None)
         with patch("core.routers._generic.CRUDBase", FakeProfileAttributeCRUD), patch(
             "core.cache.get_redis_client", return_value=None
         ):
-            identity_router = importlib.import_module("core.routers.identity")
+            identity_router = importlib.import_module("core.routers.identity_api")
             with patch.object(identity_router, "validate_domain_value", return_value=None):
                 app = FastAPI()
                 app.include_router(identity_router.profile_attributes_router)

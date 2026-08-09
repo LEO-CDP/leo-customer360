@@ -25,7 +25,7 @@ from core.utils.sql_safety import validate_sql_where_fragment
 # existing bare-column sql_rules fragments (e.g. "last_activity_at < ...")
 # keep resolving unambiguously against cdp_master_profiles. New domain-scoped
 # rules reference it explicitly, e.g. dp.domain_attributes->>'risk_segment'
-# (see GET /segments/segmentable-profile-attributes in core/routers/segment.py).
+# (see GET /segments/segmentable-profile-attributes in core/routers/segment_api.py).
 # Duplicated in backend-system/segmentation/segmentation/recompute.py (separately
 # deployed service) -- keep both in sync if this SQL changes.
 DOMAIN_ATTRIBUTES_JOIN_SQL = """

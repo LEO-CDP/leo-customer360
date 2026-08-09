@@ -246,15 +246,15 @@ Additional Segmentation Endpoints:
 
 This file was updated from the latest route declarations in:
 - customer360-api/app.py
-- customer360-api/core/routers/crm.py
-- customer360-api/core/routers/relations.py
-- customer360-api/core/routers/identity.py
-- customer360-api/core/routers/segment.py
-- customer360-api/core/routers/events.py
-- customer360-api/core/routers/content.py
-- customer360-api/core/routers/graph.py
-- customer360-api/core/routers/reporting.py
-- customer360-api/core/routers/metadata.py
+- customer360-api/core/routers/crm_api.py
+- customer360-api/core/routers/relations_api.py
+- customer360-api/core/routers/identity_api.py
+- customer360-api/core/routers/segment_api.py
+- customer360-api/core/routers/events_api.py
+- customer360-api/core/routers/content_api.py
+- customer360-api/core/routers/graph_api.py
+- customer360-api/core/routers/reporting_api.py
+- customer360-api/core/routers/metadata_api.py
 - customer360-api/core/routers/user_api.py
 
 ## Endpoint Matrix (Machine-Readable)

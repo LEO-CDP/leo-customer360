@@ -14,7 +14,7 @@ SELECT/FROM/JOIN.
 
 This is defense-in-depth, not a full SQL parser. It's applied both when a
 segment is created/updated (core/schemas/segmentation.py) AND again
-immediately before every execution (core/routers/segment.py), so rows
+immediately before every execution (core/routers/segment_api.py), so rows
 seeded/migrated outside the API (e.g. core/init_core_data.py, which builds
 ORM objects directly and never goes through the Pydantic schemas) are still
 checked at execution time.
@@ -76,7 +76,7 @@ def _reject_control_characters(value: str, field_name: str) -> None:
 
 
 def _reject_unbalanced_parentheses(value: str, field_name: str) -> None:
-    """Both call sites (core/routers/segment.py) wrap ``sql_rules`` in one
+    """Both call sites (core/routers/segment_api.py) wrap ``sql_rules`` in one
     extra pair of parentheses before interpolating it into a query. An
     unbalanced fragment could close that wrapping paren early and change how
     the remainder of the surrounding, otherwise-fixed query text is parsed,

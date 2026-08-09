@@ -21,16 +21,16 @@ from core.auth import auth_middleware
 from core.config import settings
 from core.database import engine
 from core.init_core_data import init_core_data
-from core.routers.content import all_content_routers
-from core.routers.crm import all_crm_routers
-from core.routers.events import all_events_routers
-from core.routers.graph import router as graph_router
-from core.routers.identity import all_identity_routers
-from core.routers.persona import all_persona_routers
-from core.routers.relations import all_relations_routers
-from core.routers.reporting import router as reporting_router
-from core.routers.segment import all_segment_routers
-from core.routers.metadata import all_metadata_routers
+from core.routers.content_api import all_content_routers
+from core.routers.crm_api import all_crm_routers
+from core.routers.events_api import all_events_routers
+from core.routers.graph_api import router as graph_router
+from core.routers.identity_api import all_identity_routers
+from core.routers.persona_api import all_persona_routers
+from core.routers.relations_api import all_relations_routers
+from core.routers.reporting_api import router as reporting_router
+from core.routers.segment_api import all_segment_routers
+from core.routers.metadata_api import all_metadata_routers
 from core.routers.user_api import all_user_routers
 
 logging.basicConfig(level=logging.INFO)

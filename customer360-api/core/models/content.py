@@ -5,7 +5,7 @@ New table (not in the original database-schema.sql) -- a lightweight content
 library that the ``/content-items/recommended`` endpoint ranks per master
 profile by ``segment_tags`` overlap with the profile's ``segmentation_tags``,
 so recommendations are computed from real PostgreSQL data rather than
-hardcoded in the frontend. See core/routers/content.py.
+hardcoded in the frontend. See core/routers/content_api.py.
 """
 
 import uuid
