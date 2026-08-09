@@ -31,6 +31,7 @@ from core.routers.relations import all_relations_routers
 from core.routers.reporting import router as reporting_router
 from core.routers.segment import all_segment_routers
 from core.routers.metadata import all_metadata_routers
+from core.routers.user_api import all_user_routers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -64,6 +65,8 @@ app.middleware("http")(auth_middleware)
 # CIR core models first (primary focus of this API), then supporting CRM /
 # relations / graph entities.
 for r in all_identity_routers:
+    app.include_router(r, prefix="/api/v1")
+for r in all_user_routers:
     app.include_router(r, prefix="/api/v1")
 app.include_router(reporting_router, prefix="/api/v1")
 for r in all_relations_routers:

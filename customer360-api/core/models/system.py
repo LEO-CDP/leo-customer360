@@ -26,7 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.models.base import Base
 
@@ -91,6 +91,11 @@ class SysUser(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=text("now()"), nullable=False)
     
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, server_default=text("'{}'::jsonb"))
+    
+    # ORM relationship to linked SSO identities (1-to-many)
+    sso_identities: Mapped[list["SysUserInfo"]] = relationship(
+        "SysUserInfo", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class SysUserInfo(Base):
@@ -127,6 +132,9 @@ class SysUserInfo(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
     
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, server_default=text("'{}'::jsonb"))
+    
+    # ORM relationship back to SysUser
+    user: Mapped["SysUser"] = relationship("SysUser", back_populates="sso_identities")
 
 
 class SysDomain(Base):
