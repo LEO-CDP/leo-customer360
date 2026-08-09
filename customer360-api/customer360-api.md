@@ -130,29 +130,29 @@ Profile Merge History:
 - POST /api/v1/profile-merge-history/
 
 Customer Personas:
-- GET /api/v1/customer-personas/
-- GET /api/v1/customer-personas/analytics/summary
-- GET /api/v1/customer-personas/{persona_id}
-- GET /api/v1/customer-personas/{persona_id}/features
-- GET /api/v1/customer-personas/{persona_id}/score-details
-- POST /api/v1/customer-personas/
-- PATCH /api/v1/customer-personas/{persona_id}
-- DELETE /api/v1/customer-personas/{persona_id}
+- GET /api/v1/persona/list
+- GET /api/v1/persona/analytics/summary
+- GET /api/v1/persona/{persona_id}
+- GET /api/v1/persona/{persona_id}/features
+- GET /api/v1/persona/{persona_id}/score-details
+- POST /api/v1/persona/
+- PATCH /api/v1/persona/{persona_id}
+- DELETE /api/v1/persona/{persona_id}
 
 Persona Features:
-- GET /api/v1/persona-features/
-- GET /api/v1/persona-features/{feature_id}
-- POST /api/v1/persona-features/
+- GET /api/v1/persona/features/
+- GET /api/v1/persona/features/{feature_id}
+- POST /api/v1/persona/features/
 
 Persona Score Details:
-- GET /api/v1/persona-score-details/
-- GET /api/v1/persona-score-details/{score_id}
-- POST /api/v1/persona-score-details/
+- GET /api/v1/persona/score-details/
+- GET /api/v1/persona/score-details/{score_id}
+- POST /api/v1/persona/score-details/
 
 Persona History:
-- GET /api/v1/persona-history/
-- GET /api/v1/persona-history/{history_id}
-- POST /api/v1/persona-history/
+- GET /api/v1/persona/history/
+- GET /api/v1/persona/history/{history_id}
+- POST /api/v1/persona/history/
 
 Resolution Status:
 - GET /api/v1/resolution-status/
@@ -221,7 +221,7 @@ Additional Segmentation Endpoints:
 - Some resources intentionally do not expose full CRUD:
   - profile-links: no PATCH, no /count
   - profile-merge-history: append/read only
-  - persona-features, persona-score-details, persona-history: read/create only
+  - persona/features, persona/score-details, persona/history: read/create only
   - graph-edges: no PATCH
   - events: custom ingest/list/detail APIs
 - Trailing slash behavior follows router definitions. Keep client paths aligned with the list above.
@@ -361,23 +361,23 @@ resource,method,auth_expectation
 /api/v1/profile-merge-history/,GET,bearer_if_sso
 /api/v1/profile-merge-history/{merge_id},GET,bearer_if_sso
 /api/v1/profile-merge-history/,POST,bearer_if_sso
-/api/v1/customer-personas/,GET,bearer_if_sso
-/api/v1/customer-personas/analytics/summary,GET,bearer_if_sso
-/api/v1/customer-personas/{persona_id},GET,bearer_if_sso
-/api/v1/customer-personas/{persona_id}/features,GET,bearer_if_sso
-/api/v1/customer-personas/{persona_id}/score-details,GET,bearer_if_sso
-/api/v1/customer-personas/,POST,bearer_if_sso
-/api/v1/customer-personas/{persona_id},PATCH,bearer_if_sso
-/api/v1/customer-personas/{persona_id},DELETE,bearer_if_sso
-/api/v1/persona-features/,GET,bearer_if_sso
-/api/v1/persona-features/{feature_id},GET,bearer_if_sso
-/api/v1/persona-features/,POST,bearer_if_sso
-/api/v1/persona-score-details/,GET,bearer_if_sso
-/api/v1/persona-score-details/{score_id},GET,bearer_if_sso
-/api/v1/persona-score-details/,POST,bearer_if_sso
-/api/v1/persona-history/,GET,bearer_if_sso
-/api/v1/persona-history/{history_id},GET,bearer_if_sso
-/api/v1/persona-history/,POST,bearer_if_sso
+/api/v1/persona/list,GET,bearer_if_sso
+/api/v1/persona/analytics/summary,GET,bearer_if_sso
+/api/v1/persona/{persona_id},GET,bearer_if_sso
+/api/v1/persona/{persona_id}/features,GET,bearer_if_sso
+/api/v1/persona/{persona_id}/score-details,GET,bearer_if_sso
+/api/v1/persona/,POST,bearer_if_sso
+/api/v1/persona/{persona_id},PATCH,bearer_if_sso
+/api/v1/persona/{persona_id},DELETE,bearer_if_sso
+/api/v1/persona/features/,GET,bearer_if_sso
+/api/v1/persona/features/{feature_id},GET,bearer_if_sso
+/api/v1/persona/features/,POST,bearer_if_sso
+/api/v1/persona/score-details/,GET,bearer_if_sso
+/api/v1/persona/score-details/{score_id},GET,bearer_if_sso
+/api/v1/persona/score-details/,POST,bearer_if_sso
+/api/v1/persona/history/,GET,bearer_if_sso
+/api/v1/persona/history/{history_id},GET,bearer_if_sso
+/api/v1/persona/history/,POST,bearer_if_sso
 /api/v1/resolution-status/,GET,bearer_if_sso
 /api/v1/reporting/summary,GET,bearer_if_sso
 /api/v1/reporting/master-profiles/duplicates,GET,bearer_if_sso

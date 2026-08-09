@@ -26,6 +26,7 @@ from core.routers.crm import all_crm_routers
 from core.routers.events import all_events_routers
 from core.routers.graph import router as graph_router
 from core.routers.identity import all_identity_routers
+from core.routers.persona import all_persona_routers
 from core.routers.relations import all_relations_routers
 from core.routers.reporting import router as reporting_router
 from core.routers.segment import all_segment_routers
@@ -78,7 +79,8 @@ for r in all_segment_routers:
     app.include_router(r, prefix="/api/v1")
 for r in all_metadata_routers:
     app.include_router(r, prefix="/api/v1")
-
+for r in all_persona_routers:
+    app.include_router(r, prefix="/api/v1")
 
 @app.on_event("startup")
 def _seed_core_data_on_startup() -> None:

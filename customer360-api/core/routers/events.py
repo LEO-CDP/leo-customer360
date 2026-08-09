@@ -18,6 +18,7 @@ from core.database import get_db
 from core.models.events import CdpRawEvent
 from core.models.identity import CdpRawProfileStage
 from core.schemas.events import EventCreate, EventRead
+from core.utils.domains import validate_domain_value
 
 router = APIRouter(prefix="/events", tags=["Behavioral Events"])
 
@@ -154,7 +155,7 @@ def _resolve_raw_profile_id(db: Session, payload: EventCreate) -> uuid.UUID:
 def list_events(
     tenant_id: Optional[uuid.UUID] = None,
     master_profile_id: Optional[uuid.UUID] = None,
-    domain: Optional[str] = Query(default=None, pattern="^(retail|banking|healthcare|real_estate|travel|media|education)$"),
+    domain: Optional[str] = Query(default=None),
     channel: Optional[str] = None,
     event_category: Optional[str] = None,
     event_name: Optional[str] = None,
@@ -164,6 +165,13 @@ def list_events(
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
     db: Session = Depends(get_db),
 ):
+    # DB-backed validation (sys_domain) instead of a hardcoded regex, matching
+    # every other domain-filtered endpoint (master-profiles, personas, content).
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     stmt = select(CdpRawEvent)
     if tenant_id is not None:
         stmt = stmt.where(CdpRawEvent.tenant_id == tenant_id)

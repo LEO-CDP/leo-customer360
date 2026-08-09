@@ -4,7 +4,7 @@ Serves the static single-page admin UI (index.html + static/) -- plain
 HTML/CSS/JS using Tailwind, jQuery and Handlebars via CDN.
 
 All profile/business data is fetched client-side, live, from customer360-api.
-The dynamic jinja/index.html injects configuration and cache-busting headers.
+The dynamic base-templates/index.html injects configuration and cache-busting headers.
 
 Run with:
     uvicorn app:app --reload
@@ -55,7 +55,7 @@ APP_PORT = int(os.getenv("PORT", "8890"))
 APP_START_TIME = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
 # Setup Templates directory mapping
-templates_dir = BASE_DIR / "jinja"
+templates_dir = BASE_DIR / "base-templates"
 if not templates_dir.exists():
     logger.warning(f"Templates directory not found at {templates_dir}. Creating empty directory.")
     templates_dir.mkdir(parents=True, exist_ok=True)

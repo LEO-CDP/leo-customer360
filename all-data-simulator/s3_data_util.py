@@ -14,7 +14,7 @@ class S3DataUtil:
     files to an S3-compatible bucket. Connection settings default to the
     same MINIO_* env vars used by the project's dev MinIO stack (see
     dev-docker-compose.yml / .env.example), so it works out of the box
-    against `./manage-c360.sh` / `./dev-start-all.sh` locally.
+    against `./manage-c360.sh` / `./dev-c360.sh` locally.
     """
 
     def __init__(

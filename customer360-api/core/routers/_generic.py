@@ -104,3 +104,27 @@ def build_crud_router(
         invalidate_prefix(cache_prefix)
 
     return router
+
+
+def insert_before_item_routes(router: APIRouter) -> None:
+    """Moves the APIRoute most recently appended to ``router`` (i.e. the last
+    entry in ``router.routes``) so it's registered ahead of the generic
+    ``GET/PATCH/DELETE /{item_id}`` routes added by :func:`build_crud_router`.
+
+    Necessary because those routes use an untyped path template
+    ("/{item_id}", with pk_type conversion happening in the handler
+    signature rather than the path itself) so they match ANY single-segment
+    path -- including literal static sub-paths like "/segmentable-profile-
+    attributes" added afterwards via ``@router.get(...)`` decorators.
+    Starlette dispatches to the first fully-matching route in registration
+    order, so without this the static route would be shadowed by "/{item_id}"
+    (returning a 422 "invalid UUID" instead of ever running).
+
+    Call this immediately after decorating a new static (non-parametrized)
+    route onto a router returned by :func:`build_crud_router`.
+    """
+    new_route = router.routes.pop()
+    item_id_index = next(
+        i for i, route in enumerate(router.routes) if "{item_id}" in getattr(route, "path", "")
+    )
+    router.routes.insert(item_id_index, new_route)

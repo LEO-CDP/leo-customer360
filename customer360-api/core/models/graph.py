@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Text, text
+from sqlalchemy import Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -23,9 +23,11 @@ class GraphEdge(Base):
     __tablename__ = "graph_edges"
 
     # Composite primary key (edge_id, relation), matching the partitioned
-    # table definition. edge_id is still globally unique (BIGSERIAL on the
+    # table definition. edge_id is still globally unique (UUID on the
     # parent), so it's convenient to look up/filter on edge_id alone too.
-    edge_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    edge_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
     relation: Mapped[str] = mapped_column(Text, primary_key=True)
 
     from_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)

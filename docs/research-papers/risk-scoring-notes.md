@@ -245,7 +245,7 @@ cd backend-system/identity_resolution
 .venv/bin/python -m pytest tests/test_persona_engine.py -k risk_level -v
 ./run_tests.sh
 cd ../..
-./dev-start-all.sh reset -y
+./dev-c360.sh reset -y
 ```
 
 ## 9. Limitations and Future Work

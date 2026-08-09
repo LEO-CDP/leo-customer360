@@ -54,7 +54,7 @@ Production / full stack (Postgres, Redis, Keycloak, CIR, API):
 Local dev / infra-only stack (Postgres, Redis, Keycloak, MinIO) while running API/CIR directly on the host:
 
 ```bash
-./dev-start-all.sh
+./dev-c360.sh
 ```
 
 Raw `docker compose` equivalents:
@@ -162,7 +162,7 @@ For faster iteration, run the API and CIR worker directly on the host while keep
 docker compose -f dev-docker-compose.yml build
 
 # Terminal 1: Start infra-only
-./dev-start-all.sh
+./dev-c360.sh
 
 # Terminal 2: Start the API
 cd customer360-api

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 ###############################################################################
 # Customer 360 / Identity Resolution API
+#
 # Restarts the API: stop.sh followed by start.sh.
 ###############################################################################
+
 set -Eeuo pipefail
 
 PROJECT_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,44 +21,78 @@ NC="\033[0m"
 
 mkdir -p "$LOG_DIR"
 
-# Echo to the console and append a timestamped, color-free copy to LOG_FILE.
+###############################################################################
+# Logging
+###############################################################################
+
+# Echo to console and append a timestamped, color-free copy to LOG_FILE.
 log() {
     local msg="$1"
+
     echo -e "$msg"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') $msg" | sed -E 's/\x1b\[[0-9;]*m//g' >>"$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $msg" \
+        | sed -E 's/\x1b\[[0-9;]*m//g' \
+        >> "$LOG_FILE"
 }
 
 ###############################################################################
-# Ensure .env exists (symlink to ../.env if missing) -- dev mode only, skip
-# when running inside a Docker container.
+# Ensure .env exists
+#
+# Dev mode:
+#   If service-local .env is missing, create a symlink to ../.env.
+#
+# Docker:
+#   Skip this because environment variables should be injected by Docker.
 ###############################################################################
+
 if [ ! -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] && [ ! -f /.dockerenv ]; then
     if [ -f "$PROJECT_HOME/../.env" ]; then
-        log "${YELLOW}${ENV_FILE} not found. Creating symlink to ../.env...${NC}"
+        log "${YELLOW}[ENV] ${ENV_FILE} not found${NC}"
+        log "${YELLOW}[ENV] Linking to ../.env${NC}"
+
         ln -s ../.env "$ENV_FILE"
     fi
 fi
 
 ###############################################################################
-# Load .env so SSO_LOGIN (and other settings) can be reported before restart.
+# Load environment
 ###############################################################################
+
 if [ -f "$ENV_FILE" ]; then
+    log "${GREEN}[ENV] Loading environment${NC} | ${ENV_FILE}"
+
     set -a
     # shellcheck disable=SC1090
     source "$ENV_FILE"
     set +a
-fi
-
-###############################################################################
-# SSO_LOGIN controls whether the API enforces Keycloak auth on requests.
-# This is security-critical, so it must always be visible in the log.
-###############################################################################
-if [ "${SSO_LOGIN:-false}" = "true" ]; then
-    log "${GREEN}SSO_LOGIN=true -- API authentication is ENABLED (Keycloak token required).${NC}"
 else
-    log "${RED}SSO_LOGIN=false -- API authentication is DISABLED (all requests allowed).${NC}"
+    log "${YELLOW}[ENV] ${ENV_FILE} not found${NC} | Using environment defaults"
 fi
 
-log "${GREEN}Restarting Customer 360 API...${NC}"
+###############################################################################
+# Authentication status
+###############################################################################
+
+# SSO_LOGIN controls whether the API enforces Keycloak authentication.
+# This is security-critical and should always be visible during restart.
+
+if [ "${SSO_LOGIN:-false}" = "true" ]; then
+    log "${GREEN}[AUTH] SSO_LOGIN: ENABLED${NC}  | Keycloak authentication required"
+else
+    log "${RED}[AUTH] SSO_LOGIN: DISABLED${NC} | API authentication bypassed"
+fi
+
+###############################################################################
+# Restart API
+###############################################################################
+
+log "${GREEN}[API] Restarting Customer 360 API...${NC}"
+
 "$PROJECT_HOME/stop.sh"
 "$PROJECT_HOME/start.sh"
+
+###############################################################################
+# Restart complete
+###############################################################################
+
+log "${GREEN}[API] Restart completed successfully${NC}"

@@ -405,7 +405,7 @@ class ProfileAttributeUpdate(BaseModel):
 
 class ProfileAttributeRead(ProfileAttributeBase):
     model_config = ConfigDict(from_attributes=True)
-    id: int
+    id: uuid.UUID
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

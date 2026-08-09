@@ -13,7 +13,7 @@ ROOT_ENV_FILE="${SCRIPT_DIR}/../../.env"
 LOCAL_ENV_FILE="${SCRIPT_DIR}/.env"
 ENV_FILE=""
 
-# Prefer repo-root .env so tests use the same credentials as dev-start-all.sh
+# Prefer repo-root .env so tests use the same credentials as dev-c360.sh
 # / docker compose. Fall back to service-local .env.
 if [ -f "$ROOT_ENV_FILE" ]; then
   ENV_FILE="$ROOT_ENV_FILE"

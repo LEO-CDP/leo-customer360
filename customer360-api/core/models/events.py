@@ -80,3 +80,27 @@ class CdpRawEvent(Base):
 
     event_payload: Mapped[Optional[dict]] = mapped_column(JSONB)
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class EventCatalog(Base):
+    """Governed vocabulary of event_category/event_name pairs across domains
+    (GENERAL/FEEDBACK/COMMERCE/FINANCE/STOCK_TRADING/TRAVEL/REAL_ESTATE/
+    EDUCATION). Seeded with core events and extended per domain.
+    
+    Mirrors cdp_event_catalog in database-schema.sql."""
+
+    __tablename__ = "cdp_event_catalog"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    event_name: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    event_category: Mapped[str] = mapped_column(Text, nullable=False)
+    domain_scope: Mapped[str] = mapped_column(Text, nullable=False, server_default="all")
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    is_conversion_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    value_field: Mapped[Optional[str]] = mapped_column(Text)
+    display_order: Mapped[int] = mapped_column(server_default="0")
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="ACTIVE")
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))

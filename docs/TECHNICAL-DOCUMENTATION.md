@@ -182,7 +182,7 @@ Each placeholder service exists so `customer360-api/core/utils/dagster_client.py
 | | `dagster-graphql` | Client library used to submit Dagster job runs from the API without embedding the Dagster core package. |
 | | `redis` (Python client) | Used by `core/cache.py` for the response cache. |
 | **Authentication** | Keycloak (`keycloak/keycloak:26.7`) | Real SSO service in the compose stack. `core/auth.py` calls its token-introspection endpoint directly via `urllib.request` — no Keycloak client library dependency. |
-| **Frontend** | FastAPI + Uvicorn (`frontend-admin/app.py`) | **Not Flask.** A thin FastAPI process serves a static single-page admin UI (`index.html` + `static/`) and renders one Jinja2 template (`jinja/config.js.j2`) to inject `FRONTEND_API_HOSTNAME`/`FRONTEND_TENANT_ID` into `static/js/config.js` at request time. No database access in this service — all customer data is fetched client-side, live, from `customer360-api`. |
+| **Frontend** | FastAPI + Uvicorn (`frontend-admin/app.py`) | **Not Flask.** A thin FastAPI process serves a static single-page admin UI (`index.html` + `static/`) and renders one Jinja2 template (`base-templates/index.html`) to inject `FRONTEND_API_HOSTNAME`/`FRONTEND_TENANT_ID` into `static/js/config.js` at request time. No database access in this service — all customer data is fetched client-side, live, from `customer360-api`. |
 | | Tailwind CSS, jQuery 3, Handlebars | All loaded via CDN in `index.html`; no frontend build step/bundler. |
 | | Hand-rolled hash router (`static/js/router.js`) | Small React-Router-style client-side router (path patterns, params, redirects) — not a frontend framework. |
 | **Object storage (dev only)** | MinIO | S3-compatible storage in `dev-docker-compose.yml` only, for testing file-based event ingestion locally; production uses a real S3 bucket instead and MinIO is intentionally absent from `docker-compose.yml`. |
@@ -295,8 +295,8 @@ ORDER BY opp.close_date ASC;
 
 **One-command startup:**
 ```bash
-./dev-start-all.sh            # bring up the full stack
-./dev-start-all.sh reset -y   # reset volumes and re-seed demo data
+./dev-c360.sh            # bring up the full stack
+./dev-c360.sh reset -y   # reset volumes and re-seed demo data
 ```
 
 **Real service ports** (verified from `docker-compose.yml` / `dev-docker-compose.yml`; do not assume common defaults):

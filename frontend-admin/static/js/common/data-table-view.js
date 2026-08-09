@@ -85,6 +85,11 @@ window.C360 = window.C360 || {};
       allItems: null
     };
     var headRendered = false;
+    var instanceId = "dtv-" + Math.random().toString(36).slice(2, 10);
+    var eventNamespace = "." + instanceId;
+    var bindingScope = function () {
+      return o.el && o.el.tbody ? $(o.el.tbody) : $(document);
+    };
 
     function renderHead() {
       if (!o.el.thead) return;
@@ -167,6 +172,7 @@ window.C360 = window.C360 || {};
       var countForLabel = o.pagination ? items.length : total;
       updateCountLabel(countForLabel);
       setEmpty(total === 0);
+      bindRenderedRows();
       return total;
     }
 
@@ -281,7 +287,8 @@ window.C360 = window.C360 || {};
     // DOM (unlike rows), so plain direct binding is enough -- no delegation.
     function bindSearch(selector, filterName, debounceMs) {
       var timer = null;
-      $(selector).on("input", function () {
+      $(selector).off("input" + eventNamespace);
+      $(selector).on("input" + eventNamespace, function () {
         var val = $(this).val();
         clearTimeout(timer);
         timer = setTimeout(function () { setFilter(filterName, val); }, debounceMs || 350);
@@ -289,24 +296,30 @@ window.C360 = window.C360 || {};
     }
 
     function bindSelect(selector, filterName) {
-      $(selector).on("change", function () { setFilter(filterName, $(this).val()); });
+      $(selector).off("change" + eventNamespace);
+      $(selector).on("change" + eventNamespace, function () { setFilter(filterName, $(this).val()); });
     }
 
     function bindLoadMore() {
-      if (o.el.loadMoreBtn) $(o.el.loadMoreBtn).on("click", function () { load(true); });
+      if (o.el.loadMoreBtn) {
+        $(o.el.loadMoreBtn).off("click" + eventNamespace);
+        $(o.el.loadMoreBtn).on("click" + eventNamespace, function () { load(true); });
+      }
     }
 
     function bindPagination() {
       if (!o.pagination) return;
       if (o.el.prevBtn) {
-        $(o.el.prevBtn).on("click", function () {
+        $(o.el.prevBtn).off("click" + eventNamespace);
+        $(o.el.prevBtn).on("click" + eventNamespace, function () {
           if (!state.hasPrev) return;
           state.page = Math.max(1, state.page - 1);
           load(true);
         });
       }
       if (o.el.nextBtn) {
-        $(o.el.nextBtn).on("click", function () {
+        $(o.el.nextBtn).off("click" + eventNamespace);
+        $(o.el.nextBtn).on("click" + eventNamespace, function () {
           if (!state.hasNext) return;
           state.page = state.page + 1;
           load(true);
@@ -314,23 +327,48 @@ window.C360 = window.C360 || {};
       }
     }
 
-    // Rows are rendered dynamically, so their click handler must be
-    // delegated from a stable ancestor (document), same as before.
-    function bindRowClick() {
-      if (o.rowClickable && o.rowSelectorClass && o.onRowClick) {
-        $(document).on("click", "." + o.rowSelectorClass, function () { o.onRowClick($(this).data("id")); });
+    function bindRenderedRows() {
+      if (!o.el.tbody) return;
+      var $tbody = $(o.el.tbody);
+      var rowSelector = o.rowClickable && o.rowSelectorClass ? "." + o.rowSelectorClass : null;
+
+      if (rowSelector) {
+        $tbody.find(rowSelector).each(function () {
+          var $row = $(this);
+          var rowId = $row.data("id");
+          if (!rowId && $row.attr("data-id")) rowId = $row.attr("data-id");
+          $row.off("click" + eventNamespace);
+          $row.on("click" + eventNamespace, function (e) {
+            if (e.target && $(e.target).closest(".dtv-edit-btn").length) return;
+            o.onRowClick(rowId);
+          });
+        });
+      }
+
+      if (o.onEdit) {
+        $tbody.find(".dtv-edit-btn").each(function () {
+          var $btn = $(this);
+          var rowId = $btn.data("id");
+          $btn.off("click" + eventNamespace);
+          $btn.on("click" + eventNamespace, function (e) {
+            e.stopPropagation();
+            o.onEdit(rowId);
+          });
+        });
       }
     }
 
+    // Rows are rendered dynamically, so their click handler must be attached
+    // to the actual row elements after each render.
+    function bindRowClick() {
+      bindRenderedRows();
+    }
+
     // Per-row "Edit" button (used instead of whole-row navigation for
-    // catalog-style views, e.g. the Attribute Catalog) -- delegated the
-    // same way since rows are re-rendered on every load.
+    // catalog-style views, e.g. the Attribute Catalog) -- bound directly to
+    // each rendered button so it stays local to that row.
     function bindRowEdit() {
-      if (!o.onEdit) return;
-      $(document).on("click", ".dtv-edit-btn", function (e) {
-        e.stopPropagation();
-        o.onEdit($(this).data("id"));
-      });
+      bindRenderedRows();
     }
 
     return {

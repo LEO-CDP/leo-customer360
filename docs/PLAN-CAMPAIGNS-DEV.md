@@ -456,7 +456,7 @@ Three small integration changes:
 
 2. **`static/js/main.js`** — add `campaigns: "/campaigns"` to `TAB_DEFAULT_PATH`; call `C360.campaignAnalyticsView.bindEvents()` in the `$.ready` block; inject templates into `<section id="campaign-view">` in `loadAll()`.
 
-3. **`jinja/index.html`** — add `<script src="static/js/campaign-analytics-view.js?v={{ cb }}"></script>` after `analytics.js`; add `<section id="campaign-view" class="hidden"></section>` to the view container; add a Campaigns nav tab button.
+3. **`base-templates/index.html`** — add `<script src="static/js/campaign-analytics-view.js?v={{ cb }}"></script>` after `analytics.js`; add `<section id="campaign-view" class="hidden"></section>` to the view container; add a Campaigns nav tab button.
 
 ---
 
