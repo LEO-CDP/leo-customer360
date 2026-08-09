@@ -371,7 +371,7 @@ Every service ships a container-level `HEALTHCHECK`:
 4. Persona generation failures (e.g. `GOOGLE_GENAI_API_KEY` invalid) should not block merges — verify the offline fallback path in `persona.py` is being used if the Gemini API is unreachable.
 
 **API route returns 422 on a seemingly valid literal path (e.g. a new custom GET route under a `build_crud_router()`-based router):**
-- This is a known routing-order pitfall: a literal-path GET route added *after* `build_crud_router()` builds `GET /segments/{item_id}` can be silently shadowed by it, since Starlette matches path shape + method in registration order. Fix is to reorder the route (see `core/routers/segment.py` for the applied pattern) — always smoke-test a new literal route against a running (restarted) server, not just a fresh `TestClient`.
+- This is a known routing-order pitfall: a literal-path GET route added *after* `build_crud_router()` builds `GET /segments/{item_id}` can be silently shadowed by it, since Starlette matches path shape + method in registration order. Fix is to reorder the route (see `core/routers/segment_api.py` for the applied pattern) — always smoke-test a new literal route against a running (restarted) server, not just a fresh `TestClient`.
 
 **Database connection pool exhausted:**
 - Increase `db_pool_size`/`db_max_overflow` in `core/config.py`/environment, and check `pg_stat_activity` for long-running queries.
@@ -400,7 +400,7 @@ Every service ships a container-level `HEALTHCHECK`:
 2. **Make CORS configurable** via an environment variable instead of the current hardcoded `allow_origins=["*"]`.
 3. **Document and/or implement graph-based identity matching** (`matching_rule='graph'`) in `resolver.py` if the device-ID-chain use cases (UC1/UC2) need to move from staging-time exact/fuzzy matching to an explicit graph walk.
 4. **Keep `backend-system/README.md` in sync with `workspace.yaml`** — the README currently only documents 4 of the 7 registered code locations.
-5. **Reconcile the `core/routers/metadata.py` filename** across any older internal notes/docs that may still reference a different filename, to avoid confusion for new contributors.
+5. **Reconcile the `core/routers/metadata_api.py` filename** across any older internal notes/docs that may still reference a different filename, to avoid confusion for new contributors.
 
 ---
 

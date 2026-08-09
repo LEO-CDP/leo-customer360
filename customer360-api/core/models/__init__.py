@@ -31,7 +31,15 @@ from core.models.identity import (
 )
 from core.models.relations import CdpRelation, CustomerContact, RelationType, Transaction
 from core.models.segmentation import CdpSegment
-from core.models.system import SysDataSource, SysDomain, SysTenantDomain, sys_tenant_table, sys_user_table
+from core.models.system import (
+    SysDataSource,
+    SysDomain,
+    SysTenantDomain,
+    SysUser,
+    SysUserInfo,
+    sys_organization_table,
+    sys_tenant_table,
+)
 
 __all__ = [
     "Base",
@@ -63,9 +71,11 @@ __all__ = [
     "CustomerContact",
     "Transaction",
     "RelationType",
-    "SysDomain",
     "SysDataSource",
+    "SysDomain",
     "SysTenantDomain",
+    "SysUser",
+    "SysUserInfo",
+    "sys_organization_table",
     "sys_tenant_table",
-    "sys_user_table",
 ]

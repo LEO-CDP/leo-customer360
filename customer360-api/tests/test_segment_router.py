@@ -1,4 +1,4 @@
-"""Unit tests for the /segments CRUD endpoints (core.routers.segment), built
+"""Unit tests for the /segments CRUD endpoints (core.routers.segment_api), built
 on the generic CRUD router factory (core.routers._generic.build_crud_router)
 -- verifies request/response wiring for CdpSegment (create/list/get/update/
 delete/count) entirely against an in-memory fake CRUD layer, no real
@@ -284,12 +284,12 @@ class _FakeExecSession:
 
 
 class SegmentMatchedProfilesTests(unittest.TestCase):
-    """Tests the real core.routers.segment.segments_router (including the
+    """Tests the real core.routers.segment_api.segments_router (including the
     hand-written matched-profiles endpoints, not just the generic CRUD
     routes) with a mocked SegmentRepository."""
 
     def setUp(self):
-        import core.routers.segment as segment_router_module
+        import core.routers.segment_api as segment_router_module
 
         self.segment_router_module = segment_router_module
         self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
@@ -317,7 +317,7 @@ class SegmentMatchedProfilesTests(unittest.TestCase):
             return repo
         
         repo_patcher = patch(
-            "core.routers.segment.SegmentRepository",
+            "core.routers.segment_api.SegmentRepository",
             side_effect=mock_repo_factory
         )
         repo_patcher.start()
@@ -427,11 +427,11 @@ class SegmentMatchedProfilesTests(unittest.TestCase):
 
 class SegmentRecomputeTests(unittest.TestCase):
     """Tests the hand-written POST /segments/{id}/recompute endpoint
-    (core.routers.segment.recompute_segment), mocking out SegmentRepository
+    (core.routers.segment_api.recompute_segment), mocking out SegmentRepository
     so these stay unit tests (no real PostgreSQL)."""
 
     def setUp(self):
-        import core.routers.segment as segment_router_module
+        import core.routers.segment_api as segment_router_module
 
         self.segment_router_module = segment_router_module
         self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
@@ -463,7 +463,7 @@ class SegmentRecomputeTests(unittest.TestCase):
             return repo
         
         repo_patcher = patch(
-            "core.routers.segment.SegmentRepository",
+            "core.routers.segment_api.SegmentRepository",
             side_effect=mock_repo_factory
         )
         repo_patcher.start()
@@ -503,7 +503,7 @@ class SegmentRecomputeTests(unittest.TestCase):
             return repo
 
         with patch(
-            "core.routers.segment.SegmentRepository",
+            "core.routers.segment_api.SegmentRepository",
             side_effect=mock_repo_factory_with_error
         ):
             response = client.post(f"/segments/{segment.segment_id}/recompute")
@@ -540,7 +540,7 @@ class SegmentRecomputeTests(unittest.TestCase):
 
 class SegmentAdminSeedDefaultsTests(unittest.TestCase):
     def setUp(self):
-        import core.routers.segment as segment_router_module
+        import core.routers.segment_api as segment_router_module
 
         self.segment_router_module = segment_router_module
         self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
@@ -577,7 +577,7 @@ class SegmentAdminSeedDefaultsTests(unittest.TestCase):
     def test_seed_defaults_for_all_tenants_requires_platform_admin(self):
         client = self._client_with_state(tenant_id=str(uuid.uuid4()), user_payload={"realm_access": {"roles": ["admin"]}})
 
-        with patch("core.routers.segment.settings.sso_login", True):
+        with patch("core.routers.segment_api.settings.sso_login", True):
             response = client.post("/segments/admin/defaults/seed?all_tenants=true")
 
         self.assertEqual(response.status_code, 403)
@@ -585,7 +585,7 @@ class SegmentAdminSeedDefaultsTests(unittest.TestCase):
     def test_seed_defaults_for_caller_tenant_requires_tenant_admin(self):
         client = self._client_with_state(tenant_id=str(uuid.uuid4()), user_payload={"realm_access": {"roles": ["analyst"]}})
 
-        with patch("core.routers.segment.settings.sso_login", True):
+        with patch("core.routers.segment_api.settings.sso_login", True):
             response = client.post("/segments/admin/defaults/seed")
 
         self.assertEqual(response.status_code, 403)
@@ -597,8 +597,8 @@ class SegmentAdminSeedDefaultsTests(unittest.TestCase):
             user_payload={"realm_access": {"roles": ["tenant_admin"]}},
         )
 
-        with patch("core.routers.segment.settings.sso_login", True), patch(
-            "core.routers.segment.seed_default_segments_with_breakdown",
+        with patch("core.routers.segment_api.settings.sso_login", True), patch(
+            "core.routers.segment_api.seed_default_segments_with_breakdown",
             return_value=(3, {caller_tenant_id: 3}),
         ) as mock_seed:
             response = client.post("/segments/admin/defaults/seed")
@@ -619,11 +619,11 @@ class SegmentAdminSeedDefaultsTests(unittest.TestCase):
             user_payload={"realm_access": {"roles": ["platform_admin"]}},
         )
 
-        with patch("core.routers.segment.settings.sso_login", True), patch(
-            "core.routers.segment.list_tenant_ids",
+        with patch("core.routers.segment_api.settings.sso_login", True), patch(
+            "core.routers.segment_api.list_tenant_ids",
             return_value=[tenant_a, tenant_b],
         ), patch(
-            "core.routers.segment.seed_default_segments_with_breakdown",
+            "core.routers.segment_api.seed_default_segments_with_breakdown",
             return_value=(5, {tenant_a: 2, tenant_b: 3}),
         ):
             response = client.post("/segments/admin/defaults/seed?all_tenants=true")
@@ -644,7 +644,7 @@ class SegmentAdminSeedDefaultsTests(unittest.TestCase):
 
 class SegmentAdminRecomputeAllTests(unittest.TestCase):
     def setUp(self):
-        import core.routers.segment as segment_router_module
+        import core.routers.segment_api as segment_router_module
 
         self.segment_router_module = segment_router_module
         self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
@@ -681,7 +681,7 @@ class SegmentAdminRecomputeAllTests(unittest.TestCase):
     def test_recompute_all_requires_tenant_admin(self):
         client = self._client_with_state(tenant_id=str(uuid.uuid4()), user_payload={"realm_access": {"roles": ["analyst"]}})
 
-        with patch("core.routers.segment.settings.sso_login", True):
+        with patch("core.routers.segment_api.settings.sso_login", True):
             response = client.post("/segments/admin/recompute-all")
 
         self.assertEqual(response.status_code, 403)
@@ -693,8 +693,8 @@ class SegmentAdminRecomputeAllTests(unittest.TestCase):
             user_payload={"realm_access": {"roles": ["tenant_admin"]}},
         )
 
-        with patch("core.routers.segment.settings.sso_login", True), patch(
-            "core.routers.segment.dagster_client.segmentation.refresh",
+        with patch("core.routers.segment_api.settings.sso_login", True), patch(
+            "core.routers.segment_api.dagster_client.segmentation.refresh",
             return_value="run-123",
         ) as mock_trigger:
             response = client.post("/segments/admin/recompute-all")
@@ -711,8 +711,8 @@ class SegmentAdminRecomputeAllTests(unittest.TestCase):
             user_payload={"realm_access": {"roles": ["tenant_admin"]}},
         )
 
-        with patch("core.routers.segment.settings.sso_login", True), patch(
-            "core.routers.segment.dagster_client.segmentation.refresh",
+        with patch("core.routers.segment_api.settings.sso_login", True), patch(
+            "core.routers.segment_api.dagster_client.segmentation.refresh",
             side_effect=self.segment_router_module.DagsterJobTriggerError("boom"),
         ):
             response = client.post("/segments/admin/recompute-all")
@@ -784,7 +784,7 @@ class SegmentableProfileAttributesTests(unittest.TestCase):
     422 "invalid UUID" instead of ever running the handler."""
 
     def setUp(self):
-        import core.routers.segment as segment_router_module
+        import core.routers.segment_api as segment_router_module
 
         self.segment_router_module = segment_router_module
         self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)

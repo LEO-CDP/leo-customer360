@@ -1,5 +1,5 @@
 """Unit tests for the Customer Identity Resolution profile-links endpoints
-(core.routers.identity: profile_links_router + master_profiles_router's
+(core.routers.identity_api: profile_links_router + master_profiles_router's
 GET /master-profiles/{id}/links) -- entirely against in-memory fakes, no
 real PostgreSQL instance required.
 
@@ -7,7 +7,7 @@ real PostgreSQL instance required.
 built via core.routers._generic.build_crud_router), so they can't be tested
 by patching `core.routers._generic.CRUDBase` the way the generic-router
 tests do. Instead this file monkeypatches the module-level `_link_crud`
-instance on `core.routers.identity` directly -- safe because route handlers
+instance on `core.routers.identity_api` directly -- safe because route handlers
 look up module globals by name at call time, not at def time, so swapping
 the attribute after import is picked up by every request.
 """
@@ -22,7 +22,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import core.routers.identity as identity_router
+import core.routers.identity_api as identity_router
 from core.database import get_db
 
 DEMO_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -252,7 +252,7 @@ class ProfileLinksRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
 
     def test_create_profile_link_invalidates_cache(self):
-        with patch("core.routers.identity.invalidate_prefix") as mock_invalidate:
+        with patch("core.routers.identity_api.invalidate_prefix") as mock_invalidate:
             response = self.client.post("/profile-links/", json=_link_payload())
         self.assertEqual(response.status_code, 201)
         mock_invalidate.assert_called_once_with("profile_links")
@@ -352,7 +352,7 @@ class ProfileLinksRouterTests(unittest.TestCase):
         link = _fake_link()
         FakeLinkCRUD.store[link.link_id] = link
 
-        with patch("core.routers.identity.invalidate_prefix") as mock_invalidate:
+        with patch("core.routers.identity_api.invalidate_prefix") as mock_invalidate:
             response = self.client.delete(f"/profile-links/{link.link_id}")
 
         self.assertEqual(response.status_code, 204)
@@ -526,7 +526,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             },
         }
 
-        with patch("core.routers.identity.identity_crud.list_master_profiles_page", return_value=fake_payload):
+        with patch("core.routers.identity_api.identity_crud.list_master_profiles_page", return_value=fake_payload):
             response = self.client.get("/master-profiles/?page=2&page_size=25")
 
         self.assertEqual(response.status_code, 200)
@@ -540,7 +540,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
         self.assertEqual(body["items"][0]["linked_raw_profile_count"], 4)
 
     def test_forwards_filters_and_pagination_params_to_crud(self):
-        with patch("core.routers.identity.identity_crud.list_master_profiles_page", return_value={"items": [], "pagination": {
+        with patch("core.routers.identity_api.identity_crud.list_master_profiles_page", return_value={"items": [], "pagination": {
             "page": 1,
             "page_size": 100,
             "total": 0,

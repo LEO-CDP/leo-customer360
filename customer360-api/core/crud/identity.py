@@ -3,7 +3,7 @@
 Per-row CRUD for cdp_master_profiles / cdp_raw_profiles_stage /
 cdp_profile_links / cdp_profile_attributes is handled by the generic
 CRUDBase (core/crud/base.py); this module only holds the aggregate queries
-used by core/routers/reporting.py, mirroring the "Phân tích & Báo cáo"
+used by core/routers/reporting_api.py, mirroring the "Phân tích & Báo cáo"
 section of core-customer360/identity-resolution.md.
 """
 

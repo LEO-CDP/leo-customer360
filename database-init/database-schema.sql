@@ -147,10 +147,15 @@ CREATE INDEX IF NOT EXISTS idx_org_parent ON customer360.sys_organization (paren
 -- Application User table
 -- ==========================================================
 CREATE TABLE IF NOT EXISTS customer360.sys_user (
-    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
-    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
-    organization_id UUID NULL REFERENCES customer360.sys_organization (organization_id),
-    keycloak_user_id UUID UNIQUE,
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    
+    -- Added ON DELETE CASCADE/SET NULL to prevent orphan records if a tenant/org is deleted
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    organization_id UUID NULL REFERENCES customer360.sys_organization(organization_id) ON DELETE SET NULL,
+    
+    -- REMOVED: keycloak_user_id UUID UNIQUE 
+    -- Reason: Identity mapping is now correctly handled by the 1-to-Many sys_userinfo table.
+
     username VARCHAR(150) NOT NULL,
     email VARCHAR(255),
     full_name VARCHAR(255),
@@ -158,24 +163,134 @@ CREATE TABLE IF NOT EXISTS customer360.sys_user (
     job_title VARCHAR(100),
     department VARCHAR(100),
     language_code VARCHAR(10) DEFAULT 'en',
-    timezone VARCHAR(50),
-    status VARCHAR(20) DEFAULT 'ACTIVE',
-    last_login_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT now(),
-    updated_at TIMESTAMP NOT NULL DEFAULT now(),
-    metadata JSONB,
+    
+    -- Added default UTC to prevent null timezone logic errors in the application
+    timezone VARCHAR(50) DEFAULT 'UTC',
+    
+    -- Added NOT NULL constraint to status
+    status VARCHAR(20) DEFAULT 'ACTIVE' NOT NULL,
+    
+    -- Upgraded all timestamps to TIMESTAMPTZ (WITH TIME ZONE). 
+    -- Storing naked TIMESTAMPs in a multi-tenant CDP leads to data corruption across timezones.
+    last_login_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    
+    -- Added default empty JSON object to avoid dealing with NULL JSONB values in queries
+    metadata JSONB DEFAULT '{}'::jsonb,
+    
+    -- Added CHECK constraints to force lowercase emails and usernames. 
+    -- This prevents accidental duplicates like 'Admin' vs 'admin' or 'User@Email.com' bypassing the UNIQUE constraints.
+    CONSTRAINT chk_sys_user_username_lower CHECK (username = lower(username)),
+    CONSTRAINT chk_sys_user_email_lower CHECK (email IS NULL OR email = lower(email)),
+
+    -- Tenant-scoped uniqueness
     CONSTRAINT uq_username UNIQUE (tenant_id, username),
     CONSTRAINT uq_email UNIQUE (tenant_id, email)
 );
 
-COMMENT ON TABLE customer360.sys_user IS 'Internal application user/staff account, optionally backed by a Keycloak SSO identity (keycloak_user_id). Referenced as the nullable "data owner" (user_id) on most crm_*/cdp_* tables -- NULL means the row was created by an ingestion pipeline rather than an interactive admin user.';
+COMMENT ON TABLE customer360.sys_user IS 'Internal application user/staff account. Decoupled from SSO identities (which live in sys_userinfo).';
 
-CREATE INDEX IF NOT EXISTS idx_user_tenant ON customer360.sys_user (tenant_id);
+-- ----------------------------------------------------------------------------
+-- INDEXES
+-- ----------------------------------------------------------------------------
+-- The UNIQUE constraints above automatically create B-Tree indexes for (tenant_id, username) and (tenant_id, email).
+-- We only need to manually index foreign keys and frequent filter columns.
 
-CREATE INDEX IF NOT EXISTS idx_user_org ON customer360.sys_user (organization_id);
+CREATE INDEX IF NOT EXISTS idx_user_tenant ON customer360.sys_user(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_user_org ON customer360.sys_user(organization_id);
 
-CREATE INDEX IF NOT EXISTS idx_user_keycloak ON customer360.sys_user (keycloak_user_id);
+-- Added index for status, as admin dashboards frequently filter by active/inactive users
+CREATE INDEX IF NOT EXISTS idx_user_status ON customer360.sys_user(tenant_id, status);
 
+-- ----------------------------------------------------------------------------
+-- ROW LEVEL SECURITY (RBAC)
+-- ----------------------------------------------------------------------------
+ALTER TABLE customer360.sys_user ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer360.sys_user FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_policy ON customer360.sys_user;
+
+CREATE POLICY tenant_policy ON customer360.sys_user
+    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+
+
+-- ==========================================================
+-- User Login & SSO Identity Management (sys_userinfo)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS customer360.sys_userinfo (
+    userinfo_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    
+    -- Multi-tenant and User mappings
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES customer360.sys_user(user_id) ON DELETE CASCADE,
+
+    -- Authentication Provider Details
+    -- Examples: 'LOCAL', 'KEYCLOAK', 'GOOGLE', 'MICROSOFT', 'APPLE'
+    auth_provider VARCHAR(50) NOT NULL,
+    
+    -- The unique external subject ID from the identity provider (e.g., JWT sub claim)
+    -- For 'LOCAL' auth_provider, this can act as the unique username or email for login.
+    provider_subject_id TEXT NOT NULL, 
+
+    -- Local Authentication
+    -- Stores the bcrypt/argon2 hash. Only populated when auth_provider = 'LOCAL'.
+    password_hash TEXT,
+
+    -- External SSO Token Caching (Optional)
+    access_token TEXT,
+    refresh_token TEXT,
+    token_expires_at TIMESTAMP WITH TIME ZONE,
+
+    -- Status & Tracking
+    status VARCHAR(20) DEFAULT 'ACTIVE' NOT NULL,
+    last_login_at TIMESTAMP WITH TIME ZONE,
+
+    -- Standard Audit & Extensibility Fields
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    metadata JSONB DEFAULT '{}'::jsonb,
+
+    -- Constraints
+    -- 1. Ensure external SSO IDs (or local usernames) are globally unique per tenant/provider
+    CONSTRAINT uq_sys_userinfo_provider_id UNIQUE (tenant_id, auth_provider, provider_subject_id),
+    
+    -- 2. Ensure a user only links one account per provider per tenant 
+    -- (e.g., a user can only have ONE Google account and ONE Local password linked)
+    CONSTRAINT uq_sys_userinfo_user_provider UNIQUE (tenant_id, user_id, auth_provider)
+);
+
+COMMENT ON TABLE customer360.sys_userinfo IS 'Handles multi-tenant SSO identities (Keycloak, Google, Microsoft) and local password credentials linked to a core sys_user account. Decouples login methods from the core user record to support 1-to-many authentication methods.';
+
+-- ----------------------------------------------------------------------------
+-- INDEXES
+-- ----------------------------------------------------------------------------
+-- Optimizes general tenant and user relationship queries
+CREATE INDEX IF NOT EXISTS idx_sys_userinfo_tenant ON customer360.sys_userinfo(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_sys_userinfo_user ON customer360.sys_userinfo(user_id);
+
+-- Highly optimized lookup index for the authentication pipeline 
+-- (Used immediately upon login to find the user by their SSO token or local username)
+CREATE INDEX IF NOT EXISTS idx_sys_userinfo_provider_lookup ON customer360.sys_userinfo(tenant_id, auth_provider, provider_subject_id);
+
+-- ----------------------------------------------------------------------------
+-- ROW LEVEL SECURITY (RBAC / Multi-Tenant Isolation)
+-- ----------------------------------------------------------------------------
+-- Standard RLS implementation matching the rest of the customer360 schema
+ALTER TABLE customer360.sys_userinfo ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer360.sys_userinfo FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_policy ON customer360.sys_userinfo;
+
+CREATE POLICY tenant_policy ON customer360.sys_userinfo
+    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+-- ==========================================================
+-- RBAC Role & Permission Tables
+-- ==========================================================
 CREATE TABLE IF NOT EXISTS customer360.sys_role (
     role_id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id),
@@ -1265,7 +1380,7 @@ CREATE INDEX IF NOT EXISTS idx_cdp_profile_links_status ON customer360.cdp_profi
 WHERE
     status = 'ACTIVE';
 
--- Backs GET /master-profiles/{id}/links (core/routers/identity.py) and the
+-- Backs GET /master-profiles/{id}/links (core/routers/identity_api.py) and the
 -- reporting duplicate-master queries (core/crud/identity.py), which both
 -- filter/group by master_profile_id -- without this, those lookups fall back
 -- to a full sequential scan of cdp_profile_links once the table reaches

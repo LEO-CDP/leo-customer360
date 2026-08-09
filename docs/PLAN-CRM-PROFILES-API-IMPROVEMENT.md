@@ -11,12 +11,12 @@ Rules:
 > lives alongside the other "interaction" entities rather than in `crm.py`:
 > - Model: `CustomerContact` in [customer360-api/core/models/relations.py](../customer360-api/core/models/relations.py)
 > - Schemas: `CustomerContactCreate/Update/Read` in [customer360-api/core/schemas/relations.py](../customer360-api/core/schemas/relations.py)
-> - Router: `customer_contacts_router` (built via `build_crud_router`) in [customer360-api/core/routers/relations.py](../customer360-api/core/routers/relations.py), prefix `/customer-contacts`, tag `"Customer Interactions"`
+> - Router: `customer_contacts_router` (built via `build_crud_router`) in [customer360-api/core/routers/relations_api.py](../customer360-api/core/routers/relations_api.py), prefix `/customer-contacts`, tag `"Customer Interactions"`
 > - Already wired into `app.py` via `all_relations_routers`, and already used internally by `core/crud/profile360.py` (engagement summary / timeline endpoints).
 >
 > So **Phase 1 of this plan is already done** (see note in section 4). The only real remaining gap is the sync mechanism below.
 
-- **Database tables exist, but routers for the CRM journey entities (`crm_lead`, `crm_contact`, `crm_account`, etc.) don't cover a sync-from-CDP flow**: The `crm_*` entities (Lead, Contact, Account, Opportunity, Industry, LeadSource, Campaign, CampaignMember) have CRUD routers via `_generic.py` (in `core/routers/crm.py`), but those are plain CRUD — nothing populates them from `cdp_master_profiles`.
+- **Database tables exist, but routers for the CRM journey entities (`crm_lead`, `crm_contact`, `crm_account`, etc.) don't cover a sync-from-CDP flow**: The `crm_*` entities (Lead, Contact, Account, Opportunity, Industry, LeadSource, Campaign, CampaignMember) have CRUD routers via `_generic.py` (in `core/routers/crm_api.py`), but those are plain CRUD — nothing populates them from `cdp_master_profiles`.
 
 - **No data sync mechanism**: Currently, CRM tables are manually populated or not populated at all. There is no automated or on-demand mechanism to copy **resolved master profile data** from `cdp_master_profiles` (the golden record after identity resolution) into operational CRM tables (`crm_lead`, `crm_contact`, `crm_account`).
 
@@ -73,8 +73,8 @@ different file names than assumed above:
    create, and `contact_date` is server-generated (not settable on create).
 
 3. **Router** — already built via `build_crud_router()` in
-   [customer360-api/core/routers/relations.py](../customer360-api/core/routers/relations.py)
-   (not `routers/crm.py`) as `customer_contacts_router`, prefix
+   [customer360-api/core/routers/relations_api.py](../customer360-api/core/routers/relations_api.py)
+   (not `routers/crm_api.py`) as `customer_contacts_router`, prefix
    `/customer-contacts`, tag `"Customer Interactions"` (not
    `"CRM - Customer Interactions"`).
 
@@ -109,7 +109,7 @@ different file names than assumed above:
 > `auth_middleware` in `core/auth.py`, which stashes the caller's resolved
 > `tenant_id`/`user_id` onto `request.state` and the raw Keycloak token
 > payload onto `request.state.user`. Admin-role checks follow the pattern
-> already used in `core/routers/segment.py`
+> already used in `core/routers/segment_api.py`
 > (`_is_platform_admin`/`_is_tenant_admin`, reading roles off
 > `request.state.user`). The snippets below are corrected to match.
 
@@ -152,7 +152,7 @@ different file names than assumed above:
        db: Session = Depends(get_db),
    ) -> dict:
        # Require admin role -- reuse the _is_tenant_admin/_is_platform_admin
-       # helpers pattern from core/routers/segment.py against request.state.user.
+       # helpers pattern from core/routers/segment_api.py against request.state.user.
        tenant_id = getattr(request.state, "tenant_id", None)
        user_id = getattr(request.state, "user_id", None)
        if tenant_id is None:
@@ -263,7 +263,7 @@ Response: {
 
 ## 7) Definition of done
 
-- [x] `CustomerContact` model, schema, and CRUD router implemented and wired into app.py (already done, in `models/relations.py` / `schemas/relations.py` / `routers/relations.py`)
+- [x] `CustomerContact` model, schema, and CRUD router implemented and wired into app.py (already done, in `models/relations.py` / `schemas/relations.py` / `routers/relations_api.py`)
 - [ ] All `crm_customer_contacts` CRUD operations pass unit + integration tests (tests still need to be written)
 - [ ] Tenant isolation enforced (RLS, auth middleware) — verify existing RLS policy covers `crm_customer_contacts` since the table already exists in `database-schema.sql`.
 - [ ] `crm_profile_sync_job` metadata table created in schema

@@ -277,7 +277,7 @@ class CampaignRepository:
 
 ### Task 2.2: REST Endpoints Route Controller
 
-**Target File:** `customer360-api/core/routers/crm.py` check campaigns_router
+**Target File:** `customer360-api/core/routers/crm_api.py` check campaigns_router
 
 **Your task:**
 

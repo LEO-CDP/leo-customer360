@@ -1,4 +1,4 @@
-"""Unit tests for the system metadata endpoints (core.routers.metadata).
+"""Unit tests for the system metadata endpoints (core.routers.metadata_api).
 
 Mocks out all external connectivity (Postgres engine, Redis client, socket)
 so the tests are fast and hermetic.
@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from core.database import get_db
 from core.models.identity import CdpScoringModel
 from core.models.system import SysDataSource
-from core.routers.metadata import all_metadata_routers
+from core.routers.metadata_api import all_metadata_routers
 
 
 class SysMetadataTests(unittest.TestCase):

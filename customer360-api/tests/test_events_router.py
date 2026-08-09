@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from core.database import get_db
 from core.models.events import CdpRawEvent
 from core.models.identity import CdpRawProfileStage
-from core.routers.events import router as events_router
+from core.routers.events_api import router as events_router
 
 
 class _FakeScalarResult:

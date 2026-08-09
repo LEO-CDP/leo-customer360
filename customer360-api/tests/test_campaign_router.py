@@ -1,4 +1,4 @@
-"""Unit tests for the /campaigns CRUD endpoints (core.routers.crm: campaigns_router).
+"""Unit tests for the /campaigns CRUD endpoints (core.routers.crm_api: campaigns_router).
 
 Tests HTTP-level wiring (status codes, request/response schemas, filters) for
 Campaign create/list/get/update/delete/count entirely against an in-memory

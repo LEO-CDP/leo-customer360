@@ -406,7 +406,7 @@ ON CONFLICT (attribute_internal_code) DO UPDATE SET
 -- segmentable-profile-attributes) now also returns source_table=
 -- 'cdp_domain_profiles' rows, exposed as dp.domain_attributes->>'key' via
 -- the LATERAL join added to every cdp_segments query -- see
--- core/routers/segment.py and core/crud/segmentation.py. Array-valued keys
+-- core/routers/segment_api.py and core/crud/segmentation.py. Array-valued keys
 -- and raw PII identifiers (national_id, cif_number, account_numbers,
 -- property_types_of_interest, preferred_location_codes,
 -- preferred_content_genres) stay is_segmentable=FALSE: arrays need a
