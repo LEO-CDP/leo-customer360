@@ -15,6 +15,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from sqlalchemy import text
 
 from core.auth import auth_middleware
@@ -32,6 +33,7 @@ from core.routers.reporting_api import router as reporting_router
 from core.routers.segment_api import all_segment_routers
 from core.routers.metadata_api import all_metadata_routers
 from core.routers.user_api import all_user_routers
+from core.routers.auth_api import all_auth_routers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,11 +64,37 @@ app.add_middleware(
 
 app.middleware("http")(auth_middleware)
 
+# Declares the Bearer scheme in the OpenAPI schema (purely documentation --
+# actual enforcement stays in auth_middleware) so /docs renders an
+# "Authorize" button: paste the access_token from POST /auth/login (dev) or
+# the Keycloak token from the frontend SSO flow (prod) to call any protected
+# endpoint straight from Swagger UI. See customer360-api.md "Authentication".
+def _custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(title=app.title, description=app.description, version=app.version, routes=app.routes)
+    schema.setdefault("components", {}).setdefault("securitySchemes", {})["BearerAuth"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+    }
+    for path_item in schema.get("paths", {}).values():
+        for operation in path_item.values():
+            if isinstance(operation, dict):
+                operation.setdefault("security", [{"BearerAuth": []}])
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = _custom_openapi
+
 # CIR core models first (primary focus of this API), then supporting CRM /
 # relations / graph entities.
 for r in all_identity_routers:
     app.include_router(r, prefix="/api/v1")
 for r in all_user_routers:
+    app.include_router(r, prefix="/api/v1")
+for r in all_auth_routers:
     app.include_router(r, prefix="/api/v1")
 app.include_router(reporting_router, prefix="/api/v1")
 for r in all_relations_routers:

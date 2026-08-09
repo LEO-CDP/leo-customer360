@@ -66,12 +66,45 @@ const TIME_CHECK_API_HEALTH = 60000;
     $("#settings-user-email").text(user.email || "-");
     $("#settings-user-roles").text((user.roles || []).join(", ") || "-");
     $("#settings-auth-mode").text(user.authMode || "-");
+    $("#settings-user-status").text("-");
+    $("#settings-user-last-login").text("-");
 
-    C360.config.loadSystemMetadata().done(function (metadata) {
-      if (metadata && typeof metadata.sso_login !== "undefined") {
-        $("#settings-auth-mode").text(metadata.sso_login ? "SSO (token required)" : "Dev Header (SSO disabled)");
-      }
+    // The dev root pseudo-user has no backing sys_user row -- nothing to
+    // view/edit beyond what's already shown above.
+    $("#settings-profile-edit").toggleClass("hidden", !!user.isRoot);
+    $("#settings-profile-error").addClass("hidden").text("");
+    if (user.isRoot) return;
+
+    C360.config.api("/users/me").done(function (profile) {
+      $("#settings-user-status").text(profile.status || "-");
+      $("#settings-user-last-login").text(C360.fmt.dateTime(profile.last_login_at));
+      $("#settings-profile-full-name").val(profile.full_name || "");
+      $("#settings-profile-phone").val(profile.phone || "");
+      $("#settings-profile-job-title").val(profile.job_title || "");
+      $("#settings-profile-department").val(profile.department || "");
+      $("#settings-profile-edit").data("user-id", profile.user_id);
     });
+  }
+
+  function saveMyProfile() {
+    var $error = $("#settings-profile-error");
+    $error.addClass("hidden").text("");
+    var userId = $("#settings-profile-edit").data("user-id");
+    if (!userId) return;
+
+    var payload = {
+      full_name: $.trim($("#settings-profile-full-name").val()) || null,
+      phone: $.trim($("#settings-profile-phone").val()) || null,
+      job_title: $.trim($("#settings-profile-job-title").val()) || null,
+      department: $.trim($("#settings-profile-department").val()) || null
+    };
+
+    C360.config.api("/users/" + encodeURIComponent(userId), payload, "PATCH")
+      .done(function () { populateSettingsModal(); })
+      .fail(function (xhr) {
+        var detail = (xhr.responseJSON && xhr.responseJSON.detail) || "Could not update profile.";
+        $error.removeClass("hidden").text(typeof detail === "string" ? detail : JSON.stringify(detail));
+      });
   }
 
   function bindBrowserEvents() {
@@ -132,10 +165,11 @@ const TIME_CHECK_API_HEALTH = 60000;
     });
 
     $("#btn-settings-logout").on("click", function () {
-      C360.config.logout();
       toggleSettingsModal(false);
-      location.reload();
+      C360.authView.logout();
     });
+
+    $("#btn-settings-profile-save").on("click", saveMyProfile);
 
     $(document).on("keydown", function (e) {
       if (e.key === "Escape") {
@@ -171,8 +205,10 @@ const TIME_CHECK_API_HEALTH = 60000;
       $("#view-attributes").html(C360.templates.html("attributes-list"));
       $("#view-datasources").html(C360.templates.html("data-source-list"));
       $("#view-scoring").html(C360.templates.html("scoring-model-list"));
+      $("#view-admin").html(C360.templates.html("system-user-list"));
       $("#persona-list-content").html(C360.templates.html("persona-list"));
       $("body").append(C360.templates.html("settings-modal"));
+      $("body").append(C360.templates.html("login-screen"));
 
       // apply the current theme (light/dark/system) to the page, and re-apply it
       C360.themeLoader(C360.config.current.theme, false);
@@ -187,18 +223,25 @@ const TIME_CHECK_API_HEALTH = 60000;
       C360.attributesView.bindEvents();
       C360.dataSourceView.bindEvents();
       C360.scoringModelView.bindEvents();
+      C360.systemUserView.bindEvents();
 
-      C360.config.pingHealth();
-      setInterval(C360.config.pingHealth, TIME_CHECK_API_HEALTH);
+      // Everything above is safe to set up pre-login (no authenticated API
+      // calls). The rest only runs once a session exists -- see
+      // static/js/auth-view.js -- so SSO_LOGIN=true never fires 401s before
+      // sign-in, and dev mode still shows the login screen first.
+      C360.authView.init(function startApp() {
+        C360.config.pingHealth();
+        setInterval(C360.config.pingHealth, TIME_CHECK_API_HEALTH);
 
-      // Load authoritative domain labels from the API and refresh any
-      // UI that depends on them (filter selects, chart axes, row labels).
-      C360.config.loadDomains().always(function () {
-        populateDomainSelects();
-        C360.router.start("/overview");
-        // Pre-fetch the profiles list in the background even if we didn't
-        // land on the Profiles tab, so switching to it feels instant.
-        C360.listView.load(false);
+        // Load authoritative domain labels from the API and refresh any
+        // UI that depends on them (filter selects, chart axes, row labels).
+        C360.config.loadDomains().always(function () {
+          populateDomainSelects();
+          C360.router.start("/overview");
+          // Pre-fetch the profiles list in the background even if we didn't
+          // land on the Profiles tab, so switching to it feels instant.
+          C360.listView.load(false);
+        });
       });
     }).fail(function () {
       $("#alert-banner").removeClass("hidden").text(

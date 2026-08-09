@@ -19,8 +19,10 @@ window.C360 = window.C360 || {};
   }
 
   // path -> { tab, title } for every not-yet-implemented listing/detail/editor view.
+  // NOTE: "/admin/users" is now a real view owned by system-user-view.js (loaded
+  // after this file so it wins the first-match route lookup); only its
+  // not-yet-implemented detail route remains a placeholder here.
   var ENTRIES = [
-    { path: "/admin/users", tab: "admin", title: "Admin \u00b7 User Logins" },
     { path: "/admin/users/:id", tab: "admin", title: "User Login Detail" }
   ];
 

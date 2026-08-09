@@ -1,0 +1,177 @@
+<!--
+  =============================================================================
+  SYSTEM USERS LIST VIEW CARD (sys_user)
+  =============================================================================
+  Modeled directly on scoring/scoring-model-list.html: same header/search/filter
+  layout, same shared C360.DataTableView component for the table, same
+  Add/Edit modal pattern -- rendered by static/js/system-user-view.js.
+-->
+<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
+
+  <!-- Header Section -->
+  <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+
+    <!-- Title & Icon -->
+    <div class="flex items-center gap-3">
+      <div class="p-2 bg-violet-50 text-violet-600 rounded-xl">
+        <!-- Users Icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-base font-bold text-slate-900 tracking-tight">System Users</h1>
+        <p class="text-xs text-slate-400 mt-0.5">Staff/admin accounts (sys_user) for this tenant</p>
+      </div>
+    </div>
+
+    <!-- Filter Controls -->
+    <div class="flex flex-wrap items-center gap-2.5">
+
+      <!-- Search Input with Icon -->
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+        </span>
+        <input id="system-users-search-input" type="search" name="system_user_search"
+            placeholder="Search username, email, name…" autocomplete="off" autocorrect="off" spellcheck="false" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
+
+      <!-- Status Filter -->
+      <select id="system-users-status-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All status</option>
+        <option value="ACTIVE">Active</option>
+        <option value="INACTIVE">Inactive</option>
+      </select>
+
+      <!-- Add System User -->
+      <button id="btn-system-user-add" class="inline-flex items-center gap-1.5 bg-violet-600 text-white rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-violet-700 transition-colors shadow-sm shadow-violet-100">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+        <span>Add System User</span>
+      </button>
+
+    </div>
+
+  </div>
+
+  <!-- Table Container -->
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm text-left">
+      <thead id="system-users-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
+      <tbody id="system-users-tbody" class="divide-y divide-slate-100"></tbody>
+    </table>
+  </div>
+
+  <!-- Loading State -->
+  <div id="system-users-loading" class="p-12 flex justify-center">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- Empty State -->
+  <div id="system-users-empty" class="hidden p-12 text-center text-sm text-slate-400">
+    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">🔍</div>
+    <div class="font-medium text-slate-600">No system users matched your filters</div>
+    <p class="text-xs text-slate-400 mt-1">Try adjusting your search query or filter selections.</p>
+  </div>
+
+  <!-- Footer Count -->
+  <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
+    <span id="system-users-count-label" class="font-medium"></span>
+  </div>
+
+</div>
+
+<!--
+  =============================================================================
+  SYSTEM USER FORM MODAL
+  Creates/updates a sys_user row via POST/PATCH /users (see system-user-view.js).
+  =============================================================================
+-->
+<div id="system-user-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-100 max-h-[90vh] overflow-y-auto">
+
+    <!-- Modal Header -->
+    <div class="flex items-center gap-3 mb-5 pb-3 border-b border-slate-100">
+      <div class="p-2 bg-violet-50 text-violet-600 rounded-xl">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+      </div>
+      <div>
+        <h2 id="system-user-form-title" class="text-base font-bold text-slate-900 tracking-tight">Add System User</h2>
+        <p id="system-user-form-subtitle" class="text-xs text-slate-400">Creates a new row in the sys_user table</p>
+      </div>
+    </div>
+
+    <!-- Form Fields -->
+    <div class="space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Username *</label>
+          <input id="system-user-add-username" type="text" placeholder="e.g. jdoe" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Full Name</label>
+          <input id="system-user-add-full-name" type="text" placeholder="e.g. Jane Doe" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Email</label>
+          <input id="system-user-add-email" type="email" placeholder="e.g. jane.doe@example.com" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Phone</label>
+          <input id="system-user-add-phone" type="text" placeholder="e.g. +1 555 0100" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Job Title</label>
+          <input id="system-user-add-job-title" type="text" placeholder="e.g. Data Analyst" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Department</label>
+          <input id="system-user-add-department" type="text" placeholder="e.g. Marketing" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+      </div>
+
+      <div id="system-user-password-fields" class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Password *</label>
+          <input id="system-user-add-password" type="password" placeholder="Min. 8 characters" autocomplete="new-password" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Confirm Password *</label>
+          <input id="system-user-add-password-confirm" type="password" placeholder="Repeat password" autocomplete="new-password" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Status</label>
+        <select id="system-user-add-status" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
+          <option value="ACTIVE">Active</option>
+          <option value="INACTIVE">Inactive</option>
+        </select>
+      </div>
+
+      <div id="system-user-add-error" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5"></div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="flex items-center justify-between gap-2.5 mt-6 pt-4 border-t border-slate-100">
+      <button id="btn-system-user-delete" class="hidden border border-red-200 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors shadow-sm">
+        Deactivate
+      </button>
+      <div class="flex items-center gap-2.5 ml-auto">
+        <button id="btn-system-user-add-cancel" class="border border-slate-200/80 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">
+          Cancel
+        </button>
+        <button id="btn-system-user-add-save" class="bg-violet-600 hover:bg-violet-700 text-white rounded-xl px-4 py-2 text-xs font-semibold transition-colors shadow-sm shadow-violet-100">
+          <span id="system-user-form-save-label">Save User</span>
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>

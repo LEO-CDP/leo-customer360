@@ -1,0 +1,59 @@
+<!--
+  =============================================================================
+  LOGIN SCREEN
+  =============================================================================
+  Rendered/toggled by static/js/auth-view.js. Two mutually-exclusive panels:
+  - #login-dev-panel: SSO_LOGIN=false -- username/password against
+    DEFAULT_ROOT_USERNAME/PASSWORD or a sys_user row (POST /auth/login).
+  - #login-sso-panel: SSO_LOGIN=true -- redirects to Keycloak
+    (GET .../protocol/openid-connect/auth), callback handled back here via
+    POST /auth/callback.
+-->
+<div id="auth-screen" class="hidden fixed inset-0 bg-slate-50 flex items-center justify-center z-[100] p-4">
+  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-xl w-full max-w-sm p-7">
+
+    <div class="flex items-center gap-3 mb-6">
+      <div class="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-base font-bold text-slate-900 tracking-tight">Customer 360 Admin</h1>
+        <p class="text-xs text-slate-400 mt-0.5">Sign in to continue</p>
+      </div>
+    </div>
+
+    <div id="login-error" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5 mb-4"></div>
+
+    <!-- Dev-mode credential login (SSO_LOGIN=false) -->
+    <form id="login-dev-panel" class="hidden space-y-3.5">
+      <div>
+        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Username</label>
+        <input id="login-username" type="text" autocomplete="username" placeholder="admin" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
+      <div>
+        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Password</label>
+        <input id="login-password" type="password" autocomplete="current-password" placeholder="••••••••" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
+      <button id="btn-login-submit" type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors shadow-sm shadow-indigo-100">
+        <span id="btn-login-submit-label">Sign In</span>
+      </button>
+      <p class="text-[11px] text-slate-400 text-center">Dev mode (SSO disabled) &mdash; root credentials or any active system user.</p>
+    </form>
+
+    <!-- Keycloak SSO login (SSO_LOGIN=true) -->
+    <div id="login-sso-panel" class="hidden space-y-3.5">
+      <button id="btn-login-sso" type="button" class="w-full inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors shadow-sm shadow-indigo-100">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" /></svg>
+        <span>Sign in with Keycloak</span>
+      </button>
+      <p class="text-[11px] text-slate-400 text-center">You will be redirected to the identity provider.</p>
+    </div>
+
+    <div id="login-loading" class="hidden py-6 flex justify-center">
+      <div class="spinner"></div>
+    </div>
+
+  </div>
+</div>

@@ -52,7 +52,42 @@
           <p class="text-[11px] text-slate-400">Auth Mode</p>
           <p id="settings-auth-mode" class="text-sm font-medium text-slate-700 dark:text-slate-100">-</p>
         </div>
+        <div>
+          <p class="text-[11px] text-slate-400">Status</p>
+          <p id="settings-user-status" class="text-sm font-medium text-slate-700 dark:text-slate-100">-</p>
+        </div>
+        <div>
+          <p class="text-[11px] text-slate-400">Last Login</p>
+          <p id="settings-user-last-login" class="text-sm font-medium text-slate-700 dark:text-slate-100">-</p>
+        </div>
+
+        <!-- Editable profile fields -- hidden for the dev root pseudo-user
+             (no backing sys_user row to PATCH). See auth-view.js. -->
+        <div id="settings-profile-edit" class="hidden space-y-3 pt-2 border-t border-slate-200 dark:border-slate-700">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-300">Edit My Profile</h3>
+          <div>
+            <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Full Name</label>
+            <input id="settings-profile-full-name" type="text" class="w-full text-xs border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl px-3.5 py-2.5 text-slate-700 dark:text-slate-100 shadow-sm outline-none" />
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Phone</label>
+            <input id="settings-profile-phone" type="text" class="w-full text-xs border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl px-3.5 py-2.5 text-slate-700 dark:text-slate-100 shadow-sm outline-none" />
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Job Title</label>
+            <input id="settings-profile-job-title" type="text" class="w-full text-xs border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl px-3.5 py-2.5 text-slate-700 dark:text-slate-100 shadow-sm outline-none" />
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Department</label>
+            <input id="settings-profile-department" type="text" class="w-full text-xs border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl px-3.5 py-2.5 text-slate-700 dark:text-slate-100 shadow-sm outline-none" />
+          </div>
+          <div id="settings-profile-error" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5"></div>
+          <button id="btn-settings-profile-save" class="w-full border border-indigo-200 bg-indigo-50 text-indigo-700 rounded-xl px-4 py-2 text-xs font-semibold hover:bg-indigo-100 transition-colors shadow-sm">
+            Save Profile
+          </button>
+        </div>
       </div>
+
 
       <div class="space-y-4">
         <div>

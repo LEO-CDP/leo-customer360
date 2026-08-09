@@ -203,6 +203,33 @@ class Settings(BaseSettings):
             "SSO_LOGIN_URL", "sso_login_url", "ssoLoginUrl"),
     )
 
+    # Dev-mode login (SSO_LOGIN=false): a single root/super-admin credential
+    # pair, not backed by a sys_user row, used only by POST /auth/login so
+    # local/dev environments have a way in without standing up Keycloak.
+    default_root_username: str = Field(
+        default="admin",
+        validation_alias=AliasChoices("DEFAULT_ROOT_USERNAME", "default_root_username"),
+    )
+    default_root_password: str = Field(
+        default="",
+        validation_alias=AliasChoices("DEFAULT_ROOT_PASSWORD", "default_root_password"),
+    )
+
+    # Locally-issued JWT for SSO_LOGIN=false (see core/utils/security.py +
+    # POST /auth/login). Lets dev engineers exercise the exact same
+    # `Authorization: Bearer <token>` contract used in production instead of
+    # only the X-Tenant-Id/X-User-Id header shortcut -- same token shape,
+    # just signed locally (HS256) instead of by Keycloak. Never used when
+    # SSO_LOGIN=true; change DEV_JWT_SECRET for anything beyond local dev.
+    dev_jwt_secret: str = Field(
+        default="dev-insecure-secret-change-me-please-32b",
+        validation_alias=AliasChoices("DEV_JWT_SECRET", "dev_jwt_secret"),
+    )
+    dev_jwt_expires_minutes: int = Field(
+        default=480,
+        validation_alias=AliasChoices("DEV_JWT_EXPIRES_MINUTES", "dev_jwt_expires_minutes"),
+    )
+
     @property
     def database_url(self) -> str:
         return (

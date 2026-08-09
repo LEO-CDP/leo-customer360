@@ -51,6 +51,9 @@ class UserCreate(BaseModel):
     language_code: Optional[str] = "en"
     timezone: Optional[str] = "UTC"
     status: Optional[str] = "ACTIVE"
+    # Optional: only present for admin-created system users (SSO-provisioned
+    # users have no local password). Hashed before storage, never echoed back.
+    password: Optional[str] = Field(None, min_length=8, max_length=128)
 
 
 class UserUpdate(BaseModel):

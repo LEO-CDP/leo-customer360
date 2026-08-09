@@ -16,7 +16,10 @@ window.C360 = window.C360 || {};
     accessToken: "c360.accessToken",
     theme: "c360.theme",
     multiTenantEnabled: "c360.multiTenantEnabled",
-    tenantOptions: "c360.tenantOptions"
+    tenantOptions: "c360.tenantOptions",
+    userId: "c360.userId",
+    idToken: "c360.idToken",
+    devUser: "c360.devUser"
   };
 
   var DEFAULTS = {
@@ -25,7 +28,10 @@ window.C360 = window.C360 || {};
     accessToken: "",
     theme: "system",
     multiTenantEnabled: false,
-    tenantOptions: []
+    tenantOptions: [],
+    userId: "",
+    idToken: "",
+    devUser: null
   };
 
   function readBool(value, fallback) {
@@ -75,10 +81,19 @@ window.C360 = window.C360 || {};
     }
     var tenantId = localStorage.getItem(STORAGE_KEYS.tenantId) || serverConfig.tenantId || DEFAULTS.tenantId;
     var tenantOptions = storedTenantOptions.length ? storedTenantOptions : [tenantId];
+    var storedDevUser = null;
+    try {
+      storedDevUser = JSON.parse(localStorage.getItem(STORAGE_KEYS.devUser) || "null");
+    } catch (e) {
+      storedDevUser = null;
+    }
     return {
       apiBase: localStorage.getItem(STORAGE_KEYS.apiBase) || serverConfig.apiBase || DEFAULTS.apiBase,
       tenantId: tenantId,
       accessToken: localStorage.getItem(STORAGE_KEYS.accessToken) || DEFAULTS.accessToken,
+      idToken: localStorage.getItem(STORAGE_KEYS.idToken) || DEFAULTS.idToken,
+      userId: localStorage.getItem(STORAGE_KEYS.userId) || DEFAULTS.userId,
+      devUser: storedDevUser,
       theme: localStorage.getItem(STORAGE_KEYS.theme) || DEFAULTS.theme,
       multiTenantEnabled: readBool(localStorage.getItem(STORAGE_KEYS.multiTenantEnabled), DEFAULTS.multiTenantEnabled),
       tenantOptions: tenantOptions
@@ -254,6 +269,19 @@ window.C360 = window.C360 || {};
   }
 
   function currentUserFromConfig() {
+    if (CONFIG.devUser) {
+      var du = CONFIG.devUser;
+      return {
+        username: du.username || "Developer",
+        email: du.email || "-",
+        fullName: du.full_name || "",
+        roles: du.roles && du.roles.length ? du.roles : ["user"],
+        authMode: du.is_root ? "Dev Root Credentials" : "Dev Credentials",
+        isRoot: !!du.is_root,
+        userId: du.user_id || null
+      };
+    }
+
     var payload = decodeJwtPayload(CONFIG.accessToken);
     var roles = [];
     if (payload && payload.realm_access && Array.isArray(payload.realm_access.roles)) {
@@ -271,8 +299,11 @@ window.C360 = window.C360 || {};
     return {
       username: payload ? (payload.preferred_username || payload.name || payload.email || payload.sub || "Authenticated User") : "Developer",
       email: payload ? (payload.email || "-") : "-",
+      fullName: payload ? (payload.name || "") : "",
       roles: roles.length ? roles : [CONFIG.accessToken ? "user" : "developer"],
-      authMode: CONFIG.accessToken ? "SSO Token" : "Dev Header"
+      authMode: CONFIG.accessToken ? "SSO Token" : "Dev Header",
+      isRoot: false,
+      userId: CONFIG.userId || null
     };
   }
 
@@ -281,6 +312,9 @@ window.C360 = window.C360 || {};
     var headers = { "X-Tenant-Id": CONFIG.tenantId };
     if (CONFIG.accessToken) {
       headers.Authorization = "Bearer " + CONFIG.accessToken;
+    }
+    if (CONFIG.userId) {
+      headers["X-User-Id"] = CONFIG.userId;
     }
     var options = {
       url: CONFIG.apiBase + path,
@@ -392,8 +426,67 @@ window.C360 = window.C360 || {};
 
   function logout() {
     localStorage.removeItem(STORAGE_KEYS.accessToken);
+    localStorage.removeItem(STORAGE_KEYS.idToken);
+    localStorage.removeItem(STORAGE_KEYS.userId);
+    localStorage.removeItem(STORAGE_KEYS.devUser);
     CONFIG.accessToken = "";
+    CONFIG.idToken = "";
+    CONFIG.userId = "";
+    CONFIG.devUser = null;
     C360.config.current = CONFIG;
+  }
+
+  // True once a session exists: an SSO access token, or a resolved dev-mode
+  // login (root or a real sys_user row) -- see auth-view.js.
+  function isAuthenticated() {
+    return !!(CONFIG.accessToken || CONFIG.devUser);
+  }
+
+  // Persists the profile + dev JWT returned by POST /auth/login (dev mode,
+  // SSO_LOGIN=false). The token is stored the same way an SSO access token
+  // is, so api() automatically sends it as `Authorization: Bearer <token>`
+  // -- X-Tenant-Id/X-User-Id are still set as a defense-in-depth fallback.
+  function setDevSession(loginResponse) {
+    localStorage.setItem(STORAGE_KEYS.devUser, JSON.stringify(loginResponse));
+    localStorage.setItem(STORAGE_KEYS.userId, loginResponse.user_id || "");
+    localStorage.setItem(STORAGE_KEYS.tenantId, loginResponse.tenant_id);
+    localStorage.setItem(STORAGE_KEYS.accessToken, loginResponse.access_token || "");
+    CONFIG = getConfig();
+    C360.config.current = CONFIG;
+  }
+
+  // Persists tokens returned by POST /auth/callback (SSO_LOGIN=true).
+  function setSsoSession(tokenResponse) {
+    localStorage.setItem(STORAGE_KEYS.accessToken, tokenResponse.access_token || "");
+    localStorage.setItem(STORAGE_KEYS.idToken, tokenResponse.id_token || "");
+    CONFIG = getConfig();
+    C360.config.current = CONFIG;
+  }
+
+  // POST /auth/login -- dev-mode credential login (SSO_LOGIN=false).
+  function login(username, password) {
+    return api("/auth/login", { username: username, password: password, tenant_id: CONFIG.tenantId }, "POST")
+      .done(function (resp) { setDevSession(resp); });
+  }
+
+  // POST /auth/callback -- exchanges a Keycloak authorization code for tokens.
+  function exchangeSsoCode(code, redirectUri) {
+    return api("/auth/callback", { code: code, redirect_uri: redirectUri }, "POST")
+      .done(function (resp) { setSsoSession(resp); });
+  }
+
+  // Builds the Keycloak Authorization Code redirect URL from the non-secret
+  // sso_config published by GET /metadata (see metadata_repository.py).
+  function buildSsoAuthorizeUrl(ssoConfig, redirectUri, state) {
+    var base = String(ssoConfig.login_url || "").replace(/\/$/, "");
+    var params = {
+      client_id: ssoConfig.client_id,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: "openid",
+      state: state
+    };
+    return base + "/realms/" + encodeURIComponent(ssoConfig.realm) + "/protocol/openid-connect/auth?" + $.param(params);
   }
 
   function getDataPeriodDays() {
@@ -412,6 +505,10 @@ window.C360 = window.C360 || {};
     save: saveConfig,
     switchTenant: switchTenant,
     logout: logout,
+    isAuthenticated: isAuthenticated,
+    login: login,
+    exchangeSsoCode: exchangeSsoCode,
+    buildSsoAuthorizeUrl: buildSsoAuthorizeUrl,
     parseTenantOptions: parseTenantOptions,
     currentUser: currentUserFromConfig,
     decodeJwtPayload: decodeJwtPayload,

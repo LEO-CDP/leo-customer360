@@ -22,6 +22,7 @@ from sqlalchemy import text
 
 from core.cache import get_redis_client
 from core.config import settings
+from core.utils.security import decode_dev_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,11 @@ EXEMPT_PATHS = {
     "/api/v1/metadata/dagster",
     "/api/v1/metadata/domains",
     "/api/v1/metadata/data-sources",
+    # Auth endpoints are the front door -- callers by definition have no
+    # bearer token yet when hitting them (see core/routers/auth_api.py).
+    "/api/v1/auth/login",
+    "/api/v1/auth/callback",
+    "/api/v1/auth/logout",
 }
 SSO_LOGIN=settings.sso_login
 # TTL for the resolved (tenant_id, user_id) identity cache, independent of
@@ -344,19 +350,44 @@ def _unauthorized_response(request: Request, detail: str) -> JSONResponse:
 
 
 async def auth_middleware(request: Request, call_next):
-    """Ensure API requests present a valid Keycloak bearer token before continuing."""
+    """Ensure API requests present a valid bearer token before continuing.
+
+    SSO_LOGIN=true: token must be a real Keycloak access token (verified via
+    introspection). SSO_LOGIN=false: a bearer token is optional but, when
+    present, must be a locally-signed dev JWT (see POST /auth/login +
+    core.utils.security) -- this lets dev engineers exercise the exact same
+    Authorization: Bearer contract used in production. With no token at all
+    in dev mode, X-Tenant-Id/X-User-Id headers are still honored as a quick
+    curl-without-login shortcut (see _apply_dev_tenant_headers).
+    """
     if request.method == "OPTIONS":
         return await call_next(request)
 
-    if not SSO_LOGIN or request.url.path in EXEMPT_PATHS:
+    if request.url.path in EXEMPT_PATHS:
         _apply_dev_tenant_headers(request)
         return await call_next(request)
 
     authorization = request.headers.get("Authorization", "")
-    if not authorization.startswith("Bearer "):
-        return _unauthorized_response(request, "Authentication required")
+    token = authorization[len("Bearer "):].strip() if authorization.startswith("Bearer ") else ""
 
-    token = authorization[len("Bearer "):].strip()
+    if not SSO_LOGIN:
+        if not token:
+            _apply_dev_tenant_headers(request)
+            return await call_next(request)
+
+        payload = decode_dev_access_token(token)
+        if payload is None:
+            return _unauthorized_response(request, "Invalid or expired dev token")
+
+        request.state.user = payload
+        request.state.token = token
+        tenant_id, user_id = _resolve_tenant_and_user(payload)
+        if tenant_id:
+            request.state.tenant_id = tenant_id
+        if user_id:
+            request.state.user_id = user_id
+        return await call_next(request)
+
     if not token:
         return _unauthorized_response(request, "Authentication required")
 
