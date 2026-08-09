@@ -122,12 +122,13 @@ def _load_cached_token(token: str) -> Optional[dict[str, Any]]:
         return None
 
 
-def _load_cached_identity(keycloak_user_id: str) -> Optional[dict[str, str]]:
+def _load_cached_identity(provider_subject_id: str, tenant_id: str) -> Optional[dict[str, str]]:
+    """Load cached user identity by provider subject ID and tenant."""
     client = get_redis_client()
     if client is None:
         return None
     try:
-        raw = client.get(f"auth:identity:{keycloak_user_id}")
+        raw = client.get(f"auth:identity:{tenant_id}:{provider_subject_id}")
     except Exception:
         logger.warning("Failed to read cached identity from Redis", exc_info=True)
         return None
@@ -140,25 +141,28 @@ def _load_cached_identity(keycloak_user_id: str) -> Optional[dict[str, str]]:
         return None
 
 
-def _cache_identity(keycloak_user_id: str, identity: dict[str, str]) -> None:
+def _cache_identity(provider_subject_id: str, tenant_id: str, identity: dict[str, str]) -> None:
+    """Cache user identity by provider subject ID and tenant."""
     client = get_redis_client()
     if client is None:
         return
     try:
-        client.set(f"auth:identity:{keycloak_user_id}", json.dumps(identity), ex=IDENTITY_CACHE_TTL_SECONDS)
+        client.set(f"auth:identity:{tenant_id}:{provider_subject_id}", json.dumps(identity), ex=IDENTITY_CACHE_TTL_SECONDS)
     except Exception:
         logger.warning("Failed to cache resolved identity in Redis", exc_info=True)
 
 
 def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, str]]:
-    """Provisions/updates sys_user on a successful Keycloak login, keyed by
-    the token's ``sub`` claim (stored as ``sys_user.keycloak_user_id``).
+    """Provisions/updates sys_user and sys_userinfo on a successful Keycloak login.
+    
+    Looks up via sys_userinfo table using auth_provider='KEYCLOAK' and 
+    provider_subject_id from the token's ``sub`` claim.
 
-    - **Existing user**: stamps ``last_login_at = now()`` and returns their
-      ``(user_id, tenant_id)``.
-    - **First-ever login for this identity**: auto-provisions a new sys_user
-      row. This REQUIRES the token to carry a ``tenant_id`` custom claim
-      (published via a Keycloak protocol mapper) identifying which tenant
+    - **Existing user**: stamps ``last_login_at = now()`` on both sys_user and 
+      sys_userinfo, returns ``(user_id, tenant_id)``.
+    - **First-ever login for this identity**: auto-provisions both sys_user and 
+      sys_userinfo rows. This REQUIRES the token to carry a ``tenant_id`` custom 
+      claim (published via a Keycloak protocol mapper) identifying which tenant
       this identity belongs to -- without it we refuse to provision (fail
       closed: the caller gets no tenant context / no RLS-visible rows,
       rather than being silently assigned to the wrong tenant).
@@ -166,62 +170,104 @@ def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, 
     Local import of SessionLocal avoids a hard import-time dependency
     between core.auth and core.database.
     """
-    keycloak_user_id = payload.get("sub")
-    if not keycloak_user_id:
+    provider_subject_id = payload.get("sub")
+    tenant_id = payload.get("tenant_id")
+    
+    if not provider_subject_id or not tenant_id:
+        if provider_subject_id and not tenant_id:
+            logger.warning(
+                "Cannot auto-provision sys_user for provider_subject_id=%s: token has no tenant_id claim",
+                provider_subject_id,
+            )
         return None
 
     from core.database import SessionLocal
 
     db = SessionLocal()
     try:
+        # Look up existing user via sys_userinfo (Keycloak provider)
         row = db.execute(
-            text(f"SELECT user_id, tenant_id FROM {settings.db_schema}.sys_user WHERE keycloak_user_id = :kid"),
-            {"kid": keycloak_user_id},
+            text(
+                f"""
+                SELECT u.user_id, u.tenant_id 
+                FROM {settings.db_schema}.sys_userinfo ui
+                JOIN {settings.db_schema}.sys_user u ON ui.user_id = u.user_id
+                WHERE ui.tenant_id = :tenant_id 
+                  AND ui.auth_provider = 'KEYCLOAK'
+                  AND ui.provider_subject_id = :provider_subject_id
+                """
+            ),
+            {"tenant_id": tenant_id, "provider_subject_id": provider_subject_id},
         ).mappings().first()
 
         if row is not None:
-            # Existing user: just refresh last_login_at.
+            # Existing user: refresh last_login_at on both tables
             db.execute(
                 text(f"UPDATE {settings.db_schema}.sys_user SET last_login_at = now() WHERE user_id = :uid"),
                 {"uid": row["user_id"]},
             )
+            db.execute(
+                text(
+                    f"""
+                    UPDATE {settings.db_schema}.sys_userinfo 
+                    SET last_login_at = now() 
+                    WHERE tenant_id = :tenant_id 
+                      AND auth_provider = 'KEYCLOAK'
+                      AND provider_subject_id = :provider_subject_id
+                    """
+                ),
+                {"tenant_id": tenant_id, "provider_subject_id": provider_subject_id},
+            )
             db.commit()
             return {"user_id": str(row["user_id"]), "tenant_id": str(row["tenant_id"])}
 
-        # New identity: auto-provision, but only if we know which tenant.
-        tenant_id = payload.get("tenant_id")
-        if not tenant_id:
-            logger.warning(
-                "Cannot auto-provision sys_user for keycloak_user_id=%s: token has no tenant_id claim",
-                keycloak_user_id,
-            )
-            return None
-
-        username = payload.get("preferred_username") or payload.get("email") or keycloak_user_id
+        # New identity: auto-provision both sys_user and sys_userinfo
+        username = payload.get("preferred_username") or payload.get("email") or provider_subject_id
         email = payload.get("email")
         full_name = payload.get("name")
 
-        inserted = db.execute(
+        # Insert into sys_user first
+        inserted_user = db.execute(
             text(
                 f"""
                 INSERT INTO {settings.db_schema}.sys_user
-                    (tenant_id, keycloak_user_id, username, email, full_name, last_login_at)
-                VALUES (:tenant_id, :kid, :username, :email, :full_name, now())
+                    (tenant_id, username, email, full_name, last_login_at)
+                VALUES (:tenant_id, :username, :email, :full_name, now())
                 RETURNING user_id, tenant_id
                 """
             ),
             {
                 "tenant_id": tenant_id,
-                "kid": keycloak_user_id,
                 "username": username,
                 "email": email,
                 "full_name": full_name,
             },
         ).mappings().first()
-        db.commit()
-        if inserted is None:
+
+        if inserted_user is None:
+            db.rollback()
             return None
-        return {"user_id": str(inserted["user_id"]), "tenant_id": str(inserted["tenant_id"])}
+
+        user_id = inserted_user["user_id"]
+
+        # Insert into sys_userinfo to link the Keycloak identity
+        db.execute(
+            text(
+                f"""
+                INSERT INTO {settings.db_schema}.sys_userinfo
+                    (tenant_id, user_id, auth_provider, provider_subject_id, last_login_at)
+                VALUES (:tenant_id, :user_id, 'KEYCLOAK', :provider_subject_id, now())
+                """
+            ),
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "provider_subject_id": provider_subject_id,
+            },
+        )
+        db.commit()
+        return {"user_id": str(user_id), "tenant_id": str(inserted_user["tenant_id"])}
+
     except Exception:
         db.rollback()
         logger.warning("Failed to get-or-create sys_user on Keycloak login", exc_info=True)
@@ -235,30 +281,39 @@ def _resolve_tenant_and_user(payload: dict[str, Any]) -> tuple[Optional[str], Op
 
     Prefers explicit ``tenant_id``/``user_id`` custom claims on the Keycloak
     token (if a protocol mapper publishes them); otherwise falls back to a
-    (Redis-cached) ``sys_user`` get-or-create keyed by the standard ``sub``
-    claim -- see ``_get_or_create_user_on_login``. Caching means last_login_at
-    is refreshed at most once per IDENTITY_CACHE_TTL_SECONDS per user, not on
-    every single request.
+    (Redis-cached) ``sys_userinfo`` get-or-create keyed by the standard ``sub``
+    claim and tenant_id -- see ``_get_or_create_user_on_login``. Caching means 
+    last_login_at is refreshed at most once per IDENTITY_CACHE_TTL_SECONDS per 
+    user, not on every single request.
+    
+    Returns (None, None) if tenant_id claim is missing or user can't be resolved
+    (fail-closed principle: better to deny access than grant with incomplete identity).
     """
     tenant_id = payload.get("tenant_id")
     user_id = payload.get("user_id")
+    
+    # Explicit claims in token short-circuit everything
     if tenant_id and user_id:
         return tenant_id, user_id
 
-    keycloak_user_id = payload.get("sub")
-    if not keycloak_user_id:
-        return tenant_id, user_id
+    # Fail-closed: must have tenant_id from claims or provider_subject_id lookup
+    provider_subject_id = payload.get("sub")
+    if not provider_subject_id or not tenant_id:
+        return None, None
 
-    identity = _load_cached_identity(keycloak_user_id)
+    # Try to resolve user identity from cache or database
+    identity = _load_cached_identity(provider_subject_id, tenant_id)
     if identity is None:
         identity = _get_or_create_user_on_login(payload)
         if identity is not None:
-            _cache_identity(keycloak_user_id, identity)
+            _cache_identity(provider_subject_id, tenant_id, identity)
 
+    # Only return identity if we successfully resolved it
     if identity is not None:
-        tenant_id = tenant_id or identity.get("tenant_id")
-        user_id = user_id or identity.get("user_id")
-    return tenant_id, user_id
+        return identity.get("tenant_id"), identity.get("user_id")
+    
+    # Fail-closed: return (None, None) if user can't be resolved
+    return None, None
 
 
 def _apply_dev_tenant_headers(request: Request) -> None:

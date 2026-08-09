@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 
 from core.auth import auth_middleware
-from tests.conftest import FakeRedis
+from tests.conftest import FakeDBSession, FakeQueryResult, FakeRedis
 
 
 def _build_app():
@@ -216,6 +216,156 @@ class AuthMiddlewareTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["tenant_id"], "22222222-2222-2222-2222-222222222222")
         self.assertEqual(body["user_id"], "33333333-3333-3333-3333-333333333333")
+
+
+class AuthMiddlewareSysUserInfoProvisioningTests(unittest.TestCase):
+    """End-to-end coverage of the sys_user/sys_userinfo (User Login & SSO
+    Identity Management) provisioning path through the real middleware --
+    i.e. a token that carries only ``sub``/``tenant_id`` and must be resolved
+    via ``_get_or_create_user_on_login`` rather than explicit claims."""
+
+    def test_new_identity_is_provisioned_and_resolved_onto_request_state(self):
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+        session = FakeDBSession(
+            script=[
+                FakeQueryResult(None),  # sys_userinfo/sys_user join -> not found
+                FakeQueryResult({"user_id": "e2e-new-user", "tenant_id": "tenant-e2e"}),  # INSERT sys_user
+                FakeQueryResult(None),  # INSERT sys_userinfo
+            ]
+        )
+        introspect_payload = {
+            "active": True,
+            "sub": "kc-e2e-new",
+            "tenant_id": "tenant-e2e",
+            "preferred_username": "e2e-user",
+            "email": "e2e@example.com",
+            "exp": 9999999999,
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth.get_redis_client", return_value=fake_redis
+        ), patch("core.auth._introspect_with_keycloak", return_value=introspect_payload), patch(
+            "core.database.SessionLocal", return_value=session
+        ):
+            response = client.get("/secure", headers={"Authorization": "Bearer tok-e2e-new"})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["tenant_id"], "tenant-e2e")
+        self.assertEqual(body["user_id"], "e2e-new-user")
+        self.assertTrue(session.committed)
+        self.assertEqual(len(session.executed), 3)
+
+    def test_existing_identity_is_looked_up_via_sys_userinfo_join_and_resolved(self):
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+        session = FakeDBSession(
+            script=[
+                FakeQueryResult({"user_id": "e2e-existing-user", "tenant_id": "tenant-e2e-2"}),
+            ]
+        )
+        introspect_payload = {
+            "active": True,
+            "sub": "kc-e2e-existing",
+            "tenant_id": "tenant-e2e-2",
+            "exp": 9999999999,
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth.get_redis_client", return_value=fake_redis
+        ), patch("core.auth._introspect_with_keycloak", return_value=introspect_payload), patch(
+            "core.database.SessionLocal", return_value=session
+        ):
+            response = client.get("/secure", headers={"Authorization": "Bearer tok-e2e-existing"})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["tenant_id"], "tenant-e2e-2")
+        self.assertEqual(body["user_id"], "e2e-existing-user")
+        # SELECT + UPDATE sys_user + UPDATE sys_userinfo, never an INSERT.
+        for sql, _ in session.executed:
+            self.assertNotIn("INSERT INTO", sql)
+
+    def test_token_without_tenant_claim_leaves_state_unset_fail_closed(self):
+        """A verified/active token whose payload carries no tenant_id claim
+        must never touch the DB and must leave tenant_id/user_id unset --
+        RLS then denies all rows rather than guessing a tenant."""
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+        introspect_payload = {"active": True, "sub": "kc-no-tenant-claim", "exp": 9999999999}
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth.get_redis_client", return_value=fake_redis
+        ), patch("core.auth._introspect_with_keycloak", return_value=introspect_payload), patch(
+            "core.database.SessionLocal"
+        ) as mock_session_local:
+            response = client.get("/secure", headers={"Authorization": "Bearer tok-no-tenant"})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIsNone(body["tenant_id"])
+        self.assertIsNone(body["user_id"])
+        mock_session_local.assert_not_called()
+
+    def test_identity_cache_prevents_repeat_db_lookup_on_subsequent_requests(self):
+        """Once an identity is resolved and cached in Redis, further requests
+        (even with a different bearer token for the same identity) must not
+        re-open a DB session -- only refreshing at most once per TTL."""
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+        session = FakeDBSession(
+            script=[FakeQueryResult({"user_id": "cache-user", "tenant_id": "cache-tenant"})]
+        )
+        introspect_payload = {
+            "active": True,
+            "sub": "kc-cache-e2e",
+            "tenant_id": "cache-tenant",
+            "exp": 9999999999,
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth.get_redis_client", return_value=fake_redis
+        ), patch("core.auth._introspect_with_keycloak", return_value=introspect_payload), patch(
+            "core.database.SessionLocal", return_value=session
+        ) as mock_session_local:
+            first = client.get("/secure", headers={"Authorization": "Bearer tok-cache-1"})
+            second = client.get("/secure", headers={"Authorization": "Bearer tok-cache-2"})
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json()["tenant_id"], "cache-tenant")
+        self.assertEqual(second.json()["tenant_id"], "cache-tenant")
+        self.assertEqual(second.json()["user_id"], first.json()["user_id"])
+        # Only the first (uncached) request should have opened a DB session.
+        mock_session_local.assert_called_once()
+
+    def test_database_failure_during_provisioning_fails_closed_not_500(self):
+        """If sys_user/sys_userinfo provisioning blows up mid-request, the
+        caller still gets a 200 with no tenant/user context rather than a
+        raw 500 or a half-provisioned identity leaking through."""
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+        session = FakeDBSession(raise_on_call=1)
+        introspect_payload = {
+            "active": True,
+            "sub": "kc-e2e-broken",
+            "tenant_id": "tenant-broken",
+            "exp": 9999999999,
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth.get_redis_client", return_value=fake_redis
+        ), patch("core.auth._introspect_with_keycloak", return_value=introspect_payload), patch(
+            "core.database.SessionLocal", return_value=session
+        ):
+            response = client.get("/secure", headers={"Authorization": "Bearer tok-e2e-broken"})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIsNone(body["tenant_id"])
+        self.assertIsNone(body["user_id"])
+        self.assertTrue(session.rolled_back)
 
 
 if __name__ == "__main__":
