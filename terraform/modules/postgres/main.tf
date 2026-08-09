@@ -14,11 +14,12 @@ terraform {
 #   * topology = "standalone" -> vngcloud_vdb_relational_database (single node, cheaper, dev/PoC)
 #   * topology = "cluster"    -> vngcloud_vdb_postgresql_cluster  (2-10 nodes HA, RW+RO ports, prod)
 #
-# All required extensions (postgis, vector/pgvector, pg_trgm, fuzzystrmatch,
-# uuid-ossp, pgcrypto, btree_gin, pg_partman) are supported by vDB PostgreSQL,
-# but the provider does NOT manage in-database objects. Extensions, the
-# customer360_app RLS role, schema and seed are applied by the db-bootstrap
-# module (or your CI/K8s migration job).
+# The extensions the app actually needs (uuid-ossp, pgcrypto, vector/pgvector,
+# postgis, pg_trgm, fuzzystrmatch - see postgres/init/00-extensions.sql) are all
+# supported by vDB PostgreSQL, but the provider does NOT manage in-database
+# objects. Extensions, the customer360_app RLS role, schema, seed and the
+# dedicated db_keycloak database are applied by the db-bootstrap module (or your
+# CI/K8s migration job).
 
 locals {
   is_cluster = var.topology == "cluster"

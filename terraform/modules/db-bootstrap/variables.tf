@@ -44,6 +44,18 @@ variable "db_schema" {
   default     = "customer360"
 }
 
+variable "create_keycloak_db" {
+  type        = bool
+  description = "Also create the dedicated Keycloak database on the same instance. The app wires KC_DB_URL (k8s c360-config) to this DB, so every non-TF path (docker-compose keycloak-db-init, k8s) already creates it. Keep on so a TF-provisioned Postgres is usable by Keycloak too."
+  default     = true
+}
+
+variable "keycloak_db_sql" {
+  type        = string
+  description = "Path to the idempotent CREATE DATABASE script for Keycloak (postgres/init/02-create-keycloak-db.sql). Only used when create_keycloak_db = true."
+  default     = ""
+}
+
 variable "app_role_name" {
   type        = string
   description = "Non-superuser role the app connects as (RLS depends on this)."

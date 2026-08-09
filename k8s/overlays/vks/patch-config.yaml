@@ -20,7 +20,9 @@ data:
   KAFKA_BOOTSTRAP_SERVERS: "CHANGE_ME-managed-kafka:9094"
 
   # --- vStorage (S3) instead of MinIO ---
-  S3_ENDPOINT: "https://hcm04.vstorage.vngcloud.vn"
+  # Region must match the terraform stack (vstorage_region / vstorage_s3_endpoint,
+  # zone HCM03-1A, vDB HCM-3 gateways) -> hcm03.
+  S3_ENDPOINT: "https://hcm03.vstorage.vngcloud.vn"
   MINIO_BUCKET: "CHANGE_ME-bucket"
 
   # --- Auth on, public URLs (must be browser-reachable) ---

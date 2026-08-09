@@ -65,6 +65,11 @@ module "db_bootstrap" {
   schema_sql     = "${local.repo_root}/database-init/database-schema.sql"
   seed_sql       = "${local.repo_root}/database-init/init-core-database.sql"
   extra_sql      = var.db_bootstrap_extra_sql
+
+  # Keycloak shares this Postgres server via a dedicated database (db_keycloak).
+  # The app's KC_DB_URL (k8s c360-config) targets it, so provision it here too.
+  create_keycloak_db = var.create_keycloak_db
+  keycloak_db_sql    = "${local.repo_root}/postgres/init/02-create-keycloak-db.sql"
 }
 
 # --- Redis -----------------------------------------------------------------

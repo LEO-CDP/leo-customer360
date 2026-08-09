@@ -45,7 +45,7 @@ terraform/
 │   ├── redis/          # vDB Memory store
 │   ├── kafka/          # cluster + shared/per-tenant topics + users
 │   ├── vstorage/       # S3-compatible buckets (aws provider)
-│   └── db-bootstrap/   # extensions + RLS role + schema + seed via psql
+│   └── db-bootstrap/   # db_keycloak + extensions + RLS role + schema + seed via psql
 ├── stack/              # composition module wiring all of the above
 └── environments/
     ├── dev/            # standalone PG, permissive CIDRs, no versioning
@@ -141,14 +141,23 @@ terraform apply -auto-approve        # applies immediately - no prompt
 
 ## Wiring outputs into the app
 
-`terraform output` gives you the values for the app `.env`:
+`terraform output` gives you the values for the app config (the k8s `c360-config`
+ConfigMap / `.env`). These are the exact keys the current code reads:
 
 ```
-DB_HOST      <- postgres.host        DB_PORT   <- postgres.port
-DB_NAME      <- postgres.db_name     DB_USER   <- customer360_app (see below)
-REDIS_HOST   <- redis.host           REDIS_PORT<- redis.port
-# Kafka bootstrap = kafka.broker_private_ips (+ 9094 for SASL)
+DB_HOST                 <- postgres.host          DB_PORT  <- postgres.port
+DB_NAME                 <- postgres.db_name        DB_USER  <- customer360_app (see RLS note below)
+KC_DB_URL               <- jdbc:postgresql://<postgres.host>:<port>/db_keycloak   (Keycloak's dedicated DB)
+REDIS_HOST              <- redis.host              REDIS_PORT <- redis.port  (managed port, NOT 6580)
+KAFKA_BOOTSTRAP_SERVERS <- kafka.broker_private_ips joined with ":9094" (SASL) / ":9092" (plaintext)
+S3_ENDPOINT             <- vstorage_s3_endpoint    (e.g. https://hcm03.vstorage.vngcloud.vn)
+MINIO_BUCKET            <- one vstorage_buckets entry (the "events" bucket, e.g. c360-<env>-events)
 ```
+
+> The app's S3 client authenticates with the **vStorage S3 key** (passed as
+> `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` in the k8s `c360-secrets`), i.e. the same
+> `vstorage_access_key`/`vstorage_secret_key` this stack uses — not the vngcloud
+> IAM pair.
 
 ## The critical in-database step (RLS)
 
@@ -156,13 +165,20 @@ The vDB provider provisions the **server** but not what's **inside** the databas
 Two things must run once against a fresh Postgres, and both are handled by the
 `db-bootstrap` module (or your own migration job):
 
-1. **Extensions** — `postgis`, `vector` (pgvector), `pg_trgm`, `fuzzystrmatch`,
-   `uuid-ossp`, `pgcrypto`, `btree_gin`. All are supported by vDB PostgreSQL; the
-   repo's `postgres/init/00-extensions.sql` enables them idempotently.
+1. **Extensions** — `uuid-ossp`, `pgcrypto`, `vector` (pgvector), `postgis`,
+   `pg_trgm`, `fuzzystrmatch` (exactly what `postgres/init/00-extensions.sql`
+   creates). All are supported by vDB PostgreSQL and enabled idempotently.
 2. **The `customer360_app` role** — a **non-superuser** login role. RLS is
    **silently bypassed** when the app connects as the `postgres` superuser, so the
    app MUST connect as this role. The repo documents it but never creates it —
-   `db-bootstrap` does (idempotently).
+   `db-bootstrap` does (idempotently). ⚠️ The current k8s `c360-config` still sets
+   `DB_USER=postgres`, so RLS is inert in that config — point `DB_USER` at
+   `customer360_app` (and set its password) to actually enforce tenant isolation.
+3. **The `db_keycloak` database** — Keycloak shares this Postgres server but uses
+   a **dedicated database** (`db_keycloak`), which the app targets via `KC_DB_URL`.
+   Every non-Terraform path already creates it (docker-compose `keycloak-db-init`,
+   the k8s Postgres image init). `db-bootstrap` now creates it too, idempotently,
+   from `postgres/init/02-create-keycloak-db.sql` (toggle with `create_keycloak_db`).
 
 `db-bootstrap` is `enabled = false` by default. To run it from Terraform, set
 `pg_public_access = true`, `run_db_bootstrap = true` and `app_role_password` in
@@ -181,6 +197,10 @@ console (a wrong package/version name fails at `plan` on the data-source lookup)
 - **Volume type names** and **zone** (`HCM03-1A/-1B/-1C`).
 - **vStorage endpoint / region** — confirm the host for your bucket's region and
   whether path-style vs virtual-hosted addressing is required (`s3_use_path_style`).
+  This stack defaults to **`hcm03`** everywhere (zone `HCM03-1A`, vDB `HCM-3`
+  gateways, `vstorage_region`/`vstorage_s3_endpoint`). The k8s `overlays/vks`
+  `S3_ENDPOINT` example currently says `hcm04` — reconcile the two to the region
+  your account actually uses so the app's `S3_ENDPOINT` matches these buckets.
 - Kafka **standalone minimums** — brokers 3–10, `replicas` ≤ broker count.
 
 ## Cost note

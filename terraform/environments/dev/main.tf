@@ -73,16 +73,23 @@ module "stack" {
     { name = "cdp.raw-profiles", partitions = 6, replicas = 3, retention_seconds = 604800 },
     # Dead-letter queues (design requires DLQ + object-storage backup). Longer
     # retention for inspect/replay; DLQ consumers also mirror raw bytes to the
-    # vStorage "ingestion" bucket. Keyed by the original tenant_id.
+    # vStorage "events" bucket. Keyed by the original tenant_id.
     { name = "cdp.raw-events.dlq", partitions = 3, replicas = 3, retention_seconds = 1209600 },
     { name = "cdp.raw-profiles.dlq", partitions = 3, replicas = 3, retention_seconds = 1209600 },
   ]
   kafka_per_tenant_topics = []
 
-  # --- vStorage: shared + per-tenant buckets ---
+  # --- vStorage (S3) buckets ---
+  # The app reads exactly ONE object-storage bucket today, via MINIO_BUCKET
+  # (k8s c360-config, default "customer360-events-dev") - used by the file-based
+  # event-ingestion path / all-data-simulator's MinIO client. So dev provisions
+  # just that bucket. Wire the k8s vks overlay's MINIO_BUCKET to the name below
+  # ("<vstorage_bucket_prefix>events", i.e. "c360-dev-events").
+  # exports/backups/per-tenant "assets" are forward-looking (no code consumes
+  # them yet) - add them here when those features land.
   vstorage_enabled            = var.vstorage_enabled
   vstorage_bucket_prefix      = var.vstorage_bucket_prefix
-  vstorage_shared_buckets     = ["ingestion", "exports"]
-  vstorage_per_tenant_buckets = ["assets"]
+  vstorage_shared_buckets     = ["events"]
+  vstorage_per_tenant_buckets = []
   vstorage_versioning         = false
 }

@@ -5,6 +5,13 @@ set -euo pipefail
 
 PSQL=(psql -v ON_ERROR_STOP=1 -h '${host}' -p '${port}' -U '${master_user}' -d '${db_name}')
 
+%{ if create_keycloak_db ~}
+echo "[db-bootstrap] 0/5 ensuring the Keycloak database exists (idempotent)..."
+# CREATE DATABASE cannot run inside a transaction/DO block; the script uses the
+# psql \gexec trick guarded by pg_database, so re-runs are a no-op.
+"$${PSQL[@]}" -f '${keycloak_db_sql}'
+
+%{ endif ~}
 echo "[db-bootstrap] 1/5 enabling extensions..."
 "$${PSQL[@]}" -f '${extensions_sql}'
 

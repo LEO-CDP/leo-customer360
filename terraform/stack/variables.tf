@@ -150,6 +150,12 @@ variable "db_schema" {
   default = "customer360"
 }
 
+variable "create_keycloak_db" {
+  type        = bool
+  description = "When run_db_bootstrap is on, also create the dedicated db_keycloak database the app's KC_DB_URL points at (parity with docker-compose keycloak-db-init / k8s)."
+  default     = true
+}
+
 variable "app_role_name" {
   type    = string
   default = "customer360_app"

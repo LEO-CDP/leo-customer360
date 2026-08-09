@@ -74,7 +74,7 @@ module "stack" {
     # Raw profiles from source systems + CRM/file imports -> cdp_raw_profiles_stage
     { name = "cdp.raw-profiles", partitions = 12, replicas = 3, retention_seconds = 1209600 },
     # Dead-letter queues (spec: DLQ + object-storage backup). 30d retention; DLQ
-    # consumers mirror raw bytes to the vStorage "ingestion"/"backups" buckets.
+    # consumers mirror raw bytes to the vStorage "events"/"backups" buckets.
     { name = "cdp.raw-events.dlq", partitions = 6, replicas = 3, retention_seconds = 2592000 },
     { name = "cdp.raw-profiles.dlq", partitions = 3, replicas = 3, retention_seconds = 2592000 },
 
@@ -94,9 +94,14 @@ module "stack" {
   ]
 
   # --- vStorage: versioned shared + per-tenant buckets ---
+  # "events" is the bucket the app actually reads today (MINIO_BUCKET in the k8s
+  # vks c360-config -> "<vstorage_bucket_prefix>events" = "c360-prod-events").
+  # exports/backups + per-tenant "assets" are forward-looking (DLQ backup,
+  # exports, per-tenant assets) - no code consumes them yet, kept pre-provisioned
+  # for prod. Trim if you want prod to mirror exactly what the code uses.
   vstorage_enabled            = var.vstorage_enabled
   vstorage_bucket_prefix      = var.vstorage_bucket_prefix
-  vstorage_shared_buckets     = ["ingestion", "exports", "backups"]
+  vstorage_shared_buckets     = ["events", "exports", "backups"]
   vstorage_per_tenant_buckets = ["assets"]
   vstorage_versioning         = true
 }
