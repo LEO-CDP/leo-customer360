@@ -4,15 +4,15 @@ Enforces multi-tenant isolation: users can only access/modify their own tenant's
 Respects auth_middleware.tenant_id and user_id from request.state.
 """
 
-from typing import Any
+from typing import Any, Generator, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func, text
+from sqlalchemy import func, text
 
 from core.database import SessionLocal
-from core.models.system import SysUser, SysUserInfo
+from core.models.system import SysUser
 from core.repositories.user_repository import UserRepository
 from core.schemas.user import UserCreate, UserUpdate, UserResponse, UserListResponse
 
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/users", tags=["Users"])
 # Dependencies
 # =============================================================================
 
-def get_db_session(request: Request) -> Session:
+def get_db_session(request: Request) -> Generator[Session, None, None]:
     """Yields a DB session with tenant_id from auth_middleware set in app config."""
     tenant_id = getattr(request.state, "tenant_id", None)
     
@@ -162,7 +162,7 @@ async def get_user(
 async def list_users(
     skip: int = 0,
     limit: int = 100,
-    status: str = None,
+    status_filter: Optional[str] = None,
     db: Session = Depends(get_db_session),
     current_user: dict = Depends(get_current_user),
     tenant_id: UUID = Depends(get_tenant_id),
@@ -180,12 +180,12 @@ async def list_users(
     total_query = db.query(func.count(SysUser.user_id)).filter(
         SysUser.tenant_id == tenant_id
     )
-    if status:
-        total_query = total_query.filter(SysUser.status == status)
+    if status_filter:
+        total_query = total_query.filter(SysUser.status == status_filter)
     total = total_query.scalar() or 0
     
     # Get paginated results
-    items = repo.list_users(tenant_id, status=status, skip=skip, limit=limit)
+    items = repo.list_users(tenant_id, status=status_filter, skip=skip, limit=limit)
     
     return UserListResponse(
         total=total,
@@ -212,15 +212,6 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User '{user_id}' not found in this workspace",
         )
-    
-    # Prevent duplicate username/email if they're being changed
-    if user_update.username and user_update.username.lower() != user.username:
-        existing = repo.get_user_by_username(user_update.username, tenant_id)
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Username '{user_update.username}' already exists",
-            )
     
     try:
         updated_user = repo.update_user(user, user_update)

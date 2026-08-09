@@ -4,7 +4,7 @@ This document reflects the current implementation in:
 - app.py
 - core/routers/*.py
 
-Last aligned: 2026-08-07.
+Last aligned: 2026-08-09.
 
 ## Base Paths
 
@@ -157,6 +157,21 @@ Persona History:
 Resolution Status:
 - GET /api/v1/resolution-status/
 
+### Users
+
+- GET /api/v1/users/me
+- POST /api/v1/users
+- GET /api/v1/users
+- GET /api/v1/users/{user_id}
+- PATCH /api/v1/users/{user_id}
+- DELETE /api/v1/users/{user_id} (`?hard_delete=true` for hard delete; default is soft delete/deactivate)
+- GET /api/v1/users/{user_id}/sso-identities
+
+Notes:
+- `sys_user` (profile) and `sys_userinfo` (per-provider SSO identity) are decoupled; `UserResponse` embeds `sso_identities`.
+- Username/email are immutable via PATCH (only settable at creation); `UserUpdate` intentionally excludes them.
+- `GET /api/v1/users/me` and `GET /api/v1/users/{user_id}` are Redis read-through cached (`user:profile:{tenant_id}:{user_id}`, 120s TTL) since the profile is resolved on nearly every authenticated request; every write (`PATCH`/`DELETE`/SSO link/unlink) invalidates the entry.
+
 ### Reporting
 
 - GET /api/v1/reporting/summary
@@ -224,6 +239,7 @@ Additional Segmentation Endpoints:
   - persona/features, persona/score-details, persona/history: read/create only
   - graph-edges: no PATCH
   - events: custom ingest/list/detail APIs
+  - users: no /count; DELETE defaults to soft delete (status=INACTIVE), hard delete is opt-in via query param
 - Trailing slash behavior follows router definitions. Keep client paths aligned with the list above.
 
 ## Verification Source
@@ -239,6 +255,7 @@ This file was updated from the latest route declarations in:
 - customer360-api/core/routers/graph.py
 - customer360-api/core/routers/reporting.py
 - customer360-api/core/routers/metadata.py
+- customer360-api/core/routers/user_api.py
 
 ## Endpoint Matrix (Machine-Readable)
 
@@ -435,4 +452,11 @@ resource,method,auth_expectation
 /api/v1/segments/admin/recompute-all,POST,tenant_admin_if_sso
 /api/v1/segments/admin/recompute-status/{run_id},GET,bearer_if_sso
 /api/v1/segments/segmentable-profile-attributes,GET,bearer_if_sso
+/api/v1/users/me,GET,bearer_if_sso
+/api/v1/users,POST,bearer_if_sso
+/api/v1/users,GET,bearer_if_sso
+/api/v1/users/{user_id},GET,bearer_if_sso
+/api/v1/users/{user_id},PATCH,bearer_if_sso
+/api/v1/users/{user_id},DELETE,bearer_if_sso
+/api/v1/users/{user_id}/sso-identities,GET,bearer_if_sso
 ```
