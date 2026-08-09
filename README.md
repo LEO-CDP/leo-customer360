@@ -37,6 +37,16 @@ It ships as three independently runnable pieces:
 | [`postgres/`](postgres), [`redis/`](redis) | Custom Dockerfiles for the Postgres (PostGIS + pgvector) and Redis images used by `docker-compose.yml` |
 | [`ui-wireframes/`](ui-wireframes) | UI/UX wireframe references for the admin frontend |
 
+## Copy from template
+
+Before running the stack locally, create your runtime environment file from the template:
+
+```bash
+cp .env.example .env
+```
+
+Then edit [.env](.env) with your local secrets and ports. The full variable reference is in [docs/environment-notes.md](docs/environment-notes.md).
+
 ## Quick start
 
 **Production-shaped stack (Docker Compose: postgres + redis + keycloak + cir + api):**
@@ -72,14 +82,14 @@ Every protected endpoint needs `tenant_id`/`user_id` resolved from one of:
 - **Dev JWT (recommended, `SSO_LOGIN=false`)** -- log in once, then send the
   token like a real production caller would:
   ```bash
-  curl -s -X POST http://localhost:8000/api/v1/auth/login \
+  curl -s -X POST http://localhost:8008/api/v1/auth/login \
     -H 'Content-Type: application/json' \
     -d '{"username":"admin","password":"<DEFAULT_ROOT_PASSWORD from .env>"}'
   # -> {"access_token": "...", "tenant_id": "...", "user_id": "...", ...}
 
-  curl -s http://localhost:8000/api/v1/users/me -H "Authorization: Bearer <access_token>"
+  curl -s http://localhost:8008/api/v1/users/me -H "Authorization: Bearer <access_token>"
   ```
-  Or open `http://localhost:8000/docs`, click **Authorize**, and paste the
+  Or open `http://localhost:8008/docs`, click **Authorize**, and paste the
   `access_token` to call any endpoint from Swagger UI.
 - **SSO (`SSO_LOGIN=true`)** -- the same `Authorization: Bearer <token>`
   contract, but the token comes from Keycloak (see `frontend-admin`'s login

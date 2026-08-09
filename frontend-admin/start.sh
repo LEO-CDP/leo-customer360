@@ -80,8 +80,8 @@ fi
 ###############################################################################
 log "API hostname for the browser: ${FRONTEND_API_HOSTNAME:-http://localhost:8008}"
 
-HOST="${FRONTEND_HOST:-0.0.0.0}"
-PORT="${FRONTEND_PORT:-8890}"
+HOST="${FRONTEND_HOST_BIND:-0.0.0.0}"
+PORT="${FRONTEND_HOST_PORT:-8890}"
 RELOAD_FLAG=""
 if [ "${FRONTEND_UVICORN_RELOAD:-false}" = "true" ]; then
     RELOAD_FLAG="--reload"
