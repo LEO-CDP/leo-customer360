@@ -137,10 +137,40 @@
       </section>
 
       <!-- Persona Management tab: list + analytics dashboard rendered by
-         static/js/persona-list-view.js -->
+         static/js/persona-list-view.js. Lists SHARED persona archetypes
+         (each with a real matched_profile_count), with a drill-down sub-view
+         showing every master profile currently matched to one archetype --
+         section, toggled the same way view-segments toggles list/detail. -->
       <section id="view-personas" class="hidden">
-        <div id="persona-list-content"></div>
+        <div id="persona-view-list">
+          <div id="persona-list-content"></div>
+        </div>
+        <div id="persona-view-category-detail" class="hidden">
+          <button id="btn-back-to-personas" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium mb-3">&larr;
+            Back to personas</button>
+          <h2 class="text-lg font-semibold text-slate-800 mb-1">Master Profiles &mdash; <span id="persona-category-detail-title"></span></h2>
+          <p class="text-sm text-slate-500 mb-4">All customers currently matched to this persona archetype.</p>
+          <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div id="persona-category-loading" class="p-10 flex justify-center hidden">
+              <div class="spinner"></div>
+            </div>
+            <div id="persona-category-empty" class="p-10 text-center text-sm text-slate-400 hidden">No master profiles matched to this persona archetype.</div>
+            <table class="w-full text-left">
+              <thead id="persona-category-thead"></thead>
+              <tbody id="persona-category-tbody"></tbody>
+            </table>
+            <div class="flex items-center justify-between px-6 py-3 border-t border-slate-100">
+              <span id="persona-category-count-label" class="text-xs text-slate-500"></span>
+              <div class="flex items-center gap-3">
+                <span id="persona-category-page-label" class="text-xs text-slate-500"></span>
+                <button id="btn-persona-category-page-prev" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 disabled:opacity-50">Prev</button>
+                <button id="btn-persona-category-page-next" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 disabled:opacity-50">Next</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
+
 
       <!-- System Users tab: shell from static/templates/admin/system-user-list.html,
         rendered by static/js/system-user-view.js. -->

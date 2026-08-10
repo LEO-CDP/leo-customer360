@@ -11,7 +11,7 @@ mainfont: "DejaVu Serif"
 
 ## Abstract
 
-Customer Persona Resolution (CPR) transforms Master Profiles into AI-native Personas. Each persona is a multidimensional representation built from six scoring components: behavior, engagement, financial, loyalty, relationship, and risk. The system can generate readable non-PII persona names with an LLM, produce 768-dimensional embeddings for lookalike discovery, classify risk into four levels (critical/high/medium/low), and classify value into four tiers (champion/high-value/growth-potential/at-risk). A versioning and audit mechanism records material changes (delta score >= 5), which supports compliance, trend analysis, and anomaly detection.
+Customer Persona Resolution (CPR) transforms Master Profiles into AI-native Personas. A persona is now modeled as a genuine many-to-many relationship: a shared, reusable **persona archetype** (`cdp_persona_archetypes`) can be matched by many master profiles, and each master profile accumulates a versioned history of **persona matches** (`cdp_customer_personas`) against archetypes over time. Each match is a multidimensional representation built from six scoring components: behavior, engagement, financial, loyalty, relationship, and risk. The system can generate readable non-PII persona names with an LLM, produce 768-dimensional embeddings on the archetype for lookalike discovery, classify risk into four levels (critical/high/medium/low), and classify value into four tiers (champion/high-value/growth-potential/at-risk). A versioning and audit mechanism records material changes (delta score >= 5), which supports compliance, trend analysis, and anomaly detection.
 
 ## 1. Scope
 
@@ -50,39 +50,51 @@ Raw Profiles
 
 The database stores Persona entities and supporting relations required for end-to-end customer evaluation. The following tables are central.
 
-### 2.1 Table `cdp_customer_personas`
+### 2.1 Table `cdp_persona_archetypes` (shared, reusable persona definition)
 
-This is the Golden Persona record. It stores a full snapshot per customer, including persona identity fields, six component scores, aggregated `persona_score` (0-100), embedding vector, risk level, value tier, and confidence.
+One row per `(tenant_id, domain, persona_code)`. This is the definition many master profiles can share -- the Persona Management admin UI lists these rows, each carrying a real `matched_profile_count` (a `COUNT(DISTINCT master_profile_id)` over active matches, maintained by a DB trigger).
+
+**Key fields:**
+
+- `persona_archetype_id`, `tenant_id`, `domain`, `persona_code` (unique key)
+- `persona_name`, `persona_summary` (LLM-generated, non-PII)
+- `persona_embedding` (768-dimensional `pgvector` centroid, cosine similarity use case) plus `centroid_*_score` columns (the archetype's average component scores) -- together these form the lookalike model used to find/rank profiles that resemble this archetype
+- `matched_profile_count` (denormalized, trigger-maintained)
+- `is_active`, `created_at`, `updated_at`
+
+### 2.2 Table `cdp_customer_personas` (versioned match/assignment)
+
+This is the per-profile MATCH record: one master profile matched to one archetype at a point in time. It stores a full snapshot per customer-archetype pairing, including the six component scores, aggregated `persona_score` (0-100), `match_score` (lookalike fit vs the archetype centroid), risk level, value tier, and confidence. Many rows here -- across many different master profiles -- can reference the same `persona_archetype_id`; that fan-in is what makes the relationship many-to-many instead of the earlier one-row-per-profile design.
 
 **Key fields:**
 
 - `persona_id`, `master_profile_id`, `tenant_id`, `domain` (scoping and keys)
-- `persona_name`, `persona_summary` (LLM-generated, non-PII)
+- `persona_archetype_id` (FK to `cdp_persona_archetypes` -- the shared definition this match points at)
+- `match_score` (lookalike fit, 0-1)
 - `persona_score = (0.20 * behavior) + (0.20 * engagement) + (0.20 * financial) + (0.15 * loyalty) + (0.10 * relationship) + (0.15 * (100 - risk))`
-- `persona_embedding` (768-dimensional `pgvector`, cosine similarity use case)
-- `computed_version` (increments on material score change), `confidence_score` (0-1)
-- `risk_level` and `value_tier`
+- `computed_version` (increments per `tenant_id`/`master_profile_id`/`persona_archetype_id` on material score change), `confidence_score` (0-1)
+- `risk_level` and `customer_value_tier`
 - `is_active`, `computed_at`, `updated_at`
 
-### 2.2 Table `cdp_persona_features`
+### 2.3 Table `cdp_persona_features`
 
 Feature store for raw and derived profile features used in scoring, model behavior, and audit traceability.
 
 **Key fields:** `feature_id` (PK), `persona_id` (FK), `feature_name`, `feature_value` (NUMERIC), `feature_group` (behavior/engagement/financial/loyalty/relationship/risk), `computed_at`
 
-### 2.3 Table `cdp_persona_score_details`
+### 2.4 Table `cdp_persona_score_details`
 
 Component-level breakdown for explainability and audit.
 
 **Key fields:** `score_detail_id` (PK), `persona_id` (FK), `score_component`, `component_value` (0-100), `component_weight`, `weighted_contribution`, `bonuses_applied` (JSONB), `computed_at`
 
-### 2.4 Table `cdp_persona_history`
+### 2.5 Table `cdp_persona_history`
 
 History of material changes (delta score >= 5) for trend tracking, anomaly review, and compliance.
 
 **Key fields:** `history_id` (PK), `persona_id` (FK), old/new scores, `score_delta`, old/new lifecycle stage, old/new value tier, `changed_components`, `change_reason`, `recorded_at`
 
-### 2.5 Table `cdp_persona_config`
+### 2.6 Table `cdp_persona_config`
 
 Runtime registry for scoring configuration values such as thresholds, weights, bonuses, and caps.
 
@@ -403,10 +415,10 @@ Example summary:
 
 **Embedding flow:**
 
-1. Compose text from `persona_name`, `persona_summary`, and selected features.
+1. Compose text from the archetype's `persona_name`, `persona_summary`, and selected aggregate features.
 2. Call Gemini Embeddings API.
 3. Normalize output into `pgvector`-compatible format.
-4. Store in `cdp_customer_personas.persona_embedding`.
+4. Store the centroid in `cdp_persona_archetypes.persona_embedding` (shared across every master profile matched to that archetype, not duplicated per match row).
 
 **Feature text example:**
 
@@ -425,20 +437,21 @@ Customer Profile:
 
 ### 6.2 Lookalike Audience Discovery
 
-A typical query uses cosine similarity from `pgvector`.
+A typical query uses cosine similarity from `pgvector` against the archetype centroid, then drills into that archetype's matched master profiles via `cdp_customer_personas`.
 
 ```sql
 SELECT
-    persona_id,
+    persona_archetype_id,
     persona_name,
+    matched_profile_count,
     (1 - (persona_embedding <=> ref_embedding)) AS sim
-FROM cdp_customer_personas
+FROM cdp_persona_archetypes
 WHERE (1 - (persona_embedding <=> ref_embedding)) > 0.75
 ORDER BY sim DESC
 LIMIT 100;
 ```
 
-Use case: find lookalike customers for a high-performing persona segment in cross-sell campaigns.
+Use case: find the archetype(s) most similar to a high-performing persona segment, then pull every master profile already matched to it (or not-yet-matched lookalikes) for cross-sell campaigns.
 
 ---
 

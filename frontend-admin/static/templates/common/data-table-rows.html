@@ -33,6 +33,12 @@
       </div>
       {{/each}}
     </div>
+    {{else if isLink}}
+    {{#if value}}
+      <span class="dtv-cell-link cursor-pointer text-sm font-semibold text-indigo-600 hover:text-indigo-800 hover:underline" data-link-value="{{linkValue}}">{{value}}</span>
+    {{else}}
+      <span class="text-slate-300 font-mono">—</span>
+    {{/if}}
     {{else}}
     {{#if value}}
       <span class="text-sm text-slate-700 font-medium">{{value}}</span>

@@ -314,10 +314,12 @@ class TestPersonaResolutionEngine:
         master_row = _profile()
         mock_cursor.fetchall.return_value = []
         # fetchone is called in order: _fetch_master_profile, _fetch_current_persona,
-        # _next_computed_version, _insert_persona (RETURNING persona_id)
+        # _upsert_archetype (RETURNING persona_archetype_id), _next_computed_version,
+        # _insert_persona (RETURNING persona_id)
         mock_cursor.fetchone.side_effect = [
             master_row,
             None,  # no existing/current persona
+            {"persona_archetype_id": "archetype-1"},
             {"next_version": 1},
             {"persona_id": "persona-1"},
         ]
@@ -330,6 +332,7 @@ class TestPersonaResolutionEngine:
         assert result["computed_version"] == 1
 
         executed_queries = [call.args[0] for call in mock_cursor.execute.call_args_list]
+        assert any("INSERT INTO customer360.cdp_persona_archetypes" in q for q in executed_queries)
         assert any("INSERT INTO customer360.cdp_customer_personas" in q for q in executed_queries)
         assert any("INSERT INTO customer360.cdp_persona_features" in q for q in executed_queries)
         assert any("INSERT INTO customer360.cdp_persona_score_details" in q for q in executed_queries)
@@ -345,6 +348,7 @@ class TestPersonaResolutionEngine:
         mock_cursor.fetchone.side_effect = [
             master_row,
             {"persona_id": "old-persona", "persona_name": computation.persona_name, "persona_score": computation.persona_score},
+            {"persona_archetype_id": "archetype-2"},
             {"next_version": 2},
             {"persona_id": "persona-2"},
         ]
@@ -362,6 +366,7 @@ class TestPersonaResolutionEngine:
         mock_cursor.fetchone.side_effect = [
             master_row,
             {"persona_id": "old-persona", "persona_name": "Some Old Persona #abc123", "persona_score": 1.0},
+            {"persona_archetype_id": "archetype-3"},
             {"next_version": 2},
             {"persona_id": "persona-3"},
         ]
@@ -393,6 +398,7 @@ class TestPersonaResolutionEngine:
         mock_cursor.fetchone.side_effect = [
             master_row,
             None,
+            {"persona_archetype_id": "archetype-9"},
             {"next_version": 1},
             {"persona_id": "persona-9"},
         ]
@@ -402,3 +408,114 @@ class TestPersonaResolutionEngine:
 
         assert result is not None
         assert compute_risk_level(56.0) == "high"
+
+
+class TestPersonaArchetypeMatching:
+    """Covers the many-to-many persona-archetype plumbing added on top of
+    PersonaResolutionEngine: _upsert_archetype (shared archetype upsert),
+    _fetch_current_persona (joined through the archetype for its name), and
+    _next_computed_version (versioned per master_profile_id +
+    persona_archetype_id, not the old per-persona_code scheme)."""
+
+    def make_engine(self):
+        return PersonaResolutionEngine(schema="customer360")
+
+    def test_upsert_archetype_inserts_with_conflict_upsert_on_tenant_domain_code(self, mock_cursor):
+        mock_cursor.fetchone.return_value = {"persona_archetype_id": "archetype-1"}
+        engine = self.make_engine()
+        computation = compute_persona(_profile())
+
+        result = engine._upsert_archetype(mock_cursor, "t1", "retail", computation)
+
+        assert result == "archetype-1"
+        query, params = mock_cursor.execute.call_args.args
+        assert "INSERT INTO customer360.cdp_persona_archetypes" in query
+        assert "ON CONFLICT (tenant_id, domain, persona_code) DO UPDATE" in query
+        assert "RETURNING persona_archetype_id" in query
+        assert params[:3] == ("t1", "retail", computation.persona_code)
+
+    def test_upsert_archetype_shares_the_same_row_across_master_profiles(self, mock_cursor):
+        """Two different master profiles resolving to the same persona_code
+        must upsert into (and get back the id of) the SAME archetype row --
+        this is what makes the relationship many-to-many rather than one
+        archetype row per profile."""
+        mock_cursor.fetchone.return_value = {"persona_archetype_id": "shared-archetype-1"}
+        engine = self.make_engine()
+        computation_a = compute_persona(_profile(master_profile_id="profile-a"))
+        computation_b = compute_persona(_profile(master_profile_id="profile-b"))
+
+        id_a = engine._upsert_archetype(mock_cursor, "t1", "retail", computation_a)
+        id_b = engine._upsert_archetype(mock_cursor, "t1", "retail", computation_b)
+
+        assert id_a == id_b == "shared-archetype-1"
+        assert mock_cursor.execute.call_count == 2
+
+    def test_fetch_current_persona_joins_archetype_for_persona_name(self, mock_cursor):
+        mock_cursor.fetchone.return_value = {
+            "persona_id": "persona-1", "persona_name": "Gen Z Sneaker Collector", "persona_score": 72.5,
+        }
+        engine = self.make_engine()
+
+        result = engine._fetch_current_persona(mock_cursor, "t1", "master-1")
+
+        assert result["persona_name"] == "Gen Z Sneaker Collector"
+        query = mock_cursor.execute.call_args.args[0]
+        assert "FROM customer360.cdp_customer_personas cp" in query
+        assert "JOIN customer360.cdp_persona_archetypes pa" in query
+        assert "pa.persona_archetype_id = cp.persona_archetype_id" in query
+
+    def test_next_computed_version_scopes_by_master_profile_and_archetype(self, mock_cursor):
+        mock_cursor.fetchone.return_value = {"next_version": 3}
+        engine = self.make_engine()
+
+        version = engine._next_computed_version(mock_cursor, "t1", "master-1", "archetype-1")
+
+        assert version == 3
+        query, params = mock_cursor.execute.call_args.args
+        assert "master_profile_id = %s AND persona_archetype_id = %s" in query
+        assert params == ("t1", "master-1", "archetype-1")
+
+    def test_next_computed_version_defaults_to_one_when_no_prior_row(self, mock_cursor):
+        mock_cursor.fetchone.return_value = None
+        engine = self.make_engine()
+
+        version = engine._next_computed_version(mock_cursor, "t1", "master-1", "archetype-1")
+
+        assert version == 1
+
+    def test_resolve_persona_inserts_match_row_referencing_upserted_archetype_id(self, mock_cursor, mock_conn, monkeypatch):
+        """End-to-end: the persona_archetype_id returned by the archetype
+        upsert must be the one written onto the cdp_customer_personas match
+        row (not, say, a freshly generated id)."""
+        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        master_row = _profile()
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.fetchone.side_effect = [
+            master_row,
+            None,
+            {"persona_archetype_id": "archetype-42"},
+            {"next_version": 1},
+            {"persona_id": "persona-1"},
+        ]
+        engine = self.make_engine()
+
+        engine.resolve_persona(mock_cursor, "t1", master_row["master_profile_id"])
+
+        insert_persona_call = next(
+            call for call in mock_cursor.execute.call_args_list
+            if "INSERT INTO customer360.cdp_customer_personas" in call.args[0]
+        )
+        assert "archetype-42" in insert_persona_call.args[1]
+
+    def test_resolve_persona_never_raises_when_archetype_upsert_fails(self, mock_cursor):
+        """A malformed archetype-upsert response (e.g. RETURNING clause
+        missing the key) must be swallowed by resolve_persona's blanket
+        except, same as any other unexpected persistence failure."""
+        master_row = _profile()
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.fetchone.side_effect = [master_row, None, {}]  # {} has no "persona_archetype_id" key
+        engine = PersonaResolutionEngine(schema="customer360")
+
+        result = engine.resolve_persona(mock_cursor, "t1", master_row["master_profile_id"])
+
+        assert result is None

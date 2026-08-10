@@ -74,8 +74,9 @@ class CdpMasterProfile(Base):
 
     acquisition_source: Mapped[Optional[str]] = mapped_column(Text)
     acquisition_campaign: Mapped[Optional[str]] = mapped_column(Text)
-    # Points at the latest (is_active=TRUE) cdp_customer_personas row for this
-    # profile. Nullable + ON DELETE SET NULL: computed asynchronously by
+    # Points at the latest (is_active=TRUE) cdp_customer_personas MATCH row for
+    # this profile (which itself points at a SHARED cdp_persona_archetypes
+    # row). Nullable + ON DELETE SET NULL: computed asynchronously by
     # backend-system/identity_resolution's PersonaResolutionEngine
     # (persona_engine.py), never required at profile-creation time.
     current_persona_id: Mapped[Optional[uuid.UUID]] = mapped_column(
@@ -391,19 +392,71 @@ class CdpIdResolutionStatus(Base):
     last_executed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
 
 
+class CdpPersonaArchetype(Base):
+    """Shared, reusable persona definition (one row per tenant+domain+
+    persona_code): LLM-assisted persona_name/persona_summary, a lookalike-
+    model centroid persona_embedding + centroid component scores, and a
+    denormalized matched_profile_count maintained by the DB trigger
+    ``sync_persona_archetype_match_count()``. Many ``CdpCustomerPersona``
+    match rows (across many master profiles) can reference the same
+    archetype -- that many-to-many fan-in is the whole point of this table.
+    The Persona Management admin UI lists these archetypes (not raw match
+    rows), each with its matched_profile_count."""
+
+    __tablename__ = "cdp_persona_archetypes"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "domain", "persona_code", name="cdp_persona_archetypes_tenant_id_domain_persona_code_key"),
+    )
+
+    persona_archetype_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False
+    )
+    domain: Mapped[str] = mapped_column(Text, nullable=False)
+
+    persona_code: Mapped[str] = mapped_column(Text, nullable=False)
+    persona_name: Mapped[str] = mapped_column(Text, nullable=False)
+    persona_category: Mapped[Optional[str]] = mapped_column(Text)
+    persona_summary: Mapped[Optional[str]] = mapped_column(Text)
+
+    llm_provider: Mapped[Optional[str]] = mapped_column(Text)
+    llm_model: Mapped[Optional[str]] = mapped_column(Text)
+    persona_embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(768))
+
+    centroid_behavior_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
+    centroid_engagement_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
+    centroid_financial_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
+    centroid_loyalty_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
+    centroid_relationship_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
+    centroid_risk_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
+
+    # COUNT(DISTINCT master_profile_id) across ACTIVE matches -- maintained by
+    # the DB trigger, never written directly by application code.
+    matched_profile_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
 class CdpCustomerPersona(Base):
-    """Versioned, explainable "customer persona" computed from a resolved
-    cdp_master_profiles row by backend-system/identity_resolution's
+    """Versioned MATCH/assignment of one master profile to one shared
+    ``CdpPersonaArchetype``, computed by backend-system/identity_resolution's
     PersonaResolutionEngine -- identity *understanding*, built on top of the
     identity *matching* output above. Each recomputation inserts a new row
-    (computed_version increments per tenant/master_profile/persona_code);
-    only the latest row per master profile has is_active = True, and that is
-    the row cdp_master_profiles.current_persona_id points at."""
+    (computed_version increments per tenant/master_profile/
+    persona_archetype_id); only the latest row per master profile has
+    is_active = True, and that is the row cdp_master_profiles.
+    current_persona_id points at. Many match rows (across many master
+    profiles) can reference the same persona_archetype_id -- that is the
+    many-to-many relationship."""
 
     __tablename__ = "cdp_customer_personas"
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "master_profile_id", "persona_code", "computed_version",
+            "tenant_id", "master_profile_id", "persona_archetype_id", "computed_version",
             name="cdp_customer_personas_tenant_id_master_profile_id_persona_c_key",
         ),
     )
@@ -418,14 +471,16 @@ class CdpCustomerPersona(Base):
     master_profile_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("cdp_master_profiles.master_profile_id", ondelete="CASCADE"), nullable=False
     )
+    # The shared archetype this profile is currently matched/assigned to.
+    persona_archetype_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("cdp_persona_archetypes.persona_archetype_id", ondelete="CASCADE"),
+        nullable=False,
+    )
 
-    # Stable grouping key for this "family" of persona (e.g.
-    # domain+value-tier+lifecycle slug) -- the (tenant_id, master_profile_id,
-    # persona_code) tuple is what computed_version increments within.
-    persona_code: Mapped[str] = mapped_column(Text, nullable=False)
-    persona_name: Mapped[str] = mapped_column(Text, nullable=False)
-    persona_category: Mapped[Optional[str]] = mapped_column(Text)
-    persona_summary: Mapped[Optional[str]] = mapped_column(Text)
+    # Lookalike match quality: how well this profile fits the archetype's
+    # centroid. Distinct from confidence_score (CIR identity confidence).
+    match_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4), server_default="0")
 
     persona_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), server_default="0")
     confidence_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4), server_default="0")
@@ -440,10 +495,6 @@ class CdpCustomerPersona(Base):
     customer_value_tier: Mapped[Optional[str]] = mapped_column(Text)
     risk_level: Mapped[Optional[str]] = mapped_column(Text)
     next_best_action: Mapped[Optional[str]] = mapped_column(Text)
-
-    llm_provider: Mapped[Optional[str]] = mapped_column(Text)
-    llm_model: Mapped[Optional[str]] = mapped_column(Text)
-    persona_embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(768))
 
     computed_version: Mapped[int] = mapped_column(Integer, server_default="1")
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))

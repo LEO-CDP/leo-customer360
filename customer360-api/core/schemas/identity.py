@@ -467,17 +467,66 @@ class ProfileMergeHistoryRead(ProfileMergeHistoryBase):
 
 
 # --- Customer Persona Resolution ("identity understanding") -------------------
+# A genuine many-to-many relationship: one shared CdpPersonaArchetype can be
+# matched by many master profiles (via CustomerPersonaRead rows), and one
+# master profile accumulates many versioned CustomerPersonaRead rows over time.
+
+
+class PersonaArchetypeBase(BaseModel):
+    tenant_id: uuid.UUID
+    domain: str = Field(default="retail")
+
+    persona_code: str
+    persona_name: str
+    persona_category: Optional[str] = None
+    persona_summary: Optional[str] = None
+
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+
+    centroid_behavior_score: Optional[Decimal] = None
+    centroid_engagement_score: Optional[Decimal] = None
+    centroid_financial_score: Optional[Decimal] = None
+    centroid_loyalty_score: Optional[Decimal] = None
+    centroid_relationship_score: Optional[Decimal] = None
+    centroid_risk_score: Optional[Decimal] = None
+
+    is_active: bool = True
+
+
+class PersonaArchetypeCreate(PersonaArchetypeBase):
+    pass
+
+
+class PersonaArchetypeUpdate(BaseModel):
+    persona_name: Optional[str] = None
+    persona_category: Optional[str] = None
+    persona_summary: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class PersonaArchetypeRead(PersonaArchetypeBase):
+    model_config = ConfigDict(from_attributes=True)
+    persona_archetype_id: uuid.UUID
+    # Denormalized COUNT(DISTINCT master_profile_id) across ACTIVE matches --
+    # the "Total Matched Profiles" figure the Persona Management admin UI
+    # must display per archetype (maintained by a DB trigger, read-only here).
+    matched_profile_count: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class CustomerPersonaBase(BaseModel):
     tenant_id: uuid.UUID
     domain: str = Field(default="retail")
     master_profile_id: uuid.UUID
+    # The shared archetype this profile is matched/assigned to.
+    persona_archetype_id: uuid.UUID
 
-    persona_code: str
-    persona_name: str
-    persona_category: Optional[str] = None
-    persona_summary: Optional[str] = None
+    # Lookalike match quality vs the archetype's centroid.
+    match_score: Optional[Decimal] = None
 
     persona_score: Optional[Decimal] = None
     confidence_score: Optional[Decimal] = None
@@ -494,9 +543,6 @@ class CustomerPersonaBase(BaseModel):
     customer_value_tier: Optional[str] = None
     risk_level: Optional[str] = Field(default=None, pattern="^(low|medium|high|critical)$")
     next_best_action: Optional[str] = None
-
-    llm_provider: Optional[str] = None
-    llm_model: Optional[str] = None
 
     computed_version: int = 1
     is_active: bool = True
@@ -508,8 +554,7 @@ class CustomerPersonaCreate(CustomerPersonaBase):
 
 
 class CustomerPersonaUpdate(BaseModel):
-    persona_category: Optional[str] = None
-    persona_summary: Optional[str] = None
+    match_score: Optional[Decimal] = None
     persona_score: Optional[Decimal] = None
     confidence_score: Optional[Decimal] = None
     behavior_score: Optional[Decimal] = None
@@ -524,8 +569,6 @@ class CustomerPersonaUpdate(BaseModel):
     customer_value_tier: Optional[str] = None
     risk_level: Optional[str] = Field(default=None, pattern="^(low|medium|high|critical)$")
     next_best_action: Optional[str] = None
-    llm_provider: Optional[str] = None
-    llm_model: Optional[str] = None
     is_active: Optional[bool] = None
     expires_at: Optional[datetime] = None
 
@@ -544,6 +587,7 @@ class PersonaAnalyticsBucket(BaseModel):
 
 
 class PersonaAnalyticsSummary(BaseModel):
+    total_archetypes: int
     total_personas: int
     active_personas: int
     inactive_personas: int
