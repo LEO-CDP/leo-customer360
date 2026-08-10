@@ -138,6 +138,21 @@ html.dark .divide-slate-100\/80 > :not([hidden]) ~ :not([hidden]) {
 }
 
 html.dark .ring-white { --tw-ring-color: rgb(51 65 85 / 0.6) !important; }
+
+html.dark .dtv-cell-link,
+html.dark .dtv-cell-link:hover,
+html.dark .dtv-action-label,
+html.dark .dtv-action-label:hover,
+html.dark .dtv-edit-btn,
+html.dark .dtv-edit-btn:hover {
+  color: #cbd5e1 !important;
+}
+
+html.dark .dtv-cell-link:hover,
+html.dark .dtv-action-label:hover,
+html.dark .dtv-edit-btn:hover {
+  color: #f8fafc !important;
+}
 html.dark .ring-slate-100,
 html.dark .ring-indigo-50 { --tw-ring-color: rgb(51 65 85 / 0.55) !important; }
 
@@ -203,6 +218,11 @@ html.c360-theme-dark .tab-btn:hover { color: #00d32a; border-color: #00d32a; }
 
 html.c360-theme-dark #btn-back-to-profiles { color: #f8fafc; cursor: pointer; }
 html.c360-theme-dark #btn-back-to-profiles:hover { color: #00d32a; }
+
+/* Persona detail sub-view (static/templates/persona/persona-details.html):
+   back link + Prev/Next pager still use the light-only indigo palette. */
+html.dark #persona-view-category-detail .text-indigo-600 { color: #a5b4fc !important; }
+html.dark #persona-view-category-detail .hover\:text-indigo-800:hover { color: #f8fafc !important; }
 
 html.c360-theme-dark .dtv-action-label { color: #00d32a; }
 html.c360-theme-dark tr.group:hover .dtv-action-label { color: #00d32a; }

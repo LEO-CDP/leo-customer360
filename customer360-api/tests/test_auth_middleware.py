@@ -33,6 +33,10 @@ def _build_app():
     async def health():
         return {"status": "ok"}
 
+    @app.get("/api/v1/metadata/")
+    async def metadata():
+        return {"status": "ok"}
+
     app.middleware("http")(auth_middleware)
     return app
 
@@ -46,6 +50,30 @@ def _build_app_with_cors():
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    return app
+
+
+def _build_app_with_root_path():
+    app = FastAPI(root_path="/c360api")
+
+    @app.get("/secure")
+    async def secure(request: Request):
+        return {
+            "ok": True,
+            "sub": request.state.user["sub"] if hasattr(request.state, "user") else None,
+            "tenant_id": getattr(request.state, "tenant_id", None),
+            "user_id": getattr(request.state, "user_id", None),
+        }
+
+    @app.get("/health")
+    async def health():
+        return {"status": "ok"}
+
+    @app.get("/api/v1/metadata/")
+    async def metadata():
+        return {"status": "ok"}
+
+    app.middleware("http")(auth_middleware)
     return app
 
 
@@ -152,6 +180,22 @@ class AuthMiddlewareTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_metadata_endpoint_is_exempt_even_with_trailing_slash(self):
+        client = TestClient(_build_app())
+
+        with patch("core.auth.SSO_LOGIN", True):
+            response = client.get("/api/v1/metadata/")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_metadata_endpoint_is_exempt_when_app_uses_root_path(self):
+        client = TestClient(_build_app_with_root_path())
+
+        with patch("core.auth.SSO_LOGIN", True):
+            response = client.get("/api/v1/metadata/")
+
+        self.assertEqual(response.status_code, 200)
+
     def test_options_requests_bypass_auth(self):
         client = TestClient(_build_app())
 
@@ -163,9 +207,10 @@ class AuthMiddlewareTests(unittest.TestCase):
         # middleware itself never returns our 401 "Authentication required".
         self.assertNotEqual(response.status_code, 401)
 
-    def test_dev_mode_trusts_tenant_headers_when_sso_disabled(self):
-        """When SSO_LOGIN=false (local/dev), X-Tenant-Id/X-User-Id headers
-        should populate request.state so app.tenant_id RLS still works."""
+    def test_dev_mode_rejects_requests_with_no_token_even_with_tenant_headers(self):
+        """Closed loophole: X-Tenant-Id/X-User-Id headers alone must NOT
+        bypass auth anymore, even when SSO_LOGIN=false -- a valid dev JWT is
+        always required on non-exempt routes."""
         client = TestClient(_build_app())
 
         with patch("core.auth.SSO_LOGIN", False):
@@ -174,23 +219,42 @@ class AuthMiddlewareTests(unittest.TestCase):
                 headers={"X-Tenant-Id": "11111111-1111-1111-1111-111111111111", "X-User-Id": "user-dev-1"},
             )
 
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertEqual(body["tenant_id"], "11111111-1111-1111-1111-111111111111")
-        self.assertEqual(body["user_id"], "user-dev-1")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Authentication required")
 
-    def test_dev_mode_without_headers_leaves_tenant_unset(self):
-        """Fail-closed guarantee: no headers -> no tenant context -> RLS
-        will deny all rows rather than defaulting to some tenant."""
+    def test_dev_mode_rejects_requests_with_no_token_at_all(self):
         client = TestClient(_build_app())
 
         with patch("core.auth.SSO_LOGIN", False):
             response = client.get("/secure")
 
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Authentication required")
+
+    def test_dev_mode_rejects_invalid_dev_token(self):
+        client = TestClient(_build_app())
+
+        with patch("core.auth.SSO_LOGIN", False):
+            response = client.get("/secure", headers={"Authorization": "Bearer not-a-real-dev-jwt"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Invalid or expired dev token")
+
+    def test_dev_mode_accepts_valid_dev_token(self):
+        from core.utils.security import create_dev_access_token
+
+        client = TestClient(_build_app())
+        token, _ = create_dev_access_token(
+            tenant_id="11111111-1111-1111-1111-111111111111", user_id="user-dev-1", username="admin", roles=["root"]
+        )
+
+        with patch("core.auth.SSO_LOGIN", False):
+            response = client.get("/secure", headers={"Authorization": f"Bearer {token}"})
+
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertIsNone(body["tenant_id"])
-        self.assertIsNone(body["user_id"])
+        self.assertEqual(body["tenant_id"], "11111111-1111-1111-1111-111111111111")
+        self.assertEqual(body["user_id"], "user-dev-1")
 
     def test_authenticated_request_resolves_tenant_and_user_onto_state(self):
         """End-to-end: a valid token whose payload carries explicit

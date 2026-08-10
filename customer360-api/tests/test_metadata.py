@@ -407,17 +407,22 @@ class SysMetadataTests(unittest.TestCase):
 
 
 class SysMetadataAuthExemptionTests(unittest.TestCase):
-    """Confirms the metadata endpoints are in core.auth.EXEMPT_PATHS when the
-    router is mounted under /api/v1, so the auth middleware lets them through
-    even when SSO_LOGIN is enabled."""
+    """Confirms only GET /metadata (needed by the login screen itself) is
+    exempt from auth -- every other /metadata/* route is real protected API
+    data and must require authentication like everything else (see
+    core.auth.EXEMPT_PATHS)."""
 
-    def test_metadata_paths_are_exempt(self):
+    def test_root_metadata_path_is_exempt(self):
         from core.auth import EXEMPT_PATHS
 
         self.assertIn("/api/v1/metadata", EXEMPT_PATHS)
-        self.assertIn("/api/v1/metadata/dagster", EXEMPT_PATHS)
-        self.assertIn("/api/v1/metadata/domains", EXEMPT_PATHS)
-        self.assertIn("/api/v1/metadata/data-sources", EXEMPT_PATHS)
+
+    def test_other_metadata_paths_are_not_exempt(self):
+        from core.auth import EXEMPT_PATHS
+
+        self.assertNotIn("/api/v1/metadata/dagster", EXEMPT_PATHS)
+        self.assertNotIn("/api/v1/metadata/domains", EXEMPT_PATHS)
+        self.assertNotIn("/api/v1/metadata/data-sources", EXEMPT_PATHS)
 
 
 if __name__ == "__main__":

@@ -21,34 +21,29 @@ Last aligned: 2026-08-09 (added POST /auth/login dev JWT issuance).
 Every request (except the exempt paths below) must resolve a `tenant_id` (and
 usually a `user_id`) that's stamped onto the Postgres session as
 `app.tenant_id`/`app.user_id`, which every `tenant_policy` Row-Level Security
-policy keys off (see `database-schema.sql`). There are three ways to resolve
-identity, all handled by `core/auth.py::auth_middleware`:
+policy keys off (see `database-schema.sql`). There are two ways to resolve
+identity, both handled by `core/auth.py::auth_middleware` -- a valid bearer
+token is REQUIRED on every non-exempt route in both modes; there is no
+header-only, no-login shortcut:
 
 1. **SSO (`SSO_LOGIN=true`)** -- every request must carry
    `Authorization: Bearer <keycloak_access_token>`. The token is verified via
    Keycloak's introspection endpoint (cached in Redis for its remaining TTL),
    then `(tenant_id, user_id)` is resolved from custom token claims or a
    `sys_userinfo` (`auth_provider='KEYCLOAK'`) lookup/auto-provision.
-2. **Dev JWT (`SSO_LOGIN=false`, recommended for engineers)** -- call
-   `POST /api/v1/auth/login` (see below) to get back a locally-signed
-   (HS256) dev JWT, then send it exactly like a real token:
-   `Authorization: Bearer <access_token>`. This is the same code path/claims
-   shape as SSO (`tenant_id`/`user_id`/`roles` claims), just signed with
-   `DEV_JWT_SECRET` instead of Keycloak -- so a request that works against a
-   dev JWT will also work unchanged once `SSO_LOGIN=true` in staging/prod.
-3. **Dev headers (`SSO_LOGIN=false`, quick curl-without-login shortcut)** --
-   if no `Authorization` header is sent at all, `X-Tenant-Id`/`X-User-Id`
-   headers are trusted directly (no login required). Skips `get_current_user`
-   identity resolution for endpoints that don't need a real user profile, but
-   most endpoints (anything using `Depends(get_current_user)`, e.g. every
-   `/users/*` route) still need a real `sys_user` row behind that `X-User-Id`.
+2. **Dev JWT (`SSO_LOGIN=false`)** -- call `POST /api/v1/auth/login` (see
+   below) to get back a locally-signed (HS256) dev JWT, then send it exactly
+   like a real token: `Authorization: Bearer <access_token>`. This is the
+   same code path/claims shape as SSO (`tenant_id`/`user_id`/`roles` claims),
+   just signed with `DEV_JWT_SECRET` instead of Keycloak -- so a request that
+   works against a dev JWT will also work unchanged once `SSO_LOGIN=true` in
+   staging/prod. A request with no `Authorization` header at all is now
+   rejected with 401 even when `SSO_LOGIN=false`.
 
 Exempt paths (no auth required in any mode):
 - `/health`
-- `/api/v1/metadata`
-- `/api/v1/metadata/dagster`
-- `/api/v1/metadata/domains`
-- `/api/v1/metadata/data-sources`
+- `/api/v1/metadata` (needed by the login screen itself to learn
+  `sso_login`/`sso_config` before a token exists)
 - `/api/v1/auth/login`, `/api/v1/auth/callback`, `/api/v1/auth/logout` (a
   caller by definition has no token yet when hitting these)
 

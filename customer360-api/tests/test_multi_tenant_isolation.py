@@ -121,24 +121,22 @@ class MultiTenantEndToEndIsolationTests(unittest.TestCase):
         return app
 
     def test_sequential_requests_from_different_tenants_stay_isolated(self):
+        from core.utils.security import create_dev_access_token
+
         client = TestClient(self._build_app())
+        token_a, _ = create_dev_access_token(tenant_id="tenant-A", user_id="user-A", username="a", roles=["user"])
+        token_b, _ = create_dev_access_token(tenant_id="tenant-B", user_id="user-B", username="b", roles=["user"])
 
         with patch("core.auth.SSO_LOGIN", False):
-            resp_a = client.get(
-                "/whoami",
-                headers={"X-Tenant-Id": "tenant-A", "X-User-Id": "user-A"},
-            )
-            resp_b = client.get(
-                "/whoami",
-                headers={"X-Tenant-Id": "tenant-B", "X-User-Id": "user-B"},
-            )
-            # A third, unrelated request without headers must NOT inherit
-            # tenant B's (or any previous request's) identity.
+            resp_a = client.get("/whoami", headers={"Authorization": f"Bearer {token_a}"})
+            resp_b = client.get("/whoami", headers={"Authorization": f"Bearer {token_b}"})
+            # A third, unauthenticated request must be rejected outright, not
+            # silently inherit tenant B's (or any previous request's) identity.
             resp_c = client.get("/whoami")
 
         self.assertEqual(resp_a.json(), {"tenant_id": "tenant-A", "user_id": "user-A"})
         self.assertEqual(resp_b.json(), {"tenant_id": "tenant-B", "user_id": "user-B"})
-        self.assertEqual(resp_c.json(), {"tenant_id": None, "user_id": None})
+        self.assertEqual(resp_c.status_code, 401)
 
     def test_two_authenticated_users_with_different_tenant_claims_stay_isolated(self):
         client = TestClient(self._build_app())

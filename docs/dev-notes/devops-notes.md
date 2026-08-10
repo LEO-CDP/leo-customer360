@@ -178,8 +178,8 @@ The API will use the `.env` file and connect to `localhost:5432` (Postgres), `lo
 ### Development gotchas
 
 - **Keycloak setup**: Before you can authenticate against the API, you must create a Keycloak client. See [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md) for step-by-step instructions.
-- **Bearer tokens**: All API endpoints except `/health` require a valid Keycloak bearer token. Use the Keycloak web UI or admin API to generate test tokens.
-- **SSO_LOGIN=true**: Set this in `.env` to enable token validation. Set to `false` for local testing without Keycloak, and pass `X-Tenant-Id` and `X-User-Id` headers on each request instead.
+- **Bearer tokens**: All API endpoints except `/health`, `/api/v1/metadata`, and `/api/v1/auth/*` require a valid bearer token in both modes. Use the Keycloak web UI or admin API to generate test tokens.
+- **SSO_LOGIN=true**: Set this in `.env` to require real Keycloak tokens. Set to `false` for local testing without Keycloak -- call `POST /api/v1/auth/login` (DEFAULT_ROOT_USERNAME/PASSWORD) to get a dev JWT instead; `X-Tenant-Id`/`X-User-Id` headers alone no longer bypass auth.
 - **FRONTEND_API_HOSTNAME**: Must be reachable from your browser. If running behind a reverse proxy, update this to the proxy's public URL.
 
 ## 7. Server deployment setup

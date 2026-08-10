@@ -61,10 +61,7 @@ class MetadataRepository:
 		"""Checks that the pooled SQLAlchemy engine can reach PostgreSQL."""
 		result = {
 			"service": "postgres",
-			"status": "unknown",
-			"host": settings.db_host,
-			"port": settings.db_port,
-			"database": settings.db_name,
+			"status": "unknown"
 		}
 		try:
 			with engine.connect() as conn:
@@ -80,10 +77,7 @@ class MetadataRepository:
 		"""Checks Redis cache connectivity, or reports it as disabled."""
 		result = {
 			"service": "redis",
-			"status": "unknown",
-			"host": settings.redis_host,
-			"port": settings.redis_port,
-			"db": settings.redis_db,
+			"status": "unknown"
 		}
 		client = get_redis_client()
 		if client is None:
@@ -104,9 +98,7 @@ class MetadataRepository:
 		"""Checks whether the Dagster GraphQL webserver is accepting TCP connections."""
 		result = {
 			"service": "dagster",
-			"status": "unknown",
-			"host": settings.dagster_graphql_host,
-			"port": settings.dagster_graphql_port,
+			"status": "unknown"
 		}
 		try:
 			sock = socket.create_connection(
