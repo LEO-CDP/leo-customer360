@@ -57,7 +57,7 @@ Exempt paths (no auth required in any mode):
 ```bash
 # 1. Log in (root admin from .env, or any active sys_user with a password --
 #    see POST /users and the System Users admin screen). Returns a JWT.
-curl -s -X POST http://localhost:8000/api/v1/auth/login \
+curl -s -X POST http://localhost:8008/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"username": "admin", "password": "<DEFAULT_ROOT_PASSWORD>"}' | tee /tmp/login.json
 
@@ -65,8 +65,8 @@ TOKEN=$(python3 -c "import json;print(json.load(open('/tmp/login.json'))['access
 
 # 2. Call any protected endpoint with the token -- no X-Tenant-Id/X-User-Id needed,
 #    tenant_id/user_id are already encoded as claims in the token.
-curl -s http://localhost:8000/api/v1/users -H "Authorization: Bearer $TOKEN"
-curl -s http://localhost:8000/api/v1/users/me -H "Authorization: Bearer $TOKEN"
+curl -s http://localhost:8008/api/v1/users -H "Authorization: Bearer $TOKEN"
+curl -s http://localhost:8008/api/v1/users/me -H "Authorization: Bearer $TOKEN"
 ```
 
 Or from **Swagger UI** (`/docs`): click **Authorize**, paste the

@@ -354,6 +354,7 @@ window.C360 = window.C360 || {};
   }
 
   function loadSystemMetadata() {
+    console.log("Loading system metadata from " + apiRootFromBase(CONFIG.apiBase) + "/api/v1/metadata");
     return $.ajax({
       url: apiRootFromBase(CONFIG.apiBase) + "/api/v1/metadata",
       method: "GET",
@@ -425,10 +426,8 @@ window.C360 = window.C360 || {};
   }
 
   function logout() {
-    localStorage.removeItem(STORAGE_KEYS.accessToken);
-    localStorage.removeItem(STORAGE_KEYS.idToken);
-    localStorage.removeItem(STORAGE_KEYS.userId);
-    localStorage.removeItem(STORAGE_KEYS.devUser);
+    localStorage.clear();
+    sessionStorage.clear();
     CONFIG.accessToken = "";
     CONFIG.idToken = "";
     CONFIG.userId = "";
