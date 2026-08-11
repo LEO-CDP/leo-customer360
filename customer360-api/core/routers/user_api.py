@@ -1,7 +1,11 @@
 """API router for user management endpoints (CRUD, SSO linking, profile access).
 
 Enforces multi-tenant isolation: users can only access/modify their own tenant's users.
-Respects auth_middleware.tenant_id and user_id from request.state.
+Respects auth_middleware.tenant_id and user_id from request.state, which is set
+either by the dev JWT / Keycloak token's tenant_id/user_id claims, or (dev mode,
+no token) the X-Tenant-Id/X-User-Id headers -- see core/auth.py::auth_middleware
+and customer360-api.md's "Authentication and Tenant Context" section for the
+full flow, including how to obtain a token via POST /auth/login.
 """
 
 from typing import Any, Generator, Optional

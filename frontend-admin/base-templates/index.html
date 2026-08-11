@@ -142,6 +142,10 @@
         <div id="persona-list-content"></div>
       </section>
 
+      <!-- System Users tab: shell from static/templates/admin/system-user-list.html,
+        rendered by static/js/system-user-view.js. -->
+      <section id="view-admin" class="hidden"></section>
+
       <!-- Populated from static/templates/placeholder.html for nav tabs that aren't implemented -->
       <section id="view-placeholder" class="hidden"></section>
     </main>
@@ -170,6 +174,10 @@
   <!-- load router.js first -->
   <script src="{{ url_for('static', path='js/common/router.js') }}?cb={{ cache_bust }}"></script>
 
+  <!-- authentication gate (login screen + Keycloak/dev-credential flows) --
+       loaded after config.js/templates.js, before main.js -->
+  <script src="{{ url_for('static', path='js/auth-view.js') }}?cb={{ cache_bust }}"></script>
+
   <!-- load all view modules -->
   <script src="{{ url_for('static', path='js/profile-list-view.js') }}?cb={{ cache_bust }}"></script>
   <script src="{{ url_for('static', path='js/profile-detail-view.js') }}?cb={{ cache_bust }}"></script>
@@ -181,6 +189,7 @@
   <script src="{{ url_for('static', path='js/attributes-view.js') }}?cb={{ cache_bust }}"></script>
   <script src="{{ url_for('static', path='js/data-source-view.js') }}?cb={{ cache_bust }}"></script>
   <script src="{{ url_for('static', path='js/scoring-model-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', path='js/system-user-view.js') }}?cb={{ cache_bust }}"></script>
   <script src="{{ url_for('static', path='js/placeholder-view.js') }}?cb={{ cache_bust }}"></script>
 
   <!-- load main.js last -->

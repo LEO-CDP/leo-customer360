@@ -84,7 +84,6 @@ class SysUser(Base):
     timezone: Mapped[Optional[str]] = mapped_column(Text, server_default="UTC")
     
     status: Mapped[str] = mapped_column(Text, server_default="ACTIVE", nullable=False)
-    password_hash: Mapped[Optional[str]] = mapped_column(Text)
     
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=text("now()"), nullable=False)
@@ -121,6 +120,10 @@ class SysUserInfo(Base):
     
     auth_provider: Mapped[str] = mapped_column(Text, nullable=False)
     provider_subject_id: Mapped[str] = mapped_column(Text, nullable=False)
+    
+    # Only populated when auth_provider = 'LOCAL' (see database-schema.sql) --
+    # dev/system-user password login, verified via core.utils.security.
+    password_hash: Mapped[Optional[str]] = mapped_column(Text)
     
     access_token: Mapped[Optional[str]] = mapped_column(Text)
     refresh_token: Mapped[Optional[str]] = mapped_column(Text)

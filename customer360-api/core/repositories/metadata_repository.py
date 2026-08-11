@@ -151,6 +151,13 @@ class MetadataRepository:
 			"api_version": settings.api_version,
 			"environment": settings.environment,
 			"sso_login": settings.sso_login,
+			# Non-secret Keycloak config only -- client_secret never leaves the
+			# server (see core/routers/auth_api.py, which owns the code exchange).
+			"sso_config": {
+				"login_url": settings.sso_login_url,
+				"realm": settings.keycloak_realm,
+				"client_id": settings.keycloak_client_id,
+			},
 			"overall_status": overall,
 			"services": services,
 		}

@@ -116,8 +116,8 @@ Append the service below to the existing
     environment:
       # Empty hostname => browser uses same-origin /api/v1 paths.
       FRONTEND_API_HOSTNAME: ""
-      FRONTEND_HOST: 0.0.0.0
-      FRONTEND_PORT: 8890
+      FRONTEND_HOST_BIND: 0.0.0.0
+      FRONTEND_HOST_PORT: 8890
     depends_on:
       api:
         condition: service_healthy
@@ -171,9 +171,7 @@ API_HOST_BIND=127.0.0.1
 API_HOST_PORT=8008
 
 # ----- frontend-admin / uvicorn ---------------------------------------------
-FRONTEND_HOST=0.0.0.0
-FRONTEND_PORT=8890
-FRONTEND_HOST_BIND=127.0.0.1
+FRONTEND_HOST_BIND=0.0.0.0
 FRONTEND_HOST_PORT=8890
 
 # ----- Keycloak container (production mode) ---------------------------------

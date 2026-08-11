@@ -402,7 +402,7 @@ print_final_service_table() {
   printf '%-12s | %-10s | %-25s\n' "minio" "$minio_status" "localhost:${MINIO_API_HOST_PORT:-9000} (console ${MINIO_CONSOLE_HOST_PORT:-9001})"
   printf '%-12s | %-10s | %-25s\n' "backend" "$backend_status" "localhost:${DAGSTER_UI_PORT:-3000}"
   printf '%-12s | %-10s | %-25s\n' "api" "$api_status" "localhost:${API_PORT:-8008}"
-  printf '%-12s | %-10s | %-25s\n' "frontend" "$frontend_status" "localhost:${FRONTEND_PORT:-8890}"
+  printf '%-12s | %-10s | %-25s\n' "frontend" "$frontend_status" "localhost:${FRONTEND_HOST_PORT:-8890}"
 
   if [[ "${SSO_LOGIN:-true}" == "true" ]]; then
     # Keycloak is optional when SSO_LOGIN=false, so only print its status when SSO_LOGIN=true.

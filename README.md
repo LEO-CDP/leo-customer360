@@ -37,6 +37,16 @@ It ships as three independently runnable pieces:
 | [`postgres/`](postgres), [`redis/`](redis) | Custom Dockerfiles for the Postgres (PostGIS + pgvector) and Redis images used by `docker-compose.yml` |
 | [`ui-wireframes/`](ui-wireframes) | UI/UX wireframe references for the admin frontend |
 
+## Copy from template
+
+Before running the stack locally, create your runtime environment file from the template:
+
+```bash
+cp .env.example .env
+```
+
+Then edit [.env](.env) with your local secrets and ports. The full variable reference is in [docs/environment-notes.md](docs/environment-notes.md).
+
 ## Quick start
 
 **Production-shaped stack (Docker Compose: postgres + redis + keycloak + cir + api):**
@@ -64,6 +74,32 @@ Then run `customer360-api` (`customer360-api/start.sh`) and the CIR worker
 ```bash
 ./run_all_tests.sh   # customer360-api + backend-system/identity_resolution unit tests
 ```
+
+## Authentication (calling `customer360-api` as a dev engineer)
+
+Every protected endpoint needs `tenant_id`/`user_id` resolved from one of:
+
+- **Dev JWT (recommended, `SSO_LOGIN=false`)** -- log in once, then send the
+  token like a real production caller would:
+  ```bash
+  curl -s -X POST http://localhost:8008/api/v1/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"admin","password":"<DEFAULT_ROOT_PASSWORD from .env>"}'
+  # -> {"access_token": "...", "tenant_id": "...", "user_id": "...", ...}
+
+  curl -s http://localhost:8008/api/v1/users/me -H "Authorization: Bearer <access_token>"
+  ```
+  Or open `http://localhost:8008/docs`, click **Authorize**, and paste the
+  `access_token` to call any endpoint from Swagger UI.
+- **SSO (`SSO_LOGIN=true`)** -- the same `Authorization: Bearer <token>`
+  contract, but the token comes from Keycloak (see `frontend-admin`'s login
+  flow, or `POST /api/v1/auth/callback` for a code exchange).
+- **Dev headers (`SSO_LOGIN=false`, quick shortcut)** -- `X-Tenant-Id`/
+  `X-User-Id` headers, no login required, for endpoints that don't need a
+  resolved user profile.
+
+Full reference, endpoint catalog, and auth-expectation matrix:
+[`customer360-api/customer360-api.md`](customer360-api/customer360-api.md).
 
 ## References
 

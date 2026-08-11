@@ -25,6 +25,9 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from core.database import SessionLocal
 from core.models.segmentation import CdpSegment
+from core.models.system import SysUser, SysUserInfo
+from core.repositories.metadata_repository import DEFAULT_TENANT_ID
+from core.utils.security import hash_password
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +216,65 @@ def seed_default_segments(db: Session, *, tenant_ids: Sequence[uuid.UUID] | None
     return inserted
 
 
+def seed_root_admin_user(db: Session, *, tenant_id: uuid.UUID = DEFAULT_TENANT_ID) -> bool:
+    """Ensures DEFAULT_ROOT_USERNAME has a real ``sys_user`` (+ LOCAL
+    ``sys_userinfo``) row in ``tenant_id``.
+
+    POST /auth/login (dev mode, SSO_LOGIN=false) authenticates this account
+    against DEFAULT_ROOT_USERNAME/PASSWORD, but every other endpoint
+    (get_current_user, etc.) requires an actual sys_user row to resolve
+    ``request.state.user_id`` against -- without one, the root login worked
+    but every subsequent API call 401'd. The password itself lives on
+    ``sys_userinfo`` (auth_provider='LOCAL'), matching every other local
+    credential -- ``sys_user`` has no password column (see
+    database-schema.sql). Idempotent: safe to run on every startup, and keeps
+    the hash in sync if DEFAULT_ROOT_PASSWORD changes in .env.
+    """
+    if not settings.default_root_password:
+        return False
+
+    db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": str(tenant_id)})
+    username = settings.default_root_username.strip().lower()
+
+    try:
+        inserted_user = db.execute(
+            pg_insert(SysUser)
+            .values(
+                tenant_id=tenant_id,
+                username=username,
+                full_name="Root Administrator",
+                status="ACTIVE",
+            )
+            .on_conflict_do_nothing(index_elements=[SysUser.tenant_id, SysUser.username])
+            .returning(SysUser.user_id)
+        ).first()
+
+        user_id = inserted_user[0] if inserted_user else db.execute(
+            select(SysUser.user_id).where(SysUser.tenant_id == tenant_id, SysUser.username == username)
+        ).scalar_one()
+
+        db.execute(
+            pg_insert(SysUserInfo)
+            .values(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                auth_provider="LOCAL",
+                provider_subject_id=username,
+                password_hash=hash_password(settings.default_root_password),
+                status="ACTIVE",
+            )
+            .on_conflict_do_update(
+                index_elements=[SysUserInfo.tenant_id, SysUserInfo.auth_provider, SysUserInfo.provider_subject_id],
+                set_={"password_hash": hash_password(settings.default_root_password), "updated_at": text("now()")},
+            )
+        )
+        db.commit()
+        return inserted_user is not None
+    except IntegrityError:
+        db.rollback()
+        return False
+
+
 def init_core_data() -> None:
     """Runs all startup-time seed/init steps for the API.
 
@@ -227,6 +289,8 @@ def init_core_data() -> None:
         inserted = seed_default_segments(db)
         if inserted:
             logger.info("Seeded %d default cdp_segments row(s) across tenant(s).", inserted)
+        if seed_root_admin_user(db):
+            logger.info("Seeded root admin sys_user '%s' for tenant %s.", settings.default_root_username, DEFAULT_TENANT_ID)
     except Exception:
         logger.exception("init_core_data failed (continuing startup without seed data)")
     finally:

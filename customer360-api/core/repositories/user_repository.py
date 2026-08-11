@@ -17,6 +17,7 @@ from sqlalchemy import and_
 from core.cache import get_redis_client
 from core.models.system import SysUser, SysUserInfo
 from core.schemas.user import UserCreate, UserResponse, UserUpdate
+from core.utils.security import hash_password
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,10 @@ class UserRepository:
         return query.offset(skip).limit(limit).all()
 
     def create_user(self, tenant_id: UUID, user_in: UserCreate) -> SysUser:
-        """Create a new user in a tenant."""
+        """Create a new user in a tenant. If ``password`` is set (system users
+        created via the admin UI), also creates a ``sys_userinfo`` LOCAL
+        identity row to hold the hash -- ``sys_user`` itself has no password
+        column (see database-schema.sql; SSO-provisioned users skip this)."""
         user = SysUser(
             tenant_id=tenant_id,
             username=user_in.username.lower(),
@@ -161,8 +165,25 @@ class UserRepository:
         )
         self.db.add(user)
         self.db.flush()
+
+        if user_in.password:
+            self.db.add(SysUserInfo(
+                tenant_id=tenant_id,
+                user_id=user.user_id,
+                auth_provider="LOCAL",
+                provider_subject_id=user.username,
+                password_hash=hash_password(user_in.password),
+                status="ACTIVE",
+            ))
+            self.db.flush()
+
         self.db.refresh(user)
         return user
+
+    def get_local_password_hash(self, user_id: UUID, tenant_id: UUID) -> Optional[str]:
+        """Fetch the LOCAL (dev credential) password hash for a user, if any."""
+        identity = self.get_user_sso_identity(user_id, "LOCAL", tenant_id)
+        return identity.password_hash if identity else None
 
     def update_user(self, user: SysUser, user_in: UserUpdate) -> SysUser:
         """Update an existing user."""
