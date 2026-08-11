@@ -24,7 +24,7 @@ window.C360 = window.C360 || {};
   }
 
   function duplicateRowVm(p) {
-    var displayName = p.persona_name || p.full_name || ("Profile " + fmt.shortId(p.master_profile_id));
+    var displayName = fmt.realName(p) || p.persona_name || ("Profile " + fmt.shortId(p.master_profile_id));
     return {
       displayName: displayName,
       domainLabel: fmt.domainLabel(p.domain),

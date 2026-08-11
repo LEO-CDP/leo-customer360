@@ -14,6 +14,7 @@
 #
 # Usage:
 #   ./manage-c360.sh start           Ensure .env, then build+start all services.
+#   ./manage-c360.sh start-core-services  Start only core services (postgres, redis, api) -- excludes optional keycloak.
 #   ./manage-c360.sh stop [service]  Stop container(s); keep them + volumes/network.
 #   ./manage-c360.sh restart [service]  Restart all (or one) service.
 #   ./manage-c360.sh status          Show docker compose ps + per-container health.
@@ -60,7 +61,7 @@ SERVICE_ARG=""
 FORCE="false"
 for arg in "$@"; do
   case "$arg" in
-    start|stop|restart|status|ps|logs|build|down|help|-h|--help)
+    start|start-core-services|stop|restart|status|ps|logs|build|down|help|-h|--help)
       [ "$arg" = "-h" ] || [ "$arg" = "--help" ] && arg="help"
       COMMAND="$arg"
       ;;
@@ -335,6 +336,29 @@ cmd_start() {
   echo "   Keycloak: http://${KEYCLOAK_HOST_BIND:-127.0.0.1}:${KEYCLOAK_HOST_PORT:-8080}"
 }
 
+cmd_start_core_services() {
+  validate_required_secrets
+
+  echo "🛑 Stopping all services (ensuring clean state)..."
+  "${DC_CMD[@]}" stop 2>/dev/null || true
+
+  echo "� Building and starting core services (postgres, redis, api from ${COMPOSE_FILE})..."
+  "${DC_CMD[@]}" up -d --build postgres redis
+  wait_for_healthy "customer360-postgres"
+  wait_for_healthy "customer360-redis"
+
+  # --no-deps: api's depends_on includes keycloak, which is optional here --
+  # skip it so compose doesn't also create/start keycloak/keycloak-db-init.
+  "${DC_CMD[@]}" up -d --build --no-deps api
+  wait_for_healthy "customer360-api"
+
+  echo ""
+  echo "✅ Core services stack is up."
+  echo "   API:      http://${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-8008}  (docs: /docs)"
+  echo ""
+  echo "   Note: Backend services (identity_resolution, etc.) and frontend must be started separately."
+}
+
 cmd_stop() {
   if [ -n "$SERVICE_ARG" ]; then
     echo "🛑 Stopping '${SERVICE_ARG}'..."
@@ -444,6 +468,7 @@ set +a
 
 case "$COMMAND" in
   start) cmd_start ;;
+  start-core-services) cmd_start_core_services ;;
   stop) cmd_stop ;;
   restart) cmd_restart ;;
   status|ps) cmd_status ;;

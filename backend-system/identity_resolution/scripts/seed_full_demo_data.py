@@ -61,12 +61,18 @@ real ``master_profile_id`` values. It covers:
 
 Deliberately NOT populated (left NULL / default), consistent with this
 demo's existing "never store plaintext PII" policy for identity-resolution
-tables (see init_sample_data.py's hash_pii()): ``first_name``/``last_name``
-(no plaintext name is available -- full_name is a one-way hash),
-``secondary_emails``/``secondary_phones``, and ``date_of_birth``. ``address``
-is populated with city/country only (no street). ``gender`` and
-``profile_picture_url`` ARE populated -- neither is independently
-identifying PII.
+tables (see init_sample_data.py's hash_pii()): ``secondary_emails``/
+``secondary_phones`` and ``date_of_birth``. ``address`` is populated with
+city/country only (no street). ``gender`` and ``profile_picture_url`` ARE
+populated -- neither is independently identifying PII.
+
+Exception: retail-domain master profiles ARE given plaintext
+``full_name``/``first_name``/``last_name``/``email``/``phone_number`` (and
+``is_hashed`` is set to ``FALSE``) -- retail/e-commerce apps routinely
+display the customer's own name/contact info back to them, so the demo
+reflects that instead of an unreadable hash. Banking (and every other)
+domain keeps the hashed-PII-only policy from init_sample_data.py /
+run_demo_resolution.py.
 
 Note: ``crm_lead``/``crm_contact`` DO get plaintext first/last name/email/
 phone -- that's a *different* table representing a separate use case (a
@@ -286,6 +292,14 @@ CAMPAIGNS = [
 
 LEAD_FIRST_NAMES = ("Minh", "Linh", "Huy", "Trang", "Khoa", "My", "Duc", "Anh")
 LEAD_LAST_NAMES = ("Nguyen", "Tran", "Le", "Pham", "Hoang", "Vo", "Bui", "Dang")
+
+# Retail-domain cdp_master_profiles get plaintext PII (unlike banking, which
+# stays SHA-256 hashed per init_sample_data.py's hash_pii() policy) -- retail
+# apps commonly show the customer's own name/contact info back to them, so
+# the demo should reflect that instead of an unreadable hash. See
+# enrich_master_profiles()'s retail branch.
+RETAIL_PII_FIRST_NAMES = ("Minh", "Linh", "Huy", "Trang", "Khoa", "My", "Duc", "Anh", "Hoa", "Tuan", "Thao", "Nam")
+RETAIL_PII_LAST_NAMES = ("Nguyen", "Tran", "Le", "Pham", "Hoang", "Vo", "Bui", "Dang", "Do", "Ho", "Ngo", "Duong")
 
 
 def seed_relation_types(cursor) -> None:
@@ -1425,6 +1439,19 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
         domain_attributes: dict[str, object] = {}
 
         if domain == "retail":
+            # Retail profiles show real (plaintext) PII in the demo -- see
+            # RETAIL_PII_FIRST_NAMES/RETAIL_PII_LAST_NAMES above.
+            first_name = rng.choice(RETAIL_PII_FIRST_NAMES)
+            last_name = rng.choice(RETAIL_PII_LAST_NAMES)
+            full_name = f"{last_name} {first_name}"
+            email = f"{first_name.lower()}.{last_name.lower()}.{master_id[:8]}@example.com"
+            phone_number = f"09{rng.randint(10000000, 99999999)}"
+            set_clauses.extend([
+                "full_name = %s", "first_name = %s", "last_name = %s",
+                "email = %s", "phone_number = %s", "is_hashed = FALSE",
+            ])
+            params.extend([full_name, first_name, last_name, email, phone_number])
+
             domain_attributes = {
                 "loyalty_id": f"LOY-{master_id[:8]}",
                 "membership_tier": rng.choice(("Silver", "Gold", "Platinum")),

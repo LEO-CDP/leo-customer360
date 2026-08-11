@@ -28,6 +28,17 @@ window.C360 = window.C360 || {};
 
   function shortId(id) { return id ? (id.substring(0, 8) + "…") : ""; }
 
+  // Real (plaintext) name for a master profile, or null if none is available
+  // -- e.g. is_hashed = TRUE domains (banking) only ever have a SHA-256 hash
+  // in full_name/first_name/last_name, which must never be shown as a name.
+  function realName(profile) {
+    if (!profile || profile.is_hashed) return null;
+    var first = (profile.first_name || "").trim();
+    var last = (profile.last_name || "").trim();
+    if (first || last) return (last + " " + first).trim();
+    return (profile.full_name || "").trim() || null;
+  }
+
   function maskMiddle(text, headLen, tailLen) {
     if (!text) return "";
     headLen = headLen === undefined ? 5 : headLen;
@@ -88,6 +99,7 @@ window.C360 = window.C360 || {};
     dateTime: fmtDateTime,
     initials: initialsOf,
     shortId: shortId,
+    realName: realName,
     maskMiddle: maskMiddle,
     titleCase: titleCase,
     DOMAIN_LABELS: DOMAIN_LABELS,
