@@ -16,6 +16,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from core.auth import require_admin
 from core.cache import cache_response, invalidate_prefix
 from core.config import settings
 from core.crud.base import CRUDBase
@@ -108,7 +109,7 @@ def list_master_profiles_for_persona_archetype(
     )
 
 
-@persona_archetypes_router.post("", response_model=PersonaArchetypeRead, status_code=201)
+@persona_archetypes_router.post("", response_model=PersonaArchetypeRead, status_code=201, dependencies=[Depends(require_admin)])
 def create_persona_archetype(payload: PersonaArchetypeCreate, db: Session = Depends(get_db)):
     try:
         validate_domain_value(db, payload.domain)
@@ -120,7 +121,7 @@ def create_persona_archetype(payload: PersonaArchetypeCreate, db: Session = Depe
     return obj
 
 
-@persona_archetypes_router.patch("/{persona_archetype_id}", response_model=PersonaArchetypeRead)
+@persona_archetypes_router.patch("/{persona_archetype_id}", response_model=PersonaArchetypeRead, dependencies=[Depends(require_admin)])
 def update_persona_archetype(persona_archetype_id: uuid.UUID, payload: PersonaArchetypeUpdate, db: Session = Depends(get_db)):
     repo = PersonaRepository(db)
     obj = repo.get_archetype(persona_archetype_id)
@@ -131,7 +132,7 @@ def update_persona_archetype(persona_archetype_id: uuid.UUID, payload: PersonaAr
     return obj
 
 
-@persona_archetypes_router.delete("/{persona_archetype_id}", status_code=204)
+@persona_archetypes_router.delete("/{persona_archetype_id}", status_code=204, dependencies=[Depends(require_admin)])
 def delete_persona_archetype(persona_archetype_id: uuid.UUID, db: Session = Depends(get_db)):
     repo = PersonaRepository(db)
     obj = repo.get_archetype(persona_archetype_id)

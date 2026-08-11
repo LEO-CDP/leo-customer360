@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
@@ -427,3 +427,40 @@ async def auth_middleware(request: Request, call_next):
         request.state.user_id = user_id
 
     return await call_next(request)
+
+
+def get_current_roles(request: Request) -> list[str]:
+    """Extracts the caller's role names from ``request.state.user`` (set by
+    ``authenticate_request`` above): the dev-JWT ``roles`` claim, or a real
+    Keycloak token's ``realm_access.roles`` / ``resource_access.*.roles`` --
+    same two shapes the frontend already decodes (see
+    frontend-admin/static/js/common/config.js::currentUserFromConfig).
+    """
+    payload = getattr(request.state, "user", None)
+    if not isinstance(payload, dict):
+        return []
+
+    roles: list[str] = list(payload.get("roles") or [])
+
+    realm_access = payload.get("realm_access")
+    if isinstance(realm_access, dict) and isinstance(realm_access.get("roles"), list):
+        roles.extend(realm_access["roles"])
+
+    resource_access = payload.get("resource_access")
+    if isinstance(resource_access, dict):
+        for client in resource_access.values():
+            if isinstance(client, dict) and isinstance(client.get("roles"), list):
+                roles.extend(client["roles"])
+
+    return roles
+
+
+def require_admin(request: Request) -> None:
+    """FastAPI dependency: raises 403 unless the caller has the ``admin``
+    role. Fail-closed -- use on any mutation that must be admin-only (e.g.
+    editing a shared cdp_persona_archetypes definition), since a frontend-only
+    "hide the button" check is trivially bypassed by calling the API directly.
+    """
+    if "admin" not in {r.lower() for r in get_current_roles(request)}:
+        raise HTTPException(status_code=403, detail="This action requires the 'admin' role.")
+

@@ -107,18 +107,111 @@ window.C360 = window.C360 || {};
     $("#persona-view-list").removeClass("hidden");
   }
 
+  // Last-loaded archetype backing the metadata card + edit modal (its full
+  // PersonaArchetypeRead payload, keyed by nothing since only one is ever
+  // shown at a time on this drill-down route).
+  var currentArchetype = null;
+
+  var CENTROID_FIELDS = [
+    { key: "centroid_behavior_score", label: "Behavior" },
+    { key: "centroid_engagement_score", label: "Engagement" },
+    { key: "centroid_financial_score", label: "Financial" },
+    { key: "centroid_loyalty_score", label: "Loyalty" },
+    { key: "centroid_relationship_score", label: "Relationship" },
+    { key: "centroid_risk_score", label: "Risk" }
+  ];
+
+  function renderArchetypeMetadata(archetype) {
+    currentArchetype = archetype;
+    var displayName = (archetype && archetype.persona_name) || currentArchetypeId;
+    $("#persona-category-detail-title").text(displayName);
+    $("#persona-category-detail-title-2").text(displayName);
+    $("#persona-detail-code").text((archetype && archetype.persona_code) || "—");
+    $("#persona-detail-summary").text((archetype && archetype.persona_summary) || "No summary available.");
+    $("#persona-detail-domain").text(fmt.domainLabel(archetype && archetype.domain));
+    $("#persona-detail-category").text((archetype && archetype.persona_category) || "—");
+    $("#persona-detail-matched-count").text(fmt.int(archetype && archetype.matched_profile_count));
+    $("#persona-detail-updated-at").text(fmt.dateTime(archetype && archetype.updated_at));
+    $("#persona-detail-llm-provider").text((archetype && archetype.llm_provider) || "—");
+    $("#persona-detail-llm-model").text((archetype && archetype.llm_model) || "—");
+
+    var isActive = !!(archetype && archetype.is_active);
+    $("#persona-detail-status-badge")
+      .text(isActive ? "Active" : "Inactive")
+      .attr("class", "text-xs font-semibold px-2.5 py-1 rounded-full " + (isActive ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"));
+
+    var $centroids = $("#persona-detail-centroids").empty();
+    CENTROID_FIELDS.forEach(function (f) {
+      var value = archetype ? archetype[f.key] : null;
+      $centroids.append(
+        $("<div>").addClass("rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 text-center").append(
+          $("<div>").addClass("text-[10px] uppercase tracking-wide text-slate-400 font-semibold").text(f.label),
+          $("<div>").addClass("text-sm font-bold text-slate-800 mt-0.5").text(fmt.score(value))
+        )
+      );
+    });
+
+    // Editing a shared archetype affects how EVERY current/future profile in
+    // its domain gets lookalike-matched -- gate the control behind the
+    // 'admin' role client-side (UX only; the API re-checks server-side).
+    $("#btn-persona-edit").toggleClass("hidden", !C360.config.isAdmin());
+  }
+
   function showArchetypeMatchedProfiles(personaArchetypeId) {
     currentArchetypeId = personaArchetypeId;
     $("#persona-view-list").addClass("hidden");
     $("#persona-view-category-detail").removeClass("hidden");
     api("/persona/archetypes/" + personaArchetypeId)
-      .done(function (archetype) {
-        $("#persona-category-detail-title").text((archetype && archetype.persona_name) || personaArchetypeId);
-      })
-      .fail(function () {
-        $("#persona-category-detail-title").text(personaArchetypeId);
-      });
+      .done(function (archetype) { renderArchetypeMetadata(archetype); })
+      .fail(function () { renderArchetypeMetadata(null); });
     categoryDtv.load(false);
+  }
+
+  function openPersonaEditModal() {
+    if (!currentArchetype) return;
+    $("#persona-edit-error").addClass("hidden").text("");
+    $("#persona-edit-name").val(currentArchetype.persona_name || "");
+    $("#persona-edit-category").val(currentArchetype.persona_category || "");
+    $("#persona-edit-summary").val(currentArchetype.persona_summary || "");
+    $("#persona-edit-llm-provider").val(currentArchetype.llm_provider || "");
+    $("#persona-edit-llm-model").val(currentArchetype.llm_model || "");
+    $("#persona-edit-active").prop("checked", !!currentArchetype.is_active);
+    $("#persona-edit-modal").removeClass("hidden");
+  }
+
+  function closePersonaEditModal() {
+    $("#persona-edit-modal").addClass("hidden");
+  }
+
+  function submitPersonaEditForm() {
+    var $error = $("#persona-edit-error");
+    $error.addClass("hidden").text("");
+
+    var name = $.trim($("#persona-edit-name").val());
+    if (!name) {
+      $error.removeClass("hidden").text("Persona Name is required.");
+      return;
+    }
+
+    var payload = {
+      persona_name: name,
+      persona_category: $.trim($("#persona-edit-category").val()) || null,
+      persona_summary: $.trim($("#persona-edit-summary").val()) || null,
+      llm_provider: $.trim($("#persona-edit-llm-provider").val()) || null,
+      llm_model: $.trim($("#persona-edit-llm-model").val()) || null,
+      is_active: $("#persona-edit-active").is(":checked")
+    };
+
+    api("/persona/archetypes/" + currentArchetypeId, payload, "PATCH")
+      .done(function (archetype) {
+        closePersonaEditModal();
+        renderArchetypeMetadata(archetype);
+        dtv.load(false);
+      })
+      .fail(function (xhr) {
+        var detail = xhr && xhr.responseJSON && xhr.responseJSON.detail;
+        $error.removeClass("hidden").text(detail || "Could not save changes to this persona archetype.");
+      });
   }
 
   function analyticsParams() {
@@ -213,6 +306,10 @@ window.C360 = window.C360 || {};
     });
 
     $("#btn-back-to-personas").on("click", function () { C360.router.navigate("/personas"); });
+
+    $("#btn-persona-edit").on("click", openPersonaEditModal);
+    $("#btn-persona-edit-cancel").on("click", closePersonaEditModal);
+    $("#btn-persona-edit-save").on("click", submitPersonaEditForm);
   }
 
   C360.router.define("/personas", {
