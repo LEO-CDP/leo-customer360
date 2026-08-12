@@ -1,112 +1,151 @@
 
-# Customer 360 for Composable CDP
+# Customer 360
 
-## What is a Composable CDP?
+Customer 360 is the identity-resolution and golden-record layer for the LEO CDP platform. The repository combines a PostgreSQL-backed customer graph, a FastAPI read/write API, a Dagster orchestration workspace, and a thin admin frontend that consumes the API.
 
-A composable CDP is an approach to building customer data platform capabilities by assembling modular, best-of-breed components — each handling a different stage of the Customer Intelligence Loop (collect → resolve identity → segment → activate) — instead of buying one single, bundled, black-box platform. Most composable CDPs are **warehouse-native**: they run on the cloud data warehouse you already operate (Snowflake, BigQuery, Databricks, or in this case plain PostgreSQL) and add specialized, swappable components on top for identity resolution, segmentation, and activation.
+The code in this repo is not an abstract demo. It reflects a real platform layout with:
 
+- a PostgreSQL 16 schema for master profiles, raw profiles, links, CRM entities, personas, and segmentation metadata
+- a FastAPI API in `customer360-api/` for CRUD, reporting, auth, and tenant-scoped access
+- a Dagster workspace in `backend-system/` that runs identity resolution and segmentation jobs
+- a browser-based admin UI in `frontend-admin/` that calls the API over HTTP
+- local Docker-based startup and demo seeding scripts in the repo root
 
-![](./docs/composable-cdp.png)
+![](./docs/images/composable-cdp-architecture.png)
 
-## What is Customer 360?
+## What is implemented today
 
-Customer 360 is the **identity-resolution and golden-record component** of that composable stack for LEO CDP: a self-hosted PostgreSQL 16 schema (`customer360`) that consolidates customer identity and behavior across channels — AppsFlyer (mobile attribution), MoEngage (engagement), Web Tracking/GA4, POS, and Core Banking — plus a B2B **CRM journey graph** (Lead → Contact → Opportunity), a partitioned **behavioral event fact table**, and two runnable Python services that operate on the schema. It is the piece that would otherwise be an expensive, closed-source SaaS subscription (Segment/mParticle/Amperity-style identity resolution) — here it's transparent SQL and Python you can read, extend, and run on commodity infrastructure.
+The current repo has two live backend services and a set of placeholder service skeletons.
 
-![](./ui-wireframes/customer-360-profile-details.png)
-
-It ships as three independently runnable pieces:
-
-| Component | Role | Tech |
+| Area | Status | Notes |
 |---|---|---|
-| [`database-schema.sql`](database-init/database-schema.sql) | Single source of truth for the `customer360` schema | PostgreSQL 16, `pgvector`, `postgis`, `uuid-ossp`, `pgcrypto` |
-| [`backend-system/identity_resolution/`](backend-system/identity_resolution) | **Customer Identity Resolution (CIR)** engine — links/merges raw profiles into master (golden) profiles | Python + psycopg2, orchestrated by **[Dagster](https://dagster.io)** |
-| [`customer360-api/`](customer360-api) | REST API (CRUD + reporting) over the whole schema | FastAPI + SQLAlchemy 2 ORM |
+| `backend-system/identity_resolution/` | Implemented | Real CIR worker and Dagster job; resolves raw profile matches into master profiles |
+| `backend-system/segmentation/` | Implemented | Recomputes active segments and syncs member/tag data back to master profiles |
+| `customer360-api/` | Implemented | Main REST API for identity, CRM, persona, reporting, and metadata |
+| `frontend-admin/` | Implemented | FastAPI shell for the UI, backed by client-side JS and API requests |
+| `scoring`, `analytics`, `data_synch`, `email_engine`, `notification_engine`, `campaign_orchestration`, `personalization` | Placeholder | Minimal Dagster scaffolds ready to be filled in |
 
-> **Backend pipelines run on Dagster.** [`backend-system/`](backend-system) is a Dagster workspace: `identity_resolution` (above) plus the (in-progress) `scoring`/`segmentation`/`analytics` services each register as a Dagster job, giving them shared scheduling, retries, and one run-history UI instead of separate ad-hoc scripts. Full architecture, why it scales, and how to add a new service: **[`backend-system/README.md`](backend-system/README.md)**.
+## Repository structure
 
-## Repository core services (full)
-
-| Path | Role |
+| Path | Purpose |
 |---|---|
-| [`database-init/`](database-init) | Source of truth for the Postgres schema: [`database-schema.sql`](database-init/database-schema.sql), plus `init-core-database.sql` and `data-view-for-llm.sql` |
-| [`backend-system/`](backend-system) | Dagster workspace — `identity_resolution` (CIR, implemented) and `segmentation` (implemented) are real; `scoring`, `analytics`, `data_synch`, `email_engine`, `notification_engine`, `personalization` are placeholder code locations reserved for future services. See [`backend-system/README.md`](backend-system/README.md) |
-| [`customer360-api/`](customer360-api) | FastAPI REST API (CRUD + reporting) over the whole schema. See [`customer360-api/customer360-api.md`](customer360-api/customer360-api.md) |
-| [`frontend-admin/`](frontend-admin) | FastAPI-served admin SPA (Tailwind CDN + jQuery + Handlebars) that consumes `customer360-api` over AJAX. See [`frontend-admin/README.md`](frontend-admin/README.md) |
-| [`all-data-simulator/`](all-data-simulator) | Synthetic raw-data generators (AppsFlyer, GA4) used to seed/UAT-test the ingestion pipeline. See [`all-data-simulator/README.md`](all-data-simulator/README.md) |
-| [`docs/`](docs) | Architecture, operations, and planning docs — start with [`TECHNICAL-DOCUMENTATION.md`](docs/TECHNICAL-DOCUMENTATION.md) and [`DOCKER-COMPOSE-GUIDE.md`](docs/DOCKER-COMPOSE-GUIDE.md) |
-| [`postgres/`](postgres), [`redis/`](redis) | Custom Dockerfiles for the Postgres (PostGIS + pgvector) and Redis images used by `docker-compose.yml` |
-| [`ui-wireframes/`](ui-wireframes) | UI/UX wireframe references for the admin frontend |
+| [`database-init/`](database-init) | Schema source: `database-schema.sql`, seed/init scripts, and SQL views |
+| [`backend-system/`](backend-system) | Dagster workspace with active jobs and placeholder service code locations |
+| [`customer360-api/`](customer360-api) | FastAPI service with routers, auth, SQLAlchemy models, and business logic |
+| [`frontend-admin/`](frontend-admin) | Thin admin UI served by FastAPI and loaded from static templates |
+| [`all-data-simulator/`](all-data-simulator) | Synthetic raw data and optional S3/MinIO upload helpers |
+| [`docs/`](docs) | Architecture, operations, and planning material |
+| [`postgres/`](postgres), [`redis/`](redis) | Docker image setup for Postgres and Redis |
+| [`ui-wireframes/`](ui-wireframes) | UI design references |
 
-## Copy from template
+## Runtime architecture
 
-Before running the stack locally, create your runtime environment file from the template:
+The repo runs with the following high-level flow:
+
+1. Postgres stores the canonical `customer360` schema and all operational metadata.
+2. `customer360-api` exposes the public API and enforces tenant-aware auth via middleware.
+3. The Dagster backend runs jobs such as identity resolution and segmentation in a monitored workflow.
+4. The admin frontend calls the API directly, without direct database access.
+5. Local dev and production scripts bootstrap dockerized infrastructure and run the platform as a coherent stack.
+
+## Local development quick start
+
+### 1) Prepare environment
 
 ```bash
 cp .env.example .env
 ```
 
-Then edit [.env](.env) with your local secrets and ports. The full variable reference is in [docs/environment-notes.md](docs/environment-notes.md).
+Then edit the values in `.env` for your local Postgres, Redis, Keycloak, and host ports. The repo includes a full env template and operational notes in the docs.
 
-## Quick start
-
-**Production-shaped stack (Docker Compose: postgres + redis + keycloak + cir + api):**
+### 2) Start the dev stack
 
 ```bash
-./manage-c360.sh start     # first run creates .env from .env.example and prompts for secrets
+./dev-c360.sh
+```
+
+This script starts the infra stack in Docker and automatically seeds demo data if the database is empty. It is meant for the workflow where Postgres and Redis run in Docker while the app services run directly on the host.
+
+### 3) Run host services
+
+In a separate terminal, start the API and backend workers:
+
+```bash
+cd customer360-api
+./start.sh
+
+cd ../backend-system/identity_resolution
+./run-demo.sh
+```
+
+The admin frontend can also be started separately:
+
+```bash
+cd ../frontend-admin
+./start.sh
+```
+
+## Production-style stack
+
+For the packaged stack using Docker Compose, run:
+
+```bash
+./manage-c360.sh start
 ./manage-c360.sh status
-./manage-c360.sh seed-demo # optional: seed POC/UAT demo data
 ```
 
-See [`docs/DOCKER-COMPOSE-GUIDE.md`](docs/DOCKER-COMPOSE-GUIDE.md) for the full
-operations reference (ports, services, Keycloak realm/client setup).
+This covers the main production service stack in `docker-compose.yml`, including Postgres, Redis, Keycloak, the CIR worker, and the API. The script is the recommended entrypoint for production-like local deployment and first-time env bootstrapping.
 
-**Local development (infra in Docker, services run on the host):**
+## Service entrypoints
+
+The repo uses these primary entrypoints:
+
+- `customer360-api/app.py` — FastAPI API entrypoint
+- `backend-system/identity_resolution/worker.py` — polling CIR worker
+- `frontend-admin/app.py` — admin frontend shell
+- `manage-c360.sh` — production-style Docker stack manager
+- `dev-c360.sh` — local dev infrastructure bootstrap
+
+## Authentication and tenant context
+
+The API is auth-protected on nearly every route. The current implementation requires a valid bearer token on all non-exempt endpoints, and it resolves tenant/user context from the token or Keycloak-backed auth flow. The code now intentionally rejects header-only login shortcuts, so the runtime behavior matches the current API docs in `customer360-api/customer360-api.md`.
+
+The usual local flow is:
 
 ```bash
-./dev-c360.sh   # postgres + redis + keycloak + MinIO; auto-seeds demo data if the DB is empty
+curl -s -X POST http://localhost:8008/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"<password from .env>"}'
 ```
 
-Then run `customer360-api` (`customer360-api/start.sh`) and the CIR worker
-(`backend-system/identity_resolution/run-demo.sh`) directly on the host.
+Then pass the returned `access_token` as a bearer token in subsequent requests.
 
-**Tests:**
+## Testing
+
+The repo includes a consolidated test runner:
 
 ```bash
-./run_all_tests.sh   # customer360-api + backend-system/identity_resolution unit tests
+./run_all_tests.sh
 ```
 
-## Authentication (calling `customer360-api` as a dev engineer)
+This is the current project-level smoke/test entrypoint for the API and identity-resolution logic.
 
-Every protected endpoint needs `tenant_id`/`user_id` resolved from one of:
+## Key documentation
 
-- **Dev JWT (recommended, `SSO_LOGIN=false`)** -- log in once, then send the
-  token like a real production caller would:
-  ```bash
-  curl -s -X POST http://localhost:8008/api/v1/auth/login \
-    -H 'Content-Type: application/json' \
-    -d '{"username":"admin","password":"<DEFAULT_ROOT_PASSWORD from .env>"}'
-  # -> {"access_token": "...", "tenant_id": "...", "user_id": "...", ...}
+Start here for deeper context:
 
-  curl -s http://localhost:8008/api/v1/users/me -H "Authorization: Bearer <access_token>"
-  ```
-  Or open `http://localhost:8008/docs`, click **Authorize**, and paste the
-  `access_token` to call any endpoint from Swagger UI.
-- **SSO (`SSO_LOGIN=true`)** -- the same `Authorization: Bearer <token>`
-  contract, but the token comes from Keycloak (see `frontend-admin`'s login
-  flow, or `POST /api/v1/auth/callback` for a code exchange).
-
-Every endpoint except `/health`, `/api/v1/metadata`, and the
-login/callback/logout routes above requires a valid token in both modes --
-there's no `X-Tenant-Id`/`X-User-Id`-only shortcut anymore.
-
-Full reference, endpoint catalog, and auth-expectation matrix:
-[`customer360-api/customer360-api.md`](customer360-api/customer360-api.md).
+- [`docs/TECHNICAL-DOCUMENTATION.md`](docs/TECHNICAL-DOCUMENTATION.md)
+- [`docs/DOCKER-COMPOSE-GUIDE.md`](docs/DOCKER-COMPOSE-GUIDE.md)
+- [`customer360-api/customer360-api.md`](customer360-api/customer360-api.md)
+- [`backend-system/README.md`](backend-system/README.md)
+- [`frontend-admin/README.md`](frontend-admin/README.md)
 
 ## References
 
-* [LEOCDP.com](https://leocdp.com) 
-* Salesforce Customer 360 Graph Model (adapted) — inspiration for the Lead/Campaign/Contact/Account/Opportunity journey graph.
-* [LEO CDP 1.0](https://github.com/trieu/leo-cdp) (ArangoDB 3.11-based) — the sibling CDP module in this monorepo; `cdp_event_catalog`'s event vocabulary is adapted from its [`TrackingEvent`](https://github.com/trieu/leo-cdp/blob/master/core-leo-cdp/src/main/java/leotech/cdp/model/analytics/TrackingEvent.java) taxonomy so events stay consistent whether they land in ArangoDB or here in Postgres.
-* [pgvector](https://github.com/pgvector/pgvector) / [PostGIS](https://postgis.net/)
-* Google Customer Match / Enhanced Conversions (hashed-PII matching pattern)
+- [LEOCDP.com](https://leocdp.com)
+- [Dagster](https://dagster.io)
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [PostgreSQL](https://www.postgresql.org/)
+- [pgvector](https://github.com/pgvector/pgvector)
+- [PostGIS](https://postgis.net/)
 
