@@ -4,7 +4,7 @@ This document reflects the current implementation in:
 - app.py
 - core/routers/*.py
 
-Last aligned: 2026-08-09 (added POST /auth/login dev JWT issuance).
+Last aligned: 2026-08-12.
 
 ## Base Paths
 
@@ -104,6 +104,11 @@ Note:
 - POST /api/v1/metadata/data-sources
 - PATCH /api/v1/metadata/data-sources/{data_source_id}
 - DELETE /api/v1/metadata/data-sources/{data_source_id}
+- GET /api/v1/metadata/scoring-models
+- GET /api/v1/metadata/scoring-models/{scoring_model_name}
+- POST /api/v1/metadata/scoring-models
+- PATCH /api/v1/metadata/scoring-models/{scoring_model_name}
+- DELETE /api/v1/metadata/scoring-models/{scoring_model_name}
 
 ### CRM (Generic CRUD Resources)
 
@@ -173,12 +178,22 @@ Profile Merge History:
 - GET /api/v1/profile-merge-history/{merge_id}
 - POST /api/v1/profile-merge-history/
 
+Persona Archetypes:
+- GET /api/v1/persona/archetypes
+- GET /api/v1/persona/archetypes/{persona_archetype_id}
+- GET /api/v1/persona/archetypes/{persona_archetype_id}/master-profiles
+- POST /api/v1/persona/archetypes
+- PATCH /api/v1/persona/archetypes/{persona_archetype_id}
+- DELETE /api/v1/persona/archetypes/{persona_archetype_id}
+
 Customer Personas:
 - GET /api/v1/persona/list
 - GET /api/v1/persona/analytics/summary
+- GET /api/v1/persona/category/{persona_category}/master-profiles
 - GET /api/v1/persona/{persona_id}
 - GET /api/v1/persona/{persona_id}/features
 - GET /api/v1/persona/{persona_id}/score-details
+- GET /api/v1/persona/{persona_id}/master-profile
 - POST /api/v1/persona/
 - PATCH /api/v1/persona/{persona_id}
 - DELETE /api/v1/persona/{persona_id}
@@ -291,6 +306,7 @@ Additional Segmentation Endpoints:
   - profile-links: no PATCH, no /count
   - profile-merge-history: append/read only
   - persona/features, persona/score-details, persona/history: read/create only
+  - persona archetypes: read/create/update/delete, plus master-profile listing
   - graph-edges: no PATCH
   - events: custom ingest/list/detail APIs
   - users: no /count; DELETE defaults to soft delete (status=INACTIVE), hard delete is opt-in via query param
@@ -337,6 +353,11 @@ resource,method,auth_expectation
 /api/v1/metadata/data-sources/{data_source_id},GET,bearer_if_sso
 /api/v1/metadata/data-sources/{data_source_id},PATCH,bearer_if_sso
 /api/v1/metadata/data-sources/{data_source_id},DELETE,bearer_if_sso
+/api/v1/metadata/scoring-models,GET,bearer_if_sso
+/api/v1/metadata/scoring-models/{scoring_model_name},GET,bearer_if_sso
+/api/v1/metadata/scoring-models,POST,bearer_if_sso
+/api/v1/metadata/scoring-models/{scoring_model_name},PATCH,bearer_if_sso
+/api/v1/metadata/scoring-models/{scoring_model_name},DELETE,bearer_if_sso
 /api/v1/campaigns/,GET,bearer_if_sso
 /api/v1/campaigns/count,GET,bearer_if_sso
 /api/v1/campaigns/{item_id},GET,bearer_if_sso
@@ -436,11 +457,19 @@ resource,method,auth_expectation
 /api/v1/profile-merge-history/,GET,bearer_if_sso
 /api/v1/profile-merge-history/{merge_id},GET,bearer_if_sso
 /api/v1/profile-merge-history/,POST,bearer_if_sso
+/api/v1/persona/archetypes,GET,bearer_if_sso
+/api/v1/persona/archetypes/{persona_archetype_id},GET,bearer_if_sso
+/api/v1/persona/archetypes/{persona_archetype_id}/master-profiles,GET,bearer_if_sso
+/api/v1/persona/archetypes,POST,bearer_if_sso
+/api/v1/persona/archetypes/{persona_archetype_id},PATCH,bearer_if_sso
+/api/v1/persona/archetypes/{persona_archetype_id},DELETE,bearer_if_sso
 /api/v1/persona/list,GET,bearer_if_sso
 /api/v1/persona/analytics/summary,GET,bearer_if_sso
+/api/v1/persona/category/{persona_category}/master-profiles,GET,bearer_if_sso
 /api/v1/persona/{persona_id},GET,bearer_if_sso
 /api/v1/persona/{persona_id}/features,GET,bearer_if_sso
 /api/v1/persona/{persona_id}/score-details,GET,bearer_if_sso
+/api/v1/persona/{persona_id}/master-profile,GET,bearer_if_sso
 /api/v1/persona/,POST,bearer_if_sso
 /api/v1/persona/{persona_id},PATCH,bearer_if_sso
 /api/v1/persona/{persona_id},DELETE,bearer_if_sso
