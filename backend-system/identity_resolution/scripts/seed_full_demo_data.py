@@ -170,6 +170,22 @@ def stable_rng(key: str) -> random.Random:
     return random.Random(seed)
 
 
+def realistic_event_days_ago(rng: random.Random, max_days: int = 180) -> int:
+    """Evenly-spread day offset across ``max_days`` (defaults to 6 months) so
+    seeded cdp_raw_events give the analytics dashboard's Event Activity
+    Heatmap real daily-tracking coverage for retail/banking profiles, instead
+    of clustering almost entirely in the most recent week."""
+    quarter = max(1, max_days // 4)
+    bucket = rng.random()
+    if bucket < 0.30:
+        return rng.randint(1, min(quarter, max_days))
+    if bucket < 0.55:
+        return rng.randint(min(quarter + 1, max_days), min(quarter * 2, max_days))
+    if bucket < 0.78:
+        return rng.randint(min(quarter * 2 + 1, max_days), min(quarter * 3, max_days))
+    return rng.randint(min(quarter * 3 + 1, max_days), max_days)
+
+
 # --------------------------------------------------------------------------
 # 1. CRM Journey Graph
 # --------------------------------------------------------------------------
@@ -865,7 +881,7 @@ def seed_customer_contacts(cursor, master_profiles: list) -> None:
                     str(uuid.uuid4()), DEMO_TENANT_ID, m["master_profile_id"],
                     rng.choice(types), rng.choice(channels),
                     "Synthetic demo interaction log entry.",
-                    datetime.now() - timedelta(days=rng.randint(1, 60), hours=rng.randint(0, 23)),
+                    datetime.now() - timedelta(days=realistic_event_days_ago(rng), hours=rng.randint(0, 23)),
                 ),
             )
 
@@ -907,6 +923,9 @@ def seed_transactions(cursor, master_profiles: list) -> None:
         }.get(domain)
         if catalog is None:
             continue
+        # Bug fix: this loop previously sat unreachable after `continue`, so
+        # no master profile ever got a crm_transactions row from this branch.
+        for _ in range(rng.randint(2, 5)):
             source_system, txn_type, entity_type, entity_name, amount_range, channel = rng.choice(catalog)
             cursor.execute(
                 f"""
@@ -919,7 +938,7 @@ def seed_transactions(cursor, master_profiles: list) -> None:
                 (
                     str(uuid.uuid4()), DEMO_TENANT_ID, m["master_profile_id"], source_system, txn_type,
                     "completed", entity_type, entity_name, rng.randint(*amount_range), "VND", channel,
-                    datetime.now() - timedelta(days=rng.randint(1, 90), hours=rng.randint(0, 23)),
+                    datetime.now() - timedelta(days=realistic_event_days_ago(rng), hours=rng.randint(0, 23)),
                 ),
             )
 
@@ -1040,7 +1059,7 @@ def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict = None)
                     "AppsFlyer" if m["domain"] == "retail" else "CoreBanking",
                     "mobile_app", category, event_name, is_conversion, entity_type,
                     rng.randint(*value_range) if value_range else None, "VND",
-                    datetime.now() - timedelta(days=rng.randint(1, 60), hours=rng.randint(0, 23)),
+                    datetime.now() - timedelta(days=realistic_event_days_ago(rng), hours=rng.randint(0, 23)),
                 ),
             )
 
@@ -1060,7 +1079,7 @@ def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict = None)
                     "AppsFlyer" if m["domain"] == "retail" else "CoreBanking",
                     "mobile_app", category, event_name, is_conversion, entity_type,
                     rng.randint(*value_range) if value_range else None, "VND",
-                    datetime.now() - timedelta(days=rng.randint(1, 60), hours=rng.randint(0, 23)),
+                    datetime.now() - timedelta(days=realistic_event_days_ago(rng), hours=rng.randint(0, 23)),
                 ),
             )
 
@@ -1090,7 +1109,7 @@ def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict = None)
                 DEMO_TENANT_ID, domain, device_id, raw_profile_id, "WebTracking", "web",
                 category, event_name, is_conversion, entity_type,
                 rng.randint(*value_range) if value_range else None, "VND",
-                datetime.now() - timedelta(days=rng.randint(1, 30)),
+                datetime.now() - timedelta(days=realistic_event_days_ago(rng, max_days=90)),
             ),
         )
 
