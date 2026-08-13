@@ -44,12 +44,19 @@ if env_path.is_file():
 SSO_LOGIN = os.getenv("SSO_LOGIN", "false").lower()
 IS_DEV = SSO_LOGIN in ("false", "0", "no")
 
-FRONTEND_ROOT_PATH = os.getenv("FRONTEND_ROOT_PATH", "").rstrip("/")
 API_HOSTNAME = os.getenv("FRONTEND_API_HOSTNAME", "http://localhost:8008").rstrip("/")
 API_BASE = f"{API_HOSTNAME}/api/v1"
 TENANT_ID = os.getenv("FRONTEND_TENANT_ID", "11111111-1111-1111-1111-111111111111")
 APP_HOST = os.getenv("HOST", "0.0.0.0")
 APP_PORT = int(os.getenv("PORT", "8890"))
+
+
+FRONTEND_ROOT_PATH = os.getenv(
+    "FRONTEND_ROOT_PATH",
+    "/c360",
+).rstrip("/")
+
+STATIC_BASE = f"{FRONTEND_ROOT_PATH}/static"
 
 # Static Asset Cache-Buster (Set at startup to allow static caching during runtime in production)
 # Replaced datetime.utcnow() with datetime.now(timezone.utc) to resolve Pylance deprecation warnings
@@ -94,7 +101,6 @@ app = FastAPI(
     ),
     version="1.0.0",
     lifespan=lifespan,
-    root_path=FRONTEND_ROOT_PATH
 )
 
 # Attach Security Middlewares to harden the static file serving
@@ -112,8 +118,7 @@ async def index(request: Request):
         "request": request,
         "api_base": API_BASE,
         "tenant_id": tenant_id,
-        # Force cache bust on every reload if dev, otherwise only on deployment
-        # Replaced datetime.utcnow() with datetime.now(timezone.utc)
+        "static_base": STATIC_BASE,
         "cache_bust": cb,
     }
     
