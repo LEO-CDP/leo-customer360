@@ -26,7 +26,7 @@ window.C360 = window.C360 || {};
     apiBase: "http://localhost:8008/api/v1",
     tenantId: "11111111-1111-1111-1111-111111111111",
     accessToken: "",
-    theme: "system",
+    theme: "light",
     multiTenantEnabled: false,
     tenantOptions: [],
     userId: "",
@@ -333,7 +333,16 @@ window.C360 = window.C360 || {};
       options.contentType = "application/json";
       options.data = JSON.stringify(params || {});
     }
-    return $.ajax(options);
+
+    var request = $.ajax(options);
+    request.fail(function (xhr) {
+      if (xhr && xhr.status === 401 && C360.config && typeof C360.config.logout === "function") {
+        C360.config.logout(function () {
+          window.location.reload();
+        });
+      }
+    });
+    return request;
   }
 
   function showApiError(context, xhr) {
@@ -425,7 +434,7 @@ window.C360 = window.C360 || {};
     });
   }
 
-  function logout() {
+  function logout(callback) {
     localStorage.clear();
     sessionStorage.clear();
     CONFIG.accessToken = "";
@@ -433,6 +442,7 @@ window.C360 = window.C360 || {};
     CONFIG.userId = "";
     CONFIG.devUser = null;
     C360.config.current = CONFIG;
+    if (typeof callback === "function") callback();
   }
 
   // True once a session exists: an SSO access token, or a resolved dev-mode

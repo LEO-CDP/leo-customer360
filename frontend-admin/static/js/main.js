@@ -57,7 +57,7 @@ const TIME_CHECK_API_HEALTH = 60000;
     $("#settings-api-base").val(cfg.apiBase);
     $("#settings-tenant-id").val(cfg.tenantId);
     $("#settings-access-token").val(cfg.accessToken || "");
-    $("#settings-theme").val(cfg.theme || "system");
+    $("#settings-theme").val(cfg.theme || "light");
     $("#settings-multi-tenant-enabled").prop("checked", !!cfg.multiTenantEnabled);
     $("#settings-tenant-options").val((cfg.tenantOptions || []).join(", "));
     fillTenantSwitcher(cfg);
