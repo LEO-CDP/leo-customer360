@@ -94,9 +94,10 @@ Every protected endpoint needs `tenant_id`/`user_id` resolved from one of:
 - **SSO (`SSO_LOGIN=true`)** -- the same `Authorization: Bearer <token>`
   contract, but the token comes from Keycloak (see `frontend-admin`'s login
   flow, or `POST /api/v1/auth/callback` for a code exchange).
-- **Dev headers (`SSO_LOGIN=false`, quick shortcut)** -- `X-Tenant-Id`/
-  `X-User-Id` headers, no login required, for endpoints that don't need a
-  resolved user profile.
+
+Every endpoint except `/health`, `/api/v1/metadata`, and the
+login/callback/logout routes above requires a valid token in both modes --
+there's no `X-Tenant-Id`/`X-User-Id`-only shortcut anymore.
 
 Full reference, endpoint catalog, and auth-expectation matrix:
 [`customer360-api/customer360-api.md`](customer360-api/customer360-api.md).

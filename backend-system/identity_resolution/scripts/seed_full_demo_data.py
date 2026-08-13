@@ -36,8 +36,16 @@ real ``master_profile_id`` values. It covers:
    (cif_number/account_numbers/kyc_status/risk_segment) for banking-domain
    profiles, acquisition_source/acquisition_campaign (joined back from the
    raw profile that first created the master, via first_seen_raw_profile_id),
-   segmentation_tags/attributes/gender/address/profile_picture_url, and a
-   ``persona_embedding`` vector for a representative subset of profiles.
+   segmentation_tags/attributes/gender/address/profile_picture_url.
+7a. ``cdp_persona_archetypes``: two curated "Ideal Customer Profile" (ICP)
+   archetypes per ``sys_domain`` (a premium/champion target and an emerging/
+   growth target), each tied to a concrete product and campaign time window,
+   with a declared centroid component-score vector + ``persona_embedding``.
+   Every master profile then gets its own six component scores computed
+   (via ``persona_engine.compute_persona()``) and is lookalike-matched
+   (cosine similarity against the centroids) to the best-fit archetype in
+   its domain, persisted as a versioned ``cdp_customer_personas`` row --
+   see ``seed_persona_archetypes()`` / ``seed_customer_personas()``.
 7. **crm_contact <-> cdp_master_profiles linkage**: these two tables have NO
    shared key in database-schema.sql (crm_contact has no tenant_id/
    master_profile_id column, and cdp_master_profiles has nothing pointing
@@ -53,12 +61,18 @@ real ``master_profile_id`` values. It covers:
 
 Deliberately NOT populated (left NULL / default), consistent with this
 demo's existing "never store plaintext PII" policy for identity-resolution
-tables (see init_sample_data.py's hash_pii()): ``first_name``/``last_name``
-(no plaintext name is available -- full_name is a one-way hash),
-``secondary_emails``/``secondary_phones``, and ``date_of_birth``. ``address``
-is populated with city/country only (no street). ``gender`` and
-``profile_picture_url`` ARE populated -- neither is independently
-identifying PII.
+tables (see init_sample_data.py's hash_pii()): ``secondary_emails``/
+``secondary_phones`` and ``date_of_birth``. ``address`` is populated with
+city/country only (no street). ``gender`` and ``profile_picture_url`` ARE
+populated -- neither is independently identifying PII.
+
+Exception: retail-domain master profiles ARE given plaintext
+``full_name``/``first_name``/``last_name``/``email``/``phone_number`` (and
+``is_hashed`` is set to ``FALSE``) -- retail/e-commerce apps routinely
+display the customer's own name/contact info back to them, so the demo
+reflects that instead of an unreadable hash. Banking (and every other)
+domain keeps the hashed-PII-only policy from init_sample_data.py /
+run_demo_resolution.py.
 
 Note: ``crm_lead``/``crm_contact`` DO get plaintext first/last name/email/
 phone -- that's a *different* table representing a separate use case (a
@@ -91,6 +105,7 @@ Idempotent / safe to re-run:
 
 import hashlib
 import logging
+import math
 import os
 import random
 import sys
@@ -108,7 +123,7 @@ from psycopg2.extras import Json, RealDictCursor
 # instead of re-implementing its SQL inline.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from identity_resolution.persona_engine import PersonaResolutionEngine  # noqa: E402
+from identity_resolution.persona_engine import PersonaResolutionEngine, compute_persona  # noqa: E402
 
 load_dotenv()
 
@@ -133,7 +148,6 @@ DEMO_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
 # (customer contacts / transactions / raw events / persona_embedding). All
 # master profiles still get the lightweight lifecycle+scoring enrichment.
 DETAIL_PROFILE_LIMIT = 60
-EMBEDDING_PROFILE_LIMIT = 30
 PERSONA_EMBEDDING_DIM = 768
 # Demo invariant: every resolved master profile must have >10 behavioral events.
 MIN_EVENTS_PER_MASTER_PROFILE = 11
@@ -278,6 +292,14 @@ CAMPAIGNS = [
 
 LEAD_FIRST_NAMES = ("Minh", "Linh", "Huy", "Trang", "Khoa", "My", "Duc", "Anh")
 LEAD_LAST_NAMES = ("Nguyen", "Tran", "Le", "Pham", "Hoang", "Vo", "Bui", "Dang")
+
+# Retail-domain cdp_master_profiles get plaintext PII (unlike banking, which
+# stays SHA-256 hashed per init_sample_data.py's hash_pii() policy) -- retail
+# apps commonly show the customer's own name/contact info back to them, so
+# the demo should reflect that instead of an unreadable hash. See
+# enrich_master_profiles()'s retail branch.
+RETAIL_PII_FIRST_NAMES = ("Minh", "Linh", "Huy", "Trang", "Khoa", "My", "Duc", "Anh", "Hoa", "Tuan", "Thao", "Nam")
+RETAIL_PII_LAST_NAMES = ("Nguyen", "Tran", "Le", "Pham", "Hoang", "Vo", "Bui", "Dang", "Do", "Ho", "Ngo", "Duong")
 
 
 def seed_relation_types(cursor) -> None:
@@ -1417,6 +1439,19 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
         domain_attributes: dict[str, object] = {}
 
         if domain == "retail":
+            # Retail profiles show real (plaintext) PII in the demo -- see
+            # RETAIL_PII_FIRST_NAMES/RETAIL_PII_LAST_NAMES above.
+            first_name = rng.choice(RETAIL_PII_FIRST_NAMES)
+            last_name = rng.choice(RETAIL_PII_LAST_NAMES)
+            full_name = f"{last_name} {first_name}"
+            email = f"{first_name.lower()}.{last_name.lower()}.{master_id[:8]}@example.com"
+            phone_number = f"09{rng.randint(10000000, 99999999)}"
+            set_clauses.extend([
+                "full_name = %s", "first_name = %s", "last_name = %s",
+                "email = %s", "phone_number = %s", "is_hashed = FALSE",
+            ])
+            params.extend([full_name, first_name, last_name, email, phone_number])
+
             domain_attributes = {
                 "loyalty_id": f"LOY-{master_id[:8]}",
                 "membership_tier": rng.choice(("Silver", "Gold", "Platinum")),
@@ -1477,9 +1512,10 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             # Catch-all for any future domain; do nothing domain-specific.
             pass
 
-        # NOTE: persona_embedding lives on cdp_customer_personas (not
-        # cdp_master_profiles) -- see seed_customer_personas() below, which
-        # sets it for a representative subset of computed personas.
+        # NOTE: persona_embedding lives on the SHARED cdp_persona_archetypes
+        # row (not cdp_master_profiles or cdp_customer_personas) -- see
+        # seed_customer_personas() below, which sets it for a representative
+        # subset of computed archetypes.
 
         params.append(master_id)
         cursor.execute(
@@ -1551,48 +1587,359 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             )
 
 
-def seed_customer_personas(cursor, master_profiles: list) -> int:
-    """Computes and persists a real customer persona (cdp_customer_personas +
-    cdp_persona_features + cdp_persona_score_details + cdp_persona_history)
-    for every enriched master profile, via the SAME PersonaResolutionEngine
-    backend-system/identity_resolution's CIR pipeline uses in production
-    (resolver.py) -- proves the "AI-native Customer Persona Resolution
-    Engine" actually works end-to-end against real seeded data, instead of
-    duplicating its SQL here. Must run AFTER enrich_master_profiles() (needs
-    lifecycle_stage/membership_tier/CLV/etc. already populated) and after
-    master_profiles has been refetched to include tenant_id.
 
-    Idempotent / safe to re-run: resolve_persona() always inserts a fresh
-    version (deactivating the previous one), so re-running this just adds
-    another computed_version rather than erroring.
+# --------------------------------------------------------------------------
+# Persona archetypes ("Ideal Customer Profile" per sys_domain + product/time)
+# --------------------------------------------------------------------------
+# Two curated ICP archetypes per customer360 sys_domain (see
+# database-init/init-core-database.sql's SYSTEM DOMAINS insert): a premium/
+# high-value target and an emerging/growth target, each tied to a concrete
+# product and campaign time window (product/period are folded into
+# persona_name/persona_summary -- cdp_persona_archetypes has no dedicated
+# product/period columns, and adding them isn't needed for this demo). The
+# centroid_*_score fields are the ICP's DECLARED target profile (not derived
+# from real data) -- what seed_customer_personas() below lookalike-matches
+# each master profile's own computed component scores against.
+ICP_ARCHETYPES = [
+    # -- retail --
+    {
+        "domain": "retail", "persona_code": "retail_gen_z_sneaker_collector_2026h2",
+        "persona_name": "Gen Z Sneaker Collector -- Q3-Q4 2026 Sneaker Drop",
+        "persona_category": "Champion", "product": "Limited-Edition Sneaker Drops",
+        "campaign_period": "2026-07-01 to 2026-12-31",
+        "persona_summary": "ICP for the H2 2026 limited-edition sneaker drop campaign: highly engaged Gen Z shoppers who buy frequently via the mobile app and chase every new release.",
+        "centroid": {"behavior": 85, "engagement": 90, "financial": 55, "loyalty": 65, "relationship": 55, "risk": 20},
+    },
+    {
+        "domain": "retail", "persona_code": "retail_household_essentials_loyalist_2026h2",
+        "persona_name": "Household Essentials Loyalist -- H2 2026 Subscribe & Save",
+        "persona_category": "Growth Potential", "product": "Everyday Essentials Subscription",
+        "campaign_period": "2026-07-01 to 2026-12-31",
+        "persona_summary": "ICP for the H2 2026 Subscribe & Save program: steady repeat buyers of everyday essentials, moderate spend, strong loyalty-program participation.",
+        "centroid": {"behavior": 60, "engagement": 55, "financial": 70, "loyalty": 85, "relationship": 60, "risk": 15},
+    },
+    # -- banking --
+    {
+        "domain": "banking", "persona_code": "banking_premium_wealth_client_fy2026",
+        "persona_name": "Premium Wealth Management Client -- FY2026",
+        "persona_category": "Champion", "product": "Premium Wealth Management Package",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the FY2026 premium wealth-management push: high-net-worth, low-risk, deeply loyal relationship-banking clients.",
+        "centroid": {"behavior": 70, "engagement": 65, "financial": 92, "loyalty": 88, "relationship": 75, "risk": 8},
+    },
+    {
+        "domain": "banking", "persona_code": "banking_digital_first_young_saver_2026",
+        "persona_name": "Digital-First Young Saver -- 2026 Robo-Advisor Launch",
+        "persona_category": "Growth Potential", "product": "Digital Savings + Robo-Advisor",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the 2026 digital savings + robo-advisor launch: mobile-first young savers, modest balances, high app engagement, still building tenure.",
+        "centroid": {"behavior": 80, "engagement": 85, "financial": 45, "loyalty": 50, "relationship": 40, "risk": 25},
+    },
+    # -- insurance --
+    {
+        "domain": "insurance", "persona_code": "insurance_family_protection_planner_2026",
+        "persona_name": "Family Protection Planner -- 2026 Open Enrollment",
+        "persona_category": "Champion", "product": "Family Life & Health Bundle",
+        "campaign_period": "2026-09-01 to 2026-11-30",
+        "persona_summary": "ICP for the 2026 open-enrollment family bundle campaign: established households bundling life + health coverage for dependents.",
+        "centroid": {"behavior": 65, "engagement": 60, "financial": 70, "loyalty": 75, "relationship": 70, "risk": 20},
+    },
+    {
+        "domain": "insurance", "persona_code": "insurance_young_professional_starter_2026",
+        "persona_name": "Young Professional Starter Plan -- 2026",
+        "persona_category": "Growth Potential", "product": "Term Life Starter Plan",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the 2026 starter term-life plan: early-career professionals buying their first policy, low premium, still low engagement.",
+        "centroid": {"behavior": 55, "engagement": 50, "financial": 45, "loyalty": 40, "relationship": 35, "risk": 30},
+    },
+    # -- healthcare --
+    {
+        "domain": "healthcare", "persona_code": "healthcare_chronic_care_patient_2026",
+        "persona_name": "Chronic Care Management Patient -- 2026 Telehealth Program",
+        "persona_category": "Champion", "product": "Chronic Care Telehealth Program",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the 2026 chronic-care telehealth program: frequent, highly engaged patients requiring ongoing remote monitoring.",
+        "centroid": {"behavior": 75, "engagement": 80, "financial": 55, "loyalty": 70, "relationship": 65, "risk": 35},
+    },
+    {
+        "domain": "healthcare", "persona_code": "healthcare_preventive_wellness_seeker_2026",
+        "persona_name": "Preventive Wellness Seeker -- 2026 Annual Checkup Package",
+        "persona_category": "Growth Potential", "product": "Annual Wellness Checkup Package",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the 2026 annual wellness checkup package: healthy, occasional visitors seeking preventive rather than acute care.",
+        "centroid": {"behavior": 60, "engagement": 65, "financial": 50, "loyalty": 55, "relationship": 45, "risk": 10},
+    },
+    # -- telecom --
+    {
+        "domain": "telecom", "persona_code": "telecom_unlimited_data_power_user_2026q4",
+        "persona_name": "Unlimited Data Power User -- Q4 2026 5G Family Plan",
+        "persona_category": "Champion", "product": "Unlimited 5G Family Plan",
+        "campaign_period": "2026-10-01 to 2026-12-31",
+        "persona_summary": "ICP for the Q4 2026 unlimited 5G family plan launch: heavy data users on multi-line family accounts.",
+        "centroid": {"behavior": 85, "engagement": 88, "financial": 60, "loyalty": 60, "relationship": 50, "risk": 18},
+    },
+    {
+        "domain": "telecom", "persona_code": "telecom_budget_prepaid_user_2026",
+        "persona_name": "Budget-Conscious Prepaid User -- 2026 Value Plan",
+        "persona_category": "Growth Potential", "product": "Prepaid Value Plan",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the 2026 prepaid value plan: price-sensitive, low-usage subscribers with light engagement.",
+        "centroid": {"behavior": 40, "engagement": 35, "financial": 25, "loyalty": 30, "relationship": 20, "risk": 35},
+    },
+    # -- travel --
+    {
+        "domain": "travel", "persona_code": "travel_luxury_getaway_enthusiast_2026q4",
+        "persona_name": "Luxury Getaway Enthusiast -- Q4 2026 Peak Season Package",
+        "persona_category": "Champion", "product": "Premium All-Inclusive Getaway",
+        "campaign_period": "2026-10-01 to 2026-12-31",
+        "persona_summary": "ICP for the Q4 2026 peak-season premium getaway package: high-spend travelers booking all-inclusive luxury trips.",
+        "centroid": {"behavior": 80, "engagement": 75, "financial": 88, "loyalty": 70, "relationship": 60, "risk": 10},
+    },
+    {
+        "domain": "travel", "persona_code": "travel_budget_backpacker_explorer_2026",
+        "persona_name": "Budget Backpacker Explorer -- 2026 City-Break Package",
+        "persona_category": "Growth Potential", "product": "Budget City-Break Package",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the 2026 budget city-break package: frequent but low-spend independent travelers.",
+        "centroid": {"behavior": 70, "engagement": 60, "financial": 30, "loyalty": 35, "relationship": 30, "risk": 25},
+    },
+    # -- real_estate --
+    {
+        "domain": "real_estate", "persona_code": "real_estate_luxury_condo_investor_2026q4",
+        "persona_name": "Luxury Condo Investor -- Q4 2026 Riverside Launch",
+        "persona_category": "Champion", "product": "Riverside Luxury Condo Launch",
+        "campaign_period": "2026-10-01 to 2026-12-31",
+        "persona_summary": "ICP for the Q4 2026 riverside luxury condo launch: high-net-worth investors buying multiple premium units.",
+        "centroid": {"behavior": 65, "engagement": 55, "financial": 95, "loyalty": 60, "relationship": 55, "risk": 12},
+    },
+    {
+        "domain": "real_estate", "persona_code": "real_estate_first_time_homebuyer_2026",
+        "persona_name": "First-Time Homebuyer -- 2026 Mortgage Program",
+        "persona_category": "Growth Potential", "product": "First-Time Homebuyer Mortgage Program",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the 2026 first-time homebuyer mortgage program: early-career buyers purchasing their first property.",
+        "centroid": {"behavior": 55, "engagement": 60, "financial": 40, "loyalty": 45, "relationship": 40, "risk": 30},
+    },
+    # -- education --
+    {
+        "domain": "education", "persona_code": "education_career_upskiller_2026fall",
+        "persona_name": "Career Upskiller Professional -- Fall 2026 Certificate Cohort",
+        "persona_category": "Champion", "product": "Executive Data Analytics Certificate",
+        "campaign_period": "2026-09-01 to 2026-12-15",
+        "persona_summary": "ICP for the Fall 2026 executive data analytics certificate cohort: working professionals investing in career-advancing credentials.",
+        "centroid": {"behavior": 75, "engagement": 80, "financial": 60, "loyalty": 55, "relationship": 50, "risk": 15},
+    },
+    {
+        "domain": "education", "persona_code": "education_lifelong_learner_hobbyist_2026",
+        "persona_name": "Lifelong Learner Hobbyist -- 2026 Enrichment Courses",
+        "persona_category": "Growth Potential", "product": "Self-Paced Enrichment Courses",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the 2026 self-paced enrichment catalog: casual learners taking low-stakes courses for personal interest.",
+        "centroid": {"behavior": 50, "engagement": 45, "financial": 30, "loyalty": 40, "relationship": 35, "risk": 10},
+    },
+    # -- manufacturing --
+    {
+        "domain": "manufacturing", "persona_code": "manufacturing_enterprise_bulk_buyer_fy2026",
+        "persona_name": "Enterprise B2B Bulk Buyer -- FY2026 Supply Contract",
+        "persona_category": "Champion", "product": "Industrial Equipment Bulk Supply Contract",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the FY2026 industrial equipment bulk-supply contract: large enterprise accounts with deep, long-tenure relationships.",
+        "centroid": {"behavior": 70, "engagement": 60, "financial": 90, "loyalty": 80, "relationship": 85, "risk": 15},
+    },
+    {
+        "domain": "manufacturing", "persona_code": "manufacturing_sme_growth_partner_2026",
+        "persona_name": "SME Growth Partner -- 2026 Equipment Financing Plan",
+        "persona_category": "Growth Potential", "product": "Modular Equipment Financing Plan",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the 2026 modular equipment financing plan: small/mid-size manufacturers scaling up with financed equipment.",
+        "centroid": {"behavior": 55, "engagement": 50, "financial": 55, "loyalty": 50, "relationship": 60, "risk": 25},
+    },
+    # -- media --
+    {
+        "domain": "media", "persona_code": "media_premium_streaming_bingewatcher_2026q3",
+        "persona_name": "Premium Streaming Binge-Watcher -- Q3 2026 Ad-Free Launch",
+        "persona_category": "Champion", "product": "Premium Ad-Free Streaming Tier",
+        "campaign_period": "2026-07-01 to 2026-09-30",
+        "persona_summary": "ICP for the Q3 2026 premium ad-free tier launch: daily, high-watch-time subscribers upgrading away from ads.",
+        "centroid": {"behavior": 85, "engagement": 92, "financial": 55, "loyalty": 65, "relationship": 45, "risk": 15},
+    },
+    {
+        "domain": "media", "persona_code": "media_casual_ad_supported_viewer_2026",
+        "persona_name": "Casual Ad-Supported Viewer -- 2026 Basic Tier",
+        "persona_category": "Growth Potential", "product": "Ad-Supported Basic Tier",
+        "campaign_period": "2026-01-01 to 2026-12-31",
+        "persona_summary": "ICP for the 2026 ad-supported basic tier: infrequent, price-sensitive viewers with light watch time.",
+        "centroid": {"behavior": 40, "engagement": 40, "financial": 20, "loyalty": 30, "relationship": 20, "risk": 20},
+    },
+]
+
+
+def seed_persona_archetypes(cursor) -> dict:
+    """Upserts the curated ICP archetype catalog above into
+    cdp_persona_archetypes (one row per tenant/domain/persona_code) and
+    returns them grouped by domain, each carrying its persona_archetype_id
+    and centroid vector, ready for seed_customer_personas()'s lookalike
+    matching below. persona_embedding is seeded once per archetype here
+    (deterministic from persona_code) -- it's the SHARED centroid embedding,
+    not duplicated per matched profile."""
+    logger.info("Seeding %d ICP persona archetypes across every sys_domain...", len(ICP_ARCHETYPES))
+    archetypes_by_domain: dict[str, list] = {}
+    for icp in ICP_ARCHETYPES:
+        embedding_rng = stable_rng(f"persona_archetype_embedding:{icp['persona_code']}")
+        vector_literal = (
+            "[" + ",".join(f"{embedding_rng.uniform(-1, 1):.6f}" for _ in range(PERSONA_EMBEDDING_DIM)) + "]"
+        )
+        cursor.execute(
+            f"""
+            INSERT INTO {_table('cdp_persona_archetypes')} (
+                tenant_id, domain, persona_code, persona_name, persona_category, persona_summary,
+                llm_provider, llm_model, persona_embedding,
+                centroid_behavior_score, centroid_engagement_score, centroid_financial_score,
+                centroid_loyalty_score, centroid_relationship_score, centroid_risk_score
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::vector({PERSONA_EMBEDDING_DIM}), %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, domain, persona_code) DO UPDATE SET
+                persona_name = EXCLUDED.persona_name,
+                persona_category = EXCLUDED.persona_category,
+                persona_summary = EXCLUDED.persona_summary,
+                llm_provider = EXCLUDED.llm_provider,
+                llm_model = EXCLUDED.llm_model,
+                persona_embedding = EXCLUDED.persona_embedding,
+                centroid_behavior_score = EXCLUDED.centroid_behavior_score,
+                centroid_engagement_score = EXCLUDED.centroid_engagement_score,
+                centroid_financial_score = EXCLUDED.centroid_financial_score,
+                centroid_loyalty_score = EXCLUDED.centroid_loyalty_score,
+                centroid_relationship_score = EXCLUDED.centroid_relationship_score,
+                centroid_risk_score = EXCLUDED.centroid_risk_score,
+                updated_at = NOW()
+            RETURNING persona_archetype_id;
+            """,
+            (
+                DEMO_TENANT_ID, icp["domain"], icp["persona_code"], icp["persona_name"],
+                icp["persona_category"], icp["persona_summary"], "seed-script", "icp-catalog-v1",
+                vector_literal,
+                icp["centroid"]["behavior"], icp["centroid"]["engagement"], icp["centroid"]["financial"],
+                icp["centroid"]["loyalty"], icp["centroid"]["relationship"], icp["centroid"]["risk"],
+            ),
+        )
+        persona_archetype_id = cursor.fetchone()["persona_archetype_id"]
+        archetypes_by_domain.setdefault(icp["domain"], []).append(
+            {
+                "persona_archetype_id": persona_archetype_id,
+                "persona_name": icp["persona_name"],
+                "persona_summary": icp["persona_summary"],
+                "persona_category": icp["persona_category"],
+                "centroid_behavior_score": icp["centroid"]["behavior"],
+                "centroid_engagement_score": icp["centroid"]["engagement"],
+                "centroid_financial_score": icp["centroid"]["financial"],
+                "centroid_loyalty_score": icp["centroid"]["loyalty"],
+                "centroid_relationship_score": icp["centroid"]["relationship"],
+                "centroid_risk_score": icp["centroid"]["risk"],
+            }
+        )
+    return archetypes_by_domain
+
+
+def _cosine_similarity(a: list, b: list) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def _lookalike_match(computation, archetypes: list):
+    """Finds the ICP archetype (within the profile's own domain) whose
+    centroid component-score vector this profile's OWN computed scores most
+    resemble (cosine similarity) -- the lookalike model that decides
+    cdp_customer_personas.persona_archetype_id + match_score."""
+    profile_vector = [
+        computation.behavior_score, computation.engagement_score, computation.financial_score,
+        computation.loyalty_score, computation.relationship_score, computation.risk_score,
+    ]
+    best_archetype = None
+    best_score = -1.0
+    for archetype in archetypes:
+        centroid_vector = [
+            archetype["centroid_behavior_score"], archetype["centroid_engagement_score"],
+            archetype["centroid_financial_score"], archetype["centroid_loyalty_score"],
+            archetype["centroid_relationship_score"], archetype["centroid_risk_score"],
+        ]
+        similarity = _cosine_similarity(profile_vector, centroid_vector)
+        if similarity > best_score:
+            best_score = similarity
+            best_archetype = archetype
+    return best_archetype, round(max(best_score, 0.0), 4)
+
+
+def seed_customer_personas(cursor, master_profiles: list, archetypes_by_domain: dict) -> int:
+    """For every enriched master profile: computes its own six component
+    scores via PersonaResolutionEngine's pure compute_persona() (behavior/
+    engagement/financial/loyalty/relationship/risk + persona_score/
+    confidence), lookalike-matches it against the ICP archetypes seeded for
+    its domain (_lookalike_match), then persists a versioned
+    cdp_customer_personas MATCH row referencing the winning
+    persona_archetype_id -- via the SAME PersonaResolutionEngine persistence
+    helpers (features/score-details/history/master-profile update) the CIR
+    pipeline uses in production (resolver.py), instead of duplicating that
+    SQL here.
+
+    Idempotent / safe to re-run: each call inserts a fresh computed_version
+    (deactivating the previous one), so re-running just adds another version
+    rather than erroring.
     """
-    logger.info("Computing customer personas for %d master profiles via PersonaResolutionEngine...", len(master_profiles))
+    logger.info(
+        "Computing personas + lookalike-matching %d master profiles against %d ICP archetypes...",
+        len(master_profiles), sum(len(v) for v in archetypes_by_domain.values()),
+    )
     engine = PersonaResolutionEngine(schema=DB_SCHEMA)
+    engine._ensure_runtime_persona_config(cursor)
     computed = 0
-    embedded = 0
+    unmatched_domains = set()
+
     for m in master_profiles:
-        result = engine.resolve_persona(cursor, DEMO_TENANT_ID, m["master_profile_id"])
-        if result is None:
+        master_profile = engine._fetch_master_profile(cursor, DEMO_TENANT_ID, m["master_profile_id"])
+        if master_profile is None:
             continue
+
+        domain = master_profile.get("domain") or "retail"
+        archetypes = archetypes_by_domain.get(domain)
+        if not archetypes:
+            unmatched_domains.add(domain)
+            continue
+
+        computation = compute_persona(master_profile)
+        best_archetype, match_score = _lookalike_match(computation, archetypes)
+        assert best_archetype is not None  # archetypes is non-empty here, so a match always exists
+        computation.match_score = match_score
+        # The profile's displayed persona identity is the ARCHETYPE it was
+        # matched to, not an independently-generated name/summary.
+        computation.persona_name = best_archetype["persona_name"]
+        computation.persona_summary = best_archetype["persona_summary"]
+        computation.persona_category = best_archetype["persona_category"]
+
+        old_persona = engine._fetch_current_persona(cursor, DEMO_TENANT_ID, m["master_profile_id"])
+        computed_version = engine._next_computed_version(
+            cursor, DEMO_TENANT_ID, m["master_profile_id"], best_archetype["persona_archetype_id"]
+        )
+        engine._deactivate_previous_personas(cursor, DEMO_TENANT_ID, m["master_profile_id"])
+        persona_id = engine._insert_persona(
+            cursor, DEMO_TENANT_ID, domain, m["master_profile_id"], best_archetype["persona_archetype_id"],
+            computation, computed_version,
+        )
+        engine._insert_features(cursor, persona_id, computation.features)
+        engine._insert_score_details(cursor, persona_id, computation)
+        if engine._should_insert_history(old_persona, computation):
+            engine._insert_history(cursor, persona_id, old_persona, computation)
+        engine._update_master_profile(cursor, DEMO_TENANT_ID, m["master_profile_id"], persona_id, computation)
         computed += 1
 
-        # persona_embedding lives on cdp_customer_personas (identity
-        # *understanding*), not cdp_master_profiles -- only seeded for a
-        # representative subset of profiles, same convention as the master
-        # profile enrichment step used before this table existed.
-        if embedded < EMBEDDING_PROFILE_LIMIT:
-            embedding_rng = stable_rng(f"persona_embedding:{result['persona_id']}")
-            vector_literal = (
-                "[" + ",".join(f"{embedding_rng.uniform(-1, 1):.6f}" for _ in range(PERSONA_EMBEDDING_DIM)) + "]"
-            )
-            cursor.execute(
-                f"UPDATE {_table('cdp_customer_personas')} SET persona_embedding = %s::vector({PERSONA_EMBEDDING_DIM}) "
-                "WHERE persona_id = %s;",
-                (vector_literal, result["persona_id"]),
-            )
-            embedded += 1
-
-    logger.info("Computed %d personas (%d with a persona_embedding).", computed, embedded)
+    if unmatched_domains:
+        logger.warning(
+            "No ICP archetypes seeded for domain(s) %s -- skipped persona matching for those profiles.",
+            sorted(unmatched_domains),
+        )
+    logger.info("Computed %d personas, each lookalike-matched to a shared ICP archetype.", computed)
     return computed
 
 
@@ -1644,19 +1991,20 @@ def main() -> None:
             seed_graph_edges(cursor, crm_ids, detail_profiles)
             enrich_master_profiles(cursor, master_profiles)
             master_profiles = fetch_master_profiles(cursor)
-            personas_computed = seed_customer_personas(cursor, master_profiles)
+            archetypes_by_domain = seed_persona_archetypes(cursor)
+            personas_computed = seed_customer_personas(cursor, master_profiles, archetypes_by_domain)
             seed_content_items(cursor, master_profiles)
             link_crm_contacts_to_master_profiles(cursor, crm_ids, master_profiles)
 
         conn.commit()
         logger.info(
-            "Full demo data seeded: %d master profiles enriched (%d with a persona_embedding), "
-            "%d got detail rows (relations/contacts/transactions); all master profiles got >= %d events; "
-            "content items: %d/profile/type; %d customer personas computed via PersonaResolutionEngine; "
-            "CRM journey graph + "
+            "Full demo data seeded: %d master profiles enriched, %d ICP persona archetypes seeded "
+            "across sys_domain, %d got detail rows (relations/contacts/transactions); all master "
+            "profiles got >= %d events; content items: %d/profile/type; %d customer personas "
+            "computed + lookalike-matched to an ICP archetype; CRM journey graph + "
             "graph_edges + cdp_relation_types seeded; crm_contact <-> cdp_master_profiles linked "
             "via graph_edges ('is_active_as') + cross-referenced attributes/metadata.",
-            len(master_profiles), min(len(master_profiles), EMBEDDING_PROFILE_LIMIT), len(detail_profiles),
+            len(master_profiles), len(ICP_ARCHETYPES), len(detail_profiles),
             MIN_EVENTS_PER_MASTER_PROFILE, CONTENT_ITEMS_PER_TYPE_PER_PROFILE, personas_computed,
         )
     except Exception:

@@ -4,9 +4,13 @@ Goes beyond identity *matching* (resolver.py: "is this the same raw touch as
 that master profile?") to identity *understanding*: turns an already-resolved
 ``cdp_master_profiles`` row into a scored, explainable, versioned "persona" --
 who this person actually IS (behavior/engagement/financial/loyalty/
-relationship/risk) -- persisted into ``cdp_customer_personas`` +
+relationship/risk) -- matched against a SHARED ``cdp_persona_archetypes``
+row (``persona_code``/``persona_name``/``persona_summary`` live there, not
+per-profile) via a versioned ``cdp_customer_personas`` MATCH row, plus
 ``cdp_persona_features`` + ``cdp_persona_score_details``, with
-``cdp_persona_history`` recording any material change over time.
+``cdp_persona_history`` recording any material change over time. Many master
+profiles can share one archetype -- that many-to-many fan-in is what powers
+the Persona Management admin UI's "Total Matched Profiles" per archetype.
 
 Design goals (mirrors persona.py's philosophy):
     - Pure, DB-free scoring: ``compute_persona()`` takes a plain dict
@@ -811,6 +815,11 @@ class PersonaComputation:
     llm_provider: str
     llm_model: str
     lifecycle_stage: Optional[str] = None
+    # How well this profile fits its persona_archetype_id's centroid (lookalike
+    # match quality). No real embedding-similarity model wired up yet, so this
+    # defaults to confidence_score -- a reasonable proxy until a dedicated
+    # lookalike/embedding-distance computation replaces it.
+    match_score: float = 0.0
     features: List[Dict[str, Any]] = field(default_factory=list)
 
 
@@ -901,16 +910,19 @@ def compute_persona(master_profile: Dict[str, Any]) -> PersonaComputation:
         llm_provider="google-genai" if provider_configured else "offline-heuristic",
         llm_model=persona.GOOGLE_GENAI_MODEL if provider_configured else "persona-engine-rule-based-v1",
         lifecycle_stage=lifecycle_stage,
+        match_score=round(confidence_score, 4),
         features=_build_features(master_profile),
     )
 
 
 class PersonaResolutionEngine:
-    """Computes and persists an explainable, versioned "customer persona" for
-    an already-resolved master profile: turns identity *matching* output
-    (``cdp_master_profiles``) into identity *understanding*
-    (``cdp_customer_personas`` + ``cdp_persona_features`` +
-    ``cdp_persona_score_details`` + ``cdp_persona_history``).
+    """Computes and persists an explainable, versioned "customer persona"
+    MATCH for an already-resolved master profile: turns identity *matching*
+    output (``cdp_master_profiles``) into identity *understanding* -- a
+    shared ``cdp_persona_archetypes`` row upserted by (tenant_id, domain,
+    persona_code), plus a versioned ``cdp_customer_personas`` match row
+    (+ ``cdp_persona_features`` + ``cdp_persona_score_details``), with
+    ``cdp_persona_history`` recording any material change over time.
 
     Mirrors ``CustomerIdentityResolver``'s style: stateless w.r.t. the DB
     connection (a psycopg2 cursor is passed into every method), safe to unit
@@ -986,22 +998,60 @@ class PersonaResolutionEngine:
 
     def _fetch_current_persona(self, cursor, tenant_id, master_profile_id) -> Optional[Dict[str, Any]]:
         query = f"""
-            SELECT persona_id, persona_name, persona_score
-            FROM {self._table('cdp_customer_personas')}
-            WHERE tenant_id = %s AND master_profile_id = %s AND is_active = TRUE
-            ORDER BY computed_at DESC
+            SELECT cp.persona_id, pa.persona_name, cp.persona_score
+            FROM {self._table('cdp_customer_personas')} cp
+            JOIN {self._table('cdp_persona_archetypes')} pa
+                ON pa.persona_archetype_id = cp.persona_archetype_id
+            WHERE cp.tenant_id = %s AND cp.master_profile_id = %s AND cp.is_active = TRUE
+            ORDER BY cp.computed_at DESC
             LIMIT 1;
         """
         cursor.execute(query, (tenant_id, master_profile_id))
         return cursor.fetchone()
 
-    def _next_computed_version(self, cursor, tenant_id, master_profile_id, persona_code) -> int:
+    def _upsert_archetype(
+        self, cursor, tenant_id, domain, computation: PersonaComputation
+    ) -> Any:
+        """Upserts the SHARED persona archetype (tenant_id, domain,
+        persona_code) this profile matches -- many master profiles can
+        share the same archetype row, which is what makes the persona
+        relationship many-to-many instead of one row per profile."""
+        query = f"""
+            INSERT INTO {self._table('cdp_persona_archetypes')}
+                (tenant_id, domain, persona_code, persona_name, persona_category,
+                 persona_summary, llm_provider, llm_model)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, domain, persona_code) DO UPDATE SET
+                persona_name = EXCLUDED.persona_name,
+                persona_category = EXCLUDED.persona_category,
+                persona_summary = EXCLUDED.persona_summary,
+                llm_provider = EXCLUDED.llm_provider,
+                llm_model = EXCLUDED.llm_model,
+                updated_at = NOW()
+            RETURNING persona_archetype_id;
+        """
+        cursor.execute(
+            query,
+            (
+                tenant_id,
+                domain,
+                computation.persona_code,
+                computation.persona_name,
+                computation.persona_category,
+                computation.persona_summary,
+                computation.llm_provider,
+                computation.llm_model,
+            ),
+        )
+        return cursor.fetchone()["persona_archetype_id"]
+
+    def _next_computed_version(self, cursor, tenant_id, master_profile_id, persona_archetype_id) -> int:
         query = f"""
             SELECT COALESCE(MAX(computed_version), 0) + 1 AS next_version
             FROM {self._table('cdp_customer_personas')}
-            WHERE tenant_id = %s AND master_profile_id = %s AND persona_code = %s;
+            WHERE tenant_id = %s AND master_profile_id = %s AND persona_archetype_id = %s;
         """
-        cursor.execute(query, (tenant_id, master_profile_id, persona_code))
+        cursor.execute(query, (tenant_id, master_profile_id, persona_archetype_id))
         row = cursor.fetchone()
         return int(row["next_version"]) if row else 1
 
@@ -1014,18 +1064,25 @@ class PersonaResolutionEngine:
         cursor.execute(query, (tenant_id, master_profile_id))
 
     def _insert_persona(
-        self, cursor, tenant_id, domain, master_profile_id, computation: PersonaComputation, computed_version: int
+        self,
+        cursor,
+        tenant_id,
+        domain,
+        master_profile_id,
+        persona_archetype_id,
+        computation: PersonaComputation,
+        computed_version: int,
     ) -> Any:
         query = f"""
             INSERT INTO {self._table('cdp_customer_personas')}
-                (tenant_id, domain, master_profile_id, persona_code, persona_name,
-                 persona_category, persona_summary, persona_score, confidence_score,
+                (tenant_id, domain, master_profile_id, persona_archetype_id,
+                 match_score, persona_score, confidence_score,
                  behavior_score, engagement_score, financial_score, loyalty_score,
                  relationship_score, risk_score, lifecycle_stage, customer_value_tier,
-                 risk_level, next_best_action, llm_provider, llm_model,
+                 risk_level, next_best_action,
                  computed_version, is_active)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, TRUE)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, TRUE)
             RETURNING persona_id;
         """
         cursor.execute(
@@ -1034,10 +1091,8 @@ class PersonaResolutionEngine:
                 tenant_id,
                 domain,
                 master_profile_id,
-                computation.persona_code,
-                computation.persona_name,
-                computation.persona_category,
-                computation.persona_summary,
+                persona_archetype_id,
+                computation.match_score,
                 computation.persona_score,
                 computation.confidence_score,
                 computation.behavior_score,
@@ -1050,8 +1105,6 @@ class PersonaResolutionEngine:
                 computation.customer_value_tier,
                 computation.risk_level,
                 computation.next_best_action,
-                computation.llm_provider,
-                computation.llm_model,
                 computed_version,
             ),
         )
@@ -1160,13 +1213,15 @@ class PersonaResolutionEngine:
 
             computation = compute_persona(master_profile)
             old_persona = self._fetch_current_persona(cursor, tenant_id, master_profile_id)
+            domain = master_profile.get("domain") or "retail"
+            persona_archetype_id = self._upsert_archetype(cursor, tenant_id, domain, computation)
             computed_version = self._next_computed_version(
-                cursor, tenant_id, master_profile_id, computation.persona_code
+                cursor, tenant_id, master_profile_id, persona_archetype_id
             )
 
             self._deactivate_previous_personas(cursor, tenant_id, master_profile_id)
             persona_id = self._insert_persona(
-                cursor, tenant_id, master_profile.get("domain") or "retail", master_profile_id, computation,
+                cursor, tenant_id, domain, master_profile_id, persona_archetype_id, computation,
                 computed_version,
             )
             self._insert_features(cursor, persona_id, computation.features)
@@ -1189,6 +1244,7 @@ class PersonaResolutionEngine:
 
             return {
                 "persona_id": persona_id,
+                "persona_archetype_id": persona_archetype_id,
                 "persona_code": computation.persona_code,
                 "persona_name": computation.persona_name,
                 "persona_score": computation.persona_score,

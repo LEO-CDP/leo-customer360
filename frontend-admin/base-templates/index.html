@@ -137,10 +137,17 @@
       </section>
 
       <!-- Persona Management tab: list + analytics dashboard rendered by
-         static/js/persona-list-view.js -->
+         static/js/persona-list-view.js. Lists SHARED persona archetypes
+         (each with a real matched_profile_count), with a drill-down sub-view
+         showing every master profile currently matched to one archetype --
+         section, toggled the same way view-segments toggles list/detail. -->
       <section id="view-personas" class="hidden">
-        <div id="persona-list-content"></div>
+        <div id="persona-view-list">
+          <div id="persona-list-content"></div>
+        </div>
+        <div id="persona-details-container"></div>
       </section>
+
 
       <!-- System Users tab: shell from static/templates/admin/system-user-list.html,
         rendered by static/js/system-user-view.js. -->

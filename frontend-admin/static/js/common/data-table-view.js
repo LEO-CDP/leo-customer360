@@ -36,7 +36,8 @@ window.C360 = window.C360 || {};
       class: [col.cellClass || "", col.muted ? "text-slate-500" : "", col.capitalize ? "capitalize" : ""].join(" ").trim(),
       isBadge: col.type === "badge",
       isIdentity: col.type === "identity",
-      isMetrics: col.type === "metrics"
+      isMetrics: col.type === "metrics",
+      isLink: col.type === "link"
     };
 
     if (col.type === "identity") {
@@ -50,6 +51,12 @@ window.C360 = window.C360 || {};
     } else if (col.type === "metrics") {
       // rows of { label, value } stacked vertically, e.g. Volume Metrics
       cell.metrics = (col.field ? vm[col.field] : null) || [];
+    } else if (col.type === "link") {
+      // a single clickable value within a row that navigates independently
+      // of the row's own onRowClick (e.g. "Total Master Profiles" drilling
+      // into a category listing while the row itself opens something else).
+      cell.value = col.field ? vm[col.field] : "";
+      cell.linkValue = col.valueField ? vm[col.valueField] : cell.value;
     } else {
       cell.value = col.field ? vm[col.field] : "";
       if (col.type === "badge") cell.badgeClass = (col.classField ? vm[col.classField] : null) || col.badgeClass || "";
@@ -353,6 +360,17 @@ window.C360 = window.C360 || {};
           $btn.on("click" + eventNamespace, function (e) {
             e.stopPropagation();
             o.onEdit(rowId);
+          });
+        });
+      }
+
+      if (o.onCellLink) {
+        $tbody.find(".dtv-cell-link").each(function () {
+          var $link = $(this);
+          $link.off("click" + eventNamespace);
+          $link.on("click" + eventNamespace, function (e) {
+            e.stopPropagation();
+            o.onCellLink($link.data("link-value"));
           });
         });
       }

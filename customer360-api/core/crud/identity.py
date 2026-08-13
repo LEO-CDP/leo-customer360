@@ -15,7 +15,14 @@ from typing import Optional
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from core.models.identity import CdpCustomerPersona, CdpDomainProfile, CdpMasterProfile, CdpProfileLink, CdpRawProfileStage
+from core.models.identity import (
+    CdpCustomerPersona,
+    CdpDomainProfile,
+    CdpMasterProfile,
+    CdpPersonaArchetype,
+    CdpProfileLink,
+    CdpRawProfileStage,
+)
 
 STATUS_CODE_LABELS = {
     3: "processed",
@@ -140,6 +147,107 @@ def list_master_profiles_page(
     for profile, linked_raw_profile_count in rows:
         profile.linked_raw_profile_count = int(linked_raw_profile_count or 0)
         items.append(profile)
+    total = db.execute(count_stmt).scalar_one()
+    total_pages = ceil(total / page_size) if total > 0 else 1
+
+    return {
+        "items": items,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+            "has_prev": page > 1,
+            "has_next": page < total_pages,
+        },
+    }
+
+
+def list_master_profiles_by_persona_category_page(
+    db: Session,
+    *,
+    persona_category: str,
+    tenant_id: Optional[uuid.UUID] = None,
+    page: int = 1,
+    page_size: int = 100,
+) -> dict:
+    """Page of master profiles whose current active persona match points at
+    an archetype with the given persona_category -- backs the Persona
+    Management "Total Matched Profiles" drill-down grouped by category
+    (persona_category now lives on the SHARED cdp_persona_archetypes row,
+    joined via cdp_customer_personas.persona_archetype_id)."""
+    where_clauses = [
+        CdpPersonaArchetype.persona_category == persona_category,
+        CdpCustomerPersona.persona_archetype_id == CdpPersonaArchetype.persona_archetype_id,
+        CdpCustomerPersona.is_active.is_(True),
+        CdpCustomerPersona.master_profile_id == CdpMasterProfile.master_profile_id,
+    ]
+    if tenant_id is not None:
+        where_clauses.append(CdpMasterProfile.tenant_id == tenant_id)
+
+    page = max(1, page)
+    page_size = max(1, page_size)
+    offset = (page - 1) * page_size
+
+    list_stmt = (
+        select(CdpMasterProfile)
+        .where(*where_clauses)
+        .order_by(CdpMasterProfile.last_activity_at.desc().nullslast(), CdpMasterProfile.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    count_stmt = select(func.count()).select_from(CdpMasterProfile).where(*where_clauses)
+
+    items = db.execute(list_stmt).scalars().all()
+    total = db.execute(count_stmt).scalar_one()
+    total_pages = ceil(total / page_size) if total > 0 else 1
+
+    return {
+        "items": items,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+            "has_prev": page > 1,
+            "has_next": page < total_pages,
+        },
+    }
+
+
+def list_master_profiles_by_persona_archetype_page(
+    db: Session,
+    *,
+    persona_archetype_id: uuid.UUID,
+    tenant_id: Optional[uuid.UUID] = None,
+    page: int = 1,
+    page_size: int = 100,
+) -> dict:
+    """Page of every master profile currently matched (is_active=TRUE) to a
+    given persona archetype -- backs the Persona Management admin UI's
+    per-archetype "Total Matched Profiles" drill-down."""
+    where_clauses = [
+        CdpCustomerPersona.persona_archetype_id == persona_archetype_id,
+        CdpCustomerPersona.is_active.is_(True),
+        CdpCustomerPersona.master_profile_id == CdpMasterProfile.master_profile_id,
+    ]
+    if tenant_id is not None:
+        where_clauses.append(CdpMasterProfile.tenant_id == tenant_id)
+
+    page = max(1, page)
+    page_size = max(1, page_size)
+    offset = (page - 1) * page_size
+
+    list_stmt = (
+        select(CdpMasterProfile)
+        .where(*where_clauses)
+        .order_by(CdpMasterProfile.last_activity_at.desc().nullslast(), CdpMasterProfile.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    count_stmt = select(func.count()).select_from(CdpMasterProfile).where(*where_clauses)
+
+    items = db.execute(list_stmt).scalars().all()
     total = db.execute(count_stmt).scalar_one()
     total_pages = ceil(total / page_size) if total > 0 else 1
 
@@ -317,6 +425,29 @@ def identity_graph_coverage(db: Session, tenant_id: Optional[uuid.UUID] = None, 
     }
 
 
+def list_persona_archetypes_page(
+    db: Session,
+    *,
+    tenant_id: Optional[uuid.UUID] = None,
+    domain: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    skip: int = 0,
+    limit: int = 100,
+) -> list[CdpPersonaArchetype]:
+    """List shared persona archetypes (each carrying its own
+    matched_profile_count) -- what the Persona Management admin UI must
+    render, instead of raw per-profile cdp_customer_personas match rows."""
+    stmt = select(CdpPersonaArchetype)
+    if tenant_id is not None:
+        stmt = stmt.where(CdpPersonaArchetype.tenant_id == tenant_id)
+    if domain is not None:
+        stmt = stmt.where(CdpPersonaArchetype.domain == domain)
+    if is_active is not None:
+        stmt = stmt.where(CdpPersonaArchetype.is_active == is_active)
+    stmt = stmt.order_by(CdpPersonaArchetype.matched_profile_count.desc()).offset(skip).limit(limit)
+    return list(db.execute(stmt).scalars().all())
+
+
 def persona_analytics_summary(
     db: Session,
     *,
@@ -325,7 +456,11 @@ def persona_analytics_summary(
     is_active: Optional[bool] = None,
     days: Optional[int] = None,
 ) -> dict:
-    """Aggregate analytics for customer personas used by Persona Management UI."""
+    """Aggregate analytics for customer personas used by Persona Management UI.
+
+    persona_category now lives on the SHARED cdp_persona_archetypes row, so
+    the "by_category" bucket is computed via a join instead of reading a
+    column directly off cdp_customer_personas."""
 
     where_clauses = []
     if tenant_id is not None:
@@ -339,7 +474,30 @@ def persona_analytics_summary(
     if cutoff is not None:
         where_clauses.append(CdpCustomerPersona.computed_at >= cutoff)
 
-    base = select(CdpCustomerPersona).where(*where_clauses).subquery()
+    base = (
+        select(
+            CdpCustomerPersona.master_profile_id,
+            CdpCustomerPersona.is_active,
+            CdpCustomerPersona.domain,
+            CdpCustomerPersona.persona_score,
+            CdpCustomerPersona.confidence_score,
+            CdpCustomerPersona.risk_level,
+            CdpCustomerPersona.customer_value_tier,
+            CdpPersonaArchetype.persona_category,
+        )
+        .join(CdpPersonaArchetype, CdpPersonaArchetype.persona_archetype_id == CdpCustomerPersona.persona_archetype_id)
+        .where(*where_clauses)
+        .subquery()
+    )
+
+    archetype_filters = []
+    if tenant_id is not None:
+        archetype_filters.append(CdpPersonaArchetype.tenant_id == tenant_id)
+    if domain is not None:
+        archetype_filters.append(CdpPersonaArchetype.domain == domain)
+    total_archetypes = db.execute(
+        select(func.count()).select_from(CdpPersonaArchetype).where(*archetype_filters)
+    ).scalar_one()
 
     total_personas = db.execute(select(func.count()).select_from(base)).scalar_one()
     active_personas = db.execute(
@@ -365,6 +523,7 @@ def persona_analytics_summary(
         return [{"value": (value or "unknown"), "count": count} for value, count in rows]
 
     return {
+        "total_archetypes": total_archetypes,
         "total_personas": total_personas,
         "active_personas": active_personas,
         "inactive_personas": inactive_personas,

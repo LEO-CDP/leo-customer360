@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
@@ -28,10 +28,13 @@ logger = logging.getLogger(__name__)
 
 EXEMPT_PATHS = {
     "/health",
+    # GET /metadata is part of the login flow itself: the login screen calls
+    # it (unauthenticated) to learn sso_login/sso_config and decide whether
+    # to render the Keycloak button or the dev credential form (see
+    # frontend-admin/static/js/auth-view.js). Every OTHER /metadata/* route
+    # (dagster/domains/data-sources) is real protected API data with no
+    # pre-login need and must NOT be exempt.
     "/api/v1/metadata",
-    "/api/v1/metadata/dagster",
-    "/api/v1/metadata/domains",
-    "/api/v1/metadata/data-sources",
     # Auth endpoints are the front door -- callers by definition have no
     # bearer token yet when hitting them (see core/routers/auth_api.py).
     "/api/v1/auth/login",
@@ -322,12 +325,26 @@ def _resolve_tenant_and_user(payload: dict[str, Any]) -> tuple[Optional[str], Op
     return None, None
 
 
+def _normalize_path(path: str, root_path: str = "") -> str:
+    """Normalize a request path for exempt-path matching.
+
+    The frontend may request /api/v1/metadata with or without a trailing slash,
+    and the app may also be mounted under a root path such as /c360api.
+    We strip the configured root path and then treat both slash variants as the
+    same public login endpoint.
+    """
+    if root_path and path.startswith(root_path):
+        path = path[len(root_path):] or "/"
+    return path.rstrip("/") or "/"
+
+
 def _apply_dev_tenant_headers(request: Request) -> None:
-    """Dev/test convenience only: when SSO_LOGIN is disabled, trust
-    X-Tenant-Id/X-User-Id headers so the app.tenant_id RLS session variable
-    (see core/database.py) is still set without a full Keycloak setup.
-    NEVER used when SSO_LOGIN=true -- tenant/user identity must then come
-    exclusively from the verified token (see _resolve_tenant_and_user)."""
+    """Dev/test convenience only, for EXEMPT_PATHS: when SSO_LOGIN is
+    disabled, trust X-Tenant-Id/X-User-Id headers so the app.tenant_id RLS
+    session variable (see core/database.py) is available even on the small
+    set of unauthenticated routes. NEVER used on protected routes -- those
+    always require a valid token (dev JWT or Keycloak) regardless of
+    SSO_LOGIN, see auth_middleware."""
     tenant_id = request.headers.get("X-Tenant-Id")
     user_id = request.headers.get("X-User-Id")
     if tenant_id:
@@ -352,29 +369,34 @@ def _unauthorized_response(request: Request, detail: str) -> JSONResponse:
 async def auth_middleware(request: Request, call_next):
     """Ensure API requests present a valid bearer token before continuing.
 
-    SSO_LOGIN=true: token must be a real Keycloak access token (verified via
-    introspection). SSO_LOGIN=false: a bearer token is optional but, when
-    present, must be a locally-signed dev JWT (see POST /auth/login +
-    core.utils.security) -- this lets dev engineers exercise the exact same
-    Authorization: Bearer contract used in production. With no token at all
-    in dev mode, X-Tenant-Id/X-User-Id headers are still honored as a quick
-    curl-without-login shortcut (see _apply_dev_tenant_headers).
+    Every route not in EXEMPT_PATHS (health/root-metadata/login/callback/
+    logout) requires a token, in both modes -- there is no "no token at all"
+    bypass anymore, in either mode:
+      - SSO_LOGIN=true: token must be a real Keycloak access token (verified
+        via introspection).
+      - SSO_LOGIN=false: token must be a locally-signed dev JWT obtained from
+        POST /auth/login (see core.utils.security) -- same
+        Authorization: Bearer contract used in production, just HS256-signed
+        locally instead of by Keycloak.
     """
     if request.method == "OPTIONS":
         return await call_next(request)
 
-    if request.url.path in EXEMPT_PATHS:
+    normalized_path = _normalize_path(
+        request.url.path,
+        root_path=request.scope.get("root_path", ""),
+    )
+    if normalized_path in {_normalize_path(path) for path in EXEMPT_PATHS}:
         _apply_dev_tenant_headers(request)
         return await call_next(request)
 
     authorization = request.headers.get("Authorization", "")
     token = authorization[len("Bearer "):].strip() if authorization.startswith("Bearer ") else ""
 
-    if not SSO_LOGIN:
-        if not token:
-            _apply_dev_tenant_headers(request)
-            return await call_next(request)
+    if not token:
+        return _unauthorized_response(request, "Authentication required")
 
+    if not SSO_LOGIN:
         payload = decode_dev_access_token(token)
         if payload is None:
             return _unauthorized_response(request, "Invalid or expired dev token")
@@ -387,9 +409,6 @@ async def auth_middleware(request: Request, call_next):
         if user_id:
             request.state.user_id = user_id
         return await call_next(request)
-
-    if not token:
-        return _unauthorized_response(request, "Authentication required")
 
     payload = _load_cached_token(token)
     if payload is None:
@@ -408,3 +427,40 @@ async def auth_middleware(request: Request, call_next):
         request.state.user_id = user_id
 
     return await call_next(request)
+
+
+def get_current_roles(request: Request) -> list[str]:
+    """Extracts the caller's role names from ``request.state.user`` (set by
+    ``authenticate_request`` above): the dev-JWT ``roles`` claim, or a real
+    Keycloak token's ``realm_access.roles`` / ``resource_access.*.roles`` --
+    same two shapes the frontend already decodes (see
+    frontend-admin/static/js/common/config.js::currentUserFromConfig).
+    """
+    payload = getattr(request.state, "user", None)
+    if not isinstance(payload, dict):
+        return []
+
+    roles: list[str] = list(payload.get("roles") or [])
+
+    realm_access = payload.get("realm_access")
+    if isinstance(realm_access, dict) and isinstance(realm_access.get("roles"), list):
+        roles.extend(realm_access["roles"])
+
+    resource_access = payload.get("resource_access")
+    if isinstance(resource_access, dict):
+        for client in resource_access.values():
+            if isinstance(client, dict) and isinstance(client.get("roles"), list):
+                roles.extend(client["roles"])
+
+    return roles
+
+
+def require_admin(request: Request) -> None:
+    """FastAPI dependency: raises 403 unless the caller has the ``admin``
+    role. Fail-closed -- use on any mutation that must be admin-only (e.g.
+    editing a shared cdp_persona_archetypes definition), since a frontend-only
+    "hide the button" check is trivially bypassed by calling the API directly.
+    """
+    if "admin" not in {r.lower() for r in get_current_roles(request)}:
+        raise HTTPException(status_code=403, detail="This action requires the 'admin' role.")
+

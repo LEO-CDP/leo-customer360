@@ -16,12 +16,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from core.auth import require_admin
 from core.cache import cache_response, invalidate_prefix
 from core.config import settings
 from core.crud.base import CRUDBase
 from core.database import get_db
 from core.models.identity import (
     CdpCustomerPersona,
+    CdpPersonaArchetype,
     CdpPersonaFeature,
     CdpPersonaHistory,
     CdpPersonaScoreDetail,
@@ -31,7 +33,12 @@ from core.schemas.identity import (
     CustomerPersonaCreate,
     CustomerPersonaRead,
     CustomerPersonaUpdate,
+    MasterProfileListResponse,
+    MasterProfileRead,
     PersonaAnalyticsSummary,
+    PersonaArchetypeCreate,
+    PersonaArchetypeRead,
+    PersonaArchetypeUpdate,
     PersonaFeatureCreate,
     PersonaFeatureRead,
     PersonaHistoryCreate,
@@ -42,10 +49,97 @@ from core.schemas.identity import (
 from core.utils.domains import validate_domain_value
 
 # --- Exposed for test mocking (backward compatibility) ---
+_archetype_crud = CRUDBase(CdpPersonaArchetype)
 _persona_crud = CRUDBase(CdpCustomerPersona)
 _persona_feature_crud = CRUDBase(CdpPersonaFeature)
 _persona_score_detail_crud = CRUDBase(CdpPersonaScoreDetail)
 _persona_history_crud = CRUDBase(CdpPersonaHistory)
+
+# --- Persona Archetypes ---
+# Shared, reusable persona definitions. This is what the Persona Management
+# admin UI must list (each row carrying its own matched_profile_count) --
+# NOT raw per-profile cdp_customer_personas match rows. Mounted BEFORE
+# customer_personas_router's "/{persona_id}" catch-all so "/persona/archetypes"
+# never gets swallowed by it.
+persona_archetypes_router = APIRouter(prefix="/persona/archetypes", tags=["Identity Resolution - Customer Personas"])
+
+
+@persona_archetypes_router.get("", response_model=list[PersonaArchetypeRead])
+@cache_response("persona_archetypes/list", ttl=settings.cache_ttl_seconds)
+def list_persona_archetypes(
+    tenant_id: Optional[uuid.UUID] = None,
+    domain: Optional[str] = Query(default=None),
+    is_active: Optional[bool] = None,
+    skip: int = 0,
+    limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    db: Session = Depends(get_db),
+):
+    try:
+        validate_domain_value(db, domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    repo = PersonaRepository(db)
+    return repo.list_archetypes(tenant_id=tenant_id, domain=domain, is_active=is_active, skip=skip, limit=limit)
+
+
+@persona_archetypes_router.get("/{persona_archetype_id}", response_model=PersonaArchetypeRead)
+@cache_response("persona_archetypes/item", ttl=settings.cache_ttl_seconds)
+def get_persona_archetype(persona_archetype_id: uuid.UUID, db: Session = Depends(get_db)):
+    repo = PersonaRepository(db)
+    obj = repo.get_archetype(persona_archetype_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpPersonaArchetype '{persona_archetype_id}' not found")
+    return obj
+
+
+@persona_archetypes_router.get("/{persona_archetype_id}/master-profiles", response_model=MasterProfileListResponse)
+@cache_response("persona_archetypes/master_profiles", ttl=settings.cache_ttl_seconds)
+def list_master_profiles_for_persona_archetype(
+    persona_archetype_id: uuid.UUID,
+    tenant_id: Optional[uuid.UUID] = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=settings.api_default_page_size, ge=1, le=settings.api_max_page_size),
+    db: Session = Depends(get_db),
+):
+    repo = PersonaRepository(db)
+    if repo.get_archetype(persona_archetype_id) is None:
+        raise HTTPException(status_code=404, detail=f"CdpPersonaArchetype '{persona_archetype_id}' not found")
+    return repo.list_master_profiles_by_archetype(
+        persona_archetype_id=persona_archetype_id, tenant_id=tenant_id, page=page, page_size=page_size
+    )
+
+
+@persona_archetypes_router.post("", response_model=PersonaArchetypeRead, status_code=201, dependencies=[Depends(require_admin)])
+def create_persona_archetype(payload: PersonaArchetypeCreate, db: Session = Depends(get_db)):
+    try:
+        validate_domain_value(db, payload.domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    repo = PersonaRepository(db)
+    obj = repo.create_archetype(payload.model_dump())
+    invalidate_prefix("persona_archetypes")
+    return obj
+
+
+@persona_archetypes_router.patch("/{persona_archetype_id}", response_model=PersonaArchetypeRead, dependencies=[Depends(require_admin)])
+def update_persona_archetype(persona_archetype_id: uuid.UUID, payload: PersonaArchetypeUpdate, db: Session = Depends(get_db)):
+    repo = PersonaRepository(db)
+    obj = repo.get_archetype(persona_archetype_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpPersonaArchetype '{persona_archetype_id}' not found")
+    obj = repo.update_archetype(persona_archetype_id, payload.model_dump(exclude_unset=True))
+    invalidate_prefix("persona_archetypes")
+    return obj
+
+
+@persona_archetypes_router.delete("/{persona_archetype_id}", status_code=204, dependencies=[Depends(require_admin)])
+def delete_persona_archetype(persona_archetype_id: uuid.UUID, db: Session = Depends(get_db)):
+    repo = PersonaRepository(db)
+    obj = repo.get_archetype(persona_archetype_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail=f"CdpPersonaArchetype '{persona_archetype_id}' not found")
+    repo.delete_archetype(persona_archetype_id)
+    invalidate_prefix("persona_archetypes")
 
 # --- Customer Personas ---
 # Primary CRUD + analytics for resolved personas. Mounted at "/persona" so
@@ -60,7 +154,7 @@ def list_customer_personas(
     tenant_id: Optional[uuid.UUID] = None,
     domain: Optional[str] = Query(default=None),
     master_profile_id: Optional[uuid.UUID] = None,
-    persona_code: Optional[str] = None,
+    persona_archetype_id: Optional[uuid.UUID] = None,
     is_active: Optional[bool] = None,
     skip: int = 0,
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
@@ -75,7 +169,7 @@ def list_customer_personas(
         tenant_id=tenant_id,
         domain=domain,
         master_profile_id=master_profile_id,
-        persona_code=persona_code,
+        persona_archetype_id=persona_archetype_id,
         is_active=is_active,
         skip=skip,
         limit=limit,
@@ -101,6 +195,24 @@ def get_customer_persona_analytics_summary(
         domain=domain,
         is_active=is_active,
         days=days,
+    )
+
+
+@customer_personas_router.get("/category/{persona_category}/master-profiles", response_model=MasterProfileListResponse)
+@cache_response("customer_personas/master_profiles_by_category", ttl=settings.cache_ttl_seconds)
+def list_master_profiles_by_persona_category(
+    persona_category: str,
+    tenant_id: Optional[uuid.UUID] = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=settings.api_default_page_size, ge=1, le=settings.api_max_page_size),
+    db: Session = Depends(get_db),
+):
+    repo = PersonaRepository(db)
+    return repo.list_master_profiles_by_persona_category(
+        persona_category=persona_category,
+        tenant_id=tenant_id,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -130,6 +242,19 @@ def get_customer_persona_score_details(persona_id: uuid.UUID, db: Session = Depe
     if repo.get_persona(persona_id) is None:
         raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
     return repo.list_persona_score_details(persona_id=persona_id, skip=0, limit=settings.api_max_page_size)
+
+
+@customer_personas_router.get("/{persona_id}/master-profile", response_model=MasterProfileRead)
+@cache_response("customer_personas/master_profile", ttl=settings.cache_ttl_seconds)
+def get_customer_persona_master_profile(persona_id: uuid.UUID, db: Session = Depends(get_db)):
+    repo = PersonaRepository(db)
+    if repo.get_persona(persona_id) is None:
+        raise HTTPException(status_code=404, detail=f"CdpCustomerPersona '{persona_id}' not found")
+
+    master_profile = repo.get_master_profile_by_persona_id(persona_id)
+    if master_profile is None:
+        raise HTTPException(status_code=404, detail=f"No master profile linked to persona '{persona_id}'")
+    return master_profile
 
 
 @customer_personas_router.post("/", response_model=CustomerPersonaRead, status_code=201)
@@ -277,6 +402,7 @@ def create_persona_history_entry(payload: PersonaHistoryCreate, db: Session = De
 # prefix above, so app.py only needs to add the shared "/api/v1" root -
 # every URL below therefore begins with /api/v1/persona.
 all_persona_routers = [
+    persona_archetypes_router,
     customer_personas_router,
     persona_features_router,
     persona_score_details_router,

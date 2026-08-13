@@ -86,9 +86,12 @@ window.C360 = window.C360 || {};
     personaHistory,
     domainProfiles,
   ) {
+    // Real (plaintext) name wins when available; hashed domains (banking)
+    // fall back to the AI-computed persona name, then a generic label.
+    var realName = fmt.realName(profile);
     var displayName =
+      realName ||
       profile.persona_name ||
-      profile.full_name ||
       "Profile " + fmt.shortId(profile.master_profile_id);
 
     // Channels & Identifiers card now focuses on activation-reachable channels only.
@@ -614,6 +617,9 @@ window.C360 = window.C360 || {};
       hasPersona: !!persona,
       personaId: persona ? persona.persona_id : null,
       personaName: (persona && persona.persona_name) || displayName,
+      // Real (plaintext) name shown alongside the persona name when available.
+      hasRealName: !!realName,
+      realName: realName,
       personaCategory: (persona && persona.persona_category) || fmt.domainLabel(profile.domain),
       computedVersion: persona ? persona.computed_version : null,
       customerValueTierLabel: persona ? fmt.titleCase(persona.customer_value_tier) : "—",

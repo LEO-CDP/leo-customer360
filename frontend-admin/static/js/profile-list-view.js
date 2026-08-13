@@ -18,7 +18,9 @@ window.C360 = window.C360 || {};
   var showApiError = C360.config.showApiError;
 
   function rowVm(p) {
-    var displayName = p.persona_name || p.full_name || ("Profile " + fmt.shortId(p.master_profile_id));
+    // Real (plaintext) name wins when available; hashed domains (banking)
+    // fall back to the AI-computed persona name, then a generic label.
+    var displayName = fmt.realName(p) || p.persona_name || ("Profile " + fmt.shortId(p.master_profile_id));
     return $.extend({}, p, {
       displayName: displayName,
       initials: fmt.initials(displayName),

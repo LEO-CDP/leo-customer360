@@ -1390,20 +1390,86 @@ CREATE INDEX IF NOT EXISTS idx_cdp_profile_links_master ON customer360.cdp_profi
 
 -- ============================================================================
 -- CUSTOMER PERSONA RESOLUTION ("from identity matching to identity
--- understanding"): cdp_customer_personas is a versioned, explainable
--- "who is this person" record computed FROM an already-resolved
--- cdp_master_profiles row by backend-system/identity_resolution's
--- PersonaResolutionEngine (identity_resolution/persona_engine.py). Every
--- (re)computation inserts a NEW row (computed_version increments per
--- (tenant_id, master_profile_id, persona_code)) rather than overwriting, so
--- the full history of how a person's persona evolved is preserved; only the
--- latest row per master_profile_id has is_active = TRUE, and
--- cdp_master_profiles.current_persona_id always points at it.
+-- understanding"): a genuine many-to-many relationship.
+--
+--   cdp_persona_archetypes  -- ONE shared, reusable persona definition per
+--                              (tenant_id, domain, persona_code), e.g.
+--                              'retail_gen_z_shopper'. Carries the LLM-
+--                              assisted persona_name/persona_summary, a
+--                              centroid persona_embedding + centroid
+--                              component scores (the "lookalike model" for
+--                              this archetype), and a denormalized
+--                              matched_profile_count.
+--   cdp_customer_personas   -- the versioned MATCH/assignment of ONE master
+--                              profile to ONE archetype (lookalike score +
+--                              that profile's own component scores). Every
+--                              (re)computation inserts a NEW row
+--                              (computed_version increments per tenant_id/
+--                              master_profile_id/persona_archetype_id)
+--                              rather than overwriting, so the full history
+--                              of how a person's persona evolved is
+--                              preserved; only the latest row per
+--                              master_profile_id has is_active = TRUE, and
+--                              cdp_master_profiles.current_persona_id always
+--                              points at it.
+--
+-- Net effect: 1 master profile -> many persona MATCHES over time (still
+-- true), AND 1 persona archetype -> many master profiles at once (lookalike
+-- audience) -- both directions are now real FK-backed relationships instead
+-- of the previous design, where every persona row was hard-tied to exactly
+-- one master profile and "shared" personas only coincided by string reuse.
+--
 -- cdp_persona_features / cdp_persona_score_details / cdp_persona_history are
--- the supporting explainability tables: the raw signals that fed the
--- computation, the per-component score breakdown, and an audit trail of
--- material persona changes over time, respectively.
+-- the supporting explainability tables (unchanged): the raw signals that fed
+-- one match's computation, its per-component score breakdown, and an audit
+-- trail of material persona changes over time, respectively -- all keyed off
+-- cdp_customer_personas.persona_id (the match row), not the archetype.
 -- ============================================================================
+CREATE TABLE IF NOT EXISTS customer360.cdp_persona_archetypes
+(
+    persona_archetype_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    tenant_id               UUID NOT NULL
+        REFERENCES customer360.sys_tenant(tenant_id),
+    domain                  TEXT NOT NULL,
+
+    -- Stable slug identifying this archetype, e.g. 'gen_z_shopper'.
+    persona_code            VARCHAR(50) NOT NULL,
+    persona_name            VARCHAR(255) NOT NULL,
+    persona_category        VARCHAR(100),
+    persona_summary         TEXT,
+
+    llm_provider            VARCHAR(50),
+    llm_model               VARCHAR(100),
+
+    -- Lookalike model: centroid embedding + centroid component scores across
+    -- every ACTIVE cdp_customer_personas match currently assigned to this
+    -- archetype -- used to find/rank "lookalike" master profiles (nearest
+    -- centroid via vector_cosine_ops) that aren't matched yet.
+    persona_embedding       VECTOR(768),
+    centroid_behavior_score     NUMERIC(6,2),
+    centroid_engagement_score  NUMERIC(6,2),
+    centroid_financial_score   NUMERIC(6,2),
+    centroid_loyalty_score     NUMERIC(6,2),
+    centroid_relationship_score NUMERIC(6,2),
+    centroid_risk_score        NUMERIC(6,2),
+
+    -- Denormalized COUNT(DISTINCT master_profile_id) across ACTIVE matches,
+    -- maintained by trg_sync_persona_archetype_match_count below. This is
+    -- the "Total Matched Profiles" figure the Persona Management admin UI
+    -- must display per archetype.
+    matched_profile_count   INTEGER NOT NULL DEFAULT 0,
+
+    is_active               BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(tenant_id, domain, persona_code)
+);
+
+COMMENT ON TABLE customer360.cdp_persona_archetypes IS 'Shared, reusable persona definition (one row per tenant+domain+persona_code) -- the LLM-assisted persona_name/persona_summary, a lookalike-model centroid persona_embedding + centroid component scores, and a denormalized matched_profile_count. Many cdp_master_profiles rows can share one archetype via cdp_customer_personas, and the Persona Management admin UI lists archetypes (not raw match rows) with their matched_profile_count.';
+
 CREATE TABLE IF NOT EXISTS customer360.cdp_customer_personas
 (
     persona_id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -1416,12 +1482,19 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_customer_personas
         REFERENCES customer360.cdp_master_profiles(master_profile_id)
         ON DELETE CASCADE,
 
-    persona_code            VARCHAR(50) NOT NULL,
-    persona_name            VARCHAR(255) NOT NULL,
+    -- The shared archetype this profile is currently matched/assigned to --
+    -- this FK (many match rows -> one archetype) is what makes the
+    -- relationship many-to-many instead of the previous 1-master-profile-
+    -- per-persona-row design.
+    persona_archetype_id    UUID NOT NULL
+        REFERENCES customer360.cdp_persona_archetypes(persona_archetype_id)
+        ON DELETE CASCADE,
 
-    persona_category        VARCHAR(100),
-
-    persona_summary         TEXT,
+    -- Lookalike match quality: how well this profile fits persona_archetype_id's
+    -- centroid (e.g. cosine similarity of persona_embedding vs the profile's
+    -- own feature vector). Distinct from confidence_score (CIR identity
+    -- confidence) and persona_score (this profile's own composite score).
+    match_score             NUMERIC(5,4) DEFAULT 0,
 
     persona_score           NUMERIC(8,2) DEFAULT 0,
 
@@ -1447,12 +1520,6 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_customer_personas
 
     next_best_action        TEXT,
 
-    llm_provider            VARCHAR(50),
-
-    llm_model               VARCHAR(100),
-
-    persona_embedding       VECTOR(768),
-
     computed_version        INTEGER DEFAULT 1,
 
     is_active               BOOLEAN DEFAULT TRUE,
@@ -1467,11 +1534,56 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_customer_personas
 
     UNIQUE(tenant_id,
            master_profile_id,
-           persona_code,
+           persona_archetype_id,
            computed_version)
 );
 
-COMMENT ON TABLE customer360.cdp_customer_personas IS 'Versioned, explainable "customer persona" computed from a resolved cdp_master_profiles row by backend-system/identity_resolution''s PersonaResolutionEngine: behavior/engagement/financial/loyalty/relationship/risk component scores, an overall persona_score, customer_value_tier/risk_level/next_best_action, and an LLM-assisted persona_name/persona_summary. Each recomputation inserts a new row (computed_version); only the latest row per master_profile_id has is_active = TRUE.';
+COMMENT ON TABLE customer360.cdp_customer_personas IS 'Versioned match/assignment of ONE master profile to ONE cdp_persona_archetypes row, computed by backend-system/identity_resolution''s PersonaResolutionEngine: this profile''s own behavior/engagement/financial/loyalty/relationship/risk component scores, an overall persona_score, customer_value_tier/risk_level/next_best_action, and match_score (lookalike fit vs the archetype centroid). Each recomputation inserts a new row (computed_version); only the latest row per master_profile_id has is_active = TRUE. Many rows (across many master profiles) can reference the same persona_archetype_id -- that many-to-many fan-in is the whole point of this table.';
+
+-- Maintains cdp_persona_archetypes.matched_profile_count as a true
+-- COUNT(DISTINCT master_profile_id) over ACTIVE matches, so the Persona
+-- Management admin UI never has to compute it ad hoc client-side.
+CREATE OR REPLACE FUNCTION customer360.sync_persona_archetype_match_count()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_archetype_id UUID;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_archetype_id := OLD.persona_archetype_id;
+    ELSE
+        v_archetype_id := NEW.persona_archetype_id;
+    END IF;
+
+    UPDATE customer360.cdp_persona_archetypes
+    SET matched_profile_count = (
+        SELECT COUNT(DISTINCT master_profile_id)
+        FROM customer360.cdp_customer_personas
+        WHERE persona_archetype_id = v_archetype_id AND is_active = TRUE
+    )
+    WHERE persona_archetype_id = v_archetype_id;
+
+    -- Recompute the OLD archetype too when a row is re-pointed at a
+    -- different archetype via UPDATE.
+    IF TG_OP = 'UPDATE' AND OLD.persona_archetype_id IS DISTINCT FROM NEW.persona_archetype_id THEN
+        UPDATE customer360.cdp_persona_archetypes
+        SET matched_profile_count = (
+            SELECT COUNT(DISTINCT master_profile_id)
+            FROM customer360.cdp_customer_personas
+            WHERE persona_archetype_id = OLD.persona_archetype_id AND is_active = TRUE
+        )
+        WHERE persona_archetype_id = OLD.persona_archetype_id;
+    END IF;
+
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sync_persona_archetype_match_count ON customer360.cdp_customer_personas;
+
+CREATE TRIGGER trg_sync_persona_archetype_match_count
+    AFTER INSERT OR UPDATE OF persona_archetype_id, is_active OR DELETE ON customer360.cdp_customer_personas
+    FOR EACH ROW
+    EXECUTE FUNCTION customer360.sync_persona_archetype_match_count();
 
 -- current_persona_id has a circular FK relationship with cdp_customer_personas
 -- (which itself has a NOT NULL FK back to cdp_master_profiles above), so it
@@ -1493,10 +1605,20 @@ CREATE INDEX IF NOT EXISTS idx_cdp_customer_personas_active ON customer360.cdp_c
 WHERE
     is_active = TRUE;
 
--- Audience-builder-style lookups/analytics grouped by persona archetype.
-CREATE INDEX IF NOT EXISTS idx_cdp_customer_personas_code ON customer360.cdp_customer_personas (tenant_id, persona_code)
+-- Primary access pattern for the M:N fan-out: "every master profile
+-- currently matched to this archetype" (Persona Management drill-down).
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_personas_archetype ON customer360.cdp_customer_personas (tenant_id, persona_archetype_id)
 WHERE
     is_active = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_archetypes_tenant_domain ON customer360.cdp_persona_archetypes (tenant_id, domain)
+WHERE
+    is_active = TRUE;
+
+-- Lookalike similarity search: nearest archetype centroid to a candidate
+-- profile's own embedding.
+CREATE INDEX IF NOT EXISTS idx_cdp_persona_archetypes_embedding_ivfflat ON customer360.cdp_persona_archetypes USING ivfflat (persona_embedding vector_cosine_ops)
+WITH (lists = 100);
 
 CREATE TABLE IF NOT EXISTS customer360.cdp_persona_features
 (
@@ -2859,7 +2981,8 @@ DECLARE
         'cdp_domain_profiles',
         'cdp_segments',
         'cdp_content_items',
-        'cdp_customer_personas'
+        'cdp_customer_personas',
+        'cdp_persona_archetypes'
     ];
 BEGIN
     FOREACH t IN ARRAY tenant_tables LOOP

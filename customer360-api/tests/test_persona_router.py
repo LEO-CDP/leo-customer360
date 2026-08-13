@@ -37,6 +37,8 @@ class FakePersonaRepository:
     schemas, filters) can be tested without SQLAlchemy/PostgreSQL."""
 
     persona_store: dict[uuid.UUID, SimpleNamespace] = {}
+    archetype_store: dict[uuid.UUID, SimpleNamespace] = {}
+    master_profile_store: dict[uuid.UUID, SimpleNamespace] = {}
     feature_store: dict[uuid.UUID, SimpleNamespace] = {}
     score_detail_store: dict[uuid.UUID, SimpleNamespace] = {}
     history_store: dict[uuid.UUID, SimpleNamespace] = {}
@@ -50,12 +52,77 @@ class FakePersonaRepository:
     @classmethod
     def reset(cls):
         cls.persona_store = {}
+        cls.archetype_store = {}
+        cls.master_profile_store = {}
         cls.feature_store = {}
         cls.score_detail_store = {}
         cls.history_store = {}
         cls.last_list_kwargs = {}
         cls.last_analytics_kwargs = {}
         cls.analytics_summary_return = {}
+
+    # --- Persona Archetypes ---
+
+    def list_archetypes(self, tenant_id=None, domain=None, is_active=None, skip=0, limit=100):
+        filters = {"tenant_id": tenant_id, "domain": domain, "is_active": is_active}
+        results = list(FakePersonaRepository.archetype_store.values())
+        for field, value in filters.items():
+            if value is not None:
+                results = [r for r in results if getattr(r, field, None) == value]
+        return results[skip : skip + limit]
+
+    def get_archetype(self, persona_archetype_id: uuid.UUID) -> Optional[SimpleNamespace]:
+        return FakePersonaRepository.archetype_store.get(persona_archetype_id)
+
+    def create_archetype(self, payload: dict[str, Any]) -> SimpleNamespace:
+        obj = SimpleNamespace(
+            persona_archetype_id=uuid.uuid4(),
+            matched_profile_count=0,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            **payload,
+        )
+        FakePersonaRepository.archetype_store[obj.persona_archetype_id] = obj
+        return obj
+
+    def update_archetype(self, persona_archetype_id: uuid.UUID, updates: dict[str, Any]) -> SimpleNamespace:
+        obj = FakePersonaRepository.archetype_store[persona_archetype_id]
+        for field, value in updates.items():
+            setattr(obj, field, value)
+        return obj
+
+    def delete_archetype(self, persona_archetype_id: uuid.UUID) -> None:
+        FakePersonaRepository.archetype_store.pop(persona_archetype_id, None)
+
+    def list_master_profiles_by_archetype(self, persona_archetype_id, tenant_id=None, page=1, page_size=100) -> dict:
+        matching_master_ids = {
+            p.master_profile_id
+            for p in FakePersonaRepository.persona_store.values()
+            if getattr(p, "persona_archetype_id", None) == persona_archetype_id and getattr(p, "is_active", False)
+        }
+        items = [
+            mp
+            for mp in FakePersonaRepository.master_profile_store.values()
+            if mp.master_profile_id in matching_master_ids
+            and (tenant_id is None or getattr(mp, "tenant_id", None) == tenant_id)
+        ]
+        total = len(items)
+        page = max(1, page)
+        page_size = max(1, page_size)
+        offset = (page - 1) * page_size
+        page_items = items[offset : offset + page_size]
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        return {
+            "items": page_items,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": total_pages,
+                "has_prev": page > 1,
+                "has_next": page < total_pages,
+            },
+        }
 
     # --- Customer Personas ---
 
@@ -64,7 +131,7 @@ class FakePersonaRepository:
         tenant_id=None,
         domain=None,
         master_profile_id=None,
-        persona_code=None,
+        persona_archetype_id=None,
         is_active=None,
         skip=0,
         limit=100,
@@ -73,7 +140,7 @@ class FakePersonaRepository:
             "tenant_id": tenant_id,
             "domain": domain,
             "master_profile_id": master_profile_id,
-            "persona_code": persona_code,
+            "persona_archetype_id": persona_archetype_id,
             "is_active": is_active,
         }
         FakePersonaRepository.last_list_kwargs = {k: v for k, v in filters.items() if v is not None}
@@ -85,6 +152,51 @@ class FakePersonaRepository:
 
     def get_persona(self, persona_id: uuid.UUID) -> Optional[SimpleNamespace]:
         return FakePersonaRepository.persona_store.get(persona_id)
+
+    def get_master_profile_by_persona_id(self, persona_id: uuid.UUID) -> Optional[SimpleNamespace]:
+        persona = FakePersonaRepository.persona_store.get(persona_id)
+        if persona is None:
+            return None
+        master_profile_id = getattr(persona, "master_profile_id", None)
+        if master_profile_id is None:
+            return None
+        return FakePersonaRepository.master_profile_store.get(master_profile_id)
+
+    def list_master_profiles_by_persona_category(
+        self,
+        persona_category: str,
+        tenant_id=None,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> dict:
+        matching_master_ids = {
+            p.master_profile_id
+            for p in FakePersonaRepository.persona_store.values()
+            if getattr(p, "persona_category", None) == persona_category and getattr(p, "is_active", False)
+        }
+        items = [
+            mp
+            for mp in FakePersonaRepository.master_profile_store.values()
+            if mp.master_profile_id in matching_master_ids
+            and (tenant_id is None or getattr(mp, "tenant_id", None) == tenant_id)
+        ]
+        total = len(items)
+        page = max(1, page)
+        page_size = max(1, page_size)
+        offset = (page - 1) * page_size
+        page_items = items[offset : offset + page_size]
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        return {
+            "items": page_items,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": total_pages,
+                "has_prev": page > 1,
+                "has_next": page < total_pages,
+            },
+        }
 
     def create_persona(self, payload: dict[str, Any]) -> SimpleNamespace:
         obj = SimpleNamespace(
@@ -198,17 +310,13 @@ def _persona_payload(**overrides) -> dict[str, Any]:
         "tenant_id": str(DEMO_TENANT_ID),
         "domain": "retail",
         "master_profile_id": str(uuid.uuid4()),
-        "persona_code": "retail_high_value_customer",
-        "persona_name": "Savvy Retail Shopper #4f2a9c",
-        "persona_category": "High Value Retail Shopper",
-        "persona_summary": "A high-value retail customer with strong engagement.",
+        "persona_archetype_id": str(uuid.uuid4()),
+        "match_score": "0.9000",
         "persona_score": "72.50",
         "lifecycle_stage": "customer",
         "customer_value_tier": "high_value",
         "risk_level": "low",
         "next_best_action": "Offer a loyalty upsell or premium tier upgrade.",
-        "llm_provider": "offline-heuristic",
-        "llm_model": "persona-engine-rule-based-v1",
     }
     payload.update(overrides)
     return payload
@@ -220,10 +328,13 @@ def _fake_persona(**overrides) -> SimpleNamespace:
         "tenant_id": DEMO_TENANT_ID,
         "domain": "retail",
         "master_profile_id": uuid.uuid4(),
-        "persona_code": "retail_high_value_customer",
-        "persona_name": "Savvy Retail Shopper #4f2a9c",
+        "persona_archetype_id": uuid.uuid4(),
+        # persona_category is not a real column on the match row in
+        # production (it lives on cdp_persona_archetypes), but is kept here
+        # on the fake in-memory object purely so this test's category
+        # drill-down assertions can filter on it without a real join.
         "persona_category": "High Value Retail Shopper",
-        "persona_summary": "A high-value retail customer with strong engagement.",
+        "match_score": "0.9000",
         "persona_score": "72.50",
         "confidence_score": "0.8000",
         "behavior_score": "65.00",
@@ -236,12 +347,97 @@ def _fake_persona(**overrides) -> SimpleNamespace:
         "customer_value_tier": "high_value",
         "risk_level": "low",
         "next_best_action": "Offer a loyalty upsell or premium tier upgrade.",
-        "llm_provider": "offline-heuristic",
-        "llm_model": "persona-engine-rule-based-v1",
         "computed_version": 1,
         "is_active": True,
         "computed_at": datetime.now(timezone.utc),
         "expires_at": None,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def _fake_archetype(**overrides) -> SimpleNamespace:
+    defaults = {
+        "persona_archetype_id": uuid.uuid4(),
+        "tenant_id": DEMO_TENANT_ID,
+        "domain": "retail",
+        "persona_code": "retail_gen_z_sneaker_collector_2026h2",
+        "persona_name": "Gen Z Sneaker Collector",
+        "persona_category": "Champion",
+        "persona_summary": "ICP for the H2 2026 sneaker drop campaign.",
+        "llm_provider": "seed-script",
+        "llm_model": "icp-catalog-v1",
+        "centroid_behavior_score": "85.00",
+        "centroid_engagement_score": "90.00",
+        "centroid_financial_score": "55.00",
+        "centroid_loyalty_score": "65.00",
+        "centroid_relationship_score": "55.00",
+        "centroid_risk_score": "20.00",
+        "matched_profile_count": 0,
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def _fake_master_profile(**overrides) -> SimpleNamespace:
+    defaults = {
+        "master_profile_id": uuid.uuid4(),
+        "tenant_id": DEMO_TENANT_ID,
+        "user_id": None,
+        "domain": "retail",
+        "full_name": "Jane Doe",
+        "first_name": "Jane",
+        "last_name": "Doe",
+        "is_hashed": False,
+        "email": "jane@example.com",
+        "phone_number": None,
+        "secondary_emails": [],
+        "secondary_phones": [],
+        "date_of_birth": None,
+        "gender": None,
+        "address": None,
+        "company_name": None,
+        "external_ids": {},
+        "device_ids": [],
+        "advertising_ids": [],
+        "cookie_ids": [],
+        "push_tokens": {},
+        "acquisition_source": None,
+        "acquisition_campaign": None,
+        "current_persona_id": None,
+        "persona_name": None,
+        "segmentation_tags": [],
+        "communication_preferences": {},
+        "attributes": {},
+        "source_systems": [],
+        "first_seen_raw_profile_id": None,
+        "customer_since": None,
+        "last_activity_at": None,
+        "preferred_channel": None,
+        "lifecycle_stage": None,
+        "persona_summary": None,
+        "lead_conversion_probability": None,
+        "lead_grade": None,
+        "churn_probability": None,
+        "churn_risk_tier": None,
+        "historical_clv": 0,
+        "predictive_clv": None,
+        "clv_segment": None,
+        "engagement_score": None,
+        "latest_nps_score": None,
+        "average_csat": None,
+        "overall_sentiment_score": None,
+        "profile_completeness_score": None,
+        "identity_confidence_score": None,
+        "model_versions": {},
+        "scores_updated_at": None,
+        "linked_raw_profile_count": 0,
+        "status_code": 1,
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
     }
@@ -261,6 +457,116 @@ def _patch_persona_repository(test_case: unittest.TestCase) -> None:
     cache_patcher = patch("core.cache.get_redis_client", return_value=None)
     cache_patcher.start()
     test_case.addCleanup(cache_patcher.stop)
+
+
+class PersonaArchetypesRouterTests(unittest.TestCase):
+    """Covers /persona/archetypes CRUD + the matched-profiles drill-down.
+
+    Wires up persona_archetypes_router AND customer_personas_router together
+    (in the SAME order app.py does, via all_persona_routers) so this is a
+    real regression test for the routing bug where GET /persona/archetypes
+    (no trailing slash) was being swallowed by customer_personas_router's
+    GET /persona/{persona_id} catch-all, producing a 422 uuid_parsing error
+    with persona_id="archetypes"."""
+
+    def setUp(self):
+        _patch_persona_repository(self)
+
+        self._domain_patcher = patch(
+            "core.utils.domains.get_active_domain_codes",
+            return_value={"retail", "banking", "healthcare", "real_estate", "travel", "media", "education"},
+        )
+        self._domain_patcher.start()
+        self.addCleanup(self._domain_patcher.stop)
+
+        app = FastAPI()
+        for router in persona_router.all_persona_routers:
+            app.include_router(router)
+        app.dependency_overrides[get_db] = lambda: None
+        self.client = TestClient(app)
+
+    def test_list_archetypes_without_trailing_slash_is_not_swallowed_by_persona_id_route(self):
+        archetype = _fake_archetype()
+        FakePersonaRepository.archetype_store[archetype.persona_archetype_id] = archetype
+
+        response = self.client.get("/persona/archetypes")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body), 1)
+        self.assertEqual(body[0]["persona_archetype_id"], str(archetype.persona_archetype_id))
+
+    def test_list_archetypes_empty(self):
+        response = self.client.get("/persona/archetypes")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+
+    def test_create_and_get_archetype(self):
+        payload = {
+            "tenant_id": str(DEMO_TENANT_ID),
+            "domain": "retail",
+            "persona_code": "retail_gen_z_sneaker_collector_2026h2",
+            "persona_name": "Gen Z Sneaker Collector",
+            "persona_category": "Champion",
+        }
+        response = self.client.post("/persona/archetypes", json=payload)
+        self.assertEqual(response.status_code, 201)
+        archetype_id = response.json()["persona_archetype_id"]
+
+        response = self.client.get(f"/persona/archetypes/{archetype_id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["persona_name"], "Gen Z Sneaker Collector")
+        self.assertEqual(response.json()["matched_profile_count"], 0)
+
+    def test_get_archetype_not_found(self):
+        response = self.client.get(f"/persona/archetypes/{uuid.uuid4()}")
+        self.assertEqual(response.status_code, 404)
+
+    def test_matched_master_profiles_for_archetype(self):
+        archetype = _fake_archetype()
+        FakePersonaRepository.archetype_store[archetype.persona_archetype_id] = archetype
+        matching_persona = _fake_persona(persona_archetype_id=archetype.persona_archetype_id, is_active=True)
+        other_persona = _fake_persona(persona_archetype_id=uuid.uuid4(), is_active=True)
+        matching_profile = _fake_master_profile(master_profile_id=matching_persona.master_profile_id)
+        other_profile = _fake_master_profile(master_profile_id=other_persona.master_profile_id)
+        FakePersonaRepository.persona_store[matching_persona.persona_id] = matching_persona
+        FakePersonaRepository.persona_store[other_persona.persona_id] = other_persona
+        FakePersonaRepository.master_profile_store[matching_profile.master_profile_id] = matching_profile
+        FakePersonaRepository.master_profile_store[other_profile.master_profile_id] = other_profile
+
+        response = self.client.get(f"/persona/archetypes/{archetype.persona_archetype_id}/master-profiles")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body["items"]), 1)
+        self.assertEqual(body["items"][0]["master_profile_id"], str(matching_profile.master_profile_id))
+
+    def test_matched_master_profiles_404_when_archetype_missing(self):
+        response = self.client.get(f"/persona/archetypes/{uuid.uuid4()}/master-profiles")
+        self.assertEqual(response.status_code, 404)
+
+    def test_update_and_delete_archetype(self):
+        archetype = _fake_archetype()
+        FakePersonaRepository.archetype_store[archetype.persona_archetype_id] = archetype
+
+        response = self.client.patch(f"/persona/archetypes/{archetype.persona_archetype_id}", json={"is_active": False})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["is_active"])
+
+        response = self.client.delete(f"/persona/archetypes/{archetype.persona_archetype_id}")
+        self.assertEqual(response.status_code, 204)
+        self.assertNotIn(archetype.persona_archetype_id, FakePersonaRepository.archetype_store)
+
+    def test_get_customer_persona_by_id_route_still_works_alongside_archetypes(self):
+        """Regression guard for the OTHER direction: adding the archetypes
+        router must not break GET /persona/{persona_id}."""
+        persona = _fake_persona()
+        FakePersonaRepository.persona_store[persona.persona_id] = persona
+
+        response = self.client.get(f"/persona/{persona.persona_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["persona_id"], str(persona.persona_id))
 
 
 class CustomerPersonasRouterTests(unittest.TestCase):
@@ -283,10 +589,11 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         self.client = TestClient(app)
 
     def test_create_persona(self):
-        response = self.client.post("/persona/", json=_persona_payload())
+        payload = _persona_payload()
+        response = self.client.post("/persona/", json=payload)
         self.assertEqual(response.status_code, 201)
         body = response.json()
-        self.assertEqual(body["persona_code"], "retail_high_value_customer")
+        self.assertEqual(body["persona_archetype_id"], payload["persona_archetype_id"])
         self.assertTrue(body["is_active"])
         self.assertEqual(body["computed_version"], 1)
 
@@ -354,6 +661,44 @@ class CustomerPersonasRouterTests(unittest.TestCase):
         response = self.client.get(f"/persona/{uuid.uuid4()}")
         self.assertEqual(response.status_code, 404)
 
+    def test_get_master_profile_for_persona(self):
+        persona = _fake_persona()
+        master_profile = _fake_master_profile(
+            master_profile_id=persona.master_profile_id,
+            current_persona_id=persona.persona_id,
+        )
+        FakePersonaRepository.persona_store[persona.persona_id] = persona
+        FakePersonaRepository.master_profile_store[master_profile.master_profile_id] = master_profile
+
+        response = self.client.get(f"/persona/{persona.persona_id}/master-profile")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["master_profile_id"], str(master_profile.master_profile_id))
+        self.assertEqual(body["full_name"], "Jane Doe")
+
+    def test_get_master_profile_not_found_for_persona(self):
+        response = self.client.get(f"/persona/{uuid.uuid4()}/master-profile")
+        self.assertEqual(response.status_code, 404)
+
+    def test_list_master_profiles_by_persona_category(self):
+        matching_persona = _fake_persona(persona_category="High Value Retail Shopper", is_active=True)
+        other_persona = _fake_persona(persona_category="At Risk Customer", is_active=True)
+        matching_profile = _fake_master_profile(master_profile_id=matching_persona.master_profile_id)
+        other_profile = _fake_master_profile(master_profile_id=other_persona.master_profile_id)
+        FakePersonaRepository.persona_store[matching_persona.persona_id] = matching_persona
+        FakePersonaRepository.persona_store[other_persona.persona_id] = other_persona
+        FakePersonaRepository.master_profile_store[matching_profile.master_profile_id] = matching_profile
+        FakePersonaRepository.master_profile_store[other_profile.master_profile_id] = other_profile
+
+        response = self.client.get("/persona/category/High Value Retail Shopper/master-profiles")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body["items"]), 1)
+        self.assertEqual(body["items"][0]["master_profile_id"], str(matching_profile.master_profile_id))
+        self.assertEqual(body["pagination"]["total"], 1)
+
     def test_patch_persona(self):
         persona = _fake_persona()
         FakePersonaRepository.persona_store[persona.persona_id] = persona
@@ -386,6 +731,7 @@ class CustomerPersonasRouterTests(unittest.TestCase):
 
     def test_get_persona_analytics_summary(self):
         FakePersonaRepository.analytics_summary_return = {
+            "total_archetypes": 5,
             "total_personas": 10,
             "active_personas": 8,
             "inactive_personas": 2,
