@@ -165,10 +165,10 @@ KEYCLOAK_HOSTNAME=id.example.com
 FRONTEND_API_HOSTNAME=
 
 # ----- customer360-api / uvicorn --------------------------------------------
-API_HOST=0.0.0.0
-API_PORT=8008
-API_HOST_BIND=127.0.0.1
-API_HOST_PORT=8008
+C360_API_HOST=0.0.0.0
+C360_API_PORT=8008
+C360_API_HOST=127.0.0.1
+C360_API_PORT=8008
 
 # ----- frontend-admin / uvicorn ---------------------------------------------
 FRONTEND_HOST_BIND=0.0.0.0
@@ -525,7 +525,7 @@ curl -s https://cdp.example.com/api/v1/reporting/summary \
 ## 11. Security hardening checklist
 
 - [ ] All host-published ports (`POSTGRES_HOST_BIND`, `REDIS_HOST_BIND`,
-      `API_HOST_BIND`, `KEYCLOAK_HOST_BIND`, `FRONTEND_HOST_BIND`) are
+      `C360_API_HOST`, `KEYCLOAK_HOST_BIND`, `FRONTEND_HOST_BIND`) are
       `127.0.0.1`. Only Nginx listens on `0.0.0.0:443`.
 - [ ] `.env` is owned by root with mode `600` and is never committed.
 - [ ] `KEYCLOAK_ADMIN_PASSWORD`, `KEYCLOAK_CLIENT_SECRET`, `DB_PASSWORD`, and

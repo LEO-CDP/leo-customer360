@@ -168,7 +168,7 @@ bootstrap_env_interactive() {
   local hostname
   hostname="$(prompt_value 'Public hostname/domain for this server (used by Keycloak + frontend)' 'localhost')"
   set_env_value KEYCLOAK_HOSTNAME "$hostname"
-  set_env_value FRONTEND_API_HOSTNAME "http://${hostname}:$(get_env_value API_HOST_PORT || echo 8008)"
+  set_env_value FRONTEND_API_HOSTNAME "http://${hostname}:$(get_env_value C360_API_PORT || echo 8008)"
   local real_prod
   real_prod="$(prompt_value "Run Keycloak in production mode ('start', requires TLS/reverse proxy) instead of 'start-dev'? [y/N]" 'N')"
   case "$real_prod" in
@@ -184,7 +184,7 @@ bootstrap_env_interactive() {
   local expose
   expose="$(prompt_value 'Expose Postgres/Redis/Keycloak/API ports on all interfaces (0.0.0.0) instead of localhost-only? [y/N]' 'N')"
   if [[ "$expose" =~ ^[yY] ]]; then
-    for bind_var in POSTGRES_HOST_BIND REDIS_HOST_BIND API_HOST_BIND KEYCLOAK_HOST_BIND FRONTEND_HOST_BIND; do
+    for bind_var in POSTGRES_HOST_BIND REDIS_HOST_BIND C360_API_HOST KEYCLOAK_HOST_BIND FRONTEND_HOST_BIND; do
       set_env_value "$bind_var" "0.0.0.0"
     done
     echo "   ⚠️  Ports bound to 0.0.0.0 -- make sure this host's firewall (ufw/security group) is locked down, or put a reverse proxy in front." >&2
@@ -332,7 +332,7 @@ cmd_start() {
 
   echo ""
   echo "✅ Production stack is up."
-  echo "   API:      http://${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-8008}  (docs: /docs)"
+  echo "   API:      http://${C360_API_HOST:-127.0.0.1}:${C360_API_PORT:-8008}  (docs: /docs)"
   echo "   Keycloak: http://${KEYCLOAK_HOST_BIND:-127.0.0.1}:${KEYCLOAK_HOST_PORT:-8080}"
 }
 
@@ -354,7 +354,7 @@ cmd_start_core_services() {
 
   echo ""
   echo "✅ Core services stack is up."
-  echo "   API:      http://${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-8008}  (docs: /docs)"
+  echo "   API:      http://${C360_API_HOST:-127.0.0.1}:${C360_API_PORT:-8008}  (docs: /docs)"
   echo ""
   echo "   Note: Backend services (identity_resolution, etc.) and frontend must be started separately."
 }

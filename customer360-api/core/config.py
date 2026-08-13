@@ -230,6 +230,24 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DEV_JWT_EXPIRES_MINUTES", "dev_jwt_expires_minutes"),
     )
 
+    # Redis-backed brute-force throttling (core/utils/rate_limiter.py) for
+    # security-sensitive endpoints (POST /auth/login, failed token
+    # validation). Fails open if Redis is unavailable, same as core/cache.py.
+    auth_rate_limit_max_attempts: int = Field(
+        default=10,
+        validation_alias=AliasChoices(
+            "C360_AUTH_RATE_LIMIT_MAX_ATTEMPTS",
+            "auth_rate_limit_max_attempts",
+        ),
+    )
+    auth_rate_limit_window_seconds: int = Field(
+        default=60,
+        validation_alias=AliasChoices(
+            "C360_AUTH_RATE_LIMIT_WINDOW_SECONDS",
+            "auth_rate_limit_window_seconds",
+        ),
+    )
+
     @property
     def database_url(self) -> str:
         return (

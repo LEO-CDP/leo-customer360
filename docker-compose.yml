@@ -216,7 +216,7 @@ services:
       keycloak:
         condition: service_healthy
     ports:
-      - "${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-8008}:8008"
+      - "${C360_API_HOST:-127.0.0.1}:${C360_API_PORT:-8008}:8008"
     networks:
       - customer360-network
     deploy:

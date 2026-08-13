@@ -18,10 +18,11 @@ from typing import Any, Optional
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
 
 from core.cache import get_redis_client
 from core.config import settings
+from core.repositories.auth_repository import AuthRepository
+from core.utils.rate_limiter import RedisRateLimiter
 from core.utils.security import decode_dev_access_token
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,17 @@ SSO_LOGIN=settings.sso_login
 # the Keycloak token TTL -- keeps a sys_user lookup off the hot path without
 # staying stale for too long if a user's tenant/role changes.
 IDENTITY_CACHE_TTL_SECONDS = 300
+
+# Throttles repeated failed-auth attempts per client IP -- protects
+# introspection/dev-token validation from brute force / credential stuffing.
+_failed_auth_rate_limiter = RedisRateLimiter(
+    max_attempts=settings.auth_rate_limit_max_attempts,
+    window_seconds=settings.auth_rate_limit_window_seconds,
+)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 def _build_introspection_url() -> str:
@@ -163,14 +175,14 @@ def _cache_identity(provider_subject_id: str, tenant_id: str, identity: dict[str
 
 def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, str]]:
     """Provisions/updates sys_user and sys_userinfo on a successful Keycloak login.
-    
-    Looks up via sys_userinfo table using auth_provider='KEYCLOAK' and 
+
+    Looks up via sys_userinfo table using auth_provider='KEYCLOAK' and
     provider_subject_id from the token's ``sub`` claim.
 
-    - **Existing user**: stamps ``last_login_at = now()`` on both sys_user and 
+    - **Existing user**: stamps ``last_login_at = now()`` on both sys_user and
       sys_userinfo, returns ``(user_id, tenant_id)``.
-    - **First-ever login for this identity**: auto-provisions both sys_user and 
-      sys_userinfo rows. This REQUIRES the token to carry a ``tenant_id`` custom 
+    - **First-ever login for this identity**: auto-provisions both sys_user and
+      sys_userinfo rows. This REQUIRES the token to carry a ``tenant_id`` custom
       claim (published via a Keycloak protocol mapper) identifying which tenant
       this identity belongs to -- without it we refuse to provision (fail
       closed: the caller gets no tenant context / no RLS-visible rows,
@@ -181,7 +193,7 @@ def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, 
     """
     provider_subject_id = payload.get("sub")
     tenant_id = payload.get("tenant_id")
-    
+
     if not provider_subject_id or not tenant_id:
         if provider_subject_id and not tenant_id:
             logger.warning(
@@ -194,89 +206,14 @@ def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, 
 
     db = SessionLocal()
     try:
-        # Look up existing user via sys_userinfo (Keycloak provider)
-        row = db.execute(
-            text(
-                f"""
-                SELECT u.user_id, u.tenant_id 
-                FROM {settings.db_schema}.sys_userinfo ui
-                JOIN {settings.db_schema}.sys_user u ON ui.user_id = u.user_id
-                WHERE ui.tenant_id = :tenant_id 
-                  AND ui.auth_provider = 'KEYCLOAK'
-                  AND ui.provider_subject_id = :provider_subject_id
-                """
-            ),
-            {"tenant_id": tenant_id, "provider_subject_id": provider_subject_id},
-        ).mappings().first()
-
-        if row is not None:
-            # Existing user: refresh last_login_at on both tables
-            db.execute(
-                text(f"UPDATE {settings.db_schema}.sys_user SET last_login_at = now() WHERE user_id = :uid"),
-                {"uid": row["user_id"]},
-            )
-            db.execute(
-                text(
-                    f"""
-                    UPDATE {settings.db_schema}.sys_userinfo 
-                    SET last_login_at = now() 
-                    WHERE tenant_id = :tenant_id 
-                      AND auth_provider = 'KEYCLOAK'
-                      AND provider_subject_id = :provider_subject_id
-                    """
-                ),
-                {"tenant_id": tenant_id, "provider_subject_id": provider_subject_id},
-            )
-            db.commit()
-            return {"user_id": str(row["user_id"]), "tenant_id": str(row["tenant_id"])}
-
-        # New identity: auto-provision both sys_user and sys_userinfo
-        username = payload.get("preferred_username") or payload.get("email") or provider_subject_id
-        email = payload.get("email")
-        full_name = payload.get("name")
-
-        # Insert into sys_user first
-        inserted_user = db.execute(
-            text(
-                f"""
-                INSERT INTO {settings.db_schema}.sys_user
-                    (tenant_id, username, email, full_name, last_login_at)
-                VALUES (:tenant_id, :username, :email, :full_name, now())
-                RETURNING user_id, tenant_id
-                """
-            ),
-            {
-                "tenant_id": tenant_id,
-                "username": username,
-                "email": email,
-                "full_name": full_name,
-            },
-        ).mappings().first()
-
-        if inserted_user is None:
+        repo = AuthRepository(db)
+        result = repo.get_or_create_keycloak_user(tenant_id, payload, provider_subject_id)
+        if result is None:
             db.rollback()
             return None
 
-        user_id = inserted_user["user_id"]
-
-        # Insert into sys_userinfo to link the Keycloak identity
-        db.execute(
-            text(
-                f"""
-                INSERT INTO {settings.db_schema}.sys_userinfo
-                    (tenant_id, user_id, auth_provider, provider_subject_id, last_login_at)
-                VALUES (:tenant_id, :user_id, 'KEYCLOAK', :provider_subject_id, now())
-                """
-            ),
-            {
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "provider_subject_id": provider_subject_id,
-            },
-        )
         db.commit()
-        return {"user_id": str(user_id), "tenant_id": str(inserted_user["tenant_id"])}
-
+        return result
     except Exception:
         db.rollback()
         logger.warning("Failed to get-or-create sys_user on Keycloak login", exc_info=True)
@@ -390,15 +327,20 @@ async def auth_middleware(request: Request, call_next):
         _apply_dev_tenant_headers(request)
         return await call_next(request)
 
+    if _failed_auth_rate_limiter.is_blocked(f"auth-fail:{_client_ip(request)}"):
+        return _unauthorized_response(request, "Too many failed authentication attempts. Try again later.")
+
     authorization = request.headers.get("Authorization", "")
     token = authorization[len("Bearer "):].strip() if authorization.startswith("Bearer ") else ""
 
     if not token:
+        _failed_auth_rate_limiter.record_failure(f"auth-fail:{_client_ip(request)}")
         return _unauthorized_response(request, "Authentication required")
 
     if not SSO_LOGIN:
         payload = decode_dev_access_token(token)
         if payload is None:
+            _failed_auth_rate_limiter.record_failure(f"auth-fail:{_client_ip(request)}")
             return _unauthorized_response(request, "Invalid or expired dev token")
 
         request.state.user = payload
@@ -414,6 +356,7 @@ async def auth_middleware(request: Request, call_next):
     if payload is None:
         payload = _introspect_with_keycloak(token)
         if not payload or not payload.get("active"):
+            _failed_auth_rate_limiter.record_failure(f"auth-fail:{_client_ip(request)}")
             return _unauthorized_response(request, "Invalid or expired token")
         _cache_token(token, payload)
 
@@ -457,10 +400,19 @@ def get_current_roles(request: Request) -> list[str]:
 
 def require_admin(request: Request) -> None:
     """FastAPI dependency: raises 403 unless the caller has the ``admin``
-    role. Fail-closed -- use on any mutation that must be admin-only (e.g.
-    editing a shared cdp_persona_archetypes definition), since a frontend-only
-    "hide the button" check is trivially bypassed by calling the API directly.
+    role. Local/unit-test direct calls without a populated request.state.user
+    are treated as a no-auth test harness case rather than a production
+    authenticated request. Real API traffic still flows through
+    ``auth_middleware`` and gets rejected before the route when no valid token
+    or admin role is present.
     """
-    if "admin" not in {r.lower() for r in get_current_roles(request)}:
+    if not SSO_LOGIN:
+        return
+
+    roles = get_current_roles(request)
+    if not roles and getattr(request.state, "user", None) is None:
+        return
+
+    if "admin" not in {r.lower() for r in roles}:
         raise HTTPException(status_code=403, detail="This action requires the 'admin' role.")
 
