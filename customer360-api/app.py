@@ -12,6 +12,7 @@ or simply:
 """
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,17 +39,30 @@ from core.routers.auth_api import all_auth_routers
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    password_preview = settings.default_root_password[:4] if settings.default_root_password else ""
+    logger.info(
+        "DEFAULT_ROOT_USERNAME=%s DEFAULT_ROOT_PASSWORD_PREFIX=%s",
+        settings.default_root_username,
+        password_preview,
+    )
+    init_core_data()
+    yield
+
+
 app = FastAPI(
     title="Customer 360 / Identity Resolution API",
     description=(
         "CRUD + reporting API over the customer360 PostgreSQL schema "
         "(core-customer360/database-schema.sql), covering CRM entities and "
         "the full Customer Identity Resolution (CIR) pipeline: raw profile "
-        "staging (AppsFlyer/MoEngage/Web Tracking/...), master profiles, "
+        "staging (AppsFlyer/MoEnger/...), master profiles, "
         "profile links, matching-rule metadata, and resolution reporting."
     ),
     version=settings.api_version,
-    root_path="/c360api"
+    root_path="/c360api",
+    lifespan=lifespan,
 )
 
 # Permissive CORS for local dev so the static frontend-admin HTML (opened via
@@ -112,11 +126,6 @@ for r in all_metadata_routers:
     app.include_router(r, prefix="/api/v1")
 for r in all_persona_routers:
     app.include_router(r, prefix="/api/v1")
-
-@app.on_event("startup")
-def _seed_core_data_on_startup() -> None:
-    init_core_data()
-
 
 @app.get("/", tags=["Health"])
 def root():
