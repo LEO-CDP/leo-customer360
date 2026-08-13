@@ -53,7 +53,7 @@
   <script src="https://unpkg.com/tippy.js@6"></script>
 
   <!-- App CSS -->
-  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}" />
+  <link rel="stylesheet" href="{{ static_base }}/css/app.css" />
 </head>
 
 <body class="h-full text-slate-800 antialiased">
@@ -171,36 +171,36 @@
       tenantId: "{{ tenant_id }}"
     });
   </script>
-  <script src="{{ url_for('static', path='js/common/config.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/common/formatters.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/common/templates.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/common/utils.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/common/matrix-heatmap.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/common/data-table-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/config.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/formatters.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/templates.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/utils.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/matrix-heatmap.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/data-table-view.js?cb={{ cache_bust }}"></script>
 
   <!-- load router.js first -->
-  <script src="{{ url_for('static', path='js/common/router.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/common/router.js?cb={{ cache_bust }}"></script>
 
   <!-- authentication gate (login screen + Keycloak/dev-credential flows) --
        loaded after config.js/templates.js, before main.js -->
-  <script src="{{ url_for('static', path='js/auth-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/auth-view.js?cb={{ cache_bust }}"></script>
 
   <!-- load all view modules -->
-  <script src="{{ url_for('static', path='js/profile-list-view.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/profile-detail-view.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/overview-view.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/analytics.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/segments-view.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/campaign-view.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/persona-list-view.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/attributes-view.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/data-source-view.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/scoring-model-view.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/system-user-view.js') }}?cb={{ cache_bust }}"></script>
-  <script src="{{ url_for('static', path='js/placeholder-view.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/profile-list-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/profile-detail-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/overview-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/analytics.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/segments-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/campaign-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/persona-list-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/attributes-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/data-source-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/scoring-model-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/system-user-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/placeholder-view.js?cb={{ cache_bust }}"></script>
 
   <!-- load main.js last -->
-  <script src="{{ url_for('static', path='js/main.js') }}?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/main.js?cb={{ cache_bust }}"></script>
 </body>
 
 </html>

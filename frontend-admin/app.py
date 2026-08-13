@@ -50,6 +50,14 @@ TENANT_ID = os.getenv("FRONTEND_TENANT_ID", "11111111-1111-1111-1111-11111111111
 APP_HOST = os.getenv("HOST", "0.0.0.0")
 APP_PORT = int(os.getenv("PORT", "8890"))
 
+
+FRONTEND_ROOT_PATH = os.getenv(
+    "FRONTEND_ROOT_PATH",
+    "/c360",
+).rstrip("/")
+
+STATIC_BASE = f"{FRONTEND_ROOT_PATH}/static"
+
 # Static Asset Cache-Buster (Set at startup to allow static caching during runtime in production)
 # Replaced datetime.utcnow() with datetime.now(timezone.utc) to resolve Pylance deprecation warnings
 APP_START_TIME = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
@@ -110,8 +118,7 @@ async def index(request: Request):
         "request": request,
         "api_base": API_BASE,
         "tenant_id": tenant_id,
-        # Force cache bust on every reload if dev, otherwise only on deployment
-        # Replaced datetime.utcnow() with datetime.now(timezone.utc)
+        "static_base": STATIC_BASE,
         "cache_bust": cb,
     }
     
