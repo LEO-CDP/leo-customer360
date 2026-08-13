@@ -44,6 +44,7 @@ if env_path.is_file():
 SSO_LOGIN = os.getenv("SSO_LOGIN", "false").lower()
 IS_DEV = SSO_LOGIN in ("false", "0", "no")
 
+FRONTEND_ROOT_PATH = os.getenv("FRONTEND_ROOT_PATH", "").rstrip("/")
 API_HOSTNAME = os.getenv("FRONTEND_API_HOSTNAME", "http://localhost:8008").rstrip("/")
 API_BASE = f"{API_HOSTNAME}/api/v1"
 TENANT_ID = os.getenv("FRONTEND_TENANT_ID", "11111111-1111-1111-1111-111111111111")
@@ -93,6 +94,7 @@ app = FastAPI(
     ),
     version="1.0.0",
     lifespan=lifespan,
+    root_path=FRONTEND_ROOT_PATH
 )
 
 # Attach Security Middlewares to harden the static file serving
