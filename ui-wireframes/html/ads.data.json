@@ -1,0 +1,53 @@
+{
+    "adId": "coolmate_dynamic_retargeting_01",
+    "adType": "dynamic_retargeting",
+    "adPlacementId": "12345",
+    "tracking": {
+        "impressionUrl": "https://analytics.example.com/track/impression",
+        "clickUrl": "https://analytics.example.com/track/click"
+    },
+    "advertiser": {
+        "name": "Coolmate",
+        "title": "Coolmate Chào Bạn Mới",
+        "logoUrl": "https://ui-avatars.com/api/?name=Coolmate&background=000&color=fff&size=128&font-size=0.33",
+        "landingPageUrl": "https://example.com/coolmate-home"
+    },
+    "products": [
+        {
+            "id": "p1",
+            "imageUrl": "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80",
+            "landingPageUrl": "https://example.com/product/1",
+            "isHighlighted": true,
+            "highlightText": "BẠN VẪN QUAN TÂM CHỨ?",
+            "discount": null
+        },
+        {
+            "id": "p2",
+            "imageUrl": "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80",
+            "landingPageUrl": "https://example.com/product/2",
+            "isHighlighted": false,
+            "discount": "-9%"
+        },
+        {
+            "id": "p3",
+            "imageUrl": "https://images.unsplash.com/photo-1581655353564-df123a1eb820?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80",
+            "landingPageUrl": "https://example.com/product/3",
+            "isHighlighted": false,
+            "discount": "-9%"
+        },
+        {
+            "id": "p4",
+            "imageUrl": "https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80",
+            "landingPageUrl": "https://example.com/product/4",
+            "isHighlighted": false,
+            "discount": "-9%"
+        },
+        {
+            "id": "p5",
+            "imageUrl": "https://images.unsplash.com/photo-1618354691373-d851c5c3a990?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80",
+            "landingPageUrl": "https://example.com/product/5",
+            "isHighlighted": false,
+            "discount": "-9%"
+        }
+    ]
+}
