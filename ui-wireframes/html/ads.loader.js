@@ -174,6 +174,28 @@
           aspect-ratio: 3 / 4;
         }
 
+        .ad-widget-item.is-broken {
+          display: none;
+        }
+
+        .ad-widget-skeleton {
+          border-radius: 10px;
+          background: linear-gradient(
+            100deg,
+            var(--leo-ad-surface) 30%,
+            var(--leo-ad-border) 50%,
+            var(--leo-ad-surface) 70%
+          );
+          background-size: 200% 100%;
+          animation: leo-ad-shimmer 1.4s ease-in-out infinite;
+          aspect-ratio: 3 / 4;
+        }
+
+        @keyframes leo-ad-shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+
         .ad-widget-item.highlighted {
           border: 2px solid var(--leo-ad-highlight);
           background: var(--leo-ad-bg);
@@ -205,6 +227,141 @@
           padding: 2px 6px;
           border-radius: 4px;
           z-index: 1;
+        }
+
+        .ad-carousel-item-info {
+          padding: 6px 8px 8px;
+        }
+
+        .ad-carousel-item-name {
+          font-size: clamp(11px, 1.4vw, 13px);
+          color: var(--leo-ad-text);
+          font-weight: 600;
+          margin: 0 0 2px;
+          line-height: 1.3;
+        }
+
+        .ad-carousel-item-price {
+          font-size: clamp(11px, 1.4vw, 13px);
+          color: var(--leo-ad-accent);
+          font-weight: 700;
+          margin: 0;
+        }
+
+        .ad-single-banner {
+          display: flex;
+          align-items: stretch;
+          gap: clamp(12px, 3vw, 20px);
+          text-decoration: none;
+          color: var(--leo-ad-text);
+          border-radius: 10px;
+          overflow: hidden;
+        }
+
+        .ad-single-banner-media {
+          position: relative;
+          flex: 0 0 clamp(120px, 32%, 260px);
+          aspect-ratio: var(--leo-ad-banner-w, 3) / var(--leo-ad-banner-h, 2);
+          border-radius: 10px;
+          overflow: hidden;
+          background: var(--leo-ad-surface);
+        }
+
+        .ad-single-banner-media img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+
+        .ad-single-banner-copy {
+          flex: 1 1 auto;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          min-width: 0;
+        }
+
+        .ad-single-banner-headline {
+          font-size: clamp(16px, 2.2vw, 20px);
+          font-weight: 700;
+          margin: 0 0 4px;
+          line-height: 1.3;
+        }
+
+        .ad-single-banner-subheadline {
+          font-size: clamp(12px, 1.6vw, 14px);
+          color: var(--leo-ad-subtext);
+          margin: 0 0 10px;
+          line-height: 1.4;
+        }
+
+        .ad-single-banner-cta {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          align-self: flex-start;
+          font-size: clamp(12px, 1.6vw, 14px);
+          font-weight: 700;
+          color: #fff;
+          background: var(--leo-ad-accent);
+          padding: 8px 16px;
+          border-radius: 999px;
+        }
+
+        .ad-native-card {
+          display: flex;
+          align-items: stretch;
+          gap: clamp(12px, 3vw, 18px);
+          text-decoration: none;
+          color: var(--leo-ad-text);
+        }
+
+        .ad-native-media {
+          flex: 0 0 clamp(100px, 30%, 220px);
+          aspect-ratio: 4 / 3;
+          border-radius: 10px;
+          overflow: hidden;
+          background: var(--leo-ad-surface);
+        }
+
+        .ad-native-media img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+
+        .ad-native-body {
+          flex: 1 1 auto;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          min-width: 0;
+        }
+
+        .ad-native-headline {
+          font-size: clamp(15px, 2vw, 18px);
+          font-weight: 700;
+          margin: 0 0 6px;
+          line-height: 1.3;
+        }
+
+        .ad-native-text {
+          font-size: clamp(12px, 1.6vw, 14px);
+          color: var(--leo-ad-subtext);
+          margin: 0 0 10px;
+          line-height: 1.45;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+
+        .ad-native-cta {
+          font-size: clamp(12px, 1.6vw, 14px);
+          font-weight: 700;
+          color: var(--leo-ad-accent);
         }
 
         .ad-widget-footer {
@@ -279,6 +436,23 @@
 
           .ad-widget-brand-subtitle {
             font-size: 12px;
+          }
+
+          .ad-single-banner,
+          .ad-native-card {
+            flex-direction: column;
+          }
+
+          .ad-single-banner-media,
+          .ad-native-media {
+            flex: 0 0 auto;
+            width: 100%;
+          }
+
+          .ad-single-banner-cta {
+            align-self: stretch;
+            text-align: center;
+            justify-content: center;
           }
         }
       `;
@@ -412,6 +586,7 @@
       }
 
       this.container.setAttribute("data-ad-loading", "true");
+      this.renderSkeleton();
 
       try {
         const adDataUrl = await this.getAdDataUrl(placementId);
@@ -421,7 +596,14 @@
           throw new Error(`Failed to fetch ad data: ${response.status}`);
         }
 
-        this.adData = await response.json();
+        const payload = await response.json();
+        this.adData = this.selectAdForPlacement(payload, placementId);
+
+        if (!this.adData) {
+          throw new Error(`No ad data found for placement: ${placementId}`);
+        }
+
+        this.applyBannerDimensions(this.adData.placement);
         this.renderAd();
         this.setupImpressionTracking();
         this.setupClickTracking();
@@ -437,72 +619,181 @@
       }
     }
 
+    selectAdForPlacement(payload, placementId) {
+      const ads = Array.isArray(payload?.ads) ? payload.ads : [payload];
+      return (
+        ads.find((ad) => String(ad?.adPlacementId) === String(placementId)) ||
+        ads[0] ||
+        null
+      );
+    }
+
+    applyBannerDimensions(placement) {
+      const width = Number(placement?.width) || 3;
+      const height = Number(placement?.height) || 2;
+
+      this.container.style.setProperty("--leo-ad-banner-w", width);
+      this.container.style.setProperty("--leo-ad-banner-h", height || width);
+    }
+
+    renderSkeleton() {
+      const placeholders = Array.from(
+        { length: 4 },
+        () => '<div class="ad-widget-skeleton"></div>',
+      ).join("");
+
+      this.container.innerHTML = `
+        <div class="ad-widget-wrapper">
+          <div class="ad-widget-header">
+            <span>Ad</span> Loading\u2026
+          </div>
+          <div class="ad-widget-grid" style="--leo-ad-columns: 4;">
+            ${placeholders}
+          </div>
+        </div>
+      `;
+    }
+
     renderAd() {
       const data = this.adData;
+
+      switch (data.adFormat) {
+        case "native":
+          this.renderNativeAd(data);
+          break;
+        case "single_banner":
+          this.renderSingleBannerAd(data);
+          break;
+        case "product_carousel":
+        default:
+          this.renderProductCarouselAd(data);
+          break;
+      }
+
+      this.bindImageFallbacks();
+    }
+
+    renderAdHeader(label) {
+      return `
+        <div class="ad-widget-header">
+          <span>Ad</span> ${label || "Sponsored Content"}
+        </div>
+      `;
+    }
+
+    renderAdvertiserFooter(advertiser, adId) {
+      return `
+        <a
+          href="${advertiser.landingPageUrl}"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="ad-widget-footer"
+          data-track-type="advertiser_click"
+          data-item-id="${adId}"
+        >
+          <img src="${advertiser.logoUrl}" alt="Logo" class="ad-widget-logo" />
+          <div>
+            <h3 class="ad-widget-brand-title">${advertiser.title}</h3>
+            <p class="ad-widget-brand-subtitle">${advertiser.name}</p>
+          </div>
+        </a>
+      `;
+    }
+
+    renderProductCarouselAd(data) {
       const adItems = data.adItems || [];
       const productsHtml = adItems
         .map((product) => {
-          const isHighlighted = Boolean(product.isHighlighted);
-          const badgeHtml =
-            product.discount && !isHighlighted
-              ? `<div class="ad-widget-badge">${product.discount}</div>`
-              : "";
-          const highlightHtml =
-            isHighlighted && product.highlightText
-              ? `<div class="highlight-banner">${product.highlightText}</div>`
-              : "";
+          const isHighlighted = Boolean(product.highlightText);
+          const badgeHtml = product.discount
+            ? `<div class="ad-widget-badge">${product.discount}</div>`
+            : "";
+          const highlightHtml = isHighlighted
+            ? `<div class="highlight-banner">${product.highlightText}</div>`
+            : "";
+          const priceHtml = product.price
+            ? `
+              <div class="ad-carousel-item-info">
+                <p class="ad-carousel-item-name">${product.name || ""}</p>
+                <p class="ad-carousel-item-price">${product.price}</p>
+              </div>
+            `
+            : "";
 
           return `
             <a href="${product.landingPageUrl}" target="_blank" rel="noopener noreferrer"
               class="ad-widget-item ${isHighlighted ? "highlighted" : ""}"
               data-track-type="product_click" data-item-id="${product.id}">
               ${badgeHtml}
-              <img src="${product.imageUrl}" alt="Product image" loading="lazy" />
+              <img src="${product.imageUrl}" alt="${product.name || "Product image"}" loading="lazy" />
               ${highlightHtml}
+              ${priceHtml}
             </a>
           `;
         })
         .join("");
 
-      const adCount = Math.min(adItems.length, 4);
+      const adCount = Math.min(adItems.length || 1, 4);
 
-        this.container.innerHTML = `
+      this.container.innerHTML = `
         <div class="ad-widget-wrapper">
-            <div class="ad-widget-header">
-            <span>Ad</span> ${data.advertiser.description || "Sponsored Content"}
-            </div>
-
-            <div
-            class="ad-widget-grid"
-            style="--leo-ad-columns: ${adCount};"
-            >
+          ${this.renderAdHeader(data.content?.headline || data.advertiser.description)}
+          <div class="ad-widget-grid" style="--leo-ad-columns: ${adCount};">
             ${productsHtml}
-            </div>
-
-            <a
-            href="${data.advertiser.landingPageUrl}"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="ad-widget-footer"
-            data-track-type="advertiser_click"
-            data-item-id="${data.adId}"
-            >
-            <img
-                src="${data.advertiser.logoUrl}"
-                alt="Logo"
-                class="ad-widget-logo"
-            />
-
-            <div>
-                <h3 class="ad-widget-brand-title">${data.advertiser.title}</h3>
-                <p class="ad-widget-brand-subtitle">${data.advertiser.name}</p>
-            </div>
-            </a>
+          </div>
+          ${this.renderAdvertiserFooter(data.advertiser, data.adId)}
         </div>
-        `;
-
-      this.bindImageFallbacks();
+      `;
     }
+
+    renderSingleBannerAd(data) {
+      const creative = data.creative || {};
+      const badgeHtml = creative.badge?.text
+        ? `<div class="ad-widget-badge">${creative.badge.text}</div>`
+        : "";
+
+      this.container.innerHTML = `
+        <div class="ad-widget-wrapper">
+          ${this.renderAdHeader(data.advertiser.description)}
+          <a href="${creative.landingPageUrl}" target="_blank" rel="noopener noreferrer"
+            class="ad-single-banner" data-track-type="banner_click" data-item-id="${data.adId}">
+            <div class="ad-single-banner-media">
+              ${badgeHtml}
+              <img src="${creative.imageUrl}" alt="${creative.headline || "Ad banner"}" loading="lazy" />
+            </div>
+            <div class="ad-single-banner-copy">
+              <h3 class="ad-single-banner-headline">${creative.headline || ""}</h3>
+              <p class="ad-single-banner-subheadline">${creative.subheadline || ""}</p>
+              ${creative.cta ? `<span class="ad-single-banner-cta">${creative.cta}</span>` : ""}
+            </div>
+          </a>
+          ${this.renderAdvertiserFooter(data.advertiser, data.adId)}
+        </div>
+      `;
+    }
+
+    renderNativeAd(data) {
+      const content = data.content || {};
+
+      this.container.innerHTML = `
+        <div class="ad-widget-wrapper">
+          ${this.renderAdHeader(content.label || "Sponsored")}
+          <a href="${content.landingPageUrl}" target="_blank" rel="noopener noreferrer"
+            class="ad-native-card" data-track-type="native_click" data-item-id="${data.adId}">
+            <div class="ad-native-media">
+              <img src="${content.imageUrl}" alt="${content.headline || "Sponsored content"}" loading="lazy" />
+            </div>
+            <div class="ad-native-body">
+              <h3 class="ad-native-headline">${content.headline || ""}</h3>
+              <p class="ad-native-text">${content.body || ""}</p>
+              ${content.cta ? `<span class="ad-native-cta">${content.cta} \u2192</span>` : ""}
+            </div>
+          </a>
+          ${this.renderAdvertiserFooter(data.advertiser, data.adId)}
+        </div>
+      `;
+    }
+
 
     bindImageFallbacks() {
       const images = this.container.querySelectorAll(".ad-widget-item img");
