@@ -138,9 +138,11 @@
 
         .ad-widget-grid {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(
+                var(--leo-ad-columns, 4),
+                minmax(0, 1fr)
+            );
             gap: clamp(8px, 1.5vw, 12px);
-
             width: 100%;
             max-width: 1320px;
             margin-inline: auto;
@@ -462,24 +464,42 @@
         })
         .join("");
 
-      this.container.innerHTML = `
+      const adCount = Math.min(adItems.length, 4);
+
+        this.container.innerHTML = `
         <div class="ad-widget-wrapper">
-          <div class="ad-widget-header">
+            <div class="ad-widget-header">
             <span>Ad</span> ${data.advertiser.description || "Sponsored Content"}
-          </div>
-          <div class="ad-widget-grid">
-            ${productsHtml}
-          </div>
-          <a href="${data.advertiser.landingPageUrl}" target="_blank" rel="noopener noreferrer"
-             class="ad-widget-footer" data-track-type="advertiser_click" data-item-id="${data.adId}">
-            <img src="${data.advertiser.logoUrl}" alt="Logo" class="ad-widget-logo" />
-            <div>
-              <h3 class="ad-widget-brand-title">${data.advertiser.title}</h3>
-              <p class="ad-widget-brand-subtitle">${data.advertiser.name}</p>
             </div>
-          </a>
+
+            <div
+            class="ad-widget-grid"
+            style="--leo-ad-columns: ${adCount};"
+            >
+            ${productsHtml}
+            </div>
+
+            <a
+            href="${data.advertiser.landingPageUrl}"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="ad-widget-footer"
+            data-track-type="advertiser_click"
+            data-item-id="${data.adId}"
+            >
+            <img
+                src="${data.advertiser.logoUrl}"
+                alt="Logo"
+                class="ad-widget-logo"
+            />
+
+            <div>
+                <h3 class="ad-widget-brand-title">${data.advertiser.title}</h3>
+                <p class="ad-widget-brand-subtitle">${data.advertiser.name}</p>
+            </div>
+            </a>
         </div>
-      `;
+        `;
 
       this.bindImageFallbacks();
     }
