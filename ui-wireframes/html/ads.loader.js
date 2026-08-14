@@ -13,21 +13,35 @@
       this.container.dataset.adTheme = this.theme;
       this.container.classList.add(`leo-ad-theme-${this.theme}`);
 
+      this.setContainerStyles();
       this.injectStyles();
       this.init();
     }
 
+    setContainerStyles() {
+      const maxWidth =
+        this.container.getAttribute("data-ad-max-width") || "100%";
+      const minWidth =
+        this.container.getAttribute("data-ad-min-width") || "280px";
+      const width = this.container.getAttribute("data-ad-width") || "100%";
+
+      this.container.style.setProperty("--leo-ad-max-width", maxWidth);
+      this.container.style.setProperty("--leo-ad-min-width", minWidth);
+      this.container.style.setProperty("--leo-ad-width", width);
+    }
+
     resolveTheme() {
-      const explicitTheme = (
-        this.container.getAttribute("data-ad-theme") || ""
-      ).trim().toLowerCase();
+      const explicitTheme = (this.container.getAttribute("data-ad-theme") || "")
+        .trim()
+        .toLowerCase();
 
       if (explicitTheme === "dark" || explicitTheme === "light") {
         return explicitTheme;
       }
 
       const prefersDark =
-        window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        window.matchMedia &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches;
       const parentDark = this.container.closest(".dark, [data-theme='dark']");
 
       return parentDark || prefersDark ? "dark" : "light";
@@ -90,58 +104,69 @@
 
         .ad-widget-wrapper {
           font-family: Arial, sans-serif;
-          max-width: 900px;
+          width: var(--leo-ad-width, 100%);
+          max-width: var(--leo-ad-max-width, 100%);
+          min-width: var(--leo-ad-min-width, 280px);
           margin: 0 auto;
-          padding: 12px;
+          padding: clamp(10px, 2vw, 16px);
           background: var(--leo-ad-bg);
           color: var(--leo-ad-text);
           box-sizing: border-box;
-          border-radius: 12px;
+          border-radius: 14px;
           border: 1px solid var(--leo-ad-border);
+          box-shadow: 0 10px 25px rgba(15, 23, 42, 0.06);
         }
 
         .ad-widget-header {
           text-align: center;
-          font-size: 12px;
+          font-size: clamp(11px, 1.5vw, 12px);
           color: var(--leo-ad-subtext);
-          margin-bottom: 10px;
+          margin-bottom: 12px;
+          letter-spacing: 0.02em;
         }
 
         .ad-widget-header span {
           border: 1px solid var(--leo-ad-label);
-          padding: 1px 4px;
-          border-radius: 2px;
+          padding: 1px 5px;
+          border-radius: 3px;
           color: var(--leo-ad-label);
           font-size: 10px;
           margin-right: 4px;
+          display: inline-block;
+          font-weight: 700;
         }
 
         .ad-widget-grid {
-          display: grid;
-          grid-template-columns: repeat(5, 1fr);
-          gap: 10px;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: clamp(8px, 1.5vw, 12px);
+
+            width: 100%;
+            max-width: 1320px;
+            margin-inline: auto;
         }
 
         .ad-widget-item {
           position: relative;
           display: block;
           text-decoration: none;
-          border-radius: 8px;
+          border-radius: 10px;
           overflow: hidden;
           background: var(--leo-ad-surface);
           border: 1px solid var(--leo-ad-border);
-          transition: transform 0.2s ease, box-shadow 0.2s ease;
+          transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
           cursor: pointer;
+          min-height: 0;
         }
 
         .ad-widget-item:hover {
           transform: translateY(-2px);
-          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+          box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
         }
 
         .ad-widget-item img {
           width: 100%;
-          height: auto;
+          height: 100%;
           display: block;
           object-fit: cover;
           aspect-ratio: 3 / 4;
@@ -159,7 +184,8 @@
           right: 0;
           background: var(--leo-ad-accent-soft);
           color: var(--leo-ad-accent);
-          font-size: 11px;
+          font-size: clamp(9px, 1.4vw, 11px);
+          line-height: 1.2;
           font-weight: bold;
           text-align: center;
           padding: 8px 4px;
@@ -172,7 +198,7 @@
           background: var(--leo-ad-badge-bg);
           color: var(--leo-ad-badge-text);
           border: 1px solid var(--leo-ad-badge-border);
-          font-size: 11px;
+          font-size: clamp(9px, 1.3vw, 11px);
           font-weight: bold;
           padding: 2px 6px;
           border-radius: 4px;
@@ -182,38 +208,76 @@
         .ad-widget-footer {
           display: flex;
           align-items: center;
-          margin-top: 15px;
+          margin-top: 14px;
           text-decoration: none;
           cursor: pointer;
           color: var(--leo-ad-text);
+          gap: 12px;
         }
 
         .ad-widget-logo {
-          width: 44px;
-          height: 44px;
-          border-radius: 4px;
-          margin-right: 12px;
+          width: clamp(36px, 5vw, 44px);
+          height: clamp(36px, 5vw, 44px);
+          border-radius: 6px;
+          flex-shrink: 0;
+          object-fit: cover;
         }
 
         .ad-widget-brand-title {
-          font-size: 18px;
+          font-size: clamp(15px, 2vw, 18px);
           color: var(--leo-ad-text);
           margin: 0;
-          font-weight: 500;
+          font-weight: 600;
+          line-height: 1.2;
         }
 
         .ad-widget-brand-subtitle {
-          font-size: 14px;
+          font-size: clamp(12px, 1.6vw, 14px);
           color: var(--leo-ad-subtext);
           margin: 2px 0 0;
+          line-height: 1.35;
         }
 
-        @media (max-width: 768px) {
-          .ad-widget-grid { grid-template-columns: repeat(3, 1fr); }
+        @media (max-width: 1200px) {
+            .ad-widget-grid {
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 900px) {
+            .ad-widget-grid {
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 700px) {
+            .ad-widget-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
         }
 
         @media (max-width: 480px) {
-          .ad-widget-grid { grid-template-columns: repeat(2, 1fr); }
+          .ad-widget-wrapper {
+            padding: 10px;
+            border-radius: 10px;
+          }
+
+          .ad-widget-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+
+          .ad-widget-footer {
+            align-items: flex-start;
+          }
+
+          .ad-widget-brand-title {
+            font-size: 15px;
+          }
+
+          .ad-widget-brand-subtitle {
+            font-size: 12px;
+          }
         }
       `;
 
@@ -231,7 +295,8 @@
 
     async getAdDataUrl(placementId) {
       const dataAdFormat = this.container.getAttribute("data-ad-format") || "";
-      const dataAdTheme = this.container.getAttribute("data-ad-theme") || this.theme;
+      const dataAdTheme =
+        this.container.getAttribute("data-ad-theme") || this.theme;
       const customEndpoint =
         this.container.getAttribute("data-ad-data-url") || "ads.data.json";
 
@@ -239,7 +304,9 @@
       const params = url.searchParams;
 
       if (!placementId) {
-        throw new Error("Ad placement ID is required to build the ad data URL.");
+        throw new Error(
+          "Ad placement ID is required to build the ad data URL.",
+        );
       }
 
       params.set("leopmid", placementId);
@@ -285,7 +352,9 @@
       const hashBuffer = await crypto.subtle.digest("SHA-256", bytes);
       const hashArray = Array.from(new Uint8Array(hashBuffer));
 
-      return hashArray.map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      return hashArray
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
     }
 
     getOrCreateVisitorId() {
@@ -334,7 +403,9 @@
       if (!this.container) return;
 
       if (this.container.getAttribute("data-ad-loading") === "true") {
-        console.warn(`Ad data is already loading for placement: ${placementId}`);
+        console.warn(
+          `Ad data is already loading for placement: ${placementId}`,
+        );
         return;
       }
 
@@ -366,7 +437,8 @@
 
     renderAd() {
       const data = this.adData;
-      const productsHtml = data.products
+      const adItems = data.adItems || [];
+      const productsHtml = adItems
         .map((product) => {
           const isHighlighted = Boolean(product.isHighlighted);
           const badgeHtml =
@@ -408,6 +480,21 @@
           </a>
         </div>
       `;
+
+      this.bindImageFallbacks();
+    }
+
+    bindImageFallbacks() {
+      const images = this.container.querySelectorAll(".ad-widget-item img");
+      images.forEach((img) => {
+        img.addEventListener(
+          "error",
+          () => {
+            img.closest(".ad-widget-item")?.classList.add("is-broken");
+          },
+          { once: true },
+        );
+      });
     }
 
     setupImpressionTracking() {

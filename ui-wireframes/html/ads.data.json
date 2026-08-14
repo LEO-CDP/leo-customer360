@@ -13,21 +13,14 @@
         "logoUrl": "https://ui-avatars.com/api/?name=Coolmate&background=000&color=fff&size=128&font-size=0.33",
         "landingPageUrl": "https://example.com/coolmate-home"
     },
-    "products": [
-        {
-            "id": "p1",
-            "imageUrl": "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80",
-            "landingPageUrl": "https://example.com/product/1",
-            "isHighlighted": true,
-            "highlightText": "BẠN VẪN QUAN TÂM CHỨ?",
-            "discount": null
-        },
+    "adItems": [
         {
             "id": "p2",
             "imageUrl": "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80",
             "landingPageUrl": "https://example.com/product/2",
-            "isHighlighted": false,
-            "discount": "-9%"
+            "isHighlighted": true,
+            "discount": "-9%",
+            "highlightText": "BẠN VẪN QUAN TÂM CHỨ?"
         },
         {
             "id": "p3",
