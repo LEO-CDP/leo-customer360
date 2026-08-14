@@ -8,6 +8,7 @@
     },
     "advertiser": {
         "name": "Coolmate",
+        "description": "Coolmate - Thời trang nam giới hiện đại",
         "title": "Coolmate Chào Bạn Mới",
         "logoUrl": "https://ui-avatars.com/api/?name=Coolmate&background=000&color=fff&size=128&font-size=0.33",
         "landingPageUrl": "https://example.com/coolmate-home"
