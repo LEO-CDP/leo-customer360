@@ -203,16 +203,21 @@
 
         .ad-widget-item.highlighted .highlight-banner {
           position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 0;
-          background: var(--leo-ad-accent-soft);
-          color: var(--leo-ad-accent);
+          bottom: 56px;
+          left: 8px;
+          right: 8px;
+          background: rgba(202, 233, 245, 0.28);
+          color: #000;
           font-size: clamp(9px, 1.4vw, 11px);
           line-height: 1.2;
-          font-weight: bold;
+          font-weight: 700;
           text-align: center;
-          padding: 8px 4px;
+          padding: 8px 6px;
+          border-radius: 8px;
+          backdrop-filter: blur(2px);
+          -webkit-backdrop-filter: blur(2px);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+          z-index: 2;
         }
 
         .ad-widget-badge {
@@ -230,22 +235,30 @@
         }
 
         .ad-carousel-item-info {
-          padding: 6px 8px 8px;
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          z-index: 1;
+          padding: 18px 8px 8px;
+          background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.76) 100%);
         }
 
         .ad-carousel-item-name {
           font-size: clamp(11px, 1.4vw, 13px);
-          color: var(--leo-ad-text);
+          color: #ffffff;
           font-weight: 600;
-          margin: 0 0 2px;
+          margin: 0;
           line-height: 1.3;
+          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
         }
 
         .ad-carousel-item-price {
           font-size: clamp(11px, 1.4vw, 13px);
-          color: var(--leo-ad-accent);
+          color: #ffffff;
           font-weight: 700;
-          margin: 0;
+          margin: 2px 0 0;
+          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
         }
 
         .ad-single-banner {
@@ -712,13 +725,14 @@
             ? `<div class="highlight-banner">${product.highlightText}</div>`
             : "";
           const priceHtml = product.price
-            ? `
+            ? `<p class="ad-carousel-item-price">${product.price}</p>`
+            : "";
+          const infoHtml = `
               <div class="ad-carousel-item-info">
                 <p class="ad-carousel-item-name">${product.name || ""}</p>
-                <p class="ad-carousel-item-price">${product.price}</p>
+                ${priceHtml}
               </div>
-            `
-            : "";
+            `;
 
           return `
             <a href="${product.landingPageUrl}" target="_blank" rel="noopener noreferrer"
@@ -727,7 +741,7 @@
               ${badgeHtml}
               <img src="${product.imageUrl}" alt="${product.name || "Product image"}" loading="lazy" />
               ${highlightHtml}
-              ${priceHtml}
+              ${infoHtml}
             </a>
           `;
         })
