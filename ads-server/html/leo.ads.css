@@ -360,6 +360,50 @@
   line-height: 1.35;
 }
 
+.ad-slot {
+  display: grid;
+  min-height: 140px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px dashed var(--leo-ad-border);
+  border-radius: 10px;
+  background: var(--leo-ad-surface);
+}
+
+.leo-ad-preview,
+.leo-ad-fallback {
+  display: flex;
+  min-height: 140px;
+  width: 100%;
+  padding: 24px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--leo-ad-text);
+  text-align: center;
+}
+
+.leo-ad-preview strong {
+  font-size: 18px;
+}
+
+.leo-ad-preview span,
+.leo-ad-preview small,
+.leo-ad-fallback span {
+  color: var(--leo-ad-subtext);
+}
+
+.leo-ad-preview small {
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.leo-ad-fallback a {
+  color: var(--leo-ad-accent);
+  font-weight: 700;
+}
+
 @media (max-width: 1200px) {
   .ad-widget-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));

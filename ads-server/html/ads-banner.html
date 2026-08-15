@@ -1,399 +1,227 @@
 <!doctype html>
 <html lang="en">
-
 <head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Visual test page for every Leo ad format">
+  <title>Leo Ads Format Test</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page-bg: #f3f0e8;
+      --ink: #17211b;
+      --muted: #687169;
+      --line: #cbc9bf;
+      --accent: #b6412e;
+      --panel: #fffdf7;
+    }
 
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="">
-    <meta name="author" content="Mark Otto, Jacob Thornton, and Bootstrap contributors">
-    <meta name="generator" content="Hugo 0.84.0">
-    <title>Blog Template · Bootstrap v5.0</title>
+    * {
+      box-sizing: border-box;
+    }
 
-    <link rel="canonical" href="https://getbootstrap.com/docs/5.0/examples/blog/">
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(23, 33, 27, 0.04) 1px, transparent 1px),
+        var(--page-bg);
+      background-size: 100% 32px;
+      font-family: Georgia, "Times New Roman", serif;
+    }
 
+    header,
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin-inline: auto;
+    }
 
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.8/css/bootstrap.min.css"
-        integrity="sha512-2bBQCjcnw658Lho4nlXJcc6WkV/UxpE/sAokbXPxQNGqmNdQrWqtw26Ns9kFF/yG792pKR1Sx8/Y1Lf1XN4GKA=="
-        crossorigin="anonymous" referrerpolicy="no-referrer" />
-    <meta name="theme-color" content="#7952b3">
+    header {
+      padding: 48px 0 28px;
+      border-bottom: 2px solid var(--ink);
+    }
 
-    <style>
-        .bd-placeholder-img {
-            font-size: 1.125rem;
-            text-anchor: middle;
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            user-select: none;
-        }
+    h1 {
+      max-width: 760px;
+      margin: 0;
+      font-size: clamp(36px, 7vw, 78px);
+      line-height: 0.95;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
 
-        @media (min-width: 768px) {
-            .bd-placeholder-img-lg {
-                font-size: 3.5rem;
-            }
-        }
-    </style>
+    header p {
+      max-width: 680px;
+      margin: 20px 0 0;
+      color: var(--muted);
+      font: 16px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
 
+    main {
+      padding: 32px 0 64px;
+    }
 
-    <!-- Custom styles for this template -->
-    <link href="https://fonts.googleapis.com/css?family=Playfair&#43;Display:700,900&amp;display=swap" rel="stylesheet">
-    <!-- Custom styles for this template -->
-    <link href="https://getbootstrap.com/docs/5.0/examples/blog/blog.css" rel="stylesheet">
+    .test-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+    }
+
+    .test-case {
+      min-width: 0;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-top: 5px solid var(--accent);
+      background: var(--panel);
+    }
+
+    .test-case.wide {
+      grid-column: 1 / -1;
+    }
+
+    .test-heading {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .test-heading h2 {
+      margin: 0;
+      font-size: 21px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .test-heading code,
+    .test-heading span {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .test-status {
+      flex: 0 0 auto;
+      padding: 4px 7px;
+      border: 1px solid #428052;
+      color: #285f36;
+      background: #edf7ed;
+      text-transform: uppercase;
+      font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .leo-ad-container {
+      min-height: 120px;
+    }
+
+    @media (max-width: 760px) {
+      header {
+        padding-top: 32px;
+      }
+
+      .test-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .test-case.wide {
+        grid-column: auto;
+      }
+    }
+  </style>
 </head>
-
 <body>
+  <header>
+    <h1>Ad format test bench</h1>
+    <p>
+      Seven placements from ads.data.json. Native formats render normally;
+      external JS tags use deterministic preview mode so this page needs no
+      publisher credentials or third-party network access.
+    </p>
+  </header>
 
-    <div class="container">
-        <header class="blog-header py-3">
-            <div class="row flex-nowrap justify-content-between align-items-center">
-                <div class="col-4 pt-1">
-                    <a class="link-secondary" href="#">Subscribe</a>
-                </div>
-                <div class="col-4 text-center">
-                    <a class="blog-header-logo text-dark" href="#">Large</a>
-                </div>
-                <div class="col-4 d-flex justify-content-end align-items-center">
-                    <a class="link-secondary" href="#" aria-label="Search">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" stroke="currentColor"
-                            stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="mx-3" role="img"
-                            viewBox="0 0 24 24">
-                            <title>Search</title>
-                            <circle cx="10.5" cy="10.5" r="7.5" />
-                            <path d="M21 21l-5.2-5.2" />
-                        </svg>
-                    </a>
-                    <a class="btn btn-sm btn-outline-secondary" href="#">Sign up</a>
-                </div>
-            </div>
-        </header>
-
-        <div class="nav-scroller py-1 mb-2">
-            <nav class="nav d-flex justify-content-between">
-                <a class="p-2 link-secondary" href="#">World</a>
-                <a class="p-2 link-secondary" href="#">U.S.</a>
-                <a class="p-2 link-secondary" href="#">Technology</a>
-                <a class="p-2 link-secondary" href="#">Design</a>
-                <a class="p-2 link-secondary" href="#">Culture</a>
-                <a class="p-2 link-secondary" href="#">Business</a>
-                <a class="p-2 link-secondary" href="#">Politics</a>
-                <a class="p-2 link-secondary" href="#">Opinion</a>
-                <a class="p-2 link-secondary" href="#">Science</a>
-                <a class="p-2 link-secondary" href="#">Health</a>
-                <a class="p-2 link-secondary" href="#">Style</a>
-                <a class="p-2 link-secondary" href="#">Travel</a>
-            </nav>
+  <main>
+    <div class="test-grid">
+      <section class="test-case" aria-labelledby="single-banner-title">
+        <div class="test-heading">
+          <div>
+            <h2 id="single-banner-title">Single banner</h2>
+            <code>12345 · native_json</code>
+          </div>
+          <span class="test-status">Live render</span>
         </div>
+        <div class="leo-ad-container" data-ad-placement="12345" data-ad-format="single_banner" data-ad-theme="light"></div>
+      </section>
+
+      <section class="test-case" aria-labelledby="native-title">
+        <div class="test-heading">
+          <div>
+            <h2 id="native-title">Native card</h2>
+            <code>12347 · native_json</code>
+          </div>
+          <span class="test-status">Live render</span>
+        </div>
+        <div class="leo-ad-container" data-ad-placement="12347" data-ad-format="native" data-ad-theme="light"></div>
+      </section>
+
+      <section class="test-case wide" aria-labelledby="carousel-title">
+        <div class="test-heading">
+          <div>
+            <h2 id="carousel-title">Product carousel</h2>
+            <code>12346 · native_json</code>
+          </div>
+          <span class="test-status">Live render</span>
+        </div>
+        <div class="leo-ad-container" data-ad-placement="12346" data-ad-format="product_carousel" data-ad-theme="light"></div>
+      </section>
+
+      <section class="test-case" aria-labelledby="affiliate-native-title">
+        <div class="test-heading">
+          <div>
+            <h2 id="affiliate-native-title">Affiliate product</h2>
+            <code>affiliate_product_001 · native_product</code>
+          </div>
+          <span class="test-status">Live render</span>
+        </div>
+        <div class="leo-ad-container" data-ad-placement="affiliate_product_001" data-ad-format="native_product" data-ad-theme="light"></div>
+      </section>
+
+      <section class="test-case" aria-labelledby="affiliate-widget-title">
+        <div class="test-heading">
+          <div>
+            <h2 id="affiliate-widget-title">Affiliate widget</h2>
+            <code>affiliate_sidebar_001 · external_widget</code>
+          </div>
+          <span class="test-status">JS preview</span>
+        </div>
+        <div class="leo-ad-container" data-ad-placement="affiliate_sidebar_001" data-ad-format="external_widget" data-ad-theme="light" data-ad-preview="true"></div>
+      </section>
+
+      <section class="test-case wide" aria-labelledby="google-display-title">
+        <div class="test-heading">
+          <div>
+            <h2 id="google-display-title">Google display</h2>
+            <code>google_top_banner · google_ads</code>
+          </div>
+          <span class="test-status">JS preview</span>
+        </div>
+        <div class="leo-ad-container" data-ad-placement="google_top_banner" data-ad-format="google_ads" data-ad-theme="light" data-ad-preview="true"></div>
+      </section>
+
+      <section class="test-case wide" aria-labelledby="google-native-title">
+        <div class="test-heading">
+          <div>
+            <h2 id="google-native-title">Google native</h2>
+            <code>google_native_001 · google_ads/native</code>
+          </div>
+          <span class="test-status">JS preview</span>
+        </div>
+        <div class="leo-ad-container" data-ad-placement="google_native_001" data-ad-format="google_ads" data-ad-theme="dark" data-ad-preview="true"></div>
+      </section>
     </div>
+  </main>
 
-    <main class="container">
-
-        <!-- product_carousel Placement for Ad Items -->
-        <div class="leo-ad-container" data-ad-placement="12346" data-ad-css-url="leo.ads.css"
-            data-ad-format="product_carousel" data-ad-theme="light">
-        </div>
-
-        <div class="p-4 p-md-5 mb-4 text-white rounded bg-dark">
-            <div class="col-md-6 px-0">
-                <h1 class="display-4 fst-italic">Title of a longer featured blog post</h1>
-                <p class="lead my-3">Multiple lines of text that form the lede, informing new readers quickly and
-                    efficiently about what’s most interesting in this post’s contents.</p>
-                <p class="lead mb-0"><a href="#" class="text-white fw-bold">Continue reading...</a></p>
-            </div>
-        </div>
-
-
-
-        <div class="row mb-2">
-            <div class="col-md-6">
-                <div
-                    class="row g-0 border rounded overflow-hidden flex-md-row mb-4 shadow-sm h-md-250 position-relative">
-                    <div class="col p-4 d-flex flex-column position-static">
-                        <strong class="d-inline-block mb-2 text-primary">World</strong>
-                        <h3 class="mb-0">Featured post</h3>
-                        <div class="mb-1 text-muted">Nov 12</div>
-                        <p class="card-text mb-auto">This is a wider card with supporting text below as a natural
-                            lead-in to additional content.</p>
-                        <a href="#" class="stretched-link">Continue reading</a>
-                    </div>
-                    <div class="col-auto d-none d-lg-block">
-                        <svg class="bd-placeholder-img" width="200" height="250" xmlns="http://www.w3.org/2000/svg"
-                            role="img" aria-label="Placeholder: Thumbnail" preserveAspectRatio="xMidYMid slice"
-                            focusable="false">
-                            <title>Placeholder</title>
-                            <rect width="100%" height="100%" fill="#55595c" /><text x="50%" y="50%" fill="#eceeef"
-                                dy=".3em">Thumbnail</text>
-                        </svg>
-
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div
-                    class="row g-0 border rounded overflow-hidden flex-md-row mb-4 shadow-sm h-md-250 position-relative">
-                    <div class="col p-4 d-flex flex-column position-static">
-                        <strong class="d-inline-block mb-2 text-success">Design</strong>
-                        <h3 class="mb-0">Post title</h3>
-                        <div class="mb-1 text-muted">Nov 11</div>
-                        <p class="mb-auto">This is a wider card with supporting text below as a natural lead-in to
-                            additional content.</p>
-                        <a href="#" class="stretched-link">Continue reading</a>
-                    </div>
-                    <div class="col-auto d-none d-lg-block">
-                        <svg class="bd-placeholder-img" width="200" height="250" xmlns="http://www.w3.org/2000/svg"
-                            role="img" aria-label="Placeholder: Thumbnail" preserveAspectRatio="xMidYMid slice"
-                            focusable="false">
-                            <title>Placeholder</title>
-                            <rect width="100%" height="100%" fill="#55595c" /><text x="50%" y="50%" fill="#eceeef"
-                                dy=".3em">Thumbnail</text>
-                        </svg>
-
-                    </div>
-                </div>
-            </div>
-        </div>
-
-
-
-        <div class="row g-5">
-            <div class="col-md-8">
-                <h3 class="pb-4 mb-4 fst-italic border-bottom">
-                    From the Firehose
-                </h3>
-
-                <article class="blog-post">
-                    <h2 class="blog-post-title">Sample blog post</h2>
-                    <p class="blog-post-meta">January 1, 2021 by <a href="#">Mark</a></p>
-
-                    <p>This blog post shows a few different types of content that’s supported and styled with Bootstrap.
-                        Basic typography, lists, tables, images, code, and more are all supported as expected.</p>
-                    <hr>
-                    <p>This is some additional paragraph placeholder content. It has been written to fill the available
-                        space and show how a longer snippet of text affects the surrounding content. We'll repeat it
-                        often to keep the demonstration flowing, so be on the lookout for this exact same string of
-                        text.</p>
-                    <h2>Blockquotes</h2>
-                    <p>This is an example blockquote in action:</p>
-                    <blockquote class="blockquote">
-                        <p>Quoted text goes here.</p>
-                    </blockquote>
-                    <p>This is some additional paragraph placeholder content. It has been written to fill the available
-                        space and show how a longer snippet of text affects the surrounding content. We'll repeat it
-                        often to keep the demonstration flowing, so be on the lookout for this exact same string of
-                        text.</p>
-                    <h3>Example lists</h3>
-                    <p>This is some additional paragraph placeholder content. It's a slightly shorter version of the
-                        other highly repetitive body text used throughout. This is an example unordered list:</p>
-                    <ul>
-                        <li>First list item</li>
-                        <li>Second list item with a longer description</li>
-                        <li>Third list item to close it out</li>
-                    </ul>
-                    <p>And this is an ordered list:</p>
-                    <ol>
-                        <li>First list item</li>
-                        <li>Second list item with a longer description</li>
-                        <li>Third list item to close it out</li>
-                    </ol>
-                    <p>And this is a definiton list:</p>
-                    <dl>
-                        <dt>HyperText Markup Language (HTML)</dt>
-                        <dd>The language used to describe and define the content of a Web page</dd>
-                        <dt>Cascading Style Sheets (CSS)</dt>
-                        <dd>Used to describe the appearance of Web content</dd>
-                        <dt>JavaScript (JS)</dt>
-                        <dd>The programming language used to build advanced Web sites and applications</dd>
-                    </dl>
-                    <h2>Inline HTML elements</h2>
-                    <p>HTML defines a long list of available inline tags, a complete list of which can be found on the
-                        <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element">Mozilla Developer
-                            Network</a>.
-                    </p>
-                    <ul>
-                        <li><strong>To bold text</strong>, use <code
-                                class="language-plaintext highlighter-rouge">&lt;strong&gt;</code>.</li>
-                        <li><em>To italicize text</em>, use <code
-                                class="language-plaintext highlighter-rouge">&lt;em&gt;</code>.</li>
-                        <li>Abbreviations, like <abbr title="HyperText Markup Langage">HTML</abbr> should use <code
-                                class="language-plaintext highlighter-rouge">&lt;abbr&gt;</code>, with an optional <code
-                                class="language-plaintext highlighter-rouge">title</code> attribute for the full phrase.
-                        </li>
-                        <li>Citations, like <cite>— Mark Otto</cite>, should use <code
-                                class="language-plaintext highlighter-rouge">&lt;cite&gt;</code>.</li>
-                        <li><del>Deleted</del> text should use <code
-                                class="language-plaintext highlighter-rouge">&lt;del&gt;</code> and <ins>inserted</ins>
-                            text should use <code class="language-plaintext highlighter-rouge">&lt;ins&gt;</code>.</li>
-                        <li>Superscript <sup>text</sup> uses <code
-                                class="language-plaintext highlighter-rouge">&lt;sup&gt;</code> and subscript
-                            <sub>text</sub> uses <code class="language-plaintext highlighter-rouge">&lt;sub&gt;</code>.
-                        </li>
-                    </ul>
-                    <p>Most of these elements are styled by browsers with few modifications on our part.</p>
-                    <h2>Heading</h2>
-                    <p>This is some additional paragraph placeholder content. It has been written to fill the available
-                        space and show how a longer snippet of text affects the surrounding content. We'll repeat it
-                        often to keep the demonstration flowing, so be on the lookout for this exact same string of
-                        text.</p>
-                    <h3>Sub-heading</h3>
-                    <p>This is some additional paragraph placeholder content. It has been written to fill the available
-                        space and show how a longer snippet of text affects the surrounding content. We'll repeat it
-                        often to keep the demonstration flowing, so be on the lookout for this exact same string of
-                        text.</p>
-                    <pre><code>Example code block</code></pre>
-                    <p>This is some additional paragraph placeholder content. It's a slightly shorter version of the
-                        other highly repetitive body text used throughout.</p>
-                </article>
-
-                <!-- native Placement for Ad Items -->
-                <div class="leo-ad-container" data-ad-placement="12347" data-ad-format="native" data-ad-theme="light">
-                </div>
-                <hr>
-                <!-- Affiliate -->
-                <div class="leo-ad-container" data-ad-placement="affiliate_product_001" data-ad-theme="light"></div>
-
-                <article class="blog-post">
-                    <h2 class="blog-post-title">Another blog post</h2>
-                    <p class="blog-post-meta">December 23, 2020 by <a href="#">Jacob</a></p>
-
-                    <p>This is some additional paragraph placeholder content. It has been written to fill the available
-                        space and show how a longer snippet of text affects the surrounding content. We'll repeat it
-                        often to keep the demonstration flowing, so be on the lookout for this exact same string of
-                        text.</p>
-                    <blockquote>
-                        <p>Longer quote goes here, maybe with some <strong>emphasized text</strong> in the middle of it.
-                        </p>
-                    </blockquote>
-                    <p>This is some additional paragraph placeholder content. It has been written to fill the available
-                        space and show how a longer snippet of text affects the surrounding content. We'll repeat it
-                        often to keep the demonstration flowing, so be on the lookout for this exact same string of
-                        text.</p>
-                    <h3>Example table</h3>
-                    <p>And don't forget about tables in these posts:</p>
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Upvotes</th>
-                                <th>Downvotes</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>Alice</td>
-                                <td>10</td>
-                                <td>11</td>
-                            </tr>
-                            <tr>
-                                <td>Bob</td>
-                                <td>4</td>
-                                <td>3</td>
-                            </tr>
-                            <tr>
-                                <td>Charlie</td>
-                                <td>7</td>
-                                <td>9</td>
-                            </tr>
-                        </tbody>
-                        <tfoot>
-                            <tr>
-                                <td>Totals</td>
-                                <td>21</td>
-                                <td>23</td>
-                            </tr>
-                        </tfoot>
-                    </table>
-
-                    <p>This is some additional paragraph placeholder content. It's a slightly shorter version of the
-                        other highly repetitive body text used throughout.</p>
-                </article>
-
-
-                <article class="blog-post">
-                    <h2 class="blog-post-title">New feature</h2>
-                    <p class="blog-post-meta">December 14, 2020 by <a href="#">Chris</a></p>
-
-                    <p>This is some additional paragraph placeholder content. It has been written to fill the available
-                        space and show how a longer snippet of text affects the surrounding content. We'll repeat it
-                        often to keep the demonstration flowing, so be on the lookout for this exact same string of
-                        text.</p>
-                    <ul>
-                        <li>First list item</li>
-                        <li>Second list item with a longer description</li>
-                        <li>Third list item to close it out</li>
-                    </ul>
-                    <p>This is some additional paragraph placeholder content. It's a slightly shorter version of the
-                        other highly repetitive body text used throughout.</p>
-                </article>
-
-
-                <nav class="blog-pagination" aria-label="Pagination">
-                    <a class="btn btn-outline-primary" href="#">Older</a>
-                    <a class="btn btn-outline-secondary disabled" href="#" tabindex="-1" aria-disabled="true">Newer</a>
-                </nav>
-
-            </div>
-
-
-            <div class="col-md-4">
-                <div class="position-sticky" style="top: 2rem;">
-                    <div class="p-4 mb-3 bg-light rounded">
-                        <h4 class="fst-italic">About</h4>
-                        <p class="mb-0">Customize this section to tell your visitors a little bit about your
-                            publication, writers, content, or something else entirely. Totally up to you.</p>
-                    </div>
-
-                    <div class="p-4">
-                        <h4 class="fst-italic">Archives</h4>
-                        <ol class="list-unstyled mb-0">
-                            <li><a href="#">March 2021</a></li>
-                            <li><a href="#">February 2021</a></li>
-                            <li><a href="#">January 2021</a></li>
-                            <li><a href="#">December 2020</a></li>
-                            <li><a href="#">November 2020</a></li>
-                            <li><a href="#">October 2020</a></li>
-                            <li><a href="#">September 2020</a></li>
-                            <li><a href="#">August 2020</a></li>
-                            <li><a href="#">July 2020</a></li>
-                            <li><a href="#">June 2020</a></li>
-                            <li><a href="#">May 2020</a></li>
-                            <li><a href="#">April 2020</a></li>
-                        </ol>
-                    </div>
-
-                    <!-- single_banner -->
-                    <div class="leo-ad-container" data-ad-placement="12345" data-ad-format="single_banner"
-                        data-ad-theme="light">
-                    </div>
-
-                    <!-- Google -->
-                    <div class="leo-ad-container" data-ad-placement="google_top_banner" data-ad-theme="light"></div>
-
-
-
-                    <div class="p-4">
-                        <h4 class="fst-italic">Elsewhere</h4>
-                        <ol class="list-unstyled">
-                            <li><a href="#">GitHub</a></li>
-                            <li><a href="#">Twitter</a></li>
-                            <li><a href="#">Facebook</a></li>
-                        </ol>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-    </main>
-
-    <footer class="blog-footer">
-        <p>Blog template built for <a href="https://getbootstrap.com/">Bootstrap</a> by <a
-                href="https://twitter.com/mdo">@mdo</a>.</p>
-        <p>
-            <a href="#">Back to top</a>
-        </p>
-    </footer>
-
-    <script defer src="ads.loader.js" id="leo_ads_loader"
-        data-base-cdn="http://localhost:5500/ads-server/html/"></script>
-
+  <script defer src="ads.loader.js" id="leo_ads_loader" data-base-cdn="./"></script>
 </body>
-
 </html>

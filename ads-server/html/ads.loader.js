@@ -345,7 +345,6 @@
 
       return (
         ads.find((ad) => String(ad?.adPlacementId) === String(placementId)) ||
-        ads[0] ||
         null
       );
     }
@@ -437,6 +436,7 @@
        */
       switch (data.adFormat) {
         case "native":
+        case "native_product":
           this.renderNativeAd(data);
           break;
 
@@ -449,7 +449,7 @@
           break;
 
         default:
-          this.renderProductCarouselAd(data);
+          this.renderError(`Unsupported ad format: ${data.adFormat || "unknown"}`);
           break;
       }
 
@@ -889,6 +889,12 @@
         config,
       };
 
+      if (this.container.getAttribute("data-ad-preview") === "true") {
+        this.renderExternalPreview(slot, data);
+
+        return;
+      }
+
       if (!loader.src) {
         this.renderExternalFallback(slot, data, "Missing JS loader URL");
 
@@ -908,6 +914,26 @@
             "Unable to load advertisement",
           );
         });
+    }
+
+    renderExternalPreview(slot, data) {
+      const provider = data?.source?.provider || "external";
+
+      const network = data?.source?.network || "unconfigured";
+
+      const sizes = data?.rendering?.config?.sizes;
+
+      const format = Array.isArray(sizes)
+        ? sizes.map((size) => size.join("x")).join(", ")
+        : data?.rendering?.config?.format || data?.adFormat || "JS tag";
+
+      slot.innerHTML = `
+        <div class="leo-ad-preview">
+          <strong>${this.escapeHtml(network)}</strong>
+          <span>${this.escapeHtml(provider)} · ${this.escapeHtml(format)}</span>
+          <small>External script preview</small>
+        </div>
+      `;
     }
 
     /**
