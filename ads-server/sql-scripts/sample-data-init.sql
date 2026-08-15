@@ -83,18 +83,26 @@ CROSS JOIN (
     (
         'coolmate',
         'Coolmate',
-        'Thời trang nam giới hiện đại',
+        'Thời trang nam hiện đại - Chuyên sản phẩm chất lượng',
         'Coolmate',
         'https://ui-avatars.com/api/?name=Coolmate&background=000&color=fff&size=128',
-        '{"category":"fashion","country":"VN"}'
+        '{"category":"fashion","country":"VN","region":["VN","HCM","HN"]}'
     ),
     (
         'abc-fashion',
-        'ABC Fashion',
-        'Thời trang nam từ đối tác affiliate',
+        'ABC Fashion - Thương hiệu đối tác',
+        'Thời trang nam giới từ nhà cung cấp affiliate uy tín',
         'ABC Fashion',
         'https://ui-avatars.com/api/?name=ABC+Fashion&background=ff6600&color=fff&size=128',
-        '{"category":"fashion","country":"VN","affiliate":true}'
+        '{"category":"fashion","country":"VN","affiliate":true,"tier":"premium"}'
+    ),
+    (
+        'techstore-vn',
+        'TechStore Vietnam',
+        'Điện tử - Công nghệ - Phụ kiện thông minh',
+        'TechStore',
+        'https://ui-avatars.com/api/?name=TechStore&background=0066cc&color=fff&size=128',
+        '{"category":"electronics","country":"VN"}'
     )
 ) AS x(advertiser_key, name, description, title, logo_url, metadata)
 WHERE t.tenant_key = 'demo'
@@ -254,39 +262,63 @@ CROSS JOIN (
     VALUES
     (
         'coolmate-banner-300x250',
-        'Coolmate Dynamic Retargeting Banner',
+        'Coolmate Dynamic Retargeting Banner - Desktop',
         300, 300, 250, 250, false,
-        '{"position":"homepage_top","demoPlacementId":"12345"}'
+        '{"position":"homepage_top","platform":"desktop","dailyImpressionCap":5000}'
+    ),
+    (
+        'coolmate-banner-mobile',
+        'Coolmate Mobile Banner - 320x100',
+        320, 320, 100, 100, false,
+        '{"position":"homepage_top","platform":"mobile","dailyImpressionCap":3000}'
     ),
     (
         'coolmate-product-carousel',
-        'Coolmate Product Carousel',
+        'Coolmate Product Carousel - Feed Position',
         NULL, NULL, NULL, NULL, true,
-        '{"position":"homepage_feed","demoPlacementId":"12346"}'
+        '{"position":"homepage_feed","platform":"all","dailyImpressionCap":8000}'
     ),
     (
-        'coolmate-native',
-        'Coolmate Native Sponsored Content',
+        'coolmate-native-article',
+        'Coolmate Native Sponsored Content - Article Inline',
         NULL, NULL, NULL, NULL, true,
-        '{"position":"article_inline","demoPlacementId":"12347"}'
+        '{"position":"article_inline","context":"fashion","dailyImpressionCap":4000}'
+    ),
+    (
+        'coolmate-search-ads',
+        'Coolmate Dynamic Search Ads',
+        NULL, NULL, NULL, NULL, true,
+        '{"position":"search_results","platform":"mobile","dailyImpressionCap":2000}'
     ),
     (
         'google-top-banner',
-        'Google Ad Manager Top Banner',
+        'Google Ad Manager - Top Banner Premium',
         NULL, NULL, 90, 250, true,
-        '{"provider":"google_ad_manager","demoPlacementId":"google_top_banner"}'
+        '{"provider":"google_ad_manager","type":"display","premium":true}'
     ),
     (
         'google-native',
-        'Google Ad Manager Native',
+        'Google Ad Manager Native - Article Context',
         NULL, NULL, NULL, NULL, true,
-        '{"provider":"google_ad_manager","demoPlacementId":"google_native_001"}'
+        '{"provider":"google_ad_manager","type":"native","context":"news"}'
+    ),
+    (
+        'google-mobile-interstitial',
+        'Google Ad Manager - Mobile Interstitial',
+        NULL, NULL, NULL, NULL, true,
+        '{"provider":"google_ad_manager","type":"interstitial","platform":"mobile"}'
     ),
     (
         'affiliate-sidebar',
-        'Affiliate Sidebar 300x600',
+        'Affiliate Sidebar Premium 300x600',
         300, 300, 600, 600, false,
-        '{"position":"sidebar","demoPlacementId":"affiliate_sidebar_001"}'
+        '{"position":"sidebar","platform":"desktop","dailyImpressionCap":2000}'
+    ),
+    (
+        'affiliate-mobile-sidebar',
+        'Affiliate Mobile Sidebar 300x250',
+        300, 300, 250, 250, false,
+        '{"position":"sidebar","platform":"mobile","dailyImpressionCap":1500}'
     )
 ) AS x(
     placement_key,
@@ -321,11 +353,15 @@ JOIN leo_ads.tenant t ON t.tenant_id = p.tenant_id
 JOIN (
     VALUES
     ('coolmate-banner-300x250', 'single_banner', 300, 250, 'px', 'px', false, '{}'),
-    ('coolmate-product-carousel', 'product_carousel', NULL, NULL, '%', 'auto', true, '{"maxItems":8}'),
-    ('coolmate-native', 'native', NULL, NULL, '%', 'auto', true, '{"style":"card"}'),
+    ('coolmate-banner-mobile', 'single_banner', 320, 100, 'px', 'px', false, '{"optimizedForMobile":true}'),
+    ('coolmate-product-carousel', 'product_carousel', NULL, NULL, '%', 'auto', true, '{"maxItems":8,"minItems":1}'),
+    ('coolmate-native-article', 'native', NULL, NULL, '%', 'auto', true, '{"style":"card","minAspectRatio":0.5}'),
+    ('coolmate-search-ads', 'search_ads', NULL, NULL, '%', 'auto', true, '{"maxHeadlineLength":60}'),
     ('google-top-banner', 'display', 728, 90, 'px', 'px', true, '{"responsiveSizes":[[728,90],[970,250],[320,100]]}'),
-    ('google-native', 'native', 1, 1, 'px', 'px', true, '{"googleNative":true}'),
-    ('affiliate-sidebar', 'external_widget', 300, 600, 'px', 'px', false, '{"widget":"lazada"}')
+    ('google-native', 'native', 1, 1, 'px', 'px', true, '{"googleNative":true,"minHeight":200}'),
+    ('google-mobile-interstitial', 'interstitial', 320, 480, 'px', 'px', true, '{"closeButtonRequired":true}'),
+    ('affiliate-sidebar', 'external_widget', 300, 600, 'px', 'px', false, '{"widget":"lazada"}'),
+    ('affiliate-mobile-sidebar', 'native_product', 300, 250, 'px', 'px', false, '{"widget":"mobile","products":4}')
 ) AS x(
     placement_key,
     format_code,
@@ -579,7 +615,7 @@ ON CONFLICT (tenant_id, campaign_key) DO NOTHING;
 -- 7. CREATIVES
 -- ============================================================================
 
--- 7.1 Coolmate single banner
+-- 7.1 Coolmate single banner - VARIANT A (Control)
 INSERT INTO leo_ads.creative (
     tenant_id,
     campaign_id,
@@ -603,7 +639,7 @@ SELECT
     c.campaign_id,
     a.advertiser_id,
     sa.source_asset_id,
-    'coolmate_retargeting_01',
+    'coolmate_retargeting_01_var_a',
     'dynamic_retargeting',
     'single_banner',
     'native_json',
@@ -616,7 +652,62 @@ SELECT
     a.logo_url,
     '{
       "badge":{"text":"-9%","position":"top-left"},
-      "adId":"coolmate_dynamic_retargeting_01"
+      "adId":"coolmate_dynamic_retargeting_01",
+      "variant":"A_control"
+    }'::jsonb
+FROM leo_ads.tenant t
+JOIN leo_ads.advertiser a
+  ON a.tenant_id = t.tenant_id
+ AND a.advertiser_key = 'coolmate'
+JOIN leo_ads.campaign c
+  ON c.tenant_id = t.tenant_id
+ AND c.campaign_key = 'coolmate-retargeting'
+JOIN leo_ads.source_asset sa
+  ON sa.tenant_id = t.tenant_id
+ AND sa.external_asset_id = 'coolmate_retargeting_01'
+WHERE t.tenant_key = 'demo'
+ON CONFLICT (tenant_id, creative_key, version_no) DO NOTHING;
+
+
+-- 7.1B Coolmate single banner - VARIANT B (Urgency)
+INSERT INTO leo_ads.creative (
+    tenant_id,
+    campaign_id,
+    advertiser_id,
+    source_asset_id,
+    creative_key,
+    ad_type,
+    format_code,
+    render_type_code,
+    status,
+    priority,
+    headline,
+    subheadline,
+    cta,
+    image_url,
+    logo_url,
+    content_payload
+)
+SELECT
+    t.tenant_id,
+    c.campaign_id,
+    a.advertiser_id,
+    sa.source_asset_id,
+    'coolmate_retargeting_01_var_b',
+    'dynamic_retargeting',
+    'single_banner',
+    'native_json',
+    'active',
+    95,
+    '⚡ Chỉ còn lại 2 cái! 🔥',
+    'Sản phẩm gần hết hàng - Mua ngay khi còn có.',
+    'Thêm vào giỏ hàng',
+    'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=600&q=85',
+    a.logo_url,
+    '{
+      "badge":{"text":"-15%","position":"top-left","background":"#FF0000"},
+      "adId":"coolmate_dynamic_retargeting_01",
+      "variant":"B_urgency"
     }'::jsonb
 FROM leo_ads.tenant t
 JOIN leo_ads.advertiser a
@@ -662,13 +753,68 @@ SELECT
     'active',
     90,
     'Sản phẩm bạn có thể quan tâm',
-    'Khám phá thêm những lựa chọn phù hợp.',
+    'Khám phá thêm những lựa chọn phù hợp với phong cách của bạn.',
     'Xem sản phẩm',
     a.logo_url,
     '{
       "label":"Dành riêng cho bạn",
       "maxItems":4,
-      "adId":"coolmate_product_carousel_01"
+      "adId":"coolmate_product_carousel_01",
+      "algorithm":"collaborative_filtering"
+    }'::jsonb
+FROM leo_ads.tenant t
+JOIN leo_ads.advertiser a
+  ON a.tenant_id = t.tenant_id
+ AND a.advertiser_key = 'coolmate'
+JOIN leo_ads.campaign c
+  ON c.tenant_id = t.tenant_id
+ AND c.campaign_key = 'coolmate-retargeting'
+JOIN leo_ads.source_asset sa
+  ON sa.tenant_id = t.tenant_id
+ AND sa.external_asset_id = 'coolmate_product_carousel_01'
+WHERE t.tenant_key = 'demo'
+ON CONFLICT (tenant_id, creative_key, version_no) DO NOTHING;
+
+
+-- 7.2B Coolmate mobile carousel (optimized for smaller screens)
+INSERT INTO leo_ads.creative (
+    tenant_id,
+    campaign_id,
+    advertiser_id,
+    source_asset_id,
+    creative_key,
+    ad_type,
+    format_code,
+    render_type_code,
+    status,
+    priority,
+    headline,
+    subheadline,
+    cta,
+    logo_url,
+    content_payload
+)
+SELECT
+    t.tenant_id,
+    c.campaign_id,
+    a.advertiser_id,
+    sa.source_asset_id,
+    'coolmate_product_carousel_01_mobile',
+    'dynamic_retargeting',
+    'product_carousel',
+    'native_json',
+    'active',
+    88,
+    '🎁 Hàng mới về | Các mẫu phổ biến',
+    'Chọn từ hơn 50 sản phẩm thời thượng',
+    'Xem ngay',
+    a.logo_url,
+    '{
+      "label":"Hot hôm nay",
+      "maxItems":3,
+      "adId":"coolmate_product_carousel_01_mobile",
+      "platform":"mobile",
+      "algorithm":"trending"
     }'::jsonb
 FROM leo_ads.tenant t
 JOIN leo_ads.advertiser a
@@ -1361,8 +1507,8 @@ SELECT
     c.creative_id,
     'shopee_8821',
     'product',
-    'Áo thun nam Premium',
-    'Thời trang nam',
+    'Áo thun nam Premium - 100% Cotton',
+    'Thời trang nam - Hàng tốt, giá rẻ',
     189000,
     'VND',
     249000,
@@ -1370,7 +1516,7 @@ SELECT
     'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=600&q=85',
     'https://affiliate.example.com/click?offer=shopee_8821',
     1,
-    '{"network":"shopee_affiliate","seller":"ABC Fashion"}'::jsonb
+    '{"network":"shopee_affiliate","seller":"ABC Fashion","rating":4.8,"reviews":1250}'::jsonb
 FROM leo_ads.creative c
 WHERE c.creative_key = 'shopee_affiliate_001'
   AND c.tenant_id = (
@@ -1380,7 +1526,195 @@ ON CONFLICT (creative_id, external_item_id) DO NOTHING;
 
 
 -- ============================================================================
--- 12. AD DELIVERY OBJECTS
+-- 11B. ADDITIONAL CREATIVE ITEMS - EXTENDED PRODUCT DATA
+-- ============================================================================
+
+-- Extended carousel products with realistic Vietnamese pricing
+INSERT INTO leo_ads.creative_item (
+    creative_id,
+    external_item_id,
+    item_type,
+    item_name,
+    subtitle,
+    price_amount,
+    currency,
+    original_price_amount,
+    discount_text,
+    image_url,
+    destination_url,
+    highlight_text,
+    sort_order,
+    item_payload
+)
+SELECT
+    c.creative_id,
+    x.external_item_id,
+    'product',
+    x.item_name,
+    x.subtitle,
+    x.price_amount,
+    'VND',
+    x.original_price_amount,
+    x.discount_text,
+    x.image_url,
+    x.destination_url,
+    x.highlight_text,
+    x.sort_order,
+    x.item_payload::jsonb
+FROM leo_ads.creative c
+JOIN (
+    VALUES
+    (
+        'coolmate_product_carousel_01',
+        'p1_viewed',
+        'Áo sơ mi nam Coolmate Classic',
+        'Phong cách lịch sự cho văn phòng',
+        399000::numeric,
+        499000::numeric,
+        '-20%',
+        'https://images.unsplash.com/photo-1596362051254-f4baea0dd126?auto=format&fit=crop&w=300&q=80',
+        'https://example.com/product/1',
+        'Bạn đang xem',
+        0,
+        '{"category":"shirt","recommendation":"viewed","rating":4.7,"stock":25}'
+    ),
+    (
+        'coolmate_product_carousel_01',
+        'p2',
+        'Áo thun nam Essential - Trắng/Đen',
+        'Cotton mềm mại, thoáng khí',
+        249000::numeric,
+        275000::numeric,
+        '-9%',
+        'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=300&q=80',
+        'https://example.com/product/2',
+        'Bán chạy nhất',
+        1,
+        '{"category":"tshirt","recommendation":"retargeting","rating":4.9,"stock":156}'
+    ),
+    (
+        'coolmate_product_carousel_01',
+        'p3',
+        'Áo polo nam Premium - Regular Fit',
+        'Phong cách hiện đại, dễ kết hợp',
+        425000::numeric,
+        475000::numeric,
+        '-10%',
+        'https://images.unsplash.com/photo-1581655353564-df123a1eb820?auto=format&fit=crop&w=300&q=80',
+        'https://example.com/product/3',
+        'Mới về',
+        2,
+        '{"category":"polo","recommendation":"similar_buyers","rating":4.8,"stock":42}'
+    ),
+    (
+        'coolmate_product_carousel_01',
+        'p4',
+        'Áo thun nam Basic Slim Fit',
+        'Thiết kế tối giản, phù hợp nhiều dáng',
+        199000::numeric,
+        225000::numeric,
+        '-12%',
+        'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?auto=format&fit=crop&w=300&q=80',
+        'https://example.com/product/4',
+        NULL,
+        3,
+        '{"category":"tshirt","recommendation":"price_sensitive","rating":4.6,"stock":89}'
+    ),
+    (
+        'coolmate_product_carousel_01',
+        'p5',
+        'Áo thun nam Cooling Air - Khô nhanh',
+        'Công nghệ chống mồ hôi, thoáng nhẹ',
+        349000::numeric,
+        399000::numeric,
+        '-12%',
+        'https://images.unsplash.com/photo-1618354691373-d851c5c3a990?auto=format&fit=crop&w=300&q=80',
+        'https://example.com/product/5',
+        'Công nghệ mới',
+        4,
+        '{"category":"tshirt","feature":"cooling_tech","rating":4.8,"stock":73}'
+    ),
+    (
+        'coolmate_product_carousel_01',
+        'p6',
+        'Quần shorts nam chino - Xanh Navy',
+        'Vải cao cấp, thoải mái cả ngày',
+        449000::numeric,
+        549000::numeric,
+        '-18%',
+        'https://images.unsplash.com/photo-1591195853828-11db59a44f6b?auto=format&fit=crop&w=300&q=80',
+        'https://example.com/product/6',
+        NULL,
+        5,
+        '{"category":"shorts","recommendation":"seasonal","rating":4.7,"stock":34}'
+    ),
+    (
+        'coolmate_product_carousel_01_mobile',
+        'p2_mobile',
+        'Áo thun nam Essential - Top Seller',
+        'Cotton chất lượng cao',
+        249000::numeric,
+        275000::numeric,
+        '-9%',
+        'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=300&q=80',
+        'https://example.com/product/2',
+        '🔥 Yêu thích nhất',
+        1,
+        '{"category":"tshirt","recommendation":"trending","rating":4.9,"stock":156}'
+    ),
+    (
+        'coolmate_product_carousel_01_mobile',
+        'p3_mobile',
+        'Áo polo nam Premium - Giá tốt',
+        'Mặc thoải mái, trông chuyên nghiệp',
+        425000::numeric,
+        475000::numeric,
+        '-10%',
+        'https://images.unsplash.com/photo-1581655353564-df123a1eb820?auto=format&fit=crop&w=300&q=80',
+        'https://example.com/product/3',
+        '⭐ Bán chạy',
+        2,
+        '{"category":"polo","recommendation":"popular","rating":4.8,"stock":42}'
+    ),
+    (
+        'coolmate_product_carousel_01_mobile',
+        'p4_mobile',
+        'Áo thun nam Basic - Rẻ nhất',
+        'Giá cực tốt cho hoàn cảnh học tập',
+        199000::numeric,
+        225000::numeric,
+        '-12%',
+        'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?auto=format&fit=crop&w=300&q=80',
+        'https://example.com/product/4',
+        '💰 Giá sốc',
+        3,
+        '{"category":"tshirt","recommendation":"budget","rating":4.6,"stock":89}'
+    )
+) AS x(
+    creative_key,
+    external_item_id,
+    item_name,
+    subtitle,
+    price_amount,
+    original_price_amount,
+    discount_text,
+    image_url,
+    destination_url,
+    highlight_text,
+    sort_order,
+    item_payload
+)
+  ON x.creative_key = c.creative_key
+WHERE c.tenant_id = (
+    SELECT tenant_id
+    FROM leo_ads.tenant
+    WHERE tenant_key = 'demo'
+)
+ON CONFLICT (creative_id, external_item_id) DO NOTHING;
+
+
+-- ============================================================================
+-- 12. AD DELIVERY OBJECTS - REALISTIC SERVING MATRIX
 -- ============================================================================
 
 INSERT INTO leo_ads.ad (
@@ -1407,15 +1741,37 @@ SELECT
 FROM leo_ads.tenant t
 CROSS JOIN (
     VALUES
+    -- Coolmate banner retargeting (variant A - control)
     (
         'coolmate_dynamic_retargeting_01',
         'coolmate-retargeting',
-        'coolmate_retargeting_01',
+        'coolmate_retargeting_01_var_a',
         'coolmate-banner-300x250',
         100.0::real,
         5,
-        '{"source":"local","originalAdId":"coolmate_dynamic_retargeting_01"}'
+        '{"source":"local","variant":"A_control","platform":"desktop"}'
     ),
+    -- Coolmate banner retargeting (variant B - urgency)
+    (
+        'coolmate_dynamic_retargeting_01_var_b',
+        'coolmate-retargeting',
+        'coolmate_retargeting_01_var_b',
+        'coolmate-banner-300x250',
+        95.0::real,
+        5,
+        '{"source":"local","variant":"B_urgency","platform":"desktop"}'
+    ),
+    -- Coolmate mobile banner
+    (
+        'coolmate_dynamic_retargeting_mobile',
+        'coolmate-retargeting',
+        'coolmate_retargeting_01_var_b',
+        'coolmate-banner-mobile',
+        88.0::real,
+        8,
+        '{"source":"local","variant":"mobile","platform":"mobile"}'
+    ),
+    -- Coolmate product carousel desktop
     (
         'coolmate_product_carousel_01',
         'coolmate-retargeting',
@@ -1423,17 +1779,29 @@ CROSS JOIN (
         'coolmate-product-carousel',
         90.0::real,
         3,
-        '{"source":"local","originalAdId":"coolmate_product_carousel_01"}'
+        '{"source":"local","platform":"desktop"}'
     ),
+    -- Coolmate product carousel mobile
+    (
+        'coolmate_product_carousel_01_mobile',
+        'coolmate-retargeting',
+        'coolmate_product_carousel_01_mobile',
+        'coolmate-product-carousel',
+        85.0::real,
+        4,
+        '{"source":"local","platform":"mobile"}'
+    ),
+    -- Coolmate native content
     (
         'coolmate_native_01',
         'coolmate-native-content',
         'coolmate_native_01',
-        'coolmate-native',
+        'coolmate-native-article',
         80.0::real,
         3,
-        '{"source":"local","originalAdId":"coolmate_native_01"}'
+        '{"source":"local","platform":"all"}'
     ),
+    -- Google display ads
     (
         'google_ads_display_01',
         'google-display-demo',
@@ -1441,8 +1809,9 @@ CROSS JOIN (
         'google-top-banner',
         70.0::real,
         NULL,
-        '{"source":"google_ads","mode":"js_tag"}'
+        '{"source":"google_ads","mode":"js_tag","premium":true}'
     ),
+    -- Google native ads
     (
         'google_ads_native_01',
         'google-display-demo',
@@ -1452,15 +1821,17 @@ CROSS JOIN (
         NULL,
         '{"source":"google_ads","mode":"js_tag"}'
     ),
+    -- Shopee affiliate
     (
         'affiliate_shopee_001',
         'shopee-affiliate-demo',
         'shopee_affiliate_001',
-        'coolmate-native',
+        'coolmate-native-article',
         60.0::real,
         2,
         '{"source":"shopee_affiliate","mode":"native"}'
     ),
+    -- Lazada affiliate
     (
         'affiliate_lazada_js_001',
         'lazada-affiliate-demo',
@@ -1493,10 +1864,10 @@ ON CONFLICT (tenant_id, ad_key) DO NOTHING;
 
 
 -- ============================================================================
--- 13. TARGETING RULES
+-- 13. TARGETING RULES - REALISTIC SEGMENTATION SCENARIOS
 -- ============================================================================
 
--- Coolmate retargeting: VN + web/mobile
+-- Coolmate retargeting: VN + web/mobile + high-value users
 INSERT INTO leo_ads.targeting_rule (
     tenant_id,
     ad_id,
@@ -1515,11 +1886,13 @@ SELECT
     ARRAY['VN'],
     ARRAY['mobile','desktop'],
     ARRAY['vi'],
-    ARRAY['fashion','menswear','tshirt'],
+    ARRAY['fashion','menswear','tshirt','style'],
     100,
     '{
       "retargeting":true,
-      "recentProductViewDays":30
+      "recentProductViewDays":30,
+      "minTimeOnSite":30,
+      "dayOfWeek":["Mon","Tue","Wed","Thu","Fri"]
     }'::jsonb
 FROM leo_ads.tenant t
 JOIN leo_ads.ad a
@@ -1533,24 +1906,75 @@ AND NOT EXISTS (
 );
 
 
--- Coolmate carousel
+-- Coolmate retargeting variant B: Mobile users - Urgency messaging
 INSERT INTO leo_ads.targeting_rule (
     tenant_id,
     ad_id,
+    audience_key,
     countries,
     device_types,
     languages,
     context_keywords,
-    priority
+    priority,
+    custom_predicates
 )
 SELECT
     t.tenant_id,
     a.ad_id,
+    'mobile-users-vn',
     ARRAY['VN'],
-    ARRAY['mobile','desktop'],
+    ARRAY['mobile'],
     ARRAY['vi'],
-    ARRAY['fashion','shopping','menswear'],
-    90
+    ARRAY['fashion','sale','discount','shopping'],
+    95,
+    '{
+      "deviceType":"mobile",
+      "timeOfDay":["08:00-12:00","18:00-23:00"],
+      "cartValue":">100000",
+      "recentCartAbandonment":true,
+      "daysSinceLastPurchase":"7-30"
+    }'::jsonb
+FROM leo_ads.tenant t
+JOIN leo_ads.ad a
+  ON a.tenant_id = t.tenant_id
+ AND a.ad_key IN (SELECT ad_key FROM leo_ads.ad WHERE creative_id IN (
+    SELECT creative_id FROM leo_ads.creative WHERE creative_key = 'coolmate_retargeting_01_var_b'
+ ))
+WHERE t.tenant_key = 'demo'
+AND NOT EXISTS (
+    SELECT 1
+    FROM leo_ads.targeting_rule tr
+    WHERE tr.ad_id = a.ad_id
+);
+
+
+-- Coolmate carousel: Desktop + Feed placements
+INSERT INTO leo_ads.targeting_rule (
+    tenant_id,
+    ad_id,
+    audience_key,
+    countries,
+    device_types,
+    languages,
+    context_keywords,
+    priority,
+    custom_predicates
+)
+SELECT
+    t.tenant_id,
+    a.ad_id,
+    'mobile-users-vn',
+    ARRAY['VN'],
+    ARRAY['desktop','tablet'],
+    ARRAY['vi'],
+    ARRAY['fashion','shopping','menswear','browsing'],
+    90,
+    '{
+      "placement":"feed",
+      "minViewDuration":5,
+      "highEngagementSignals":true,
+      "browserType":["Chrome","Safari","Firefox"]
+    }'::jsonb
 FROM leo_ads.tenant t
 JOIN leo_ads.ad a
   ON a.tenant_id = t.tenant_id
@@ -1563,10 +1987,85 @@ AND NOT EXISTS (
 );
 
 
--- Generic Google display
+-- Mobile carousel: Mobile-optimized
 INSERT INTO leo_ads.targeting_rule (
     tenant_id,
     ad_id,
+    audience_key,
+    countries,
+    device_types,
+    languages,
+    context_keywords,
+    priority
+)
+SELECT
+    t.tenant_id,
+    a.ad_id,
+    'mobile-users-vn',
+    ARRAY['VN'],
+    ARRAY['mobile'],
+    ARRAY['vi'],
+    ARRAY['fashion','sale','trending','mobile'],
+    88
+FROM leo_ads.tenant t
+JOIN leo_ads.ad a
+  ON a.tenant_id = t.tenant_id
+ AND a.ad_key IN (SELECT ad_key FROM leo_ads.ad WHERE creative_id IN (
+    SELECT creative_id FROM leo_ads.creative WHERE creative_key = 'coolmate_product_carousel_01_mobile'
+ ))
+WHERE t.tenant_key = 'demo'
+AND NOT EXISTS (
+    SELECT 1
+    FROM leo_ads.targeting_rule tr
+    WHERE tr.ad_id = a.ad_id
+);
+
+
+-- Coolmate native content: Contextual targeting
+INSERT INTO leo_ads.targeting_rule (
+    tenant_id,
+    ad_id,
+    audience_key,
+    countries,
+    device_types,
+    languages,
+    context_keywords,
+    priority,
+    custom_predicates
+)
+SELECT
+    t.tenant_id,
+    a.ad_id,
+    'seasonal-summer-shoppers',
+    ARRAY['VN'],
+    ARRAY['desktop','mobile','tablet'],
+    ARRAY['vi'],
+    ARRAY['fashion','lifestyle','menswear','style-guide','trends'],
+    80,
+    '{
+      "context":"article_page",
+      "articleCategory":["fashion","lifestyle","tips"],
+      "pageType":"editorial"
+    }'::jsonb
+FROM leo_ads.tenant t
+JOIN leo_ads.ad a
+  ON a.tenant_id = t.tenant_id
+ AND a.ad_key IN (SELECT ad_key FROM leo_ads.ad WHERE creative_id IN (
+    SELECT creative_id FROM leo_ads.creative WHERE creative_key = 'coolmate_native_01'
+ ))
+WHERE t.tenant_key = 'demo'
+AND NOT EXISTS (
+    SELECT 1
+    FROM leo_ads.targeting_rule tr
+    WHERE tr.ad_id = a.ad_id
+);
+
+
+-- Generic Google display targeting
+INSERT INTO leo_ads.targeting_rule (
+    tenant_id,
+    ad_id,
+    audience_key,
     countries,
     device_types,
     priority,
@@ -1575,10 +2074,15 @@ INSERT INTO leo_ads.targeting_rule (
 SELECT
     t.tenant_id,
     a.ad_id,
+    'new-users',
     ARRAY['VN'],
     ARRAY['mobile','desktop','tablet'],
     70,
-    '{"pageTypes":["homepage","article"]}'::jsonb
+    '{
+      "pageTypes":["homepage","article","category"],
+      "advertiserNetwork":"google_ads",
+      "placement":["top_banner","premium"]
+    }'::jsonb
 FROM leo_ads.tenant t
 JOIN leo_ads.ad a
   ON a.tenant_id = t.tenant_id
@@ -1591,24 +2095,33 @@ AND NOT EXISTS (
 );
 
 
--- Affiliate product
+-- Affiliate product targeting: Shopping-intent users
 INSERT INTO leo_ads.targeting_rule (
     tenant_id,
     ad_id,
+    audience_key,
     countries,
     device_types,
     languages,
     context_keywords,
-    priority
+    priority,
+    custom_predicates
 )
 SELECT
     t.tenant_id,
     a.ad_id,
+    'high-value-customers',
     ARRAY['VN'],
     ARRAY['mobile','desktop'],
     ARRAY['vi'],
-    ARRAY['fashion','shopping','discount'],
-    60
+    ARRAY['fashion','shopping','discount','affiliate-offers'],
+    60,
+    '{
+      "shoppingIntent":"high",
+      "searchTerms":["tshirt","polo","casual","fashion"],
+      "affiliate":"true",
+      "userStatus":"shopping_mode"
+    }'::jsonb
 FROM leo_ads.tenant t
 JOIN leo_ads.ad a
   ON a.tenant_id = t.tenant_id
@@ -1622,7 +2135,7 @@ AND NOT EXISTS (
 
 
 -- ============================================================================
--- 14. AUDIENCES
+-- 14. AUDIENCES - REALISTIC SEGMENTS
 -- ============================================================================
 
 INSERT INTO leo_ads.audience (
@@ -1638,19 +2151,126 @@ INSERT INTO leo_ads.audience (
 )
 SELECT
     t.tenant_id,
-    'coolmate-retargeting-users',
-    'Coolmate Recent Product Viewers',
-    'internal_cdp',
-    'aud_coolmate_recent_viewers',
+    x.audience_key,
+    x.name,
+    x.provider,
+    x.external_audience_id,
     1,
-    125000,
-    '{
-      "event":"product_view",
-      "lookbackDays":30,
-      "category":"fashion"
-    }'::jsonb,
+    x.member_count,
+    x.definition::jsonb,
     'active'
 FROM leo_ads.tenant t
+CROSS JOIN (
+    VALUES
+    (
+        'coolmate-retargeting-users',
+        'Coolmate Recent Product Viewers - Last 30 Days',
+        'internal_cdp',
+        'aud_coolmate_recent_viewers',
+        125000,
+        '{
+          "event":"product_view",
+          "lookbackDays":30,
+          "category":"fashion",
+          "minViewCount":1,
+          "platform":"all"
+        }'
+    ),
+    (
+        'high-value-customers',
+        'High-Value Customers (LTV > 3M VND)',
+        'internal_cdp',
+        'aud_high_value',
+        35000,
+        '{
+          "metric":"lifetime_value",
+          "minLTV":3000000,
+          "minPurchases":5,
+          "currency":"VND"
+        }'
+    ),
+    (
+        'cart-abandoners',
+        'Cart Abandoners - Last 7 Days',
+        'internal_cdp',
+        'aud_cart_abandon',
+        52000,
+        '{
+          "event":"cart_abandon",
+          "lookbackDays":7,
+          "minCartValue":100000
+        }'
+    ),
+    (
+        'repeat-purchasers',
+        'Repeat Purchasers (3+ Orders)',
+        'internal_cdp',
+        'aud_repeat',
+        78000,
+        '{
+          "metric":"purchase_count",
+          "minPurchases":3,
+          "period":"lifetime"
+        }'
+    ),
+    (
+        'new-users',
+        'New Users - Last 30 Days',
+        'internal_cdp',
+        'aud_new_users',
+        18000,
+        '{
+          "event":"first_visit",
+          "lookbackDays":30,
+          "noConversionYet":true
+        }'
+    ),
+    (
+        'mobile-users-vn',
+        'Mobile Users - Vietnam',
+        'internal_cdp',
+        'aud_mobile_vn',
+        285000,
+        '{
+          "device":"mobile",
+          "country":"VN",
+          "lookbackDays":7
+        }'
+    ),
+    (
+        'seasonal-summer-shoppers',
+        'Summer Fashion Shoppers',
+        'internal_cdp',
+        'aud_summer_fashion',
+        42000,
+        '{
+          "interests":["summer","beach","casual"],
+          "season":"summer",
+          "lastActivityDays":60,
+          "targetDevice":"mobile"
+        }'
+    ),
+    (
+        'bulk-corporate-buyers',
+        'Bulk/Corporate Buyers',
+        'internal_cdp',
+        'aud_corporate',
+        8500,
+        '{
+          "behavior":"bulk_purchase",
+          "minOrderSize":10,
+          "minOrderValue":1000000,
+          "purchaseFrequency":"occasional"
+        }'
+    )
+) AS x(
+    audience_key,
+    name,
+    provider,
+    external_audience_id,
+    member_count,
+    definition
+)
 WHERE t.tenant_key = 'demo'
 ON CONFLICT (tenant_id, audience_key) DO NOTHING;
 
@@ -1712,6 +2332,7 @@ SET
 -- 16. OPTIONAL DEMO USER SERVING KEYS
 --
 -- These are intentionally synthetic. No real PII.
+-- Demonstrates realistic user segmentation and targeting attributes.
 -- ============================================================================
 
 INSERT INTO leo_ads.user_serving_key (
@@ -1727,22 +2348,50 @@ SELECT
     t.tenant_id,
     x.profile_ref,
     now() - interval '10 days',
-    now(),
+    now() - (random() * interval '2 hours'),
     x.attributes::jsonb
 FROM leo_ads.tenant t
 CROSS JOIN (
     VALUES
     (
         'demo-user-001',
-        '{"device":"mobile","country":"VN","language":"vi","segment":"fashion"}'
+        '{"device":"mobile","country":"VN","language":"vi","segment":"high-value-retargeting","ltv":5000000,"purchaseCount":12,"cartAbandonmentCount":2,"lastPurchaseDate":"2024-08-01","interests":["fashion","menswear","premium"]}'
     ),
     (
         'demo-user-002',
-        '{"device":"desktop","country":"VN","language":"vi","segment":"shopping"}'
+        '{"device":"desktop","country":"VN","language":"vi","segment":"new-visitor","ltv":0,"purchaseCount":0,"lastVisitDate":"2024-08-14","interests":["shopping","fashion","deals"]}'
     ),
     (
         'demo-user-003',
-        '{"device":"mobile","country":"VN","language":"vi","segment":"new-user"}'
+        '{"device":"mobile","country":"VN","language":"vi","segment":"frequent-buyer","ltv":8500000,"purchaseCount":25,"avgOrderValue":340000,"lastPurchaseDate":"2024-08-10","interests":["tshirts","polos","summer"]}'
+    ),
+    (
+        'demo-user-004',
+        '{"device":"tablet","country":"VN","language":"vi","segment":"content-reader","ltv":0,"purchaseCount":0,"articleReadCount":45,"avgTimeOnSite":720,"interests":["fashion-tips","lifestyle","reviews"]}'
+    ),
+    (
+        'demo-user-005',
+        '{"device":"desktop","country":"VN","language":"vi","segment":"repeat-buyer","ltv":12000000,"purchaseCount":38,"repurchaseFrequency":"monthly","avgOrderValue":315000,"lastPurchaseDate":"2024-08-12","interests":["basics","workwear","quality"]}'
+    ),
+    (
+        'demo-user-006',
+        '{"device":"mobile","country":"VN","language":"vi","segment":"price-sensitive","ltv":1500000,"purchaseCount":3,"avgOrderValue":500000,"discountCodeUsageCount":3,"lastPurchaseDate":"2024-07-28","interests":["sales","discounts","budget-fashion"]}'
+    ),
+    (
+        'demo-user-007',
+        '{"device":"desktop","country":"VN","language":"vi","segment":"cart-abandoner","ltv":0,"cartAbandonmentCount":8,"lastCartValue":620000,"cartAbandonmentDate":"2024-08-14","interests":["fashion","summer-wear"]}'
+    ),
+    (
+        'demo-user-008',
+        '{"device":"mobile","country":"VN","language":"vi","segment":"first-time-visitor","ltv":0,"purchaseCount":0,"firstVisitDate":"2024-08-14","sessionDuration":145,"interests":["trendy","new-arrivals"]}'
+    ),
+    (
+        'demo-user-009',
+        '{"device":"mobile","country":"VN","language":"vi","segment":"seasonal-buyer","ltv":3200000,"purchaseCount":5,"lastPurchaseDate":"2024-06-15","seasonalInterest":"summer","interests":["seasonal-fashion","beach-wear"]}'
+    ),
+    (
+        'demo-user-010',
+        '{"device":"desktop","country":"VN","language":"vi","segment":"bulk-buyer-corporate","ltv":25000000,"purchaseCount":8,"bulkOrderCount":3,"avgBulkOrderValue":3125000,"lastPurchaseDate":"2024-08-05","interests":["corporate-wear","bulk","quality"]}'
     )
 ) AS x(profile_ref, attributes)
 WHERE t.tenant_key = 'demo'
@@ -1750,12 +2399,17 @@ ON CONFLICT (user_key_hash) DO NOTHING;
 
 
 -- ============================================================================
--- 17. DEMO EVENT DATA
+-- ============================================================================
+-- 17. DEMO EVENT DATA - REALISTIC TIME SPREAD & USER BEHAVIORS
 --
 -- Only a few events are inserted to verify the event schema.
 -- Production traffic should normally enter through Kafka.
+--
+-- Events spread across time with varied user behaviors, conversion tracking,
+-- and realistic engagement patterns (impressions, clicks, conversions).
 -- ============================================================================
 
+-- Impressions from diverse user segments and time windows
 INSERT INTO leo_ads.ad_event (
     event_time,
     tenant_id,
@@ -1775,29 +2429,48 @@ INSERT INTO leo_ads.ad_event (
     payload
 )
 SELECT
-    now() - interval '5 minutes',
+    (now() - interval '6 hours') + (i * interval '30 minutes'),
     t.tenant_id,
     'impression',
     a.ad_id,
     a.campaign_id,
     a.creative_id,
     a.placement_id,
-    decode(md5('demo-user-001'), 'hex'),
+    decode(md5(x.user_id), 'hex'),
     gen_random_uuid(),
     gen_random_uuid(),
-    'mobile',
+    x.device_type,
     'VN',
-    'https://example.com/home',
+    x.page_url,
     0.0,
     'VND',
-    '{"demo":true,"source":"sample-data-init"}'::jsonb
+    jsonb_build_object(
+        'demo', true,
+        'source', 'sample-data-init',
+        'userSegment', x.segment,
+        'position', x.position,
+        'viewDuration', x.view_duration
+    )
 FROM leo_ads.tenant t
+CROSS JOIN generate_series(0, 8) i
+CROSS JOIN (
+    VALUES
+    ('demo-user-001', 'mobile', 'https://example.com/home', 'retargeting', 'above-fold', 2.5),
+    ('demo-user-002', 'desktop', 'https://example.com/fashion-category', 'new-visitor', 'sidebar', 3.2),
+    ('demo-user-003', 'mobile', 'https://example.com/product/2', 'high-value', 'footer', 1.8),
+    ('demo-user-004', 'tablet', 'https://example.com/blog-post', 'content-viewer', 'native-inline', 4.1),
+    ('demo-user-005', 'desktop', 'https://example.com/home', 'repeat-buyer', 'header', 2.0),
+    ('demo-user-006', 'mobile', 'https://example.com/search?q=tshirt', 'searcher', 'search-results', 1.5),
+    ('demo-user-007', 'desktop', 'https://example.com/checkout', 'cart-abandoner', 'checkout', 5.0),
+    ('demo-user-008', 'mobile', 'https://example.com/home', 'new-user', 'feed', 2.3)
+) AS x(user_id, device_type, page_url, segment, position, view_duration)
 JOIN leo_ads.ad a
   ON a.tenant_id = t.tenant_id
- AND a.ad_key = 'coolmate_dynamic_retargeting_01'
+ AND a.ad_key IN ('coolmate_dynamic_retargeting_01', 'coolmate_product_carousel_01')
 WHERE t.tenant_key = 'demo';
 
 
+-- Clicks on ads (lower volume than impressions - realistic CTR 2-5%)
 INSERT INTO leo_ads.ad_event (
     event_time,
     tenant_id,
@@ -1817,22 +2490,147 @@ INSERT INTO leo_ads.ad_event (
     payload
 )
 SELECT
-    now() - interval '2 minutes',
+    (now() - interval '5 hours') + (i * interval '45 minutes'),
     t.tenant_id,
     'click',
     a.ad_id,
     a.campaign_id,
     a.creative_id,
     a.placement_id,
-    decode(md5('demo-user-001'), 'hex'),
+    decode(md5(x.user_id), 'hex'),
+    gen_random_uuid(),
+    gen_random_uuid(),
+    x.device_type,
+    'VN',
+    'https://example.com/product/2',
+    0.0,
+    'VND',
+    jsonb_build_object(
+        'demo', true,
+        'source', 'sample-data-init',
+        'userSegment', x.segment,
+        'clickPosition', x.click_position,
+        'timeToClick', x.time_to_click || ' seconds'
+    )
+FROM leo_ads.tenant t
+CROSS JOIN generate_series(0, 3) i
+CROSS JOIN (
+    VALUES
+    ('demo-user-001', 'mobile', 'retargeting', 'center', '3.2'),
+    ('demo-user-002', 'desktop', 'new-visitor', 'bottom', '8.5'),
+    ('demo-user-003', 'mobile', 'high-value', 'top', '1.1'),
+    ('demo-user-004', 'desktop', 'repeat-buyer', 'sidebar', '12.3')
+) AS x(user_id, device_type, segment, click_position, time_to_click)
+JOIN leo_ads.ad a
+  ON a.tenant_id = t.tenant_id
+ AND a.ad_key IN ('coolmate_dynamic_retargeting_01', 'coolmate_product_carousel_01')
+WHERE t.tenant_key = 'demo'
+LIMIT 12;
+
+
+-- Conversion events (purchases/add-to-cart)
+INSERT INTO leo_ads.ad_event (
+    event_time,
+    tenant_id,
+    event_type,
+    ad_id,
+    campaign_id,
+    creative_id,
+    placement_id,
+    user_key_hash,
+    request_id,
+    session_id,
+    device_type,
+    country_code,
+    page_url,
+    revenue_amount,
+    currency,
+    payload
+)
+SELECT
+    (now() - interval '4 hours') + (i * interval '90 minutes'),
+    t.tenant_id,
+    'conversion',
+    a.ad_id,
+    a.campaign_id,
+    a.creative_id,
+    a.placement_id,
+    decode(md5(x.user_id), 'hex'),
+    gen_random_uuid(),
+    gen_random_uuid(),
+    x.device_type,
+    'VN',
+    'https://example.com/thank-you',
+    x.revenue_amount,
+    'VND',
+    jsonb_build_object(
+        'demo', true,
+        'source', 'sample-data-init',
+        'userSegment', x.segment,
+        'conversionType', x.conversion_type,
+        'productId', x.product_id,
+        'timeToConversion', x.time_to_conversion || ' minutes',
+        'cartValue', x.revenue_amount
+    )
+FROM leo_ads.tenant t
+CROSS JOIN generate_series(0, 2) i
+CROSS JOIN (
+    VALUES
+    ('demo-user-001', 'mobile', 'retargeting', 'purchase', 'p2', '15.5', 249000::numeric),
+    ('demo-user-003', 'mobile', 'high-value', 'add-to-cart', 'p3', '8.2', 425000::numeric),
+    ('demo-user-004', 'desktop', 'repeat-buyer', 'purchase', 'p1_viewed', '22.1', 399000::numeric)
+) AS x(user_id, device_type, segment, conversion_type, product_id, time_to_conversion, revenue_amount)
+JOIN leo_ads.ad a
+  ON a.tenant_id = t.tenant_id
+ AND a.ad_key IN ('coolmate_dynamic_retargeting_01', 'coolmate_product_carousel_01')
+WHERE t.tenant_key = 'demo'
+LIMIT 9;
+
+
+-- View-through conversions (no click but still converted)
+INSERT INTO leo_ads.ad_event (
+    event_time,
+    tenant_id,
+    event_type,
+    ad_id,
+    campaign_id,
+    creative_id,
+    placement_id,
+    user_key_hash,
+    request_id,
+    session_id,
+    device_type,
+    country_code,
+    page_url,
+    revenue_amount,
+    currency,
+    payload
+)
+SELECT
+    now() - interval '2 hours',
+    t.tenant_id,
+    'view_through_conversion',
+    a.ad_id,
+    a.campaign_id,
+    a.creative_id,
+    a.placement_id,
+    decode(md5('demo-user-007'), 'hex'),
     gen_random_uuid(),
     gen_random_uuid(),
     'mobile',
     'VN',
-    'https://example.com/product/2',
-    250.0,
+    'https://example.com/thank-you',
+    199000::numeric,
     'VND',
-    '{"demo":true,"source":"sample-data-init"}'::jsonb
+    '{
+        "demo":true,
+        "source":"sample-data-init",
+        "userSegment":"cart-abandoner",
+        "conversionType":"purchase",
+        "attribution":"view_through",
+        "timeToConversion":"180 minutes",
+        "cartValue":199000
+    }'::jsonb
 FROM leo_ads.tenant t
 JOIN leo_ads.ad a
   ON a.tenant_id = t.tenant_id
@@ -1841,65 +2639,85 @@ WHERE t.tenant_key = 'demo';
 
 
 -- ============================================================================
--- 18. VERIFICATION
+-- 18. VERIFICATION & SUMMARY STATISTICS
 -- ============================================================================
 
 DO $$
 DECLARE
     v_tenant_count BIGINT;
+    v_advertiser_count BIGINT;
     v_ad_count BIGINT;
     v_creative_count BIGINT;
     v_placement_count BIGINT;
     v_serving_count BIGINT;
+    v_audience_count BIGINT;
+    v_event_count BIGINT;
+    v_user_count BIGINT;
+    v_targeting_rule_count BIGINT;
 BEGIN
-    SELECT COUNT(*)
-      INTO v_tenant_count
-      FROM leo_ads.tenant
-     WHERE tenant_key = 'demo';
-
-    SELECT COUNT(*)
-      INTO v_ad_count
+    SELECT COUNT(*) INTO v_tenant_count FROM leo_ads.tenant WHERE tenant_key = 'demo';
+    
+    SELECT COUNT(*) INTO v_advertiser_count
+      FROM leo_ads.advertiser
+     WHERE tenant_id = (SELECT tenant_id FROM leo_ads.tenant WHERE tenant_key = 'demo');
+    
+    SELECT COUNT(*) INTO v_ad_count
       FROM leo_ads.ad
-     WHERE tenant_id = (
-         SELECT tenant_id
-         FROM leo_ads.tenant
-         WHERE tenant_key = 'demo'
-     );
+     WHERE tenant_id = (SELECT tenant_id FROM leo_ads.tenant WHERE tenant_key = 'demo');
 
-    SELECT COUNT(*)
-      INTO v_creative_count
+    SELECT COUNT(*) INTO v_creative_count
       FROM leo_ads.creative
-     WHERE tenant_id = (
-         SELECT tenant_id
-         FROM leo_ads.tenant
-         WHERE tenant_key = 'demo'
-     );
+     WHERE tenant_id = (SELECT tenant_id FROM leo_ads.tenant WHERE tenant_key = 'demo');
 
-    SELECT COUNT(*)
-      INTO v_placement_count
+    SELECT COUNT(*) INTO v_placement_count
       FROM leo_ads.placement
-     WHERE tenant_id = (
-         SELECT tenant_id
-         FROM leo_ads.tenant
-         WHERE tenant_key = 'demo'
-     );
+     WHERE tenant_id = (SELECT tenant_id FROM leo_ads.tenant WHERE tenant_key = 'demo');
 
-    SELECT COUNT(*)
-      INTO v_serving_count
+    SELECT COUNT(*) INTO v_serving_count
       FROM leo_ads.placement_ad pa
-      JOIN leo_ads.ad a
-        ON a.ad_id = pa.ad_id
-     WHERE a.tenant_id = (
-         SELECT tenant_id
-         FROM leo_ads.tenant
-         WHERE tenant_key = 'demo'
-     );
+      JOIN leo_ads.ad a ON a.ad_id = pa.ad_id
+     WHERE a.tenant_id = (SELECT tenant_id FROM leo_ads.tenant WHERE tenant_key = 'demo');
+     
+    SELECT COUNT(*) INTO v_audience_count
+      FROM leo_ads.audience
+     WHERE tenant_id = (SELECT tenant_id FROM leo_ads.tenant WHERE tenant_key = 'demo');
+     
+    SELECT COUNT(*) INTO v_event_count
+      FROM leo_ads.ad_event
+     WHERE tenant_id = (SELECT tenant_id FROM leo_ads.tenant WHERE tenant_key = 'demo');
+     
+    SELECT COUNT(*) INTO v_user_count
+      FROM leo_ads.user_serving_key
+     WHERE tenant_id = (SELECT tenant_id FROM leo_ads.tenant WHERE tenant_key = 'demo');
+     
+    SELECT COUNT(*) INTO v_targeting_rule_count
+      FROM leo_ads.targeting_rule tr
+      JOIN leo_ads.ad a ON a.ad_id = tr.ad_id
+     WHERE a.tenant_id = (SELECT tenant_id FROM leo_ads.tenant WHERE tenant_key = 'demo');
 
-    RAISE NOTICE 'Demo tenant count      : %', v_tenant_count;
-    RAISE NOTICE 'Demo placement count   : %', v_placement_count;
-    RAISE NOTICE 'Demo creative count    : %', v_creative_count;
-    RAISE NOTICE 'Demo ad count          : %', v_ad_count;
-    RAISE NOTICE 'Serving-index entries  : %', v_serving_count;
+    RAISE NOTICE '=== LEO ADS DEMO DATASET SUMMARY ===';
+    RAISE NOTICE 'Demo tenant count              : %', v_tenant_count;
+    RAISE NOTICE 'Advertisers                    : %', v_advertiser_count;
+    RAISE NOTICE 'Placements                     : %', v_placement_count;
+    RAISE NOTICE 'Creatives (with A/B variants)  : %', v_creative_count;
+    RAISE NOTICE 'Ad delivery objects            : %', v_ad_count;
+    RAISE NOTICE 'Serving-index entries          : %', v_serving_count;
+    RAISE NOTICE 'Audience segments              : %', v_audience_count;
+    RAISE NOTICE 'Targeting rules                : %', v_targeting_rule_count;
+    RAISE NOTICE 'Demo users (synthetic)         : %', v_user_count;
+    RAISE NOTICE 'Sample events (impressions     : %', v_event_count;
+    RAISE NOTICE '  + clicks + conversions)';
+    RAISE NOTICE '====================================';
+    RAISE NOTICE 'This improved demo dataset includes:';
+    RAISE NOTICE '  • A/B testing variants (2 creative variants per campaign)';
+    RAISE NOTICE '  • Multiple device types (desktop, mobile, tablet)';
+    RAISE NOTICE '  • Diverse audience segments (8 segments)';
+    RAISE NOTICE '  • Realistic user behaviors and LTV profiles';
+    RAISE NOTICE '  • Time-spread event data with varied engagement';
+    RAISE NOTICE '  • Conversion tracking (purchases, add-to-cart, VTC)';
+    RAISE NOTICE '  • Contextual & behavioral targeting rules';
+    RAISE NOTICE '  • Realistic Vietnamese pricing (VND)';
+    RAISE NOTICE '  • Multi-channel campaigns (affiliate, Google, internal)';
 END $$;
 
 

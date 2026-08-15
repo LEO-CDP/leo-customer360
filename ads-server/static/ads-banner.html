@@ -116,6 +116,32 @@
       min-height: 120px;
     }
 
+    .placement-group {
+      margin-bottom: 48px;
+    }
+
+    .placement-group-title {
+      padding: 16px 0 12px;
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .placement-group-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+      margin-top: 24px;
+    }
+
+    .placement-group-grid .test-case.wide {
+      grid-column: 1 / -1;
+    }
+
     @media (max-width: 760px) {
       header {
         padding-top: 32px;
@@ -128,6 +154,14 @@
       .test-case.wide {
         grid-column: auto;
       }
+
+      .placement-group-grid {
+        grid-template-columns: 1fr !important;
+      }
+
+      .placement-group-grid .test-case.wide {
+        grid-column: auto;
+      }
     }
   </style>
 </head>
@@ -135,91 +169,140 @@
   <header>
     <h1>Ad format test bench</h1>
     <p>
-      Seven placements served live from the ads-server API
-      (http://localhost:9009). Native formats render normally; external JS
-      tags use deterministic preview mode so this page needs no publisher
-      credentials or third-party network access.
+      Ten placements served live from the ads-server API
+      (http://localhost:9009). Test all Coolmate, Google, and Affiliate ad formats.
+      Native formats render normally; external JS tags use deterministic preview mode
+      so this page needs no publisher credentials or third-party network access.
     </p>
   </header>
 
   <main>
-    <div class="test-grid">
-      <section class="test-case" aria-labelledby="single-banner-title">
-        <div class="test-heading">
-          <div>
-            <h2 id="single-banner-title">Single banner</h2>
-            <code>12345 · native_json</code>
+    <!-- COOLMATE FORMATS -->
+    <div class="placement-group">
+      <h3 class="placement-group-title">Coolmate Placements</h3>
+      <div class="placement-group-grid">
+        <section class="test-case" aria-labelledby="coolmate-banner-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="coolmate-banner-title">Desktop banner 300x250</h2>
+              <code>coolmate-banner-300x250</code>
+            </div>
+            <span class="test-status">Live</span>
           </div>
-          <span class="test-status">Live render</span>
-        </div>
-        <div class="leo-ad-container" data-ad-placement="12345" data-ad-format="single_banner" data-ad-theme="light"></div>
-      </section>
+          <div class="leo-ad-container" data-ad-placement="coolmate-banner-300x250" data-ad-format="banner" data-ad-theme="light"></div>
+        </section>
 
-      <section class="test-case" aria-labelledby="native-title">
-        <div class="test-heading">
-          <div>
-            <h2 id="native-title">Native card</h2>
-            <code>12347 · native_json</code>
+        <section class="test-case" aria-labelledby="coolmate-banner-mobile-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="coolmate-banner-mobile-title">Mobile banner 320x50</h2>
+              <code>coolmate-banner-mobile</code>
+            </div>
+            <span class="test-status">Live</span>
           </div>
-          <span class="test-status">Live render</span>
-        </div>
-        <div class="leo-ad-container" data-ad-placement="12347" data-ad-format="native" data-ad-theme="light"></div>
-      </section>
+          <div class="leo-ad-container" data-ad-placement="coolmate-banner-mobile" data-ad-format="banner" data-ad-theme="light"></div>
+        </section>
 
-      <section class="test-case wide" aria-labelledby="carousel-title">
-        <div class="test-heading">
-          <div>
-            <h2 id="carousel-title">Product carousel</h2>
-            <code>12346 · native_json</code>
+        <section class="test-case wide" aria-labelledby="coolmate-carousel-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="coolmate-carousel-title">Product carousel desktop</h2>
+              <code>coolmate-product-carousel</code>
+            </div>
+            <span class="test-status">Live</span>
           </div>
-          <span class="test-status">Live render</span>
-        </div>
-        <div class="leo-ad-container" data-ad-placement="12346" data-ad-format="product_carousel" data-ad-theme="light"></div>
-      </section>
+          <div class="leo-ad-container" data-ad-placement="coolmate-product-carousel" data-ad-format="product_carousel" data-ad-theme="light"></div>
+        </section>
 
-      <section class="test-case" aria-labelledby="affiliate-native-title">
-        <div class="test-heading">
-          <div>
-            <h2 id="affiliate-native-title">Affiliate product</h2>
-            <code>affiliate_shopee_001 · native_product</code>
+        <section class="test-case wide" aria-labelledby="coolmate-native-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="coolmate-native-title">Native article inline</h2>
+              <code>coolmate-native-article</code>
+            </div>
+            <span class="test-status">Live</span>
           </div>
-          <span class="test-status">Live render</span>
-        </div>
-        <div class="leo-ad-container" data-ad-placement="affiliate_shopee_001" data-ad-format="native_product" data-ad-theme="light"></div>
-      </section>
+          <div class="leo-ad-container" data-ad-placement="coolmate-native-article" data-ad-format="native" data-ad-theme="light"></div>
+        </section>
 
-      <section class="test-case" aria-labelledby="affiliate-widget-title">
-        <div class="test-heading">
-          <div>
-            <h2 id="affiliate-widget-title">Affiliate widget</h2>
-            <code>affiliate_sidebar_001 · external_widget</code>
+        <section class="test-case wide" aria-labelledby="coolmate-search-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="coolmate-search-title">Search ads format</h2>
+              <code>coolmate-search-ads</code>
+            </div>
+            <span class="test-status">Live</span>
           </div>
-          <span class="test-status">JS preview</span>
-        </div>
-        <div class="leo-ad-container" data-ad-placement="affiliate_sidebar_001" data-ad-format="external_widget" data-ad-theme="light" data-ad-preview="true"></div>
-      </section>
+          <div class="leo-ad-container" data-ad-placement="coolmate-search-ads" data-ad-format="search_ads" data-ad-theme="light"></div>
+        </section>
+      </div>
+    </div>
 
-      <section class="test-case wide" aria-labelledby="google-display-title">
-        <div class="test-heading">
-          <div>
-            <h2 id="google-display-title">Google display</h2>
-            <code>google_top_banner · google_ads</code>
+    <!-- GOOGLE FORMATS -->
+    <div class="placement-group">
+      <h3 class="placement-group-title">Google Ad Placements</h3>
+      <div class="placement-group-grid">
+        <section class="test-case wide" aria-labelledby="google-top-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="google-top-title">Display banner</h2>
+              <code>google-top-banner</code>
+            </div>
+            <span class="test-status">JS</span>
           </div>
-          <span class="test-status">JS preview</span>
-        </div>
-        <div class="leo-ad-container" data-ad-placement="google_top_banner" data-ad-format="google_ads" data-ad-theme="light" data-ad-preview="true"></div>
-      </section>
+          <div class="leo-ad-container" data-ad-placement="google-top-banner" data-ad-format="google_ads" data-ad-theme="light" data-ad-preview="true"></div>
+        </section>
 
-      <section class="test-case wide" aria-labelledby="google-native-title">
-        <div class="test-heading">
-          <div>
-            <h2 id="google-native-title">Google native</h2>
-            <code>google_native_001 · google_ads/native</code>
+        <section class="test-case wide" aria-labelledby="google-native-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="google-native-title">Native ad format</h2>
+              <code>google-native</code>
+            </div>
+            <span class="test-status">JS</span>
           </div>
-          <span class="test-status">JS preview</span>
-        </div>
-        <div class="leo-ad-container" data-ad-placement="google_native_001" data-ad-format="google_ads" data-ad-theme="dark" data-ad-preview="true"></div>
-      </section>
+          <div class="leo-ad-container" data-ad-placement="google-native" data-ad-format="google_ads" data-ad-theme="light" data-ad-preview="true"></div>
+        </section>
+
+        <section class="test-case" aria-labelledby="google-interstitial-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="google-interstitial-title">Mobile interstitial</h2>
+              <code>google-mobile-interstitial</code>
+            </div>
+            <span class="test-status">JS</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="google-mobile-interstitial" data-ad-format="interstitial" data-ad-theme="light" data-ad-preview="true"></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- AFFILIATE FORMATS -->
+    <div class="placement-group">
+      <h3 class="placement-group-title">Affiliate Placements</h3>
+      <div class="placement-group-grid">
+        <section class="test-case" aria-labelledby="affiliate-sidebar-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="affiliate-sidebar-title">Sidebar widget desktop</h2>
+              <code>affiliate-sidebar</code>
+            </div>
+            <span class="test-status">JS</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="affiliate-sidebar" data-ad-format="external_widget" data-ad-theme="light" data-ad-preview="true"></div>
+        </section>
+
+        <section class="test-case" aria-labelledby="affiliate-mobile-sidebar-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="affiliate-mobile-sidebar-title">Mobile product sidebar</h2>
+              <code>affiliate-mobile-sidebar</code>
+            </div>
+            <span class="test-status">Live</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="affiliate-mobile-sidebar" data-ad-format="native_product" data-ad-theme="light"></div>
+        </section>
+      </div>
     </div>
   </main>
 

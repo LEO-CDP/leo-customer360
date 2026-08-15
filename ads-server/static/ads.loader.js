@@ -12,14 +12,16 @@
 (() => {
   "use strict";
 
-  const STYLE_ID = "leo-ad-widget-styles";
+  const VERSION = "1.0.0";
+  const jsdoc = window.document;
 
-  const DEFAULT_CDN =
-    document.currentScript?.getAttribute("data-base-cdn") ||
-    "https://cdn.leocdp.com/ui-wireframes/html/";
+  const STYLE_ID = "leo-ad-widget-styles";
+  const GITHUB_CDN = "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@latest/ads-server/static/";
+
+  const DEFAULT_CDN = jsdoc.currentScript?.getAttribute("data-base-cdn") || GITHUB_CDN;
 
   const rawApiBase =
-    document.currentScript?.getAttribute("data-ads-api-base") || DEFAULT_CDN;
+    jsdoc.currentScript?.getAttribute("data-ads-api-base") || DEFAULT_CDN;
 
   const DEFAULT_API_BASE = rawApiBase.endsWith("/")
     ? rawApiBase
@@ -149,9 +151,9 @@
 
       params.set("leovid", this.getOrCreateVisitorId());
 
-      params.set("url", window.location.href);
+      params.set("url", jsdoc.location.href);
 
-      params.set("referrer", document.referrer || "");
+      params.set("referrer", jsdoc.referrer || "");
 
       params.set("timestamp", new Date().toISOString());
 
@@ -500,7 +502,10 @@
     renderProductCarouselAd(data) {
       const adItems = Array.isArray(data.adItems) ? data.adItems : [];
 
-      const productsHtml = adItems
+      // Limit to maximum 4 items for carousel display
+      const displayItems = adItems.slice(0, 5);
+
+      const productsHtml = displayItems
         .map((product) => {
           const isHighlighted = Boolean(product.highlightText);
 
@@ -575,7 +580,7 @@
         })
         .join("");
 
-      const adCount = Math.min(adItems.length || 1, 4);
+      const adCount = Math.min(displayItems.length || 1, 4);
 
       this.container.innerHTML = `
         <div class="ad-widget-wrapper">
@@ -842,7 +847,7 @@
         </div>
       `;
 
-      const slot = document.getElementById(containerId);
+      const slot = jsdoc.getElementById(containerId);
 
       if (!slot) {
         throw new Error(
@@ -920,7 +925,7 @@
           return;
         }
 
-        const existingScripts = document.querySelectorAll(
+        const existingScripts = jsdoc.querySelectorAll(
           "script[data-leo-ad-script]",
         );
 
@@ -955,7 +960,7 @@
           return;
         }
 
-        const script = document.createElement("script");
+        const script = jsdoc.createElement("script");
 
         script.src = src;
         script.async = async;
@@ -984,7 +989,7 @@
           },
         );
 
-        document.head.appendChild(script);
+        jsdoc.head.appendChild(script);
       });
     }
 
@@ -1437,7 +1442,7 @@
   // GLOBAL STYLESHEET INJECTION
   // ------------------------------------------------------------
   const injectStyles = (cssUrl) => {
-    if (document.getElementById(STYLE_ID)) {
+    if (jsdoc.getElementById(STYLE_ID)) {
       return;
     }
 
@@ -1454,17 +1459,17 @@
         return response.text();
       })
       .then((cssText) => {
-        if (document.getElementById(STYLE_ID)) {
+        if (jsdoc.getElementById(STYLE_ID)) {
           return;
         }
 
-        const style = document.createElement("style");
+        const style = jsdoc.createElement("style");
 
         style.type = "text/css";
         style.id = STYLE_ID;
         style.textContent = cssText;
 
-        document.head.appendChild(style);
+        jsdoc.head.appendChild(style);
       })
       .catch((error) => {
         console.warn("Unable to load ad stylesheet", error);
@@ -1478,7 +1483,7 @@
    */
 
   const initializeAdWidgets = () => {
-    const nodes = Array.from(document.getElementsByClassName("leo-ad-container"));
+    const nodes = Array.from(jsdoc.getElementsByClassName("leo-ad-container"));
 
     if (nodes.length > 0) {
       const firstNode = nodes[0];
@@ -1499,8 +1504,8 @@
     });
   };
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initializeAdWidgets);
+  if (jsdoc.readyState === "loading") {
+    jsdoc.addEventListener("DOMContentLoaded", initializeAdWidgets);
   } else {
     initializeAdWidgets();
   }
