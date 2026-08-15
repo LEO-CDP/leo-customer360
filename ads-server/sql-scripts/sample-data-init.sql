@@ -1405,7 +1405,7 @@ SELECT
     x.frequency_cap,
     x.metadata::jsonb
 FROM leo_ads.tenant t
-JOIN (
+CROSS JOIN (
     VALUES
     (
         'coolmate_dynamic_retargeting_01',

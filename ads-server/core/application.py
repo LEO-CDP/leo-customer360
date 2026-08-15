@@ -219,6 +219,13 @@ class AdServerApplication:
             tags=["Placements"],
         )
 
+        application.add_api_route(
+            "/serve/{placement_ref}",
+            self.serve_ads,
+            methods=["GET"],
+            tags=["Ads"],
+        )
+
     # ------------------------------------------------------------------
     # Health
     # ------------------------------------------------------------------
@@ -289,3 +296,27 @@ class AdServerApplication:
         return self.placement_repository.get_active_by_key(
             placement_key=placement_key,
         )
+
+    def serve_ads(
+        self,
+        placement_ref: str,
+        tenant: str = "demo",
+        limit: int = 5,
+    ) -> dict:
+        """
+        Assemble a full ad-serving payload (creative, rendering, tracking,
+        advertiser, destination) for a placement, or for a single ad when
+        `placement_ref` matches an `ad_key` instead.
+
+        Dev/test endpoint powering html/ads-banner.html and
+        html/ads.loader.js against real leo_ads data instead of the
+        static html/ads.data.json fixture.
+        """
+
+        ads = self.ad_repository.get_serving_ads(
+            tenant_key=tenant,
+            placement_ref=placement_ref,
+            limit=limit,
+        )
+
+        return {"ads": ads}

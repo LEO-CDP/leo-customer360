@@ -16,9 +16,17 @@
 
   const DEFAULT_CDN =
     document.currentScript?.getAttribute("data-base-cdn") ||
-    "https://cdn.leo.com/ui-wireframes/html/";
+    "https://cdn.leocdp.com/ui-wireframes/html/";
+
+  const rawApiBase =
+    document.currentScript?.getAttribute("data-ads-api-base") || DEFAULT_CDN;
+
+  const DEFAULT_API_BASE = rawApiBase.endsWith("/")
+    ? rawApiBase
+    : `${rawApiBase}/`;
 
   console.log("Leo Ad Widget Loader initialized. Using CDN:", DEFAULT_CDN);
+  console.log("Leo Ad Widget Loader initialized. Using API base:", DEFAULT_API_BASE);
 
   class LeoAdWidget {
     constructor(container) {
@@ -34,7 +42,6 @@
       this.container.classList.add(`leo-ad-theme-${this.theme}`);
 
       this.setContainerStyles();
-      this.injectStyles();
       this.init();
     }
 
@@ -78,43 +85,6 @@
       return parentDark || prefersDark ? "dark" : "light";
     }
 
-    injectStyles() {
-      if (document.getElementById(STYLE_ID)) {
-        return;
-      }
-
-      const cssUrl =
-        this.container.getAttribute("data-ad-css-url") ||
-        `${DEFAULT_CDN}leo.ads.css`;
-
-      fetch(cssUrl, {
-        cache: "no-store",
-      })
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error(`Failed to load ad stylesheet: ${response.status}`);
-          }
-
-          return response.text();
-        })
-        .then((cssText) => {
-          if (document.getElementById(STYLE_ID)) {
-            return;
-          }
-
-          const style = document.createElement("style");
-
-          style.type = "text/css";
-          style.id = STYLE_ID;
-          style.textContent = cssText;
-
-          document.head.appendChild(style);
-        })
-        .catch((error) => {
-          console.warn("Unable to load ad stylesheet", error);
-        });
-    }
-
     /**
      * ------------------------------------------------------------
      * INITIALIZATION
@@ -147,7 +117,7 @@
 
       const customEndpoint =
         this.container.getAttribute("data-ad-data-url") ||
-        `${DEFAULT_CDN}ads.data.json`;
+        `${DEFAULT_API_BASE}serve/${encodeURIComponent(placementId)}`;
 
       const url = new URL(customEndpoint, window.location.href);
 
@@ -1463,6 +1433,44 @@
     }
   }
 
+  // ------------------------------------------------------------
+  // GLOBAL STYLESHEET INJECTION
+  // ------------------------------------------------------------
+  const injectStyles = (cssUrl) => {
+    if (document.getElementById(STYLE_ID)) {
+      return;
+    }
+
+    const resolvedCssUrl = cssUrl || `${DEFAULT_CDN}leo.ads.css`;
+
+    fetch(resolvedCssUrl, {
+      cache: "no-store",
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to load ad stylesheet: ${response.status}`);
+        }
+
+        return response.text();
+      })
+      .then((cssText) => {
+        if (document.getElementById(STYLE_ID)) {
+          return;
+        }
+
+        const style = document.createElement("style");
+
+        style.type = "text/css";
+        style.id = STYLE_ID;
+        style.textContent = cssText;
+
+        document.head.appendChild(style);
+      })
+      .catch((error) => {
+        console.warn("Unable to load ad stylesheet", error);
+      });
+  };
+
   /**
    * ------------------------------------------------------------
    * GLOBAL INITIALIZER
@@ -1470,9 +1478,17 @@
    */
 
   const initializeAdWidgets = () => {
-    const nodes = document.getElementsByClassName("leo-ad-container");
+    const nodes = Array.from(document.getElementsByClassName("leo-ad-container"));
 
-    Array.from(nodes).forEach((node) => {
+    if (nodes.length > 0) {
+      const firstNode = nodes[0];
+
+      injectStyles(
+        firstNode.getAttribute("data-ad-css-url") || `${DEFAULT_CDN}leo.ads.css`,
+      );
+    }
+
+    nodes.forEach((node) => {
       if (node.dataset.adInitialized === "true") {
         return;
       }

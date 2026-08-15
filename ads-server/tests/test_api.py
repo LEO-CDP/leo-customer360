@@ -20,6 +20,7 @@ written here is ever persisted to the real database.
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from tests._pg import check_postgres_available
@@ -379,6 +380,109 @@ class TestMultiTenancy:
             assert data_t1["tenant_id"] == seed["tenant_id"]
         if data_t2:
             assert data_t2["tenant_id"] == other_tenant.tenant_id
+
+
+class TestServeEndpoint:
+    """Test GET /serve/{placement_ref} (full ad-serving payload)."""
+
+    @pytest.fixture
+    def serving_setup(self, test_engine, seed):
+        """Create a placement + single-banner ad with a demoPlacementId."""
+        from model.creative import Creative
+
+        session = Session(bind=test_engine, expire_on_commit=False)
+
+        creative = Creative(
+            tenant_id=seed["tenant_id"],
+            creative_key="serve-test-creative",
+            ad_type="dynamic_retargeting",
+            format_code="single_banner",
+            render_type_code="native_json",
+            headline="Test headline",
+            subheadline="Test subheadline",
+            cta="Shop now",
+            image_url="https://example.com/banner.jpg",
+            content_payload={"badge": {"text": "-10%"}},
+        )
+        session.add(creative)
+        session.flush()
+
+        placement = Placement(
+            tenant_id=seed["tenant_id"],
+            placement_key="serve-test-banner",
+            name="Serve Test Banner",
+            status="active",
+            responsive=False,
+            max_width_px=300,
+            max_height_px=250,
+            metadata_={"demoPlacementId": "99999"},
+        )
+        session.add(placement)
+        session.flush()
+
+        ad = Ad(
+            tenant_id=seed["tenant_id"],
+            ad_key="serve-test-ad",
+            creative_id=creative.creative_id,
+            placement_id=placement.placement_id,
+            status="active",
+            score_weight=100.0,
+            metadata_={},
+        )
+        session.add(ad)
+        session.commit()
+
+        tenant_key = session.execute(
+            text("SELECT tenant_key FROM leo_ads.tenant WHERE tenant_id = :id"),
+            {"id": seed["tenant_id"]},
+        ).scalar_one()
+
+        session.close()
+
+        return {"tenant_key": tenant_key, "demo_placement_id": "99999"}
+
+    def test_serve_by_demo_placement_id(self, client, serving_setup):
+        """Placement lookup via metadata.demoPlacementId returns the ad."""
+        response = client.get(
+            f"/serve/{serving_setup['demo_placement_id']}",
+            params={"tenant": serving_setup["tenant_key"]},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "ads" in data
+        assert len(data["ads"]) == 1
+
+        ad_payload = data["ads"][0]
+        assert ad_payload["adId"] == "serve-test-ad"
+        assert ad_payload["adFormat"] == "single_banner"
+        assert ad_payload["adPlacementId"] == "99999"
+        assert ad_payload["creative"]["headline"] == "Test headline"
+        assert ad_payload["creative"]["badge"] == {"text": "-10%"}
+
+    def test_serve_by_ad_key_fallback(self, client, serving_setup):
+        """When no placement matches, fall back to ad_key lookup."""
+        response = client.get(
+            "/serve/serve-test-ad",
+            params={"tenant": serving_setup["tenant_key"]},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert len(data["ads"]) == 1
+        assert data["ads"][0]["adId"] == "serve-test-ad"
+
+    def test_serve_unknown_ref_returns_empty(self, client, serving_setup):
+        """Unknown placement/ad reference returns an empty ads array."""
+        response = client.get(
+            "/serve/does-not-exist",
+            params={"tenant": serving_setup["tenant_key"]},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"ads": []}
 
 
 class TestErrorHandling:

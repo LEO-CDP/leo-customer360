@@ -135,9 +135,10 @@
   <header>
     <h1>Ad format test bench</h1>
     <p>
-      Seven placements from ads.data.json. Native formats render normally;
-      external JS tags use deterministic preview mode so this page needs no
-      publisher credentials or third-party network access.
+      Seven placements served live from the ads-server API
+      (http://localhost:9009). Native formats render normally; external JS
+      tags use deterministic preview mode so this page needs no publisher
+      credentials or third-party network access.
     </p>
   </header>
 
@@ -180,11 +181,11 @@
         <div class="test-heading">
           <div>
             <h2 id="affiliate-native-title">Affiliate product</h2>
-            <code>affiliate_product_001 · native_product</code>
+            <code>affiliate_shopee_001 · native_product</code>
           </div>
           <span class="test-status">Live render</span>
         </div>
-        <div class="leo-ad-container" data-ad-placement="affiliate_product_001" data-ad-format="native_product" data-ad-theme="light"></div>
+        <div class="leo-ad-container" data-ad-placement="affiliate_shopee_001" data-ad-format="native_product" data-ad-theme="light"></div>
       </section>
 
       <section class="test-case" aria-labelledby="affiliate-widget-title">
@@ -222,6 +223,12 @@
     </div>
   </main>
 
-  <script defer src="ads.loader.js" id="leo_ads_loader" data-base-cdn="./"></script>
+  <script
+    defer
+    src="ads.loader.js"
+    id="leo_ads_loader"
+    data-base-cdn="./"
+    data-ads-api-base="http://localhost:9009/"
+  ></script>
 </body>
 </html>
