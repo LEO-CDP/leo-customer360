@@ -35,10 +35,29 @@ from model.base import Base
 
 class Creative(Base):
     """
-    Canonical ad creative.
+    Canonical ad creative content.
 
-    Keeps common fields relational while provider/template-specific data
-    lives in content_payload.
+    Creative stores the content/assets used by ads. This model separates:
+
+    - Common rendering fields: headline, body, image_url, video_url, cta, etc.
+    - Provider-specific payload: content_payload (JSONB) for platform-specific data
+    - Creative lifecycle: status, version_no, starts_at, ends_at
+    - Multiple rendering mechanisms: CreativeRender links to render_type_code
+
+    Example flow:
+        1. Upload image, text content → create Creative
+        2. Define rendering variations → create CreativeRender rows
+        3. Link Creative to Campaign (ownership)
+        4. Link Ad to Creative (delivery config)
+        5. Render endpoint returns content based on placement's accepted formats
+
+    Database:
+        Schema: leo_ads
+        Table:  creative
+        Indexes: tenant_id, status, campaign_id
+
+    Multi-tenancy:
+        All queries must filter by tenant_id.
     """
 
     __tablename__ = "creative"
@@ -295,7 +314,8 @@ class Destination(Base):
         nullable=True,
     )
 
-    metadata: Mapped[dict[str, Any]] = mapped_column(
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
         JSONB,
         nullable=False,
         default=dict,

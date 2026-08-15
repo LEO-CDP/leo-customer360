@@ -1,9 +1,23 @@
 """
 Placement repository.
 
-Responsible for querying:
+Responsible for querying leo_ads.placement.
 
-    leo_ads.placement
+Placements represent publisher inventory slots. The serving layer uses placement
+lookup to retrieve available ad candidates for a specific slot (e.g., homepage_top).
+
+Key separation:
+    - Placement: Publisher inventory definition (dimensions, location, format)
+    - Placement Format: Supported formats/capabilities for a placement
+    - Ad: Business logic + content linking (placement -> ads via Ad table)
+
+Performance notes:
+    - Placement lookups should be cached in Redis (TTL=3600 seconds)
+    - Placement-to-format lookup is embedded in PlacementFormat table
+    - Consider pre-computing compatible ad candidates in Redis for hot placements
+
+Multi-tenancy:
+    - Tenant filtering is optional but should become mandatory
 """
 
 from __future__ import annotations
@@ -19,6 +33,17 @@ from model.placement import Placement
 class PlacementRepository:
     """
     Repository for publisher inventory placements.
+
+    Responsibilities:
+        - Retrieve active placements by placement_key
+        - Optional tenant filtering for multi-tenancy
+        - Serialize ORM objects to API-safe dicts
+
+    Not responsible for:
+        - Validating placement constraints (width/height/responsive)
+        - Fetching associated formats (PlacementFormat)
+        - Fetching candidate ads (use AdRepository)
+        - Caching (should migrate to RedisRepository)
     """
 
     def __init__(
@@ -96,7 +121,7 @@ class PlacementRepository:
             "min_height_px": placement.min_height_px,
             "max_height_px": placement.max_height_px,
             "responsive": placement.responsive,
-            "metadata": placement.metadata,
+            "metadata": placement.metadata_,
             "created_at": placement.created_at,
             "updated_at": placement.updated_at,
         }

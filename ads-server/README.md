@@ -1,768 +1,699 @@
-# LEO Ads — High-Scale Ad Server Database Schema
+# LEO Ad Server API
 
-PostgreSQL 16+ schema for a multi-tenant, high-scale advertising platform designed to support approximately **40M users/profiles**, multiple ad supply sources, flexible ad formats, low-latency serving, and high-volume impression/click telemetry.
+High-performance, multi-tenant ad serving API built on FastAPI + SQLAlchemy + PostgreSQL 16.
 
-The schema is intentionally split between the **ad control plane**, the **serving/eligibility layer**, and the **event stream**. PostgreSQL is the source of truth for campaign and creative configuration; Redis is intended for the hot candidate cache; targeting is expected to use precomputed audience/feature data; and Kafka is the preferred high-volume event transport.
+Designed for:
+- **Low-latency ad serving** with Redis caching
+- **Multi-tenant isolation** with strict tenant_id filtering
+- **Production-grade code** with comprehensive documentation and tests
+- **Scalability** supporting 40M+ profiles, multiple ad sources, flexible formats
 
-## Goals
+---
 
-The schema is designed to:
+## Quick Start
 
-- support local/internal ads, Google Ad Manager, affiliate networks, JS widgets, native JSON, display, carousel, video, redirects, and future formats
-- support multiple providers and source accounts without changing PostgreSQL enum types
-- separate advertisers, campaigns, ads, creatives, placements, targeting, and rendering configuration
-- keep the ad-serving path relational and index-friendly
-- keep provider-specific payloads flexible through carefully scoped `JSONB`
-- avoid putting 40M-user membership or event traffic into the core ad catalog
-- support precomputed placement-to-ad candidate sets that can be cached in Redis
-- retain recent operational telemetry in partitioned PostgreSQL tables while allowing Kafka to be the primary streaming path
+### Prerequisites
+- Python 3.9+
+- PostgreSQL 16+
+- Redis (optional, for caching)
+- Docker Compose (optional, for local dev environment)
 
-## Runtime Architecture
-
-```mermaid
-flowchart TD
-    A["Ad Request<br/>placement • user • page"]
-        --> B["Redis Cache<br/>placement → candidate ads"]
-
-    B -->|"candidate ads only"| C["Targeting / Ranking<br/>audience • context"]
-
-    C --> D["Creative Resolver<br/>native • GAM • affiliate • widget"]
-
-    D --> E["Ad Response"]
-
-    E --> F["Impression"]
-    E --> G["Click"]
-
-    F --> H["Kafka"]
-    G --> H
-
-    H --> I["Analytics / Attribution"]
-```
-
-### Responsibilities by component
-
-| Component | Responsibility |
-|---|---|
-| PostgreSQL | Canonical ad catalog, campaign configuration, creatives, placements, targeting rules, source mappings, and operational metadata |
-| Redis | Hot cache of active placement candidates and other serving-time data |
-| Targeting / feature layer | Audience membership and user/context signals used to filter and rank candidates |
-| Ad API | Low-latency ad request handling and response construction |
-| Kafka | High-volume impression, click, conversion, and related event streaming |
-| Analytics / attribution | Downstream aggregation, attribution, reporting, and optimization |
-
-The SQL schema does **not** attempt to implement the entire ad-serving engine. It provides the durable data model and the precomputed serving index required by that engine.
-
-## Core Design Principle
-
-The most important architectural separation is:
-
-```text
-Control Plane
-    tenant
-      ↓
-    advertiser
-      ↓
-    source_account / source_asset
-      ↓
-    campaign
-      ↓
-    creative
-      ↓
-    creative_render
-      ↓
-    destination / tracking / creative_item
-
-Serving Plane
-    placement
-      ↓
-    placement_format
-      ↓
-    ad
-      ↓
-    targeting_rule / audience
-      ↓
-    placement_ad
-      ↓
-    Redis candidate cache
-
-Telemetry Plane
-    ad request
-      ↓
-    impression / click / conversion
-      ↓
-    Kafka
-      ↓
-    analytics / attribution
-```
-
-This prevents the operational ad catalog from becoming the runtime event store or a 40M-user identity store.
-
-## Schema
-
-All tables are contained in the `leo_ads` PostgreSQL schema.
-
-### 1. Tenancy
-
-`leo_ads.tenant`
-
-Provides tenant isolation for the ad platform. Most business objects carry a `tenant_id` so queries and indexes can remain tenant-aware.
-
-Key fields:
-
-- `tenant_id`
-- `tenant_key`
-- `status`
-- `settings`
-
-### 2. Provider / Source Dictionaries
-
-The schema deliberately avoids PostgreSQL `ENUM` for provider-facing categories.
-
-Dictionary tables:
-
-- `source_type`
-- `render_type`
-- `destination_type`
-
-This allows new providers or rendering modes to be introduced without requiring a database enum migration.
-
-Examples already seeded:
-
-```text
-source_type:
-  local
-  ad_network
-  affiliate
-
-render_type:
-  native_json
-  js_tag
-  iframe
-  html
-  video
-  redirect
-
-destination_type:
-  url
-  product
-  affiliate_url
-  app_deep_link
-  custom
-```
-
-### 3. Advertisers and Source Accounts
-
-`advertiser` represents the commercial advertiser.
-
-`source_account` represents the account through which an advertiser or tenant receives ads/assets from an external source such as Google, an affiliate network, or an internal provider.
-
-`source_asset` stores provider-specific external objects such as:
-
-- external campaign IDs
-- external creative IDs
-- ad unit IDs
-- provider-specific raw payloads
-
-The provider payload remains available through `raw_payload JSONB` without forcing the relational schema to understand every external API.
-
-### 4. Placements
-
-`placement` represents a stable publisher inventory slot.
-
-Examples:
-
-```text
-homepage_top
-article_inline_01
-sidebar_01
-product_recommendation
-native_feed
-```
-
-A placement defines the available physical/semantic inventory characteristics.
-
-`placement_format` defines which formats a placement can accept.
-
-This is intentionally different from putting one permanent `adFormat` on an ad. A placement may support multiple formats and responsive sizes.
-
-Example:
-
-```text
-placement: homepage_top
-
-supported formats:
-  display_728x90
-  display_970x250
-  display_320x100
-```
-
-### 5. Campaigns
-
-`campaign` is the business/buying object.
-
-It stores:
-
-- advertiser/source ownership
-- campaign key and name
-- objective
-- buying model
-- budget and daily budget
-- currency
-- start/end time
-- lifecycle status
-
-The campaign is intentionally separate from `ad`, because one campaign may contain multiple delivery objects and creative variants.
-
-### 6. Creatives
-
-`creative` is the reusable content object.
-
-Common renderer fields are promoted to relational columns:
-
-- `headline`
-- `subheadline`
-- `body`
-- `cta`
-- `image_url`
-- `video_url`
-- `logo_url`
-
-Provider/template-specific content remains in:
-
-```sql
-content_payload JSONB
-```
-
-Examples include:
-
-- badges
-- product attributes
-- native-specific fields
-- recommendation metadata
-- provider-specific creative values
-
-This avoids creating a new SQL column every time an external ad source adds a field.
-
-### 7. Rendering
-
-`creative_render` separates **content** from **how that content is rendered**.
-
-It supports:
-
-```text
-native_json
-js_tag
-iframe
-html
-video
-redirect
-```
-
-It can store:
-
-- template key
-- external loader source
-- async loading flag
-- container ID
-- container class
-- renderer-specific configuration
-
-For example, a Google Ad Manager creative can use a `js_tag` renderer with a GPT loader and ad-unit configuration, while an internal native ad can use `native_json` and a template such as `native_card_v1`.
-
-### 8. Destinations and Tracking
-
-`destination` stores the click destination separately from creative content.
-
-`tracking_endpoint` supports event types such as:
-
-- impression
-- click
-- viewable impression
-- conversion
-- video start
-- video complete
-
-This allows different supply providers to have different tracking endpoints without changing the core creative model.
-
-### 9. Creative Items
-
-`creative_item` supports multi-item formats such as:
-
-- product carousel
-- product grid
-- recommendation cards
-- affiliate product lists
-
-It contains normalized common commerce fields such as:
-
-- item name
-- price
-- currency
-- original price
-- discount text
-- image URL
-- destination URL
-- highlight text
-- sort order
-
-Additional provider-specific attributes can remain in `item_payload JSONB`.
-
-### 10. Ad Delivery Object
-
-`ad` is the thin object intended to participate in serving.
-
-An ad points to:
-
-```text
-campaign
-creative
-placement
-```
-
-It also contains serving-oriented attributes such as:
-
-- `status`
-- `score_weight`
-- `frequency_cap`
-- `metadata`
-
-Keeping this object small is important because it sits directly in the serving path.
-
-### 11. Targeting and Audiences
-
-`targeting_rule` stores cheap request-time predicates and audience references.
-
-Supported fields include:
-
-- countries
-- regions
-- device types
-- operating systems
-- browsers
-- languages
-- age range
-- gender codes
-- context keywords
-- custom predicates
-- exclusions
-- priority
-
-`audience` defines an audience as a reusable logical object.
-
-`ad_audience` defines whether an audience is included or excluded for a specific ad.
-
-### 12. 40M-User Boundary
-
-The schema intentionally does **not** define a massive relational table such as:
-
-```text
-40M users × many ads × many audiences
-```
-
-inside the primary ad catalog.
-
-Instead:
-
-```text
-Customer / CDP profile
-        ↓
-Audience computation
-        ↓
-Audience / feature store
-        ↓
-Ad targeting
-        ↓
-Placement candidate filtering
-```
-
-`user_serving_key` is only a compact serving-side identity table for identifiers/hashes needed by the ad server. It is not intended to replace the Customer 360/CDP profile store.
-
-### 13. Precomputed Serving Index
-
-`placement_ad` is one of the most important tables for high-QPS serving.
-
-It stores the eligible relationship between:
-
-```text
-placement → ad
-```
-
-plus:
-
-- `rank_score`
-- validity window
-- active flag
-
-The serving system can periodically materialize this set into Redis:
-
-```text
-redis key:
-  ads:placement:{placement_id}
-
-value:
-  ranked candidate ad IDs
-```
-
-The request path can then retrieve a small candidate set rather than scanning the complete `ad` table.
-
-### 14. Event Telemetry
-
-`ad_event` is a range-partitioned event table for operational retention/landing use.
-
-It supports:
-
-```text
-impression
-click
-conversion
-video_start
-video_complete
-...
-```
-
-The table is partitioned by `event_time`.
-
-The SQL includes:
-
-- August 2026 partition
-- default partition
-
-Production deployments should create future partitions ahead of time with a scheduler or migration process.
-
-For very high traffic, Kafka should remain the primary ingestion path, with PostgreSQL retaining only the operational window or serving as an analytics landing layer.
-
-## Source-Agnostic Ad Model
-
-The schema maps cleanly to different source types without changing the core delivery model.
-
-| Source | Example | Source layer | Rendering |
-|---|---|---|---|
-| Local | Internal Coolmate campaign | `source_account` / `source_asset` | `native_json` |
-| Google Ad Manager | Display banner | `source_account` / `source_asset` | `js_tag` |
-| Affiliate | Shopee product | `source_account` / `source_asset` | `native_json` |
-| Affiliate | Lazada widget | `source_account` / `source_asset` | `js_tag` |
-| Future provider | New network/API | Same model | Add render/source codes as required |
-
-The database therefore models **what the ad is**, **where it came from**, and **how it is rendered** as separate concerns.
-
-## Example Serving Flow
-
-A typical request should conceptually behave like this:
-
-```text
-1. Receive:
-   placement + user key + page/context + device
-
-2. Redis:
-   retrieve candidate ads for the placement
-
-3. Targeting:
-   remove excluded/ineligible candidates
-
-4. Ranking:
-   apply rank_score + campaign/ad priorities + user/context signals
-
-5. Creative Resolver:
-   load the creative + renderer + destination + tracking configuration
-
-6. Response:
-   return native JSON, JS tag, widget configuration, etc.
-
-7. Telemetry:
-   emit impression/click/conversion events to Kafka
-```
-
-The PostgreSQL view `leo_ads.v_active_ads` is intended for administration/debugging, not as the primary low-latency serving path.
-
-## Indexing Strategy
-
-The schema includes indexes for three major access patterns.
-
-### Control-plane queries
-
-Examples:
-
-```sql
-campaign by tenant + status
-source account by tenant + provider
-source asset by external ID
-creative by source asset
-```
-
-### Hot serving queries
-
-The most important serving indexes are:
-
-```sql
-idx_placement_active
-idx_ad_active_by_placement
-idx_placement_ad_hot
-idx_ad_campaign_active
-idx_creative_active
-```
-
-The key runtime path is:
-
-```text
-placement
-   ↓
-active placement_ad rows
-   ↓
-rank_score DESC
-   ↓
-small candidate set
-```
-
-### Event queries
-
-Telemetry indexes include:
-
-```sql
-idx_ad_event_tenant_time
-idx_ad_event_ad_time
-idx_ad_event_request
-```
-
-## JSONB Strategy
-
-JSONB is intentionally limited to fields where schema flexibility is valuable.
-
-Use JSONB for:
-
-- provider payloads
-- renderer configuration
-- custom content fields
-- targeting predicates that are not yet normalized
-- future provider-specific metadata
-
-Do **not** use JSONB as a replacement for high-frequency relational joins such as:
-
-```text
-tenant_id
-campaign_id
-creative_id
-placement_id
-status
-```
-
-Those remain explicit indexed columns.
-
-GIN indexes are provided for the two main provider/content payload areas:
-
-```sql
-source_asset.raw_payload
-creative.content_payload
-```
-
-Add additional JSONB indexes only after query patterns justify them.
-
-## PostgreSQL and Scaling Guidance
-
-### PostgreSQL should be the source of truth
-
-Use PostgreSQL for:
-
-- configuration
-- lifecycle state
-- campaign metadata
-- creative metadata
-- placement configuration
-- targeting definitions
-- source-provider mappings
-
-### Redis should be the hot serving cache
-
-Cache things such as:
-
-```text
-placement → active candidate ad IDs
-placement → supported formats
-ad ID → compact serving metadata
-```
-
-Avoid putting large mutable creative payloads into every Redis candidate entry when the renderer can resolve them separately.
-
-### Kafka should absorb telemetry volume
-
-Do not synchronously write every impression/click into the core transactional catalog.
-
-Preferred pattern:
-
-```text
-Ad API
-  ↓
-Kafka
-  ├── real-time analytics
-  ├── attribution
-  ├── fraud / anomaly detection
-  ├── campaign reporting
-  └── storage / warehouse pipelines
-```
-
-## Data Lifecycle
-
-Recommended lifecycle for serving objects:
-
-```text
-draft
-  ↓
-active
-  ↓
-paused
-  ↓
-completed / archived
-```
-
-The SQL enforces lifecycle values with `CHECK` constraints on the major entities.
-
-`updated_at` is maintained automatically through the shared `leo_ads.set_updated_at()` trigger function.
-
-## Installation
-
-Run the schema against PostgreSQL 16+:
+### Installation
 
 ```bash
-psql "$DATABASE_URL" \
-  -f db-schema-high-scale-ad-server.sql
+cd ads-server
+
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Copy .env template
+cp .env.example .env
+
+# Edit .env with your configuration
+# LEO_AD_API_HOST=localhost
+# LEO_AD_API_PORT=9009
+# DB_HOST=localhost
+# DB_PORT=5432
+# DB_USER=postgres
+# DB_PASSWORD=change_me_postgres_password
+# DB_NAME=customer360
 ```
 
-The SQL creates:
+### Running the Server
 
-```text
-schema: leo_ads
-extension: pgcrypto
+**Basic startup:**
+```bash
+./start.sh
 ```
 
-The file is wrapped in a transaction with `BEGIN` / `COMMIT`.
-
-## Important Production Considerations
-
-### Event partition management
-
-The SQL contains an initial monthly partition and a default partition. Production should create future partitions before they are needed.
-
-For example:
-
-```text
-ad_event_2026_09
-ad_event_2026_10
-ad_event_2026_11
-...
+**With database seeding (creates schema + demo data):**
+```bash
+./start.sh --seed-demo-ads-server
 ```
 
-### Redis materialization
-
-`placement_ad` should be treated as the durable candidate index. Redis should be a cache/materialized serving layer, not the authoritative source.
-
-### Audience membership
-
-Do not automatically create a PostgreSQL row for every user/ad relationship. For 40M users, audience membership should normally be generated and stored in a dedicated segmentation/feature system optimized for membership tests.
-
-### Tenant isolation
-
-All tenant-owned resources should be queried with `tenant_id` in the application layer. The schema provides tenant foreign keys and tenant-oriented indexes; application/API authorization remains responsible for enforcing the correct tenant context.
-
-### Ad ranking
-
-`rank_score` and `score_weight` are deliberately simple primitives. A production ranking engine can combine them with:
-
-```text
-user affinity
-context relevance
-campaign priority
-bid / value
-frequency
-pacing
-conversion probability
-business rules
+**Stop the server:**
+```bash
+./stop.sh
 ```
 
-The database schema does not prescribe one ranking algorithm.
-
-## Example Data Relationships
-
-```mermaid
-erDiagram
-    TENANT ||--o{ ADVERTISER : owns
-    TENANT ||--o{ SOURCE_ACCOUNT : owns
-    ADVERTISER ||--o{ SOURCE_ACCOUNT : uses
-    SOURCE_ACCOUNT ||--o{ SOURCE_ASSET : imports
-
-    TENANT ||--o{ CAMPAIGN : owns
-    ADVERTISER ||--o{ CAMPAIGN : funds
-    CAMPAIGN ||--o{ CREATIVE : contains
-    SOURCE_ASSET ||--o{ CREATIVE : maps
-
-    TENANT ||--o{ PLACEMENT : owns
-    PLACEMENT ||--o{ PLACEMENT_FORMAT : supports
-    PLACEMENT ||--o{ AD : serves
-    CAMPAIGN ||--o{ AD : delivers
-    CREATIVE ||--o{ AD : renders
-
-    CREATIVE ||--o{ CREATIVE_RENDER : uses
-    CREATIVE ||--o{ CREATIVE_ITEM : contains
-    CREATIVE ||--o{ DESTINATION : targets
-    CREATIVE ||--o{ TRACKING_ENDPOINT : tracks
-
-    AD ||--o{ TARGETING_RULE : filters
-    AD ||--o{ AD_AUDIENCE : targets
-    AUDIENCE ||--o{ AD_AUDIENCE : groups
-
-    PLACEMENT ||--o{ PLACEMENT_AD : indexes
-    AD ||--o{ PLACEMENT_AD : candidates
-
-    TENANT ||--o{ USER_SERVING_KEY : identifies
-    AD ||--o{ AD_EVENT : generates
+**Restart the server:**
+```bash
+./restart.sh
 ```
 
-## Recommended Repository Layout
+### Development Mode
 
-A minimal repository can keep the schema and documentation together:
+```bash
+# With auto-reload
+UVICORN_RELOAD=true ./start.sh
 
-```text
+# Or directly with uvicorn
+uvicorn app:app --reload --port 9009
+```
+
+**Browse API docs:**
+- Swagger UI: http://localhost:9009/docs
+- ReDoc: http://localhost:9009/redoc
+
+---
+
+## API Endpoints
+
+### Health
+
+**GET** `/`
+```json
+{
+  "service": "leo-ad-server-api",
+  "status": "ok",
+  "version": "1.0.0",
+  "schema": "leo_ads",
+  "docs": "/docs"
+}
+```
+
+**GET** `/health`
+```json
+{
+  "status": "ok",
+  "service": "leo-ad-server-api"
+}
+```
+
+**GET** `/health/database`
+```json
+{
+  "status": "ok",
+  "database": "reachable",
+  "schema": "leo_ads"
+}
+```
+
+### Ads
+
+**GET** `/ads/{ad_id}`
+
+Retrieve a single ad by ID.
+
+Parameters:
+- `ad_id` (int, path): The primary key of the ad
+
+Response:
+```json
+{
+  "ad_id": 12345,
+  "tenant_id": 1,
+  "ad_key": "ad_1001",
+  "campaign_id": 100,
+  "creative_id": 500,
+  "placement_id": 10,
+  "status": "active",
+  "score_weight": 1.5,
+  "frequency_cap": 3,
+  "metadata": {},
+  "created_at": "2024-01-01T10:00:00Z",
+  "updated_at": "2024-01-15T14:30:00Z"
+}
+```
+
+### Placements
+
+**GET** `/placements/{placement_key}`
+
+Retrieve a placement by key.
+
+Parameters:
+- `placement_key` (str, path): The external identifier for the placement
+
+Response:
+```json
+{
+  "placement_id": 10,
+  "tenant_id": 1,
+  "placement_key": "homepage_top",
+  "name": "Homepage Top Banner",
+  "status": "active",
+  "min_width_px": 728,
+  "max_width_px": 728,
+  "min_height_px": 90,
+  "max_height_px": 90,
+  "responsive": false,
+  "metadata": {},
+  "created_at": "2024-01-01T10:00:00Z",
+  "updated_at": "2024-01-15T14:30:00Z"
+}
+```
+
+---
+
+## Project Structure
+
+```
 ads-server/
-├── db-schema-high-scale-ad-server.sql
-├── README.md
-├── migrations/
-├── seeds/
-├── ad-api/
-├── targeting/
-├── ranking/
-├── redis/
-├── kafka/
-└── docs/
+├── app.py                     # FastAPI entrypoint
+├── core/
+│   ├── application.py         # Application composition & lifecycle
+│   ├── config.py              # Configuration & database setup
+│   └── database.py            # Database connection pooling
+├── model/
+│   ├── base.py                # SQLAlchemy DeclarativeBase
+│   ├── ad.py                  # Ad ORM model
+│   ├── campaign.py            # Campaign ORM model
+│   ├── creative.py            # Creative ORM model
+│   └── placement.py           # Placement ORM model
+├── repository/
+│   ├── ad_repository.py       # Ad query repository
+│   └── placement_repository.py # Placement query repository
+├── tests/
+│   ├── test_model_metadata.py # ORM field mapping tests
+│   ├── test_models.py         # Model unit tests
+│   ├── test_repositories.py   # Repository unit tests
+│   └── test_api.py            # Integration tests
+├── sql-scripts/
+│   ├── db-schema-init.sql     # Schema initialization
+│   └── sample-data-init.sql   # Demo data seeding
+├── .env.example               # Environment template
+├── start.sh                   # Startup script
+├── stop.sh                    # Shutdown script
+├── restart.sh                 # Restart script
+├── run_unit_tests.sh          # Test runner
+└── requirements.txt           # Python dependencies
 ```
 
-## Scope
+---
 
-This SQL file focuses on the database foundation for the ad server.
+## Models
 
-It does not define:
+### Ad (leo_ads.ad)
 
-- a complete bidding/auction protocol
-- a full RTB/OpenRTB implementation
-- an actual Redis materializer service
-- the targeting engine implementation
-- machine-learning ranking models
-- Kafka consumers
-- billing/invoicing
-- fraud detection
-- consent/privacy workflows
+Represents a delivery configuration for an ad unit.
 
-Those services can be built around the same control-plane and serving-plane model without changing the core domain boundaries.
+**Key fields:**
+- `ad_id` (BigInteger, PK): Internal ID
+- `ad_key` (String): External identifier (use this for APIs)
+- `tenant_id` (BigInteger, FK): Multi-tenant isolation
+- `campaign_id` (BigInteger, FK, nullable): Links to Campaign
+- `creative_id` (BigInteger, FK): Links to Creative content
+- `placement_id` (BigInteger, FK): Links to Placement inventory
+- `status` (String): 'active' | 'paused' | 'archived'
+- `score_weight` (Float): Ranking weight for candidate selection
+- `frequency_cap` (Integer, nullable): Max impressions per user
+- `metadata` (JSONB): Extensible ad-tech configuration
+- `created_at`, `updated_at` (DateTime): Audit timestamps
 
-## Reference
+**Multi-tenancy rule:**
+⚠️  **CRITICAL**: All queries MUST filter by `tenant_id` to prevent cross-tenant data exposure.
 
-Schema file:
-
-- [`db-schema-high-scale-ad-server.sql`](db-schema-high-scale-ad-server.sql)
-
-Namespace:
-
-```text
-leo_ads
+**Example query (from AdRepository):**
+```python
+statement = (
+    select(Ad)
+    .where(
+        Ad.tenant_id == tenant_id,      # ← Multi-tenant filter
+        Ad.placement_id == placement_id,
+        Ad.status == "active",
+    )
+    .order_by(Ad.score_weight.desc(), Ad.ad_id.asc())
+    .limit(20)
+)
 ```
 
-Primary architectural idea:
+### Campaign (leo_ads.campaign)
 
-> PostgreSQL stores the truth, Redis serves the hot candidate set, targeting/ranking decides eligibility, the creative resolver renders the correct source format, and Kafka carries the high-volume event stream.
+Represents the business/buying configuration.
+
+**Key fields:**
+- `campaign_id` (BigInteger, PK): Internal ID
+- `campaign_key` (String): External identifier
+- `tenant_id` (BigInteger): Multi-tenant isolation
+- `advertiser_id` (BigInteger, nullable): Advertiser owner
+- `name` (String): Display name
+- `objective` (String): 'awareness' | 'traffic' | 'conversions' | 'retention' | ...
+- `buying_model` (String): 'CPM' | 'CPC' | 'CPA' | 'vCPM' | ...
+- `budget_amount` (Decimal): Total budget
+- `currency` (String): ISO 4217 code (e.g., 'USD')
+- `daily_budget_amount` (Decimal, nullable): Daily cap
+- `status` (String): 'draft' | 'approved' | 'running' | 'paused' | 'ended' | 'archived'
+- `starts_at`, `ends_at` (DateTime, nullable): Campaign date range
+- `metadata` (JSONB): Campaign-specific attributes
+
+### Creative (leo_ads.creative)
+
+Represents reusable ad content/assets.
+
+**Key fields:**
+- `creative_id` (BigInteger, PK): Internal ID
+- `creative_key` (String): External identifier
+- `tenant_id` (BigInteger): Multi-tenant isolation
+- `ad_type` (String): 'display' | 'native' | 'video' | 'carousel' | ...
+- `format_code` (String): '300x250' | '728x90' | '1200x628' | 'responsive' | ...
+- `status` (String): 'active' | 'paused' | 'archived'
+- `version_no` (Integer): Content version tracking
+- `headline`, `subheadline`, `body`, `cta` (Text): Common rendering fields
+- `image_url`, `video_url`, `logo_url` (Text): Asset URLs
+- `content_payload` (JSONB): Provider-specific payload
+- `created_at`, `updated_at` (DateTime): Audit timestamps
+
+**Design note:**
+Creative separates content (text, images) from delivery config (Ad) and business config (Campaign). This allows:
+- Multiple Ads to reference the same Creative
+- Multiple Campaigns to share Creative variants
+- Provider-specific data in `content_payload` without schema migrations
+
+### Placement (leo_ads.placement)
+
+Represents publisher inventory slots.
+
+**Key fields:**
+- `placement_id` (BigInteger, PK): Internal ID
+- `placement_key` (String): External identifier (e.g., 'homepage_top')
+- `tenant_id` (BigInteger): Multi-tenant isolation
+- `name` (String): Display name
+- `status` (String): 'active' | 'paused' | 'archived'
+- `min_width_px`, `max_width_px` (Integer, nullable): Width constraints
+- `min_height_px`, `max_height_px` (Integer, nullable): Height constraints
+- `responsive` (Boolean): Whether placement supports responsive sizing
+- `metadata` (JSONB): Placement-specific metadata
+- `created_at`, `updated_at` (DateTime): Audit timestamps
+
+**Example placements:**
+```
+homepage_top → 728x90 banner
+article_inline → 300x250 | 336x280
+sidebar → 300x600 | 320x600
+native_feed → responsive
+```
+
+---
+
+## Repositories
+
+Repositories encapsulate all database queries. Business logic lives in Services (future).
+
+### AdRepository
+
+Located in: `repository/ad_repository.py`
+
+**Methods:**
+
+#### `get_by_id(ad_id: int) -> dict | None`
+Retrieve a single ad by primary key.
+
+```python
+repo = AdRepository(engine=db_engine)
+ad = repo.get_by_id(123)
+# Returns: {"ad_id": 123, "tenant_id": 1, ...} or None
+```
+
+#### `get_active_by_placement(tenant_id: int, placement_id: int, limit: int = 20) -> list[dict]`
+Retrieve active ads for a placement (hot path).
+
+```python
+repo = AdRepository(engine=db_engine)
+ads = repo.get_active_by_placement(
+    tenant_id=1,
+    placement_id=10,
+    limit=20
+)
+# Returns: [{"ad_id": 1, ...}, {"ad_id": 2, ...}, ...]
+```
+
+**Performance:**
+- Uses indexed fields: `(tenant_id, placement_id, status)`
+- Results ordered by `score_weight DESC, ad_id ASC` for deterministic ranking
+- Limits to max 100 results to prevent over-fetching
+- Should be cached in Redis with TTL=300 seconds
+
+**Multi-tenancy:**
+⚠️  Always includes `tenant_id` filter to prevent cross-tenant leakage.
+
+### PlacementRepository
+
+Located in: `repository/placement_repository.py`
+
+**Methods:**
+
+#### `get_active_by_key(placement_key: str, tenant_id: int | None = None) -> dict | None`
+Retrieve an active placement by key.
+
+```python
+repo = PlacementRepository(engine=db_engine)
+placement = repo.get_active_by_key(
+    placement_key="homepage_top",
+    tenant_id=1
+)
+# Returns: {"placement_id": 10, "placement_key": "homepage_top", ...} or None
+```
+
+**Performance:**
+- Placement lookups should be cached in Redis (TTL=3600 seconds)
+- No additional joins; plain SELECT
+
+**Multi-tenancy:**
+- Tenant filtering is optional for now but should become mandatory
+- Future versions will enforce tenant_id on all queries
+
+---
+
+## Testing
+
+Run all tests:
+```bash
+./run_unit_tests.sh
+```
+
+Run specific test file:
+```bash
+.venv/bin/python -m pytest tests/test_models.py -v
+```
+
+Run with coverage:
+```bash
+.venv/bin/python -m pytest tests/ --cov=. --cov-report=html
+```
+
+### Test Structure
+
+#### Unit Tests: `tests/test_models.py`
+- Test ORM field mappings
+- Test constraints and defaults
+- Test SQLAlchemy type system
+
+#### Unit Tests: `tests/test_repositories.py`
+- Test repository query logic (mocked DB)
+- Test serialization (_to_dict methods)
+- Test edge cases (NULL values, empty results)
+
+#### Integration Tests: `tests/test_api.py`
+- Test API endpoints with a test database
+- Test multi-tenancy isolation
+- Test health checks and error handling
+
+---
+
+## Database
+
+### Schema
+
+All tables are in the `leo_ads` schema.
+
+Initialize the database:
+```bash
+./start.sh --seed-demo-ads-server
+```
+
+This:
+1. Creates the `leo_ads` schema
+2. Creates all tables (from `sql-scripts/db-schema-init.sql`)
+3. Seeds demo data (from `sql-scripts/sample-data-init.sql`)
+4. Starts the API server
+
+### Connection Configuration
+
+From `.env`:
+```bash
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=change_me_postgres_password
+DB_NAME=customer360
+DB_SCHEMA=leo_ads
+```
+
+### Important Constraints
+
+1. **Multi-tenancy**: Every table has `tenant_id`. Queries must filter by tenant.
+2. **Foreign keys**: Ad → Campaign, Creative, Placement all have CASCADE/RESTRICT
+3. **Unique keys**: `(tenant_id, ad_key)`, `(tenant_id, campaign_key)`, etc. (in schema)
+4. **Indexes**: Placement ID, Status, Score Weight for fast ad serving
+
+---
+
+## Development Guidelines
+
+### Code Quality
+
+1. **Always filter by `tenant_id`** in queries to prevent cross-tenant data leakage
+2. **Use repositories** for all database access (never write SQL in controllers)
+3. **Add docstrings** to all public methods
+4. **Type hints** on all function signatures
+5. **Validate inputs** in repositories and services
+6. **Handle errors explicitly** (don't swallow exceptions)
+
+### Adding a New Endpoint
+
+1. Define repository method (persistence layer)
+2. Add service logic (business logic) - future
+3. Add API route in `core/application.py`
+4. Add tests
+5. Update this README
+
+Example:
+```python
+# repository/ad_repository.py
+def get_by_campaign(self, tenant_id: int, campaign_id: int) -> list[dict]:
+    # Query logic...
+
+# core/application.py (in _register_routes)
+application.add_api_route(
+    "/campaigns/{campaign_id}/ads",
+    self.get_campaign_ads,
+    methods=["GET"],
+    tags=["Ads"],
+)
+
+# Handler
+def get_campaign_ads(self, campaign_id: int):
+    return self.ad_repository.get_by_campaign(
+        tenant_id=1,  # TODO: Extract from JWT/auth context
+        campaign_id=campaign_id,
+    )
+```
+
+### Environment Variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `LEO_AD_API_HOST` | `localhost` | API listen address |
+| `LEO_AD_API_PORT` | `9009` | API listen port |
+| `DB_HOST` | `localhost` | PostgreSQL host |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `DB_USER` | `postgres` | PostgreSQL user |
+| `DB_PASSWORD` | `change_me_postgres_password` | PostgreSQL password |
+| `DB_NAME` | `customer360` | Database name |
+| `DB_SCHEMA` | `leo_ads` | Schema name |
+| `UVICORN_RELOAD` | `false` | Enable auto-reload (dev only) |
+
+---
+
+## Architecture
+
+### Layering
+
+```
+API Layer (FastAPI endpoints)
+    ↓
+Repository Layer (persistence)
+    ↓
+SQLAlchemy ORM (model mapping)
+    ↓
+PostgreSQL (durability)
+```
+
+### Separation of Concerns
+
+- **Models** (`model/`): ORM definitions only
+- **Repositories** (`repository/`): Database queries only
+- **Application** (`core/application.py`): Routing, lifecycle, dependency injection
+- **Controllers/Handlers** (`app.py`): HTTP request/response (minimal logic)
+- **Services** (future): Business logic (targeting, ranking, caching)
+
+### Data Flow: Ad Request
+
+```
+1. Client GET /placements/homepage_top
+2. API → PlacementRepository.get_active_by_key("homepage_top")
+3. Repository → SELECT * FROM leo_ads.placement WHERE placement_key=? AND status='active'
+4. ORM → Map Row → Placement object
+5. Repository → _to_dict(placement) → dict
+6. API → return dict as JSON
+```
+
+```
+1. Client GET /ads?placement_id=10
+2. API → AdRepository.get_active_by_placement(tenant_id=1, placement_id=10)
+3. Repository → SELECT * FROM leo_ads.ad WHERE tenant_id=? AND placement_id=? AND status='active'
+4. ORM → Map Rows → [Ad, Ad, ...]
+5. Repository → [_to_dict(ad) for ad in ads]
+6. API → return [dict, dict, ...] as JSON
+```
+
+---
+
+## Production Deployment Checklist
+
+- [ ] Database is PostgreSQL 16+
+- [ ] Implement JWT/OAuth authentication middleware
+- [ ] Enforce `tenant_id` extraction from auth context
+- [ ] Add request logging and distributed tracing (OpenTelemetry)
+- [ ] Set up Redis caching for `placement_key` → Placement lookups
+- [ ] Implement ad ranking service (not just score_weight ordering)
+- [ ] Add pagination to list endpoints
+- [ ] Implement input validation with Pydantic models
+- [ ] Add rate limiting and DDoS protection
+- [ ] Set up monitoring, alerting, and health checks
+- [ ] Configure database connection pooling (current: default 5)
+- [ ] Enable SSL/TLS for database and API
+- [ ] Rotate secrets (DB password, API keys)
+- [ ] Document SLAs and performance targets
+- [ ] Load test with realistic placement and ad volumes
+
+---
+
+## Monitoring & Observability
+
+### Health Checks
+
+API provides three health endpoints for monitoring:
+
+```bash
+# Service is running
+curl http://localhost:9009/health
+
+# Database is reachable
+curl http://localhost:9009/health/database
+
+# Basic info
+curl http://localhost:9009/
+```
+
+### Logging
+
+Logs are written to `logs/app.log` with timestamps.
+
+Example entries:
+```
+2024-01-15 14:30:45 [API] Endpoint | http://localhost:9009
+2024-01-15 14:30:46 [API] Health | curl http://localhost:9009/health
+2024-01-15 14:30:46 [DB] PostgreSQL ready | localhost:5432/customer360
+```
+
+### Performance Tips
+
+1. **Cache placements**: Placement lookups have 90% read ratio → cache in Redis
+2. **Cache ad candidates**: Pre-compute `placement_id → [ad_ids]` in Redis
+3. **Batch ad queries**: Use `get_active_by_placement` instead of loop of `get_by_id`
+4. **Connection pooling**: SQLAlchemy uses default pool (5 connections, recycle every 3600s)
+5. **Query optimization**: All hot queries use indexed fields: `(tenant_id, placement_id, status)`
+
+---
+
+## Troubleshooting
+
+### PostgreSQL connection error
+
+```
+PostgreSQL connection failed
+```
+
+**Solution:**
+- Ensure PostgreSQL is running: `docker ps | grep postgres`
+- Check credentials in `.env`
+- Verify `DB_HOST` is reachable: `ping localhost`
+
+### Schema not found
+
+```
+ERROR:  schema "leo_ads" does not exist
+```
+
+**Solution:**
+```bash
+./start.sh --seed-demo-ads-server
+```
+
+This creates the schema and seeds demo data.
+
+### Stale virtual environment
+
+```
+[VENV] Stale environment detected
+```
+
+**Solution:**
+The script auto-recreates the venv. Just restart:
+```bash
+./start.sh
+```
+
+### Ad server already running
+
+```
+[API] Already running | PID 12345
+[API] Stop first | ./stop.sh
+```
+
+**Solution:**
+```bash
+./stop.sh
+./start.sh
+```
+
+---
+
+## Contributing
+
+### Code Style
+
+- Follow PEP 8
+- Use type hints
+- Document public APIs with docstrings
+- Add tests for new features
+
+### Pull Request Checklist
+
+- [ ] Tests pass: `./run_unit_tests.sh`
+- [ ] Code is documented
+- [ ] Multi-tenancy is preserved (tenant_id filtering)
+- [ ] No SQL injection vectors (use parameterized queries)
+- [ ] README is updated if needed
+
+---
+
+## Links
+
+- **PostgreSQL schema**: See `sql-scripts/db-schema-init.sql` for full table definitions
+- **Sample data**: See `sql-scripts/sample-data-init.sql` for demo dataset
+- **FastAPI docs**: https://fastapi.tiangolo.com
+- **SQLAlchemy 2.0**: https://docs.sqlalchemy.org
+- **Pydantic**: https://docs.pydantic.dev
+
+---
+
+## License
+
+[TBD - Add your license]

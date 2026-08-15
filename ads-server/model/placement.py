@@ -97,7 +97,8 @@ class Placement(Base):
         default=False,
     )
 
-    metadata: Mapped[dict[str, Any]] = mapped_column(
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
         JSONB,
         nullable=False,
         default=dict,

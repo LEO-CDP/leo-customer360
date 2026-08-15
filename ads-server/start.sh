@@ -1,8 +1,23 @@
 #!/usr/bin/env bash
 ###############################################################################
-# LEO AD SERVER / Identity Resolution API
+# LEO AD SERVER
 #
 # Starts the FastAPI app (app.py) with uvicorn in the background.
+#
+# Usage:
+#   ./start.sh
+#       Start the FastAPI app with uvicorn.
+#
+#   ./start.sh --seed-demo-ads-server
+#       Ensure database schema exists, seed demo data if leo_ads.tenant
+#       is empty, then start the API.
+#
+# Environment variables (from .env):
+#   DB_HOST                 PostgreSQL host (default: localhost)
+#   DB_PORT                 PostgreSQL port (default: 5432)
+#   LEO_AD_API_HOST         AD SERVER API listen address (default: localhost)
+#   LEO_AD_API_PORT         AD SERVER API listen port (default: 9009)
+#   UVICORN_RELOAD          Enable auto-reload (default: false)
 ###############################################################################
 
 set -Eeuo pipefail
@@ -15,11 +30,34 @@ ENV_FILE="$PROJECT_HOME/.env"
 LOG_DIR="$PROJECT_HOME/logs"
 PID_FILE="$PROJECT_HOME/.uvicorn.pid"
 LOG_FILE="$LOG_DIR/app.log"
+SQL_DIR="$PROJECT_HOME/sql-scripts"
 
 GREEN="\033[0;32m"
 RED="\033[0;31m"
 YELLOW="\033[1;33m"
 NC="\033[0m"
+
+###############################################################################
+# Command-line arguments
+###############################################################################
+
+SEED_DEMO=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --seed-demo-ads-server)
+            SEED_DEMO=true
+            ;;
+        --help|-h)
+            head -n 18 "$0" | tail -n +2 | sed 's/^# //'
+            exit 0
+            ;;
+        *)
+            echo "❌ Unknown argument: $arg (use --help for usage)" >&2
+            exit 1
+            ;;
+    esac
+done
 
 mkdir -p "$LOG_DIR"
 
@@ -27,11 +65,11 @@ mkdir -p "$LOG_DIR"
 # Logging
 ###############################################################################
 
-# Echo to console and append a timestamped, color-free copy to LOG_FILE.
 log() {
     local msg="$1"
 
     echo -e "$msg"
+
     echo "$(date '+%Y-%m-%d %H:%M:%S') $msg" \
         | sed -E 's/\x1b\[[0-9;]*m//g' \
         >> "$LOG_FILE"
@@ -126,20 +164,344 @@ fi
 # Runtime configuration
 ###############################################################################
 
-HOST="${C360_API_HOST:-0.0.0.0}"
-PORT="${C360_API_PORT:-8008}"
+HOST="${LEO_AD_API_HOST:-localhost}"
+PORT="${LEO_AD_API_PORT:-9009}"
+
+DB_HOST="${DB_HOST:-localhost}"
+DB_PORT="${DB_PORT:-5432}"
+DB_USER="${DB_USER:-postgres}"
+DB_PASSWORD="${DB_PASSWORD:-change_me_postgres_password}"
+DB_NAME="${DB_NAME:-customer360}"
 
 ###############################################################################
-# SSO / Authentication
+# PostgreSQL helpers
 ###############################################################################
 
-# SSO_LOGIN controls whether the API enforces Keycloak authentication.
-# This is security-critical and must always be visible in the startup log.
+check_db_available() {
+    "$VENV_PYTHON" - "$DB_HOST" "$DB_PORT" <<'PY'
+import socket
+import sys
 
-if [ "${SSO_LOGIN:-false}" = "true" ]; then
-    log "${GREEN}[AUTH] SSO_LOGIN: ENABLED${NC}  | Keycloak authentication required"
+host = sys.argv[1]
+port = int(sys.argv[2])
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.settimeout(2)
+
+try:
+    sock.connect((host, port))
+    print(f"DB_OK {host}:{port}")
+    raise SystemExit(0)
+except OSError:
+    raise SystemExit(1)
+finally:
+    sock.close()
+PY
+}
+
+###############################################################################
+# Check whether leo_ads schema exists
+###############################################################################
+
+schema_exists() {
+    PGPASSWORD="$DB_PASSWORD" \
+        psql \
+        -h "$DB_HOST" \
+        -p "$DB_PORT" \
+        -U "$DB_USER" \
+        -d "$DB_NAME" \
+        -tAc "
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.schemata
+                WHERE schema_name = 'leo_ads'
+            );
+        " 2>/dev/null | grep -qx "t"
+}
+
+###############################################################################
+# Check whether leo_ads.tenant exists
+###############################################################################
+
+tenant_table_exists() {
+    PGPASSWORD="$DB_PASSWORD" \
+        psql \
+        -h "$DB_HOST" \
+        -p "$DB_PORT" \
+        -U "$DB_USER" \
+        -d "$DB_NAME" \
+        -tAc "
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'leo_ads'
+                  AND table_name = 'tenant'
+            );
+        " 2>/dev/null | grep -qx "t"
+}
+
+###############################################################################
+# Check whether leo_ads.tenant contains data
+#
+# Returns:
+#   0 -> tenant table exists and contains at least one row
+#   1 -> tenant table is empty
+#   2 -> tenant table does not exist
+###############################################################################
+
+tenant_has_data() {
+    local tenant_count
+
+    if ! tenant_table_exists; then
+        return 2
+    fi
+
+    tenant_count="$(
+        PGPASSWORD="$DB_PASSWORD" \
+            psql \
+            -h "$DB_HOST" \
+            -p "$DB_PORT" \
+            -U "$DB_USER" \
+            -d "$DB_NAME" \
+            -tAc "
+                SELECT COUNT(*)
+                FROM leo_ads.tenant;
+            " 2>/dev/null \
+            | tr -d '[:space:]'
+    )"
+
+    if [ -z "$tenant_count" ]; then
+        return 2
+    fi
+
+    if [ "$tenant_count" -gt 0 ]; then
+        return 0
+    fi
+
+    return 1
+}
+
+###############################################################################
+# Initialize database schema
+###############################################################################
+
+init_database_schema() {
+    local schema_sql="$SQL_DIR/db-schema-init.sql"
+
+    if [ ! -f "$schema_sql" ]; then
+        log "${RED}[SEED] Schema init script not found${NC} | ${schema_sql}"
+        return 1
+    fi
+
+    log "${YELLOW}[SEED] leo_ads schema not found${NC}"
+    log "${YELLOW}[SEED] Initializing database schema${NC}"
+    log "[SEED] SQL | ${schema_sql}"
+
+    if ! PGPASSWORD="$DB_PASSWORD" \
+        psql \
+        -v ON_ERROR_STOP=1 \
+        -h "$DB_HOST" \
+        -p "$DB_PORT" \
+        -U "$DB_USER" \
+        -d "$DB_NAME" \
+        -f "$schema_sql" \
+        >> "$LOG_FILE" 2>&1; then
+
+        log "${RED}[SEED] Failed to initialize database schema${NC}"
+        log "${RED}[SEED] Check log${NC} | ${LOG_FILE}"
+        return 1
+    fi
+
+    log "${GREEN}[SEED] Database schema initialized successfully${NC}"
+
+    return 0
+}
+
+###############################################################################
+# Seed demo data
+###############################################################################
+
+seed_sample_data() {
+    local sample_sql="$SQL_DIR/sample-data-init.sql"
+
+    if [ ! -f "$sample_sql" ]; then
+        log "${RED}[SEED] Sample data script not found${NC} | ${sample_sql}"
+        return 1
+    fi
+
+    log "${YELLOW}[SEED] leo_ads.tenant is empty${NC}"
+    log "${YELLOW}[SEED] Seeding demo ads data${NC}"
+    log "[SEED] SQL | ${sample_sql}"
+
+    if ! PGPASSWORD="$DB_PASSWORD" \
+        psql \
+        -v ON_ERROR_STOP=1 \
+        -h "$DB_HOST" \
+        -p "$DB_PORT" \
+        -U "$DB_USER" \
+        -d "$DB_NAME" \
+        -f "$sample_sql" \
+        >> "$LOG_FILE" 2>&1; then
+
+        log "${RED}[SEED] Failed to seed demo data${NC}"
+        log "${RED}[SEED] Check log${NC} | ${LOG_FILE}"
+        return 1
+    fi
+
+    log "${GREEN}[SEED] Demo ads data seeded successfully${NC}"
+
+    return 0
+}
+
+###############################################################################
+# Seed database
+#
+# Desired behavior:
+#
+#   Schema missing
+#       |
+#       +--> run db-schema-init.sql
+#       |
+#       v
+#   Check leo_ads.tenant
+#       |
+#       +--> empty --> run sample-data-init.sql
+#       |
+#       +--> has data --> skip sample seed
+#
+###############################################################################
+
+seed_database() {
+    if [ ! -d "$SQL_DIR" ]; then
+        log "${RED}[SEED] SQL scripts directory not found${NC} | ${SQL_DIR}"
+        return 1
+    fi
+
+    ###########################################################################
+    # Step 1: Initialize schema only when it does not exist
+    ###########################################################################
+
+    if ! schema_exists; then
+        if ! init_database_schema; then
+            return 1
+        fi
+    else
+        log "${GREEN}[SEED] leo_ads schema already exists${NC} | skipping schema initialization"
+    fi
+
+    ###########################################################################
+    # Step 2: Check tenant table
+    ###########################################################################
+
+    local tenant_status=0
+
+    tenant_has_data || tenant_status=$?
+
+    case "$tenant_status" in
+
+        0)
+            # tenant table has at least one row
+            log "${GREEN}[SEED] leo_ads.tenant already contains data${NC}"
+            log "${GREEN}[SEED] Skipping demo data seed${NC}"
+            ;;
+
+        1)
+            # tenant table exists but is empty
+            if ! seed_sample_data; then
+                return 1
+            fi
+            ;;
+
+        2)
+            # This should normally never happen if the schema script is valid.
+            log "${RED}[SEED] leo_ads.tenant table does not exist${NC}"
+            log "${RED}[SEED] Database schema may be incomplete${NC}"
+            return 1
+            ;;
+
+        *)
+            log "${RED}[SEED] Unable to determine leo_ads.tenant state${NC}"
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+###############################################################################
+# Ensure local development infrastructure
+###############################################################################
+
+ensure_dev_infra() {
+    local root_dir
+    root_dir="$(cd "$PROJECT_HOME/.." && pwd)"
+
+    local compose_file="$root_dir/dev-docker-compose.yml"
+
+    if [ ! -f "$compose_file" ]; then
+        return 1
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        log "${YELLOW}[DB] Starting local infrastructure${NC} | docker compose -f $compose_file up -d postgres redis keycloak"
+
+        (
+            cd "$root_dir"
+
+            if docker compose \
+                -f "$compose_file" \
+                up -d postgres redis keycloak >/dev/null 2>&1; then
+                return 0
+            fi
+
+            return 1
+        )
+    fi
+
+    return 1
+}
+
+###############################################################################
+# Check PostgreSQL
+###############################################################################
+
+if ! check_db_available; then
+    log "${YELLOW}[DB] PostgreSQL not reachable${NC} | ${DB_HOST}:${DB_PORT}"
+
+    if ensure_dev_infra; then
+
+        if ! check_db_available; then
+            log "${RED}[DB] PostgreSQL did not become ready${NC} | ${DB_HOST}:${DB_PORT}"
+            exit 1
+        fi
+
+    else
+        log "${YELLOW}[DB] Start the dev stack first${NC} | cd .. && ./dev-c360.sh"
+        log "${YELLOW}[DB] Or boot postgres manually${NC} | docker compose -f ../dev-docker-compose.yml up -d postgres redis keycloak"
+        exit 1
+    fi
+fi
+
+log "${GREEN}[DB] PostgreSQL ready${NC} | ${DB_HOST}:${DB_PORT}/${DB_NAME}"
+
+###############################################################################
+# Database initialization / demo seeding
+###############################################################################
+
+if [ "$SEED_DEMO" = true ]; then
+
+    log "${YELLOW}[SEED] Demo ads server initialization requested${NC}"
+
+    if ! seed_database; then
+        log "${RED}[SEED] Database initialization failed${NC}"
+        exit 1
+    fi
+
+    log "${GREEN}[SEED] Database initialization completed${NC}"
+
 else
-    log "${RED}[AUTH] SSO_LOGIN: DISABLED${NC} | API authentication bypassed"
+    log "[SEED] Demo database initialization disabled"
+    log "[SEED] Use ./start.sh --seed-demo-ads-server to initialize/seed demo data"
 fi
 
 ###############################################################################
@@ -178,15 +540,19 @@ sleep 2
 ###############################################################################
 
 if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+
     PID="$(cat "$PID_FILE")"
 
     log "${GREEN}[API] Started successfully${NC} | PID ${PID}"
     log "[API] Logs   | ${LOG_FILE}"
     log "[API] Health | curl http://${HOST}:${PORT}/health"
     log "[API] Docs   | http://${HOST}:${PORT}/docs"
+
 else
+
     log "${RED}[API] Failed to start${NC} | Check ${LOG_FILE}"
 
     rm -f "$PID_FILE"
+
     exit 1
 fi

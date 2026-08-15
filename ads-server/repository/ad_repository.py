@@ -5,6 +5,17 @@ Responsible for querying leo_ads.ad.
 
 This repository deliberately contains persistence logic only.
 Business decisions such as targeting and ranking belong in services.
+
+Assumptions:
+    - Queries filter by tenant_id to prevent cross-tenant data exposure
+    - Status filters prevent serving inactive ads (paused, archived)
+    - Ordering by score_weight, then ad_id ensures deterministic ranking
+    - Redis should normally cache hot placement->ads paths for performance
+
+Performance notes:
+    - The hot path (get_active_by_placement) uses indexed fields only
+    - Results should be cached in Redis with TTL=300 seconds
+    - Do not increase limit beyond 100; use pagination if needed
 """
 
 from __future__ import annotations
@@ -19,7 +30,17 @@ from model.ad import Ad
 
 class AdRepository:
     """
-    Repository for ad persistence.
+    Repository for ad persistence and queries.
+
+    Responsibilities:
+        - Retrieve ads by ID
+        - Retrieve active ads for a placement (hot path)
+        - Serialize ORM objects to API-safe dicts
+
+    Not responsible for:
+        - Targeting, ranking, or business logic
+        - Caching or Redis
+        - Pydantic validation (for now - should migrate later)
     """
 
     def __init__(
@@ -155,7 +176,7 @@ class AdRepository:
             "status": ad.status,
             "score_weight": ad.score_weight,
             "frequency_cap": ad.frequency_cap,
-            "metadata": ad.metadata,
+            "metadata": ad.metadata_,
             "created_at": ad.created_at,
             "updated_at": ad.updated_at,
         }

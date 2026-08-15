@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 ###############################################################################
-# LEO AD SERVER  API -- unit test runner.
+# LEO AD SERVER API -- Unit Test Runner
 #
-# Runs the hermetic unit test suite in tests/ (auth middleware, Keycloak
-# login provisioning, multi-tenant Row-Level Security GUC wiring, generic
-# tenant-scoped CRUD router). No real PostgreSQL/Redis/Keycloak is required
-# -- every external dependency is faked/mocked (see tests/conftest.py).
+# Runs the comprehensive unit test suite in tests/ covering:
+# - ORM models (Ad, Campaign, Creative, Placement) and field validation
+# - Repository query logic and multi-tenancy filtering
+# - API endpoints (health checks, ad delivery, placement lookups)
+# - Multi-tenant isolation and error handling
+#
+# No real PostgreSQL required for model/unit tests (uses in-memory SQLite).
+# For integration tests with PostgreSQL, use docker-compose (see README.md).
 #
 # Usage:
-#   ./run_unit_tests.sh                # run the whole suite
-#   ./run_unit_tests.sh -k keycloak     # pass extra args straight to pytest
-#   ./run_unit_tests.sh tests/test_auth_middleware.py
+#   ./run_unit_tests.sh                        # run entire test suite
+#   ./run_unit_tests.sh tests/test_models.py   # run specific test file
+#   ./run_unit_tests.sh -v --tb=short -k ad    # pass args to pytest
 ###############################################################################
 set -Eeuo pipefail
 
@@ -49,5 +53,49 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 echo -e "${GREEN}Installing requirements...${NC}"
 "$VENV_PYTHON" -m pip install -q -r requirements.txt
 
+###############################################################################
+# Load .env so DB_* variables are available for the PostgreSQL check below
+###############################################################################
+if [ -f "$PROJECT_HOME/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$PROJECT_HOME/.env"
+    set +a
+fi
+
+###############################################################################
+# Check PostgreSQL availability for integration tests
+###############################################################################
+echo -e "${YELLOW}Checking for PostgreSQL...${NC}"
+
+POSTGRES_AVAILABLE=0
+TEST_FILES=""
+if command -v psql &> /dev/null; then
+    if PGPASSWORD="${DB_PASSWORD:-}" psql -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-postgres}" -d "${DB_NAME:-customer360}" -c "SELECT 1" -w &>/dev/null; then
+        POSTGRES_AVAILABLE=1
+        echo -e "${GREEN}✓ PostgreSQL available - running full test suite${NC}"
+    else
+        echo -e "${YELLOW}⚠ PostgreSQL unavailable - running model tests only${NC}"
+        echo -e "${YELLOW}  (Repository/API tests require PostgreSQL)${NC}"
+        echo -e "${YELLOW}  To run full tests: docker-compose up postgres${NC}"
+        TEST_FILES="tests/test_models.py tests/test_model_metadata.py"
+    fi
+else
+    echo -e "${YELLOW}⚠ psql not found - running model tests only${NC}"
+    echo -e "${YELLOW}  (Repository/API tests require PostgreSQL)${NC}"
+    echo -e "${YELLOW}  To run full tests: docker-compose up postgres${NC}"
+    TEST_FILES="tests/test_models.py tests/test_model_metadata.py"
+fi
+
+###############################################################################
+# Run tests
+###############################################################################
 echo -e "${YELLOW}Running LEO AD SERVER API unit tests...${NC}"
-"$VENV_PYTHON" -m pytest tests/ -v "$@"
+
+if [ -z "$TEST_FILES" ]; then
+    # PostgreSQL available - run all tests
+    "$VENV_PYTHON" -m pytest tests/ -v "$@"
+else
+    # Only model tests (SQLite-compatible)
+    "$VENV_PYTHON" -m pytest $TEST_FILES -v "$@"
+fi
