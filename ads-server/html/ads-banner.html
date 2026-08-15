@@ -88,8 +88,7 @@
     <main class="container">
 
         <!-- product_carousel Placement for Ad Items -->
-        <div class="leo-ad-container" 
-            data-ad-placement="12346" data-ad-css-url="ads-banner.css"
+        <div class="leo-ad-container" data-ad-placement="12346" data-ad-css-url="leo.ads.css"
             data-ad-format="product_carousel" data-ad-theme="light">
         </div>
 
@@ -247,6 +246,9 @@
                 <!-- native Placement for Ad Items -->
                 <div class="leo-ad-container" data-ad-placement="12347" data-ad-format="native" data-ad-theme="light">
                 </div>
+                <hr>
+                <!-- Affiliate -->
+                <div class="leo-ad-container" data-ad-placement="affiliate_product_001" data-ad-theme="light"></div>
 
                 <article class="blog-post">
                     <h2 class="blog-post-title">Another blog post</h2>
@@ -357,10 +359,15 @@
                         </ol>
                     </div>
 
-                    <!-- single_banner Placement for Ad Items -->
+                    <!-- single_banner -->
                     <div class="leo-ad-container" data-ad-placement="12345" data-ad-format="single_banner"
                         data-ad-theme="light">
                     </div>
+
+                    <!-- Google -->
+                    <div class="leo-ad-container" data-ad-placement="google_top_banner" data-ad-theme="light"></div>
+
+
 
                     <div class="p-4">
                         <h4 class="fst-italic">Elsewhere</h4>
@@ -384,7 +391,8 @@
         </p>
     </footer>
 
-    <script defer src="ads.loader.js"></script>
+    <script defer src="ads.loader.js" id="leo_ads_loader"
+        data-base-cdn="http://localhost:5500/ads-server/html/"></script>
 
 </body>
 
