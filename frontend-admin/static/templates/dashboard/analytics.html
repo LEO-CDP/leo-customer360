@@ -130,20 +130,24 @@
       <p id="profile-heatmap-empty" class="hidden text-sm text-slate-500 py-6 text-center italic">No profile source/domain breakdown available.</p>
     </div>
 
-    <!-- Campaigns Heatmap -->
+    <!-- Event Activity Heatmap -->
     <div class="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
       <h2 class="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
         <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-3.102-.069m3.102.069a22.536 22.536 0 013.102.069m-3.102-.069c.56.021 1.12.04 1.68.057m-1.68-.057c-.56-.021-1.12-.04-1.68-.057m-1.68-.057a22.53 22.53 0 00-3.102-.069m3.102.069a18.03 18.03 0 003.102-.069" /></svg>
-        Campaign Performance Heatmap (Source System × Campaign)
+        Event Activity Heatmap (Daily Event Volume)
       </h2>
+      <div id="event-activity-heatmap-meta" class="flex flex-wrap items-center justify-between gap-2 mb-3 hidden">
+        <p id="event-activity-heatmap-summary" class="text-xs text-slate-500"></p>
+        <div id="event-activity-heatmap-legend" class="flex items-center gap-1 text-[11px] text-slate-400"></div>
+      </div>
       <div class="overflow-x-auto">
-        <div id="campaign-heatmap" class="min-w-max">
+        <div id="event-activity-heatmap" class="min-w-max">
           <div class="matrix-heatmap-wrapper">
-            <canvas id="campaign-events-chart"></canvas>
+            <canvas id="event-activity-chart"></canvas>
           </div>
         </div>
       </div>
-      <p id="campaign-heatmap-empty" class="hidden text-sm text-slate-500 py-6 text-center italic">No campaign source/campaign breakdown available.</p>
+      <p id="event-activity-heatmap-empty" class="hidden text-sm text-slate-500 py-6 text-center italic">No event activity available for the selected period.</p>
     </div>
 
   </div>

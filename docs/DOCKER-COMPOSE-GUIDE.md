@@ -20,7 +20,7 @@ containerized deployment.
 | `keycloak-db-init` | reuses `customer360-postgres:local` | **One-shot** job that creates the dedicated `db_keycloak` database on the shared `postgres` instance, then exits | none |
 | `keycloak` | `keycloak/keycloak:latest` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
 | `cir` | `customer360-cir:local` (Python 3.11-slim) | Customer Identity Resolution worker — continuously drains `cdp_raw_profiles_stage` | none (background worker, no HTTP) |
-| `api` | `customer360-api:local` (Python 3.11-slim) | Customer 360 / CIR REST API (FastAPI), Keycloak-secured | `${API_HOST_PORT:-8008}` → 8008 |
+| `api` | `customer360-api:local` (Python 3.11-slim) | Customer 360 / CIR REST API (FastAPI), Keycloak-secured | `${C360_API_PORT:-8008}` → 8008 |
 | `cir-demo-seed` | reuses `customer360-cir:local` | **Dev only** one-shot job that seeds demo data, then exits | none |
 
 All services share one bridge network, `customer360-network`, and are isolated
@@ -149,7 +149,7 @@ In `.env`:
 ```dotenv
 POSTGRES_HOST_PORT=15432
 REDIS_HOST_PORT=16379
-API_HOST_PORT=18000
+C360_API_PORT=18000
 ```
 
 Containers still talk to each other over `customer360-network` on the
@@ -176,7 +176,7 @@ docker inspect -f '{{.State.Health.Status}}' customer360-postgres
 docker inspect -f '{{.State.Health.Status}}' customer360-redis
 docker inspect -f '{{.State.Health.Status}}' customer360-cir
 docker inspect -f '{{.State.Health.Status}}' customer360-api
-curl -s http://localhost:${API_HOST_PORT:-8008}/health
+curl -s http://localhost:${C360_API_PORT:-8008}/health
 ```
 
 | Service | Healthcheck mechanism |
@@ -296,7 +296,7 @@ volume — see above.)
 
 | Symptom | Likely cause / fix |
 |---|---|
-| `failed to bind host port ... address already in use` | Another process (e.g. `pgsql16_vector`, a host Redis) already owns 5432/6580/8008. Set `POSTGRES_HOST_PORT`/`REDIS_HOST_PORT`/`API_HOST_PORT` in `.env` to unused ports. |
+| `failed to bind host port ... address already in use` | Another process (e.g. `pgsql16_vector`, a host Redis) already owns 5432/6580/8008. Set `POSTGRES_HOST_PORT`/`REDIS_HOST_PORT`/`C360_API_PORT` in `.env` to unused ports. |
 | `api`/`cir` stuck "waiting" / never healthy | Check `docker compose logs postgres` — if it never reaches healthy, the DB init script likely failed (bad `.env` values, or a non-idempotent manual schema edit). |
 | `psycopg2.errors.UndefinedColumn` after editing `database-schema.sql` | Schema drift — the running volume was provisioned before your edit. See §7. |
 | `NOAUTH Authentication required` from Redis | `REDIS_PASSWORD` mismatch between `.env` and what `api`/`redis` were started with — restart both after changing it (`docker compose up -d --force-recreate redis api`). |
@@ -345,7 +345,7 @@ TOKEN=$(curl -s -X POST \
   -d "username=<test-user>" \
   -d "password=<test-user-password>" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
-curl -s http://localhost:${API_HOST_PORT:-8008}/api/v1/reporting/summary \
+curl -s http://localhost:${C360_API_PORT:-8008}/api/v1/reporting/summary \
   -H "Authorization: Bearer $TOKEN"
 ```
 

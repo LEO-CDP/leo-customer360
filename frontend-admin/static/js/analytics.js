@@ -15,7 +15,7 @@ window.C360 = window.C360 || {};
   var showApiError = C360.config.showApiError;
 
   var charts = {};
-  var campaignHeatmap = null;
+  var eventHeatmap = null;
   var PALETTE = ["#6366f1", "#22c55e", "#3b82f6", "#f97316", "#ef4444", "#a855f7", "#14b8a6", "#eab308", "#64748b"];
 
   function renderChart(id, config) {
@@ -30,9 +30,9 @@ window.C360 = window.C360 || {};
       if (charts[id]) { charts[id].destroy(); }
       delete charts[id];
     });
-    if (campaignHeatmap) {
-      campaignHeatmap.destroy();
-      campaignHeatmap = null;
+    if (eventHeatmap) {
+      eventHeatmap.destroy();
+      eventHeatmap = null;
     }
   }
 
@@ -211,41 +211,100 @@ window.C360 = window.C360 || {};
     $container.append($grid);
   }
 
-  function generateMockData(days, maxCount) {
-    var data = [];
-    var endDate = new Date();
-    var startDate = new Date(endDate);
-    startDate.setDate(startDate.getDate() - days);
+  function buildEventHeatmapSeries(events, days) {
+    var countsByDate = {};
+    var heatmapDays = Math.max(1, Number(days) || 365);
 
-    for (var d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    (events || []).forEach(function (event) {
+      var eventDate = event && event.event_time ? event.event_time.substring(0, 10) : "";
+      if (!eventDate) return;
+      countsByDate[eventDate] = (countsByDate[eventDate] || 0) + 1;
+    });
+
+    var endDate = new Date();
+    endDate.setUTCHours(0, 0, 0, 0);
+    var startDate = new Date(endDate);
+    startDate.setUTCDate(endDate.getUTCDate() - (heatmapDays - 1));
+
+    var data = [];
+    for (var d = new Date(startDate); d <= endDate; d.setUTCDate(d.getUTCDate() + 1)) {
+      var isoDate = d.toISOString().split("T")[0];
       data.push({
-        date: d.toISOString().split("T")[0],
-        count: Math.floor(Math.random() * maxCount)
+        date: isoDate,
+        count: countsByDate[isoDate] || 0
       });
     }
     return data;
   }
 
-  function renderCampaignHeatmap() {
-    if (campaignHeatmap) {
-      campaignHeatmap.destroy();
-      campaignHeatmap = null;
+  // Builds quantile-scaled color thresholds from the actual peak day, so the
+  // heatmap keeps good visual contrast whether the tenant has 5 events/day
+  // or 5,000 -- a fixed { 1, 3, 5, 7 } scale washes out either extreme.
+  function buildHeatmapColorTheme(maxCount) {
+    var palette = ["#ebedf0", "#cbe2f9", "#79b8ff", "#2188ff", "#0366d6"];
+    if (!maxCount || maxCount <= 0) return [{ min: 0, color: palette[0] }];
+
+    var ratios = [0, 0.15, 0.4, 0.65, 0.85];
+    var theme = [];
+    var lastMin = -1;
+    ratios.forEach(function (ratio, idx) {
+      var min = idx === 0 ? 0 : Math.max(idx, Math.ceil(maxCount * ratio));
+      if (min <= lastMin) return;
+      theme.push({ min: min, color: palette[idx] });
+      lastMin = min;
+    });
+    return theme;
+  }
+
+  function renderHeatmapLegend(theme) {
+    var $legend = $("#event-activity-heatmap-legend").empty();
+    $legend.append($("<span></span>").text("Less"));
+    theme.forEach(function (stop) {
+      $legend.append($("<span></span>")
+        .addClass("inline-block w-3 h-3 rounded-sm border border-slate-200/60")
+        .css("background-color", stop.color)
+        .attr("title", stop.min + "+ events/day"));
+    });
+    $legend.append($("<span></span>").text("More"));
+  }
+
+  function renderHeatmapSummary(series, days) {
+    var totalEvents = series.reduce(function (sum, d) { return sum + d.count; }, 0);
+    var activeDays = series.filter(function (d) { return d.count > 0; }).length;
+    var peak = series.reduce(function (max, d) { return Math.max(max, d.count); }, 0);
+    $("#event-activity-heatmap-summary").text(
+      fmt.int(totalEvents) + " events across " + fmt.int(activeDays) + " active day" + (activeDays === 1 ? "" : "s") +
+      " (last " + fmt.int(days) + " days) \u00b7 peak " + fmt.int(peak) + "/day"
+    );
+  }
+
+  function renderEventHeatmap(events, days) {
+    if (eventHeatmap) {
+      eventHeatmap.destroy();
+      eventHeatmap = null;
     }
 
-    var canvas = document.getElementById("campaign-events-chart");
+    var hasEvents = !!(events && events.length);
+    $("#event-activity-heatmap").toggleClass("hidden", !hasEvents);
+    $("#event-activity-heatmap-meta").toggleClass("hidden", !hasEvents);
+    $("#event-activity-heatmap-empty").toggleClass("hidden", hasEvents);
+    if (!hasEvents) return;
+
+    var canvas = document.getElementById("event-activity-chart");
     if (!canvas) return;
 
-    campaignHeatmap = new MatrixHeatmap({
-      canvasId: "campaign-events-chart",
-      entityName: "campaign triggers",
-      data: generateMockData(365, 8),
-      colorTheme: [
-        { min: 0, color: "#ebedf0" },
-        { min: 1, color: "#cbe2f9" },
-        { min: 3, color: "#79b8ff" },
-        { min: 5, color: "#2188ff" },
-        { min: 7, color: "#0366d6" }
-      ]
+    var series = buildEventHeatmapSeries(events, days || 365);
+    var maxCount = series.reduce(function (max, d) { return Math.max(max, d.count); }, 0);
+    var colorTheme = buildHeatmapColorTheme(maxCount);
+
+    renderHeatmapSummary(series, days || 365);
+    renderHeatmapLegend(colorTheme);
+
+    eventHeatmap = new MatrixHeatmap({
+      canvasId: "event-activity-chart",
+      entityName: "events",
+      data: series,
+      colorTheme: colorTheme
     });
   }
 
@@ -301,7 +360,7 @@ window.C360 = window.C360 || {};
       }
 
       buildProfileHeatmap(summary.raw_profiles_by_source_system || []);
-      renderCampaignHeatmap();
+      renderEventHeatmap(events, days);
     }).fail(function (xhr) {
       $("#analytics-loading").addClass("hidden");
       showApiError("loading analytics data", xhr);

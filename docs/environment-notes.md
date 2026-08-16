@@ -7,7 +7,7 @@ This repository uses a single root-level environment file, `.env`. The companion
 - Copy `.env.example` to `.env` before local development.
 - Docker Compose overrides `DB_HOST` and `REDIS_HOST` to the internal service names `postgres` and `redis` for containers running on the shared network.
 - `SSO_LOGIN=false` is the default for local development. Enable SSO only when Keycloak is configured and reachable.
-- `POSTGRES_HOST_BIND`, `REDIS_HOST_BIND`, `API_HOST_BIND`, `KEYCLOAK_HOST_BIND`, and `MINIO_HOST_BIND` default to loopback. Change them only if you need access from other machines.
+- `POSTGRES_HOST_BIND`, `REDIS_HOST_BIND`, `C360_API_HOST`, `KEYCLOAK_HOST_BIND`, and `MINIO_HOST_BIND` default to loopback. Change them only if you need access from other machines.
 
 ## Database and cache
 
@@ -35,13 +35,13 @@ This repository uses a single root-level environment file, `.env`. The companion
 - `DB_POOL_RECYCLE_SECONDS`: Connection recycle interval. Default: `1800`
 - `DB_POOL_PRE_PING`: Enables SQLAlchemy pre-ping for connection health checks. Default: `true`
 - `DB_ECHO_SQL`: Enables SQL echo for debugging. Default: `false`
-- `API_DEFAULT_PAGE_SIZE`: Default page size for API pagination. Default: `100`
-- `API_MAX_PAGE_SIZE`: Maximum page size allowed by the API. Default: `1000`
-- `API_HOST`: Host interface for the API server. Default: `0.0.0.0`
-- `API_PORT`: Port for the API server. Default: `8008`
+- `C360_API_DEFAULT_PAGE_SIZE`: Default page size for API pagination. Default: `100`
+- `C360_API_MAX_PAGE_SIZE`: Maximum page size allowed by the API. Default: `1000`
+- `C360_API_HOST`: Host interface for the API server. Default: `0.0.0.0`
+- `C360_API_PORT`: Port for the API server. Default: `8008`
 - `UVICORN_RELOAD`: Enables auto-reload for the development server. Default: `false`
-- `API_HOST_PORT`: Host-published API port. Default: `8008`
-- `API_HOST_BIND`: Bind address for the published API port. Default: `127.0.0.1`
+- `C360_API_PORT`: Host-published API port. Default: `8008`
+- `C360_API_HOST`: Bind address for the published API port. Default: `127.0.0.1`
 
 ## Frontend admin settings
 

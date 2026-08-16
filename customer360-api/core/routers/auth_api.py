@@ -16,7 +16,7 @@ import urllib.request
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import text
 
 from core.config import settings
@@ -31,11 +31,25 @@ from core.schemas.auth import (
     SsoCallbackRequest,
     SsoTokenResponse,
 )
+from core.utils.rate_limiter import RedisRateLimiter
 from core.utils.security import create_dev_access_token, verify_password
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
+# Throttles repeated bad credentials against POST /auth/login, keyed by
+# username+client IP so one attacker can't lock out another legitimate
+# username, and one username isn't globally locked by a single abusive IP.
+_login_rate_limiter = RedisRateLimiter(
+    max_attempts=settings.auth_rate_limit_max_attempts,
+    window_seconds=settings.auth_rate_limit_window_seconds,
+)
+
+
+def _login_rate_limit_key(request: Request, username: str) -> str:
+    client_ip = request.client.host if request.client else "unknown"
+    return f"login:{client_ip}:{username}"
 
 
 def _token_endpoint() -> str:
@@ -100,7 +114,7 @@ def _exchange_code_for_token(code: str, redirect_uri: str) -> dict[str, Any]:
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(payload: LoginRequest) -> Any:
+async def login(payload: LoginRequest, request: Request) -> Any:
     """Dev-mode credential login (only meaningful while SSO_LOGIN=false).
 
     Checks the single DEFAULT_ROOT_USERNAME/PASSWORD super-admin pair first,
@@ -115,6 +129,13 @@ async def login(payload: LoginRequest) -> Any:
 
     tenant_id = payload.tenant_id or DEFAULT_TENANT_ID
     username = payload.username.strip().lower()
+
+    rate_limit_key = _login_rate_limit_key(request, username)
+    if _login_rate_limiter.is_blocked(rate_limit_key):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Try again later.",
+        )
 
     if (
         settings.default_root_password
@@ -162,6 +183,7 @@ async def login(payload: LoginRequest) -> Any:
         user = repo.get_user_by_username(username, tenant_id)
         password_hash = repo.get_local_password_hash(user.user_id, tenant_id) if user else None
         if not user or not password_hash or not verify_password(payload.password, password_hash):
+            _login_rate_limiter.record_failure(rate_limit_key)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",

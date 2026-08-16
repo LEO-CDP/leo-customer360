@@ -208,7 +208,7 @@ cp .env.example .env
 #   - KEYCLOAK_CLIENT_SECRET: strong random password
 #   - POSTGRES_HOST_BIND: 127.0.0.1 (keep internal)
 #   - REDIS_HOST_BIND: 127.0.0.1 (keep internal)
-#   - API_HOST_BIND: 127.0.0.1 (reverse proxy in front)
+#   - C360_API_HOST: 127.0.0.1 (reverse proxy in front)
 #   - KEYCLOAK_HOST_BIND: 127.0.0.1 (reverse proxy in front)
 #   - FRONTEND_HOST_BIND: 127.0.0.1 (reverse proxy in front)
 #   - FRONTEND_API_HOSTNAME: https://api.customer360.example.com (public URL)
@@ -412,7 +412,7 @@ KEYCLOAK_CLIENT_SECRET=<strong-secret>
 | `SSO_LOGIN_URL` | `http://localhost:8080` | `https://auth.customer360.example.com` | Used by API to verify tokens |
 | `KEYCLOAK_HOSTNAME` | `localhost` | `customer360.example.com` | Public hostname Keycloak advertises |
 | `FRONTEND_API_HOSTNAME` | `http://localhost:8008` | `https://api.customer360.example.com` | Used by the browser to call the API |
-| `API_HOST_BIND` | `0.0.0.0` or `127.0.0.1` | `127.0.0.1` | Only change to `0.0.0.0` if firewall is restrictive |
+| `C360_API_HOST` | `0.0.0.0` or `127.0.0.1` | `127.0.0.1` | Only change to `0.0.0.0` if firewall is restrictive |
 | `POSTGRES_HOST_BIND` | `127.0.0.1` | `127.0.0.1` | Always keep loopback-only unless running a multi-host cluster |
 | `REDIS_HOST_BIND` | `127.0.0.1` | `127.0.0.1` | Always keep loopback-only unless running a multi-host cluster |
 | `KEYCLOAK_HOST_BIND` | `127.0.0.1` | `127.0.0.1` | Always keep loopback-only; use reverse proxy for public access |

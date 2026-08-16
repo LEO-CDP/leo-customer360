@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Visual test page for every Leo ad format">
+  <title>Leo Ads Format Test</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page-bg: #f3f0e8;
+      --ink: #17211b;
+      --muted: #687169;
+      --line: #cbc9bf;
+      --accent: #b6412e;
+      --panel: #fffdf7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(23, 33, 27, 0.04) 1px, transparent 1px),
+        var(--page-bg);
+      background-size: 100% 32px;
+      font-family: Georgia, "Times New Roman", serif;
+    }
+
+    header,
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin-inline: auto;
+    }
+
+    header {
+      padding: 48px 0 28px;
+      border-bottom: 2px solid var(--ink);
+    }
+
+    h1 {
+      max-width: 760px;
+      margin: 0;
+      font-size: clamp(36px, 7vw, 78px);
+      line-height: 0.95;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    header p {
+      max-width: 680px;
+      margin: 20px 0 0;
+      color: var(--muted);
+      font: 16px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    main {
+      padding: 32px 0 64px;
+    }
+
+    .test-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+    }
+
+    .test-case {
+      min-width: 0;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-top: 5px solid var(--accent);
+      background: var(--panel);
+    }
+
+    .test-case.wide {
+      grid-column: 1 / -1;
+    }
+
+    .test-heading {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .test-heading h2 {
+      margin: 0;
+      font-size: 21px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .test-heading code,
+    .test-heading span {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .test-status {
+      flex: 0 0 auto;
+      padding: 4px 7px;
+      border: 1px solid #428052;
+      color: #285f36;
+      background: #edf7ed;
+      text-transform: uppercase;
+      font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .leo-ad-container {
+      min-height: 120px;
+    }
+
+    .placement-group {
+      margin-bottom: 48px;
+    }
+
+    .placement-group-title {
+      padding: 16px 0 12px;
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .placement-group-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+      margin-top: 24px;
+    }
+
+    .placement-group-grid .test-case.wide {
+      grid-column: 1 / -1;
+    }
+
+    @media (max-width: 760px) {
+      header {
+        padding-top: 32px;
+      }
+
+      .test-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .test-case.wide {
+        grid-column: auto;
+      }
+
+      .placement-group-grid {
+        grid-template-columns: 1fr !important;
+      }
+
+      .placement-group-grid .test-case.wide {
+        grid-column: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Ad format test bench</h1>
+    <p>
+      Ten placements served live from the ads-server API
+      (http://localhost:9009). Test all Coolmate, Google, and Affiliate ad formats.
+      Native formats render normally; external JS tags use deterministic preview mode
+      so this page needs no publisher credentials or third-party network access.
+    </p>
+  </header>
+
+  <main>
+    <!-- COOLMATE FORMATS -->
+    <div class="placement-group">
+      <h3 class="placement-group-title">Coolmate Placements</h3>
+      <div class="placement-group-grid">
+        <section class="test-case" aria-labelledby="coolmate-banner-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="coolmate-banner-title">Desktop banner 300x250</h2>
+              <code>coolmate-banner-300x250</code>
+            </div>
+            <span class="test-status">Live</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="coolmate-banner-300x250" data-ad-format="banner" data-ad-theme="light"></div>
+        </section>
+
+        <section class="test-case" aria-labelledby="coolmate-banner-mobile-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="coolmate-banner-mobile-title">Mobile banner 320x50</h2>
+              <code>coolmate-banner-mobile</code>
+            </div>
+            <span class="test-status">Live</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="coolmate-banner-mobile" data-ad-format="banner" data-ad-theme="light"></div>
+        </section>
+
+        <section class="test-case wide" aria-labelledby="coolmate-carousel-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="coolmate-carousel-title">Product carousel desktop</h2>
+              <code>coolmate-product-carousel</code>
+            </div>
+            <span class="test-status">Live</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="coolmate-product-carousel" data-ad-format="product_carousel" data-ad-theme="light"></div>
+        </section>
+
+        <section class="test-case wide" aria-labelledby="coolmate-native-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="coolmate-native-title">Native article inline</h2>
+              <code>coolmate-native-article</code>
+            </div>
+            <span class="test-status">Live</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="coolmate-native-article" data-ad-format="native" data-ad-theme="light"></div>
+        </section>
+
+        <section class="test-case wide" aria-labelledby="coolmate-search-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="coolmate-search-title">Search ads format</h2>
+              <code>coolmate-search-ads</code>
+            </div>
+            <span class="test-status">Live</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="coolmate-search-ads" data-ad-format="search_ads" data-ad-theme="light"></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- GOOGLE FORMATS -->
+    <div class="placement-group">
+      <h3 class="placement-group-title">Google Ad Placements</h3>
+      <div class="placement-group-grid">
+        <section class="test-case wide" aria-labelledby="google-top-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="google-top-title">Display banner</h2>
+              <code>google-top-banner</code>
+            </div>
+            <span class="test-status">JS</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="google-top-banner" data-ad-format="google_ads" data-ad-theme="light" data-ad-preview="true"></div>
+        </section>
+
+        <section class="test-case wide" aria-labelledby="google-native-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="google-native-title">Native ad format</h2>
+              <code>google-native</code>
+            </div>
+            <span class="test-status">JS</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="google-native" data-ad-format="google_ads" data-ad-theme="light" data-ad-preview="true"></div>
+        </section>
+
+        <section class="test-case" aria-labelledby="google-interstitial-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="google-interstitial-title">Mobile interstitial</h2>
+              <code>google-mobile-interstitial</code>
+            </div>
+            <span class="test-status">JS</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="google-mobile-interstitial" data-ad-format="interstitial" data-ad-theme="light" data-ad-preview="true"></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- AFFILIATE FORMATS -->
+    <div class="placement-group">
+      <h3 class="placement-group-title">Affiliate Placements</h3>
+      <div class="placement-group-grid">
+        <section class="test-case" aria-labelledby="affiliate-sidebar-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="affiliate-sidebar-title">Sidebar widget desktop</h2>
+              <code>affiliate-sidebar</code>
+            </div>
+            <span class="test-status">JS</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="affiliate-sidebar" data-ad-format="external_widget" data-ad-theme="light" data-ad-preview="true"></div>
+        </section>
+
+        <section class="test-case" aria-labelledby="affiliate-mobile-sidebar-title">
+          <div class="test-heading">
+            <div>
+              <h2 id="affiliate-mobile-sidebar-title">Mobile product sidebar</h2>
+              <code>affiliate-mobile-sidebar</code>
+            </div>
+            <span class="test-status">Live</span>
+          </div>
+          <div class="leo-ad-container" data-ad-placement="affiliate-mobile-sidebar" data-ad-format="native_product" data-ad-theme="light"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script
+    defer
+    src="ads.loader.js"
+    id="leo_ads_loader"
+    data-base-cdn="./"
+    data-ads-api-base="http://localhost:9009/"
+  ></script>
+</body>
+</html>

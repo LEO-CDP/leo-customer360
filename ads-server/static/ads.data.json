@@ -1,0 +1,381 @@
+{
+  "ads": [
+    {
+      "adId": "coolmate_dynamic_retargeting_01",
+      "adType": "dynamic_retargeting",
+      "adFormat": "single_banner",
+      "adPlacementId": "12345",
+      "placement": {
+        "width": 300,
+        "height": 250,
+        "unit": "px"
+      },
+      "source": {
+        "type": "local",
+        "provider": "internal",
+        "campaignId": "cmp_coolmate_retargeting_001",
+        "creativeId": "coolmate_retargeting_01"
+      },
+      "rendering": {
+        "type": "native_json",
+        "template": "single_banner_v1"
+      },
+      "tracking": {
+        "impressionUrl": "https://analytics.example.com/track/impression",
+        "clickUrl": "https://analytics.example.com/track/click"
+      },
+      "advertiser": {
+        "id": "coolmate",
+        "name": "Coolmate",
+        "description": "Thời trang nam giới hiện đại",
+        "title": "Coolmate Chào Bạn Mới",
+        "logoUrl": "https://ui-avatars.com/api/?name=Coolmate&background=000&color=fff&size=128&font-size=0.33"
+      },
+      "destination": {
+        "type": "url",
+        "url": "https://example.com/product/2"
+      },
+      "creative": {
+        "id": "coolmate_retargeting_01",
+        "headline": "Bạn vẫn quan tâm chứ?",
+        "subheadline": "Những sản phẩm bạn đã xem đang chờ bạn.",
+        "cta": "Xem lại ngay",
+        "imageUrl": "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=85",
+        "badge": {
+          "text": "-9%",
+          "position": "top-left"
+        }
+      }
+    },
+    {
+      "adId": "coolmate_product_carousel_01",
+      "adType": "dynamic_retargeting",
+      "adFormat": "product_carousel",
+      "adPlacementId": "12346",
+      "placement": {
+        "width": 100,
+        "height": 0,
+        "unit": "%",
+        "responsive": true
+      },
+      "source": {
+        "type": "local",
+        "provider": "internal",
+        "campaignId": "cmp_coolmate_retargeting_001",
+        "creativeId": "coolmate_product_carousel_01"
+      },
+      "rendering": {
+        "type": "native_json",
+        "template": "product_carousel_v1"
+      },
+      "tracking": {
+        "impressionUrl": "https://analytics.example.com/track/impression",
+        "clickUrl": "https://analytics.example.com/track/click"
+      },
+      "advertiser": {
+        "id": "coolmate",
+        "name": "Coolmate",
+        "description": "Thời trang nam giới hiện đại",
+        "title": "Có thể bạn sẽ thích",
+        "logoUrl": "https://ui-avatars.com/api/?name=Coolmate&background=000&color=fff&size=128&font-size=0.33"
+      },
+      "destination": {
+        "type": "product",
+        "url": "https://example.com/coolmate-home"
+      },
+      "content": {
+        "eyebrow": "Dành riêng cho bạn",
+        "headline": "Sản phẩm bạn có thể quan tâm",
+        "subheadline": "Khám phá thêm những lựa chọn phù hợp."
+      },
+      "adItems": [
+        {
+          "id": "p2",
+          "name": "Áo thun nam Essential",
+          "subtitle": "Cotton mềm mại",
+          "price": "249.000đ",
+          "imageUrl": "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80",
+          "destination": {
+            "type": "url",
+            "url": "https://example.com/product/2"
+          },
+          "discount": "-9%",
+          "highlightText": "Bạn vẫn quan tâm?"
+        },
+        {
+          "id": "p3",
+          "name": "Áo polo nam Premium",
+          "subtitle": "Phong cách hiện đại",
+          "price": "399.000đ",
+          "imageUrl": "https://images.unsplash.com/photo-1581655353564-df123a1eb820?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80",
+          "destination": {
+            "type": "url",
+            "url": "https://example.com/product/3"
+          },
+          "discount": "-9%"
+        },
+        {
+          "id": "p4",
+          "name": "Áo thun nam Basic",
+          "subtitle": "Thiết kế tối giản",
+          "price": "199.000đ",
+          "imageUrl": "https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80",
+          "destination": {
+            "type": "url",
+            "url": "https://example.com/product/4"
+          },
+          "discount": "-9%"
+        },
+        {
+          "id": "p5",
+          "name": "Áo thun nam Air",
+          "subtitle": "Thoáng nhẹ cả ngày",
+          "price": "299.000đ",
+          "imageUrl": "https://images.unsplash.com/photo-1618354691373-d851c5c3a990?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&q=80",
+          "destination": {
+            "type": "url",
+            "url": "https://example.com/product/5"
+          },
+          "discount": "-9%"
+        }
+      ]
+    },
+    {
+      "adId": "coolmate_native_01",
+      "adType": "sponsored_content",
+      "adFormat": "native",
+      "adPlacementId": "12347",
+      "placement": {
+        "width": 100,
+        "height": 0,
+        "unit": "%",
+        "responsive": true
+      },
+      "source": {
+        "type": "local",
+        "provider": "internal",
+        "campaignId": "cmp_001",
+        "creativeId": "cr_001"
+      },
+      "rendering": {
+        "type": "native_json",
+        "template": "native_card_v1"
+      },
+      "tracking": {
+        "impressionUrl": "https://analytics.example.com/track/impression",
+        "clickUrl": "https://analytics.example.com/track/click"
+      },
+      "advertiser": {
+        "id": "coolmate",
+        "name": "Coolmate",
+        "description": "Thời trang nam giới hiện đại",
+        "title": "Coolmate",
+        "logoUrl": "https://ui-avatars.com/api/?name=Coolmate&background=000&color=fff&size=128&font-size=0.33"
+      },
+      "destination": {
+        "type": "url",
+        "url": "https://example.com/coolmate-home"
+      },
+      "content": {
+        "id": "content_001",
+        "label": "Sponsored",
+        "headline": "Phong cách nam giới hiện đại cho mọi ngày",
+        "body": "Khám phá những sản phẩm được thiết kế để mang lại sự thoải mái và phong cách trong cuộc sống hàng ngày.",
+        "cta": "Khám phá ngay",
+        "imageUrl": "https://images.unsplash.com/photo-1496747611176-843222e1e57c?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=85"
+      }
+    },
+    {
+      "adId": "google_ads_display_01",
+      "adType": "display",
+      "adFormat": "google_ads",
+      "adPlacementId": "google_top_banner",
+      "placement": {
+        "width": 100,
+        "height": 250,
+        "unit": "%",
+        "responsive": true
+      },
+      "source": {
+        "type": "ad_network",
+        "provider": "google_ads",
+        "network": "google_ad_manager",
+        "mode": "js_tag",
+        "publisherId": "pub-1234567890",
+        "adUnitId": "12345678901"
+      },
+      "rendering": {
+        "type": "js_tag",
+        "loader": {
+          "src": "https://securepubads.g.doubleclick.net/tag/js/gpt.js",
+          "async": true
+        },
+        "config": {
+          "adUnitPath": "/1234567890/example/homepage",
+          "sizes": [
+            [
+              728,
+              90
+            ],
+            [
+              970,
+              250
+            ],
+            [
+              320,
+              100
+            ]
+          ],
+          "targeting": {
+            "page": "homepage",
+            "device": "responsive"
+          }
+        },
+        "container": {
+          "id": "google-ad-slot-001",
+          "className": "ad-slot google-ad-slot"
+        }
+      },
+      "tracking": {
+        "impressionUrl": "https://analytics.example.com/track/impression?source=google",
+        "clickUrl": "https://analytics.example.com/track/click?source=google"
+      }
+    },
+    {
+      "adId": "google_ads_native_01",
+      "adType": "native",
+      "adFormat": "google_ads",
+      "adPlacementId": "google_native_001",
+      "placement": {
+        "width": 100,
+        "height": 0,
+        "unit": "%",
+        "responsive": true
+      },
+      "source": {
+        "type": "ad_network",
+        "provider": "google_ads",
+        "network": "google_ad_manager",
+        "mode": "js_tag",
+        "publisherId": "pub-1234567890",
+        "adUnitId": "12345678902"
+      },
+      "rendering": {
+        "type": "js_tag",
+        "loader": {
+          "src": "https://securepubads.g.doubleclick.net/tag/js/gpt.js",
+          "async": true
+        },
+        "config": {
+          "adUnitPath": "/1234567890/example/native",
+          "sizes": [
+            [
+              1,
+              1
+            ]
+          ],
+          "native": true
+        },
+        "container": {
+          "id": "google-native-slot-001",
+          "className": "ad-slot google-native-slot"
+        }
+      },
+      "tracking": {
+        "impressionUrl": "https://analytics.example.com/track/impression?source=google",
+        "clickUrl": "https://analytics.example.com/track/click?source=google"
+      }
+    },
+    {
+      "adId": "affiliate_shopee_001",
+      "adType": "affiliate",
+      "adFormat": "native_product",
+      "adPlacementId": "affiliate_product_001",
+      "placement": {
+        "width": 100,
+        "height": 0,
+        "unit": "%",
+        "responsive": true
+      },
+      "source": {
+        "type": "affiliate",
+        "provider": "affiliate_network",
+        "network": "shopee_affiliate",
+        "campaignId": "shopee_campaign_001",
+        "creativeId": "shopee_creative_001",
+        "mode": "native"
+      },
+      "rendering": {
+        "type": "native_json",
+        "template": "affiliate_product_card_v1"
+      },
+      "tracking": {
+        "impressionUrl": "https://analytics.example.com/track/impression?source=shopee",
+        "clickUrl": "https://analytics.example.com/track/click?source=shopee"
+      },
+      "advertiser": {
+        "id": "shopee_seller_8821",
+        "name": "ABC Fashion",
+        "description": "Thời trang nam",
+        "title": "Ưu đãi dành cho bạn",
+        "logoUrl": "https://ui-avatars.com/api/?name=ABC+Fashion&background=ff6600&color=fff&size=128&font-size=0.33"
+      },
+      "destination": {
+        "type": "affiliate_url",
+        "url": "https://affiliate.example.com/click?offer=shopee_8821",
+        "finalUrl": "https://shopee.vn/product/8821"
+      },
+      "content": {
+        "id": "shopee_product_8821",
+        "label": "Sponsored",
+        "headline": "Áo thun nam Premium - giảm 25%",
+        "body": "Ưu đãi độc quyền từ đối tác affiliate.",
+        "cta": "Xem sản phẩm",
+        "imageUrl": "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=85",
+        "price": "189.000đ",
+        "originalPrice": "249.000đ",
+        "discount": "-25%"
+      }
+    },
+    {
+      "adId": "affiliate_lazada_js_001",
+      "adType": "affiliate",
+      "adFormat": "external_widget",
+      "adPlacementId": "affiliate_sidebar_001",
+      "placement": {
+        "width": 300,
+        "height": 600,
+        "unit": "px"
+      },
+      "source": {
+        "type": "affiliate",
+        "provider": "affiliate_network",
+        "network": "lazada_affiliate",
+        "campaignId": "lazada_campaign_001",
+        "creativeId": "lazada_widget_001",
+        "mode": "js_tag"
+      },
+      "rendering": {
+        "type": "js_tag",
+        "loader": {
+          "src": "https://affiliate.example.com/ads/lazada-widget.js",
+          "async": true
+        },
+        "config": {
+          "publisherId": "publisher_12345",
+          "campaignId": "lazada_campaign_001",
+          "placementId": "sidebar_001",
+          "format": "300x600"
+        },
+        "container": {
+          "id": "affiliate-lazada-slot-001",
+          "className": "ad-slot affiliate-ad-slot"
+        }
+      },
+      "tracking": {
+        "impressionUrl": "https://analytics.example.com/track/impression?source=lazada",
+        "clickUrl": "https://analytics.example.com/track/click?source=lazada"
+      }
+    }
+  ]
+}
