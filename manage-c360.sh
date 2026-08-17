@@ -22,6 +22,9 @@
 #   ./manage-c360.sh build           Rebuild images without starting anything.
 #   ./manage-c360.sh down            Stop + remove containers/network (volumes kept).
 #   ./manage-c360.sh seed-demo       Seed full POC/UAT demo data (CIR + content).
+#   ./manage-c360.sh backup          One-shot logical backup (pg_dump) of
+#                                    customer360 + db_keycloak -> 'customer360-pgbackups'
+#                                    volume (+ vStorage if BACKUP_S3_* set). See postgres/docs/backup.
 #   ./manage-c360.sh help            Show this usage.
 #
 # Flags:
@@ -65,7 +68,7 @@ for arg in "$@"; do
       [ "$arg" = "-h" ] || [ "$arg" = "--help" ] && arg="help"
       COMMAND="$arg"
       ;;
-    seed-demo)
+    seed-demo|backup)
       COMMAND="$arg"
       ;;
     --force) FORCE="true" ;;
@@ -81,7 +84,7 @@ for arg in "$@"; do
 done
 
 usage() {
-  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 if [ -z "$COMMAND" ] || [ "$COMMAND" = "help" ]; then
@@ -455,6 +458,42 @@ cmd_seed_demo() {
   echo "✅ POC/UAT demo data seeding complete."
 }
 
+# One-shot LOGICAL backup of the running stack. Delegates to the existing
+# tooling (postgres/docs/backup): runs pg_backup.sh once in the pg-backup image
+# via the backup compose overlay, so we reuse its dump+verify+checksum+offload+
+# retention logic rather than re-implementing pg_dump here. Dumps land in the
+# 'customer360-pgbackups' named volume (and vStorage when BACKUP_S3_* are set in
+# .env). For restore/PITR see postgres/docs/02 + 04 and pg_restore.sh.
+cmd_backup() {
+  local backup_overlay="postgres/docs/backup/docker-compose.backup.yml"
+  if [ ! -f "$backup_overlay" ]; then
+    echo "❌ Error: '${backup_overlay}' not found." >&2
+    exit 1
+  fi
+  if [ "$(docker inspect -f '{{.State.Running}}' "$POSTGRES_CONTAINER" 2>/dev/null)" != "true" ]; then
+    echo "❌ '${POSTGRES_CONTAINER}' is not running. Start the stack first: ./manage-c360.sh start" >&2
+    exit 1
+  fi
+
+  local dc_backup=("${DC[@]}" -f "$COMPOSE_FILE" -f "$backup_overlay")
+
+  echo "🗄️  Building backup image + running one-shot logical backup (customer360 + db_keycloak)..."
+  "${dc_backup[@]}" build pg-backup
+  # Passing the command after the service overrides the sidecar's cron-loop
+  # command, so pg_backup.sh runs exactly once and the container exits.
+  "${dc_backup[@]}" run --rm pg-backup /usr/local/bin/pg_backup.sh
+
+  echo ""
+  echo "✅ Backup complete -> Docker volume 'customer360-pgbackups' (path /backups inside the job)."
+  if [ -n "$(get_env_value BACKUP_S3_BUCKET)" ]; then
+    echo "   Offloaded to vStorage bucket '$(get_env_value BACKUP_S3_BUCKET)'."
+  else
+    echo "   Offsite: set BACKUP_S3_ENDPOINT / BACKUP_S3_BUCKET / BACKUP_S3_ACCESS_KEY /"
+    echo "            BACKUP_S3_SECRET_KEY in '${ENV_FILE}' to also push to vStorage."
+  fi
+  echo "   Restore: see postgres/docs/backup/pg_restore.sh and postgres/docs/02-backup-and-recovery.md."
+}
+
 # Every command below invokes 'docker compose', and docker-compose.yml
 # requires DB_PASSWORD/REDIS_PASSWORD/KEYCLOAK_ADMIN_PASSWORD just to parse
 # (${VAR:?...} guards) -- so .env must exist and be sourced first, regardless
@@ -476,4 +515,5 @@ case "$COMMAND" in
   build) cmd_build ;;
   down) cmd_down ;;
   seed-demo) cmd_seed_demo ;;
+  backup) cmd_backup ;;
 esac

@@ -1,0 +1,69 @@
+# Logical backup CronJob for the Customer360 Postgres tier.
+#
+# Works with ANY topology: the in-cluster StatefulSet
+# (k8s/components/in-cluster-data/postgres.yaml) OR managed VNG vDB (point
+# DB_HOST at the vDB private host). Runs pg_backup.sh from the backup image
+# (see Dockerfile.backup) and offloads dumps to vStorage.
+#
+# Build & push the image first:
+#   docker build -f postgres/docs/backup/Dockerfile.backup \
+#     -t <registry>/customer360-pg-backup:16 postgres/docs/backup
+#
+# Then create the Secret from backup-secret.example.env (see that file) and
+# apply this manifest into the app namespace.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-logical-backup
+  labels: { app: postgres, role: backup }
+spec:
+  schedule: "0 18 * * *"            # 01:00 Asia/Ho_Chi_Minh (UTC+7) daily
+  concurrencyPolicy: Forbid         # never overlap runs
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2               # retry a failed backup twice, then alert
+      activeDeadlineSeconds: 7200
+      template:
+        metadata:
+          labels: { app: postgres, role: backup }
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            fsGroup: 65534
+          containers:
+            - name: backup
+              image: REPLACE_ME/customer360-pg-backup:16
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - secretRef: { name: postgres-backup-secrets }   # PGPASSWORD, AWS keys
+              env:
+                # DB connection — reuse the app ConfigMap where possible.
+                - name: PGHOST
+                  valueFrom: { configMapKeyRef: { name: c360-config, key: DB_HOST } }
+                - name: PGPORT
+                  valueFrom: { configMapKeyRef: { name: c360-config, key: DB_PORT } }
+                - { name: PGUSER, value: "postgres" }
+                - { name: DATABASES, value: "customer360 db_keycloak" }
+                - { name: PG_DUMP_FORMAT, value: "directory" }
+                - { name: JOBS, value: "4" }
+                - { name: COMPRESS, value: "zstd" }
+                - { name: RETENTION_DAYS, value: "3" }   # local; S3 lifecycle owns offsite
+                # vStorage / S3 offload
+                - { name: S3_ENDPOINT, value: "https://hcm04.vstorage.vngcloud.vn" }
+                - { name: S3_BUCKET,   value: "c360-prod-backups" }
+                - { name: S3_PREFIX,   value: "postgres" }
+                - { name: AWS_REGION,  value: "us-east-1" }
+              resources:
+                requests: { cpu: "250m", memory: "512Mi" }
+                limits:   { cpu: "2",    memory: "2Gi" }
+              volumeMounts:
+                - { name: work, mountPath: /backups }
+          volumes:
+            - name: work
+              emptyDir: { sizeLimit: 20Gi }   # scratch; real copy lives in vStorage

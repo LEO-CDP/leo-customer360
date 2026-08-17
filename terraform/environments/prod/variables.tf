@@ -125,6 +125,23 @@ variable "pg_db_name" {
   default = "customer360"
 }
 
+# HA-cluster backups are configured via VNG Backup Center (vBackup), NOT via
+# backup_auto/duration/time (those are standalone-only and inert for a cluster).
+# Create a Backup Policy + Location in the console (or vBackup TF resources if
+# available) and set their IDs here — else the prod cluster has NO automatic
+# backups. Leave null only if you rely solely on manual snapshots + the logical
+# pg_dump CronJob (postgres/docs/backup/backup-cronjob.yaml).
+variable "pg_backup_policy_id" {
+  type        = string
+  description = "VNG Backup Center Backup Policy ID applied to the prod PG cluster."
+  default     = null
+}
+variable "pg_backup_location_id" {
+  type        = string
+  description = "VNG Backup Center Backup Location ID for the prod PG cluster's backups."
+  default     = null
+}
+
 # --- In-DB bootstrap (recommended: run via CI/K8s job, not from here) ------
 variable "run_db_bootstrap" {
   type    = bool

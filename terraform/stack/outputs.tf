@@ -10,6 +10,9 @@ output "postgres" {
     ro_port     = module.postgres.ro_port
     db_name     = module.postgres.db_name
     username    = module.postgres.username
+    # Cluster backup wiring (null for standalone) — verify post-apply.
+    backup_policy_id   = module.postgres.backup_policy_id
+    backup_location_id = module.postgres.backup_location_id
   }
 }
 

@@ -45,6 +45,14 @@ module "stack" {
     autovacuum      = "true"
   }
 
+  # --- HA-cluster backups via VNG Backup Center (vBackup) ---
+  # REQUIRED for automatic prod backups: the cluster resource has no
+  # backup_auto/duration/time. Set these to a Backup Policy + Location created
+  # in Backup Center. If left null, the cluster has NO scheduled backups — rely
+  # on manual snapshots + the logical pg_dump CronJob until they are set.
+  pg_backup_policy_id   = var.pg_backup_policy_id
+  pg_backup_location_id = var.pg_backup_location_id
+
   # --- In-DB bootstrap: run via CI/K8s job in prod (kept off here) ---
   run_db_bootstrap       = var.run_db_bootstrap
   app_role_password      = var.app_role_password

@@ -1,0 +1,78 @@
+# pgBackRest for the self-managed StatefulSet (k8s/components/in-cluster-data/postgres.yaml).
+# See ../../04-pgbackrest-pitr.md. PREFER CloudNativePG's Barman Cloud plugin if you can adopt
+# it — this hand-rolled sidecar is for those staying on the raw StatefulSet.
+#
+# Apply order:
+#   1. kubectl create configmap pgbackrest-conf \
+#        --from-file=pgbackrest.conf=postgres/docs/backup/pgbackrest/pgbackrest.conf -n <ns>
+#      (edit pg1-path to /var/lib/postgresql/data/pgdata first — matches the StatefulSet's PGDATA)
+#   2. kubectl create secret generic pgbackrest-secrets -n <ns> \
+#        --from-literal=PGBACKREST_REPO1_S3_KEY=... \
+#        --from-literal=PGBACKREST_REPO1_S3_KEY_SECRET=... \
+#        --from-literal=PGBACKREST_REPO1_CIPHER_PASS=...
+#   3. Merge this as a strategic-merge / Kustomize patch onto the `postgres` StatefulSet.
+#
+# NOTE: the DB image must contain the pgbackrest binary (postgres/Dockerfile installs it) so the
+# primary can run archive_command. The sidecar (same image) shares PGDATA + the postgres socket.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  template:
+    spec:
+      containers:
+        # --- Patch the existing postgres container: turn on WAL archiving ---
+        - name: postgres
+          args:
+            - postgres
+            - -c
+            - wal_level=replica
+            - -c
+            - archive_mode=on
+            - -c
+            - max_wal_senders=3
+            - -c
+            - archive_command=pgbackrest --stanza=c360 archive-push %p
+          envFrom:
+            - secretRef: { name: pgbackrest-secrets }   # archive-push needs repo creds
+          volumeMounts:
+            - { name: pgbackrest-conf, mountPath: /etc/pgbackrest }
+            - { name: pg-socket, mountPath: /var/run/postgresql }
+            - { name: pgbackrest-spool, mountPath: /var/spool/pgbackrest }
+        # --- New sidecar: stanza-create + scheduled base backups ---
+        - name: pgbackrest
+          image: customer360-postgres:local
+          envFrom:
+            - secretRef: { name: pgbackrest-secrets }
+          env:
+            - { name: FULL_AT, value: "1800" }   # HHMM (container TZ) for daily full
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -e
+              pgbackrest --stanza=c360 stanza-create || true
+              until pgbackrest --stanza=c360 check; do echo "waiting for archiving..."; sleep 5; done
+              echo "pgbackrest sidecar up; daily full at ${FULL_AT}"
+              while true; do
+                if [ "$(date +%H%M)" = "${FULL_AT}" ]; then
+                  pgbackrest --stanza=c360 --type=full backup || echo "full backup failed"
+                  sleep 61
+                fi
+                sleep 30
+              done
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }   # same PVC as primary
+            - { name: pgbackrest-conf, mountPath: /etc/pgbackrest }
+            - { name: pg-socket, mountPath: /var/run/postgresql }
+            - { name: pgbackrest-spool, mountPath: /var/spool/pgbackrest }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits:   { cpu: "1",    memory: "1Gi" }
+      volumes:
+        - name: pgbackrest-conf
+          configMap: { name: pgbackrest-conf }
+        - name: pg-socket
+          emptyDir: {}
+        - name: pgbackrest-spool
+          emptyDir: {}

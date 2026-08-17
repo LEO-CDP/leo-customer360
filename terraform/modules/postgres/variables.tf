@@ -89,8 +89,26 @@ variable "config_values" {
 
 variable "backup_auto" {
   type        = bool
-  description = "Standalone only: enable daily automatic backups."
+  description = "Standalone only: enable daily automatic backups. Ignored for topology=cluster (use backup_policy_id/backup_location_id)."
   default     = true
+}
+
+# --- Cluster backups (vBackup / Backup Center) -------------------------------
+# The vngcloud_vdb_postgresql_cluster resource does NOT accept backup_auto/
+# backup_duration/backup_time. HA-cluster backups are configured by attaching a
+# Backup Policy + Backup Location created in VNG Backup Center (vBackup). Both
+# are Optional+Computed on the resource: setting them applies the policy at
+# create time; leaving them null keeps whatever the console/vBackup assigned.
+variable "backup_policy_id" {
+  type        = string
+  description = "Cluster only: Backup Policy ID (schedule + retention) from VNG Backup Center. null = leave as-is."
+  default     = null
+}
+
+variable "backup_location_id" {
+  type        = string
+  description = "Cluster only: Backup Location ID (where backups are stored) from VNG Backup Center. null = leave as-is."
+  default     = null
 }
 
 variable "backup_duration" {

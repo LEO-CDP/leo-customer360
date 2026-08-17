@@ -116,6 +116,15 @@ resource "vngcloud_vdb_postgresql_cluster" "cluster" {
   password = var.password
   db_name  = var.db_name
 
+  # Cluster backups: attach a Backup Policy + Location from VNG Backup Center
+  # (vBackup). These are the cluster equivalent of the standalone resource's
+  # backup_auto/backup_duration/backup_time (which do NOT exist here). null
+  # leaves the console/vBackup-assigned value untouched (both are Computed).
+  # To restore a NEW cluster from a backup point, set var-driven backup_id via a
+  # separate apply (ForceNew) — omitted here to keep steady-state applies clean.
+  backup_policy_id   = var.backup_policy_id
+  backup_location_id = var.backup_location_id
+
   config_id = (local.is_cluster && length(var.config_values) > 0) ? vngcloud_vdb_postgresql_cluster_config_group.cluster[0].id : null
 
   # Read-write listener on 5432 for every allowed CIDR. Add 15432 rules for the

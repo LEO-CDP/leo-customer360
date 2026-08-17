@@ -136,6 +136,18 @@ variable "pg_config_values" {
   default     = {}
 }
 
+variable "pg_backup_policy_id" {
+  type        = string
+  description = "Cluster only: VNG Backup Center Backup Policy ID (schedule+retention). null = leave as-is."
+  default     = null
+}
+
+variable "pg_backup_location_id" {
+  type        = string
+  description = "Cluster only: VNG Backup Center Backup Location ID (backup storage). null = leave as-is."
+  default     = null
+}
+
 # ---------------------------------------------------------------------------
 # In-database bootstrap (extensions + RLS role + schema + seed)
 # ---------------------------------------------------------------------------

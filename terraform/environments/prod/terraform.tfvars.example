@@ -36,3 +36,10 @@ tenants = [
 # redis_package_name = "db.new.s-general-2x4"
 # kafka_package_name = "db-kafka.s-general-2x4-n10"
 # kafka_broker_count = 3
+
+# --- PG cluster backups (VNG Backup Center / vBackup) ---
+# The HA cluster has NO backup_auto/duration/time. Create a Backup Policy +
+# Location in Backup Center and paste their IDs here to enable automatic
+# backups. Leaving these unset => manual snapshots + logical CronJob only.
+# pg_backup_policy_id   = "bkpol-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+# pg_backup_location_id = "bkloc-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"

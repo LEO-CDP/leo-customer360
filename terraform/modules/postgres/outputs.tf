@@ -44,3 +44,13 @@ output "username" {
 output "topology" {
   value = var.topology
 }
+
+output "backup_policy_id" {
+  description = "Effective Backup Policy ID (cluster only; null for standalone)."
+  value       = local.is_cluster ? try(local.cluster.backup_policy_id, null) : null
+}
+
+output "backup_location_id" {
+  description = "Effective Backup Location ID (cluster only; null for standalone)."
+  value       = local.is_cluster ? try(local.cluster.backup_location_id, null) : null
+}

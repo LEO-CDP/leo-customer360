@@ -25,9 +25,17 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
             'Acquire::ForceIPv4 "true";' \
             > /etc/apt/apt.conf.d/80-retries-and-timeouts; \
         apt-get update \
-        && apt-get install -y --no-install-recommends postgresql-16-pgvector \
+        && apt-get install -y --no-install-recommends \
+            postgresql-16-pgvector \
+            pgbackrest \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# pgbackrest (installed above) powers the physical/PITR backup track: the server
+# calls it from archive_command, and a sidecar runs base backups. See
+# postgres/docs/04-pgbackrest-pitr.md. Pre-create its spool/log dirs owned by
+# the postgres runtime user so archive-async + logging work out of the box.
+RUN install -d -o postgres -g postgres /var/spool/pgbackrest /var/log/pgbackrest
 
 # Scripts in /docker-entrypoint-initdb.d/ run once, in filename order, ONLY
 # when the data directory is empty (first-ever container start). See:

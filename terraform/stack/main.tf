@@ -43,6 +43,10 @@ module "postgres" {
   public_access       = var.pg_public_access
   allowed_ip_prefixes = var.db_allowed_ip_prefixes
   config_values       = var.pg_config_values
+
+  # Cluster backups via VNG Backup Center (null for standalone / when unset).
+  backup_policy_id   = var.pg_backup_policy_id
+  backup_location_id = var.pg_backup_location_id
 }
 
 # --- In-database bootstrap (extensions + RLS role + schema + seed) ----------

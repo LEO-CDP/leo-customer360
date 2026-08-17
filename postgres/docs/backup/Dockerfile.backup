@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1.7
+# Backup runner image: PostgreSQL 16 client tools (pg_dump/pg_dumpall/pg_restore)
+# + aws-cli for vStorage/S3 offload. Kept separate from the DB image so the
+# CronJob/sidecar has the S3 client without bloating the database image.
+#
+# The client MAJOR version must be >= the server (16), so pg_dump/pg_restore
+# understand the server's catalog. This uses the PGDG apt repo to match PG16.
+FROM debian:bookworm-slim
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg lsb-release awscli zstd; \
+    install -d /usr/share/postgresql-common/pgdg; \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc; \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends postgresql-client-16; \
+    apt-get clean; rm -rf /var/lib/apt/lists/*
+
+COPY pg_backup.sh pg_restore.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/pg_backup.sh /usr/local/bin/pg_restore.sh
+
+# Default: one backup run. The CronJob/sidecar overrides the schedule.
+ENTRYPOINT ["/usr/local/bin/pg_backup.sh"]

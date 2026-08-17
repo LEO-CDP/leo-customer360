@@ -1,0 +1,81 @@
+# pgBackRest physical/PITR overlay for the Customer360 stack. See ../../04-pgbackrest-pitr.md
+#
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f postgres/docs/backup/pgbackrest/docker-compose.pgbackrest.yml \
+#     up -d --build postgres pgbackrest
+#
+# Requires in the stack .env:
+#   PGBACKREST_CIPHER_PASS   repo encryption passphrase (keep it safe!)
+#   BACKUP_S3_ACCESS_KEY / BACKUP_S3_SECRET_KEY   vStorage keys
+# The base postgres/Dockerfile now installs the pgbackrest binary, so both
+# services use customer360-postgres:local (no separate image needed).
+services:
+  # Enable WAL archiving on the primary. archive_mode change needs a restart,
+  # which `up` performs. archive-push runs IN this container (hence pgbackrest
+  # must be in the image).
+  postgres:
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - max_wal_senders=3
+      - -c
+      - archive_command=pgbackrest --stanza=c360 archive-push %p
+    environment:
+      PGBACKREST_REPO1_S3_KEY: ${BACKUP_S3_ACCESS_KEY:?Set BACKUP_S3_ACCESS_KEY in .env}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${BACKUP_S3_SECRET_KEY:?Set BACKUP_S3_SECRET_KEY in .env}
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_CIPHER_PASS:?Set PGBACKREST_CIPHER_PASS in .env}
+    volumes:
+      - ./postgres/docs/backup/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - postgres-socket:/var/run/postgresql
+      - pgbackrest-spool:/var/spool/pgbackrest
+      - pgbackrest-log:/var/log/pgbackrest
+
+  # Scheduler: creates the stanza, then takes a daily full backup. Shares PGDATA
+  # + the postgres unix socket so pgBackRest reads data files and opens its local
+  # control connection. Runs as `postgres` to match PGDATA ownership.
+  pgbackrest:
+    image: customer360-postgres:local
+    container_name: customer360-pgbackrest
+    restart: unless-stopped
+    user: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGBACKREST_REPO1_S3_KEY: ${BACKUP_S3_ACCESS_KEY:?}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${BACKUP_S3_SECRET_KEY:?}
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_CIPHER_PASS:?}
+      FULL_AT: ${PGBACKREST_FULL_AT:-1800}   # HHMM (container TZ) for the daily full
+    volumes:
+      - customer360-pgdata:/var/lib/postgresql/data
+      - postgres-socket:/var/run/postgresql
+      - ./postgres/docs/backup/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - pgbackrest-spool:/var/spool/pgbackrest
+      - pgbackrest-log:/var/log/pgbackrest
+    networks:
+      - customer360-network
+    # `$$` defers expansion to THIS container's shell (not Compose at parse time).
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        pgbackrest --stanza=c360 stanza-create || true
+        pgbackrest --stanza=c360 check
+        echo "pgbackrest scheduler up; daily full at $${FULL_AT} (container TZ)"
+        while true; do
+          if [ "$$(date +%H%M)" = "$${FULL_AT}" ]; then
+            pgbackrest --stanza=c360 --type=full backup || echo "full backup failed"
+            sleep 61
+          fi
+          sleep 30
+        done
+
+volumes:
+  postgres-socket:
+  pgbackrest-spool:
+  pgbackrest-log:
