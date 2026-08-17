@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is git-ignored.
+# SECRETS ONLY — non-secret, per-env config lives in overlays/<env>.tfvars.
+
+# --- vStorage S3 keys ---
+# Create at: vStorage console -> IAM -> Service account -> vStorage credentials
+# -> Create a S3 key. The Secret Key is shown ONCE on creation — copy it then.
+access_key = "your-vstorage-access-key"
+secret_key = "your-vstorage-secret-key"
