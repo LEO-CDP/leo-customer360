@@ -35,7 +35,9 @@ fi
 if [[ -f .env ]]; then
   set -a
   # shellcheck disable=SC1091
-  source .env
+  # ./ prefix: a source/. arg with no slash is a PATH lookup under POSIX sh
+  # (e.g. `sh deploy.sh`) and would miss a cwd-local .env — the ./ forces cwd.
+  source ./.env
   set +a
 fi
 
