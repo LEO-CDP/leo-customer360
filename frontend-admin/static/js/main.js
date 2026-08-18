@@ -217,7 +217,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       $("#footer-api-base").text(C360.config.current.apiBase);
 
       bindBrowserEvents();
-      C360.listView.bindEvents();
+      C360.profileListView.bindEvents();
       C360.duplicateProfilesView.bindEvents();
       C360.duplicateProfilesView.bindTabs();
       C360.profileDetailView.bindEvents();
@@ -241,9 +241,6 @@ const TIME_CHECK_API_HEALTH = 60000;
         C360.config.loadDomains().always(function () {
           populateDomainSelects();
           C360.router.start("/overview");
-          // Pre-fetch the profiles list in the background even if we didn't
-          // land on the Profiles tab, so switching to it feels instant.
-          C360.listView.load(false);
         });
       });
     }).fail(function () {

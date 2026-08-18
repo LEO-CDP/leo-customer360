@@ -106,5 +106,5 @@ window.C360 = window.C360 || {};
     mount: function () { load(false); }
   });
 
-  C360.listView = { load: load, bindEvents: bindEvents, rowVm: rowVm, columns: COLUMNS };
+  C360.profileListView = { load: load, bindEvents: bindEvents, rowVm: rowVm, columns: COLUMNS };
 })(window.C360);

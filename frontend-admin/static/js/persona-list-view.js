@@ -79,9 +79,9 @@ window.C360 = window.C360 || {};
   // pattern as segments-view.js's matched-profiles sub-table.
   var currentArchetypeId = null;
   var categoryDtv = C360.DataTableView.create({
-    columns: C360.listView.columns,
+    columns: C360.profileListView.columns,
     pagination: true,
-    rowVm: C360.listView.rowVm,
+    rowVm: C360.profileListView.rowVm,
     rowId: function (vm) { return vm.master_profile_id; },
     rowSelectorClass: "profile-row",
     resourceLabel: "master profile",
