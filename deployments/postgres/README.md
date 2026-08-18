@@ -103,3 +103,29 @@ required argument").
 - **Secrets & state:** `terraform.tfvars`, `.env`, and `*.tfstate` hold secrets in plaintext
   and are git-ignored. Use a shared remote backend + locking for team/CI use (local state is
   what makes re-runs idempotent — a second machine with no state would create duplicates).
+
+## Post-deploy SQL (`run-sql.sh`)
+
+`run-sql.sh <env>` is a **standalone** step — it is intentionally NOT run by `deploy.sh`.
+It runs every `*.sql` under the repo's [`../../postgres/`](../../postgres/) directory
+(currently `init/00-extensions.sql` then `init/02-create-keycloak-db.sql`), in **filename
+order**, against the deployed DB.
+
+```bash
+cd deployments/postgres
+./run-sql.sh uat                          # auto-discovers the bastion (see below)
+BASTION=leocdp360@<floating_ip> ./run-sql.sh uat   # or target a jump host explicitly
+```
+
+- **How:** reads `db_host`/`db_port` from the workspace's Terraform outputs and
+  `db_name`/`db_username`/`db_password` from the overlay + `.env`/`terraform.tfvars`, then
+  pipes each file through `psql` with `ON_ERROR_STOP=1`. `psql` is required — `02-create-keycloak-db.sql`
+  uses the `\gexec` meta-command.
+- **Private DB → runs on the bastion.** With `public_access = false` the DB IP is private
+  (10.x) and unreachable from a laptop, so `run-sql.sh` runs psql **on the bastion** over SSH.
+  It **auto-discovers** the sibling `../server` box's floating IP from that deployment's
+  outputs (user `leocdp360`, key `~/.ssh/c360-api_rsa`); override with `BASTION=<user>@<ip>`,
+  `BASTION_USER`, or `SSH_KEY`. With no bastion it falls back to a local (or dockerized
+  `postgres:16-alpine`) psql — which only works if the DB is actually reachable from here.
+- **Extension caveat:** `00-extensions.sql` creates `postgis`/`vector`/`uuid-ossp`/… — these
+  must be available on the managed vDB and creatable by `db_username`; if not, that script errors.

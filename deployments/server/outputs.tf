@@ -22,13 +22,13 @@ output "flavors" {
 }
 
 output "image_id" {
-  description = "Resolved id of the Ubuntu 24.04 image used for all servers."
-  value       = data.vngcloud_vserver_image.this.id
+  description = "Resolved id of the image used for all servers (direct var.image_id or the name lookup)."
+  value       = local.image_id
 }
 
 output "root_disk_type_id" {
   description = "Resolved id of the root-disk volume type used for all servers."
-  value       = data.vngcloud_vserver_volume_type.this.id
+  value       = local.root_disk_type_id
 }
 
 output "network_id" {

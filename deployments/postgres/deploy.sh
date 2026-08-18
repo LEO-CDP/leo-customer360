@@ -71,6 +71,9 @@ case "$ACTION" in
       *) rm -f tfplan; echo "terraform plan failed (exit $code)"; exit "$code" ;;
     esac
     rm -f tfplan
+    # SQL bootstrapping is intentionally SEPARATE from deploy: run './run-sql.sh <env>'
+    # afterwards. It auto-finds the bastion (or set BASTION=<user>@<ip>) since the DB is
+    # private. See run-sql.sh / the README "Post-deploy SQL" section.
     ;;
   destroy)
     terraform destroy -input=false -lock-timeout="$LOCK_TIMEOUT" -var-file="$VAR_FILE"

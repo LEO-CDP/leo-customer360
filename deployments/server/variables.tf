@@ -60,7 +60,13 @@ variable "zone_id" {
 variable "flavor_zone_name" {
   type        = string
   default     = "General v2 Instances"
-  description = "Flavor-zone (compute family) display name that the s2-general flavors live under. Copy the exact group label from the console create form."
+  description = "Flavor-zone display name. Used only when flavor_zone_id is empty. NOTE: many zones share a name, and the provider picks the FIRST match — prefer flavor_zone_id."
+}
+
+variable "flavor_zone_id" {
+  type        = string
+  default     = ""
+  description = "Direct flavor-zone id (a UUID). When set, bypasses the flavor_zone_name lookup — required when zones share a display name across AZs. From discover-catalog.py: a flavor's `zoneId` is this UUID; its `flavorZoneId` field is the actual AZ (pick the AZ that isn't sold out)."
 }
 
 variable "volume_type_zone_name" {
@@ -72,13 +78,25 @@ variable "volume_type_zone_name" {
 variable "image_name" {
   type        = string
   default     = "Ubuntu 24.04 x64"
-  description = "OS image name. Copy the EXACT name from the console image picker (Ubuntu Server 24.04)."
+  description = "OS image name (matched on the image's imageVersion). Used only when image_id is empty."
+}
+
+variable "image_id" {
+  type        = string
+  default     = ""
+  description = "Direct image id (img-...). When set, bypasses the image_name lookup — needed for s2-general flavors, whose flavor zone the OS images aren't associated with. Find via discover-catalog.py."
 }
 
 variable "root_disk_type_name" {
   type        = string
   default     = "SSD-IOPS3000"
-  description = "Root-disk volume type name. Copy the exact name from the console (per-zone/account-specific)."
+  description = "Root-disk volume type name. Used only when root_disk_type_id is empty."
+}
+
+variable "root_disk_type_id" {
+  type        = string
+  default     = ""
+  description = "Direct volume-type id (vtype-...). When set, bypasses the name lookup — required because the volume_type_zone name lookup returns the DEFAULT AZ's zone (often a disabled one, e.g. HCM03-1A), not your AZ's. From discover-catalog.py / the ?zoneId=<AZ> volume_type_zones query."
 }
 
 # ---------------------------------------------------------------------------
@@ -158,6 +176,17 @@ variable "user_password" {
   default     = ""
   description = "Optional admin password. Do NOT commit a real value."
   sensitive   = true
+  # VNG rule: >=1 lowercase, >=1 uppercase, >=1 digit, and one of * @ ! (RE2 has no
+  # lookahead, so check each class separately).
+  validation {
+    condition = var.user_password == "" || (
+      can(regex("[a-z]", var.user_password)) &&
+      can(regex("[A-Z]", var.user_password)) &&
+      can(regex("[0-9]", var.user_password)) &&
+      can(regex("[@!*]", var.user_password))
+    )
+    error_message = "user_password must contain a lowercase, an uppercase, a digit, and one of * @ ! (VNG password rule)."
+  }
 }
 
 variable "user_data" {
@@ -176,6 +205,24 @@ variable "security_group" {
   type        = list(string)
   default     = []
   description = "Existing security-group ids (secg-...) to attach. Empty = provider default."
+}
+
+variable "attach_floating" {
+  type        = bool
+  default     = false
+  description = "Attach a floating (public) IP to each server — needed to SSH in from outside the VPC (e.g. a bastion)."
+}
+
+variable "open_ssh" {
+  type        = bool
+  default     = false
+  description = "If true, add an inbound tcp/22 rule to the FIRST security_group so you can SSH in (the VNG Default secgroup opens nothing inbound)."
+}
+
+variable "ssh_ingress_cidr" {
+  type        = string
+  default     = "0.0.0.0/0"
+  description = "CIDR allowed to reach tcp/22 when open_ssh = true. TIGHTEN to your public IP (e.g. 203.0.113.4/32) — 0.0.0.0/0 exposes SSH to the whole internet."
 }
 
 # ---------------------------------------------------------------------------

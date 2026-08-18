@@ -6,16 +6,17 @@
 
 name_prefix = "c360-api-prod"
 
-# Both API-server sizes from the request, side by side in this env.
+# Least-cost for now: only the smaller 4x8 is provisioned. Re-enable the
+# 8x16 block below to run both sizes again (per the original request).
 servers = {
   "4x8" = {
     flavor_name    = "s2-general-4x8" # 4 vCPU / 8 GB
     root_disk_size = 50
   }
-  "8x16" = {
-    flavor_name    = "s2-general-8x16" # 8 vCPU / 16 GB
-    root_disk_size = 50
-  }
+  # "8x16" = {
+  #   flavor_name    = "s2-general-8x16" # 8 vCPU / 16 GB
+  #   root_disk_size = 50
+  # }
 }
 
 # Catalog names — VERIFY against the console create form for this account/zone.
@@ -32,7 +33,7 @@ network_cidr   = "10.101.0.0/16"
 subnet_name    = "c360-api-subnet-prod"
 subnet_cidr    = "10.101.1.0/24"
 
-zone_id           = "HCM03-1A" # enabled/default AZ for this account (1A/1B disabled) — see deployments/issues/
+zone_id           = "HCM03-1C" # only AZ enabled for vServer/subnets on this account (1A/1B: "contact to enable") — see deployments/issues/
 encryption_volume = false
 
 # Login: register an SSH key and attach it to both servers (recommended).
@@ -43,5 +44,5 @@ ssh_key_name   = "c360-api-prod"
 # Admin user for password login; password set in ../terraform.tfvars (user_password).
 user_name = "leocdp360"
 
-# Existing security groups to attach (secg-...). Empty = provider default.
-security_group = []
+# security_group is REQUIRED by the provider. Only the project "Default" secgroup exists.
+security_group = ["secg-7c1e85ec-8028-460a-8592-99463f198831"] # "Default"
