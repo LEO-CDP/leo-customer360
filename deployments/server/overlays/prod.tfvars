@@ -10,8 +10,13 @@ name_prefix = "c360-api-prod"
 # 8x16 block below to run both sizes again (per the original request).
 servers = {
   "4x8" = {
-    flavor_name    = "s2-general-4x8" # 4 vCPU / 8 GB
+    flavor_name    = "s2-general-4x8" # 4 vCPU / 8 GB — customer360-api
     root_disk_size = 50
+  }
+  "sso" = {
+    flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB — dedicated Keycloak (SSO); see deployments/sso
+    root_disk_size = 50
+    name           = "sso" # -> c360-api-prod-sso
   }
   # "8x16" = {
   #   flavor_name    = "s2-general-8x16" # 8 vCPU / 16 GB

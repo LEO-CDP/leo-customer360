@@ -113,6 +113,7 @@ variable "servers" {
   type = map(object({
     flavor_name    = string
     root_disk_size = number
+    name           = optional(string) # server-name suffix; defaults to the map key
   }))
   default = {
     "4x8" = {

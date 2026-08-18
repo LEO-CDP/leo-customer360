@@ -8,8 +8,13 @@ name_prefix = "c360-api-uat"
 
 servers = {
   "1x2" = {
-    flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB — smallest flavor offered in HCM03-1C
-    root_disk_size = 20              # smallest practical root disk
+    flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB — jump host + backend-system (Dagster)
+    root_disk_size = 20
+    name           = "backend" # -> c360-api-uat-backend
+  }
+  "api" = {
+    flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB — for customer360-api
+    root_disk_size = 20
   }
 }
 

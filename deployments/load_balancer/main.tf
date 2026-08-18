@@ -46,7 +46,10 @@ resource "vngcloud_vlb_load_balancer" "this" {
   project_id = var.project_id
   name       = var.lb_name
 
-  package_id = local.lb_package_id
+  # Package id: the lb_packages data source only returns the DEFAULT AZ's packages, whose
+  # uuids the create API rejects for other zones — so prefer a direct var.package_id (the
+  # zone's full "lbp-..." uuid from `?zoneId=`; the create wants it WITH the prefix).
+  package_id = var.package_id != "" ? var.package_id : local.lb_package_id
   scheme     = var.scheme
   type       = var.lb_type
 
@@ -70,4 +73,69 @@ resource "vngcloud_vlb_load_balancer" "this" {
       error_message = "project_id must be your REAL VNG Cloud project id (pro-...), not the placeholder. Find it in the console project selector / overview."
     }
   }
+}
+
+# ---------------------------------------------------------------------------
+# One pool per backend service (Layer 4 / TCP for the NLB). The member is the
+# backend server's PRIVATE ip; health checks hit member_port (HTTP path when
+# given, else a plain TCP connect).
+# ---------------------------------------------------------------------------
+resource "vngcloud_vlb_pool" "this" {
+  for_each = var.backends
+
+  project_id       = var.project_id
+  load_balancer_id = vngcloud_vlb_load_balancer.this.id
+  name             = "${var.lb_name}-${each.key}"
+  protocol         = "TCP"
+  algorithm        = "ROUND_ROBIN"
+
+  health_monitor {
+    health_check_protocol = each.value.health_path != null ? "HTTP" : "TCP"
+    health_check_method   = each.value.health_path != null ? "GET" : null
+    health_check_path     = each.value.health_path
+    success_code          = each.value.health_path != null ? 200 : null
+    http_version          = each.value.health_path != null ? "1.0" : null
+    healthy_threshold     = 3
+    unhealthy_threshold   = 3
+    interval              = 30
+    timeout               = 5
+  }
+
+  members {
+    backup       = false
+    name         = "${each.key}-member"
+    ip_address   = each.value.member_ip
+    port         = each.value.member_port
+    monitor_port = each.value.member_port
+    weight       = 1
+  }
+}
+
+# One TCP listener per backend: public listen_port -> the pool above.
+resource "vngcloud_vlb_listener" "this" {
+  for_each = var.backends
+
+  project_id       = var.project_id
+  load_balancer_id = vngcloud_vlb_load_balancer.this.id
+  name             = "${var.lb_name}-${each.key}"
+  protocol         = "TCP"
+  protocol_port    = each.value.listen_port
+  default_pool_id  = vngcloud_vlb_pool.this[each.key].id
+  allowed_cidrs    = "0.0.0.0/0"
+}
+
+# Open each backend's app port on its security group so the LB (and clients,
+# if the NLB preserves the source IP) can reach it. Skipped when no secgroup id.
+resource "vngcloud_vserver_secgrouprule" "backend" {
+  for_each = var.backend_security_group_id != "" ? var.backends : {}
+
+  project_id        = var.project_id
+  security_group_id = var.backend_security_group_id
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "TCP"
+  port_range_min    = each.value.member_port
+  port_range_max    = each.value.member_port
+  remote_ip_prefix  = var.backend_ingress_cidr
+  description       = "LB backend ${each.key} port ${each.value.member_port}"
 }

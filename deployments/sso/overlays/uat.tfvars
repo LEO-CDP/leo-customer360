@@ -1,0 +1,14 @@
+# UAT overlay — Keycloak runs as a Docker container on the SAME VM as the API.
+# Read by deploy-sso.sh (grep); no Terraform is involved.
+
+sso_server_key      = "api"                    # SHARE the customer360-api box (c360-api-uat-api, 10.100.1.5)
+keycloak_image      = "keycloak/keycloak:26.7"
+keycloak_command    = "start-dev"              # dev mode: HTTP + lenient hostname — fine for uat
+keycloak_http_port  = 8080
+keycloak_admin_user = "admin"
+keycloak_hostname   = "http://103.245.254.29:8080" # public entry = the load balancer (deployments/load_balancer)
+keycloak_db_name    = "db_keycloak"            # already created by postgres/init/02-create-keycloak-db.sql
+
+# Cap the JVM heap: the shared 2 GB box ALSO runs customer360-api + Redis, so let
+# Keycloak's default (up to 70% of RAM) run wild would OOM the box.
+java_heap = "-Xms256m -Xmx512m"

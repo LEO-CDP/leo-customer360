@@ -4,8 +4,11 @@
 
 lb_name      = "customer360-nlb-uat"
 package_name = "NLB_Small"
-lb_type      = "Layer 4" # Layer 4 = Network Load Balancer (NLB)
-scheme       = "Internet"
+# HCM03-1C NLB_Small uuid (from ?zoneId=HCM03-1C); the data source returns the default-AZ
+# one which the create API rejects. Bypass it with this direct id.
+package_id = "lbp-f60d5354-0600-11f0-a0a4-ec2a72332f83"
+lb_type    = "Layer 4" # Layer 4 = Network Load Balancer (NLB)
+scheme     = "Internet"
 
 # Project the LB is created in (same account/project as the vDB postgres deploy).
 project_id = "pro-8986f5c6-02ca-4647-be9a-4070bb100559"
@@ -14,6 +17,33 @@ project_id = "pro-8986f5c6-02ca-4647-be9a-4070bb100559"
 # isolated VPC — it couldn't route to them). After `deployments/postgres`
 # applies its UAT VPC (c360-vpc-uat / c360-subnet-uat), copy that subnet id here.
 create_network = false
-subnet_id      = "sub-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" # <-- set the real sub-... id
+subnet_id      = "sub-7c1f6eff-7244-4a29-a3cf-3592745ea0e7" # same subnet as the backends (server/postgres, HCM03-1C)
 
-zone_id = "HCM03-1C" # enabled/default AZ for this account (1A/1B disabled)
+zone_id = "HCM03-1C" # only AZ enabled for this account
+
+# Expose both services. member_ip = each box's PRIVATE ip (see `terraform output servers`
+# in ../server): api box 10.100.1.5, backend box 10.100.1.4.
+backends = {
+  "api" = {
+    member_ip   = "10.100.1.5" # c360-api-uat-api (customer360-api)
+    member_port = 8008
+    listen_port = 80 # LB public :80 -> api:8008 (HTTPS needs Layer 7 + a cert)
+    health_path = "/health"
+  }
+  "dagster" = {
+    member_ip   = "10.100.1.4" # c360-api-uat-backend (backend-system / Dagster)
+    member_port = 3000
+    listen_port = 3000 # LB public :3000 -> dagster:3000
+    health_path = null # TCP health check (no simple Dagster health path)
+  }
+  "keycloak" = {
+    member_ip   = "10.100.1.5" # c360-api-uat-api (Keycloak co-located, see deployments/sso)
+    member_port = 8080
+    listen_port = 8080 # LB public :8080 -> keycloak:8080
+    health_path = null # TCP health check: Keycloak's /health is on the mgmt port 9000, not 8080
+  }
+}
+
+# Open the app ports on the backends' Default secgroup so the LB can reach them.
+backend_security_group_id = "secg-7c1e85ec-8028-460a-8592-99463f198831" # Default secgroup on the boxes
+backend_ingress_cidr      = "0.0.0.0/0"                                 # L4 NLB preserves client IP -> keep open

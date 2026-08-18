@@ -56,7 +56,13 @@ variable "lb_name" {
 variable "package_name" {
   type        = string
   default     = "NLB_Small"
-  description = "Package (throughput tier) name. Copy the exact name from the console dropdown; matched by name against the vngcloud_vlb_lb_packages data source. Common: NLB_Small, NLB_Medium, NLB_Large."
+  description = "Package name. Used only when package_id is empty. NOTE: the data source returns the DEFAULT AZ's packages, whose uuids the create API rejects in other zones — prefer package_id."
+}
+
+variable "package_id" {
+  type        = string
+  default     = ""
+  description = "Direct LB package uuid (lbp-...). When set, bypasses the package_name lookup — REQUIRED because vLB packages are per-AZ and the data source returns the DEFAULT AZ's, not yours. Get your zone's uuid from: GET {vlb_base_url}/v2/{project}/loadBalancers/packages?zoneId=<AZ>."
 }
 
 variable "lb_type" {
@@ -121,4 +127,31 @@ variable "zone_id" {
     condition     = contains(["HCM03-1A", "HCM03-1B", "HCM03-1C"], var.zone_id)
     error_message = "zone_id must be one of HCM03-1A, HCM03-1B, HCM03-1C."
   }
+}
+
+# ---------------------------------------------------------------------------
+# Backends to expose: each entry becomes one pool + one listener (+ a secgroup
+# rule opening the app port). Layer-4 NLB, so pools/listeners are TCP.
+# ---------------------------------------------------------------------------
+variable "backends" {
+  type = map(object({
+    member_ip   = string           # backend server's PRIVATE ip (must be in the LB subnet)
+    member_port = number           # port the app listens on, on the backend
+    listen_port = number           # public port exposed on the LB
+    health_path = optional(string) # HTTP health-check path (e.g. /health); null -> plain TCP health check
+  }))
+  default     = {}
+  description = "Services to expose through the LB: key -> { member_ip, member_port, listen_port, health_path }."
+}
+
+variable "backend_security_group_id" {
+  type        = string
+  default     = ""
+  description = "Security group id (secg-...) on the backend servers. A rule per backend opens its member_port so the LB can reach it. Empty = skip (open the ports yourself)."
+}
+
+variable "backend_ingress_cidr" {
+  type        = string
+  default     = "0.0.0.0/0"
+  description = "Source CIDR allowed to the backend app ports. An L4 NLB may PRESERVE the client source IP, so 0.0.0.0/0 is the safe default; tighten to the subnet CIDR only if VNG SNATs traffic to the LB."
 }

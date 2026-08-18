@@ -126,7 +126,7 @@ resource "vngcloud_vserver_server" "this" {
   for_each = var.servers
 
   project_id = var.project_id
-  name       = "${var.name_prefix}-${each.key}"
+  name       = "${var.name_prefix}-${coalesce(each.value.name, each.key)}"
   zone_id    = var.zone_id
 
   flavor_id         = data.vngcloud_vserver_flavor.this[each.key].id

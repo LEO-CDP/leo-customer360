@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Run every repo postgres/**/*.sql (filename order) against the deployed vDB for an env.
+# Bootstrap the deployed vDB for an env by running, in a fixed dependency order:
+#   1) repo  postgres/**/*.sql   (extensions, keycloak db — filename order)
+#   2) repo  database-init/*.sql (the app schema) AFTER the init, in the order the
+#      project's own postgres/Dockerfile uses: database-schema -> init-core-database,
+#      then data-view-for-llm (materialized views) LAST since it reads those tables.
 #   ./run-sql.sh <uat|prod>
 #
 # The DB is PRIVATE (public_access is non-functional on this platform), so psql is run ON
@@ -16,7 +20,9 @@ case "$ENV" in
   *) echo "Usage: ./run-sql.sh <uat|prod>"; exit 1 ;;
 esac
 
-SQL_DIR="../../postgres" # repo-root/postgres, scanned recursively for *.sql
+PG_SQL_DIR="../../postgres"       # repo-root/postgres/**  (extensions, keycloak db) — filename order
+APP_SQL_DIR="../../database-init" # the app schema; ORDER MATTERS, so run these known files first:
+APP_ORDER=(database-schema.sql init-core-database.sql data-view-for-llm.sql)
 
 # --- creds/config: overlay (non-secret) + .env/terraform.tfvars (secret) ---
 if [[ -f .env ]]; then set -a; source ./.env; set +a; fi
@@ -67,9 +73,17 @@ remote+="PGPASSWORD=\$(printf %s '$PW_B64' | base64 -d) psql -v ON_ERROR_STOP=1 
 # The bastion is disposable and recreated often (host key changes) -> don't pin it.
 run_psql() { ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$BASTION" "$remote"; }
 
-# --- collect + run scripts in filename order ---
-mapfile -t FILES < <(find "$SQL_DIR" -type f -iname '*.sql' | sort)
-if [[ ${#FILES[@]} -eq 0 ]]; then echo "No *.sql found under $SQL_DIR — nothing to run."; exit 0; fi
+# --- collect scripts in dependency order: postgres/init first, then the app schema ---
+FILES=()
+while IFS= read -r f; do FILES+=("$f"); done < <(find "$PG_SQL_DIR" -type f -iname '*.sql' | sort)
+if [[ -d "$APP_SQL_DIR" ]]; then
+  # known app-schema files in dependency order, then any *other* *.sql alphabetically
+  for n in "${APP_ORDER[@]}"; do [[ -f "$APP_SQL_DIR/$n" ]] && FILES+=("$APP_SQL_DIR/$n"); done
+  while IFS= read -r f; do
+    printf '%s\n' "${APP_ORDER[@]}" | grep -qxF "$(basename "$f")" || FILES+=("$f")
+  done < <(find "$APP_SQL_DIR" -maxdepth 1 -type f -iname '*.sql' | sort)
+fi
+if [[ ${#FILES[@]} -eq 0 ]]; then echo "No *.sql found under $PG_SQL_DIR or $APP_SQL_DIR — nothing to run."; exit 0; fi
 echo "Running ${#FILES[@]} SQL script(s) via psql on ${BASTION} against ${DB_NAME}@${HOST}:${PORT} (user ${DB_USER}):"
 for f in "${FILES[@]}"; do
   echo "  -> $f"

@@ -5,6 +5,18 @@
 CREATE SCHEMA IF NOT EXISTS customer360;
 
 ---------------------------------------------------
+-- TENANT CONTEXT FOR SEEDING (Row-Level Security)
+---------------------------------------------------
+-- Every seed row below belongs to the Default Tenant. The tenant-scoped tables
+-- use FORCE ROW LEVEL SECURITY (see database-schema.sql), whose policy is
+--   WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid)
+-- so an INSERT is DENIED (fail-closed) unless app.tenant_id is set to the row's
+-- tenant. Superusers bypass RLS, so the local/dev postgres never needed this;
+-- a managed DB seeded as a NON-superuser (e.g. app_admin) does. Set it once for
+-- the whole session (false = session-level, persists until the connection ends).
+SELECT set_config('app.tenant_id', '11111111-1111-1111-1111-111111111111', false);
+
+---------------------------------------------------
 -- SYSTEM TABLE HARDENING
 ---------------------------------------------------
 
