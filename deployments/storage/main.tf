@@ -12,6 +12,10 @@ resource "aws_s3_bucket" "this" {
   for_each = toset(var.bucket_names)
 
   bucket = each.value
+
+  # false during normal use so a bucket with objects can't be wiped by accident.
+  # undeploy.sh --force passes -var force_destroy=true to empty + delete on teardown.
+  force_destroy = var.force_destroy
 }
 
 resource "aws_s3_bucket_versioning" "this" {

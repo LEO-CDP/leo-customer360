@@ -27,9 +27,14 @@ variable "s3_endpoint" {
 }
 
 variable "region" {
-  type        = string
-  default     = "hcm04"
-  description = "Region string sent in the S3 signature. Match it to s3_endpoint's region; validation is skipped so it is a label only."
+  type    = string
+  default = "us-east-1"
+  # MUST stay "us-east-1" for vStorage: the AWS SDK only OMITS the
+  # CreateBucketConfiguration/LocationConstraint when region == us-east-1. Any
+  # other value makes it send LocationConstraint=<region>, which vStorage
+  # rejects with "InvalidLocationConstraint". The real region is selected by
+  # s3_endpoint's host (hcm04/han02); this is just the SigV4 signing label.
+  description = "SigV4 signing region. Keep \"us-east-1\" so no bucket LocationConstraint is sent (vStorage rejects any other). The actual region comes from s3_endpoint."
 }
 
 # ---------------------------------------------------------------------------
@@ -56,6 +61,12 @@ variable "enable_versioning" {
   type        = bool
   default     = false
   description = "If true, enable object versioning on every bucket (PutBucketVersioning). Off by default to keep a fresh apply minimal."
+}
+
+variable "force_destroy" {
+  type        = bool
+  default     = false
+  description = "If true, a destroy empties the bucket (deletes ALL objects) before removing it. Keep false normally; undeploy.sh --force sets it just for teardown."
 }
 
 # ---------------------------------------------------------------------------

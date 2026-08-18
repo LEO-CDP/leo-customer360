@@ -7,7 +7,7 @@
 # only manages buckets INSIDE that project — it cannot create the project. See README.
 
 s3_endpoint = "https://hcm04.vstorage.vngcloud.vn" # object storage = HCM04/HAN02 (NOT HCM03)
-region      = "hcm04"
+region      = "us-east-1"                          # keep us-east-1 (no LocationConstraint) — see variables.tf
 
 bucket_names = ["leo-customer360-uat"]
 

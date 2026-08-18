@@ -27,6 +27,7 @@ allow-list) switched off and path-style addressing on. See `provider.tf`.
 | `terraform.tfvars.example` | Secrets template (copy to `terraform.tfvars`) |
 | `.env.example` | Alternative secrets via `TF_VAR_*` (copy to `.env`) |
 | `deploy.sh` | Env-aware `<uat\|prod> plan/apply/destroy` wrapper |
+| `undeploy.sh` | Tear down an env's buckets (destroy) with preview + confirm; `--force` empties non-empty buckets |
 | `.gitignore` | Keeps secrets and state out of git |
 
 ## Pricing (quoted rate card)
@@ -89,6 +90,10 @@ cp terraform.tfvars.example terraform.tfvars   # fill in the S3 keys (or use .en
 ./deploy.sh uat plan
 ./deploy.sh uat apply
 ./deploy.sh prod plan
+
+# Tear down (destroy) an env's buckets — previews, then asks you to type the env name:
+./undeploy.sh uat            # fails if a bucket still has objects
+./undeploy.sh uat --force    # empties non-empty buckets first (deletes ALL objects)
 ```
 
 On Windows, run `deploy.sh` from Git Bash. To drive Terraform directly, select
@@ -99,9 +104,14 @@ the workspace and pass the overlay yourself:
 
 - **Bucket names are globally unique** within the vStorage tenant, so UAT and
   PROD must use different names (the overlays already do).
-- **Endpoint/region:** defaults target HCM03. If your project lives elsewhere,
-  override `s3_endpoint` + `region` in the overlay. `region` is only a signature
-  label here (validation is skipped) — keep it consistent with the endpoint.
+- **Endpoint:** `s3_endpoint` defaults to **HCM04** (this account's object-storage
+  regions are `hcm04` / `han02`, not `hcm03`). Override it in the overlay if your
+  project lives elsewhere. `region` is a SigV4 signing label only and must stay
+  **`us-east-1`** so the AWS SDK omits the bucket `LocationConstraint` (vStorage
+  rejects any other value with `InvalidLocationConstraint`).
+- **Teardown:** `./undeploy.sh <env>` destroys the buckets (with a preview + typed
+  confirmation) and leaves the vStorage project alone. S3 won't delete a non-empty
+  bucket, so add `--force` to empty it first (deletes all objects, irreversible).
 - **Versioning** is off in UAT, on in PROD (`enable_versioning`). Only the
   versioning API is used beyond bucket create; AWS-only sub-resources
   (public-access-block, ownership controls) are omitted as vStorage lacks them.
