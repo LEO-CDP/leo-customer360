@@ -498,8 +498,11 @@ window.C360 = window.C360 || {};
     return base + "/realms/" + encodeURIComponent(ssoConfig.realm) + "/protocol/openid-connect/auth?" + $.param(params);
   }
 
-  function getDataPeriodDays() {
-    var value = parseInt($("#data-period-select").val(), 10);
+  // The Period selector is now a per-view component (Overview: #overview-period-select,
+  // Analytics: #analytics-period-select) rather than one shared header control -- pass
+  // the relevant selector; views without their own period control get the 90-day default.
+  function getDataPeriodDays(selector) {
+    var value = parseInt($(selector || "#data-period-select").val(), 10);
     return isNaN(value) ? 90 : value;
   }
 

@@ -301,10 +301,6 @@ window.C360 = window.C360 || {};
       loadAnalytics();
     });
 
-    $("#data-period-select").on("change", function () {
-      loadAnalytics();
-    });
-
     $("#btn-back-to-personas").on("click", function () { C360.router.navigate("/personas"); });
 
     $("#btn-persona-edit").on("click", openPersonaEditModal);

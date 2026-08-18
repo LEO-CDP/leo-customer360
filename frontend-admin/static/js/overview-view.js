@@ -2,8 +2,10 @@
  * Fetches core-customer360-api /reporting/* endpoints (see
  * customer360-api/core/routers/reporting_api.py) and renders KPI cards plus
  * Chart.js visualizations: processing funnel, profile counts by domain,
- * raw profiles by source system, identity graph channel coverage, and a
- * list of the top duplicate (merged) master profiles. */
+ * raw profiles by source system, and identity graph channel coverage.
+ * The "Top Duplicate Master Profiles" table previously rendered here has
+ * moved to the Profiles list view's "Duplicate Profiles" tab -- see
+ * profile-duplicates-view.js. */
 window.C360 = window.C360 || {};
 
 (function (C360) {
@@ -23,27 +25,14 @@ window.C360 = window.C360 || {};
     charts[id] = new Chart(el.getContext("2d"), config);
   }
 
-  function duplicateRowVm(p) {
-    var displayName = fmt.realName(p) || p.persona_name || ("Profile " + fmt.shortId(p.master_profile_id));
-    return {
-      displayName: displayName,
-      domainLabel: fmt.domainLabel(p.domain),
-      linked_raw_profile_count: p.linked_raw_profile_count,
-      sourceSystemsLabel: (p.source_systems || []).join(", ") || "—"
-    };
-  }
-
-  function buildVm(summary, duplicates) {
-    var vms = (duplicates || []).map(duplicateRowVm);
+  function buildVm(summary) {
     return {
       totalRawProfilesLabel: fmt.int(summary.total_raw_profiles),
       totalMasterProfilesLabel: fmt.int(summary.total_master_profiles),
       duplicateCountLabel: fmt.int(summary.duplicate_master_profile_count),
       processedLabel: fmt.int(summary.processed_raw_profiles),
       inProgressLabel: fmt.int(summary.in_progress_raw_profiles),
-      pendingLabel: fmt.int(summary.pending_raw_profiles),
-      hasDuplicates: vms.length > 0,
-      duplicates: vms
+      pendingLabel: fmt.int(summary.pending_raw_profiles)
     };
   }
 
@@ -135,29 +124,28 @@ window.C360 = window.C360 || {};
   }
 
   function periodParams() {
-    var days = C360.config.getDataPeriodDays();
+    var days = C360.config.getDataPeriodDays("#overview-period-select");
     return { days: days };
   }
 
   function load() {
+    var days = periodParams().days;
     $("#overview-loading").removeClass("hidden");
     $("#overview-content").empty();
 
-    $.when(
-      api("/reporting/summary", periodParams()),
-      api("/reporting/master-profiles/duplicates", $.extend({ limit: 8 }, periodParams()))
-    ).done(function (summaryRes, duplicatesRes) {
-      var summary = summaryRes[0];
-      var duplicates = duplicatesRes[0];
-      var vm = buildVm(summary, duplicates);
+    api("/reporting/summary", { days: days }).done(function (summary) {
+      var vm = buildVm(summary);
       $("#overview-loading").addClass("hidden");
       $("#overview-content").html(C360.templates.render("overview-dashboard", vm));
+      // The select is recreated by the render above -- restore the period the
+      // user had picked instead of it snapping back to the template default.
+      $("#overview-period-select").val(days);
 
       renderStatusFunnelChart(summary);
       renderDomainChart(summary);
       renderSourceSystemsChart(summary);
 
-      api("/reporting/identity-graph/coverage", periodParams())
+      api("/reporting/identity-graph/coverage", { days: days })
         .done(function (coverage) { renderIdentityCoverageChart(coverage); })
         .fail(function (xhr) { showApiError("loading identity graph coverage", xhr); });
     }).fail(function (xhr) {
@@ -167,7 +155,7 @@ window.C360 = window.C360 || {};
   }
 
   function bindEvents() {
-    $(document).on("change", "#data-period-select", load);
+    $(document).on("change", "#overview-period-select", load);
   }
 
   bindEvents();
