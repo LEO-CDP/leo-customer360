@@ -5,9 +5,25 @@
   Features:
   - Polished 6-column KPI grid with icons and interactive hover shadow states
   - Modernized chart containers with clear headers and visual icons
-  - Styled data table for duplicate master profiles with clean separation and badges
+
+  Note: the "Top Duplicate Master Profiles" table previously shown here has
+  moved to the Profiles list view's "Duplicate Profiles" tab (see
+  static/templates/profile/profiles-list.html / profile-duplicates-view.js).
 -->
 <div class="space-y-6">
+
+  <!-- Report Period (independent of the old shared header control -- see overview-view.js) -->
+  <div id="overview-report-period" class="flex items-center justify-end gap-2">
+    <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider" for="overview-period-select">Period</label>
+    <select id="overview-period-select" class="text-xs border border-slate-200/80 bg-white hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer font-medium">
+      <option value="3">Last 3 days</option>
+      <option value="7">Last 7 days</option>
+      <option value="30">Last 30 days</option>
+      <option value="90" selected>Last 90 days</option>
+      <option value="180">Last 180 days</option>
+      <option value="365">Last 365 days</option>
+    </select>
+  </div>
 
   <!-- KPI Stat Cards Grid -->
   <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -130,60 +146,6 @@
       <div class="h-64">
         <canvas id="chart-identity-coverage"></canvas>
       </div>
-    </div>
-
-  </div>
-
-  <!-- Duplicate Master Profiles Table Card -->
-  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow overflow-hidden">
-    
-    <!-- Header -->
-    <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <div class="p-2 bg-orange-50 text-orange-600 rounded-xl">
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
-        </div>
-        <div>
-          <h3 class="font-bold text-slate-900 text-base">Top Duplicate Master Profiles</h3>
-          <p class="text-xs text-slate-400 mt-0.5">Master profiles consolidated from 2+ raw source records</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Content / Table -->
-    <div class="p-6">
-      {{#if hasDuplicates}}
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm text-left">
-          <thead>
-            <tr class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-100">
-              <th class="py-3 pr-4">Profile</th>
-              <th class="py-3 pr-4">Domain</th>
-              <th class="py-3 pr-4">Linked Raw Profiles</th>
-              <th class="py-3 pr-4">Source Systems</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            {{#each duplicates}}
-            <tr class="hover:bg-slate-50/50 transition-colors">
-              <td class="py-3.5 pr-4 font-semibold text-slate-800">{{displayName}}</td>
-              <td class="py-3.5 pr-4 text-slate-600 capitalize">{{domainLabel}}</td>
-              <td class="py-3.5 pr-4">
-                <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-orange-50 text-orange-700">
-                  {{linked_raw_profile_count}}
-                </span>
-              </td>
-              <td class="py-3.5 pr-4 text-slate-500 text-xs">{{sourceSystemsLabel}}</td>
-            </tr>
-            {{/each}}
-          </tbody>
-        </table>
-      </div>
-      {{else}}
-      <div class="flex items-center justify-center gap-2 px-3 py-8 w-full rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-slate-400 text-sm italic">
-        No duplicate master profiles found.
-      </div>
-      {{/if}}
     </div>
 
   </div>

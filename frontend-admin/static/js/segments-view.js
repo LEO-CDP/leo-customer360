@@ -68,8 +68,8 @@ window.C360 = window.C360 || {};
   var matchedDtv = null;
   function createMatchedDtv() {
     return C360.DataTableView.create({
-      columns: C360.listView.columns,
-      rowVm: C360.listView.rowVm,
+      columns: C360.profileListView.columns,
+      rowVm: C360.profileListView.rowVm,
       rowId: function (vm) { return vm.master_profile_id; },
       rowSelectorClass: "profile-row",
       resourceLabel: "matched profile",
@@ -239,7 +239,7 @@ window.C360 = window.C360 || {};
     listDtv.bindRowClick();
     listDtv.bindLoadMore();
     // Matched-profiles rows share the ".profile-row" click delegation
-    // already bound once by C360.listView.bindEvents() (both tables render
+    // already bound once by C360.profileListView.bindEvents() (both tables render
     // the same profile columns/rowVm) -- only "load more" needs re-binding
     // here since #segment-matched-* is fresh DOM on every loadDetail().
     $(document).on("click", "#btn-back-to-segments", function () { C360.router.navigate("/segments"); });

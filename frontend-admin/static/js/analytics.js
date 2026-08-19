@@ -46,7 +46,7 @@ window.C360 = window.C360 || {};
   }
 
   function periodParams() {
-    var days = C360.config.getDataPeriodDays();
+    var days = C360.config.getDataPeriodDays("#analytics-period-select");
     return { days: days };
   }
 
@@ -368,7 +368,7 @@ window.C360 = window.C360 || {};
   }
 
   function bindEvents() {
-    $(document).on("change", "#data-period-select", load);
+    $(document).on("change", "#analytics-period-select", load);
     $(document).on("click", "#btn-analytics-refresh", load);
   }
 

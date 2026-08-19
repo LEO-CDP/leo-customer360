@@ -45,15 +45,11 @@ window.C360 = window.C360 || {};
     { label: "Lifecycle", type: "badge", field: "lifecycleLabel", classField: "lifecycleBadgeClass" },
     { label: "Churn Risk", type: "badge", field: "churn_risk_tier", classField: "churnBadgeClass" },
     { label: "Linked Profiles", field: "linkedRawProfileCountLabel" },
-    { label: "Predictive CLV", field: "clvLabel" },
-    { label: "Engagement", field: "engagementLabel" },
     { label: "Last Activity", field: "lastActivityLabel", muted: true }
   ];
 
   function buildListParams(params) {
     var query = params || {};
-    var days = C360.config.getDataPeriodDays();
-    if (days) query.days = days;
     return query;
   }
 
@@ -99,7 +95,6 @@ window.C360 = window.C360 || {};
       dtv.setFilter("linked_raw_profile_count_min", isNaN(n) ? "" : String(Math.max(0, n)));
     });
     dtv.bindPagination();
-    $("#data-period-select").on("change", function () { load(false); });
   }
 
   // Owns the "/profiles" listing route (see router.js). The row-click
@@ -111,5 +106,5 @@ window.C360 = window.C360 || {};
     mount: function () { load(false); }
   });
 
-  C360.listView = { load: load, bindEvents: bindEvents, rowVm: rowVm, columns: COLUMNS };
+  C360.profileListView = { load: load, bindEvents: bindEvents, rowVm: rowVm, columns: COLUMNS };
 })(window.C360);

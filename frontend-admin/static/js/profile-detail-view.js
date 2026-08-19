@@ -55,8 +55,10 @@ window.C360 = window.C360 || {};
       });
   }
 
+  // Profile detail has no Period control of its own (removed along with the
+  // shared header one) -- always uses the fixed 90-day default.
   function periodDays() {
-    return parseInt($("#data-period-select").val(), 10) || 90;
+    return 90;
   }
 
   function timelineEntryVm(t) {
@@ -1043,7 +1045,6 @@ window.C360 = window.C360 || {};
       }
     });
 
-    $("#data-period-select").on("change", reload);
   }
 
   // Owns the "/profiles/:id" detail route (see router.js). navigate()

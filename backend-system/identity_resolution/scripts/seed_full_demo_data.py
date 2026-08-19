@@ -170,11 +170,11 @@ def stable_rng(key: str) -> random.Random:
     return random.Random(seed)
 
 
-def realistic_event_days_ago(rng: random.Random, max_days: int = 180) -> int:
-    """Evenly-spread day offset across ``max_days`` (defaults to 6 months) so
-    seeded cdp_raw_events give the analytics dashboard's Event Activity
-    Heatmap real daily-tracking coverage for retail/banking profiles, instead
-    of clustering almost entirely in the most recent week."""
+def realistic_event_days_ago(rng: random.Random, max_days: int = 365) -> int:
+    """Evenly-spread day offset across ``max_days`` (defaults to 365 days / 1 year) so
+    seeded cdp_raw_events give the analytics dashboard's Event Activity Heatmap
+    real daily-tracking coverage across the full year, instead of clustering
+    almost entirely in the most recent week."""
     quarter = max(1, max_days // 4)
     bucket = rng.random()
     if bucket < 0.30:
@@ -1109,7 +1109,7 @@ def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict = None)
                 DEMO_TENANT_ID, domain, device_id, raw_profile_id, "WebTracking", "web",
                 category, event_name, is_conversion, entity_type,
                 rng.randint(*value_range) if value_range else None, "VND",
-                datetime.now() - timedelta(days=realistic_event_days_ago(rng, max_days=90)),
+                datetime.now() - timedelta(days=realistic_event_days_ago(rng, max_days=365)),
             ),
         )
 
@@ -1204,7 +1204,7 @@ def seed_content_items(cursor, master_profiles: list) -> None:
                         defaults["cta_label"],
                         f"https://demo.customer360.local/{defaults['url_path']}/{str(master_id)[:8]}-{item_type}-{position}",
                         tags,
-                        datetime.now() - timedelta(days=rng.randint(0, 45), hours=rng.randint(0, 23)),
+                        datetime.now() - timedelta(days=rng.randint(0, 365), hours=rng.randint(0, 23)),
                     ),
                 )
 
@@ -1372,8 +1372,9 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             MEDIA_CHANNELS if domain == "media" else
             EDUCATION_CHANNELS
         )
+        # customer_since: back-date by 0-365 days for established customers (realistic year-over-year retention)
         customer_since = (
-            (m["created_at"] - timedelta(days=rng.randint(0, 400))).date() if is_established_customer else None
+            (m["created_at"] - timedelta(days=rng.randint(0, 365))).date() if is_established_customer else None
         )
         last_activity_at = datetime.now() - timedelta(days=rng.randint(0, 30), hours=rng.randint(0, 23))
 

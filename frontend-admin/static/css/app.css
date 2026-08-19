@@ -216,6 +216,14 @@ html.dark code {
 html.c360-theme-dark .tab-btn.active { border-color: #f8fafc; }
 html.c360-theme-dark .tab-btn:hover { color: #00d32a; border-color: #00d32a; }
 
+/* Left-tab rail on the Profiles list card (Master Profiles / Duplicate
+   Profiles) -- static/templates/profile/profiles-list.html. */
+.profile-tab-btn { color: #64748b; }
+.profile-tab-btn:hover { color: #4338ca; background-color: #eef2ff; cursor: pointer; }
+.profile-tab-btn.active { color: #4338ca; background-color: #eef2ff; }
+html.c360-theme-dark .profile-tab-btn.active { color: #a5b4fc; background-color: rgba(99, 102, 241, 0.15); }
+html.c360-theme-dark .profile-tab-btn:hover { color: #a5b4fc; background-color: rgba(99, 102, 241, 0.15); }
+
 html.c360-theme-dark #btn-back-to-profiles { color: #f8fafc; cursor: pointer; }
 html.c360-theme-dark #btn-back-to-profiles:hover { color: #00d32a; }
 
@@ -238,7 +246,7 @@ html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
  */
 .matrix-heatmap-wrapper { 
     width: 100%; 
-    height: 180px; /* Explicit height is mandatory to stop infinite growth */
+    height: 250px; /* Explicit height is mandatory to stop infinite growth */
     position: relative; /* Keeps the canvas bounded strictly within this container */
     margin: 0 auto; 
 }

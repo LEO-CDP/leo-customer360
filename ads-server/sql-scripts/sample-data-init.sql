@@ -1801,6 +1801,16 @@ CROSS JOIN (
         3,
         '{"source":"local","platform":"all"}'
     ),
+    -- Coolmate search ads
+    (
+        'coolmate_search_ads_01',
+        'coolmate-native-content',
+        'coolmate_native_01',
+        'coolmate-search-ads',
+        78.0::real,
+        3,
+        '{"source":"local","platform":"mobile","format":"search"}'
+    ),
     -- Google display ads
     (
         'google_ads_display_01',
@@ -1821,6 +1831,16 @@ CROSS JOIN (
         NULL,
         '{"source":"google_ads","mode":"js_tag"}'
     ),
+    -- Google mobile interstitial
+    (
+        'google_ads_interstitial_01',
+        'google-display-demo',
+        'google_ads_native_01',
+        'google-mobile-interstitial',
+        62.0::real,
+        NULL,
+        '{"source":"google_ads","mode":"js_tag","interstitial":true}'
+    ),
     -- Shopee affiliate
     (
         'affiliate_shopee_001',
@@ -1830,6 +1850,16 @@ CROSS JOIN (
         60.0::real,
         2,
         '{"source":"shopee_affiliate","mode":"native"}'
+    ),
+    -- Affiliate mobile sidebar
+    (
+        'affiliate_mobile_sidebar_001',
+        'shopee-affiliate-demo',
+        'shopee_affiliate_001',
+        'affiliate-mobile-sidebar',
+        58.0::real,
+        2,
+        '{"source":"shopee_affiliate","mode":"native","platform":"mobile"}'
     ),
     -- Lazada affiliate
     (

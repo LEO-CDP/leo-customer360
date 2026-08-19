@@ -153,8 +153,9 @@ class PersonaRepository:
         days: int = 90,
     ) -> dict:
         """Get persona analytics summary."""
-        return identity_crud.persona_analytics_summary(
-            self.session,
+        from core.repositories.reporting_respository import ReportingRepository
+
+        return ReportingRepository(self.session).persona_analytics_summary(
             tenant_id=tenant_id,
             domain=domain,
             is_active=is_active,
