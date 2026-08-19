@@ -20,9 +20,12 @@
 		reverse_proxy {$KC_UPSTREAM}
 	}
 
-	# --- customer360-api under /c360api (the app's root_path). Strip the prefix so the
-	#     app sees its own /api/v1/... routes; root_path=/c360api keeps generated URLs right. ---
-	handle_path /c360api/* {
+	# --- customer360-api under /c360api. The app sets root_path=/c360api, so forward the
+	#     prefix UNSTRIPPED (handle, NOT handle_path): Starlette strips root_path for routing
+	#     and keeps it in generated URLs (e.g. the trailing-slash 307 redirect). Stripping it
+	#     makes those redirects drop /c360api -> the browser lands on the frontend and the
+	#     /api/v1/metadata fetch fails (frontend then shows "Dev mode / SSO disabled"). ---
+	handle /c360api/* {
 		reverse_proxy {$API_UPSTREAM}
 	}
 
