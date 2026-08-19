@@ -23,6 +23,11 @@ servers = {
     root_disk_size = 50
     name           = "frontend" # -> c360-api-prod-frontend
   }
+  "ads" = {
+    flavor_name    = "s2-general-4x8" # 4 vCPU / 8 GB — dedicated ad-server (high-QPS); see deployments/ads-server
+    root_disk_size = 50
+    name           = "ads" # -> c360-api-prod-ads
+  }
   # "8x16" = {
   #   flavor_name    = "s2-general-8x16" # 8 vCPU / 16 GB
   #   root_disk_size = 50

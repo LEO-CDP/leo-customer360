@@ -48,6 +48,12 @@ backends = {
     listen_port = 8890 # LB public :8890 -> frontend:8890
     health_path = "/health" # frontend-admin serves /health on 8890
   }
+  "ads" = {
+    member_ip   = "10.100.1.5" # c360-api-uat-api (ads-server co-located, see deployments/ads-server)
+    member_port = 9009
+    listen_port = 9009 # LB public :9009 -> ads:9009
+    health_path = "/health" # ads-server serves /health on 9009
+  }
 }
 
 # Open the app ports on the backends' Default secgroup so the LB can reach them.
