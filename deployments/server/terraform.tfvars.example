@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is git-ignored.
+# SECRETS ONLY — non-secret, per-env config lives in overlays/<env>.tfvars.
+
+# --- Auth (vIAM service account) ---
+# Create at https://iam.console.greennode.ai/service-accounts (Secret shown once).
+client_id     = "your-client-id"
+client_secret = "your-client-secret"
+
+# --- Login material (optional) ---
+# SSH public key attached when create_ssh_key = true (both overlays set it true).
+ssh_public_key = "ssh-ed25519 AAAA... you@host"
+# Admin password, only if you set user_name in an overlay.
+# user_password = "CHANGE_ME_Strong#123"

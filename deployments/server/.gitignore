@@ -1,0 +1,21 @@
+# Secrets — never commit
+terraform.tfvars
+*.auto.tfvars
+*.tfvars.json
+.env
+
+# State (may contain secrets in plaintext).
+# Per-env workspace state lives under terraform.tfstate.d/<env>/.
+# NOTE: overlays/*.tfvars are NON-secret and intentionally committed.
+*.tfstate
+*.tfstate.*
+terraform.tfstate.d/
+.terraform.tfstate.lock.info
+
+# Saved plan file written by deploy.sh apply
+tfplan
+
+# Provider plugins / local cache
+.terraform/
+crash.log
+crash.*.log
