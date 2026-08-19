@@ -182,7 +182,7 @@ const TIME_CHECK_API_HEALTH = 60000;
     var labels = C360.fmt && C360.fmt.DOMAIN_LABELS ? C360.fmt.DOMAIN_LABELS : {};
     var keys = Object.keys(labels).filter(function (k) { return k !== "all"; }).sort();
 
-    $("#domain-filter, #duplicate-domain-filter, #attributes-domain-filter, #persona-domain-filter, #persona-add-domain, #attribute-add-domain-scope").each(function () {
+    $("#domain-filter, #duplicate-domain-filter, #attributes-domain-filter, #persona-domain-filter, #persona-add-domain, #attribute-add-domain-scope, #segment-form-domain").each(function () {
       var $sel = $(this);
       var current = $sel.val();
       $sel.find("option[value!=''][value!='all']").remove();

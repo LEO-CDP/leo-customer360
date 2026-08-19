@@ -151,6 +151,10 @@ async def health():
 static_dir = BASE_DIR / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    # Keep the configured reverse-proxy prefix usable when running the
+    # frontend directly with uvicorn as well as behind that proxy.
+    if FRONTEND_ROOT_PATH and FRONTEND_ROOT_PATH != "/":
+        app.mount(f"{FRONTEND_ROOT_PATH}/static", StaticFiles(directory=str(static_dir)), name="prefixed-static")
 else:
     logger.warning(f"Static Directory missing at path: {static_dir}")
 

@@ -123,7 +123,7 @@ window.C360 = window.C360 || {};
           rowClass: o.rowClass + rowSelectorClass,
           clickable: o.rowClickable,
           actionLabel: o.actionLabel,
-          editable: !o.rowClickable && !!o.onEdit,
+          editable: !!o.onEdit,
           editLabel: o.editLabel || "Edit",
           cells: o.columns.map(function (col) { return buildCellVm(col, vm); })
         };

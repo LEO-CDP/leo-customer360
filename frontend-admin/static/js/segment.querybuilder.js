@@ -19,7 +19,7 @@ var rules_basic = {
 };
 
 $('#builder-basic').queryBuilder({
-  plugins: ['bt-tooltip-errors'],
+  plugins: ['tw-tooltip-errors'],
   
   filters: [{
     id: 'name',
