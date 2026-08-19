@@ -218,8 +218,9 @@ class AdRepository:
             placement = session.execute(
                 text(
                     """
-                    SELECT p.placement_id, p.placement_key, p.responsive,
-                           p.max_width_px, p.max_height_px, p.metadata
+                    SELECT p.tenant_id, p.placement_id, p.placement_key,
+                           p.responsive, p.max_width_px, p.max_height_px,
+                           p.metadata
                     FROM leo_ads.placement p
                     JOIN leo_ads.tenant t ON t.tenant_id = p.tenant_id
                     WHERE t.tenant_key = :tenant_key
@@ -262,6 +263,33 @@ class AdRepository:
                 ),
                 {**params, "tenant_key": tenant_key, "limit": safe_limit},
             ).mappings().all()
+
+            if not ads and placement is not None:
+                ads = session.execute(
+                    text(
+                        """
+                        SELECT a.ad_id, a.ad_key, a.placement_id,
+                               cr.creative_id, cr.creative_key, cr.ad_type,
+                               cr.format_code, cr.headline, cr.subheadline,
+                               cr.body, cr.cta, cr.image_url, cr.content_payload,
+                               cr.advertiser_id, c.campaign_key
+                        FROM leo_ads.ad a
+                        JOIN leo_ads.creative cr ON cr.creative_id = a.creative_id
+                        LEFT JOIN leo_ads.campaign c ON c.campaign_id = a.campaign_id
+                        JOIN leo_ads.tenant t ON t.tenant_id = a.tenant_id
+                        WHERE t.tenant_key = :tenant_key
+                          AND a.status = 'active'
+                          AND a.tenant_id = :tenant_id
+                        ORDER BY a.score_weight DESC, a.ad_id ASC
+                        LIMIT :limit
+                        """
+                    ),
+                    {
+                        "tenant_key": tenant_key,
+                        "tenant_id": placement["tenant_id"],
+                        "limit": safe_limit,
+                    },
+                ).mappings().all()
 
             if not ads:
                 return []

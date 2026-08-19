@@ -18,6 +18,7 @@ written here is ever persisted to the real database.
 """
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from model.ad import Ad
@@ -83,6 +84,17 @@ def _make_ad(test_engine, seed, placement_id, **overrides):
     return ad
 
 
+def _tenant_key(test_engine, tenant_id):
+    """Return the tenant_key for a tenant_id."""
+    session = Session(bind=test_engine, expire_on_commit=False)
+    tenant_key = session.execute(
+        text("SELECT tenant_key FROM leo_ads.tenant WHERE tenant_id = :tenant_id"),
+        {"tenant_id": tenant_id},
+    ).scalar_one()
+    session.close()
+    return tenant_key
+
+
 class TestAdRepository:
     """Test AdRepository query methods."""
 
@@ -131,6 +143,60 @@ class TestAdRepository:
             placement_id=placement_id,
         )
         assert result == []
+
+    def test_get_serving_ads_returns_placement_ad(self, ad_repo, test_engine, seed):
+        """Direct placement lookups should return the linked ad payload."""
+        placement_id = _make_placement(test_engine, seed, placement_key="serve_direct")
+        _make_ad(
+            test_engine,
+            seed,
+            placement_id,
+            ad_key="serve_direct_ad",
+            score_weight=12.0,
+        )
+
+        tenant_key = _tenant_key(test_engine, seed["tenant_id"])
+        result = ad_repo.get_serving_ads(
+            tenant_key=tenant_key,
+            placement_ref="placement-serve_direct",
+        )
+
+        assert len(result) == 1
+        assert result[0]["adId"] == "serve_direct_ad"
+        assert result[0]["adPlacementId"] == "placement-serve_direct"
+
+    def test_get_serving_ads_uses_fallback_ad_for_empty_placement(
+        self, ad_repo, test_engine, seed
+    ):
+        """Empty placements should resolve to a tenant fallback ad."""
+        empty_placement_id = _make_placement(
+            test_engine, seed, placement_key="serve_empty_fallback"
+        )
+        fallback_placement_id = _make_placement(
+            test_engine, seed, placement_key="serve_fallback_source"
+        )
+        _make_ad(
+            test_engine,
+            seed,
+            fallback_placement_id,
+            ad_key="fallback_ad",
+            score_weight=99.0,
+        )
+
+        tenant_key = _tenant_key(test_engine, seed["tenant_id"])
+        result = ad_repo.get_serving_ads(
+            tenant_key=tenant_key,
+            placement_ref="placement-serve_empty_fallback",
+        )
+
+        assert len(result) == 1
+        assert result[0]["adId"] == "fallback_ad"
+        assert result[0]["adPlacementId"] == "placement-serve_empty_fallback"
+        assert result[0]["placement"]["width"] == 300
+        assert result[0]["placement"]["unit"] == "px"
+        assert "responsive" not in result[0]["placement"]
+
+        assert empty_placement_id is not None
 
     def test_get_active_by_placement_returns_list(self, ad_repo, test_engine, seed):
         """Test get_active_by_placement returns list of dicts."""

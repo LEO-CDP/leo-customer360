@@ -172,6 +172,7 @@ DB_PORT="${DB_PORT:-5432}"
 DB_USER="${DB_USER:-postgres}"
 DB_PASSWORD="${DB_PASSWORD:-change_me_postgres_password}"
 DB_NAME="${DB_NAME:-customer360}"
+DB_CONTAINER_NAME="${DB_CONTAINER_NAME:-customer360-postgres}"
 
 ###############################################################################
 # PostgreSQL helpers
@@ -203,20 +204,84 @@ PY
 # Check whether leo_ads schema exists
 ###############################################################################
 
-schema_exists() {
-    PGPASSWORD="$DB_PASSWORD" \
+run_sql_query() {
+    local sql="$1"
+
+    if command -v psql >/dev/null 2>&1; then
+        PGPASSWORD="$DB_PASSWORD" \
+            psql \
+            -h "$DB_HOST" \
+            -p "$DB_PORT" \
+            -U "$DB_USER" \
+            -d "$DB_NAME" \
+            -tAc "$sql" 2>/dev/null
+        return
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        docker exec -i -u postgres "$DB_CONTAINER_NAME" \
+            env PGPASSWORD="$DB_PASSWORD" \
+            psql \
+            -h 127.0.0.1 \
+            -p 5432 \
+            -U "$DB_USER" \
+            -d "$DB_NAME" \
+            -tAc "$sql" 2>/dev/null
+        return
+    fi
+
+    return 127
+}
+
+run_sql_file() {
+    local sql_file="$1"
+
+    if command -v psql >/dev/null 2>&1; then
+        PGPASSWORD="$DB_PASSWORD" \
+            psql \
+            -v ON_ERROR_STOP=1 \
+            -h "$DB_HOST" \
+            -p "$DB_PORT" \
+            -U "$DB_USER" \
+            -d "$DB_NAME" \
+            -f "$sql_file" \
+            >> "$LOG_FILE" 2>&1
+        return
+    fi
+
+    if ! command -v docker >/dev/null 2>&1; then
+        return 127
+    fi
+
+    local remote_name
+    remote_name="$(basename "$sql_file")"
+
+    if ! docker cp "$sql_file" "$DB_CONTAINER_NAME:/tmp/$remote_name" >/dev/null 2>&1; then
+        return 1
+    fi
+
+    if ! docker exec -i -u postgres "$DB_CONTAINER_NAME" \
+        env PGPASSWORD="$DB_PASSWORD" \
         psql \
-        -h "$DB_HOST" \
-        -p "$DB_PORT" \
+        -h 127.0.0.1 \
+        -p 5432 \
         -U "$DB_USER" \
         -d "$DB_NAME" \
-        -tAc "
-            SELECT EXISTS (
-                SELECT 1
-                FROM information_schema.schemata
-                WHERE schema_name = 'leo_ads'
-            );
-        " 2>/dev/null | grep -qx "t"
+        -v ON_ERROR_STOP=1 \
+        -f "/tmp/$remote_name" \
+        >> "$LOG_FILE" 2>&1; then
+        docker exec -u postgres "$DB_CONTAINER_NAME" rm -f "/tmp/$remote_name" >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    docker exec -u postgres "$DB_CONTAINER_NAME" rm -f "/tmp/$remote_name" >/dev/null 2>&1 || true
+}
+
+schema_exists() {
+    local query
+    query="SELECT EXISTS ( SELECT 1 FROM information_schema.schemata WHERE schema_name = 'leo_ads' );"
+
+    run_sql_query "$query" 2>/dev/null | grep -qx "t"
 }
 
 ###############################################################################
@@ -224,20 +289,10 @@ schema_exists() {
 ###############################################################################
 
 tenant_table_exists() {
-    PGPASSWORD="$DB_PASSWORD" \
-        psql \
-        -h "$DB_HOST" \
-        -p "$DB_PORT" \
-        -U "$DB_USER" \
-        -d "$DB_NAME" \
-        -tAc "
-            SELECT EXISTS (
-                SELECT 1
-                FROM information_schema.tables
-                WHERE table_schema = 'leo_ads'
-                  AND table_name = 'tenant'
-            );
-        " 2>/dev/null | grep -qx "t"
+    local query
+    query="SELECT EXISTS ( SELECT 1 FROM information_schema.tables WHERE table_schema = 'leo_ads' AND table_name = 'tenant' );"
+
+    run_sql_query "$query" 2>/dev/null | grep -qx "t"
 }
 
 ###############################################################################
@@ -257,16 +312,7 @@ tenant_has_data() {
     fi
 
     tenant_count="$(
-        PGPASSWORD="$DB_PASSWORD" \
-            psql \
-            -h "$DB_HOST" \
-            -p "$DB_PORT" \
-            -U "$DB_USER" \
-            -d "$DB_NAME" \
-            -tAc "
-                SELECT COUNT(*)
-                FROM leo_ads.tenant;
-            " 2>/dev/null \
+        run_sql_query "SELECT COUNT(*) FROM leo_ads.tenant;" 2>/dev/null \
             | tr -d '[:space:]'
     )"
 
@@ -297,16 +343,7 @@ init_database_schema() {
     log "${YELLOW}[SEED] Initializing database schema${NC}"
     log "[SEED] SQL | ${schema_sql}"
 
-    if ! PGPASSWORD="$DB_PASSWORD" \
-        psql \
-        -v ON_ERROR_STOP=1 \
-        -h "$DB_HOST" \
-        -p "$DB_PORT" \
-        -U "$DB_USER" \
-        -d "$DB_NAME" \
-        -f "$schema_sql" \
-        >> "$LOG_FILE" 2>&1; then
-
+    if ! run_sql_file "$schema_sql"; then
         log "${RED}[SEED] Failed to initialize database schema${NC}"
         log "${RED}[SEED] Check log${NC} | ${LOG_FILE}"
         return 1
@@ -333,16 +370,7 @@ seed_sample_data() {
     log "${YELLOW}[SEED] Seeding demo ads data${NC}"
     log "[SEED] SQL | ${sample_sql}"
 
-    if ! PGPASSWORD="$DB_PASSWORD" \
-        psql \
-        -v ON_ERROR_STOP=1 \
-        -h "$DB_HOST" \
-        -p "$DB_PORT" \
-        -U "$DB_USER" \
-        -d "$DB_NAME" \
-        -f "$sample_sql" \
-        >> "$LOG_FILE" 2>&1; then
-
+    if ! run_sql_file "$sample_sql"; then
         log "${RED}[SEED] Failed to seed demo data${NC}"
         log "${RED}[SEED] Check log${NC} | ${LOG_FILE}"
         return 1
