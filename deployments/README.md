@@ -15,7 +15,7 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 | [`ads-server`](./ads-server) | LEO Ad Server (schema `leo_ads`) — uat: container on the api box; prod: dedicated vServer |
 | [`monitoring`](./monitoring) | Portainer (direct HTTPS) + Netdata (behind oauth2-proxy / Keycloak SSO) dashboards — on the api box |
 | [`load_balancer`](./load_balancer) | L4 NLB fronting api / dagster / keycloak / frontend / ads / monitoring |
-| [`proxy`](./proxy) | **Caddy** reverse proxy — TLS termination (auto Let's Encrypt) + single-host path routing (`beta.leocdp.com`). **Staged**: built + validated, not cut over — see its [runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom) |
+| [`proxy`](./proxy) | **Caddy** reverse proxy — TLS termination (auto Let's Encrypt) + single-host path routing. **Live** at `https://beta.leocdp.com` (fronts frontend `/`, api `/c360api`, keycloak `/auth`, ads `/ads`); [runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom) |
 | [`storage`](./storage) | Object storage (vStorage / S3) |
 
 > **Scope:** this view shows the **UAT** overlay only. The prod overlay differs
@@ -171,24 +171,49 @@ flowchart TB
 
 ### Public endpoints — `beta.leocdp.com`
 
-The domain (`beta.leocdp.com`, A record → the LB public IP `103.245.254.29`) is fronted by
-**Caddy** (deployments/proxy), which terminates TLS and path-routes the browser-facing apps.
-The ops dashboards stay on their raw LB ports (they don't sub-path cleanly).
+The domain (`beta.leocdp.com`, A record → the LB public IP `103.245.254.29`) is **live**,
+fronted by **Caddy** (deployments/proxy), which terminates TLS (Let's Encrypt) and path-routes
+the browser-facing apps on `:443`. The ops dashboards stay on their raw LB ports and are reached
+via the **LB IP** (see the HSTS note below).
 
 | Service | URL | Served by |
 |---------|-----|-----------|
 | frontend-admin (UI) | `https://beta.leocdp.com/` | Caddy `/` → frontend :8890 |
-| customer360-api | `https://beta.leocdp.com/c360api` (base `…/c360api/api/v1`) | Caddy `/c360api/*` → api :8008 (prefix stripped) |
+| customer360-api | `https://beta.leocdp.com/c360api` (base `…/c360api/api/v1`) | Caddy `/c360api/*` → api :8008 (`root_path=/c360api`) |
 | Keycloak | `https://beta.leocdp.com/auth` | Caddy `/auth/*` → keycloak :8080 |
-| ads-server | `https://beta.leocdp.com/ads` | Caddy `/ads/*` → ads :9009 |
-| Portainer (own login) | `https://beta.leocdp.com:9443` | LB direct → Portainer :9443 (self-signed TLS) |
-| Netdata (SSO) | `http://beta.leocdp.com:19999` | LB → oauth2-proxy :4199 → Netdata (Keycloak login) |
-| Dagster | `http://beta.leocdp.com:3000` | LB direct → dagster :3000 |
+| ads-server (+ `/ads/docs`) | `https://beta.leocdp.com/ads` | Caddy `/ads/*` → ads :9009 (`root_path=/ads`) |
+| Portainer (own login) | `https://103.245.254.29:9443` | LB direct → Portainer :9443 (self-signed TLS) |
+| Netdata (SSO) | `http://103.245.254.29:19999` | LB → oauth2-proxy :4199 → Netdata (Keycloak login) |
+| Dagster | `http://103.245.254.29:3000` | LB direct → dagster :3000 |
 
-> The cutover overlay edits are in [`proxy/cutover-beta.leocdp.com.patch`](./proxy/cutover-beta.leocdp.com.patch);
-> the ordered deploy is the [proxy runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom).
-> Before the cutover the same services were reachable raw at `http://103.245.254.29:<80|3000|8080|8890|9009>`
-> and `https://…:9443` / `http://…:19999`.
+> ⚠️ **Ops tools use the LB IP, not the `beta.leocdp.com` hostname.** The parent domain
+> `leocdp.com` is HSTS-preloaded (`includeSubDomains`), so browsers force HTTPS-with-valid-cert
+> on the **entire** `beta.leocdp.com` host, on every port — breaking the plain-HTTP (`:3000`,
+> `:19999`) and self-signed (`:9443`) ops ports (an `http://beta…:3000` gets auto-upgraded to
+> `https` and fails). The **IP is not HSTS-pinned**, so use `http://103.245.254.29:<port>`
+> (or an SSH tunnel to `localhost`). Only the `:443` Caddy front door has a trusted cert.
+>
+> The cutover was applied via [`proxy/cutover-beta.leocdp.com.patch`](./proxy/cutover-beta.leocdp.com.patch)
+> (ordered deploy: the [proxy runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom)).
+> To move to a **different domain**, edit one value and run [`set-domain.sh`](./set-domain.sh) (below).
+
+### Changing the public domain
+
+The domain has a **single source of truth** — `caddy_domain` in
+[`proxy/overlays/<env>.tfvars`](./proxy/overlays/uat.tfvars). [`set-domain.sh`](./set-domain.sh)
+reads it and propagates a change to every overlay that embeds the domain literal (sso,
+frontend, monitoring), preserving the `https://` scheme and the `/auth` · `/c360api` · `/ads`
+suffixes:
+
+```bash
+./set-domain.sh --dry-run cdp.example.com uat   # preview every line that would change
+./set-domain.sh cdp.example.com uat             # rewrite the overlays (config only, no deploy)
+```
+
+It edits config only — then point DNS at the LB IP and redeploy **in order** (the script
+prints the exact commands; full detail in the
+[proxy runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom)).
+Docs and the point-in-time `proxy/cutover-*.patch` are left untouched.
 
 ### Data flows
 
