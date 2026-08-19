@@ -203,9 +203,15 @@ def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, 
         return None
 
     from core.database import SessionLocal
+    from sqlalchemy import text
 
     db = SessionLocal()
     try:
+        # sys_user/sys_userinfo are RLS-protected; this get-or-create lookup+insert
+        # must run with app.tenant_id set to this identity's tenant (from the token),
+        # otherwise current_setting('app.tenant_id') is unset/empty and the tenant_policy's
+        # ::uuid cast fails (managed non-superuser DB; a local superuser bypasses RLS).
+        db.execute(text("SELECT set_config('app.tenant_id', :t, true)"), {"t": str(tenant_id)})
         repo = AuthRepository(db)
         result = repo.get_or_create_keycloak_user(tenant_id, payload, provider_subject_id)
         if result is None:

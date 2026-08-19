@@ -70,6 +70,25 @@ if [[ -n "$REDIS_PASS" ]]; then
 fi
 if [[ -n "$REDIS_HOST" ]]; then echo ">> Redis: ${REDIS_HOST}:${REDIS_PORT} (cache enabled)"; else echo ">> Redis: not configured — caching DISABLED (fail-open)."; fi
 
+# --- SSO / Keycloak (optional) from the sibling ../sso deployment. When
+#     api_sso_enabled=true the api runs SSO_LOGIN=true (OIDC token introspection) instead
+#     of the dev local-JWT login. Client secret from ../sso/.env (bootstrap-realm.py). ---
+sso="../sso"
+SSO_LOGIN="false"; SSO_URL=""; KC_REALM=""; KC_CLIENT=""; KC_SECRET=""
+if [[ "$(tfval api_sso_enabled "$sso/overlays/$ENV.tfvars")" == "true" ]]; then
+  SSO_URL="$(tfval api_sso_login_url "$sso/overlays/$ENV.tfvars")"
+  KC_REALM="$(tfval api_keycloak_realm "$sso/overlays/$ENV.tfvars")"
+  KC_CLIENT="$(tfval api_keycloak_client_id "$sso/overlays/$ENV.tfvars")"
+  [[ -f "$sso/.env" ]] && KC_SECRET="$(grep -E '^KEYCLOAK_CLIENT_SECRET=' "$sso/.env" | cut -d= -f2-)"
+  if [[ -n "$SSO_URL" && -n "$KC_REALM" && -n "$KC_CLIENT" && -n "$KC_SECRET" ]]; then
+    SSO_LOGIN="true"; echo ">> SSO: ENABLED (realm=$KC_REALM client=$KC_CLIENT url=$SSO_URL)"
+  else
+    echo ">> SSO: api_sso_enabled=true but config/secret incomplete — deploying with SSO_LOGIN=false."
+  fi
+else
+  echo ">> SSO: disabled (dev local-JWT login)."
+fi
+
 # --- ship customer360-api/ to the VM ---
 echo ">> Shipping customer360-api/ ..."
 tar -C "$REPO_ROOT" -czf - customer360-api \
@@ -79,10 +98,12 @@ tar -C "$REPO_ROOT" -czf - customer360-api \
 echo ">> Installing Docker (if needed), building, and (re)starting the container ..."
 PW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
 REDIS_PW_B64="$(printf %s "${REDIS_PASS:-}" | base64 | tr -d '\n')"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" <<'REMOTE'
+KC_SECRET_B64="$(printf %s "$KC_SECRET" | base64 | tr -d '\n')"
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" <<'REMOTE'
 set -euo pipefail
 DB_HOST="$1"; DB_PORT="$2"; DB_NAME="$3"; DB_USER="$4"; DB_PW="$(printf %s "$5" | base64 -d)"; DAG_HOST="$6"
 REDIS_HOST="$7"; REDIS_PORT="$8"; REDIS_PW="$(printf %s "${9:-}" | base64 -d 2>/dev/null || true)"
+SSO_LOGIN="${10:-false}"; SSO_URL="${11:-}"; KC_REALM="${12:-}"; KC_CLIENT="${13:-}"; KC_SECRET="$(printf %s "${14:-}" | base64 -d 2>/dev/null || true)"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -111,6 +132,18 @@ CACHE_ENABLED=true
 ENVR
 else
   echo "CACHE_ENABLED=false" >> "$env_file"
+fi
+if [[ "$SSO_LOGIN" == "true" ]]; then
+  cat >> "$env_file" <<ENVS
+SSO_LOGIN=true
+SSO_LOGIN_URL=$SSO_URL
+KEYCLOAK_REALM=$KC_REALM
+KEYCLOAK_CLIENT_ID=$KC_CLIENT
+KEYCLOAK_CLIENT_SECRET=$KC_SECRET
+KEYCLOAK_VERIFY_SSL=false
+ENVS
+else
+  echo "SSO_LOGIN=false" >> "$env_file"
 fi
 sudo mkdir -p /opt/c360
 sudo mv "$env_file" /opt/c360/api.env

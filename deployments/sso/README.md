@@ -52,12 +52,44 @@ to its own box (as prod does).
 
 ## Wire the API to Keycloak
 
-Keycloak only takes effect when the API runs with `SSO_LOGIN=true`. After deploying:
+customer360-api uses OIDC **authorization-code** login and validates tokens by
+**introspection** (a confidential client), and it **requires a `tenant_id` claim** on
+the token. `bootstrap-realm.py` provisions all of that idempotently:
 
-1. In Keycloak, create a realm + a confidential client for customer360-api.
-2. Set `SSO_LOGIN=true`, `SSO_LOGIN_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID`,
-   `KEYCLOAK_CLIENT_SECRET` for the API (uat: `SSO_LOGIN_URL=http://127.0.0.1:8080`
-   since it's co-located), then re-run `../server/deploy-api.sh <env>`.
+```bash
+# needs KEYCLOAK_ADMIN_PASSWORD + KC_TEST_USER_PASSWORD in .env
+KC_URL=http://103.245.254.29:8080 REALM=customer360 CLIENT_ID=customer360-api \
+  TENANT_ID=11111111-1111-1111-1111-111111111111 TEST_USER=c360admin REDIRECT_URIS='*' \
+  python3 bootstrap-realm.py
+```
+
+It creates: the realm; a confidential client (standard flow + direct grants);
+protocol mappers for `tenant_id`, `user_id`, **and an audience mapper** (Keycloak 24+
+introspection returns `active:false` unless the introspecting client is in the token
+`aud`); enables **unmanaged attributes** (Keycloak 26 drops undeclared attributes like
+`tenant_id` otherwise); and a test user with `tenant_id`. The client secret is written
+to `.env` as `KEYCLOAK_CLIENT_SECRET`.
+
+Then enable it for the API (already set in `overlays/uat.tfvars`):
+`api_sso_enabled=true`, `api_sso_login_url` (the **public LB URL** — used by both the
+browser redirect and the backend introspection), `api_keycloak_realm`,
+`api_keycloak_client_id`. Re-deploy:
+
+```bash
+../server/deploy-api.sh uat    # prints ">> SSO: ENABLED ..."; injects SSO_LOGIN=true + KEYCLOAK_*
+```
+
+Verify headlessly (direct-grant token -> protected endpoint):
+
+```bash
+# token for c360admin, then:
+curl -H "Authorization: Bearer <token>" http://103.245.254.29:80/api/v1/users/me   # -> 200, auto-provisioned
+```
+
+> **Note:** auto-provisioning a first-time Keycloak user writes RLS-protected
+> `sys_user`/`sys_userinfo`, so `core.auth._get_or_create_user_on_login` sets
+> `app.tenant_id` on that session (fixed in this repo) — otherwise the RLS `::uuid`
+> cast fails on the managed (non-superuser) DB.
 
 ## Public exposure (via the load balancer)
 
