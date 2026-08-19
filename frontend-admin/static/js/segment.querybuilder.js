@@ -1,20 +1,9 @@
 var rules_basic = {
   condition: 'AND',
   rules: [{
-    id: 'price',
-    operator: 'less',
-    value: 10.25
-  }, {
-    condition: 'OR',
-    rules: [{
-      id: 'category',
-      operator: 'equal',
-      value: 2
-    }, {
-      id: 'category',
-      operator: 'equal',
-      value: 1
-    }]
+    field: 'customer_since',
+    value: '-30 days',
+    operator: 'greater_or_equal'
   }]
 };
 
@@ -22,6 +11,11 @@ $('#builder-basic').queryBuilder({
   plugins: ['tw-tooltip-errors'],
   
   filters: [{
+    id: 'customer_since',
+    label: 'Customer since',
+    type: 'datetime',
+    input: 'text'
+  }, {
     id: 'name',
     label: 'Name',
     type: 'string'

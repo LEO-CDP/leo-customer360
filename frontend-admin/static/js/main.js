@@ -202,6 +202,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       $("#view-list").html(C360.templates.html("profiles-list"));
       $("#view-placeholder").html(C360.templates.html("placeholder"));
       $("#segment-view-list").html(C360.templates.html("segments-list"));
+      $("#segment-form-modal-container").html(C360.templates.html("segment-form-modal"));
       $("#view-attributes").html(C360.templates.html("attributes-list"));
       $("#view-datasources").html(C360.templates.html("data-source-list"));
       $("#view-scoring").html(C360.templates.html("scoring-model-list"));

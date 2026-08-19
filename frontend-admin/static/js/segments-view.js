@@ -153,6 +153,16 @@ window.C360 = window.C360 || {};
     });
   }
 
+  function normalizeSegmentRules(rules) {
+    if (!rules || typeof rules !== "object") return rules;
+    return $.extend({}, rules, {
+      rules: (rules.rules || []).map(function (rule) {
+        if (rule && rule.rules) return normalizeSegmentRules(rule);
+        return $.extend({}, rule, { id: rule && (rule.id || rule.field) });
+      })
+    });
+  }
+
   function loadSegmentAttributes(domain, rules) {
     var $builder = $("#segment-query-builder");
     var loadSequence = ++attributeLoadSequence;
@@ -183,7 +193,7 @@ window.C360 = window.C360 || {};
           });
           queryBuilderReady = true;
           if (rules && rules.rules && rules.rules.length) {
-            $builder.queryBuilder("setRules", rules);
+            $builder.queryBuilder("setRules", normalizeSegmentRules(rules));
           }
         } catch (error) {
           queryBuilderReady = false;
@@ -252,10 +262,12 @@ window.C360 = window.C360 || {};
       var request = editingSegmentId
         ? api("/segments/" + editingSegmentId, payload, "PATCH")
         : api("/segments/", payload, "POST");
+      var savedSegmentId = editingSegmentId;
       $("#btn-segment-form-save").prop("disabled", true).addClass("opacity-60");
       request.done(function () {
         closeSegmentForm();
         loadList(false);
+        if (savedSegmentId && savedSegmentId === currentSegmentId) loadDetail(savedSegmentId);
         showToast(editingSegmentId ? "Segment updated" : "Segment created", "success");
       }).fail(function (xhr) {
         var detail = (xhr.responseJSON && xhr.responseJSON.detail) || "Could not save segment.";
@@ -376,6 +388,7 @@ window.C360 = window.C360 || {};
 
     api("/segments/" + segmentId)
       .done(function (segment) {
+        segmentsById[segment.segment_id] = segment;
         $("#segment-detail-loading").addClass("hidden");
         $("#segment-detail-content").html(C360.templates.render("segment-details", segmentDetailVm(segment)));
         matchedDtv = createMatchedDtv();
@@ -504,6 +517,7 @@ window.C360 = window.C360 || {};
     $(document).on("click", "#btn-back-to-segments", function () { C360.router.navigate("/segments"); });
     $(document).on("click", "#btn-segments-refresh", function () { refreshAllSegments(); });
     $(document).on("click", "#btn-segments-create", function () { openSegmentForm(null); });
+    $(document).on("click", "#btn-segment-detail-edit", function () { openSegmentForm(segmentsById[currentSegmentId]); });
     $(document).on("click", "#btn-segment-form-save", submitSegmentForm);
     $(document).on("click", "#btn-segment-form-cancel, #btn-segment-form-close", closeSegmentForm);
     $(document).on("click", "#segment-form-modal", function (e) {

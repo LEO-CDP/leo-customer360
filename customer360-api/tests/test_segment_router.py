@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from core.database import get_db
 from core.models.segmentation import CdpSegment
 from core.routers._generic import build_crud_router
+from core.routers.segment_api import _transform_segment_create, _transform_segment_update
 from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
 
 
@@ -90,6 +91,8 @@ def _build_test_app() -> FastAPI:
             update_validator=lambda db, payload: __import__("core.utils.domains", fromlist=["validate_domain_value"]).validate_domain_value(
                 db, payload.get("domain"), allow_all=True
             ),
+            create_transform=_transform_segment_create,
+            update_transform=_transform_segment_update,
         )
     app = FastAPI()
     app.include_router(router)
@@ -138,6 +141,27 @@ class SegmentCrudTests(unittest.TestCase):
         self.assertEqual(body["segment_name"], "Gen Z Shoppers")
         self.assertEqual(body["processed_by"], "human")
         self.assertEqual(body["status_code"], 1)
+
+    def test_create_segment_translates_relative_datetime_and_generates_sql(self):
+        payload = _segment_payload(
+            json_rules={
+                "condition": "AND",
+                "rules": [{"field": "last_activity_at", "operator": "greater_or_equal", "value": "-5 days"}],
+            },
+            sql_rules="(last_activity_at >= '-5 days')",
+        )
+
+        response = self.client.post("/segments/", json=payload)
+
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        expected_rules = "(last_activity_at >= (now() - INTERVAL '5 days'))"
+        self.assertEqual(body["sql_rules"], expected_rules)
+        self.assertEqual(
+            body["final_generated_sql"],
+            "SELECT master_profile_id FROM customer360.cdp_master_profiles "
+            f"WHERE tenant_id = '{payload['tenant_id']}'::uuid AND {expected_rules}",
+        )
 
     def test_create_segment_defaults_processed_by_to_human(self):
         payload = _segment_payload()
@@ -225,6 +249,36 @@ class SegmentCrudTests(unittest.TestCase):
         # Untouched fields must survive the partial update.
         self.assertEqual(body["segment_tag"], "gen_z_shopper")
         self.assertEqual(body["description"], created["description"])
+
+    def test_update_segment_regenerates_sql_when_rules_change(self):
+        created = self.client.post("/segments/", json=_segment_payload()).json()
+        updated_rules = "(last_activity_at >= '-5 days')"
+
+        response = self.client.patch(
+            f"/segments/{created['segment_id']}",
+            json={"sql_rules": updated_rules},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        normalized_rules = "(last_activity_at >= (now() - INTERVAL '5 days'))"
+        self.assertEqual(body["sql_rules"], normalized_rules)
+        self.assertEqual(
+            body["final_generated_sql"],
+            "SELECT master_profile_id FROM customer360.cdp_master_profiles "
+            f"WHERE tenant_id = '{created['tenant_id']}'::uuid AND {normalized_rules}",
+        )
+
+    def test_update_segment_clearing_rules_clears_generated_sql(self):
+        created = self.client.post("/segments/", json=_segment_payload()).json()
+
+        response = self.client.patch(
+            f"/segments/{created['segment_id']}",
+            json={"sql_rules": None},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["final_generated_sql"])
 
     def test_update_missing_segment_returns_404(self):
         response = self.client.patch(f"/segments/{uuid.uuid4()}", json={"segment_name": "Nope"})

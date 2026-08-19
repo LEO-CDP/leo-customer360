@@ -2001,6 +2001,9 @@ QueryBuilder.prototype.setRules = function(data, options) {
             }
             else {
                 if (!item.empty) {
+                    if (item.id === undefined && item.field !== undefined) {
+                        item.id = item.field;
+                    }
                     if (item.id === undefined) {
                         Utils.error(!options.allow_invalid, 'RulesParse', 'Missing rule field id');
                         item.empty = true;

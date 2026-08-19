@@ -2,12 +2,6 @@
   =============================================================================
   SEGMENT DETAIL VIEW TEMPLATE (Handlebars)
   =============================================================================
-  Features:
-  - Polished modern container cards with rounded-2xl corners and hover shadows
-  - Integrated SVG icons for metadata, rule definitions, and matched profiles
-  - Refined typography and grid layouts for segment statistics
-  - Styled code/pre blocks for SQL and JSON query rules
-  - Modernized data table container with sticky headers and responsive states
 -->
 <div class="space-y-6">
 
@@ -35,6 +29,10 @@
         <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold shadow-sm {{activeBadgeClass}}">{{activeLabel}}</span>
         <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold shadow-sm {{processedByBadgeClass}}">{{processedByLabel}}</span>
       </div>
+      <button id="btn-segment-detail-edit" type="button" class="inline-flex items-center gap-1.5 border border-slate-200/80 bg-white text-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">
+        <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13l-3.384.966.966-3.384a4.5 4.5 0 011.13-1.897L16.862 4.487zM19.5 7.125L16.875 4.5M18 14.25V19.5A2.25 2.25 0 0115.75 21.75H5.25A2.25 2.25 0 013 19.5V9A2.25 2.25 0 015.25 6.75H10.5" /></svg>
+        <span>Edit segment</span>
+      </button>
     </div>
 
     <!-- Description -->
