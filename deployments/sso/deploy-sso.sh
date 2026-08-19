@@ -125,10 +125,13 @@ fi
 sudo docker rm -f c360-keycloak >/dev/null 2>&1 || true
 sudo docker run -d --name c360-keycloak --restart unless-stopped --network host "${args[@]}" "$IMG" "$CMD"
 
-echo "   waiting for Keycloak readiness (http://127.0.0.1:9000/health/ready) ..."
+# KC_HTTP_RELATIVE_PATH moves the mgmt health endpoints under that prefix too,
+# so probe http://127.0.0.1:9000${RELPATH}/health/ready (not the bare path).
+HEALTH_URL="http://127.0.0.1:9000${RELPATH}/health/ready"
+echo "   waiting for Keycloak readiness ($HEALTH_URL) ..."
 ok=0
 for _ in $(seq 1 60); do
-  if curl -fsS "http://127.0.0.1:9000/health/ready" >/dev/null 2>&1; then ok=1; break; fi
+  if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then ok=1; break; fi
   sleep 3
 done
 sudo docker ps --filter name=c360-keycloak --format '   running: {{.Names}} ({{.Status}})'
