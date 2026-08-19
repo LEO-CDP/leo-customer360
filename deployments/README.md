@@ -35,12 +35,13 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 ```mermaid
 flowchart TB
   client([Client / public internet])
-  lb["L4 Network Load Balancer<br/>103.245.254.29<br/>:80→api · :3000→dagster · :8080→keycloak · :8890→frontend · :9009→ads<br/>:9443→portainer (direct TLS) · :19999→netdata (SSO)"]
+  lb["L4 Network Load Balancer<br/>beta.leocdp.com → 103.245.254.29<br/>:443/:80 → Caddy · :3000 → dagster<br/>:9443 → portainer (direct TLS) · :19999 → netdata (SSO)"]
   client --> lb
 
   subgraph vpc["VPC c360-vpc-uat · subnet 10.100.1.0/24 · HCM03-1C"]
     direction TB
     subgraph apibox["vServer c360-api-uat-api · 10.100.1.5 (s-general-1x2)"]
+      caddy["Caddy reverse proxy<br/>:443/:80 · TLS termination + path routing"]
       api["customer360-api (FastAPI)<br/>:8008"]
       redis["c360-redis (Redis 8)<br/>:6580"]
       kc["c360-keycloak (Keycloak 26)<br/>:8080 · health :9000"]
@@ -58,11 +59,12 @@ flowchart TB
     end
   end
 
-  lb -->|":80 → :8008"| api
+  lb -->|":443/:80"| caddy
   lb -->|":3000"| dagster
-  lb -.->|":8080"| kc
-  lb -.->|":8890"| fe
-  lb -.->|":9009"| ads
+  caddy -->|"/"| fe
+  caddy -->|"/c360api"| api
+  caddy -.->|"/auth"| kc
+  caddy -.->|"/ads"| ads
   api -->|cache| redis
   api -.->|introspect SSO| kc
   api -->|SQL| pg
