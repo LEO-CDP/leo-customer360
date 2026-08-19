@@ -87,7 +87,7 @@ def main():
     desired = {
         "clientId": CLIENT_ID, "enabled": True, "protocol": "openid-connect",
         "publicClient": False, "standardFlowEnabled": True, "directAccessGrantsEnabled": True,
-        "serviceAccountsEnabled": False, "redirectUris": REDIRECT_URIS, "webOrigins": ["*"],
+        "serviceAccountsEnabled": False, "redirectUris": REDIRECT_URIS, "webOrigins": ["+"],
     }
     if clients:
         cuid = clients[0]["id"]

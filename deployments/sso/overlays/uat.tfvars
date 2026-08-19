@@ -23,3 +23,8 @@ api_sso_enabled        = true
 api_sso_login_url      = "http://103.245.254.29:8080"
 api_keycloak_realm     = "customer360"
 api_keycloak_client_id = "customer360-api"
+
+# Keycloak client redirect URI(s), tightened from "*" to the frontend's public origin.
+# Must cover the SPA's redirect (window.location.origin + pathname); the trailing /*
+# allows the app's paths. Comma-separate for multiple. Consumed by bootstrap-realm.py.
+sso_redirect_uris = "http://103.245.254.29:8890/*"
