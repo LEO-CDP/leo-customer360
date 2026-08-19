@@ -20,12 +20,14 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 
 ## UAT deployment view
 
-📐 **Editable diagram:** [`deployment-view-uat.excalidraw`](./deployment-view-uat.excalidraw)
-— open in [excalidraw.com](https://excalidraw.com) or the Obsidian Excalidraw plugin.
+![Customer 360 — UAT deployment view](./deployment-view-uat.png)
 
-![[deployment-view-uat.excalidraw]]
+📐 **Editable sources:** [`deployment-view-uat.excalidraw`](./deployment-view-uat.excalidraw)
+(open at [excalidraw.com](https://excalidraw.com) or the Obsidian Excalidraw plugin) ·
+[`deployment-view-uat.svg`](./deployment-view-uat.svg) (vector source of the image above).
 
-<!-- Inline preview (renders on GitHub / any Mermaid viewer): -->
+<details><summary>Same view as a Mermaid diagram (editable text)</summary>
+
 ```mermaid
 flowchart TB
   client([Client / public internet])
@@ -54,6 +56,8 @@ flowchart TB
   kc -->|db_keycloak| pg
   dagster -->|SQL| pg
 ```
+
+</details>
 
 ### Components (UAT)
 
