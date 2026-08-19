@@ -6,7 +6,7 @@ keycloak_image      = "keycloak/keycloak:26.7"
 keycloak_command    = "start-dev"              # dev mode: HTTP + lenient hostname — fine for uat
 keycloak_http_port  = 8080
 keycloak_admin_user = "admin"
-keycloak_hostname           = "https://beta.leocdp.com"    # public entry = Caddy (deployments/proxy), TLS-terminated
+keycloak_hostname           = "https://beta.leocdp.com/auth" # public base = Caddy (deployments/proxy), TLS-terminated; path /auth so the OIDC issuer includes it
 keycloak_http_relative_path = "/auth"                      # Caddy path-routes Keycloak under /auth
 keycloak_proxy_headers      = "xforwarded"                 # trust X-Forwarded-* from Caddy (TLS terminates upstream)
 keycloak_db_name    = "db_keycloak"            # already created by postgres/init/02-create-keycloak-db.sql
