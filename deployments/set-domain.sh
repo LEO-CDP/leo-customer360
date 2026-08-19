@@ -4,8 +4,10 @@
 #
 # The single source of truth is `caddy_domain` in proxy/overlays/<env>.tfvars.
 # This script reads the CURRENT domain from there, then rewrites every place the
-# domain literal appears in the env overlays (proxy, sso, frontend, monitoring) â€”
-# so the /auth, /c360api, /ads suffixes and https:// scheme are preserved.
+# domain literal appears in the env overlays: the functional values in
+# proxy/sso/frontend/monitoring, plus the comment-only mentions in
+# ads-server/load_balancer (kept in sync so nothing reads stale). The /auth,
+# /c360api, /ads suffixes and the https:// scheme are preserved.
 #
 #   ./set-domain.sh <new-domain> [env]     # env defaults to uat
 #   ./set-domain.sh cdp.example.com uat
@@ -37,10 +39,14 @@ if [[ "$OLD" == "$NEW" ]]; then echo "Domain is already '$NEW' for env '$ENV' â€
 OLD_RE="$(printf '%s' "$OLD" | sed 's/[.]/\./g')"
 
 FILES=(
+  # functional domain values:
   "proxy/overlays/${ENV}.tfvars"
   "sso/overlays/${ENV}.tfvars"
   "frontend/overlays/${ENV}.tfvars"
   "monitoring/overlays/${ENV}.tfvars"
+  # comment-only mentions (no functional value, kept in sync so nothing reads stale):
+  "ads-server/overlays/${ENV}.tfvars"
+  "load_balancer/overlays/${ENV}.tfvars"
 )
 
 echo ">> ${DRY:+[dry-run] }env '$ENV': $OLD  ->  $NEW"

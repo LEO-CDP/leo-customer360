@@ -201,9 +201,9 @@ via the **LB IP** (see the HSTS note below).
 
 The domain has a **single source of truth** — `caddy_domain` in
 [`proxy/overlays/<env>.tfvars`](./proxy/overlays/uat.tfvars). [`set-domain.sh`](./set-domain.sh)
-reads it and propagates a change to every overlay that embeds the domain literal (sso,
-frontend, monitoring), preserving the `https://` scheme and the `/auth` · `/c360api` · `/ads`
-suffixes:
+reads it and propagates a change to every env overlay that embeds it — the functional values
+in sso/frontend/monitoring plus the comment-only mentions in ads-server/load_balancer —
+preserving the `https://` scheme and the `/auth` · `/c360api` · `/ads` suffixes:
 
 ```bash
 ./set-domain.sh --dry-run cdp.example.com uat   # preview every line that would change
