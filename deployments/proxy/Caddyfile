@@ -1,0 +1,48 @@
+# Caddy reverse proxy for the Customer 360 platform — single public host, path-routed,
+# TLS terminated here (auto Let's Encrypt). Runs on the api box (--network host), so
+# 127.0.0.1:<port> reaches the co-located containers and 10.100.1.4 reaches the backend box.
+#
+# Values are injected as env by deploy-caddy.sh ({$VAR} is substituted at load).
+# Order matters: specific handle/handle_path blocks match first; the bare `handle`
+# (frontend) is the catch-all and MUST stay last.
+{
+	email {$ACME_EMAIL}
+	# Staging tip: to avoid Let's Encrypt rate limits while testing DNS, uncomment:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$CADDY_DOMAIN} {
+	encode zstd gzip
+
+	# --- Keycloak under /auth (needs KC_HTTP_RELATIVE_PATH=/auth on Keycloak) ---
+	# NOT handle_path: Keycloak serves under /auth itself, so forward the prefix as-is.
+	handle /auth/* {
+		reverse_proxy {$KC_UPSTREAM}
+	}
+
+	# --- customer360-api under /c360api (the app's root_path). Strip the prefix so the
+	#     app sees its own /api/v1/... routes; root_path=/c360api keeps generated URLs right. ---
+	handle_path /c360api/* {
+		reverse_proxy {$API_UPSTREAM}
+	}
+
+	# --- ads-server under /ads (FastAPI; strip the prefix) ---
+	handle_path /ads/* {
+		reverse_proxy {$ADS_UPSTREAM}
+	}
+
+	# --- everything else -> the admin UI (frontend-admin). Keep this block LAST. ---
+	handle {
+		reverse_proxy {$FRONTEND_UPSTREAM}
+	}
+
+	# --- OPS TOOLS (optional / fiddly under a sub-path — see README) --------------------
+	# Dagster, Netdata (via oauth2-proxy) and Portainer generate absolute URLs / have their
+	# own callback paths, so they do NOT sub-path cleanly without app-side config
+	# (dagster --path-prefix, oauth2-proxy --proxy-prefix, Portainer base href). By default
+	# they stay on their existing LB ports. To bring one under Caddy, configure it app-side
+	# and add a block, e.g.:
+	#   handle_path /dagster/* { reverse_proxy {$DAGSTER_UPSTREAM} }   # dagster --path-prefix /dagster
+	#   handle_path /netdata/* { reverse_proxy {$NETDATA_UPSTREAM} }   # oauth2-proxy --proxy-prefix
+	#   handle_path /portainer/* { reverse_proxy https://{$PORTAINER_UPSTREAM} { transport http { tls_insecure_skip_verify } } }
+}

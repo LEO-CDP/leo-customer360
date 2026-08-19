@@ -43,6 +43,8 @@ KC_HTTP_PORT="$(tfval keycloak_http_port "$ovl")"; KC_HTTP_PORT="${KC_HTTP_PORT:
 KC_ADMIN_USER="$(tfval keycloak_admin_user "$ovl")"; KC_ADMIN_USER="${KC_ADMIN_USER:-admin}"
 KC_DB_NAME="$(tfval keycloak_db_name "$ovl")"; KC_DB_NAME="${KC_DB_NAME:-db_keycloak}"
 KC_HOSTNAME_CFG="$(tfval keycloak_hostname "$ovl")"
+KC_RELPATH="$(tfval keycloak_http_relative_path "$ovl")"   # e.g. /auth when a proxy path-routes Keycloak under a sub-path
+KC_PROXY_HEADERS="$(tfval keycloak_proxy_headers "$ovl")"  # e.g. xforwarded when TLS terminates upstream (Caddy/L7 LB)
 JAVA_HEAP="$(tfval java_heap "$ovl")"
 
 : "${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env (cp .env.example .env)}"
@@ -86,10 +88,11 @@ HEAP_B64="$(printf %s "$JAVA_HEAP" | base64 | tr -d '\n')"
 
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' \
   "$KC_IMAGE" "$KC_COMMAND" "$KC_HTTP_PORT" "$DB_HOST" "$DB_PORT" "$KC_DB_NAME" "$DB_USER" "$DBPW_B64" \
-  "$KC_ADMIN_USER" "$ADMPW_B64" "$KC_HOSTNAME_EFF" "$HEAP_B64" <<'REMOTE'
+  "$KC_ADMIN_USER" "$ADMPW_B64" "$KC_HOSTNAME_EFF" "$HEAP_B64" "$KC_RELPATH" "$KC_PROXY_HEADERS" <<'REMOTE'
 set -euo pipefail
 IMG="$1"; CMD="$2"; PORT="$3"; DBHOST="$4"; DBPORT="$5"; DBNAME="$6"; DBUSER="$7"; DBPW="$(printf %s "$8" | base64 -d)"
 ADMUSER="$9"; ADMPW="$(printf %s "${10}" | base64 -d)"; HOSTNAME_EFF="${11}"; JAVA_HEAP="$(printf %s "${12:-}" | base64 -d 2>/dev/null || true)"
+RELPATH="${13:-}"; PROXY_HEADERS="${14:-}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -110,9 +113,13 @@ args=(
   -e KC_HOSTNAME="$HOSTNAME_EFF"
 )
 [ -n "$JAVA_HEAP" ] && args+=( -e JAVA_OPTS_APPEND="$JAVA_HEAP" )
-# Production `start` behind an HTTP load balancer (TLS terminates at the LB).
-if [ "$CMD" = "start" ]; then
-  args+=( -e KC_HTTP_ENABLED=true -e KC_PROXY_HEADERS=xforwarded -e KC_HOSTNAME_STRICT=false )
+# Serve Keycloak under a sub-path (e.g. /auth) when a proxy path-routes it.
+[ -n "$RELPATH" ] && args+=( -e KC_HTTP_RELATIVE_PATH="$RELPATH" )
+# Behind a proxy that terminates TLS: `start` (prod), OR any env that sets
+# keycloak_proxy_headers (e.g. Caddy in front). Trust X-Forwarded-* so Keycloak
+# builds https:// issuer/redirect URLs and doesn't reject the forwarded host.
+if [ "$CMD" = "start" ] || [ -n "$PROXY_HEADERS" ]; then
+  args+=( -e KC_HTTP_ENABLED=true -e KC_PROXY_HEADERS="${PROXY_HEADERS:-xforwarded}" -e KC_HOSTNAME_STRICT=false )
 fi
 
 sudo docker rm -f c360-keycloak >/dev/null 2>&1 || true

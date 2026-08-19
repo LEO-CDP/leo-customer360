@@ -1,0 +1,160 @@
+# proxy — Caddy (TLS + path routing)
+
+A single **Caddy** reverse proxy that terminates TLS (auto **Let's Encrypt**) and
+path-routes **one public host** (`caddy_domain`, e.g. `beta.leocdp.com`) to the
+platform services. It replaces the "one raw port per service" scheme of the L4 NLB
+with a clean HTTPS front door — at **$0 extra cost**, since it runs as a container on
+a box you already pay for (the shared api box in uat).
+
+```
+Client ──HTTPS──▶ LB :443 ─(TCP passthrough)─▶ Caddy :443 (api box)
+                  LB :80  ─(ACME + redirect)─▶ Caddy :80
+                                                  │  terminates TLS, routes by path:
+                                                  ├─ /            → frontend-admin :8890
+                                                  ├─ /c360api/*    → customer360-api :8008   (prefix stripped)
+                                                  ├─ /auth/*       → keycloak :8080          (KC serves under /auth)
+                                                  └─ /ads/*        → ads-server :9009        (prefix stripped)
+```
+
+The L4 NLB stays in front (it's the thing with the public IP), but for the app it now
+does dumb TCP passthrough of `:80`/`:443` to Caddy. Ops dashboards (Dagster, Portainer,
+Netdata) can stay on their existing LB ports, or move under Caddy later (see Caveats).
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `Caddyfile` | routing + TLS config; `{$VAR}` placeholders resolved from env at load |
+| `deploy-caddy.sh` | ships the Caddyfile + runs Caddy on the target box over SSH |
+| `overlays/uat.tfvars` · `overlays/prod.tfvars` | per-env host, ACME email, upstreams |
+
+## Usage
+
+```bash
+./deploy-caddy.sh uat validate   # adapt+validate the Caddyfile on the box (no deploy, no ACME)
+./deploy-caddy.sh uat            # (re)deploy Caddy; issues/renews the cert once DNS+LB are ready
+./deploy-caddy.sh uat destroy    # remove the container (cert volume caddy_data is kept)
+```
+
+> **Certs need three things** before Let's Encrypt will issue: (1) `caddy_domain`
+> resolves (DNS A record) to the LB public IP, (2) the LB forwards **:80** to this box
+> (HTTP-01 challenge) and **:443** for traffic, (3) Caddy is running. Until all three
+> hold, Caddy runs but serves no HTTPS — that's expected while staging.
+
+---
+
+## Cutover runbook: put the platform behind `beta.leocdp.com`
+
+Everything below is the **cutover** — do it once DNS is ready. Until you start, the
+current `http://103.245.254.29:<port>` access keeps working, so you can prep the edits
+first and flip in one sitting. Order matters (Keycloak's issuer changes, which
+invalidates existing tokens — everyone re-logs-in once).
+
+### 0. Prereqs
+All services already deployed and healthy on the IP (api, keycloak, frontend, ads, LB).
+
+### 1. DNS
+Create an **A record**: `beta.leocdp.com → 103.245.254.29` (the LB public IP). Confirm
+it resolves before continuing (`nslookup beta.leocdp.com`).
+
+### 2. Edit the overlays (host + scheme; nothing applied yet)
+
+| File | Key | From | To |
+|------|-----|------|----|
+| `sso/overlays/uat.tfvars` | `keycloak_hostname` | `http://103.245.254.29:8080` | `https://beta.leocdp.com` |
+| `sso/overlays/uat.tfvars` | *(add)* `keycloak_http_relative_path` | — | `/auth` |
+| `sso/overlays/uat.tfvars` | *(add)* `keycloak_proxy_headers` | — | `xforwarded` |
+| `sso/overlays/uat.tfvars` | `api_sso_login_url` | `http://103.245.254.29:8080` | `https://beta.leocdp.com/auth` |
+| `sso/overlays/uat.tfvars` | `sso_redirect_uris` | `http://103.245.254.29:8890/*` | `https://beta.leocdp.com/*` |
+| `frontend/overlays/uat.tfvars` | `frontend_api_hostname` | `http://103.245.254.29:80` | `https://beta.leocdp.com/c360api` |
+| `monitoring/overlays/uat.tfvars` | `oauth2_issuer_url` | `http://103.245.254.29:8080/realms/customer360` | `https://beta.leocdp.com/auth/realms/customer360` |
+| `monitoring/overlays/uat.tfvars` | `oauth2_public_host` | `103.245.254.29` | `beta.leocdp.com` |
+
+> **Why `/auth` everywhere:** with `keycloak_http_relative_path=/auth`, Keycloak's OIDC
+> **issuer** becomes `https://beta.leocdp.com/auth/realms/customer360`. Every consumer
+> (API introspection, oauth2-proxy discovery, the browser's authorize redirect) must use
+> the *same* issuer string, or introspection/validation fails.
+
+### 3. Redeploy Keycloak (new hostname + `/auth` + proxy-trust)
+```bash
+(cd sso && ./deploy-sso.sh uat)
+```
+This sets `KC_HOSTNAME=https://beta.leocdp.com`, `KC_HTTP_RELATIVE_PATH=/auth`,
+`KC_PROXY_HEADERS=xforwarded`, `KC_HOSTNAME_STRICT=false` (the last three from the two
+new overlay keys) so Keycloak builds correct `https://…/auth/…` URLs behind Caddy.
+
+### 4. Re-register OIDC clients (redirect URIs / issuer)
+```bash
+(cd sso && python3 bootstrap-realm.py)            # customer360-api redirect URIs → https://beta.leocdp.com/*
+(cd monitoring && ./deploy-monitoring.sh uat)     # re-provisions c360-oauth2-proxy client + new issuer
+```
+
+### 5. Redeploy the apps (new public URLs)
+```bash
+(cd server   && ./deploy-api.sh uat)        # SSO_LOGIN_URL=https://beta.leocdp.com/auth
+(cd frontend && ./deploy-frontend.sh uat)   # apiBase=https://beta.leocdp.com/c360api/api/v1
+```
+
+### 6. Deploy Caddy
+```bash
+(cd proxy && ./deploy-caddy.sh uat)
+```
+
+### 7. Repoint the LB: `:80` + `:443` → Caddy
+In `load_balancer/overlays/uat.tfvars`, **replace** the `api`, `keycloak`, `frontend`
+(and `ads`, now under `/ads`) backends with two Caddy backends, and keep the ops ports:
+```hcl
+backends = {
+  caddy_https = { listen_port = 443, member_ip = "10.100.1.5", member_port = 443 }             # TCP health
+  caddy_http  = { listen_port = 80,  member_ip = "10.100.1.5", member_port = 80  }             # ACME + HTTP→HTTPS
+  # --- ops tools stay raw on their own ports (or move under Caddy later) ---
+  dagster   = { listen_port = 3000,  member_ip = "10.100.1.4", member_port = 3000 }
+  portainer = { listen_port = 9443,  member_ip = "10.100.1.5", member_port = 9443 }
+  netdata   = { listen_port = 19999, member_ip = "10.100.1.5", member_port = 19999 }
+}
+```
+```bash
+(cd load_balancer && ./deploy.sh uat apply)
+```
+The LB's security-group rules auto-open `:80`/`:443` on the api box for each new backend.
+Caddy now sees ACME traffic on `:80` and issues the cert for `beta.leocdp.com`.
+
+### 8. Verify
+```bash
+curl -sI  https://beta.leocdp.com/                     # frontend (200)
+curl -s   https://beta.leocdp.com/c360api/api/v1/health
+curl -sI  https://beta.leocdp.com/auth/realms/customer360/.well-known/openid-configuration
+```
+Then log in from the UI at `https://beta.leocdp.com/` — the OIDC round-trip should now
+run entirely over `https://beta.leocdp.com/auth`.
+
+### Rollback
+Revert the overlay edits, re-run steps 3–5, and restore the old per-port `backends`
+map in the LB overlay (`./deploy.sh uat apply`). Caddy can be left running or
+`./deploy-caddy.sh uat destroy`'d — it's harmless when the LB doesn't point at it.
+
+---
+
+## Caveats (single-host path routing)
+
+- **Keycloak** must serve under `/auth` (`KC_HTTP_RELATIVE_PATH=/auth`) so its absolute
+  URLs match the path — handled by the new `deploy-sso.sh` keys. Caddy forwards
+  `/auth/*` **without** stripping.
+- **customer360-api** has `root_path=/c360api`, so Caddy uses `handle_path` to **strip**
+  `/c360api` and the app sees its own `/api/v1/...` routes; `root_path` keeps its
+  generated URLs (docs) correct.
+- **ads-server** is proxied under `/ads` with the prefix stripped — fine for its JSON
+  API; if it serves UI assets it'd need its own base-path config.
+- **Dagster / Portainer / Netdata** generate absolute URLs or have their own callback
+  paths and do **not** sub-path cleanly without app-side config (`dagster --path-prefix`,
+  `oauth2-proxy --proxy-prefix`, Portainer base href). By default they stay on their raw
+  LB ports; the Caddyfile has commented blocks + notes if you want to bring one under a
+  path. A subdomain (`dagster.beta.leocdp.com`) is the cleaner route for these.
+- **HTTPS knock-ons:** once TLS is live, set oauth2-proxy `--cookie-secure=true` and use
+  `https://` callback URLs (the monitoring overlay/`deploy-monitoring.sh` drive this).
+
+## prod
+
+Each service runs on its **own box** in prod, so Caddy can't use `127.0.0.1` — set each
+`*_upstream` in `overlays/prod.tfvars` to that box's **private IP** (from `server` prod
+outputs), and pick where Caddy runs via `caddy_server_key` (default: the frontend box).

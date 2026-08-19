@@ -1,0 +1,9 @@
+# secrets / local overrides (never commit)
+.env
+*.env
+terraform.tfvars
+*.auto.tfvars
+# terraform state / caches (this deployment ships over SSH; no TF state expected here)
+.terraform/
+*.tfstate
+*.tfstate.*
