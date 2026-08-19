@@ -484,13 +484,6 @@ class PersonaArchetypeBase(BaseModel):
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
 
-    centroid_behavior_score: Optional[Decimal] = None
-    centroid_engagement_score: Optional[Decimal] = None
-    centroid_financial_score: Optional[Decimal] = None
-    centroid_loyalty_score: Optional[Decimal] = None
-    centroid_relationship_score: Optional[Decimal] = None
-    centroid_risk_score: Optional[Decimal] = None
-
     is_active: bool = True
 
 
@@ -510,12 +503,29 @@ class PersonaArchetypeUpdate(BaseModel):
 class PersonaArchetypeRead(PersonaArchetypeBase):
     model_config = ConfigDict(from_attributes=True)
     persona_archetype_id: uuid.UUID
-    # Denormalized COUNT(DISTINCT master_profile_id) across ACTIVE matches --
-    # the "Total Matched Profiles" figure the Persona Management admin UI
-    # must display per archetype (maintained by a DB trigger, read-only here).
+    # Centroid component scores + matched_profile_count are NEVER accepted
+    # as input (see PersonaArchetypeBase/Create/Update above) -- both are
+    # computed/maintained entirely server-side: matched_profile_count by a
+    # DB trigger (trg_sync_persona_archetype_match_count), and the centroid_*
+    # scores by backend-system/identity_resolution's PersonaResolutionEngine
+    # (_upsert_archetype), which folds each newly (re)resolved master
+    # profile's component scores into a running mean every time the
+    # identity_resolution_job processes it.
+    centroid_behavior_score: Optional[Decimal] = None
+    centroid_engagement_score: Optional[Decimal] = None
+    centroid_financial_score: Optional[Decimal] = None
+    centroid_loyalty_score: Optional[Decimal] = None
+    centroid_relationship_score: Optional[Decimal] = None
+    centroid_risk_score: Optional[Decimal] = None
     matched_profile_count: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Not a DB column -- set via setattr() in persona_api.py's create/update
+    # handlers when they successfully submit a Dagster identity_resolution_job
+    # run to (re)compute this archetype's centroid; None if no run was
+    # submitted (e.g. Dagster webserver unreachable -- never blocks the
+    # create/update itself, see persona_api.py).
+    centroid_recompute_run_id: Optional[str] = None
 
 
 class CustomerPersonaBase(BaseModel):

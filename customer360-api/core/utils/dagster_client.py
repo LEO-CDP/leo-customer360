@@ -272,6 +272,36 @@ class IdentityResolutionDagsterService(DagsterService):
         ``cdp_raw_profiles_stage`` until empty)."""
         return self.submit()
 
+    def recompute_personas(
+        self,
+        trigger_reason: str,
+        tenant_id: Optional[str] = None,
+        persona_archetype_id: Optional[str] = None,
+    ) -> str:
+        """Triggers ``identity_resolution_job`` after a ``cdp_persona_archetypes``
+        row is created/edited in the Persona Management admin UI, so any
+        profile whose persona gets (re)resolved during that run folds its
+        component scores into this archetype's ``centroid_*_score`` running
+        mean (see ``PersonaResolutionEngine._upsert_archetype`` in
+        backend-system/identity_resolution) -- centroid scores are NEVER
+        accepted as admin input (see ``PersonaArchetypeCreate``/``Update``),
+        they only ever come from this engine.
+
+        NOTE: unlike ``SegmentationDagsterService``, ``identity_resolution_job``
+        is NOT tenant-scoped today -- it drains the whole shared
+        ``cdp_raw_profiles_stage`` table (see
+        ``identity_resolution/daily_job.py``), so this cannot target just one
+        tenant/archetype's profiles. ``tenant_id``/``persona_archetype_id``
+        are attached only as Dagster run tags for observability (filtering
+        run history in the Dagster UI), they do not scope execution.
+        """
+        tags = {"trigger_reason": trigger_reason}
+        if tenant_id:
+            tags["tenant_id"] = str(tenant_id)
+        if persona_archetype_id:
+            tags["persona_archetype_id"] = str(persona_archetype_id)
+        return self.submit(tags=tags)
+
 
 class ScoringDagsterService(DagsterService):
     """backend-system/scoring -- profile scoring run (placeholder job today,

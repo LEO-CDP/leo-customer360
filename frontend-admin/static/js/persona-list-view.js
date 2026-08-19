@@ -8,6 +8,23 @@ window.C360 = window.C360 || {};
   var api = C360.config.api;
   var showApiError = C360.config.showApiError;
 
+  function populatePersonaCategoryOptions(selectedValue) {
+    var $selects = $("#persona-add-category, #persona-edit-category");
+    var options = C360.config.personaCategoryOptions || [];
+    $selects.each(function () {
+      var $select = $(this);
+      var value = selectedValue || $select.val() || "";
+      $select.find("option:not(:first)").remove();
+      options.forEach(function (option) {
+        $select.append($("<option>").val(option.value).text(option.label));
+      });
+      if (value && !options.some(function (option) { return option.value === value; })) {
+        $select.append($("<option>").val(value).text(value));
+      }
+      $select.val(value);
+    });
+  }
+
   var charts = {};
   var PALETTE = ["#4f46e5", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a855f7"];
 
@@ -170,6 +187,7 @@ window.C360 = window.C360 || {};
   function openPersonaEditModal() {
     if (!currentArchetype) return;
     $("#persona-edit-error").addClass("hidden").text("");
+    populatePersonaCategoryOptions(currentArchetype.persona_category || "");
     $("#persona-edit-name").val(currentArchetype.persona_name || "");
     $("#persona-edit-category").val(currentArchetype.persona_category || "");
     $("#persona-edit-summary").val(currentArchetype.persona_summary || "");
@@ -207,11 +225,90 @@ window.C360 = window.C360 || {};
         closePersonaEditModal();
         renderArchetypeMetadata(archetype);
         dtv.load(false);
+        notifyCentroidRecompute(archetype);
       })
       .fail(function (xhr) {
         var detail = xhr && xhr.responseJSON && xhr.responseJSON.detail;
         $error.removeClass("hidden").text(detail || "Could not save changes to this persona archetype.");
       });
+  }
+
+  // "Add New Persona" -- creates a brand-new shared archetype (POST
+  // /persona/archetypes). Admin-only, mirrors openPersonaEditModal's shape
+  // but resets all fields since there's no existing row to seed from.
+  function openPersonaAddModal() {
+    $("#persona-add-error").addClass("hidden").text("");
+    populatePersonaCategoryOptions("");
+    $("#persona-add-domain").val("");
+    $("#persona-add-code").val("");
+    $("#persona-add-name").val("");
+    $("#persona-add-category").val("");
+    $("#persona-add-summary").val("");
+    $("#persona-add-llm-provider").val("");
+    $("#persona-add-llm-model").val("");
+    $("#persona-add-active").prop("checked", true);
+    $("#persona-add-modal").removeClass("hidden");
+  }
+
+  function closePersonaAddModal() {
+    $("#persona-add-modal").addClass("hidden");
+  }
+
+  function submitPersonaAddForm() {
+    var $error = $("#persona-add-error");
+    $error.addClass("hidden").text("");
+
+    var domain = $.trim($("#persona-add-domain").val());
+    var code = $.trim($("#persona-add-code").val());
+    var name = $.trim($("#persona-add-name").val());
+    if (!domain || !code || !name) {
+      $error.removeClass("hidden").text("Domain, Persona Code, and Persona Name are required.");
+      return;
+    }
+
+    var payload = {
+      tenant_id: C360.config.current.tenantId,
+      domain: domain,
+      persona_code: code,
+      persona_name: name,
+      persona_category: $.trim($("#persona-add-category").val()) || null,
+      persona_summary: $.trim($("#persona-add-summary").val()) || null,
+      llm_provider: $.trim($("#persona-add-llm-provider").val()) || null,
+      llm_model: $.trim($("#persona-add-llm-model").val()) || null,
+      is_active: $("#persona-add-active").is(":checked")
+    };
+
+    api("/persona/archetypes", payload, "POST")
+      .done(function (archetype) {
+        closePersonaAddModal();
+        dtv.load(false);
+        loadAnalytics(false);
+        notifyCentroidRecompute(archetype);
+      })
+      .fail(function (xhr) {
+        var detail = xhr && xhr.responseJSON && xhr.responseJSON.detail;
+        $error.removeClass("hidden").text(typeof detail === "string" ? detail : "Could not create this persona archetype.");
+      });
+  }
+
+  // Surfaces whether saving this archetype successfully triggered
+  // identity_resolution_job to (re)compute its centroid_*_score (see
+  // core/routers/persona_api.py's _trigger_persona_centroid_recompute) --
+  // a soft, best-effort signal only: a missing run_id (Dagster webserver
+  // unreachable) never blocks the create/update itself, so just inform the
+  // admin the centroid may stay stale until the next scheduled CIR run.
+  function notifyCentroidRecompute(archetype) {
+    if (archetype && archetype.centroid_recompute_run_id) {
+      showToast(
+        "Persona Resolution Engine recompute submitted (run " + archetype.centroid_recompute_run_id + ")…",
+        "info"
+      );
+    } else {
+      showToast(
+        "Saved, but could not trigger the centroid recompute job -- scores may be stale until the next scheduled run.",
+        "warning"
+      );
+    }
   }
 
   function analyticsParams() {
@@ -281,6 +378,10 @@ window.C360 = window.C360 || {};
 
   function load() {
     showPersonaList();
+    // Creating a shared archetype affects future lookalike-matching for every
+    // profile in its domain -- gate client-side like btn-persona-edit (the
+    // API's require_admin dependency is the real, fail-closed enforcement).
+    $("#btn-persona-add").toggleClass("hidden", !C360.config.isAdmin());
     loadAnalytics(true);
   }
 
@@ -306,6 +407,13 @@ window.C360 = window.C360 || {};
     $("#btn-persona-edit").on("click", openPersonaEditModal);
     $("#btn-persona-edit-cancel").on("click", closePersonaEditModal);
     $("#btn-persona-edit-save").on("click", submitPersonaEditForm);
+
+    $("#btn-persona-add").on("click", openPersonaAddModal);
+    $("#btn-persona-add-cancel").on("click", closePersonaAddModal);
+    $("#btn-persona-add-save").on("click", submitPersonaAddForm);
+    $("#persona-add-modal").on("click", function (e) {
+      if (e.target === this) closePersonaAddModal();
+    });
   }
 
   C360.router.define("/personas", {
