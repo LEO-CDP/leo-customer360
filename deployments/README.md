@@ -8,10 +8,11 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 | Folder | What it provisions |
 |--------|--------------------|
 | [`postgres`](./postgres) | Managed PostgreSQL vDB (`customer360` + `db_keycloak`), `run-sql.sh` schema/seed bootstrap |
-| [`server`](./server) | vServers (VMs): the api box + backend box (uat); adds a dedicated `sso` box (prod) |
+| [`server`](./server) | vServers (VMs): api box + backend box (uat); adds dedicated `sso` + `frontend` boxes (prod) |
 | [`cache`](./cache) | Redis — uat: container on the api box; prod: managed MemStore |
 | [`sso`](./sso) | Keycloak (SSO/OIDC) — uat: container on the api box; prod: dedicated vServer |
-| [`load_balancer`](./load_balancer) | L4 NLB fronting api / dagster / keycloak |
+| [`frontend`](./frontend) | frontend-admin (admin UI) — uat: container on the api box; prod: dedicated vServer |
+| [`load_balancer`](./load_balancer) | L4 NLB fronting api / dagster / keycloak / frontend |
 | [`storage`](./storage) | Object storage (vStorage / S3) |
 
 > **Scope:** this view shows the **UAT** overlay only. The prod overlay differs
@@ -31,7 +32,7 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 ```mermaid
 flowchart TB
   client([Client / public internet])
-  lb["L4 Network Load Balancer<br/>103.245.254.29<br/>:80→api · :3000→dagster · :8080→keycloak"]
+  lb["L4 Network Load Balancer<br/>103.245.254.29<br/>:80→api · :3000→dagster · :8080→keycloak · :8890→frontend"]
   client --> lb
 
   subgraph vpc["VPC c360-vpc-uat · subnet 10.100.1.0/24 · HCM03-1C"]
@@ -40,6 +41,7 @@ flowchart TB
       api["customer360-api (FastAPI)<br/>:8008"]
       redis["c360-redis (Redis 8)<br/>:6580"]
       kc["c360-keycloak (Keycloak 26)<br/>:8080 · health :9000"]
+      fe["frontend-admin (admin UI)<br/>:8890"]
     end
     subgraph bebox["vServer c360-api-uat-backend · 10.100.1.4"]
       dagster["backend-system<br/>Dagster :3000"]
@@ -50,7 +52,9 @@ flowchart TB
   lb -->|":80 → :8008"| api
   lb -->|":3000"| dagster
   lb -.->|":8080"| kc
+  lb -.->|":8890"| fe
   api -->|cache| redis
+  api -.->|introspect SSO| kc
   api -->|SQL| pg
   api -.->|GraphQL| dagster
   kc -->|db_keycloak| pg
@@ -63,10 +67,11 @@ flowchart TB
 
 | Component | Runs on | Port | Notes |
 |-----------|---------|------|-------|
-| L4 NLB | VNG vLB | 80 / 3000 / 8080 | public `103.245.254.29`; TCP passthrough (no TLS) |
-| customer360-api | api box `10.100.1.5` | 8008 | FastAPI, `--network host`; cache via Redis; auth dev-JWT (SSO optional) |
+| L4 NLB | VNG vLB | 80 / 3000 / 8080 / 8890 | public `103.245.254.29`; TCP passthrough (no TLS) |
+| customer360-api | api box `10.100.1.5` | 8008 | FastAPI, `--network host`; Redis cache; SSO via Keycloak introspection (`SSO_LOGIN=true`) |
 | c360-redis | api box `10.100.1.5` | 6580 | fail-open response cache; `maxmemory 256mb allkeys-lru` |
-| c360-keycloak | api box `10.100.1.5` | 8080 | Keycloak 26 `start-dev`; health on mgmt `:9000` |
+| c360-keycloak | api box `10.100.1.5` | 8080 | Keycloak 26 `start-dev`; health on mgmt `:9000`; realm `customer360` |
+| frontend-admin | api box `10.100.1.5` | 8890 | FastAPI admin UI; browser calls the API/Keycloak via the LB |
 | Dagster | backend box `10.100.1.4` | 3000 | backend-system worker |
 | PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` |
 
@@ -74,13 +79,16 @@ flowchart TB
 
 | Path | Endpoint |
 |------|----------|
+| frontend-admin (UI) | `http://103.245.254.29:8890` |
 | customer360-api | `http://103.245.254.29:80` |
 | Dagster | `http://103.245.254.29:3000` |
 | Keycloak | `http://103.245.254.29:8080` |
 
 ### Data flows
 
-- **Client → LB → services** — the NLB forwards `:80→api:8008`, `:3000→dagster:3000`, `:8080→keycloak:8080`.
+- **Client → LB → services** — the NLB forwards `:80→api:8008`, `:3000→dagster:3000`, `:8080→keycloak:8080`, `:8890→frontend:8890`.
+- **Browser → frontend-admin** — loads the UI (`:8890`); its JS then calls the API + Keycloak from the browser via the LB.
+- **api ⇄ keycloak (SSO)** — the API validates Bearer tokens by OIDC **introspection** against realm `customer360` (token needs a `tenant_id` claim + the client in its audience).
 - **api → redis** — `127.0.0.1:6580` (co-located, `--network host`).
 - **api → postgres** — private `10.100.1.3:5432`, database `customer360` (tenant-scoped via RLS).
 - **api → dagster** — GraphQL at `10.100.1.4:3000`.
