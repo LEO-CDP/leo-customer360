@@ -22,6 +22,80 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 > (dedicated boxes, managed MemStore, own VPC `10.101.0.0/16`) and will be added
 > here once it is provisioned.
 
+## One-shot deploy — `deploy-all.sh`
+
+[`deploy-all.sh`](./deploy-all.sh) is a single orchestrator that runs **every module's
+deploy script in the correct dependency order** for one environment. Each module keeps
+its own script (they are the source of truth); this is a thin, re-runnable wrapper on top.
+
+```bash
+./deploy-all.sh uat                 # apply everything, in order (default action)
+./deploy-all.sh uat --list          # print the ordered steps and exit (no changes)
+./deploy-all.sh uat --dry-run        # show the exact commands that would run
+./deploy-all.sh uat --with seed     # also load the CIR demo data
+./deploy-all.sh uat plan            # terraform plan for the IaC steps only
+./deploy-all.sh uat destroy         # tear everything down (REVERSE order)
+```
+
+![Customer 360 — deploy pipeline](./deploy-process.png)
+
+📐 **Editable sources:** [`deploy-process.excalidraw`](./deploy-process.excalidraw)
+(open at [excalidraw.com](https://excalidraw.com) or the Obsidian Excalidraw plugin) ·
+[`deploy-process.svg`](./deploy-process.svg) (vector source of the image above).
+
+### Ordered steps
+
+Phases run top → bottom; every step is idempotent/converging, so re-running is a safe
+no-op when there is no drift.
+
+| # | Phase | Step | Runs | Depends on |
+|---|-------|------|------|------------|
+| 1 | Infra (Terraform) | `storage` | `storage/deploy.sh` | — (independent) |
+| 2 | Infra (Terraform) | `postgres` | `postgres/deploy.sh` | — |
+| 3 | Infra (Terraform) | `server` | `server/deploy.sh` | — |
+| 4 | DB bootstrap | `db-schema` | `postgres/run-sql.sh` | `server` (bastion) + `postgres` |
+| 5 | Data-plane | `cache` | `cache/deploy.sh` | `server` |
+| 6 | Data-plane | `sso` | `sso/deploy-sso.sh` | `server` + `db-schema` (`db_keycloak`) |
+| 7 | Data-plane | `backend` | `server/deploy-backend.sh` | `server` + `db-schema` |
+| 8 | Front door | `load-balancer` | `load_balancer/deploy.sh` | `server` |
+| 9 | Front door | `proxy` (Caddy) | `proxy/deploy-caddy.sh` | `load-balancer` (`:80`/`:443` → box) + **DNS** |
+| 10 | SSO + apps | `sso-realm` | `sso/bootstrap-realm.py` | `sso` + public HTTPS (writes `KEYCLOAK_CLIENT_SECRET` → `sso/.env`) |
+| 11 | SSO + apps | `api` | `server/deploy-api.sh` | `db-schema`, `cache`, `backend`, `sso-realm` (SSO optional) |
+| 12 | SSO + apps | `frontend` | `frontend/deploy-frontend.sh` | `server` |
+| 13 | SSO + apps | `ads` | `ads-server/deploy-ads.sh` | `server` + `db-schema` + `cache` |
+| 14 | SSO + apps | `monitoring` | `monitoring/deploy-monitoring.sh` | `server`; SSO gate needs `sso-realm` + `load-balancer` |
+| 15 | Demo data | `seed` *(optional)* | `server/seed_data.sh` | `api`/`db-schema`; opt-in via `--with seed` |
+
+### Flags
+
+| Flag | Effect |
+|------|--------|
+| `--list` | Print the ordered steps (with phases) and exit. |
+| `--from <step>` | Start at `<step>`, skip everything before it (**resume** after a fix). |
+| `--only <a,b,c>` | Run **only** these steps, keeping order. |
+| `--skip <a,b,c>` | Run everything **except** these steps. |
+| `--with <a,b,c>` | Also run the **optional** steps (e.g. `seed`). |
+| `--keep-going` | Don't stop on the first failure; report at the end. |
+| `--dry-run` | Print the commands that **would** run; execute nothing. |
+| `-y`, `--yes` | Don't prompt for confirmation before executing. |
+
+### First bring-up & the HTTPS prerequisite
+
+Steps 9–14 that need the **public HTTPS entry point** (Caddy's cert, the API's SSO mode,
+the monitoring oauth2 gate) require that DNS for `caddy_domain` (`beta.leocdp.com`) points
+at the load balancer and Caddy has issued its Let's Encrypt certificate. On a first
+bring-up before DNS is live:
+
+```bash
+./deploy-all.sh uat --skip proxy,sso-realm,monitoring   # infra + apps (api starts in local-JWT mode)
+# → point DNS: beta.leocdp.com (A) → the LB public IP, wait for it to resolve
+./deploy-all.sh uat --from proxy                        # Caddy → realm → re-deploy api (SSO on) → monitoring
+```
+
+`deploy-api.sh` falls back to `SSO_LOGIN=false` (dev local-JWT) until the realm exists, so
+running `api` early is safe — re-run it after `sso-realm` to switch SSO on. Secrets/creds
+live in each module's own `.env` / `terraform.tfvars` (see each module's README).
+
 ## UAT deployment view
 
 ![Customer 360 — UAT deployment view](./deployment-view-uat.png)
