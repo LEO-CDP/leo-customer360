@@ -16,7 +16,11 @@
 
 	# --- Keycloak under /auth (needs KC_HTTP_RELATIVE_PATH=/auth on Keycloak) ---
 	# NOT handle_path: Keycloak serves under /auth itself, so forward the prefix as-is.
-	handle /auth/* {
+	# Match BOTH the bare /auth AND /auth/* — otherwise a request to exactly /auth (no
+	# trailing slash) misses `/auth/*` and falls through to the frontend catch-all (404);
+	# Keycloak then redirects /auth -> /auth/ -> /auth/admin/ itself.
+	@auth path /auth /auth/*
+	handle @auth {
 		reverse_proxy {$KC_UPSTREAM}
 	}
 
