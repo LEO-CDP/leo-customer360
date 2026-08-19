@@ -42,6 +42,12 @@ backends = {
     listen_port = 8080 # LB public :8080 -> keycloak:8080
     health_path = null # TCP health check: Keycloak's /health is on the mgmt port 9000, not 8080
   }
+  "frontend" = {
+    member_ip   = "10.100.1.5" # c360-api-uat-api (frontend-admin co-located, see deployments/frontend)
+    member_port = 8890
+    listen_port = 8890 # LB public :8890 -> frontend:8890
+    health_path = "/health" # frontend-admin serves /health on 8890
+  }
 }
 
 # Open the app ports on the backends' Default secgroup so the LB can reach them.
