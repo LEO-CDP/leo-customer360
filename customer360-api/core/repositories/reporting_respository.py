@@ -11,7 +11,7 @@ Uses the same synchronous SQLAlchemy Session as the rest of the API
 """
 
 import uuid
-from datetime import datetime, timedelta
+from core.utils.datetime import cutoff_for_days
 from math import ceil
 from typing import Optional
 
@@ -41,13 +41,10 @@ class ReportingRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def _cutoff_for_days(self, days: Optional[int]) -> Optional[datetime]:
-        if days is None:
-            return None
-        return datetime.utcnow() - timedelta(days=days)
+
 
     def _filter_recent(self, stmt, model, days: Optional[int]):
-        cutoff = self._cutoff_for_days(days)
+        cutoff = cutoff_for_days(days) 
         if cutoff is not None:
             stmt = stmt.where(model.created_at >= cutoff)
         return stmt
@@ -221,7 +218,7 @@ class ReportingRepository:
         if is_active is not None:
             where_clauses.append(CdpCustomerPersona.is_active == is_active)
 
-        cutoff = self._cutoff_for_days(days)
+        cutoff = cutoff_for_days(days)
         if cutoff is not None:
             where_clauses.append(CdpCustomerPersona.computed_at >= cutoff)
 

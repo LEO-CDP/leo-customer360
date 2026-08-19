@@ -9,9 +9,8 @@ section of core-customer360/identity-resolution.md.
 
 import uuid
 from math import ceil
-from datetime import datetime, timedelta
 from typing import Optional
-
+from core.utils.datetime import cutoff_for_days
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -86,7 +85,7 @@ def list_master_profiles_page(
     if churn_risk_tier is not None:
         where_clauses.append(CdpMasterProfile.churn_risk_tier == churn_risk_tier)
 
-    cutoff = _cutoff_for_days(days)
+    cutoff = cutoff_for_days(days)
     if cutoff is not None:
         where_clauses.append(CdpMasterProfile.created_at >= cutoff)
 

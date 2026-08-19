@@ -573,6 +573,31 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             page_size=15,
         )
 
+    def test_master_profiles_page_supports_days_filter(self):
+        from core.crud import identity as identity_crud
+
+        class _ListPageSession:
+            def execute(self, stmt, params=None):
+                class _Rows:
+                    def all(self):
+                        return []
+
+                    def scalar_one(self):
+                        return 0
+
+                return _Rows()
+
+        result = identity_crud.list_master_profiles_page(
+            _ListPageSession(),
+            days=30,
+            page=1,
+            page_size=25,
+        )
+
+        self.assertEqual(result["items"], [])
+        self.assertEqual(result["pagination"]["total"], 0)
+        self.assertEqual(result["pagination"]["total_pages"], 1)
+
     def test_rejects_invalid_domain(self):
         response = self.client.get("/master-profiles/?domain=finance")
 
