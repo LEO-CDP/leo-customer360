@@ -89,7 +89,9 @@ class IdentityRepository:
         self, tenant_id: Optional[uuid.UUID] = None, days: int = 90
     ) -> int:
         """Count raw profiles created within the last N days."""
-        return identity_crud.count_raw_profiles(self.session, tenant_id, days=days)
+        from core.repositories.reporting_respository import ReportingRepository
+
+        return ReportingRepository(self.session).count_raw_profiles(tenant_id=tenant_id, days=days)
 
     def get_raw_profile(self, raw_profile_id: uuid.UUID) -> Optional[CdpRawProfileStage]:
         """Get raw profile by ID."""
