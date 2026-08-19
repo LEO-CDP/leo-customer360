@@ -58,10 +58,10 @@ backends = {
   # The LB targets the PROXY ports (4443/4199), NOT the dashboards' own 9443/19999 (which stay
   # loopback/firewalled). /ping is oauth2-proxy's unauthenticated health endpoint.
   "portainer" = {
-    member_ip   = "10.100.1.5" # c360-api-uat-api (oauth2-proxy -> Portainer 127.0.0.1:9443)
-    member_port = 4443
-    listen_port = 9443 # LB public :9443 -> oauth2-proxy:4443 -> Portainer
-    health_path = "/ping"
+    member_ip   = "10.100.1.5" # c360-api-uat-api — Portainer DIRECT (its own login; not behind oauth2-proxy)
+    member_port = 9443
+    listen_port = 9443 # LB public https :9443 -> Portainer :9443 (L4 TLS passthrough, self-signed)
+    health_path = null # Portainer is HTTPS on 9443 -> plain TCP health check (no HTTP /ping)
   }
   "netdata" = {
     member_ip   = "10.100.1.5" # c360-api-uat-api (oauth2-proxy -> Netdata 127.0.0.1:19999)

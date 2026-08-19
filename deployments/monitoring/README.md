@@ -17,6 +17,23 @@ cover the two things you actually want on the shared box: **operate the containe
 No **required** secrets. DB/Redis are untouched. An **optional** Portainer admin password
 lives in `.env` (git-ignored); Netdata has no auth.
 
+> **First run — set `PORTAINER_ADMIN_PASSWORD` in `.env` BEFORE deploying.** Portainer CE
+> locks its first-run setup screen ("Portainer instance timed out for security purposes")
+> if no admin is created within a few minutes of the container starting — and going
+> through the LB + Keycloak login easily blows that window. Setting the password makes the
+> deploy bootstrap the admin non-interactively (`--admin-password-file`), so the lock never
+> triggers:
+>
+> ```bash
+> cp .env.example .env
+> echo "PORTAINER_ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)" >> .env
+> grep '^PORTAINER_ADMIN_PASSWORD=' .env   # copy it to your password manager
+> ```
+>
+> If you already hit the lock, add the password then redeploy; if it persists, wipe the
+> volume first: `docker rm -f c360-portainer && docker volume rm portainer_data`. Log in
+> at the dashboard as `admin` with that password (after the Keycloak gate).
+
 ## Deploy
 
 ```bash
@@ -31,16 +48,21 @@ Re-running is idempotent (`docker rm -f` then `run`). Toggle either tool via
 (`127.0.0.1:9443`); Netdata listens on `19999`. Neither is reachable from the internet
 until the LB backend (below) is added — and then only through the Keycloak SSO gate.
 
-## Public access via the LB, gated by Keycloak (oauth2-proxy)
+## Public access via the LB
 
-The LB is an **L4 NLB** — it forwards TCP and cannot do OIDC, and neither Portainer CE nor
-the Netdata agent authenticate against Keycloak natively. So `deploy-monitoring.sh` runs
-**oauth2-proxy** on the box as a confidential client (`c360-oauth2-proxy`) in the existing
-`customer360` realm, and the LB targets the proxy, not the dashboard:
+The LB is an **L4 NLB** — it forwards TCP and cannot do OIDC. Auth is **per dashboard**
+(`portainer_sso` / `netdata_sso` in the overlay):
+
+- **Portainer → direct** (`portainer_sso = false`). It has its own login, and its CSRF/origin
+  check **rejects mutating requests behind a reverse proxy** ("Forbidden - origin invalid" —
+  e.g. creating a tag), so it must NOT sit behind oauth2-proxy. The LB targets Portainer's
+  own port; it serves **HTTPS/self-signed**, so the public URL is `https://…:9443`.
+- **Netdata → gated** (`netdata_sso = true`). It has no auth of its own, so it stays behind
+  **oauth2-proxy** — a confidential `c360-oauth2-proxy` client in the `customer360` realm.
 
 ```
-browser → LB :9443  (TCP) → box :4443 oauth2-proxy → [Keycloak login] → https://127.0.0.1:9443  Portainer
-browser → LB :19999 (TCP) → box :4199 oauth2-proxy → [Keycloak login] → http://127.0.0.1:19999  Netdata
+browser → LB :9443  (TCP) ───────────────────────────────────→ https://127.0.0.1:9443  Portainer (own login)
+browser → LB :19999 (TCP) → box :4199 oauth2-proxy → [Keycloak] → http://127.0.0.1:19999  Netdata
 ```
 
 ### Deploy order
@@ -58,8 +80,9 @@ the cookie secret (needs the KC admin password — reused from `../sso/.env` if 
 (cd ../load_balancer && ./deploy.sh uat apply)
 ```
 
-Then browse (each prompts a Keycloak login):
-`http://103.245.254.29:9443/` (Portainer) and `http://103.245.254.29:19999/` (Netdata).
+Then browse:
+- `https://103.245.254.29:9443/` (Portainer) — accept the self-signed cert, then Portainer's own login.
+- `http://103.245.254.29:19999/` (Netdata) — prompts a Keycloak login.
 
 To run **without** the gate, set `oauth2_enabled = false` and redeploy (dashboards stay
 tunnel-only). `./deploy-monitoring.sh uat destroy` removes everything (volumes kept).
@@ -94,6 +117,11 @@ ssh -i ~/.ssh/c360-api_ed25519 \
   tokens must equal this exactly (it's `KC_HOSTNAME/realms/customer360`).
 - **UAT rides HTTP end-to-end** (no TLS on the L4 LB), so oauth2-proxy sets
   `--cookie-secure=false`. For a TLS'd prod, flip that and use `https://` callback URLs.
+- **Portainer behind a reverse proxy = "Forbidden - origin invalid".** Portainer's CSRF
+  check compares the request `Origin` to its own host; an oauth2-proxy/L7 hop in front
+  breaks that on POST/PUT (e.g. creating a tag). That's why Portainer is exposed **directly**
+  (`portainer_sso = false`) rather than gated. If you must gate it, you'd need Portainer EE
+  (native OIDC) or a proxy that rewrites Origin to match — not worth it here.
 - **Portainer setup-timeout lock.** If you don't create the admin user within a few
   minutes of first start, Portainer locks the init screen for security — either set
   `PORTAINER_ADMIN_PASSWORD` in `.env` (non-interactive bootstrap) or

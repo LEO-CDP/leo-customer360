@@ -22,3 +22,7 @@ oauth2_issuer_url  = "http://REPLACE_WITH_PROD_LB_IP:8080/realms/customer360"
 oauth2_client_id   = "c360-oauth2-proxy"
 portainer_proxy_port = 4443
 netdata_proxy_port   = 4199
+
+# Portainer exposed DIRECTLY (its own login + reverse-proxy CSRF issue); Netdata gated.
+portainer_sso = false
+netdata_sso   = true

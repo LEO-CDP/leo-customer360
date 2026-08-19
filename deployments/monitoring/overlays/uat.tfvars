@@ -30,3 +30,9 @@ oauth2_client_id   = "c360-oauth2-proxy"                           # confidentia
 # ports 6580/8008/8080/8890/9000/9009 and the dashboards' own 9443/19999).
 portainer_proxy_port = 4443
 netdata_proxy_port   = 4199
+
+# Per-dashboard SSO gating. Portainer has its OWN login AND a CSRF/origin check that rejects
+# mutating requests behind a reverse proxy ("Forbidden - origin invalid"), so expose it
+# DIRECTLY (LB -> Portainer :9443, HTTPS/self-signed). Netdata has no auth -> keep it gated.
+portainer_sso = false
+netdata_sso   = true

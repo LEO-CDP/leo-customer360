@@ -66,6 +66,16 @@ CLIENT_ID="$(tfval oauth2_client_id "$ovl")"; CLIENT_ID="${CLIENT_ID:-c360-oauth
 PUB_HOST="$(tfval oauth2_public_host "$ovl")"
 P_PROXY="$(tfval portainer_proxy_port "$ovl")"; P_PROXY="${P_PROXY:-4443}"
 N_PROXY="$(tfval netdata_proxy_port "$ovl")";   N_PROXY="${N_PROXY:-4199}"
+# Per-dashboard SSO gating. Portainer has its OWN login AND a CSRF/origin check that rejects
+# mutating requests behind a reverse proxy ("Forbidden - origin invalid"), so it is exposed
+# DIRECTLY (portainer_sso=false). Netdata has no auth of its own, so keep it gated.
+P_SSO="$(tfval portainer_sso "$ovl")"; P_SSO="${P_SSO:-true}"
+N_SSO="$(tfval netdata_sso "$ovl")";   N_SSO="${N_SSO:-true}"
+P_GATED=false; [[ "$OA_EN" == "true" && "$P_EN" == "true" && "$P_SSO" == "true" ]] && P_GATED=true
+N_GATED=false; [[ "$OA_EN" == "true" && "$N_EN" == "true" && "$N_SSO" == "true" ]] && N_GATED=true
+# Gated dashboards bind loopback (only the proxy reaches them); an un-gated but enabled
+# dashboard binds all interfaces so the LB can reach it directly.
+P_BIND="127.0.0.1"; [[ "$P_GATED" == "true" ]] || P_BIND="0.0.0.0"
 
 [[ "$P_EN" == "true" || "$N_EN" == "true" ]] || { echo "ERROR: both portainer_enabled and netdata_enabled are false in $ovl — nothing to do."; exit 1; }
 
@@ -91,13 +101,14 @@ PADMIN_B64="$(printf %s "${PORTAINER_ADMIN_PASSWORD:-}" | base64 | tr -d '\n')"
 
 # --- SSO gate: provision the Keycloak client + secrets locally (before we ship) ---
 SEC_B64=""; COOKIE_B64=""; P_REDIRECT=""; N_REDIRECT=""
-if [[ "$OA_EN" == "true" ]]; then
+if [[ "$P_GATED" == "true" || "$N_GATED" == "true" ]]; then
   : "${ISSUER:?set oauth2_issuer_url in $ovl (e.g. http://<lb>:8080/realms/customer360)}"
   : "${PUB_HOST:?set oauth2_public_host in $ovl (the LB public IP/host the browser uses)}"
   KC_URL="${ISSUER%/realms/*}"; REALM="${ISSUER##*/realms/}"
   P_REDIRECT="http://$PUB_HOST:$P_PORT/oauth2/callback"
   N_REDIRECT="http://$PUB_HOST:$N_PORT/oauth2/callback"
-  REDIRECTS=""; [[ "$P_EN" == "true" ]] && REDIRECTS="$P_REDIRECT"; [[ "$N_EN" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$N_REDIRECT"
+  # only GATED dashboards get a callback URL registered on the Keycloak client
+  REDIRECTS=""; [[ "$P_GATED" == "true" ]] && REDIRECTS="$P_REDIRECT"; [[ "$N_GATED" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$N_REDIRECT"
 
   if [[ -z "${OAUTH2_PROXY_CLIENT_SECRET:-}" ]]; then
     : "${KEYCLOAK_ADMIN_PASSWORD:?need the Keycloak client secret — set KEYCLOAK_ADMIN_PASSWORD in .env (or ../sso/.env) so bootstrap-oauth2-client.py can provision it}"
@@ -118,13 +129,14 @@ if [[ "$OA_EN" == "true" ]]; then
 fi
 
 echo ">> Target (monitoring): $BASTION"
-[[ "$P_EN" == "true" ]] && echo "   Portainer : 127.0.0.1:$P_PORT  ($P_IMG)"
-[[ "$N_EN" == "true" ]] && echo "   Netdata   : :$N_PORT  ($N_IMG)"
-[[ "$OA_EN" == "true" ]] && echo "   SSO gate  : oauth2-proxy -> Keycloak ($ISSUER), client $CLIENT_ID"
+[[ "$P_EN" == "true" ]] && echo "   Portainer : $P_BIND:$P_PORT  ($P_IMG)  [$([[ "$P_GATED" == "true" ]] && echo "SSO gate" || echo "direct, own login")]"
+[[ "$N_EN" == "true" ]] && echo "   Netdata   : :$N_PORT  ($N_IMG)  [$([[ "$N_GATED" == "true" ]] && echo "SSO gate" || echo "DIRECT, no auth")]"
+[[ "$P_GATED" == "true" || "$N_GATED" == "true" ]] && echo "   SSO gate  : oauth2-proxy -> Keycloak ($ISSUER), client $CLIENT_ID"
 
 # All params shipped in one base64 blob (dodges ssh arg-flattening; values are space-free).
 PARAMS_B64="$(printf '%s\n' \
-  "P_EN=$P_EN" "P_PORT=$P_PORT" "P_IMG=$P_IMG" "PADMIN_B64=$PADMIN_B64" \
+  "P_EN=$P_EN" "P_PORT=$P_PORT" "P_IMG=$P_IMG" "PADMIN_B64=$PADMIN_B64" "P_BIND=$P_BIND" \
+  "P_GATED=$P_GATED" "N_GATED=$N_GATED" \
   "N_EN=$N_EN" "N_PORT=$N_PORT" "N_IMG=$N_IMG" \
   "OA_EN=$OA_EN" "OA_IMG=$OA_IMG" "ISSUER=$ISSUER" "CLIENT_ID=$CLIENT_ID" \
   "SEC_B64=$SEC_B64" "COOKIE_B64=$COOKIE_B64" \
@@ -152,7 +164,7 @@ if [ "$P_EN" = "true" ]; then
   sudo docker rm -f c360-portainer >/dev/null 2>&1 || true
   run_args=(
     -d --name c360-portainer --restart unless-stopped
-    -p 127.0.0.1:"$P_PORT":9443   # loopback only: reach it via the SSH tunnel or the oauth2-proxy (never raw on the LB)
+    -p "$P_BIND":"$P_PORT":9443   # gated -> 127.0.0.1 (proxy/tunnel only); direct -> 0.0.0.0 so the LB can reach it
     -v /var/run/docker.sock:/var/run/docker.sock
     -v portainer_data:/data
   )
@@ -187,8 +199,11 @@ if [ "$N_EN" = "true" ]; then
   [ "$ok" = "1" ] && echo "   Netdata OK" || echo "   WARN: Netdata not ready yet"
 fi
 
-# ---------- oauth2-proxy (optional Keycloak SSO gate, one per enabled dashboard) ----------
-if [ "$OA_EN" = "true" ]; then
+# ---------- oauth2-proxy (Keycloak SSO gate, one per GATED dashboard) ----------
+# Tear down any gate that should no longer exist (e.g. Portainer moved to direct access).
+[ "$P_GATED" = "true" ] || sudo docker rm -f c360-oauth2-portainer >/dev/null 2>&1 || true
+[ "$N_GATED" = "true" ] || sudo docker rm -f c360-oauth2-netdata   >/dev/null 2>&1 || true
+if [ "$P_GATED" = "true" ] || [ "$N_GATED" = "true" ]; then
   sudo docker pull "$OA_IMG" >/dev/null || true
   run_proxy() {  # name listen redirect upstream extra_flag
     local name="$1" listen="$2" redirect="$3" upstream="$4" extra="$5"
@@ -206,16 +221,22 @@ if [ "$OA_EN" = "true" ]; then
     sudo docker ps --filter "name=c360-oauth2-$name" --format '   running: {{.Names}} ({{.Status}})'
     [ "$ok" = "1" ] && echo "   oauth2-$name OK (/ping on :$listen)" || { echo "   WARN: oauth2-$name not ready — logs:"; sudo docker logs --tail 25 "c360-oauth2-$name" || true; }
   }
-  if [ "$P_EN" = "true" ]; then echo "   deploying oauth2-proxy for Portainer ..."; run_proxy portainer "$P_PROXY" "$P_REDIRECT" "https://127.0.0.1:$P_PORT" "--ssl-upstream-insecure-skip-verify=true"; fi
-  if [ "$N_EN" = "true" ]; then echo "   deploying oauth2-proxy for Netdata ...";   run_proxy netdata   "$N_PROXY" "$N_REDIRECT" "http://127.0.0.1:$N_PORT" ""; fi
+  if [ "$P_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Portainer ..."; run_proxy portainer "$P_PROXY" "$P_REDIRECT" "https://127.0.0.1:$P_PORT" "--ssl-upstream-insecure-skip-verify=true"; fi
+  if [ "$N_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Netdata ...";   run_proxy netdata   "$N_PROXY" "$N_REDIRECT" "http://127.0.0.1:$N_PORT" ""; fi
 fi
 REMOTE
 
 echo ">> Done."
-if [[ "$OA_EN" == "true" ]]; then
-  echo "   Open the LB ports (portainer -> :$P_PROXY, netdata -> :$N_PROXY backends are in ../load_balancer/overlays/$ENV.tfvars):"
-  echo "     (cd ../load_balancer && ./deploy.sh $ENV apply)"
-  [[ "$P_EN" == "true" ]] && echo "   Public (Keycloak login): http://$PUB_HOST:$P_PORT/   (Portainer)"
-  [[ "$N_EN" == "true" ]] && echo "   Public (Keycloak login): http://$PUB_HOST:$N_PORT/   (Netdata)"
+echo "   Apply/refresh the LB backends (in ../load_balancer/overlays/$ENV.tfvars):"
+echo "     (cd ../load_balancer && ./deploy.sh $ENV apply)"
+if [[ "$P_EN" == "true" && -n "$PUB_HOST" ]]; then
+  [[ "$P_GATED" == "true" ]] \
+    && echo "   Portainer: http://$PUB_HOST:$P_PORT/   (Keycloak gate + Portainer login)" \
+    || echo "   Portainer: https://$PUB_HOST:$P_PORT/  (Portainer's OWN login; self-signed TLS, LB -> :$P_PORT direct)"
+fi
+if [[ "$N_EN" == "true" && -n "$PUB_HOST" ]]; then
+  [[ "$N_GATED" == "true" ]] \
+    && echo "   Netdata  : http://$PUB_HOST:$N_PORT/   (Keycloak login)" \
+    || echo "   Netdata  : http://$PUB_HOST:$N_PORT/   (DIRECT — NO AUTH; set netdata_sso=true)"
 fi
 echo "   Admin tunnel (no LB): ssh -i $SSH_KEY -L $P_PORT:localhost:$P_PORT -L $N_PORT:localhost:$N_PORT $BASTION"
