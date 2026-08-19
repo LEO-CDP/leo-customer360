@@ -93,21 +93,30 @@ flowchart TB
 | Dagster | backend box `10.100.1.4` | 3000 | backend-system worker |
 | PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` + `leo_ads` |
 
-### Public endpoints (via the LB)
+### Public endpoints — `beta.leocdp.com`
 
-| Path | Endpoint |
-|------|----------|
-| frontend-admin (UI) | `http://103.245.254.29:8890` |
-| customer360-api | `http://103.245.254.29:80` |
-| ads-server | `http://103.245.254.29:9009` |
-| Portainer (direct HTTPS, own login) | `https://103.245.254.29:9443` |
-| Netdata (SSO) | `http://103.245.254.29:19999` |
-| Dagster | `http://103.245.254.29:3000` |
-| Keycloak | `http://103.245.254.29:8080` |
+The domain (`beta.leocdp.com`, A record → the LB public IP `103.245.254.29`) is fronted by
+**Caddy** (deployments/proxy), which terminates TLS and path-routes the browser-facing apps.
+The ops dashboards stay on their raw LB ports (they don't sub-path cleanly).
+
+| Service | URL | Served by |
+|---------|-----|-----------|
+| frontend-admin (UI) | `https://beta.leocdp.com/` | Caddy `/` → frontend :8890 |
+| customer360-api | `https://beta.leocdp.com/c360api` (base `…/c360api/api/v1`) | Caddy `/c360api/*` → api :8008 (prefix stripped) |
+| Keycloak | `https://beta.leocdp.com/auth` | Caddy `/auth/*` → keycloak :8080 |
+| ads-server | `https://beta.leocdp.com/ads` | Caddy `/ads/*` → ads :9009 |
+| Portainer (own login) | `https://beta.leocdp.com:9443` | LB direct → Portainer :9443 (self-signed TLS) |
+| Netdata (SSO) | `http://beta.leocdp.com:19999` | LB → oauth2-proxy :4199 → Netdata (Keycloak login) |
+| Dagster | `http://beta.leocdp.com:3000` | LB direct → dagster :3000 |
+
+> The cutover overlay edits are in [`proxy/cutover-beta.leocdp.com.patch`](./proxy/cutover-beta.leocdp.com.patch);
+> the ordered deploy is the [proxy runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom).
+> Before the cutover the same services were reachable raw at `http://103.245.254.29:<80|3000|8080|8890|9009>`
+> and `https://…:9443` / `http://…:19999`.
 
 ### Data flows
 
-- **Client → LB → services** — the NLB forwards `:80→api:8008`, `:3000→dagster:3000`, `:8080→keycloak:8080`, `:8890→frontend:8890`, `:9009→ads:9009`.
+- **Client → LB → Caddy → apps** — the NLB passes `:443`/`:80` through to **Caddy** on the api box, which terminates TLS and path-routes `beta.leocdp.com`: `/`→frontend :8890, `/c360api`→api :8008, `/auth`→keycloak :8080, `/ads`→ads :9009. Ops tools stay on raw LB ports (`:3000`→dagster, `:9443`→Portainer, `:19999`→oauth2-proxy→Netdata).
 - **Browser → frontend-admin** — loads the UI (`:8890`); its JS then calls the API + Keycloak from the browser via the LB.
 - **api ⇄ keycloak (SSO)** — the API validates Bearer tokens by OIDC **introspection** against realm `customer360` (token needs a `tenant_id` claim + the client in its audience).
 - **ads-server → postgres** — its own `leo_ads` schema (no RLS) in the same managed DB; also uses the co-located Redis (`127.0.0.1:6580`).
@@ -117,6 +126,7 @@ flowchart TB
 - **api → dagster** — GraphQL at `10.100.1.4:3000`.
 - **keycloak → postgres** — database `db_keycloak` on the same managed instance.
 
-> ⚠️ UAT is HTTP-only (L4, no TLS) and the Keycloak admin console is publicly
-> reachable — fine for testing, not for production. Prod should add a DNS name,
-> TLS-terminating L7, and locked-down admin access.
+> ⚠️ The browser-facing apps are now HTTPS via Caddy (`beta.leocdp.com`, auto Let's Encrypt),
+> but the ops dashboards still ride raw HTTP/self-signed ports and the Keycloak admin console
+> is publicly reachable — fine for testing, not production. For prod, move the ops tools
+> behind the domain (subdomains) too and lock down admin access.

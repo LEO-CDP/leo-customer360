@@ -7,7 +7,7 @@ frontend_port       = 8890
 
 # The PUBLIC API URL the BROWSER calls (injected into the page as api_base = <host>/api/v1).
 # Must be reachable from the client -> the LB, not localhost.
-frontend_api_hostname = "http://103.245.254.29:80"
+frontend_api_hostname = "https://beta.leocdp.com/c360api"
 
 # Empty = serve at the LB root. The app mounts static at /static, but the template's
 # static_base is FRONTEND_ROOT_PATH/static — so a non-empty prefix only works behind an

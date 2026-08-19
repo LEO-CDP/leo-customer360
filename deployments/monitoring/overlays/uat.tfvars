@@ -22,8 +22,8 @@ netdata_image   = "netdata/netdata:stable"
 # Read by deploy-monitoring.sh (grep). The client secret + cookie secret live in .env.
 oauth2_enabled     = true
 oauth2_image       = "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0"
-oauth2_public_host = "103.245.254.29"                              # the LB public IP the browser hits
-oauth2_issuer_url  = "http://103.245.254.29:8080/realms/customer360" # KC via the LB (box hairpins; iss must match)
+oauth2_public_host = "beta.leocdp.com"                              # public host the browser hits (Netdata still served on :19999)
+oauth2_issuer_url  = "https://beta.leocdp.com/auth/realms/customer360" # KC via the LB (box hairpins; iss must match)
 oauth2_client_id   = "c360-oauth2-proxy"                           # confidential client in the customer360 realm
 
 # oauth2-proxy listen ports on the box = the LB backend member_port (kept off the in-use

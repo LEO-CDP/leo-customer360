@@ -21,52 +21,42 @@ subnet_id      = "sub-7c1f6eff-7244-4a29-a3cf-3592745ea0e7" # same subnet as the
 
 zone_id = "HCM03-1C" # only AZ enabled for this account
 
-# Expose both services. member_ip = each box's PRIVATE ip (see `terraform output servers`
-# in ../server): api box 10.100.1.5, backend box 10.100.1.4.
+# After the beta.leocdp.com cutover the app is fronted by Caddy (deployments/proxy):
+# the LB does dumb :80/:443 TCP passthrough -> Caddy. Ops tools stay on their own ports.
+# member_ip = each box PRIVATE ip (see `terraform output servers`): api 10.100.1.5, backend 10.100.1.4.
 backends = {
-  "api" = {
-    member_ip   = "10.100.1.5" # c360-api-uat-api (customer360-api)
-    member_port = 8008
-    listen_port = 80 # LB public :80 -> api:8008 (HTTPS needs Layer 7 + a cert)
-    health_path = "/health"
+  # HTTPS front door: Caddy (deployments/proxy) terminates TLS + path-routes
+  #   beta.leocdp.com/ -> frontend · /c360api -> api · /auth -> keycloak · /ads -> ads
+  # The L4 NLB just passes TCP through; health = plain TCP connect.
+  "caddy_https" = {
+    member_ip   = "10.100.1.5" # c360-api-uat-api (Caddy, --network host)
+    member_port = 443
+    listen_port = 443
+    health_path = null # TLS on 443 -> TCP health check
   }
+  "caddy_http" = {
+    member_ip   = "10.100.1.5" # Caddy :80 = ACME HTTP-01 challenge + HTTP->HTTPS redirect
+    member_port = 80
+    listen_port = 80
+    health_path = null # :80 redirects (no 200 body) -> TCP health check
+  }
+  # --- ops tools stay raw on their own ports (they don't sub-path cleanly; see proxy/README) ---
   "dagster" = {
     member_ip   = "10.100.1.4" # c360-api-uat-backend (backend-system / Dagster)
     member_port = 3000
-    listen_port = 3000 # LB public :3000 -> dagster:3000
-    health_path = null # TCP health check (no simple Dagster health path)
+    listen_port = 3000
+    health_path = null
   }
-  "keycloak" = {
-    member_ip   = "10.100.1.5" # c360-api-uat-api (Keycloak co-located, see deployments/sso)
-    member_port = 8080
-    listen_port = 8080 # LB public :8080 -> keycloak:8080
-    health_path = null # TCP health check: Keycloak's /health is on the mgmt port 9000, not 8080
-  }
-  "frontend" = {
-    member_ip   = "10.100.1.5" # c360-api-uat-api (frontend-admin co-located, see deployments/frontend)
-    member_port = 8890
-    listen_port = 8890      # LB public :8890 -> frontend:8890
-    health_path = "/health" # frontend-admin serves /health on 8890
-  }
-  "ads" = {
-    member_ip   = "10.100.1.5" # c360-api-uat-api (ads-server co-located, see deployments/ads-server)
-    member_port = 9009
-    listen_port = 9009      # LB public :9009 -> ads:9009
-    health_path = "/health" # ads-server serves /health on 9009
-  }
-  # Monitoring dashboards, fronted by oauth2-proxy (Keycloak SSO) — see deployments/monitoring.
-  # The LB targets the PROXY ports (4443/4199), NOT the dashboards' own 9443/19999 (which stay
-  # loopback/firewalled). /ping is oauth2-proxy's unauthenticated health endpoint.
   "portainer" = {
-    member_ip   = "10.100.1.5" # c360-api-uat-api — Portainer DIRECT (its own login; not behind oauth2-proxy)
+    member_ip   = "10.100.1.5" # Portainer DIRECT (own login, self-signed TLS)
     member_port = 9443
-    listen_port = 9443 # LB public https :9443 -> Portainer :9443 (L4 TLS passthrough, self-signed)
-    health_path = null # Portainer is HTTPS on 9443 -> plain TCP health check (no HTTP /ping)
+    listen_port = 9443
+    health_path = null
   }
   "netdata" = {
-    member_ip   = "10.100.1.5" # c360-api-uat-api (oauth2-proxy -> Netdata 127.0.0.1:19999)
+    member_ip   = "10.100.1.5" # oauth2-proxy -> Netdata (Keycloak SSO)
     member_port = 4199
-    listen_port = 19999 # LB public :19999 -> oauth2-proxy:4199 -> Netdata
+    listen_port = 19999
     health_path = "/ping"
   }
 }

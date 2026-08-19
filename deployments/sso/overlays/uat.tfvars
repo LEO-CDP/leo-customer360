@@ -6,7 +6,9 @@ keycloak_image      = "keycloak/keycloak:26.7"
 keycloak_command    = "start-dev"              # dev mode: HTTP + lenient hostname — fine for uat
 keycloak_http_port  = 8080
 keycloak_admin_user = "admin"
-keycloak_hostname   = "http://103.245.254.29:8080" # public entry = the load balancer (deployments/load_balancer)
+keycloak_hostname           = "https://beta.leocdp.com"    # public entry = Caddy (deployments/proxy), TLS-terminated
+keycloak_http_relative_path = "/auth"                      # Caddy path-routes Keycloak under /auth
+keycloak_proxy_headers      = "xforwarded"                 # trust X-Forwarded-* from Caddy (TLS terminates upstream)
 keycloak_db_name    = "db_keycloak"            # already created by postgres/init/02-create-keycloak-db.sql
 
 # Cap the JVM heap: the shared 2 GB box ALSO runs customer360-api + Redis, so let
@@ -20,11 +22,11 @@ java_heap = "-Xms256m -Xmx512m"
 # URL: it's used by BOTH the browser (authorize redirect) and the backend (introspection;
 # the box can hairpin to the LB, verified).
 api_sso_enabled        = true
-api_sso_login_url      = "http://103.245.254.29:8080"
+api_sso_login_url      = "https://beta.leocdp.com/auth"
 api_keycloak_realm     = "customer360"
 api_keycloak_client_id = "customer360-api"
 
 # Keycloak client redirect URI(s), tightened from "*" to the frontend's public origin.
 # Must cover the SPA's redirect (window.location.origin + pathname); the trailing /*
 # allows the app's paths. Comma-separate for multiple. Consumed by bootstrap-realm.py.
-sso_redirect_uris = "http://103.245.254.29:8890/*"
+sso_redirect_uris = "https://beta.leocdp.com/*"
