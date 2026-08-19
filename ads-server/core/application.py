@@ -26,6 +26,7 @@ without changing app.py.
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -151,6 +152,10 @@ class AdServerApplication:
             ),
             version=ad_server_settings.api_version,
             lifespan=self.lifespan,
+            # Public mount point when fronted by a path-routing proxy (e.g. Caddy /ads).
+            # Keeps generated URLs (Swagger's openapi.json, redirects) prefixed correctly.
+            # Empty by default (served at root, e.g. a dedicated prod host).
+            root_path=os.getenv("ADS_ROOT_PATH", ""),
         )
 
         self._configure_middleware(application)

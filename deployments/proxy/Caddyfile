@@ -29,8 +29,10 @@
 		reverse_proxy {$API_UPSTREAM}
 	}
 
-	# --- ads-server under /ads (FastAPI; strip the prefix) ---
-	handle_path /ads/* {
+	# --- ads-server under /ads. Forward UNSTRIPPED (ads-server sets root_path=/ads via
+	#     ADS_ROOT_PATH) so Swagger's openapi.json + any redirects keep the /ads prefix,
+	#     same as the customer360-api block above. ---
+	handle /ads/* {
 		reverse_proxy {$ADS_UPSTREAM}
 	}
 

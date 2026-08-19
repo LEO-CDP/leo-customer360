@@ -37,6 +37,7 @@ ADS_PORT="$(tfval ads_port "$ovl")"; ADS_PORT="${ADS_PORT:-9009}"
 DB_SCHEMA="$(tfval ads_db_schema "$ovl")"; DB_SCHEMA="${DB_SCHEMA:-leo_ads}"
 SEED_SAMPLE="$(tfval ads_seed_sample "$ovl")"; SEED_SAMPLE="${SEED_SAMPLE:-false}"
 ENVIRONMENT="$(tfval ads_environment "$ovl")"; ENVIRONMENT="${ENVIRONMENT:-production}"
+ADS_ROOT_PATH="$(tfval ads_root_path "$ovl")"   # e.g. /ads when fronted by Caddy under that path (empty = served at root)
 
 # --- resolve the target VM from ../server outputs ---
 SERVERS_JSON="$( (cd ../server && terraform workspace select "$ENV" >/dev/null 2>&1 && terraform output -json servers 2>/dev/null) || true )"
@@ -91,7 +92,8 @@ DB_SCHEMA=$DB_SCHEMA
 REDIS_HOST=${REDIS_HOST:-}
 REDIS_PORT=${REDIS_PORT:-6580}
 REDIS_PASSWORD=${REDIS_PASS:-}
-CACHE_ENABLED=$CACHE_ENABLED" | base64 | tr -d '\n')"
+CACHE_ENABLED=$CACHE_ENABLED
+ADS_ROOT_PATH=$ADS_ROOT_PATH" | base64 | tr -d '\n')"
 DBPW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
 
 echo ">> Building, bootstrapping leo_ads schema, and (re)starting the container ..."
