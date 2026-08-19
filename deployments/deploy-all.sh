@@ -190,6 +190,7 @@ run_one() {  # <id> <action>
 # ---------------------------------------------------------------- arg parsing
 ENV=""; ACTION="apply"; DRY_RUN=0; ASSUME_YES=0; KEEP_GOING=0; DO_LIST=0
 FROM=""; ONLY=""; SKIP=""; WITH=""
+OK_STEPS=(); FAIL_STEPS=()   # init so `set -u` doesn't trip on the summary when nothing failed
 
 usage() { sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
