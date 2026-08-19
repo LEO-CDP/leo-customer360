@@ -168,7 +168,10 @@ if [ "$P_EN" = "true" ]; then
     -v /var/run/docker.sock:/var/run/docker.sock
     -v portainer_data:/data
   )
-  cmd_args=()
+  # -H auto-connects the local Docker env. Without it, the --admin-password-file bootstrap
+  # skips Portainer's setup wizard — the step that would otherwise create the local
+  # environment — so the UI shows an admin but NO containers/images.
+  cmd_args=( -H unix:///var/run/docker.sock )
   if [ -n "$PADMIN" ]; then
     pwf="/opt/c360/portainer_admin_pw"; sudo mkdir -p /opt/c360
     printf '%s' "$PADMIN" | sudo tee "$pwf" >/dev/null; sudo chmod 600 "$pwf"
