@@ -33,6 +33,16 @@ STATUS_CODE_LABELS = {
 }
 
 
+def _cutoff_for_days(days: Optional[int]) -> Optional[datetime]:
+    """Return a UTC datetime `days` in the past, or None when days is unset.
+
+    Used to filter master profiles to a recent window (created_at >= cutoff).
+    """
+    if days is None:
+        return None
+    return datetime.utcnow() - timedelta(days=days)
+
+
 def list_master_profiles_page(
     db: Session,
     *,
