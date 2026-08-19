@@ -45,14 +45,29 @@ backends = {
   "frontend" = {
     member_ip   = "10.100.1.5" # c360-api-uat-api (frontend-admin co-located, see deployments/frontend)
     member_port = 8890
-    listen_port = 8890 # LB public :8890 -> frontend:8890
+    listen_port = 8890      # LB public :8890 -> frontend:8890
     health_path = "/health" # frontend-admin serves /health on 8890
   }
   "ads" = {
     member_ip   = "10.100.1.5" # c360-api-uat-api (ads-server co-located, see deployments/ads-server)
     member_port = 9009
-    listen_port = 9009 # LB public :9009 -> ads:9009
+    listen_port = 9009      # LB public :9009 -> ads:9009
     health_path = "/health" # ads-server serves /health on 9009
+  }
+  # Monitoring dashboards, fronted by oauth2-proxy (Keycloak SSO) — see deployments/monitoring.
+  # The LB targets the PROXY ports (4443/4199), NOT the dashboards' own 9443/19999 (which stay
+  # loopback/firewalled). /ping is oauth2-proxy's unauthenticated health endpoint.
+  "portainer" = {
+    member_ip   = "10.100.1.5" # c360-api-uat-api (oauth2-proxy -> Portainer 127.0.0.1:9443)
+    member_port = 4443
+    listen_port = 9443 # LB public :9443 -> oauth2-proxy:4443 -> Portainer
+    health_path = "/ping"
+  }
+  "netdata" = {
+    member_ip   = "10.100.1.5" # c360-api-uat-api (oauth2-proxy -> Netdata 127.0.0.1:19999)
+    member_port = 4199
+    listen_port = 19999 # LB public :19999 -> oauth2-proxy:4199 -> Netdata
+    health_path = "/ping"
   }
 }
 
