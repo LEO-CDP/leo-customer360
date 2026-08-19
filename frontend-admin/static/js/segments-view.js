@@ -27,11 +27,45 @@ window.C360 = window.C360 || {};
 
   function sqlValue(value, dataType) {
     var type = String(dataType || "TEXT").toUpperCase();
-    if (type === "BOOLEAN" || type === "BOOL") return value === true || value === "true" ? "TRUE" : "FALSE";
-    if (["INTEGER", "BIGINT", "NUMERIC", "DECIMAL", "DOUBLE", "FLOAT", "NUMBER"].indexOf(type) !== -1) {
+    if (type === "BOOLEAN" || type === "BOOL") {
+      var booleanValue = String(value).trim().toLowerCase();
+      if (value !== true && value !== false && booleanValue !== "true" && booleanValue !== "false" && booleanValue !== "1" && booleanValue !== "0") {
+        throw new Error("Enter a valid boolean value.");
+      }
+      return value === true || booleanValue === "true" || booleanValue === "1" ? "TRUE" : "FALSE";
+    }
+    if (["SMALLINT", "INTEGER", "INT", "BIGINT", "SERIAL", "BIGSERIAL"].indexOf(type) !== -1) {
       var number = Number(value);
-      if (!isFinite(number)) throw new Error("Enter a valid number.");
+      if (!isFinite(number) || !Number.isInteger(number)) throw new Error("Enter a valid integer.");
       return String(number);
+    }
+    if (["NUMERIC", "DECIMAL", "REAL", "FLOAT", "DOUBLE", "DOUBLE PRECISION", "NUMBER"].indexOf(type) !== -1) {
+      var decimal = Number(value);
+      if (!isFinite(decimal)) throw new Error("Enter a valid number.");
+      return String(decimal);
+    }
+    if (type === "JSON" || type === "JSONB") {
+      try {
+        JSON.parse(String(value));
+      } catch (error) {
+        throw new Error("Enter valid JSON.");
+      }
+      return sqlQuote(value) + (type === "JSONB" ? "::jsonb" : "::json");
+    }
+    if (type === "ARRAY") {
+      throw new Error("Array attributes are not available for segment rules.");
+    }
+    if (type === "DATE" || type === "TIME" || type === "TIMESTAMP" || type === "TIMESTAMPTZ" || type === "DATETIME") {
+      return sqlQuote(value);
+    }
+    if (!String(value == null ? "" : value).trim()) {
+      throw new Error("Enter a value.");
+    }
+    if (typeof value === "number" && !isFinite(value)) {
+      throw new Error("Enter a valid number.");
+    }
+    if (typeof value === "number") {
+      return String(value);
     }
     return sqlQuote(value);
   }
@@ -52,6 +86,8 @@ window.C360 = window.C360 || {};
     var value;
     if (operator === "is_null") return field + " IS NULL";
     if (operator === "is_not_null") return field + " IS NOT NULL";
+    if (operator === "is_empty") return field + " = ''";
+    if (operator === "is_not_empty") return field + " <> ''";
     if (operator === "in" || operator === "not_in") {
       values = values.filter(function (item) { return item !== null && typeof item !== "undefined" && String(item).trim() !== ""; });
       if (!values.length) throw new Error("Enter at least one value for each list rule.");
@@ -84,22 +120,35 @@ window.C360 = window.C360 || {};
   }
 
   function queryBuilderFilters(attributes) {
-    return attributes.map(function (attribute) {
-      var type = String(attribute.data_type || "TEXT").toUpperCase();
-      var numeric = ["INTEGER", "BIGINT", "NUMERIC", "DECIMAL", "DOUBLE", "FLOAT", "NUMBER"].indexOf(type) !== -1;
-      var boolean = type === "BOOLEAN" || type === "BOOL";
-      var filter = {
+    return attributes.filter(function (attribute) {
+      return $.fn.queryBuilder.catalogType(attribute.data_type).category !== "array";
+    }).map(function (attribute) {
+      var typeInfo = $.fn.queryBuilder.catalogType(attribute.data_type);
+      var operators;
+      if (typeInfo.category === "integer" || typeInfo.category === "number") {
+        operators = ["equal", "not_equal", "less", "less_or_equal", "greater", "greater_or_equal", "between", "not_between", "in", "not_in", "is_null", "is_not_null"];
+      } else if (typeInfo.category === "datetime") {
+        operators = ["equal", "not_equal", "less", "less_or_equal", "greater", "greater_or_equal", "between", "not_between", "in", "not_in", "is_null", "is_not_null"];
+      } else if (typeInfo.category === "boolean") {
+        operators = ["equal", "not_equal", "is_null", "is_not_null"];
+      } else if (typeInfo.category === "json") {
+        operators = ["equal", "not_equal", "is_null", "is_not_null"];
+      } else {
+        operators = ["equal", "not_equal", "contains", "begins_with", "ends_with", "is_empty", "is_not_empty", "is_null", "is_not_null", "in", "not_in"];
+      }
+      var filter = $.extend({}, typeInfo, {
         id: attribute.field,
         label: attribute.name || attribute.field,
-        type: numeric ? "double" : (boolean ? "boolean" : "string"),
+        data_type: attribute.data_type || "TEXT",
         value_separator: ",",
-        operators: boolean ? ["equal"] : ["equal", "not_equal", "less", "less_or_equal", "greater", "greater_or_equal", "is_null", "is_not_null", "in", "not_in"]
-      };
-      if (!numeric && !boolean) {
-        filter.operators = ["equal", "not_equal", "contains", "begins_with", "ends_with", "is_null", "is_not_null", "in", "not_in"];
+        operators: operators
+      });
+      if (attribute.field === "status_code") {
+        filter.type = "integer";
+        filter.input = "select";
+        filter.values = { 1: "Active", 0: "Inactive" };
+        filter.operators = ["equal", "not_equal", "is_null", "is_not_null"];
       }
-      if (numeric) filter.validation = { step: 0.01 };
-      if (boolean) filter.values = { true: "Yes", false: "No" };
       return filter;
     });
   }

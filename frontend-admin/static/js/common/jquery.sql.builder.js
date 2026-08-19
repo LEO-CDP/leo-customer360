@@ -1,7 +1,7 @@
 /*!
- * jQuery QueryBuilder 3.0.0 (Tailwind CSS Edition)
+ * jQuery QueryBuilder 4.0.0 (Tailwind CSS Edition)
  * Copyright 2014-2024 Damien "Mistic" Sorel (http://www.strangeplanet.fr)
- * Modified to replace Bootstrap with Tailwind CSS styling.
+ * Modified to replace Bootstrap with Tailwind CSS styling by Gemini and Trieu.
  * Licensed under MIT (https://opensource.org/licenses/MIT)
  */
 
@@ -260,6 +260,57 @@ QueryBuilder.types = {
 };
 
 /**
+ * Maps the data_type values used by customer360.cdp_profile_attributes to
+ * QueryBuilder's filter model. The catalog is extensible, so unknown values
+ * deliberately fall back to a text filter instead of preventing the builder
+ * from opening.
+ * @param {string} dataType
+ * @returns {object}
+ */
+QueryBuilder.catalogType = function(dataType) {
+    var normalized = String(dataType || 'TEXT').trim().toUpperCase();
+    var textTypes = ['TEXT', 'VARCHAR', 'CHAR', 'CHARACTER', 'CHARACTER VARYING', 'UUID', 'CITEXT'];
+    var integerTypes = ['SMALLINT', 'INTEGER', 'INT', 'INT2', 'INT4', 'BIGINT', 'INT8', 'SERIAL', 'BIGSERIAL'];
+    var decimalTypes = ['NUMERIC', 'DECIMAL', 'REAL', 'FLOAT', 'FLOAT4', 'DOUBLE', 'FLOAT8', 'DOUBLE PRECISION', 'NUMBER'];
+
+    if (textTypes.indexOf(normalized) !== -1) {
+        return { catalog_type: normalized, type: 'string', input: 'text', category: 'string' };
+    }
+    if (integerTypes.indexOf(normalized) !== -1) {
+        return { catalog_type: normalized, type: 'integer', input: 'number', category: 'integer', validation: { step: 1 } };
+    }
+    if (decimalTypes.indexOf(normalized) !== -1) {
+        return { catalog_type: normalized, type: 'double', input: 'number', category: 'number', validation: { step: 'any' } };
+    }
+    if (normalized === 'BOOLEAN' || normalized === 'BOOL') {
+        return {
+            catalog_type: normalized,
+            type: 'boolean',
+            input: 'radio',
+            category: 'boolean',
+            values: { true: 'Yes', false: 'No' }
+        };
+    }
+    if (normalized === 'DATE') {
+        return { catalog_type: normalized, type: 'date', input: 'date', category: 'datetime' };
+    }
+    if (normalized === 'TIME') {
+        return { catalog_type: normalized, type: 'time', input: 'time', category: 'datetime' };
+    }
+    if (['TIMESTAMP', 'TIMESTAMPTZ', 'DATETIME'].indexOf(normalized) !== -1) {
+        return { catalog_type: normalized, type: 'datetime', input: 'text', category: 'datetime' };
+    }
+    if (normalized === 'JSON' || normalized === 'JSONB') {
+        return { catalog_type: normalized, type: 'string', input: 'textarea', category: 'json' };
+    }
+    if (normalized === 'ARRAY') {
+        return { catalog_type: normalized, type: 'string', input: 'text', category: 'array' };
+    }
+
+    return { catalog_type: normalized, type: 'string', input: 'text', category: 'string' };
+};
+
+/**
  * Allowed inputs
  * @type {string[]}
  * @readonly
@@ -269,6 +320,9 @@ QueryBuilder.inputs = [
     'text',
     'number',
     'textarea',
+    'date',
+    'time',
+    'datetime-local',
     'radio',
     'checkbox',
     'select'
@@ -594,6 +648,10 @@ QueryBuilder.prototype.checkFilters = function(filters) {
     }
 
     filters.forEach(function(filter, i) {
+        if (filter.data_type && !filter.type) {
+            filter = $.extend({}, QueryBuilder.catalogType(filter.data_type), filter);
+            filters[i] = filter;
+        }
         if (!filter.id) {
             Utils.error('Config', 'Missing filter {0} id', i);
         }
@@ -2997,6 +3055,14 @@ QueryBuilder.prototype.getRuleInput = function (rule, value_id) {
         h += '>';
         break;
 
+            case 'date':
+            case 'time':
+            case 'datetime-local':
+                h += '<input class="' + commonInputClass + '" type="' + filter.input + '" name="' + name + '"';
+                if (placeholder) h += ' placeholder="' + placeholder + '"';
+                h += '>';
+                break;
+
       default:
         h += '<input class="' + commonInputClass + '" type="text" name="' + name + '"';
         if (placeholder) h += ' placeholder="' + placeholder + '"';
@@ -3139,7 +3205,7 @@ Utils.changeType = function(value, type) {
             if (typeof value === 'string' && !/^(0|1|true|false){1}$/i.test(value)) {
                 return value;
             }
-            return value === true || value === 1 || value.toLowerCase() === 'true' || value === '1';
+            return value === true || value === 1 || String(value).toLowerCase() === 'true' || value === '1';
         default: return value;
     }
 };
@@ -3586,6 +3652,7 @@ $.fn.queryBuilder = function(option) {
 };
 
 $.fn.queryBuilder.constructor = QueryBuilder;
+$.fn.queryBuilder.catalogType = QueryBuilder.catalogType;
 $.fn.queryBuilder.defaults = QueryBuilder.defaults;
 $.fn.queryBuilder.extend = QueryBuilder.extend;
 $.fn.queryBuilder.define = QueryBuilder.define;
