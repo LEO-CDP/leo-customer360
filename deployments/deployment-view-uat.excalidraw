@@ -174,7 +174,15 @@
         },
         {
           "type": "arrow",
+          "id": "a_lb_port"
+        },
+        {
+          "type": "arrow",
           "id": "a_lb_o2"
+        },
+        {
+          "type": "arrow",
+          "id": "a_lb_port"
         }
       ],
       "updated": 1,
@@ -207,13 +215,13 @@
       "updated": 1,
       "link": null,
       "locked": false,
-      "text": "L4 Network Load Balancer\n103.245.254.29\n:80\u2192api  :3000\u2192dagster\n:8080\u2192keycloak  :8890\u2192frontend  :9009\u2192ads\n:9443\u2192portainer  :19999\u2192netdata (SSO)",
+      "text": "L4 Network Load Balancer\n103.245.254.29\n:80\u2192api  :3000\u2192dagster\n:8080\u2192keycloak  :8890\u2192frontend  :9009\u2192ads\n:9443\u2192portainer (direct)  :19999\u2192netdata (SSO)",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
       "verticalAlign": "middle",
       "containerId": "lb",
-      "originalText": "L4 Network Load Balancer\n103.245.254.29\n:80\u2192api  :3000\u2192dagster\n:8080\u2192keycloak  :8890\u2192frontend  :9009\u2192ads\n:9443\u2192portainer  :19999\u2192netdata (SSO)",
+      "originalText": "L4 Network Load Balancer\n103.245.254.29\n:80\u2192api  :3000\u2192dagster\n:8080\u2192keycloak  :8890\u2192frontend  :9009\u2192ads\n:9443\u2192portainer (direct)  :19999\u2192netdata (SSO)",
       "lineHeight": 1.25,
       "autoResize": true,
       "baseline": 11
@@ -1086,11 +1094,11 @@
         },
         {
           "type": "arrow",
-          "id": "a_o2_port"
+          "id": "a_lb_port"
         },
         {
           "type": "arrow",
-          "id": "a_o2_port"
+          "id": "a_lb_port"
         }
       ],
       "updated": 1,
@@ -1123,13 +1131,13 @@
       "updated": 1,
       "link": null,
       "locked": false,
-      "text": "Portainer\n:9443 (loopback)",
+      "text": "Portainer\n:9443 \u00b7 own login",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "center",
       "verticalAlign": "middle",
       "containerId": "portainer",
-      "originalText": "Portainer\n:9443 (loopback)",
+      "originalText": "Portainer\n:9443 \u00b7 own login",
       "lineHeight": 1.25,
       "autoResize": true,
       "baseline": 11
@@ -1248,19 +1256,11 @@
         },
         {
           "type": "arrow",
-          "id": "a_o2_port"
-        },
-        {
-          "type": "arrow",
           "id": "a_o2_net"
         },
         {
           "type": "arrow",
           "id": "a_lb_o2"
-        },
-        {
-          "type": "arrow",
-          "id": "a_o2_port"
         },
         {
           "type": "arrow",
@@ -1297,13 +1297,13 @@
       "updated": 1,
       "link": null,
       "locked": false,
-      "text": "oauth2-proxy (SSO gate)\n:4443/:4199 -> Keycloak",
+      "text": "oauth2-proxy (SSO gate)\n:4199 -> Netdata \u00b7 Keycloak",
       "fontSize": 12,
       "fontFamily": 1,
       "textAlign": "center",
       "verticalAlign": "middle",
       "containerId": "oauth2",
-      "originalText": "oauth2-proxy (SSO gate)\n:4443/:4199 -> Keycloak",
+      "originalText": "oauth2-proxy (SSO gate)\n:4199 -> Netdata \u00b7 Keycloak",
       "lineHeight": 1.25,
       "autoResize": true,
       "baseline": 10
@@ -2543,30 +2543,30 @@
       "updated": 1,
       "link": null,
       "locked": false,
-      "text": ":9443/:19999 SSO",
+      "text": ":19999 (SSO)",
       "fontSize": 12,
       "fontFamily": 3,
       "textAlign": "center",
       "verticalAlign": "middle",
       "containerId": null,
-      "originalText": ":9443/:19999 SSO",
+      "originalText": ":19999 (SSO)",
       "lineHeight": 1.25,
       "autoResize": true,
       "baseline": 10
     },
     {
-      "id": "a_o2_port",
+      "id": "a_lb_port",
       "type": "arrow",
-      "x": 600,
-      "y": 973.0,
-      "width": 240,
-      "height": 0.0,
+      "x": 620.0,
+      "y": 282,
+      "width": 360.0,
+      "height": 658,
       "angle": 0,
       "strokeColor": "#495057",
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "strokeStyle": "solid",
+      "strokeStyle": "dotted",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
@@ -2588,13 +2588,13 @@
           0
         ],
         [
-          -240,
-          0.0
+          -360.0,
+          658
         ]
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "elementId": "oauth2",
+        "elementId": "lb",
         "focus": 0.0,
         "gap": 4
       },
@@ -2607,10 +2607,10 @@
       "endArrowhead": "arrow"
     },
     {
-      "id": "a_o2_port_l",
+      "id": "a_lb_port_l",
       "type": "text",
-      "x": 440.0,
-      "y": 963.0,
+      "x": 400.0,
+      "y": 601.0,
       "width": 80,
       "height": 18,
       "angle": 0,
@@ -2632,13 +2632,13 @@
       "updated": 1,
       "link": null,
       "locked": false,
-      "text": "gates",
+      "text": ":9443 direct",
       "fontSize": 12,
       "fontFamily": 3,
       "textAlign": "center",
       "verticalAlign": "middle",
       "containerId": null,
-      "originalText": "gates",
+      "originalText": ":9443 direct",
       "lineHeight": 1.25,
       "autoResize": true,
       "baseline": 10
@@ -2785,18 +2785,18 @@
       "baseline": 10
     },
     {
-      "id": "a_o2_port",
+      "id": "a_lb_port",
       "type": "arrow",
-      "x": 600,
-      "y": 973.0,
-      "width": 240,
-      "height": 0.0,
+      "x": 620.0,
+      "y": 282,
+      "width": 360.0,
+      "height": 658,
       "angle": 0,
       "strokeColor": "#495057",
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "strokeStyle": "solid",
+      "strokeStyle": "dotted",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
@@ -2818,13 +2818,13 @@
           0
         ],
         [
-          -240,
-          0.0
+          -360.0,
+          658
         ]
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "elementId": "oauth2",
+        "elementId": "lb",
         "focus": 0.0,
         "gap": 4
       },
@@ -2837,10 +2837,10 @@
       "endArrowhead": "arrow"
     },
     {
-      "id": "a_o2_port_l",
+      "id": "a_lb_port_l",
       "type": "text",
-      "x": 440.0,
-      "y": 963.0,
+      "x": 400.0,
+      "y": 601.0,
       "width": 80,
       "height": 18,
       "angle": 0,
@@ -2862,13 +2862,13 @@
       "updated": 1,
       "link": null,
       "locked": false,
-      "text": "gates",
+      "text": ":9443 direct",
       "fontSize": 12,
       "fontFamily": 3,
       "textAlign": "center",
       "verticalAlign": "middle",
       "containerId": null,
-      "originalText": "gates",
+      "originalText": ":9443 direct",
       "lineHeight": 1.25,
       "autoResize": true,
       "baseline": 10
