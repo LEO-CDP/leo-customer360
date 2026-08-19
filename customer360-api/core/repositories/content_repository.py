@@ -69,12 +69,12 @@ class ContentRepository:
             SELECT
                 content_item_id, tenant_id, domain, item_type, title, summary, image_url,
                 cta_label, cta_url, segment_tags, published_at, status_code, created_at, updated_at,
-                ARRAY(SELECT UNNEST(segment_tags) INTERSECT SELECT UNNEST(:tags)) AS matched_tags
+                ARRAY(SELECT UNNEST(segment_tags) INTERSECT SELECT UNNEST(CAST(:tags AS text[]))) AS matched_tags
             FROM {settings.db_schema}.cdp_content_items
             WHERE status_code = 1
               AND (domain = 'all' OR domain = :domain)
               AND (:item_type IS NULL OR item_type = :item_type)
-            ORDER BY cardinality(ARRAY(SELECT UNNEST(segment_tags) INTERSECT SELECT UNNEST(:tags))) DESC,
+            ORDER BY cardinality(ARRAY(SELECT UNNEST(segment_tags) INTERSECT SELECT UNNEST(CAST(:tags AS text[])))) DESC,
                      published_at DESC
             LIMIT :limit
         """

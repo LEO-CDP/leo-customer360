@@ -191,6 +191,60 @@ class SegmentationDagsterServiceTests(unittest.TestCase):
         self.assertEqual(reasons, ["create", "update"])
 
 
+class IdentityResolutionRecomputePersonasTests(unittest.TestCase):
+    """Covers IdentityResolutionDagsterService.recompute_personas -- the
+    Persona Management admin UI's create/update-archetype trigger (see
+    persona_api.py's _trigger_persona_centroid_recompute)."""
+
+    def _service_with_fake_client(self, fake_client) -> IdentityResolutionDagsterService:
+        service = IdentityResolutionDagsterService()
+        service._client_factory = lambda: fake_client
+        return service
+
+    def test_recompute_personas_submits_identity_resolution_job_with_tags(self):
+        fake_client = MagicMock()
+        fake_client.submit_job_execution.return_value = "run-9"
+        service = self._service_with_fake_client(fake_client)
+
+        run_id = service.recompute_personas(
+            trigger_reason="persona_archetype_created",
+            tenant_id="tenant-1",
+            persona_archetype_id="archetype-1",
+        )
+
+        self.assertEqual(run_id, "run-9")
+        args, kwargs = fake_client.submit_job_execution.call_args
+        self.assertEqual(args[0], service.job_name)
+        self.assertEqual(
+            kwargs["tags"],
+            {
+                "trigger_reason": "persona_archetype_created",
+                "tenant_id": "tenant-1",
+                "persona_archetype_id": "archetype-1",
+            },
+        )
+
+    def test_recompute_personas_omits_optional_tags_when_not_given(self):
+        fake_client = MagicMock()
+        fake_client.submit_job_execution.return_value = "run-10"
+        service = self._service_with_fake_client(fake_client)
+
+        service.recompute_personas(trigger_reason="persona_archetype_updated")
+
+        self.assertEqual(
+            fake_client.submit_job_execution.call_args.kwargs["tags"],
+            {"trigger_reason": "persona_archetype_updated"},
+        )
+
+    def test_recompute_personas_raises_dagster_job_trigger_error_on_connection_failure(self):
+        fake_client = MagicMock()
+        fake_client.submit_job_execution.side_effect = ConnectionRefusedError("refused")
+        service = self._service_with_fake_client(fake_client)
+
+        with self.assertRaises(DagsterJobTriggerError):
+            service.recompute_personas(trigger_reason="persona_archetype_created")
+
+
 class DagsterClientFacadeTests(unittest.TestCase):
     def test_facade_exposes_one_service_per_backend_system_location(self):
         self.assertIsInstance(dagster_client.analytics, AnalyticsDagsterService)

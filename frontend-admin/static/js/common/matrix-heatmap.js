@@ -15,37 +15,72 @@ class MatrixHeatmap {
         this.entityName = config.entityName || 'items';
         this.ctx = document.getElementById(this.canvasId).getContext('2d');
         this.chartInstance = null;
-        
+
         // Default to a standard green progression theme if none is provided
-        this.colorTheme = config.colorTheme || [
+        var defaultTheme = config.colorTheme || [
             { min: 0, color: '#ebedf0' },
             { min: 1, color: '#9be9a8' },
             { min: 4, color: '#40c463' },
             { min: 7, color: '#30a14e' },
             { min: 10, color: '#216e39' }
         ];
+        // Sort ascending by threshold so _getColorForValue's backward scan is
+        // correct even if the caller supplies stops out of order (matters most
+        // for auto-generated, quantile-based themes on high-volume datasets).
+        this.colorTheme = defaultTheme.slice().sort(function (a, b) { return a.min - b.min; });
 
-        // Transform the provided raw data into the strict format expected by the Chart.js Matrix plugin
+        // weekCount/monthTicks are populated by _transformData
+        this.weekCount = 1;
+        this.monthTicks = [];
         this.chartData = this._transformData(config.data || []);
 
-        // Build the chart
         this._initChart();
     }
 
     /**
-     * Transforms standard {date, count} objects into the matrix {x, y, v, d} format
+     * Transforms {date, count} objects into GitHub-style matrix cells: each entry
+     * is placed at (weekIndex, dayOfWeek) so every day in the same calendar week
+     * lands in the same column, instead of being scattered along a continuous
+     * date axis (which is what a Chart.js 'time' x-scale would do with raw dates).
      * @private
      */
     _transformData(rawData) {
-        return rawData.map(item => {
-            const dateObj = new Date(item.date);
-            return {
-                x: item.date,                 // X-axis mapping: ISO Date string
-                y: dateObj.getDay(),          // Y-axis mapping: Day of week (0-6)
-                v: item.count,                // Value mapping: The metric determining color
-                d: item.date                  // Utility mapping: Raw date for tooltips
-            };
+        this.weekCount = 1;
+        this.monthTicks = [];
+        if (!rawData.length) return [];
+
+        var sorted = rawData.slice().sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+
+        // Grid starts on the Sunday on/before the first day, like GitHub's calendar.
+        var first = new Date(sorted[0].date + 'T00:00:00Z');
+        var gridStart = new Date(first);
+        gridStart.setUTCDate(first.getUTCDate() - first.getUTCDay());
+
+        var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        var msPerDay = 24 * 60 * 60 * 1000;
+        var maxWeek = 0;
+        var lastMonth = -1;
+        var monthTicks = [];
+
+        var points = sorted.map(function (item) {
+            var d = new Date(item.date + 'T00:00:00Z');
+            var dayOfWeek = d.getUTCDay();
+            var weekIndex = Math.round((d - gridStart) / (7 * msPerDay));
+            maxWeek = Math.max(maxWeek, weekIndex);
+
+            // Record the first week each calendar month appears in, for axis labels.
+            var month = d.getUTCMonth();
+            if (month !== lastMonth) {
+                monthTicks.push({ value: weekIndex, label: monthNames[month] });
+                lastMonth = month;
+            }
+
+            return { x: weekIndex, y: dayOfWeek, v: item.count, d: item.date };
         });
+
+        this.weekCount = maxWeek + 1;
+        this.monthTicks = monthTicks;
+        return points;
     }
 
     /**
@@ -72,6 +107,8 @@ class MatrixHeatmap {
      * @private
      */
     _initChart() {
+        const self = this;
+
         this.chartInstance = new Chart(this.ctx, {
             type: 'matrix',
             data: {
@@ -90,18 +127,21 @@ class MatrixHeatmap {
                     borderWidth: 1,
                     borderRadius: 2,
                     
-                    // Dynamically calculate block width to fit exactly 53 weeks across the canvas
+                    // Square blocks sized to the real week/day grid, capped so neither
+                    // dimension outgrows the other.
                     width: (context) => {
                         const chartArea = context.chart.chartArea;
                         if (!chartArea) return 0;
-                        return (chartArea.right - chartArea.left) / 53 - 2;
+                        const colWidth = (chartArea.right - chartArea.left) / self.weekCount - 2;
+                        const rowHeight = (chartArea.bottom - chartArea.top) / 7 - 2;
+                        return Math.max(0, Math.min(colWidth, rowHeight));
                     },
-                    
-                    // Dynamically calculate block height to fit exactly 7 days vertically
                     height: (context) => {
                         const chartArea = context.chart.chartArea;
                         if (!chartArea) return 0;
-                        return (chartArea.bottom - chartArea.top) / 7 - 2;
+                        const colWidth = (chartArea.right - chartArea.left) / self.weekCount - 2;
+                        const rowHeight = (chartArea.bottom - chartArea.top) / 7 - 2;
+                        return Math.max(0, Math.min(colWidth, rowHeight));
                     }
                 }]
             },
@@ -126,32 +166,55 @@ class MatrixHeatmap {
                 },
                 scales: {
                     x: {
-                        type: 'time',
-                        time: {
-                            unit: 'month',
-                            round: 'week',
-                            displayFormats: { month: 'MMM' }
+                        type: 'linear',
+                        position: 'top', // GitHub shows month labels above the grid, not below
+                        min: -0.5,
+                        max: this.weekCount - 0.5,
+                        // Only render ticks at the week columns where a new month starts,
+                        // matching GitHub's "month label above its first column" layout.
+                        afterBuildTicks: (axis) => {
+                            axis.ticks = self.monthTicks.map((t) => ({ value: t.value }));
                         },
-                        ticks: { maxRotation: 0, autoSkip: true, font: { size: 11 } },
-                        grid: { display: false, drawBorder: false }
+                        ticks: {
+                            maxRotation: 0,
+                            autoSkip: false,
+                            padding: 4,
+                            color: '#8b95a1',
+                            font: { size: 11, weight: '400' },
+                            callback: (value) => {
+                                const tick = self.monthTicks.find((t) => t.value === value);
+                                return tick ? tick.label : '';
+                            }
+                        },
+                        grid: { display: false, drawBorder: false, drawTicks: false },
+                        border: { display: false }
                     },
                     y: {
                         type: 'linear',
                         position: 'left',
-                        min: 0,
-                        max: 6,
+                        min: -0.5,
+                        max: 6.5,
                         reverse: true, // Flips axis to put Sunday (0) at the top
+                        // A linear scale with -0.5/6.5 bounds auto-generates ticks at
+                        // -0.5, 0.5, 1.5... (offset from the integer day indices), so the
+                        // callback below never matched 1/3/5 and no weekday label rendered.
+                        // Force exact integer ticks like the x-axis month ticks do.
+                        afterBuildTicks: (axis) => {
+                            axis.ticks = [0, 1, 2, 3, 4, 5, 6].map((v) => ({ value: v }));
+                        },
                         ticks: {
                             maxRotation: 0,
-                            stepSize: 1,
-                            font: { size: 11 },
+                            padding: 4,
+                            color: '#8b95a1',
+                            font: { size: 11, weight: '400' },
                             callback: (value) => {
                                 const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                                 // Only display Monday, Wednesday, and Friday to match standard UI patterns
                                 return [1, 3, 5].includes(value) ? days[value] : '';
                             }
                         },
-                        grid: { display: false, drawBorder: false }
+                        grid: { display: false, drawBorder: false, drawTicks: false },
+                        border: { display: false }
                     }
                 }
             }
@@ -163,8 +226,9 @@ class MatrixHeatmap {
      * @param {Array} newData - Array of { date, count } objects
      */
     updateData(newData) {
-        this.chartData = this._transformData(newData);
+        this.chartData = this._transformData(newData || []);
         this.chartInstance.data.datasets[0].data = this.chartData;
+        this.chartInstance.options.scales.x.max = this.weekCount - 0.5;
         this.chartInstance.update();
     }
 

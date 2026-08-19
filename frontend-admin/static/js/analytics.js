@@ -237,20 +237,32 @@ window.C360 = window.C360 || {};
     return data;
   }
 
-  // Builds quantile-scaled color thresholds from the actual peak day, so the
-  // heatmap keeps good visual contrast whether the tenant has 5 events/day
-  // or 5,000 -- a fixed { 1, 3, 5, 7 } scale washes out either extreme.
-  function buildHeatmapColorTheme(maxCount) {
+  // Builds color thresholds from the quantiles of the actual active-day
+  // distribution (not fractions of the single peak day). A max-based scale
+  // washes out contrast on high-volume tenants: one 5,000-event spike day
+  // pushes every normal 50-200 event day into the lightest bucket. Quantiles
+  // of the real active days keep contrast meaningful regardless of scale.
+  function buildHeatmapColorTheme(series) {
     var palette = ["#ebedf0", "#cbe2f9", "#79b8ff", "#2188ff", "#0366d6"];
-    if (!maxCount || maxCount <= 0) return [{ min: 0, color: palette[0] }];
+    var activeCounts = (series || [])
+      .map(function (d) { return d.count; })
+      .filter(function (c) { return c > 0; })
+      .sort(function (a, b) { return a - b; });
 
-    var ratios = [0, 0.15, 0.4, 0.65, 0.85];
-    var theme = [];
-    var lastMin = -1;
-    ratios.forEach(function (ratio, idx) {
-      var min = idx === 0 ? 0 : Math.max(idx, Math.ceil(maxCount * ratio));
+    if (!activeCounts.length) return [{ min: 0, color: palette[0] }];
+
+    function quantile(p) {
+      var idx = Math.min(activeCounts.length - 1, Math.floor(p * activeCounts.length));
+      return activeCounts[idx];
+    }
+
+    var quantiles = [0.25, 0.5, 0.75, 0.92];
+    var theme = [{ min: 0, color: palette[0] }];
+    var lastMin = 0;
+    quantiles.forEach(function (p, idx) {
+      var min = Math.max(lastMin + 1, quantile(p));
       if (min <= lastMin) return;
-      theme.push({ min: min, color: palette[idx] });
+      theme.push({ min: min, color: palette[idx + 1] });
       lastMin = min;
     });
     return theme;
@@ -294,8 +306,7 @@ window.C360 = window.C360 || {};
     if (!canvas) return;
 
     var series = buildEventHeatmapSeries(events, days || 365);
-    var maxCount = series.reduce(function (max, d) { return Math.max(max, d.count); }, 0);
-    var colorTheme = buildHeatmapColorTheme(maxCount);
+    var colorTheme = buildHeatmapColorTheme(series);
 
     renderHeatmapSummary(series, days || 365);
     renderHeatmapLegend(colorTheme);

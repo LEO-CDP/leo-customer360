@@ -10,6 +10,31 @@ from typing import Any, Optional
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_real_redis_rate_limiter(monkeypatch):
+    """Force core.utils.rate_limiter's failed-auth-attempt counter off Redis
+    for every test.
+
+    ``core.auth._failed_auth_rate_limiter`` is a module-level RedisRateLimiter
+    singleton built at ``core.auth`` import time; its ``is_blocked``/
+    ``record_failure`` call ``core.utils.rate_limiter.get_redis_client()`` --
+    a SEPARATE name binding from ``core.auth.get_redis_client`` (each module
+    did its own ``from core.cache import get_redis_client``). Individual
+    tests patching only ``core.auth.get_redis_client`` with a FakeRedis
+    therefore never reach the rate limiter, which silently falls through to
+    the REAL Redis client if one is reachable on the test machine --
+    accumulating real ``ratelimit:*`` failure counters across the whole test
+    session (and across separate ``pytest`` invocations) until enough
+    intentionally-invalid-token tests push a later, otherwise-valid-token
+    test over ``auth_rate_limit_max_attempts`` and it gets wrongly 401'd.
+    Forcing ``get_redis_client()`` to ``None`` here makes the rate limiter
+    fail open (by design, see rate_limiter.py's own docstring), matching
+    this suite's "no real Redis required" promise for every test, not just
+    the ones that remember to patch it themselves.
+    """
+    monkeypatch.setattr("core.utils.rate_limiter.get_redis_client", lambda: None)
+
+
 class FakeRedis:
     """Minimal in-memory stand-in for redis.Redis, covering get/set/scan/delete."""
 

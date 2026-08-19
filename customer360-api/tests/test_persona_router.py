@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 import core.routers.identity_api as identity_router
 import core.routers.persona_api as persona_router
 from core.database import get_db
+from core.utils.dagster_client import DagsterJobTriggerError
 
 DEMO_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
@@ -479,6 +480,20 @@ class PersonaArchetypesRouterTests(unittest.TestCase):
         self._domain_patcher.start()
         self.addCleanup(self._domain_patcher.stop)
 
+        # create/update now call dagster_client.identity_resolution.recompute_personas()
+        # (see persona_api.py's _trigger_persona_centroid_recompute) -- default
+        # to a mocked "submitted" response so unrelated tests never make a real
+        # DagsterGraphQLClient call (slow, network-dependent, and trips a
+        # DeprecationWarning deep in the gql library on every invocation).
+        # Tests that care about the trigger itself override this with their
+        # own nested `patch(...)`.
+        self._recompute_patcher = patch(
+            "core.routers.persona_api.dagster_client.identity_resolution.recompute_personas",
+            return_value="run-default",
+        )
+        self._recompute_patcher.start()
+        self.addCleanup(self._recompute_patcher.stop)
+
         app = FastAPI()
         for router in persona_router.all_persona_routers:
             app.include_router(router)
@@ -517,6 +532,70 @@ class PersonaArchetypesRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["persona_name"], "Gen Z Sneaker Collector")
         self.assertEqual(response.json()["matched_profile_count"], 0)
+
+    def test_create_archetype_rejects_centroid_scores_as_input(self):
+        """centroid_*_score is computed by PersonaResolutionEngine only --
+        PersonaArchetypeCreate must not accept it, even if a client sends it."""
+        payload = {
+            "tenant_id": str(DEMO_TENANT_ID),
+            "domain": "retail",
+            "persona_code": "retail_should_ignore_centroid",
+            "persona_name": "Should Ignore Centroid",
+            "centroid_behavior_score": 999,
+        }
+        response = self.client.post("/persona/archetypes", json=payload)
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.json()["centroid_behavior_score"])
+
+    def test_create_archetype_triggers_identity_resolution_job_recompute(self):
+        payload = {
+            "tenant_id": str(DEMO_TENANT_ID),
+            "domain": "retail",
+            "persona_code": "retail_recompute_trigger_check",
+            "persona_name": "Recompute Trigger Check",
+        }
+        with patch(
+            "core.routers.persona_api.dagster_client.identity_resolution.recompute_personas",
+            return_value="run-123",
+        ) as mock_recompute:
+            response = self.client.post("/persona/archetypes", json=payload)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["centroid_recompute_run_id"], "run-123")
+        mock_recompute.assert_called_once()
+        self.assertEqual(mock_recompute.call_args.kwargs["trigger_reason"], "persona_archetype_created")
+
+    def test_create_archetype_still_succeeds_when_dagster_trigger_fails(self):
+        payload = {
+            "tenant_id": str(DEMO_TENANT_ID),
+            "domain": "retail",
+            "persona_code": "retail_recompute_trigger_failure",
+            "persona_name": "Recompute Trigger Failure",
+        }
+        with patch(
+            "core.routers.persona_api.dagster_client.identity_resolution.recompute_personas",
+            side_effect=DagsterJobTriggerError("webserver unreachable"),
+        ):
+            response = self.client.post("/persona/archetypes", json=payload)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.json()["centroid_recompute_run_id"])
+
+    def test_update_archetype_triggers_identity_resolution_job_recompute(self):
+        archetype = _fake_archetype()
+        FakePersonaRepository.archetype_store[archetype.persona_archetype_id] = archetype
+
+        with patch(
+            "core.routers.persona_api.dagster_client.identity_resolution.recompute_personas",
+            return_value="run-456",
+        ) as mock_recompute:
+            response = self.client.patch(
+                f"/persona/archetypes/{archetype.persona_archetype_id}", json={"persona_name": "Renamed"}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["centroid_recompute_run_id"], "run-456")
+        self.assertEqual(mock_recompute.call_args.kwargs["trigger_reason"], "persona_archetype_updated")
 
     def test_get_archetype_not_found(self):
         response = self.client.get(f"/persona/archetypes/{uuid.uuid4()}")

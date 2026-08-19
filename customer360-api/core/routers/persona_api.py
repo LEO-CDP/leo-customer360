@@ -10,6 +10,7 @@ Persona score details provide score breakdown.
 Persona history is an append-only audit trail of material persona changes.
 """
 
+import logging
 import uuid
 from typing import Optional
 
@@ -46,7 +47,10 @@ from core.schemas.identity import (
     PersonaScoreDetailCreate,
     PersonaScoreDetailRead,
 )
+from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 from core.utils.domains import validate_domain_value
+
+logger = logging.getLogger(__name__)
 
 # --- Exposed for test mocking (backward compatibility) ---
 _archetype_crud = CRUDBase(CdpPersonaArchetype)
@@ -109,6 +113,28 @@ def list_master_profiles_for_persona_archetype(
     )
 
 
+def _trigger_persona_centroid_recompute(obj, trigger_reason: str) -> Optional[str]:
+    """Best-effort submit of ``identity_resolution_job`` so this archetype's
+    ``centroid_*_score`` gets (re)computed by ``PersonaResolutionEngine``
+    instead of staying null/stale after an admin create/edit. Never raises --
+    a Dagster webserver outage must not block archetype metadata CRUD, which
+    is a synchronous DB write independent of the async recompute."""
+    try:
+        return dagster_client.identity_resolution.recompute_personas(
+            trigger_reason=trigger_reason,
+            tenant_id=str(obj.tenant_id),
+            persona_archetype_id=str(obj.persona_archetype_id),
+        )
+    except DagsterJobTriggerError:
+        logger.warning(
+            "Could not submit identity_resolution_job to recompute centroid for persona_archetype_id=%s "
+            "(trigger_reason=%s) -- centroid scores will stay stale until the next scheduled CIR run.",
+            obj.persona_archetype_id,
+            trigger_reason,
+        )
+        return None
+
+
 @persona_archetypes_router.post("", response_model=PersonaArchetypeRead, status_code=201, dependencies=[Depends(require_admin)])
 def create_persona_archetype(payload: PersonaArchetypeCreate, db: Session = Depends(get_db)):
     try:
@@ -118,6 +144,8 @@ def create_persona_archetype(payload: PersonaArchetypeCreate, db: Session = Depe
     repo = PersonaRepository(db)
     obj = repo.create_archetype(payload.model_dump())
     invalidate_prefix("persona_archetypes")
+    run_id = _trigger_persona_centroid_recompute(obj, trigger_reason="persona_archetype_created")
+    setattr(obj, "centroid_recompute_run_id", run_id)
     return obj
 
 
@@ -129,6 +157,8 @@ def update_persona_archetype(persona_archetype_id: uuid.UUID, payload: PersonaAr
         raise HTTPException(status_code=404, detail=f"CdpPersonaArchetype '{persona_archetype_id}' not found")
     obj = repo.update_archetype(persona_archetype_id, payload.model_dump(exclude_unset=True))
     invalidate_prefix("persona_archetypes")
+    run_id = _trigger_persona_centroid_recompute(obj, trigger_reason="persona_archetype_updated")
+    setattr(obj, "centroid_recompute_run_id", run_id)
     return obj
 
 

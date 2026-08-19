@@ -6,6 +6,7 @@ sql_rules against cdp_master_profiles (see core/utils/sql_safety.py for the
 injection-safety validation applied before every execution).
 """
 
+import re
 import uuid
 from collections.abc import Iterable
 from typing import Any, Optional
@@ -37,6 +38,87 @@ _segment_crud = CRUDBase(CdpSegment)
 # columns and cdp_domain_profiles.domain_attributes JSONB keys (as dp.domain_attributes->>'key').
 _SEGMENTABLE_SOURCE_TABLES = ("cdp_master_profiles", "cdp_domain_profiles")
 
+_RELATIVE_INTERVAL_PATTERN = re.compile(
+    r"(?P<quote>['\"])(?P<sign>[+-])\s*(?P<amount>\d+)\s+"
+    r"(?P<unit>milliseconds?|seconds?|minutes?|hours?|days?|weeks?|months?|years?)"
+    r"(?P=quote)",
+    re.IGNORECASE,
+)
+
+
+def _normalize_relative_intervals(sql_rules: str) -> str:
+    """Translate UI date offsets into PostgreSQL interval expressions.
+
+    The QueryBuilder sends datetime values such as ``'-5 days'`` as quoted
+    strings. PostgreSQL cannot compare a timestamp to that text value, so
+    convert it before both execution and audit SQL generation.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        sign = "+" if match.group("sign") == "+" else "-"
+        amount = match.group("amount")
+        unit = match.group("unit").lower()
+        return f"(now() {sign} INTERVAL '{amount} {unit}')"
+
+    return _RELATIVE_INTERVAL_PATTERN.sub(replace, sql_rules)
+
+
+def _has_wrapping_parentheses(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped.startswith("(") or not stripped.endswith(")"):
+        return False
+
+    depth = 0
+    quote: Optional[str] = None
+    index = 0
+    while index < len(stripped):
+        char = stripped[index]
+        if quote:
+            if char == quote:
+                if index + 1 < len(stripped) and stripped[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+        elif char in {"'", '"'}:
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0 and index != len(stripped) - 1:
+                return False
+        index += 1
+    return depth == 0 and quote is None
+
+
+def _final_generated_sql(sql_rules: str, tenant_id: uuid.UUID) -> str:
+    where_clause = sql_rules.strip() if _has_wrapping_parentheses(sql_rules) else f"({sql_rules.strip()})"
+    return (
+        f"SELECT master_profile_id FROM {settings.db_schema}.cdp_master_profiles "
+        f"WHERE tenant_id = '{tenant_id}'::uuid AND {where_clause}"
+    )
+
+
+def _transform_segment_create(_db: Session, payload: dict[str, Any]) -> dict[str, Any]:
+    sql_rules = payload.get("sql_rules")
+    if sql_rules:
+        normalized_rules = _normalize_relative_intervals(sql_rules)
+        payload["sql_rules"] = normalized_rules
+        payload["final_generated_sql"] = _final_generated_sql(normalized_rules, payload["tenant_id"])
+    return payload
+
+
+def _transform_segment_update(_db: Session, segment: CdpSegment, payload: dict[str, Any]) -> dict[str, Any]:
+    if "sql_rules" in payload:
+        sql_rules = payload["sql_rules"]
+        if sql_rules:
+            normalized_rules = _normalize_relative_intervals(sql_rules)
+            payload["sql_rules"] = normalized_rules
+            payload["final_generated_sql"] = _final_generated_sql(normalized_rules, segment.tenant_id)
+        else:
+            payload["final_generated_sql"] = None
+    return payload
+
 segments_router = build_crud_router(
     model=CdpSegment,
     pk_field="segment_id",
@@ -48,6 +130,8 @@ segments_router = build_crud_router(
     tags=["Segmentation"],
     create_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
     update_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
+    create_transform=_transform_segment_create,
+    update_transform=_transform_segment_update,
 )
 
 PLATFORM_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin"}

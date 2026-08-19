@@ -29,6 +29,8 @@ def build_crud_router(
     tags: list[str],
     create_validator: Optional[Callable[[Session, dict[str, Any]], None]] = None,
     update_validator: Optional[Callable[[Session, dict[str, Any]], None]] = None,
+    create_transform: Optional[Callable[[Session, dict[str, Any]], dict[str, Any]]] = None,
+    update_transform: Optional[Callable[[Session, Any, dict[str, Any]], dict[str, Any]]] = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=tags)  # type: ignore[arg-type]
     crud = CRUDBase(model)
@@ -71,12 +73,15 @@ def build_crud_router(
 
     @router.post("/", response_model=read_schema, status_code=201)
     def create_item(payload: create_schema, db: Session = Depends(get_db)):  # type: ignore[valid-type]
+        obj_in = payload.model_dump()
+        if create_transform is not None:
+            obj_in = create_transform(db, obj_in)
         if create_validator is not None:
             try:
-                create_validator(db, payload.model_dump())
+                create_validator(db, obj_in)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
-        obj = crud.create(db, payload.model_dump())
+        obj = crud.create(db, obj_in)
         invalidate_prefix(cache_prefix)
         return obj
 
@@ -86,6 +91,8 @@ def build_crud_router(
         if obj is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")
         obj_in = payload.model_dump(exclude_unset=True)
+        if update_transform is not None:
+            obj_in = update_transform(db, obj, obj_in)
         if update_validator is not None:
             try:
                 update_validator(db, obj_in)

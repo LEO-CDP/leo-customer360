@@ -1015,18 +1015,63 @@ class PersonaResolutionEngine:
         """Upserts the SHARED persona archetype (tenant_id, domain,
         persona_code) this profile matches -- many master profiles can
         share the same archetype row, which is what makes the persona
-        relationship many-to-many instead of one row per profile."""
+        relationship many-to-many instead of one row per profile.
+
+        Also (re)computes ``centroid_*_score`` as a running mean over every
+        master profile ever matched to this archetype: on first INSERT the
+        centroid is simply this profile's own component scores; on every
+        later match it's folded in as
+        ``(old_centroid * old_count + new_score) / (old_count + 1)``, using
+        ``matched_profile_count`` as it stands BEFORE this call (the
+        ``trg_sync_persona_archetype_match_count`` DB trigger only
+        increments it AFTER the caller inserts the new
+        ``cdp_customer_personas`` row below, so it's still the correct
+        pre-match weight here). This is the ONLY place centroid_*_score is
+        ever written -- the admin API's PersonaArchetypeCreate/Update never
+        accept it as input (see customer360-api/core/schemas/identity.py)."""
         query = f"""
             INSERT INTO {self._table('cdp_persona_archetypes')}
                 (tenant_id, domain, persona_code, persona_name, persona_category,
-                 persona_summary, llm_provider, llm_model)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 persona_summary, llm_provider, llm_model,
+                 centroid_behavior_score, centroid_engagement_score, centroid_financial_score,
+                 centroid_loyalty_score, centroid_relationship_score, centroid_risk_score)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (tenant_id, domain, persona_code) DO UPDATE SET
                 persona_name = EXCLUDED.persona_name,
                 persona_category = EXCLUDED.persona_category,
                 persona_summary = EXCLUDED.persona_summary,
                 llm_provider = EXCLUDED.llm_provider,
                 llm_model = EXCLUDED.llm_model,
+                centroid_behavior_score = (
+                    COALESCE({self._table('cdp_persona_archetypes')}.centroid_behavior_score, 0)
+                    * {self._table('cdp_persona_archetypes')}.matched_profile_count
+                    + EXCLUDED.centroid_behavior_score
+                ) / ({self._table('cdp_persona_archetypes')}.matched_profile_count + 1),
+                centroid_engagement_score = (
+                    COALESCE({self._table('cdp_persona_archetypes')}.centroid_engagement_score, 0)
+                    * {self._table('cdp_persona_archetypes')}.matched_profile_count
+                    + EXCLUDED.centroid_engagement_score
+                ) / ({self._table('cdp_persona_archetypes')}.matched_profile_count + 1),
+                centroid_financial_score = (
+                    COALESCE({self._table('cdp_persona_archetypes')}.centroid_financial_score, 0)
+                    * {self._table('cdp_persona_archetypes')}.matched_profile_count
+                    + EXCLUDED.centroid_financial_score
+                ) / ({self._table('cdp_persona_archetypes')}.matched_profile_count + 1),
+                centroid_loyalty_score = (
+                    COALESCE({self._table('cdp_persona_archetypes')}.centroid_loyalty_score, 0)
+                    * {self._table('cdp_persona_archetypes')}.matched_profile_count
+                    + EXCLUDED.centroid_loyalty_score
+                ) / ({self._table('cdp_persona_archetypes')}.matched_profile_count + 1),
+                centroid_relationship_score = (
+                    COALESCE({self._table('cdp_persona_archetypes')}.centroid_relationship_score, 0)
+                    * {self._table('cdp_persona_archetypes')}.matched_profile_count
+                    + EXCLUDED.centroid_relationship_score
+                ) / ({self._table('cdp_persona_archetypes')}.matched_profile_count + 1),
+                centroid_risk_score = (
+                    COALESCE({self._table('cdp_persona_archetypes')}.centroid_risk_score, 0)
+                    * {self._table('cdp_persona_archetypes')}.matched_profile_count
+                    + EXCLUDED.centroid_risk_score
+                ) / ({self._table('cdp_persona_archetypes')}.matched_profile_count + 1),
                 updated_at = NOW()
             RETURNING persona_archetype_id;
         """
@@ -1041,6 +1086,12 @@ class PersonaResolutionEngine:
                 computation.persona_summary,
                 computation.llm_provider,
                 computation.llm_model,
+                computation.behavior_score,
+                computation.engagement_score,
+                computation.financial_score,
+                computation.loyalty_score,
+                computation.relationship_score,
+                computation.risk_score,
             ),
         )
         return cursor.fetchone()["persona_archetype_id"]

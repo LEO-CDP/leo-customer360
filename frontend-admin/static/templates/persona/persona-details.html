@@ -91,7 +91,10 @@
   PATCH /persona/archetypes/{id} -- only the fields the API actually allows
   mutating (PersonaArchetypeUpdate): persona_name/category/summary/
   llm_provider/llm_model/is_active. persona_code/domain/centroid scores are
-  identity/computed and intentionally not editable here.
+  identity/computed and intentionally not editable here. Saving also submits
+  identity_resolution_job to Dagster so PersonaResolutionEngine promptly
+  recomputes centroid_*_score for this archetype (see persona_api.py's
+  _trigger_persona_centroid_recompute) -- best-effort, never blocks the save.
   =============================================================================
 -->
 <div id="persona-edit-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -113,7 +116,9 @@
       </div>
       <div>
         <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Category</label>
-        <input id="persona-edit-category" type="text" placeholder="e.g. Champion / Emerging" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        <select id="persona-edit-category" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none">
+          <option value="">Select category</option>
+        </select>
       </div>
       <div>
         <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Summary</label>

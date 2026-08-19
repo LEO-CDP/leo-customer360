@@ -182,7 +182,7 @@ const TIME_CHECK_API_HEALTH = 60000;
     var labels = C360.fmt && C360.fmt.DOMAIN_LABELS ? C360.fmt.DOMAIN_LABELS : {};
     var keys = Object.keys(labels).filter(function (k) { return k !== "all"; }).sort();
 
-    $("#domain-filter, #duplicate-domain-filter, #attributes-domain-filter, #persona-domain-filter, #attribute-add-domain-scope").each(function () {
+    $("#domain-filter, #duplicate-domain-filter, #attributes-domain-filter, #persona-domain-filter, #persona-add-domain, #attribute-add-domain-scope, #segment-form-domain").each(function () {
       var $sel = $(this);
       var current = $sel.val();
       $sel.find("option[value!=''][value!='all']").remove();
@@ -202,6 +202,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       $("#view-list").html(C360.templates.html("profiles-list"));
       $("#view-placeholder").html(C360.templates.html("placeholder"));
       $("#segment-view-list").html(C360.templates.html("segments-list"));
+      $("#segment-form-modal-container").html(C360.templates.html("segment-form-modal"));
       $("#view-attributes").html(C360.templates.html("attributes-list"));
       $("#view-datasources").html(C360.templates.html("data-source-list"));
       $("#view-scoring").html(C360.templates.html("scoring-model-list"));

@@ -34,6 +34,24 @@ window.C360 = window.C360 || {};
     devUser: null
   };
 
+  var PERSONA_CATEGORY_OPTIONS = [
+    { value: "Champion", label: "Champion" },
+    { value: "High Value", label: "High Value" },
+    { value: "Growth Potential", label: "Growth Potential" },
+    { value: "Standard", label: "Standard" },
+    { value: "Emerging Customer", label: "Emerging Customer" },
+    { value: "New Customer", label: "New Customer" },
+    { value: "Loyal Customer", label: "Loyal Customer" },
+    { value: "Engaged Customer", label: "Engaged Customer" },
+    { value: "Digital First", label: "Digital First" },
+    { value: "Value Conscious", label: "Value Conscious" },
+    { value: "At Risk", label: "At Risk" },
+    { value: "Critical Risk", label: "Critical Risk" },
+    { value: "Retention Priority", label: "Retention Priority" },
+    { value: "Dormant Customer", label: "Dormant Customer" },
+    { value: "Prospective Customer", label: "Prospective Customer" }
+  ];
+
   function readBool(value, fallback) {
     if (value === null || typeof value === "undefined") return fallback;
     return value === "true";
@@ -562,7 +580,8 @@ window.C360 = window.C360 || {};
     applyTheme: applyTheme,
     themeLoader: themeLoader,
     getDataPeriodDays: getDataPeriodDays,
-    isAdmin: isAdmin
+    isAdmin: isAdmin,
+    personaCategoryOptions: PERSONA_CATEGORY_OPTIONS
   };
 
   C360.themeLoader = themeLoader;
