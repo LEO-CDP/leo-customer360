@@ -59,6 +59,14 @@ it resolves before continuing (`nslookup beta.leocdp.com`).
 
 ### 2. Edit the overlays (host + scheme; nothing applied yet)
 
+**Fast path** — apply the ready-made patch instead of hand-editing all four files:
+```bash
+git apply deployments/proxy/cutover-beta.leocdp.com.patch   # from the repo root
+git diff --stat                                             # review before redeploying
+```
+It makes exactly the edits below (LB `backends` map + the sso/frontend/monitoring hosts).
+To undo: `git apply -R deployments/proxy/cutover-beta.leocdp.com.patch`.
+
 | File | Key | From | To |
 |------|-----|------|----|
 | `sso/overlays/uat.tfvars` | `keycloak_hostname` | `http://103.245.254.29:8080` | `https://beta.leocdp.com` |
@@ -75,63 +83,75 @@ it resolves before continuing (`nslookup beta.leocdp.com`).
 > (API introspection, oauth2-proxy discovery, the browser's authorize redirect) must use
 > the *same* issuer string, or introspection/validation fails.
 
+> **Ordering matters.** The OIDC consumers (oauth2-proxy, the API) do discovery against
+> the issuer **at startup** — so they get redeployed *after* Caddy + the LB make
+> `https://beta.leocdp.com/auth` live (steps 4–6), never before. Doing it earlier
+> crash-loops oauth2-proxy on an unreachable issuer.
+
 ### 3. Redeploy Keycloak (new hostname + `/auth` + proxy-trust)
 ```bash
 (cd sso && ./deploy-sso.sh uat)
 ```
-This sets `KC_HOSTNAME=https://beta.leocdp.com`, `KC_HTTP_RELATIVE_PATH=/auth`,
-`KC_PROXY_HEADERS=xforwarded`, `KC_HOSTNAME_STRICT=false` (the last three from the two
-new overlay keys) so Keycloak builds correct `https://…/auth/…` URLs behind Caddy.
+Sets `KC_HOSTNAME=https://beta.leocdp.com`, `KC_HTTP_RELATIVE_PATH=/auth`,
+`KC_PROXY_HEADERS=xforwarded`, `KC_HOSTNAME_STRICT=false` so Keycloak builds correct
+`https://…/auth/…` URLs behind Caddy. (Keycloak itself doesn't need the domain reachable
+to start — it just stamps these into the URLs it generates.)
 
-### 4. Re-register OIDC clients (redirect URIs / issuer)
-```bash
-(cd sso && python3 bootstrap-realm.py)            # customer360-api redirect URIs → https://beta.leocdp.com/*
-(cd monitoring && ./deploy-monitoring.sh uat)     # re-provisions c360-oauth2-proxy client + new issuer
-```
-
-### 5. Redeploy the apps (new public URLs)
-```bash
-(cd server   && ./deploy-api.sh uat)        # SSO_LOGIN_URL=https://beta.leocdp.com/auth
-(cd frontend && ./deploy-frontend.sh uat)   # apiBase=https://beta.leocdp.com/c360api/api/v1
-```
-
-### 6. Deploy Caddy
+### 4. Deploy Caddy
 ```bash
 (cd proxy && ./deploy-caddy.sh uat)
 ```
 
-### 7. Repoint the LB: `:80` + `:443` → Caddy
-In `load_balancer/overlays/uat.tfvars`, **replace** the `api`, `keycloak`, `frontend`
-(and `ads`, now under `/ads`) backends with two Caddy backends, and keep the ops ports:
-```hcl
-backends = {
-  caddy_https = { listen_port = 443, member_ip = "10.100.1.5", member_port = 443 }             # TCP health
-  caddy_http  = { listen_port = 80,  member_ip = "10.100.1.5", member_port = 80  }             # ACME + HTTP→HTTPS
-  # --- ops tools stay raw on their own ports (or move under Caddy later) ---
-  dagster   = { listen_port = 3000,  member_ip = "10.100.1.4", member_port = 3000 }
-  portainer = { listen_port = 9443,  member_ip = "10.100.1.5", member_port = 9443 }
-  netdata   = { listen_port = 19999, member_ip = "10.100.1.5", member_port = 19999 }
-}
-```
+### 5. Repoint the LB: `:80` + `:443` → Caddy
+The patch (step 2) already rewrote `load_balancer/overlays/uat.tfvars` — the
+`api`/`keycloak`/`frontend`/`ads` backends are replaced by `caddy_http` (:80) +
+`caddy_https` (:443), and the ops ports (dagster/portainer/netdata) stay. Apply it:
 ```bash
 (cd load_balancer && ./deploy.sh uat apply)
 ```
-The LB's security-group rules auto-open `:80`/`:443` on the api box for each new backend.
-Caddy now sees ACME traffic on `:80` and issues the cert for `beta.leocdp.com`.
+The LB security-group rules auto-open `:80`/`:443` on the api box. **This is the moment
+the domain goes live:** Caddy sees the ACME HTTP-01 challenge on `:80` and issues the
+Let's Encrypt cert for `beta.leocdp.com` (watch `sudo docker logs c360-caddy`).
 
-### 8. Verify
+> **If apply errors `port 80 … in use`:** the old `api` listener (also `:80`) is being
+> replaced by `caddy_http`, and the API can create-before-destroy. Just run
+> `./deploy.sh uat apply` **again** — the first run frees `:80`, the second creates the
+> Caddy listener cleanly. (`:443` is new, so it never conflicts.)
+
+### 6. Confirm the issuer is live (gate before the OIDC consumers)
 ```bash
-curl -sI  https://beta.leocdp.com/                     # frontend (200)
-curl -s   https://beta.leocdp.com/c360api/api/v1/health
-curl -sI  https://beta.leocdp.com/auth/realms/customer360/.well-known/openid-configuration
+curl -s https://beta.leocdp.com/auth/realms/customer360/.well-known/openid-configuration | head -c 200
 ```
-Then log in from the UI at `https://beta.leocdp.com/` — the OIDC round-trip should now
-run entirely over `https://beta.leocdp.com/auth`.
+Must return JSON with `"issuer":"https://beta.leocdp.com/auth/realms/customer360"`. If it
+404s or the TLS handshake fails, wait for Caddy to finish issuing before continuing.
+
+### 7. Re-register clients + redeploy the OIDC consumers
+```bash
+(cd sso        && python3 bootstrap-realm.py)   # customer360-api redirect URIs -> https://beta.leocdp.com/*
+(cd monitoring && ./deploy-monitoring.sh uat)   # re-provisions c360-oauth2-proxy client + new issuer
+(cd server     && ./deploy-api.sh uat)          # SSO_LOGIN_URL=https://beta.leocdp.com/auth
+(cd frontend   && ./deploy-frontend.sh uat)     # apiBase=https://beta.leocdp.com/c360api/api/v1
+```
+
+### 8. Verify end-to-end
+```bash
+curl -sI https://beta.leocdp.com/                       # frontend (200)
+curl -s  https://beta.leocdp.com/c360api/api/v1/health  # api
+```
+Then log in from the UI at `https://beta.leocdp.com/` — the whole OIDC round-trip should
+run over `https://beta.leocdp.com/auth`. Existing sessions are invalid (the issuer
+changed), so everyone logs in once more.
 
 ### Rollback
-Revert the overlay edits, re-run steps 3–5, and restore the old per-port `backends`
-map in the LB overlay (`./deploy.sh uat apply`). Caddy can be left running or
-`./deploy-caddy.sh uat destroy`'d — it's harmless when the LB doesn't point at it.
+Reverse the patch and re-deploy in the same order:
+```bash
+git apply -R deployments/proxy/cutover-beta.leocdp.com.patch
+(cd sso && ./deploy-sso.sh uat)
+(cd load_balancer && ./deploy.sh uat apply)     # restores the per-port backends
+(cd server && ./deploy-api.sh uat) && (cd frontend && ./deploy-frontend.sh uat) && (cd monitoring && ./deploy-monitoring.sh uat)
+```
+Caddy can be left running or `./deploy-caddy.sh uat destroy`'d — it's harmless when the
+LB no longer points at it.
 
 ---
 

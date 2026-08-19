@@ -1,0 +1,3 @@
+# Keep the cutover patch byte-stable (LF): CRLF conversion would corrupt its
+# context lines and break `git apply` on a fresh checkout.
+*.patch -text
