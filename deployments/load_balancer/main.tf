@@ -122,6 +122,14 @@ resource "vngcloud_vlb_listener" "this" {
   protocol_port    = each.value.listen_port
   default_pool_id  = vngcloud_vlb_pool.this[each.key].id
   allowed_cidrs    = "0.0.0.0/0"
+
+  # A pool's health-protocol/member changes are ForceNew, but the VNG API refuses to
+  # delete a pool still bound to a listener ("Pool ... is used in listener"), and the
+  # default order deletes the old pool first. Replacing the listener whenever its pool
+  # is replaced makes terraform destroy the listener FIRST, freeing the old pool.
+  lifecycle {
+    replace_triggered_by = [vngcloud_vlb_pool.this[each.key].id]
+  }
 }
 
 # Open each backend's app port on its security group so the LB (and clients,
