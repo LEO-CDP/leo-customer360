@@ -364,9 +364,35 @@ window.C360 = window.C360 || {};
   }
 
   function showApiError(context, xhr) {
-    var msg = "Could not reach the Customer 360 API at " + CONFIG.apiBase + " (" + context + "). " +
-      "Make sure customer360-api is running and reachable, and CORS is enabled. " +
-      (xhr && xhr.status ? ("HTTP " + xhr.status) : "");
+    // status 0 = no HTTP response reached the browser (network/DNS/TLS, or a blocked
+    // CORS preflight). Any other status means the request DID reach the API, so blaming
+    // "CORS / unreachable" would be misleading — report what actually came back.
+    var status = xhr && typeof xhr.status === "number" ? xhr.status : 0;
+    var detail = "";
+    if (xhr && xhr.responseJSON && xhr.responseJSON.detail) {
+      detail = typeof xhr.responseJSON.detail === "string"
+        ? xhr.responseJSON.detail
+        : JSON.stringify(xhr.responseJSON.detail);
+    } else if (xhr && xhr.responseText) {
+      detail = String(xhr.responseText).slice(0, 200);
+    }
+    var at = " at " + CONFIG.apiBase + " (" + context + ")";
+    var msg;
+    if (status === 0) {
+      msg = "Could not reach the Customer 360 API" + at + ". Check that customer360-api is "
+        + "running and reachable, and that CORS is enabled.";
+    } else if (status >= 500) {
+      msg = "The Customer 360 API returned a server error (HTTP " + status + ")" + at
+        + " — a backend fault; check the customer360-api logs." + (detail ? " Detail: " + detail : "");
+    } else if (status === 401 || status === 403) {
+      msg = "Not authorized (HTTP " + status + ")" + at
+        + ". Your session may have expired — try signing in again.";
+    } else if (status >= 400) {
+      msg = "The Customer 360 API rejected the request (HTTP " + status + ")" + at + "."
+        + (detail ? " Detail: " + detail : "");
+    } else {
+      msg = "Unexpected response (HTTP " + status + ")" + at + " from the Customer 360 API.";
+    }
     $("#alert-banner").removeClass("hidden").text(msg);
     $("#api-status-dot").removeClass("bg-green-500 bg-slate-300").addClass("bg-red-500");
   }
