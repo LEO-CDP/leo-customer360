@@ -6,13 +6,20 @@ on:
     paths-ignore:
       - 'ui-wireframes/**'
       - 'docs/**'
-      - 'frontend-admin/**'
   pull_request:
     branches: [main, master]
     paths-ignore:
       - 'ui-wireframes/**'
       - 'docs/**'
-      - 'frontend-admin/**'
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a branch/PR).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege by default; the build job widens to packages:write below.
+permissions:
+  contents: read
 
 jobs:
   unit-tests:
@@ -25,12 +32,9 @@ jobs:
 
     steps:
       - name: Checkout code
-        # FIX: Ensure this is the absolute latest version. 
-        # If v7 still throws the warning, check the actions/checkout repo for a v8+.
         uses: actions/checkout@v7
 
       - name: Set up Python 3.11
-        # FIX: Ensure this is the absolute latest version.
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
@@ -41,21 +45,17 @@ jobs:
 
       - name: Run all unit tests
         run: |
-          # Create the 'logs' directory so 'tee' has a place to write the file.
           mkdir -p logs
-          
-          # Run the script and pipe the output
           ./run_all_tests.sh 2>&1 | tee logs/test-output.log
 
       - name: Upload test logs
         if: always()
-        # FIX: Check actions/upload-artifact for the latest tag if the warning persists.
         uses: actions/upload-artifact@v7
         with:
           name: all-unit-test-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             logs/test-output.log
-          retention-days: 30
+          retention-days: 7
 
       - name: Send email notification
         if: always()
@@ -79,3 +79,87 @@ jobs:
             Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           attachments: |
             logs/test-output.log
+
+  # ---------------------------------------------------------------------------
+  # Detect which service(s) changed so we only build the relevant image(s).
+  # `steps.filter.outputs.changes` is a JSON array of the filter names that
+  # matched — exactly the shape the build matrix needs.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Filter changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ads-server: 'ads-server/**'
+            backend-system: 'backend-system/**'
+            customer360-api: 'customer360-api/**'
+            frontend-admin: 'frontend-admin/**'
+
+  # ---------------------------------------------------------------------------
+  # Build one image per changed service (matrix). Push to GHCR only on `main`,
+  # and only after unit-tests pass. PRs and feature branches build-only, which
+  # still catches Dockerfile breakage without publishing anything.
+  # ---------------------------------------------------------------------------
+  build-and-push:
+    name: Build & push (${{ matrix.service }})
+    needs: [changes, unit-tests]
+    if: ${{ needs.changes.outputs.services != '[]' && needs.changes.outputs.services != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.services) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Log in only when we are actually going to push (main).
+      - name: Log in to GHCR
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Derives tags/labels. metadata-action lowercases the image name, so the
+      # uppercase org (LEO-CDP) in github.repository is handled automatically.
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.service }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.service }}/Dockerfile
+          # Push only on the default branch; build-only everywhere else.
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Per-service layer cache so services don't evict each other.
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
