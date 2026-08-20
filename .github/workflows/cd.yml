@@ -130,4 +130,6 @@ jobs:
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
           TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
         run: |
-          ./deploy-all.sh "$ENVIRONMENT" --only api,backend,ads,frontend -y
+          # Invoke via `bash` (not ./) — scripts committed from Windows lack the
+          # git executable bit, so ./deploy-all.sh would fail with exit 126.
+          bash deploy-all.sh "$ENVIRONMENT" --only api,backend,ads,frontend -y
