@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is git-ignored.
+# SECRETS ONLY — non-secret, per-env config lives in overlays/<env>.tfvars.
+
+# --- Redis AUTH password (REQUIRED for BOTH uat and prod) ---
+# Shared with customer360-api's REDIS_PASSWORD. Min 12 chars.
+redis_password = "CHANGE_ME_Redis#123456"
+
+# --- Auth (vIAM service account) — required only for the PROD managed MemStore ---
+# Create at https://iam.console.greennode.ai/service-accounts (Secret shown once).
+# Leave blank for uat (Docker path uses no VNG API).
+client_id     = ""
+client_secret = ""

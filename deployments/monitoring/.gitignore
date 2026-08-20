@@ -1,0 +1,6 @@
+# Optional local overrides / logs. The only secret is an OPTIONAL Portainer admin
+# bootstrap password in .env (git-ignored) — Netdata has no auth, DB/Redis are untouched.
+.env
+*.log
+__pycache__/
+*.pyc

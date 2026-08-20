@@ -36,6 +36,8 @@ run_suite() {
 
 run_suite "Customer 360 API" "${SCRIPT_DIR}/customer360-api/run_unit_tests.sh" "$@"
 run_suite "Identity Resolution" "${SCRIPT_DIR}/backend-system/identity_resolution/run_tests.sh" "$@"
+run_suite "Segmentation" "${SCRIPT_DIR}/backend-system/segmentation/run_tests.sh" "$@"
+run_suite "LEO Ad Server" "${SCRIPT_DIR}/ads-server/run_unit_tests.sh" "$@"
 
 echo ""
 echo "==================================================================="

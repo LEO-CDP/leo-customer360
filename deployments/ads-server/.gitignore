@@ -1,0 +1,4 @@
+# Optional local overrides / logs — no secrets in this deployment (DB/Redis creds
+# are read from ../postgres and ../cache).
+.env
+*.log

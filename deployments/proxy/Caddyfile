@@ -1,0 +1,57 @@
+# Caddy reverse proxy for the Customer 360 platform — single public host, path-routed,
+# TLS terminated here (auto Let's Encrypt). Runs on the api box (--network host), so
+# 127.0.0.1:<port> reaches the co-located containers and 10.100.1.4 reaches the backend box.
+#
+# Values are injected as env by deploy-caddy.sh ({$VAR} is substituted at load).
+# Order matters: specific handle/handle_path blocks match first; the bare `handle`
+# (frontend) is the catch-all and MUST stay last.
+{
+	email {$ACME_EMAIL}
+	# Staging tip: to avoid Let's Encrypt rate limits while testing DNS, uncomment:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$CADDY_DOMAIN} {
+	encode zstd gzip
+
+	# --- Keycloak under /auth (needs KC_HTTP_RELATIVE_PATH=/auth on Keycloak) ---
+	# NOT handle_path: Keycloak serves under /auth itself, so forward the prefix as-is.
+	# Match BOTH the bare /auth AND /auth/* — otherwise a request to exactly /auth (no
+	# trailing slash) misses `/auth/*` and falls through to the frontend catch-all (404);
+	# Keycloak then redirects /auth -> /auth/ -> /auth/admin/ itself.
+	@auth path /auth /auth/*
+	handle @auth {
+		reverse_proxy {$KC_UPSTREAM}
+	}
+
+	# --- customer360-api under /c360api. The app sets root_path=/c360api, so forward the
+	#     prefix UNSTRIPPED (handle, NOT handle_path): Starlette strips root_path for routing
+	#     and keeps it in generated URLs (e.g. the trailing-slash 307 redirect). Stripping it
+	#     makes those redirects drop /c360api -> the browser lands on the frontend and the
+	#     /api/v1/metadata fetch fails (frontend then shows "Dev mode / SSO disabled"). ---
+	handle /c360api/* {
+		reverse_proxy {$API_UPSTREAM}
+	}
+
+	# --- ads-server under /ads. Forward UNSTRIPPED (ads-server sets root_path=/ads via
+	#     ADS_ROOT_PATH) so Swagger's openapi.json + any redirects keep the /ads prefix,
+	#     same as the customer360-api block above. ---
+	handle /ads/* {
+		reverse_proxy {$ADS_UPSTREAM}
+	}
+
+	# --- everything else -> the admin UI (frontend-admin). Keep this block LAST. ---
+	handle {
+		reverse_proxy {$FRONTEND_UPSTREAM}
+	}
+
+	# --- OPS TOOLS (optional / fiddly under a sub-path — see README) --------------------
+	# Dagster, Netdata (via oauth2-proxy) and Portainer generate absolute URLs / have their
+	# own callback paths, so they do NOT sub-path cleanly without app-side config
+	# (dagster --path-prefix, oauth2-proxy --proxy-prefix, Portainer base href). By default
+	# they stay on their existing LB ports. To bring one under Caddy, configure it app-side
+	# and add a block, e.g.:
+	#   handle_path /dagster/* { reverse_proxy {$DAGSTER_UPSTREAM} }   # dagster --path-prefix /dagster
+	#   handle_path /netdata/* { reverse_proxy {$NETDATA_UPSTREAM} }   # oauth2-proxy --proxy-prefix
+	#   handle_path /portainer/* { reverse_proxy https://{$PORTAINER_UPSTREAM} { transport http { tls_insecure_skip_verify } } }
+}

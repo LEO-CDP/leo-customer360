@@ -1,0 +1,3 @@
+# Optional local overrides / logs — no secrets needed by this deployment.
+.env
+*.log

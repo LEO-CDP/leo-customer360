@@ -12,6 +12,13 @@ output "lb_address" {
   value       = vngcloud_vlb_load_balancer.this.address
 }
 
+output "endpoints" {
+  description = "Public endpoints per backend: <name> -> lb_address:listen_port."
+  value = {
+    for k, l in vngcloud_vlb_listener.this : k => "${vngcloud_vlb_load_balancer.this.address}:${l.protocol_port}"
+  }
+}
+
 output "lb_status" {
   value = vngcloud_vlb_load_balancer.this.status
 }
