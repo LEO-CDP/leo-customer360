@@ -28,4 +28,4 @@ CMD ["dagster", "dev", "-w", "workspace.yaml", "-h", "0.0.0.0", "-p", "3000"]
 
 # ci: trigger image build — GHCR smoke test 2026-08-20
 
-# ci/cd: redeploy trigger 2026-08-20 #2 (no functional change)
+# ci/cd: redeploy trigger 2026-08-20 #3 (no functional change)

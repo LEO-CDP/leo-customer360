@@ -23,4 +23,4 @@ CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8008"]
 
 # ci: trigger image build — GHCR smoke test 2026-08-20
 
-# ci/cd: redeploy trigger 2026-08-20 #2 (no functional change)
+# ci/cd: redeploy trigger 2026-08-20 #3 (no functional change)
