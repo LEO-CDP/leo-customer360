@@ -1,0 +1,925 @@
+/**
+ * Leo Event Observer version 0.9.3 - Updated for Beacon & Session Handling
+ */
+(function(global) {
+    'use strict';
+
+    // Configuration
+    var CONFIG = {
+        CONTENT_TYPE_FORM: 'application/x-www-form-urlencoded',
+        RETRY_DELAY: 2222,
+        TIME_TO_FLUSH: 5555,
+        DEBUG: false // Set to true to see logs
+    };
+
+    // Global session tracking variable
+    var localSessionKey = "";
+
+    function hasOwn(obj, key) {
+        return Object.prototype.hasOwnProperty.call(obj, key);
+    }
+
+    function toSafeParamValue(value) {
+        if (value === null || typeof value === 'undefined') {
+            return '';
+        }
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+            return value;
+        }
+        if (typeof value === 'object') {
+            try {
+                return JSON.stringify(value);
+            } catch (e) {
+                return String(value);
+            }
+        }
+        return String(value);
+    }
+
+    // Logger Utility
+    function log(msg, type) {
+        if (!window.console) return;
+        var prefix = "[LeoCDP] ";
+        if (type === 'error') {
+            window.console.error(prefix + msg);
+        } else if (CONFIG.DEBUG) {
+            window.console.log(prefix + msg);
+        }
+    }
+
+    // --- Network Layer ---
+
+    function createXHR() {
+        if (window.XMLHttpRequest) {
+            return new XMLHttpRequest();
+        }
+        try {
+            return new ActiveXObject("Microsoft.XMLHTTP");
+        } catch (e) {
+            log("XHR not supported.", "error");
+            return null;
+        }
+    }
+
+    var Network = {
+        request: function(method, url, data, headers, callback) {
+            var xhr = createXHR();
+            if (!xhr) return;
+
+            xhr.open(method, url, true);
+            
+            if (headers) {
+                Object.keys(headers).forEach(function(key) {
+                    xhr.setRequestHeader(key, headers[key]);
+                });
+            }
+
+            xhr.withCredentials = true;
+
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4) {
+                    var isSuccess = (xhr.status >= 200 && xhr.status < 300) || xhr.status === 304 || xhr.status === 1223;
+                    if (callback) {
+                        callback(isSuccess, xhr.responseText, xhr);
+                    }
+                }
+            };
+
+            xhr.send(data);
+        },
+
+        get: function(url, callback) {
+            this.request("GET", url, null, null, function(success, response, xhr) {
+                if (success && callback) {
+                    callback(response);
+                } else {
+                    log("GET failed: " + url, "error");
+                }
+            });
+        },
+
+        post: function(url, data, callback) {
+            var headers = { 'Content-Type': CONFIG.CONTENT_TYPE_FORM };
+            this.request("POST", url, data, headers, function(success, response) {
+                if (success && callback) {
+                    callback(response);
+                } else if (!success) {
+                    log("POST failed: " + url, "error");
+                }
+            });
+        },
+
+        /**
+         * Tries to use sendBeacon, falls back to XHR.
+         * Note: Beacon responses cannot be read by JS.
+         * @param {string} url 
+         * @param {string} payload 
+         * @param {function} callback - (success, responseText)
+         * @param {boolean} forceXHR - If true, bypasses Beacon to ensure we get a response
+         */
+        sendBeaconOrXHR: function(url, payload, callback, forceXHR) {
+            // 1. Force XHR if we need to read the response (e.g., to get sessionKey)
+            // or if Beacon is not supported.
+            if (!forceXHR && navigator.sendBeacon) {
+                try {
+                    var blob = new Blob([payload], { type: CONFIG.CONTENT_TYPE_FORM });
+                    var queued = navigator.sendBeacon(url, blob);
+                    if (queued) {
+                        // Beacon success: We assume success, but responseText is NULL
+                        if (callback) callback(true, null);
+                        return;
+                    }
+                } catch (e) {
+                    log("Beacon failed, falling back to XHR", "error");
+                }
+            }
+
+            // 2. Fallback (or forced) to XHR
+            this.post(url, payload, function(resp) {
+                if (callback) callback(true, resp);
+            });
+        }
+    };
+
+
+    function trackingCallback(text){
+        if(typeof text === "string" && text.length > 0){
+            try {
+                var data = JSON.parse(text);
+                // Check if server returned a new sessionKey
+                if(data.sessionKey && localSessionKey !== data.sessionKey){
+                    localSessionKey = data.sessionKey;
+                    
+                    // Update the main object if method exists
+                    if (global.LeoEventObserver && typeof global.LeoEventObserver.setSessionKey === 'function') {
+                        global.LeoEventObserver.setSessionKey(localSessionKey);
+                    }
+                    log("SessionKey updated: " + localSessionKey);
+                }
+            } catch (e) {
+                log("Failed to parse tracking response: " + e.message, "error");
+            }
+        }
+    }
+
+    // --- Batching & Queue Layer ---
+
+    var BatchManager = {
+        queues: {},
+        isFlushing: {},
+
+        createPayload: function(events) {
+            // Inject current session key into payload if available
+            var payloadStr = JSON.stringify(events);
+            return "events=" + encodeURIComponent(payloadStr) + 
+                   (localSessionKey ? "&sessionKey=" + encodeURIComponent(localSessionKey) : "");
+        },
+
+        enqueue: function(url, data, batchSize) {
+            if (!this.queues[url]) {
+                this.queues[url] = [];
+            }
+            this.queues[url].push(data);
+
+            if (this.queues[url].length >= batchSize) {
+                this.flush(url);
+            }
+        },
+
+        flush: function(url) {
+            var self = this;
+            var queue = this.queues[url];
+
+            if (!queue || queue.length === 0 || this.isFlushing[url]) {
+                return;
+            }
+
+            this.isFlushing[url] = true;
+
+            var buffer = queue.slice(0);
+            this.queues[url] = [];
+
+            var eventCount = buffer.length;
+            var payload = this.createPayload(buffer);
+            var finalUrl = url + (url.indexOf('?') === -1 ? '?' : '&') + "evc=" + eventCount;
+            var forceXHR = !(localSessionKey && localSessionKey.length > 0);
+
+            Network.sendBeaconOrXHR(finalUrl, payload, function(success, responseText) {
+                self.isFlushing[url] = false;
+
+                if (success) {
+                    if (responseText) {
+                        trackingCallback(responseText);
+                    }
+                    if (CONFIG.DEBUG) {
+                        log("Batch sent successfully (" + (responseText ? "XHR" : "Beacon") + "): " + eventCount + " events");
+                    }
+                } else {
+                    log("Batch failed. Restoring data.", "error");
+                    self.queues[url] = buffer.concat(self.queues[url]);
+                }
+            }, forceXHR);
+        }
+    };
+
+    // --- Global Interface ---
+
+    var LeoCorsRequest = {
+        // Allow external setting of key if needed
+        setSessionKey: function(key) {
+			if(key && key !== "") localSessionKey = key;
+        },
+
+        get: function(url) {
+            Network.get(url, trackingCallback);
+        },
+        
+        post: function(url, params) {
+            Network.post(url, params, trackingCallback);
+        },
+
+        batchSend: function(url, paramsObj, batchSize) {
+            BatchManager.enqueue(url, paramsObj, batchSize || 10);
+        }
+    };
+
+    // --- Automatic Flush Timer ---
+    var flushPendingQueues = function() {
+        Object.keys(BatchManager.queues).forEach(function(url) {
+            BatchManager.flush(url);
+        });
+    };
+
+    setInterval(flushPendingQueues, CONFIG.TIME_TO_FLUSH);
+
+    // --- Flush on Page Unload ---
+    if (window.addEventListener) {
+        var handlePageExit = function() {
+            flushPendingQueues();
+        };
+
+        window.addEventListener('pagehide', handlePageExit, false);
+        window.addEventListener('beforeunload', handlePageExit, false);
+    }
+
+    global.LeoCorsRequest = LeoCorsRequest;
+
+})(typeof window === 'undefined' ? this : window);
+
+// ------------------------------------------------------------------------------------//
+
+
+// ------------ BEGIN lscache ------------------
+/**
+ * lscache library https://github.com/pamelafox/lscache
+ * Copyright (c) 2011, Pamela Fox
+ */
+(function(root, factory) {
+    if (typeof define === 'function' && define.amd) {
+        // AMD. Register as an anonymous module.
+        define([], factory);
+    } else if (typeof module !== "undefined" && module.exports) {
+        // CommonJS/Node module
+        module.exports = factory();
+    } else {
+        // Browser globals
+        root.lscache = factory();
+    }
+}(this, function() {
+
+    // Prefix for all lscache keys
+    var CACHE_PREFIX = 'leocache-';
+
+    // Suffix for the key name on the expiration items in localStorage
+    var CACHE_SUFFIX = '-cacheexpiration';
+
+    // expiration date radix (set to Base-36 for most space savings)
+    var EXPIRY_RADIX = 10;
+
+    // time resolution in milliseconds
+    var expiryMilliseconds = 60 * 1000;
+    // ECMAScript max Date (epoch + 1e8 days)
+    var maxDate = calculateMaxDate(expiryMilliseconds);
+
+    var cachedStorage;
+    var cachedJSON;
+    var cacheBucket = '';
+    var warnings = false;
+
+    // Determines if localStorage is supported in the browser;
+    // result is cached for better performance instead of being run each time.
+    // Feature detection is based on how Modernizr does it;
+    // it's not straightforward due to FF4 issues.
+    // It's not run at parse-time as it takes 200ms in Android.
+    function supportsStorage() {
+        var key = '__lscachetest__';
+        var value = key;
+
+        if (cachedStorage !== undefined) {
+            return cachedStorage;
+        }
+
+        // some browsers will throw an error if you try to access local storage (e.g. brave browser)
+        // hence check is inside a try/catch
+        
+        try {
+        	if (typeof window.localStorage !== "object") {
+                return false;
+            }
+        	
+            setItem(key, value);
+            removeItem(key);
+            cachedStorage = true;
+        } catch (e) {
+        	console.error(e);
+            // If we hit the limit, and we don't have an empty localStorage then it means we have support
+            if (isOutOfSpace(e) && localStorage.length) {
+                cachedStorage = true; // just maxed it out and even the set test failed.
+            } else {
+                cachedStorage = false;
+            }
+        }
+        return cachedStorage;
+    }
+
+    // Check to set if the error is us dealing with being out of space
+    function isOutOfSpace(e) {
+        return e && (
+            e.name === 'QUOTA_EXCEEDED_ERR' ||
+            e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+            e.name === 'QuotaExceededError'
+        );
+    }
+
+    // Determines if native JSON (de-)serialization is supported in the browser.
+    function supportsJSON() {
+        /*jshint eqnull:true */
+        if (cachedJSON === undefined) {
+            cachedJSON = (window.JSON != null);
+        }
+        return cachedJSON;
+    }
+
+    /**
+     * Returns a string where all RegExp special characters are escaped with a \.
+     * @param {String} text
+     * @return {string}
+     */
+    function escapeRegExpSpecialCharacters(text) {
+        return text.replace(/[[\]{}()*+?.\\^$|]/g, '\\$&');
+    }
+
+    /**
+     * Returns the full string for the localStorage expiration item.
+     * @param {String} key
+     * @return {string}
+     */
+    function expirationKey(key) {
+        return key + CACHE_SUFFIX;
+    }
+
+    /**
+     * Returns the number of minutes since the epoch.
+     * @return {number}
+     */
+    function currentTime() {
+        return Math.floor((new Date().getTime()) / expiryMilliseconds);
+    }
+
+    /**
+     * Wrapper functions for localStorage methods
+     */
+
+    function getItem(key) {
+        return localStorage.getItem(CACHE_PREFIX + cacheBucket + key);
+    }
+
+    function setItem(key, value) {
+        // Fix for iPad issue - sometimes throws QUOTA_EXCEEDED_ERR on setItem.
+        localStorage.removeItem(CACHE_PREFIX + cacheBucket + key);
+        localStorage.setItem(CACHE_PREFIX + cacheBucket + key, value);
+    }
+
+    function removeItem(key) {
+        localStorage.removeItem(CACHE_PREFIX + cacheBucket + key);
+    }
+
+    function eachKey(fn) {
+        var prefixRegExp = new RegExp('^' + CACHE_PREFIX + escapeRegExpSpecialCharacters(cacheBucket) + '(.*)');
+        // Loop in reverse as removing items will change indices of tail
+        for (var i = localStorage.length - 1; i >= 0; --i) {
+            var key = localStorage.key(i);
+            key = key && key.match(prefixRegExp);
+            key = key && key[1];
+            if (key && key.indexOf(CACHE_SUFFIX) < 0) {
+                fn(key, expirationKey(key));
+            }
+        }
+    }
+
+    function flushItem(key) {
+        var exprKey = expirationKey(key);
+
+        removeItem(key);
+        removeItem(exprKey);
+    }
+
+    function flushExpiredItem(key) {
+        var exprKey = expirationKey(key);
+        var expr = getItem(exprKey);
+
+        if (expr) {
+            var expirationTime = parseInt(expr, EXPIRY_RADIX);
+
+            // Check if we should actually kick item out of storage
+            if (currentTime() >= expirationTime) {
+                removeItem(key);
+                removeItem(exprKey);
+                return true;
+            }
+        }
+    }
+
+    function warn(message, err) {
+        if (!warnings) return;
+        if (!('console' in window) || typeof window.console.warn !== 'function') return;
+        window.console.warn("lscache - " + message);
+        if (err) window.console.warn("lscache - The error was: " + err.message);
+    }
+
+    function calculateMaxDate(expiryMilliseconds) {
+        return Math.floor(8.64e15 / expiryMilliseconds);
+    }
+
+    var lscache = {
+        /**
+         * Stores the value in localStorage. Expires after specified number of minutes.
+         * @param {string} key
+         * @param {Object|string} value
+         * @param {number} time
+         * @return {boolean} whether the value was inserted successfully
+         */
+        set: function(key, value, time) {
+            if (!supportsStorage()) return false;
+
+            // If we don't get a string value, try to stringify
+            // In future, localStorage may properly support storing non-strings
+            // and this can be removed.
+
+            if (!supportsJSON()) return false;
+            try {
+                value = JSON.stringify(value);
+            } catch (e) {
+                // Sometimes we can't stringify due to circular refs
+                // in complex objects, so we won't bother storing then.
+                return false;
+            }
+
+            try {
+                setItem(key, value);
+            } catch (e) {
+                if (isOutOfSpace(e)) {
+                    // If we exceeded the quota, then we will sort
+                    // by the expire time, and then remove the N oldest
+                    var storedKeys = [];
+                    var storedKey;
+                    eachKey(function(key, exprKey) {
+                        var expiration = getItem(exprKey);
+                        if (expiration) {
+                            expiration = parseInt(expiration, EXPIRY_RADIX);
+                        } else {
+                            // TODO: Store date added for non-expiring items for smarter removal
+                            expiration = maxDate;
+                        }
+                        storedKeys.push({
+                            key: key,
+                            size: (getItem(key) || '').length,
+                            expiration: expiration
+                        });
+                    });
+                    // Sorts the keys with oldest expiration time last
+                    storedKeys.sort(function(a, b) {
+                        return (b.expiration - a.expiration);
+                    });
+
+                    var targetSize = (value || '').length;
+                    while (storedKeys.length && targetSize > 0) {
+                        storedKey = storedKeys.pop();
+                        warn("Cache is full, removing item with key '" + key + "'");
+                        flushItem(storedKey.key);
+                        targetSize -= storedKey.size;
+                    }
+                    try {
+                        setItem(key, value);
+                    } catch (e) {
+                        // value may be larger than total quota
+                        warn("Could not add item with key '" + key + "', perhaps it's too big?", e);
+                        return false;
+                    }
+                } else {
+                    // If it was some other error, just give up.
+                    warn("Could not add item with key '" + key + "'", e);
+                    return false;
+                }
+            }
+
+            // If a time is specified, store expiration info in localStorage
+            if (time) {
+                setItem(expirationKey(key), (currentTime() + time).toString(EXPIRY_RADIX));
+            } else {
+                // In case they previously set a time, remove that info from localStorage.
+                removeItem(expirationKey(key));
+            }
+            return true;
+        },
+
+        /**
+         * Retrieves specified value from localStorage, if not expired.
+         * @param {string} key
+         * @return {string|Object}
+         */
+        get: function(key) {
+            if (!supportsStorage()) return null;
+
+            // Return the de-serialized item if not expired
+            if (flushExpiredItem(key)) {
+                return null;
+            }
+
+            // Tries to de-serialize stored value if its an object, and returns the normal value otherwise.
+            var value = getItem(key);
+            if (!value || !supportsJSON()) {
+                return value;
+            }
+
+            try {
+                // We can't tell if its JSON or a string, so we try to parse
+                return JSON.parse(value);
+            } catch (e) {
+                // If we can't parse, it's probably because it isn't an object
+                return value;
+            }
+        },
+
+        /**
+         * Removes a value from localStorage.
+         * Equivalent to 'delete' in memcache, but that's a keyword in JS.
+         * @param {string} key
+         */
+        remove: function(key) {
+            if (!supportsStorage()) return;
+
+            flushItem(key);
+        },
+
+        /**
+         * Returns whether local storage is supported.
+         * Currently exposed for testing purposes.
+         * @return {boolean}
+         */
+        supported: function() {
+            return supportsStorage();
+        },
+
+        /**
+         * Flushes all lscache items and expiry markers without affecting rest of localStorage
+         */
+        flush: function() {
+            if (!supportsStorage()) return;
+
+            eachKey(function(key) {
+                flushItem(key);
+            });
+        },
+
+        /**
+         * Flushes expired lscache items and expiry markers without affecting rest of localStorage
+         */
+        flushExpired: function() {
+            if (!supportsStorage()) return;
+
+            eachKey(function(key) {
+                flushExpiredItem(key);
+            });
+        },
+
+        /**
+         * Appends CACHE_PREFIX so lscache will partition data in to different buckets.
+         * @param {string} bucket
+         */
+        setBucket: function(bucket) {
+            cacheBucket = bucket;
+        },
+
+        /**
+         * Resets the string being appended to CACHE_PREFIX so lscache will use the default storage behavior.
+         */
+        resetBucket: function() {
+            cacheBucket = '';
+        },
+
+        /**
+         * @returns {number} The currently set number of milliseconds each time unit represents in
+         *   the set() function's "time" argument.
+         */
+        getExpiryMilliseconds: function() {
+            return expiryMilliseconds;
+        },
+
+        /**
+         * Sets the number of milliseconds each time unit represents in the set() function's
+         *   "time" argument.
+         * Sample values:
+         *  1: each time unit = 1 millisecond
+         *  1000: each time unit = 1 second
+         *  60000: each time unit = 1 minute (Default value)
+         *  360000: each time unit = 1 hour
+         * @param {number} milliseconds
+         */
+        setExpiryMilliseconds: function(milliseconds) {
+            expiryMilliseconds = milliseconds;
+            maxDate = calculateMaxDate(expiryMilliseconds);
+        },
+
+        /**
+         * Sets whether to display warnings when an item is removed from the cache or not.
+         */
+        enableWarnings: function(enabled) {
+            warnings = enabled;
+        }
+    };
+
+    // Return the module
+    return lscache;
+}));
+
+// ------------ END LEO Cache ------------------
+
+// ------------ BEGIN LEO Event Observer -------
+
+var leoSessionStringKey = "leoctxsk";
+var leoVisitorIdStringKey = "leocdp_vid";
+
+(function(global, undefined) {
+    var LeoEventObserver = {'fingerprintId' : ""};
+    var sessionKey = false;
+    var debug = false;
+
+    function debugLog(data){
+    	if(debug && window.console){
+			window.console.log(data);
+		}
+    }
+    
+    function setSessionKey(key){
+    	sessionKey = key;
+    	lscache.set(leoSessionStringKey, sessionKey);
+    }
+    
+    function getSessionKey(autoResfresh){
+    	sessionKey = lscache.get(leoSessionStringKey);
+		if(typeof sessionKey !== 'string' && autoResfresh === true){
+			sessionKey = "";
+		}
+    	return sessionKey;
+    }
+    
+    function clearSessionKey(){
+    	lscache.remove(leoSessionStringKey);
+    }
+    
+    function initFingerprint(callback){
+    	if (typeof Fingerprint2 === 'undefined' || typeof Fingerprint2.get !== 'function') {
+    		if (typeof callback === 'function') {
+    			callback('');
+    		}
+    		return;
+    	}
+
+    	var options = { excludes: { enumerateDevices : true, deviceMemory : true}};
+    	Fingerprint2.get(options, function (components) {
+    	    if (!components || !components.length) {
+    	        if (typeof callback === 'function') {
+    	            callback('');
+    	        }
+    	        return;
+    	    }
+    
+    	    var values = components.map(function (component) {
+    	        return component && component.value;
+    	    }).filter(function (value) {
+    	        return typeof value !== 'undefined' && value !== null;
+    	    });
+    	    var fingerprintId = Fingerprint2.x64hash128(values.join(''), 31);
+  
+    		lscache.set("leocdp_fgp", fingerprintId);
+
+    		if (typeof callback === 'function') {
+    			callback(fingerprintId);
+    		}
+    	});
+    }
+    
+
+    function generateVisitorId() {
+    	if(typeof INJECTED_VISITOR_ID === 'string') {
+    		return INJECTED_VISITOR_ID;
+    	} else {
+    		var d = new Date().getTime();
+	        var uuid = 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+	            var r = (d + Math.random() * 16) % 16 | 0;
+	            d = Math.floor(d / 16);
+	            return (c == 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+	        });
+	        return uuid;
+    	}
+    }
+    
+    function getVisitorId() {
+        var key = leoVisitorIdStringKey;
+        var uuid =  lscache.get(key); 
+        
+        if(typeof INJECTED_VISITOR_ID === 'string' && typeof uuid === 'string') {
+        	if(uuid !== INJECTED_VISITOR_ID) {
+        		uuid = INJECTED_VISITOR_ID;
+        		lscache.set(key, uuid);
+        	}
+        }
+        
+        if (typeof uuid !== 'string') {
+        	uuid = generateVisitorId();
+            lscache.set(key, uuid);
+        } 
+
+        return uuid;
+    }
+
+    var doTracking = function(eventType, params) {
+        if (!params || typeof params !== 'object') {
+            params = {};
+        }
+
+        var activeSessionKey = getSessionKey(true);
+        LeoCorsRequest.setSessionKey(activeSessionKey);
+
+        var payload = {};
+        for (var key in params) {
+            if (!hasOwn(params, key)) {
+                continue;
+            }
+            if (key === 'batchsize' || key === 'screen' || typeof params[key] === 'undefined' || params[key] === null || typeof params[key] === 'function') {
+                continue;
+            }
+            payload[key] = params[key];
+        }
+
+        var batchSize = parseInt(params.batchsize, 10);
+        if (!isFinite(batchSize) || batchSize < 1) {
+            batchSize = 1;
+        }
+
+        var screen = params.screen || "";
+        payload.visid = getVisitorId();
+        var queryStr = objectToQueryString(payload);
+
+        var prefixUrl = PREFIX_EVENT_VIEW_URL;
+        if (eventType === "action") {
+            prefixUrl = PREFIX_EVENT_ACTION_URL;
+        } else if (eventType === "conversion") {
+            prefixUrl = PREFIX_EVENT_CONVERSION_URL;
+        } else if (eventType === "feedback") {
+            prefixUrl = PREFIX_EVENT_FEEDBACK_URL;
+        }
+
+        var url = prefixUrl + '?ctxsk=' + encodeURIComponent(activeSessionKey || "") + "&screen=" + encodeURIComponent(screen);
+
+        if (batchSize <= 1) {
+            LeoCorsRequest.post(url, queryStr);
+            if (CONFIG.DEBUG) {
+                log("LeoCorsRequest post " + url, "debug");
+            }
+        } else {
+            LeoCorsRequest.batchSend(url, payload, batchSize);
+            if (CONFIG.DEBUG) {
+                log("LeoCorsRequest batchSend " + url, "debug");
+            }
+        }
+    };
+
+    var updateProfile = function(params) {
+        if (!params || typeof params !== 'object') {
+            params = {};
+        }
+
+        var h = function(resHeaders, text) {
+             //var data = JSON.parse(text);
+         };
+
+         var payload = {};
+         for (var key in params) {
+             if (!hasOwn(params, key)) {
+                 continue;
+             }
+             if (typeof params[key] === 'undefined' || params[key] === null || typeof params[key] === 'function') {
+                 continue;
+             }
+             payload[key] = params[key];
+         }
+
+         payload.visid = getVisitorId();
+         var paramsStr = objectToQueryString(payload);
+
+         var sessionKey = getSessionKey();
+         var url = PREFIX_UPDATE_PROFILE_URL + '?' + 'ctxsk=' + sessionKey;
+
+         LeoCorsRequest.post(url, paramsStr, h);
+    };
+
+    var objectToQueryString = function(params) {
+        if (!params || typeof params !== 'object') {
+            return '';
+        }
+
+        var normalized = {};
+        for (var key in params) {
+            if (!hasOwn(params, key)) {
+                continue;
+            }
+            var value = params[key];
+            if (typeof value === 'undefined' || value === null || typeof value === 'function') {
+                continue;
+            }
+            normalized[key] = toSafeParamValue(value);
+        }
+
+        if (OBSERVE_WITH_FINGERPRINT) {
+            var fingerprint = lscache.get("leocdp_fgp") || LeoEventObserver.fingerprintId || "";
+            if (fingerprint) {
+                normalized.fgp = fingerprint;
+            }
+        }
+
+        var pairs = [];
+        for (var field in normalized) {
+            if (!hasOwn(normalized, field)) {
+                continue;
+            }
+            pairs.push(encodeURIComponent(field) + '=' + encodeURIComponent(normalized[field]));
+        }
+        return pairs.join('&');
+    };
+    
+    function leoObserverProxyReady(data) {
+    	setSessionKey(data.sessionKey);
+    	
+    	var vid = getVisitorId();
+    	var newVisitorId = data.visitorId;
+    	if(typeof newVisitorId === "string" && newVisitorId !== vid){
+    		lscache.set(leoVisitorIdStringKey, newVisitorId);
+    	}
+    	
+		sendMessage("LeoObserverProxyReady");
+        debugLog(data);
+    }
+
+    var getContextSession = function(params) {
+        if (!params || typeof params !== 'object') {
+            params = {};
+        }
+
+        var leoctxsk = getSessionKey();
+        var isExpired = typeof leoctxsk !== 'string' || leoctxsk === '';
+
+        if (isExpired) {
+            var h = function(resHeaders, text) {
+                try {
+                    var data = JSON.parse(text);
+                    if (data && data.status === 101) {
+                        leoObserverProxyReady(data);
+                    } else {
+                        log("Session init failed: " + (data ? JSON.stringify(data) : text), "error");
+                    }
+                } catch (e) {
+                    log("Failed to parse session init response: " + e.message, "error");
+                }
+            };
+
+            var queryStr = objectToQueryString(params);
+            var vsId = getVisitorId();
+            var url = PREFIX_SESSION_INIT_URL + '?' + queryStr + '&visid=' + vsId;
+            LeoCorsRequest.get(url, h);
+        } else {
+            sendMessage("LeoObserverProxyReady");
+        }
+    };
+    // --- Expose Public API ---
+    LeoEventObserver.doTracking = doTracking;
+    LeoEventObserver.getContextSession = getContextSession;
+    LeoEventObserver.updateProfile = updateProfile;
+    LeoEventObserver.initFingerprint = initFingerprint;
+    LeoEventObserver.getVisitorId = getVisitorId;
+	LeoEventObserver.setSessionKey = setSessionKey;
+
+    global.LeoEventObserver = LeoEventObserver;
+
+})(typeof window === 'undefined' ? this : window);

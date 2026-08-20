@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>CDP Tracking Sandbox</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+</head>
+
+<body class="bg-slate-50 text-gray-900">
+
+    <div class="mx-auto w-[calc(100%-20px)] max-w-[1440px] py-3.5 pb-12 sm:w-[calc(100%-32px)] sm:py-6">
+
+        <header
+            class="mb-6 flex flex-col items-start justify-between gap-5 min-[601px]:flex-row min-[601px]:items-center">
+            <div>
+                <h1 class="text-[28px] font-bold">CDP Tracking Sandbox</h1>
+                <p class="mt-1.5 text-gray-500">
+                    Test identity, behavioral and conversion events
+                    before deploying the tracking SDK.
+                </p>
+            </div>
+
+            <div id="sdk-status"
+                class="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-2 text-[13px] font-semibold text-amber-600">
+                <span class="size-2 rounded-full bg-current"></span>
+                SDK Loading
+            </div>
+        </header>
+
+        <div class="grid items-start gap-5 min-[951px]:grid-cols-[1fr_1.35fr]">
+
+            <!-- LEFT -->
+            <section>
+
+                <div class="overflow-hidden rounded-[14px] border border-gray-200 bg-white">
+                    <div class="flex items-center justify-between gap-3 border-b border-gray-200 px-[18px] py-4">
+                        <h2 class="text-base font-semibold">Tracking Configuration</h2>
+                        <span class="text-xs text-gray-500">Environment</span>
+                    </div>
+
+                    <div class="p-[18px]">
+
+                        <div class="grid gap-3 min-[601px]:grid-cols-2">
+
+                            <div class="flex flex-col gap-1.5">
+                                <label class="text-xs font-semibold text-gray-500" for="tenant-id">
+                                    Tenant ID
+                                </label>
+
+                                <input id="tenant-id"
+                                    class="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-gray-900 outline-none focus:border-blue-600"
+                                    value="demo-tenant">
+                            </div>
+
+                            <div class="flex flex-col gap-1.5">
+                                <label class="text-xs font-semibold text-gray-500" for="environment">
+                                    Environment
+                                </label>
+
+                                <select id="environment"
+                                    class="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-gray-900 outline-none focus:border-blue-600">
+                                    <option value="sandbox">
+                                        Sandbox
+                                    </option>
+
+                                    <option value="production">
+                                        Production
+                                    </option>
+                                </select>
+                            </div>
+
+                            <div class="flex flex-col gap-1.5">
+                                <label class="text-xs font-semibold text-gray-500" for="observer-id">
+                                    Observer ID
+                                </label>
+
+                                <input id="observer-id" type="text" autocomplete="off"
+                                    class="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-gray-900 outline-none focus:border-blue-600">
+                            </div>
+
+                            <div class="flex flex-col gap-1.5">
+                                <label class="text-xs font-semibold text-gray-500" for="observer-log-domain">
+                                    Observer Log Domain
+                                </label>
+
+                                <input id="observer-log-domain" type="text" autocomplete="off"
+                                    class="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-gray-900 outline-none focus:border-blue-600">
+                            </div>
+
+                            <div class="flex flex-col gap-1.5 min-[601px]:col-span-2">
+                                <label class="text-xs font-semibold text-gray-500" for="observer-cdn-domain">
+                                    Observer CDN Domain
+                                </label>
+
+                                <input id="observer-cdn-domain" type="text" autocomplete="off"
+                                    class="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-gray-900 outline-none focus:border-blue-600">
+                            </div>
+
+                            <div class="rounded-lg border border-gray-200 bg-slate-50/60 p-3 min-[601px]:col-span-2">
+                                <h3 class="mb-3 text-sm font-semibold text-gray-900">Customer Information</h3>
+
+                                <div class="grid gap-3 min-[601px]:grid-cols-2">
+                                    <div class="flex flex-col gap-1.5">
+                                        <label class="text-xs font-semibold text-gray-500" for="email">
+                                            Customer Email
+                                        </label>
+
+                                        <input id="email" type="email"
+                                            class="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-gray-900 outline-none focus:border-blue-600">
+                                    </div>
+
+                                    <div class="flex flex-col gap-1.5">
+                                        <label class="text-xs font-semibold text-gray-500" for="login-id">
+                                            Login ID
+                                        </label>
+
+                                        <input id="login-id" type="text"
+                                            class="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-gray-900 outline-none focus:border-blue-600">
+                                    </div>
+
+                                    <div class="flex flex-col gap-1.5">
+                                        <label class="text-xs font-semibold text-gray-500" for="phone">
+                                            Customer Phone
+                                        </label>
+
+                                        <input id="phone" type="tel"
+                                            class="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-gray-900 outline-none focus:border-blue-600">
+                                    </div>
+
+                                    <div class="flex flex-col gap-1.5">
+                                        <label class="text-xs font-semibold text-gray-500" for="facebook-user-id">
+                                            Facebook User ID
+                                        </label>
+
+                                        <input id="facebook-user-id" type="text"
+                                            class="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-gray-900 outline-none focus:border-blue-600">
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+
+                    </div>
+                </div>
+
+                <div class="mt-5 overflow-hidden rounded-[14px] border border-gray-200 bg-white">
+
+                    <div class="flex items-center justify-between gap-3 border-b border-gray-200 px-[18px] py-4">
+                        <h2 class="text-base font-semibold">Customer Journey</h2>
+                        <span id="journey-status" class="text-xs text-gray-500">
+                            0 / 6 events
+                        </span>
+                    </div>
+
+                    <div class="p-[18px]">
+
+                        <div class="flex flex-col gap-2">
+
+                            <div class="flow-step grid grid-cols-[36px_1fr_auto] items-center gap-3 rounded-[10px] border border-gray-200 bg-white p-3 transition duration-150"
+                                data-step="page-view">
+                                <div
+                                    class="grid size-[30px] place-items-center rounded-full bg-gray-100 text-xs font-bold text-gray-500">
+                                    1</div>
+
+                                <div>
+                                    <div class="text-sm font-semibold">
+                                        Page View
+                                    </div>
+
+                                    <div class="mt-[3px] font-mono text-xs text-gray-500">
+                                        page-view
+                                    </div>
+                                </div>
+
+                                <button
+                                    class="cursor-pointer rounded-lg border border-blue-600 bg-blue-600 px-2.5 py-[7px] text-xs font-semibold text-white hover:border-blue-700 hover:bg-blue-700"
+                                    data-event="page-view">
+                                    Fire
+                                </button>
+                            </div>
+
+                            <div class="flow-step grid grid-cols-[36px_1fr_auto] items-center gap-3 rounded-[10px] border border-gray-200 bg-white p-3 transition duration-150"
+                                data-step="user-login">
+                                <div
+                                    class="grid size-[30px] place-items-center rounded-full bg-gray-100 text-xs font-bold text-gray-500">
+                                    2</div>
+
+                                <div>
+                                    <div class="text-sm font-semibold">
+                                        Identify Customer
+                                    </div>
+
+                                    <div class="mt-[3px] font-mono text-xs text-gray-500">
+                                        user-login
+                                    </div>
+                                </div>
+
+                                <button
+                                    class="cursor-pointer rounded-lg border border-gray-200 bg-white px-2.5 py-[7px] text-xs font-semibold text-gray-900 hover:border-blue-600 hover:text-blue-600"
+                                    data-event="user-login">
+                                    Fire
+                                </button>
+                            </div>
+
+                            <div class="flow-step grid grid-cols-[36px_1fr_auto] items-center gap-3 rounded-[10px] border border-gray-200 bg-white p-3 transition duration-150"
+                                data-step="item-view">
+                                <div
+                                    class="grid size-[30px] place-items-center rounded-full bg-gray-100 text-xs font-bold text-gray-500">
+                                    3</div>
+
+                                <div>
+                                    <div class="text-sm font-semibold">
+                                        Product View
+                                    </div>
+
+                                    <div class="mt-[3px] font-mono text-xs text-gray-500">
+                                        item-view
+                                    </div>
+                                </div>
+
+                                <button
+                                    class="cursor-pointer rounded-lg border border-gray-200 bg-white px-2.5 py-[7px] text-xs font-semibold text-gray-900 hover:border-blue-600 hover:text-blue-600"
+                                    data-event="item-view">
+                                    Fire
+                                </button>
+                            </div>
+
+                            <div class="flow-step grid grid-cols-[36px_1fr_auto] items-center gap-3 rounded-[10px] border border-gray-200 bg-white p-3 transition duration-150"
+                                data-step="add-to-cart">
+                                <div
+                                    class="grid size-[30px] place-items-center rounded-full bg-gray-100 text-xs font-bold text-gray-500">
+                                    4</div>
+
+                                <div>
+                                    <div class="text-sm font-semibold">
+                                        Add To Cart
+                                    </div>
+
+                                    <div class="mt-[3px] font-mono text-xs text-gray-500">
+                                        add-to-cart
+                                    </div>
+                                </div>
+
+                                <button
+                                    class="cursor-pointer rounded-lg border border-gray-200 bg-white px-2.5 py-[7px] text-xs font-semibold text-gray-900 hover:border-blue-600 hover:text-blue-600"
+                                    data-event="add-to-cart">
+                                    Fire
+                                </button>
+                            </div>
+
+                            <div class="flow-step grid grid-cols-[36px_1fr_auto] items-center gap-3 rounded-[10px] border border-gray-200 bg-white p-3 transition duration-150"
+                                data-step="order-checkout">
+                                <div
+                                    class="grid size-[30px] place-items-center rounded-full bg-gray-100 text-xs font-bold text-gray-500">
+                                    5</div>
+
+                                <div>
+                                    <div class="text-sm font-semibold">
+                                        Checkout
+                                    </div>
+
+                                    <div class="mt-[3px] font-mono text-xs text-gray-500">
+                                        order-checkout
+                                    </div>
+                                </div>
+
+                                <button
+                                    class="cursor-pointer rounded-lg border border-gray-200 bg-white px-2.5 py-[7px] text-xs font-semibold text-gray-900 hover:border-blue-600 hover:text-blue-600"
+                                    data-event="order-checkout">
+                                    Fire
+                                </button>
+                            </div>
+
+                            <div class="flow-step grid grid-cols-[36px_1fr_auto] items-center gap-3 rounded-[10px] border border-gray-200 bg-white p-3 transition duration-150"
+                                data-step="purchase">
+                                <div
+                                    class="grid size-[30px] place-items-center rounded-full bg-gray-100 text-xs font-bold text-gray-500">
+                                    6</div>
+
+                                <div>
+                                    <div class="text-sm font-semibold">
+                                        Purchase / Conversion
+                                    </div>
+
+                                    <div class="mt-[3px] font-mono text-xs text-gray-500">
+                                        purchase
+                                    </div>
+                                </div>
+
+                                <button
+                                    class="cursor-pointer rounded-lg border border-gray-200 bg-white px-2.5 py-[7px] text-xs font-semibold text-gray-900 hover:border-blue-600 hover:text-blue-600"
+                                    data-event="purchase">
+                                    Fire
+                                </button>
+                            </div>
+
+                        </div>
+
+                        <div
+                            class="mt-[18px] grid gap-4 rounded-[10px] border border-gray-200 p-3.5 min-[601px]:grid-cols-[110px_1fr]">
+
+                            <img class="h-[140px] w-[110px] rounded-lg bg-gray-100 object-cover max-[600px]:w-full"
+                                src="https://images-na.ssl-images-amazon.com/images/I/41gUgegbS3L._SX336_BO1,204,203,200_.jpg"
+                                alt="Customer Data Platforms book">
+
+                            <div>
+
+                                <h3 class="mb-1.5 text-base font-semibold">
+                                    Customer Data Platforms
+                                </h3>
+
+                                <p class="my-1 text-[13px] text-gray-500">
+                                    ISBN-13:
+                                    <strong>
+                                        978-1119790112
+                                    </strong>
+                                </p>
+
+                                <p class="my-1 text-[13px] text-gray-500">
+                                    Source:
+                                    <strong>amazon</strong>
+                                </p>
+
+                                <div class="my-2.5 text-xl font-bold">
+                                    $25 USD
+                                </div>
+
+                                <div class="mt-3 flex flex-wrap gap-2">
+
+                                    <button id="btn-demo-flow"
+                                        class="cursor-pointer rounded-lg border border-blue-600 bg-blue-600 px-[13px] py-[9px] text-[13px] font-semibold text-white hover:border-blue-700 hover:bg-blue-700"
+                                        type="button">
+                                        Run Full Journey
+                                    </button>
+
+                                    <button id="btn-reset"
+                                        class="cursor-pointer rounded-lg border border-gray-200 bg-white px-[13px] py-[9px] text-[13px] font-semibold text-red-600 hover:border-red-600"
+                                        type="button">
+                                        Reset
+                                    </button>
+
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+            <!-- RIGHT -->
+            <section>
+
+                <div class="mb-[18px] grid gap-2.5 min-[601px]:grid-cols-3">
+
+                    <div class="rounded-[10px] border border-gray-200 bg-white p-3">
+                        <div class="text-[11px] text-gray-500">
+                            Events
+                        </div>
+
+                        <div id="metric-events" class="mt-[3px] text-xl font-bold">
+                            0
+                        </div>
+                    </div>
+
+                    <div class="rounded-[10px] border border-gray-200 bg-white p-3">
+                        <div class="text-[11px] text-gray-500">
+                            Session
+                        </div>
+
+                        <div id="metric-session" class="mt-[3px] text-[13px] font-bold">
+                            -
+                        </div>
+                    </div>
+
+                    <div class="rounded-[10px] border border-gray-200 bg-white p-3">
+                        <div class="text-[11px] text-gray-500">
+                            Conversion
+                        </div>
+
+                        <div id="metric-conversion" class="mt-[3px] text-xl font-bold">
+                            0%
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="overflow-hidden rounded-[14px] border border-gray-200 bg-white">
+
+                    <div class="flex items-center justify-between gap-3 border-b border-gray-200 px-[18px] py-4">
+
+                        <h2 class="text-base font-semibold">
+                            Event Stream
+                        </h2>
+
+                        <button id="btn-clear"
+                            class="cursor-pointer rounded-lg border border-gray-200 bg-white px-[13px] py-[9px] text-[13px] font-semibold text-gray-900 hover:border-blue-600 hover:text-blue-600"
+                            type="button">
+                            Clear
+                        </button>
+
+                    </div>
+
+                    <div id="event-stream" class="max-h-[660px] overflow-y-auto">
+                        <div class="empty p-10 text-center text-[13px] text-gray-500">
+                            No events yet.<br>
+                            Fire an event from the journey.
+                        </div>
+                    </div>
+
+                </div>
+
+            </section>
+
+        </div>
+
+    </div>
+
+
+    <!-- ============================================================
+     CUSTOMER / PRODUCT DATA
+     ============================================================ -->
+
+    <script>
+
+        const trackingContext = {
+            tenantId: "demo-tenant",
+            environment: "sandbox",
+            sessionId:
+                "sess_" +
+                crypto.randomUUID(),
+            visitorId:
+                "visitor_" +
+                crypto.randomUUID(),
+            profileId: null,
+            source: "web",
+            sourceSystem: "leo-tracking-sandbox"
+        };
+
+
+        const customer = {
+            loginId: "123",
+            loginProvider: "facebook",
+            email: "trieu@leocdp.com",
+            phone: "",
+            facebookUserId: "",
+            firstName: "Trieu",
+            lastName: "Nguyen"
+        };
+
+        $("#email").val(customer.email);
+        $("#login-id").val(customer.loginId);
+        $("#phone").val(customer.phone);
+        $("#facebook-user-id").val(customer.facebookUserId);
+
+
+        const product = {
+            itemId: "978-1119790112",
+            idType: "ISBN-13",
+            name: "Customer Data Platforms",
+            description: "The book about Customer Data Platform (CDP) for beginners",
+            productCode: "",
+            originalPrice: 25,
+            salePrice: 25,
+            quantity: 1,
+            currency: "USD",
+            storeId: "",
+            source: "amazon",
+            imageUrl:"https://images-na.ssl-images-amazon.com/images/I/41gUgegbS3L._SX336_BO1,204,203,200_.jpg",
+            fullUrl:"https://www.amazon.com/Customer-Data-Platforms-Transform-Engagement/dp/1119790115/"
+        };
+
+
+        let shoppingCartItems = [];
+        let transactionId = null;
+        const eventHistory = [];
+
+    </script>
+
+
+    <!-- ============================================================
+     LEO CDP OBSERVER CONFIGURATION
+     ============================================================ -->
+
+    <script>
+
+        const observerDefaults = {
+            id: "7gMWEg2kzbEV7xNuiGQD0q",
+            logDomain: "datahub4dcdp.bigdatavietnam.org",
+            cdnDomain: "static.leocdp.com"
+        };
+
+        const observerFields = {
+            id: $("#observer-id"),
+            logDomain: $("#observer-log-domain"),
+            cdnDomain: $("#observer-cdn-domain")
+        };
+
+        Object.entries(observerFields).forEach(([key, $field]) =>
+            $field.val(observerDefaults[key])
+        );
+
+        const observerConfig = Object.fromEntries(
+            Object.entries(observerFields).map(([key, $field]) => [key, $field.val().trim()])
+        );
+
+        window.leoObserverId = observerConfig.id;
+        window.leoObserverLogDomain = observerConfig.logDomain;
+        window.leoObserverCdnDomain = observerConfig.cdnDomain;
+
+        window.srcTouchpointName =
+            encodeURIComponent(document.title);
+
+        window.srcTouchpointUrl =
+            encodeURIComponent(location.href);
+
+
+        /*
+         * Load LEO Observer asynchronously.
+         */
+
+        $.getScript(
+            `https://${window.leoObserverCdnDomain}/js/leo-observer/leo.proxy.min.js`
+        ).done(() => {
+            setSdkStatus("ready", "SDK Ready");
+            if (typeof window.leoObserverProxyReady === "function") {
+                window.leoObserverProxyReady();
+            }
+        }).fail(() => setSdkStatus("error", "SDK Load Failed"));
+
+
+        function setSdkStatus(
+            state,
+            label
+        ) {
+
+            const element =
+                $("#sdk-status");
+
+            element.attr("class",
+                "inline-flex items-center gap-2 rounded-full px-3 py-2 text-[13px] font-semibold " +
+                (state === "ready"
+                    ? "bg-green-50 text-green-600"
+                    : "bg-amber-50 text-amber-600"));
+
+            element.html(
+                '<span class="size-2 rounded-full bg-current"></span>' +
+                label
+            );
+
+        }
+
+    </script>
+
+
+    <!-- ============================================================
+     TRACKING EVENT MODEL
+     ============================================================ -->
+
+    <script>
+
+        const EventType = {
+            VIEW: "view",
+            ACTION: "action",
+            CONVERSION: "conversion",
+            IDENTITY: "identity"
+        };
+
+        const EventName = {
+            PAGE_VIEW: "page-view",
+            USER_LOGIN: "user-login",
+            ITEM_VIEW: "item-view",
+            ADD_TO_CART: "add-to-cart",
+            ORDER_CHECKOUT: "order-checkout",
+            PURCHASE: "purchase"
+        };
+
+        function createEventEnvelope(
+            eventName,
+            eventType,
+            data = {}
+        ) {
+            return {
+                schema_version: "1.0",
+                event_id:
+                    crypto.randomUUID(),
+                event_name:
+                    eventName,
+                event_type:
+                    eventType,
+                datetime:
+                    new Date().toISOString(),
+                unix_timestamp:
+                    Date.now(),
+                tenant_id:
+                    trackingContext.tenantId,
+                environment:
+                    trackingContext.environment,
+                session_id:
+                    trackingContext.sessionId,
+                visitor_id:
+                    trackingContext.visitorId,
+                profile_id:
+                    trackingContext.profileId,
+                source:
+                    trackingContext.source,
+                source_system:
+                    trackingContext.sourceSystem,
+                page: {
+                    title: document.title,
+                    url: location.href
+                },
+                data
+            };
+        }
+    </script>
+
+
+    <!-- ============================================================
+     LEO OBSERVER API
+     ============================================================ -->
+
+    <script>
+
+        window.LeoObserver =
+            window.LeoObserver || {};
+
+
+        function proxyReady() {
+
+            return (
+                window.LeoObserverProxy &&
+                typeof window.LeoObserverProxy
+                    .recordViewEvent === "function"
+            );
+
+        }
+
+
+        function sendToLeo(
+            eventName,
+            eventType,
+            data
+        ) {
+
+            const envelope =
+                createEventEnvelope(
+                    eventName,
+                    eventType,
+                    data
+                );
+
+
+            /*
+             * Always show the event in the sandbox.
+             */
+
+            addEventToStream(
+                envelope,
+                "generated"
+            );
+
+
+            /*
+             * Send to real LEO CDP SDK
+             * when available.
+             */
+
+            if (!proxyReady()) {
+
+                updateEventStatus(
+                    envelope.event_id,
+                    "queued"
+                );
+
+                return envelope;
+
+            }
+
+
+            try {
+
+                const proxy = window.LeoObserverProxy;
+
+                if (eventName === EventName.PURCHASE) {
+                    proxy.recordConversionEvent(
+                        eventName,
+                        envelope,
+                        transactionId,
+                        shoppingCartItems,
+                        product.salePrice,
+                        product.currency
+                    );
+                } else {
+                    const method = [
+                        EventName.USER_LOGIN,
+                        EventName.ADD_TO_CART,
+                        EventName.ORDER_CHECKOUT
+                    ].includes(eventName)
+                        ? "recordActionEvent"
+                        : "recordViewEvent";
+
+                    proxy[method](eventName, envelope);
+                }
+
+
+                updateEventStatus(
+                    envelope.event_id,
+                    "sent"
+                );
+
+            } catch (error) {
+                console.error(
+                    "LEO tracking error",  error
+                );
+                updateEventStatus(
+                    envelope.event_id,
+                    "error"
+                );
+            }
+            return envelope;
+
+        }
+
+
+        const recordEvent = (eventName, eventType) =>
+            (data = {}) => sendToLeo(eventName, eventType, data);
+
+        const LeoObserver = {
+            recordEventPageView: recordEvent(EventName.PAGE_VIEW, EventType.VIEW),
+            recordEventItemView: recordEvent(EventName.ITEM_VIEW, EventType.VIEW),
+            recordEventAddToCart: recordEvent(EventName.ADD_TO_CART, EventType.ACTION),
+            recordEventOrderCheckout: recordEvent(EventName.ORDER_CHECKOUT, EventType.CONVERSION),
+            recordEventPurchase: recordEvent(EventName.PURCHASE, EventType.CONVERSION),
+            recordEventUserLogin(data = {}) {
+                trackingContext.profileId = data.loginId || null;
+                return sendToLeo(EventName.USER_LOGIN, EventType.IDENTITY, data);
+            }
+        };
+
+
+        window.LeoObserver =
+            LeoObserver;
+
+    </script>
+
+
+    <!-- ============================================================
+     EVENT ACTIONS
+     ============================================================ -->
+
+    <script>
+
+        const flowEvents = [
+            EventName.PAGE_VIEW,
+            EventName.USER_LOGIN,
+            EventName.ITEM_VIEW,
+            EventName.ADD_TO_CART,
+            EventName.ORDER_CHECKOUT,
+            EventName.PURCHASE
+        ];
+
+        const ensureCart = () => {
+            if (!shoppingCartItems.length) shoppingCartItems.push(product);
+            transactionId ||= `txn_${crypto.randomUUID()}`;
+            return {
+                transaction_id: transactionId,
+                items: shoppingCartItems,
+                value: calculateCartTotal(),
+                currency: product.currency
+            };
+        };
+
+        const eventActions = {
+            [EventName.PAGE_VIEW]: () => LeoObserver.recordEventPageView({
+                utm: parseUTM(),
+                referrer: document.referrer || null
+            }),
+            [EventName.USER_LOGIN]: () => LeoObserver.recordEventUserLogin({
+                ...customer,
+                loginId: $("#login-id").val().trim(),
+                email: $("#email").val().trim(),
+                phone: $("#phone").val().trim(),
+                facebookUserId: $("#facebook-user-id").val().trim()
+            }),
+            [EventName.ITEM_VIEW]: () => LeoObserver.recordEventItemView({ product }),
+            [EventName.ADD_TO_CART]: () => {
+                if (!shoppingCartItems.length) shoppingCartItems.push(product);
+                LeoObserver.recordEventAddToCart({
+                    product,
+                    cart: {
+                        item_count: shoppingCartItems.length,
+                        total: calculateCartTotal()
+                    }
+                });
+            },
+            [EventName.ORDER_CHECKOUT]: () =>
+                LeoObserver.recordEventOrderCheckout(ensureCart()),
+            [EventName.PURCHASE]: () =>
+                LeoObserver.recordEventPurchase(ensureCart())
+        };
+
+        function fireEvent(eventName) {
+            eventActions[eventName]?.();
+            markFlowStep(eventName);
+            updateMetrics();
+        }
+
+
+        const calculateCartTotal = () => shoppingCartItems.reduce(
+            (total, item) => total + Number(item.salePrice) * Number(item.quantity || 1),
+            0
+        );
+
+
+        function parseUTM() {
+            const params = new URLSearchParams(location.search);
+
+            return ["source", "medium", "campaign", "term", "content"]
+                .reduce((utm, key) => {
+                    const value = params.get(`utm_${key}`);
+                    if (value) utm[`utm_${key}`] = value;
+                    return utm;
+                }, {});
+        }
+
+    </script>
+
+
+    <!-- ============================================================
+     SANDBOX UI
+     ============================================================ -->
+
+    <script>
+
+        const stepButtonClasses = {
+            primary: "border-blue-600 bg-blue-600 hover:border-blue-700 hover:bg-blue-700",
+            secondary: "border-gray-200 bg-white text-gray-900 hover:border-blue-600 hover:text-blue-600",
+            sent: "border-green-600 bg-green-600 text-white hover:border-green-700 hover:bg-green-700"
+        };
+
+        const allStepButtonClasses = Object.values(stepButtonClasses).join(" ");
+
+        function setStepButton($button, state) {
+            $button.removeClass(allStepButtonClasses).addClass(stepButtonClasses[state]);
+        }
+
+        function markFlowStep(eventName) {
+            const $step = $(`[data-step="${eventName}"]`);
+            if (!$step.length) return;
+
+            $step.addClass("completed border-green-200 bg-green-50");
+            $step.children().first()
+                .removeClass("bg-gray-100 text-gray-500")
+                .addClass("bg-green-600 text-white");
+            setStepButton($step.find("button").text("Sent"), "sent");
+        }
+
+        function addEventToStream(envelope, initialStatus) {
+            const eventTypeClass = envelope.event_type === EventType.CONVERSION
+                ? "text-blue-600 bg-blue-50"
+                : "";
+            const payload = escapeHtml(JSON.stringify(envelope, null, 2));
+            const $event = $(`
+                <article class="border-b border-gray-200 p-[14px_18px] last:border-b-0">
+                    <div class="flex items-center justify-between gap-2.5">
+                        <div class="font-mono text-[13px] font-bold">${escapeHtml(envelope.event_name)}</div>
+                        <div class="text-[11px] text-gray-500">${formatTime(envelope.datetime)}</div>
+                    </div>
+                    <div class="mt-2 flex flex-wrap gap-1.5">
+                        <span class="inline-flex rounded-[5px] bg-gray-100 px-[7px] py-1 font-mono text-[10px] text-gray-500 ${eventTypeClass}">${escapeHtml(envelope.event_type)}</span>
+                        <span class="inline-flex rounded-[5px] bg-gray-100 px-[7px] py-1 font-mono text-[10px] text-gray-500">${escapeHtml(envelope.event_id)}</span>
+                        <span class="status-badge inline-flex rounded-[5px] bg-gray-100 px-[7px] py-1 font-mono text-[10px] text-gray-500" data-status>${initialStatus}</span>
+                    </div>
+                    <div class="mt-2.5 overflow-x-auto whitespace-pre-wrap rounded-lg bg-gray-900 p-3 font-mono text-[11px] leading-[1.5] text-gray-300">${payload}</div>
+                </article>`).attr("data-event-id", envelope.event_id);
+
+            $("#event-stream .empty").remove();
+            $("#event-stream").prepend($event);
+            eventHistory.push(envelope);
+            updateMetrics();
+        }
+
+        function updateEventStatus(eventId, status) {
+            $(`[data-event-id="${eventId}"] [data-status]`)
+                .text(status)
+                .toggleClass("bg-green-50 text-green-600", status === "sent");
+        }
+
+        function updateMetrics() {
+            $("#metric-events").text(eventHistory.length);
+            $("#metric-session").text(`${trackingContext.sessionId.slice(0, 14)}...`);
+            $("#metric-conversion").text(
+                eventHistory.some(event => event.event_name === EventName.PURCHASE)
+                    ? "100%"
+                    : "0%"
+            );
+            $("#journey-status").text(
+                `${new Set(eventHistory.map(event => event.event_name)).size} / 6 events`
+            );
+        }
+
+        const formatTime = datetime => new Date(datetime).toLocaleTimeString();
+        const htmlEscapes = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
+        const escapeHtml = value => String(value).replace(/[&<>"']/g, character => htmlEscapes[character]);
+
+    </script>
+
+
+    <!-- ============================================================
+     UI EVENTS
+     ============================================================ -->
+
+    <script>
+
+        const renderEmpty = message => $("#event-stream").html(
+            `<div class="empty p-10 text-center text-[13px] text-gray-500">${message}</div>`
+        );
+
+        $("[data-event]").on("click", function () {
+            fireEvent(this.dataset.event);
+        });
+
+        $("#btn-demo-flow").on("click", async () => {
+            for (const eventName of flowEvents) {
+                fireEvent(eventName);
+                await delay(450);
+            }
+        });
+
+        $("#btn-reset").on("click", () => {
+            shoppingCartItems = [];
+            transactionId = null;
+            trackingContext.profileId = null;
+            eventHistory.length = 0;
+
+            $(".flow-step").each(function () {
+                const $step = $(this);
+                $step.removeClass("completed active border-green-200 bg-green-50");
+                $step.children().first()
+                    .removeClass("bg-green-600 text-white")
+                    .addClass("bg-gray-100 text-gray-500");
+                setStepButton(
+                    $step.find("button").text("Fire"),
+                    $step.data("step") === EventName.PAGE_VIEW ? "primary" : "secondary"
+                );
+            });
+
+            renderEmpty("No events yet.<br>Fire an event from the journey.");
+            updateMetrics();
+        });
+
+        $("#btn-clear").on("click", () => {
+            eventHistory.length = 0;
+            renderEmpty("Event stream cleared.");
+            updateMetrics();
+        });
+        const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+    </script>
+
+
+    <!-- ============================================================
+     AUTO PAGE VIEW
+     ============================================================ -->
+    <script>
+        /*
+         * Page View is generated automatically
+         * after the sandbox initializes.
+         */
+        setTimeout(
+            function () {
+                fireEvent(EventName.PAGE_VIEW);
+            },
+            100
+        );
+    </script>
+
+</body>
+
+</html>
