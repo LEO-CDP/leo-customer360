@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: ['**']
+    tags: ['v*']          # release tags (vX.Y.Z) build + publish the versioned prod image
     paths-ignore:
       - 'ui-wireframes/**'
       - 'docs/**'
@@ -33,7 +34,7 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      services: ${{ steps.filter.outputs.changes }}
+      services: ${{ steps.select.outputs.services }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -47,6 +48,19 @@ jobs:
             backend-system: 'backend-system/**'
             customer360-api: 'customer360-api/**'
             frontend-admin: 'frontend-admin/**'
+            postgres: 'postgres/**'
+            redis: 'redis/**'
+
+      # On a version tag (release) build ALL services so the whole platform is
+      # published at that version; otherwise only the services that changed.
+      - name: Select services
+        id: select
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo 'services=["ads-server","backend-system","customer360-api","frontend-admin","postgres","redis"]' >> "$GITHUB_OUTPUT"
+          else
+            printf 'services=%s\n' '${{ steps.filter.outputs.changes }}' >> "$GITHUB_OUTPUT"
+          fi
 
   # ---------------------------------------------------------------------------
   # One test job per CHANGED service. Each writes a per-service result to the
@@ -148,9 +162,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Log in only when we are actually going to push (main).
+      # Log in only when we are actually going to push (main branch or a release tag).
       - name: Log in to GHCR
-        if: ${{ github.ref == 'refs/heads/main' }}
+        if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -167,14 +181,16 @@ jobs:
           tags: |
             type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: ./${{ matrix.service }}
           file: ./${{ matrix.service }}/Dockerfile
-          # Push only on the default branch; build-only everywhere else.
-          push: ${{ github.ref == 'refs/heads/main' }}
+          # Push on the default branch and on release tags; build-only elsewhere.
+          push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Per-service layer cache so services don't evict each other.

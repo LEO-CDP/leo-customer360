@@ -109,10 +109,12 @@ each environment **pull that same immutable image by tag** — instead of rebuil
 (open at [excalidraw.com](https://excalidraw.com) or the Obsidian Excalidraw plugin) ·
 [`cd-process.svg`](./cd-process.svg) (vector source of the image above).
 
-> **Status:** today the app deploy scripts (`server/deploy-api.sh`, `server/deploy-backend.sh`,
-> `ads-server/deploy-ads.sh`, `frontend/deploy-frontend.sh`) **build the image on the VM**
-> (`tar`-ship source → `docker build` → `docker run`); they do **not** pull from GHCR yet.
-> This section is the intended CD wiring — the CI half already publishes the images.
+> **Status:** the app deploy scripts now **pull the CI-built image from GHCR by default**
+> (`server/deploy-api.sh`, `server/deploy-backend.sh`, `ads-server/deploy-ads.sh`,
+> `frontend/deploy-frontend.sh` → `docker pull` + `docker run`, via the shared
+> [`lib/ghcr.sh`](./lib/ghcr.sh)). Set `BUILD_LOCAL=1` to fall back to shipping source and
+> building on the VM. The [`CD`](../.github/workflows/cd.yml) workflow runs these
+> automatically after CI succeeds (`main` → uat, a `vX.Y.Z` tag → prod).
 
 ### 1 · What CI publishes to GHCR
 
@@ -123,18 +125,19 @@ image, and pushes it to:
 ghcr.io/leo-cdp/leo-customer360/<service>
 ```
 
-for `<service>` ∈ `customer360-api` · `backend-system` · `ads-server` · `frontend-admin`.
+for `<service>` ∈ `customer360-api` · `backend-system` · `ads-server` · `frontend-admin`
+· `postgres` · `redis` (each has its own `Dockerfile`; a change under that folder builds it).
 Tags come from `docker/metadata-action`:
 
 | Tag | From | When |
 |-----|------|------|
 | `sha-<git-sha>` | `type=sha,format=long` | every build — **immutable**, traceable to a commit |
 | `latest` | `type=raw,value=latest` | default branch (`main`) only |
-| `vX.Y.Z` | `type=semver` *(to add)* | on a release / `v*` tag — **needed for the prod path** |
+| `vX.Y.Z` | `type=semver` | on a release / `v*` tag — the pinned image prod deploys |
 
-> ⚠️ Push is currently gated to `main` (`push: ${{ github.ref == 'refs/heads/main' }}`), and there
-> is **no** version-tag build yet. The `prod` flow below needs CI to also trigger on `v*` tags /
-> releases and emit the `type=semver` tag.
+> ✅ CI triggers on branch pushes **and** `v*` tags, and pushes images on `main` **or** a release
+> tag (`push: … || startsWith(github.ref, 'refs/tags/v')`). A tag build publishes **all** services
+> at that version (branch builds only the changed ones).
 
 ### 2 · How a deploy resolves the image (the "latest SHA" lookup)
 

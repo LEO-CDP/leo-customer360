@@ -89,21 +89,35 @@ else
   echo ">> SSO: disabled (dev local-JWT login)."
 fi
 
-# --- ship customer360-api/ to the VM ---
-echo ">> Shipping customer360-api/ ..."
-tar -C "$REPO_ROOT" -czf - customer360-api \
-  | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
+# --- CD image source: pull the CI-built image from GHCR by default; set
+#     BUILD_LOCAL=1 to fall back to shipping source + building on the VM. ---
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
+SERVICE="customer360-api"
+GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
+GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
+if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
+  DEPLOY_MODE="build"; IMAGE=""
+  echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
+  echo ">> Shipping customer360-api/ ..."
+  tar -C "$REPO_ROOT" -czf - customer360-api \
+    | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
+else
+  DEPLOY_MODE="ghcr"
+  IMAGE="$(image_ref "$SERVICE" "$(resolve_tag "overlays/$ENV.tfvars")")"
+  echo ">> Image: $IMAGE   (pull from GHCR; BUILD_LOCAL=1 to build on the VM)"
+fi
 
 # --- build + run on the VM (values passed as positional args; password base64'd) ---
 echo ">> Installing Docker (if needed), building, and (re)starting the container ..."
 PW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
 REDIS_PW_B64="$(printf %s "${REDIS_PASS:-}" | base64 | tr -d '\n')"
 KC_SECRET_B64="$(printf %s "$KC_SECRET" | base64 | tr -d '\n')"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" <<'REMOTE'
 set -euo pipefail
 DB_HOST="$1"; DB_PORT="$2"; DB_NAME="$3"; DB_USER="$4"; DB_PW="$(printf %s "$5" | base64 -d)"; DAG_HOST="$6"
 REDIS_HOST="$7"; REDIS_PORT="$8"; REDIS_PW="$(printf %s "${9:-}" | base64 -d 2>/dev/null || true)"
 SSO_LOGIN="${10:-false}"; SSO_URL="${11:-}"; KC_REALM="${12:-}"; KC_CLIENT="${13:-}"; KC_SECRET="$(printf %s "${14:-}" | base64 -d 2>/dev/null || true)"
+DEPLOY_MODE="${15:-build}"; IMAGE="${16:-}"; GHCR_USER="${17:-token}"; GHCR_TOKEN="$(printf %s "${18:-}" | base64 -d 2>/dev/null || true)"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -148,13 +162,21 @@ fi
 sudo mkdir -p /opt/c360
 sudo mv "$env_file" /opt/c360/api.env
 sudo chmod 600 /opt/c360/api.env
-echo "   building image (a few minutes on a small box)..."
-# The Dockerfile uses `RUN --mount=type=cache` (BuildKit-only) but docker.io ships no
-# buildx, so strip the mount (it's only a pip-cache optimization) and use the classic builder.
-sed -i 's/ --mount=[^ ]*//g' /opt/c360/customer360-api/Dockerfile
-sudo docker build -t customer360-api /opt/c360/customer360-api
+if [ "$DEPLOY_MODE" = "ghcr" ]; then
+  echo "   pulling $IMAGE ..."
+  [ -n "$GHCR_TOKEN" ] && printf %s "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+  sudo docker pull "$IMAGE"
+  RUN_IMG="$IMAGE"
+else
+  echo "   building image (a few minutes on a small box)..."
+  # The Dockerfile uses `RUN --mount=type=cache` (BuildKit-only) but docker.io ships no
+  # buildx, so strip the mount (it's only a pip-cache optimization) and use the classic builder.
+  sed -i 's/ --mount=[^ ]*//g' /opt/c360/customer360-api/Dockerfile
+  sudo docker build -t customer360-api /opt/c360/customer360-api
+  RUN_IMG="customer360-api"
+fi
 sudo docker rm -f customer360-api >/dev/null 2>&1 || true
-sudo docker run -d --name customer360-api --restart unless-stopped --network host --env-file /opt/c360/api.env customer360-api
+sudo docker run -d --name customer360-api --restart unless-stopped --network host --env-file /opt/c360/api.env "$RUN_IMG"
 sleep 3
 sudo docker ps --filter name=customer360-api --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
 REMOTE
