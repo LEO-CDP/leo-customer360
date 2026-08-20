@@ -173,6 +173,26 @@ def _cache_identity(provider_subject_id: str, tenant_id: str, identity: dict[str
         logger.warning("Failed to cache resolved identity in Redis", exc_info=True)
 
 
+def _pin_transaction_tenant(db: Any, tenant_id: str) -> None:
+    """Set ``app.tenant_id`` (transaction-local) on the session's underlying
+    connection so the Row-Level Security policies on sys_user/sys_userinfo admit
+    this tenant's rows during Keycloak get-or-create provisioning.
+
+    Pins the GUC on the raw connection instead of via ``Session.execute`` so the
+    RLS session variable stays OUT of the repository's SELECT/INSERT/UPDATE
+    business-query sequence -- that sequence is the single source of truth for
+    the lookup-vs-provision logic (and what the unit tests assert on). Sessions
+    that expose no live connection (e.g. the unit-test FakeDBSession, which does
+    not enforce RLS anyway) are a no-op.
+    """
+    connection = getattr(db, "connection", None)
+    if connection is None:
+        return
+    from sqlalchemy import text
+
+    connection().execute(text("SELECT set_config('app.tenant_id', :t, true)"), {"t": tenant_id})
+
+
 def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, str]]:
     """Provisions/updates sys_user and sys_userinfo on a successful Keycloak login.
 
@@ -203,7 +223,6 @@ def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, 
         return None
 
     from core.database import SessionLocal
-    from sqlalchemy import text
 
     db = SessionLocal()
     try:
@@ -211,7 +230,7 @@ def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, 
         # must run with app.tenant_id set to this identity's tenant (from the token),
         # otherwise current_setting('app.tenant_id') is unset/empty and the tenant_policy's
         # ::uuid cast fails (managed non-superuser DB; a local superuser bypasses RLS).
-        db.execute(text("SELECT set_config('app.tenant_id', :t, true)"), {"t": str(tenant_id)})
+        _pin_transaction_tenant(db, str(tenant_id))
         repo = AuthRepository(db)
         result = repo.get_or_create_keycloak_user(tenant_id, payload, provider_subject_id)
         if result is None:
