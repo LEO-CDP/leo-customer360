@@ -25,3 +25,5 @@ RUN mkdir -p /dagster_home
 
 EXPOSE 3000
 CMD ["dagster", "dev", "-w", "workspace.yaml", "-h", "0.0.0.0", "-p", "3000"]
+
+# ci: trigger image build — GHCR smoke test 2026-08-20
