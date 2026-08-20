@@ -192,6 +192,36 @@ sudo docker run -d --name "$SERVICE" --restart unless-stopped --network host \
   --env-file "/opt/c360/$SERVICE.env" "$REGISTRY/$SERVICE:$TAG"
 ```
 
+### 5 · Remote Terraform state (required for CI/CD)
+
+CD runs on GitHub-hosted runners, which have **no local Terraform state**, so the
+`server` / `postgres` / `cache` modules use an **S3 remote backend on VNG vStorage**
+(see each module's `backend.tf`) — CI reads the same state operators use locally.
+Credentials come from the environment, never the code.
+
+**One-time setup:**
+
+1. Create the state bucket once (any S3 client, pointed at the vStorage endpoint):
+   ```bash
+   AWS_ACCESS_KEY_ID=<k> AWS_SECRET_ACCESS_KEY=<s> \
+     aws --endpoint-url https://hcm04.vstorage.vngcloud.vn s3 mb s3://leocdp360-tfstate
+   ```
+2. Migrate each module's existing **local** state into it (run locally; Terraform ≥ 1.6):
+   ```bash
+   export AWS_ACCESS_KEY_ID=<vstorage key> AWS_SECRET_ACCESS_KEY=<vstorage secret>
+   for m in server postgres cache; do
+     terraform -chdir="deployments/$m" init -migrate-state -force-copy
+   done
+   ```
+3. Add the vStorage S3 creds as GitHub Actions secrets so CD can read state —
+   `VSTORAGE_ACCESS_KEY`, `VSTORAGE_SECRET_KEY` (`cd.yml` maps them to
+   `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`).
+
+Bucket/endpoint/region live in each `backend.tf` (bucket `leocdp360-tfstate`, endpoint
+`hcm04.vstorage.vngcloud.vn`, region `us-east-1` — required by vStorage). Per-module
+state lands at `env/<workspace>/<module>/terraform.tfstate`. The `storage` and
+`load_balancer` modules can adopt the same backend later; CD only needs these three.
+
 ## UAT deployment view
 
 ![Customer 360 — UAT deployment view](./deployment-view-uat.png)

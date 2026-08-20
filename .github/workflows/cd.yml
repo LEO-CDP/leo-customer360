@@ -89,6 +89,9 @@ jobs:
     env:
       ENVIRONMENT: ${{ needs.select.outputs.env }}
       IMAGE_TAG: ${{ needs.select.outputs.tag }}   # consumed by lib/ghcr.sh resolve_tag
+      # vStorage S3 creds for the remote Terraform backend (state read on the runner).
+      AWS_ACCESS_KEY_ID: ${{ secrets.VSTORAGE_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.VSTORAGE_SECRET_KEY }}
     steps:
       - name: Checkout the exact commit CI validated
         uses: actions/checkout@v7
@@ -107,14 +110,15 @@ jobs:
           chmod 600 ~/.ssh/c360-api_ed25519
 
       # READ-ONLY. The app deploy scripts read the vServer IPs / DB host / redis
-      # host from these modules' Terraform OUTPUTS, so they need a linux provider
-      # init on the runner. This runs `init` + `output` only — it never `apply`s
-      # and never provisions or mutates the vDB, vLB, or vStorage.
-      - name: terraform init (read-only — output resolution only)
+      # host from these modules' Terraform OUTPUTS. init connects to the shared
+      # S3/vStorage remote backend (creds from the AWS_* env above) so the runner
+      # sees the same state operators use. This runs `init` + `output` only — it
+      # never `apply`s and never provisions or mutates the vDB, vLB, or vStorage.
+      - name: terraform init (read-only — remote state, output resolution only)
         working-directory: deployments
         run: |
           for m in server postgres cache; do
-            terraform -chdir="$m" init -input=false -upgrade >/dev/null
+            terraform -chdir="$m" init -input=false >/dev/null
           done
 
       # Deploys to the vSERVERS ONLY: pull the image from GHCR and `docker run`
