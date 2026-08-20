@@ -5,9 +5,11 @@ name: CD
 # after the CI workflow finishes (workflow_run), and then deploys only when:
 #   • CI concluded successfully, AND
 #   • the ref CI ran on is a deploy target:
-#       main            -> uat   (default dev env, pulls :latest)
-#       vX.Y.Z tag      -> prod  (release, pulls the pinned :vX.Y.Z)
-# Everything else (feature branches, PRs, failed CI) is skipped.
+#       main + commit title contains "--deploy-uat"  -> uat  (pulls :latest)
+#       vX.Y.Z tag                                    -> prod (pulls :vX.Y.Z)
+# Everything else (main pushes without the marker, feature branches, PRs,
+# failed CI) is skipped. The "--deploy-uat" marker makes uat deploys OPT-IN per
+# commit rather than firing on every push to main.
 #
 # It deploys by PULLING the image CI already built+pushed to GHCR — the module
 # scripts run in ghcr mode (BUILD_LOCAL unset), so nothing is rebuilt here.
@@ -50,12 +52,21 @@ jobs:
           # For a branch push this is the branch name; for a tag push it is the
           # tag name (e.g. v1.2.3).
           REF: ${{ github.event.workflow_run.head_branch }}
+          # Full message of the commit CI ran on; its first line is the title.
+          MSG: ${{ github.event.workflow_run.head_commit.message }}
         run: |
+          TITLE="$(printf '%s\n' "$MSG" | head -n1)"
           if [[ "$REF" == "main" ]]; then
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-            echo "env=uat"     >> "$GITHUB_OUTPUT"
-            echo "tag=latest"  >> "$GITHUB_OUTPUT"
-            echo "→ deploy uat (tag latest)"
+            # uat is OPT-IN: only deploy when the commit TITLE carries the marker.
+            if [[ "$TITLE" == *"--deploy-uat"* ]]; then
+              echo "deploy=true" >> "$GITHUB_OUTPUT"
+              echo "env=uat"     >> "$GITHUB_OUTPUT"
+              echo "tag=latest"  >> "$GITHUB_OUTPUT"
+              echo "→ deploy uat (title opted in: --deploy-uat)"
+            else
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              echo "→ skip uat: commit title has no --deploy-uat marker"
+            fi
           elif [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"
             echo "env=prod"    >> "$GITHUB_OUTPUT"
@@ -63,7 +74,7 @@ jobs:
             echo "→ deploy prod (tag $REF)"
           else
             echo "deploy=false" >> "$GITHUB_OUTPUT"
-            echo "→ skip: ref '$REF' is neither main nor a vX.Y.Z tag"
+            echo "→ skip: ref '$REF' is not main(+--deploy-uat) nor a vX.Y.Z tag"
           fi
 
   deploy:
@@ -95,16 +106,23 @@ jobs:
           printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/c360-api_ed25519
           chmod 600 ~/.ssh/c360-api_ed25519
 
-      # The app deploy scripts read VM IPs / DB host from each module's Terraform
-      # outputs, so init the modules they consult (linux providers on the runner).
-      - name: terraform init (modules the deploy reads)
+      # READ-ONLY. The app deploy scripts read the vServer IPs / DB host / redis
+      # host from these modules' Terraform OUTPUTS, so they need a linux provider
+      # init on the runner. This runs `init` + `output` only — it never `apply`s
+      # and never provisions or mutates the vDB, vLB, or vStorage.
+      - name: terraform init (read-only — output resolution only)
         working-directory: deployments
         run: |
-          for m in server postgres cache sso; do
+          for m in server postgres cache; do
             terraform -chdir="$m" init -input=false -upgrade >/dev/null
           done
 
-      - name: Deploy app services (pull from GHCR)
+      # Deploys to the vSERVERS ONLY: pull the image from GHCR and `docker run`
+      # over SSH for the four app containers. `--only` restricts execution to the
+      # app steps, so CD NEVER runs the infra Terraform deploy.sh scripts —
+      # server (vServer provisioning), storage (vStorage), postgres (vDB), or
+      # load_balancer (vLB) are all managed outside this pipeline.
+      - name: Deploy app containers to the vServers (pull from GHCR)
         working-directory: deployments
         env:
           GHCR_USER: ${{ github.actor }}

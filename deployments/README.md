@@ -114,7 +114,8 @@ each environment **pull that same immutable image by tag** — instead of rebuil
 > `frontend/deploy-frontend.sh` → `docker pull` + `docker run`, via the shared
 > [`lib/ghcr.sh`](./lib/ghcr.sh)). Set `BUILD_LOCAL=1` to fall back to shipping source and
 > building on the VM. The [`CD`](../.github/workflows/cd.yml) workflow runs these
-> automatically after CI succeeds (`main` → uat, a `vX.Y.Z` tag → prod).
+> automatically after CI succeeds (`main` commit whose title contains `--deploy-uat` → uat;
+> a `vX.Y.Z` tag → prod).
 
 ### 1 · What CI publishes to GHCR
 
@@ -168,7 +169,7 @@ Each env picks its tag the way the scripts already read config — a value from
 
 | Env | Image tag | Trigger | Boxes |
 |-----|-----------|---------|-------|
-| **uat** (default dev) | `latest` / newest `sha-*` | auto, on every `main` push | shared api box (uat overlay) |
+| **uat** (default dev) | `latest` / newest `sha-*` | a `main` commit whose **title** contains `--deploy-uat` | shared api box (uat overlay) |
 | **prod** | `vX.Y.Z` (pinned digest) | a GitHub **Release** (version tag) | dedicated prod boxes (prod overlay) |
 
 Promotion is a **shift of the same artifact**: validate the build in `uat`, then cut a release —
