@@ -29,3 +29,5 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=5 \
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8890"]
 
 # ci: trigger image build — GHCR smoke test 2026-08-20
+
+# ci/cd: redeploy trigger 2026-08-20 (no functional change)
