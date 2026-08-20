@@ -96,6 +96,102 @@ bring-up before DNS is live:
 running `api` early is safe — re-run it after `sso-realm` to switch SSO on. Secrets/creds
 live in each module's own `.env` / `terraform.tfvars` (see each module's README).
 
+## Continuous Delivery (CD)
+
+`deploy-all.sh` above is the **manual / one-shot** path. The **target CD model** builds each
+service's image **once** in CI, publishes it to the GitHub Container Registry (GHCR), and then has
+each environment **pull that same immutable image by tag** — instead of rebuilding on the box.
+`uat` is the default dev environment and tracks `main`; a version-tagged **release** ships `prod`.
+
+![Customer 360 — CD model](./cd-process.png)
+
+📐 **Editable sources:** [`cd-process.excalidraw`](./cd-process.excalidraw)
+(open at [excalidraw.com](https://excalidraw.com) or the Obsidian Excalidraw plugin) ·
+[`cd-process.svg`](./cd-process.svg) (vector source of the image above).
+
+> **Status:** the app deploy scripts now **pull the CI-built image from GHCR by default**
+> (`server/deploy-api.sh`, `server/deploy-backend.sh`, `ads-server/deploy-ads.sh`,
+> `frontend/deploy-frontend.sh` → `docker pull` + `docker run`, via the shared
+> [`lib/ghcr.sh`](./lib/ghcr.sh)). Set `BUILD_LOCAL=1` to fall back to shipping source and
+> building on the VM. The [`CD`](../.github/workflows/cd.yml) workflow runs these
+> automatically after CI succeeds (`main` commit whose title contains `--deploy-uat` → uat;
+> a `vX.Y.Z` tag → prod).
+
+### 1 · What CI publishes to GHCR
+
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) tests each changed service, builds its
+image, and pushes it to:
+
+```
+ghcr.io/leo-cdp/leo-customer360/<service>
+```
+
+for `<service>` ∈ `customer360-api` · `backend-system` · `ads-server` · `frontend-admin`
+· `postgres` · `redis` (each has its own `Dockerfile`; a change under that folder builds it).
+Tags come from `docker/metadata-action`:
+
+| Tag | From | When |
+|-----|------|------|
+| `sha-<git-sha>` | `type=sha,format=long` | every build — **immutable**, traceable to a commit |
+| `latest` | `type=raw,value=latest` | default branch (`main`) only |
+| `vX.Y.Z` | `type=semver` | on a release / `v*` tag — the pinned image prod deploys |
+
+> ✅ CI triggers on branch pushes **and** `v*` tags, and pushes images on `main` **or** a release
+> tag (`push: … || startsWith(github.ref, 'refs/tags/v')`). A tag build publishes **all** services
+> at that version (branch builds only the changed ones).
+
+### 2 · How a deploy resolves the image (the "latest SHA" lookup)
+
+Rather than hard-code a tag, a deploy step asks GHCR for the **newest** version of each service's
+package. The GitHub Packages *container versions* API returns versions **newest-first**, so `[0]`
+is the last push:
+
+```bash
+# newest image for one service — its digest + tags
+gh api -H "Accept: application/vnd.github+json" \
+  "/orgs/LEO-CDP/packages/container/leo-customer360%2Fcustomer360-api/versions?per_page=1" \
+  --jq '.[0] | {digest: .name, tags: .metadata.container.tags}'
+# → { "digest": "sha256:…", "tags": ["sha-<git>", "latest"] }
+```
+
+- `.[0].name` is the immutable **digest** → deploy `ghcr.io/…/<svc>@sha256:…` for a fully pinned run.
+- `.[0].metadata.container.tags` are the human tags (`sha-<git>`, `latest`, `vX.Y.Z`).
+
+The package name is `<repo>/<service>` **URL-encoded** — the `/` becomes `%2F`. Private packages
+need a token with `read:packages`, and the VM runs `docker login ghcr.io` before pulling. (The
+Registry v2 `/tags/list` endpoint does **not** guarantee chronological order — hence the Packages
+API for "newest".)
+
+### 3 · Per-environment tag policy
+
+Each env picks its tag the way the scripts already read config — a value from
+`overlays/<env>.tfvars` (via the `tfval` helper), with a sensible default:
+
+| Env | Image tag | Trigger | Boxes |
+|-----|-----------|---------|-------|
+| **uat** (default dev) | `latest` / newest `sha-*` | a `main` commit whose **title** contains `--deploy-uat` | shared api box (uat overlay) |
+| **prod** | `vX.Y.Z` (pinned digest) | a GitHub **Release** (version tag) | dedicated prod boxes (prod overlay) |
+
+Promotion is a **shift of the same artifact**: validate the build in `uat`, then cut a release —
+that version tag is exactly what `prod` pulls. The model extends to more envs (e.g. `staging`) by
+adding another `overlays/<env>.tfvars`.
+
+### 4 · Wiring it into the deploy scripts
+
+To move a service from build-on-box to pull-from-GHCR, the remote block changes from a
+`docker build` to a resolve-and-pull — everything else (env-file assembly, DB/Redis/SSO wiring,
+`--network host`) stays the same:
+
+```bash
+REGISTRY="ghcr.io/leo-cdp/leo-customer360"
+TAG="$(tfval image_tag "overlays/$ENV.tfvars")"; TAG="${TAG:-latest}"   # prod overlay pins vX.Y.Z
+sudo docker login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"    # if the package is private
+sudo docker pull  "$REGISTRY/$SERVICE:$TAG"
+sudo docker rm -f "$SERVICE" 2>/dev/null || true
+sudo docker run -d --name "$SERVICE" --restart unless-stopped --network host \
+  --env-file "/opt/c360/$SERVICE.env" "$REGISTRY/$SERVICE:$TAG"
+```
+
 ## UAT deployment view
 
 ![Customer 360 — UAT deployment view](./deployment-view-uat.png)

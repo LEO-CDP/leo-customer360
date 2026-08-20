@@ -1,0 +1,133 @@
+name: CD
+
+# ---------------------------------------------------------------------------
+# Continuous Delivery. This workflow NEVER runs on its own push — it only fires
+# after the CI workflow finishes (workflow_run), and then deploys only when:
+#   • CI concluded successfully, AND
+#   • the ref CI ran on is a deploy target:
+#       main + commit title contains "--deploy-uat"  -> uat  (pulls :latest)
+#       vX.Y.Z tag                                    -> prod (pulls :vX.Y.Z)
+# Everything else (main pushes without the marker, feature branches, PRs,
+# failed CI) is skipped. The "--deploy-uat" marker makes uat deploys OPT-IN per
+# commit rather than firing on every push to main.
+#
+# It deploys by PULLING the image CI already built+pushed to GHCR — the module
+# scripts run in ghcr mode (BUILD_LOCAL unset), so nothing is rebuilt here.
+#
+# Required repo secrets:
+#   DEPLOY_SSH_KEY   private key for the deploy user on the VNG Cloud VMs
+#   DB_PASSWORD      -> TF_VAR_db_password    (read by the app deploy scripts)
+#   REDIS_PASSWORD   -> TF_VAR_redis_password (optional; cache stays off if unset)
+# GHCR pulls use the built-in GITHUB_TOKEN (packages: read).
+# The 'prod' GitHub Environment should carry required-reviewer protection so a
+# release deploy waits for manual approval.
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: cd-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  # Decide whether and where to deploy from the finished CI run.
+  select:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.pick.outputs.deploy }}
+      env: ${{ steps.pick.outputs.env }}
+      tag: ${{ steps.pick.outputs.tag }}
+    steps:
+      - name: Pick target environment
+        id: pick
+        env:
+          # For a branch push this is the branch name; for a tag push it is the
+          # tag name (e.g. v1.2.3).
+          REF: ${{ github.event.workflow_run.head_branch }}
+          # Full message of the commit CI ran on; its first line is the title.
+          MSG: ${{ github.event.workflow_run.head_commit.message }}
+        run: |
+          TITLE="$(printf '%s\n' "$MSG" | head -n1)"
+          if [[ "$REF" == "main" ]]; then
+            # uat is OPT-IN: only deploy when the commit TITLE carries the marker.
+            if [[ "$TITLE" == *"--deploy-uat"* ]]; then
+              echo "deploy=true" >> "$GITHUB_OUTPUT"
+              echo "env=uat"     >> "$GITHUB_OUTPUT"
+              echo "tag=latest"  >> "$GITHUB_OUTPUT"
+              echo "→ deploy uat (title opted in: --deploy-uat)"
+            else
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              echo "→ skip uat: commit title has no --deploy-uat marker"
+            fi
+          elif [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "env=prod"    >> "$GITHUB_OUTPUT"
+            echo "tag=$REF"    >> "$GITHUB_OUTPUT"
+            echo "→ deploy prod (tag $REF)"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "→ skip: ref '$REF' is not main(+--deploy-uat) nor a vX.Y.Z tag"
+          fi
+
+  deploy:
+    needs: select
+    if: ${{ needs.select.outputs.deploy == 'true' }}
+    runs-on: ubuntu-latest
+    # Binds to a GitHub Environment — attach protection rules to 'prod'.
+    environment: ${{ needs.select.outputs.env }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      ENVIRONMENT: ${{ needs.select.outputs.env }}
+      IMAGE_TAG: ${{ needs.select.outputs.tag }}   # consumed by lib/ghcr.sh resolve_tag
+    steps:
+      - name: Checkout the exact commit CI validated
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+
+      - name: Install the deploy SSH key
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/c360-api_ed25519
+          chmod 600 ~/.ssh/c360-api_ed25519
+
+      # READ-ONLY. The app deploy scripts read the vServer IPs / DB host / redis
+      # host from these modules' Terraform OUTPUTS, so they need a linux provider
+      # init on the runner. This runs `init` + `output` only — it never `apply`s
+      # and never provisions or mutates the vDB, vLB, or vStorage.
+      - name: terraform init (read-only — output resolution only)
+        working-directory: deployments
+        run: |
+          for m in server postgres cache; do
+            terraform -chdir="$m" init -input=false -upgrade >/dev/null
+          done
+
+      # Deploys to the vSERVERS ONLY: pull the image from GHCR and `docker run`
+      # over SSH for the four app containers. `--only` restricts execution to the
+      # app steps, so CD NEVER runs the infra Terraform deploy.sh scripts —
+      # server (vServer provisioning), storage (vStorage), postgres (vDB), or
+      # load_balancer (vLB) are all managed outside this pipeline.
+      - name: Deploy app containers to the vServers (pull from GHCR)
+        working-directory: deployments
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
+        run: |
+          ./deploy-all.sh "$ENVIRONMENT" --only api,backend,ads,frontend -y

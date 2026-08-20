@@ -74,10 +74,28 @@ fi
 
 echo ">> Target (ads): $BASTION :$ADS_PORT   DB: ${DB_NAME}.${DB_SCHEMA}@${DB_HOST}:${DB_PORT}   Redis: ${REDIS_HOST:-<none>}:${REDIS_PORT:-}"
 
-# --- ship ads-server/ (includes sql-scripts/) ---
-echo ">> Shipping ads-server/ ..."
-tar -C "$REPO_ROOT" -czf - ads-server \
-  | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
+# --- CD image source: pull the CI-built image from GHCR by default; set
+#     BUILD_LOCAL=1 to fall back to shipping source + building on the VM. ---
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
+SERVICE="ads-server"
+GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
+GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
+if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
+  DEPLOY_MODE="build"; IMAGE=""
+  echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
+  echo ">> Shipping ads-server/ ..."
+  tar -C "$REPO_ROOT" -czf - ads-server \
+    | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
+else
+  DEPLOY_MODE="ghcr"
+  IMAGE="$(image_ref "$SERVICE" "$(resolve_tag "overlays/$ENV.tfvars")")"
+  echo ">> Image: $IMAGE   (pull from GHCR; BUILD_LOCAL=1 to build on the VM)"
+  # The leo_ads schema bootstrap (below) runs psql against ads-server/sql-scripts/
+  # on the VM, so ship just those SQL files even when the image comes from GHCR.
+  echo ">> Shipping ads-server/sql-scripts/ (schema bootstrap) ..."
+  tar -C "$REPO_ROOT" -czf - ads-server/sql-scripts \
+    | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
+fi
 
 # env file built locally, shipped base64 (dodges ssh arg-flattening). CACHE_ENABLED
 # only when a Redis password+host is available; otherwise the app fails open.
@@ -97,9 +115,10 @@ ADS_ROOT_PATH=$ADS_ROOT_PATH" | base64 | tr -d '\n')"
 DBPW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
 
 echo ">> Building, bootstrapping leo_ads schema, and (re)starting the container ..."
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ADS_PORT" "$ENVB64" "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DBPW_B64" "$DB_SCHEMA" "$SEED_SAMPLE" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ADS_PORT" "$ENVB64" "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DBPW_B64" "$DB_SCHEMA" "$SEED_SAMPLE" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" <<'REMOTE'
 set -euo pipefail
 PORT="$1"; ENVB64="$2"; DBHOST="$3"; DBPORT="$4"; DBNAME="$5"; DBUSER="$6"; DBPW="$(printf %s "$7" | base64 -d)"; SCHEMA="$8"; SEED="$9"
+DEPLOY_MODE="${10:-build}"; IMAGE="${11:-}"; GHCR_USER="${12:-token}"; GHCR_TOKEN="$(printf %s "${13:-}" | base64 -d 2>/dev/null || true)"
 command -v docker >/dev/null 2>&1 || { sudo apt-get update -qq; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io; sudo systemctl enable --now docker; }
 command -v psql   >/dev/null 2>&1 || { sudo apt-get update -qq; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql-client; }
 
@@ -113,10 +132,18 @@ fi
 
 umask 077; env_file="$(mktemp)"; printf '%s' "$ENVB64" | base64 -d > "$env_file"
 sudo mkdir -p /opt/c360; sudo mv "$env_file" /opt/c360/ads.env; sudo chmod 600 /opt/c360/ads.env
-sed -i 's/ --mount=[^ ]*//g' /opt/c360/ads-server/Dockerfile   # docker.io: no buildx
-sudo docker build -t customer360-ads /opt/c360/ads-server
+if [ "$DEPLOY_MODE" = "ghcr" ]; then
+  echo "   pulling $IMAGE ..."
+  [ -n "$GHCR_TOKEN" ] && printf %s "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+  sudo docker pull "$IMAGE"
+  RUN_IMG="$IMAGE"
+else
+  sed -i 's/ --mount=[^ ]*//g' /opt/c360/ads-server/Dockerfile   # docker.io: no buildx
+  sudo docker build -t customer360-ads /opt/c360/ads-server
+  RUN_IMG="customer360-ads"
+fi
 sudo docker rm -f customer360-ads >/dev/null 2>&1 || true
-sudo docker run -d --name customer360-ads --restart unless-stopped --network host --env-file /opt/c360/ads.env customer360-ads
+sudo docker run -d --name customer360-ads --restart unless-stopped --network host --env-file /opt/c360/ads.env "$RUN_IMG"
 sleep 3
 curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && echo "   health OK (:$PORT/health)" || echo "   WARN: health not ready yet"
 sudo docker ps --filter name=customer360-ads --format '   running: {{.Names}} ({{.Status}})'

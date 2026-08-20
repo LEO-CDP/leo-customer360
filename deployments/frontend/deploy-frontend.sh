@@ -57,10 +57,23 @@ fi
 echo ">> Target (frontend): $BASTION :$PORT"
 echo "   API=$API_HOSTNAME  SSO_LOGIN=$SSO_LOGIN  tenant=$TENANT  root_path='${ROOT_PATH}'"
 
-# --- ship frontend-admin/ to the VM ---
-echo ">> Shipping frontend-admin/ ..."
-tar -C "$REPO_ROOT" -czf - frontend-admin \
-  | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
+# --- CD image source: pull the CI-built image from GHCR by default; set
+#     BUILD_LOCAL=1 to fall back to shipping source + building on the VM. ---
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
+SERVICE="frontend-admin"
+GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
+GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
+if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
+  DEPLOY_MODE="build"; IMAGE=""
+  echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
+  echo ">> Shipping frontend-admin/ ..."
+  tar -C "$REPO_ROOT" -czf - frontend-admin \
+    | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
+else
+  DEPLOY_MODE="ghcr"
+  IMAGE="$(image_ref "$SERVICE" "$(resolve_tag "overlays/$ENV.tfvars")")"
+  echo ">> Image: $IMAGE   (pull from GHCR; BUILD_LOCAL=1 to build on the VM)"
+fi
 
 # Build the env file locally and ship it base64-encoded as ONE arg (avoids the
 # ssh arg-flattening trap where an empty/space value corrupts positional args).
@@ -72,9 +85,10 @@ HOST=0.0.0.0
 PORT=$PORT" | base64 | tr -d '\n')"
 
 echo ">> Building + (re)starting the container ..."
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PORT" "$ENV_B64" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PORT" "$ENV_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" <<'REMOTE'
 set -euo pipefail
 PORT="$1"; ENV_B64="$2"
+DEPLOY_MODE="${3:-build}"; IMAGE="${4:-}"; GHCR_USER="${5:-token}"; GHCR_TOKEN="$(printf %s "${6:-}" | base64 -d 2>/dev/null || true)"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -86,11 +100,19 @@ printf '%s' "$ENV_B64" | base64 -d > "$env_file"
 sudo mkdir -p /opt/c360
 sudo mv "$env_file" /opt/c360/frontend.env
 sudo chmod 600 /opt/c360/frontend.env
-# docker.io has no buildx -> strip the BuildKit `RUN --mount` (pip-cache only).
-sed -i 's/ --mount=[^ ]*//g' /opt/c360/frontend-admin/Dockerfile
-sudo docker build -t customer360-frontend /opt/c360/frontend-admin
+if [ "$DEPLOY_MODE" = "ghcr" ]; then
+  echo "   pulling $IMAGE ..."
+  [ -n "$GHCR_TOKEN" ] && printf %s "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+  sudo docker pull "$IMAGE"
+  RUN_IMG="$IMAGE"
+else
+  # docker.io has no buildx -> strip the BuildKit `RUN --mount` (pip-cache only).
+  sed -i 's/ --mount=[^ ]*//g' /opt/c360/frontend-admin/Dockerfile
+  sudo docker build -t customer360-frontend /opt/c360/frontend-admin
+  RUN_IMG="customer360-frontend"
+fi
 sudo docker rm -f customer360-frontend >/dev/null 2>&1 || true
-sudo docker run -d --name customer360-frontend --restart unless-stopped --network host --env-file /opt/c360/frontend.env customer360-frontend
+sudo docker run -d --name customer360-frontend --restart unless-stopped --network host --env-file /opt/c360/frontend.env "$RUN_IMG"
 sleep 3
 curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && echo "   health OK (:$PORT/health)" || echo "   WARN: health not ready yet"
 sudo docker ps --filter name=customer360-frontend --format '   running: {{.Names}} ({{.Status}})'
