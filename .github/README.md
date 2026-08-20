@@ -1,9 +1,9 @@
 # CI / CD — `leo-customer360`
 
 This folder holds the GitHub Actions automation for the monorepo. The single
-workflow ([`workflows/ci.yml`](workflows/ci.yml)) runs the test suite on every
-change and then **builds only the service(s) that actually changed**, pushing
-their Docker images to the GitHub Container Registry (GHCR) on `main`.
+workflow ([`workflows/ci.yml`](workflows/ci.yml)) runs, **for each changed
+service**, its unit tests and then a Docker build — pushing the image to the
+GitHub Container Registry (GHCR) on `main`.
 
 ![CI/CD pipeline](ci-pipeline.png)
 
@@ -16,49 +16,49 @@ their Docker images to the GitHub Container Registry (GHCR) on `main`.
 
 ### 1. Triggers
 
-The workflow runs on:
+Runs on **`push`** to any branch and on **`pull_request`** targeting
+`main` / `master`. Skipped when a change touches *only* `docs/**` or
+`ui-wireframes/**`.
 
-- **`push`** to any branch
-- **`pull_request`** targeting `main` / `master`
+### 2. `changes` — detect what moved
 
-It is **skipped** when a change touches *only* `docs/**` or `ui-wireframes/**`
-(nothing to test or build there).
+[`dorny/paths-filter`](https://github.com/dorny/paths-filter) compares the diff
+against a filter per service and emits a **JSON array of the changed services**
+(e.g. `["ads-server","frontend-admin"]`), which drives both matrices below.
 
-### 2. `unit-tests`
+### 3. `test` — one job per changed service
 
-Runs `run_all_tests.sh` (pytest) on Python 3.11, uploads the log as an
-artifact, and emails a pass/fail report via Brevo SMTP. This is the existing
-job — unchanged.
+A matrix job (`needs: changes`) that runs **once per changed service**, invoking
+that service's own test runner(s). Each job writes a **per-service result row**
+(Service · Result · Duration) to the run's **Step Summary** and uploads its log.
 
-### 3. `changes` — detect what moved
-
-Uses [`dorny/paths-filter`](https://github.com/dorny/paths-filter) to compare
-the diff against a filter per service. Its `changes` output is a **JSON array of
-the service names that changed** (e.g. `["ads-server","frontend-admin"]`), which
-feeds the build matrix directly.
+> **Coverage note:** tests run only for *changed* services. To test all four on
+> every run, replace `matrix.service` with a static list — there's a one-line
+> comment marking the spot in `ci.yml`.
 
 ### 4. `build-and-push` — one image per changed service
 
-A matrix job (`needs: [changes, unit-tests]`) that runs once **per changed
-service**. If nothing relevant changed, it is skipped entirely.
+A matrix job (`needs: [changes, test]`) — so a service's image builds only after
+**its tests pass**. Builds `./<service>/Dockerfile` with Buildx + a per-service
+GHA layer cache. **Pushes to GHCR only on `main`** (tags `sha-<sha>` + `latest`);
+branches and PRs build-only, still catching Dockerfile breakage.
 
-- **Builds** the service's `Dockerfile` with Buildx + a per-service GHA layer cache.
-- **Pushes to GHCR only on `main`** — tagged with the commit SHA and `latest`.
-- On feature branches and PRs it **builds but does not push**, which still
-  catches Dockerfile breakage before merge.
+### 5. `notify` — aggregate summary + email
 
-> Image push is gated on `unit-tests` passing: a red test run ships no images.
+`needs: [changes, test]`, runs `always()`. Downloads every service's result,
+renders **one aggregated table** into the run summary, and sends the Brevo email
+(subject carries the overall test result; body includes the per-service table).
 
 ---
 
-## Services & images
+## Services, tests & images
 
-| Service          | Build context        | Port | Image on GHCR                                          |
-| ---------------- | -------------------- | ---- | ----------------------------------------------------- |
-| `ads-server`     | `./ads-server`       | 9009 | `ghcr.io/leo-cdp/leo-customer360/ads-server`          |
-| `backend-system` | `./backend-system`   | 3000 | `ghcr.io/leo-cdp/leo-customer360/backend-system`      |
-| `customer360-api`| `./customer360-api`  | 8008 | `ghcr.io/leo-cdp/leo-customer360/customer360-api`     |
-| `frontend-admin` | `./frontend-admin`   | 8890 | `ghcr.io/leo-cdp/leo-customer360/frontend-admin`      |
+| Service          | Build context       | Port | Test runner(s)                                          | Image on GHCR                                      |
+| ---------------- | ------------------- | ---- | ------------------------------------------------------- | -------------------------------------------------- |
+| `ads-server`     | `./ads-server`      | 9009 | `run_unit_tests.sh`                                     | `ghcr.io/leo-cdp/leo-customer360/ads-server`       |
+| `backend-system` | `./backend-system`  | 3000 | `identity_resolution/run_tests.sh` + `segmentation/run_tests.sh` | `ghcr.io/leo-cdp/leo-customer360/backend-system`   |
+| `customer360-api`| `./customer360-api` | 8008 | `run_unit_tests.sh`                                     | `ghcr.io/leo-cdp/leo-customer360/customer360-api`  |
+| `frontend-admin` | `./frontend-admin`  | 8890 | *(none — reported as skip)*                             | `ghcr.io/leo-cdp/leo-customer360/frontend-admin`   |
 
 Each image is published with two tags on `main`:
 
@@ -66,40 +66,37 @@ Each image is published with two tags on `main`:
 - `latest` — the newest build on the default branch
 
 ```bash
-# Pull a specific, reproducible build
 docker pull ghcr.io/leo-cdp/leo-customer360/customer360-api:sha-<git-sha>
-
-# Or the latest from main
 docker pull ghcr.io/leo-cdp/leo-customer360/customer360-api:latest
 ```
+
+The full local run of every suite still lives in [`../run_all_tests.sh`](../run_all_tests.sh).
 
 ---
 
 ## Operating notes
 
 - **Registry auth.** Push uses the built-in `GITHUB_TOKEN` with `packages: write`
-  (scoped to the build job). No extra secret needed. Make sure the org allows
-  Actions to write packages, and that each package's visibility/access is set as
-  you want under the repo/org **Packages** settings.
-- **Lowercase image names.** GHCR requires lowercase paths. `docker/metadata-action`
+  (scoped to the build job). No extra secret needed. If a push returns `403`,
+  set **Settings → Actions → General → Workflow permissions** to *Read and write*,
+  and check the org/package **Packages** access.
+- **Lowercase image names.** GHCR requires lowercase paths; `docker/metadata-action`
   lowercases automatically, so the uppercase org (`LEO-CDP`) in
   `${{ github.repository }}` is handled for you.
-- **Add a service.** Add one line to the `changes` job's `filters:` and the
-  matrix picks it up — no other change needed (the build step is generic:
-  `context: ./<service>`, `file: ./<service>/Dockerfile`).
-- **`backend-system/identity_resolution`** has its own `Dockerfile` but is not
-  built here yet. Add a filter + a dedicated matrix leg if you want it published.
-- **Want frontend images independent of Python tests?** Change
-  `build-and-push`'s `needs:` to drop `unit-tests` (trade-off: images could then
-  publish even if tests fail).
+- **Add a service.** Add one line to the `changes` job's `filters:` and one `case`
+  arm in the `test` job's runner map; both matrices pick it up automatically.
+- **Test/build gating is all-or-nothing across the matrix:** if any service's
+  tests fail, the whole `test` job is red and `build-and-push` is skipped.
+- **`backend-system/identity_resolution`** also has its own `Dockerfile` but is
+  not built as a separate image; add a filter + matrix arm if you want it.
 
 ---
 
 ## Secrets used
 
-| Secret               | Used by       | Purpose                          |
-| -------------------- | ------------- | -------------------------------- |
-| `GITHUB_TOKEN`       | build-and-push| GHCR login/push (auto-provided)  |
-| `BREVO_SMTP_LOGIN`   | unit-tests    | Email report auth                |
-| `BREVO_SMTP_KEY`     | unit-tests    | Email report auth                |
-| `BREVO_SENDER_EMAIL` | unit-tests    | Email report `from:` address     |
+| Secret               | Used by | Purpose                          |
+| -------------------- | ------- | -------------------------------- |
+| `GITHUB_TOKEN`       | build   | GHCR login/push (auto-provided)  |
+| `BREVO_SMTP_LOGIN`   | notify  | Email report auth                |
+| `BREVO_SMTP_KEY`     | notify  | Email report auth                |
+| `BREVO_SENDER_EMAIL` | notify  | Email report `from:` address     |
