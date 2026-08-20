@@ -22,68 +22,9 @@ permissions:
   contents: read
 
 jobs:
-  unit-tests:
-    name: Run all unit tests
-    runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: .
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Make test runner executable
-        run: chmod +x run_all_tests.sh
-
-      - name: Run all unit tests
-        run: |
-          mkdir -p logs
-          ./run_all_tests.sh 2>&1 | tee logs/test-output.log
-
-      - name: Upload test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: all-unit-test-logs-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            logs/test-output.log
-          retention-days: 7
-
-      - name: Send email notification
-        if: always()
-        uses: dawidd6/action-send-mail@v4
-        with:
-          server_address: smtp-relay.brevo.com
-          server_port: 587
-          secure: false
-          username: ${{ secrets.BREVO_SMTP_LOGIN }}
-          password: ${{ secrets.BREVO_SMTP_KEY }}
-          subject: "CI ${{ job.status }}: all unit tests (run #${{ github.run_number }})"
-          to: trieu@leocdp.com
-          from: ${{ secrets.BREVO_SENDER_EMAIL }}
-          body: |
-            Workflow: ${{ github.workflow }}
-            Job status: ${{ job.status }}
-            Repository: ${{ github.repository }}
-            Branch/ref: ${{ github.ref }}
-            Commit: ${{ github.sha }}
-            Triggered by: ${{ github.actor }}
-            Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          attachments: |
-            logs/test-output.log
-
   # ---------------------------------------------------------------------------
-  # Detect which service(s) changed so we only build the relevant image(s).
-  # `steps.filter.outputs.changes` is a JSON array of the filter names that
-  # matched — exactly the shape the build matrix needs.
+  # Detect which service(s) changed. `steps.filter.outputs.changes` is a JSON
+  # array of the matched filter names — the shape both matrices below consume.
   # ---------------------------------------------------------------------------
   changes:
     name: Detect changed services
@@ -108,13 +49,89 @@ jobs:
             frontend-admin: 'frontend-admin/**'
 
   # ---------------------------------------------------------------------------
+  # One test job per CHANGED service. Each writes a per-service result to the
+  # run's Step Summary and uploads its log. To test every service on every run
+  # instead, replace `matrix.service` with a static list of all four services.
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test (${{ matrix.service }})
+    needs: changes
+    if: ${{ needs.changes.outputs.services != '[]' && needs.changes.outputs.services != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.services) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Run unit tests
+        id: run
+        run: |
+          set +e
+          svc="${{ matrix.service }}"
+          mkdir -p logs
+          # Map each service to its test runner script(s).
+          case "$svc" in
+            ads-server)      runners="ads-server/run_unit_tests.sh" ;;
+            customer360-api) runners="customer360-api/run_unit_tests.sh" ;;
+            backend-system)  runners="backend-system/identity_resolution/run_tests.sh backend-system/segmentation/run_tests.sh" ;;
+            *)               runners="" ;;
+          esac
+          log="logs/${svc}.log"; : > "$log"
+          start=$(date +%s)
+          if [ -z "$runners" ]; then
+            result="no-tests"; emoji="[skip]"
+            echo "No unit tests defined for ${svc}." | tee -a "$log"
+          else
+            result="pass"; emoji="[pass]"
+            for r in $runners; do
+              echo "===== $r =====" | tee -a "$log"
+              if [ -f "$r" ]; then
+                bash "$r" >> "$log" 2>&1 || { result="fail"; emoji="[FAIL]"; }
+              else
+                echo "runner not found: $r" | tee -a "$log"
+                result="fail"; emoji="[FAIL]"
+              fi
+            done
+          fi
+          dur=$(( $(date +%s) - start ))
+          {
+            echo "### Test result — \`${svc}\`"
+            echo ""
+            echo "| Service | Result | Duration |"
+            echo "| --- | --- | --- |"
+            echo "| \`${svc}\` | ${emoji} ${result} | ${dur}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # One line per service for the notify job to aggregate.
+          printf '%s|%s %s|%ss\n' "$svc" "$emoji" "$result" "$dur" > "logs/${svc}.result"
+          echo "result=${result}" >> "$GITHUB_OUTPUT"
+          [ "$result" = "fail" ] && exit 1 || exit 0
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-result-${{ matrix.service }}
+          path: |
+            logs/${{ matrix.service }}.log
+            logs/${{ matrix.service }}.result
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
   # Build one image per changed service (matrix). Push to GHCR only on `main`,
-  # and only after unit-tests pass. PRs and feature branches build-only, which
-  # still catches Dockerfile breakage without publishing anything.
+  # and only after that service's tests pass. PRs and branches build-only.
   # ---------------------------------------------------------------------------
   build-and-push:
     name: Build & push (${{ matrix.service }})
-    needs: [changes, unit-tests]
+    needs: [changes, test]
     if: ${{ needs.changes.outputs.services != '[]' && needs.changes.outputs.services != '' }}
     runs-on: ubuntu-latest
     permissions:
@@ -163,3 +180,74 @@ jobs:
           # Per-service layer cache so services don't evict each other.
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # ---------------------------------------------------------------------------
+  # Aggregate every service's result into one summary table + one email.
+  # ---------------------------------------------------------------------------
+  notify:
+    name: Test summary & notify
+    needs: [changes, test]
+    if: ${{ always() && needs.changes.outputs.services != '[]' && needs.changes.outputs.services != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download per-service results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-result-*
+          merge-multiple: true
+          path: results
+
+      - name: Build summary table
+        id: sum
+        run: |
+          {
+            echo "| Service | Result | Duration |"
+            echo "| --- | --- | --- |"
+          } > table.md
+          shopt -s nullglob
+          rows=0
+          for f in results/*.result; do
+            IFS='|' read -r svc status dur < "$f"
+            echo "| \`${svc}\` | ${status} | ${dur} |" >> table.md
+            rows=$((rows+1))
+          done
+          if [ "$rows" -eq 0 ]; then
+            echo "| (none) | no relevant services | - |" >> table.md
+          fi
+          {
+            echo "## Unit test summary — changed services"
+            echo ""
+            cat table.md
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Expose the table (multiline) for the email body.
+          {
+            echo 'table<<TABLE_EOF'
+            cat table.md
+            echo 'TABLE_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send email notification
+        if: always()
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: smtp-relay.brevo.com
+          server_port: 587
+          secure: false
+          username: ${{ secrets.BREVO_SMTP_LOGIN }}
+          password: ${{ secrets.BREVO_SMTP_KEY }}
+          subject: "CI ${{ needs.test.result }}: unit tests (run #${{ github.run_number }})"
+          to: trieu@leocdp.com
+          from: ${{ secrets.BREVO_SENDER_EMAIL }}
+          body: |
+            Workflow: ${{ github.workflow }}
+            Overall test result: ${{ needs.test.result }}
+            Repository: ${{ github.repository }}
+            Branch/ref: ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Triggered by: ${{ github.actor }}
+            Changed services: ${{ needs.changes.outputs.services }}
+
+            Per-service results:
+            ${{ steps.sum.outputs.table }}
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
