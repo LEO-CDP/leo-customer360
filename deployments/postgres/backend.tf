@@ -6,7 +6,7 @@
 #   export AWS_ACCESS_KEY_ID=<vstorage key>  AWS_SECRET_ACCESS_KEY=<vstorage secret>
 #   terraform -chdir=postgres init -migrate-state -force-copy
 #
-# Requires Terraform >= 1.6 (endpoints block, use_path_style, skip_s3_checksum)
+# Requires Terraform >= 1.6 (endpoints attribute, use_path_style, skip_s3_checksum)
 # and that the state bucket already exists.
 terraform {
   backend "s3" {
@@ -14,7 +14,7 @@ terraform {
     key    = "postgres/terraform.tfstate" # per-module path; workspaces nest under env/
     region = "us-east-1"                  # vStorage requires us-east-1
 
-    endpoints {
+    endpoints = {
       s3 = "https://hcm04.vstorage.vngcloud.vn"
     }
 

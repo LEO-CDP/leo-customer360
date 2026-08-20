@@ -101,7 +101,9 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.9.5
+          # Must be >= the Terraform that wrote the remote state (migrated with
+          # 1.14.8); an older Terraform refuses state from a newer version.
+          terraform_version: 1.14.8
 
       - name: Install the deploy SSH key
         run: |
