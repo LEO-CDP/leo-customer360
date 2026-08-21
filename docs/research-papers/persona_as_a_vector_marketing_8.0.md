@@ -1417,47 +1417,24 @@ The ethical purpose is not to eliminate commercial value, but to align commercia
 
 # 20. Research Propositions
 
-The framework generates several propositions for future empirical research.
+Ten claims this framework makes, and that future data should test. Each is stated in plain language for practitioners, alongside the formal constructs a researcher would operationalize.
 
-### Proposition 1 -- Dynamic Persona
+\renewcommand{\arraystretch}{1.6}
 
-**P1:** Customer personas modeled as dynamic state vectors provide a richer representation of customer behavior than static demographic segmentation.
+| # | Plain-English Claim | What to Measure (for Researchers) |
+|:--|:--|:--|
+| **P1** | A dynamic customer profile beats a static segment label at explaining behavior. | Persona State Vector $\mathbf{P}(t)$ vs. static segment as predictors of behavior |
+| **P2** | AI can learn "who the customer is becoming" from enough behavioral history. | $\hat{\mathbf{P}}(t)=f_\theta(X_{1:t})$ accuracy as a function of history length |
+| **P3** | Customers closer to their desired identity are more likely to convert. | Persona Alignment Score (PAS) vs. conversion, controlling for context |
+| **P4** | A conversion-readiness score helps predict who is close to taking action. | PCS as a leading indicator of Conversion Propensity (CP) |
+| **P5** | That score is only trustworthy once it is checked against real outcomes. | PCS calibration (Platt scaling / isotonic regression) vs. observed conversion rates |
+| **P6** | AI-generated content works better when it reflects the customer's current and desired state. | Conditioned vs. unconditioned generation, effect on engagement/conversion |
+| **P7** | A system that learns from customer reactions personalizes better than one that doesn't. | Closed-loop (Section 10) vs. static one-time segmentation, effect on TV |
+| **P8** | Focusing on customer transformation, not just conversion, builds more long-term value. | Transformation Value (TVa) vs. short-term-conversion-only optimization |
+| **P9** | Customers who are actively moving toward their goal stay longer and spend more. | Transformation Velocity (TV) vs. retention and lifetime value, controlling for baseline propensity |
+| **P10** | Aligning customer goals with business goals builds more trust than chasing quick sales. | Customer-goal/business-goal alignment vs. trust and long-term retention |
 
-### Proposition 2 -- Behavioral Inference
-
-**P2:** Deep Learning models can improve estimation of latent customer persona states when sufficient longitudinal behavioral data are available.
-
-### Proposition 3 -- Persona Alignment
-
-**P3:** Greater alignment between a customer's current and desired persona is associated with a higher probability of completing the desired transformation, controlling for context and opportunity.
-
-### Proposition 4 -- Conversion Readiness
-
-**P4:** Persona Conversion Score provides a useful intermediate signal for estimating conversion propensity when derived from relevant behavioral signals.
-
-### Proposition 5 -- Calibration
-
-**P5:** Calibration against historical outcomes improves the reliability of probabilities derived from Persona Conversion Scores.
-
-### Proposition 6 -- Generative Personalization
-
-**P6:** Generative AI can improve the relevance of personalized interventions when generation is conditioned on current persona, desired persona, context, and constraints.
-
-### Proposition 7 -- Closed-Loop Personalization
-
-**P7:** Continuous feedback between behavioral observation, persona estimation, intervention, and subsequent behavior produces more adaptive personalization than one-time segmentation.
-
-### Proposition 8 -- Transformation-Oriented Marketing
-
-**P8:** Marketing systems optimized for meaningful customer transformation can create higher long-term customer value than systems optimized exclusively for short-term conversion.
-
-### Proposition 9 -- Transformation Velocity
-
-**P9:** Positive transformation velocity is associated with stronger retention and downstream value, controlling for baseline customer propensity.
-
-### Proposition 10 -- Ethical Alignment
-
-**P10:** Personalization strategies that align customer goals with business outcomes can produce stronger long-term trust than strategies optimized primarily for immediate conversion.
+\renewcommand{\arraystretch}{1}
 
 \newpage
 
@@ -1731,9 +1708,11 @@ The transaction remains important. But it becomes **a consequence within a large
 
 > **The future of marketing is not only about influencing what people buy. It is about helping people become who they aspire to be.**
 
----
+\newpage
 
 ## References
+
+### Theoretical Foundations: Psychology and Physics
 
 Einstein, A. (1915). *The Field Equations of Gravitation*. 
 *Sitzungsberichte der Preussischen Akademie der Wissenschaften*, 844–847.
@@ -1749,9 +1728,13 @@ Jung, C. G. (1959). *The Archetypes and the Collective Unconscious*.
 In *The Collected Works of C. G. Jung, Vol. 9, Part 1*. 
 Princeton University Press.
 
+### Marketing and Customer Experience
+
 Kotler, P., Kartajaya, H., & Setiawan, I. (2026). 
 *Marketing 7.0: A Guide for Thinking Marketers in the Age of AI*. 
 John Wiley & Sons.
+
+### Identity Resolution and Data Integration
 
 Christen, P. (2012). 
 *Data Matching: Concepts and Techniques for Record Linkage, 
@@ -1762,6 +1745,88 @@ https://doi.org/10.1007/978-3-642-31164-2
 Elmagarmid, A. K., Ipeirotis, P. G., & Verykios, V. S. (2007). 
 Duplicate record detection: A survey. 
 *IEEE Transactions on Knowledge and Data Engineering*, 19(1), 1–16.
+
+### Machine Learning: Sequence Models and Representation Learning
+
+Hochreiter, S., & Schmidhuber, J. (1997). 
+Long short-term memory. 
+*Neural Computation*, 9(8), 1735–1780.
+https://doi.org/10.1162/neco.1997.9.8.1735
+
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., ... & Polosukhin, I. (2017).
+Attention is all you need.
+*Advances in Neural Information Processing Systems (NeurIPS)*, 30, 5998–6008.
+
+### Kalman Filtering and Bayesian State Estimation
+
+Kalman, R. E. (1960).
+A new approach to linear filtering and prediction problems.
+*Journal of Basic Engineering*, 82(1), 35–45.
+https://doi.org/10.1115/1.3662552
+
+### Contextual Bandits and Exploration-Exploitation
+
+Thompson, W. R. (1933).
+On the likelihood that one unknown probability exceeds another in the light of the evidence of two samples.
+*Biometrika*, 25(3–4), 285–294.
+
+Chu, W., Li, L., Reyzin, L., & Schapire, R. E. (2011).
+Contextual bandits with stochastic experts.
+*Proceedings of the 24th International Conference on Algorithmic Learning Theory*, 405–418.
+
+Li, L., Chu, W., Langford, J., & Schapire, R. E. (2010).
+A contextual-bandit approach to personalized news recommendation.
+*Proceedings of the 19th International Conference on World Wide Web*, 661–670.
+https://doi.org/10.1145/1772690.1772758
+
+### Offline and Batch-Constrained Reinforcement Learning
+
+Kumar, A., Zhou, A., Tucker, G., & Levine, S. (2020).
+Conservative Q-learning for offline reinforcement learning.
+*Advances in Neural Information Processing Systems (NeurIPS)*, 33, 1346–1357.
+
+Fujimoto, S., Meger, D., & Precup, D. (2019).
+Off-policy deep reinforcement learning without exploration.
+*International Conference on Machine Learning (ICML)*, 2052–2062.
+
+### Off-Policy Evaluation and Importance Sampling
+
+Precup, D., Sutton, R. S., & Singh, S. P. (2000).
+Eligibility traces for off-policy policy evaluation.
+*International Conference on Machine Learning (ICML)*, 759–766.
+
+Thomas, P., & Brunskill, E. (2016).
+Data-efficient off-policy policy evaluation for reinforcement learning.
+*International Conference on Machine Learning (ICML)*, 2139–2148.
+
+### Causal Inference and Heterogeneous Treatment Effects
+
+Kunzel, S. R., Sekhon, J. S., Bickel, P. J., & Yu, B. (2019).
+Metalearners for estimating heterogeneous treatment effects using machine learning.
+*Proceedings of the National Academy of Sciences*, 116(10), 4156–4165.
+https://doi.org/10.1073/pnas.1804597116
+
+Athey, S., & Wager, S. (2019).
+Estimating treatment effects with causal forests.
+*Journal of the American Statistical Association*, 114(528), 1125–1136.
+https://doi.org/10.1080/01621459.2019.1604365
+
+Künzel, S. R., Sekhon, J. S., Bickel, P. J., & Yu, B. (2019).
+Generalized random forests.
+*Annals of Statistics*, 46(3), 1148–1178.
+
+### Probability Calibration
+
+Platt, J. C. (1999).
+Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods.
+*Advances in Large Margin Classifiers*, 10(3), 61–74.
+
+Niculescu-Mizil, A., & Caruana, R. (2005).
+Predicting good probabilities with supervised learning.
+*Proceedings of the 22nd International Conference on Machine Learning (ICML)*, 625–632.
+https://doi.org/10.1145/1102351.1102430
+
+### References: Psychology and Identity
 
 Library of Congress. 
 *The Red Book of Carl Jung: The Red Book and Beyond*. 
