@@ -118,3 +118,7 @@ curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && echo "   health OK 
 sudo docker ps --filter name=customer360-frontend --format '   running: {{.Names}} ({{.Status}})'
 REMOTE
 echo ">> Done. Expose it via the LB (add a 'frontend' backend -> <box-ip>:$PORT), then open http://<lb>:$PORT/"
+
+# --- release ledger: record this deploy to the GitHub Deployments API (best-effort) ---
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/record_deploy.sh"
+record_deployment "$ENV" "$SERVICE" "${IMAGE:-local}" success

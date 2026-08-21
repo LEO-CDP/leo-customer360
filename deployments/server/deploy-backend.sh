@@ -108,3 +108,7 @@ REMOTE
 
 echo ">> Done. Dagster UI is on the VM at :3000. Reach it from your laptop with an SSH tunnel:"
 echo "   ssh -i $SSH_KEY -L 3000:localhost:3000 $BASTION   # then open http://localhost:3000"
+
+# --- release ledger: record this deploy to the GitHub Deployments API (best-effort) ---
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/record_deploy.sh"
+record_deployment "$ENV" "$SERVICE" "${IMAGE:-local}" success

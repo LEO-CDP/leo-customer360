@@ -1,80 +1,119 @@
 name: CD
 
 # ---------------------------------------------------------------------------
-# Continuous Delivery. This workflow NEVER runs on its own push — it only fires
-# after the CI workflow finishes (workflow_run), and then deploys only when:
-#   • CI concluded successfully, AND
-#   • the ref CI ran on is a deploy target:
-#       main + commit title contains "--deploy-uat"  -> uat  (pulls :latest)
-#       vX.Y.Z tag                                    -> prod (pulls :vX.Y.Z)
-# Everything else (main pushes without the marker, feature branches, PRs,
-# failed CI) is skipped. The "--deploy-uat" marker makes uat deploys OPT-IN per
-# commit rather than firing on every push to main.
+# Continuous Delivery. Two ways in:
 #
-# It deploys by PULLING the image CI already built+pushed to GHCR — the module
-# scripts run in ghcr mode (BUILD_LOCAL unset), so nothing is rebuilt here.
+# 1. workflow_run (automatic) — fires after CI finishes and deploys only when:
+#      • CI concluded successfully, AND
+#      • the ref CI ran on is a deploy target:
+#          main + commit title contains "--deploy-uat"  -> uat  (pulls :latest)
+#          vX.Y.Z tag                                    -> prod (pulls :vX.Y.Z)
+#    Everything else (main pushes without the marker, feature branches, PRs,
+#    failed CI) is skipped. The "--deploy-uat" marker makes uat deploys OPT-IN
+#    per commit rather than firing on every push to main.
+#
+# 2. workflow_dispatch (manual) — Actions "Run workflow" form (or `gh workflow
+#    run cd.yml -f ...`) to deploy/ROLL BACK any environment to any image tag:
+#      environment: uat | prod
+#      image_tag:   v1.2.3 | sha-<git> | latest   (immutable tags for rollback)
+#      services:    comma list (default: api,backend,ads,frontend)
+#    This is the rollback path — pick a previously-built tag and redeploy it.
+#
+# It deploys by PULLING the image from GHCR — the module scripts run in ghcr
+# mode (BUILD_LOCAL unset), so nothing is rebuilt here.
 #
 # Required repo secrets:
 #   DEPLOY_SSH_KEY   private key for the deploy user on the VNG Cloud VMs
 #   DB_PASSWORD      -> TF_VAR_db_password    (read by the app deploy scripts)
 #   REDIS_PASSWORD   -> TF_VAR_redis_password (optional; cache stays off if unset)
+#   VSTORAGE_ACCESS_KEY / VSTORAGE_SECRET_KEY -> S3/vStorage remote-state creds
 # GHCR pulls use the built-in GITHUB_TOKEN (packages: read).
 # The 'prod' GitHub Environment should carry required-reviewer protection so a
-# release deploy waits for manual approval.
+# release (or manual prod rollback) waits for manual approval.
 # ---------------------------------------------------------------------------
 
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        type: choice
+        options: [uat, prod]
+        required: true
+      image_tag:
+        description: "Image tag to deploy — use an immutable tag to roll back (vX.Y.Z or sha-<git>); avoid 'latest'"
+        type: string
+        required: true
+      services:
+        description: "Comma-separated services to (re)deploy"
+        type: string
+        default: "api,backend,ads,frontend"
+        required: false
 
 permissions:
   contents: read
   packages: read
 
 concurrency:
-  group: cd-${{ github.event.workflow_run.head_branch }}
+  # Serialise per environment (single writer). For workflow_run the branch/tag
+  # name maps to the env; for a manual run the chosen environment does.
+  group: cd-${{ github.event.workflow_run.head_branch || inputs.environment }}
   cancel-in-progress: false
 
 jobs:
-  # Decide whether and where to deploy from the finished CI run.
+  # Decide whether/where/what to deploy — from the finished CI run, or from the
+  # manual dispatch inputs.
   select:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       deploy: ${{ steps.pick.outputs.deploy }}
       env: ${{ steps.pick.outputs.env }}
       tag: ${{ steps.pick.outputs.tag }}
+      services: ${{ steps.pick.outputs.services }}
     steps:
       - name: Pick target environment
         id: pick
         env:
-          # For a branch push this is the branch name; for a tag push it is the
-          # tag name (e.g. v1.2.3).
+          EVENT: ${{ github.event_name }}
+          # workflow_run context (branch name, or tag name for tag pushes) + commit msg
           REF: ${{ github.event.workflow_run.head_branch }}
-          # Full message of the commit CI ran on; its first line is the title.
           MSG: ${{ github.event.workflow_run.head_commit.message }}
+          # workflow_dispatch inputs
+          IN_ENV: ${{ inputs.environment }}
+          IN_TAG: ${{ inputs.image_tag }}
+          IN_SERVICES: ${{ inputs.services }}
         run: |
-          TITLE="$(printf '%s\n' "$MSG" | head -n1)"
-          if [[ "$REF" == "main" ]]; then
-            # uat is OPT-IN: only deploy when the commit TITLE carries the marker.
-            if [[ "$TITLE" == *"--deploy-uat"* ]]; then
-              echo "deploy=true" >> "$GITHUB_OUTPUT"
-              echo "env=uat"     >> "$GITHUB_OUTPUT"
-              echo "tag=latest"  >> "$GITHUB_OUTPUT"
-              echo "→ deploy uat (title opted in: --deploy-uat)"
+          DEFAULT_SVC="api,backend,ads,frontend"
+          if [[ "$EVENT" == "workflow_dispatch" ]]; then
+            svc="${IN_SERVICES:-$DEFAULT_SVC}"
+            {
+              echo "deploy=true"
+              echo "env=$IN_ENV"
+              echo "tag=$IN_TAG"
+              echo "services=$svc"
+            } >> "$GITHUB_OUTPUT"
+            echo "→ manual deploy/rollback: env=$IN_ENV tag=$IN_TAG services=$svc"
+          else
+            TITLE="$(printf '%s\n' "$MSG" | head -n1)"
+            if [[ "$REF" == "main" ]]; then
+              if [[ "$TITLE" == *"--deploy-uat"* ]]; then
+                { echo "deploy=true"; echo "env=uat"; echo "tag=latest"; echo "services=$DEFAULT_SVC"; } >> "$GITHUB_OUTPUT"
+                echo "→ deploy uat (title opted in: --deploy-uat)"
+              else
+                echo "deploy=false" >> "$GITHUB_OUTPUT"
+                echo "→ skip uat: commit title has no --deploy-uat marker"
+              fi
+            elif [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              { echo "deploy=true"; echo "env=prod"; echo "tag=$REF"; echo "services=$DEFAULT_SVC"; } >> "$GITHUB_OUTPUT"
+              echo "→ deploy prod (tag $REF)"
             else
               echo "deploy=false" >> "$GITHUB_OUTPUT"
-              echo "→ skip uat: commit title has no --deploy-uat marker"
+              echo "→ skip: ref '$REF' is not main(+--deploy-uat) nor a vX.Y.Z tag"
             fi
-          elif [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-            echo "env=prod"    >> "$GITHUB_OUTPUT"
-            echo "tag=$REF"    >> "$GITHUB_OUTPUT"
-            echo "→ deploy prod (tag $REF)"
-          else
-            echo "deploy=false" >> "$GITHUB_OUTPUT"
-            echo "→ skip: ref '$REF' is not main(+--deploy-uat) nor a vX.Y.Z tag"
           fi
 
   deploy:
@@ -86,17 +125,21 @@ jobs:
     permissions:
       contents: read
       packages: read
+      deployments: write   # record each deploy to the GitHub Deployments API (release ledger)
     env:
       ENVIRONMENT: ${{ needs.select.outputs.env }}
       IMAGE_TAG: ${{ needs.select.outputs.tag }}   # consumed by lib/ghcr.sh resolve_tag
+      SERVICES: ${{ needs.select.outputs.services }}
       # vStorage S3 creds for the remote Terraform backend (state read on the runner).
       AWS_ACCESS_KEY_ID: ${{ secrets.VSTORAGE_ACCESS_KEY }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.VSTORAGE_SECRET_KEY }}
     steps:
-      - name: Checkout the exact commit CI validated
+      - name: Checkout the deploy scripts
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          # For an automatic run, use the exact commit CI validated; for a manual
+          # run, use the default branch's scripts (the image itself is pinned by tag).
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -124,8 +167,8 @@ jobs:
           done
 
       # Deploys to the vSERVERS ONLY: pull the image from GHCR and `docker run`
-      # over SSH for the four app containers. `--only` restricts execution to the
-      # app steps, so CD NEVER runs the infra Terraform deploy.sh scripts —
+      # over SSH for the selected app containers. `--only` restricts execution to
+      # the app steps, so CD NEVER runs the infra Terraform deploy.sh scripts —
       # server (vServer provisioning), storage (vStorage), postgres (vDB), or
       # load_balancer (vLB) are all managed outside this pipeline.
       - name: Deploy app containers to the vServers (pull from GHCR)
@@ -135,7 +178,8 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
           TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}   # lets lib/record_deploy.sh call `gh api` (Deployments ledger)
         run: |
           # Invoke via `bash` (not ./) — scripts committed from Windows lack the
           # git executable bit, so ./deploy-all.sh would fail with exit 126.
-          bash deploy-all.sh "$ENVIRONMENT" --only api,backend,ads,frontend -y
+          bash deploy-all.sh "$ENVIRONMENT" --only "$SERVICES" -y
