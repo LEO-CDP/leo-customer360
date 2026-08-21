@@ -1714,127 +1714,73 @@ The transaction remains important. But it becomes **a consequence within a large
 
 ### Theoretical Foundations: Psychology and Physics
 
-Einstein, A. (1915). *The Field Equations of Gravitation*. 
-*Sitzungsberichte der Preussischen Akademie der Wissenschaften*, 844–847.
+Einstein, A. (1915). *The Field Equations of Gravitation*. *Sitzungsberichte der Preussischen Akademie der Wissenschaften*, 844–847.
 
-Einstein, A. (1916). *Die Grundlage der allgemeinen Relativitätstheorie*. 
-*Annalen der Physik*, 49, 769–822. 
-https://doi.org/10.1002/andp.19163540702
+Einstein, A. (1916). *Die Grundlage der allgemeinen Relativitätstheorie*. *Annalen der Physik*, 49, 769–822. https://doi.org/10.1002/andp.19163540702
 
-Jung, C. G. (1921). *Psychologische Typen*. 
-Zürich: Rascher & Cie.
+Jung, C. G. (1921). *Psychologische Typen*. Zürich: Rascher & Cie.
 
-Jung, C. G. (1959). *The Archetypes and the Collective Unconscious*. 
-In *The Collected Works of C. G. Jung, Vol. 9, Part 1*. 
-Princeton University Press.
+Jung, C. G. (1959). *The Archetypes and the Collective Unconscious*. In *The Collected Works of C. G. Jung, Vol. 9, Part 1*. Princeton University Press.
 
 ### Marketing and Customer Experience
 
-Kotler, P., Kartajaya, H., & Setiawan, I. (2026). 
-*Marketing 7.0: A Guide for Thinking Marketers in the Age of AI*. 
-John Wiley & Sons.
+Kotler, P., Kartajaya, H., & Setiawan, I. (2026). *Marketing 7.0: A Guide for Thinking Marketers in the Age of AI*. John Wiley & Sons.
 
 ### Identity Resolution and Data Integration
 
-Christen, P. (2012). 
-*Data Matching: Concepts and Techniques for Record Linkage, 
-Entity Resolution, and Duplicate Detection*. 
-Springer. 
-https://doi.org/10.1007/978-3-642-31164-2
+Christen, P. (2012). *Data Matching: Concepts and Techniques for Record Linkage, Entity Resolution, and Duplicate Detection*. Springer. https://doi.org/10.1007/978-3-642-31164-2
 
-Elmagarmid, A. K., Ipeirotis, P. G., & Verykios, V. S. (2007). 
-Duplicate record detection: A survey. 
-*IEEE Transactions on Knowledge and Data Engineering*, 19(1), 1–16.
+Elmagarmid, A. K., Ipeirotis, P. G., & Verykios, V. S. (2007). Duplicate record detection: A survey. *IEEE Transactions on Knowledge and Data Engineering*, 19(1), 1–16.
 
 ### Machine Learning: Sequence Models and Representation Learning
 
-Hochreiter, S., & Schmidhuber, J. (1997). 
-Long short-term memory. 
-*Neural Computation*, 9(8), 1735–1780.
-https://doi.org/10.1162/neco.1997.9.8.1735
+Hochreiter, S., & Schmidhuber, J. (1997). Long short-term memory. *Neural Computation*, 9(8), 1735–1780. https://doi.org/10.1162/neco.1997.9.8.1735
 
-Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., ... & Polosukhin, I. (2017).
-Attention is all you need.
-*Advances in Neural Information Processing Systems (NeurIPS)*, 30, 5998–6008.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., ... & Polosukhin, I. (2017). Attention is all you need. *Advances in Neural Information Processing Systems (NeurIPS)*, 30, 5998–6008.
 
 ### Kalman Filtering and Bayesian State Estimation
 
-Kalman, R. E. (1960).
-A new approach to linear filtering and prediction problems.
-*Journal of Basic Engineering*, 82(1), 35–45.
-https://doi.org/10.1115/1.3662552
+Kalman, R. E. (1960). A new approach to linear filtering and prediction problems. *Journal of Basic Engineering*, 82(1), 35–45. https://doi.org/10.1115/1.3662552
 
 ### Contextual Bandits and Exploration-Exploitation
 
-Thompson, W. R. (1933).
-On the likelihood that one unknown probability exceeds another in the light of the evidence of two samples.
-*Biometrika*, 25(3–4), 285–294.
+Thompson, W. R. (1933). On the likelihood that one unknown probability exceeds another in the light of the evidence of two samples. *Biometrika*, 25(3–4), 285–294.
 
-Chu, W., Li, L., Reyzin, L., & Schapire, R. E. (2011).
-Contextual bandits with stochastic experts.
-*Proceedings of the 24th International Conference on Algorithmic Learning Theory*, 405–418.
+Chu, W., Li, L., Reyzin, L., & Schapire, R. E. (2011). *Contextual Bandits with Linear Payoff Functions*. Proceedings of the Fourteenth International Conference on Artificial Intelligence and Statistics (AISTATS), 208–214.
 
-Li, L., Chu, W., Langford, J., & Schapire, R. E. (2010).
-A contextual-bandit approach to personalized news recommendation.
-*Proceedings of the 19th International Conference on World Wide Web*, 661–670.
-https://doi.org/10.1145/1772690.1772758
+Li, L., Chu, W., Langford, J., & Schapire, R. E. (2010). A contextual-bandit approach to personalized news recommendation. *Proceedings of the 19th International Conference on World Wide Web*, 661–670. https://doi.org/10.1145/1772690.1772758
 
 ### Offline and Batch-Constrained Reinforcement Learning
 
-Kumar, A., Zhou, A., Tucker, G., & Levine, S. (2020).
-Conservative Q-learning for offline reinforcement learning.
-*Advances in Neural Information Processing Systems (NeurIPS)*, 33, 1346–1357.
+Kumar, A., Zhou, A., Tucker, G., & Levine, S. (2020). Conservative Q-learning for offline reinforcement learning. *Advances in Neural Information Processing Systems (NeurIPS)*, 33, 1346–1357.
 
-Fujimoto, S., Meger, D., & Precup, D. (2019).
-Off-policy deep reinforcement learning without exploration.
-*International Conference on Machine Learning (ICML)*, 2052–2062.
+Fujimoto, S., Meger, D., & Precup, D. (2019). Off-policy deep reinforcement learning without exploration. *International Conference on Machine Learning (ICML)*, 2052–2062.
 
 ### Off-Policy Evaluation and Importance Sampling
 
-Precup, D., Sutton, R. S., & Singh, S. P. (2000).
-Eligibility traces for off-policy policy evaluation.
-*International Conference on Machine Learning (ICML)*, 759–766.
+Precup, D., Sutton, R. S., & Singh, S. P. (2000). Eligibility traces for off-policy policy evaluation. *International Conference on Machine Learning (ICML)*, 759–766.
 
-Thomas, P., & Brunskill, E. (2016).
-Data-efficient off-policy policy evaluation for reinforcement learning.
-*International Conference on Machine Learning (ICML)*, 2139–2148.
+Thomas, P., & Brunskill, E. (2016). Data-efficient off-policy policy evaluation for reinforcement learning. *International Conference on Machine Learning (ICML)*, 2139–2148.
 
 ### Causal Inference and Heterogeneous Treatment Effects
 
-Kunzel, S. R., Sekhon, J. S., Bickel, P. J., & Yu, B. (2019).
-Metalearners for estimating heterogeneous treatment effects using machine learning.
-*Proceedings of the National Academy of Sciences*, 116(10), 4156–4165.
-https://doi.org/10.1073/pnas.1804597116
+Kunzel, S. R., Sekhon, J. S., Bickel, P. J., & Yu, B. (2019). Metalearners for estimating heterogeneous treatment effects using machine learning. *Proceedings of the National Academy of Sciences*, 116(10), 4156–4165. https://doi.org/10.1073/pnas.1804597116
 
-Athey, S., & Wager, S. (2019).
-Estimating treatment effects with causal forests.
-*Journal of the American Statistical Association*, 114(528), 1125–1136.
-https://doi.org/10.1080/01621459.2019.1604365
+Wager, S., & Athey, S. (2018). *Estimation and Inference of Heterogeneous Treatment Effects using Random Forests*. Journal of the American Statistical Association, 113(523), 1228–1242.
 
-Künzel, S. R., Sekhon, J. S., Bickel, P. J., & Yu, B. (2019).
-Generalized random forests.
-*Annals of Statistics*, 46(3), 1148–1178.
+Athey, S., Tibshirani, J., & Wager, S. (2019). *Generalized random forests*. Annals of Statistics, 47(2), 1148–1178.
 
 ### Probability Calibration
 
-Platt, J. C. (1999).
-Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods.
-*Advances in Large Margin Classifiers*, 10(3), 61–74.
+Platt, J. C. (1999). Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods. *Advances in Large Margin Classifiers*, 10(3), 61–74.
 
-Niculescu-Mizil, A., & Caruana, R. (2005).
-Predicting good probabilities with supervised learning.
-*Proceedings of the 22nd International Conference on Machine Learning (ICML)*, 625–632.
-https://doi.org/10.1145/1102351.1102430
+Niculescu-Mizil, A., & Caruana, R. (2005). Predicting good probabilities with supervised learning. *Proceedings of the 22nd International Conference on Machine Learning (ICML)*, 625–632. https://doi.org/10.1145/1102351.1102430
 
 ### References: Psychology and Identity
 
-Library of Congress. 
-*The Red Book of Carl Jung: The Red Book and Beyond*. 
-U.S. Library of Congress.
+Library of Congress. *The Red Book of Carl Jung: The Red Book and Beyond*. U.S. Library of Congress.
 
-American Psychological Association. 
-*APA Dictionary of Psychology*. 
-Entries on self and individuation.
+American Psychological Association. *APA Dictionary of Psychology*. Entries on self and individuation.
 
 --- 
 
