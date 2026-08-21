@@ -65,7 +65,7 @@ This framework is proposed as a conceptual contribution to the author's Marketin
 
 **Keywords:** Persona, Customer 360, Personalization, Deep Learning, Generative AI, Conversion Propensity, Customer Transformation, Attractor, Marketing 8.0, Customer Journey, Next Best Action
 
-
+---
 
 # 1. Introduction
 
@@ -381,15 +381,15 @@ Thus:
 Consider a fitness example:
 
 $$
+\begin{aligned}
 \text{"I do not exercise"}
-\rightarrow
-\text{"I am interested in fitness"}
-\rightarrow
-\text{"I exercise occasionally"}
-\rightarrow
-\text{"I exercise regularly"}
-\rightarrow
-\text{"I identify as a runner"}
+&\rightarrow \text{"I am interested in fitness"}
+\\[6pt]
+&\rightarrow \text{"I exercise occasionally"}
+&\rightarrow \text{"I exercise regularly"}
+\\[6pt]
+&\rightarrow \text{"I identify as a runner"}
+\end{aligned}
 $$
 
 The commercial transaction may happen anywhere along the journey. A shoe purchase might occur in the middle, rather than at the end. The deeper process is the transformation of behavior and identity.
@@ -1128,6 +1128,8 @@ where:
 
 The weights can be adapted by domain and strategy. The important principle is that value should not be reduced to short-term revenue.
 
+![Metrics for Persona Transformation](persona-metrics.png){width=95%}
+
 \newpage
 
 # 19. Ethical Persona Alignment
@@ -1296,81 +1298,165 @@ Finally, product strategy and customer experience become connected. A product is
 
 # 22. Limitations and Research Agenda
 
-This framework is theoretical and should not be interpreted as an established psychological, physical, or marketing law.
+This framework is a **proposed theoretical model**. It should not be interpreted as an established psychological, physical, or marketing law.
 
-First, vector representations of human identity are necessarily reductive. Human personality, consciousness, culture, meaning, and social identity cannot be completely represented by numerical coordinates.
+### 22.1 Limitations
 
-Second, the concept of an attractor is borrowed from mathematical and dynamical-system thinking. It is a modeling construct rather than evidence that psychological development follows physical laws.
+**1. Human identity is difficult to represent numerically.**
 
-Third, Jung's theory is historically influential but is not equivalent to contemporary empirical personality science. The framework uses Jung primarily as a conceptual foundation for Persona, Self, identity, and transformation.
+A Persona Vector is necessarily a simplification. Human personality, consciousness, culture, meaning, and social identity cannot be fully represented by numerical coordinates.
 
-Fourth, the proposed dimensions of the Persona State Vector are illustrative. Empirical research is required to determine which dimensions are stable, measurable, predictive, and ethically appropriate.
+**2. The "attractor" is a conceptual model.**
 
-Fifth, the Persona Conversion Score is a business scoring construct. A score of 84 is not an 84\% probability unless the model is explicitly calibrated and validated for that interpretation.
+The idea of an attractor is borrowed from dynamical-systems thinking. It provides a useful way to describe movement toward a desired state, but it does not imply that human development follows physical laws.
 
-Sixth, causal inference is difficult. A customer may move toward a desired persona because of external life events rather than because of marketing intervention.
+**3. Jung provides a conceptual, not empirical, foundation.**
 
-Seventh, desired personas can be ambiguous or unstable. Customers may have multiple goals, conflicting identities, or goals that change over time.
+Jung's theory is historically influential, but it is not equivalent to contemporary empirical personality science. In this framework, Jung is used primarily to explain **Persona, Self, identity, and transformation**.
 
-Eighth, generative AI can introduce hallucinations, bias, inappropriate recommendations, or unwanted persuasion. Responsible deployment requires guardrails, evaluation, and human oversight in higher-risk contexts.
+**4. Persona dimensions require empirical validation.**
 
-The research agenda therefore includes five priorities:
+The dimensions proposed for the Persona State Vector are illustrative. Future research must determine which dimensions are measurable, stable, predictive, and ethically appropriate.
 
-1. establish reliable persona dimensions;
-2. compare alternative persona distance metrics;
-3. evaluate longitudinal Deep Learning models;
-4. test whether transformation-oriented interventions outperform conversion-only strategies;
-5. develop robust ethical and governance mechanisms.
+**5. Conversion Score is not automatically probability.**
 
+Persona Conversion Score is a business scoring construct.
+
+For example:
+
+> **A score of 84/100 does not mean an 84% probability of conversion.**
+
+To interpret the score as probability, the model must be calibrated and validated against historical outcomes.
+
+**6. Correlation does not establish causation.**
+
+A customer's Persona may change because of factors outside marketing, such as life events, economic conditions, relationships, health, or changes in personal goals.
+
+Therefore:
+
+> **Observed transformation does not necessarily mean that marketing caused the transformation.**
+
+**7. Desired Personas can change.**
+
+Customers may have multiple goals, conflicting identities, or changing aspirations. The Desired Persona should therefore be treated as a **dynamic state**, rather than a permanent target.
+
+**8. AI introduces new risks.**
+
+Deep Learning and Generative AI can introduce bias, hallucinations, inappropriate recommendations, privacy risks, or unwanted persuasion.
+
+Responsible deployment therefore requires:
+
+- clear objectives;
+- data governance;
+- model evaluation;
+- transparency;
+- human oversight in higher-risk contexts;
+- mechanisms for customer control and rejection.
+
+### 22.2 Research Agenda
+
+The framework creates several directions for future research.
+
+| Priority | Research Question |
+|---|---|
+| **1. Persona Dimensions** | Which dimensions provide a reliable representation of a customer's Persona State? |
+| **2. Persona Distance** | Which distance metrics best represent meaningful differences between personas? |
+| **3. Longitudinal Learning** | Can Deep Learning reliably detect Persona changes over time? |
+| **4. Transformation Effects** | Do transformation-oriented interventions produce better long-term outcomes than conversion-only strategies? |
+| **5. Ethics and Governance** | How can AI personalization support transformation without manipulating customer autonomy? |
+
+Future research should therefore move from **conceptual modeling** toward **empirical validation**:
+
+$$
+\text{Theory}
+\rightarrow
+\text{Measurement}
+\rightarrow
+\text{Experiment}
+\rightarrow
+\text{Validation}
+\rightarrow
+\text{Application}
+$$
+
+The ultimate research challenge is not simply to predict **what customers will do**, but to determine whether AI can reliably understand **who customers are, how they are changing, and which interventions create meaningful value without compromising human autonomy**.
 
 
 # 23. Conclusion
 
-This paper proposes a shift in the fundamental unit of personalization.
+This paper proposes a fundamental shift in how personalization understands the customer.
 
 The customer should not be treated simply as:
 
 > **a segment, profile, or conversion opportunity.**
 
-The customer can instead be modeled as:
+Instead, the customer can be understood as:
 
-> **a dynamic persona moving through a space of possible states.**
+> **a dynamic Persona moving through a space of possible states.**
 
-The framework can be summarized as:
+![Persona as a Vector: From Human Understanding to Transformation](persona-as-vector.png){width=95%}
+
+The proposed framework can be summarized as:
 
 $$
-\boxed{
+\begin{aligned}
 \text{Current Persona}
+&\rightarrow \text{Desired Persona}
+\rightarrow \text{Transformation Gap}
+\\[6pt]
+&\rightarrow \text{Next Best Transformation Action}
+\rightarrow \text{Experience}
+\rightarrow \text{New Persona}
+\end{aligned}
+$$
+
+Within this framework, each technology has a distinct role.
+
+**Deep Learning** provides the mechanism for **understanding the current Persona state** from observable behavioral signals.
+
+**Persona Conversion Scoring** provides the mechanism for **estimating readiness for action**.
+
+**Generative AI** provides the mechanism for **creating adaptive and contextual interventions**.
+
+**Personalization** provides the mechanism for **delivering those interventions to the individual**.
+
+**Customer Journey** provides the mechanism for **observing how the Persona changes over time**.
+
+The **Desired Persona** functions as a conceptual **attractor**: a state toward which the customer may move through a sequence of experiences, decisions, and behavioral changes.
+
+The system therefore becomes a continuous learning loop:
+
+$$
+\text{Observe}
 \rightarrow
-\text{Desired Persona}
+\text{Infer}
 \rightarrow
-\text{Transformation Gap}
-\rightarrow
-\text{Next Best Transformation Action}
+\text{Act}
 \rightarrow
 \text{Experience}
 \rightarrow
-\text{New Persona}
-}
+\text{Observe Again}
 $$
 
-Deep Learning provides the mechanism for **understanding the current state**.
+The deeper implication is that a consumer decision should not be viewed as an isolated event.
 
-Persona Conversion Scoring provides the mechanism for **estimating readiness for action**.
+A purchase, click, subscription, renewal, or rejection is often the visible consequence of a deeper chain involving:
 
-Generative AI provides the mechanism for **creating adaptive interventions**.
-
-Personalization provides the mechanism for **delivering those interventions**.
-
-Customer Journey provides the mechanism for **observing transformation over time**.
-
-And the Desired Persona functions as a conceptual **attractor**.
-
-The central proposition is therefore:
-
-> **The future of personalization is not merely about giving each person a different message. It is about understanding the person's current state, recognizing the state they aspire to reach, and designing experiences that responsibly help them move from one to the other.**
-
-A consumer decision is often not the beginning of the story. It is a visible consequence of a deeper chain of identity, aspiration, need, intent, context, and behavior.
+$$
+\text{Identity}
+\rightarrow
+\text{Aspiration}
+\rightarrow
+\text{Need}
+\rightarrow
+\text{Intent}
+\rightarrow
+\text{Context}
+\rightarrow
+\text{Behavior}
+\rightarrow
+\text{Choice}
+$$
 
 Therefore:
 
@@ -1380,29 +1466,95 @@ $$
 }
 $$
 
-In this sense, the ultimate object of Marketing 8.0 is not the transaction.
+This changes the fundamental question of personalization.
 
-It is **transformation**.
+Instead of asking:
 
-\newpage
+> **"What should we sell to this customer?"**
+
+the system asks:
+
+> **"Who is this person now, who do they want to become, and what experience could responsibly help them move toward that state?"**
+
+This distinction is critical for the future of AI-driven marketing. A more powerful personalization engine should not simply become better at predicting and manipulating customer behavior. It should become better at **understanding human context, respecting customer agency, and creating meaningful value through transformation**.
+
+In this sense, the future of personalization is not merely about giving every person a different message.
+
+It is about:
+
+> **understanding the current Persona, recognizing the Desired Persona, reducing the Transformation Gap, and creating experiences that help the person move from one state to another.**
+
+The ultimate object of Marketing 8.0 is therefore not simply the transaction.
+
+$$
+\boxed{
+\text{Marketing}
+\neq
+\text{Optimization of Transactions}
+}
+$$
+
+Rather:
+
+$$
+\boxed{
+\text{Marketing 8.0}
+=
+\text{Understanding}
++
+\text{Personalization}
++
+\text{Transformation}
++
+\text{Value}
+}
+$$
+
+The transaction remains important. But it becomes **a consequence within a larger human journey**.
+
+> **The future of marketing is not only about influencing what people buy. It is about helping people become who they aspire to be.**
+
+---
 
 ## References
 
-Einstein, A. (1915). *The Field Equations of Gravitation*. Proceedings of the Prussian Academy of Sciences.
+Einstein, A. (1915). *The Field Equations of Gravitation*. 
+*Sitzungsberichte der Preussischen Akademie der Wissenschaften*, 844–847.
 
-Einstein, A. (1916). *The Foundation of the General Theory of Relativity*. *Annalen der Physik*.
+Einstein, A. (1916). *Die Grundlage der allgemeinen Relativitätstheorie*. 
+*Annalen der Physik*, 49, 769–822. 
+https://doi.org/10.1002/andp.19163540702
 
-Jung, C. G. (1921). *Psychological Types*. Zurich: Rascher Verlag.
+Jung, C. G. (1921). *Psychologische Typen*. 
+Zürich: Rascher & Cie.
 
-Jung, C. G. (1959). *The Archetypes and the Collective Unconscious*. In *Collected Works of C. G. Jung, Vol. 9, Part 1*. Princeton University Press.
+Jung, C. G. (1959). *The Archetypes and the Collective Unconscious*. 
+In *The Collected Works of C. G. Jung, Vol. 9, Part 1*. 
+Princeton University Press.
 
-Kotler, P., Kartajaya, H., & Setiawan, I. (2026). *Marketing 7.0: A Guide for Thinking Marketers in the Age of AI*. John Wiley & Sons.
+Kotler, P., Kartajaya, H., & Setiawan, I. (2026). 
+*Marketing 7.0: A Guide for Thinking Marketers in the Age of AI*. 
+John Wiley & Sons.
 
-Library of Congress. *The Red Book of Carl Jung: The Red Book and Beyond*. U.S. Library of Congress.
+Christen, P. (2012). 
+*Data Matching: Concepts and Techniques for Record Linkage, 
+Entity Resolution, and Duplicate Detection*. 
+Springer. 
+https://doi.org/10.1007/978-3-642-31164-2
 
-American Psychological Association. *APA Dictionary of Psychology*. Entries on self and individuation.
+Elmagarmid, A. K., Ipeirotis, P. G., & Verykios, V. S. (2007). 
+Duplicate record detection: A survey. 
+*IEEE Transactions on Knowledge and Data Engineering*, 19(1), 1–16.
 
+Library of Congress. 
+*The Red Book of Carl Jung: The Red Book and Beyond*. 
+U.S. Library of Congress.
 
+American Psychological Association. 
+*APA Dictionary of Psychology*. 
+Entries on self and individuation.
+
+--- 
 
 ## Acknowledgment
 
