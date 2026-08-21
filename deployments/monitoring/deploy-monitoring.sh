@@ -58,6 +58,15 @@ P_IMG="$(tfval portainer_image "$ovl")";   P_IMG="${P_IMG:-portainer/portainer-c
 N_EN="$(tfval netdata_enabled "$ovl")";    N_EN="${N_EN:-true}"
 N_PORT="$(tfval netdata_port "$ovl")";     N_PORT="${N_PORT:-19999}"   # fixed at Netdata's default; see README to change
 N_IMG="$(tfval netdata_image "$ovl")";     N_IMG="${N_IMG:-netdata/netdata:stable}"
+# jaeger — OpenTelemetry OTLP trace backend + UI (added for API request tracing).
+# Default OFF: on uat it stays off (tiny box, profile on demand); prod overlay flips it on.
+J_EN="$(tfval jaeger_enabled "$ovl")";               J_EN="${J_EN:-false}"
+J_IMG="$(tfval jaeger_image "$ovl")";                J_IMG="${J_IMG:-jaegertracing/all-in-one:1.62}"
+J_UI_PORT="$(tfval jaeger_ui_port "$ovl")";          J_UI_PORT="${J_UI_PORT:-16686}"
+J_UI_BIND="$(tfval jaeger_ui_bind "$ovl")";          J_UI_BIND="${J_UI_BIND:-127.0.0.1}"
+J_OTLP_HTTP="$(tfval jaeger_otlp_http_port "$ovl")"; J_OTLP_HTTP="${J_OTLP_HTTP:-4318}"
+J_OTLP_GRPC="$(tfval jaeger_otlp_grpc_port "$ovl")"; J_OTLP_GRPC="${J_OTLP_GRPC:-4317}"
+J_MEM="$(tfval jaeger_mem "$ovl")";                  J_MEM="${J_MEM:-300m}"
 # sso gate
 OA_EN="$(tfval oauth2_enabled "$ovl")";    OA_EN="${OA_EN:-false}"
 OA_IMG="$(tfval oauth2_image "$ovl")";     OA_IMG="${OA_IMG:-quay.io/oauth2-proxy/oauth2-proxy:v7.6.0}"
@@ -77,7 +86,7 @@ N_GATED=false; [[ "$OA_EN" == "true" && "$N_EN" == "true" && "$N_SSO" == "true" 
 # dashboard binds all interfaces so the LB can reach it directly.
 P_BIND="127.0.0.1"; [[ "$P_GATED" == "true" ]] || P_BIND="0.0.0.0"
 
-[[ "$P_EN" == "true" || "$N_EN" == "true" ]] || { echo "ERROR: both portainer_enabled and netdata_enabled are false in $ovl — nothing to do."; exit 1; }
+[[ "$P_EN" == "true" || "$N_EN" == "true" || "$J_EN" == "true" ]] || { echo "ERROR: portainer_enabled, netdata_enabled and jaeger_enabled are all false in $ovl — nothing to do."; exit 1; }
 
 # --- discover the target VM's floating IP from ../server outputs (by for_each key) ---
 SERVERS_JSON="$( (cd ../server && terraform workspace select "$ENV" >/dev/null 2>&1 && terraform output -json servers 2>/dev/null) || true )"
@@ -89,7 +98,7 @@ SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/n
 
 if [[ "$ACTION" == "destroy" ]]; then
   echo ">> Removing monitoring containers on $BASTION ..."
-  ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo docker rm -f c360-portainer c360-netdata c360-oauth2-portainer c360-oauth2-netdata >/dev/null 2>&1; echo "   removed dashboards + SSO gate (data volumes kept)"'
+  ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo docker rm -f c360-portainer c360-netdata c360-jaeger c360-oauth2-portainer c360-oauth2-netdata >/dev/null 2>&1; echo "   removed dashboards + Jaeger + SSO gate (data volumes kept)"'
   exit 0
 fi
 
@@ -131,6 +140,7 @@ fi
 echo ">> Target (monitoring): $BASTION"
 [[ "$P_EN" == "true" ]] && echo "   Portainer : $P_BIND:$P_PORT  ($P_IMG)  [$([[ "$P_GATED" == "true" ]] && echo "SSO gate" || echo "direct, own login")]"
 [[ "$N_EN" == "true" ]] && echo "   Netdata   : :$N_PORT  ($N_IMG)  [$([[ "$N_GATED" == "true" ]] && echo "SSO gate" || echo "DIRECT, no auth")]"
+[[ "$J_EN" == "true" ]] && echo "   Jaeger    : $J_UI_BIND:$J_UI_PORT (UI)  OTLP http :$J_OTLP_HTTP grpc :$J_OTLP_GRPC  ($J_IMG)"
 [[ "$P_GATED" == "true" || "$N_GATED" == "true" ]] && echo "   SSO gate  : oauth2-proxy -> Keycloak ($ISSUER), client $CLIENT_ID"
 
 # All params shipped in one base64 blob (dodges ssh arg-flattening; values are space-free).
@@ -138,6 +148,7 @@ PARAMS_B64="$(printf '%s\n' \
   "P_EN=$P_EN" "P_PORT=$P_PORT" "P_IMG=$P_IMG" "PADMIN_B64=$PADMIN_B64" "P_BIND=$P_BIND" \
   "P_GATED=$P_GATED" "N_GATED=$N_GATED" \
   "N_EN=$N_EN" "N_PORT=$N_PORT" "N_IMG=$N_IMG" \
+  "J_EN=$J_EN" "J_IMG=$J_IMG" "J_UI_PORT=$J_UI_PORT" "J_UI_BIND=$J_UI_BIND" "J_OTLP_HTTP=$J_OTLP_HTTP" "J_OTLP_GRPC=$J_OTLP_GRPC" "J_MEM=$J_MEM" \
   "OA_EN=$OA_EN" "OA_IMG=$OA_IMG" "ISSUER=$ISSUER" "CLIENT_ID=$CLIENT_ID" \
   "SEC_B64=$SEC_B64" "COOKIE_B64=$COOKIE_B64" \
   "P_PROXY=$P_PROXY" "P_REDIRECT=$P_REDIRECT" "N_PROXY=$N_PROXY" "N_REDIRECT=$N_REDIRECT" \
@@ -200,6 +211,22 @@ if [ "$N_EN" = "true" ]; then
   ok=0; for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$N_PORT/api/v1/info" >/dev/null 2>&1 && { ok=1; break; }; sleep 2; done
   sudo docker ps --filter name=c360-netdata --format '   running: {{.Names}} ({{.Status}})'
   [ "$ok" = "1" ] && echo "   Netdata OK" || echo "   WARN: Netdata not ready yet"
+fi
+
+# ---------- Jaeger (OTLP trace backend + UI, badger on-disk storage) ----------
+# OTLP receiver on 4317/4318 (COLLECTOR_OTLP_ENABLED); traces persisted to a badger
+# volume (low RAM vs in-memory). UI bound per J_UI_BIND (loopback by default -> reach
+# via the SSH tunnel); OTLP ports published on 0.0.0.0 so per-service prod boxes reach
+# them over the private VPC. Memory-capped so it can't starve the shared uat box.
+if [ "${J_EN:-false}" = "true" ]; then
+  echo "   deploying Jaeger (all-in-one, badger storage) ..."
+  sudo docker pull "$J_IMG" >/dev/null || true
+  sudo docker volume create jaeger_data >/dev/null
+  sudo docker rm -f c360-jaeger >/dev/null 2>&1 || true
+  sudo docker run -d --name c360-jaeger --restart unless-stopped --memory "${J_MEM:-300m}" -e COLLECTOR_OTLP_ENABLED=true -e SPAN_STORAGE_TYPE=badger -e BADGER_EPHEMERAL=false -e BADGER_DIRECTORY_VALUE=/badger/data -e BADGER_DIRECTORY_KEY=/badger/key -v jaeger_data:/badger -p "${J_UI_BIND:-127.0.0.1}:${J_UI_PORT:-16686}:16686" -p "0.0.0.0:${J_OTLP_HTTP:-4318}:4318" -p "0.0.0.0:${J_OTLP_GRPC:-4317}:4317" "$J_IMG"
+  ok=0; for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:${J_UI_PORT:-16686}/" >/dev/null 2>&1 && { ok=1; break; }; sleep 2; done
+  sudo docker ps --filter name=c360-jaeger --format '   running: {{.Names}} ({{.Status}})'
+  [ "$ok" = "1" ] && echo "   Jaeger OK (UI :${J_UI_PORT:-16686}, OTLP http :${J_OTLP_HTTP:-4318} / grpc :${J_OTLP_GRPC:-4317})" || echo "   WARN: Jaeger not ready yet"
 fi
 
 # ---------- oauth2-proxy (Keycloak SSO gate, one per GATED dashboard) ----------

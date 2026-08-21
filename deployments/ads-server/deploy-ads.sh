@@ -97,6 +97,13 @@ else
     | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
 fi
 
+# --- OpenTelemetry tracing (OTLP -> Jaeger). OFF on uat, 10% on prod; Jaeger on
+#     the monitoring box (mon_server_key, default "api"). See deployments/lib/otel.sh. ---
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/otel.sh"
+JAEGER_HOST="127.0.0.1"
+if [[ "$ENV" == "prod" ]]; then MON_IP="$(printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get("fixed_ip") for i in (s.get("internal_interfaces") or []) if i.get("fixed_ip")), ""))' "${MON_SERVER_KEY:-api}")"; [[ -n "$MON_IP" ]] && JAEGER_HOST="$MON_IP"; fi
+OTEL_LINES="$(otel_env_lines ads-server "$ENV" "$JAEGER_HOST")"
+
 # env file built locally, shipped base64 (dodges ssh arg-flattening). CACHE_ENABLED
 # only when a Redis password+host is available; otherwise the app fails open.
 CACHE_ENABLED="false"; [[ -n "${REDIS_HOST:-}" && -n "${REDIS_PASS:-}" ]] && CACHE_ENABLED="true"
@@ -111,7 +118,8 @@ REDIS_HOST=${REDIS_HOST:-}
 REDIS_PORT=${REDIS_PORT:-6580}
 REDIS_PASSWORD=${REDIS_PASS:-}
 CACHE_ENABLED=$CACHE_ENABLED
-ADS_ROOT_PATH=$ADS_ROOT_PATH" | base64 | tr -d '\n')"
+ADS_ROOT_PATH=$ADS_ROOT_PATH
+$OTEL_LINES" | base64 | tr -d '\n')"
 DBPW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
 
 echo ">> Building, bootstrapping leo_ads schema, and (re)starting the container ..."
