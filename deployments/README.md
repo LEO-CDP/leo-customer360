@@ -232,6 +232,50 @@ stale local copy. Running a module script **directly** (not via `deploy-all.sh`)
 `terraform init` per module (no `-migrate-state`). Note: vStorage has **no state locking** —
 don't run two `apply`s against the same module/workspace at once.
 
+### 6 · Rollback & release history
+
+![Customer 360 — rollback & release history](./rollback-release.png)
+
+📐 **Editable sources:** [`rollback-release.excalidraw`](./rollback-release.excalidraw)
+(open at [excalidraw.com](https://excalidraw.com) or the Obsidian Excalidraw plugin) ·
+[`rollback-release.svg`](./rollback-release.svg) (vector source of the image above).
+
+**Images are pulled by tag, so a rollback is just deploying an older immutable tag.**
+Use `sha-<git>` (per-commit, per-service) or `vX.Y.Z` (a release — all services at one
+version); **never roll back to `latest`** (mutable).
+
+- **Local:** `IMAGE_TAG` overrides the tag `lib/ghcr.sh` resolves:
+  ```bash
+  IMAGE_TAG=v1.2.3 ./deploy-all.sh uat --only api,backend,ads,frontend -y   # atomic, all services
+  IMAGE_TAG=sha-<oldgitsha> bash server/deploy-api.sh uat                    # one service
+  ```
+- **From GitHub (UI/API):** the [`CD`](../.github/workflows/cd.yml) workflow has a
+  **`workflow_dispatch`** trigger — Actions → *Run workflow* (or `gh workflow run cd.yml
+  -f environment=uat -f image_tag=v1.2.3 -f services=api,backend`). A `prod` rollback still
+  passes through the `prod` environment's approval gate.
+
+> Keep your GHCR package retention from pruning old **tagged** versions (`sha-*`, `v*`) —
+> those are your rollback targets. Prefer a `vX.Y.Z` release as the atomic rollback unit.
+
+**Release ledger (all deploys — manual + CD).** `lib/record_deploy.sh` records every deploy
+to the **GitHub Deployments API** (env, service, image tag/digest, actor, `cd`|`manual`,
+time, status) — it's sourced by each app deploy script, so both manual runs and CD are
+captured. View the history in the repo's **Environments** tab; query the Deployments API for
+a custom UI later. Auth: CD sets `GH_TOKEN` + `permissions: deployments: write`; locally it
+uses your `gh auth`. It's best-effort — a missing `gh`/token never fails a deploy. (Postgres
+was ruled out for the ledger: the managed DB is on a private VPC IP, unreachable from the CI
+runner / a laptop where deploys run.)
+
+**Monitor it** two ways: the repo's **Environments** tab (per-env history, zero-setup), or
+[`release-log.sh`](./release-log.sh) which reads the same Deployments API into a table:
+```bash
+./release-log.sh                 # recent history, uat + prod
+./release-log.sh uat 50          # uat, last 50
+./release-log.sh --current       # latest SUCCESS per (env, service) = what's live now
+```
+The Environments tab's single "Active" badge is per-environment; for per-**service** "what's
+live now", use `release-log.sh --current`.
+
 ## UAT deployment view
 
 ![Customer 360 — UAT deployment view](./deployment-view-uat.png)

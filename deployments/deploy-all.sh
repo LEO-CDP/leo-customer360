@@ -154,7 +154,8 @@ realm_step() {  # <action>
     kcurl="${KC_URL:-$(tfval api_sso_login_url "$ovl")}"
     tenant="${TENANT_ID:-11111111-1111-1111-1111-111111111111}"
     testuser="${TEST_USER:-c360admin}"
-    redirects="${REDIRECT_URIS:-$(tfval sso_redirect_uris "$ovl")}"; redirects="${redirects:-*}"
+    redirects="${REDIRECT_URIS:-$(tfval sso_redirect_uris "$ovl")}"
+    case "$redirects" in ""|"*") die "set sso_redirect_uris in $ovl to an explicit, non-wildcard redirect URI list — refusing to register '*'";; esac
     [ -n "$kcurl" ] || die "could not determine KC_URL — set KC_URL=<public keycloak url> or api_sso_login_url in $ovl"
     [ -n "${KEYCLOAK_ADMIN_PASSWORD:-}" ] || die "set KEYCLOAK_ADMIN_PASSWORD in sso/.env so bootstrap-realm.py can log in"
     info "KC_URL=$kcurl  realm=$realm  client=$client  tenant=$tenant"

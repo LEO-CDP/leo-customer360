@@ -23,7 +23,10 @@ CLIENT_ID = os.environ.get("CLIENT_ID", "customer360-api")
 TENANT_ID = os.environ.get("TENANT_ID", "11111111-1111-1111-1111-111111111111")
 TEST_USER = os.environ.get("TEST_USER", "c360admin")
 TEST_PW = os.environ.get("KC_TEST_USER_PASSWORD", "")
-REDIRECT_URIS = [u for u in os.environ.get("REDIRECT_URIS", "*").split(",") if u]
+REDIRECT_URIS = [u.strip() for u in os.environ.get("REDIRECT_URIS", "").split(",") if u.strip()]
+if not REDIRECT_URIS or "*" in REDIRECT_URIS:
+    sys.exit("REDIRECT_URIS must be an explicit, non-wildcard comma-separated list "
+             "(refusing '*' — set sso_redirect_uris in the env overlay).")
 ENV_FILE = os.environ.get("ENV_FILE", os.path.join(os.path.dirname(__file__), ".env"))
 
 
