@@ -61,7 +61,7 @@ N_IMG="$(tfval netdata_image "$ovl")";     N_IMG="${N_IMG:-netdata/netdata:stabl
 # jaeger — OpenTelemetry OTLP trace backend + UI (added for API request tracing).
 # Default OFF: on uat it stays off (tiny box, profile on demand); prod overlay flips it on.
 J_EN="$(tfval jaeger_enabled "$ovl")";               J_EN="${J_EN:-false}"
-J_IMG="$(tfval jaeger_image "$ovl")";                J_IMG="${J_IMG:-jaegertracing/all-in-one:1.62}"
+J_IMG="$(tfval jaeger_image "$ovl")";                J_IMG="${J_IMG:-jaegertracing/all-in-one:1.62.0}"
 J_UI_PORT="$(tfval jaeger_ui_port "$ovl")";          J_UI_PORT="${J_UI_PORT:-16686}"
 J_UI_BIND="$(tfval jaeger_ui_bind "$ovl")";          J_UI_BIND="${J_UI_BIND:-127.0.0.1}"
 J_OTLP_HTTP="$(tfval jaeger_otlp_http_port "$ovl")"; J_OTLP_HTTP="${J_OTLP_HTTP:-4318}"
@@ -227,10 +227,10 @@ if [ "${J_EN:-false}" = "true" ]; then
   sudo docker pull "$J_IMG" >/dev/null || true
   sudo docker volume create jaeger_data >/dev/null
   sudo docker rm -f c360-jaeger >/dev/null 2>&1 || true
-  sudo docker run -d --name c360-jaeger --restart unless-stopped --memory "${J_MEM:-300m}" -e COLLECTOR_OTLP_ENABLED=true -e SPAN_STORAGE_TYPE=badger -e BADGER_EPHEMERAL=false -e BADGER_DIRECTORY_VALUE=/badger/data -e BADGER_DIRECTORY_KEY=/badger/key -v jaeger_data:/badger -p "${J_UI_BIND:-127.0.0.1}:${J_UI_PORT:-16686}:16686" -p "0.0.0.0:${J_OTLP_HTTP:-4318}:4318" -p "0.0.0.0:${J_OTLP_GRPC:-4317}:4317" "$J_IMG"
+  sudo docker run -d --name c360-jaeger --restart unless-stopped --user root --memory "${J_MEM:-300m}" -e COLLECTOR_OTLP_ENABLED=true -e SPAN_STORAGE_TYPE=badger -e BADGER_EPHEMERAL=false -e BADGER_DIRECTORY_VALUE=/badger/data -e BADGER_DIRECTORY_KEY=/badger/key -v jaeger_data:/badger -p "${J_UI_BIND:-127.0.0.1}:${J_UI_PORT:-16686}:16686" -p "0.0.0.0:${J_OTLP_HTTP:-4318}:4318" "$J_IMG"   # gRPC 4317 NOT published: Netdata's otel-plugin owns host :4317; apps export OTLP/HTTP :4318
   ok=0; for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:${J_UI_PORT:-16686}/" >/dev/null 2>&1 && { ok=1; break; }; sleep 2; done
   sudo docker ps --filter name=c360-jaeger --format '   running: {{.Names}} ({{.Status}})'
-  [ "$ok" = "1" ] && echo "   Jaeger OK (UI :${J_UI_PORT:-16686}, OTLP http :${J_OTLP_HTTP:-4318} / grpc :${J_OTLP_GRPC:-4317})" || echo "   WARN: Jaeger not ready yet"
+  [ "$ok" = "1" ] && echo "   Jaeger OK (UI :${J_UI_PORT:-16686}, OTLP http :${J_OTLP_HTTP:-4318} (gRPC in-container))" || echo "   WARN: Jaeger not ready yet"
 fi
 
 # ---------- oauth2-proxy (Keycloak SSO gate, one per GATED dashboard) ----------
