@@ -22,3 +22,10 @@ dagster-graphql
 pytest>=7.4,<9
 httpx2>=2.9.1
 
+
+# OpenTelemetry zero-code request tracing (OTLP -> Jaeger). Installed here; the
+# Dockerfile runs `opentelemetry-bootstrap -a install` to pull the matching
+# FastAPI/SQLAlchemy/Redis/psycopg2/httpx instrumentors. No app code changes.
+# Fully no-op at runtime unless OTEL_SDK_DISABLED=false (see deployments/lib/otel.sh).
+opentelemetry-distro>=0.48b0,<1
+opentelemetry-exporter-otlp>=1.27,<2

@@ -26,3 +26,17 @@ netdata_proxy_port   = 4199
 # Portainer exposed DIRECTLY (its own login + reverse-proxy CSRF issue); Netdata gated.
 portainer_sso = false
 netdata_sso   = true
+
+# --- Jaeger (OpenTelemetry OTLP trace backend + UI) ---------------------------
+# ON in prod (dedicated boxes have headroom); apps export at 10% head sampling.
+# Runs on the monitoring box (mon_server_key). OTLP ports are published on 0.0.0.0
+# so each per-service box reaches them over the private VPC; the UI stays on
+# loopback — reach it via the admin tunnel, or gate it behind oauth2-proxy like
+# the other dashboards. Give it more RAM here than on the shared uat box.
+jaeger_enabled        = true
+jaeger_image          = "jaegertracing/all-in-one:1.62"
+jaeger_ui_port        = 16686
+jaeger_ui_bind        = "127.0.0.1"
+jaeger_otlp_http_port = 4318
+jaeger_otlp_grpc_port = 4317
+jaeger_mem            = "1g"

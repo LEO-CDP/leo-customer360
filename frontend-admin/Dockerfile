@@ -14,6 +14,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     pip install -r requirements.txt
+RUN opentelemetry-bootstrap -a install
 
 # Copy the application code
 COPY . .
@@ -26,7 +27,7 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=5 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8890/health', timeout=3)" || exit 1
 
 # Start the application with uvicorn
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8890"]
+CMD ["opentelemetry-instrument", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8890"]
 
 # ci: trigger image build — GHCR smoke test 2026-08-20
 

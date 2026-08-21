@@ -36,3 +36,17 @@ netdata_proxy_port   = 4199
 # DIRECTLY (LB -> Portainer :9443, HTTPS/self-signed). Netdata has no auth -> keep it gated.
 portainer_sso = false
 netdata_sso   = true
+
+# --- Jaeger (OpenTelemetry OTLP trace backend + UI) ---------------------------
+# OFF by default: the api box is a tiny 1 vCPU / 2 GB host shared by every service,
+# so tracing is profiled ON DEMAND (see this module's README.md, Jaeger section). To capture:
+# flip jaeger_enabled=true here AND set the app's OTEL_SDK_DISABLED=false, redeploy
+# monitoring + the target service, view via the SSH tunnel, then revert.
+# badger = on-disk storage (low RAM); UI on loopback (reach via the admin tunnel).
+jaeger_enabled        = false
+jaeger_image          = "jaegertracing/all-in-one:1.62"
+jaeger_ui_port        = 16686
+jaeger_ui_bind        = "127.0.0.1"   # loopback only; view via `ssh -L 16686:localhost:16686`
+jaeger_otlp_http_port = 4318
+jaeger_otlp_grpc_port = 4317
+jaeger_mem            = "300m"         # docker --memory cap (protect the shared box)

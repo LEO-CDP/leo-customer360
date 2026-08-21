@@ -75,6 +75,13 @@ else
   echo ">> Image: $IMAGE   (pull from GHCR; BUILD_LOCAL=1 to build on the VM)"
 fi
 
+# --- OpenTelemetry tracing (OTLP -> Jaeger). OFF on uat, 10% on prod; Jaeger on
+#     the monitoring box (mon_server_key, default "api"). See deployments/lib/otel.sh. ---
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/otel.sh"
+JAEGER_HOST="127.0.0.1"
+if [[ "$ENV" == "prod" ]]; then MON_IP="$(printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get("fixed_ip") for i in (s.get("internal_interfaces") or []) if i.get("fixed_ip")), ""))' "${MON_SERVER_KEY:-api}")"; [[ -n "$MON_IP" ]] && JAEGER_HOST="$MON_IP"; fi
+OTEL_LINES="$(otel_env_lines frontend-admin "$ENV" "$JAEGER_HOST")"
+
 # Build the env file locally and ship it base64-encoded as ONE arg (avoids the
 # ssh arg-flattening trap where an empty/space value corrupts positional args).
 ENV_B64="$(printf '%s' "SSO_LOGIN=$SSO_LOGIN
@@ -82,7 +89,8 @@ FRONTEND_API_HOSTNAME=$API_HOSTNAME
 FRONTEND_TENANT_ID=$TENANT
 FRONTEND_ROOT_PATH=$ROOT_PATH
 HOST=0.0.0.0
-PORT=$PORT" | base64 | tr -d '\n')"
+PORT=$PORT
+$OTEL_LINES" | base64 | tr -d '\n')"
 
 echo ">> Building + (re)starting the container ..."
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PORT" "$ENV_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" <<'REMOTE'
