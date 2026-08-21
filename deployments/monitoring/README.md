@@ -142,8 +142,11 @@ sed -i 's/^jaeger_enabled *=.*/jaeger_enabled = true/' overlays/uat.tfvars
 #    fast path (no redeploy): flip the env-file on the box and restart the container
 #    ssh <box> 'sudo sed -i "s/^OTEL_SDK_DISABLED=.*/OTEL_SDK_DISABLED=false/" /opt/c360/api.env && sudo docker restart customer360-api'
 
-# 3) view via the admin tunnel (UI is loopback-bound), then open http://localhost:16686
-ssh -i ~/.ssh/c360-api_ed25519 -L 16686:localhost:16686 leocdp360@<api-box-fip>
+# 3) view the trace UI. Primary: LB + Keycloak SSO (like Netdata) at http://<lb-ip>:16686
+#    — jaeger_sso=true + oauth2_enabled are already set; make sure the LB backend is applied:
+#    (cd ../load_balancer && ./deploy.sh uat apply)
+#    Fallback (no LB): tunnel to the loopback UI —
+ssh -i ~/.ssh/c360-api_ed25519 -L 16686:localhost:16686 leocdp360@<api-box-fip>  # then http://localhost:16686
 
 # 4) revert: OTEL_SDK_DISABLED=true (redeploy or the sed+restart above), and optionally
 #    jaeger_enabled=false + ./deploy-monitoring.sh uat to stop Jaeger and reclaim RAM.
@@ -152,8 +155,9 @@ ssh -i ~/.ssh/c360-api_ed25519 -L 16686:localhost:16686 leocdp360@<api-box-fip>
 **PROD.** Nothing to toggle — `jaeger_enabled=true` in `overlays/prod.tfvars` and services
 deploy with tracing on at 10% sampling. Per-service boxes reach the monitoring box's Jaeger
 over the private VPC (the deploy scripts resolve the `mon_server_key` box's private IP). OTLP
-ports are published on `0.0.0.0`; the UI stays loopback — tunnel in, or gate it behind
-oauth2-proxy like Netdata.
+ports are published on `0.0.0.0`; the **UI is gated behind oauth2-proxy / Keycloak and exposed
+via the LB on `:16686`** (like Netdata — `jaeger_sso=true` + the `jaeger` backend in
+`../load_balancer/overlays/`; fill `REPLACE_WITH_PROD_API_IP` in the prod LB overlay).
 
 **Local docker-compose dev** (not wired by default). Add a `jaeger` service to
 `docker-compose.yml` (`jaegertracing/all-in-one:1.62`, `COLLECTOR_OTLP_ENABLED=true`, ports
@@ -171,6 +175,14 @@ oauth2-proxy like Netdata.
   in-memory) and a `--memory` cap (`jaeger_mem`, `300m` on uat) so it can't starve the
   shared 1 vCPU / 2 GB box. On uat it's off by default — start it only while profiling
   (see the Jaeger section) and stop it (`jaeger_enabled=false` + redeploy) when done.
+- **Enabling Jaeger SSO on an existing env needs a redirect sync.** The Jaeger UI is gated like
+  Netdata (oauth2-proxy → Keycloak → LB `:16686`). But `deploy-monitoring.sh` **skips** the
+  Keycloak client bootstrap when `OAUTH2_PROXY_CLIENT_SECRET` is already in `.env`, so the new
+  Jaeger callback (`http://<oauth2_public_host>:16686/oauth2/callback`) is NOT auto-registered on
+  the existing `c360-oauth2-proxy` client — login then fails with *"Invalid redirect_uri"*. Fix:
+  add that URI under the client's **Valid redirect URIs** in Keycloak, **or** comment out
+  `OAUTH2_PROXY_CLIENT_SECRET` in `.env` and re-run `./deploy-monitoring.sh <env>` (the bootstrap
+  upserts all current redirect URIs and rewrites the same secret).
 - **Netdata is unauthenticated at the agent.** The `:19999` dashboard has no login of its
   own — public access is safe ONLY because the LB fronts it with oauth2-proxy/Keycloak.
   Note it still listens on `0.0.0.0:19999`, so other hosts *inside the VPC subnet* can
