@@ -183,3 +183,7 @@ REMOTE
 
 echo ">> Done. customer360-api is on the VM at :8008 (health: /health). Reach it via an SSH tunnel:"
 echo "   ssh -i $SSH_KEY -L 8008:localhost:8008 $BASTION   # then open http://localhost:8008/health"
+
+# --- release ledger: record this deploy to the GitHub Deployments API (best-effort) ---
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/record_deploy.sh"
+record_deployment "$ENV" "$SERVICE" "${IMAGE:-local}" success
