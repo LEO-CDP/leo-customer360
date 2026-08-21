@@ -13,9 +13,9 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 | [`sso`](./sso) | Keycloak (SSO/OIDC) — uat: container on the api box; prod: dedicated vServer |
 | [`frontend`](./frontend) | frontend-admin (admin UI) — uat: container on the api box; prod: dedicated vServer |
 | [`ads-server`](./ads-server) | LEO Ad Server (schema `leo_ads`) — uat: container on the api box; prod: dedicated vServer |
-| [`monitoring`](./monitoring) | Portainer (direct HTTPS) + Netdata (behind oauth2-proxy / Keycloak SSO) dashboards **+ Jaeger** (OpenTelemetry request-trace UI, `:16686`) — on the api box |
+| [`monitoring`](./monitoring) | Portainer (direct HTTPS) + Netdata (behind oauth2-proxy / Keycloak SSO) dashboards **+ Jaeger** (OpenTelemetry request-trace UI at `/jaeger`) — on the api box |
 | [`load_balancer`](./load_balancer) | L4 NLB fronting api / dagster / keycloak / frontend / ads / monitoring |
-| [`proxy`](./proxy) | **Caddy** reverse proxy — TLS termination (auto Let's Encrypt) + single-host path routing. **Live** at `https://beta.leocdp.com` (fronts frontend `/`, api `/c360api`, keycloak `/auth`, ads `/ads`); [runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom) |
+| [`proxy`](./proxy) | **Caddy** reverse proxy — TLS termination (auto Let's Encrypt) + single-host path routing. **Live** at `https://beta.leocdp.com` (fronts frontend `/`, api `/c360api`, keycloak `/auth`, ads `/ads`, jaeger `/jaeger`); [runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom) |
 | [`storage`](./storage) | Object storage (vStorage / S3) |
 
 > **Scope:** this view shows the **UAT** overlay only. The prod overlay differs
@@ -289,7 +289,7 @@ live now", use `release-log.sh --current`.
 ```mermaid
 flowchart TB
   client([Client / public internet])
-  lb["L4 Network Load Balancer<br/>beta.leocdp.com → 103.245.254.29<br/>:443/:80 → Caddy · :3000 → dagster<br/>:9443 → portainer (direct TLS) · :19999 → netdata (SSO) · :16686 → jaeger (SSO)"]
+  lb["L4 Network Load Balancer<br/>beta.leocdp.com → 103.245.254.29<br/>:443/:80 → Caddy · :3000 → dagster<br/>:9443 → portainer (direct TLS) · :19999 → netdata (SSO)"]
   client --> lb
 
   subgraph vpc["VPC c360-vpc-uat · subnet 10.100.1.0/24 · HCM03-1C"]
@@ -310,7 +310,7 @@ flowchart TB
       oauth2["oauth2-proxy (SSO gate)<br/>:4199 → Netdata · :4686 → Jaeger · Keycloak"]
       portainer["Portainer<br/>:9443 · own login"]
       netdata["Netdata<br/>:19999"]
-      jaeger["Jaeger UI<br/>:16686 · OTLP :4318<br/>SSO-gated · off by default on uat"]
+      jaeger["Jaeger UI<br/>127.0.0.1:16686 (base /jaeger) · OTLP :4318<br/>SSO via Caddy /jaeger · off by default on uat"]
     end
   end
 
@@ -329,7 +329,7 @@ flowchart TB
   dagster -->|SQL| pg
   lb -->|":9443 direct TLS"| portainer
   lb -.->|":19999 SSO"| oauth2
-  lb -.->|":16686 SSO"| oauth2
+  caddy -.->|"/jaeger SSO"| oauth2
   oauth2 -->|gates| netdata
   oauth2 -->|gates| jaeger
 ```
@@ -340,7 +340,7 @@ flowchart TB
 
 | Component | Runs on | Port | Notes |
 |-----------|---------|------|-------|
-| L4 NLB | VNG vLB | 80 / 3000 / 8080 / 8890 / 9009 / 9443 / 16686 / 19999 | public `103.245.254.29`; TCP passthrough (no TLS) |
+| L4 NLB | VNG vLB | 80 / 3000 / 8080 / 8890 / 9009 / 9443 / 19999 | public `103.245.254.29`; TCP passthrough (no TLS) |
 | customer360-api | api box `10.100.1.5` | 8008 | FastAPI, `--network host`; Redis cache; SSO via Keycloak introspection (`SSO_LOGIN=true`) |
 | c360-redis | api box `10.100.1.5` | 6580 | fail-open response cache; `maxmemory 256mb allkeys-lru` |
 | c360-keycloak | api box `10.100.1.5` | 8080 | Keycloak 26 `start-dev`; health on mgmt `:9000`; realm `customer360` |
@@ -349,7 +349,7 @@ flowchart TB
 | oauth2-proxy | api box `10.100.1.5` | 4199 | Keycloak SSO gate in front of Netdata (the L4 LB can't do OIDC) |
 | Portainer | api box `10.100.1.5` | 9443 | container ops UI (logs/exec/restart); direct HTTPS on the LB — its own login |
 | Netdata | api box `10.100.1.5` | 19999 | real-time host + per-container metrics; no native auth → oauth2-proxy SSO |
-| Jaeger | api box `10.100.1.5` | 16686 (UI) · 4318/4317 (OTLP) | OpenTelemetry request-trace UI (`c360-jaeger`); **off by default on uat** — start on demand; badger storage, mem-capped; UI loopback → **oauth2-proxy :4686 → LB :16686 (Keycloak SSO)** |
+| Jaeger | api box `10.100.1.5` | 16686 (UI) · 4318/4317 (OTLP) | OpenTelemetry request-trace UI (`c360-jaeger`); **off by default on uat** — start on demand; badger storage, mem-capped; UI loopback (base path /jaeger) → **oauth2-proxy :4686 → Caddy /jaeger on :443 (Keycloak SSO, TLS)** |
 | Dagster | backend box `10.100.1.4` | 3000 | backend-system worker |
 | PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` + `leo_ads` |
 
@@ -369,7 +369,7 @@ via the **LB IP** (see the HSTS note below).
 | Portainer (own login) | `https://103.245.254.29:9443` | LB direct → Portainer :9443 (self-signed TLS) |
 | Netdata (SSO) | `http://103.245.254.29:19999` | LB → oauth2-proxy :4199 → Netdata (Keycloak login) |
 | Dagster | `http://103.245.254.29:3000` | LB direct → dagster :3000 |
-| Jaeger (trace UI, SSO) | `http://103.245.254.29:16686` | LB → oauth2-proxy :4686 → Jaeger (Keycloak login); **on-demand on uat** (routes only while `jaeger_enabled=true`) — see the [monitoring runbook](./monitoring/README.md) |
+| Jaeger (trace UI, SSO) | `https://beta.leocdp.com/jaeger` | Caddy :443 (TLS) → oauth2-proxy :4686 → Jaeger (Keycloak login as `c360admin`); **on-demand on uat** (up only while `jaeger_enabled=true`) — see the [monitoring runbook](./monitoring/README.md) |
 
 > ⚠️ **Ops tools use the LB IP, not the `beta.leocdp.com` hostname.** The parent domain
 > `leocdp.com` is HSTS-preloaded (`includeSubDomains`), so browsers force HTTPS-with-valid-cert
