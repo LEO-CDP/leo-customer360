@@ -119,7 +119,7 @@ if [[ "$P_GATED" == "true" || "$N_GATED" == "true" || "$J_GATED" == "true" ]]; t
   KC_URL="${ISSUER%/realms/*}"; REALM="${ISSUER##*/realms/}"
   P_REDIRECT="http://$PUB_HOST:$P_PORT/oauth2/callback"
   N_REDIRECT="http://$PUB_HOST:$N_PORT/oauth2/callback"
-  J_REDIRECT="http://$PUB_HOST:$J_UI_PORT/oauth2/callback"
+  J_REDIRECT="https://$PUB_HOST/jaeger/oauth2/callback"
   # only GATED dashboards get a callback URL registered on the Keycloak client
   REDIRECTS=""; [[ "$P_GATED" == "true" ]] && REDIRECTS="$P_REDIRECT"; [[ "$N_GATED" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$N_REDIRECT"; [[ "$J_GATED" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$J_REDIRECT"
 
@@ -227,7 +227,7 @@ if [ "${J_EN:-false}" = "true" ]; then
   sudo docker pull "$J_IMG" >/dev/null || true
   sudo docker volume create jaeger_data >/dev/null
   sudo docker rm -f c360-jaeger >/dev/null 2>&1 || true
-  sudo docker run -d --name c360-jaeger --restart unless-stopped --user root --memory "${J_MEM:-300m}" -e COLLECTOR_OTLP_ENABLED=true -e SPAN_STORAGE_TYPE=badger -e BADGER_EPHEMERAL=false -e BADGER_DIRECTORY_VALUE=/badger/data -e BADGER_DIRECTORY_KEY=/badger/key -v jaeger_data:/badger -p "${J_UI_BIND:-127.0.0.1}:${J_UI_PORT:-16686}:16686" -p "0.0.0.0:${J_OTLP_HTTP:-4318}:4318" "$J_IMG"   # gRPC 4317 NOT published: Netdata's otel-plugin owns host :4317; apps export OTLP/HTTP :4318
+  sudo docker run -d --name c360-jaeger --restart unless-stopped --user root --memory "${J_MEM:-300m}" -e COLLECTOR_OTLP_ENABLED=true -e QUERY_BASE_PATH=/jaeger -e SPAN_STORAGE_TYPE=badger -e BADGER_EPHEMERAL=false -e BADGER_DIRECTORY_VALUE=/badger/data -e BADGER_DIRECTORY_KEY=/badger/key -v jaeger_data:/badger -p "${J_UI_BIND:-127.0.0.1}:${J_UI_PORT:-16686}:16686" -p "0.0.0.0:${J_OTLP_HTTP:-4318}:4318" "$J_IMG"   # gRPC 4317 NOT published: Netdata's otel-plugin owns host :4317; apps export OTLP/HTTP :4318
   ok=0; for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:${J_UI_PORT:-16686}/" >/dev/null 2>&1 && { ok=1; break; }; sleep 2; done
   sudo docker ps --filter name=c360-jaeger --format '   running: {{.Names}} ({{.Status}})'
   [ "$ok" = "1" ] && echo "   Jaeger OK (UI :${J_UI_PORT:-16686}, OTLP http :${J_OTLP_HTTP:-4318} (gRPC in-container))" || echo "   WARN: Jaeger not ready yet"
@@ -240,15 +240,16 @@ fi
 [ "$J_GATED" = "true" ] || sudo docker rm -f c360-oauth2-jaeger    >/dev/null 2>&1 || true
 if [ "$P_GATED" = "true" ] || [ "$N_GATED" = "true" ] || [ "$J_GATED" = "true" ]; then
   sudo docker pull "$OA_IMG" >/dev/null || true
-  run_proxy() {  # name listen redirect upstream extra_flag
-    local name="$1" listen="$2" redirect="$3" upstream="$4" extra="$5"
+  run_proxy() {  # name listen redirect upstream [cookie_secure] [proxy_prefix] [extra_flag]
+    local name="$1" listen="$2" redirect="$3" upstream="$4" cookie_secure="${5:-false}" pprefix="${6:-}" extra="${7:-}"
     local args=(
       --provider=oidc --oidc-issuer-url="$ISSUER" --client-id="$CLIENT_ID" --client-secret="$SECRET"
-      --cookie-secret="$COOKIE" --cookie-name="_oauth2_$name" --cookie-secure=false
+      --cookie-secret="$COOKIE" --cookie-name="_oauth2_$name" --cookie-secure="$cookie_secure"
       --email-domain="*" --insecure-oidc-allow-unverified-email=true
       --http-address="0.0.0.0:$listen" --redirect-url="$redirect" --upstream="$upstream"
       --reverse-proxy=true --skip-provider-button=true
     )
+    [ -n "$pprefix" ] && args+=( "--proxy-prefix=$pprefix" )
     [ -n "$extra" ] && args+=( "$extra" )
     sudo docker rm -f "c360-oauth2-$name" >/dev/null 2>&1 || true
     sudo docker run -d --name "c360-oauth2-$name" --restart unless-stopped --network host "$OA_IMG" "${args[@]}"
@@ -256,9 +257,9 @@ if [ "$P_GATED" = "true" ] || [ "$N_GATED" = "true" ] || [ "$J_GATED" = "true" ]
     sudo docker ps --filter "name=c360-oauth2-$name" --format '   running: {{.Names}} ({{.Status}})'
     [ "$ok" = "1" ] && echo "   oauth2-$name OK (/ping on :$listen)" || { echo "   WARN: oauth2-$name not ready — logs:"; sudo docker logs --tail 25 "c360-oauth2-$name" || true; }
   }
-  if [ "$P_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Portainer ..."; run_proxy portainer "$P_PROXY" "$P_REDIRECT" "https://127.0.0.1:$P_PORT" "--ssl-upstream-insecure-skip-verify=true"; fi
-  if [ "$N_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Netdata ...";   run_proxy netdata   "$N_PROXY" "$N_REDIRECT" "http://127.0.0.1:$N_PORT" ""; fi
-  if [ "$J_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Jaeger ...";    run_proxy jaeger    "$J_PROXY" "$J_REDIRECT" "http://127.0.0.1:$J_UI_PORT" ""; fi
+  if [ "$P_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Portainer ..."; run_proxy portainer "$P_PROXY" "$P_REDIRECT" "https://127.0.0.1:$P_PORT" false "" "--ssl-upstream-insecure-skip-verify=true"; fi
+  if [ "$N_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Netdata ...";   run_proxy netdata   "$N_PROXY" "$N_REDIRECT" "http://127.0.0.1:$N_PORT" false "" ""; fi
+  if [ "$J_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Jaeger ...";    run_proxy jaeger    "$J_PROXY" "$J_REDIRECT" "http://127.0.0.1:$J_UI_PORT" true "/jaeger/oauth2" ""; fi
 fi
 REMOTE
 
