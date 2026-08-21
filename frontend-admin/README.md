@@ -13,6 +13,55 @@ The frontend is intentionally thin: it does not own the business logic or databa
 - Renders charts, dashboards, and tables using jQuery + Handlebars + Chart.js
 - Routes the browser via hash-based navigation without a framework build step
 
+## UX of Menu 
+
+For a marketing user, the natural journey is:
+
+```
+Who are my customers?
+        ↓
+Who are the important customer types?
+        ↓
+Which audience should I target?
+        ↓
+What campaign should I run?
+        ↓
+What happened?
+```
+
+```
+OVERVIEW
+   │
+   ├── PROFILES
+   ├── PERSONAS
+   ├── SEGMENTS
+   ├── CAMPAIGNS
+   ├── ANALYTICS
+   │
+   ├── DATA
+   │    ├── Data Sources
+   │    └── Attributes
+   │
+   ├── INTELLIGENCE
+   │    └── Scoring
+   │
+   └── ADMIN
+```
+
+| Order | Menu             | UX rationale                                              |
+| ----: | ---------------- | --------------------------------------------------------- |
+|     1 | **Overview**     | Entry point: health, KPIs, customer growth, activity      |
+|     2 | **Profiles**     | Core value of a Customer 360: *Who are my customers?*     |
+|     3 | **Personas**     | Understand customer archetypes: *Who are these people?*   |
+|     4 | **Segments**     | Operationalize personas into actionable audiences         |
+|     5 | **Campaigns**    | Activate audiences: *What do we do with them?*            |
+|     6 | **Analytics**    | Measure outcomes: *Did it work?*                          |
+|     7 | **Data Sources** | Technical/data configuration; less frequently visited     |
+|     8 | **Attributes**   | Define/manage the customer data model                     |
+|     9 | **Scoring**      | Advanced intelligence: propensity, CLV, churn, lead score |
+|    10 | **Admin**        | Tenant, users, permissions, system configuration          |
+
+
 ## Current folder structure
 
 ```text
