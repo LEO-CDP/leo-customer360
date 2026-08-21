@@ -75,13 +75,16 @@ CLIENT_ID="$(tfval oauth2_client_id "$ovl")"; CLIENT_ID="${CLIENT_ID:-c360-oauth
 PUB_HOST="$(tfval oauth2_public_host "$ovl")"
 P_PROXY="$(tfval portainer_proxy_port "$ovl")"; P_PROXY="${P_PROXY:-4443}"
 N_PROXY="$(tfval netdata_proxy_port "$ovl")";   N_PROXY="${N_PROXY:-4199}"
+J_PROXY="$(tfval jaeger_proxy_port "$ovl")";    J_PROXY="${J_PROXY:-4686}"
 # Per-dashboard SSO gating. Portainer has its OWN login AND a CSRF/origin check that rejects
 # mutating requests behind a reverse proxy ("Forbidden - origin invalid"), so it is exposed
 # DIRECTLY (portainer_sso=false). Netdata has no auth of its own, so keep it gated.
 P_SSO="$(tfval portainer_sso "$ovl")"; P_SSO="${P_SSO:-true}"
 N_SSO="$(tfval netdata_sso "$ovl")";   N_SSO="${N_SSO:-true}"
+J_SSO="$(tfval jaeger_sso "$ovl")";    J_SSO="${J_SSO:-true}"   # Jaeger has NO native auth -> gate it like Netdata
 P_GATED=false; [[ "$OA_EN" == "true" && "$P_EN" == "true" && "$P_SSO" == "true" ]] && P_GATED=true
 N_GATED=false; [[ "$OA_EN" == "true" && "$N_EN" == "true" && "$N_SSO" == "true" ]] && N_GATED=true
+J_GATED=false; [[ "$OA_EN" == "true" && "$J_EN" == "true" && "$J_SSO" == "true" ]] && J_GATED=true
 # Gated dashboards bind loopback (only the proxy reaches them); an un-gated but enabled
 # dashboard binds all interfaces so the LB can reach it directly.
 P_BIND="127.0.0.1"; [[ "$P_GATED" == "true" ]] || P_BIND="0.0.0.0"
@@ -98,7 +101,7 @@ SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/n
 
 if [[ "$ACTION" == "destroy" ]]; then
   echo ">> Removing monitoring containers on $BASTION ..."
-  ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo docker rm -f c360-portainer c360-netdata c360-jaeger c360-oauth2-portainer c360-oauth2-netdata >/dev/null 2>&1; echo "   removed dashboards + Jaeger + SSO gate (data volumes kept)"'
+  ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo docker rm -f c360-portainer c360-netdata c360-jaeger c360-oauth2-portainer c360-oauth2-netdata c360-oauth2-jaeger >/dev/null 2>&1; echo "   removed dashboards + Jaeger + SSO gate (data volumes kept)"'
   exit 0
 fi
 
@@ -109,15 +112,16 @@ fi
 PADMIN_B64="$(printf %s "${PORTAINER_ADMIN_PASSWORD:-}" | base64 | tr -d '\n')"
 
 # --- SSO gate: provision the Keycloak client + secrets locally (before we ship) ---
-SEC_B64=""; COOKIE_B64=""; P_REDIRECT=""; N_REDIRECT=""
-if [[ "$P_GATED" == "true" || "$N_GATED" == "true" ]]; then
+SEC_B64=""; COOKIE_B64=""; P_REDIRECT=""; N_REDIRECT=""; J_REDIRECT=""
+if [[ "$P_GATED" == "true" || "$N_GATED" == "true" || "$J_GATED" == "true" ]]; then
   : "${ISSUER:?set oauth2_issuer_url in $ovl (e.g. http://<lb>:8080/realms/customer360)}"
   : "${PUB_HOST:?set oauth2_public_host in $ovl (the LB public IP/host the browser uses)}"
   KC_URL="${ISSUER%/realms/*}"; REALM="${ISSUER##*/realms/}"
   P_REDIRECT="http://$PUB_HOST:$P_PORT/oauth2/callback"
   N_REDIRECT="http://$PUB_HOST:$N_PORT/oauth2/callback"
+  J_REDIRECT="http://$PUB_HOST:$J_UI_PORT/oauth2/callback"
   # only GATED dashboards get a callback URL registered on the Keycloak client
-  REDIRECTS=""; [[ "$P_GATED" == "true" ]] && REDIRECTS="$P_REDIRECT"; [[ "$N_GATED" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$N_REDIRECT"
+  REDIRECTS=""; [[ "$P_GATED" == "true" ]] && REDIRECTS="$P_REDIRECT"; [[ "$N_GATED" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$N_REDIRECT"; [[ "$J_GATED" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$J_REDIRECT"
 
   if [[ -z "${OAUTH2_PROXY_CLIENT_SECRET:-}" ]]; then
     : "${KEYCLOAK_ADMIN_PASSWORD:?need the Keycloak client secret — set KEYCLOAK_ADMIN_PASSWORD in .env (or ../sso/.env) so bootstrap-oauth2-client.py can provision it}"
@@ -141,17 +145,17 @@ echo ">> Target (monitoring): $BASTION"
 [[ "$P_EN" == "true" ]] && echo "   Portainer : $P_BIND:$P_PORT  ($P_IMG)  [$([[ "$P_GATED" == "true" ]] && echo "SSO gate" || echo "direct, own login")]"
 [[ "$N_EN" == "true" ]] && echo "   Netdata   : :$N_PORT  ($N_IMG)  [$([[ "$N_GATED" == "true" ]] && echo "SSO gate" || echo "DIRECT, no auth")]"
 [[ "$J_EN" == "true" ]] && echo "   Jaeger    : $J_UI_BIND:$J_UI_PORT (UI)  OTLP http :$J_OTLP_HTTP grpc :$J_OTLP_GRPC  ($J_IMG)"
-[[ "$P_GATED" == "true" || "$N_GATED" == "true" ]] && echo "   SSO gate  : oauth2-proxy -> Keycloak ($ISSUER), client $CLIENT_ID"
+[[ "$P_GATED" == "true" || "$N_GATED" == "true" || "$J_GATED" == "true" ]] && echo "   SSO gate  : oauth2-proxy -> Keycloak ($ISSUER), client $CLIENT_ID"
 
 # All params shipped in one base64 blob (dodges ssh arg-flattening; values are space-free).
 PARAMS_B64="$(printf '%s\n' \
   "P_EN=$P_EN" "P_PORT=$P_PORT" "P_IMG=$P_IMG" "PADMIN_B64=$PADMIN_B64" "P_BIND=$P_BIND" \
-  "P_GATED=$P_GATED" "N_GATED=$N_GATED" \
+  "P_GATED=$P_GATED" "N_GATED=$N_GATED" "J_GATED=$J_GATED" \
   "N_EN=$N_EN" "N_PORT=$N_PORT" "N_IMG=$N_IMG" \
   "J_EN=$J_EN" "J_IMG=$J_IMG" "J_UI_PORT=$J_UI_PORT" "J_UI_BIND=$J_UI_BIND" "J_OTLP_HTTP=$J_OTLP_HTTP" "J_OTLP_GRPC=$J_OTLP_GRPC" "J_MEM=$J_MEM" \
   "OA_EN=$OA_EN" "OA_IMG=$OA_IMG" "ISSUER=$ISSUER" "CLIENT_ID=$CLIENT_ID" \
   "SEC_B64=$SEC_B64" "COOKIE_B64=$COOKIE_B64" \
-  "P_PROXY=$P_PROXY" "P_REDIRECT=$P_REDIRECT" "N_PROXY=$N_PROXY" "N_REDIRECT=$N_REDIRECT" \
+  "P_PROXY=$P_PROXY" "P_REDIRECT=$P_REDIRECT" "N_PROXY=$N_PROXY" "N_REDIRECT=$N_REDIRECT" "J_PROXY=$J_PROXY" "J_REDIRECT=$J_REDIRECT" \
   | base64 | tr -d '\n')"
 
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PARAMS_B64" <<'REMOTE'
@@ -233,7 +237,8 @@ fi
 # Tear down any gate that should no longer exist (e.g. Portainer moved to direct access).
 [ "$P_GATED" = "true" ] || sudo docker rm -f c360-oauth2-portainer >/dev/null 2>&1 || true
 [ "$N_GATED" = "true" ] || sudo docker rm -f c360-oauth2-netdata   >/dev/null 2>&1 || true
-if [ "$P_GATED" = "true" ] || [ "$N_GATED" = "true" ]; then
+[ "$J_GATED" = "true" ] || sudo docker rm -f c360-oauth2-jaeger    >/dev/null 2>&1 || true
+if [ "$P_GATED" = "true" ] || [ "$N_GATED" = "true" ] || [ "$J_GATED" = "true" ]; then
   sudo docker pull "$OA_IMG" >/dev/null || true
   run_proxy() {  # name listen redirect upstream extra_flag
     local name="$1" listen="$2" redirect="$3" upstream="$4" extra="$5"
@@ -253,6 +258,7 @@ if [ "$P_GATED" = "true" ] || [ "$N_GATED" = "true" ]; then
   }
   if [ "$P_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Portainer ..."; run_proxy portainer "$P_PROXY" "$P_REDIRECT" "https://127.0.0.1:$P_PORT" "--ssl-upstream-insecure-skip-verify=true"; fi
   if [ "$N_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Netdata ...";   run_proxy netdata   "$N_PROXY" "$N_REDIRECT" "http://127.0.0.1:$N_PORT" ""; fi
+  if [ "$J_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Jaeger ...";    run_proxy jaeger    "$J_PROXY" "$J_REDIRECT" "http://127.0.0.1:$J_UI_PORT" ""; fi
 fi
 REMOTE
 
@@ -268,5 +274,10 @@ if [[ "$N_EN" == "true" && -n "$PUB_HOST" ]]; then
   [[ "$N_GATED" == "true" ]] \
     && echo "   Netdata  : http://$PUB_HOST:$N_PORT/   (Keycloak login)" \
     || echo "   Netdata  : http://$PUB_HOST:$N_PORT/   (DIRECT — NO AUTH; set netdata_sso=true)"
+fi
+if [[ "$J_EN" == "true" && -n "$PUB_HOST" ]]; then
+  [[ "$J_GATED" == "true" ]] \
+    && echo "   Jaeger   : http://$PUB_HOST:$J_UI_PORT/  (trace UI, Keycloak login)" \
+    || echo "   Jaeger   : $J_UI_BIND:$J_UI_PORT (tunnel only — set jaeger_sso=true + oauth2_enabled to gate via LB)"
 fi
 echo "   Admin tunnel (no LB): ssh -i $SSH_KEY -L $P_PORT:localhost:$P_PORT -L $N_PORT:localhost:$N_PORT $BASTION"

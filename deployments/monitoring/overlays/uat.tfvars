@@ -50,3 +50,9 @@ jaeger_ui_bind        = "127.0.0.1"   # loopback only; view via `ssh -L 16686:lo
 jaeger_otlp_http_port = 4318
 jaeger_otlp_grpc_port = 4317
 jaeger_mem            = "300m"         # docker --memory cap (protect the shared box)
+# Gate the Jaeger UI behind oauth2-proxy / Keycloak (like Netdata) and expose it via
+# the LB on :16686. Only active once jaeger_enabled=true (on-demand on uat). The LB
+# 'jaeger' backend (deployments/load_balancer/overlays/uat.tfvars) maps public :16686
+# -> box :jaeger_proxy_port. Jaeger has no native auth, so keep jaeger_sso=true.
+jaeger_sso        = true
+jaeger_proxy_port = 4686   # oauth2-proxy listen port on the box (LB backend member_port)

@@ -40,3 +40,7 @@ jaeger_ui_bind        = "127.0.0.1"
 jaeger_otlp_http_port = 4318
 jaeger_otlp_grpc_port = 4317
 jaeger_mem            = "1g"
+# Gate the Jaeger UI behind oauth2-proxy / Keycloak and expose via the LB on :16686
+# (Jaeger has no native auth). LB 'jaeger' backend maps public :16686 -> :jaeger_proxy_port.
+jaeger_sso        = true
+jaeger_proxy_port = 4686
