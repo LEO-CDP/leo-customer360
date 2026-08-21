@@ -14,7 +14,7 @@
 # ---------------------------------------------------------------------------
 
 # Modules whose state lives in the S3/vStorage remote backend (see their backend.tf).
-TF_REMOTE_MODULES="${TF_REMOTE_MODULES:-server postgres cache}"
+TF_REMOTE_MODULES="${TF_REMOTE_MODULES:-server postgres cache load_balancer}"
 
 # ensure_vstorage_creds <deployments-dir>
 #   Export AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY from storage/terraform.tfvars
