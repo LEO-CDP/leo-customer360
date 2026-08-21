@@ -284,6 +284,16 @@ missing=""
 for t in terraform python3 ssh; do command -v "$t" >/dev/null 2>&1 || missing="$missing $t"; done
 [ -n "$missing" ] && info "${C_WARN}WARNING${C_RESET}: not on PATH:$missing — some steps will fail without them."
 
+# Align local runs with the REMOTE Terraform state (vStorage) that CI uses:
+# load the s3-backend creds into AWS_* and `terraform init` the remote-backend
+# modules so a local deploy always reads/writes the SAME state as CI — never a
+# stale local terraform.tfstate.d/ copy. Idempotent; safe to run every time.
+if [ -f "$ROOT/lib/tfstate.sh" ]; then
+  . "$ROOT/lib/tfstate.sh"
+  ensure_vstorage_creds "$ROOT" || true
+  ensure_remote_init "$ROOT" || true
+fi
+
 # ---------------------------------------------------------------- confirm
 banner "Customer 360 — $ACTION [$ENV]  ($([ "$DRY_RUN" = 1 ] && echo 'DRY RUN' || echo 'LIVE'))"
 printf '   Steps (%d), in order:\n' "${#selected[@]}"

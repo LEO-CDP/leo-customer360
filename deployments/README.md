@@ -222,6 +222,16 @@ Bucket/endpoint/region live in each `backend.tf` (bucket `leocdp360-tfstate`, en
 state lands at `env/<workspace>/<module>/terraform.tfstate`. The `storage` and
 `load_balancer` modules can adopt the same backend later; CD only needs these three.
 
+**Local runs stay aligned with remote automatically.** You never sync state down —
+a remote backend means Terraform reads/writes it live on every command. `deploy-all.sh`
+preflight sources [`lib/tfstate.sh`](./lib/tfstate.sh), which (1) loads the vStorage S3
+creds into `AWS_*` from `storage/`'s config and (2) `terraform init`s the remote-backend
+modules, so a local `./deploy-all.sh uat …` always uses the **same state as CI** — never a
+stale local copy. Running a module script **directly** (not via `deploy-all.sh`) still needs
+`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` exported, and a fresh checkout needs a one-time
+`terraform init` per module (no `-migrate-state`). Note: vStorage has **no state locking** —
+don't run two `apply`s against the same module/workspace at once.
+
 ## UAT deployment view
 
 ![Customer 360 — UAT deployment view](./deployment-view-uat.png)
