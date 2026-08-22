@@ -19,3 +19,6 @@ ads_upstream       = "127.0.0.1:9009"  # ads-server (/ads)
 dagster_upstream   = "10.100.1.4:3000" # backend box (only if you enable the /dagster block)
 netdata_upstream   = "127.0.0.1:4199"  # oauth2-proxy -> Netdata (only if you enable /netdata)
 portainer_upstream = "127.0.0.1:9443"  # Portainer HTTPS (only if you enable /portainer)
+
+# Jaeger trace UI served under /jaeger on :443 (TLS) via its oauth2-proxy SSO gate.
+jaeger_upstream = "127.0.0.1:4686"

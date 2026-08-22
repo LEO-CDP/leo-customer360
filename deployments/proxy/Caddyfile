@@ -40,6 +40,15 @@
 		reverse_proxy {$ADS_UPSTREAM}
 	}
 
+	# --- Jaeger trace UI under /jaeger, via its oauth2-proxy (Keycloak SSO). UNSTRIPPED
+	#     (handle, not handle_path): oauth2-proxy runs with --proxy-prefix=/jaeger/oauth2 and
+	#     Jaeger with QUERY_BASE_PATH=/jaeger, so both expect the /jaeger prefix. TLS here on
+	#     :443 (valid cert) fixes the HSTS callback that a raw http://:16686 hit. ---
+	@jaeger path /jaeger /jaeger/*
+	handle @jaeger {
+		reverse_proxy {$JAEGER_UPSTREAM}
+	}
+
 	# --- everything else -> the admin UI (frontend-admin). Keep this block LAST. ---
 	handle {
 		reverse_proxy {$FRONTEND_UPSTREAM}

@@ -46,6 +46,7 @@ ADS_UP="$(tfval ads_upstream "$ovl")";       ADS_UP="${ADS_UP:-127.0.0.1:9009}"
 DAG_UP="$(tfval dagster_upstream "$ovl")";   DAG_UP="${DAG_UP:-10.100.1.4:3000}"
 NET_UP="$(tfval netdata_upstream "$ovl")";   NET_UP="${NET_UP:-127.0.0.1:4199}"
 PORT_UP="$(tfval portainer_upstream "$ovl")";PORT_UP="${PORT_UP:-127.0.0.1:9443}"
+JAE_UP="$(tfval jaeger_upstream "$ovl")";     JAE_UP="${JAE_UP:-127.0.0.1:4686}"   # -> oauth2-jaeger (SSO) -> Jaeger
 
 : "${DOMAIN:?set caddy_domain in $ovl (e.g. cdp.example.com)}"
 : "${EMAIL:?set acme_email in $ovl (Let’s Encrypt account email)}"
@@ -69,7 +70,7 @@ CADDYFILE_B64="$(base64 < Caddyfile | tr -d '\n')"
 PARAMS_B64="$(printf '%s\n' \
   "ACTION=$ACTION" "IMG=$IMG" "DOMAIN=$DOMAIN" "EMAIL=$EMAIL" \
   "API_UP=$API_UP" "KC_UP=$KC_UP" "FE_UP=$FE_UP" "ADS_UP=$ADS_UP" \
-  "DAG_UP=$DAG_UP" "NET_UP=$NET_UP" "PORT_UP=$PORT_UP" \
+  "DAG_UP=$DAG_UP" "NET_UP=$NET_UP" "PORT_UP=$PORT_UP" "JAE_UP=$JAE_UP" \
   "CADDYFILE_B64=$CADDYFILE_B64" | base64 | tr -d '\n')"
 
 echo ">> Target (caddy): $BASTION   [$ACTION]"
@@ -95,6 +96,7 @@ env_args=(
   -e API_UPSTREAM="$API_UP" -e KC_UPSTREAM="$KC_UP" -e FRONTEND_UPSTREAM="$FE_UP"
   -e ADS_UPSTREAM="$ADS_UP" -e DAGSTER_UPSTREAM="$DAG_UP"
   -e NETDATA_UPSTREAM="$NET_UP" -e PORTAINER_UPSTREAM="$PORT_UP"
+  -e JAEGER_UPSTREAM="$JAE_UP"
 )
 sudo docker pull "$IMG" >/dev/null || true
 

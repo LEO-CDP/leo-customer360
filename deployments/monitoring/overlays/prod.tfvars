@@ -34,7 +34,7 @@ netdata_sso   = true
 # loopback — reach it via the admin tunnel, or gate it behind oauth2-proxy like
 # the other dashboards. Give it more RAM here than on the shared uat box.
 jaeger_enabled        = true
-jaeger_image          = "jaegertracing/all-in-one:1.62"
+jaeger_image          = "jaegertracing/all-in-one:1.62.0"
 jaeger_ui_port        = 16686
 jaeger_ui_bind        = "127.0.0.1"
 jaeger_otlp_http_port = 4318
