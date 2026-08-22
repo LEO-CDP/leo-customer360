@@ -43,8 +43,8 @@ netdata_sso   = true
 # flip jaeger_enabled=true here AND set the app's OTEL_SDK_DISABLED=false, redeploy
 # monitoring + the target service, view via the SSH tunnel, then revert.
 # badger = on-disk storage (low RAM); UI on loopback (reach via the admin tunnel).
-jaeger_enabled        = false
-jaeger_image          = "jaegertracing/all-in-one:1.62"
+jaeger_enabled = false
+jaeger_image          = "jaegertracing/all-in-one:1.62.0"
 jaeger_ui_port        = 16686
 jaeger_ui_bind        = "127.0.0.1"   # loopback only; view via `ssh -L 16686:localhost:16686`
 jaeger_otlp_http_port = 4318

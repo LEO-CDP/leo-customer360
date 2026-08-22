@@ -43,13 +43,8 @@ backends = {
     listen_port = 19999 # LB public :19999 -> oauth2-proxy:4199 -> Netdata
     health_path = "/ping"
   }
-  "jaeger" = {
-    member_ip   = "REPLACE_WITH_PROD_API_IP" # PROD monitoring box private ip (oauth2-proxy -> Jaeger 127.0.0.1:16686)
-    member_port = 4686
-    listen_port = 16686 # LB public :16686 -> oauth2-proxy:4686 -> Jaeger trace UI (Keycloak SSO)
-    health_path = "/ping"
-  }
 }
+# Jaeger is fronted by Caddy at https://<domain>/jaeger (see deployments/proxy) — no dedicated LB listener.
 
 # Open the proxy ports (4443/4199) on the backends' security group so the LB can reach them.
 backend_security_group_id = "secg-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" # <-- PROD boxes' security group

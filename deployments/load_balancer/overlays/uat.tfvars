@@ -59,13 +59,8 @@ backends = {
     listen_port = 19999
     health_path = "/ping"
   }
-  "jaeger" = {
-    member_ip   = "10.100.1.5" # oauth2-proxy -> Jaeger trace UI (Keycloak SSO). Dormant until jaeger_enabled=true.
-    member_port = 4686
-    listen_port = 16686
-    health_path = "/ping"
-  }
 }
+# Jaeger is fronted by Caddy at https://beta.leocdp.com/jaeger (see deployments/proxy) — no dedicated LB listener.
 
 # Open the app ports on the backends' Default secgroup so the LB can reach them.
 backend_security_group_id = "secg-7c1e85ec-8028-460a-8592-99463f198831" # Default secgroup on the boxes
