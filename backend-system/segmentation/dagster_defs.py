@@ -83,7 +83,7 @@ def recompute_segments_op(context: OpExecutionContext, config: RecomputeSegments
     scoped to ``config.tenant_id`` if provided, otherwise across all tenants
     (see segmentation.recompute.recompute_all_active_segments)."""
     context.log.info("segmentation job: started (tenant_id=%s)", config.tenant_id or "ALL")
-    summary = recompute_all_active_segments(tenant_id=config.tenant_id)
+    summary = recompute_all_active_segments(tenant_id=config.tenant_id, log=context.log.info)
     context.log.info(
         "segmentation job: done (tenant_id=%s, segments_processed=%d, segments_skipped=%d, total_members=%d)",
         summary.get("tenant_id") or "ALL",

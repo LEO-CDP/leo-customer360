@@ -8,10 +8,12 @@ RunRequest/SkipReason behavior), not the recompute SQL itself (exercised
 manually against a real database -- see docs/PLAN-SEGMENTS-API-IMPROVEMENT.md).
 """
 
+import logging
 from unittest.mock import MagicMock
 
 import dagster_defs
 from dagster import DagsterInstance, RunRequest, SkipReason, build_sensor_context
+from segmentation import recompute
 
 
 class TestSegmentationJob:
@@ -25,7 +27,9 @@ class TestSegmentationJob:
 
         assert result.success
         assert result.output_for_node("recompute_segments_op") == summary
-        dagster_defs.recompute_all_active_segments.assert_called_once_with(tenant_id=None)
+        dagster_defs.recompute_all_active_segments.assert_called_once()
+        assert dagster_defs.recompute_all_active_segments.call_args.kwargs["tenant_id"] is None
+        assert callable(dagster_defs.recompute_all_active_segments.call_args.kwargs["log"])
 
     def test_runs_scoped_to_tenant_when_run_config_provides_one(self, monkeypatch):
         tenant_id = "11111111-1111-1111-1111-111111111111"
@@ -40,7 +44,9 @@ class TestSegmentationJob:
 
         assert result.success
         assert result.output_for_node("recompute_segments_op") == summary
-        dagster_defs.recompute_all_active_segments.assert_called_once_with(tenant_id=tenant_id)
+        dagster_defs.recompute_all_active_segments.assert_called_once()
+        assert dagster_defs.recompute_all_active_segments.call_args.kwargs["tenant_id"] == tenant_id
+        assert callable(dagster_defs.recompute_all_active_segments.call_args.kwargs["log"])
 
     def test_definitions_expose_job_and_sensor(self):
         assert dagster_defs.defs.get_job_def("segmentation_job") is not None
@@ -83,3 +89,24 @@ class TestSegmentationPollSensor:
             result = dagster_defs.segmentation_poll_sensor(context)
 
         assert isinstance(result, SkipReason)
+
+
+class TestSegmentationRecomputeLogging:
+    def test_logs_member_count_for_each_recomputed_segment(self, monkeypatch, caplog):
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchall.return_value = [
+            {
+                "segment_id": "segment-1",
+                "tenant_id": "tenant-1",
+                "segment_tag": "segment_one",
+                "sql_rules": "status_code = 1",
+            }
+        ]
+        monkeypatch.setattr(recompute, "_connect", MagicMock(return_value=connection))
+        monkeypatch.setattr(recompute, "_recompute_one_segment", MagicMock(return_value=7))
+        caplog.set_level(logging.INFO, logger=recompute.logger.name)
+
+        recompute.recompute_all_active_segments()
+
+        assert "Recomputed segment segment-1 (tenant tenant-1): member_count=7" in caplog.text

@@ -223,6 +223,19 @@ class IdentityResolutionRecomputePersonasTests(unittest.TestCase):
                 "persona_archetype_id": "archetype-1",
             },
         )
+        self.assertEqual(
+            kwargs["run_config"],
+            {
+                "ops": {
+                    "resolve_identities_op": {
+                        "config": {
+                            "tenant_id": "tenant-1",
+                            "persona_archetype_id": "archetype-1",
+                        }
+                    }
+                }
+            },
+        )
 
     def test_recompute_personas_omits_optional_tags_when_not_given(self):
         fake_client = MagicMock()
@@ -235,6 +248,7 @@ class IdentityResolutionRecomputePersonasTests(unittest.TestCase):
             fake_client.submit_job_execution.call_args.kwargs["tags"],
             {"trigger_reason": "persona_archetype_updated"},
         )
+        self.assertIsNone(fake_client.submit_job_execution.call_args.kwargs["run_config"])
 
     def test_recompute_personas_raises_dagster_job_trigger_error_on_connection_failure(self):
         fake_client = MagicMock()

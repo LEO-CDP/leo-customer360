@@ -114,11 +114,13 @@ def list_master_profiles_for_persona_archetype(
 
 
 def _trigger_persona_centroid_recompute(obj, trigger_reason: str) -> Optional[str]:
-    """Best-effort submit of ``identity_resolution_job`` so this archetype's
-    ``centroid_*_score`` gets (re)computed by ``PersonaResolutionEngine``
-    instead of staying null/stale after an admin create/edit. Never raises --
-    a Dagster webserver outage must not block archetype metadata CRUD, which
-    is a synchronous DB write independent of the async recompute."""
+    """Best-effort submit of ``identity_resolution_job`` to refresh this
+    archetype's ``matched_profile_count`` after an admin create/edit. Never
+    raises -- a Dagster webserver outage must not block archetype metadata
+    CRUD, which is a synchronous DB write independent of the async recompute.
+
+    The helper and response field retain their ``centroid_*`` names for API
+    compatibility with the earlier recompute trigger response."""
     try:
         return dagster_client.identity_resolution.recompute_personas(
             trigger_reason=trigger_reason,
@@ -127,8 +129,9 @@ def _trigger_persona_centroid_recompute(obj, trigger_reason: str) -> Optional[st
         )
     except DagsterJobTriggerError:
         logger.warning(
-            "Could not submit identity_resolution_job to recompute centroid for persona_archetype_id=%s "
-            "(trigger_reason=%s) -- centroid scores will stay stale until the next scheduled CIR run.",
+            "Could not submit identity_resolution_job to refresh matched_profile_count for "
+            "persona_archetype_id=%s (trigger_reason=%s) -- the count will stay stale until the next "
+            "scheduled recompute.",
             obj.persona_archetype_id,
             trigger_reason,
         )

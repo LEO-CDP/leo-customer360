@@ -31,6 +31,8 @@ def build_crud_router(
     update_validator: Optional[Callable[[Session, dict[str, Any]], None]] = None,
     create_transform: Optional[Callable[[Session, dict[str, Any]], dict[str, Any]]] = None,
     update_transform: Optional[Callable[[Session, Any, dict[str, Any]], dict[str, Any]]] = None,
+    create_hook: Optional[Callable[[Any], None]] = None,
+    update_hook: Optional[Callable[[Any], None]] = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=tags)  # type: ignore[arg-type]
     crud = CRUDBase(model)
@@ -83,6 +85,8 @@ def build_crud_router(
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         obj = crud.create(db, obj_in)
         invalidate_prefix(cache_prefix)
+        if create_hook is not None:
+            create_hook(obj)
         return obj
 
     @router.patch("/{item_id}", response_model=read_schema)
@@ -100,6 +104,8 @@ def build_crud_router(
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         obj = crud.update(db, obj, obj_in)
         invalidate_prefix(cache_prefix)
+        if update_hook is not None:
+            update_hook(obj)
         return obj
 
     @router.delete("/{item_id}", status_code=204)

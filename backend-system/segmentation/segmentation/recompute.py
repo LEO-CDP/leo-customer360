@@ -17,7 +17,7 @@ over every ``is_active`` segment, across all tenants) and by
 import logging
 import os
 import re
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import psycopg2
 from dotenv import load_dotenv
@@ -142,7 +142,10 @@ def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_frag
     return len(matched_ids)
 
 
-def recompute_all_active_segments(tenant_id: Optional[str] = None) -> dict[str, Any]:
+def recompute_all_active_segments(
+    tenant_id: Optional[str] = None,
+    log: Optional[Callable[..., None]] = None,
+) -> dict[str, Any]:
     """Recomputes member_count/segmentation_tags for every ``is_active =
     true`` segment, optionally scoped to a single tenant. This is the
     full-scan batch job counterpart to customer360-api's on-demand
@@ -206,6 +209,12 @@ def recompute_all_active_segments(tenant_id: Optional[str] = None) -> dict[str, 
             )
             segments_processed += 1
             total_members += member_count
+            (log or logger.info)(
+                "Recomputed segment %s (tenant %s): member_count=%d",
+                segment["segment_id"],
+                segment["tenant_id"],
+                member_count,
+            )
 
         conn.commit()
     finally:

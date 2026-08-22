@@ -25,6 +25,7 @@ ephemeral in-memory instance.
 
 import os
 import sys
+from typing import Optional
 
 # Dagster's `python_file` workspace loader (unlike `python dagster_defs.py`
 # directly, or pytest with `pythonpath = .`) does NOT add this file's own
@@ -35,6 +36,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dagster import (  # noqa: E402
+        Config,
     DefaultSensorStatus,
     Definitions,
     OpExecutionContext,
@@ -46,14 +48,39 @@ from dagster import (  # noqa: E402
     sensor,
 )
 
-from identity_resolution.daily_job import run_daily_identity_resolution  # noqa: E402
+from identity_resolution.daily_job import (  # noqa: E402
+    recompute_persona_archetype_match_count,
+    run_daily_identity_resolution,
+)
 
 POLL_INTERVAL_SECONDS = int(os.environ.get("CIR_POLL_INTERVAL_SECONDS", "30"))
 
 
+class IdentityResolutionConfig(Config):
+    """Optional config for a full CIR run or a targeted persona refresh."""
+
+    tenant_id: Optional[str] = None
+    persona_archetype_id: Optional[str] = None
+
+
 @op(retry_policy=RetryPolicy(max_retries=2, delay=10))
-def resolve_identities_op(context: OpExecutionContext) -> int:
-    """Drains cdp_raw_profiles_stage in batches via CustomerIdentityResolver."""
+def resolve_identities_op(context: OpExecutionContext, config: IdentityResolutionConfig) -> int:
+    """Runs full CIR or refreshes one persona archetype's match count."""
+    if config.persona_archetype_id:
+        if not config.tenant_id:
+            raise ValueError("tenant_id is required for a targeted persona archetype refresh")
+        matched_profile_count = recompute_persona_archetype_match_count(
+            tenant_id=config.tenant_id,
+            persona_archetype_id=config.persona_archetype_id,
+        )
+        context.log.info(
+            "Persona archetype recompute: persona_archetype_id=%s tenant_id=%s matched_profile_count=%d",
+            config.persona_archetype_id,
+            config.tenant_id,
+            matched_profile_count,
+        )
+        return matched_profile_count
+
     context.log.info("CIR identity resolution job: started")
     processed = run_daily_identity_resolution()
     context.log.info(f"CIR identity resolution job: done (processed={processed})")

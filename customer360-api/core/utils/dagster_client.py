@@ -278,29 +278,35 @@ class IdentityResolutionDagsterService(DagsterService):
         tenant_id: Optional[str] = None,
         persona_archetype_id: Optional[str] = None,
     ) -> str:
-        """Triggers ``identity_resolution_job`` after a ``cdp_persona_archetypes``
-        row is created/edited in the Persona Management admin UI, so any
-        profile whose persona gets (re)resolved during that run folds its
-        component scores into this archetype's ``centroid_*_score`` running
-        mean (see ``PersonaResolutionEngine._upsert_archetype`` in
-        backend-system/identity_resolution) -- centroid scores are NEVER
-        accepted as admin input (see ``PersonaArchetypeCreate``/``Update``),
-        they only ever come from this engine.
+        """Triggers ``identity_resolution_job`` after a
+        ``cdp_persona_archetypes`` row is created/edited. When
+        ``persona_archetype_id`` and ``tenant_id`` are provided, the job
+        receives them as run config and refreshes only that archetype's
+        active ``matched_profile_count``; the values are also retained as
+        run tags for observability.
 
-        NOTE: unlike ``SegmentationDagsterService``, ``identity_resolution_job``
-        is NOT tenant-scoped today -- it drains the whole shared
-        ``cdp_raw_profiles_stage`` table (see
-        ``identity_resolution/daily_job.py``), so this cannot target just one
-        tenant/archetype's profiles. ``tenant_id``/``persona_archetype_id``
-        are attached only as Dagster run tags for observability (filtering
-        run history in the Dagster UI), they do not scope execution.
+        Without ``persona_archetype_id``, this preserves the existing full
+        CIR job behavior and submits tags only.
         """
         tags = {"trigger_reason": trigger_reason}
+        run_config = None
         if tenant_id:
             tags["tenant_id"] = str(tenant_id)
         if persona_archetype_id:
+            if not tenant_id:
+                raise ValueError("tenant_id is required when persona_archetype_id is provided")
             tags["persona_archetype_id"] = str(persona_archetype_id)
-        return self.submit(tags=tags)
+            run_config = {
+                "ops": {
+                    "resolve_identities_op": {
+                        "config": {
+                            "tenant_id": str(tenant_id),
+                            "persona_archetype_id": str(persona_archetype_id),
+                        }
+                    }
+                }
+            }
+        return self.submit(run_config=run_config, tags=tags)
 
 
 class ScoringDagsterService(DagsterService):

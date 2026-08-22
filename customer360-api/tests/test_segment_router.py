@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Optional
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -18,7 +18,12 @@ from fastapi.testclient import TestClient
 from core.database import get_db
 from core.models.segmentation import CdpSegment
 from core.routers._generic import build_crud_router
-from core.routers.segment_api import _transform_segment_create, _transform_segment_update
+from core.routers.segment_api import (
+    _transform_segment_create,
+    _transform_segment_update,
+    _trigger_segment_recompute_after_create,
+    _trigger_segment_recompute_after_update,
+)
 from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
 
 
@@ -74,7 +79,7 @@ class FakeSegmentCRUD:
         FakeSegmentCRUD.store.pop(db_obj.segment_id, None)
 
 
-def _build_test_app() -> FastAPI:
+def _build_test_app(*, create_hook=None, update_hook=None) -> FastAPI:
     with patch("core.routers._generic.CRUDBase", FakeSegmentCRUD):
         router = build_crud_router(
             model=CdpSegment,
@@ -93,6 +98,8 @@ def _build_test_app() -> FastAPI:
             ),
             create_transform=_transform_segment_create,
             update_transform=_transform_segment_update,
+            create_hook=create_hook,
+            update_hook=update_hook,
         )
     app = FastAPI()
     app.include_router(router)
@@ -141,6 +148,32 @@ class SegmentCrudTests(unittest.TestCase):
         self.assertEqual(body["segment_name"], "Gen Z Shoppers")
         self.assertEqual(body["processed_by"], "human")
         self.assertEqual(body["status_code"], 1)
+
+    def test_create_hook_runs_after_segment_is_persisted(self):
+        create_hook = Mock()
+        client = TestClient(_build_test_app(create_hook=create_hook))
+        payload = _segment_payload()
+
+        response = client.post("/segments/", json=payload)
+
+        self.assertEqual(response.status_code, 201)
+        create_hook.assert_called_once()
+        self.assertEqual(create_hook.call_args.args[0].tenant_id, uuid.UUID(payload["tenant_id"]))
+
+    def test_update_hook_runs_after_segment_is_persisted(self):
+        update_hook = Mock()
+        client = TestClient(_build_test_app(update_hook=update_hook))
+        payload = _segment_payload()
+        created = client.post("/segments/", json=payload).json()
+
+        response = client.patch(
+            f"/segments/{created['segment_id']}",
+            json={"segment_name": "Updated Name"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        update_hook.assert_called_once()
+        self.assertEqual(update_hook.call_args.args[0].tenant_id, uuid.UUID(payload["tenant_id"]))
 
     def test_create_segment_translates_relative_datetime_and_generates_sql(self):
         payload = _segment_payload(
@@ -298,6 +331,24 @@ class SegmentCrudTests(unittest.TestCase):
         response = self.client.delete(f"/segments/{uuid.uuid4()}")
 
         self.assertEqual(response.status_code, 404)
+
+    @patch("core.routers.segment_api.dagster_client.segmentation.create", return_value="run-create")
+    def test_create_trigger_submits_tenant_scoped_dagster_job(self, mock_trigger):
+        tenant_id = uuid.uuid4()
+        segment = SimpleNamespace(segment_id=uuid.uuid4(), tenant_id=tenant_id)
+
+        _trigger_segment_recompute_after_create(segment)
+
+        mock_trigger.assert_called_once_with(tenant_id=str(tenant_id))
+
+    @patch("core.routers.segment_api.dagster_client.segmentation.update", return_value="run-update")
+    def test_update_trigger_submits_tenant_scoped_dagster_job(self, mock_trigger):
+        tenant_id = uuid.uuid4()
+        segment = SimpleNamespace(segment_id=uuid.uuid4(), tenant_id=tenant_id)
+
+        _trigger_segment_recompute_after_update(segment)
+
+        mock_trigger.assert_called_once_with(tenant_id=str(tenant_id))
 
 
 class _FakeRows:

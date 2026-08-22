@@ -564,6 +564,8 @@ class PersonaArchetypesRouterTests(unittest.TestCase):
         self.assertEqual(response.json()["centroid_recompute_run_id"], "run-123")
         mock_recompute.assert_called_once()
         self.assertEqual(mock_recompute.call_args.kwargs["trigger_reason"], "persona_archetype_created")
+        self.assertEqual(mock_recompute.call_args.kwargs["tenant_id"], payload["tenant_id"])
+        self.assertEqual(mock_recompute.call_args.kwargs["persona_archetype_id"], response.json()["persona_archetype_id"])
 
     def test_create_archetype_still_succeeds_when_dagster_trigger_fails(self):
         payload = {
@@ -596,6 +598,11 @@ class PersonaArchetypesRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["centroid_recompute_run_id"], "run-456")
         self.assertEqual(mock_recompute.call_args.kwargs["trigger_reason"], "persona_archetype_updated")
+        self.assertEqual(mock_recompute.call_args.kwargs["tenant_id"], str(archetype.tenant_id))
+        self.assertEqual(
+            mock_recompute.call_args.kwargs["persona_archetype_id"],
+            str(archetype.persona_archetype_id),
+        )
 
     def test_get_archetype_not_found(self):
         response = self.client.get(f"/persona/archetypes/{uuid.uuid4()}")

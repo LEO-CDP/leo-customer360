@@ -505,9 +505,9 @@ class PersonaArchetypeRead(PersonaArchetypeBase):
     persona_archetype_id: uuid.UUID
     # Centroid component scores + matched_profile_count are NEVER accepted
     # as input (see PersonaArchetypeBase/Create/Update above) -- both are
-    # computed/maintained entirely server-side: matched_profile_count by a
-    # DB trigger (trg_sync_persona_archetype_match_count), and the centroid_*
-    # scores by backend-system/identity_resolution's PersonaResolutionEngine
+    # computed/maintained entirely server-side: matched_profile_count by the
+    # DB trigger (trg_sync_persona_archetype_match_count) and targeted Dagster
+    # refreshes, and the centroid_* scores by backend-system/identity_resolution's PersonaResolutionEngine
     # (_upsert_archetype), which folds each newly (re)resolved master
     # profile's component scores into a running mean every time the
     # identity_resolution_job processes it.

@@ -6,6 +6,7 @@ sql_rules against cdp_master_profiles (see core/utils/sql_safety.py for the
 injection-safety validation applied before every execution).
 """
 
+import logging
 import re
 import uuid
 from collections.abc import Iterable
@@ -28,6 +29,8 @@ from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
 from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 from core.utils.domains import validate_domain_value
 from core.utils.sql_safety import validate_sql_where_fragment
+
+logger = logging.getLogger(__name__)
 
 # Exposed for test mocking
 _segment_crud = CRUDBase(CdpSegment)
@@ -119,6 +122,39 @@ def _transform_segment_update(_db: Session, segment: CdpSegment, payload: dict[s
             payload["final_generated_sql"] = None
     return payload
 
+
+def _trigger_segment_recompute(segment: CdpSegment, trigger_reason: str) -> None:
+    """Best-effort submit of the tenant-scoped segmentation job after a
+    segment row has been committed. A Dagster outage must not turn an already
+    successful segment CRUD write into an HTTP failure; the scheduled job can
+    reconcile the stale member_count later."""
+    try:
+        run_id = getattr(dagster_client.segmentation, trigger_reason)(tenant_id=str(segment.tenant_id))
+    except DagsterJobTriggerError:
+        logger.warning(
+            "Could not submit segmentation_job for segment_id=%s (trigger_reason=%s); "
+            "member_count will be refreshed by a later recompute.",
+            segment.segment_id,
+            trigger_reason,
+        )
+        return
+
+    logger.info(
+        "Submitted segmentation_job for segment_id=%s (tenant_id=%s, trigger_reason=%s, run_id=%s)",
+        segment.segment_id,
+        segment.tenant_id,
+        trigger_reason,
+        run_id,
+    )
+
+
+def _trigger_segment_recompute_after_create(segment: CdpSegment) -> None:
+    _trigger_segment_recompute(segment, trigger_reason="create")
+
+
+def _trigger_segment_recompute_after_update(segment: CdpSegment) -> None:
+    _trigger_segment_recompute(segment, trigger_reason="update")
+
 segments_router = build_crud_router(
     model=CdpSegment,
     pk_field="segment_id",
@@ -132,6 +168,8 @@ segments_router = build_crud_router(
     update_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
     create_transform=_transform_segment_create,
     update_transform=_transform_segment_update,
+    create_hook=_trigger_segment_recompute_after_create,
+    update_hook=_trigger_segment_recompute_after_update,
 )
 
 PLATFORM_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin"}
