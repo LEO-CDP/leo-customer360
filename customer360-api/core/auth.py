@@ -46,7 +46,7 @@ SSO_LOGIN=settings.sso_login
 # TTL for the resolved (tenant_id, user_id) identity cache, independent of
 # the Keycloak token TTL -- keeps a sys_user lookup off the hot path without
 # staying stale for too long if a user's tenant/role changes.
-IDENTITY_CACHE_TTL_SECONDS = 300
+IDENTITY_CACHE_TTL_SECONDS = 200
 
 # Throttles repeated failed-auth attempts per client IP -- protects
 # introspection/dev-token validation from brute force / credential stuffing.
