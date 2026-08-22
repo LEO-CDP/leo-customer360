@@ -42,8 +42,9 @@ def get_db(request: Request) -> Generator[Session, None, None]:
     try:
         tenant_id = getattr(request.state, "tenant_id", None)
         user_id = getattr(request.state, "user_id", None)
-        if tenant_id is not None:
-            db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": str(tenant_id)})
+        tenant_value = str(tenant_id).strip() if tenant_id is not None else ""
+        if tenant_value:
+            db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": tenant_value})
         if user_id is not None:
             db.execute(text("SELECT set_config('app.user_id', :user_id, true)"), {"user_id": str(user_id)})
         yield db

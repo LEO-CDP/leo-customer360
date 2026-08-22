@@ -79,6 +79,26 @@ class GetDbTenantGucTests(unittest.TestCase):
 
         self.assertEqual(session.executed, [])
 
+    def test_skips_set_config_when_tenant_on_request_state_is_blank(self):
+        """Blank tenant context must behave like missing context, not become
+        an empty string that PostgreSQL tries to cast to UUID."""
+        session = FakeDBSession()
+        request = _fake_request(tenant_id="")
+
+        with patch("core.database.SessionLocal", return_value=session):
+            next(get_db(request))
+
+        self.assertEqual(session.executed, [])
+
+    def test_skips_set_config_when_tenant_on_request_state_is_whitespace(self):
+        session = FakeDBSession()
+        request = _fake_request(tenant_id="   ")
+
+        with patch("core.database.SessionLocal", return_value=session):
+            next(get_db(request))
+
+        self.assertEqual(session.executed, [])
+
     def test_sets_only_tenant_guc_when_user_id_absent(self):
         session = FakeDBSession()
         request = _fake_request(tenant_id="tenant-only")

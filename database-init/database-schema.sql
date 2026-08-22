@@ -212,8 +212,8 @@ ALTER TABLE customer360.sys_user FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_policy ON customer360.sys_user;
 
 CREATE POLICY tenant_policy ON customer360.sys_user
-    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
 
 
 
@@ -285,8 +285,8 @@ ALTER TABLE customer360.sys_userinfo FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_policy ON customer360.sys_userinfo;
 
 CREATE POLICY tenant_policy ON customer360.sys_userinfo
-    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
 
 -- ==========================================================
 -- RBAC Role & Permission Tables
@@ -544,8 +544,8 @@ ALTER TABLE customer360.crm_campaign_performance_daily FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_policy ON customer360.crm_campaign_performance_daily;
 
 CREATE POLICY tenant_policy ON customer360.crm_campaign_performance_daily
-    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
 
 
 -- CampaignMember
@@ -2305,8 +2305,8 @@ DROP POLICY IF EXISTS tenant_policy ON customer360.sys_data_source;
 
 -- Policy ensures queries only return rows matching the current connection's tenant_id
 CREATE POLICY tenant_policy ON customer360.sys_data_source
-    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
 
 -- ============================================================================
 -- cdp_profile_merge_history: audit trail of master-to-master profile merges
@@ -2991,8 +2991,8 @@ BEGIN
         EXECUTE format('DROP POLICY IF EXISTS tenant_policy ON customer360.%I;', t);
         EXECUTE format(
             'CREATE POLICY tenant_policy ON customer360.%I
-                USING (tenant_id = current_setting(''app.tenant_id'', true)::uuid)
-                WITH CHECK (tenant_id = current_setting(''app.tenant_id'', true)::uuid);',
+                USING (tenant_id = NULLIF(btrim(current_setting(''app.tenant_id'', true)), '''')::uuid)
+                WITH CHECK (tenant_id = NULLIF(btrim(current_setting(''app.tenant_id'', true)), '''')::uuid);',
             t
         );
     END LOOP;
@@ -3005,5 +3005,5 @@ $$;
 -- ON customer360.cdp_master_profiles
 -- USING (
 --     tenant_id =
---     current_setting('app.tenant_id')::uuid
+--     NULLIF(btrim(current_setting('app.tenant_id')), '')::uuid
 -- );
