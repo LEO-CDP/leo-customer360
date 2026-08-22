@@ -250,3 +250,5 @@ html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
     position: relative; /* Keeps the canvas bounded strictly within this container */
     margin: 0 auto; 
 }
+
+.hidden { display: none !important; }
