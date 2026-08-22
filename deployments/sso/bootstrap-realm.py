@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Idempotently provision a Keycloak realm + confidential client for customer360-api.
+"""Idempotently provision a Keycloak realm + root role + confidential client for customer360-api.
 
 Creates (or updates): a realm, a confidential client (standard flow + direct-access
 grants so tokens can be minted headlessly for testing), a `tenant_id` protocol
@@ -73,6 +73,14 @@ def main():
         print(f"realm '{REALM}': created" if st in (201, 204) else f"realm create HTTP {st}")
     else:
         print(f"realm '{REALM}': exists")
+
+    # 1a) realm role used by the platform's root administrator authorization.
+    st, _, _ = req("GET", f"/admin/realms/{REALM}/roles/root", token=tok)
+    if st == 404:
+        st, _, _ = req("POST", f"/admin/realms/{REALM}/roles", token=tok, body={"name": "root"})
+        print("realm role 'root': created" if st in (201, 204) else f"realm role create HTTP {st}")
+    else:
+        print("realm role 'root': exists")
 
     # 1b) allow unmanaged custom attributes. Keycloak 26's declarative user profile
     # silently DROPS undeclared attributes (e.g. tenant_id), so the mapper would map
