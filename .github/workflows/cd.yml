@@ -166,6 +166,27 @@ jobs:
             terraform -chdir="$m" init -input=false >/dev/null
           done
 
+      # SSO client secret for customer360-api. deployments/sso/.env is git-ignored
+      # (bootstrap-realm.py writes it locally), so it is ABSENT on the runner — and
+      # without KEYCLOAK_CLIENT_SECRET deploy-api.sh treats the SSO config as
+      # "incomplete" and downgrades the API to SSO_LOGIN=false, which the frontend
+      # then reads from GET /metadata. Recreate the file from the environment secret
+      # so the API (and thus the UI) keeps SSO enabled. Set as a REPO secret (matches
+      # DB_PASSWORD / DEPLOY_SSH_KEY here); scope it to a GitHub Environment only if the
+      # realm secret ever differs between uat and prod (env secret overrides repo).
+      - name: Provision the Keycloak client secret (deployments/sso/.env)
+        working-directory: deployments/sso
+        env:
+          KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+        run: |
+          if [ -z "$KEYCLOAK_CLIENT_SECRET" ]; then
+            echo "::warning::KEYCLOAK_CLIENT_SECRET not set for '$ENVIRONMENT' — API will deploy with SSO_LOGIN=false."
+            exit 0
+          fi
+          umask 077
+          printf 'KEYCLOAK_CLIENT_SECRET=%s\n' "$KEYCLOAK_CLIENT_SECRET" > .env
+          echo "Wrote deployments/sso/.env for '$ENVIRONMENT' (KEYCLOAK_CLIENT_SECRET set)."
+
       # Deploys to the vSERVERS ONLY: pull the image from GHCR and `docker run`
       # over SSH for the selected app containers. `--only` restricts execution to
       # the app steps, so CD NEVER runs the infra Terraform deploy.sh scripts —
