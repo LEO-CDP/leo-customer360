@@ -154,6 +154,11 @@ resource "vngcloud_vserver_server" "this" {
   action = var.action
 
   lifecycle {
+    # CRLF-vs-LF churn in the overlay's user_data heredoc otherwise reads as a change and
+    # FORCES a destroy+recreate of the running box for a no-op. user_data only applies at
+    # first boot, so ignore post-creation drift.
+    ignore_changes = [user_data]
+
     # The zone/catalog data sources return an EMPTY id on a no-match (rather than
     # erroring), which otherwise surfaces as a confusing "Missing required
     # argument" on flavor_id/image_id/root_disk_type_id. Fail early, actionably.
