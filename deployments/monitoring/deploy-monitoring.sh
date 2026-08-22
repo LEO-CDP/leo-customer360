@@ -278,7 +278,7 @@ if [[ "$N_EN" == "true" && -n "$PUB_HOST" ]]; then
 fi
 if [[ "$J_EN" == "true" && -n "$PUB_HOST" ]]; then
   [[ "$J_GATED" == "true" ]] \
-    && echo "   Jaeger   : http://$PUB_HOST:$J_UI_PORT/  (trace UI, Keycloak login)" \
-    || echo "   Jaeger   : $J_UI_BIND:$J_UI_PORT (tunnel only — set jaeger_sso=true + oauth2_enabled to gate via LB)"
+    && echo "   Jaeger   : https://$PUB_HOST/jaeger  (trace UI, Keycloak login)" \
+    || echo "   Jaeger   : $J_UI_BIND:$J_UI_PORT (tunnel only — set jaeger_sso=true + oauth2_enabled + a Caddy /jaeger route to gate over TLS)"
 fi
 echo "   Admin tunnel (no LB): ssh -i $SSH_KEY -L $P_PORT:localhost:$P_PORT -L $N_PORT:localhost:$N_PORT $BASTION"
