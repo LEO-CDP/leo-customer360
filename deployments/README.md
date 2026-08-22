@@ -310,7 +310,7 @@ flowchart TB
       oauth2["oauth2-proxy (SSO gate)<br/>:4199 → Netdata · :4686 → Jaeger · Keycloak"]
       portainer["Portainer<br/>:9443 · own login"]
       netdata["Netdata<br/>:19999"]
-      jaeger["Jaeger UI<br/>127.0.0.1:16686 (base /jaeger) · OTLP :4318<br/>SSO via Caddy /jaeger · off by default on uat"]
+      jaeger["Jaeger UI<br/>127.0.0.1:16686 (base /jaeger) · OTLP :4318<br/>SSO via Caddy /jaeger · always-on"]
     end
   end
 
@@ -349,7 +349,7 @@ flowchart TB
 | oauth2-proxy | api box `10.100.1.5` | 4199 | Keycloak SSO gate in front of Netdata (the L4 LB can't do OIDC) |
 | Portainer | api box `10.100.1.5` | 9443 | container ops UI (logs/exec/restart); direct HTTPS on the LB — its own login |
 | Netdata | api box `10.100.1.5` | 19999 | real-time host + per-container metrics; no native auth → oauth2-proxy SSO |
-| Jaeger | api box `10.100.1.5` | 16686 (UI) · 4318/4317 (OTLP) | OpenTelemetry request-trace UI (`c360-jaeger`); **off by default on uat** — start on demand; badger storage, mem-capped; UI loopback (base path /jaeger) → **oauth2-proxy :4686 → Caddy /jaeger on :443 (Keycloak SSO, TLS)** |
+| Jaeger | api box `10.100.1.5` | 16686 (UI) · 4318/4317 (OTLP) | OpenTelemetry request-trace UI (`c360-jaeger`); **always-on** (SSO+TLS); badger storage, mem-capped; UI loopback (base path /jaeger) → **oauth2-proxy :4686 → Caddy /jaeger on :443 (Keycloak SSO, TLS)** |
 | Dagster | backend box `10.100.1.4` | 3000 | backend-system worker |
 | PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` + `leo_ads` |
 
@@ -369,7 +369,7 @@ via the **LB IP** (see the HSTS note below).
 | Portainer (own login) | `https://103.245.254.29:9443` | LB direct → Portainer :9443 (self-signed TLS) |
 | Netdata (SSO) | `http://103.245.254.29:19999` | LB → oauth2-proxy :4199 → Netdata (Keycloak login) |
 | Dagster | `http://103.245.254.29:3000` | LB direct → dagster :3000 |
-| Jaeger (trace UI, SSO) | `https://beta.leocdp.com/jaeger` | Caddy :443 (TLS) → oauth2-proxy :4686 → Jaeger (Keycloak login as `c360admin`); **on-demand on uat** (up only while `jaeger_enabled=true`) — see the [monitoring runbook](./monitoring/README.md) |
+| Jaeger (trace UI, SSO) | `https://beta.leocdp.com/jaeger` | Caddy :443 (TLS) → oauth2-proxy :4686 → Jaeger (Keycloak login as `c360admin`); **always-on** (`jaeger_enabled=true`) — see the [monitoring runbook](./monitoring/README.md) |
 
 > ⚠️ **Ops tools use the LB IP, not the `beta.leocdp.com` hostname.** The parent domain
 > `leocdp.com` is HSTS-preloaded (`includeSubDomains`), so browsers force HTTPS-with-valid-cert
