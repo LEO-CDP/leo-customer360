@@ -40,6 +40,10 @@ env_path = BASE_DIR / ".env"
 if env_path.is_file():
     load_dotenv(env_path)
 
+# BUILD_VERSION is embedded by the Docker build and remains stable for the
+# lifetime of the image. Local non-container development uses the fallback.
+BUILD_VERSION = os.getenv("BUILD_VERSION", "dev")
+
 # Environment & Configuration Parsing
 SSO_LOGIN = os.getenv("SSO_LOGIN", "false").lower()
 IS_DEV = SSO_LOGIN in ("false", "0", "no")
@@ -113,13 +117,15 @@ async def index(request: Request):
     
     cb = APP_START_TIME if not IS_DEV else datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     tenant_id = TENANT_ID or request.cookies.get("tenant_id") or request.headers.get("X-Tenant-ID")
-    
+
+    build_version = BUILD_VERSION
     context: Dict[str, str | Request | None] = {
         "request": request,
         "api_base": API_BASE,
         "tenant_id": tenant_id,
         "static_base": STATIC_BASE,
         "cache_bust": cb,
+        "build_version": build_version
     }
     
     try:

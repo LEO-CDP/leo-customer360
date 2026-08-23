@@ -128,6 +128,21 @@ Relevant settings:
 - `FRONTEND_TENANT_ID` (default: demo tenant UUID)
 - `SSO_LOGIN` (default: `false` in local/dev)
 - `HOST` / `PORT` for the frontend itself (`0.0.0.0:8890` by default)
+- `BUILD_VERSION` is embedded into Docker images at build time in
+        `yyyy-mm-dd-HH-MM` format. CI supplies the UTC value; local non-container
+        development falls back to `dev`.
+
+Build the image with an explicit version:
+
+```bash
+docker build \
+        --build-arg BUILD_VERSION="$(date -u +%Y-%m-%d-%H-%M)" \
+        -t customer360-frontend:local \
+        frontend-admin
+```
+
+The displayed build version is read once when the application starts from the
+image's `BUILD_VERSION` value. It is not regenerated for each request.
 
 These values are injected into the browser at render time through `window.C360_SERVER_CONFIG`, and then read by `static/js/common/config.js`.
 

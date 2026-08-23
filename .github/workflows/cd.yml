@@ -6,7 +6,7 @@ name: CD
 # 1. workflow_run (automatic) — fires after CI finishes and deploys only when:
 #      • CI concluded successfully, AND
 #      • the ref CI ran on is a deploy target:
-#          main (any merge/commit)                       -> uat  (pulls :latest)
+#          main (any merge/commit)                       -> uat  (pulls :sha-<commit>)
 #          vX.Y.Z tag                                    -> prod (pulls :vX.Y.Z)
 #    Feature branches, PRs, and failed-CI runs are skipped. Every successful push
 #    to main deploys uat automatically (no opt-in marker).
@@ -101,8 +101,8 @@ jobs:
           else
             if [[ "$REF" == "main" ]]; then
               # Every successful push/merge to main deploys uat automatically (no opt-in marker).
-              { echo "deploy=true"; echo "env=uat"; echo "tag=latest"; echo "services=$DEFAULT_SVC"; } >> "$GITHUB_OUTPUT"
-              echo "→ deploy uat (every merge/commit to main)"
+              { echo "deploy=true"; echo "env=uat"; echo "tag=sha-${{ github.event.workflow_run.head_sha }}"; echo "services=$DEFAULT_SVC"; } >> "$GITHUB_OUTPUT"
+              echo "→ deploy uat (exact CI-built image for ${{ github.event.workflow_run.head_sha }})"
             elif [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
               { echo "deploy=true"; echo "env=prod"; echo "tag=$REF"; echo "services=$DEFAULT_SVC"; } >> "$GITHUB_OUTPUT"
               echo "→ deploy prod (tag $REF)"

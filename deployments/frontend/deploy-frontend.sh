@@ -119,7 +119,8 @@ if [ "$DEPLOY_MODE" = "ghcr" ]; then
 else
   # docker.io has no buildx -> strip the BuildKit `RUN --mount` (pip-cache only).
   sed -i 's/ --mount=[^ ]*//g' /opt/c360/frontend-admin/Dockerfile
-  sudo docker build -t customer360-frontend /opt/c360/frontend-admin
+  BUILD_VERSION="$(date -u +%Y-%m-%d-%H-%M)"
+  sudo docker build --build-arg BUILD_VERSION="$BUILD_VERSION" -t customer360-frontend /opt/c360/frontend-admin
   RUN_IMG="customer360-frontend"
 fi
 sudo docker rm -f customer360-frontend >/dev/null 2>&1 || true

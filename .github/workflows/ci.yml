@@ -51,12 +51,13 @@ jobs:
             postgres: 'postgres/**'
             redis: 'redis/**'
 
-      # On a version tag (release) build ALL services so the whole platform is
-      # published at that version; otherwise only the services that changed.
+      # On main and version tags, build ALL services so automatic UAT and
+      # production deployments can use one exact commit SHA for the platform.
+      # On other branches, build only services that changed.
       - name: Select services
         id: select
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [[ "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/tags/v* ]]; then
             echo 'services=["ads-server","backend-system","customer360-api","frontend-admin","postgres","redis"]' >> "$GITHUB_OUTPUT"
           else
             printf 'services=%s\n' '${{ steps.filter.outputs.changes }}' >> "$GITHUB_OUTPUT"
@@ -190,6 +191,10 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
+      - name: Generate image build version
+        id: build-version
+        run: echo "value=$(date -u +'%Y-%m-%d-%H-%M')" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -199,6 +204,8 @@ jobs:
           push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_VERSION=${{ steps.build-version.outputs.value }}
           # Per-service layer cache so services don't evict each other.
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}

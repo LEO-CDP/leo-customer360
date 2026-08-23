@@ -2,8 +2,9 @@
 
 This folder holds the GitHub Actions automation for the monorepo. The single
 workflow ([`workflows/ci.yml`](workflows/ci.yml)) runs, **for each changed
-service**, its unit tests and then a Docker build — pushing the image to the
-GitHub Container Registry (GHCR) on `main`.
+service** on branches and pull requests, its unit tests and then a Docker build.
+On `main` and version tags it builds the complete image set so CD can deploy
+one exact commit SHA across the platform.
 
 ![CI/CD pipeline](ci-pipeline.png)
 
@@ -22,13 +23,14 @@ Runs on **`push`** to any branch and on **`pull_request`** targeting
 
 ### 2. `changes` — detect what moved
 
-[`dorny/paths-filter`](https://github.com/dorny/paths-filter) compares the diff
+`dorny/paths-filter`](https://github.com/dorny/paths-filter) compares the diff
 against a filter per service and emits a **JSON array of the changed services**
-(e.g. `["ads-server","frontend-admin"]`), which drives both matrices below.
+(e.g. `["ads-server","frontend-admin"]`). Branch and PR matrices use that
+array; `main` and release tags expand it to all publishable services.
 
-### 3. `test` — one job per changed service
+### 3. `test` — one job per selected service
 
-A matrix job (`needs: changes`) that runs **once per changed service**, invoking
+A matrix job (`needs: changes`) that runs **once per selected service**, invoking
 that service's own test runner(s). Each job writes a **per-service result row**
 (Service · Result · Duration) to the run's **Step Summary** and uploads its log.
 
@@ -36,12 +38,13 @@ that service's own test runner(s). Each job writes a **per-service result row**
 > every run, replace `matrix.service` with a static list — there's a one-line
 > comment marking the spot in `ci.yml`.
 
-### 4. `build-and-push` — one image per changed service
+### 4. `build-and-push` — one image per selected service
 
 A matrix job (`needs: [changes, test]`) — so a service's image builds only after
 **its tests pass**. Builds `./<service>/Dockerfile` with Buildx + a per-service
-GHA layer cache. **Pushes to GHCR only on `main`** (tags `sha-<sha>` + `latest`);
-branches and PRs build-only, still catching Dockerfile breakage.
+GHA layer cache. **Pushes to GHCR on `main` and version tags**; branches and
+PRs build-only, still catching Dockerfile breakage. Automatic UAT deploys the
+immutable `sha-<commit>` tags from the successful main run.
 
 ### 5. `notify` — aggregate summary + email
 
@@ -63,7 +66,12 @@ renders **one aggregated table** into the run summary, and sends the Brevo email
 Each image is published with two tags on `main`:
 
 - `sha-<full-git-sha>` — immutable, use this for deploys and rollbacks
-- `latest` — the newest build on the default branch
+- `latest` — convenience tag for the newest build on the default branch
+
+Automatic UAT CD deploys the immutable `sha-<full-git-sha>` tag belonging to
+the successful CI run, so a concurrent build cannot cause UAT to receive a
+different image than the one that was validated. Manual rollback can still use
+an older SHA tag or a release tag.
 
 ```bash
 docker pull ghcr.io/leo-cdp/leo-customer360/customer360-api:sha-<git-sha>

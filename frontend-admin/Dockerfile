@@ -6,9 +6,16 @@ FROM python:3.11-slim
 # Set the working directory
 WORKDIR /app
 
+ARG BUILD_VERSION
+RUN if ! printf '%s' "$BUILD_VERSION" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$'; then \
+            echo "BUILD_VERSION must match yyyy-mm-dd-HH-MM" >&2; \
+            exit 1; \
+        fi
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    BUILD_VERSION=${BUILD_VERSION}
 
 # Copy and install dependencies first
 COPY requirements.txt .
