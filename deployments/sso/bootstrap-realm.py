@@ -74,13 +74,19 @@ def main():
     else:
         print(f"realm '{REALM}': exists")
 
-    # 1a) realm role used by the platform's root administrator authorization.
-    st, _, _ = req("GET", f"/admin/realms/{REALM}/roles/root", token=tok)
-    if st == 404:
-        st, _, _ = req("POST", f"/admin/realms/{REALM}/roles", token=tok, body={"name": "root"})
-        print("realm role 'root': created" if st in (201, 204) else f"realm role create HTTP {st}")
-    else:
-        print("realm role 'root': exists")
+    # 1a) realm roles the customer360-api authorizes on. These MUST match the role sets in
+    # customer360-api/core/routers/segment_api.py:
+    #   PLATFORM_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin"}
+    #   TENANT_ADMIN_ROLES   = PLATFORM_ADMIN_ROLES | {"tenant_admin", "admin"}
+    # 'root' is kept for backward compatibility with older tokens. Idempotent: each role is
+    # created only if it doesn't already exist (GET 404 -> POST).
+    for role in ("root", "platform_admin", "super_admin", "system_admin", "tenant_admin", "admin"):
+        st, _, _ = req("GET", f"/admin/realms/{REALM}/roles/{role}", token=tok)
+        if st == 404:
+            st, _, _ = req("POST", f"/admin/realms/{REALM}/roles", token=tok, body={"name": role})
+            print(f"realm role '{role}': created" if st in (201, 204) else f"realm role '{role}' create HTTP {st}")
+        else:
+            print(f"realm role '{role}': exists")
 
     # 1b) allow unmanaged custom attributes. Keycloak 26's declarative user profile
     # silently DROPS undeclared attributes (e.g. tenant_id), so the mapper would map
@@ -165,6 +171,17 @@ def main():
     req("PUT", f"/admin/realms/{REALM}/users/{uid}/reset-password", token=tok,
         body={"type": "password", "value": TEST_PW, "temporary": False})
     print(f"user '{TEST_USER}': password set")
+
+    # 5a) grant the test user the 'platform_admin' realm role so it satisfies the
+    # customer360-api PLATFORM_ADMIN_ROLES check out of the box. Idempotent: re-POSTing an
+    # already-assigned role mapping is a no-op on Keycloak.
+    st, role_rep, _ = req("GET", f"/admin/realms/{REALM}/roles/platform_admin", token=tok)
+    if st == 200 and isinstance(role_rep, dict) and role_rep.get("id"):
+        req("POST", f"/admin/realms/{REALM}/users/{uid}/role-mappings/realm", token=tok,
+            body=[{"id": role_rep["id"], "name": role_rep["name"]}])
+        print(f"user '{TEST_USER}': granted realm role 'platform_admin'")
+    else:
+        print(f"user '{TEST_USER}': WARN could not resolve 'platform_admin' to assign (HTTP {st})")
 
     # 6) write the secret back into .env (never print it)
     if secret:
