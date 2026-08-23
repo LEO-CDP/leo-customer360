@@ -21,6 +21,7 @@ from psycopg2.extras import RealDictCursor
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from identity_resolution.resolver import CustomerIdentityResolver  # noqa: E402
+from identity_resolution.rls import set_tenant_context  # noqa: E402
 
 load_dotenv()
 
@@ -115,6 +116,7 @@ def main() -> None:
         logger.info("Resolution complete. Total raw profiles processed: %d", total_processed)
 
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            set_tenant_context(cursor, DEMO_TENANT_ID)
             print_summary(cursor)
     finally:
         conn.close()

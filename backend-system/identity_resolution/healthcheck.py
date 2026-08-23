@@ -10,6 +10,8 @@ import sys
 
 import psycopg2
 
+from identity_resolution.rls import set_tenant_context
+
 DB_HOST = os.environ.get("DB_HOST", "localhost")
 DB_NAME = os.environ.get("DB_NAME", "customer360")
 DB_USER = os.environ.get("DB_USER", "postgres")
@@ -27,6 +29,9 @@ def main() -> int:
             port=DB_PORT,
             connect_timeout=3,
         )
+        with conn.cursor() as cursor:
+            set_tenant_context(cursor, None)
+            cursor.execute("SELECT 1")
         conn.close()
         return 0
     except Exception as exc:  # noqa: BLE001 - any failure means "unhealthy"

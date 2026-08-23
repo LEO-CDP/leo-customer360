@@ -445,51 +445,58 @@ window.C360 = window.C360 || {};
     return parts.length ? " (" + parts.join(", ") + ")" : "";
   }
 
-  function setRefreshButtonBusy(busy, label) {
-    var $btn = $("#btn-segments-refresh");
+  function setRefreshButtonBusy(selector, busy, label) {
+    var $btn = $(selector);
+    if (!$btn.length) return;
+    var $label = $btn.children("span").last();
     if (busy) {
       if (!$btn.data("original-class")) { $btn.data("original-class", $btn.attr("class")); }
-      if (!$btn.data("original-text")) { $btn.data("original-text", $btn.text()); }
-      $btn.attr("disabled", "disabled")
-        .removeClass("bg-slate-100 hover:bg-slate-200")
+      if (!$btn.data("original-label")) { $btn.data("original-label", $label.length ? $label.text() : $btn.text()); }
+      $btn.prop("disabled", true).attr("aria-busy", "true")
         .addClass("bg-slate-300 cursor-wait")
-        .text(label || "Refreshing...");
+        .removeClass("hover:bg-slate-100 hover:bg-slate-50");
+      if ($label.length) $label.text(label || "Refreshing...");
+      else $btn.text(label || "Refreshing...");
     } else {
-      $btn.removeAttr("disabled").attr("class", $btn.data("original-class") || $btn.attr("class"));
-      $btn.text($btn.data("original-text") || "Refresh");
+      $btn.prop("disabled", false).removeAttr("aria-busy")
+        .attr("class", $btn.data("original-class") || $btn.attr("class"));
+      if ($label.length) $label.text($btn.data("original-label") || "Refresh");
+      else $btn.text($btn.data("original-label") || "Refresh");
     }
   }
 
-  function pollRecomputeStatus(runId, attempt) {
+  function pollRecomputeStatus(runId, attempt, options) {
+    options = options || {};
+    var buttonSelector = options.buttonSelector || "#btn-segments-refresh";
     api("/segments/admin/recompute-status/" + runId)
       .done(function (result) {
         if (result.status === "success") {
-          setRefreshButtonBusy(false);
+          setRefreshButtonBusy(buttonSelector, false);
           showToast("\u2713 Segment refresh completed" + formatRunDetail(result), "success");
-          loadList(false); // reload to show updated member_count values
+          if (options.onSuccess) options.onSuccess();
           return;
         }
         if (result.status === "failure") {
-          setRefreshButtonBusy(false);
+          setRefreshButtonBusy(buttonSelector, false);
           showToast("\u2717 Segment refresh job failed" + formatRunDetail(result), "error");
           return;
         }
         // Still running: keep polling until REFRESH_POLL_MAX_ATTEMPTS is hit.
         if (attempt >= REFRESH_POLL_MAX_ATTEMPTS) {
-          setRefreshButtonBusy(false);
+          setRefreshButtonBusy(buttonSelector, false);
           showToast("Segment refresh is still running in the background; check back shortly.", "info");
           return;
         }
-        setTimeout(function () { pollRecomputeStatus(runId, attempt + 1); }, REFRESH_POLL_INTERVAL_MS);
+        setTimeout(function () { pollRecomputeStatus(runId, attempt + 1, options); }, REFRESH_POLL_INTERVAL_MS);
       })
       .fail(function (xhr) {
-        setRefreshButtonBusy(false);
+        setRefreshButtonBusy(buttonSelector, false);
         showApiError("checking segment refresh status", xhr);
       });
   }
 
   function refreshAllSegments() {
-    setRefreshButtonBusy(true, "Submitting...");
+    setRefreshButtonBusy("#btn-segments-refresh", true, "Submitting...");
 
     // Fire-and-return: this only submits a Dagster run and gets a run_id
     // back immediately (see backend docstring on the endpoint) -- the
@@ -497,12 +504,42 @@ window.C360 = window.C360 || {};
     // on cdp_master_profiles size.
     api("/segments/admin/recompute-all", {}, "POST")
       .done(function (response) {
-        setRefreshButtonBusy(true, "Refreshing...");
+        setRefreshButtonBusy("#btn-segments-refresh", true, "Refreshing...");
         showToast("Segment refresh job submitted (run " + response.run_id + ")...", "info");
-        pollRecomputeStatus(response.run_id, 1);
+        pollRecomputeStatus(response.run_id, 1, {
+          buttonSelector: "#btn-segments-refresh",
+          onSuccess: function () { loadList(false); }
+        });
       })
       .fail(function (xhr) {
-        setRefreshButtonBusy(false);
+        setRefreshButtonBusy("#btn-segments-refresh", false);
+        showApiError("submitting segment refresh job", xhr);
+      });
+  }
+
+  function refreshSegmentDetail() {
+    var segmentId = currentSegmentId;
+    if (!segmentId) return;
+
+    var buttonSelector = "#btn-segment-detail-refresh";
+    setRefreshButtonBusy(buttonSelector, true, "Submitting...");
+    api("/segments/" + encodeURIComponent(segmentId) + "/recompute", {}, "POST")
+      .done(function (response) {
+        setRefreshButtonBusy(buttonSelector, true, "Refreshing...");
+        showToast("Segment refresh job submitted (run " + response.run_id + ")...", "info");
+        pollRecomputeStatus(response.run_id, 1, {
+          buttonSelector: buttonSelector,
+          onSuccess: function () {
+            if (currentSegmentId === segmentId && !$("#segment-view-detail").hasClass("hidden")) {
+              loadDetail(segmentId);
+            } else {
+              loadList(false);
+            }
+          }
+        });
+      })
+      .fail(function (xhr) {
+        setRefreshButtonBusy(buttonSelector, false);
         showApiError("submitting segment refresh job", xhr);
       });
   }
@@ -516,6 +553,7 @@ window.C360 = window.C360 || {};
     // here since #segment-matched-* is fresh DOM on every loadDetail().
     $(document).on("click", "#btn-back-to-segments", function () { C360.router.navigate("/segments"); });
     $(document).on("click", "#btn-segments-refresh", function () { refreshAllSegments(); });
+    $(document).on("click", "#btn-segment-detail-refresh", function () { refreshSegmentDetail(); });
     $(document).on("click", "#btn-segments-create", function () { openSegmentForm(null); });
     $(document).on("click", "#btn-segment-detail-edit", function () { openSegmentForm(segmentsById[currentSegmentId]); });
     $(document).on("click", "#btn-segment-form-save", submitSegmentForm);

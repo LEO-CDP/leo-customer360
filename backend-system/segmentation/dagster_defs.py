@@ -9,11 +9,11 @@ on-demand ``POST /api/v1/segments/{id}/recompute``
 (``customer360-api/core/crud/segmentation.py``). See
 ``docs/PLAN-SEGMENTS-API-IMPROVEMENT.md`` Phase 3.
 
-  - ``recompute_segments_op`` / ``segmentation_job`` -- one full pass over
-    every active segment (see ``segmentation/recompute.py``), scoped to
-    ``RecomputeSegmentsConfig.tenant_id`` if the run was submitted with one
-    (e.g. customer360-api's admin "Refresh" button -- see
-    ``core/utils/dagster_client.py``), otherwise ALL tenants.
+    - ``recompute_segments_op`` / ``segmentation_job`` -- one pass over every
+        active segment (see ``segmentation/recompute.py``), scoped to
+        ``RecomputeSegmentsConfig.tenant_id`` and optionally
+        ``RecomputeSegmentsConfig.segment_id`` when submitted by customer360-api,
+        otherwise ALL tenants.
   - ``segmentation_poll_sensor`` -- polls ``cdp_master_profiles`` every
     ``SEGMENTATION_POLL_INTERVAL_SECONDS`` (default 10s) and only requests a
     new ``segmentation_job`` run when at least one profile was created or
@@ -75,18 +75,29 @@ class RecomputeSegmentsConfig(Config):
     core/utils/dagster_client.py)."""
 
     tenant_id: Optional[str] = None
+    segment_id: Optional[str] = None
 
 
 @op(retry_policy=RetryPolicy(max_retries=2, delay=10))
 def recompute_segments_op(context: OpExecutionContext, config: RecomputeSegmentsConfig) -> dict:
     """Recomputes member_count/segmentation_tags for every active segment,
-    scoped to ``config.tenant_id`` if provided, otherwise across all tenants
-    (see segmentation.recompute.recompute_all_active_segments)."""
-    context.log.info("segmentation job: started (tenant_id=%s)", config.tenant_id or "ALL")
-    summary = recompute_all_active_segments(tenant_id=config.tenant_id, log=context.log.info)
+    scoped to ``config.tenant_id`` and ``config.segment_id`` when provided,
+    otherwise across all tenants (see
+    segmentation.recompute.recompute_all_active_segments)."""
     context.log.info(
-        "segmentation job: done (tenant_id=%s, segments_processed=%d, segments_skipped=%d, total_members=%d)",
+        "segmentation job: started (tenant_id=%s, segment_id=%s)",
+        config.tenant_id or "ALL",
+        config.segment_id or "ALL",
+    )
+    summary = recompute_all_active_segments(
+        tenant_id=config.tenant_id,
+        segment_id=config.segment_id,
+        log=context.log.info,
+    )
+    context.log.info(
+        "segmentation job: done (tenant_id=%s, segment_id=%s, segments_processed=%d, segments_skipped=%d, total_members=%d)",
         summary.get("tenant_id") or "ALL",
+        config.segment_id or "ALL",
         summary["segments_processed"],
         summary["segments_skipped"],
         summary["total_members"],

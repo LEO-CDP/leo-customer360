@@ -23,6 +23,7 @@ from psycopg2.extras import Json, RealDictCursor
 from .models import IdentityRule
 from .persona import generate_persona_name, profile_looks_hashed
 from .persona_engine import PersonaResolutionEngine
+from .rls import set_tenant_context
 
 logger = logging.getLogger(__name__)
 
@@ -158,17 +159,21 @@ class CustomerIdentityResolver:
         ]
 
     def _fetch_master_profile_state(
-        self, cursor, master_id: str, columns: Sequence[str] = BASE_MASTER_STATE_COLUMNS
+        self,
+        cursor,
+        tenant_id: str,
+        master_id: str,
+        columns: Sequence[str] = BASE_MASTER_STATE_COLUMNS,
     ) -> Dict[str, Any]:
         """Fetches the current master row values needed for merge precedence."""
         column_list = ", ".join(columns)
         query = f"""
             SELECT {column_list}
             FROM {self._table('cdp_master_profiles')}
-            WHERE master_profile_id = %s
+            WHERE tenant_id = %s AND master_profile_id = %s
             LIMIT 1;
         """
-        cursor.execute(query, (master_id,))
+        cursor.execute(query, (tenant_id, master_id))
         row = cursor.fetchone() or {}
         return dict(row)
 
@@ -630,16 +635,22 @@ class CustomerIdentityResolver:
         )
         return None
 
-    def _fetch_unprocessed_profiles(self, cursor) -> List[Dict[str, Any]]:
-        """Fetches a batch of raw profiles not yet processed (status_code = 1)."""
+    def _fetch_tenant_ids(self, cursor) -> List[str]:
+        """Fetch tenant IDs before entering each tenant's RLS context."""
+        set_tenant_context(cursor, None)
+        cursor.execute(f"SELECT tenant_id FROM {self._table('sys_tenant')} ORDER BY tenant_id;")
+        return [str(row["tenant_id"] if isinstance(row, dict) else row[0]) for row in cursor.fetchall()]
+
+    def _fetch_unprocessed_profiles(self, cursor, tenant_id: str) -> List[Dict[str, Any]]:
+        """Fetch a batch of this tenant's raw profiles not yet processed."""
         columns = ", ".join(RAW_PROFILE_COLUMNS)
         query = f"""
             SELECT {columns}
             FROM {self._table('cdp_raw_profiles_stage')}
-            WHERE status_code = 1
+            WHERE tenant_id = %s AND status_code = 1
             LIMIT %s;
         """
-        cursor.execute(query, (self.batch_size,))
+        cursor.execute(query, (tenant_id, self.batch_size))
         return cursor.fetchall()
 
     def _find_master_profile(
@@ -773,7 +784,12 @@ class CustomerIdentityResolver:
         current_domain_attrs: Dict[str, Any] = {}
         if has_consolidation_metadata:
             columns = self._collect_master_state_columns(rule_map)
-            current_master = self._fetch_master_profile_state(cursor, master_id, columns)
+            current_master = self._fetch_master_profile_state(
+                cursor,
+                str(raw_profile["tenant_id"]),
+                master_id,
+                columns,
+            )
             current_domain_attrs = self._fetch_domain_attributes(
                 cursor,
                 str(raw_profile["tenant_id"]),
@@ -985,14 +1001,14 @@ class CustomerIdentityResolver:
         )
         return new_master_id
 
-    def _mark_as_processed(self, cursor, raw_profile_id: str) -> None:
+    def _mark_as_processed(self, cursor, tenant_id: str, raw_profile_id: str) -> None:
         """Marks a raw profile as processed (status_code = 3) and stamps processed_at."""
         query = f"""
             UPDATE {self._table('cdp_raw_profiles_stage')}
             SET status_code = 3, processed_at = NOW()
-            WHERE raw_profile_id = %s;
+            WHERE tenant_id = %s AND raw_profile_id = %s;
         """
-        cursor.execute(query, (raw_profile_id,))
+        cursor.execute(query, (tenant_id, raw_profile_id))
 
     def run_resolution_batch(self) -> int:
         """Main orchestration method for a single batch run. Idempotent and
@@ -1005,58 +1021,52 @@ class CustomerIdentityResolver:
         """
         try:
             with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                set_tenant_context(cursor, None)
                 rules = self._get_active_rules(cursor)
                 if not rules:
                     logger.warning("No active identity resolution rules found. Aborting.")
                     return 0
 
-                raw_profiles = self._fetch_unprocessed_profiles(cursor)
-                if not raw_profiles:
+                total_processed = 0
+                for tenant_id in self._fetch_tenant_ids(cursor):
+                    set_tenant_context(cursor, tenant_id)
+                    raw_profiles = self._fetch_unprocessed_profiles(cursor, tenant_id)
+                    if not raw_profiles:
+                        continue
+
+                    logger.info("Processing batch of %d profiles for tenant %s.", len(raw_profiles), tenant_id)
+
+                    for profile in raw_profiles:
+                        matched = self._find_master_profile(cursor, profile, rules, return_details=True)
+
+                        if matched:
+                            self._link_and_update(
+                                cursor,
+                                profile,
+                                matched["master_profile_id"],
+                                match_method=matched.get("match_method", "DynamicMatch"),
+                                match_score=matched.get("match_score"),
+                                rules=rules,
+                            )
+                            matched_id = matched["master_profile_id"]
+                        else:
+                            matched_id = self._create_master_and_link(cursor, profile)
+
+                        # Identity *understanding*: recompute the resolved master
+                        # profile's persona without changing the active RLS tenant.
+                        if self.persona_engine is not None:
+                            self.persona_engine.resolve_persona(cursor, tenant_id, matched_id)
+
+                        self._mark_as_processed(cursor, tenant_id, profile["raw_profile_id"])
+                        total_processed += 1
+
+                if total_processed == 0:
                     logger.info("No unprocessed profiles found in staging.")
                     return 0
 
-                logger.info("Processing batch of %d profiles.", len(raw_profiles))
-
-                for profile in raw_profiles:
-                    # Scope this connection to the raw profile's tenant for the
-                    # duration of its processing. The reads/writes below are
-                    # already explicitly tenant-scoped in SQL, but this also
-                    # keeps this batch worker compatible with the tenant_policy
-                    # Row-Level Security policies (see database-schema.sql)
-                    # if/when this service's DB role is not BYPASSRLS/superuser
-                    # -- required since a single batch can span many tenants.
-                    cursor.execute(
-                        "SELECT set_config('app.tenant_id', %s, false);",
-                        (str(profile["tenant_id"]),),
-                    )
-
-                    matched = self._find_master_profile(cursor, profile, rules, return_details=True)
-
-                    if matched:
-                        self._link_and_update(
-                            cursor,
-                            profile,
-                            matched["master_profile_id"],
-                            match_method=matched.get("match_method", "DynamicMatch"),
-                            match_score=matched.get("match_score"),
-                            rules=rules,
-                        )
-                        matched_id = matched["master_profile_id"]
-                    else:
-                        matched_id = self._create_master_and_link(cursor, profile)
-
-                    # Identity *understanding*: recompute the resolved master
-                    # profile's persona (persona_engine.py never raises, so
-                    # this can't abort/rollback the identity *matching* work
-                    # done above for this batch).
-                    if self.persona_engine is not None:
-                        self.persona_engine.resolve_persona(cursor, profile["tenant_id"], matched_id)
-
-                    self._mark_as_processed(cursor, profile["raw_profile_id"])
-
                 self.conn.commit()
                 logger.info("Batch processed and committed successfully.")
-                return len(raw_profiles)
+                return total_processed
 
         except Exception:
             self.conn.rollback()

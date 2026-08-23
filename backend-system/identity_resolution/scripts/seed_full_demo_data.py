@@ -124,6 +124,7 @@ from psycopg2.extras import Json, RealDictCursor
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from identity_resolution.persona_engine import PersonaResolutionEngine, compute_persona  # noqa: E402
+from identity_resolution.rls import set_tenant_context  # noqa: E402
 
 load_dotenv()
 
@@ -1985,6 +1986,7 @@ def main() -> None:
     conn = psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT)
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            set_tenant_context(cursor, DEMO_TENANT_ID)
             master_profiles = fetch_master_profiles(cursor)
             if not master_profiles:
                 logger.error(

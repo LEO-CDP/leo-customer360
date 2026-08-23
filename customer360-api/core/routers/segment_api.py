@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from core.cache import cache_response, invalidate_prefix
 from core.config import settings
 from core.crud.base import CRUDBase
-from core.crud.segmentation import DOMAIN_ATTRIBUTES_JOIN_SQL, recompute_segment_membership
+from core.crud.segmentation import DOMAIN_ATTRIBUTES_JOIN_SQL
 from core.database import get_db
 from core.init_core_data import list_tenant_ids, seed_default_segments_with_breakdown
 from core.models.segmentation import CdpSegment
@@ -129,7 +129,10 @@ def _trigger_segment_recompute(segment: CdpSegment, trigger_reason: str) -> None
     successful segment CRUD write into an HTTP failure; the scheduled job can
     reconcile the stale member_count later."""
     try:
-        run_id = getattr(dagster_client.segmentation, trigger_reason)(tenant_id=str(segment.tenant_id))
+        run_id = getattr(dagster_client.segmentation, trigger_reason)(
+            tenant_id=str(segment.tenant_id),
+            segment_id=str(segment.segment_id),
+        )
     except DagsterJobTriggerError:
         logger.warning(
             "Could not submit segmentation_job for segment_id=%s (trigger_reason=%s); "
@@ -337,27 +340,47 @@ def count_segment_matched_profiles(segment_id: uuid.UUID, db: Session = Depends(
 
 
 @segments_router.post("/{segment_id}/recompute")
-def recompute_segment(segment_id: uuid.UUID, db: Session = Depends(get_db)):
-    """Re-runs the segment's ``sql_rules`` against ``cdp_master_profiles``
-    (see core.crud.segmentation.recompute_segment_membership), updating
-    ``member_count``/``last_computed_at`` and syncing ``segment_tag`` into/out
-    of ``cdp_master_profiles.segmentation_tags`` for matching/non-matching
-    profiles."""
+def recompute_segment(segment_id: uuid.UUID, request: Request, db: Session = Depends(get_db)):
+    """Submits an asynchronous Dagster run for this tenant's one segment.
+
+    The run updates ``member_count``/``last_computed_at`` and synchronizes
+    ``segment_tag`` in the backend service. Use the status endpoint to track
+    completion; the API does not perform the expensive profile scan inline.
+    """
+    caller_tenant_id = getattr(request.state, "tenant_id", None)
+    if not caller_tenant_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No tenant context found (missing X-Tenant-Id); recompute requires a tenant_id",
+        )
+
     repo = SegmentRepository(db)
+    segment = _get_segment_or_404(repo, segment_id)
+    if str(segment.tenant_id) != str(caller_tenant_id):
+        raise HTTPException(status_code=404, detail=f"CdpSegment '{segment_id}' not found")
+    if not segment.sql_rules:
+        raise HTTPException(status_code=400, detail="Segment has no sql_rules to compute")
+    _validated_where_fragment(segment.sql_rules)
+
     try:
-        result = repo.recompute_membership(segment_id)
-    except ValueError as exc:
-        error_msg = str(exc)
-        if "not found" in error_msg:
-            raise HTTPException(status_code=404, detail=error_msg) from exc
-        raise HTTPException(status_code=400, detail=error_msg) from exc
+        run_id = dagster_client.segmentation.refresh(
+            tenant_id=str(caller_tenant_id),
+            segment_id=str(segment_id),
+        )
+    except DagsterJobTriggerError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    # Recomputed membership/tags can change the result of the read-only
-    # matched-profiles endpoints, so their cached responses are now stale.
-    invalidate_prefix("segments/matched_profiles")
-    invalidate_prefix("segments/matched_profiles_count")
-
-    return result
+    return {
+        "status": "submitted",
+        "run_id": run_id,
+        "tenant_id": str(caller_tenant_id),
+        "segment_id": str(segment_id),
+        "job_name": settings.dagster_segmentation_job_name,
+        "message": (
+            "Segment recompute job submitted to Dagster; membership updates asynchronously. "
+            "Poll /segments/admin/recompute-status/{run_id} for completion."
+        ),
+    }
 
 
 @segments_router.post("/admin/defaults/seed")
@@ -477,7 +500,9 @@ def get_recompute_job_status(run_id: str):
 
     if result["status"] == "success":
         # Recomputed membership/tags can change the result of the read-only
-        # matched-profiles endpoints, so their cached responses are now stale.
+        # matched-profiles endpoints and the stored member_count, so their
+        # cached responses are now stale.
+        invalidate_prefix("cdp_segments")
         invalidate_prefix("segments/matched_profiles")
         invalidate_prefix("segments/matched_profiles_count")
 

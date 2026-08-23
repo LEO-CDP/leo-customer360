@@ -45,10 +45,16 @@ import hashlib
 import logging
 import os
 import random
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import psycopg2
 from dotenv import load_dotenv
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from identity_resolution.rls import set_tenant_context  # noqa: E402
 
 load_dotenv()
 
@@ -432,6 +438,7 @@ def main() -> None:
     try:
         raw_profiles = generate_raw_profiles(count=1000, duplicate_rate=0.3)
         with conn.cursor() as cursor:
+            set_tenant_context(cursor, DEMO_TENANT_ID)
             ensure_extensions(cursor)
             ensure_demo_tenant(cursor)
             reset_demo_data(cursor)

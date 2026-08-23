@@ -339,7 +339,10 @@ class SegmentCrudTests(unittest.TestCase):
 
         _trigger_segment_recompute_after_create(segment)
 
-        mock_trigger.assert_called_once_with(tenant_id=str(tenant_id))
+        mock_trigger.assert_called_once_with(
+            tenant_id=str(tenant_id),
+            segment_id=str(segment.segment_id),
+        )
 
     @patch("core.routers.segment_api.dagster_client.segmentation.update", return_value="run-update")
     def test_update_trigger_submits_tenant_scoped_dagster_job(self, mock_trigger):
@@ -348,7 +351,10 @@ class SegmentCrudTests(unittest.TestCase):
 
         _trigger_segment_recompute_after_update(segment)
 
-        mock_trigger.assert_called_once_with(tenant_id=str(tenant_id))
+        mock_trigger.assert_called_once_with(
+            tenant_id=str(tenant_id),
+            segment_id=str(segment.segment_id),
+        )
 
 
 class _FakeRows:
@@ -547,7 +553,13 @@ class SegmentRecomputeTests(unittest.TestCase):
         self.app.include_router(segment_router_module.segments_router)
         self.app.dependency_overrides[get_db] = lambda: None
 
-    def _client_for(self, fake_segment: Optional[SimpleNamespace]) -> TestClient:
+    def _client_for(
+        self,
+        fake_segment: Optional[SimpleNamespace],
+        tenant_id: Optional[str] = None,
+    ) -> TestClient:
+        request_tenant_id = tenant_id or (str(fake_segment.tenant_id) if fake_segment else None)
+
         # Mock SegmentRepository to return fake_segment
         def mock_repo_factory(db):
             repo = SimpleNamespace()
@@ -573,10 +585,17 @@ class SegmentRecomputeTests(unittest.TestCase):
         )
         repo_patcher.start()
         self.addCleanup(repo_patcher.stop)
+
+        @self.app.middleware("http")
+        async def _inject_tenant(request, call_next):
+            if request_tenant_id is not None:
+                request.state.tenant_id = request_tenant_id
+            return await call_next(request)
+
         return TestClient(self.app)
 
     def test_recompute_404_for_missing_segment(self):
-        client = self._client_for(None)
+        client = self._client_for(None, tenant_id=str(uuid.uuid4()))
 
         response = client.post(f"/segments/{uuid.uuid4()}/recompute")
 
@@ -615,7 +634,8 @@ class SegmentRecomputeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
 
-    def test_recompute_returns_updated_member_count_and_invalidates_cache(self):
+    @patch("core.routers.segment_api.dagster_client.segmentation.refresh", return_value="run-segment")
+    def test_recompute_submits_tenant_and_segment_scoped_job(self, mock_trigger):
         segment_id = uuid.uuid4()
         last_computed_at = datetime(2026, 7, 28, 10, 15, tzinfo=timezone.utc)
 
@@ -628,18 +648,16 @@ class SegmentRecomputeTests(unittest.TestCase):
         )
         client = self._client_for(segment)
 
-        with patch.object(
-            self.segment_router_module, "invalidate_prefix"
-        ) as mock_invalidate:
-            response = client.post(f"/segments/{segment_id}/recompute")
+        response = client.post(f"/segments/{segment_id}/recompute")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["segment_id"], str(segment_id))
-        self.assertEqual(body["member_count"], 42)
-        self.assertEqual(
-            [call.args[0] for call in mock_invalidate.call_args_list],
-            ["segments/matched_profiles", "segments/matched_profiles_count"],
+        self.assertEqual(body["tenant_id"], str(segment.tenant_id))
+        self.assertEqual(body["run_id"], "run-segment")
+        mock_trigger.assert_called_once_with(
+            tenant_id=str(segment.tenant_id),
+            segment_id=str(segment_id),
         )
 
 

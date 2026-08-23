@@ -17,10 +17,16 @@ import hashlib
 import logging
 import os
 import random
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import psycopg2
 from dotenv import load_dotenv
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from identity_resolution.rls import set_tenant_context  # noqa: E402
 
 load_dotenv()
 
@@ -295,6 +301,7 @@ def main() -> None:
             host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
         )
         cursor = conn.cursor()
+        set_tenant_context(cursor, DEMO_TENANT_ID)
         
         # Generate profiles
         raw_profiles = generate_fuzzy_match_profiles(num_groups=10)

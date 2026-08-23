@@ -338,7 +338,9 @@ class SegmentationDagsterService(DagsterService):
     (useful for filtering run history in the Dagster UI) and the docstring
     describing when to call it.
 
-    All three REQUIRE a ``tenant_id`` and always scope the run to it via
+    All methods require a ``tenant_id`` and scope the run to that tenant.
+    ``refresh`` can optionally pass ``segment_id``; ``create`` and ``update``
+    always pass it so only the changed segment is recomputed. All values are sent via
     ``RecomputeSegmentsConfig`` (see
     ``backend-system/segmentation/dagster_defs.py``) -- this can never
     accidentally trigger a cross-tenant/global recompute from an on-demand
@@ -353,29 +355,44 @@ class SegmentationDagsterService(DagsterService):
             repository_name=settings.dagster_segmentation_repository_name,
         )
 
-    def _submit_scoped_recompute(self, tenant_id: str, trigger_reason: str) -> str:
+    def _submit_scoped_recompute(
+        self,
+        tenant_id: str,
+        trigger_reason: str,
+        segment_id: Optional[str] = None,
+    ) -> str:
         if not tenant_id:
             raise ValueError("tenant_id is required to trigger a segmentation recompute")
-        run_config = {"ops": {"recompute_segments_op": {"config": {"tenant_id": str(tenant_id)}}}}
-        return self.submit(run_config=run_config, tags={"trigger_reason": trigger_reason})
+        if segment_id is not None and not segment_id:
+            raise ValueError("segment_id cannot be empty")
+        config = {"tenant_id": str(tenant_id)}
+        tags = {"trigger_reason": trigger_reason}
+        if segment_id is not None:
+            config["segment_id"] = str(segment_id)
+        run_config = {"ops": {"recompute_segments_op": {"config": config}}}
+        return self.submit(run_config=run_config, tags=tags)
 
-    def refresh(self, tenant_id: str) -> str:
+    def refresh(self, tenant_id: str, segment_id: Optional[str] = None) -> str:
         """Recomputes member_count/segmentation_tags for every active
         segment belonging to ``tenant_id`` (the admin UI's "Refresh"
-        button)."""
-        return self._submit_scoped_recompute(tenant_id, trigger_reason="refresh")
+        button), or only ``segment_id`` when provided."""
+        return self._submit_scoped_recompute(
+            tenant_id,
+            trigger_reason="refresh",
+            segment_id=segment_id,
+        )
 
-    def create(self, tenant_id: str) -> str:
+    def create(self, tenant_id: str, segment_id: str) -> str:
         """Recomputes membership for ``tenant_id`` after a new segment was
         created, so the new segment's member_count/tags are populated
         without waiting for the next scheduled poll."""
-        return self._submit_scoped_recompute(tenant_id, trigger_reason="create")
+        return self._submit_scoped_recompute(tenant_id, trigger_reason="create", segment_id=segment_id)
 
-    def update(self, tenant_id: str) -> str:
+    def update(self, tenant_id: str, segment_id: str) -> str:
         """Recomputes membership for ``tenant_id`` after a segment's rules
         were edited, so member_count/tags reflect the new rules
         immediately."""
-        return self._submit_scoped_recompute(tenant_id, trigger_reason="update")
+        return self._submit_scoped_recompute(tenant_id, trigger_reason="update", segment_id=segment_id)
 
 
 class DataSynchDagsterService(DagsterService):

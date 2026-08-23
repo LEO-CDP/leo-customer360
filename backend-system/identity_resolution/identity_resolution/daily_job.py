@@ -13,6 +13,7 @@ import psycopg2
 from dotenv import load_dotenv
 
 from identity_resolution.resolver import CustomerIdentityResolver
+from identity_resolution.rls import set_tenant_context
 
 load_dotenv()
 
@@ -71,6 +72,7 @@ def recompute_persona_archetype_match_count(tenant_id: str, persona_archetype_id
     )
     try:
         with conn.cursor() as cursor:
+            set_tenant_context(cursor, tenant_id)
             cursor.execute(
                 f"""
                 UPDATE {DB_SCHEMA}.cdp_persona_archetypes

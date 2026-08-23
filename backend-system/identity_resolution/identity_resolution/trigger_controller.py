@@ -16,6 +16,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from .resolver import CustomerIdentityResolver
+from .rls import set_tenant_context
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class IdentityResolutionTrigger:
         """
         try:
             with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                set_tenant_context(cursor, None)
                 lock_query = f"""
                     SELECT last_executed_at
                     FROM {self._table('cdp_id_resolution_status')}

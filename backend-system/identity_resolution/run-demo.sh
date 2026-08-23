@@ -39,10 +39,8 @@ RECREATE_VENV=0
 if [ ! -d "$VENV_DIR" ] || [ ! -x "$VENV_DIR/bin/python" ]; then
   RECREATE_VENV=1
 else
-  # A moved/copied venv can keep stale paths; recreate if sys.prefix no longer matches.
   VENV_PREFIX="$($VENV_DIR/bin/python -c 'import os, sys; print(os.path.realpath(sys.prefix))' 2>/dev/null || true)"
   if [ "$VENV_PREFIX" != "$VENV_DIR" ]; then
-    echo "♻️  Detected stale virtual environment (prefix: ${VENV_PREFIX}). Recreating..."
     RECREATE_VENV=1
   fi
 fi
@@ -77,23 +75,24 @@ cat <<EOF
 ✅ Demo complete. Inspect the results yourself in psql, e.g.:
 
   docker exec -it -u postgres ${PG_CONTAINER} psql -d ${DB_NAME} -c \\
-    "SELECT master_profile_id, domain, full_name, email, phone_number, source_systems FROM ${DB_SCHEMA}.cdp_master_profiles WHERE tenant_id = '${DEMO_TENANT_ID}' ORDER BY domain;"
+    "SET app.tenant_id = '${DEMO_TENANT_ID}'; SELECT master_profile_id, domain, full_name, email, phone_number, source_systems FROM ${DB_SCHEMA}.cdp_master_profiles WHERE tenant_id = '${DEMO_TENANT_ID}' ORDER BY domain;"
 
   docker exec -it -u postgres ${PG_CONTAINER} psql -d ${DB_NAME} -c \\
-    "SELECT raw_profile_id, source_system, domain, status_code FROM ${DB_SCHEMA}.cdp_raw_profiles_stage WHERE tenant_id = '${DEMO_TENANT_ID}' ORDER BY source_system;"
+    "SET app.tenant_id = '${DEMO_TENANT_ID}'; SELECT raw_profile_id, source_system, domain, status_code FROM ${DB_SCHEMA}.cdp_raw_profiles_stage WHERE tenant_id = '${DEMO_TENANT_ID}' ORDER BY source_system;"
 
   docker exec -it -u postgres ${PG_CONTAINER} psql -d ${DB_NAME} -c \\
-    "SELECT * FROM ${DB_SCHEMA}.cdp_profile_links WHERE tenant_id = '${DEMO_TENANT_ID}';"
+    "SET app.tenant_id = '${DEMO_TENANT_ID}'; SELECT * FROM ${DB_SCHEMA}.cdp_profile_links WHERE tenant_id = '${DEMO_TENANT_ID}';"
 
   docker exec -it -u postgres ${PG_CONTAINER} psql -d ${DB_NAME} -c \\
-    "SELECT lifecycle_stage, churn_risk_tier, clv_segment, engagement_score, preferred_channel FROM ${DB_SCHEMA}.cdp_master_profiles WHERE tenant_id = '${DEMO_TENANT_ID}' LIMIT 10;"
+    "SET app.tenant_id = '${DEMO_TENANT_ID}'; SELECT lifecycle_stage, churn_risk_tier, clv_segment, engagement_score, preferred_channel FROM ${DB_SCHEMA}.cdp_master_profiles WHERE tenant_id = '${DEMO_TENANT_ID}' LIMIT 10;"
 
   docker exec -it -u postgres ${PG_CONTAINER} psql -d ${DB_NAME} -c \\
-    "SELECT domain, event_category, event_name, COUNT(*) FROM ${DB_SCHEMA}.cdp_raw_events WHERE tenant_id = '${DEMO_TENANT_ID}' GROUP BY 1,2,3 ORDER BY 1,2,3;"
+    "SET app.tenant_id = '${DEMO_TENANT_ID}'; SELECT domain, event_category, event_name, COUNT(*) FROM ${DB_SCHEMA}.cdp_raw_events WHERE tenant_id = '${DEMO_TENANT_ID}' GROUP BY 1,2,3 ORDER BY 1,2,3;"
 
   docker exec -it -u postgres ${PG_CONTAINER} psql -d ${DB_NAME} -c \\
-    "SELECT name, stage, value FROM ${DB_SCHEMA}.crm_opportunity ORDER BY value DESC;"
+    "SET app.tenant_id = '${DEMO_TENANT_ID}'; SELECT name, stage, value FROM ${DB_SCHEMA}.crm_opportunity WHERE tenant_id = '${DEMO_TENANT_ID}' ORDER BY value DESC;"
 
 Or open an interactive shell:
   docker exec -it -u postgres ${PG_CONTAINER} psql -d ${DB_NAME}
+  SET app.tenant_id = '${DEMO_TENANT_ID}';
 EOF

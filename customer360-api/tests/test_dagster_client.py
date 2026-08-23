@@ -179,16 +179,36 @@ class SegmentationDagsterServiceTests(unittest.TestCase):
         )
         self.assertEqual(kwargs["tags"], {"trigger_reason": "refresh"})
 
+    def test_refresh_can_scope_run_config_to_one_segment(self):
+        fake_client = MagicMock()
+        fake_client.submit_job_execution.return_value = "run-2"
+        service = self._service_with_fake_client(fake_client)
+
+        service.refresh(tenant_id="tenant-1", segment_id="segment-1")
+
+        self.assertEqual(
+            fake_client.submit_job_execution.call_args.kwargs["run_config"],
+            {"ops": {"recompute_segments_op": {"config": {"tenant_id": "tenant-1", "segment_id": "segment-1"}}}},
+        )
+
     def test_create_and_update_tag_runs_distinctly(self):
         fake_client = MagicMock()
         fake_client.submit_job_execution.return_value = "run-1"
         service = self._service_with_fake_client(fake_client)
 
-        service.create(tenant_id="tenant-1")
-        service.update(tenant_id="tenant-1")
+        service.create(tenant_id="tenant-1", segment_id="segment-1")
+        service.update(tenant_id="tenant-1", segment_id="segment-2")
 
         reasons = [call.kwargs["tags"]["trigger_reason"] for call in fake_client.submit_job_execution.call_args_list]
         self.assertEqual(reasons, ["create", "update"])
+        self.assertEqual(
+            fake_client.submit_job_execution.call_args_list[0].kwargs["run_config"],
+            {"ops": {"recompute_segments_op": {"config": {"tenant_id": "tenant-1", "segment_id": "segment-1"}}}},
+        )
+        self.assertEqual(
+            fake_client.submit_job_execution.call_args_list[1].kwargs["run_config"],
+            {"ops": {"recompute_segments_op": {"config": {"tenant_id": "tenant-1", "segment_id": "segment-2"}}}},
+        )
 
 
 class IdentityResolutionRecomputePersonasTests(unittest.TestCase):

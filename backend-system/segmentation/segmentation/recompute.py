@@ -23,6 +23,8 @@ import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor
 
+from .rls import set_tenant_context
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -88,12 +90,20 @@ def _connect():
     return psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT)
 
 
+def _list_tenant_ids(cursor) -> list[str]:
+    """List tenant IDs from the global catalog before tenant-scoped work."""
+    set_tenant_context(cursor, None)
+    cursor.execute(f"SELECT tenant_id FROM {DB_SCHEMA}.sys_tenant ORDER BY tenant_id")
+    return [str(row[0]) for row in cursor.fetchall()]
+
+
 def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_fragment: str, segment_id: str) -> int:
     """Re-runs where_fragment against cdp_master_profiles for one tenant,
     syncs segment_tag into/out of segmentation_tags, and writes back
     member_count/last_computed_at onto the cdp_segments row. Returns the
     matched member count."""
     with conn.cursor() as cur:
+        set_tenant_context(cur, tenant_id)
         cur.execute(
             f"""
             SELECT master_profile_id FROM {DB_SCHEMA}.cdp_master_profiles
@@ -134,9 +144,9 @@ def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_frag
             f"""
             UPDATE {DB_SCHEMA}.cdp_segments
             SET member_count = %(member_count)s, last_computed_at = now(), updated_at = now()
-            WHERE segment_id = %(segment_id)s
+            WHERE tenant_id = %(tenant_id)s AND segment_id = %(segment_id)s
             """,
-            {"member_count": len(matched_ids), "segment_id": segment_id},
+            {"tenant_id": tenant_id, "member_count": len(matched_ids), "segment_id": segment_id},
         )
 
     return len(matched_ids)
@@ -144,10 +154,11 @@ def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_frag
 
 def recompute_all_active_segments(
     tenant_id: Optional[str] = None,
+    segment_id: Optional[str] = None,
     log: Optional[Callable[..., None]] = None,
 ) -> dict[str, Any]:
     """Recomputes member_count/segmentation_tags for every ``is_active =
-    true`` segment, optionally scoped to a single tenant. This is the
+    true`` segment, optionally scoped to a single tenant and segment. This is the
     full-scan batch job counterpart to customer360-api's on-demand
     ``POST /segments/{id}/recompute``.
 
@@ -159,35 +170,44 @@ def recompute_all_active_segments(
             tenant instead of recomputing every tenant's segments. ``None``
             (the default) recomputes across ALL tenants -- used by
             ``segmentation_poll_sensor``'s scheduled full pass.
+        segment_id: if provided, only this active segment is recomputed. It
+            must be accompanied by ``tenant_id`` to keep targeted runs
+            tenant-scoped.
 
     Returns:
         ``{"tenant_id": str | None, "segments_processed": int,
         "segments_skipped": int, "total_members": int}``
     """
+    if tenant_id is not None and not tenant_id:
+        raise ValueError("tenant_id cannot be empty")
+    if segment_id is not None and not segment_id:
+        raise ValueError("segment_id cannot be empty")
+    if segment_id is not None and tenant_id is None:
+        raise ValueError("tenant_id is required when segment_id is provided")
+
     conn = _connect()
     segments_processed = 0
     segments_skipped = 0
     total_members = 0
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            if tenant_id:
-                cur.execute(
-                    f"""
+            tenant_ids = [tenant_id] if tenant_id is not None else _list_tenant_ids(cur)
+            segments = []
+            for current_tenant_id in tenant_ids:
+                set_tenant_context(cur, current_tenant_id)
+                query = f"""
                     SELECT segment_id, tenant_id, segment_tag, sql_rules
                     FROM {DB_SCHEMA}.cdp_segments
-                    WHERE is_active = true AND status_code = 1 AND tenant_id = %(tenant_id)s
-                    """,
-                    {"tenant_id": tenant_id},
-                )
-            else:
-                cur.execute(
-                    f"""
-                    SELECT segment_id, tenant_id, segment_tag, sql_rules
-                    FROM {DB_SCHEMA}.cdp_segments
-                    WHERE is_active = true AND status_code = 1
-                    """
-                )
-            segments = cur.fetchall()
+                    WHERE is_active = true
+                      AND status_code = 1
+                      AND tenant_id = %(tenant_id)s
+                """
+                params: dict[str, str] = {"tenant_id": current_tenant_id}
+                if segment_id is not None:
+                    query += " AND segment_id = %(segment_id)s"
+                    params["segment_id"] = segment_id
+                cur.execute(query, params)
+                segments.extend(cur.fetchall())
 
         for segment in segments:
             sql_rules = segment["sql_rules"]
@@ -238,17 +258,25 @@ def count_recently_changed_master_profiles(since_iso: Optional[str]) -> int:
     conn = _connect()
     try:
         with conn.cursor() as cur:
-            if since_iso is None:
-                cur.execute(f"SELECT count(*) FROM {DB_SCHEMA}.cdp_master_profiles")
-            else:
-                cur.execute(
-                    f"""
-                    SELECT count(*) FROM {DB_SCHEMA}.cdp_master_profiles
-                    WHERE created_at > %(since)s OR updated_at > %(since)s
-                    """,
-                    {"since": since_iso},
-                )
-            row = cur.fetchone()
-            return row[0] if row else 0
+            total = 0
+            for tenant_id in _list_tenant_ids(cur):
+                set_tenant_context(cur, tenant_id)
+                if since_iso is None:
+                    cur.execute(
+                        f"SELECT count(*) FROM {DB_SCHEMA}.cdp_master_profiles WHERE tenant_id = %(tenant_id)s",
+                        {"tenant_id": tenant_id},
+                    )
+                else:
+                    cur.execute(
+                        f"""
+                        SELECT count(*) FROM {DB_SCHEMA}.cdp_master_profiles
+                        WHERE tenant_id = %(tenant_id)s
+                          AND (created_at > %(since)s OR updated_at > %(since)s)
+                        """,
+                        {"tenant_id": tenant_id, "since": since_iso},
+                    )
+                row = cur.fetchone()
+                total += row[0] if row else 0
+            return total
     finally:
         conn.close()

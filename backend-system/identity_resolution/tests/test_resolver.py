@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 from identity_resolution.models import IdentityRule
 from identity_resolution.persona import generate_persona_name
 from identity_resolution.resolver import CustomerIdentityResolver
+from identity_resolution.rls import set_tenant_context
 
 
 def make_resolver(mock_conn, **kwargs):
@@ -20,6 +21,13 @@ def make_resolver(mock_conn, **kwargs):
     # coverage of the enable_persona_resolution=True (production default) path.
     kwargs.setdefault("enable_persona_resolution", False)
     return CustomerIdentityResolver(mock_conn, schema="customer360", **kwargs)
+
+
+class TestRlsContext:
+    def test_sets_parameterized_tenant_context(self, mock_cursor):
+        set_tenant_context(mock_cursor, "tenant-1")
+
+        mock_cursor.execute.assert_called_once_with("SET app.tenant_id = %s", ("tenant-1",))
 
 
 class TestGetActiveRules:
@@ -56,12 +64,12 @@ class TestFetchUnprocessedProfiles:
         mock_cursor.fetchall.return_value = [{"raw_profile_id": "r1"}]
         resolver = make_resolver(mock_conn, batch_size=42)
 
-        result = resolver._fetch_unprocessed_profiles(mock_cursor)
+        result = resolver._fetch_unprocessed_profiles(mock_cursor, "t1")
 
         assert result == [{"raw_profile_id": "r1"}]
         query, params = mock_cursor.execute.call_args[0]
         assert "status_code = 1" in query
-        assert params == (42,)
+        assert params == ("t1", 42)
 
 
 class TestFindMasterProfile:
@@ -446,11 +454,11 @@ class TestMarkAsProcessed:
     def test_sets_status_code_and_processed_at(self, mock_cursor, mock_conn):
         resolver = make_resolver(mock_conn)
 
-        resolver._mark_as_processed(mock_cursor, "r1")
+        resolver._mark_as_processed(mock_cursor, "t1", "r1")
 
         query, params = mock_cursor.execute.call_args[0]
         assert "SET status_code = 3, processed_at = NOW()" in query
-        assert params == ("r1",)
+        assert params == ("t1", "r1")
 
 
 class TestRunResolutionBatch:
@@ -466,6 +474,7 @@ class TestRunResolutionBatch:
     def test_no_unprocessed_profiles_returns_zero(self, mock_cursor, mock_conn):
         mock_cursor.fetchall.side_effect = [
             [{"attribute_internal_code": "email", "matching_rule": "exact", "matching_threshold": None}],
+            [{"tenant_id": "t1"}],
             [],
         ]
         resolver = make_resolver(mock_conn)
@@ -509,7 +518,7 @@ class TestRunResolutionBatch:
                 "push_token": None,
             },
         ]
-        mock_cursor.fetchall.side_effect = [rules, profiles]
+        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles]
         # fetchone is called by: _find_master_profile(r1) -> match,
         # _find_master_profile(r2) -> no match, _create_master_and_link(r2) -> new id
         mock_cursor.fetchone.side_effect = [
@@ -567,7 +576,7 @@ class TestPersonaEngineWiring:
                 "push_token": None,
             }
         ]
-        mock_cursor.fetchall.side_effect = [rules, profiles]
+        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles]
         mock_cursor.fetchone.side_effect = [{"master_profile_id": "existing-master"}]
         resolver = CustomerIdentityResolver(mock_conn, schema="customer360", batch_size=10)
         resolver.persona_engine = MagicMock()
@@ -600,7 +609,7 @@ class TestPersonaEngineWiring:
                 "push_token": None,
             }
         ]
-        mock_cursor.fetchall.side_effect = [rules, profiles]
+        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles]
         # fetchone: _find_master_profile -> no match, _create_master_and_link -> new id
         mock_cursor.fetchone.side_effect = [None, {"master_profile_id": "brand-new-master"}]
         resolver = CustomerIdentityResolver(mock_conn, schema="customer360", batch_size=10)
@@ -633,7 +642,7 @@ class TestPersonaEngineWiring:
                 "push_token": None,
             }
         ]
-        mock_cursor.fetchall.side_effect = [rules, profiles]
+        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles]
         mock_cursor.fetchone.side_effect = [{"master_profile_id": "existing-master"}]
         resolver = CustomerIdentityResolver(mock_conn, schema="customer360", batch_size=10)
         resolver.persona_engine = MagicMock()
