@@ -56,7 +56,7 @@ renders **one aggregated table** into the run summary, and sends the Brevo email
 | Service          | Build context       | Port | Test runner(s)                                          | Image on GHCR                                      |
 | ---------------- | ------------------- | ---- | ------------------------------------------------------- | -------------------------------------------------- |
 | `ads-server`     | `./ads-server`      | 9009 | `run_unit_tests.sh`                                     | `ghcr.io/leo-cdp/leo-customer360/ads-server`       |
-| `backend-system` | `./backend-system`  | 3000 | `identity_resolution/run_tests.sh` + `segmentation/run_tests.sh` | `ghcr.io/leo-cdp/leo-customer360/backend-system`   |
+| `backend-system` | `./backend-system`  | 3000 | `identity_resolution/run_tests.sh` + `segmentation/run_tests.sh` | `ghcr.io/leo-cdp/leo-customer360/customer360-dagster` |
 | `customer360-api`| `./customer360-api` | 8008 | `run_unit_tests.sh`                                     | `ghcr.io/leo-cdp/leo-customer360/customer360-api`  |
 | `frontend-admin` | `./frontend-admin`  | 8890 | *(none — reported as skip)*                             | `ghcr.io/leo-cdp/leo-customer360/frontend-admin`   |
 
@@ -87,8 +87,9 @@ The full local run of every suite still lives in [`../run_all_tests.sh`](../run_
   arm in the `test` job's runner map; both matrices pick it up automatically.
 - **Test/build gating is all-or-nothing across the matrix:** if any service's
   tests fail, the whole `test` job is red and `build-and-push` is skipped.
-- **`backend-system/identity_resolution`** also has its own `Dockerfile` but is
-  not built as a separate image; add a filter + matrix arm if you want it.
+- All backend-system code locations, including `identity_resolution`, are
+  packaged in the single `backend-system` Dagster image. A change anywhere
+  under `backend-system/` rebuilds that image.
 
 ---
 

@@ -21,7 +21,6 @@ build customer360-postgres:local .                              postgres/Dockerf
 build customer360-redis:local    redis
 build customer360-api:local      customer360-api
 build customer360-frontend:local frontend-admin
-build customer360-cir:local      backend-system/identity_resolution
 build customer360-dagster:local  backend-system
 
 # Preload third-party images (everything referenced by the overlay that we do

@@ -177,7 +177,13 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/${{ matrix.service }}
+          # backend-system is the source directory and matrix key; the
+          # published Dagster image uses its runtime name.
+          images: ghcr.io/${{ github.repository }}/${{ matrix.service == 'backend-system' && 'customer360-dagster' || matrix.service }}
+          # The matrix key remains backend-system because it is the source
+          # directory and test scope; its published image has the Dagster name.
+          flavor: |
+            latest=auto
           tags: |
             type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}

@@ -50,7 +50,7 @@ echo ">> DB: ${DB_NAME}@${DB_HOST}:${DB_PORT} (user ${DB_USER})"
 # --- CD image source: pull the CI-built image from GHCR by default; set
 #     BUILD_LOCAL=1 to fall back to shipping source + building on the VM. ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
-SERVICE="backend-system"
+SERVICE="customer360-dagster"
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
 GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
 if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
@@ -97,8 +97,8 @@ if [ "$DEPLOY_MODE" = "ghcr" ]; then
   RUN_IMG="$IMAGE"
 else
   echo "   building image (this can take a few minutes on a small box)..."
-  sudo docker build -t backend-system /opt/c360/backend-system
-  RUN_IMG="backend-system"
+  sudo docker build -t customer360-dagster /opt/c360/backend-system
+  RUN_IMG="customer360-dagster"
 fi
 sudo docker rm -f backend-system >/dev/null 2>&1 || true
 sudo docker run -d --name backend-system --restart unless-stopped --network host --env-file /opt/c360/backend.env "$RUN_IMG"

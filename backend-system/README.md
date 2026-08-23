@@ -14,7 +14,7 @@ backend-system/
 │
 ├── identity_resolution/              # implemented service: CIR / identity matching + merge
 │   ├── dagster_defs.py               # identity_resolution_job + sensor
-│   ├── worker.py                     # containerized entrypoint used by Docker/local loop
+│   ├── worker.py                     # legacy/local polling helper; Dagster is the container entrypoint
 │   ├── identity_resolution/          # business logic package
 │   ├── requirements.txt
 │   └── tests/

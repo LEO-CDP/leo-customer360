@@ -3,7 +3,7 @@ name: customer360
 # =============================================================================
 # Customer 360 Platform - containerized microservice stack
 #
-#   docker compose up                 Production: postgres + redis + Keycloak + cir + api
+#   docker compose up                 Production: postgres + redis + Keycloak + Dagster + api
 #   docker compose --profile dev up    Same 5 services, PLUS a one-shot
 #                                       `cir-demo-seed` job that seeds demo
 #                                       data (CIR sample profiles, resolution,
@@ -18,7 +18,7 @@ name: customer360
 #     in .env.example). Set to 0.0.0.0 only if this host's firewall/network
 #     is otherwise trusted, or put a reverse proxy in front instead.
 #   - `env_file: .env` is only attached to services that actually need the
-#     full app config (api, cir) to avoid leaking unrelated secrets
+#     full app config (api, Dagster, demo seed) to avoid leaking unrelated secrets
 #     (e.g. GOOGLE_GENAI_API_KEY, KEYCLOAK_CLIENT_SECRET) into postgres/redis/keycloak.
 # =============================================================================
 
@@ -43,6 +43,8 @@ volumes:
     name: customer360-pgdata
   customer360-redisdata:
     name: customer360-redisdata
+  customer360-dagsterdata:
+    name: customer360-dagsterdata
 
 services:
   # ---------------------------------------------------------------------------
@@ -188,7 +190,52 @@ services:
       start_period: 60s
 
   # ---------------------------------------------------------------------------
-  # 5) Customer 360 API (FastAPI) - CRUD + reporting over the customer360
+  # 5) Dagster orchestrator - all nine backend-system code locations.
+  # ---------------------------------------------------------------------------
+  dagster:
+    build:
+      context: ./backend-system
+      dockerfile: Dockerfile
+    image: customer360-dagster:local
+    container_name: customer360-dagster
+    restart: unless-stopped
+    init: true
+    <<: *default-hardening
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DAGSTER_HOME: /dagster_home
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${DAGSTER_UI_HOST:-127.0.0.1}:${DAGSTER_UI_PORT:-3000}:3000"
+    volumes:
+      - customer360-dagsterdata:/dagster_home
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:3000/server_info', timeout=5)",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # 6) Customer 360 API (FastAPI) - CRUD + reporting over the customer360
   #    schema, Redis-cached reads (see customer360-api/core/cache.py).
   # ---------------------------------------------------------------------------
   api:
@@ -239,15 +286,14 @@ services:
 
   # ---------------------------------------------------------------------------
   # dev-only: one-shot demo data seeder (`docker compose --profile dev up`).
-  # Reuses the CIR image, overriding its command to run the seeding scripts
-  # instead of the continuous worker, then exits (restart: "no").
+  # Reuses the unified Dagster image with an explicit seed command, then exits.
   # ---------------------------------------------------------------------------
   cir-demo-seed:
     profiles: ["dev"]
     build:
-      context: ./backend-system/identity_resolution
+      context: ./backend-system
       dockerfile: Dockerfile
-    image: customer360-cir:local
+    image: customer360-dagster:local
     container_name: customer360-cir-demo-seed
     restart: "no"
     <<: *default-hardening
@@ -262,6 +308,6 @@ services:
     networks:
       - customer360-network
     command: >
-      sh -c "python scripts/init_sample_data.py &&
-             python scripts/run_demo_resolution.py &&
-             python scripts/seed_full_demo_data.py"
+          sh -c "python identity_resolution/scripts/init_sample_data.py &&
+            python identity_resolution/scripts/run_demo_resolution.py &&
+            python identity_resolution/scripts/seed_full_demo_data.py"

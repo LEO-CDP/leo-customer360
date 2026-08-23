@@ -40,3 +40,9 @@ load_from:
   - python_file:
       relative_path: notification_engine/dagster_defs.py
       location_name: notification_engine
+  - python_file:
+      relative_path: campaign_orchestration/dagster_defs.py
+      location_name: campaign_orchestration
+  - python_file:
+      relative_path: personalization/dagster_defs.py
+      location_name: personalization

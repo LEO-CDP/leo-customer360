@@ -65,7 +65,7 @@ flowchart TB
     end
 
     subgraph SERVICES["Application services"]
-        CIR["backend-system/identity_resolution/\nCIR worker + Dagster job"]
+        CIR["backend-system/identity_resolution/\nDagster identity-resolution job"]
         API["customer360-api/\nFastAPI REST + reporting"]
         UI["frontend-admin/\nFastAPI-served static SPA"]
     end
@@ -134,7 +134,7 @@ flowchart TB
 
 ```
 backend-system/
-├── workspace.yaml            # lists all 7 code locations below
+├── workspace.yaml            # lists all 9 code locations below
 ├── requirements-dev.txt      # dagster-webserver, only needed for ./start.sh (local UI)
 ├── start.sh / stop.sh / restart.sh   # local dev: dagster dev -w workspace.yaml
 │
@@ -313,7 +313,7 @@ ORDER BY opp.close_date ASC;
 
 **Two compose files, different purposes:**
 - `docker-compose.yml` — production-shaped stack: `postgres`, `redis`, `keycloak`, `api`, `cir` (identity resolution worker), plus an optional `--profile dev` one-shot `cir-demo-seed` job.
-- `dev-docker-compose.yml` — infra-only stack (`postgres`, `redis`, `keycloak`, `minio`) for running `customer360-api` and the CIR worker directly on the host during development. The two files intentionally share the same project name, container names, and volumes — never run both at the same time.
+- `dev-docker-compose.yml` — infra-only stack (`postgres`, `redis`, `keycloak`, `minio`) for running `customer360-api` and Dagster directly on the host during development. The two files intentionally share the same project name, container names, and volumes — never run both at the same time.
 
 **Common issues & fixes:**
 
@@ -323,14 +323,16 @@ ORDER BY opp.close_date ASC;
 | Empty tables after `reset` | A DDL error in `database-schema.sql` aborted the init script silently (Postgres init scripts run with `ON_ERROR_STOP=1`, aborting the whole `/docker-entrypoint-initdb.d/` loop on any error) | `docker logs customer360-postgres \| grep -i error`. |
 | API returns 401 on every request | Keycloak unreachable, or the request path isn't in `EXEMPT_PATHS` | `curl http://localhost:8008/health` (public, no auth) to confirm the API itself is healthy first. |
 | Keycloak container reports unhealthy | Healthcheck targets the wrong port | Keycloak 26 serves `/health/*` on port `9000`, not `8080` — this is already handled in the compose healthcheck, but matters for any custom monitoring. |
-| CIR worker appears stuck | DB connectivity lost, or an unhandled error in a batch | `docker logs <cir-container>`; `worker.py`'s healthcheck (`healthcheck.py`) only verifies DB connectivity, not pipeline progress. |
+| Dagster identity-resolution job appears stuck | DB connectivity lost, a sensor is stopped, or an unhandled error in a batch | `docker logs customer360-dagster`; inspect the Dagster sensor and run history. |
 
 ### 6.2 Production Deployment Considerations
 
 **Per-service images (all `python:3.11-slim` based):**
 - `customer360-api/Dockerfile` → `uvicorn app:app --host 0.0.0.0 --port 8008`.
 - `frontend-admin/Dockerfile` → `uvicorn app:app --host 0.0.0.0 --port 8890`.
-- `backend-system/identity_resolution/Dockerfile` → `python worker.py` (no HTTP port; healthcheck runs `healthcheck.py` to verify DB connectivity).
+- `backend-system/Dockerfile` → Dagster webserver and daemon loading all nine
+    backend-system code locations on port `3000`; identity resolution runs as a
+    Dagster job and sensor.
 - `postgres/Dockerfile` → `FROM postgis/postgis:16-3.5` + `postgresql-16-pgvector`; copies `database-schema.sql`/`init-core-database.sql` into `/docker-entrypoint-initdb.d/`, which only run on a first-ever (empty data directory) container start.
 - `redis/Dockerfile` → `FROM redis:8-alpine`, custom `redis.conf`, port `6580`.
 
@@ -348,7 +350,7 @@ FRONTEND_API_HOSTNAME, FRONTEND_TENANT_ID   # frontend-admin only
 
 **Scaling notes (based on current architecture, not yet implemented):**
 - `customer360-api` is stateless (auth/RLS resolved per-request via middleware) and can run multiple replicas behind a load balancer.
-- The CIR worker (`worker.py`) currently runs as a single, long-running polling process — there is no fan-out/parallelism across multiple workers today.
+- The identity-resolution job currently runs through one Dagster sensor and daemon — there is no fan-out/parallelism across multiple runs today.
 - `segmentation_job` recomputes all active segments in one pass by default; `customer360-api` can scope a run to one tenant by passing `tenant_id` through Dagster run config (see `RecomputeSegmentsConfig` in `segmentation/dagster_defs.py`).
 
 ### 6.3 Monitoring & Health Checks
@@ -358,7 +360,7 @@ Every service ships a container-level `HEALTHCHECK`:
 - `postgres`: `pg_isready`.
 - `redis`: `redis-cli ping` with the configured password.
 - `keycloak`: raw TCP probe of `GET /health/ready` on management port `9000`.
-- `identity_resolution` (CIR worker): `python healthcheck.py` — verifies DB connectivity (no HTTP port on this service).
+- `identity_resolution` (Dagster job): monitored through Dagster run status and the Dagster webserver on port `3000`.
 
 `GET /api/v1/metadata/` (public, in `EXEMPT_PATHS`) reports overall API health plus per-dependency status (Postgres, Redis, Dagster webserver reachability). `GET /api/v1/metadata/dagster` reports Dagster connectivity plus the configured job/location/repository names for every backend-system service.
 
@@ -387,7 +389,7 @@ Every service ships a container-level `HEALTHCHECK`:
 | Limitation | Impact | Notes |
 |------------|--------|-------|
 | Synchronous API only | Long-running admin operations (e.g. recompute-all) run inline unless explicitly offloaded to Dagster | Segment recompute already has both a synchronous per-segment endpoint and a scheduled Dagster job; not every future admin operation will get this treatment automatically. |
-| CIR worker has no fan-out | A single polling process handles all tenants/domains | Scaling beyond one worker would require partitioning work (e.g. by tenant or domain) across multiple worker processes/Dagster ops. |
+| Identity-resolution job has no fan-out | One Dagster sensor submits runs for all tenants/domains | Scaling beyond one run would require partitioning work (e.g. by tenant or domain) across multiple Dagster runs/ops. |
 | `scoring`, `analytics`, `data_synch`, `email_engine`, `notification_engine` are placeholders | Their Dagster jobs exist and are wired into `customer360-api`'s Dagster client config, but contain no real business logic yet (each just logs "started" → sleeps → logs "done") | The wiring (job names, workspace registration) is ready for real implementations to be dropped in. |
 | CORS is hardcoded, not configurable | `allow_origins=["*"]` in `app.py` has no environment override | Any production CORS hardening requires a code change. |
 | Persona naming depends on an optional external LLM call | If `GOOGLE_GENAI_API_KEY` is unset or the Gemini API is unreachable, persona names fall back to a deterministic offline generator | This is intentional graceful degradation, not a bug — but persona name "quality" will vary based on whether the key is configured. |

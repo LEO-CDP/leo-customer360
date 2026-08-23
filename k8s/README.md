@@ -1,7 +1,7 @@
 # Customer360 on Kubernetes
 
 Run the **entire** Customer360 stack — Postgres, Redis, Kafka, Keycloak, MinIO,
-the API, the Dagster backend workers, the CIR worker, and the admin frontend —
+the API, the unified Dagster backend, and the admin frontend —
 on a local Kubernetes cluster, then reuse the same manifests to deploy the app
 tier on **GreenNode VKS** against the managed data tier from `../terraform`.
 
@@ -41,7 +41,7 @@ k8s/
 ├── kind/cluster.yaml            # kind node with host port-maps for the NodePorts
 ├── scripts/{up,down,build-load}.sh
 ├── base/                        # app tier (env-agnostic)
-│   ├── api, frontend, dagster, cir, keycloak (+ db-init Job), config, namespace
+│   ├── api, frontend, dagster, keycloak (+ db-init Job), config, namespace
 │   └── kustomization.yaml
 ├── components/
 │   └── in-cluster-data/         # postgres, redis, kafka, minio (+seed) — opt-in
@@ -69,8 +69,9 @@ images + secret) and applies the rendered manifests to the target cluster.
 
 Inside the `customer360` namespace, the **app tier** (Deployments, `replicas: 1`)
 sits above the **data tier** (StatefulSets + MinIO). `api` is the hub — it reaches
-Postgres, Redis, Kafka and Dagster's GraphQL; `cir`, `dagster` and `keycloak` all
-share **Postgres** as the system of record. `c360-config` + `c360-secrets` are
+Postgres, Redis, Kafka and Dagster's GraphQL; Dagster owns the identity-resolution
+and other backend task runs. `dagster` and `keycloak` share **Postgres** as the
+system of record. `c360-config` + `c360-secrets` are
 injected into every pod via `envFrom`. The host reaches Services through kind's
 port-map → NodePort chain, and three one-shot **Jobs** create `db_keycloak`, the
 MinIO bucket, and the demo data. The data tier and Jobs exist **only** in the local
@@ -94,7 +95,7 @@ overlay — `vks` drops them and points the app at the managed vDB + vStorage.
   `data-postgres-0` PVC) and bring up again.
 - **`keycloak-db-init`** Job creates the `db_keycloak` database (idempotent).
 - **`minio-init`** Job creates the events bucket.
-- **`cir-demo-seed`** Job loads demo profiles → identity resolution → full demo data.
+- **`cir-demo-seed`** Job uses the unified Dagster image to load demo profiles → identity resolution → full demo data.
 - **Auth is off by default** (`SSO_LOGIN=false`) so the API accepts
   `X-Tenant-Id` / `X-User-Id` headers — Keycloak still runs, but there is **no
   automated `leocdp` realm/client seed**; create it manually if you set SSO on.
@@ -103,7 +104,7 @@ overlay — `vks` drops them and points the app at the managed vDB + vStorage.
 
 ```bash
 kubectl -n customer360 get pods
-kubectl -n customer360 logs -f deploy/api          # or dagster / cir / frontend
+kubectl -n customer360 logs -f deploy/api          # or dagster / frontend
 kubectl -n customer360 rollout restart deploy/api
 kubectl apply -k overlays/local                    # re-apply after edits
 ```

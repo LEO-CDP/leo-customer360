@@ -3,7 +3,7 @@
 # Customer 360 Platform - PRODUCTION service manager (Ubuntu server)
 #
 # Starts/stops/restarts the full production Docker Compose stack
-# (docker-compose.yml: postgres + redis + keycloak + cir + api -- the `dev`
+# (docker-compose.yml: postgres + redis + keycloak + Dagster + api -- the `dev`
 # profile / cir-demo-seed job is intentionally never included here).
 #
 # On first run (no '.env' present), interactively asks for the handful of
@@ -42,9 +42,9 @@ ENV_EXAMPLE_FILE=".env.example"
 POSTGRES_CONTAINER="customer360-postgres"
 REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
-CIR_CONTAINER="customer360-cir"
+DAGSTER_CONTAINER="customer360-dagster"
 API_CONTAINER="customer360-api"
-ALL_CONTAINERS=("$POSTGRES_CONTAINER" "$REDIS_CONTAINER" "$KEYCLOAK_CONTAINER" "$CIR_CONTAINER" "$API_CONTAINER")
+ALL_CONTAINERS=("$POSTGRES_CONTAINER" "$REDIS_CONTAINER" "$KEYCLOAK_CONTAINER" "$DAGSTER_CONTAINER" "$API_CONTAINER")
 
 # Required secrets that MUST be changed from the .env.example placeholder
 # before we'll let 'start' bring up production (see docker-compose.yml's

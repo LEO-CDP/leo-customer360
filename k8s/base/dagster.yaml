@@ -1,4 +1,4 @@
-# Dagster orchestrator (webserver + daemon via `dagster dev`, 7 code locations
+# Dagster orchestrator (webserver + daemon via `dagster dev`, 9 code locations
 # from backend-system/workspace.yaml). Serves the GraphQL endpoint the API calls
 # to submit jobs. Needs a PVC for DAGSTER_HOME (SQLite run/event storage) and DB
 # access (envFrom).  Image built from the new backend-system/Dockerfile.

@@ -1,6 +1,7 @@
-# Dagster orchestrator image for backend-system (used by k8s/base/dagster.yaml).
-# Runs `dagster dev` (webserver + daemon) loading the 7 code locations in
-# workspace.yaml. There is no compose service for this; it was host-run before.
+# Dagster orchestrator image for backend-system.
+# Runs `dagster dev` (webserver + daemon) loading all nine code locations in
+# workspace.yaml. Identity resolution is managed by Dagster; there is no
+# separate identity-resolution worker image.
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -16,7 +17,7 @@ RUN pip install --no-cache-dir \
 COPY . /app
 
 # Install each code location's own requirements if present.
-RUN for d in identity_resolution scoring segmentation analytics data_synch email_engine notification_engine; do \
+RUN for d in identity_resolution scoring segmentation analytics data_synch email_engine notification_engine campaign_orchestration personalization; do \
       if [ -f "$d/requirements.txt" ]; then pip install --no-cache-dir -r "$d/requirements.txt"; fi; \
     done
 

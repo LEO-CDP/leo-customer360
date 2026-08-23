@@ -8,14 +8,11 @@ bare ``while True`` polling loop:
 
   - ``resolve_identities_op`` / ``identity_resolution_job`` -- one CIR
     resolution cycle (drains ``cdp_raw_profiles_stage`` until empty).
-  - ``identity_resolution_poll_sensor`` -- requests a new run every
-    ``CIR_POLL_INTERVAL_SECONDS``, replicating the old worker.py polling
-    loop, but launched/tracked by the Dagster daemon once one is running.
-    Stopped by default (opt-in), since ``worker.py`` already drives this job
-    in-process for the current single-process container deployment.
+    - ``identity_resolution_poll_sensor`` -- requests a new run every
+        ``CIR_POLL_INTERVAL_SECONDS``, replicating the old worker.py polling
+        loop, launched and tracked by the Dagster daemon.
 
-See ``worker.py`` for the container entrypoint that executes this job
-in-process on a timer, and ``../workspace.yaml`` (in ``backend-system/``) to
+See ``../workspace.yaml`` (in ``backend-system/``) to
 load this code location alongside ``scoring``/``segmentation``/``analytics``
 in the Dagster UI: ``dagster dev -w ../workspace.yaml`` (run from this
 directory, or adjust the path). Set ``DAGSTER_HOME`` to a persistent
@@ -95,16 +92,13 @@ def identity_resolution_job() -> None:
 @sensor(
     job=identity_resolution_job,
     minimum_interval_seconds=POLL_INTERVAL_SECONDS,
-    default_status=DefaultSensorStatus.STOPPED,
+    default_status=DefaultSensorStatus.RUNNING,
 )
 def identity_resolution_poll_sensor(context: SensorEvaluationContext):
     """Requests a new identity_resolution_job run every poll interval.
 
-    Enable this (from the Dagster UI, or `default_status=RUNNING`) once a
-    real Dagster daemon is deployed for this service, instead of relying on
-    worker.py's in-process loop, to get daemon-managed scheduling/scaling
-    (e.g. run concurrency limits, backfills) on top of the per-run
-    monitoring this code location already provides.
+    The unified backend-system image runs the Dagster daemon, so this sensor is
+    enabled by default and replaces the legacy worker.py polling loop.
     """
     yield RunRequest()
 

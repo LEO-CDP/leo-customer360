@@ -9,7 +9,6 @@ resources:
   - api.yaml
   - frontend.yaml
   - dagster.yaml
-  - cir.yaml
   - keycloak.yaml
 
 commonLabels:

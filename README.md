@@ -19,7 +19,7 @@ The current repo has two live backend services and a set of placeholder service 
 
 | Area | Status | Notes |
 |---|---|---|
-| `backend-system/identity_resolution/` | Implemented | Real CIR worker and Dagster job; resolves raw profile matches into master profiles |
+| `backend-system/identity_resolution/` | Implemented | Dagster identity-resolution job; resolves raw profile matches into master profiles |
 | `backend-system/segmentation/` | Implemented | Recomputes active segments and syncs member/tag data back to master profiles |
 | `customer360-api/` | Implemented | Main REST API for identity, CRM, persona, reporting, and metadata |
 | `frontend-admin/` | Implemented | FastAPI shell for the UI, backed by client-side JS and API requests |
@@ -94,14 +94,14 @@ For the packaged stack using Docker Compose, run:
 ./manage-c360.sh status
 ```
 
-This covers the main production service stack in `docker-compose.yml`, including Postgres, Redis, Keycloak, the CIR worker, and the API. The script is the recommended entrypoint for production-like local deployment and first-time env bootstrapping.
+This covers the main production service stack in `docker-compose.yml`, including Postgres, Redis, Keycloak, Dagster, and the API. The script is the recommended entrypoint for production-like local deployment and first-time env bootstrapping.
 
 ## Service entrypoints
 
 The repo uses these primary entrypoints:
 
 - `customer360-api/app.py` — FastAPI API entrypoint
-- `backend-system/identity_resolution/worker.py` — polling CIR worker
+- `backend-system/identity_resolution/worker.py` — legacy local polling helper; production runs the Dagster job
 - `frontend-admin/app.py` — admin frontend shell
 - `manage-c360.sh` — production-style Docker stack manager
 - `dev-c360.sh` — local dev infrastructure bootstrap

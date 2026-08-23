@@ -19,9 +19,9 @@ containerized deployment.
 | `redis` | `customer360-redis:local` (redis:8-alpine) | Response cache **and Keycloak token cache** for customer360-api (see [`core/cache.py`](customer360-api/core/cache.py) / [`core/auth.py`](customer360-api/core/auth.py)) | `${REDIS_HOST_PORT:-6580}` → 6580 |
 | `keycloak-db-init` | reuses `customer360-postgres:local` | **One-shot** job that creates the dedicated `db_keycloak` database on the shared `postgres` instance, then exits | none |
 | `keycloak` | `keycloak/keycloak:latest` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
-| `cir` | `customer360-cir:local` (Python 3.11-slim) | Customer Identity Resolution worker — continuously drains `cdp_raw_profiles_stage` | none (background worker, no HTTP) |
+| `dagster` | `customer360-dagster:local` (Python 3.11-slim) | Dagster webserver and daemon for all nine backend-system code locations, including identity resolution | `${DAGSTER_UI_PORT:-3000}` → 3000 |
 | `api` | `customer360-api:local` (Python 3.11-slim) | Customer 360 / CIR REST API (FastAPI), Keycloak-secured | `${C360_API_PORT:-8008}` → 8008 |
-| `cir-demo-seed` | reuses `customer360-cir:local` | **Dev only** one-shot job that seeds demo data, then exits | none |
+| `cir-demo-seed` | reuses `customer360-dagster:local` | **Dev only** one-shot job that seeds demo data, then exits | none |
 
 All services share one bridge network, `customer360-network`, and are isolated
 from other Docker workloads on the host. Two named volumes persist state
@@ -34,10 +34,10 @@ flowchart LR
         PG[(postgres)]
         RD[(redis)]
         KC[keycloak]
-        CIR[cir worker]
+        DAG[dagster: all backend tasks]
         API[api]
     end
-    CIR -->|psycopg2| PG
+    DAG -->|psycopg2| PG
     API -->|SQLAlchemy| PG
     API -->|redis-py: cache + token cache| RD
     API -->|introspect Bearer token| KC
@@ -86,13 +86,13 @@ credentials. `.env.example` is the committed template.
 > 1. `docker-compose.yml` uses `${VAR}` substitution to seed the official
 >    Postgres/Redis image bootstrap variables (`POSTGRES_USER`, `--requirepass`, etc.).
 > 2. Every service also gets the whole file injected via `env_file:`, exactly
->    like `customer360-api`/`backend-system/identity_resolution` read it for non-Docker
+>    like `customer360-api`/`backend-system` read it for non-Docker
 >    local dev (`pydantic-settings` / `python-dotenv`).
 > 3. **`DB_HOST` / `REDIS_HOST` in `.env` are overridden by `docker-compose.yml`**
 >    to the in-network service names (`postgres` / `redis`) for the
->    `api`/`cir`/`cir-demo-seed` containers, regardless of what's in the file.
+>    `api`/`dagster`/`cir-demo-seed` containers, regardless of what's in the file.
 >    The `localhost` defaults in `.env.example` are only correct when you run
->    `customer360-api`/`backend-system/identity_resolution` directly on the host
+>    `customer360-api`/`backend-system` directly on the host
 >    (`./start.sh`, `./run-demo.sh`) against the dockerized Postgres/Redis via
 >    their published host ports.
 
@@ -100,14 +100,14 @@ credentials. `.env.example` is the committed template.
 
 ## 4. Running the stack
 
-### Production mode (4 core services)
+### Production mode (5 core services)
 
 ```bash
 docker compose up -d --build
 docker compose ps
 ```
 
-Starts `postgres`, `redis`, `cir`, `api` only. First boot on a fresh
+Starts `postgres`, `redis`, `keycloak`, `dagster`, and `api`. First boot on a fresh
 `customer360-pgdata` volume runs `postgres/init/00-extensions.sql` then the
 full `database-schema.sql` automatically (Postgres' standard
 `/docker-entrypoint-initdb.d/` mechanism — **only runs once**, on an empty
@@ -119,13 +119,13 @@ data directory; see §7 for schema changes afterward).
 docker compose --profile dev up -d --build
 ```
 
-Same 4 services, **plus** `cir-demo-seed`, a one-shot job (`restart: "no"`)
+Same 5 services, **plus** `cir-demo-seed`, a one-shot job (`restart: "no"`)
 that waits for `postgres` to be healthy, then runs, in order:
 
-1. `scripts/init_sample_data.py` — seeds 1000 synthetic AppsFlyer raw profiles
+1. `identity_resolution/scripts/init_sample_data.py` — seeds 1000 synthetic AppsFlyer raw profiles
    (retail + banking, ~30% deliberate duplicates).
-2. `scripts/run_demo_resolution.py` — drains them through identity resolution.
-3. `scripts/seed_full_demo_data.py` — seeds the full CRM journey graph,
+2. `identity_resolution/scripts/run_demo_resolution.py` — drains them through identity resolution.
+3. `identity_resolution/scripts/seed_full_demo_data.py` — seeds the full CRM journey graph,
    relations, transactions, behavioral events, and master-profile enrichment.
 
 Check it completed successfully:
@@ -174,7 +174,7 @@ docker compose up -d --no-deps api  # restart only api, don't touch its deps
 docker compose ps
 docker inspect -f '{{.State.Health.Status}}' customer360-postgres
 docker inspect -f '{{.State.Health.Status}}' customer360-redis
-docker inspect -f '{{.State.Health.Status}}' customer360-cir
+docker inspect -f '{{.State.Health.Status}}' customer360-dagster
 docker inspect -f '{{.State.Health.Status}}' customer360-api
 curl -s http://localhost:${C360_API_PORT:-8008}/health
 ```
@@ -184,10 +184,10 @@ curl -s http://localhost:${C360_API_PORT:-8008}/health
 | `postgres` | `pg_isready -U $DB_USER -d $DB_NAME` |
 | `redis` | `redis-cli -a $REDIS_PASSWORD ping` |
 | `keycloak` | `GET /health/ready` (`KC_HEALTH_ENABLED=true`) |
-| `cir` | `python healthcheck.py` — raw psycopg2 connection test (no HTTP surface on this worker) |
+| `dagster` | HTTP readiness on port `3000` |
 | `api` | `python -c "urllib.request.urlopen('http://localhost:8008/health')"` |
 
-All 4 use `restart: unless-stopped` — a crashed container (or one killed by
+All 5 use `restart: unless-stopped` — a crashed container (or one killed by
 `docker restart`) comes back automatically; a deliberate `docker compose stop`
 does not.
 
@@ -195,7 +195,7 @@ does not.
 
 ```bash
 docker compose logs -f api
-docker compose logs -f cir            # look for "Processed N raw profile(s)"
+docker compose logs -f dagster       # Dagster UI, daemon, and task-run logs
 docker compose logs -f postgres redis
 ```
 

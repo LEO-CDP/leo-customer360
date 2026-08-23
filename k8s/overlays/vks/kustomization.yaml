@@ -24,9 +24,6 @@ images:
   - name: customer360-dagster
     newName: REGISTRY.example/customer360-dagster
     newTag: latest
-  - name: customer360-cir
-    newName: REGISTRY.example/customer360-cir
-    newTag: latest
 
 secretGenerator:
   - name: c360-secrets

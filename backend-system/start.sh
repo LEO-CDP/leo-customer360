@@ -3,11 +3,9 @@
 # Customer 360 / backend-system - Dagster local dev orchestrator
 #
 # Starts `dagster dev` (webserver UI on DAGSTER_UI_PORT + the Dagster daemon)
-# loading every backend-system service via workspace.yaml
-# (identity_resolution, scoring, segmentation, analytics) -- LOCAL DEV ONLY.
-# Not used by docker-compose.yml (each service still ships its own container
-# there -- see identity_resolution/Dockerfile). See README.md for the full
-# architecture writeup.
+# loading every backend-system service via workspace.yaml -- LOCAL DEV ONLY.
+# Docker deployments use the same unified backend-system image. See README.md
+# for the full architecture writeup.
 ###############################################################################
 set -Eeuo pipefail
 
