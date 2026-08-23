@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from typing import Any, Optional
 
 from fastapi import Depends, HTTPException, Query, Request
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
@@ -158,6 +159,15 @@ def _trigger_segment_recompute_after_create(segment: CdpSegment) -> None:
 def _trigger_segment_recompute_after_update(segment: CdpSegment) -> None:
     _trigger_segment_recompute(segment, trigger_reason="update")
 
+
+def _segment_integrity_error_detail(exc: IntegrityError) -> Optional[str]:
+    """Returns a client-safe conflict message for known segment constraints."""
+    original = getattr(exc, "orig", None)
+    diagnostic = getattr(original, "diag", None)
+    if getattr(diagnostic, "constraint_name", None) == "uq_cdp_segments_tenant_tag":
+        return "A segment with this tag already exists in this workspace."
+    return None
+
 segments_router = build_crud_router(
     model=CdpSegment,
     pk_field="segment_id",
@@ -171,6 +181,7 @@ segments_router = build_crud_router(
     update_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
     create_transform=_transform_segment_create,
     update_transform=_transform_segment_update,
+    integrity_error_detail=_segment_integrity_error_detail,
     create_hook=_trigger_segment_recompute_after_create,
     update_hook=_trigger_segment_recompute_after_update,
 )

@@ -8,7 +8,7 @@ recover from dropped connections and pool_recycle to avoid stale connections.
 from collections.abc import Generator
 
 from fastapi import Request
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.config import settings
@@ -24,6 +24,26 @@ engine = create_engine(
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+
+
+def _set_transaction_context(session: Session, _transaction: object, connection: object) -> None:
+    """Restore request identity GUCs whenever a SQLAlchemy transaction starts.
+
+    The GUCs are transaction-local so pooled connections cannot leak tenant
+    context. A commit ends that transaction, though, and ORM refreshes or
+    later queries can immediately start another one. Reapplying the values at
+    transaction start keeps RLS active across those boundaries.
+    """
+    tenant_id = session.info.get("tenant_id")
+    if tenant_id:
+        connection.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": tenant_id})
+
+    user_id = session.info.get("user_id")
+    if user_id:
+        connection.execute(text("SELECT set_config('app.user_id', :user_id, true)"), {"user_id": user_id})
+
+
+event.listen(Session, "after_begin", _set_transaction_context)
 
 
 def get_db(request: Request) -> Generator[Session, None, None]:
@@ -43,6 +63,9 @@ def get_db(request: Request) -> Generator[Session, None, None]:
         tenant_id = getattr(request.state, "tenant_id", None)
         user_id = getattr(request.state, "user_id", None)
         tenant_value = str(tenant_id).strip() if tenant_id is not None else ""
+        if hasattr(db, "info"):
+            db.info["tenant_id"] = tenant_value or None
+            db.info["user_id"] = str(user_id) if user_id is not None else None
         if tenant_value:
             db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": tenant_value})
         if user_id is not None:

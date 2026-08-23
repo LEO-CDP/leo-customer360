@@ -8,6 +8,7 @@ from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
@@ -31,6 +32,7 @@ def build_crud_router(
     update_validator: Optional[Callable[[Session, dict[str, Any]], None]] = None,
     create_transform: Optional[Callable[[Session, dict[str, Any]], dict[str, Any]]] = None,
     update_transform: Optional[Callable[[Session, Any, dict[str, Any]], dict[str, Any]]] = None,
+    integrity_error_detail: Optional[Callable[[IntegrityError], Optional[str]]] = None,
     create_hook: Optional[Callable[[Any], None]] = None,
     update_hook: Optional[Callable[[Any], None]] = None,
 ) -> APIRouter:
@@ -83,7 +85,16 @@ def build_crud_router(
                 create_validator(db, obj_in)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
-        obj = crud.create(db, obj_in)
+        try:
+            obj = crud.create(db, obj_in)
+        except IntegrityError as exc:
+            db.rollback()
+            if integrity_error_detail is None:
+                raise
+            detail = integrity_error_detail(exc)
+            if detail is None:
+                raise
+            raise HTTPException(status_code=409, detail=detail) from exc
         invalidate_prefix(cache_prefix)
         if create_hook is not None:
             create_hook(obj)
@@ -102,7 +113,16 @@ def build_crud_router(
                 update_validator(db, obj_in)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
-        obj = crud.update(db, obj, obj_in)
+        try:
+            obj = crud.update(db, obj, obj_in)
+        except IntegrityError as exc:
+            db.rollback()
+            if integrity_error_detail is None:
+                raise
+            detail = integrity_error_detail(exc)
+            if detail is None:
+                raise
+            raise HTTPException(status_code=409, detail=detail) from exc
         invalidate_prefix(cache_prefix)
         if update_hook is not None:
             update_hook(obj)

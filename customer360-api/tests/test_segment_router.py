@@ -14,11 +14,13 @@ from unittest.mock import Mock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 
 from core.database import get_db
 from core.models.segmentation import CdpSegment
 from core.routers._generic import build_crud_router
 from core.routers.segment_api import (
+    _segment_integrity_error_detail,
     _transform_segment_create,
     _transform_segment_update,
     _trigger_segment_recompute_after_create,
@@ -36,6 +38,7 @@ class FakeSegmentCRUD:
     store: dict[uuid.UUID, SimpleNamespace] = {}
     last_list_kwargs: dict[str, Any] = {}
     last_count_kwargs: dict[str, Any] = {}
+    integrity_error: Optional[IntegrityError] = None
 
     def __init__(self, model):
         self.model = model
@@ -45,6 +48,7 @@ class FakeSegmentCRUD:
         cls.store = {}
         cls.last_list_kwargs = {}
         cls.last_count_kwargs = {}
+        cls.integrity_error = None
 
     def list(self, db, *, skip=0, limit=100, **filters):
         FakeSegmentCRUD.last_list_kwargs = filters
@@ -58,6 +62,8 @@ class FakeSegmentCRUD:
         return FakeSegmentCRUD.store.get(pk)
 
     def create(self, db, obj_in: dict[str, Any]) -> SimpleNamespace:
+        if FakeSegmentCRUD.integrity_error is not None:
+            raise FakeSegmentCRUD.integrity_error
         obj = SimpleNamespace(
             segment_id=uuid.uuid4(),
             status_code=1,
@@ -71,6 +77,8 @@ class FakeSegmentCRUD:
         return obj
 
     def update(self, db, db_obj: SimpleNamespace, obj_in: dict[str, Any]) -> SimpleNamespace:
+        if FakeSegmentCRUD.integrity_error is not None:
+            raise FakeSegmentCRUD.integrity_error
         for field, value in obj_in.items():
             setattr(db_obj, field, value)
         return db_obj
@@ -79,7 +87,13 @@ class FakeSegmentCRUD:
         FakeSegmentCRUD.store.pop(db_obj.segment_id, None)
 
 
-def _build_test_app(*, create_hook=None, update_hook=None) -> FastAPI:
+class _FakeDatabaseError(Exception):
+    def __init__(self, constraint_name: str):
+        super().__init__("duplicate key")
+        self.diag = SimpleNamespace(constraint_name=constraint_name)
+
+
+def _build_test_app(*, create_hook=None, update_hook=None, db=None) -> FastAPI:
     with patch("core.routers._generic.CRUDBase", FakeSegmentCRUD):
         router = build_crud_router(
             model=CdpSegment,
@@ -98,12 +112,13 @@ def _build_test_app(*, create_hook=None, update_hook=None) -> FastAPI:
             ),
             create_transform=_transform_segment_create,
             update_transform=_transform_segment_update,
+            integrity_error_detail=_segment_integrity_error_detail,
             create_hook=create_hook,
             update_hook=update_hook,
         )
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[get_db] = lambda: None
+    app.dependency_overrides[get_db] = lambda: db
     return app
 
 
@@ -148,6 +163,19 @@ class SegmentCrudTests(unittest.TestCase):
         self.assertEqual(body["segment_name"], "Gen Z Shoppers")
         self.assertEqual(body["processed_by"], "human")
         self.assertEqual(body["status_code"], 1)
+
+    def test_create_duplicate_segment_tag_returns_409(self):
+        db = Mock()
+        FakeSegmentCRUD.integrity_error = IntegrityError(
+            "INSERT", {}, _FakeDatabaseError("uq_cdp_segments_tenant_tag")
+        )
+        client = TestClient(_build_test_app(db=db))
+
+        response = client.post("/segments/", json=_segment_payload())
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "A segment with this tag already exists in this workspace.")
+        db.rollback.assert_called_once()
 
     def test_create_hook_runs_after_segment_is_persisted(self):
         create_hook = Mock()

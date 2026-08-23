@@ -7,13 +7,13 @@ requests from *different* tenants.
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from core.auth import auth_middleware
-from core.database import get_db
+from core.database import _set_transaction_context, get_db
 from tests.conftest import FakeDBSession, FakeRedis
 
 
@@ -33,6 +33,23 @@ def _fake_request(tenant_id=None, user_id=None) -> Request:
 
 
 class GetDbTenantGucTests(unittest.TestCase):
+    def test_reapplies_identity_gucs_when_refresh_starts_new_transaction(self):
+        session = SimpleNamespace(
+            info={
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "user_id": "22222222-2222-2222-2222-222222222222",
+            }
+        )
+        connection = Mock()
+
+        _set_transaction_context(session, None, connection)
+        _set_transaction_context(session, None, connection)
+
+        self.assertEqual(connection.execute.call_count, 4)
+        executed_sql = [str(call.args[0]) for call in connection.execute.call_args_list]
+        self.assertEqual(executed_sql.count("SELECT set_config('app.tenant_id', :tenant_id, true)"), 2)
+        self.assertEqual(executed_sql.count("SELECT set_config('app.user_id', :user_id, true)"), 2)
+
     def test_sets_both_gucs_when_tenant_and_user_present(self):
         session = FakeDBSession()
         request = _fake_request(tenant_id="tenant-123", user_id="user-456")
