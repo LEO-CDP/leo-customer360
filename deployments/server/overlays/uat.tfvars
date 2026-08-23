@@ -6,6 +6,11 @@
 
 name_prefix = "c360-api-uat"
 
+# Tracing: persist OpenTelemetry ON for uat so it survives redeploys (read by deploy-api.sh ->
+# lib/otel.sh). Without this the uat default is OFF (tiny-box zero-overhead); an explicit
+# OTEL_ENABLED env var at deploy time still overrides. See deployments/monitoring (Jaeger).
+otel_enabled = "true"
+
 servers = {
   "1x2" = {
     flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB — jump host + backend-system (Dagster)

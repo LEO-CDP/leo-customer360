@@ -8,3 +8,7 @@ ads_root_path  = "/ads"       # public mount behind Caddy (beta.leocdp.com/ads);
 ads_db_schema  = "leo_ads"    # ad-server's own schema in the customer360 DB (no RLS)
 ads_environment = "production"
 ads_seed_sample = true        # load sql-scripts/sample-data-init.sql (demo advertisers/campaigns)
+
+# Persist OpenTelemetry tracing ON for uat across redeploys (read by deploy-ads.sh -> lib/otel.sh;
+# an explicit OTEL_ENABLED env var still overrides). Default without this is OFF on uat.
+otel_enabled = "true"
