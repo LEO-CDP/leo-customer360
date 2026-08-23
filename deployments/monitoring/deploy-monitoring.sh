@@ -60,6 +60,13 @@ P_IMG="$(tfval portainer_image "$ovl")";   P_IMG="${P_IMG:-portainer/portainer-c
 N_EN="$(tfval netdata_enabled "$ovl")";    N_EN="${N_EN:-true}"
 N_PORT="$(tfval netdata_port "$ovl")";     N_PORT="${N_PORT:-19999}"   # fixed at Netdata's default; see README to change
 N_IMG="$(tfval netdata_image "$ovl")";     N_IMG="${N_IMG:-netdata/netdata:stable}"
+# Netdata's built-in go.d/redis collector monitors the co-located Redis (ops/mem/hit-rate/
+# evictions/clients + alarms) — no extra container. Needs the Redis AUTH password (Redis runs
+# with --requirepass on a non-default port), sourced like ../cache: TF_VAR_redis_password or
+# ../cache/terraform.tfvars (redis_password). Skipped with a note if the password can't be found.
+N_REDIS_EN="$(tfval netdata_redis_monitor "$ovl")"; N_REDIS_EN="${N_REDIS_EN:-true}"
+N_REDIS_PORT="$(tfval netdata_redis_port "$ovl")";  N_REDIS_PORT="${N_REDIS_PORT:-6580}"
+REDIS_PASSWORD="${TF_VAR_redis_password:-$(tfval redis_password ../cache/terraform.tfvars 2>/dev/null)}"
 # jaeger — OpenTelemetry OTLP trace backend + UI (added for API request tracing).
 # Default OFF: on uat it stays off (tiny box, profile on demand); prod overlay flips it on.
 J_EN="$(tfval jaeger_enabled "$ovl")";               J_EN="${J_EN:-false}"
@@ -155,6 +162,7 @@ if [[ "$PG_EN" == "true" ]]; then
   fi
 fi
 PGADMIN_PW_B64="$(printf %s "${PGADMIN_DEFAULT_PASSWORD:-}" | base64 | tr -d '\n')"
+REDIS_PW_B64="$(printf %s "${REDIS_PASSWORD:-}" | base64 | tr -d '\n')"   # for Netdata's redis collector
 
 # --- SSO gate: provision the Keycloak client + secrets locally (before we ship) ---
 SEC_B64=""; COOKIE_B64=""; P_REDIRECT=""; N_REDIRECT=""; J_REDIRECT=""; PG_REDIRECT=""
@@ -198,7 +206,7 @@ echo ">> Target (monitoring): $BASTION"
 PARAMS_B64="$(printf '%s\n' \
   "P_EN=$P_EN" "P_PORT=$P_PORT" "P_IMG=$P_IMG" "PADMIN_B64=$PADMIN_B64" "P_BIND=$P_BIND" \
   "P_GATED=$P_GATED" "N_GATED=$N_GATED" "J_GATED=$J_GATED" "PG_GATED=$PG_GATED" \
-  "N_EN=$N_EN" "N_PORT=$N_PORT" "N_IMG=$N_IMG" \
+  "N_EN=$N_EN" "N_PORT=$N_PORT" "N_IMG=$N_IMG" "N_REDIS_EN=$N_REDIS_EN" "N_REDIS_PORT=$N_REDIS_PORT" "REDIS_PW_B64=$REDIS_PW_B64" \
   "J_EN=$J_EN" "J_IMG=$J_IMG" "J_UI_PORT=$J_UI_PORT" "J_UI_BIND=$J_UI_BIND" "J_OTLP_HTTP=$J_OTLP_HTTP" "J_OTLP_GRPC=$J_OTLP_GRPC" "J_MEM=$J_MEM" \
   "PG_EN=$PG_EN" "PG_PORT=$PG_PORT" "PG_IMG=$PG_IMG" "PG_BIND=$PG_BIND" "PG_MEM=$PG_MEM" "PG_EMAIL=$PG_EMAIL" "PGADMIN_PW_B64=$PGADMIN_PW_B64" \
   "OA_EN=$OA_EN" "OA_IMG=$OA_IMG" "ISSUER=$ISSUER" "CLIENT_ID=$CLIENT_ID" \
@@ -211,6 +219,7 @@ set -euo pipefail
 tmp="$(mktemp)"; printf %s "$1" | base64 -d > "$tmp"; set -a; . "$tmp"; set +a; rm -f "$tmp"
 PADMIN="$(printf %s "$PADMIN_B64" | base64 -d 2>/dev/null || true)"
 PGADMIN_PW="$(printf %s "$PGADMIN_PW_B64" | base64 -d 2>/dev/null || true)"
+REDIS_PW="$(printf %s "${REDIS_PW_B64:-}" | base64 -d 2>/dev/null || true)"
 SECRET="$(printf %s "$SEC_B64" | base64 -d 2>/dev/null || true)"
 COOKIE="$(printf %s "$COOKIE_B64" | base64 -d 2>/dev/null || true)"
 
@@ -253,6 +262,17 @@ if [ "$N_EN" = "true" ]; then
   sudo docker pull "$N_IMG" >/dev/null || true
   sudo docker volume create netdataconfig >/dev/null; sudo docker volume create netdatalib >/dev/null; sudo docker volume create netdatacache >/dev/null
   sudo docker rm -f c360-netdata >/dev/null 2>&1 || true
+  # Configure Netdata's built-in Redis collector (go.d/redis) BEFORE start, so it's picked up at
+  # boot — no restart. The password is single-quote-escaped for YAML and piped via stdin (never in
+  # argv); written into the netdataconfig volume by a throwaway container using the netdata image.
+  if [ "${N_REDIS_EN:-true}" = "true" ] && [ -n "${REDIS_PW:-}" ]; then
+    _rpw_esc="$(printf '%s' "$REDIS_PW" | sed "s/'/''/g")"
+    printf "jobs:\n  - name: c360-redis\n    address: 'redis://127.0.0.1:%s'\n    password: '%s'\n" "${N_REDIS_PORT:-6580}" "$_rpw_esc" \
+      | sudo docker run --rm -i -v netdataconfig:/etc/netdata --entrypoint sh "$N_IMG" -c 'mkdir -p /etc/netdata/go.d && cat > /etc/netdata/go.d/redis.conf && chmod 600 /etc/netdata/go.d/redis.conf'
+    echo "   Netdata: Redis collector configured (127.0.0.1:${N_REDIS_PORT:-6580})"
+  else
+    echo "   Netdata: Redis collector skipped (netdata_redis_monitor=$N_REDIS_EN, redis password $([ -n "${REDIS_PW:-}" ] && echo present || echo MISSING))"
+  fi
   sudo docker run -d --name c360-netdata --restart unless-stopped \
     --pid host --network host \
     -v netdataconfig:/etc/netdata -v netdatalib:/var/lib/netdata -v netdatacache:/var/cache/netdata \

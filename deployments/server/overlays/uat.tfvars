@@ -18,6 +18,9 @@ servers = {
     name           = "backend" # -> c360-api-uat-backend
   }
   "api" = {
+    # Kept at 1x2 for now. A resize to s-general-2x4 (2 vCPU / 4 GB) is available and is an in-place
+    # terraform change (0 destroy) but reboots the box + costs more — revisit if 2 GB gets tight
+    # (this box runs api + keycloak + redis + frontend + ads + caddy + the whole monitoring stack).
     flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB — for customer360-api
     root_disk_size = 20
   }
