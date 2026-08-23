@@ -157,7 +157,15 @@ realm_step() {  # <action>
     redirects="${REDIRECT_URIS:-$(tfval sso_redirect_uris "$ovl")}"
     case "$redirects" in ""|"*") die "set sso_redirect_uris in $ovl to an explicit, non-wildcard redirect URI list — refusing to register '*'";; esac
     [ -n "$kcurl" ] || die "could not determine KC_URL — set KC_URL=<public keycloak url> or api_sso_login_url in $ovl"
-    [ -n "${KEYCLOAK_ADMIN_PASSWORD:-}" ] || die "set KEYCLOAK_ADMIN_PASSWORD in sso/.env so bootstrap-realm.py can log in"
+    # bootstrap-realm.py needs BOTH the KC admin password (to log in) AND the test-user
+    # password (KC_TEST_USER_PASSWORD, to set c360admin's password). If either is absent, SKIP
+    # this step rather than failing the whole deploy — the realm is idempotent and already
+    # provisioned, and CD now runs on every merge to main, so a missing/rotated secret must not
+    # break unrelated app deploys. `exit 0` here exits only the subshell, so the deploy continues.
+    if [ -z "${KEYCLOAK_ADMIN_PASSWORD:-}" ] || [ -z "${KC_TEST_USER_PASSWORD:-}" ]; then
+      info "sso-realm SKIPPED — set KEYCLOAK_ADMIN_PASSWORD + KC_TEST_USER_PASSWORD in sso/.env (CI: repo/env secrets) to (re)provision the realm."
+      exit 0
+    fi
     info "KC_URL=$kcurl  realm=$realm  client=$client  tenant=$tenant"
     if [ "$DRY_RUN" = 1 ]; then printf '%s   $ KC_URL=%s REALM=%s CLIENT_ID=%s ... python3 bootstrap-realm.py%s\n' "$C_DIM" "$kcurl" "$realm" "$client" "$C_RESET"; return 0; fi
     KC_URL="$kcurl" REALM="$realm" CLIENT_ID="$client" TENANT_ID="$tenant" \
