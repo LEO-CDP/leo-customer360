@@ -94,7 +94,7 @@ def _list_tenant_ids(cursor) -> list[str]:
     """List tenant IDs from the global catalog before tenant-scoped work."""
     set_tenant_context(cursor, None)
     cursor.execute(f"SELECT tenant_id FROM {DB_SCHEMA}.sys_tenant ORDER BY tenant_id")
-    return [str(row[0]) for row in cursor.fetchall()]
+    return [str(row["tenant_id"] if isinstance(row, dict) else row[0]) for row in cursor.fetchall()]
 
 
 def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_fragment: str, segment_id: str) -> int:

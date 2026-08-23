@@ -25,6 +25,14 @@ def test_sets_parameterized_tenant_context():
     cursor.execute.assert_called_once_with("SET app.tenant_id = %s", ("tenant-1",))
 
 
+def test_lists_tenant_ids_from_real_dict_cursor_rows(monkeypatch):
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [{"tenant_id": "tenant-1"}, {"tenant_id": "tenant-2"}]
+    monkeypatch.setattr(recompute, "set_tenant_context", MagicMock())
+
+    assert recompute._list_tenant_ids(cursor) == ["tenant-1", "tenant-2"]
+
+
 class TestSegmentationJob:
     def test_runs_successfully_and_returns_summary(self, monkeypatch):
         summary = {"tenant_id": None, "segments_processed": 3, "segments_skipped": 1, "total_members": 42}
