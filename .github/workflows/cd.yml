@@ -6,11 +6,10 @@ name: CD
 # 1. workflow_run (automatic) — fires after CI finishes and deploys only when:
 #      • CI concluded successfully, AND
 #      • the ref CI ran on is a deploy target:
-#          main + commit title contains "--deploy-uat"  -> uat  (pulls :latest)
+#          main (any merge/commit)                       -> uat  (pulls :latest)
 #          vX.Y.Z tag                                    -> prod (pulls :vX.Y.Z)
-#    Everything else (main pushes without the marker, feature branches, PRs,
-#    failed CI) is skipped. The "--deploy-uat" marker makes uat deploys OPT-IN
-#    per commit rather than firing on every push to main.
+#    Feature branches, PRs, and failed-CI runs are skipped. Every successful push
+#    to main deploys uat automatically (no opt-in marker).
 #
 # 2. workflow_dispatch (manual) — Actions "Run workflow" form (or `gh workflow
 #    run cd.yml -f ...`) to deploy/ROLL BACK any environment to any image tag:
@@ -79,9 +78,8 @@ jobs:
         id: pick
         env:
           EVENT: ${{ github.event_name }}
-          # workflow_run context (branch name, or tag name for tag pushes) + commit msg
+          # workflow_run context (branch name, or tag name for tag pushes)
           REF: ${{ github.event.workflow_run.head_branch }}
-          MSG: ${{ github.event.workflow_run.head_commit.message }}
           # workflow_dispatch inputs
           IN_ENV: ${{ inputs.environment }}
           IN_TAG: ${{ inputs.image_tag }}
@@ -101,21 +99,16 @@ jobs:
             } >> "$GITHUB_OUTPUT"
             echo "→ manual deploy/rollback: env=$IN_ENV tag=$IN_TAG services=$svc"
           else
-            TITLE="$(printf '%s\n' "$MSG" | head -n1)"
             if [[ "$REF" == "main" ]]; then
-              if [[ "$TITLE" == *"--deploy-uat"* ]]; then
-                { echo "deploy=true"; echo "env=uat"; echo "tag=latest"; echo "services=$DEFAULT_SVC"; } >> "$GITHUB_OUTPUT"
-                echo "→ deploy uat (title opted in: --deploy-uat)"
-              else
-                echo "deploy=false" >> "$GITHUB_OUTPUT"
-                echo "→ skip uat: commit title has no --deploy-uat marker"
-              fi
+              # Every successful push/merge to main deploys uat automatically (no opt-in marker).
+              { echo "deploy=true"; echo "env=uat"; echo "tag=latest"; echo "services=$DEFAULT_SVC"; } >> "$GITHUB_OUTPUT"
+              echo "→ deploy uat (every merge/commit to main)"
             elif [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
               { echo "deploy=true"; echo "env=prod"; echo "tag=$REF"; echo "services=$DEFAULT_SVC"; } >> "$GITHUB_OUTPUT"
               echo "→ deploy prod (tag $REF)"
             else
               echo "deploy=false" >> "$GITHUB_OUTPUT"
-              echo "→ skip: ref '$REF' is not main(+--deploy-uat) nor a vX.Y.Z tag"
+              echo "→ skip: ref '$REF' is neither main nor a vX.Y.Z tag"
             fi
           fi
 

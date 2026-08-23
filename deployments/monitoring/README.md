@@ -309,6 +309,13 @@ Add → Agent → `<private-ip>:9001`*). Idempotent — re-runs skip an already-
   Note it still listens on `0.0.0.0:19999`, so other hosts *inside the VPC subnet* can
   reach it directly (bypassing SSO); tighten with a `netdata.conf [web] bind to = 127.0.0.1`
   override if that matters. Portainer already binds loopback-only.
+- **Netdata's Redis collector needs the password + the non-default port.** Netdata's `go.d/redis`
+  auto-detects only `127.0.0.1:6379` with no auth, so our Redis (`:6580`, `--requirepass`) is NOT
+  picked up automatically. `deploy-monitoring.sh` writes `/etc/netdata/go.d/redis.conf` into the
+  `netdataconfig` volume (address `redis://127.0.0.1:6580` + `password`) using the Redis password
+  from `../cache` (`TF_VAR_redis_password` / `../cache/terraform.tfvars`). Toggle with
+  `netdata_redis_monitor`; if the password can't be found the deploy logs a skip and Redis charts
+  won't appear. The charts show up under `redis_c360-redis.*` in the Netdata dashboard.
 - **oauth2-proxy needs Keycloak reachable at the issuer URL.** `oauth2_issuer_url` is the
   public LB Keycloak URL; the box hairpins to the LB to fetch OIDC discovery. The `iss` in
   tokens must equal this exactly (it's `KC_HOSTNAME/realms/customer360`).

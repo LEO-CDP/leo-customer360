@@ -14,6 +14,11 @@ portainer_image   = "portainer/portainer-ce:lts"
 netdata_enabled = true
 netdata_port    = 19999               # Netdata's fixed default (see README to change it).
 netdata_image   = "netdata/netdata:stable"
+# Monitor the co-located Redis via Netdata's built-in go.d/redis collector (ops/mem/hit-rate/
+# evictions/clients + alarms; no extra container). Needs the Redis password — sourced from
+# ../cache (TF_VAR_redis_password or ../cache/terraform.tfvars). Set false to disable.
+netdata_redis_monitor = true
+netdata_redis_port    = 6580          # Redis runs on 6580 (non-default), so auto-detect misses it
 
 # --- oauth2-proxy: Keycloak SSO gate in front of BOTH dashboards ---
 # The L4 NLB can't do OIDC, so oauth2-proxy enforces Keycloak login on the box:
