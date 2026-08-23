@@ -6,7 +6,9 @@
 #                 bound LOOPBACK-only (127.0.0.1:9443); reachable via the SSH tunnel or the
 #                 SSO gate below.
 #   Netdata    -> real-time metrics dashboard (host + per-container + Redis). host net, :19999.
-#   oauth2-proxy (optional, oauth2_enabled) -> a Keycloak SSO gate in front of the two
+#   pgAdmin    -> web Postgres admin/monitoring UI (dpage/pgadmin4). Own login (email+password),
+#                 GATED behind Keycloak SSO (pgadmin_sso=true) since it serves cleartext HTTP. Bridge net.
+#   oauth2-proxy (optional, oauth2_enabled) -> a Keycloak SSO gate in front of the
 #                 dashboards, so they can be exposed publicly through the L4 LB (which can't
 #                 do OIDC itself). One confidential client `c360-oauth2-proxy` in the
 #                 existing customer360 realm; one proxy container per enabled dashboard.
@@ -67,6 +69,16 @@ J_UI_BIND="$(tfval jaeger_ui_bind "$ovl")";          J_UI_BIND="${J_UI_BIND:-127
 J_OTLP_HTTP="$(tfval jaeger_otlp_http_port "$ovl")"; J_OTLP_HTTP="${J_OTLP_HTTP:-4318}"
 J_OTLP_GRPC="$(tfval jaeger_otlp_grpc_port "$ovl")"; J_OTLP_GRPC="${J_OTLP_GRPC:-4317}"
 J_MEM="$(tfval jaeger_mem "$ovl")";                  J_MEM="${J_MEM:-300m}"
+# pgadmin — web Postgres admin/monitoring UI (dpage/pgadmin4). Own login (email+password), NOT
+# gated by default (pgadmin_sso=false); TUNNEL-ONLY (loopback) since it serves cleartext HTTP.
+# Default OFF (heaviest of the four ~150-250 MB; flip on to inspect the DB — see README).
+PG_EN="$(tfval pgadmin_enabled "$ovl")";   PG_EN="${PG_EN:-false}"
+PG_PORT="$(tfval pgadmin_port "$ovl")";    PG_PORT="${PG_PORT:-5050}"
+PG_IMG="$(tfval pgadmin_image "$ovl")";    PG_IMG="${PG_IMG:-dpage/pgadmin4:8.14}"
+PG_MEM="$(tfval pgadmin_mem "$ovl")";      PG_MEM="${PG_MEM:-512m}"
+# Login email: from .env (PGADMIN_DEFAULT_EMAIL) or the overlay (pgadmin_email); the password
+# lives ONLY in .env (auto-generated + persisted below if unset).
+PG_EMAIL="${PGADMIN_DEFAULT_EMAIL:-$(tfval pgadmin_email "$ovl")}"; PG_EMAIL="${PG_EMAIL:-admin@leocdp.com}"
 # sso gate
 OA_EN="$(tfval oauth2_enabled "$ovl")";    OA_EN="${OA_EN:-false}"
 OA_IMG="$(tfval oauth2_image "$ovl")";     OA_IMG="${OA_IMG:-quay.io/oauth2-proxy/oauth2-proxy:v7.6.0}"
@@ -76,20 +88,29 @@ PUB_HOST="$(tfval oauth2_public_host "$ovl")"
 P_PROXY="$(tfval portainer_proxy_port "$ovl")"; P_PROXY="${P_PROXY:-4443}"
 N_PROXY="$(tfval netdata_proxy_port "$ovl")";   N_PROXY="${N_PROXY:-4199}"
 J_PROXY="$(tfval jaeger_proxy_port "$ovl")";    J_PROXY="${J_PROXY:-4686}"
+PG_PROXY="$(tfval pgadmin_proxy_port "$ovl")";  PG_PROXY="${PG_PROXY:-4050}"
 # Per-dashboard SSO gating. Portainer has its OWN login AND a CSRF/origin check that rejects
 # mutating requests behind a reverse proxy ("Forbidden - origin invalid"), so it is exposed
 # DIRECTLY (portainer_sso=false). Netdata has no auth of its own, so keep it gated.
 P_SSO="$(tfval portainer_sso "$ovl")"; P_SSO="${P_SSO:-true}"
 N_SSO="$(tfval netdata_sso "$ovl")";   N_SSO="${N_SSO:-true}"
 J_SSO="$(tfval jaeger_sso "$ovl")";    J_SSO="${J_SSO:-true}"   # Jaeger has NO native auth -> gate it like Netdata
+PG_SSO="$(tfval pgadmin_sso "$ovl")";  PG_SSO="${PG_SSO:-false}"  # pgAdmin has its OWN login -> direct like Portainer
 P_GATED=false; [[ "$OA_EN" == "true" && "$P_EN" == "true" && "$P_SSO" == "true" ]] && P_GATED=true
 N_GATED=false; [[ "$OA_EN" == "true" && "$N_EN" == "true" && "$N_SSO" == "true" ]] && N_GATED=true
 J_GATED=false; [[ "$OA_EN" == "true" && "$J_EN" == "true" && "$J_SSO" == "true" ]] && J_GATED=true
+PG_GATED=false; [[ "$OA_EN" == "true" && "$PG_EN" == "true" && "$PG_SSO" == "true" ]] && PG_GATED=true
 # Gated dashboards bind loopback (only the proxy reaches them); an un-gated but enabled
 # dashboard binds all interfaces so the LB can reach it directly.
 P_BIND="127.0.0.1"; [[ "$P_GATED" == "true" ]] || P_BIND="0.0.0.0"
+# pgAdmin is a DB admin tool: default LOOPBACK (reach via the admin SSH tunnel), because on
+# the L4 LB uat rides plain HTTP and pgAdmin serves HTTP (no self-signed TLS like Portainer)
+# — a public :5050 would ship the admin login in cleartext. Set pgadmin_bind="0.0.0.0" to
+# expose it directly to the LB anyway (accept the cleartext caveat), or gate it (pgadmin_sso).
+PG_BIND="$(tfval pgadmin_bind "$ovl")"; PG_BIND="${PG_BIND:-127.0.0.1}"
+[[ "$PG_GATED" == "true" ]] && PG_BIND="127.0.0.1"   # gated -> only the oauth2-proxy reaches it
 
-[[ "$P_EN" == "true" || "$N_EN" == "true" || "$J_EN" == "true" ]] || { echo "ERROR: portainer_enabled, netdata_enabled and jaeger_enabled are all false in $ovl — nothing to do."; exit 1; }
+[[ "$P_EN" == "true" || "$N_EN" == "true" || "$J_EN" == "true" || "$PG_EN" == "true" ]] || { echo "ERROR: portainer_enabled, netdata_enabled, jaeger_enabled and pgadmin_enabled are all false in $ovl — nothing to do."; exit 1; }
 
 # --- discover the target VM's floating IP from ../server outputs (by for_each key) ---
 SERVERS_JSON="$( (cd ../server && terraform workspace select "$ENV" >/dev/null 2>&1 && terraform output -json servers 2>/dev/null) || true )"
@@ -101,7 +122,7 @@ SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/n
 
 if [[ "$ACTION" == "destroy" ]]; then
   echo ">> Removing monitoring containers on $BASTION ..."
-  ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo docker rm -f c360-portainer c360-netdata c360-jaeger c360-oauth2-portainer c360-oauth2-netdata c360-oauth2-jaeger >/dev/null 2>&1; echo "   removed dashboards + Jaeger + SSO gate (data volumes kept)"'
+  ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo docker rm -f c360-portainer c360-netdata c360-jaeger c360-pgadmin c360-oauth2-portainer c360-oauth2-netdata c360-oauth2-jaeger c360-oauth2-pgadmin >/dev/null 2>&1; echo "   removed dashboards + Jaeger + pgAdmin + SSO gate (data volumes kept)"'
   exit 0
 fi
 
@@ -111,17 +132,34 @@ if [[ -n "${PORTAINER_ADMIN_PASSWORD:-}" && ${#PORTAINER_ADMIN_PASSWORD} -lt 12 
 fi
 PADMIN_B64="$(printf %s "${PORTAINER_ADMIN_PASSWORD:-}" | base64 | tr -d '\n')"
 
+# --- pgAdmin admin login (the image REQUIRES a password to start when enabled) ---
+# Auto-generate + persist to .env if unset (same convenience as the cookie secret), so a
+# first deploy just works and the credential is recorded once in the git-ignored .env.
+if [[ "$PG_EN" == "true" ]]; then
+  if [[ -z "${PGADMIN_DEFAULT_PASSWORD:-}" ]]; then
+    # openssl (finite output) not `tr </dev/urandom | head` — the latter SIGPIPEs tr on the
+    # infinite source, which under `set -o pipefail` returns 141 and set -e kills the script.
+    PGADMIN_DEFAULT_PASSWORD="$(openssl rand -base64 24 | LC_ALL=C tr -dc 'A-Za-z0-9')"
+    printf 'PGADMIN_DEFAULT_PASSWORD=%s\n' "$PGADMIN_DEFAULT_PASSWORD" >> ./.env
+    echo ">> Generated PGADMIN_DEFAULT_PASSWORD (saved to .env) — log in at pgAdmin as $PG_EMAIL."
+  elif [[ ${#PGADMIN_DEFAULT_PASSWORD} -lt 6 ]]; then
+    echo "ERROR: PGADMIN_DEFAULT_PASSWORD must be >= 6 chars (pgAdmin rejects shorter)."; exit 1
+  fi
+fi
+PGADMIN_PW_B64="$(printf %s "${PGADMIN_DEFAULT_PASSWORD:-}" | base64 | tr -d '\n')"
+
 # --- SSO gate: provision the Keycloak client + secrets locally (before we ship) ---
-SEC_B64=""; COOKIE_B64=""; P_REDIRECT=""; N_REDIRECT=""; J_REDIRECT=""
-if [[ "$P_GATED" == "true" || "$N_GATED" == "true" || "$J_GATED" == "true" ]]; then
+SEC_B64=""; COOKIE_B64=""; P_REDIRECT=""; N_REDIRECT=""; J_REDIRECT=""; PG_REDIRECT=""
+if [[ "$P_GATED" == "true" || "$N_GATED" == "true" || "$J_GATED" == "true" || "$PG_GATED" == "true" ]]; then
   : "${ISSUER:?set oauth2_issuer_url in $ovl (e.g. http://<lb>:8080/realms/customer360)}"
   : "${PUB_HOST:?set oauth2_public_host in $ovl (the LB public IP/host the browser uses)}"
   KC_URL="${ISSUER%/realms/*}"; REALM="${ISSUER##*/realms/}"
   P_REDIRECT="http://$PUB_HOST:$P_PORT/oauth2/callback"
   N_REDIRECT="http://$PUB_HOST:$N_PORT/oauth2/callback"
   J_REDIRECT="https://$PUB_HOST/jaeger/oauth2/callback"
+  PG_REDIRECT="http://$PUB_HOST:$PG_PORT/oauth2/callback"   # pgAdmin gated on its own port, root-served (like Netdata)
   # only GATED dashboards get a callback URL registered on the Keycloak client
-  REDIRECTS=""; [[ "$P_GATED" == "true" ]] && REDIRECTS="$P_REDIRECT"; [[ "$N_GATED" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$N_REDIRECT"; [[ "$J_GATED" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$J_REDIRECT"
+  REDIRECTS=""; [[ "$P_GATED" == "true" ]] && REDIRECTS="$P_REDIRECT"; [[ "$N_GATED" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$N_REDIRECT"; [[ "$J_GATED" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$J_REDIRECT"; [[ "$PG_GATED" == "true" ]] && REDIRECTS="${REDIRECTS:+$REDIRECTS,}$PG_REDIRECT"
 
   if [[ -z "${OAUTH2_PROXY_CLIENT_SECRET:-}" ]]; then
     : "${KEYCLOAK_ADMIN_PASSWORD:?need the Keycloak client secret — set KEYCLOAK_ADMIN_PASSWORD in .env (or ../sso/.env) so bootstrap-oauth2-client.py can provision it}"
@@ -145,23 +183,26 @@ echo ">> Target (monitoring): $BASTION"
 [[ "$P_EN" == "true" ]] && echo "   Portainer : $P_BIND:$P_PORT  ($P_IMG)  [$([[ "$P_GATED" == "true" ]] && echo "SSO gate" || echo "direct, own login")]"
 [[ "$N_EN" == "true" ]] && echo "   Netdata   : :$N_PORT  ($N_IMG)  [$([[ "$N_GATED" == "true" ]] && echo "SSO gate" || echo "DIRECT, no auth")]"
 [[ "$J_EN" == "true" ]] && echo "   Jaeger    : $J_UI_BIND:$J_UI_PORT (UI)  OTLP http :$J_OTLP_HTTP grpc :$J_OTLP_GRPC  ($J_IMG)"
-[[ "$P_GATED" == "true" || "$N_GATED" == "true" || "$J_GATED" == "true" ]] && echo "   SSO gate  : oauth2-proxy -> Keycloak ($ISSUER), client $CLIENT_ID"
+[[ "$PG_EN" == "true" ]] && echo "   pgAdmin   : $PG_BIND:$PG_PORT  ($PG_IMG)  [$([[ "$PG_GATED" == "true" ]] && echo "SSO gate + own login" || echo "direct, own login")]  login=$PG_EMAIL"
+[[ "$P_GATED" == "true" || "$N_GATED" == "true" || "$J_GATED" == "true" || "$PG_GATED" == "true" ]] && echo "   SSO gate  : oauth2-proxy -> Keycloak ($ISSUER), client $CLIENT_ID"
 
 # All params shipped in one base64 blob (dodges ssh arg-flattening; values are space-free).
 PARAMS_B64="$(printf '%s\n' \
   "P_EN=$P_EN" "P_PORT=$P_PORT" "P_IMG=$P_IMG" "PADMIN_B64=$PADMIN_B64" "P_BIND=$P_BIND" \
-  "P_GATED=$P_GATED" "N_GATED=$N_GATED" "J_GATED=$J_GATED" \
+  "P_GATED=$P_GATED" "N_GATED=$N_GATED" "J_GATED=$J_GATED" "PG_GATED=$PG_GATED" \
   "N_EN=$N_EN" "N_PORT=$N_PORT" "N_IMG=$N_IMG" \
   "J_EN=$J_EN" "J_IMG=$J_IMG" "J_UI_PORT=$J_UI_PORT" "J_UI_BIND=$J_UI_BIND" "J_OTLP_HTTP=$J_OTLP_HTTP" "J_OTLP_GRPC=$J_OTLP_GRPC" "J_MEM=$J_MEM" \
+  "PG_EN=$PG_EN" "PG_PORT=$PG_PORT" "PG_IMG=$PG_IMG" "PG_BIND=$PG_BIND" "PG_MEM=$PG_MEM" "PG_EMAIL=$PG_EMAIL" "PGADMIN_PW_B64=$PGADMIN_PW_B64" \
   "OA_EN=$OA_EN" "OA_IMG=$OA_IMG" "ISSUER=$ISSUER" "CLIENT_ID=$CLIENT_ID" \
   "SEC_B64=$SEC_B64" "COOKIE_B64=$COOKIE_B64" \
-  "P_PROXY=$P_PROXY" "P_REDIRECT=$P_REDIRECT" "N_PROXY=$N_PROXY" "N_REDIRECT=$N_REDIRECT" "J_PROXY=$J_PROXY" "J_REDIRECT=$J_REDIRECT" \
+  "P_PROXY=$P_PROXY" "P_REDIRECT=$P_REDIRECT" "N_PROXY=$N_PROXY" "N_REDIRECT=$N_REDIRECT" "J_PROXY=$J_PROXY" "J_REDIRECT=$J_REDIRECT" "PG_PROXY=$PG_PROXY" "PG_REDIRECT=$PG_REDIRECT" \
   | base64 | tr -d '\n')"
 
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PARAMS_B64" <<'REMOTE'
 set -euo pipefail
 tmp="$(mktemp)"; printf %s "$1" | base64 -d > "$tmp"; set -a; . "$tmp"; set +a; rm -f "$tmp"
 PADMIN="$(printf %s "$PADMIN_B64" | base64 -d 2>/dev/null || true)"
+PGADMIN_PW="$(printf %s "$PGADMIN_PW_B64" | base64 -d 2>/dev/null || true)"
 SECRET="$(printf %s "$SEC_B64" | base64 -d 2>/dev/null || true)"
 COOKIE="$(printf %s "$COOKIE_B64" | base64 -d 2>/dev/null || true)"
 
@@ -233,12 +274,39 @@ if [ "${J_EN:-false}" = "true" ]; then
   [ "$ok" = "1" ] && echo "   Jaeger OK (UI :${J_UI_PORT:-16686}, OTLP http :${J_OTLP_HTTP:-4318} (gRPC in-container))" || echo "   WARN: Jaeger not ready yet"
 fi
 
+# ---------- pgAdmin (web Postgres admin/monitoring UI, own login) ----------
+# Bridge net, container listens on :80 -> published on PG_BIND:PG_PORT (loopback by default =
+# tunnel-only; set pgadmin_bind=0.0.0.0 to expose to the LB). Login = PG_EMAIL / PGADMIN_PW.
+# pgadmin_data volume persists the config DB + saved server connections + sessions. Memory
+# capped so it can't starve the shared box (it's the heaviest of the four).
+if [ "${PG_EN:-false}" = "true" ]; then
+  echo "   deploying pgAdmin ..."
+  sudo docker pull "$PG_IMG" >/dev/null || true
+  sudo docker volume create pgadmin_data >/dev/null
+  sudo docker rm -f c360-pgadmin >/dev/null 2>&1 || true
+  # GUNICORN_CMD_ARGS raises gunicorn's per-field header limit (default 8190B): all these ops
+  # tools share one host/IP, and cookies are host- not port-scoped, so the big _oauth2_* session
+  # cookies oauth2-proxy sets for Netdata/Jaeger get sent to pgAdmin too -> the combined Cookie:
+  # header overflows the default and gunicorn returns 431 "limit request headers fields size".
+  sudo docker run -d --name c360-pgadmin --restart unless-stopped --memory "${PG_MEM:-512m}" \
+    -e PGADMIN_DEFAULT_EMAIL="$PG_EMAIL" -e PGADMIN_DEFAULT_PASSWORD="$PGADMIN_PW" \
+    -e PGADMIN_LISTEN_PORT=80 \
+    -e GUNICORN_CMD_ARGS="--limit-request-field_size 65535 --limit-request-fields 200" \
+    -v pgadmin_data:/var/lib/pgadmin \
+    -p "$PG_BIND":"$PG_PORT":80 \
+    "$PG_IMG"
+  ok=0; for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PG_PORT/misc/ping" >/dev/null 2>&1 && { ok=1; break; }; sleep 2; done
+  sudo docker ps --filter name=c360-pgadmin --format '   running: {{.Names}} ({{.Status}})'
+  [ "$ok" = "1" ] && echo "   pgAdmin OK (login $PG_EMAIL on :$PG_PORT)" || { echo "   WARN: pgAdmin not ready — logs:"; sudo docker logs --tail 25 c360-pgadmin || true; }
+fi
+
 # ---------- oauth2-proxy (Keycloak SSO gate, one per GATED dashboard) ----------
 # Tear down any gate that should no longer exist (e.g. Portainer moved to direct access).
-[ "$P_GATED" = "true" ] || sudo docker rm -f c360-oauth2-portainer >/dev/null 2>&1 || true
-[ "$N_GATED" = "true" ] || sudo docker rm -f c360-oauth2-netdata   >/dev/null 2>&1 || true
-[ "$J_GATED" = "true" ] || sudo docker rm -f c360-oauth2-jaeger    >/dev/null 2>&1 || true
-if [ "$P_GATED" = "true" ] || [ "$N_GATED" = "true" ] || [ "$J_GATED" = "true" ]; then
+[ "$P_GATED" = "true" ]  || sudo docker rm -f c360-oauth2-portainer >/dev/null 2>&1 || true
+[ "$N_GATED" = "true" ]  || sudo docker rm -f c360-oauth2-netdata   >/dev/null 2>&1 || true
+[ "$J_GATED" = "true" ]  || sudo docker rm -f c360-oauth2-jaeger    >/dev/null 2>&1 || true
+[ "$PG_GATED" = "true" ] || sudo docker rm -f c360-oauth2-pgadmin   >/dev/null 2>&1 || true
+if [ "$P_GATED" = "true" ] || [ "$N_GATED" = "true" ] || [ "$J_GATED" = "true" ] || [ "$PG_GATED" = "true" ]; then
   sudo docker pull "$OA_IMG" >/dev/null || true
   run_proxy() {  # name listen redirect upstream [cookie_secure] [proxy_prefix] [extra_flag]
     local name="$1" listen="$2" redirect="$3" upstream="$4" cookie_secure="${5:-false}" pprefix="${6:-}" extra="${7:-}"
@@ -260,6 +328,8 @@ if [ "$P_GATED" = "true" ] || [ "$N_GATED" = "true" ] || [ "$J_GATED" = "true" ]
   if [ "$P_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Portainer ..."; run_proxy portainer "$P_PROXY" "$P_REDIRECT" "https://127.0.0.1:$P_PORT" false "" "--ssl-upstream-insecure-skip-verify=true"; fi
   if [ "$N_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Netdata ...";   run_proxy netdata   "$N_PROXY" "$N_REDIRECT" "http://127.0.0.1:$N_PORT" false "" ""; fi
   if [ "$J_GATED" = "true" ]; then echo "   deploying oauth2-proxy for Jaeger ...";    run_proxy jaeger    "$J_PROXY" "$J_REDIRECT" "http://127.0.0.1:$J_UI_PORT" true "/jaeger/oauth2" ""; fi
+  # pgAdmin is root-served on its own port (like Netdata), so no proxy-prefix needed.
+  if [ "$PG_GATED" = "true" ]; then echo "   deploying oauth2-proxy for pgAdmin ...";   run_proxy pgadmin   "$PG_PROXY" "$PG_REDIRECT" "http://127.0.0.1:$PG_PORT" false "" ""; fi
 fi
 REMOTE
 
@@ -281,4 +351,13 @@ if [[ "$J_EN" == "true" && -n "$PUB_HOST" ]]; then
     && echo "   Jaeger   : https://$PUB_HOST/jaeger  (trace UI, Keycloak login)" \
     || echo "   Jaeger   : $J_UI_BIND:$J_UI_PORT (tunnel only — set jaeger_sso=true + oauth2_enabled + a Caddy /jaeger route to gate over TLS)"
 fi
-echo "   Admin tunnel (no LB): ssh -i $SSH_KEY -L $P_PORT:localhost:$P_PORT -L $N_PORT:localhost:$N_PORT $BASTION"
+if [[ "$PG_EN" == "true" ]]; then
+  if [[ "$PG_GATED" == "true" && -n "$PUB_HOST" ]]; then
+    echo "   pgAdmin  : http://$PUB_HOST:$PG_PORT/  (Keycloak gate + pgAdmin login $PG_EMAIL; add a 'pgadmin' LB backend -> :$PG_PROXY)"
+  elif [[ "$PG_BIND" == "0.0.0.0" && -n "$PUB_HOST" ]]; then
+    echo "   pgAdmin  : http://$PUB_HOST:$PG_PORT/  (pgAdmin's OWN login $PG_EMAIL; add a 'pgadmin' LB backend -> :$PG_PORT — CLEARTEXT)"
+  else
+    echo "   pgAdmin  : $PG_BIND:$PG_PORT (login $PG_EMAIL — tunnel-only; see the admin tunnel below)"
+  fi
+fi
+echo "   Admin tunnel (no LB): ssh -i $SSH_KEY -L $P_PORT:localhost:$P_PORT -L $N_PORT:localhost:$N_PORT${PG_EN:+ -L $PG_PORT:localhost:$PG_PORT} $BASTION"

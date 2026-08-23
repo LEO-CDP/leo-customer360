@@ -44,3 +44,19 @@ jaeger_mem            = "1g"
 # (Jaeger has no native auth). LB 'jaeger' backend maps public :16686 -> :jaeger_proxy_port.
 jaeger_sso        = true
 jaeger_proxy_port = 4686
+
+# --- pgAdmin (web Postgres admin/monitoring UI) ------------------------------
+# GATED behind Keycloak SSO (pgadmin_sso = true), same model as Netdata/Jaeger: public LB :5050
+# -> oauth2-proxy :4050 on the box -> Keycloak login -> pgAdmin (loopback :5050), then pgAdmin's
+# OWN login. pgAdmin serves plain HTTP with no TLS of its own, so it must NOT sit raw on the LB —
+# the SSO gate is how it's reached safely. Requires oauth2_enabled = true (above) and the matching
+# 'pgadmin' backend in ../load_balancer/overlays/prod.tfvars (member_port = 4050). Login password
+# lives ONLY in .env (PGADMIN_DEFAULT_PASSWORD), auto-generated on first deploy. Runs on mon_server_key.
+pgadmin_enabled = true
+pgadmin_port    = 5050
+pgadmin_image   = "dpage/pgadmin4:8.14"
+pgadmin_bind    = "127.0.0.1"                 # loopback: only the oauth2-proxy (SSO gate) reaches it
+pgadmin_email   = "admin@leocdp.com"
+pgadmin_mem     = "512m"                        # more headroom than uat (dedicated/bigger box)
+pgadmin_sso       = true                         # GATE the UI behind Keycloak SSO (oauth2-proxy)
+pgadmin_proxy_port = 4050                        # oauth2-proxy listen port on the box (LB 'pgadmin' backend member_port)

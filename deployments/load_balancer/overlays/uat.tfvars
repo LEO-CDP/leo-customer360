@@ -59,6 +59,15 @@ backends = {
     listen_port = 19999
     health_path = "/ping"
   }
+  # pgAdmin exposed DIRECTLY with its own login (deployments/monitoring pgadmin_sso = false,
+  # pgadmin_bind = 0.0.0.0): LB :5050 -> pgAdmin :5050. Plain HTTP (no TLS) — cleartext login,
+  # accepted uat tradeoff (see the monitoring overlay). Health-check pgAdmin's own /misc/ping.
+  "pgadmin" = {
+    member_ip   = "10.100.1.5" # c360-api-uat-api — pgAdmin direct (its own login)
+    member_port = 5050
+    listen_port = 5050
+    health_path = "/misc/ping"
+  }
 }
 # Jaeger is fronted by Caddy at https://beta.leocdp.com/jaeger (see deployments/proxy) — no dedicated LB listener.
 

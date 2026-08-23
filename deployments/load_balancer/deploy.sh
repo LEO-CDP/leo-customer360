@@ -18,6 +18,14 @@ LOCK_TIMEOUT="120s"
 
 cd "$(dirname "$0")"
 
+# Optional targeted replacement: set REPLACE to a resource address to force-recreate it instead
+# of updating in place. Needed when the provider's in-place UPDATE is buggy — e.g. VNG rejects a
+# vLB pool member_port/health change with "Stickiness cannot be specified for non-HTTP pools", so
+# the pool must be replaced (create path). Kept inside the plan->saved-plan->apply flow below.
+#   REPLACE='vngcloud_vlb_pool.this["pgadmin"]' ./deploy.sh uat apply
+REPLACE_ARGS=()
+[[ -n "${REPLACE:-}" ]] && REPLACE_ARGS=(-replace="$REPLACE")
+
 ENV="${1:-}"
 ACTION="${2:-plan}"
 
@@ -55,14 +63,14 @@ terraform workspace select "$ENV" 2>/dev/null || terraform workspace new "$ENV"
 
 case "$ACTION" in
   plan)
-    terraform plan -input=false -lock-timeout="$LOCK_TIMEOUT" -var-file="$VAR_FILE"
+    terraform plan -input=false -lock-timeout="$LOCK_TIMEOUT" "${REPLACE_ARGS[@]}" -var-file="$VAR_FILE"
     ;;
   apply)
     # Plan first with -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error.
     # Only apply when there is a real diff, and apply the SAVED plan so what runs
     # is exactly what was reviewed. Re-running with no drift is a clean no-op.
     set +e
-    terraform plan -input=false -lock-timeout="$LOCK_TIMEOUT" -var-file="$VAR_FILE" -detailed-exitcode -out=tfplan
+    terraform plan -input=false -lock-timeout="$LOCK_TIMEOUT" "${REPLACE_ARGS[@]}" -var-file="$VAR_FILE" -detailed-exitcode -out=tfplan
     code=$?
     set -e
     case "$code" in
