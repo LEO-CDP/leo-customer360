@@ -119,6 +119,23 @@ resource "vngcloud_vserver_secgrouprule" "ssh" {
   description = "SSH inbound tcp 22 managed by terraform"
 }
 
+# Extra intra-VPC inbound TCP rules on the Default secgroup (opens nothing by default). Used for
+# ops ports between boxes, e.g. the Portainer agent on tcp/9001 reached from the Portainer box's
+# private IP. Keep each CIDR tight (a /32). See var.extra_ingress.
+resource "vngcloud_vserver_secgrouprule" "extra" {
+  for_each = length(var.security_group) > 0 ? { for r in var.extra_ingress : "${r.port}-${r.cidr}" => r } : {}
+
+  project_id        = var.project_id
+  security_group_id = var.security_group[0]
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "TCP"
+  port_range_min    = each.value.port
+  port_range_max    = each.value.port
+  remote_ip_prefix  = each.value.cidr
+  description       = "intra VPC tcp ${each.value.port} managed by terraform"
+}
+
 # ---------------------------------------------------------------------------
 # The API servers.
 # ---------------------------------------------------------------------------

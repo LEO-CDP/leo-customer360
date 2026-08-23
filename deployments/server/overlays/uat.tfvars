@@ -6,6 +6,11 @@
 
 name_prefix = "c360-api-uat"
 
+# Tracing: persist OpenTelemetry ON for uat so it survives redeploys (read by deploy-api.sh ->
+# lib/otel.sh). Without this the uat default is OFF (tiny-box zero-overhead); an explicit
+# OTEL_ENABLED env var at deploy time still overrides. See deployments/monitoring (Jaeger).
+otel_enabled = "true"
+
 servers = {
   "1x2" = {
     flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB — jump host + backend-system (Dagster)
@@ -28,13 +33,13 @@ servers = {
 #   DISABLED ("contact to enable") — so 1C rejects them. The real HCM03-1C SSD zone
 #   (C0A35725-…, enabled) is only returned via the ?zoneId= query the data source can't
 #   send, so we pin root_disk_type_id directly to its "3000" tier.
-flavor_zone_id        = "9818AAB0-8DC5-4FED-898B-9EFD804AB137" # "General Purpose Code S" @ HCM03-1C (not sold out)
-flavor_zone_name      = "General Purpose Code S"               # unused while flavor_zone_id is set (kept for reference)
-volume_type_zone_name = "SSD"                                  # unused while root_disk_type_id is set (kept for reference)
-root_disk_type_name   = "3000"                                 # unused while root_disk_type_id is set
+flavor_zone_id        = "9818AAB0-8DC5-4FED-898B-9EFD804AB137"       # "General Purpose Code S" @ HCM03-1C (not sold out)
+flavor_zone_name      = "General Purpose Code S"                     # unused while flavor_zone_id is set (kept for reference)
+volume_type_zone_name = "SSD"                                        # unused while root_disk_type_id is set (kept for reference)
+root_disk_type_name   = "3000"                                       # unused while root_disk_type_id is set
 root_disk_type_id     = "vtype-e782f8e1-0569-11f0-a0a4-ec2a72332f83" # SSD "3000" @ HCM03-1C (enabled)
-image_name            = "1_Ubuntu-24.04x64"                        # unused while image_id is set (kept for reference)
-image_id              = "img-54743c32-3cab-4566-9b5b-b21452300d97" # 1_Ubuntu-24.04x64 (non-UEFI, fits gen-1 s-general)
+image_name            = "1_Ubuntu-24.04x64"                          # unused while image_id is set (kept for reference)
+image_id              = "img-54743c32-3cab-4566-9b5b-b21452300d97"   # 1_Ubuntu-24.04x64 (non-UEFI, fits gen-1 s-general)
 
 # Place this box in the SAME subnet as the DB so it can reach the DB's PRIVATE ip.
 # Do NOT create a fresh isolated VPC here — it couldn't route to the DB. Fill these from
@@ -59,6 +64,14 @@ security_group = ["secg-7c1e85ec-8028-460a-8592-99463f198831"] # "Default"
 # Open inbound SSH (tcp/22) on the Default secgroup. TIGHTEN ssh_ingress_cidr to your IP.
 open_ssh         = true
 ssh_ingress_cidr = "0.0.0.0/0" # <-- change to "<your-public-ip>/32"
+
+# Intra-VPC ops ports on the Default secgroup. tcp/9001 = Portainer agent on the backend box
+# (server key "1x2", 10.100.1.4), reached by the Portainer box (api, 10.100.1.5) over the private
+# VPC so ONE Portainer manages every box (see ../monitoring portainer_agent_server_keys). Source
+# tightened to the api box's private IP. Apply after adding: `./deploy.sh uat apply`.
+extra_ingress = [
+  { port = 9001, cidr = "10.100.1.5/32" },
+]
 
 # LOGIN via cloud-init user_data. The VNG Ubuntu 24.04 image's ssh-keygen.service FAILS at
 # boot (persistently) -> no SSH host keys -> sshd exits -> port 22 REFUSED. cloud-init's
