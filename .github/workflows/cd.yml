@@ -174,10 +174,12 @@ jobs:
         working-directory: deployments/sso
         env:
           KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
-          # Required by the 'sso-realm' step (bootstrap-realm.py logs in as the KC admin to
-          # idempotently provision the realm, roles + confidential client). Add it as a repo/env
-          # secret; without it the sso-realm step aborts.
+          # The 'sso-realm' step (bootstrap-realm.py) needs BOTH of these: KEYCLOAK_ADMIN_PASSWORD
+          # (to log in as the KC admin) AND KC_TEST_USER_PASSWORD (to set the c360admin test-user
+          # password). If either is missing the step now SKIPS (deploy-all realm_step), so a missing
+          # secret no longer breaks the deploy — add both repo/env secrets to (re)provision the realm.
           KEYCLOAK_ADMIN_PASSWORD: ${{ secrets.KEYCLOAK_ADMIN_PASSWORD }}
+          KC_TEST_USER_PASSWORD: ${{ secrets.KC_TEST_USER_PASSWORD }}
         run: |
           umask 077
           : > .env
@@ -187,11 +189,12 @@ jobs:
           else
             echo "::warning::KEYCLOAK_CLIENT_SECRET not set for '$ENVIRONMENT' — API will deploy with SSO_LOGIN=false."
           fi
-          if [ -n "$KEYCLOAK_ADMIN_PASSWORD" ]; then
-            printf 'KEYCLOAK_ADMIN_PASSWORD=%s\n' "$KEYCLOAK_ADMIN_PASSWORD" >> .env
-            echo "sso/.env: KEYCLOAK_ADMIN_PASSWORD set (enables the sso-realm bootstrap)."
+          [ -n "$KEYCLOAK_ADMIN_PASSWORD" ] && printf 'KEYCLOAK_ADMIN_PASSWORD=%s\n' "$KEYCLOAK_ADMIN_PASSWORD" >> .env
+          [ -n "$KC_TEST_USER_PASSWORD" ]   && printf 'KC_TEST_USER_PASSWORD=%s\n'   "$KC_TEST_USER_PASSWORD"   >> .env
+          if [ -n "$KEYCLOAK_ADMIN_PASSWORD" ] && [ -n "$KC_TEST_USER_PASSWORD" ]; then
+            echo "sso/.env: KEYCLOAK_ADMIN_PASSWORD + KC_TEST_USER_PASSWORD set (enables the sso-realm bootstrap)."
           else
-            echo "::warning::KEYCLOAK_ADMIN_PASSWORD not set for '$ENVIRONMENT' — the sso-realm step will fail; add it as a repo/env secret."
+            echo "::warning::KEYCLOAK_ADMIN_PASSWORD and/or KC_TEST_USER_PASSWORD not set — sso-realm will SKIP (realm not re-provisioned). Add both repo/env secrets to enable it."
           fi
 
       # Deploys to the vSERVERS ONLY: pull the image from GHCR and `docker run`
