@@ -376,8 +376,9 @@ jwt="$(curl -sk -X POST "$base/api/auth" -H 'Content-Type: application/json' -d 
 if curl -sk "$base/api/endpoints" -H "Authorization: Bearer $jwt" | grep -q "\"Name\":\"$NAME\""; then
   echo "   Portainer env '$NAME': already registered"
 else
+  # Agent endpoints need the tcp:// scheme, else Portainer 500s with "Unable to parse docker host".
   code="$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$base/api/endpoints" -H "Authorization: Bearer $jwt" \
-    -F "Name=$NAME" -F "EndpointCreationType=2" -F "URL=$URL" -F "TLS=true" -F "TLSSkipVerify=true" -F "TLSSkipClientVerify=true")"
+    -F "Name=$NAME" -F "EndpointCreationType=2" -F "URL=tcp://$URL" -F "TLS=true" -F "TLSSkipVerify=true" -F "TLSSkipClientVerify=true")"
   case "$code" in 200|201|204) echo "   Portainer env '$NAME' -> $URL: registered";;
     *) echo "   WARN: endpoint create HTTP $code — add manually: Environments -> Add -> Agent -> $URL";; esac
 fi

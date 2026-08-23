@@ -18,6 +18,13 @@ LOCK_TIMEOUT="120s"
 
 cd "$(dirname "$0")"
 
+# Optional targeted apply: set TARGET to a resource address to converge ONLY that resource
+# (and its deps), leaving unrelated drift untouched — e.g. add a new secgroup rule without
+# reconciling pre-existing changes to the vServers. Kept inside the plan->saved-plan->apply flow.
+#   TARGET='vngcloud_vserver_secgrouprule.extra["9001-10.100.1.5/32"]' ./deploy.sh uat apply
+TARGET_ARGS=()
+[[ -n "${TARGET:-}" ]] && TARGET_ARGS=(-target="$TARGET")
+
 ENV="${1:-}"
 ACTION="${2:-plan}"
 
@@ -55,14 +62,14 @@ terraform workspace select "$ENV" 2>/dev/null || terraform workspace new "$ENV"
 
 case "$ACTION" in
   plan)
-    terraform plan -input=false -lock-timeout="$LOCK_TIMEOUT" -var-file="$VAR_FILE"
+    terraform plan -input=false -lock-timeout="$LOCK_TIMEOUT" "${TARGET_ARGS[@]}" -var-file="$VAR_FILE"
     ;;
   apply)
     # Plan first with -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error.
     # Only apply when there is a real diff, and apply the SAVED plan so what runs
     # is exactly what was reviewed. Re-running with no drift is a clean no-op.
     set +e
-    terraform plan -input=false -lock-timeout="$LOCK_TIMEOUT" -var-file="$VAR_FILE" -detailed-exitcode -out=tfplan
+    terraform plan -input=false -lock-timeout="$LOCK_TIMEOUT" "${TARGET_ARGS[@]}" -var-file="$VAR_FILE" -detailed-exitcode -out=tfplan
     code=$?
     set -e
     case "$code" in
