@@ -1,0 +1,93 @@
+name: Admin (UAT)
+
+# Manual, on-demand ADMIN operations against the UAT platform, picked from a
+# fixed dropdown. UAT ONLY — there is no environment input; every run targets uat.
+# Backed by deployments/admin-uat.sh (the deployed-platform counterpart of the
+# local dev-c360.sh). Run it from the Actions tab → "Admin (UAT)" → Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Admin action to run on UAT"
+        required: true
+        type: choice
+        default: db-status
+        options:
+          - db-status          # read-only: key CDP table row counts
+          - seed-demo          # seed CIR/demo data (idempotent)
+          - bootstrap-realm    # re-run idempotent Keycloak realm/roles/client bootstrap
+          - restart-apps       # restart api + ads + frontend containers
+          - restart-backend    # restart backend-system (Dagster)
+          - redeploy-apps      # pull latest images + recreate api/ads/frontend/backend
+          - flush-cache        # FLUSHDB the Redis cache (requires confirm below)
+      confirm:
+        description: "Confirm destructive actions — type the action name (required for flush-cache)"
+        required: false
+        default: ""
+
+concurrency:
+  group: admin-uat            # serialize admin ops against the shared uat box
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  admin:
+    name: "uat · ${{ inputs.action }}"
+    runs-on: ubuntu-latest
+    environment: uat           # attach GitHub Environment protection rules here if desired
+    env:
+      # vStorage S3 creds for the remote Terraform backend (read-only output resolution).
+      AWS_ACCESS_KEY_ID: ${{ secrets.VSTORAGE_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.VSTORAGE_SECRET_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.8
+
+      - name: Install the deploy SSH key
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/c360-api_ed25519
+          chmod 600 ~/.ssh/c360-api_ed25519
+
+      # READ-ONLY: init the remote state so admin-uat.sh can resolve vServer IPs /
+      # DB host from Terraform OUTPUTS. Never applies, never provisions.
+      - name: terraform init (read-only — output resolution)
+        working-directory: deployments
+        run: |
+          for m in server postgres cache; do
+            terraform -chdir="$m" init -input=false >/dev/null
+          done
+
+      # bootstrap-realm needs the KC admin password in sso/.env (git-ignored on the runner).
+      - name: Provision Keycloak secrets (deployments/sso/.env)
+        if: ${{ inputs.action == 'bootstrap-realm' }}
+        working-directory: deployments/sso
+        env:
+          KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+          KEYCLOAK_ADMIN_PASSWORD: ${{ secrets.KEYCLOAK_ADMIN_PASSWORD }}
+        run: |
+          umask 077
+          : > .env
+          [ -n "$KEYCLOAK_CLIENT_SECRET" ]  && printf 'KEYCLOAK_CLIENT_SECRET=%s\n'  "$KEYCLOAK_CLIENT_SECRET"  >> .env || true
+          [ -n "$KEYCLOAK_ADMIN_PASSWORD" ] && printf 'KEYCLOAK_ADMIN_PASSWORD=%s\n' "$KEYCLOAK_ADMIN_PASSWORD" >> .env \
+            || echo "::warning::KEYCLOAK_ADMIN_PASSWORD not set — bootstrap-realm will abort."
+
+      - name: Run admin action
+        working-directory: deployments
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}          # GHCR pulls for redeploy-apps
+          GH_TOKEN: ${{ github.token }}                    # gh (digest resolution / deploy ledger)
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}   # db-status
+          TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}  # flush-cache
+          CONFIRM: ${{ inputs.confirm }}
+        run: bash admin-uat.sh "${{ inputs.action }}"

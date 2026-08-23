@@ -11,6 +11,10 @@ portainer_image   = "portainer/portainer-ce:lts"
 netdata_enabled = true
 netdata_port    = 19999
 netdata_image   = "netdata/netdata:stable"
+# Monitor Redis via Netdata's built-in go.d/redis collector (no extra container). Needs the Redis
+# password from ../cache (TF_VAR_redis_password or ../cache/terraform.tfvars). Set false to disable.
+netdata_redis_monitor = true
+netdata_redis_port    = 6580
 
 # --- oauth2-proxy: Keycloak SSO gate (see uat.tfvars for the flow) ---
 # FILL IN for prod: oauth2_public_host + oauth2_issuer_url must be the PROD LB /
