@@ -60,3 +60,12 @@ pgadmin_email   = "admin@leocdp.com"
 pgadmin_mem     = "512m"                        # more headroom than uat (dedicated/bigger box)
 pgadmin_sso       = true                         # GATE the UI behind Keycloak SSO (oauth2-proxy)
 pgadmin_proxy_port = 4050                        # oauth2-proxy listen port on the box (LB 'pgadmin' backend member_port)
+
+# --- Portainer agents on OTHER boxes (one Portainer manages every box) --------
+# Set to the comma-separated ../server keys of the boxes whose containers Portainer should manage
+# (besides mon_server_key). Empty by default here since the prod topology may differ from uat —
+# fill in the prod backend/worker keys. PREREQUISITE (infra, one-time): open tcp/9001 on those
+# boxes' secgroup from the Portainer box's private IP (../server agent_ports + ./deploy.sh prod apply).
+portainer_agent_server_keys = ""
+portainer_agent_image       = "portainer/agent:lts"
+portainer_agent_port        = 9001

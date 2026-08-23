@@ -225,6 +225,39 @@ credentials (pgAdmin only stores them if you tick "Save").
 #   terraform apply -replace='vngcloud_vlb_pool.this["pgadmin"]' -var-file=overlays/uat.tfvars
 ```
 
+## Portainer agents — one Portainer, every box
+
+Portainer runs on the api box (`mon_server_key`) and by default sees only that box's Docker
+socket. The platform spans more than one vServer (the **backend** box, server key `1x2` /
+`10.100.1.4`, runs `backend-system`/Dagster) — so rather than stand up a **second** Portainer,
+run a lightweight **`portainer/agent`** on the other box and register it in the existing Portainer
+as another *Environment*. One login, one UI, every box in the list.
+
+```
+browser → LB :9443 → Portainer (api box)  ──local socket──→  api-box containers
+                                          ──private VPC :9001 (agent, mTLS)──→ backend-box containers
+```
+
+Driven by `portainer_agent_server_keys` in the overlay (comma-separated `../server` keys):
+
+```hcl
+portainer_agent_server_keys = "1x2"           # backend box; add more keys comma-separated
+portainer_agent_image       = "portainer/agent:lts"   # match your portainer-ce:lts
+portainer_agent_port        = 9001
+```
+
+`deploy-monitoring.sh` then, for each key: runs `c360-portainer-agent` on that box (reached via
+its floating IP) and **auto-registers** it in Portainer via the API (needs
+`PORTAINER_ADMIN_PASSWORD` in `.env`; otherwise it prints the one-click UI step — *Environments →
+Add → Agent → `<private-ip>:9001`*). Idempotent — re-runs skip an already-registered environment.
+
+> **Prerequisite (infra, one-time):** the VNG Default secgroup opens nothing inbound, so Portainer
+> can't reach the agent until you open `tcp/9001` on the boxes' secgroup **from the Portainer box's
+> private IP**. That rule lives in `../server/overlays/<env>.tfvars` as `extra_ingress`
+> (`{ port = 9001, cidr = "10.100.1.5/32" }` for uat) — apply it out-of-band (CD never runs infra
+> Terraform): `cd ../server && ./deploy.sh <env> apply`. Traffic stays on the private VPC; `:9001`
+> is never public.
+
 ## Gotchas
 
 - **Port 9000 is taken.** Keycloak's management/health endpoint owns `:9000` on this box,

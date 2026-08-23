@@ -75,3 +75,16 @@ pgadmin_email   = "admin@leocdp.com"          # first-login user (password in .e
 pgadmin_mem     = "384m"                       # docker --memory cap (protect the shared box)
 pgadmin_sso       = false                       # DIRECT, own login (no Keycloak gate)
 pgadmin_proxy_port = 4050                       # (unused while pgadmin_sso = false; kept for a quick re-gate)
+
+# --- Portainer agents on OTHER boxes (one Portainer manages every box) --------
+# Portainer runs on the api box and by default only sees the api box's containers. To manage the
+# BACKEND box (server key "1x2" = 10.100.1.4, runs backend-system/Dagster) from the SAME Portainer,
+# run portainer/agent there and register it as an environment (no second Portainer). Comma-separate
+# for more boxes. Portainer reaches the agent over the private VPC at <box-private-ip>:9001.
+# PREREQUISITE (infra, one-time): open tcp/9001 on the Default secgroup from the api box's private
+# IP — set in ../server/overlays/uat.tfvars (agent_ports) and apply with
+# `cd ../server && ./deploy.sh uat apply`. deploy-monitoring auto-registers the env via the
+# Portainer API (needs PORTAINER_ADMIN_PASSWORD in .env; else it prints the one-click UI step).
+portainer_agent_server_keys = "1x2"
+portainer_agent_image       = "portainer/agent:lts"
+portainer_agent_port        = 9001

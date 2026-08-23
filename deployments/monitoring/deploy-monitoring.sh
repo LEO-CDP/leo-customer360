@@ -79,6 +79,14 @@ PG_MEM="$(tfval pgadmin_mem "$ovl")";      PG_MEM="${PG_MEM:-512m}"
 # Login email: from .env (PGADMIN_DEFAULT_EMAIL) or the overlay (pgadmin_email); the password
 # lives ONLY in .env (auto-generated + persisted below if unset).
 PG_EMAIL="${PGADMIN_DEFAULT_EMAIL:-$(tfval pgadmin_email "$ovl")}"; PG_EMAIL="${PG_EMAIL:-admin@leocdp.com}"
+# portainer agents — manage OTHER boxes' Docker from the SAME Portainer (one pane of glass, one
+# login) instead of a second Portainer. Comma-separated ../server keys to run portainer/agent on
+# and auto-register as Portainer environments (e.g. "1x2" = the backend/Dagster box). Portainer
+# reaches each agent over the PRIVATE VPC on :PA_PORT — that port must be open on the box's
+# secgroup from the Portainer box's private IP (deployments/server agent_ports; applied out-of-band).
+PA_KEYS="$(tfval portainer_agent_server_keys "$ovl")"
+PA_IMG="$(tfval portainer_agent_image "$ovl")";  PA_IMG="${PA_IMG:-portainer/agent:lts}"
+PA_PORT="$(tfval portainer_agent_port "$ovl")";  PA_PORT="${PA_PORT:-9001}"
 # sso gate
 OA_EN="$(tfval oauth2_enabled "$ovl")";    OA_EN="${OA_EN:-false}"
 OA_IMG="$(tfval oauth2_image "$ovl")";     OA_IMG="${OA_IMG:-quay.io/oauth2-proxy/oauth2-proxy:v7.6.0}"
@@ -332,6 +340,53 @@ if [ "$P_GATED" = "true" ] || [ "$N_GATED" = "true" ] || [ "$J_GATED" = "true" ]
   if [ "$PG_GATED" = "true" ]; then echo "   deploying oauth2-proxy for pgAdmin ...";   run_proxy pgadmin   "$PG_PROXY" "$PG_REDIRECT" "http://127.0.0.1:$PG_PORT" false "" ""; fi
 fi
 REMOTE
+
+# ---------- Portainer agents on OTHER boxes (one Portainer, many environments) ----------
+# For each ../server key in PA_KEYS: run portainer/agent on that box (reached via its floating IP)
+# and register it in the api-box Portainer as an Agent environment (reached over the private VPC
+# at <fixed_ip>:PA_PORT). Idempotent; registration is best-effort (falls back to a manual hint).
+if [[ "$P_EN" == "true" && -n "$PA_KEYS" ]]; then
+  _ip_of() { printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get(sys.argv[2]) for i in (s.get("internal_interfaces") or []) if i.get(sys.argv[2])), ""))' "$1" "$2"; }
+  IFS=',' read -ra _PA_KEYS <<< "$PA_KEYS"
+  for key in "${_PA_KEYS[@]}"; do
+    key="$(printf '%s' "$key" | tr -d '[:space:]')"; [[ -n "$key" ]] || continue
+    afip="$(_ip_of "$key" floating_ip)"; apriv="$(_ip_of "$key" fixed_ip)"
+    [[ -n "$afip" && -n "$apriv" ]] || { echo "   WARN: no floating/private IP for agent server key '$key' — skipping"; continue; }
+    echo ">> Portainer agent on '$key'  (private $apriv:$PA_PORT, ssh $afip)  ($PA_IMG)"
+    ssh "${SSH_OPTS[@]}" "${BASTION_USER:-leocdp360}@$afip" 'bash -s' "$PA_IMG" "$PA_PORT" <<'AREMOTE'
+set -eu
+IMG="$1"; PORT="$2"
+command -v docker >/dev/null 2>&1 || { sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io && sudo systemctl enable --now docker; }
+sudo docker pull "$IMG" >/dev/null || true
+sudo docker rm -f c360-portainer-agent >/dev/null 2>&1 || true
+sudo docker run -d --name c360-portainer-agent --restart unless-stopped \
+  -p "$PORT":9001 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /var/lib/docker/volumes:/var/lib/docker/volumes \
+  "$IMG" >/dev/null
+sudo docker ps --filter name=c360-portainer-agent --format '   agent: {{.Names}} ({{.Status}})'
+AREMOTE
+    # register the environment in Portainer (run ON the mon box against its loopback API)
+    if [[ -n "${PORTAINER_ADMIN_PASSWORD:-}" ]]; then
+      ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$P_PORT" "$(printf %s "$PORTAINER_ADMIN_PASSWORD" | base64 | tr -d '\n')" "c360-$key" "$apriv:$PA_PORT" <<'RREMOTE'
+set -eu
+PPORT="$1"; PW="$(printf %s "$2" | base64 -d)"; NAME="$3"; URL="$4"; base="https://127.0.0.1:$PPORT"
+jwt="$(curl -sk -X POST "$base/api/auth" -H 'Content-Type: application/json' -d "{\"Username\":\"admin\",\"Password\":\"$PW\"}" | sed -n 's/.*"jwt":"\([^"]*\)".*/\1/p')"
+[ -n "$jwt" ] || { echo "   WARN: Portainer auth failed — register manually: Environments -> Add -> Agent -> $URL"; exit 0; }
+if curl -sk "$base/api/endpoints" -H "Authorization: Bearer $jwt" | grep -q "\"Name\":\"$NAME\""; then
+  echo "   Portainer env '$NAME': already registered"
+else
+  code="$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$base/api/endpoints" -H "Authorization: Bearer $jwt" \
+    -F "Name=$NAME" -F "EndpointCreationType=2" -F "URL=$URL" -F "TLS=true" -F "TLSSkipVerify=true" -F "TLSSkipClientVerify=true")"
+  case "$code" in 200|201|204) echo "   Portainer env '$NAME' -> $URL: registered";;
+    *) echo "   WARN: endpoint create HTTP $code — add manually: Environments -> Add -> Agent -> $URL";; esac
+fi
+RREMOTE
+    else
+      echo "   NOTE: PORTAINER_ADMIN_PASSWORD not in .env — add the env in the UI: Environments -> Add -> Agent -> $apriv:$PA_PORT"
+    fi
+  done
+fi
 
 echo ">> Done."
 echo "   Apply/refresh the LB backends (in ../load_balancer/overlays/$ENV.tfvars):"
