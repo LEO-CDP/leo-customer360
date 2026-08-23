@@ -137,7 +137,15 @@ class AuthMiddlewareTests(unittest.TestCase):
         fake_redis = FakeRedis()
         fake_redis.set(
             "auth:token:abc123",
-            json.dumps({"sub": "user-1", "preferred_username": "demo", "exp": 9999999999}),
+            json.dumps(
+                {
+                    "sub": "user-1",
+                    "preferred_username": "demo",
+                    "tenant_id": "11111111-1111-1111-1111-111111111111",
+                    "user_id": "22222222-2222-2222-2222-222222222222",
+                    "exp": 9999999999,
+                }
+            ),
         )
 
         with patch("core.auth.SSO_LOGIN", True), patch(
@@ -152,13 +160,18 @@ class AuthMiddlewareTests(unittest.TestCase):
         client = TestClient(_build_app())
         fake_redis = FakeRedis()
 
-        introspect_payload = {"active": True, "sub": "user-2", "preferred_username": "new-guy", "exp": 9999999999}
+        introspect_payload = {
+            "active": True,
+            "sub": "user-2",
+            "preferred_username": "new-guy",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "user_id": "22222222-2222-2222-2222-222222222222",
+            "exp": 9999999999,
+        }
 
         with patch("core.auth.SSO_LOGIN", True), patch(
             "core.auth.get_redis_client", return_value=fake_redis
-        ), patch("core.auth._introspect_with_keycloak", return_value=introspect_payload) as mock_introspect, patch(
-            "core.auth._resolve_tenant_and_user", return_value=(None, None)
-        ):
+        ), patch("core.auth._introspect_with_keycloak", return_value=introspect_payload) as mock_introspect:
             response = client.get("/secure", headers={"Authorization": "Bearer newtoken"})
 
         self.assertEqual(response.status_code, 200)
@@ -168,7 +181,7 @@ class AuthMiddlewareTests(unittest.TestCase):
             "core.auth.get_redis_client", return_value=fake_redis
         ), patch(
             "core.auth._introspect_with_keycloak", side_effect=AssertionError("should not call Keycloak again")
-        ), patch("core.auth._resolve_tenant_and_user", return_value=(None, None)):
+        ):
             response2 = client.get("/secure", headers={"Authorization": "Bearer newtoken"})
         self.assertEqual(response2.status_code, 200)
 
@@ -353,8 +366,7 @@ class AuthMiddlewareSysUserInfoProvisioningTests(unittest.TestCase):
 
     def test_token_without_tenant_claim_leaves_state_unset_fail_closed(self):
         """A verified/active token whose payload carries no tenant_id claim
-        must never touch the DB and must leave tenant_id/user_id unset --
-        RLS then denies all rows rather than guessing a tenant."""
+        must be rejected before it can reach tenant-scoped routes."""
         client = TestClient(_build_app())
         fake_redis = FakeRedis()
         introspect_payload = {"active": True, "sub": "kc-no-tenant-claim", "exp": 9999999999}
@@ -366,10 +378,8 @@ class AuthMiddlewareSysUserInfoProvisioningTests(unittest.TestCase):
         ) as mock_session_local:
             response = client.get("/secure", headers={"Authorization": "Bearer tok-no-tenant"})
 
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertIsNone(body["tenant_id"])
-        self.assertIsNone(body["user_id"])
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Tenant context could not be resolved")
         mock_session_local.assert_not_called()
 
     def test_identity_cache_prevents_repeat_db_lookup_on_subsequent_requests(self):
@@ -406,8 +416,8 @@ class AuthMiddlewareSysUserInfoProvisioningTests(unittest.TestCase):
 
     def test_database_failure_during_provisioning_fails_closed_not_500(self):
         """If sys_user/sys_userinfo provisioning blows up mid-request, the
-        caller still gets a 200 with no tenant/user context rather than a
-        raw 500 or a half-provisioned identity leaking through."""
+        caller gets a 401 rather than a raw 500 or a half-provisioned identity
+        leaking through."""
         client = TestClient(_build_app())
         fake_redis = FakeRedis()
         session = FakeDBSession(raise_on_call=1)
@@ -425,10 +435,8 @@ class AuthMiddlewareSysUserInfoProvisioningTests(unittest.TestCase):
         ):
             response = client.get("/secure", headers={"Authorization": "Bearer tok-e2e-broken"})
 
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertIsNone(body["tenant_id"])
-        self.assertIsNone(body["user_id"])
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Tenant context could not be resolved")
         self.assertTrue(session.rolled_back)
 
 

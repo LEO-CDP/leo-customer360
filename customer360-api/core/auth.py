@@ -371,8 +371,9 @@ async def auth_middleware(request: Request, call_next):
         request.state.user = payload
         request.state.token = token
         tenant_id, user_id = _resolve_tenant_and_user(payload)
-        if tenant_id:
-            request.state.tenant_id = tenant_id
+        if not tenant_id:
+            return _unauthorized_response(request, "Tenant context could not be resolved")
+        request.state.tenant_id = tenant_id
         if user_id:
             request.state.user_id = user_id
         return await call_next(request)
@@ -389,8 +390,9 @@ async def auth_middleware(request: Request, call_next):
     request.state.token = token
 
     tenant_id, user_id = _resolve_tenant_and_user(payload)
-    if tenant_id:
-        request.state.tenant_id = tenant_id
+    if not tenant_id:
+        return _unauthorized_response(request, "Tenant context could not be resolved")
+    request.state.tenant_id = tenant_id
     if user_id:
         request.state.user_id = user_id
 

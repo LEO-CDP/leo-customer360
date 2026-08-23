@@ -23,6 +23,7 @@ esac
 PG_SQL_DIR="../../postgres"       # repo-root/postgres/**  (extensions, keycloak db) — filename order
 APP_SQL_DIR="../../database-init" # the app schema; ORDER MATTERS, so run these known files first:
 APP_ORDER=(database-schema.sql init-core-database.sql data-view-for-llm.sql)
+MIGRATIONS_DIR="$APP_SQL_DIR/migrations"
 
 # --- creds/config: overlay (non-secret) + .env/terraform.tfvars (secret) ---
 if [[ -f .env ]]; then set -a; source ./.env; set +a; fi
@@ -82,6 +83,9 @@ if [[ -d "$APP_SQL_DIR" ]]; then
   while IFS= read -r f; do
     printf '%s\n' "${APP_ORDER[@]}" | grep -qxF "$(basename "$f")" || FILES+=("$f")
   done < <(find "$APP_SQL_DIR" -maxdepth 1 -type f -iname '*.sql' | sort)
+fi
+if [[ -d "$MIGRATIONS_DIR" ]]; then
+  while IFS= read -r f; do FILES+=("$f"); done < <(find "$MIGRATIONS_DIR" -type f -iname '*.sql' | sort)
 fi
 if [[ ${#FILES[@]} -eq 0 ]]; then echo "No *.sql found under $PG_SQL_DIR or $APP_SQL_DIR — nothing to run."; exit 0; fi
 echo "Running ${#FILES[@]} SQL script(s) via psql on ${BASTION} against ${DB_NAME}@${HOST}:${PORT} (user ${DB_USER}):"
