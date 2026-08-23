@@ -144,8 +144,14 @@ sed -i 's/^jaeger_enabled *=.*/jaeger_enabled = true/' overlays/uat.tfvars
 
 # 2) turn tracing on for the target service and redeploy
 (cd ../server && OTEL_ENABLED=true ./deploy-api.sh uat)     # or ../ads-server, ../frontend
-#    fast path (no redeploy): flip the env-file on the box and restart the container
-#    ssh <box> 'sudo sed -i "s/^OTEL_SDK_DISABLED=.*/OTEL_SDK_DISABLED=false/" /opt/c360/api.env && sudo docker restart customer360-api'
+#    fast path (no full redeploy): flip the env-file on the box then RE-CREATE the container.
+#    NOTE: `docker restart` does NOT re-read --env-file (it's applied only at `docker run`), so a
+#    restart alone leaves tracing OFF — you must rm + run (reusing the same image):
+#    ssh <box> 'sudo sed -i "s/^OTEL_SDK_DISABLED=.*/OTEL_SDK_DISABLED=false/" /opt/c360/api.env; \
+#      img=$(sudo docker inspect customer360-api --format "{{.Config.Image}}"); \
+#      sudo docker rm -f customer360-api; \
+#      sudo docker run -d --name customer360-api --restart unless-stopped --network host --env-file /opt/c360/api.env "$img"'
+#    (then send a request to the service — Jaeger lists a service only after it receives >=1 span)
 
 # 3) view the trace UI at https://<domain>/jaeger (Caddy :443 TLS -> oauth2 -> Keycloak; login c360admin)
 #    jaeger_sso + oauth2_enabled are set; make sure Caddy has the /jaeger route:
