@@ -16,3 +16,7 @@ frontend_root_path = ""
 
 frontend_tenant_id = "11111111-1111-1111-1111-111111111111"
 sso_login          = true      # match customer360-api (SSO_LOGIN=true)
+
+# Persist OpenTelemetry tracing ON for uat across redeploys (read by deploy-frontend.sh ->
+# lib/otel.sh; an explicit OTEL_ENABLED env var still overrides). Default without this is OFF on uat.
+otel_enabled = "true"

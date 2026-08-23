@@ -43,6 +43,15 @@ backends = {
     listen_port = 19999 # LB public :19999 -> oauth2-proxy:4199 -> Netdata
     health_path = "/ping"
   }
+  # pgAdmin behind Keycloak SSO (deployments/monitoring pgadmin_sso = true, pgadmin_bind = 127.0.0.1):
+  # LB :5050 -> oauth2-proxy :4050 on the box -> Keycloak -> pgAdmin 127.0.0.1:5050. Health-check the
+  # PROXY's /ping (not pgAdmin's /misc/ping), same as the netdata backend above.
+  "pgadmin" = {
+    member_ip   = "REPLACE_WITH_PROD_API_IP" # oauth2-proxy :4050 -> pgAdmin 127.0.0.1:5050 (Keycloak SSO)
+    member_port = 4050
+    listen_port = 5050
+    health_path = "/ping"
+  }
 }
 # Jaeger is fronted by Caddy at https://<domain>/jaeger (see deployments/proxy) — no dedicated LB listener.
 

@@ -55,3 +55,36 @@ jaeger_mem            = "300m"         # docker --memory cap (protect the shared
 # :jaeger_proxy_port -> Jaeger. (No dedicated LB port; the old :16686 listener was retired.)
 jaeger_sso        = true
 jaeger_proxy_port = 4686   # oauth2-proxy listen port on the box (LB backend member_port)
+
+# --- pgAdmin (web Postgres admin/monitoring UI) ------------------------------
+# Occasional-use DB admin tool, exposed DIRECTLY on the LB with its OWN login (pgadmin_sso =
+# false), like Portainer: public LB :5050 -> pgAdmin :5050, pgAdmin authenticates. No Keycloak
+# gate (single login). CAVEAT: unlike Portainer (self-signed HTTPS), pgAdmin serves plain HTTP
+# and the L4 LB has no TLS, so the DB-admin login page is public + credentials cross the wire in
+# cleartext — accepted here as a deliberate uat tradeoff for a single login. It's the HEAVIEST
+# of the four tools (~150-250 MB) on the shared 1 vCPU / 2 GB api box, so it's capped and easy to
+# turn off: set pgadmin_enabled = false to run it on-demand (like Jaeger) if the box gets tight.
+# (To harden later: gate it (pgadmin_sso = true) or front it with Caddy TLS like Jaeger.)
+# Admin tunnel: ssh -i ~/.ssh/c360-api_ed25519 -L 5050:localhost:5050 leocdp360@<api-box-fip>
+# Login password lives ONLY in .env (PGADMIN_DEFAULT_PASSWORD) — auto-generated on first deploy.
+pgadmin_enabled = true
+pgadmin_port    = 5050                        # dodges in-use 6580/8008/8080/8890/9000/9009/9443/16686/19999
+pgadmin_image   = "dpage/pgadmin4:8.14"
+pgadmin_bind    = "0.0.0.0"                    # exposed to the LB directly (own login; cleartext caveat above)
+pgadmin_email   = "admin@leocdp.com"          # first-login user (password in .env)
+pgadmin_mem     = "384m"                       # docker --memory cap (protect the shared box)
+pgadmin_sso       = false                       # DIRECT, own login (no Keycloak gate)
+pgadmin_proxy_port = 4050                       # (unused while pgadmin_sso = false; kept for a quick re-gate)
+
+# --- Portainer agents on OTHER boxes (one Portainer manages every box) --------
+# Portainer runs on the api box and by default only sees the api box's containers. To manage the
+# BACKEND box (server key "1x2" = 10.100.1.4, runs backend-system/Dagster) from the SAME Portainer,
+# run portainer/agent there and register it as an environment (no second Portainer). Comma-separate
+# for more boxes. Portainer reaches the agent over the private VPC at <box-private-ip>:9001.
+# PREREQUISITE (infra, one-time): open tcp/9001 on the Default secgroup from the api box's private
+# IP — set in ../server/overlays/uat.tfvars (agent_ports) and apply with
+# `cd ../server && ./deploy.sh uat apply`. deploy-monitoring auto-registers the env via the
+# Portainer API (needs PORTAINER_ADMIN_PASSWORD in .env; else it prints the one-click UI step).
+portainer_agent_server_keys = "1x2"
+portainer_agent_image       = "portainer/agent:lts"
+portainer_agent_port        = 9001

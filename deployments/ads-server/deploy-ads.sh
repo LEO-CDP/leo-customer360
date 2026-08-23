@@ -102,6 +102,9 @@ fi
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/otel.sh"
 JAEGER_HOST="127.0.0.1"
 if [[ "$ENV" == "prod" ]]; then MON_IP="$(printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get("fixed_ip") for i in (s.get("internal_interfaces") or []) if i.get("fixed_ip")), ""))' "${MON_SERVER_KEY:-api}")"; [[ -n "$MON_IP" ]] && JAEGER_HOST="$MON_IP"; fi
+# Persist the tracing choice in config: otel_enabled in overlays/<env>.tfvars sets the default
+# (an explicit OTEL_ENABLED env var still overrides); empty -> otel.sh's per-env default.
+OTEL_ENABLED="${OTEL_ENABLED:-$(tfval otel_enabled "overlays/$ENV.tfvars")}"
 OTEL_LINES="$(otel_env_lines ads-server "$ENV" "$JAEGER_HOST")"
 
 # env file built locally, shipped base64 (dodges ssh arg-flattening). CACHE_ENABLED

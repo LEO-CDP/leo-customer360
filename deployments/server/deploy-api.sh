@@ -113,6 +113,9 @@ fi
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/otel.sh"
 JAEGER_HOST="127.0.0.1"
 if [[ "$ENV" == "prod" ]]; then MON_IP="$(srv_ip "${MON_SERVER_KEY:-api}" fixed_ip)"; [[ -n "$MON_IP" ]] && JAEGER_HOST="$MON_IP"; fi
+# Persist the tracing choice in config: otel_enabled in overlays/<env>.tfvars sets the default
+# (an explicit OTEL_ENABLED env var still overrides); empty -> otel.sh's per-env default.
+OTEL_ENABLED="${OTEL_ENABLED:-$(tfval otel_enabled "overlays/$ENV.tfvars")}"
 OTEL_B64="$(otel_env_lines customer360-api "$ENV" "$JAEGER_HOST" | base64 | tr -d '\n')"
 
 # --- build + run on the VM (values passed as positional args; password base64'd) ---

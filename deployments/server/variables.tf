@@ -226,6 +226,12 @@ variable "ssh_ingress_cidr" {
   description = "CIDR allowed to reach tcp/22 when open_ssh = true. TIGHTEN to your public IP (e.g. 203.0.113.4/32) — 0.0.0.0/0 exposes SSH to the whole internet."
 }
 
+variable "extra_ingress" {
+  type        = list(object({ port = number, cidr = string }))
+  default     = []
+  description = "Extra inbound TCP rules on the FIRST security_group (the Default secgroup opens nothing inbound). Use for intra-VPC ports like the Portainer agent (tcp/9001 from the Portainer box's private IP, e.g. { port = 9001, cidr = \"10.100.1.5/32\" }). Keep the CIDR tight (a /32), never 0.0.0.0/0 for ops ports."
+}
+
 # ---------------------------------------------------------------------------
 # Network: attach to an existing network+subnet, or create a fresh VPC+subnet.
 # The server resource needs BOTH network_id and subnet_id.

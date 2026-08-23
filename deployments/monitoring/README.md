@@ -1,22 +1,26 @@
-# deployments/monitoring — Portainer + Netdata + Jaeger
+# deployments/monitoring — Portainer + Netdata + Jaeger + pgAdmin
 
 Deploys self-contained observability UIs onto a server VM as Docker containers. They
-cover the three things you actually want on the shared box: **operate the containers**,
-**watch the metrics**, and **trace API requests**.
+cover the things you actually want on the shared box: **operate the containers**,
+**watch the metrics**, **trace API requests**, and **inspect the database**.
 
 | Tool | Container | URL | Job |
 |------|-----------|-----|-----|
 | **Portainer** | `c360-portainer` | `https://<box>:9443` | container status/health, **live logs**, exec/console, start/stop/restart, per-container CPU/mem |
 | **Netdata** | `c360-netdata` | `http://<box>:19999` | real-time host + **per-container** + Redis metrics, with alarms |
 | **Jaeger** | `c360-jaeger` | `https://<domain>/jaeger` | **API request traces** (OpenTelemetry/OTLP): per-request waterfall incl. every SQL query, Redis + outbound-HTTP hops, stitched across services |
+| **pgAdmin** | `c360-pgadmin` | `http://<lb-ip>:5050` (own login) | **Postgres admin/monitoring**: browse schemas/tables, run SQL, view locks/activity/index usage. Its own login (email+password), exposed directly on the LB |
 
 | Env | Where | Why |
 |-----|-------|-----|
 | `uat`  | both containers on the **api box** (`c360-api-uat-api`, server key `api`) | one shared box already runs api/ads/frontend/keycloak/redis — monitor it from itself |
 | `prod` | api box by default | set `mon_server_key` to a dedicated box in `overlays/prod.tfvars` to isolate monitoring once prod has load |
 
-No **required** secrets. DB/Redis are untouched. An **optional** Portainer admin password
-lives in `.env` (git-ignored); Netdata has no auth.
+No **required** secrets for Portainer/Netdata/Jaeger. DB/Redis are untouched. An **optional**
+Portainer admin password lives in `.env` (git-ignored); Netdata has no auth. **pgAdmin** needs
+a login password (`PGADMIN_DEFAULT_PASSWORD` in `.env`) — the deploy auto-generates and saves
+one on first run if you don't set it; pgAdmin is exposed **directly on the LB with its own login**
+(`pgadmin_sso = false`, `pgadmin_bind = 0.0.0.0`) — see the cleartext caveat in its section below.
 
 > **First run — set `PORTAINER_ADMIN_PASSWORD` in `.env` BEFORE deploying.** Portainer CE
 > locks its first-run setup screen ("Portainer instance timed out for security purposes")
@@ -95,11 +99,12 @@ are LB backends), so for direct admin access tunnel in like you do for the API:
 
 ```bash
 ssh -i ~/.ssh/c360-api_ed25519 \
-    -L 9443:localhost:9443 -L 19999:localhost:19999 \
+    -L 9443:localhost:9443 -L 19999:localhost:19999 -L 5050:localhost:5050 \
     leocdp360@<floating_ip>
 # then browse:
 #   https://localhost:9443   (Portainer — set the admin user on first visit)
 #   http://localhost:19999   (Netdata)
+#   http://localhost:5050    (pgAdmin — log in with admin@leocdp.com / PGADMIN_DEFAULT_PASSWORD)
 ```
 
 ## Jaeger — API request tracing (OpenTelemetry → OTLP)
@@ -139,8 +144,14 @@ sed -i 's/^jaeger_enabled *=.*/jaeger_enabled = true/' overlays/uat.tfvars
 
 # 2) turn tracing on for the target service and redeploy
 (cd ../server && OTEL_ENABLED=true ./deploy-api.sh uat)     # or ../ads-server, ../frontend
-#    fast path (no redeploy): flip the env-file on the box and restart the container
-#    ssh <box> 'sudo sed -i "s/^OTEL_SDK_DISABLED=.*/OTEL_SDK_DISABLED=false/" /opt/c360/api.env && sudo docker restart customer360-api'
+#    fast path (no full redeploy): flip the env-file on the box then RE-CREATE the container.
+#    NOTE: `docker restart` does NOT re-read --env-file (it's applied only at `docker run`), so a
+#    restart alone leaves tracing OFF — you must rm + run (reusing the same image):
+#    ssh <box> 'sudo sed -i "s/^OTEL_SDK_DISABLED=.*/OTEL_SDK_DISABLED=false/" /opt/c360/api.env; \
+#      img=$(sudo docker inspect customer360-api --format "{{.Config.Image}}"); \
+#      sudo docker rm -f customer360-api; \
+#      sudo docker run -d --name customer360-api --restart unless-stopped --network host --env-file /opt/c360/api.env "$img"'
+#    (then send a request to the service — Jaeger lists a service only after it receives >=1 span)
 
 # 3) view the trace UI at https://<domain>/jaeger (Caddy :443 TLS -> oauth2 -> Keycloak; login c360admin)
 #    jaeger_sso + oauth2_enabled are set; make sure Caddy has the /jaeger route:
@@ -165,12 +176,122 @@ via **Caddy at `/jaeger` on :443 (TLS)** (like Netdata — `jaeger_sso=true`; th
 `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`,
 `OTEL_SERVICE_NAME=<svc>`.
 
+## pgAdmin — Postgres admin / monitoring
+
+Web UI for the platform's PostgreSQL: browse schemas/tables, run ad-hoc SQL, and watch DB
+health (server activity, locks, index usage, table bloat) — the DB-side complement to
+Netdata's host/container metrics and Jaeger's per-query traces.
+
+**How it works.** `c360-pgadmin` runs `dpage/pgadmin4` on the monitoring box, bridge net,
+listening on container `:80` published to `pgadmin_bind:pgadmin_port` (`127.0.0.1:5050`). Its
+config DB, saved server connections, and sessions persist in the `pgadmin_data` volume. Memory
+is `--memory`-capped (`pgadmin_mem`) — it's the heaviest of the four tools on the shared uat box.
+
+**Access = direct on the LB, pgAdmin's own login (uat default).** Like Portainer, pgAdmin has its
+own login, so it's exposed directly (`pgadmin_sso = false`, `pgadmin_bind = 0.0.0.0`): the LB
+forwards straight to it and pgAdmin authenticates.
+
+```
+browser → LB :5050 (TCP) → pgAdmin 0.0.0.0:5050 (own login)
+```
+
+The LB backend is `member_port = 5050`, `listen_port = 5050`, health `/misc/ping` in
+`../load_balancer/overlays/<env>.tfvars`.
+
+> ⚠️ **Cleartext caveat.** Unlike Portainer (self-signed HTTPS), pgAdmin serves **plain HTTP**,
+> and the uat L4 LB has no TLS — so the DB-admin login page is public and credentials cross the
+> wire in cleartext. This is a deliberate uat tradeoff for a single login. **To harden:** gate it
+> behind Keycloak (`pgadmin_sso = true` + `pgadmin_bind = 127.0.0.1`, then a `c360-oauth2-pgadmin`
+> proxy fronts it on `pgadmin_proxy_port` 4050 and the LB backend uses `member_port = 4050`,
+> health `/ping` — reachability control, still HTTP transit), or front it with **Caddy TLS** like
+> Jaeger (real encryption). Tunnel-only (leave the LB backend off + `ssh -L 5050:localhost:5050`)
+> is the most conservative.
+
+**First login.** pgAdmin: email `pgadmin_email` (default `admin@leocdp.com`), password
+`PGADMIN_DEFAULT_PASSWORD` from `.env` (auto-generated + saved on first deploy). Then _Add New
+Server_ → point host at the Postgres box's private IP / the `postgres` service, with the app DB
+credentials (pgAdmin only stores them if you tick "Save").
+
+**Deploy.**
+
+```bash
+# 1) deploy pgAdmin (pgadmin_enabled already set in overlays/uat.tfvars)
+./deploy-monitoring.sh uat
+
+# 2) open the LB port (the 'pgadmin' backend is in overlays/uat.tfvars)
+(cd ../load_balancer && ./deploy.sh uat apply)
+
+# then browse http://<lb-ip>:5050  → pgAdmin login (admin@leocdp.com)
+# admin (no LB): ssh -i ~/.ssh/c360-api_ed25519 -L 5050:localhost:5050 leocdp360@<api-box-fip>
+# turn it off to reclaim RAM on the tiny box: set pgadmin_enabled = false + redeploy
+#
+# NOTE: switching an EXISTING 'pgadmin' LB backend between gated (:4050) and direct (:5050)
+# changes the pool member_port, which the VNG provider tries as an in-place update and the API
+# REJECTS ("Stickiness cannot be specified for non-HTTP pools"). Force a pool replace instead:
+#   terraform apply -replace='vngcloud_vlb_pool.this["pgadmin"]' -var-file=overlays/uat.tfvars
+```
+
+## Portainer agents — one Portainer, every box
+
+Portainer runs on the api box (`mon_server_key`) and by default sees only that box's Docker
+socket. The platform spans more than one vServer (the **backend** box, server key `1x2` /
+`10.100.1.4`, runs `backend-system`/Dagster) — so rather than stand up a **second** Portainer,
+run a lightweight **`portainer/agent`** on the other box and register it in the existing Portainer
+as another *Environment*. One login, one UI, every box in the list.
+
+```
+browser → LB :9443 → Portainer (api box)  ──local socket──→  api-box containers
+                                          ──private VPC :9001 (agent, mTLS)──→ backend-box containers
+```
+
+Driven by `portainer_agent_server_keys` in the overlay (comma-separated `../server` keys):
+
+```hcl
+portainer_agent_server_keys = "1x2"           # backend box; add more keys comma-separated
+portainer_agent_image       = "portainer/agent:lts"   # match your portainer-ce:lts
+portainer_agent_port        = 9001
+```
+
+`deploy-monitoring.sh` then, for each key: runs `c360-portainer-agent` on that box (reached via
+its floating IP) and **auto-registers** it in Portainer via the API (needs
+`PORTAINER_ADMIN_PASSWORD` in `.env`; otherwise it prints the one-click UI step — *Environments →
+Add → Agent → `<private-ip>:9001`*). Idempotent — re-runs skip an already-registered environment.
+
+> **Prerequisite (infra, one-time):** the VNG Default secgroup opens nothing inbound, so Portainer
+> can't reach the agent until you open `tcp/9001` on the boxes' secgroup **from the Portainer box's
+> private IP**. That rule lives in `../server/overlays/<env>.tfvars` as `extra_ingress`
+> (`{ port = 9001, cidr = "10.100.1.5/32" }` for uat) — apply it out-of-band (CD never runs infra
+> Terraform): `cd ../server && ./deploy.sh <env> apply`. Traffic stays on the private VPC; `:9001`
+> is never public.
+
 ## Gotchas
 
 - **Port 9000 is taken.** Keycloak's management/health endpoint owns `:9000` on this box,
   so Portainer runs on `9443` (its HTTPS default) — do **not** move it to `9000`. Other
   in-use ports to dodge if you add more: redis `6580`, api `8008`, keycloak `8080`,
-  frontend `8890`, ads `9009`, jaeger UI `16686` + OTLP `4317`/`4318`.
+  frontend `8890`, ads `9009`, jaeger UI `16686` + OTLP `4317`/`4318`, pgAdmin `5050`
+  (+ its oauth2 gate `4050` when `pgadmin_sso`).
+- **pgAdmin is direct + cleartext (`pgadmin_sso = false`, `pgadmin_bind = 0.0.0.0`).** It serves
+  plain HTTP and uat's L4 LB has no TLS, so its DB-admin login page is public and credentials go
+  over the wire in cleartext — a deliberate uat tradeoff for a single login. Harden by gating it
+  (`pgadmin_sso = true`) or fronting it with Caddy TLS. It's the heaviest tool here — set
+  `pgadmin_enabled = false` to run it on-demand if the shared box gets tight.
+- **Switching pgAdmin's LB backend between gated and direct needs a pool `-replace`.** Gated uses
+  `member_port = 4050` (oauth2-proxy), direct uses `member_port = 5050` (pgAdmin). Changing the
+  member_port on an existing `pgadmin` pool makes the VNG provider attempt an **in-place update**,
+  which the API rejects: *"Stickiness cannot be specified for non-HTTP pools"* — leaving the LB
+  half-applied (secgroup flipped, pool not). `./deploy.sh` can't express a replace, so run it
+  directly: `terraform apply -replace='vngcloud_vlb_pool.this["pgadmin"]' -var-file=overlays/<env>.tfvars`
+  (the listener cascades via its `replace_triggered_by`).
+- **Gating pgAdmin later needs a redirect sync** (same trap as Jaeger). If you set
+  `pgadmin_sso = true`, `deploy-monitoring.sh` **skips** the Keycloak client bootstrap when
+  `OAUTH2_PROXY_CLIENT_SECRET` is already in `.env`, so pgAdmin's callback
+  (`http://<oauth2_public_host>:5050/oauth2/callback`) isn't auto-registered on the
+  `c360-oauth2-proxy` client → *"Invalid redirect_uri"*. Fix: add that URI in Keycloak, **or**
+  comment out `OAUTH2_PROXY_CLIENT_SECRET` in `.env` and re-run (bootstrap upserts all URIs).
+- **pgAdmin volume permissions.** The config lives in the `pgadmin_data` named volume mounted
+  at `/var/lib/pgadmin` (owned by the image's `pgadmin` user). Don't switch it to a host bind
+  mount without `chown`-ing to UID 5050, or pgAdmin fails to write its config DB on boot.
 - **Jaeger memory on the tiny box.** `c360-jaeger` uses **badger** on-disk storage (not
   in-memory) and a `--memory` cap (`jaeger_mem`, `300m` on uat) so it can't starve the
   shared 1 vCPU / 2 GB box. On uat it's off by default — start it only while profiling
@@ -207,12 +328,15 @@ via **Caddy at `/jaeger` on :443 (TLS)** (like Netdata — `jaeger_sso=true`; th
 
 ## Cost
 
-Both are **free** (open source) and run on a VM you already pay for — **$0** in
+All four are **free** (open source) and run on a VM you already pay for — **$0** in
 licenses/subscriptions. They're the lightweight choice on the `s-general-1x2`
-(1 vCPU / 2 GB) box: Portainer ~50 MB, Netdata ~100–200 MB, neither with a heavy TSDB. A
-full **Prometheus + Grafana + cAdvisor + exporters** stack is also free software, but its
-~0.5–1 GB RAM + steady CPU would likely force a VM upsize on a 2 GB box — that upsize is
-the only real cost. Reserve it for when monitoring gets its own box.
+(1 vCPU / 2 GB) box: Portainer ~50 MB, Netdata ~100–200 MB, Jaeger ~250–350 MB (badger),
+pgAdmin ~150–250 MB — none with a heavy TSDB. **pgAdmin is the heaviest**, so on the shared
+uat box it's `pgadmin_mem`-capped and easy to make on-demand (`pgadmin_enabled = false`); the
+same is true of Jaeger. Running all four at once approaches the 2 GB budget — turn off what
+you aren't using. A full **Prometheus + Grafana + cAdvisor + exporters** stack is also free
+software, but its ~0.5–1 GB RAM + steady CPU would likely force a VM upsize on a 2 GB box —
+that upsize is the only real cost. Reserve it for when monitoring gets its own box.
 
 ## Dependencies
 
