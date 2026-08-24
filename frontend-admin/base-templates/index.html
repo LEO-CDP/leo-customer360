@@ -155,8 +155,22 @@
       <section id="view-placeholder" class="hidden"></section>
     </main>
 
-    <footer class="border-t border-slate-200 py-3 text-center text-xs text-slate-400">
-      Build : {{ build_version }}  Customer 360 Admin &middot; data loaded live from <code id="footer-api-base"></code>
+    <footer class="border-t border-slate-200 px-4 py-3 text-center text-xs text-slate-400">
+      <div class="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+        <span class="font-medium text-slate-500">Customer 360 Admin</span>
+        <span class="text-slate-300">&middot;</span>
+        <span>Build {{ build_version }}</span>
+        <span class="text-slate-300">&middot;</span>
+
+        <span class="inline-flex max-w-full items-center gap-1">
+          <span>Live:</span>
+          <code
+            id="footer-api-base"
+            title="API Base URL"
+            class="max-w-[320px] truncate rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500"
+          ></code>
+        </span>
+      </div>
     </footer>
   </div>
 
