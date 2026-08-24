@@ -16,9 +16,6 @@ papersize: a4
 fontsize: 11pt
 toc: true
 ---
-The contribution can be extended with correlation and temporal factors when
-those assumptions are validated:
-
 
 \newpage
 
@@ -408,7 +405,6 @@ $$
 
 Evidence strength must consider the source.
 
----
 
 # 8. Source Trust
 
@@ -442,7 +438,6 @@ These values should be governed by organizational data-quality policies and
 validated against representative labeled outcomes. They should not be copied
 into production as universal constants.
 
----
 
 # 9. Source Trust and Data Governance
 
@@ -486,7 +481,6 @@ identity-resolution engine. However, changing a trust policy changes scores and
 possibly links, so the policy must be versioned, approved, monitored, and
 reprocessed according to the organization's change procedure.
 
----
 
 # 10. Data Quality
 
@@ -534,7 +528,6 @@ Examples of quality factors include:
 * expiration;
 * normalization quality.
 
----
 
 # 11. Three-Dimensional Identity Evidence
 
@@ -567,7 +560,6 @@ resulting $E_k$ is an evidence contribution, not a probability that two records
 belong to the same person. The weights must be defined for a particular signal,
 source context, and population; they are not universal constants.
 
----
 
 # 12. Dynamic Identity Matching
 
@@ -607,7 +599,6 @@ email
 
 The dynamic approach is important because different systems naturally expose different identity information.
 
----
 
 # 13. Evidence Score and Calibrated Probability
 
@@ -663,7 +654,6 @@ $$
 Confidence = 100\hat{p}
 $$
 
----
 
 # 14. Example: Internal CRM Evidence
 
@@ -693,7 +683,6 @@ $$
 
 This represents strong identity evidence.
 
----
 
 # 15. Example: External Feedback Survey
 
@@ -727,7 +716,6 @@ This distinction is fundamental:
 
 > **A strong identifier from a weak source is not necessarily strong identity evidence.**
 
----
 
 # 16. Multiple Evidence Sources
 
@@ -770,7 +758,6 @@ Thus:
 
 > **Weak evidence may reinforce an identity hypothesis, but should rarely establish identity by itself.**
 
----
 
 # 17. Independence of Evidence
 
@@ -825,7 +812,6 @@ contribution, and test performance on records from the same household, device,
 network, or account. Repeated copies of the same value from different feeds
 should not be counted as independent confirmations.
 
----
 
 # 18. Resolution Thresholds
 
@@ -878,7 +864,6 @@ For high-risk identity operations, the organization may require stronger evidenc
 
 For low-risk personalization use cases, lower thresholds may be acceptable.
 
----
 
 # 19. Resolution Outcomes
 
@@ -920,7 +905,6 @@ $$
 r_i \rightarrow M_{new}
 $$
 
----
 
 # 20. New Master Profile Is Not a 100% Match
 
@@ -972,7 +956,6 @@ match_evidence
 
 rather than combining them into one value.
 
----
 
 # 21. Identity Graph Link Model
 
@@ -1021,7 +1004,6 @@ Timestamp
 
 This creates complete provenance.
 
----
 
 # 22. Explainability
 
@@ -1054,7 +1036,6 @@ Website = medium trust
 
 This allows business users, data engineers, and auditors to understand why an identity relationship exists.
 
----
 
 # 23. Temporal Identity
 
@@ -1118,7 +1099,6 @@ The decay parameters should be estimated or approved for each signal and
 validated against time-sliced data. Decay must not silently erase historical
 provenance or override an explicit revocation.
 
----
 
 # 24. Adaptive Source Trust
 
@@ -1174,7 +1154,7 @@ Historical Resolution Outcomes
 
 This creates a feedback loop between data quality and identity resolution.
 
----
+\newpage 
 
 # 25. Identity Resolution Pipeline
 
@@ -1234,7 +1214,7 @@ The complete CIR process can be represented as:
           New Master Profile
 ```
 
----
+\newpage
 
 # 26. Architectural Interpretation
 
@@ -1274,7 +1254,6 @@ CUSTOMER 360
 
 This architecture prevents downstream applications from having to independently solve customer identity.
 
----
 
 # 27. Relationship to Customer 360
 
@@ -1306,7 +1285,6 @@ CIR is therefore not merely an infrastructure component.
 
 It is a **foundational data-quality layer for Customer 360**.
 
----
 
 # 28. Identity Resolution Metadata in Customer 360
 
@@ -1363,7 +1341,6 @@ Identity-resolution evidence can therefore become a useful feature for
 downstream decision systems, provided that its score, calibration status,
 validity, and permitted purpose are explicit.
 
----
 
 # 29. Identity Graph vs. Traditional Deduplication
 
@@ -1404,7 +1381,6 @@ Record B
 
 The latter is more suitable for continuously evolving CDP environments.
 
----
 
 # 30. Methodological Principles
 
@@ -1438,7 +1414,6 @@ Identity evidence changes over time and should therefore retain timestamps and, 
 
 The system should preserve relationships between raw profiles, identity signals, sources, and Master Profiles instead of simply destroying source records through irreversible merging.
 
----
 
 # 31. Proposed CIR Data Model
 
@@ -1512,7 +1487,6 @@ This separates:
 * evidence;
 * source governance.
 
----
 
 # 32. Example End-to-End Resolution
 
@@ -1591,7 +1565,6 @@ The survey contributes weak evidence.
 
 The combined evidence can produce a high-confidence identity relationship without treating every source equally.
 
----
 
 # 33. Security and Privacy Considerations
 
@@ -1642,7 +1615,6 @@ The system should also implement, as required by applicable law and policy:
 
 The identity graph should therefore preserve the minimum information required to establish and maintain identity relationships.
 
----
 
 # 34. Operational Monitoring
 
@@ -1677,7 +1649,6 @@ time-sliced examples, and relevant populations. Organizations should also
 monitor calibration, candidate coverage, cluster-size distribution, review
 outcomes, and drift in signal and source behavior.
 
----
 
 # 35. Feedback Loop
 
@@ -1733,7 +1704,6 @@ deployment, with versioned rollouts and rollback controls. A system must not
 update source trust solely from its own prior links, since that can reinforce
 false matches.
 
----
 
 # 36. Theoretical Model
 
@@ -1817,7 +1787,6 @@ $$
 Decision = NEW_MASTER
 $$
 
----
 
 # 37. Practical CIR Architecture
 
@@ -1941,15 +1910,16 @@ This produces an Identity Graph in which every relationship can be represented w
 
 Such an architecture provides a more robust foundation for Customer 360 because downstream systems no longer need to assume that every identity relationship is equally certain.
 
-The ultimate objective of CIR is therefore not merely to answer:
+The practical contribution of this framework is a change in the question that
+CIR is asked to answer. Rather than treating resolution as a binary exercise
+in deciding which records belong together, it examines the basis of each
+proposed relationship: which signals agree or conflict, where the observations
+came from, how reliable and current they are, and what uncertainty remains.
+The result is not simply a merge. It is a documented identity relationship,
+with a score or calibrated probability where the data support one, an explicit
+outcome, and provenance that can be revisited as new evidence becomes available.
 
-> **Which records belong together?**
-
-but rather:
-
-> **What evidence supports the belief that these records represent the same person, how trustworthy is that evidence, and what identity relationship should the system create?**
-
-This shift-from **record matching** to **evidence-based identity inference**-
-provides the conceptual foundation for a modern Customer Data Platform in which
-identity becomes a continuously evaluated, explainable, and graph-based
-representation of the customer.
+In this sense, SAE-CIR reframes identity resolution as evidence-based identity
+inference rather than record matching. Its value lies not in claiming certainty
+where none exists, but in making the grounds for each identity decision visible,
+testable, and open to revision.
