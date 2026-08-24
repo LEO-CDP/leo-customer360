@@ -32,7 +32,7 @@ This paper proposes a **Source-Aware Evidence-Based Customer Identity Resolution
 
 The proposed methodology further represents identity relationships as an Identity Graph, enabling the CDP to preserve identity evidence, provenance, scores or calibrated probabilities, and temporal information rather than simply merging records. This creates a more transparent, explainable, auditable, and adaptable foundation for Customer 360, segmentation, personalization, analytics, and marketing activation.
 
----
+
 
 # 1. Introduction
 
@@ -107,7 +107,7 @@ $$
 }
 $$
 
----
+
 
 # 2. The Customer Identity Problem
 
@@ -165,7 +165,7 @@ $$
 
 and construct a unified identity representation.
 
----
+
 
 # 3. Raw Profile Model
 
@@ -210,7 +210,7 @@ $$
 
 where (M_j) represents an existing Master Profile.
 
----
+
 
 # 4. Master Profile
 
@@ -252,7 +252,7 @@ $$
 
 This distinction is important because a CDP must preserve not only the resolved identity but also **why the system believes the identity is correct**.
 
----
+
 
 # 5. Identity Graph
 
@@ -294,7 +294,6 @@ This approach provides an important property:
 
 > **Identity decisions become explainable and auditable relationships rather than irreversible record merges.**
 
----
 
 # 6. Identity Signals
 
@@ -356,7 +355,6 @@ These values are illustrative priors for an example policy, not probabilities an
 not universal constants. They should be replaced or adjusted using labeled
 validation data and monitored separately by source, signal, population, and time.
 
----
 
 # 7. Why Signal Strength Alone Is Insufficient
 
@@ -981,18 +979,11 @@ rather than combining them into one value.
 A production identity link can therefore be modeled as:
 
 $$
-L =
-{
-raw_profile_id,
-master_profile_id,
-evidence_score,
-calibrated_match_probability,
-outcome,
-evidence,
-source_context,
-timestamp,
-algorithm_version
-}
+\begin{aligned}
+L = \{&\text{raw\_profile\_id},\ \text{master\_profile\_id},\ \text{evidence\_score},\\
+&\text{calibrated\_match\_probability},\ \text{outcome},\ \text{evidence},\\
+&\text{source\_context},\ \text{timestamp},\ \text{algorithm\_version}\}
+\end{aligned}
 $$
 
 For example:
