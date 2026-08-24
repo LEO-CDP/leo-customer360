@@ -1,10 +1,4 @@
--- =============================================================================
--- FROZEN REFERENCE SNAPSHOT -- editing this file does NOT change any database.
--- The authoritative, applied version is the dbmate migration:
---   database-init/db/migrations/20260824090300_data_views.sql (a copy).
--- To change these materialized views: `dbmate new <name>` and write a NEW migration.
--- =============================================================================
-
+-- migrate:up
 
 -- Both MVs flatten AI/ML scoring + behavioral summaries into one table → optimized for LLM-based text-to-SQL.
 -- persona_embedding is a pgvector `vector(768)` column — LLM can use it for semantic search.
@@ -127,3 +121,8 @@ CREATE UNIQUE INDEX idx_mv_customer_engagements_master
 -- REFRESH MATERIALIZED VIEW CONCURRENTLY customer360.mv_customer_transactions;
 -- REFRESH MATERIALIZED VIEW CONCURRENTLY customer360.mv_customer_engagements;
 
+
+
+-- migrate:down
+DROP MATERIALIZED VIEW IF EXISTS customer360.mv_customer_engagements CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS customer360.mv_customer_transactions CASCADE;

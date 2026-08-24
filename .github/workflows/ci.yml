@@ -35,6 +35,7 @@ jobs:
       pull-requests: read
     outputs:
       services: ${{ steps.select.outputs.services }}
+      migrations: ${{ steps.filter.outputs.migrations }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -50,6 +51,7 @@ jobs:
             frontend-admin: 'frontend-admin/**'
             postgres: 'postgres/**'
             redis: 'redis/**'
+            migrations: 'database-init/db/migrations/**'
 
       # On main and version tags, build ALL services so automatic UAT and
       # production deployments can use one exact commit SHA for the platform.
@@ -60,7 +62,10 @@ jobs:
           if [[ "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/tags/v* ]]; then
             echo 'services=["ads-server","backend-system","customer360-api","frontend-admin","postgres","redis"]' >> "$GITHUB_OUTPUT"
           else
-            printf 'services=%s\n' '${{ steps.filter.outputs.changes }}' >> "$GITHUB_OUTPUT"
+            # Strip 'migrations' — it's a paths-filter for the DB-migrations job,
+            # not a buildable service; it must not enter the test/build matrices.
+            svc=$(printf '%s' '${{ steps.filter.outputs.changes }}' | jq -c 'map(select(. != "migrations"))')
+            printf 'services=%s\n' "$svc" >> "$GITHUB_OUTPUT"
           fi
 
   # ---------------------------------------------------------------------------
@@ -139,6 +144,188 @@ jobs:
             logs/${{ matrix.service }}.log
             logs/${{ matrix.service }}.result
           retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Validate SQL migrations: apply them from zero on an ephemeral Postgres
+  # (proves a fresh DB builds), then wipe dbmate's tracking and replay on the
+  # populated DB asserting 0 pending (proves every migration is idempotent, i.e.
+  # safe to adopt on an existing database). Uses the project's own postgres image
+  # so PostGIS + pgvector (which the baseline migration needs) are available.
+  # ---------------------------------------------------------------------------
+  migrations:
+    name: DB migrations (apply + idempotency)
+    needs: changes
+    if: ${{ needs.changes.outputs.migrations == 'true' || github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build Postgres image (PostGIS + pgvector + extensions)
+        run: docker build -f postgres/Dockerfile -t c360-pg:ci .
+
+      - name: Start ephemeral Postgres
+        run: |
+          docker network create c360ci
+          docker run -d --name pg --network c360ci \
+            -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=customer360 \
+            c360-pg:ci
+          for _ in $(seq 1 40); do
+            docker exec pg pg_isready -U postgres -d customer360 >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+      - name: dbmate up — apply from zero
+        id: apply
+        run: |
+          out=$(docker run --rm --network c360ci -v "$PWD/database-init/db:/db:ro" \
+            -e DATABASE_URL="postgres://postgres:ci@pg:5432/customer360?sslmode=disable" \
+            ghcr.io/amacneil/dbmate:2 --no-dump-schema --migrations-dir /db/migrations up 2>&1) \
+            && rc=0 || rc=$?
+          printf '%s\n' "$out" | tee "$RUNNER_TEMP/apply.log"
+          echo "count=$(grep -c '^Applied:' "$RUNNER_TEMP/apply.log" || true)" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      - name: dbmate — assert idempotent (replay on the populated DB, 0 pending)
+        id: idem
+        run: |
+          url="postgres://postgres:ci@pg:5432/customer360?sslmode=disable"
+          run_dbmate() {
+            docker run --rm --network c360ci -v "$PWD/database-init/db:/db:ro" \
+              -e DATABASE_URL="$url" ghcr.io/amacneil/dbmate:2 \
+              --no-dump-schema --migrations-dir /db/migrations "$@"
+          }
+          # Wipe dbmate's tracking and replay every migration on the already-
+          # populated DB: proves each is idempotent, i.e. safe to adopt on an
+          # existing database. Non-idempotent DDL (bare CREATE TRIGGER/INDEX/etc)
+          # would error here.
+          docker exec pg psql -U postgres -d customer360 -c "TRUNCATE public.schema_migrations;"
+          run_dbmate up 2>&1 | tee "$RUNNER_TEMP/replay.log"
+          out=$(run_dbmate status 2>&1) && rc=0 || rc=$?
+          printf '%s\n' "$out" | tee "$RUNNER_TEMP/status.log"
+          [ "$rc" = 0 ] || exit "$rc"
+          echo "$out" | grep -q "Pending: 0" || { echo "::error::migrations left pending after replay"; exit 1; }
+
+      # Always publish a detailed result to the run's Summary page — pass or fail.
+      # Reads the schema/seed facts straight out of the DB the job just built.
+      - name: Write run summary
+        if: always()
+        run: |
+          st() { case "$1" in success) echo "✅ pass";; failure) echo "❌ fail";; skipped) echo "⏭️ skipped";; *) echo "— not run";; esac; }
+          # query the built customer360 DB; prints nothing if the container is gone
+          q() { docker exec pg psql -U postgres -d customer360 -tAqc "$1" 2>/dev/null | tr -d '\r'; }
+          fence="$(printf '\140\140\140')"   # ``` without literal backticks in source
+          bt="$(printf '\140')"              # single ` for inline code
+          apply="${{ steps.apply.outcome }}"; idem="${{ steps.idem.outcome }}"
+          count="${{ steps.apply.outputs.count }}"
+          applied="$(sed -n 's/.*Applied:[[:space:]]*\([0-9]*\).*/\1/p' "$RUNNER_TEMP/status.log" 2>/dev/null | tail -1)"
+          pending="$(sed -n 's/.*Pending:[[:space:]]*\([0-9]*\).*/\1/p' "$RUNNER_TEMP/status.log" 2>/dev/null | tail -1)"
+          pgver="$(q "SHOW server_version" | head -1)"
+          dbmatever="$(docker run --rm ghcr.io/amacneil/dbmate:2 --version 2>/dev/null | head -1)"
+
+          {
+            echo "## DB migrations — apply, idempotency & built-schema report"
+            echo ""
+            echo "Commit \`${GITHUB_SHA:0:8}\` · migrations in \`database-init/db/migrations/\`"
+            echo ""
+            if [ "$apply" = success ] && [ "$idem" = success ]; then
+              echo "> **Overall: ✅ PASS** — dbmate builds a fresh DB from zero and re-running every migration on the populated DB is a clean no-op (idempotent)."
+            else
+              echo "> **Overall: ❌ FAIL** — see the gate table and dbmate output below."
+            fi
+            echo ""
+
+            echo "### Gates"
+            echo "| Check | Result | Detail |"
+            echo "| --- | --- | --- |"
+            echo "| Apply from zero (fresh DB) | $(st "$apply") | ${count:-0} migration(s) applied |"
+            echo "| Idempotent replay (populated DB) | $(st "$idem") | Applied: ${applied:-?}, Pending: ${pending:-?} |"
+            echo ""
+
+            echo "### Environment"
+            echo "| Component | Version |"
+            echo "| --- | --- |"
+            echo "| PostgreSQL | ${pgver:-n/a} |"
+            echo "| dbmate | ${dbmatever:-n/a} |"
+            exts="$(q "SELECT '| '||extname||' | '||extversion||' |' FROM pg_extension WHERE extname<>'plpgsql' ORDER BY extname")"
+            if [ -n "$exts" ]; then
+              echo ""
+              echo "**Extensions**"
+              echo "| Extension | Version |"
+              echo "| --- | --- |"
+              echo "$exts"
+            fi
+            echo ""
+
+            echo "### Migrations applied (in order)"
+            if [ -s "$RUNNER_TEMP/apply.log" ]; then
+              echo "| # | Migration | Apply time |"
+              echo "| --- | --- | --- |"
+              n=0
+              while read -r kw file _in dur _rest; do
+                [ "$kw" = "Applied:" ] || continue
+                n=$((n+1))
+                printf '| %s | %s%s%s | %s |\n' "$n" "$bt" "$file" "$bt" "$dur"
+              done < "$RUNNER_TEMP/apply.log"
+            else
+              echo "_no apply log captured_"
+            fi
+            echo ""
+
+            echo "### Schema built (schema \`customer360\`)"
+            echo "| Object | Count |"
+            echo "| --- | --- |"
+            q "
+              SELECT '| Tables | '||count(*)||' |' FROM information_schema.tables WHERE table_schema='customer360' AND table_type='BASE TABLE'
+              UNION ALL SELECT '| Columns | '||count(*)||' |' FROM information_schema.columns WHERE table_schema='customer360'
+              UNION ALL SELECT '| Primary keys | '||count(*)||' |' FROM information_schema.table_constraints WHERE table_schema='customer360' AND constraint_type='PRIMARY KEY'
+              UNION ALL SELECT '| Foreign keys | '||count(*)||' |' FROM information_schema.table_constraints WHERE table_schema='customer360' AND constraint_type='FOREIGN KEY'
+              UNION ALL SELECT '| Unique constraints | '||count(*)||' |' FROM information_schema.table_constraints WHERE table_schema='customer360' AND constraint_type='UNIQUE'
+              UNION ALL SELECT '| Check constraints | '||count(*)||' |' FROM information_schema.table_constraints tc WHERE tc.table_schema='customer360' AND tc.constraint_type='CHECK' AND tc.constraint_name NOT LIKE '%\_not\_null'
+              UNION ALL SELECT '| Indexes | '||count(*)||' |' FROM pg_indexes WHERE schemaname='customer360'
+              UNION ALL SELECT '| Functions | '||count(*)||' |' FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='customer360'
+              UNION ALL SELECT '| Triggers | '||count(*)||' |' FROM information_schema.triggers WHERE trigger_schema='customer360'
+              UNION ALL SELECT '| Materialized views | '||count(*)||' |' FROM pg_matviews WHERE schemaname='customer360'
+              UNION ALL SELECT '| Sequences | '||count(*)||' |' FROM information_schema.sequences WHERE sequence_schema='customer360'
+            "
+            echo ""
+
+            echo "### Row-Level Security"
+            rlsforced="$(q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='customer360' AND c.relkind='r' AND c.relforcerowsecurity")"
+            rlspol="$(q "SELECT count(*) FROM pg_policies WHERE schemaname='customer360'")"
+            echo "- Tenant tables with \`FORCE ROW LEVEL SECURITY\`: **${rlsforced:-?}**"
+            echo "- Policies defined: **${rlspol:-?}**"
+            echo ""
+
+            echo "### Seed / reference data"
+            echo "| Table | Rows |"
+            echo "| --- | --- |"
+            q "
+              SELECT '| sys_tenant | '||count(*)||' |' FROM customer360.sys_tenant
+              UNION ALL SELECT '| sys_domain | '||count(*)||' |' FROM customer360.sys_domain
+              UNION ALL SELECT '| cdp_event_catalog | '||count(*)||' |' FROM customer360.cdp_event_catalog
+              UNION ALL SELECT '| cdp_scoring_models | '||count(*)||' |' FROM customer360.cdp_scoring_models
+              UNION ALL SELECT '| cdp_profile_attributes | '||count(*)||' |' FROM customer360.cdp_profile_attributes
+              UNION ALL SELECT '| cdp_segments | '||count(*)||' |' FROM customer360.cdp_segments
+              UNION ALL SELECT '| sys_data_source | '||count(*)||' |' FROM customer360.sys_data_source
+            "
+            echo ""
+
+            echo "<details><summary>dbmate status checklist</summary>"
+            echo ""; echo "$fence"
+            cat "$RUNNER_TEMP/status.log" 2>/dev/null || echo "(no status captured)"
+            echo "$fence"; echo "</details>"
+
+            if [ "$apply" != success ] || [ "$idem" != success ]; then
+              echo ""
+              echo "<details><summary>Full dbmate output (apply + replay)</summary>"
+              echo ""; echo "$fence"
+              cat "$RUNNER_TEMP/apply.log" "$RUNNER_TEMP/replay.log" 2>/dev/null || true
+              echo "$fence"; echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
   # Build one image per changed service (matrix). Push to GHCR only on `main`,

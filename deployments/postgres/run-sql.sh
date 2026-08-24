@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# Bootstrap the deployed vDB for an env by running, in a fixed dependency order:
-#   1) repo  postgres/**/*.sql   (extensions, keycloak db — filename order)
-#   2) repo  database-init/*.sql (the app schema) AFTER the init, in the order the
-#      project's own postgres/Dockerfile uses: database-schema -> init-core-database,
-#      then data-view-for-llm (materialized views) LAST since it reads those tables.
+# Bootstrap / migrate the deployed vDB for an env, in two stages:
+#   1) repo postgres/**/*.sql via psql (extensions, keycloak db — filename order).
+#      These are infra bootstrap, NOT app schema, so they stay on psql.
+#   2) app schema via dbmate `up` (database-init/db/migrations/*.sql, tracked in
+#      the schema_migrations table). Ordered, idempotent and version-tracked --
+#      replaces the old blind raw replay of database-schema.sql / init-core /
+#      data-view + database-init/migrations, which had no version tracking.
 #   ./run-sql.sh <uat|prod>
 #
-# The DB is PRIVATE (public_access is non-functional on this platform), so psql is run ON
-# a bastion inside the VPC over SSH: BASTION=<user>@<ip> (auto-discovered from the sibling
-# ../server deployment's floating IP if unset; SSH user via BASTION_USER, key via SSH_KEY).
-# psql is ensured on the bastion (installed via apt if missing). Each file is piped over
-# stdin with ON_ERROR_STOP=1 so the first failure aborts.
+# The DB is PRIVATE (public_access is non-functional on this platform), so BOTH
+# psql and dbmate run ON a bastion inside the VPC over SSH: BASTION=<user>@<ip>
+# (auto-discovered from the sibling ../server deployment's floating IP if unset;
+# SSH user via BASTION_USER, key via SSH_KEY). psql and the dbmate static binary
+# are installed on the bastion on demand. dbmate runs ONLY up-migrations here.
+# NEVER feed the dbmate migration files to psql -- their `-- migrate:down`
+# sections contain `DROP SCHEMA customer360 CASCADE`.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -20,10 +24,8 @@ case "$ENV" in
   *) echo "Usage: ./run-sql.sh <uat|prod>"; exit 1 ;;
 esac
 
-PG_SQL_DIR="../../postgres"       # repo-root/postgres/**  (extensions, keycloak db) — filename order
-APP_SQL_DIR="../../database-init" # the app schema; ORDER MATTERS, so run these known files first:
-APP_ORDER=(database-schema.sql init-core-database.sql data-view-for-llm.sql)
-MIGRATIONS_DIR="$APP_SQL_DIR/migrations"
+PG_SQL_DIR="../../postgres"          # repo-root/postgres/** (extensions, keycloak db) — psql, filename order
+MIG_DIR="../../database-init/db/migrations"  # app schema, applied by dbmate (tracked in schema_migrations)
 
 # --- creds/config: overlay (non-secret) + .env/terraform.tfvars (secret) ---
 if [[ -f .env ]]; then set -a; source ./.env; set +a; fi
@@ -66,31 +68,62 @@ print(out[0] if out else "")' 2>/dev/null)"
 fi
 [[ -n "${BASTION:-}" ]] || { echo "ERROR: no bastion. Set BASTION=<user>@<floating_ip> (the ../server box) — the DB is private."; exit 1; }
 
-# --- run psql ON the bastion (it reaches the DB's private ip). Ensure psql is installed. ---
+# --- ssh/scp onto the bastion (it reaches the DB's private ip) ---
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
+# The bastion is disposable and recreated often (host key changes) -> don't pin it.
+SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+bssh() { ssh "${SSH_OPTS[@]}" "$BASTION" "$@"; }
+bscp() { scp "${SSH_OPTS[@]}" "$@"; }
+
+# psql on the bastion (installed on demand); files piped over stdin, first error aborts.
 PW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')" # ship the password without quoting headaches
 remote="command -v psql >/dev/null 2>&1 || { sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql-client >/dev/null; }; "
 remote+="PGPASSWORD=\$(printf %s '$PW_B64' | base64 -d) psql -v ON_ERROR_STOP=1 -h '$HOST' -p '$PORT' -U '$DB_USER' -d '$DB_NAME' -f -"
-# The bastion is disposable and recreated often (host key changes) -> don't pin it.
-run_psql() { ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$BASTION" "$remote"; }
+run_psql() { bssh "$remote"; }
 
-# --- collect scripts in dependency order: postgres/init first, then the app schema ---
-FILES=()
-while IFS= read -r f; do FILES+=("$f"); done < <(find "$PG_SQL_DIR" -type f -iname '*.sql' | sort)
-if [[ -d "$APP_SQL_DIR" ]]; then
-  # known app-schema files in dependency order, then any *other* *.sql alphabetically
-  for n in "${APP_ORDER[@]}"; do [[ -f "$APP_SQL_DIR/$n" ]] && FILES+=("$APP_SQL_DIR/$n"); done
-  while IFS= read -r f; do
-    printf '%s\n' "${APP_ORDER[@]}" | grep -qxF "$(basename "$f")" || FILES+=("$f")
-  done < <(find "$APP_SQL_DIR" -maxdepth 1 -type f -iname '*.sql' | sort)
+# --- stage 1: infra SQL (extensions, keycloak db) via psql — NOT dbmate-managed ---
+INFRA_FILES=()
+while IFS= read -r f; do INFRA_FILES+=("$f"); done < <(find "$PG_SQL_DIR" -type f -iname '*.sql' | sort)
+if [[ ${#INFRA_FILES[@]} -gt 0 ]]; then
+  echo "Applying ${#INFRA_FILES[@]} infra SQL script(s) via psql on ${BASTION} against ${DB_NAME}@${HOST}:${PORT}:"
+  for f in "${INFRA_FILES[@]}"; do echo "  -> $f"; run_psql < "$f"; done
 fi
-if [[ -d "$MIGRATIONS_DIR" ]]; then
-  while IFS= read -r f; do FILES+=("$f"); done < <(find "$MIGRATIONS_DIR" -type f -iname '*.sql' | sort)
+
+# --- stage 2: app schema via dbmate `up` on the bastion (tracked, idempotent) ---
+[[ -d "$MIG_DIR" ]] || { echo "ERROR: migrations dir not found: $MIG_DIR"; exit 1; }
+mig_count="$(find "$MIG_DIR" -maxdepth 1 -type f -iname '*.sql' | wc -l | tr -d ' ')"
+[[ "$mig_count" -gt 0 ]] || { echo "ERROR: no *.sql migrations under $MIG_DIR"; exit 1; }
+
+# Build DATABASE_URL locally (python3 percent-encodes user+password) and ship it
+# base64 so no secret lands on the SSH command line / bastion process list.
+dburl="$(python3 - "$DB_USER" "$DB_PASS" "$HOST" "$PORT" "$DB_NAME" <<'PY'
+import sys, urllib.parse as u
+usr, pw, host, port, db = sys.argv[1:6]
+print(f"postgres://{u.quote(usr, safe='')}:{u.quote(pw, safe='')}@{host}:{port}/{db}?sslmode=prefer")
+PY
+)"
+dburl_b64="$(printf %s "$dburl" | base64 | tr -d '\n')"
+
+remote_tmp="/tmp/c360-dbmate.$$"
+echo "Shipping ${mig_count} migration(s) to ${BASTION}:${remote_tmp} and running 'dbmate up':"
+bssh "mkdir -p '$remote_tmp/migrations'"
+bscp "$MIG_DIR"/*.sql "$BASTION:$remote_tmp/migrations/"
+# On the bastion: ensure curl + the dbmate static binary (arch-matched), then apply.
+# Only up-migrations run; --wait blocks until the DB accepts connections. The temp
+# dir is always removed and dbmate's exit code is propagated back over SSH.
+bssh "
+set -u
+command -v curl >/dev/null 2>&1 || { sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl >/dev/null; } || { echo 'curl install failed'; exit 1; }
+dbm=\$(command -v dbmate || true)
+if [ -z \"\$dbm\" ]; then
+  case \"\$(uname -m)\" in x86_64) a=amd64 ;; aarch64|arm64) a=arm64 ;; *) echo \"unsupported arch \$(uname -m)\"; exit 1 ;; esac
+  curl -fsSL -o '$remote_tmp/dbmate' \"https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-\$a\" || { echo 'dbmate download failed'; rm -rf '$remote_tmp'; exit 1; }
+  chmod +x '$remote_tmp/dbmate'; dbm='$remote_tmp/dbmate'
 fi
-if [[ ${#FILES[@]} -eq 0 ]]; then echo "No *.sql found under $PG_SQL_DIR or $APP_SQL_DIR — nothing to run."; exit 0; fi
-echo "Running ${#FILES[@]} SQL script(s) via psql on ${BASTION} against ${DB_NAME}@${HOST}:${PORT} (user ${DB_USER}):"
-for f in "${FILES[@]}"; do
-  echo "  -> $f"
-  run_psql < "$f"
-done
-echo "All SQL scripts completed."
+export DATABASE_URL=\$(printf %s '$dburl_b64' | base64 -d)
+\"\$dbm\" --no-dump-schema --wait --migrations-dir '$remote_tmp/migrations' up
+rc=\$?
+rm -rf '$remote_tmp'
+exit \$rc
+"
+echo "Schema migrations complete."

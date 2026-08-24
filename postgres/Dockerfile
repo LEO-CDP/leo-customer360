@@ -32,9 +32,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Scripts in /docker-entrypoint-initdb.d/ run once, in filename order, ONLY
 # when the data directory is empty (first-ever container start). See:
 # https://hub.docker.com/_/postgres -> "Initialization scripts".
+#
+# Only the extensions are bootstrapped here (they need superuser and rarely
+# change). The SCHEMA and SEED DATA are NO LONGER copied here -- they are owned
+# by dbmate migrations (database-init/db/migrations/*.sql), applied by the
+# one-shot `migrate` service in docker-compose.yml. This is deliberate: the
+# initdb.d hook runs only on an empty volume, so it silently ignored schema
+# changes on existing databases. dbmate applies them everywhere, in order.
 COPY postgres/init/00-extensions.sql /docker-entrypoint-initdb.d/00-extensions.sql
-COPY database-init/database-schema.sql /docker-entrypoint-initdb.d/01-schema.sql
-COPY database-init/init-core-database.sql /docker-entrypoint-initdb.d/02-init-core-database.sql
 
 # IMPROVEMENT: Increased start-period to 120s to allow large schema scripts to finish executing.
 # IMPROVEMENT: Added default fallbacks (:-postgres) so the healthcheck doesn't crash if vars are unset.
