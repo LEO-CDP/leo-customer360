@@ -1,11 +1,13 @@
 # syntax=docker/dockerfile:1.7
 
 # PostgreSQL 16 with PostGIS + pgvector + contrib extensions (uuid-ossp,
-# pgcrypto, pg_trgm, fuzzystrmatch) needed by core-customer360/database-schema.sql
-# and by backend-system/identity_resolution's fuzzy-matching rules.
+# pgcrypto, pg_trgm, fuzzystrmatch) needed by the dbmate baseline migration
+# (database-init/db/migrations) and by backend-system/identity_resolution's
+# fuzzy-matching rules.
 #
-# Build context is the core-customer360/ directory (see docker-compose.yml)
-# so this Dockerfile can COPY the schema and init bootstrap SQL files.
+# Build context is the repo root (see docker-compose.yml) so this Dockerfile can
+# COPY the extensions bootstrap. The schema + seed are applied by dbmate (the
+# `migrate` service), NOT baked into the image.
 FROM postgis/postgis:16-3.5
 
 # Prevent apt-get from throwing interactive prompts during build

@@ -56,8 +56,8 @@ volumes:
 
 services:
   # ---------------------------------------------------------------------------
-  # 1) PostgreSQL 16 + PostGIS + pgvector + contrib, auto-provisioned with
-  #    database-schema.sql on first start.
+  # 1) PostgreSQL 16 + PostGIS + pgvector + contrib. Schema + seed come from the
+  #    dbmate migrations (database-init/db/migrations), not baked into the image.
   # ---------------------------------------------------------------------------
   postgres:
     build:

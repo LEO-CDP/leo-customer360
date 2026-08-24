@@ -1,32 +1,28 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Migration parity test — proves `dbmate up` produces the correct database, by
-# building a THROWAWAY test database with dbmate and comparing it against a
-# reference. The test database is created and dropped by the test.
+# Migration drift test — builds a THROWAWAY database with `dbmate up` and diffs
+# it against the CURRENT live database (e.g. UAT/prod) to confirm the migrations
+# reproduce the live schema and to surface any drift. The test database is
+# created and dropped by the test; the live DB is only ever READ.
 #
-# Two modes (auto-selected by whether REFERENCE_DATABASE_URL is set):
+# The reference is REQUIRED — set REFERENCE_DATABASE_URL:
 #
-#   LIVE   (REFERENCE_DATABASE_URL=postgres://user:pass@host:port/db):
-#          Reference = the current live database (e.g. UAT/prod). Because a live
-#          DB holds real transactional data, only the SCHEMA is a hard pass/fail
-#          gate; row-count / content differences are reported as INFO (a fresh
-#          dbmate build legitimately has only seed data). Proves the migration
-#          reproduces the live schema (and surfaces any drift).
-#          The live DB is only ever READ (SELECT / catalog queries).
-#          For a private DB, open a tunnel first, e.g.:
-#            ssh -fN -L 15432:<db-host>:<db-port> <user>@<bastion>
-#            REFERENCE_DATABASE_URL=postgres://app_admin:$PW@localhost:15432/customer360 \
-#              ./run-migration-test.sh
+#   REFERENCE_DATABASE_URL=postgres://user:pass@host:port/db  ./run-migration-test.sh
 #
-#   SELF-CONTAINED (default, no REFERENCE_DATABASE_URL, runs anywhere):
-#          Reference = the legacy bootstrap rebuilt locally in a second throwaway
-#          DB from the frozen database-init/*.sql (database-schema.sql ->
-#          init-core-database.sql -> data-view-for-llm.sql). Both DBs are fresh,
-#          so SCHEMA **and** DATA are hard pass/fail gates. Proves dbmate exactly
-#          reproduces the legacy raw-SQL bootstrap.
+# Because a live DB holds real transactional data, only the SCHEMA is a hard
+# pass/fail gate; per-table row-count / content differences are reported as INFO
+# (a fresh dbmate build legitimately has only seed data). All comparisons are
+# scoped to schema `customer360`.
 #
-# All comparisons are scoped to schema `customer360`. The disposable container
-# (and every database in it) is ALWAYS destroyed on exit.
+# The private VPC DB isn't reachable directly — open a tunnel through the bastion
+# first, then point the test at it:
+#   ssh -fN -L 15432:<db-host>:<db-port> -i ~/.ssh/c360-api_ed25519 <user>@<bastion>
+#   REFERENCE_DATABASE_URL="postgres://app_admin:$PW@localhost:15432/customer360?sslmode=prefer" \
+#     ./run-migration-test.sh
+#
+# The db host/port/bastion come from the same terraform outputs run-sql.sh uses
+# (deployments/postgres, workspace uat/prod) — run from an env with the AWS creds
+# + bastion access (e.g. the CD runner), not a bare laptop.
 #
 #   KEEP=1        keep the container + artifacts for debugging
 #   PG_IMAGE=…    Postgres image w/ PostGIS+pgvector (default: build the repo image)
@@ -68,11 +64,8 @@ mkdir -p "$OUT_DIR"
 
 # --- sanity ---
 command -v docker >/dev/null 2>&1 || { fail "docker not found on PATH"; exit 2; }
-[[ -f "$DB_INIT_DIR/database-schema.sql" ]] || { fail "missing $DB_INIT_DIR/database-schema.sql"; exit 2; }
 [[ -d "$DB_INIT_DIR/db/migrations" ]] || { fail "missing $DB_INIT_DIR/db/migrations"; exit 2; }
-
-if [[ -n "${REFERENCE_DATABASE_URL:-}" ]]; then REF_MODE="live"; else REF_MODE="legacy"; fi
-echo "Reference mode: ${REF_MODE}"
+[[ -n "${REFERENCE_DATABASE_URL:-}" ]] || { fail "REFERENCE_DATABASE_URL is required — open a bastion tunnel to the current DB and point this at it (see header)."; exit 2; }
 
 # --- ensure a Postgres image with the required extensions ---
 if ! docker image inspect "$PG_IMAGE" >/dev/null 2>&1; then
@@ -80,7 +73,7 @@ if ! docker image inspect "$PG_IMAGE" >/dev/null 2>&1; then
   docker build -q -f "$REPO_ROOT/postgres/Dockerfile" -t "$PG_IMAGE" "$REPO_ROOT" >/dev/null
 fi
 
-# --- disposable Postgres (hosts the dbmate CANDIDATE, and the legacy REF) ---
+# --- disposable Postgres (hosts the dbmate CANDIDATE build) ---
 info "starting throwaway Postgres '$PG' ..."
 docker network create "$NET" >/dev/null
 docker run -d --name "$PG" --network "$NET" \
@@ -91,8 +84,7 @@ done
 docker exec "$PG" pg_isready -U postgres -d postgres >/dev/null 2>&1 || { fail "Postgres not ready"; exit 2; }
 ok "Postgres ready"
 
-psql_db()   { docker exec -i "$PG" psql -v ON_ERROR_STOP=1 -U postgres -d "$1" -tAqc "$2"; }
-psql_file() { docker exec -i "$PG" psql -v ON_ERROR_STOP=1 -U postgres -d "$1" -f - ; }
+psql_db() { docker exec -i "$PG" psql -v ON_ERROR_STOP=1 -U postgres -d "$1" -tAqc "$2"; }
 
 # --- CANDIDATE: dbmate up into a throwaway db ---
 # Docker bind-mount source must be a Windows path on Git-Bash/Docker-Desktop
@@ -108,27 +100,15 @@ docker run --rm --network "$NET" -v "$MIG_MOUNT:/db:ro" \
 ok "candidate built"
 cand_query() { psql_db "$CAND_DB" "$1"; }
 
-# --- REFERENCE ---
-if [[ "$REF_MODE" = "legacy" ]]; then
-  REF_DB="ref_db"
-  info "building REFERENCE ($REF_DB) from frozen SQL (legacy bootstrap) ..."
-  docker exec "$PG" psql -U postgres -qc "CREATE DATABASE $REF_DB" >/dev/null
-  for f in database-schema.sql init-core-database.sql data-view-for-llm.sql; do
-    [[ -f "$DB_INIT_DIR/$f" ]] || { fail "missing $DB_INIT_DIR/$f"; exit 2; }
-    info "  psql < $f"; psql_file "$REF_DB" < "$DB_INIT_DIR/$f" >/dev/null
-  done
-  ok "reference built"
-  ref_query() { psql_db "$REF_DB" "$1"; }
-else
-  info "REFERENCE = live DB via REFERENCE_DATABASE_URL (READ-ONLY)"
-  # --network host so a localhost SSH tunnel (or any reachable host) works.
-  ref_query() {
-    docker run --rm --network host "$PG_IMAGE" \
-      psql -v ON_ERROR_STOP=1 "$REFERENCE_DATABASE_URL" -tAqc "$1"
-  }
-  ref_query "SELECT 1" >/dev/null 2>&1 || { fail "cannot reach REFERENCE_DATABASE_URL (open a tunnel to the private DB first)"; exit 2; }
-  ok "live reference reachable"
-fi
+# --- REFERENCE = the live current DB via REFERENCE_DATABASE_URL (READ-ONLY) ---
+info "REFERENCE = live DB via REFERENCE_DATABASE_URL (READ-ONLY)"
+# --network host so a localhost SSH tunnel (or any reachable host) works.
+ref_query() {
+  docker run --rm --network host "$PG_IMAGE" \
+    psql -v ON_ERROR_STOP=1 "$REFERENCE_DATABASE_URL" -tAqc "$1"
+}
+ref_query "SELECT 1" >/dev/null 2>&1 || { fail "cannot reach REFERENCE_DATABASE_URL (open a tunnel to the private DB first)"; exit 2; }
+ok "live reference reachable"
 
 # =============================================================================
 # Comparison
@@ -167,8 +147,8 @@ compare_query "rls_policies" "SELECT tablename||'|'||policyname||'|'||cmd||'|'||
 compare_query "rls_flags" "SELECT c.relname||'|'||c.relrowsecurity||'|'||c.relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='$SCHEMA' AND c.relkind='r';" hard
 compare_query "matviews" "SELECT matviewname FROM pg_matviews WHERE schemaname='$SCHEMA';" hard
 
-# Data gate: hard when both refs are fresh (legacy), soft against a live DB.
-DATA_GATE="hard"; [[ "$REF_MODE" = "live" ]] && DATA_GATE="soft"
+# Data gate is soft: a live DB holds real transactional data a fresh build lacks.
+DATA_GATE="soft"
 echo ""; echo "=== DATA comparison (${DATA_GATE} gate, schema=$SCHEMA) ==="
 ROWCOUNT_SQL="SELECT string_agg(fmt,E'\n' ORDER BY fmt) FROM (SELECT format('SELECT %L||''|''||count(*) FROM %I.%I', c.relname, n.nspname, c.relname) AS fmt FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='$SCHEMA' AND c.relkind='r') s;"
 CHECKSUM_SQL="SELECT string_agg(fmt,E'\n' ORDER BY fmt) FROM (SELECT format('SELECT %L||''|''||coalesce(md5(string_agg(t.line,E''\n'' ORDER BY t.line)),''<empty>'') FROM (SELECT (x.*)::text AS line FROM %I.%I x) t', c.relname, n.nspname, c.relname) AS fmt FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='$SCHEMA' AND c.relkind='r') s;"
@@ -179,7 +159,7 @@ compare_query "content_md5" "$(cand_query "$CHECKSUM_SQL")" "$DATA_GATE"
 echo ""
 [[ "$SOFT_DIFFS" -gt 0 ]] && warn "$SOFT_DIFFS data group(s) differ — expected against a live DB (real transactional data); review the diffs above."
 if [[ "$HARD_FAILS" -eq 0 ]]; then
-  ok "MIGRATION PARITY VERIFIED — dbmate schema matches the ${REF_MODE} reference$([[ $REF_MODE = legacy ]] && echo ' (schema + data)')."
+  ok "MIGRATION PARITY VERIFIED — dbmate schema matches the live reference."
   echo "${C_GREEN}PASS${C_RST}"; exit 0
 else
   fail "$HARD_FAILS hard comparison group(s) differ (see diffs; rerun with KEEP=1 to inspect $OUT_DIR)."

@@ -8,9 +8,9 @@
 -- transactions + engagement in one denormalized view for super-fast semantic queries.
 --
 -- NOTE: these views are built strictly from the columns that actually exist in
--- core-customer360/database-schema.sql (customer360.cdp_master_profiles,
--- customer360.crm_transactions, customer360.crm_customer_contacts) -- that file is
--- the single source of truth for all table/column names used here.
+-- the baseline migration (20260824090000_baseline_schema.sql):
+-- customer360.cdp_master_profiles, customer360.crm_transactions,
+-- customer360.crm_customer_contacts -- the source of truth for all names used here.
 
 -- ======================================================
 -- Materialized View: Customer Transactions with AI/ML Scores

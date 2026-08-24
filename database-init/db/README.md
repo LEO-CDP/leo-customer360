@@ -101,9 +101,10 @@ docker compose run --rm migrate --migrations-dir /db/migrations down
 4. **Commit `schema.sql`** after changing migrations: run `dbmate dump` against a
    freshly-migrated DB and commit the diff. CI can diff it to catch drift.
 5. **Never manage Keycloak's DB** (`db_keycloak`) — Keycloak self-migrates.
-6. The legacy `database-init/database-schema.sql` and `init-core-database.sql`
-   are **frozen reference snapshots** — editing them changes nothing. Change the
-   schema through a new migration here.
+6. These migrations are the **single source of truth** for the schema. The old
+   standalone `database-init/database-schema.sql` / `init-core-database.sql` /
+   `data-view-for-llm.sql` files have been removed — change the schema only by
+   adding a new migration here.
 
 ## Production / UAT via `deployments/postgres/run-sql.sh`
 
