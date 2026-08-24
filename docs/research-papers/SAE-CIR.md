@@ -1836,7 +1836,7 @@ A production implementation can therefore be organized into the following logica
 -------------------------------------------------
 +              DATA SOURCES                   +
 |                                             |
-+ Ads + Website + App + CRM + POS + Surveys +
++ Ads + Website + App + CRM + POS + Surveys   +
 --------------------------------------------------
                       |
                       v
@@ -1848,7 +1848,7 @@ A production implementation can therefore be organized into the following logica
 -------------------------------------------------
 +          IDENTITY SIGNAL EXTRACTION         +
 |                                             |
-+ Email + Phone + Device + Customer ID + ... +
++ Email + Phone + Device + Customer ID + ...  +
 --------------------------------------------------
                       |
                       v
@@ -1879,7 +1879,7 @@ A production implementation can therefore be organized into the following logica
 -------------------------------------------------
 ```
 
----
+\newpage 
 
 # 38. Conclusion
 
@@ -1890,15 +1890,13 @@ fundamental dimensions of identity evidence:
 
 $$
 \boxed{
-Evidence\ Contribution
-=
-Comparison\ Result
-\times
-Signal\ Weight
-\times
-Source\ Reliability
-\cdot
-Observation\ Quality
+\begin{aligned}
+\mathrm{Evidence\ Contribution}
+&= \mathrm{Comparison\ Result}
+\cdot \mathrm{Signal\ Weight} \\
+&\quad \times \mathrm{Source\ Reliability}
+\cdot \mathrm{Observation\ Quality}
+\end{aligned}
 }
 $$
 
@@ -1906,19 +1904,15 @@ The model can be extended with temporal decay and evidence independence:
 
 $$
 \boxed{
-Evidence\ Contribution
-=
-Comparison
-\cdot
-Signal
-\cdot
-Source
-\cdot
-Quality
-\cdot
-Independence
-\cdot
-Time
+\begin{aligned}
+\mathrm{Evidence\ Contribution}
+&= \mathrm{Comparison}
+\cdot \mathrm{Signal}
+\cdot \mathrm{Source} \\
+&\quad \cdot \mathrm{Quality}
+\cdot \mathrm{Independence}
+\cdot \mathrm{Time}
+\end{aligned}
 }
 $$
 
