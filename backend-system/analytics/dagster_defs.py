@@ -1,39 +1,52 @@
-"""Placeholder Dagster job for the Analytics service
-(backend-system/analytics).
-
-Future home of the "build reporting & update report table" pipeline
-(materializing/refreshing reporting tables consumed by
-`customer360-api`'s `/api/v1/reporting` endpoints). No real business logic
-lives here yet -- this file only wires up a job/op skeleton so the Dagster
-workspace (`../workspace.yaml`) already has an `analytics` code location
-ready for that logic to be dropped in.
-
-Run from `backend-system/`: `dagster dev -w workspace.yaml` to see this job
-(alongside `identity_resolution`/`scoring`/`segmentation`) in the Dagster
-UI.
-"""
+"""Dagster definitions for hourly Customer 360 tracking-log analytics."""
 
 import os
-import time
+import sys
 
-from dagster import Definitions, OpExecutionContext, job, op
+# Dagster's python_file loader does not add this file's directory to sys.path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-PLACEHOLDER_SLEEP_SECONDS = int(os.environ.get("ANALYTICS_PLACEHOLDER_SLEEP_SECONDS", "2"))
+from dagster import (  # noqa: E402
+    DefaultScheduleStatus,
+    Definitions,
+    OpExecutionContext,
+    RetryPolicy,
+    ScheduleDefinition,
+    job,
+    op,
+)
+
+from source_analytics.tracking_log_aggregation import process_tracking_logs  # noqa: E402
 
 
-@op
-def analytics_placeholder_op(context: OpExecutionContext) -> None:
-    """Stand-in for the real reporting-table-refresh op: logs started ->
-    sleep -> done so the job is runnable/observable end-to-end before real
-    logic exists."""
-    context.log.info("analytics job: started")
-    time.sleep(PLACEHOLDER_SLEEP_SECONDS)
-    context.log.info("analytics job: done")
+@op(retry_policy=RetryPolicy(max_retries=2, delay=30))
+def aggregate_tracking_logs_op(context: OpExecutionContext) -> dict[str, int]:
+    """Count hourly S3 JSONL logs and update Redis and source totals."""
+    context.log.info("analytics job: tracking-log aggregation started")
+    summary = process_tracking_logs(run_id=context.run_id, log=context.log.info)
+    context.log.info(
+        "analytics job: tracking-log aggregation done "
+        "(sources=%d, skipped_running=%d, objects=%d, events_added=%d)",
+        summary["sources_processed"],
+        summary["sources_skipped_running"],
+        summary["objects_processed"],
+        summary["events_added"],
+    )
+    return summary
 
 
 @job(name="analytics_job")
 def analytics_job() -> None:
-    analytics_placeholder_op()
+    aggregate_tracking_logs_op()
 
 
-defs = Definitions(jobs=[analytics_job])
+analytics_hourly_schedule = ScheduleDefinition(
+    name="analytics_hourly_schedule",
+    job=analytics_job,
+    cron_schedule="0 * * * *",
+    execution_timezone="UTC",
+    default_status=DefaultScheduleStatus.RUNNING,
+)
+
+
+defs = Definitions(jobs=[analytics_job], schedules=[analytics_hourly_schedule])

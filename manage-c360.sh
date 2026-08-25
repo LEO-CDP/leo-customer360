@@ -357,7 +357,7 @@ cmd_start_core_services() {
   echo ""
   echo "✅ Core services stack is up."
   echo "   API:      http://${C360_API_HOST:-127.0.0.1}:${C360_API_PORT:-8008}  (docs: /docs)"
-  echo "   Tracking: http://${DATA_TRACKING_API_HOST:-127.0.0.1}:${DATA_TRACKING_API_PORT:-8010}  (docs: /docs)"
+  echo "   Tracking: http://${C360_TRACKING_API_HOST:-127.0.0.1}:${C360_TRACKING_API_PORT:-8010}  (docs: /docs)"
   echo ""
   echo "   Note: Backend services (identity_resolution, etc.) and frontend must be started separately."
 }

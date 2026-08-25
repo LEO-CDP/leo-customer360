@@ -37,11 +37,10 @@ Layout:
     point for the rest of the codebase (mirrors the ``core.config.settings``
     singleton pattern).
 
-``analytics``/``scoring``/``data_synch``/``email_engine``/
-``notification_engine`` currently wrap placeholder Dagster jobs (no real
-business logic yet, see each service's ``dagster_defs.py``) -- their
-service classes and job/location settings already exist here so real logic
-can be dropped in behind them without any customer360-api changes.
+``scoring``/``data_synch``/``email_engine``/``notification_engine`` currently
+wrap placeholder Dagster jobs. ``analytics`` now wraps the hourly data-source
+tracking-log aggregation job; all service classes and job/location settings
+remain centralized here.
 """
 
 import logging
@@ -240,8 +239,7 @@ class DagsterService:
 
 
 class AnalyticsDagsterService(DagsterService):
-    """backend-system/analytics -- reporting-table refresh (placeholder job
-    today, see backend-system/analytics/dagster_defs.py)."""
+    """backend-system/analytics -- data-source tracking-log aggregation."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -250,10 +248,13 @@ class AnalyticsDagsterService(DagsterService):
             repository_name=settings.dagster_analytics_repository_name,
         )
 
+    def process_tracking_logs(self) -> str:
+        """Triggers one asynchronous data-source tracking-log aggregation."""
+        return self.submit(tags={"trigger_reason": "manual_api"})
+
     def refresh_reports(self) -> str:
-        """Triggers a refresh of reporting tables consumed by
-        ``/api/v1/reporting``."""
-        return self.submit()
+        """Backward-compatible alias for the tracking-log aggregation run."""
+        return self.process_tracking_logs()
 
 
 class IdentityResolutionDagsterService(DagsterService):

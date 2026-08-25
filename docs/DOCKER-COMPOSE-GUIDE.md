@@ -22,7 +22,7 @@ containerized deployment.
 | `keycloak` | `keycloak/keycloak:26.7` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
 | `dagster` | `customer360-dagster:local` (Python 3.11-slim) | Dagster webserver and daemon for all nine backend-system code locations, including identity resolution | `${DAGSTER_UI_PORT:-3000}` → 3000 |
 | `api` | `customer360-api:local` (Python 3.11-slim) | Customer 360 / CIR REST API (FastAPI), Keycloak-secured | `${C360_API_PORT:-8008}` → 8008 |
-| `tracking-api` | `customer360-tracking-api:local` (Python 3.11-slim) | CDP tracking-log ingestion; AWS S3 in production, MinIO in dev | `${DATA_TRACKING_API_PORT:-8010}` → 8010 |
+| `tracking-api` | `customer360-tracking-api:local` (Python 3.11-slim) | CDP tracking-log ingestion; AWS S3 in production, MinIO in dev | `${C360_TRACKING_API_PORT:-8010}` → 8010 |
 | `cir-demo-seed` | reuses `customer360-dagster:local` | **Dev only** one-shot job that seeds demo data, then exits | none |
 
 All services share one bridge network, `customer360-network`, and are isolated
@@ -164,7 +164,7 @@ docker compose -f dev-docker-compose.yml up -d --build
 When `SSO_LOGIN=false`, [`dev-c360.sh`](../dev-c360.sh) selects
 `dev-no-sso-docker-compose.yml`, which provides the same MinIO-backed tracking
 API without starting Keycloak. Both variants publish the tracking API at
-`${DATA_TRACKING_API_PORT:-8010}` and connect it to the in-network Redis and
+`${C360_TRACKING_API_PORT:-8010}` and connect it to the in-network Redis and
 MinIO services.
 
 ### Overriding host ports (avoid clashing with other local Postgres/Redis)
@@ -204,7 +204,7 @@ docker inspect -f '{{.State.Health.Status}}' customer360-dagster
 docker inspect -f '{{.State.Health.Status}}' customer360-api
 docker inspect -f '{{.State.Health.Status}}' customer360-tracking-api
 curl -s http://localhost:${C360_API_PORT:-8008}/health
-curl -s http://localhost:${DATA_TRACKING_API_PORT:-8010}/health
+curl -s http://localhost:${C360_TRACKING_API_PORT:-8010}/health
 ```
 
 | Service | Healthcheck mechanism |
@@ -242,7 +242,7 @@ s3://data-tracking-[data_source_id]/yyyy-mm-dd-hh/[batch-uuid].jsonl
 Example local upload against the MinIO-backed dev service:
 
 ```bash
-curl -i -X POST http://localhost:${DATA_TRACKING_API_PORT:-8010}/api/v1/tracking/logs \
+curl -i -X POST http://localhost:${C360_TRACKING_API_PORT:-8010}/api/v1/tracking/logs \
   -H 'Content-Type: application/json' \
   -H 'User-Agent: c360-debug-client' \
   -d '{
@@ -322,7 +322,7 @@ tune per environment (dev/staging/prod). Highlights:
 | `KEYCLOAK_VERIFY_SSL` | `false` | Set `true` once Keycloak is behind real TLS (self-signed/dev certs will fail introspection otherwise). |
 | `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` | `admin` / placeholder | Bootstrap admin console credentials for the local `keycloak` container (`start-dev` mode only). **Change in every real environment.** |
 | `KEYCLOAK_HOST_PORT` | `8080` | Host-published port for the Keycloak admin console / API. |
-| `DATA_TRACKING_API_PORT` | `8010` | Host-published port for the CDP tracking-log API. |
+| `C360_TRACKING_API_PORT` | `8010` | Host-published port for the CDP tracking-log API. |
 | `OBJECT_STORAGE_MODE` | `s3` | `s3` in the production-shaped stack; `minio` is forced by the dev Compose files. |
 | `S3_ENDPOINT_URL` | empty | Optional S3-compatible endpoint. Dev Compose overrides it to `http://minio:9000`. |
 | `S3_REGION` | `us-east-1` | AWS region used by the tracking API. |

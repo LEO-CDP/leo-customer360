@@ -93,8 +93,8 @@ This repository uses a single root-level environment file, `.env`. The companion
 
 ## CDP data tracking object storage
 
-- `DATA_TRACKING_API_HOST`: Bind address for the tracking API. Default: `127.0.0.1`
-- `DATA_TRACKING_API_PORT`: Host-published tracking API port. Default: `8010`
+- `C360_TRACKING_API_HOST`: Bind address for the tracking API. Default: `127.0.0.1`
+- `C360_TRACKING_API_PORT`: Host-published tracking API port. Default: `8010`
 - `TRACKING_MAX_EVENTS_PER_REQUEST`: Maximum events accepted in one batch. Default: `1000`
 - `OBJECT_STORAGE_MODE`: `s3` for production or `minio` for a host-run dev service.
 - `S3_ENDPOINT_URL`: S3-compatible endpoint; dev Compose sets this to `http://minio:9000`.

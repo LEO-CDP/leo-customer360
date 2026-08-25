@@ -9,6 +9,9 @@ python-dotenv>=1.0,<2
 pgvector>=0.3,<1
 redis>=5.0,<6
 
+# database migrations. 
+alembic>=1.13.0,<2
+
 # Dev-mode local JWT issuance/verification (POST /auth/login) -- see
 # core/utils/security.py. Already a transitive dep via other packages, but
 # pinned explicitly since core/auth.py and core/routers/auth_api.py import

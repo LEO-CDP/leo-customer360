@@ -25,7 +25,7 @@ Current implementation status:
 |---|---|
 | `identity_resolution` | Implemented CIR job and optional poll sensor |
 | `segmentation` | Implemented segment recomputation job and poll sensor |
-| `analytics` | Placeholder Dagster job |
+| `analytics` | Hourly tracking-log aggregation job and UTC schedule |
 | `campaign_orchestration` | Placeholder Dagster job |
 | `data_synch` | Placeholder Dagster job |
 | `email_engine` | Placeholder Dagster job |

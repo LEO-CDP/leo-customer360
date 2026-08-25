@@ -196,7 +196,7 @@ Each placeholder service exists so `customer360-api/core/utils/dagster_client.py
 - Auth is a single ASGI middleware (`core/auth.py:auth_middleware`), not a per-endpoint `Depends(get_current_user)` — it stashes the resolved `tenant_id`/`user_id` on `request.state` for every request, which downstream Row-Level Security policies rely on.
 - The Redis cache (`core/cache.py`) is a decorator (`cache_response`) that wraps any GET route and fails open — any Redis connectivity issue silently falls back to hitting Postgres directly, so caching is never a hard dependency.
 - The identity resolution worker (`worker.py`) runs a single-threaded polling loop, executing `identity_resolution_job` in-process via Dagster on each iteration — it does not fork or use a thread pool.
-- Heavy, potentially slow operations (segmentation recompute for all tenants, future scoring/analytics jobs) are offloaded to Dagster job runs submitted over GraphQL (`core/utils/dagster_client.py`), rather than run inline inside a request.
+- Heavy, potentially slow operations (segmentation recompute for all tenants and data-source tracking-log aggregation) are offloaded to Dagster job runs submitted over GraphQL (`core/utils/dagster_client.py`), rather than run inline inside a request.
 
 ### 4.2 Extension Mechanism
 
