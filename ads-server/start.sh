@@ -13,11 +13,11 @@
 #       is empty, then start the API.
 #
 # Environment variables (from .env):
-#   DB_HOST                 PostgreSQL host (default: localhost)
-#   DB_PORT                 PostgreSQL port (default: 5432)
+#   LEO_AD_DB_HOST          PostgreSQL host (default: localhost)
+#   LEO_AD_DB_PORT          PostgreSQL port (default: 5432)
 #   LEO_AD_API_HOST         AD SERVER API listen address (default: localhost)
 #   LEO_AD_API_PORT         AD SERVER API listen port (default: 9009)
-#   UVICORN_RELOAD          Enable auto-reload (default: false)
+#   LEO_AD_UVICORN_RELOAD   Enable auto-reload (default: false)
 ###############################################################################
 
 set -Eeuo pipefail
@@ -167,19 +167,19 @@ fi
 HOST="${LEO_AD_API_HOST:-localhost}"
 PORT="${LEO_AD_API_PORT:-9009}"
 
-DB_HOST="${DB_HOST:-localhost}"
-DB_PORT="${DB_PORT:-5432}"
-DB_USER="${DB_USER:-postgres}"
-DB_PASSWORD="${DB_PASSWORD:-change_me_postgres_password}"
-DB_NAME="${DB_NAME:-customer360}"
-DB_CONTAINER_NAME="${DB_CONTAINER_NAME:-customer360-postgres}"
+LEO_AD_DB_HOST="${LEO_AD_DB_HOST:-localhost}"
+LEO_AD_DB_PORT="${LEO_AD_DB_PORT:-5432}"
+LEO_AD_DB_USER="${LEO_AD_DB_USER:-postgres}"
+LEO_AD_DB_PASSWORD="${LEO_AD_DB_PASSWORD:-change_me_postgres_password}"
+LEO_AD_DB_NAME="${LEO_AD_DB_NAME:-customer360}"
+LEO_AD_DB_CONTAINER_NAME="${LEO_AD_DB_CONTAINER_NAME:-customer360-postgres}"
 
 ###############################################################################
 # PostgreSQL helpers
 ###############################################################################
 
 check_db_available() {
-    "$VENV_PYTHON" - "$DB_HOST" "$DB_PORT" <<'PY'
+    "$VENV_PYTHON" - "$LEO_AD_DB_HOST" "$LEO_AD_DB_PORT" <<'PY'
 import socket
 import sys
 
@@ -208,24 +208,24 @@ run_sql_query() {
     local sql="$1"
 
     if command -v psql >/dev/null 2>&1; then
-        PGPASSWORD="$DB_PASSWORD" \
+        PGPASSWORD="$LEO_AD_DB_PASSWORD" \
             psql \
-            -h "$DB_HOST" \
-            -p "$DB_PORT" \
-            -U "$DB_USER" \
-            -d "$DB_NAME" \
+            -h "$LEO_AD_DB_HOST" \
+            -p "$LEO_AD_DB_PORT" \
+            -U "$LEO_AD_DB_USER" \
+            -d "$LEO_AD_DB_NAME" \
             -tAc "$sql" 2>/dev/null
         return
     fi
 
     if command -v docker >/dev/null 2>&1; then
-        docker exec -i -u postgres "$DB_CONTAINER_NAME" \
-            env PGPASSWORD="$DB_PASSWORD" \
+        docker exec -i -u postgres "$LEO_AD_DB_CONTAINER_NAME" \
+            env PGPASSWORD="$LEO_AD_DB_PASSWORD" \
             psql \
             -h 127.0.0.1 \
             -p 5432 \
-            -U "$DB_USER" \
-            -d "$DB_NAME" \
+            -U "$LEO_AD_DB_USER" \
+            -d "$LEO_AD_DB_NAME" \
             -tAc "$sql" 2>/dev/null
         return
     fi
@@ -237,13 +237,13 @@ run_sql_file() {
     local sql_file="$1"
 
     if command -v psql >/dev/null 2>&1; then
-        PGPASSWORD="$DB_PASSWORD" \
+        PGPASSWORD="$LEO_AD_DB_PASSWORD" \
             psql \
             -v ON_ERROR_STOP=1 \
-            -h "$DB_HOST" \
-            -p "$DB_PORT" \
-            -U "$DB_USER" \
-            -d "$DB_NAME" \
+            -h "$LEO_AD_DB_HOST" \
+            -p "$LEO_AD_DB_PORT" \
+            -U "$LEO_AD_DB_USER" \
+            -d "$LEO_AD_DB_NAME" \
             -f "$sql_file" \
             >> "$LOG_FILE" 2>&1
         return
@@ -256,25 +256,25 @@ run_sql_file() {
     local remote_name
     remote_name="$(basename "$sql_file")"
 
-    if ! docker cp "$sql_file" "$DB_CONTAINER_NAME:/tmp/$remote_name" >/dev/null 2>&1; then
+    if ! docker cp "$sql_file" "$LEO_AD_DB_CONTAINER_NAME:/tmp/$remote_name" >/dev/null 2>&1; then
         return 1
     fi
 
-    if ! docker exec -i -u postgres "$DB_CONTAINER_NAME" \
-        env PGPASSWORD="$DB_PASSWORD" \
+    if ! docker exec -i -u postgres "$LEO_AD_DB_CONTAINER_NAME" \
+        env PGPASSWORD="$LEO_AD_DB_PASSWORD" \
         psql \
         -h 127.0.0.1 \
         -p 5432 \
-        -U "$DB_USER" \
-        -d "$DB_NAME" \
+        -U "$LEO_AD_DB_USER" \
+        -d "$LEO_AD_DB_NAME" \
         -v ON_ERROR_STOP=1 \
         -f "/tmp/$remote_name" \
         >> "$LOG_FILE" 2>&1; then
-        docker exec -u postgres "$DB_CONTAINER_NAME" rm -f "/tmp/$remote_name" >/dev/null 2>&1 || true
+        docker exec -u postgres "$LEO_AD_DB_CONTAINER_NAME" rm -f "/tmp/$remote_name" >/dev/null 2>&1 || true
         return 1
     fi
 
-    docker exec -u postgres "$DB_CONTAINER_NAME" rm -f "/tmp/$remote_name" >/dev/null 2>&1 || true
+    docker exec -u postgres "$LEO_AD_DB_CONTAINER_NAME" rm -f "/tmp/$remote_name" >/dev/null 2>&1 || true
 }
 
 schema_exists() {
@@ -494,12 +494,12 @@ ensure_dev_infra() {
 ###############################################################################
 
 if ! check_db_available; then
-    log "${YELLOW}[DB] PostgreSQL not reachable${NC} | ${DB_HOST}:${DB_PORT}"
+    log "${YELLOW}[DB] PostgreSQL not reachable${NC} | ${LEO_AD_DB_HOST}:${LEO_AD_DB_PORT}"
 
     if ensure_dev_infra; then
 
         if ! check_db_available; then
-            log "${RED}[DB] PostgreSQL did not become ready${NC} | ${DB_HOST}:${DB_PORT}"
+            log "${RED}[DB] PostgreSQL did not become ready${NC} | ${LEO_AD_DB_HOST}:${LEO_AD_DB_PORT}"
             exit 1
         fi
 
@@ -510,7 +510,7 @@ if ! check_db_available; then
     fi
 fi
 
-log "${GREEN}[DB] PostgreSQL ready${NC} | ${DB_HOST}:${DB_PORT}/${DB_NAME}"
+log "${GREEN}[DB] PostgreSQL ready${NC} | ${LEO_AD_DB_HOST}:${LEO_AD_DB_PORT}/${LEO_AD_DB_NAME}"
 
 ###############################################################################
 # Database initialization / demo seeding

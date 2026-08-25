@@ -155,7 +155,7 @@ class AdServerApplication:
             # Public mount point when fronted by a path-routing proxy (e.g. Caddy /ads).
             # Keeps generated URLs (Swagger's openapi.json, redirects) prefixed correctly.
             # Empty by default (served at root, e.g. a dedicated prod host).
-            root_path=os.getenv("ADS_ROOT_PATH", ""),
+            root_path=os.getenv("LEO_AD_ROOT_PATH", ""),
         )
 
         self._configure_middleware(application)

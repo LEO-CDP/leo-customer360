@@ -54,7 +54,7 @@ echo -e "${GREEN}Installing requirements...${NC}"
 "$VENV_PYTHON" -m pip install -q -r requirements.txt
 
 ###############################################################################
-# Load .env so DB_* variables are available for the PostgreSQL check below
+# Load .env so LEO_AD_DB_* variables are available for the PostgreSQL check below
 ###############################################################################
 if [ -f "$PROJECT_HOME/.env" ]; then
     set -a
@@ -71,19 +71,19 @@ echo -e "${YELLOW}Checking for PostgreSQL...${NC}"
 POSTGRES_AVAILABLE=0
 TEST_FILES=""
 if command -v psql &> /dev/null; then
-    if PGPASSWORD="${DB_PASSWORD:-}" psql -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-postgres}" -d "${DB_NAME:-customer360}" -c "SELECT 1" -w &>/dev/null; then
+    if PGPASSWORD="${LEO_AD_DB_PASSWORD:-}" psql -h "${LEO_AD_DB_HOST:-localhost}" -p "${LEO_AD_DB_PORT:-5432}" -U "${LEO_AD_DB_USER:-postgres}" -d "${LEO_AD_DB_NAME:-customer360}" -tAc "SELECT to_regclass('leo_ads.tenant') IS NOT NULL" -w 2>/dev/null | grep -qx "t"; then
         POSTGRES_AVAILABLE=1
-        echo -e "${GREEN}✓ PostgreSQL available - running full test suite${NC}"
+        echo -e "${GREEN}✓ PostgreSQL and leo_ads schema available - running full test suite${NC}"
     else
-        echo -e "${YELLOW}⚠ PostgreSQL unavailable - running model tests only${NC}"
-        echo -e "${YELLOW}  (Repository/API tests require PostgreSQL)${NC}"
-        echo -e "${YELLOW}  To run full tests: docker-compose up postgres${NC}"
+        echo -e "${YELLOW}⚠ PostgreSQL or leo_ads schema unavailable - running model tests only${NC}"
+        echo -e "${YELLOW}  (Repository/API tests require PostgreSQL with the leo_ads schema)${NC}"
+        echo -e "${YELLOW}  To initialize it: psql ... -f sql-scripts/db-schema-init.sql${NC}"
         TEST_FILES="tests/test_models.py tests/test_model_metadata.py"
     fi
 else
     echo -e "${YELLOW}⚠ psql not found - running model tests only${NC}"
-    echo -e "${YELLOW}  (Repository/API tests require PostgreSQL)${NC}"
-    echo -e "${YELLOW}  To run full tests: docker-compose up postgres${NC}"
+    echo -e "${YELLOW}  (Repository/API tests require PostgreSQL with the leo_ads schema)${NC}"
+    echo -e "${YELLOW}  To initialize it: psql ... -f sql-scripts/db-schema-init.sql${NC}"
     TEST_FILES="tests/test_models.py tests/test_model_metadata.py"
 fi
 

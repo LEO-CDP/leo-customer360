@@ -27,7 +27,7 @@ from tests._pg import check_postgres_available
 
 pytestmark = pytest.mark.skipif(
     not check_postgres_available(),
-    reason="PostgreSQL required. Run: docker-compose up postgres",
+    reason="PostgreSQL with leo_ads schema required",
 )
 
 from core.application import AdServerApplication

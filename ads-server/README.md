@@ -51,11 +51,11 @@ cp .env.example .env
 # Edit .env:
 #   LEO_AD_API_HOST=localhost
 #   LEO_AD_API_PORT=9009
-#   DB_HOST=localhost
-#   DB_PORT=5432
-#   DB_USER=postgres
-#   DB_PASSWORD=your_password
-#   DB_NAME=customer360
+#   LEO_AD_DB_HOST=localhost
+#   LEO_AD_DB_PORT=5432
+#   LEO_AD_DB_USER=postgres
+#   LEO_AD_DB_PASSWORD=your_password
+#   LEO_AD_DB_NAME=customer360
 ```
 
 ### Running the Server
@@ -633,15 +633,15 @@ This:
 
 From `.env`:
 ```bash
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=your_password
-DB_NAME=customer360
-DB_SCHEMA=leo_ads
-DB_POOL_SIZE=10
-DB_MAX_OVERFLOW=20
-DB_ECHO_SQL=false  # Set to true for SQL debugging
+LEO_AD_DB_HOST=localhost
+LEO_AD_DB_PORT=5432
+LEO_AD_DB_USER=postgres
+LEO_AD_DB_PASSWORD=your_password
+LEO_AD_DB_NAME=customer360
+LEO_AD_DB_SCHEMA=leo_ads
+LEO_AD_DB_POOL_SIZE=10
+LEO_AD_DB_MAX_OVERFLOW=20
+LEO_AD_DB_ECHO_SQL=false  # Set to true for SQL debugging
 ```
 
 **Connection pooling:**
@@ -870,21 +870,23 @@ PostgreSQL (durability) → Source of truth
 |----------|---------|---------|
 | `LEO_AD_API_HOST` | `localhost` | API listen address |
 | `LEO_AD_API_PORT` | `9009` | API listen port |
-| `DB_HOST` | `localhost` | PostgreSQL host |
-| `DB_PORT` | `5432` | PostgreSQL port |
-| `DB_USER` | `postgres` | PostgreSQL user |
-| `DB_PASSWORD` | `password` | PostgreSQL password |
-| `DB_NAME` | `customer360` | Database name |
-| `DB_SCHEMA` | `leo_ads` | Schema name |
-| `DB_POOL_SIZE` | `10` | Connection pool size |
-| `DB_MAX_OVERFLOW` | `20` | Max overflow connections |
-| `DB_POOL_RECYCLE_SECONDS` | `1800` | Connection recycle interval |
-| `DB_ECHO_SQL` | `false` | Enable SQL logging (debug) |
-| `UVICORN_RELOAD` | `false` | Enable auto-reload (dev only) |
-| `CACHE_ENABLED` | `true` | Enable Redis caching |
-| `REDIS_HOST` | `localhost` | Redis host |
-| `REDIS_PORT` | `6580` | Redis port |
-| `CACHE_TTL_SECONDS` | `60` | Cache TTL |
+| `LEO_AD_DB_HOST` | `localhost` | PostgreSQL host |
+| `LEO_AD_DB_PORT` | `5432` | PostgreSQL port |
+| `LEO_AD_DB_USER` | `postgres` | PostgreSQL user |
+| `LEO_AD_DB_PASSWORD` | `password` | PostgreSQL password |
+| `LEO_AD_DB_NAME` | `customer360` | Database name |
+| `LEO_AD_DB_SCHEMA` | `leo_ads` | Schema name |
+| `LEO_AD_DB_POOL_SIZE` | `10` | Connection pool size |
+| `LEO_AD_DB_MAX_OVERFLOW` | `20` | Max overflow connections |
+| `LEO_AD_DB_POOL_RECYCLE_SECONDS` | `1800` | Connection recycle interval |
+| `LEO_AD_DB_ECHO_SQL` | `false` | Enable SQL logging (debug) |
+| `LEO_AD_UVICORN_RELOAD` | `false` | Enable auto-reload (dev only) |
+| `LEO_AD_CACHE_ENABLED` | `true` | Enable Redis caching |
+| `LEO_AD_REDIS_HOST` | `localhost` | Redis host |
+| `LEO_AD_REDIS_PORT` | `6580` | Redis port |
+| `LEO_AD_REDIS_DB` | `0` | Redis database number |
+| `LEO_AD_REDIS_PASSWORD` | unset | Redis password |
+| `LEO_AD_CACHE_TTL_SECONDS` | `60` | Cache TTL |
 
 ---
 
@@ -952,7 +954,7 @@ PostgreSQL connection failed
 **Solution:**
 - Ensure PostgreSQL is running: `docker ps | grep postgres`
 - Check credentials in `.env`
-- Verify `DB_HOST` is reachable: `ping localhost`
+- Verify `LEO_AD_DB_HOST` is reachable: `ping localhost`
 
 ### Schema not found
 

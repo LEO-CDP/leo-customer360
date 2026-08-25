@@ -20,11 +20,11 @@ def _pg_url() -> str:
     import os
 
     return (
-        f"postgresql+psycopg2://{os.getenv('DB_USER', 'postgres')}:"
-        f"{os.getenv('DB_PASSWORD', 'postgres')}@"
-        f"{os.getenv('DB_HOST', 'localhost')}:"
-        f"{os.getenv('DB_PORT', '5432')}/"
-        f"{os.getenv('DB_NAME', 'customer360')}"
+        f"postgresql+psycopg2://{os.getenv('LEO_AD_DB_USER', 'postgres')}:"
+        f"{os.getenv('LEO_AD_DB_PASSWORD', 'postgres')}@"
+        f"{os.getenv('LEO_AD_DB_HOST', 'localhost')}:"
+        f"{os.getenv('LEO_AD_DB_PORT', '5432')}/"
+        f"{os.getenv('LEO_AD_DB_NAME', 'customer360')}"
     )
 
 

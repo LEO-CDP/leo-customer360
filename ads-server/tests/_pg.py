@@ -9,19 +9,22 @@ import os
 
 
 def check_postgres_available() -> bool:
-    """Return True if PostgreSQL is reachable with the current DB_* env vars."""
+    """Return True if PostgreSQL and the leo_ads schema are available."""
     try:
         import psycopg2
 
         conn = psycopg2.connect(
-            host=os.getenv("DB_HOST", "localhost"),
-            port=os.getenv("DB_PORT", "5432"),
-            user=os.getenv("DB_USER", "postgres"),
-            password=os.getenv("DB_PASSWORD", "postgres"),
-            dbname=os.getenv("DB_NAME", "customer360"),
+            host=os.getenv("LEO_AD_DB_HOST", "localhost"),
+            port=os.getenv("LEO_AD_DB_PORT", "5432"),
+            user=os.getenv("LEO_AD_DB_USER", "postgres"),
+            password=os.getenv("LEO_AD_DB_PASSWORD", "postgres"),
+            dbname=os.getenv("LEO_AD_DB_NAME", "customer360"),
             connect_timeout=2,
         )
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT to_regclass('leo_ads.tenant')")
+            schema_ready = cursor.fetchone()[0] is not None
         conn.close()
-        return True
+        return schema_ready
     except Exception:
         return False

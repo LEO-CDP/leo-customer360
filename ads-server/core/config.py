@@ -2,7 +2,6 @@
 
 from typing import Optional
 
-from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from sqlalchemy import create_engine, text
@@ -12,16 +11,14 @@ from sqlalchemy.orm import Session, sessionmaker
 class AdServerSettings(BaseSettings):
     """Application settings for the LEO Ad Server API."""
     
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="LEO_AD_",
+        extra="ignore",
+    )
 
-    environment: str = Field(
-        default="development",
-        validation_alias=AliasChoices("ENVIRONMENT", "environment"),
-    )
-    api_version: str = Field(
-        default="1.0.0",
-        validation_alias=AliasChoices("API_VERSION", "api_version"),
-    )
+    environment: str = "development"
+    api_version: str = "1.0.0"
 
     db_host: str = "localhost"
     db_port: int = 5432

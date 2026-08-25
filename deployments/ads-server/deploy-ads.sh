@@ -37,7 +37,7 @@ ADS_PORT="$(tfval ads_port "$ovl")"; ADS_PORT="${ADS_PORT:-9009}"
 DB_SCHEMA="$(tfval ads_db_schema "$ovl")"; DB_SCHEMA="${DB_SCHEMA:-leo_ads}"
 SEED_SAMPLE="$(tfval ads_seed_sample "$ovl")"; SEED_SAMPLE="${SEED_SAMPLE:-false}"
 ENVIRONMENT="$(tfval ads_environment "$ovl")"; ENVIRONMENT="${ENVIRONMENT:-production}"
-ADS_ROOT_PATH="$(tfval ads_root_path "$ovl")"   # e.g. /ads when fronted by Caddy under that path (empty = served at root)
+LEO_AD_ROOT_PATH="$(tfval ads_root_path "$ovl")"   # e.g. /ads when fronted by Caddy under that path (empty = served at root)
 
 # --- resolve the target VM from ../server outputs ---
 SERVERS_JSON="$( (cd ../server && terraform workspace select "$ENV" >/dev/null 2>&1 && terraform output -json servers 2>/dev/null) || true )"
@@ -110,18 +110,18 @@ OTEL_LINES="$(otel_env_lines ads-server "$ENV" "$JAEGER_HOST")"
 # env file built locally, shipped base64 (dodges ssh arg-flattening). CACHE_ENABLED
 # only when a Redis password+host is available; otherwise the app fails open.
 CACHE_ENABLED="false"; [[ -n "${REDIS_HOST:-}" && -n "${REDIS_PASS:-}" ]] && CACHE_ENABLED="true"
-ENVB64="$(printf '%s' "ENVIRONMENT=$ENVIRONMENT
-DB_HOST=$DB_HOST
-DB_PORT=$DB_PORT
-DB_NAME=$DB_NAME
-DB_USER=$DB_USER
-DB_PASSWORD=$DB_PASS
-DB_SCHEMA=$DB_SCHEMA
-REDIS_HOST=${REDIS_HOST:-}
-REDIS_PORT=${REDIS_PORT:-6580}
-REDIS_PASSWORD=${REDIS_PASS:-}
-CACHE_ENABLED=$CACHE_ENABLED
-ADS_ROOT_PATH=$ADS_ROOT_PATH
+ENVB64="$(printf '%s' "LEO_AD_ENVIRONMENT=$ENVIRONMENT
+LEO_AD_DB_HOST=$DB_HOST
+LEO_AD_DB_PORT=$DB_PORT
+LEO_AD_DB_NAME=$DB_NAME
+LEO_AD_DB_USER=$DB_USER
+LEO_AD_DB_PASSWORD=$DB_PASS
+LEO_AD_DB_SCHEMA=$DB_SCHEMA
+LEO_AD_REDIS_HOST=${REDIS_HOST:-}
+LEO_AD_REDIS_PORT=${REDIS_PORT:-6580}
+LEO_AD_REDIS_PASSWORD=${REDIS_PASS:-}
+LEO_AD_CACHE_ENABLED=$CACHE_ENABLED
+LEO_AD_ROOT_PATH=$LEO_AD_ROOT_PATH
 $OTEL_LINES" | base64 | tr -d '\n')"
 DBPW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
 
