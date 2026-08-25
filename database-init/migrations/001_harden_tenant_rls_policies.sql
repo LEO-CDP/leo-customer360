@@ -1,4 +1,3 @@
--- migrate:up
 -- Existing databases do not rerun database-schema.sql automatically. Recreate
 -- tenant policies so an unset/blank app.tenant_id fails closed instead of
 -- raising an invalid UUID cast error.
@@ -51,7 +50,3 @@ BEGIN
     END LOOP;
 END;
 $$;
-
--- migrate:down
--- No-op: dropping tenant RLS policies would reopen a fail-closed hole.
--- The up section recreates them idempotently (DROP POLICY IF EXISTS + CREATE).
