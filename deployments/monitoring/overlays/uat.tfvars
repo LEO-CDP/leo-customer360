@@ -90,6 +90,6 @@ pgadmin_proxy_port = 4050                       # (unused while pgadmin_sso = fa
 # IP — set in ../server/overlays/uat.tfvars (agent_ports) and apply with
 # `cd ../server && ./deploy.sh uat apply`. deploy-monitoring auto-registers the env via the
 # Portainer API (needs PORTAINER_ADMIN_PASSWORD in .env; else it prints the one-click UI step).
-portainer_agent_server_keys = "1x2"
+portainer_agent_server_keys = "1x2,tracking"   # backend box (10.100.1.4) + data-tracking box (10.100.1.8)
 portainer_agent_image       = "portainer/agent:lts"
 portainer_agent_port        = 9001

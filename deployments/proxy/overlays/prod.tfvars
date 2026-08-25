@@ -20,3 +20,7 @@ portainer_upstream = "127.0.0.1:9443"   # monitoring
 
 # Jaeger trace UI served under /jaeger on :443 (TLS) via its oauth2-proxy SSO gate.
 jaeger_upstream = "127.0.0.1:4686"
+
+# data-tracking-api served under /data. Dedicated box in prod too — FILL with that box's
+# PRIVATE ip from ../server (prod) outputs once the "tracking" server key is provisioned.
+data_upstream = "10.101.1.15:8010" # <-- set the real tracking-box private ip

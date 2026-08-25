@@ -22,3 +22,8 @@ portainer_upstream = "127.0.0.1:9443"  # Portainer HTTPS (only if you enable /po
 
 # Jaeger trace UI served under /jaeger on :443 (TLS) via its oauth2-proxy SSO gate.
 jaeger_upstream = "127.0.0.1:4686"
+
+# data-tracking-api served under /data. On its OWN box (server key "tracking"), so this is a
+# PRIVATE cross-box ip, NOT 127.0.0.1. Assumes DHCP gives the tracking box 10.100.1.8 — verify
+# with `cd ../server && terraform output servers` and correct if it differs.
+data_upstream = "10.100.1.8:8010"

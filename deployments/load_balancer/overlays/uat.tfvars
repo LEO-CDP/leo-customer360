@@ -69,7 +69,9 @@ backends = {
     health_path = "/misc/ping"
   }
 }
-# Jaeger is fronted by Caddy at https://beta.leocdp.com/jaeger (see deployments/proxy) — no dedicated LB listener.
+# data-tracking-api is fronted by Caddy at https://beta.leocdp.com/data (no dedicated LB listener;
+# it rides the existing :443 caddy_https passthrough). Jaeger is likewise fronted by Caddy at
+# https://beta.leocdp.com/jaeger — no dedicated LB listener.
 
 # Open the app ports on the backends' Default secgroup so the LB can reach them.
 backend_security_group_id = "secg-7c1e85ec-8028-460a-8592-99463f198831" # Default secgroup on the boxes
