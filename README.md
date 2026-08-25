@@ -34,6 +34,7 @@ The current repo has two live backend services and a set of placeholder service 
 | [`customer360-api/`](customer360-api) | FastAPI service with routers, auth, SQLAlchemy models, and business logic |
 | [`frontend-admin/`](frontend-admin) | Thin admin UI served by FastAPI and loaded from static templates |
 | [`all-data-simulator/`](all-data-simulator) | Synthetic raw data and optional S3/MinIO upload helpers |
+| [`data-tracking-api/`](data-tracking-api) | FastAPI service that stores CDP tracking logs in hourly S3/MinIO objects |
 | [`docs/`](docs) | Architecture, operations, and planning material |
 | [`postgres/`](postgres), [`redis/`](redis) | Docker image setup for Postgres and Redis |
 | [`ui-wireframes/`](ui-wireframes) | UI design references |
@@ -46,7 +47,8 @@ The repo runs with the following high-level flow:
 2. `customer360-api` exposes the public API and enforces tenant-aware auth via middleware.
 3. The Dagster backend runs jobs such as identity resolution and segmentation in a monitored workflow.
 4. The admin frontend calls the API directly, without direct database access.
-5. Local dev and production scripts bootstrap dockerized infrastructure and run the platform as a coherent stack.
+5. The data-tracking API stores immutable hourly NDJSON batches in per-source S3 buckets; dev uses the in-network MinIO service.
+6. Local dev and production scripts bootstrap dockerized infrastructure and run the platform as a coherent stack.
 
 ## Local development quick start
 
@@ -64,7 +66,7 @@ Then edit the values in `.env` for your local Postgres, Redis, Keycloak, and hos
 ./dev-c360.sh
 ```
 
-This script starts the infra stack in Docker and automatically seeds demo data if the database is empty. It is meant for the workflow where Postgres and Redis run in Docker while the app services run directly on the host.
+This script starts the infra stack and the MinIO-backed data-tracking API in Docker, then automatically seeds demo data if the database is empty. It is meant for the workflow where Postgres and Redis run in Docker while the main API and backend workers run directly on the host.
 
 ### 3) Run host services
 
@@ -94,13 +96,14 @@ For the packaged stack using Docker Compose, run:
 ./manage-c360.sh status
 ```
 
-This covers the main production service stack in `docker-compose.yml`, including Postgres, Redis, Keycloak, Dagster, and the API. The script is the recommended entrypoint for production-like local deployment and first-time env bootstrapping.
+This covers the main production service stack in `docker-compose.yml`, including Postgres, Redis, Keycloak, Dagster, the APIs, and the data-tracking service. The script is the recommended entrypoint for production-like local deployment and first-time env bootstrapping.
 
 ## Service entrypoints
 
 The repo uses these primary entrypoints:
 
 - `customer360-api/app.py` — FastAPI API entrypoint
+- `data-tracking-api/app.py` — CDP tracking-log FastAPI entrypoint (port 8010)
 - `backend-system/identity_resolution/worker.py` — legacy local polling helper; production runs the Dagster job
 - `frontend-admin/app.py` — admin frontend shell
 - `manage-c360.sh` — production-style Docker stack manager

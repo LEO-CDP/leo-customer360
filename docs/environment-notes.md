@@ -91,6 +91,24 @@ This repository uses a single root-level environment file, `.env`. The companion
 - `MINIO_CONSOLE_HOST_PORT`: Host-published MinIO console port. Default: `9001`
 - `MINIO_HOST_BIND`: Bind address for the published MinIO ports. Default: `127.0.0.1`
 
+## CDP data tracking object storage
+
+- `DATA_TRACKING_API_HOST`: Bind address for the tracking API. Default: `127.0.0.1`
+- `DATA_TRACKING_API_PORT`: Host-published tracking API port. Default: `8010`
+- `TRACKING_MAX_EVENTS_PER_REQUEST`: Maximum events accepted in one batch. Default: `1000`
+- `OBJECT_STORAGE_MODE`: `s3` for production or `minio` for a host-run dev service.
+- `S3_ENDPOINT_URL`: S3-compatible endpoint; dev Compose sets this to `http://minio:9000`.
+- `S3_REGION`: AWS region. Default: `us-east-1`
+- `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`: Optional explicit credentials; omit them in AWS when using IAM roles.
+- `S3_FORCE_PATH_STYLE`: Required for MinIO. Default: `false`
+- `S3_AUTO_CREATE_BUCKETS`: Create `data-tracking-[data_source_id]` on first write. Default: `true`
+- `TRACKING_REDIS_KEY_PREFIX`: Prefix for tracking session and rate-limit keys. Default: `data-tracking-api`
+- `TRACKING_SESSION_TTL_SECONDS`: Session metadata TTL. Default: `86400`
+- `TRACKING_RATE_LIMIT_REQUESTS` / `TRACKING_RATE_LIMIT_WINDOW_SECONDS`: Per-IP request window. Defaults: `120` / `60`
+- `TRACKING_RATE_LIMIT_FAIL_OPEN`: Allow ingestion when Redis rate limiting is unavailable. Default: `true`; use `false` for strict enforcement.
+- `TRACKING_BOT_FILTER_ENABLED`: Enable configured user-agent filtering. Default: `true`
+- `TRACKING_BOT_USER_AGENT_PATTERNS`: Comma-separated case-insensitive user-agent substrings to discard.
+
 ## GenAI settings
 
 - `GOOGLE_GENAI_API_KEY`: API key for the Google GenAI integration. Default: `YOUR_GOOGLE_GENAI_API_KEY`

@@ -2,7 +2,8 @@
 
 Audience: DevOps engineers deploying/operating the stack, and backend
 engineers developing against it locally. Covers
-[`docker-compose.yml`](docker-compose.yml) at the root of `core-customer360/`.
+[`docker-compose.yml`](docker-compose.yml) and the host-run development Compose
+variants at the root of `core-customer360/`.
 
 For architecture/DB schema background see [README.md](README.md),
 [TECHNICAL-DOCUMENTATION.md](TECHNICAL-DOCUMENTATION.md), and
@@ -18,15 +19,18 @@ containerized deployment.
 | `postgres` | `customer360-postgres:local` (postgis/postgis:16-3.5 + pgvector) | Primary datastore, auto-provisioned with [`database-schema.sql`](database-init/database-schema.sql) | `${POSTGRES_HOST_PORT:-5432}` → 5432 |
 | `redis` | `customer360-redis:local` (redis:8-alpine) | Response cache **and Keycloak token cache** for customer360-api (see [`core/cache.py`](customer360-api/core/cache.py) / [`core/auth.py`](customer360-api/core/auth.py)) | `${REDIS_HOST_PORT:-6580}` → 6580 |
 | `keycloak-db-init` | reuses `customer360-postgres:local` | **One-shot** job that creates the dedicated `db_keycloak` database on the shared `postgres` instance, then exits | none |
-| `keycloak` | `keycloak/keycloak:latest` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
+| `keycloak` | `keycloak/keycloak:26.7` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
 | `dagster` | `customer360-dagster:local` (Python 3.11-slim) | Dagster webserver and daemon for all nine backend-system code locations, including identity resolution | `${DAGSTER_UI_PORT:-3000}` → 3000 |
 | `api` | `customer360-api:local` (Python 3.11-slim) | Customer 360 / CIR REST API (FastAPI), Keycloak-secured | `${C360_API_PORT:-8008}` → 8008 |
+| `tracking-api` | `customer360-tracking-api:local` (Python 3.11-slim) | CDP tracking-log ingestion; AWS S3 in production, MinIO in dev | `${DATA_TRACKING_API_PORT:-8010}` → 8010 |
 | `cir-demo-seed` | reuses `customer360-dagster:local` | **Dev only** one-shot job that seeds demo data, then exits | none |
 
 All services share one bridge network, `customer360-network`, and are isolated
-from other Docker workloads on the host. Two named volumes persist state
-across restarts: `customer360-pgdata` (Postgres data directory, also backs
-`db_keycloak`) and `customer360-redisdata` (Redis AOF file).
+from other Docker workloads on the host. The production-shaped Compose file
+uses three named volumes: `customer360-pgdata` (Postgres data directory, also
+backs `db_keycloak`), `customer360-redisdata` (Redis AOF file), and
+`customer360-dagsterdata` (Dagster home). The development Compose file adds
+`customer360-miniodata` for MinIO.
 
 ```mermaid
 flowchart LR
@@ -36,6 +40,7 @@ flowchart LR
         KC[keycloak]
         DAG[dagster: all backend tasks]
         API[api]
+        TRACK[tracking-api]
     end
     DAG -->|psycopg2| PG
     API -->|SQLAlchemy| PG
@@ -43,6 +48,7 @@ flowchart LR
     API -->|introspect Bearer token| KC
     KC -->|db_keycloak| PG
     Client -->|HTTP :8008 + Authorization: Bearer| API
+    Client -->|HTTP :8010| TRACK
     Seed[cir-demo-seed\nprofile: dev] -.->|one-shot| PG
 ```
 
@@ -53,7 +59,7 @@ flowchart LR
 - Docker Engine + Docker Compose v2 (the `docker compose` plugin, not the
   legacy standalone `docker-compose` v1 binary — `depends_on.condition:
   service_healthy` requires the Compose Specification).
-- Ports `5432` / `6580` / `8008` free on the host, **or** override them (see
+- Ports `5432` / `6580` / `8008` / `8010` free on the host, **or** override them (see
   §4) — this matters on dev machines that already run `pgsql16_vector` /
   another Redis via [`dev-start-pgsql.sh`](dev-start-pgsql.sh).
 
@@ -74,7 +80,7 @@ Edit `.env` and set real values for at least:
 - `KEYCLOAK_ADMIN_PASSWORD` — admin console password for the local `keycloak`
   container.
 - `KEYCLOAK_CLIENT_SECRET` — secret of the confidential client customer360-api
-  uses to introspect tokens (see §10 below to create it).
+  uses to introspect tokens (see §9 below to create it).
 - `GOOGLE_GENAI_API_KEY` — optional; leave the `YOUR_...` placeholder to keep
   CIR's persona-name generation fully offline/deterministic (see
   [identity-resolution.md](identity-resolution.md)).
@@ -85,12 +91,15 @@ credentials. `.env.example` is the committed template.
 > **How `.env` is used (important to understand before editing it):**
 > 1. `docker-compose.yml` uses `${VAR}` substitution to seed the official
 >    Postgres/Redis image bootstrap variables (`POSTGRES_USER`, `--requirepass`, etc.).
-> 2. Every service also gets the whole file injected via `env_file:`, exactly
->    like `customer360-api`/`backend-system` read it for non-Docker
->    local dev (`pydantic-settings` / `python-dotenv`).
+> 2. Application services (`api`, Dagster, demo seed, and `tracking-api`) get
+>    the whole file injected via `env_file:`, exactly like
+>    `customer360-api`/`backend-system` read it for non-Docker local dev
+>    (`pydantic-settings` / `python-dotenv`). Infrastructure containers receive
+>    only the explicit variables they need.
 > 3. **`DB_HOST` / `REDIS_HOST` in `.env` are overridden by `docker-compose.yml`**
 >    to the in-network service names (`postgres` / `redis`) for the
->    `api`/`dagster`/`cir-demo-seed` containers, regardless of what's in the file.
+>    `api`/`dagster`/`cir-demo-seed`/`tracking-api` containers, regardless of
+>    what's in the file.
 >    The `localhost` defaults in `.env.example` are only correct when you run
 >    `customer360-api`/`backend-system` directly on the host
 >    (`./start.sh`, `./run-demo.sh`) against the dockerized Postgres/Redis via
@@ -100,14 +109,14 @@ credentials. `.env.example` is the committed template.
 
 ## 4. Running the stack
 
-### Production mode (5 core services)
+### Production mode
 
 ```bash
 docker compose up -d --build
 docker compose ps
 ```
 
-Starts `postgres`, `redis`, `keycloak`, `dagster`, and `api`. First boot on a fresh
+Starts `postgres`, `redis`, `keycloak`, `dagster`, `api`, and `tracking-api`. The tracking API writes to configured AWS S3 and does not require a local MinIO container. First boot on a fresh
 `customer360-pgdata` volume runs `postgres/init/00-extensions.sql` then the
 full `database-schema.sql` automatically (Postgres' standard
 `/docker-entrypoint-initdb.d/` mechanism — **only runs once**, on an empty
@@ -119,7 +128,7 @@ data directory; see §7 for schema changes afterward).
 docker compose --profile dev up -d --build
 ```
 
-Same 5 services, **plus** `cir-demo-seed`, a one-shot job (`restart: "no"`)
+The same six long-running services, **plus** `cir-demo-seed`, a one-shot job (`restart: "no"`)
 that waits for `postgres` to be healthy, then runs, in order:
 
 1. `identity_resolution/scripts/init_sample_data.py` — seeds 1000 synthetic AppsFlyer raw profiles
@@ -142,6 +151,22 @@ repo notes) — safe to re-run:
 docker compose --profile dev up cir-demo-seed
 ```
 
+### Host-run application development
+
+For the workflow that runs `customer360-api`, Dagster, and the frontend on the
+host, use the development Compose file for Postgres, Redis, Keycloak, MinIO,
+and the tracking API:
+
+```bash
+docker compose -f dev-docker-compose.yml up -d --build
+```
+
+When `SSO_LOGIN=false`, [`dev-c360.sh`](../dev-c360.sh) selects
+`dev-no-sso-docker-compose.yml`, which provides the same MinIO-backed tracking
+API without starting Keycloak. Both variants publish the tracking API at
+`${DATA_TRACKING_API_PORT:-8010}` and connect it to the in-network Redis and
+MinIO services.
+
 ### Overriding host ports (avoid clashing with other local Postgres/Redis)
 
 In `.env`:
@@ -153,7 +178,7 @@ C360_API_PORT=18000
 ```
 
 Containers still talk to each other over `customer360-network` on the
-standard internal ports (5432/6580/8008) — only the host-published mapping
+standard internal ports (5432/6580/8008/8010) — only the host-published mapping
 changes.
 
 ### Building without starting, or rebuilding a single service
@@ -161,6 +186,7 @@ changes.
 ```bash
 docker compose build                # all services
 docker compose build api            # just customer360-api after a code change
+docker compose build tracking-api  # just the CDP tracking service
 docker compose up -d --no-deps api  # restart only api, don't touch its deps
 ```
 
@@ -176,7 +202,9 @@ docker inspect -f '{{.State.Health.Status}}' customer360-postgres
 docker inspect -f '{{.State.Health.Status}}' customer360-redis
 docker inspect -f '{{.State.Health.Status}}' customer360-dagster
 docker inspect -f '{{.State.Health.Status}}' customer360-api
+docker inspect -f '{{.State.Health.Status}}' customer360-tracking-api
 curl -s http://localhost:${C360_API_PORT:-8008}/health
+curl -s http://localhost:${DATA_TRACKING_API_PORT:-8010}/health
 ```
 
 | Service | Healthcheck mechanism |
@@ -186,8 +214,9 @@ curl -s http://localhost:${C360_API_PORT:-8008}/health
 | `keycloak` | `GET /health/ready` (`KC_HEALTH_ENABLED=true`) |
 | `dagster` | HTTP readiness on port `3000` |
 | `api` | `python -c "urllib.request.urlopen('http://localhost:8008/health')"` |
+| `tracking-api` | `python -c "urllib.request.urlopen('http://localhost:8010/health')"` |
 
-All 5 use `restart: unless-stopped` — a crashed container (or one killed by
+All six long-running services use `restart: unless-stopped` — a crashed container (or one killed by
 `docker restart`) comes back automatically; a deliberate `docker compose stop`
 does not.
 
@@ -195,9 +224,49 @@ does not.
 
 ```bash
 docker compose logs -f api
+docker compose logs -f tracking-api
 docker compose logs -f dagster       # Dagster UI, daemon, and task-run logs
 docker compose logs -f postgres redis
 ```
+
+### Tracking API and object storage
+
+The tracking service accepts JSON batches at
+`POST /api/v1/tracking/logs` and writes immutable NDJSON objects to a separate
+bucket for each data source:
+
+```text
+s3://data-tracking-[data_source_id]/yyyy-mm-dd-hh/[batch-uuid].jsonl
+```
+
+Example local upload against the MinIO-backed dev service:
+
+```bash
+curl -i -X POST http://localhost:${DATA_TRACKING_API_PORT:-8010}/api/v1/tracking/logs \
+  -H 'Content-Type: application/json' \
+  -H 'User-Agent: c360-debug-client' \
+  -d '{
+    "data_source_id": "11111111-1111-1111-1111-111111111111",
+    "session_id": "debug-session",
+    "events": [{"event_name": "page_view", "page_url": "https://example.test/"}]
+  }'
+```
+
+Check the API access log and MinIO contents separately:
+
+```bash
+docker compose -f dev-no-sso-docker-compose.yml logs -f --timestamps tracking-api
+docker logs -f --timestamps customer360-minio
+```
+
+The default `customer360-events-dev` bucket is not used by this endpoint. Open
+the generated `data-tracking-[data_source_id]` bucket in the MinIO console at
+`http://localhost:${MINIO_CONSOLE_HOST_PORT:-9001}`. A `422` response means the
+JSON body failed validation; a `503` means the tracking service could not reach
+S3/MinIO; a `429` means the Redis rate limit was exceeded. The tracking API is
+not connected to the Customer 360 Keycloak middleware, so production deployments
+must protect its ingress or add an API-key/signature layer before exposing it
+publicly.
 
 ### Stopping / restarting
 
@@ -206,7 +275,7 @@ docker compose stop            # stop containers, keep volumes/network
 docker compose start           # resume
 docker compose restart api     # just one service
 docker compose down            # stop + remove containers (volumes kept)
-docker compose down -v         # DESTRUCTIVE: also deletes customer360-pgdata/-redisdata
+docker compose down -v         # DESTRUCTIVE: also deletes named volumes, including Dagster data
 ```
 
 ### Shelling in / ad-hoc SQL
@@ -246,13 +315,23 @@ tune per environment (dev/staging/prod). Highlights:
 | `CIR_POLL_INTERVAL_SECONDS` | `30` | How often the `cir` worker polls `cdp_raw_profiles_stage` for unresolved rows. |
 | `CIR_BATCH_SIZE` | `5000` | Rows per resolution batch. |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `10` / `20` | customer360-api SQLAlchemy pool sizing — tune with expected concurrent request volume. |
-| `SSO_LOGIN` | `true` | Master switch read by the API's auth middleware config (kept `true` in every environment — customer360-api has no "open" mode besides `/health`). |
+| `SSO_LOGIN` | `false` | Customer 360 API auth mode from `.env.example`; set `true` for Keycloak-protected deployments. The dev no-SSO Compose path is selected when this is `false`. |
 | `SSO_LOGIN_URL` | `http://localhost:8080` | Base Keycloak URL. **Overridden to `http://keycloak:8080` for the `api` container** by `docker-compose.yml` (in-network service name), same pattern as `DB_HOST`/`REDIS_HOST`. |
-| `KEYCLOAK_REALM` | `leocdp` | Realm customer360-api validates tokens against — must exist in Keycloak (see §10). |
+| `KEYCLOAK_REALM` | `leocdp` | Realm customer360-api validates tokens against — must exist in Keycloak (see §9). |
 | `KEYCLOAK_CLIENT_ID` / `KEYCLOAK_CLIENT_SECRET` | `leocdp` / placeholder | Confidential client customer360-api uses to call Keycloak's token introspection endpoint. **Change the secret in every real environment.** |
 | `KEYCLOAK_VERIFY_SSL` | `false` | Set `true` once Keycloak is behind real TLS (self-signed/dev certs will fail introspection otherwise). |
 | `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` | `admin` / placeholder | Bootstrap admin console credentials for the local `keycloak` container (`start-dev` mode only). **Change in every real environment.** |
 | `KEYCLOAK_HOST_PORT` | `8080` | Host-published port for the Keycloak admin console / API. |
+| `DATA_TRACKING_API_PORT` | `8010` | Host-published port for the CDP tracking-log API. |
+| `OBJECT_STORAGE_MODE` | `s3` | `s3` in the production-shaped stack; `minio` is forced by the dev Compose files. |
+| `S3_ENDPOINT_URL` | empty | Optional S3-compatible endpoint. Dev Compose overrides it to `http://minio:9000`. |
+| `S3_REGION` | `us-east-1` | AWS region used by the tracking API. |
+| `S3_AUTO_CREATE_BUCKETS` | `true` | Creates `data-tracking-[data_source_id]` on first write; set `false` when infrastructure provisions buckets. |
+| `TRACKING_SESSION_TTL_SECONDS` | `86400` | TTL for non-payload session metadata in Redis. |
+| `TRACKING_RATE_LIMIT_REQUESTS` / `TRACKING_RATE_LIMIT_WINDOW_SECONDS` | `120` / `60` | Per-source-IP Redis request window for tracking ingestion. |
+| `TRACKING_RATE_LIMIT_FAIL_OPEN` | `true` | Allows ingestion when Redis is unavailable; set `false` for strict production enforcement. |
+| `TRACKING_BOT_FILTER_ENABLED` | `true` | Discards configured crawler user agents before storage and rate-limit accounting. |
+| `TRACKING_BOT_USER_AGENT_PATTERNS` | `googlebot,...` | Comma-separated, case-insensitive user-agent substrings to filter. |
 | `GOOGLE_GENAI_API_KEY` | placeholder | Leave as `YOUR_...` to keep CIR persona-name generation offline (see `identity_resolution/persona.py`). |
 
 ---
@@ -296,7 +375,7 @@ volume — see above.)
 
 | Symptom | Likely cause / fix |
 |---|---|
-| `failed to bind host port ... address already in use` | Another process (e.g. `pgsql16_vector`, a host Redis) already owns 5432/6580/8008. Set `POSTGRES_HOST_PORT`/`REDIS_HOST_PORT`/`C360_API_PORT` in `.env` to unused ports. |
+| `failed to bind host port ... address already in use` | Another process (e.g. `pgsql16_vector`, a host Redis) already owns 5432/6580/8008/8010. Set the corresponding `*_HOST_PORT` variables in `.env` to unused ports. |
 | `api`/`cir` stuck "waiting" / never healthy | Check `docker compose logs postgres` — if it never reaches healthy, the DB init script likely failed (bad `.env` values, or a non-idempotent manual schema edit). |
 | `psycopg2.errors.UndefinedColumn` after editing `database-schema.sql` | Schema drift — the running volume was provisioned before your edit. See §7. |
 | `NOAUTH Authentication required` from Redis | `REDIS_PASSWORD` mismatch between `.env` and what `api`/`redis` were started with — restart both after changing it (`docker compose up -d --force-recreate redis api`). |

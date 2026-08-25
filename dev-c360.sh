@@ -1,11 +1,12 @@
 
 #!/bin/bash
 # =============================================================================
-# Customer 360 Platform - local DEV bootstrap (infra-only)
+# Customer 360 Platform - local DEV bootstrap
 #
-# Starts the infra-only stack in dev-docker-compose.yml (postgres + redis +
-# keycloak) so customer360-api and backend-system/identity_resolution (CIR) can be
-# run directly on the host against dockerized Postgres/Redis -- see
+# Starts the development stack in dev-docker-compose.yml (postgres + redis +
+# keycloak + minio + tracking-api) so customer360-api and
+# backend-system/identity_resolution (CIR) can be run directly on the host
+# against dockerized Postgres/Redis -- see
 # customer360-api/start.sh and backend-system/identity_resolution/run-demo.sh, and
 # "non-Docker local dev workflow" in DOCKER-COMPOSE-GUIDE.md section 10.
 #
@@ -14,9 +15,9 @@
 #      contains every key currently in '.env.example'.
 #   2. Starts (or resets) postgres/redis/keycloak/minio via
 #      `docker compose -f dev-docker-compose.yml`.
-#   3. Waits for postgres/redis/keycloak/minio containers to report healthy,
-#      then waits for the one-shot `minio-init` bucket-bootstrap job to
-#      complete.
+#   3. Waits for postgres/redis/keycloak/minio/tracking-api containers to
+#      report healthy, then waits for the one-shot `minio-init` bucket-bootstrap
+#      job to complete.
 #   4. Checks whether the Keycloak 'leocdp' realm exists yet; there is no
 #      automated realm/client seed script in this repo, so it prints manual
 #      setup instructions (DOCKER-COMPOSE-GUIDE.md section 9) when missing.
@@ -58,6 +59,7 @@ REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
 MINIO_CONTAINER="customer360-minio"
 MINIO_INIT_CONTAINER="customer360-minio-init"
+TRACKING_CONTAINER="customer360-tracking-api"
 
 # --- Parse args (order-independent) ---
 ACTION="up"
@@ -270,6 +272,7 @@ wait_for_completed() {
 wait_for_healthy "$POSTGRES_CONTAINER"
 wait_for_healthy "$REDIS_CONTAINER"
 wait_for_healthy "$MINIO_CONTAINER"
+wait_for_healthy "$TRACKING_CONTAINER"
 wait_for_completed "$MINIO_INIT_CONTAINER"
 
 if [[ "${SSO_LOGIN:-true}" == "true" ]]; then
@@ -392,11 +395,12 @@ get_host_service_status() {
 restart_host_services
 
 print_final_service_table() {
-  local postgres_status redis_status minio_status
+  local postgres_status redis_status minio_status tracking_status
   local backend_status api_status frontend_status
   postgres_status="$(docker inspect -f '{{.State.Health.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || echo "unknown")"
   redis_status="$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER" 2>/dev/null || echo "unknown")"
   minio_status="$(docker inspect -f '{{.State.Health.Status}}' "$MINIO_CONTAINER" 2>/dev/null || echo "unknown")"
+  tracking_status="$(docker inspect -f '{{.State.Health.Status}}' "$TRACKING_CONTAINER" 2>/dev/null || echo "unknown")"
   backend_status="$(get_host_service_status "$SCRIPT_DIR/$BACKEND_SYSTEM_DIR/.dagster.pid")"
   api_status="$(get_host_service_status "$SCRIPT_DIR/$CUSTOMER360_API_DIR/.uvicorn.pid")"
   frontend_status="$(get_host_service_status "$SCRIPT_DIR/$FRONTEND_ADMIN_DIR/.uvicorn.pid")"
@@ -408,6 +412,7 @@ print_final_service_table() {
   printf '%-12s | %-10s | %-25s\n' "postgres" "$postgres_status" "localhost:${POSTGRES_HOST_PORT:-5432}"
   printf '%-12s | %-10s | %-25s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6580}"
   printf '%-12s | %-10s | %-25s\n' "minio" "$minio_status" "localhost:${MINIO_API_HOST_PORT:-9000} (console ${MINIO_CONSOLE_HOST_PORT:-9001})"
+  printf '%-12s | %-10s | %-25s\n' "tracking-api" "$tracking_status" "localhost:${DATA_TRACKING_API_PORT:-8010}"
   printf '%-12s | %-10s | %-25s\n' "backend" "$backend_status" "localhost:${DAGSTER_UI_PORT:-3000}"
   printf '%-12s | %-10s | %-25s\n' "api" "$api_status" "localhost:${C360_API_PORT:-8008}"
   printf '%-12s | %-10s | %-25s\n' "frontend" "$frontend_status" "localhost:${FRONTEND_HOST_PORT:-8890}"

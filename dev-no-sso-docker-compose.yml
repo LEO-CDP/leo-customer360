@@ -161,3 +161,54 @@ services:
         mc anonymous set none "local/$$MINIO_BUCKET"
         echo "Bucket $$MINIO_BUCKET ready."
 
+  # ---------------------------------------------------------------------------
+  # 5) CDP data tracking API - DEV uses the in-network customer360-minio.
+  # ---------------------------------------------------------------------------
+  tracking-api:
+    build:
+      context: ./data-tracking-api
+      dockerfile: Dockerfile
+    image: customer360-tracking-api:local
+    container_name: customer360-tracking-api
+    restart: unless-stopped
+    init: true
+    <<: *default-hardening
+    env_file:
+      - .env
+    environment:
+      OBJECT_STORAGE_MODE: minio
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      S3_FORCE_PATH_STYLE: "true"
+      S3_AUTO_CREATE_BUCKETS: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: 6580
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "${DATA_TRACKING_API_HOST:-127.0.0.1}:${DATA_TRACKING_API_PORT:-8010}:8010"
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+

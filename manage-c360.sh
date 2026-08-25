@@ -44,7 +44,8 @@ REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
 DAGSTER_CONTAINER="customer360-dagster"
 API_CONTAINER="customer360-api"
-ALL_CONTAINERS=("$POSTGRES_CONTAINER" "$REDIS_CONTAINER" "$KEYCLOAK_CONTAINER" "$DAGSTER_CONTAINER" "$API_CONTAINER")
+TRACKING_CONTAINER="customer360-tracking-api"
+ALL_CONTAINERS=("$POSTGRES_CONTAINER" "$REDIS_CONTAINER" "$KEYCLOAK_CONTAINER" "$DAGSTER_CONTAINER" "$API_CONTAINER" "$TRACKING_CONTAINER")
 
 # Required secrets that MUST be changed from the .env.example placeholder
 # before we'll let 'start' bring up production (see docker-compose.yml's
@@ -343,7 +344,7 @@ cmd_start_core_services() {
   "${DC_CMD[@]}" stop 2>/dev/null || true
 
   echo "� Building and starting core services (postgres, redis, api from ${COMPOSE_FILE})..."
-  "${DC_CMD[@]}" up -d --build postgres redis
+  "${DC_CMD[@]}" up -d --build postgres redis tracking-api
   wait_for_healthy "customer360-postgres"
   wait_for_healthy "customer360-redis"
 
@@ -351,10 +352,12 @@ cmd_start_core_services() {
   # skip it so compose doesn't also create/start keycloak/keycloak-db-init.
   "${DC_CMD[@]}" up -d --build --no-deps api
   wait_for_healthy "customer360-api"
+  wait_for_healthy "$TRACKING_CONTAINER"
 
   echo ""
   echo "✅ Core services stack is up."
   echo "   API:      http://${C360_API_HOST:-127.0.0.1}:${C360_API_PORT:-8008}  (docs: /docs)"
+  echo "   Tracking: http://${DATA_TRACKING_API_HOST:-127.0.0.1}:${DATA_TRACKING_API_PORT:-8010}  (docs: /docs)"
   echo ""
   echo "   Note: Backend services (identity_resolution, etc.) and frontend must be started separately."
 }
