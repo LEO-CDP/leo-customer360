@@ -24,6 +24,14 @@ servers = {
     flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB — for customer360-api
     root_disk_size = 20
   }
+  "tracking" = {
+    # data-tracking-api (FastAPI event ingestion on :8010 -> S3/vStorage NDJSON, Redis session
+    # cache + rate limit). Its OWN dedicated box (not co-located on the shared api box) so a
+    # beacon-traffic spike can't starve api/keycloak/redis. Deployed by ../server/deploy-tracking.sh.
+    flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB
+    root_disk_size = 20
+    name           = "tracking" # -> c360-api-uat-tracking
+  }
 }
 
 # All resolved from discover-catalog.py for THIS account's live AZ (HCM03-1C):
@@ -68,12 +76,25 @@ security_group = ["secg-7c1e85ec-8028-460a-8592-99463f198831"] # "Default"
 open_ssh         = true
 ssh_ingress_cidr = "0.0.0.0/0" # <-- change to "<your-public-ip>/32"
 
-# Intra-VPC ops ports on the Default secgroup. tcp/9001 = Portainer agent on the backend box
-# (server key "1x2", 10.100.1.4), reached by the Portainer box (api, 10.100.1.5) over the private
-# VPC so ONE Portainer manages every box (see ../monitoring portainer_agent_server_keys). Source
-# tightened to the api box's private IP. Apply after adding: `./deploy.sh uat apply`.
+# Intra-VPC ops ports on the shared Default secgroup (it opens nothing inbound by default).
+# The tracking box (server key "tracking") is the FIRST service NOT co-located on the api box,
+# so unlike the co-located services (which reach each other on 127.0.0.1 via --network host) it
+# needs its cross-box hops opened explicitly. NOTE the private IPs below assume DHCP assigns the
+# tracking box 10.100.1.8 (after backend .4 / api .5) — VERIFY with `terraform output servers`
+# after the first apply and correct the /32s if it differs. Apply: `./deploy.sh uat apply`.
+#   * 9001 -> Portainer agent, reached by the Portainer box (api 10.100.1.5) on EVERY box
+#            (backend 10.100.1.4 AND tracking 10.100.1.8 share this secgroup).
+#   * 8010 -> data-tracking-api, reached by Caddy on the api box (10.100.1.5) to route /data.
+#   * 6580 -> the BROKER Redis co-located on the tracking box (10.100.1.8), reached by the
+#            backend box (10.100.1.4) where the event Loader (Dagster) consumes the stream.
+#            (The tracking-api itself uses this broker on loopback — no cross-box rule needed.)
+#   * 4318 -> Jaeger OTLP/HTTP on the api box, reached by the tracking box (10.100.1.8) for traces.
 extra_ingress = [
-  { port = 9001, cidr = "10.100.1.5/32" },
+  { port = 9001, cidr = "10.100.1.5/32" }, # Portainer agent   <- api box (Portainer)
+  { port = 8010, cidr = "10.100.1.5/32" }, # data-tracking-api <- api box (Caddy /data)
+  { port = 8081, cidr = "10.100.1.5/32" }, # redis-commander  <- api box (Caddy /redis, TLS)
+  { port = 6580, cidr = "10.100.1.4/32" }, # broker Redis (tracking box) <- backend box (Loader)
+  { port = 4318, cidr = "10.100.1.8/32" }, # Jaeger OTLP (api box) <- tracking box
 ]
 
 # LOGIN via cloud-init user_data. The VNG Ubuntu 24.04 image's ssh-keygen.service FAILS at

@@ -101,6 +101,23 @@ class Settings(BaseSettings):
             "TRACKING_BOT_USER_AGENT_PATTERNS", "tracking_bot_user_agent_patterns"
         ),
     )
+    # Phase-1 event broker: when enabled, each accepted event is also XADD-ed to a Redis
+    # Stream that the backend-system event Loader consumes (deployments/docs/
+    # web-tracking-implementation-plan.md §6-8). Best-effort — the durable record is the S3
+    # object, so a Redis hiccup never fails ingestion. OFF by default (dev/compose write only
+    # to S3); the tracking-box deploy sets TRACKING_STREAM_ENABLED=true (its own broker Redis).
+    tracking_stream_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("TRACKING_STREAM_ENABLED", "tracking_stream_enabled"),
+    )
+    tracking_stream_key: str = Field(
+        default="cdp:events:raw",
+        validation_alias=AliasChoices("TRACKING_STREAM_KEY", "tracking_stream_key"),
+    )
+    tracking_stream_maxlen: int = Field(
+        default=1_000_000,
+        validation_alias=AliasChoices("TRACKING_STREAM_MAXLEN", "tracking_stream_maxlen"),
+    )
 
 
 settings = Settings()

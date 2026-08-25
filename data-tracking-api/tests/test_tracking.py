@@ -9,7 +9,7 @@ from redis.exceptions import RedisError
 
 from app import app
 from core.config import Settings
-from core.redis_cache import RateLimitDecision, TrackingRequestProtection
+from core.redis_cache import EventStreamPublisher, RateLimitDecision, TrackingRequestProtection
 from core.routers.tracking import get_protection, get_tracking_service
 from core.service import TrackingLogService, _collect_sessions
 from core.storage import StoredTrackingLog, build_tracking_object
@@ -64,6 +64,37 @@ class FakeProtection:
 
     def allow_request(self, _request):
         return self.decision
+
+
+class FakeStreamPipeline:
+    def __init__(self, error=None):
+        self.error = error
+        self.adds = []
+
+    def xadd(self, key, fields, maxlen=None, approximate=None):
+        self.adds.append((key, fields, maxlen, approximate))
+
+    def execute(self):
+        if self.error:
+            raise self.error
+        return [b"1-0"] * len(self.adds)
+
+
+class FakeStreamRedis:
+    def __init__(self, error=None):
+        self.pipeline_obj = FakeStreamPipeline(error=error)
+
+    def pipeline(self, transaction=True):
+        return self.pipeline_obj
+
+
+class CapturingStream:
+    def __init__(self):
+        self.calls = []
+
+    def publish(self, data_source_id, events, received_at):
+        self.calls.append((data_source_id, list(events), received_at))
+        return len(events)
 
 
 def test_build_tracking_object_uses_utc_hour_folder_and_ndjson():
@@ -187,3 +218,48 @@ def test_rate_limited_request_returns_retry_after_header():
     assert response.status_code == 429
     assert response.headers["retry-after"] == "17"
     assert not fake_storage.calls
+
+
+def test_event_stream_publisher_xadds_one_capped_entry_per_event_when_enabled():
+    client = FakeStreamRedis()
+    publisher = EventStreamPublisher(client, "cdp:events:raw", 1000, enabled=True)
+    received_at = datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc)
+
+    published = publisher.publish(
+        SOURCE_ID, [{"event_name": "page_view"}, {"event_name": "click"}], received_at
+    )
+
+    assert published == 2
+    assert len(client.pipeline_obj.adds) == 2
+    key, fields, maxlen, approximate = client.pipeline_obj.adds[0]
+    assert key == "cdp:events:raw"
+    assert fields["data_source_id"] == str(SOURCE_ID)
+    assert maxlen == 1000 and approximate is True
+    assert json.loads(fields["payload"])["event"] == {"event_name": "page_view"}
+
+
+def test_event_stream_publisher_is_noop_when_disabled():
+    client = FakeStreamRedis()
+    publisher = EventStreamPublisher(client, "cdp:events:raw", 1000, enabled=False)
+
+    assert publisher.publish(SOURCE_ID, [{"event_name": "x"}], datetime.now(timezone.utc)) == 0
+    assert client.pipeline_obj.adds == []
+
+
+def test_event_stream_publisher_is_best_effort_on_redis_error():
+    client = FakeStreamRedis(error=RedisError("stream down"))
+    publisher = EventStreamPublisher(client, "cdp:events:raw", 1000, enabled=True)
+
+    # A broker outage must never raise into the ingestion path.
+    assert publisher.publish(SOURCE_ID, [{"event_name": "x"}], datetime.now(timezone.utc)) == 0
+
+
+def test_ingest_publishes_enriched_events_to_the_event_stream():
+    stream = CapturingStream()
+    service = TrackingLogService(FakeStorage(), FakeSessionCache(), stream)
+
+    service.ingest(SOURCE_ID, [{"event_name": "page_view"}], session_id="s-1", user_id="u-1")
+
+    assert stream.calls and stream.calls[0][0] == SOURCE_ID
+    assert stream.calls[0][1][0]["session_id"] == "s-1"
+    assert stream.calls[0][1][0]["user_id"] == "u-1"

@@ -47,6 +47,24 @@ DB_PORT="$( (cd "$pg" && terraform output -raw db_port 2>/dev/null) || echo 5432
 : "${DB_NAME:?missing db_name}"; : "${DB_USER:?missing db_username}"; : "${DB_PASS:?missing db_password}"; : "${DB_HOST:?could not read db_host from ../postgres outputs (is it applied?)}"
 echo ">> DB: ${DB_NAME}@${DB_HOST}:${DB_PORT} (user ${DB_USER})"
 
+# --- Broker Redis (on the tracking box) for the event Loader Dagster location. The Loader
+#     consumes the cdp:events:raw stream produced by data-tracking-api. We pass the tracking
+#     box's PRIVATE ip + the broker password (saved to ./.env by deploy-tracking.sh) and the
+#     persistence gate (EVENT_LOADER_WRITE_EVENTS/_TENANT_ID, see backend-system/event_loader).
+#     Absent -> the Loader idles (no broker configured) rather than failing the deploy. ---
+TRACKING_SERVER_KEY="${TRACKING_SERVER_KEY:-tracking}"
+SERVERS_JSON="${SERVERS_JSON:-$(terraform output -json servers 2>/dev/null || true)}"
+BROKER_REDIS_HOST="$(printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get("fixed_ip") for i in (s.get("internal_interfaces") or []) if i.get("fixed_ip")), ""))' "$TRACKING_SERVER_KEY" 2>/dev/null || true)"
+BROKER_REDIS_PORT="${BROKER_REDIS_PORT:-6580}"
+BROKER_REDIS_PASSWORD="${BROKER_REDIS_PASSWORD:-}"   # sourced from ./.env (written by deploy-tracking.sh)
+EVENT_LOADER_WRITE="${EVENT_LOADER_WRITE_EVENTS:-false}"
+EVENT_LOADER_TENANT="${EVENT_LOADER_TENANT_ID:-}"
+if [[ -n "$BROKER_REDIS_HOST" && -n "$BROKER_REDIS_PASSWORD" ]]; then
+  echo ">> Broker: ${BROKER_REDIS_HOST}:${BROKER_REDIS_PORT} (event Loader source; write_events=$EVENT_LOADER_WRITE)"
+else
+  echo ">> Broker: not configured (host='${BROKER_REDIS_HOST:-}', password set=$([[ -n "$BROKER_REDIS_PASSWORD" ]] && echo yes || echo no)) — the event Loader idles until BROKER_REDIS_* are set (run deploy-tracking.sh first; it saves BROKER_REDIS_PASSWORD to ./.env)."
+fi
+
 # --- CD image source: pull the CI-built image from GHCR by default; set
 #     BUILD_LOCAL=1 to fall back to shipping source + building on the VM. ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
@@ -65,13 +83,29 @@ else
   echo ">> Image: $IMAGE   (pull from GHCR; BUILD_LOCAL=1 to build on the VM)"
 fi
 
-# --- build + run on the VM (values passed as positional args; password base64'd) ---
+# --- build + run on the VM. ALL params travel as ONE base64 blob of KEY=VALUE lines, decoded +
+#     sourced on the box — this dodges ssh arg-flattening: `ssh 'bash -s' a b c` joins args into one
+#     space-separated string the remote re-splits, so empty args (IMAGE/GHCR_TOKEN on a local build)
+#     collapse and shift later positional args, which silently dropped the broker/loader wiring. ---
 echo ">> Installing Docker (if needed), building, and (re)starting the container ..."
 PW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" <<'REMOTE'
+BROKER_PW_B64="$(printf %s "$BROKER_REDIS_PASSWORD" | base64 | tr -d '\n')"
+GHCR_TOKEN_B64="$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')"
+PARAMS_B64="$(printf '%s\n' \
+  "DB_HOST=$DB_HOST" "DB_PORT=$DB_PORT" "DB_NAME=$DB_NAME" "DB_USER=$DB_USER" "DB_PW_B64=$PW_B64" \
+  "DEPLOY_MODE=$DEPLOY_MODE" "IMAGE=$IMAGE" "GHCR_USER=$GHCR_USER" "GHCR_TOKEN_B64=$GHCR_TOKEN_B64" \
+  "BROKER_REDIS_HOST=$BROKER_REDIS_HOST" "BROKER_REDIS_PORT=$BROKER_REDIS_PORT" "BROKER_PW_B64=$BROKER_PW_B64" \
+  "EVENT_LOADER_WRITE=$EVENT_LOADER_WRITE" "EVENT_LOADER_TENANT=$EVENT_LOADER_TENANT" \
+  | base64 | tr -d '\n')"
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PARAMS_B64" <<'REMOTE'
 set -euo pipefail
-DB_HOST="$1"; DB_PORT="$2"; DB_NAME="$3"; DB_USER="$4"; DB_PW="$(printf %s "$5" | base64 -d)"
-DEPLOY_MODE="${6:-build}"; IMAGE="${7:-}"; GHCR_USER="${8:-token}"; GHCR_TOKEN="$(printf %s "${9:-}" | base64 -d 2>/dev/null || true)"
+tmp="$(mktemp)"; printf %s "$1" | base64 -d > "$tmp"; set -a; . "$tmp"; set +a; rm -f "$tmp"
+DB_PW="$(printf %s "$DB_PW_B64" | base64 -d)"
+GHCR_TOKEN="$(printf %s "${GHCR_TOKEN_B64:-}" | base64 -d 2>/dev/null || true)"
+BROKER_REDIS_PW="$(printf %s "${BROKER_PW_B64:-}" | base64 -d 2>/dev/null || true)"
+DEPLOY_MODE="${DEPLOY_MODE:-build}"; IMAGE="${IMAGE:-}"; GHCR_USER="${GHCR_USER:-token}"
+BROKER_REDIS_HOST="${BROKER_REDIS_HOST:-}"; BROKER_REDIS_PORT="${BROKER_REDIS_PORT:-6580}"
+EVENT_LOADER_WRITE="${EVENT_LOADER_WRITE:-false}"; EVENT_LOADER_TENANT="${EVENT_LOADER_TENANT:-}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -87,6 +121,18 @@ DB_USER=$DB_USER
 DB_PASSWORD=$DB_PW
 DB_SCHEMA=$DB_NAME
 ENVF
+# Event Loader (backend-system/event_loader) broker connection. When the broker isn't
+# configured yet, the Loader location simply idles (its sensor keeps requesting runs that
+# find an empty/unreachable stream) — the rest of backend-system is unaffected.
+if [ -n "$BROKER_REDIS_HOST" ] && [ -n "$BROKER_REDIS_PW" ]; then
+  cat >> "$env_file" <<ENVB
+BROKER_REDIS_HOST=$BROKER_REDIS_HOST
+BROKER_REDIS_PORT=$BROKER_REDIS_PORT
+BROKER_REDIS_PASSWORD=$BROKER_REDIS_PW
+EVENT_LOADER_WRITE_EVENTS=$EVENT_LOADER_WRITE
+EVENT_LOADER_TENANT_ID=$EVENT_LOADER_TENANT
+ENVB
+fi
 sudo mkdir -p /opt/c360
 sudo mv "$env_file" /opt/c360/backend.env
 sudo chmod 600 /opt/c360/backend.env

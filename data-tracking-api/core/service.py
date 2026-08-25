@@ -25,12 +25,27 @@ class SessionCache(Protocol):
     ) -> int: ...
 
 
+class EventStream(Protocol):
+    def publish(
+        self,
+        data_source_id: UUID,
+        events: list[dict[str, Any]],
+        received_at: datetime,
+    ) -> int: ...
+
+
 class TrackingLogService:
     """Coordinates request timestamps and durable object-storage writes."""
 
-    def __init__(self, storage: TrackingLogStorage, session_cache: SessionCache):
+    def __init__(
+        self,
+        storage: TrackingLogStorage,
+        session_cache: SessionCache,
+        event_stream: Optional[EventStream] = None,
+    ):
         self.storage = storage
         self.session_cache = session_cache
+        self.event_stream = event_stream
 
     def ingest(
         self,
@@ -42,6 +57,10 @@ class TrackingLogService:
         received_at = datetime.now(timezone.utc)
         events = _enrich_events(events, session_id=session_id, user_id=user_id)
         stored = self.storage.store_tracking_logs(data_source_id, events, received_at)
+        # Best-effort publish to the broker stream (consumed by the backend Loader). The S3
+        # object above is the durable record, so a stream failure never affects the response.
+        if self.event_stream is not None:
+            self.event_stream.publish(data_source_id, events, received_at)
         sessions = _collect_sessions(events, session_id=session_id, user_id=user_id)
         cached_session_count = self.session_cache.touch_sessions(data_source_id, sessions, received_at)
         return stored, cached_session_count

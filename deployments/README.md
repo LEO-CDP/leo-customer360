@@ -387,6 +387,63 @@ via the **LB IP** (see the HSTS note below).
 > (ordered deploy: the [proxy runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom)).
 > To move to a **different domain**, edit one value and run [`set-domain.sh`](./set-domain.sh) (below).
 
+### Tracking feature — bring-up (data-tracking-api + broker + viewer + Loader)
+
+The web-tracking ingestion service runs on its **own** vServer (server key `tracking`, private
+`10.100.1.8`) with a co-located **broker Redis** (event stream `cdp:events:raw`, AOF + noeviction),
+a **redis-commander** data viewer, and an **event Loader** Dagster code location on the backend box.
+Bring the whole feature live on UAT in order — every step is idempotent (re-running is a safe
+no-op / reconverge):
+
+```bash
+# 1) INFRA — provision the tracking vServer + open the cross-box secgroup ports
+#    (8010 Caddy→tracking · 6580 backend→broker · 4318 tracking→Jaeger; 9001 already open)
+cd deployments/server && ./deploy.sh uat apply
+terraform output servers          # confirm the tracking box private ip (expected 10.100.1.8)
+#    If it differs, fix member_ip (load_balancer overlay) / data_upstream (proxy overlay) /
+#    the 4318 cidr (server overlay extra_ingress), then re-run the apply above.
+
+# 2) APP — data-tracking-api + broker Redis + redis-commander (own-login viewer)
+#    BUILD_LOCAL=1 for the FIRST run (CI only publishes the GHCR image after it lands on main).
+#    Writes BROKER_REDIS_PASSWORD + REDIS_VIEWER_PASSWORD into server/.env (git-ignored).
+BUILD_LOCAL=1 ./deploy-tracking.sh uat
+
+# 3) FRONT DOOR — add the beta.leocdp.com/data route to Caddy
+cd ../proxy && ./deploy-caddy.sh uat
+
+# 4) MONITORING — register the Portainer agent on the tracking box
+cd ../monitoring && ./deploy-monitoring.sh uat
+
+# 5) LB — publish the redis-commander :8081 listener (+ open its secgroup port)
+cd ../load_balancer && ./deploy.sh uat apply
+
+# 6) LOADER — deploy backend-system so the event Loader consumes the broker stream
+cd ../server && ./deploy-backend.sh uat
+```
+
+Or the whole chain via the orchestrator (same order):
+
+```bash
+cd deployments && BUILD_LOCAL=1 ./deploy-all.sh uat \
+  --only server,tracking,proxy,monitoring,load-balancer,backend apply
+```
+
+**Endpoints once live**
+
+- Ingestion: `POST https://beta.leocdp.com/data/api/v1/tracking/logs` (Caddy `/data` → tracking `:8010`)
+- Redis viewer: `http://<lb-ip>:8081` — own login `admin` / `REDIS_VIEWER_PASSWORD` (from `server/.env`)
+
+**Notes**
+
+- The **Loader persists nothing by default** (`EVENT_LOADER_WRITE_EVENTS=false`) — it drains + logs
+  safely. To land rows into `cdp_raw_events` (once the `data_source_id → tenant_id` + identity-staging
+  rules are decided): `EVENT_LOADER_WRITE_EVENTS=true EVENT_LOADER_TENANT_ID=<uuid> ./deploy-backend.sh uat`.
+- redis-commander is exposed **directly** on the LB with its own basic-auth login (plain HTTP over the
+  L4 LB → cleartext, same accepted tradeoff as pgAdmin) — harden later with Caddy TLS or an SSO gate.
+- The tracking box is the **first dedicated box**: unlike the co-located services (which reach each
+  other on `127.0.0.1`), its cross-box hops are opened explicitly in `server/overlays/uat.tfvars`
+  (`extra_ingress`) and applied out-of-band by step 1 (CD never runs infra Terraform).
+
 ### Changing the public domain
 
 The domain has a **single source of truth** — `caddy_domain` in

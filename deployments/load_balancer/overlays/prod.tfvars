@@ -52,6 +52,14 @@ backends = {
     listen_port = 5050
     health_path = "/ping"
   }
+  # redis-commander (broker Redis viewer) on the prod tracking box — own basic-auth login (direct).
+  # Uncomment once the "tracking" server key is provisioned and fill its private ip.
+  # "redis-commander" = {
+  #   member_ip   = "REPLACE_WITH_PROD_TRACKING_IP"
+  #   member_port = 8081
+  #   listen_port = 8081
+  #   health_path = null # basic auth returns 401 on / -> plain TCP health check
+  # }
 }
 # Jaeger is fronted by Caddy at https://<domain>/jaeger (see deployments/proxy) — no dedicated LB listener.
 

@@ -47,6 +47,8 @@ DAG_UP="$(tfval dagster_upstream "$ovl")";   DAG_UP="${DAG_UP:-10.100.1.4:3000}"
 NET_UP="$(tfval netdata_upstream "$ovl")";   NET_UP="${NET_UP:-127.0.0.1:4199}"
 PORT_UP="$(tfval portainer_upstream "$ovl")";PORT_UP="${PORT_UP:-127.0.0.1:9443}"
 JAE_UP="$(tfval jaeger_upstream "$ovl")";     JAE_UP="${JAE_UP:-127.0.0.1:4686}"   # -> oauth2-jaeger (SSO) -> Jaeger
+DATA_UP="$(tfval data_upstream "$ovl")";      DATA_UP="${DATA_UP:-10.100.1.8:8010}" # -> data-tracking-api on its own box (/data)
+REDIS_UP="$(tfval redis_upstream "$ovl")";    REDIS_UP="${REDIS_UP:-10.100.1.8:8081}" # -> redis-commander (URL_PREFIX=/redis), own login
 
 : "${DOMAIN:?set caddy_domain in $ovl (e.g. cdp.example.com)}"
 : "${EMAIL:?set acme_email in $ovl (Let’s Encrypt account email)}"
@@ -70,12 +72,12 @@ CADDYFILE_B64="$(base64 < Caddyfile | tr -d '\n')"
 PARAMS_B64="$(printf '%s\n' \
   "ACTION=$ACTION" "IMG=$IMG" "DOMAIN=$DOMAIN" "EMAIL=$EMAIL" \
   "API_UP=$API_UP" "KC_UP=$KC_UP" "FE_UP=$FE_UP" "ADS_UP=$ADS_UP" \
-  "DAG_UP=$DAG_UP" "NET_UP=$NET_UP" "PORT_UP=$PORT_UP" "JAE_UP=$JAE_UP" \
+  "DAG_UP=$DAG_UP" "NET_UP=$NET_UP" "PORT_UP=$PORT_UP" "JAE_UP=$JAE_UP" "DATA_UP=$DATA_UP" "REDIS_UP=$REDIS_UP" \
   "CADDYFILE_B64=$CADDYFILE_B64" | base64 | tr -d '\n')"
 
 echo ">> Target (caddy): $BASTION   [$ACTION]"
 echo "   domain: https://$DOMAIN   image: $IMG"
-echo "   routes: / -> $FE_UP   /c360api -> $API_UP   /auth -> $KC_UP   /ads -> $ADS_UP"
+echo "   routes: / -> $FE_UP   /c360api -> $API_UP   /auth -> $KC_UP   /ads -> $ADS_UP   /data -> $DATA_UP   /redis -> $REDIS_UP"
 
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PARAMS_B64" <<'REMOTE'
 set -euo pipefail
@@ -96,7 +98,7 @@ env_args=(
   -e API_UPSTREAM="$API_UP" -e KC_UPSTREAM="$KC_UP" -e FRONTEND_UPSTREAM="$FE_UP"
   -e ADS_UPSTREAM="$ADS_UP" -e DAGSTER_UPSTREAM="$DAG_UP"
   -e NETDATA_UPSTREAM="$NET_UP" -e PORTAINER_UPSTREAM="$PORT_UP"
-  -e JAEGER_UPSTREAM="$JAE_UP"
+  -e JAEGER_UPSTREAM="$JAE_UP" -e DATA_UPSTREAM="$DATA_UP" -e REDIS_UPSTREAM="$REDIS_UP"
 )
 sudo docker pull "$IMG" >/dev/null || true
 

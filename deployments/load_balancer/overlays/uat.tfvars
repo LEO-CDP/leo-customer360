@@ -69,7 +69,11 @@ backends = {
     health_path = "/misc/ping"
   }
 }
-# Jaeger is fronted by Caddy at https://beta.leocdp.com/jaeger (see deployments/proxy) — no dedicated LB listener.
+# redis-commander (broker Redis viewer) is fronted by Caddy at https://beta.leocdp.com/redis
+# (TLS + its own basic-auth login, URL_PREFIX=/redis) — no dedicated LB listener, so it is not
+# served in cleartext on a raw LB port. Caddy reaches it over the private VPC (proxy overlay
+# redis_upstream); tcp/8081 is opened to the api box only (server extra_ingress).
+# Jaeger is likewise fronted by Caddy at https://beta.leocdp.com/jaeger — no dedicated LB listener.
 
 # Open the app ports on the backends' Default secgroup so the LB can reach them.
 backend_security_group_id = "secg-7c1e85ec-8028-460a-8592-99463f198831" # Default secgroup on the boxes

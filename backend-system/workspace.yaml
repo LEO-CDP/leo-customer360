@@ -35,6 +35,9 @@ load_from:
       relative_path: data_synch/dagster_defs.py
       location_name: data_synch
   - python_file:
+      relative_path: event_loader/dagster_defs.py
+      location_name: event_loader
+  - python_file:
       relative_path: email_engine/dagster_defs.py
       location_name: email_engine
   - python_file:

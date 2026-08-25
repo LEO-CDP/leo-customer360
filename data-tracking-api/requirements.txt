@@ -6,6 +6,13 @@ pydantic>=2.6,<3
 pydantic-settings>=2.2,<3
 python-dotenv>=1.0,<2
 
+# OpenTelemetry zero-code request tracing (OTLP -> Jaeger), mirrors customer360-api.
+# The Dockerfile runs `opentelemetry-bootstrap -a install` to pull the matching
+# FastAPI / Redis / boto3 instrumentors. Fully no-op at runtime unless
+# OTEL_SDK_DISABLED=false (see deployments/lib/otel.sh).
+opentelemetry-distro>=0.48b0,<1
+opentelemetry-exporter-otlp>=1.27,<2
+
 # Test-only dependency
 pytest>=7.4,<9
 httpx>=0.27,<1
