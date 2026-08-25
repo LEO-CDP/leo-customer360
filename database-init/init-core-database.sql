@@ -1,4 +1,3 @@
--- migrate:up
 ---------------------------------------------------
 -- SCHEMA CREATION
 ---------------------------------------------------
@@ -843,6 +842,3 @@ ON CONFLICT (tenant_id, slug) DO UPDATE SET
     javascript_tags = EXCLUDED.javascript_tags,
     qr_code_data = EXCLUDED.qr_code_data,
     updated_at = now();
-
--- migrate:down
--- No-op: core reference data (default tenant, catalogs) other rows depend on.

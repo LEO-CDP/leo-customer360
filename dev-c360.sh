@@ -73,7 +73,7 @@ for arg in "$@"; do
     -y|--yes) SKIP_CONFIRM="true" ;;
     --no-seed) SKIP_SEED="true" ;;
     -h|--help)
-      sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -412,7 +412,7 @@ print_final_service_table() {
   printf '%-12s | %-10s | %-25s\n' "postgres" "$postgres_status" "localhost:${POSTGRES_HOST_PORT:-5432}"
   printf '%-12s | %-10s | %-25s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6580}"
   printf '%-12s | %-10s | %-25s\n' "minio" "$minio_status" "localhost:${MINIO_API_HOST_PORT:-9000} (console ${MINIO_CONSOLE_HOST_PORT:-9001})"
-  printf '%-12s | %-10s | %-25s\n' "tracking-api" "$tracking_status" "localhost:${DATA_TRACKING_API_PORT:-8010}"
+  printf '%-12s | %-10s | %-25s\n' "tracking-api" "$tracking_status" "localhost:${C360_TRACKING_API_PORT:-8010}"
   printf '%-12s | %-10s | %-25s\n' "backend" "$backend_status" "localhost:${DAGSTER_UI_PORT:-3000}"
   printf '%-12s | %-10s | %-25s\n' "api" "$api_status" "localhost:${C360_API_PORT:-8008}"
   printf '%-12s | %-10s | %-25s\n' "frontend" "$frontend_status" "localhost:${FRONTEND_HOST_PORT:-8890}"

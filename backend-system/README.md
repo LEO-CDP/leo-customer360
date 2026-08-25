@@ -27,8 +27,11 @@ backend-system/
 │
 ├── scoring/                          # placeholder service skeleton
 │   └── dagster_defs.py
-├── analytics/                        # placeholder service skeleton
-│   └── dagster_defs.py
+├── analytics/                        # hourly tracking-log aggregation
+│   ├── dagster_defs.py               # analytics_job + UTC hourly schedule
+│   ├── source_analytics/              # S3/Redis/Postgres aggregation logic
+│   ├── requirements.txt
+│   └── tests/
 ├── data_synch/                       # placeholder service skeleton
 │   └── dagster_defs.py
 ├── email_engine/                     # placeholder service skeleton
@@ -51,7 +54,7 @@ backend-system/
 | `identity_resolution` | Implemented | Real identity resolution job and poll sensor |
 | `segmentation` | Implemented | Recomputes active segment membership and profile tags |
 | `scoring` | Placeholder | Minimal job skeleton only |
-| `analytics` | Placeholder | Minimal job skeleton only |
+| `analytics` | Implemented | Counts hourly tracking JSONL objects from S3/MinIO and updates Redis plus `sys_data_source.total_tracked_event` |
 | `data_synch` | Placeholder | Minimal job skeleton only |
 | `email_engine` | Placeholder | Minimal job skeleton only |
 | `notification_engine` | Placeholder | Minimal job skeleton only |
@@ -109,12 +112,17 @@ This service runs the Customer Identity Resolution pipeline. The Dagster job is 
 
 This service recomputes active segment membership and synchronizes tags into `cdp_master_profiles`. The Dagster job is `segmentation_job` and the sensor is `segmentation_poll_sensor`. The poll sensor checks for profile changes and only requests new runs when activity has occurred since the last cursor checkpoint.
 
+#### `analytics`
+
+This service processes the first ten data sources from `sys_data_source` on an hourly UTC schedule. It lists each `data-tracking-{data_source_id}` S3/MinIO bucket, counts JSONL records by hour, increments the Redis hash field `tracked-event`, and adds newly processed records to `sys_data_source.total_tracked_event`. Immutable object checkpoints make retries idempotent. Each source has a Redis lease and cursor, so overlapping runs skip locked sources and resume from the last processed object instead of scanning the full bucket.
+
+The Customer 360 API exposes `POST /api/v1/analytics/source-analytics/process` for platform-admin manual runs, `GET /api/v1/analytics/source-analytics/status` for per-source state/cursors and UI triggerability, and `GET /api/v1/analytics/source-analytics/status/{run_id}` for Dagster run status. A duplicate manual submission returns `409`.
+
 ### Placeholder code locations
 
 The following folders currently provide the basic Dagster skeletons needed for future services:
 
 - `scoring`
-- `analytics`
 - `data_synch`
 - `email_engine`
 - `notification_engine`
@@ -189,4 +197,4 @@ The existing placeholder jobs are the best templates for new service scaffolds.
 
 ## Summary
 
-`backend-system/` is the orchestration layer for the Customer 360 platform: it gives each backend capability a Dagster code location, keeps the jobs observable in one UI, and provides the foundation for future production deployment patterns. The repo currently contains one active identity-resolution implementation and one active segmentation implementation, with the rest of the services intentionally scaffolded and ready to be filled with real logic.
+`backend-system/` is the orchestration layer for the Customer 360 platform: it gives each backend capability a Dagster code location, keeps the jobs observable in one UI, and provides the foundation for future production deployment patterns. The repo currently contains active identity-resolution, segmentation, and analytics implementations, with the rest of the services intentionally scaffolded and ready to be filled with real logic.

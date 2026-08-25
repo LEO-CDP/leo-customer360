@@ -35,6 +35,7 @@ from core.routers.segment_api import all_segment_routers
 from core.routers.metadata_api import all_metadata_routers
 from core.routers.user_api import all_user_routers
 from core.routers.auth_api import all_auth_routers
+from core.routers.analytics_api import all_analytics_routers
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -125,6 +126,8 @@ for r in all_segment_routers:
 for r in all_metadata_routers:
     app.include_router(r, prefix="/api/v1")
 for r in all_persona_routers:
+    app.include_router(r, prefix="/api/v1")
+for r in all_analytics_routers:
     app.include_router(r, prefix="/api/v1")
 
 @app.get("/", tags=["Health"])

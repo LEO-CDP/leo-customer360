@@ -211,6 +211,38 @@ class SegmentationDagsterServiceTests(unittest.TestCase):
         )
 
 
+class AnalyticsDagsterServiceTests(unittest.TestCase):
+    def _service_with_fake_client(self, fake_client):
+        service = AnalyticsDagsterService()
+        service._client_factory = lambda: fake_client
+        return service
+
+    def test_process_tracking_logs_submits_manual_trigger_tag(self):
+        fake_client = MagicMock()
+        fake_client.submit_job_execution.return_value = "run-analytics-1"
+        service = self._service_with_fake_client(fake_client)
+
+        run_id = service.process_tracking_logs()
+
+        self.assertEqual(run_id, "run-analytics-1")
+        self.assertEqual(
+            fake_client.submit_job_execution.call_args.kwargs["tags"],
+            {"trigger_reason": "manual_api"},
+        )
+        self.assertIsNone(fake_client.submit_job_execution.call_args.kwargs["run_config"])
+
+    def test_refresh_reports_remains_a_compatibility_alias(self):
+        fake_client = MagicMock()
+        fake_client.submit_job_execution.return_value = "run-analytics-2"
+        service = self._service_with_fake_client(fake_client)
+
+        self.assertEqual(service.refresh_reports(), "run-analytics-2")
+        self.assertEqual(
+            fake_client.submit_job_execution.call_args.kwargs["tags"],
+            {"trigger_reason": "manual_api"},
+        )
+
+
 class IdentityResolutionRecomputePersonasTests(unittest.TestCase):
     """Covers IdentityResolutionDagsterService.recompute_personas -- the
     Persona Management admin UI's create/update-archetype trigger (see

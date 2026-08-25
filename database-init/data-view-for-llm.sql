@@ -1,4 +1,3 @@
--- migrate:up
 
 -- Both MVs flatten AI/ML scoring + behavioral summaries into one table → optimized for LLM-based text-to-SQL.
 -- persona_embedding is a pgvector `vector(768)` column — LLM can use it for semantic search.
@@ -8,9 +7,9 @@
 -- transactions + engagement in one denormalized view for super-fast semantic queries.
 --
 -- NOTE: these views are built strictly from the columns that actually exist in
--- the baseline migration (20260824090000_baseline_schema.sql):
--- customer360.cdp_master_profiles, customer360.crm_transactions,
--- customer360.crm_customer_contacts -- the source of truth for all names used here.
+-- core-customer360/database-schema.sql (customer360.cdp_master_profiles,
+-- customer360.crm_transactions, customer360.crm_customer_contacts) -- that file is
+-- the single source of truth for all table/column names used here.
 
 -- ======================================================
 -- Materialized View: Customer Transactions with AI/ML Scores
@@ -121,8 +120,3 @@ CREATE UNIQUE INDEX idx_mv_customer_engagements_master
 -- REFRESH MATERIALIZED VIEW CONCURRENTLY customer360.mv_customer_transactions;
 -- REFRESH MATERIALIZED VIEW CONCURRENTLY customer360.mv_customer_engagements;
 
-
-
--- migrate:down
-DROP MATERIALIZED VIEW IF EXISTS customer360.mv_customer_engagements CASCADE;
-DROP MATERIALIZED VIEW IF EXISTS customer360.mv_customer_transactions CASCADE;
