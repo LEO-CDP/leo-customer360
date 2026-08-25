@@ -1,4 +1,3 @@
--- migrate:up
 -- SQLBook: Code
 -- Customer 360 Database Schema -- 
 
@@ -3008,18 +3007,3 @@ $$;
 --     tenant_id =
 --     NULLIF(btrim(current_setting('app.tenant_id')), '')::uuid
 -- );
-
--- migrate:down
--- Rolling back the baseline drops the ENTIRE customer360 schema and all data.
--- Guarded so an accidental `dbmate down` cannot wipe a database: the drop only
--- runs when the operator explicitly opts in for this connection, e.g.
---   DATABASE_URL="...&options=-c%20app.allow_destructive_down%3Dtrue" dbmate down
--- Without the flag this RAISEs; dbmate wraps the down in a transaction, so the
--- schema is left fully intact and the migration stays marked applied.
-DO $$
-BEGIN
-    IF current_setting('app.allow_destructive_down', true) IS DISTINCT FROM 'true' THEN
-        RAISE EXCEPTION 'Refusing to DROP SCHEMA customer360 (full data loss). Set app.allow_destructive_down=true on the connection to confirm a teardown.';
-    END IF;
-END $$;
-DROP SCHEMA IF EXISTS customer360 CASCADE;
