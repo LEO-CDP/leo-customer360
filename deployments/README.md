@@ -387,62 +387,51 @@ via the **LB IP** (see the HSTS note below).
 > (ordered deploy: the [proxy runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom)).
 > To move to a **different domain**, edit one value and run [`set-domain.sh`](./set-domain.sh) (below).
 
-### Tracking feature — bring-up (data-tracking-api + broker + viewer + Loader)
+### Tracking feature — bring-up (data-tracking-api)
 
-The web-tracking ingestion service runs on its **own** vServer (server key `tracking`, private
-`10.100.1.8`) with a co-located **broker Redis** (event stream `cdp:events:raw`, AOF + noeviction),
-a **redis-commander** data viewer, and an **event Loader** Dagster code location on the backend box.
-Bring the whole feature live on UAT in order — every step is idempotent (re-running is a safe
-no-op / reconverge):
+The web-tracking ingestion service (`data-tracking-api`) runs on its **own** vServer (server key
+`tracking`, private `10.100.1.8`). It is deliberately minimal — it uses only what the app needs:
+**vStorage/S3** (the durable NDJSON sink); optionally the **api-box Redis** for IP rate-limiting
++ session cache (fail-open if absent); and it exports **OpenTelemetry request traces** over OTLP to
+the **api-box Jaeger** (reusing the existing Jaeger — no new one). It is exposed publicly at
+`https://beta.leocdp.com/data` via Caddy + the LB. Bring it up on UAT in order (each step is idempotent):
 
 ```bash
-# 1) INFRA — provision the tracking vServer + open the cross-box secgroup ports
-#    (8010 Caddy→tracking · 6580 backend→broker · 4318 tracking→Jaeger; 9001 already open)
+# 1) INFRA — provision the tracking vServer + open its cross-box secgroup ports
+#    (8010 Caddy→tracking · 6580 api-box-Redis←tracking · 4318 api-box-Jaeger←tracking · 9001 Portainer)
 cd deployments/server && ./deploy.sh uat apply
 terraform output servers          # confirm the tracking box private ip (expected 10.100.1.8)
-#    If it differs, fix member_ip (load_balancer overlay) / data_upstream (proxy overlay) /
-#    the 4318 cidr (server overlay extra_ingress), then re-run the apply above.
+#    If it differs, fix data_upstream (proxy overlay) + the 6580/4318 cidrs (server extra_ingress), re-apply.
 
-# 2) APP — data-tracking-api + broker Redis + redis-commander (own-login viewer)
-#    BUILD_LOCAL=1 for the FIRST run (CI only publishes the GHCR image after it lands on main).
-#    Writes BROKER_REDIS_PASSWORD + REDIS_VIEWER_PASSWORD into server/.env (git-ignored).
-BUILD_LOCAL=1 ./deploy-tracking.sh uat
+# 2) APP — build + run data-tracking-api (:8010), wired to S3 + the api-box Redis
+#    (BUILD_LOCAL=1 is the default — data-tracking-api is not built by CI)
+cd ../server && ./deploy-tracking.sh uat
 
-# 3) FRONT DOOR — add the beta.leocdp.com/data route to Caddy
+# 3) FRONT DOOR — add/refresh the beta.leocdp.com/data route in Caddy
 cd ../proxy && ./deploy-caddy.sh uat
 
-# 4) MONITORING — register the Portainer agent on the tracking box
+# 4) MONITORING (optional) — register the Portainer agent on the tracking box for ops visibility
 cd ../monitoring && ./deploy-monitoring.sh uat
-
-# 5) LB — publish the redis-commander :8081 listener (+ open its secgroup port)
-cd ../load_balancer && ./deploy.sh uat apply
-
-# 6) LOADER — deploy backend-system so the event Loader consumes the broker stream
-cd ../server && ./deploy-backend.sh uat
 ```
 
-Or the whole chain via the orchestrator (same order):
-
-```bash
-cd deployments && BUILD_LOCAL=1 ./deploy-all.sh uat \
-  --only server,tracking,proxy,monitoring,load-balancer,backend apply
-```
-
-**Endpoints once live**
+**Endpoint once live**
 
 - Ingestion: `POST https://beta.leocdp.com/data/api/v1/tracking/logs` (Caddy `/data` → tracking `:8010`)
-- Redis viewer: `http://<lb-ip>:8081` — own login `admin` / `REDIS_VIEWER_PASSWORD` (from `server/.env`)
+- Health (GET): `https://beta.leocdp.com/data/health`
+- Traces: `data-tracking-api` appears in the Jaeger UI at `https://beta.leocdp.com/jaeger` (Keycloak SSO)
 
 **Notes**
 
-- The **Loader persists nothing by default** (`EVENT_LOADER_WRITE_EVENTS=false`) — it drains + logs
-  safely. To land rows into `cdp_raw_events` (once the `data_source_id → tenant_id` + identity-staging
-  rules are decided): `EVENT_LOADER_WRITE_EVENTS=true EVENT_LOADER_TENANT_ID=<uuid> ./deploy-backend.sh uat`.
-- redis-commander is exposed **directly** on the LB with its own basic-auth login (plain HTTP over the
-  L4 LB → cleartext, same accepted tradeoff as pgAdmin) — harden later with Caddy TLS or an SSO gate.
-- The tracking box is the **first dedicated box**: unlike the co-located services (which reach each
-  other on `127.0.0.1`), its cross-box hops are opened explicitly in `server/overlays/uat.tfvars`
-  (`extra_ingress`) and applied out-of-band by step 1 (CD never runs infra Terraform).
+- Redis is **optional** — the rate limiter fails open and the session cache no-ops if it's absent.
+  The tracking box reuses the existing api-box Redis (no dedicated instance); `deploy-tracking.sh`
+  resolves it from `../cache` and opens `6580` api-box←tracking (server `extra_ingress`).
+- **Jaeger tracing** reuses the existing api-box Jaeger — the app is OTEL-instrumented and exports
+  OTLP to the monitoring box's `:4318` (on/off via `otel_enabled` in `server/overlays/<env>.tfvars`
+  or `OTEL_ENABLED`). No Jaeger runs on the tracking box.
+- The tracking box is a **dedicated box**: its cross-box hops (Caddy→`:8010`, tracking→api-Redis
+  `:6580`) are opened explicitly in `server/overlays/uat.tfvars` (`extra_ingress`) and applied
+  out-of-band by step 1 (CD never runs infra Terraform).
+- No dedicated LB listener — `/data` rides the existing `:443` Caddy passthrough.
 
 ### Changing the public domain
 

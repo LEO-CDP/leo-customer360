@@ -27,7 +27,3 @@ jaeger_upstream = "127.0.0.1:4686"
 # PRIVATE cross-box ip, NOT 127.0.0.1. Assumes DHCP gives the tracking box 10.100.1.8 — verify
 # with `cd ../server && terraform output servers` and correct if it differs.
 data_upstream = "10.100.1.8:8010"
-
-# redis-commander (broker viewer) served under /redis on :443 (TLS) with its own basic-auth login.
-# Same tracking box; the container runs URL_PREFIX=/redis so the prefix is forwarded unstripped.
-redis_upstream = "10.100.1.8:8081"

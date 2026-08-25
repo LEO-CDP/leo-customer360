@@ -77,24 +77,20 @@ open_ssh         = true
 ssh_ingress_cidr = "0.0.0.0/0" # <-- change to "<your-public-ip>/32"
 
 # Intra-VPC ops ports on the shared Default secgroup (it opens nothing inbound by default).
-# The tracking box (server key "tracking") is the FIRST service NOT co-located on the api box,
-# so unlike the co-located services (which reach each other on 127.0.0.1 via --network host) it
-# needs its cross-box hops opened explicitly. NOTE the private IPs below assume DHCP assigns the
-# tracking box 10.100.1.8 (after backend .4 / api .5) — VERIFY with `terraform output servers`
-# after the first apply and correct the /32s if it differs. Apply: `./deploy.sh uat apply`.
-#   * 9001 -> Portainer agent, reached by the Portainer box (api 10.100.1.5) on EVERY box
-#            (backend 10.100.1.4 AND tracking 10.100.1.8 share this secgroup).
-#   * 8010 -> data-tracking-api, reached by Caddy on the api box (10.100.1.5) to route /data.
-#   * 6580 -> the BROKER Redis co-located on the tracking box (10.100.1.8), reached by the
-#            backend box (10.100.1.4) where the event Loader (Dagster) consumes the stream.
-#            (The tracking-api itself uses this broker on loopback — no cross-box rule needed.)
-#   * 4318 -> Jaeger OTLP/HTTP on the api box, reached by the tracking box (10.100.1.8) for traces.
+# The tracking box (server key "tracking", 10.100.1.8) is not co-located on the api box, so its
+# cross-box hops are opened explicitly (co-located services reach each other on 127.0.0.1). The
+# tracking-api only needs: Caddy -> its app port, and it -> the api-box Redis (rate-limit + session
+# cache; Redis is optional/fail-open). VERIFY IPs with `terraform output servers`; apply out-of-band
+# with `./deploy.sh uat apply` (CD never runs infra Terraform).
+#   * 9001 -> Portainer agent on the tracking box, reached by the Portainer box (api 10.100.1.5).
+#   * 8010 -> data-tracking-api on the tracking box, reached by Caddy on the api box (10.100.1.5) for /data.
+#   * 6580 -> the api-box Redis (10.100.1.5), reached by the tracking box (10.100.1.8) for its cache.
+#   * 4318 -> the api-box Jaeger OTLP/HTTP (10.100.1.5), reached by the tracking box for request traces.
 extra_ingress = [
   { port = 9001, cidr = "10.100.1.5/32" }, # Portainer agent   <- api box (Portainer)
   { port = 8010, cidr = "10.100.1.5/32" }, # data-tracking-api <- api box (Caddy /data)
-  { port = 8081, cidr = "10.100.1.5/32" }, # redis-commander  <- api box (Caddy /redis, TLS)
-  { port = 6580, cidr = "10.100.1.4/32" }, # broker Redis (tracking box) <- backend box (Loader)
-  { port = 4318, cidr = "10.100.1.8/32" }, # Jaeger OTLP (api box) <- tracking box
+  { port = 6580, cidr = "10.100.1.8/32" }, # api-box Redis      <- tracking box (rate-limit + session cache)
+  { port = 4318, cidr = "10.100.1.8/32" }, # api-box Jaeger OTLP <- tracking box (request traces)
 ]
 
 # LOGIN via cloud-init user_data. The VNG Ubuntu 24.04 image's ssh-keygen.service FAILS at

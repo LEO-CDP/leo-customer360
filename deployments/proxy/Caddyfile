@@ -61,16 +61,6 @@
 		reverse_proxy {$JAEGER_UPSTREAM}
 	}
 
-	# --- redis-commander (broker Redis viewer) under /redis. UNSTRIPPED (handle, not handle_path):
-	#     the container runs with URL_PREFIX=/redis so its SPA emits /redis-prefixed asset + API
-	#     URLs, so the prefix must be forwarded as-is (stripping it would 404 the assets). It keeps
-	#     its OWN HTTP basic-auth login; TLS here on :443 replaces the plain-HTTP LB port. On its own
-	#     box, so $REDIS_UPSTREAM is that box's PRIVATE ip:8081. ---
-	@redis path /redis /redis/*
-	handle @redis {
-		reverse_proxy {$REDIS_UPSTREAM}
-	}
-
 	# --- everything else -> the admin UI (frontend-admin). Keep this block LAST. ---
 	handle {
 		reverse_proxy {$FRONTEND_UPSTREAM}
