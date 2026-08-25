@@ -38,6 +38,8 @@
 #                                    then starts fresh and reseeds.
 #   ./dev-c360.sh reset -y          Same as 'reset' but skips the confirmation
 #                                    prompt (CI / automation).
+#   ./dev-c360.sh stop-all          DESTRUCTIVE: stop and remove all development
+#                                    containers, volumes, and the shared network.
 # =============================================================================
 set -euo pipefail
 
@@ -65,6 +67,7 @@ for arg in "$@"; do
   case "$arg" in
     restart) ACTION="restart" ;;
     reset) ACTION="reset" ;;
+    stop-all) ACTION="stop-all" ;;
     -y|--yes) SKIP_CONFIRM="true" ;;
     --no-seed) SKIP_SEED="true" ;;
     -h|--help)
@@ -77,6 +80,11 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [ "$ACTION" = "stop-all" ]; then
+  bash "$SCRIPT_DIR/dev-stop-and-delete-all.sh"
+  exit 0
+fi
 
 if [ "$ACTION" = "restart" ]; then
   echo "🔁 Restarting host services..."

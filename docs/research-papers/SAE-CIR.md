@@ -2,7 +2,7 @@
 title: "Methodological Principles for Customer Identity Resolution"
 subtitle: "A Source-Aware Evidence-Based Method for Identity Graph Construction"
 author: "Trieu Nguyen"
-date: "August 24, 2026"
+date: "August 25, 2026"
 
 geometry:
   - a4paper
@@ -10,7 +10,7 @@ geometry:
 
 linestretch: 0.95
 
-mainfont: "DejaVu Serif"
+mainfont: "Latin Modern Roman"
 documentclass: article
 papersize: a4
 fontsize: 11pt
@@ -108,7 +108,7 @@ $$
 
 # 2. The Customer Identity Problem
 
-## 2.1 Multiple representations of one person
+**Multiple representations of one person**
 
 A real-world individual can be represented by multiple identifiers:
 
@@ -162,7 +162,7 @@ $$
 
 and construct a unified identity representation.
 
-
+\newpage 
 
 # 3. Raw Profile Model
 
@@ -249,7 +249,7 @@ $$
 
 This distinction is important because a CDP must preserve not only the resolved identity but also **why the system believes the identity is correct**.
 
-
+\newpage
 
 # 5. Identity Graph
 
@@ -528,6 +528,7 @@ Examples of quality factors include:
 * expiration;
 * normalization quality.
 
+\newpage
 
 # 11. Three-Dimensional Identity Evidence
 
@@ -560,6 +561,47 @@ resulting $E_k$ is an evidence contribution, not a probability that two records
 belong to the same person. The weights must be defined for a particular signal,
 source context, and population; they are not universal constants.
 
+A simple example with **CRM, Web Survey, and Facebook Ads**:
+
+## 11.1 Example: Same customer appears in 3 sources
+
+Suppose the system is checking whether three records belong to **Nguyen Van A**.
+
+| Source       | Signal                | Comparison (M_k) | Signal Weight | Source Trust | Quality | Evidence (E_k) |
+| ------------ | --------------------- | ---------------: | ------------: | -----------: | ------: | -------------: |
+| CRM          | Phone = `0901234567`  |              1.0 |           1.0 |         0.95 |     1.0 |       **0.95** |
+| Web Survey   | Email = `a@gmail.com` |              1.0 |           0.9 |         0.70 |     0.9 |      **0.567** |
+| Facebook Ads | Email = `a@gmail.com` |              1.0 |           0.9 |         0.40 |     0.8 |      **0.288** |
+
+So:
+
+[
+E_{CRM}=1.0\times1.0\times0.95\times1.0=0.95
+]
+
+[
+E_{Survey}=1.0\times0.9\times0.70\times0.9=0.567
+]
+
+[
+E_{Facebook}=1.0\times0.9\times0.40\times0.8=0.288
+]
+
+### Interpretation
+
+The important point is that **the same identity signal does not have the same evidential value across sources**.
+
+> **CRM phone match = strong evidence** because CRM is a highly trusted first-party source.
+> **Web Survey email match = moderate evidence** because the user manually provided it, but it may contain errors.
+> **Facebook Ads email match = weaker evidence** because the data may be inferred, hashed, uploaded, or less directly controlled.
+
+For example, if Facebook Ads says the email matches but CRM says the phone belongs to a different person, the system should **not treat both signals equally**. The CRM evidence carries substantially more weight.
+
+A very simple way to explain CIR is:
+
+> **CIR does not ask only “Do these values match?” It asks “How strong is the match, how trustworthy is the source, and how good is the data?”**
+
+\newpage
 
 # 12. Dynamic Identity Matching
 
@@ -655,7 +697,7 @@ Confidence = 100\hat{p}
 $$
 
 
-# 14. Example: Internal CRM Evidence
+## 13.1 Example: Internal CRM Evidence
 
 Suppose an internal CRM provides a phone number.
 
@@ -684,7 +726,7 @@ $$
 This represents strong identity evidence.
 
 
-# 15. Example: External Feedback Survey
+## 13.2 Example: External Feedback Survey
 
 Suppose a customer voluntarily enters the same phone number into an external web feedback survey.
 
@@ -716,8 +758,9 @@ This distinction is fundamental:
 
 > **A strong identifier from a weak source is not necessarily strong identity evidence.**
 
+\newpage 
 
-# 16. Multiple Evidence Sources
+# 14. Multiple Evidence Sources
 
 CIR should allow evidence to accumulate across independent sources.
 
@@ -759,7 +802,7 @@ Thus:
 > **Weak evidence may reinforce an identity hypothesis, but should rarely establish identity by itself.**
 
 
-# 17. Independence of Evidence
+# 15. Independence of Evidence
 
 CIR should also consider whether multiple signals are genuinely independent.
 
@@ -813,7 +856,7 @@ network, or account. Repeated copies of the same value from different feeds
 should not be counted as independent confirmations.
 
 
-# 18. Resolution Thresholds
+# 16. Resolution Thresholds
 
 Once CIR calculates an evidence score or calibrated probability, the result can
 be classified into resolution bands.
@@ -865,13 +908,13 @@ For high-risk identity operations, the organization may require stronger evidenc
 For low-risk personalization use cases, lower thresholds may be acceptable.
 
 
-# 19. Resolution Outcomes
+# 17. Resolution Outcomes
 
 CIR should distinguish between **confidence** and **resolution outcome**.
 
 The possible outcomes include:
 
-### 19.1 Existing Master
+### 17.1 Existing Master
 
 A sufficiently supported and unambiguous candidate match exists:
 
@@ -879,7 +922,7 @@ $$
 r_i \rightarrow M_j
 $$
 
-### 19.2 Review
+### 17.2 Review
 
 Evidence is insufficient for automatic resolution:
 
@@ -887,7 +930,7 @@ $$
 r_i \rightarrow REVIEW
 $$
 
-### 19.3 No Match
+### 17.3 No Match
 
 The raw profile is not linked to the evaluated candidate, either because the
 evidence is insufficient or because a contradiction blocks the link:
@@ -896,7 +939,7 @@ $$
 r_i \rightarrow NO\ MATCH
 $$
 
-### 19.4 New Master
+### 17.4 New Master
 
 No acceptable existing candidate is selected, and the system creates a new
 provisional identity cluster or Master Profile according to its lifecycle policy:
@@ -906,7 +949,7 @@ r_i \rightarrow M_{new}
 $$
 
 
-# 20. New Master Profile Is Not a 100% Match
+# 18. New Master Profile Is Not a 100% Match
 
 This distinction is particularly important for CIR system design.
 
@@ -957,7 +1000,7 @@ match_evidence
 rather than combining them into one value.
 
 
-# 21. Identity Graph Link Model
+# 19. Identity Graph Link Model
 
 A production identity link can therefore be modeled as:
 
@@ -1005,7 +1048,7 @@ Timestamp
 This creates complete provenance.
 
 
-# 22. Explainability
+# 20. Explainability
 
 Every CIR decision should be explainable.
 
@@ -1037,7 +1080,9 @@ Website = medium trust
 This allows business users, data engineers, and auditors to understand why an identity relationship exists.
 
 
-# 23. Temporal Identity
+\newpage
+
+# 21. Temporal Identity
 
 Identity is not necessarily static.
 
@@ -1100,7 +1145,7 @@ validated against time-sliced data. Decay must not silently erase historical
 provenance or override an explicit revocation.
 
 
-# 24. Adaptive Source Trust
+# 22. Adaptive Source Trust
 
 Source reliability should not necessarily remain static.
 
@@ -1156,7 +1201,7 @@ This creates a feedback loop between data quality and identity resolution.
 
 \newpage 
 
-# 25. Identity Resolution Pipeline
+# 23. Identity Resolution Pipeline
 
 The complete CIR process can be represented as:
 
@@ -1216,7 +1261,7 @@ The complete CIR process can be represented as:
 
 \newpage
 
-# 26. Architectural Interpretation
+# 24. Architectural Interpretation
 
 CIR can therefore be viewed as a decision layer between raw data ingestion and Customer 360.
 
@@ -1255,7 +1300,7 @@ CUSTOMER 360
 This architecture prevents downstream applications from having to independently solve customer identity.
 
 
-# 27. Relationship to Customer 360
+# 25. Relationship to Customer 360
 
 Customer 360 depends heavily on identity quality, but identity resolution is
 only one contributor to downstream quality.
@@ -1286,7 +1331,7 @@ CIR is therefore not merely an infrastructure component.
 It is a **foundational data-quality layer for Customer 360**.
 
 
-# 28. Identity Resolution Metadata in Customer 360
+# 26. Identity Resolution Metadata in Customer 360
 
 The system should preserve the evidence and decision status of each identity
 relationship. A single aggregate confidence value for a Master Profile can hide
@@ -1341,8 +1386,9 @@ Identity-resolution evidence can therefore become a useful feature for
 downstream decision systems, provided that its score, calibration status,
 validity, and permitted purpose are explicit.
 
+\newpage 
 
-# 29. Identity Graph vs. Traditional Deduplication
+# 27. Identity Graph vs. Traditional Deduplication
 
 Traditional deduplication asks:
 
@@ -1382,7 +1428,7 @@ Record B
 The latter is more suitable for continuously evolving CDP environments.
 
 
-# 30. Methodological Principles
+# 28. Methodological Principles
 
 The proposed CIR methodology is based on seven principles.
 
@@ -1415,7 +1461,27 @@ Identity evidence changes over time and should therefore retain timestamps and, 
 The system should preserve relationships between raw profiles, identity signals, sources, and Master Profiles instead of simply destroying source records through irreversible merging.
 
 
-# 31. Proposed CIR Data Model
+# 29. Proposed CIR Data Model
+
+Logical relationship
+
+```text
+SOURCE REGISTRY
+       |
+       +-------------------+
+       |                   |
+       v                   v
+ RAW PROFILE       IDENTITY EVIDENCE
+       |                   ^
+       |                   |
+       v                   |
+ IDENTITY LINK -----------+
+       |
+       v
+ MASTER PROFILE
+```
+
+---
 
 A conceptual CIR data model can contain:
 
@@ -1487,8 +1553,7 @@ This separates:
 * evidence;
 * source governance.
 
-
-# 32. Example End-to-End Resolution
+# 30. Example End-to-End Resolution
 
 Consider the following records.
 
@@ -1514,6 +1579,17 @@ email = customer@example.com
 phone = 0901234567
 ```
 
+### Facebook Ads
+
+```text
+campaign_id = FB-C100
+ad_id = FB-A200
+click_id = CL123
+email = customer@example.com
+```
+
+The Facebook record provides **supporting identity evidence** because the email is available. A normal Facebook Ad impression or click without an identity attribute would primarily be behavioral evidence.
+
 ### Feedback Survey
 
 ```text
@@ -1523,50 +1599,67 @@ phone = 0901234567
 CIR observes:
 
 ```text
-             CUSTOMER IDENTITY
-                    |
-       ------------------------------
-       |            |            |
-      CRM         Website       App
-       |            |            |
-       |            |            |
-   customer_id    email      device_id
-       |            |            |
-       -            -----------------
-       |                 |
-       +++++++++ phone +++++
-                    |
-                    v
-                 CIR
-                    |
-                    v
-             Evidence Model
-                    |
-        ----------------------------
-        |           |           |
-      Signal      Source      Quality
-      Weight      Trust       Score
-        |           |           |
-        ----------------------------
-                    v
-             Match Confidence
-                    |
-                    v
-             Existing Master
+                       CUSTOMER IDENTITY
+                              |
+              +---------------+---------------+
+              |               |               |
+             CRM           Website           App
+              |               |               |
+              |               |               |
+          customer_id       email         device_id
+              |               |               |
+              |               +-------+-------+
+              |                       |
+              +-----------+-----------+
+                          |
+                        phone
+                          |
+              +-----------+-----------+
+              |                       |
+          Survey                  Facebook Ads
+          phone                    email
+              |                       |
+              +-----------+-----------+
+                          |
+                          v
+                        CIR
+                          |
+                          v
+                   Evidence Model
+                          |
+              +-----------+-----------+
+              |           |           |
+            Signal      Source      Quality
+            Weight      Trust        Score
+              |           |           |
+              +-----------+-----------+
+                          |
+                          v
+                   Match Confidence
+                          |
+                          v
+                 Existing Master Profile
 ```
 
 The CRM evidence receives high trust.
 
-The mobile application contributes supporting evidence.
+The mobile application provides supporting identity evidence through the
+shared device ID and phone number.
 
-The website contributes medium-strength evidence.
+The website provides supporting evidence through the email and device ID.
 
-The survey contributes weak evidence.
+The Facebook Ads record provides weaker identity evidence when an email or other
+usable identifier is available; an ad click alone should not be treated as proof
+of human identity.
 
-The combined evidence can produce a high-confidence identity relationship without treating every source equally.
+The survey provides weaker evidence because the phone number is self-reported.
+
+The combined evidence can produce a high-confidence identity relationship while
+preserving the different trust levels of each source.
 
 
-# 33. Security and Privacy Considerations
+
+# 31. Security and Privacy Considerations
 
 CIR operates on identity information and therefore requires appropriate privacy and security controls.
 
@@ -1616,7 +1709,7 @@ The system should also implement, as required by applicable law and policy:
 The identity graph should therefore preserve the minimum information required to establish and maintain identity relationships.
 
 
-# 34. Operational Monitoring
+# 32. Operational Monitoring
 
 A production CIR system should continuously monitor:
 
@@ -1649,8 +1742,9 @@ time-sliced examples, and relevant populations. Organizations should also
 monitor calibration, candidate coverage, cluster-size distribution, review
 outcomes, and drift in signal and source behavior.
 
+\newpage 
 
-# 35. Feedback Loop
+# 33. Feedback Loop
 
 CIR can operate as a controlled learning system, but business outcomes are not
 automatically identity labels.
@@ -1704,10 +1798,9 @@ deployment, with versioned rollouts and rollback controls. A system must not
 update source trust solely from its own prior links, since that can reinforce
 false matches.
 
+# 34. Theoretical Model
 
-# 36. Theoretical Model
-
-The complete model can be summarized as:
+The complete SAE-CIR evidence model can be summarized as:
 
 $$
 \boxed{
@@ -1730,14 +1823,14 @@ $$
 
 where:
 
-* ($M_k$) = comparison result for signal $k$;
-* ($W_{signal,k}$) = signal weighting;
-* ($W_{source,k}$) = source- and context-specific reliability;
-* ($W_{quality,k}$) = observation quality;
-* ($W_{independence,k}$) = correlation adjustment;
-* ($W_{time,k}$) = optional time weighting.
+* $M_k$ = comparison result for identity signal $k$;
+* $W_{signal,k}$ = intrinsic strength of the identity signal;
+* $W_{source,k}$ = source- and context-specific reliability;
+* $W_{quality,k}$ = quality of the observed data;
+* $W_{independence,k}$ = adjustment for correlated evidence;
+* $W_{time,k}$ = temporal relevance of the evidence.
 
-For each evidence (k):
+For each observed identity signal:
 
 $$
 \boxed{
@@ -1756,133 +1849,201 @@ W_{time,k}
 }
 $$
 
-The score is not itself a probability. When labeled data are available, a
-calibration model can produce:
+The total evidence score is therefore the sum of the individual evidence
+contributions:
 
 $$
-\boxed{
+S(r_i,r_j)=\sum_k E_k
+$$
+
+The score $S$ is an **evidence score, not a probability**. Its value depends on
+the selected weights and the available evidence.
+
+### Example
+
+Suppose CIR evaluates whether a raw profile belongs to an existing Master
+Profile.
+
+| Source | Signal | $M_k$ | $W_{signal}$ | $W_{source}$ | $W_{quality}$ | $W_{independence}$ | $W_{time}$ | $E_k$ |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| CRM | Phone | 1.00 | 0.95 | 0.95 | 1.00 | 1.00 | 1.00 | **0.903** |
+| Web Survey | Phone | 1.00 | 0.95 | 0.30 | 0.90 | 1.00 | 1.00 | **0.257** |
+| FB Lead Ad | Phone | 1.00 | 0.95 | 0.40 | 0.85 | 1.00 | 1.00 | **0.323** |
+
+Therefore:
+
+$$
+S
+=
+0.903+0.257+0.323
+=
+\boxed{1.483}
+$$
+
+This example shows that the same phone match can contribute different amounts
+of evidence because the observations come from sources with different trust and
+data-quality levels.
+
+The score may be used directly for a validated rule-based resolution policy.
+When representative labeled same-person and different-person pairs are
+available, the evidence features can instead be calibrated into a match
+probability:
+
+$$
 \operatorname{logit}(\hat{p})
 =
-\beta_0 + \sum_k \beta_k x_k
-}
+\beta_0+\sum_k\beta_kx_k
 $$
 
-where $\hat{p}$ is calibrated on held-out data. Without representative labels,
-the system should report $S$ and uncertainty rather than a match probability.
+where:
 
-The final resolution becomes:
+$$
+\hat{p}=P(Y=1\mid x)
+$$
+
+and $x_k$ may include the comparison results, signal type, source context,
+data quality, independence, recency, and candidate ambiguity.
+
+Without representative labeled data, CIR should report the evidence score $S$
+rather than presenting it as a probability.
+
+The final resolution decision is then conceptually:
 
 $$
 Decision(\hat{p})=
 \begin{cases}
-LINK & \hat{p} \geq T_{auto}\\
+LINK & \hat{p}\geq T_{auto}\\
 REVIEW & T_{review}\leq\hat{p}<T_{auto}\\
 NO\ LINK & \hat{p}<T_{review}
 \end{cases}
 $$
 
-If no suitable Master Profile exists:
+If no suitable existing Master Profile is found, the system may create a new
+provisional Master Profile according to its lifecycle policy.
 
-$$
-Decision = NEW_MASTER
-$$
+\newpage
 
-
-# 37. Practical CIR Architecture
+# 35. Practical CIR Architecture
 
 A production implementation can therefore be organized into the following logical components:
 
-```text
+\begin{figure}[h]
+\centering
+\begin{verbatim}
 -------------------------------------------------
-+              DATA SOURCES                   +
-|                                             |
-+ Ads + Website + App + CRM + POS + Surveys   +
++              DATA SOURCES                     +
+|                                               |
++ Ads + Website + App + CRM + POS + Surveys     +
 --------------------------------------------------
                       |
                       v
 -------------------------------------------------
-+             RAW PROFILE STORE               +
++             RAW PROFILE STORE                 +
 --------------------------------------------------
                       |
                       v
 -------------------------------------------------
-+          IDENTITY SIGNAL EXTRACTION         +
-|                                             |
-+ Email + Phone + Device + Customer ID + ...  +
---------------------------------------------------
++          IDENTITY SIGNAL EXTRACTION           +
+|                                               |
++ Email + Phone + Device + Customer ID + ...    +
+-------------------------------------------------
                       |
                       v
 -------------------------------------------------
-+             CIR ENGINE                      +
-|                                             |
-+ Candidate Generation                        +
-+ Dynamic Matching                            +
-+ Source Trust                                +
-+ Data Quality                                +
-+ Evidence Aggregation                        +
-+ Confidence Estimation                       +
---------------------------------------------------
++             CIR ENGINE                        +
+|                                               |
++ Candidate Generation                          +
++ Dynamic Matching                              +
++ Source Trust                                  +
++ Data Quality                                  +
++ Evidence Aggregation                          +
++ Confidence Estimation                         +
+-------------------------------------------------
                       |
                       v
 -------------------------------------------------
-+             IDENTITY GRAPH                  +
-|                                             |
-+ Raw Profiles + Master Profiles              +
-+ Evidence + Confidence + Provenance          +
---------------------------------------------------
++             IDENTITY GRAPH                    +
+|                                               |
++ Raw Profiles + Master Profiles                +
++ Evidence + Confidence + Provenance            +
+-------------------------------------------------
                       |
                       v
 -------------------------------------------------
-+             CUSTOMER 360                    +
-|                                             |
-+ Profile + Journey + CLV + Segments + AI     +
++             CUSTOMER 360                      +
+|                                               |
++ Profile + Journey + CLV + Segments + AI       +
 -------------------------------------------------
-```
+\end{verbatim}
+\end{figure}
 
 \newpage 
 
-# 38. Conclusion
+# 36. Conclusion
 
-Customer Identity Resolution should be understood as an **evidence-based identity inference system**, rather than a simple record-matching or database-deduplication mechanism.
+Customer Identity Resolution should be understood as an **evidence-based identity
+inference system**, rather than a simple record-matching or database-deduplication
+mechanism.
 
-The proposed Source-Aware Evidence-Based CIR methodology introduces three
-fundamental dimensions of identity evidence:
-
-$$
-\boxed{
-\begin{aligned}
-\mathrm{Evidence\ Contribution}
-&= \mathrm{Comparison\ Result}
-\cdot \mathrm{Signal\ Weight} \\
-&\quad \times \mathrm{Source\ Reliability}
-\cdot \mathrm{Observation\ Quality}
-\end{aligned}
-}
-$$
-
-The model can be extended with temporal decay and evidence independence:
+The proposed Source-Aware Evidence-Based CIR methodology evaluates identity
+evidence using three core dimensions:
 
 $$
 \boxed{
-\begin{aligned}
-\mathrm{Evidence\ Contribution}
-&= \mathrm{Comparison}
-\cdot \mathrm{Signal}
-\cdot \mathrm{Source} \\
-&\quad \cdot \mathrm{Quality}
-\cdot \mathrm{Independence}
-\cdot \mathrm{Time}
-\end{aligned}
+\text{Evidence}
+=
+\text{Signal Strength}
+\times
+\text{Source Reliability}
+\times
+\text{Data Quality}
 }
 $$
 
-This approach recognizes an important reality of modern customer data:
+The model can be extended with independence and temporal factors when required:
+
+$$
+\boxed{
+\text{Evidence}
+=
+\text{Signal}
+\times
+\text{Source}
+\times
+\text{Quality}
+\times
+\text{Independence}
+\times
+\text{Time}
+}
+$$
+
+The resulting evidence contributions are aggregated to evaluate whether a raw
+profile should be linked to an existing Master Profile, sent for review, or
+kept unresolved.
+
+This approach recognizes an important reality of customer data:
 
 > **Not all customer information has equal evidential value.**
 
-A verified internal customer record may provide strong evidence of identity, while a self-reported value from an anonymous feedback survey may provide only weak evidence. Nevertheless, weak evidence can still contribute to an identity hypothesis when combined with stronger and independent evidence.
+A verified internal CRM record may provide strong evidence, while a
+self-reported value from a web survey or a marketing platform may provide
+weaker evidence. The evidence is therefore evaluated according to both the
+identity signal and the context in which it was observed.
 
-The resulting CIR system therefore performs four essential functions:
+The resulting Identity Graph preserves:
+
+* identity evidence;
+* source provenance;
+* data quality;
+* evidence scores or calibrated probabilities;
+* temporal context;
+* resolution outcomes.
+
+CIR therefore becomes more than a matching mechanism. It provides an
+**explainable and auditable identity layer** for Customer 360.
+
+The methodology can be summarized as:
 
 $$
 \boxed{
@@ -1896,30 +2057,6 @@ $$
 }
 $$
 
-It detects identity signals, evaluates their reliability, resolves raw profiles into Master Profiles, and learns from subsequent validation outcomes.
-
-This produces an Identity Graph in which every relationship can be represented with:
-
-* identity evidence;
-* source provenance;
-* source and acquisition context;
-* data quality;
-* evidence score or calibrated match probability;
-* temporal context;
-* resolution outcome.
-
-Such an architecture provides a more robust foundation for Customer 360 because downstream systems no longer need to assume that every identity relationship is equally certain.
-
-The practical contribution of this framework is a change in the question that
-CIR is asked to answer. Rather than treating resolution as a binary exercise
-in deciding which records belong together, it examines the basis of each
-proposed relationship: which signals agree or conflict, where the observations
-came from, how reliable and current they are, and what uncertainty remains.
-The result is not simply a merge. It is a documented identity relationship,
-with a score or calibrated probability where the data support one, an explicit
-outcome, and provenance that can be revisited as new evidence becomes available.
-
-In this sense, SAE-CIR reframes identity resolution as evidence-based identity
-inference rather than record matching. Its value lies not in claiming certainty
-where none exists, but in making the grounds for each identity decision visible,
-testable, and open to revision.
+Its practical objective is not to claim certainty where none exists, but to
+make every identity decision **measurable, explainable, and revisable as new
+evidence becomes available**.
