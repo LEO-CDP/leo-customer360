@@ -33,7 +33,7 @@ def get_tracking_service(
     storage: S3ObjectStorage = Depends(get_storage),
     protection: TrackingRequestProtection = Depends(get_protection),
 ) -> TrackingLogService:
-    return TrackingLogService(storage, protection.session_cache, protection.event_stream)
+    return TrackingLogService(storage, protection.session_cache)
 
 
 @router.post("/logs", response_model=TrackingLogResponse, status_code=status.HTTP_201_CREATED)

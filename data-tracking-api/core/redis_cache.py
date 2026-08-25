@@ -1,6 +1,5 @@
 """Redis-backed session metadata and request protection for tracking ingestion."""
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -69,54 +68,6 @@ class RedisSessionCache:
         return len(sessions)
 
 
-class EventStreamPublisher:
-    """Best-effort producer that XADDs each accepted event to the broker Redis stream.
-
-    The stream is the Phase-1 event broker consumed by the backend-system event Loader
-    (see deployments/docs/web-tracking-implementation-plan.md §6-8). Publishing is
-    best-effort: the durable record is the S3/vStorage object, so a Redis hiccup never
-    fails ingestion. Disabled unless ``TRACKING_STREAM_ENABLED=true`` (the tracking-box
-    deploy enables it with its co-located broker Redis).
-    """
-
-    def __init__(self, client: Any, stream_key: str, maxlen: int, *, enabled: bool):
-        self.client = client
-        self.stream_key = stream_key
-        self.maxlen = maxlen
-        self.enabled = enabled
-
-    def publish(
-        self,
-        data_source_id: UUID,
-        events: list[dict[str, Any]],
-        received_at: datetime,
-    ) -> int:
-        """XADD one capped entry per event; return the count published (0 if off/unavailable)."""
-        if not self.enabled or not events:
-            return 0
-        timestamp = received_at.astimezone(timezone.utc).isoformat()
-        source_id = str(data_source_id)
-        pipe = self.client.pipeline(transaction=False)
-        for event in events:
-            payload = json.dumps(
-                {"data_source_id": source_id, "received_at": timestamp, "event": event},
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            pipe.xadd(
-                self.stream_key,
-                {"data_source_id": source_id, "received_at": timestamp, "payload": payload},
-                maxlen=self.maxlen,
-                approximate=True,
-            )
-        try:
-            pipe.execute()
-        except redis.RedisError:
-            logger.warning("Redis event stream unavailable; events not published to broker", exc_info=True)
-            return 0
-        return len(events)
-
-
 class TrackingRequestProtection:
     """Applies configurable bot filtering and an atomic Redis rate limit."""
 
@@ -127,12 +78,6 @@ class TrackingRequestProtection:
             self.client,
             settings.tracking_redis_key_prefix,
             settings.tracking_session_ttl_seconds,
-        )
-        self.event_stream = EventStreamPublisher(
-            self.client,
-            settings.tracking_stream_key,
-            settings.tracking_stream_maxlen,
-            enabled=settings.tracking_stream_enabled,
         )
         self.bot_patterns = tuple(
             pattern.strip().lower()
