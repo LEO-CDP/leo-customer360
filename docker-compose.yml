@@ -48,8 +48,9 @@ volumes:
 
 services:
   # ---------------------------------------------------------------------------
-  # 1) PostgreSQL 16 + PostGIS + pgvector + contrib, auto-provisioned with
-  #    database-schema.sql and database-init/init-core-database.sql on first start.
+  # 1) PostgreSQL 16 + PostGIS + pgvector + contrib. Extensions are bootstrapped
+  #    by /docker-entrypoint-initdb.d; the SCHEMA + SEED DATA are applied by the
+  #    `migrate` (dbmate) service below, not by initdb.d.
   # ---------------------------------------------------------------------------
   postgres:
     build:
@@ -80,6 +81,41 @@ services:
       timeout: 10s
       retries: 8
       start_period: 90s
+
+  # ---------------------------------------------------------------------------
+  # 1b) dbmate - one-shot SQL schema migrations. Runs `dbmate up` against the
+  #     customer360 database, then exits (~8 MB Go binary, no daemon). Every
+  #     service that touches the schema waits on this via
+  #     `depends_on: migrate: { condition: service_completed_successfully }`.
+  #     Replaces the /docker-entrypoint-initdb.d bootstrap, which only ran once
+  #     on an empty volume. Migrations: database-init/db/migrations/*.sql.
+  # ---------------------------------------------------------------------------
+  migrate:
+    image: ghcr.io/amacneil/dbmate:2
+    container_name: customer360-migrate
+    restart: "no"
+    <<: *default-hardening
+    environment:
+      # No search_path -> dbmate's schema_migrations table lives in `public`;
+      # every migration is customer360.-qualified, so this is safe and avoids a
+      # chicken-and-egg with the schema the baseline migration itself creates.
+      DATABASE_URL: "postgres://${DB_USER:-postgres}:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/${DB_NAME:-customer360}?sslmode=disable"
+    # --no-dump-schema: the /db mount is read-only; schema.sql is a dev/CI
+    # artifact, not written by the runtime container. --wait: block until the DB
+    # accepts connections (belt-and-suspenders with depends_on: service_healthy).
+    command: ["--no-dump-schema", "--wait", "--migrations-dir", "/db/migrations", "up"]
+    volumes:
+      - ./database-init/db:/db:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128m
 
   # ---------------------------------------------------------------------------
   # 2) Redis 8 - API response cache (see customer360-api/core/cache.py).
@@ -210,6 +246,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "${DAGSTER_UI_HOST:-127.0.0.1}:${DAGSTER_UI_PORT:-3000}:3000"
     volumes:
@@ -262,6 +300,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "${C360_API_HOST:-127.0.0.1}:${C360_API_PORT:-8008}:8008"
     networks:
@@ -358,6 +398,8 @@ services:
 
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - customer360-network
     command: >

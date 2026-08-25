@@ -1,5 +1,5 @@
--- Extensions required by database-schema.sql (uuid-ossp, pgcrypto, vector,
--- postgis) plus the fuzzy-matching extensions used by identity-resolution-
+-- Extensions required by the dbmate baseline migration (uuid-ossp, pgcrypto,
+-- vector, postgis) plus the fuzzy-matching extensions used by identity-resolution-
 -- service's matching rules (pg_trgm, fuzzystrmatch). Created up front so a
 -- fresh production database is fully usable even if the dev-only demo-data
 -- seeder (which also idempotently creates pg_trgm/fuzzystrmatch) never runs.
