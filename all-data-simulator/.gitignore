@@ -7,3 +7,6 @@ logs/
 .dagster.pid
 .dagster_home/
 .tmp_dagster_home_*/
+
+platform_cir_csv
+platform_cir_api_csv_simulated.zip
