@@ -1,5 +1,7 @@
 import csv
+import hashlib
 import os
+import re
 import zipfile
 import random
 from datetime import datetime, timedelta
@@ -44,6 +46,24 @@ def write_csv(filename, fieldnames, rows):
         writer.writeheader()
         writer.writerows(rows)
     return path
+
+
+def normalize_ga4_email(email):
+    normalized = "".join(email.strip().lower().split())
+    local_part, separator, domain = normalized.rpartition("@")
+    if separator and domain in {"gmail.com", "googlemail.com"}:
+        local_part = local_part.replace(".", "")
+        normalized = f"{local_part}@{domain}"
+    return normalized
+
+
+def normalize_ga4_phone(phone):
+    digits = re.sub(r"\D", "", phone)
+    return f"+{digits}" if digits else ""
+
+
+def sha256_hex(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 # =====================================================================
 # 1) META LEAD ADS (Graph API)
@@ -130,7 +150,10 @@ def generate_ga4_data(num_rows):
         "date", "eventName", "campaignId", "campaignName", "sessionSource", 
         "sessionMedium", "country", "city", "browser", "deviceCategory", 
         "platform", "sessionCampaignId", "sessionCampaignName", "transactionId",
-        "eventCount", "keyEvents", "totalRevenue", "engagementRate"
+        "eventCount", "keyEvents", "totalRevenue", "engagementRate",
+        "client_id", "user_pseudo_id", "user_id", "login_method",
+        "utm_source", "utm_medium", "utm_campaign", "utm_id", "fbclid",
+        "sha256_email_address", "sha256_phone_number"
     ]
     rows = []
     events = ["page_view", "view_item", "begin_checkout", "purchase"]
@@ -140,32 +163,51 @@ def generate_ga4_data(num_rows):
         p = PEOPLE[i % len(PEOPLE)]
         dt = Config.BASE_DATE.date() + timedelta(days=random.randint(0, 10))
         campaign_id = f"GAD-C360-{random.randint(1,4):03d}"
+        campaign_name = f"C360_Web_{random.randint(1,4)}"
+        source = random.choice(sources)
+        medium = "cpc" if source == "google" else "paid_social"
         event_name = random.choice(events)
         
         is_purchase = event_name == "purchase"
         txid = f"ORD-{i+1:05d}" if is_purchase else ""
         key_events = 1 if is_purchase else 0
         revenue = round(random.uniform(450000, 950000), 2) if is_purchase else 0
+        is_authenticated = i % 3 != 0
+        user_id = f"GA4-{p['cid']}" if is_authenticated else ""
+        login_method = random.choice(["google_sso", "internal"]) if is_authenticated else ""
+        email_hash = sha256_hex(normalize_ga4_email(p["email"])) if is_authenticated else ""
+        phone_hash = sha256_hex(normalize_ga4_phone(p["phone"])) if is_authenticated else ""
         
         rows.append({
             "date": dt.strftime("%Y%m%d"), # GA4 strictly uses YYYYMMDD
             "eventName": event_name,
             "campaignId": campaign_id,
-            "campaignName": f"C360_Web_{random.randint(1,4)}",
-            "sessionSource": random.choice(sources),
-            "sessionMedium": "paid_social" if sources != "google" else "cpc",
+            "campaignName": campaign_name,
+            "sessionSource": source,
+            "sessionMedium": medium,
             "country": p["country"],
             "city": p["city"],
             "browser": random.choice(["Chrome", "Safari", "Edge"]),
             "deviceCategory": random.choice(["mobile", "desktop", "tablet"]),
             "platform": "web",
             "sessionCampaignId": campaign_id,
-            "sessionCampaignName": f"C360_Web_{random.randint(1,4)}",
+            "sessionCampaignName": campaign_name,
             "transactionId": txid,
             "eventCount": random.randint(1, 5),
             "keyEvents": key_events, 
             "totalRevenue": revenue,
             "engagementRate": round(random.uniform(0.35, 0.85), 4),
+            "client_id": f"GA4-CLIENT-{i+1:08d}",
+            "user_pseudo_id": f"GA4-PSEUDO-{i+1:08d}",
+            "user_id": user_id,
+            "login_method": login_method,
+            "utm_source": source,
+            "utm_medium": medium,
+            "utm_campaign": campaign_name,
+            "utm_id": campaign_id,
+            "fbclid": f"FBCLID-{i+1:08d}" if source == "facebook" else "",
+            "sha256_email_address": email_hash,
+            "sha256_phone_number": phone_hash,
         })
     return fields, rows
 

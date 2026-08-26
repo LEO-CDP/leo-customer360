@@ -41,6 +41,37 @@ It describes the source platform represented by each dataset, the generated CSV 
 field types and meanings, identity value, and differences between a real platform
 payload and this simulator's flattened test representation.
 
+### Overview Flow
+
+\begin{center}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{c@{\quad}c@{\quad}c@{\quad}c@{\quad}c}
+\fcolorbox{black}{gray!10}{\parbox{0.22\linewidth}{\centering
+	{Data sources}\\[3pt]
+Meta Lead Ads\\
+TikTok Ads\\
+Google Analytics 4\\
+Zalo Official Account\\
+AppsFlyer Pull API}}
+& $\longrightarrow$ &
+\fcolorbox{black}{gray!10}{\parbox{0.18\linewidth}{\centering
+	{Fields}\\[3pt]
+Identity fields\\
+Profile fields\\
+Event fields\\
+Campaign fields}}
+& $\longrightarrow$ &
+\fcolorbox{black}{gray!10}{\parbox{0.22\linewidth}{\centering
+	{Identity Resolution}\\[3pt]
+Normalize\\
+Match\\
+Merge customer identities}}
+\end{tabular}
+\end{center}
+
+\newpage
+
 ## 1. Document Scope
 
 ### Source datasets
@@ -226,9 +257,87 @@ CSV serializer renders without quotes.
 ### Source contract
 
 - Official Data API schema: [Google Analytics Data API dimensions and metrics](https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema)
+- GA4 configuration fields: [Google Analytics configuration reference](https://developers.google.com/analytics/devguides/collection/ga4/reference/config)
+- Send login identity: [Send user IDs](https://developers.google.com/analytics/devguides/collection/ga4/user-id)
+- Send hashed user data: [Send user-provided data using Measurement Protocol](https://developers.google.com/analytics/devguides/collection/ga4/uid-data)
+- Measurement Protocol payload: [Measurement Protocol reference](https://developers.google.com/analytics/devguides/collection/protocol/ga4/reference)
+- PII policy: [Best practices to avoid sending PII](https://support.google.com/analytics/answer/6366371)
 
 This dataset uses Google Analytics Data API dimension and metric names. It is a flat
 CSV projection of synthetic report rows, not a GA4 BigQuery export event record.
+
+### GA4 attribution and identity integration
+
+#### UTM source and Facebook traffic
+
+For a website, GA4 can read campaign parameters from the landing URL, including
+`utm_source`, `utm_medium`, `utm_campaign`, `utm_id`, `utm_content`, and `utm_term`.
+These values feed GA4 traffic-source dimensions such as `sessionSource`,
+`sessionMedium`, `sessionCampaignName`, and `sessionCampaignId`.
+
+`utm_source=facebook` identifies Facebook as the traffic source; it does not identify
+the customer. Meta's `fbclid` is a click identifier, not a customer ID, `cid`, or
+authenticated user identity. It must not be used as a CIR customer key. If the
+application retains it for internal campaign diagnostics, do not place PII in campaign
+parameters or page URLs, and apply the project's privacy and retention rules.
+
+Do not confuse these identifiers: GA4 `client_id` identifies a browser or app instance,
+GA4 `user_id` identifies a signed-in user with a non-PII site-owned value, `fbclid`
+identifies a Meta ad click, and the simulator's `cid` identifies a synthetic customer.
+
+The simulator now generates synthetic UTM fields and a Facebook-only `fbclid` as
+collection metadata. These values represent landing-page attribution inputs; they are
+not copied from a real URL or Facebook account.
+
+#### Google SSO or internal login
+
+After a successful Google SSO or internal login, the website may set GA4 `user_id` to a
+stable, site-owned, pseudonymous identifier. Google documents `user_id` as a reserved
+configuration value for connecting activity across sessions, devices, and platforms.
+The value must not itself be PII. It must not be sent as a custom user property, a
+custom dimension, or an event-level parameter.
+
+Send `user_id` only while the user is authenticated. On logout, set it to `null`; do not
+send an empty string or the text `"null"`. The simulator represents anonymous rows with
+empty `user_id` and authenticated rows with a synthetic non-PII value. It also includes
+synthetic `client_id`, `user_pseudo_id`, and `login_method` collection fields in the CSV.
+
+#### Hashed email and phone
+
+When a server-side integration uses GA4 Measurement Protocol, user-provided data can
+be sent in the top-level `user_data` object alongside `user_id`. Email and phone are
+not ordinary event parameters in this model. Measurement Protocol requires the
+developer to normalize the values, hash them with SHA-256, and send lowercase
+hex-encoded values in `sha256_email_address` and `sha256_phone_number`.
+
+The documented normalization rules include:
+
+- Email: remove leading/trailing whitespace, lowercase, remove spaces, and remove
+  periods before the domain for `gmail.com` or `googlemail.com` addresses, then hash.
+- Phone: remove all non-digit characters, add the `+` prefix using E.164-style form,
+  then hash.
+
+Only send this data when the required consent, privacy, and data-governance conditions
+for the implementation are satisfied. Never send raw email or phone in a GA4 URL,
+ordinary event parameter, or custom dimension. The simulator CSV contains only synthetic
+SHA-256 fixture values in the `sha256_*` columns; it does not contain raw email or phone.
+
+Illustrative Measurement Protocol shape:
+
+```json
+{
+  "client_id": "WEB_CLIENT_ID",
+  "user_id": "NON_PII_INTERNAL_USER_ID",
+  "events": [{"name": "login", "params": {"method": "google_sso"}}],
+  "user_data": {
+    "sha256_email_address": ["SHA256_EMAIL_HEX"],
+    "sha256_phone_number": ["SHA256_PHONE_HEX"]
+  }
+}
+```
+
+The example values are placeholders. The actual request also requires the appropriate
+Measurement Protocol transport credentials and identifiers.
 
 ### Dataset metadata
 
@@ -243,6 +352,9 @@ CSV projection of synthetic report rows, not a GA4 BigQuery export event record.
 | Source set | `google`, `facebook`, `tiktok`, `zalo` |
 | Revenue currency | Not explicitly declared; values are synthetic VND-like amounts |
 | Key-event model | `purchase` produces `keyEvents = 1`; all other events produce `0` |
+| Authentication model | Every third row is anonymous; other rows use synthetic `google_sso` or `internal` login context |
+| UTM model | `utm_*` values are synthetic and aligned with the session/campaign fields |
+| User data model | Authenticated rows contain synthetic SHA-256 email/phone values; raw PII is never generated |
 
 ### Column metadata
 
@@ -266,6 +378,17 @@ CSV projection of synthetic report rows, not a GA4 BigQuery export event record.
 | `keyEvents` | integer | non-null | `1` for purchase rows and `0` otherwise; modern GA4 metric naming |
 | `totalRevenue` | decimal | non-null | Random 450,000 to 950,000 for purchase rows; `0` otherwise |
 | `engagementRate` | decimal fraction | non-null | Random fraction from 0.35 to 0.85; follows GA4 fraction convention |
+| `client_id` | string | non-null | Synthetic browser/app collection identifier, unique per generated row; not a customer ID |
+| `user_pseudo_id` | string | non-null | Synthetic pseudonymous GA4 collection identifier, unique per generated row |
+| `user_id` | string | empty for anonymous rows | Synthetic non-PII site-owned identifier `GA4-CUST-NNNN` for authenticated rows |
+| `login_method` | string | empty for anonymous rows | Synthetic authentication context: `google_sso` or `internal` |
+| `utm_source` | string | non-null | Synthetic landing attribution source; equal to `sessionSource` |
+| `utm_medium` | string | non-null | Synthetic landing attribution medium; equal to `sessionMedium`, `cpc` for Google and `paid_social` otherwise |
+| `utm_campaign` | string | non-null | Synthetic landing campaign name; equal to `campaignName` and `sessionCampaignName` |
+| `utm_id` | string | non-null | Synthetic landing campaign ID; equal to `campaignId` and `sessionCampaignId` |
+| `fbclid` | string | empty except Facebook rows | Synthetic Meta click identifier when `utm_source` is `facebook`; never a customer key |
+| `sha256_email_address` | string SHA-256 hex | empty for anonymous rows | Normalized synthetic email hashed as lowercase hexadecimal SHA-256 for Measurement Protocol-style user data |
+| `sha256_phone_number` | string SHA-256 hex | empty for anonymous rows | Digits-only synthetic phone normalized with `+`, then hashed as lowercase hexadecimal SHA-256 |
 
 ### Simulator limitations
 
@@ -274,6 +397,9 @@ CSV projection of synthetic report rows, not a GA4 BigQuery export event record.
   respective IDs.
 - There is no `userPseudoId`, session ID, event timestamp, item array, user property,
   ecommerce item, or GA4 request/response envelope.
+- `client_id`, `user_pseudo_id`, `user_id`, UTM fields, `fbclid`, and flattened
+  `sha256_*` fields are simulator collection metadata; they are not all queryable as
+  standard Google Analytics Data API dimensions.
 - `totalRevenue` has no declared currency in this file.
 - The `sessionMedium` implementation currently has a semantic defect documented above;
   consumers should not infer source-medium correctness from generated rows until fixed.
@@ -423,7 +549,7 @@ of canonical Pull API field names.
 |---|---|---|---|
 | Meta | `field_email`, `field_phone` | First/last name, city, state | No |
 | TikTok | None | Advertiser/campaign hierarchy and country only | No |
-| GA4 | None in current schema | City, country, campaign/source context | No |
+| GA4 | None in current schema; production GA4 may use non-PII `user_id` | City, country, campaign/source context, optional UTM-derived traffic dimensions | No |
 | Zalo | `shared_info_phone` | Name, city, address | No |
 | AppsFlyer | `customer_user_id`, `event_value.customer_id` | Original URL, device identifiers, geography | Yes, embedded in fields rather than as a column |
 
@@ -447,32 +573,4 @@ of canonical Pull API field names.
 - CSV values are serialized from Python values; downstream ingestion should explicitly cast
   numeric, boolean, date, datetime, and JSON-string fields instead of relying on inference.
 
-## 9. Source References and Maintenance Rules
-
-Update this document when any generated header, source endpoint, field meaning, type,
-format, identity behavior, or flattening rule changes.
-
-Before using a generated file as an integration fixture:
-
-1. Run the simulator from the repository root.
-2. Confirm every CSV header against the tables in this document.
-3. Parse `event_value` as JSON for AppsFlyer rows.
-4. Validate GA4 date and metric conventions against the current Data API schema.
-5. Validate TikTok dimensions and metrics against the report type and data level being
-   simulated.
-6. Validate Meta and Zalo flattened fields against the corresponding live object examples.
-7. Treat all IDs, names, revenue, and device values as synthetic test data.
-
-## 10. Pandoc PDF Export
-
-From the repository root, export this document with XeLaTeX:
-
-```bash
-pandoc ./all-data-simulator/full_metadata_doc_simulator.md --pdf-
-engine=xelatex  -o ./all-data-simulator/full_metadata_doc_simulator.pdf
-```
-
-The YAML metadata in this file enables the table of contents, A4 page geometry,
-wrapped URLs, compact long tables, and clickable PDF links. The export requires
-Pandoc and a XeLaTeX installation with the `microtype`, `xurl`, and `enumitem`
-packages available.
+## 9. 
