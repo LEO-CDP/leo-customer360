@@ -20,7 +20,7 @@ LOG_FILE="$LOG_DIR/dagster.log"
 
 # Every backend-system code location registered in workspace.yaml. Keep in
 # sync with that file -- see README.md "add a new backend service" section.
-SERVICES=(identity_resolution scoring segmentation analytics)
+SERVICES=(identity_resolution scoring segmentation analytics data_synch email_engine notification_engine campaign_activation personalization)
 
 GREEN="\033[0;32m"
 RED="\033[0;31m"

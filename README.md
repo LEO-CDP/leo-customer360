@@ -23,7 +23,7 @@ The current repo has two live backend services and a set of placeholder service 
 | `backend-system/segmentation/` | Implemented | Recomputes active segments and syncs member/tag data back to master profiles |
 | `customer360-api/` | Implemented | Main REST API for identity, CRM, persona, reporting, and metadata |
 | `frontend-admin/` | Implemented | FastAPI shell for the UI, backed by client-side JS and API requests |
-| `scoring`, `analytics`, `data_synch`, `email_engine`, `notification_engine`, `campaign_orchestration`, `personalization` | Placeholder | Minimal Dagster scaffolds ready to be filled in |
+| `scoring`, `analytics`, `data_synch`, `email_engine`, `notification_engine`, `campaign_activation`, `personalization` | Placeholder | Minimal Dagster scaffolds ready to be filled in |
 
 ## Repository structure
 

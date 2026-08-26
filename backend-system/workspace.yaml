@@ -7,42 +7,49 @@
 #   pip install -r identity_resolution/requirements.txt   # (or a venv per service)
 #   dagster dev -w workspace.yaml
 #
-# Each `python_file` entry is loaded like `python <relative_path>`, with
-# that file's directory added to sys.path -- so e.g.
-# identity_resolution/dagster_defs.py can `import identity_resolution`
-# (its nested package) without any extra path config.
+# Each `python_file` entry is resolved relative to this workspace file. Code
+# locations with nested local packages add their own directory to `sys.path`
+# in `dagster_defs.py`, so imports work consistently in Dagster and in tests.
 #
-# NOTE: identity_resolution/scoring/segmentation/analytics/data_synch/
-# email_engine/notification_engine each ship their own requirements.txt
-# (they're independent services). Running `dagster dev` against this
-# workspace from a single environment requires every service's requirements
-# installed there; once services diverge more, give each location its own
-# venv and add `executable_path: <path-to-venv-python>` under that entry.
+# NOTE: Every code location ships its own requirements.txt because these are
+# independent services. Running `dagster dev` against this workspace from a
+# single environment requires all nine requirements files to be installed
+# there; once services diverge more, give each location its own venv and add
+# `executable_path: <path-to-venv-python>` under that entry.
 load_from:
+  # Customer Identity Resolution: matches raw profiles to master profiles.
   - python_file:
       relative_path: identity_resolution/dagster_defs.py
       location_name: identity_resolution
+  # Scoring: placeholder for customer scoring pipelines.
   - python_file:
       relative_path: scoring/dagster_defs.py
       location_name: scoring
+  # Segmentation: recomputes active segment membership.
   - python_file:
       relative_path: segmentation/dagster_defs.py
       location_name: segmentation
+  # Analytics: aggregates tracking logs into analytical metrics.
   - python_file:
       relative_path: analytics/dagster_defs.py
       location_name: analytics
+  # Data synchronization: placeholder for inbound/outbound data pipelines.
   - python_file:
       relative_path: data_synch/dagster_defs.py
       location_name: data_synch
+  # Email engine: placeholder for outbound email delivery workflows.
   - python_file:
       relative_path: email_engine/dagster_defs.py
       location_name: email_engine
+  # Notification engine: placeholder for push/SMS/in-app dispatch.
   - python_file:
       relative_path: notification_engine/dagster_defs.py
       location_name: notification_engine
+  # Campaign activation: placeholder for executable audience activation.
   - python_file:
-      relative_path: campaign_orchestration/dagster_defs.py
-      location_name: campaign_orchestration
+      relative_path: campaign_activation/dagster_defs.py
+      location_name: campaign_activation
+  # Personalization: placeholder for next-best-action decisions.
   - python_file:
       relative_path: personalization/dagster_defs.py
       location_name: personalization

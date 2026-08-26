@@ -1,1 +1,8 @@
 dagster>=1.9,<2
+psycopg2-binary>=2.9,<3
+boto3>=1.34,<2
+redis>=5.0,<6
+python-dotenv>=1.0,<2
+pytest>=7.4,<9
+pandas>=2.2,<3
+polars>=1.0,<2

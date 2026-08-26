@@ -1,13 +1,13 @@
-"""Placeholder Dagster job for the Campaign Orchestration service
-(backend-system/campaign_orchestration).
+"""Placeholder Dagster job for the Campaign Activation service
+(backend-system/campaign_activation).
 
 Future home of external/inbound data synchronization pipelines (e.g.
 pulling CRM/warehouse exports into ``cdp_raw_profiles_stage``, or pushing
 resolved profiles out to downstream systems). No real business logic lives
 here yet -- this file only wires up a job/op skeleton so the Dagster
-workspace (``../workspace.yaml``) already has a ``campaign_orchestration`` code location
+workspace (``../workspace.yaml``) already has a ``campaign_activation`` code location
 ready for that logic to be dropped in, and so
-``customer360-api/core/utils/dagster_client.py``'s ``CampaignOrchestrationDagsterService``
+``customer360-api/core/utils/dagster_client.py``'s campaign Dagster service
 has a real job to submit against.
 
 Run from `backend-system/`: `dagster dev -w workspace.yaml` to see this job
@@ -20,7 +20,7 @@ import time
 
 from dagster import Definitions, OpExecutionContext, job, op
 
-PLACEHOLDER_SLEEP_SECONDS = int(os.environ.get("CAMPAIGN_ORCHESTRATION_PLACEHOLDER_SLEEP_SECONDS", "2"))
+PLACEHOLDER_SLEEP_SECONDS = int(os.environ.get("CAMPAIGN_ACTIVATION_PLACEHOLDER_SLEEP_SECONDS", "2"))
 
 
 @op
@@ -32,9 +32,9 @@ def run_campaign(context: OpExecutionContext) -> None:
     context.log.info("run_campaign op: done")
 
 
-@job(name="campaign_orchestration_job")
-def campaign_orchestration_job() -> None:
+@job(name="campaign_activation_job")
+def campaign_activation_job() -> None:
     run_campaign()
 
 
-defs = Definitions(jobs=[campaign_orchestration_job])
+defs = Definitions(jobs=[campaign_activation_job])

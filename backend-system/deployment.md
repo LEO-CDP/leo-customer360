@@ -8,7 +8,7 @@ This document describes how to deploy the Dagster orchestration layer in
 The repository currently contains **nine** Dagster task directories:
 
 1. `analytics`
-2. `campaign_orchestration`
+2. `campaign_activation`
 3. `data_synch`
 4. `email_engine`
 5. `identity_resolution`
@@ -26,7 +26,7 @@ Current implementation status:
 | `identity_resolution` | Implemented CIR job and optional poll sensor |
 | `segmentation` | Implemented segment recomputation job and poll sensor |
 | `analytics` | Hourly tracking-log aggregation job and UTC schedule |
-| `campaign_orchestration` | Placeholder Dagster job |
+| `campaign_activation` | Placeholder Dagster job |
 | `data_synch` | Placeholder Dagster job |
 | `email_engine` | Placeholder Dagster job |
 | `notification_engine` | Placeholder Dagster job |
@@ -44,7 +44,7 @@ Current implementation status:
 - `data_synch`
 - `email_engine`
 - `notification_engine`
-- `campaign_orchestration`
+- `campaign_activation`
 - `personalization`
 
 Keep the workspace list and the `backend-system/Dockerfile`
@@ -62,7 +62,7 @@ backend-system/
 	Dockerfile
 	workspace.yaml
 	analytics/
-	campaign_orchestration/
+	campaign_activation/
 	data_synch/
 	email_engine/
 	identity_resolution/

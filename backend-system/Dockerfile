@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir \
 COPY . /app
 
 # Install each code location's own requirements if present.
-RUN for d in identity_resolution scoring segmentation analytics data_synch email_engine notification_engine campaign_orchestration personalization; do \
+RUN for d in identity_resolution scoring segmentation analytics data_synch email_engine notification_engine campaign_activation personalization; do \
       if [ -f "$d/requirements.txt" ]; then pip install --no-cache-dir -r "$d/requirements.txt"; fi; \
     done
 
