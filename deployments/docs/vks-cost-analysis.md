@@ -2,223 +2,176 @@
 
 > **Status:** research / decision-support · **Date:** 2026-08-26 · **Scope:** UAT + PROD
 > **Companion:** [`vks-migration-technical-analysis.md`](./vks-migration-technical-analysis.md)
-> **FX used:** ≈ **26,100 VND = 1 USD** (mid-market, week of 2026-08-19). All figures indicative.
+> **FX used:** ≈ **26,000 VND = 1 USD** (external market level, Aug 2026 — VNG prices only in VND).
 
-## 0. Read this first — why there are few hard numbers
+## 0. Sources & confidence
 
-**VNG Cloud / GreenNode does not publish static price tables.** Every pricing page routes to
-the interactive calculator (`calculator.console.greennode.ai`) or a sales quote. That means the
-per-flavor monthly prices this analysis needs —
-`s-general-1x2`, `s2-general-2x4`, `s2-general-4x8`, `s2-general-8x16`,
-`db.s-general-2x4`, `db.s-general-8x16`, `NLB_Small`, SSD block-storage per-GB — are **not
-publicly documented**. The **only** VNG-published compute/storage rate found anywhere is a
-**Kafka** example (below), which is Kafka-specific and used here purely as an order-of-magnitude
-anchor.
+VNG's pricing **calculator** (`calculator.console.greennode.ai`) is **decommissioned** (NXDOMAIN),
+and the docs deliberately carry no per-resource numbers. **However**, the real, current
+**Pay-As-You-Go list prices are published** as server-rendered CMS data on the VNG product pages
+(`vngcloud.vn/vi/product/{vserver,vdb,vstorage}`). So the compute, managed-DB and MemStore numbers
+below are **published** (VAT-inclusive monthly list prices); only **block-storage per-GB** and the
+**load-balancer package** remain **estimated** (calculator-only). Every figure is tagged.
 
-Therefore this document does two things:
-1. **Quantifies what *can* be quantified without prices** — the resource footprint (vCPU, RAM,
-   storage, load balancers) of the current setup vs the VKS target, per env. This is the real
-   driver of cost and is exact.
-2. Provides a **parametric cost model + a fill-in-the-blank rate table** so that, once you pull
-   the six unit prices from the VNG calculator for **HCM03-1C**, the monthly TCO drops out
-   immediately.
+| Bucket | Confidence |
+|---|---|
+| vServer compute flavors (= VKS worker-node prices) | ✅ **published** (product page) |
+| Managed PostgreSQL / MemStore instance prices | ✅ **published** (product page) |
+| VKS control plane = free | ✅ **published** (docs) |
+| Object storage (vStorage) per GB | ✅ published (usage; identical in both models) |
+| **Block volume / PVC SSD per GB** | ⚠️ **estimated** ~2,000 VND/GB/mo (from vDB storage anchor) |
+| **Load balancer (`NLB_Small`) per month** | ⚠️ **estimated** ~300,000 VND/mo (market placeholder — confirm in console) |
 
-> ⚠️ **Do not treat any VND figure in §5 as VNG-confirmed.** Fill the rate table from the
-> calculator/quote first. Only the Kafka anchor in §6 is a published VNG number.
+> The two estimated lines (PVC, NLB) are **identical in both deployment models**, so they largely
+> **cancel out in the delta** — the comparison is robust even though those two rates aren't published.
 
 ---
 
-## 1. Cost model
-
-Monthly cost decomposes into the same buckets before and after — VKS only changes *how many* of
-each you buy:
+## 1. Cost model & the one insight that decides it
 
 ```
-Total/mo =  Σ(worker-node VMs · flavor_price)          ← compute
-          + Σ(PVC GB · block_storage_price)            ← in-cluster persistent volumes
-          + Σ(load balancers · LB_package_price)       ← ingress / NLB
-          + managed PostgreSQL (unchanged)
-          + managed Redis/MemStore (unchanged)
-          + object storage + egress (≈ unchanged)
-          + VKS control plane .......................... = 0 (free)
+Total/mo =  Σ(worker/VM vCPU+RAM · flavor price)     ← compute
+          + Σ(disk + PVC GB · block price)           ← storage
+          + Σ(load balancers · NLB price)            ← ingress
+          + managed PostgreSQL + managed MemStore    ← unchanged by the migration
+          + object storage + egress                  ← ≈ unchanged
+          + VKS control plane ....................... = 0 (free)
 ```
 
-Key structural facts that shape the model:
-- **VKS control plane is free** — no per-cluster/hour charge (unlike GKE/EKS ≈ $73/cluster/mo).
-- **Worker nodes are billed as ordinary vServer VMs** at the *same flavor prices you pay today*.
-  So compute cost is driven purely by **how much vCPU/RAM you provision**, VM-or-K8s.
-- **Managed PostgreSQL and MemStore are untouched** by the migration → their cost is a constant
-  in both columns and can be ignored for the *delta*.
-- **Each `Service type=LoadBalancer` provisions a billed NLB** → consolidate to **one** ingress LB.
+**The decisive fact:** VNG vServer pricing is **perfectly linear** — a fixed price per
+**(1 vCPU + 2 GB) block**, and **VKS worker nodes are billed at those same flavor prices**:
 
-**The migration's cost verdict is therefore decided by one question: does the VKS node pool
-provision more or less vCPU/RAM than the VMs it replaces?**
+- `s-general` (Intel gen-1): **236,500 VND** per (1 vCPU + 2 GB)/mo
+- `s2-general` (Intel gen-2): **283,800 VND** per (1 vCPU + 2 GB)/mo (2x4 = 2×, 4x8 = 4×, 8x16 = 8×)
 
----
-
-## 2. Current footprint (exact)
-
-### 2.1 UAT
-| Item | Qty | Spec | vCPU | RAM | Disk |
-|---|---|---|---|---|---|
-| app VMs (`s-general-1x2`) | 3 | api + backend + tracking | **3** | **6 GB** | 3 × 20 GB |
-| managed PostgreSQL | 1 | `db.s-general-2x4` | (2) | (4) | 20 GB |
-| Redis | 0 | container on api box | — | — | — |
-| L4 NLB | 1 | `NLB_Small` | — | — | — |
-| **App-compute subtotal** | | | **3 vCPU** | **6 GB** | |
-
-### 2.2 PROD (as provisioned today — 4 boxes)
-| Item | Qty | Spec | vCPU | RAM | Disk |
-|---|---|---|---|---|---|
-| api (`s2-general-4x8`) | 1 | 4/8 | 4 | 8 | 50 GB |
-| sso (`s2-general-2x4`) | 1 | 2/4 | 2 | 4 | 50 GB |
-| frontend (`s2-general-2x4`) | 1 | 2/4 | 2 | 4 | 50 GB |
-| ads (`s2-general-4x8`) | 1 | 4/8 | 4 | 8 | 50 GB |
-| managed PostgreSQL | 1 | `db.s-general-8x16` | (8) | (16) | 250 GB |
-| managed MemStore | 1 | `db.s-general-2x4` | (2) | (4) | — |
-| L4 NLB | 1 | `NLB_Small` | — | — | — |
-| **App-compute subtotal (provisioned)** | | | **12 vCPU** | **24 GB** | |
-| **App-compute subtotal (design-complete: + tracking 2/4 + backend ~2/4)** | | | **~16 vCPU** | **~32 GB** | |
+Because it's linear and the node price is the same VM-or-Kubernetes, **compute cost depends only on
+the *total* vCPU/RAM you provision — not on how many boxes you slice it into.** Consequences:
+- At **equal capacity**, VKS compute cost = vServer compute cost (no Kubernetes premium; control plane is free).
+- VKS gets **cheaper** only when it lets you provision **less** total vCPU/RAM — via **bin-packing**
+  (one shared pool instead of per-service boxes sized for isolated peaks) and **autoscaling** (pay for
+  peak only when it happens).
+- The **managed PostgreSQL + MemStore** dominate the bill and are **unchanged**, so they cancel in the delta.
 
 ---
 
-## 3. VKS target footprint (proposed)
+## 2. Published rate card (VND/month)
 
-Sizing rule of thumb: sum the workloads' realistic requests, add ~15–20% for the node OS +
-kubelet + DaemonSets (CNI, kube-proxy, CSI node, ingress, Netdata) + scheduling headroom.
-
-### 3.1 UAT — node pool
-Today's 3 vCPU/6 GB is **oversubscribed** (the api box alone runs ~11 containers on 1 vCPU/2 GB).
-Right-sized in K8s:
-| Option | Node pool | vCPU | RAM | HA | Note |
-|---|---|---|---|---|---|
-| **A (recommended)** | 1 × `s2-general-4x8` (autoscale →2) | 4 | 8 | none (uat ok) | more real capacity than today, still tiny |
-| B | 2 × `s2-general-2x4` | 4 | 8 | node-level | survives one node drain |
-
-- PVCs: Jaeger badger (~5–10 GB) + pgAdmin data (~1–2 GB) ≈ **~10–15 GB SSD** (only if not kept ephemeral).
-- Load balancers: **1** (ingress). Managed PostgreSQL unchanged; Redis → keep in-cluster (tiny) or adopt managed.
-
-### 3.2 PROD — node pool
-Bin-packing the 4–6 dedicated boxes into a shared pool (isolation via requests/limits, not per-VM):
-| Option | Node pool | vCPU | RAM | HA | Note |
-|---|---|---|---|---|---|
-| **A (recommended)** | 2 × `s2-general-4x8` (autoscale 2→4) | 8–16 | 16–32 | node-level | headroom for ads bursts via autoscale |
-| B | 2 × `s2-general-8x16` | 16 | 32 | node-level | matches design-complete footprint 1:1 |
-
-- PVCs: Jaeger badger (~20 GB) + pgAdmin (~2 GB) ≈ **~20–25 GB SSD**.
-- Load balancers: **1** (ingress). Managed PostgreSQL (`8x16`) + MemStore (`2x4`) unchanged.
-
----
-
-## 4. Footprint delta (the part that *is* certain)
-
-| | UAT now | UAT VKS (A) | PROD now (prov.) | PROD now (design) | PROD VKS (A) |
-|---|---|---|---|---|---|
-| Worker vCPU | 3 (oversub.) | **4** | 12 | ~16 | **8–16** (autoscale) |
-| Worker RAM | 6 GB (oversub.) | **8 GB** | 24 GB | ~32 GB | **16–32 GB** |
-| Load balancers | 1 | 1 | 1 | 1 | **1** |
-| Block-storage PVCs | 0 | ~10–15 GB | 0 | 0 | ~20–25 GB |
-| Control-plane fee | n/a | **0** | n/a | n/a | **0** |
-| Managed PG / Redis | same | same | same | same | same |
-
-**Interpretation**
-- **UAT**: VKS provisions *slightly more* vCPU/RAM than today (4/8 vs an oversubscribed 3/6) plus
-  a little PVC — a **small cost increase**, buying real capacity, HPA, and reliability the current
-  1 vCPU box can't give. UAT is small either way.
-- **PROD**: VKS provisions **the same or less** worker vCPU/RAM than the dedicated boxes, because
-  bin-packing removes the per-service isolation waste (4–6 boxes sized for peak → a shared pool
-  sized for aggregate). **Compute is roughly flat-to-cheaper**; you add only a modest PVC line and
-  keep one LB. **Control-plane is free**, so there is no Kubernetes "tax" on top.
-- **Net:** infra cost is expected **≈ flat overall** (UAT slightly up, PROD flat-to-down), with the
-  real savings landing in **operations** (§7).
-
----
-
-## 5. Fill-in rate table (pull from the VNG calculator for HCM03-1C)
-
-Get these six numbers from `calculator.console.greennode.ai` (or a VNG quote), then compute totals.
-Unit prices are **identical** for a VM and a VKS worker node of the same flavor — so this table
-also re-prices the *current* setup.
-
-| Line item | Unit | Unit price (VND/mo) | UAT qty | PROD qty |
-|---|---|---|---|---|
-| `s-general-1x2` (1/2) | node | `____` | current: 3 | — |
-| `s2-general-2x4` (2/4) | node | `____` | VKS-B: 2 | current: 2 |
-| `s2-general-4x8` (4/8) | node | `____` | VKS-A: 1–2 | current: 2 · VKS-A: 2–4 |
-| `s2-general-8x16` (8/16) | node | `____` | — | VKS-B: 2 |
-| Block storage SSD | GB/mo | `____` | ~10–15 GB | ~20–25 GB |
-| Load balancer (`NLB_Small`) | LB/mo | `____` | 1 | 1 |
-| Managed PostgreSQL `db.s-general-2x4` | inst/mo | `____` | 1 | — |
-| Managed PostgreSQL `db.s-general-8x16` | inst/mo | `____` | — | 1 |
-| Managed MemStore `db.s-general-2x4` | inst/mo | `____` | — (uat: in-cluster) | 1 |
-| Object storage + egress | GB/mo | `____` | usage | usage |
-| **VKS control plane** | cluster | **0 (free)** | 1 | 1 |
-
-**Then:** `Total = Σ(qty × unit price)` per column. Compare the *current* column (VMs) to the *VKS*
-column (worker nodes + PVC) — the managed-DB/Redis/object-storage rows cancel out in the delta.
-
----
-
-## 6. The one published anchor (order-of-magnitude only)
-
-The **only** VNG-published compute+storage rate located:
-- **vDB Kafka (KDS): 1,500,000 VND/mo for 4 vCPU / 16 GB**, storage **2,000 VND/GB/mo**
-  (source: docs.greennode.ai/vdb/kafka-cluster-kds/cach-tinh-phi).
-
-⚠️ This is **Kafka-specific** and must **not** be assumed equal to vServer worker-node flavors or
-to RDS/MemStore. Used *only* to sanity-check magnitude: if a 4/16 managed Kafka node is ~1.5M
-VND/mo (~$57), general-purpose worker VMs are plausibly in the low-hundreds-of-thousands to
-~1M VND/mo range per node — but **confirm with the calculator**. Block storage at ~2,000 VND/GB/mo
-(~$0.077) implies the PROD PVC line (~25 GB) is ~**50,000 VND/mo (~$2)** — negligible either way.
-
----
-
-## 7. Total cost of ownership (the decisive, non-price factor)
-
-Infra cost is ≈ flat; the migration pays off in **operations**. These are qualitative but real:
-
-| Dimension | vServer today | VKS | Effect |
+| Resource | Spec | VND/month | Basis |
 |---|---|---|---|
-| Deploys | SSH bash pipeline (`deploy-all.sh`), manual ordering, `docker run` per box | declarative manifests / Helm / GitOps, controller reconciliation | fewer failed/partial deploys; faster rollback |
-| Scaling | resize a whole VM (downtime) | HPA + cluster autoscaler (ads bursts) | pay for peak only when needed |
-| Reliability | container dies → `--restart`; box dies → manual | pod reschedule + node auto-repair | less manual firefighting |
-| Networking | hand-maintained cross-box security groups, guessed IPs | Service DNS + NetworkPolicy | fewer misconfig outages |
-| TLS / routing | Caddy + cutover runbook + `set-domain.sh` | Ingress + cert-manager | one mechanism, auto-renew |
-| Ops access | Portainer + agents per box | `kubectl` | no extra tool to run/secure |
-| Env parity | separate `uat`/`prod` tfvars sprawl + placeholders | one manifest set, values per env | drift/placeholder bugs (see tech doc §7) removed |
-| Utilisation | dedicated boxes sized for peak isolation (idle waste) | bin-packing | better $/workload, esp. PROD |
+| vServer `s-general-1x2` | 1 vCPU / 2 GB | **236,500** | published |
+| vServer `s2-general-2x4` | 2 / 4 | **567,600** | published |
+| vServer `s2-general-4x8` | 4 / 8 | **1,135,200** | published |
+| vServer `s2-general-8x16` | 8 / 16 | **2,270,400** | published |
+| Managed PostgreSQL `db.v1.small2x4.b100`¹ | 2 / 4 · 100 GB incl. | **840,000** | published |
+| Managed PostgreSQL `db.v1.medium8x16.b100`¹ | 8 / 16 · 100 GB incl. | **3,360,000** | published |
+| Managed MemStore `db.v1.small2x4.b100`¹ | 2 / 4 · 100 GB incl. | **840,000** | published |
+| Block volume / PVC (SSD) | per GB-month | ~2,000 | ⚠️ estimated |
+| Load balancer (`NLB_Small`) | per LB-month | ~300,000 | ⚠️ estimated |
+| Object storage (vStorage, Gold/High-Perf) | per GB-month | 1,000 / 1,600 | published (usage) |
+| **VKS control plane** | per cluster | **0 (free)** | published |
 
-**Cost of the migration itself** (one-time): engineering to write manifests/Helm + platform
-add-ons + cutover + CI change for `data-tracking-api`; run UAT and PROD in parallel briefly during
-cutover (temporary double-run). No new licensing (VKS control plane free; NGINX/cert-manager/
-oauth2-proxy are OSS).
-
----
-
-## 8. Verdict & recommendation
-
-- **Infra spend:** expected **≈ neutral overall** — UAT ticks up slightly (buys real capacity),
-  PROD is **flat-to-cheaper** via bin-packing; VKS's free control plane means no Kubernetes premium.
-- **Operational spend:** **materially lower** — the migration deletes an entire class of VM-era
-  toil (SSH deploys, cross-box firewalls, Caddy cutovers, Portainer, IP juggling).
-- **Recommendation:** **Proceed**, UAT first (low risk, exercises the full pattern), then PROD with
-  the same manifests. **Before committing budget, pull the six unit prices in §5 from the VNG
-  calculator for HCM03-1C and confirm flavor availability + AZ (HCM03-1C only ⇒ no cross-AZ HA)
-  with VNG.**
-
-### Open pricing items to get from VNG (calculator or sales)
-1. vServer flavor monthly prices: `s-general-1x2`, `s2-general-2x4`, `s2-general-4x8`, `s2-general-8x16`.
-2. Block-storage SSD / SSD-IOPS per-GB-month.
-3. Load-balancer package price (`NLB_Small`) + egress VND/GB.
-4. Managed PostgreSQL (`db.s-general-2x4`, `db.s-general-8x16`) and MemStore (`db.s-general-2x4`).
-5. vCR (registry) storage/pricing, if moving off GHCR.
-6. **HCM03-1C** parity — public docs price/flavor pages cover HCM03-1A only.
+¹ The old `db.s-general-*` names are retired; current SKUs are `db.v1.*` (General) / `db.v2.*` (High-Perf),
+`.b100` = 100 GB bundled storage. Extra DB storage ≈ 2,000 VND/GB/mo. A **Saving Plan** (committed 1–3 yr)
+is cheaper than these PAYG list prices for steady prod — worth pricing separately.
 
 ---
 
-## 9. Sources
-- VKS control-plane-free, worker-nodes-as-VMs, LB-per-service billing, CSI, release schedule: **docs.greennode.ai/vks/**.
-- Kafka published rate: **docs.greennode.ai/vdb/kafka-cluster-kds/cach-tinh-phi**.
-- Pricing calculator (no static tables): **calculator.console.greennode.ai**.
-- Current footprint: this repo's `deployments/*/overlays/{uat,prod}.tfvars` + module READMEs (see the technical doc §2).
-- FX ≈ 26,100 VND/USD (mid-market, 2026-08-19 week).
+## 3. Estimated monthly cost — vServer vs VKS
+
+Assumptions: root/node disks and PVCs billed at ~2,000 VND/GB/mo; one `NLB_Small` per env in both
+models; managed PostgreSQL + MemStore identical in both models; object-storage usage identical (excluded
+from the compute comparison). UAT keeps Redis in-cluster; PROD keeps managed MemStore.
+
+### 3.1 UAT
+
+| Line | vServer (current) | VKS |
+|---|---|---|
+| Compute | 3 × `s-general-1x2` = **709,500** | 1 × `s2-general-4x8` = **1,135,200** |
+| Node / root disks | 3 × 20 GB ≈ 120,000 | 1 × 50 GB ≈ 100,000 |
+| PVCs (Jaeger / pgAdmin / Redis) | — (on-box volumes) | ~20 GB ≈ 40,000 |
+| Redis | container on api box = 0 | in-cluster (PVC above) = 0 |
+| Managed PostgreSQL (2×4) | 840,000 | 840,000 |
+| Load balancer (`NLB_Small`) | ~300,000 | ~300,000 |
+| VKS control plane | — | 0 |
+| **Total / month** | **≈ 1,969,500 VND** (~$76) | **≈ 2,415,200 VND** (~$93) |
+
+**UAT delta: VKS ≈ +445,700 VND/mo (~+23%, ~+$17).** The increase buys real capacity (4 vCPU/8 GB vs
+today's *oversubscribed* 3 vCPU/6 GB single box), plus per-pod limits, HPA and self-healing. UAT is
+small either way; a 2 × `s2-general-2x4` layout (node-level HA) costs the same compute + one extra
+node disk (≈ +100,000). Redis stays in-cluster to avoid the 840,000 managed-MemStore line.
+
+### 3.2 PROD
+
+| Line | vServer (current, 4 boxes) | vServer (design-complete, 6 boxes) | VKS — like-for-like (3 × 4x8) | VKS — bin-packed (2 × 4x8 + autoscale) |
+|---|---|---|---|---|
+| Compute | 4x8+2x4+2x4+4x8 = **3,405,600** | + tracking 2x4 + backend 2x4 = **4,540,800** | 3 × `s2-general-4x8` = **3,405,600** | 2 × `s2-general-4x8` = **2,270,400** |
+| Node / root disks | 4 × 50 GB ≈ 400,000 | 6 × 50 GB ≈ 600,000 | 3 × 50 GB ≈ 300,000 | 2 × 50 GB ≈ 200,000 |
+| PVCs (Jaeger / pgAdmin) | — | — | ~25 GB ≈ 50,000 | ~25 GB ≈ 50,000 |
+| Managed PostgreSQL (8×16, 250 GB)² | 3,660,000 | 3,660,000 | 3,660,000 | 3,660,000 |
+| Managed MemStore (2×4) | 840,000 | 840,000 | 840,000 | 840,000 |
+| Load balancer (`NLB_Small`) | ~300,000 | ~300,000 | ~300,000 | ~300,000 |
+| VKS control plane | — | — | 0 | 0 |
+| **Total / month** | **≈ 8,605,600 VND** (~$331) | **≈ 9,940,800 VND** (~$382) | **≈ 8,555,600 VND** (~$329) | **≈ 7,320,400 VND** (~$282) |
+
+² `db.v1.medium8x16.b100` = 3,360,000 (100 GB incl.) + 150 GB extra × 2,000 = 300,000 → 3,660,000.
+
+**PROD deltas (vs current 4-box, ≈ 8,605,600):**
+- **VKS like-for-like** (same 12 vCPU / 24 GB, one autoscaling pool): **≈ −50,000 VND/mo (≈ break-even)** — proof of the linear-pricing point.
+- **VKS bin-packed** (8 vCPU / 16 GB baseline, autoscale to 4 nodes for ads bursts): **≈ −1,285,200 VND/mo (~−15%, ~−$49)**.
+- **vs the design-complete 6-box target** (≈ 9,940,800): bin-packed VKS saves **≈ −2,620,400 VND/mo (~−26%)** and still covers tracking + backend as pods (no extra boxes to buy).
+
+> Managed PostgreSQL + MemStore (**≈ 4,500,000 VND/mo**) are **>50% of the PROD bill** and are
+> **unchanged** by the migration. The only movable money is compute + disks + LB (≈ 4.1M), which is
+> exactly where VKS bin-packing/autoscale wins.
+
+---
+
+## 4. Footprint delta (price-free, exact)
+
+| | UAT now | UAT VKS | PROD now (prov.) | PROD now (design) | PROD VKS (bin-packed) |
+|---|---|---|---|---|---|
+| Worker vCPU | 3 (oversub.) | 4 | 12 | ~16 | 8 (autoscale →16) |
+| Worker RAM | 6 GB (oversub.) | 8 GB | 24 GB | ~32 GB | 16 GB (→32) |
+| Load balancers | 1 | 1 | 1 | 1 | 1 |
+| Managed PG / MemStore | same | same | same | same | same |
+| Control-plane fee | — | 0 | — | — | 0 |
+
+---
+
+## 5. TCO — the non-price factor
+
+Infra spend is ≈ flat (UAT slightly up, PROD flat-to-cheaper). The migration pays off in **operations**:
+deploys become declarative (no SSH `deploy-all.sh` pipeline), scaling is HPA/autoscaler (pay for peak
+only when it happens), reliability improves (pod reschedule + node auto-repair), networking simplifies
+(Service DNS + NetworkPolicy replace hand-maintained cross-box security groups), TLS/routing is one
+mechanism (Ingress + cert-manager replace Caddy + the cutover runbook), and ops loses a tool (kubectl
+replaces Portainer + agents). See the technical doc §7.
+
+**One-time migration cost:** engineering to author manifests/Helm + platform add-ons + cutover, plus a
+brief parallel run during cutover. No new licensing (VKS control plane free; NGINX/cert-manager/
+oauth2-proxy are OSS). `data-tracking-api` is already CI-built (prerequisite done).
+
+---
+
+## 6. Verdict & recommendation
+
+- **UAT:** VKS costs **~+446k VND/mo (~+$17)** — a rounding error that buys real capacity + HPA + self-healing over today's oversubscribed 1-box setup. **Migrate** (low risk, first).
+- **PROD:** VKS is **break-even at equal capacity** and **~1.3M VND/mo cheaper (~−15%) bin-packed**, rising to **~2.6M/mo (~−26%)** vs the design-complete 6-box target — while the free control plane means no Kubernetes tax. **Migrate** after UAT.
+- **Biggest lever is not the platform:** managed PostgreSQL + MemStore are >50% of PROD spend and unchanged. To cut the bill materially, right-size the DB tier and consider a **Saving Plan** (committed) for steady prod compute + DB — both orthogonal to the VKS decision.
+
+### Confirm before committing budget
+1. **`NLB_Small` monthly** and **SSD block/PVC per-GB** — the only two estimated lines (console/quote); they cancel in the delta but set the absolute total.
+2. **HCM03-1C** flavor availability + price parity (product-page prices are the national catalogue; the account's single enabled AZ is HCM03-1C).
+3. **Saving Plan** vs PAYG for prod (committed discounts not modelled here).
+
+---
+
+## 7. Sources
+- vServer flavor prices (published CMS table): `https://vngcloud.vn/vi/product/vserver`
+- Managed PostgreSQL (RDS) + MemStore prices: `https://vngcloud.vn/vi/product/vdb`
+- Object storage per-GB tiers: `https://vngcloud.vn/vi/product/vstorage`
+- vDB storage 2,000 VND/GB (illustrative) + Kafka example: `https://docs.greennode.ai/vdb/kafka-cluster-kds/cach-tinh-phi`
+- VKS control plane free: `https://docs.greennode.ai/vn/vks/cach-tinh-gia`
+- Volume/IOPS tiers (unpriced): `https://docs.greennode.ai/vserver/compute-hcm03-1a/volume/volume-types`
+- Current footprint: this repo's `deployments/*/overlays/{uat,prod}.tfvars` + module READMEs (technical doc §2).
+- FX ≈ 26,000 VND/USD (external market, Aug 2026). Prices are VAT-inclusive PAYG list; a Saving Plan is cheaper.
