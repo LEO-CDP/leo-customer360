@@ -12,7 +12,8 @@
 #
 # Re-runnable. Target box = servers["$TRACKING_SERVER_KEY"] (default "tracking"). Overrides:
 #   BASTION_USER / SSH_KEY / TRACKING_SERVER_KEY / REDIS_SERVER_KEY
-#   BUILD_LOCAL (default 1 — data-tracking-api is not built by CI, so it builds on the VM)
+#   BUILD_LOCAL (default 0 — data-tracking-api is now built + published to GHCR by CI, so it
+#               pulls the image; set BUILD_LOCAL=1 to build on the VM from source instead)
 #   S3_AUTO_CREATE_BUCKETS (default true — per-source buckets; see ../storage/README.md caveat)
 set -euo pipefail
 cd "$(dirname "$0")"                 # deployments/server
@@ -74,14 +75,14 @@ if [[ -n "$REDIS_PASS" ]]; then
 fi
 if [[ -n "$REDIS_HOST" ]]; then echo ">> Redis: ${REDIS_HOST}:${REDIS_PORT} (rate-limit + session cache)"; else echo ">> Redis: not configured — caching off, rate limiter fails open."; fi
 
-# --- CD image source: build on the VM by default (data-tracking-api is not published by CI);
-#     set BUILD_LOCAL=0 to pull a GHCR image once one exists. ---
+# --- CD image source: pull the CI-built image from GHCR by default (data-tracking-api is now
+#     published by CI, like the other services); set BUILD_LOCAL=1 to build on the VM instead. ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
-SERVICE="data-tracking-api"          # source dir + (future) GHCR image name
+SERVICE="data-tracking-api"          # source dir + GHCR image name (ghcr.io/leo-cdp/leo-customer360/data-tracking-api)
 CONTAINER="customer360-tracking-api" # runtime container name (matches dev-docker-compose.yml)
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
 GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
-if [[ "${BUILD_LOCAL:-1}" == "1" ]]; then
+if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
   DEPLOY_MODE="build"; IMAGE=""
   echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
   echo ">> Shipping data-tracking-api/ ..."

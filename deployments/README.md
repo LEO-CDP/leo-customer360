@@ -18,9 +18,9 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 | [`proxy`](./proxy) | **Caddy** reverse proxy — TLS termination (auto Let's Encrypt) + single-host path routing. **Live** at `https://beta.leocdp.com` (fronts frontend `/`, api `/c360api`, keycloak `/auth`, ads `/ads`, jaeger `/jaeger`); [runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom) |
 | [`storage`](./storage) | Object storage (vStorage / S3) |
 
-> **Scope:** this view shows the **UAT** overlay only. The prod overlay differs
-> (dedicated boxes, managed MemStore, own VPC `10.101.0.0/16`) and will be added
-> here once it is provisioned.
+> **Scope:** this table maps to the **UAT** overlay. The prod overlay differs
+> (dedicated boxes, managed MemStore, own VPC `10.101.0.0/16`) — see the
+> [PROD deployment view](#prod-deployment-view) and the UAT → PROD differences table below.
 
 ## One-shot deploy — `deploy-all.sh`
 
@@ -111,7 +111,7 @@ each environment **pull that same immutable image by tag** — instead of rebuil
 
 > **Status:** the app deploy scripts now **pull the CI-built image from GHCR by default**
 > (`server/deploy-api.sh`, `server/deploy-backend.sh`, `ads-server/deploy-ads.sh`,
-> `frontend/deploy-frontend.sh` → `docker pull` + `docker run`, via the shared
+> `frontend/deploy-frontend.sh`, `server/deploy-tracking.sh` → `docker pull` + `docker run`, via the shared
 > [`lib/ghcr.sh`](./lib/ghcr.sh)). Set `BUILD_LOCAL=1` to fall back to shipping source and
 > building on the VM. The [`CD`](../.github/workflows/cd.yml) workflow runs these
 > automatically after CI succeeds (`main` commit whose title contains `--deploy-uat` → uat;
@@ -127,7 +127,7 @@ ghcr.io/leo-cdp/leo-customer360/<service>
 ```
 
 for `<service>` ∈ `customer360-api` · `backend-system` · `ads-server` · `frontend-admin`
-· `postgres` · `redis` (each has its own `Dockerfile`; a change under that folder builds it).
+· `data-tracking-api` · `postgres` · `redis` (each has its own `Dockerfile`; a change under that folder builds it).
 Tags come from `docker/metadata-action`:
 
 | Tag | From | When |
@@ -354,7 +354,8 @@ flowchart TB
 | Jaeger | api box `10.100.1.5` | 16686 (UI) · 4318/4317 (OTLP) | OpenTelemetry request-trace UI (`c360-jaeger`); **always-on** (SSO+TLS); badger storage, mem-capped; UI loopback (base path /jaeger) → **oauth2-proxy :4686 → Caddy /jaeger on :443 (Keycloak SSO, TLS)** |
 | pgAdmin | api box `10.100.1.5` | 5050 | Postgres admin/monitoring UI (`c360-pgadmin`); its own login, exposed **directly** on the LB (`LB :5050 → pgAdmin :5050`); plain HTTP (cleartext login — see the LB note); `pgadmin_data` volume, mem-capped |
 | Dagster | backend box `10.100.1.4` | 3000 | backend-system worker |
-| Portainer agent | backend box `10.100.1.4` | 9001 | `c360-portainer-agent`; lets the api-box Portainer manage this box too (private VPC, reached from `10.100.1.5`); registered as a Portainer environment |
+| Portainer agent | backend `10.100.1.4` + tracking `10.100.1.8` | 9001 | `c360-portainer-agent`; lets the api-box Portainer manage these boxes too (private VPC, reached from `10.100.1.5`); registered as Portainer environments |
+| data-tracking-api | tracking box `10.100.1.8` | 8010 | FastAPI event ingestion (`--network host`) on its own dedicated `s-general-1x2` box; writes NDJSON to vStorage/S3; reuses the api-box Redis for IP rate-limit + session cache (fail-open); OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
 | PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` + `leo_ads` |
 
 ### Public endpoints — `beta.leocdp.com`
@@ -370,6 +371,7 @@ via the **LB IP** (see the HSTS note below).
 | customer360-api | `https://beta.leocdp.com/c360api` (base `…/c360api/api/v1`) | Caddy `/c360api/*` → api :8008 (`root_path=/c360api`) |
 | Keycloak | `https://beta.leocdp.com/auth` | Caddy `/auth/*` → keycloak :8080 |
 | ads-server (+ `/ads/docs`) | `https://beta.leocdp.com/ads` | Caddy `/ads/*` → ads :9009 (`root_path=/ads`) |
+| data-tracking-api (ingest) | `https://beta.leocdp.com/data` (POST `…/data/api/v1/tracking/logs`; health `…/data/health`) | Caddy `/data/*` → tracking :8010 |
 | Portainer (own login) | `https://103.245.254.29:9443` | LB direct → Portainer :9443 (self-signed TLS) |
 | Netdata (SSO) | `http://103.245.254.29:19999` | LB → oauth2-proxy :4199 → Netdata (Keycloak login) |
 | pgAdmin (own login) | `http://103.245.254.29:5050` | LB direct → pgAdmin :5050 (its own login as `admin@leocdp.com`; plain HTTP — cleartext) |
@@ -403,8 +405,8 @@ cd deployments/server && ./deploy.sh uat apply
 terraform output servers          # confirm the tracking box private ip (expected 10.100.1.8)
 #    If it differs, fix data_upstream (proxy overlay) + the 6580/4318 cidrs (server extra_ingress), re-apply.
 
-# 2) APP — build + run data-tracking-api (:8010), wired to S3 + the api-box Redis
-#    (BUILD_LOCAL=1 is the default — data-tracking-api is not built by CI)
+# 2) APP — run data-tracking-api (:8010), wired to S3 + the api-box Redis
+#    (pulls the CI-built image from GHCR by default; set BUILD_LOCAL=1 to build on the VM)
 cd ../server && ./deploy-tracking.sh uat
 
 # 3) FRONT DOOR — add/refresh the beta.leocdp.com/data route in Caddy
@@ -467,3 +469,41 @@ Docs and the point-in-time `proxy/cutover-*.patch` are left untouched.
 > but the ops dashboards still ride raw HTTP/self-signed ports and the Keycloak admin console
 > is publicly reachable — fine for testing, not production. For prod, move the ops tools
 > behind the domain (subdomains) too and lock down admin access.
+
+## PROD deployment view
+
+The prod overlay differs from UAT: **each service runs on its own dedicated vServer**
+(api · sso · frontend · ads), cache is a **managed MemStore** and Postgres a **managed vDB**
+(no co-located containers), it has its **own VPC** (`10.101.0.0/16`) and public host
+(`leocdp.com`), deploys pull the **pinned `vX.Y.Z` release** image, and ops is **hardened** —
+**pgAdmin and Netdata are both Keycloak-SSO-gated** via oauth2-proxy (only Portainer stays
+direct). The backend (Dagster) and tracking boxes are drawn **dashed** — designed in the
+overlays but not yet provisioned.
+
+![Customer 360 — PROD deployment view](./deployment-view-prod.png)
+
+📐 **Editable sources:** [`deployment-view-prod.excalidraw`](./deployment-view-prod.excalidraw)
+(open at [excalidraw.com](https://excalidraw.com) or the Obsidian Excalidraw plugin) ·
+[`deployment-view-prod.svg`](./deployment-view-prod.svg) (vector source of the image above).
+
+### UAT → PROD differences
+
+| Aspect | UAT | PROD |
+|--------|-----|------|
+| VPC / subnet | `c360-vpc-uat` · `10.100.1.0/24` | `c360-api-vpc-prod` · `10.101.1.0/24` (CIDR `10.101.0.0/16`) |
+| Public host | `beta.leocdp.com` | `leocdp.com` |
+| Load balancer | (uat NLB) | `customer360-nlb-prod` (NLB_Small) |
+| customer360-api | api box `10.100.1.5` | dedicated `c360-api-prod-4x8` · `10.101.1.10` (s2-general-4x8) |
+| Keycloak (SSO) | container on the api box | dedicated `c360-api-prod-sso` · `10.101.1.11` (2x4) |
+| frontend-admin + Caddy | on the api box | dedicated `c360-api-prod-frontend` · `10.101.1.12` (2x4) |
+| ads-server | container on the api box | dedicated `c360-api-prod-ads` · `10.101.1.13` (4x8) |
+| Redis / cache | container on the api box | **managed MemStore** `c360-redis-prod` (Redis 7, db 2x4), private |
+| PostgreSQL | managed vDB `10.100.1.3` | managed vDB `customer360-pg-prod` (PG 15, db 8x16) |
+| Image tag | `latest` / newest `sha-*` (tracks `main`) | pinned `vX.Y.Z` (a GitHub Release) |
+| pgAdmin | direct on the LB (plain HTTP, own login) | **Keycloak-SSO-gated** via oauth2-proxy `:4050` |
+| Netdata / Jaeger | SSO via oauth2-proxy | SSO via oauth2-proxy (same) |
+| backend (Dagster) · tracking | provisioned | **designed in overlays, not yet provisioned** (dashed) |
+
+> **Scope:** this view reflects the **prod overlays** (`*/overlays/prod.tfvars`). Private IPs
+> follow the planned `10.101.1.x` assignment (`proxy/overlays/prod.tfvars` upstreams); the LB
+> public IP is assigned at provisioning time. Verify against `terraform output` once prod is live.
