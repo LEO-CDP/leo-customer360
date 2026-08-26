@@ -23,14 +23,14 @@ os.makedirs(Config.OUT_DIR, exist_ok=True)
 # Recurring identities across platforms to allow CIR matching
 # =====================================================================
 PEOPLE = [
-    {"cid": "CUST-0001", "name": "Nguyen An", "first": "An", "last": "Nguyen", "email": "an.nguyen@example.test", "phone": "84901234001", "city": "Ho Chi Minh City", "state": "Ho Chi Minh", "country": "VN"},
-    {"cid": "CUST-0002", "name": "Tran Binh", "first": "Binh", "last": "Tran", "email": "binh.tran@example.test", "phone": "84901234002", "city": "Hanoi", "state": "Hanoi", "country": "VN"},
-    {"cid": "CUST-0003", "name": "Le Chi", "first": "Chi", "last": "Le", "email": "chi.le@example.test", "phone": "84901234003", "city": "Da Nang", "state": "Da Nang", "country": "VN"},
-    {"cid": "CUST-0004", "name": "Pham Dung", "first": "Dung", "last": "Pham", "email": "dung.pham@example.test", "phone": "84901234004", "city": "Can Tho", "state": "Can Tho", "country": "VN"},
-    {"cid": "CUST-0005", "name": "Vo Giang", "first": "Giang", "last": "Vo", "email": "giang.vo@example.test", "phone": "84901234005", "city": "Hai Phong", "state": "Hai Phong", "country": "VN"},
-    {"cid": "CUST-0006", "name": "Do Hanh", "first": "Hanh", "last": "Do", "email": "hanh.do@example.test", "phone": "84901234006", "city": "Nha Trang", "state": "Khanh Hoa", "country": "VN"},
-    {"cid": "CUST-0007", "name": "Bui Khoa", "first": "Khoa", "last": "Bui", "email": "khoa.bui@example.test", "phone": "84901234007", "city": "Bien Hoa", "state": "Dong Nai", "country": "VN"},
-    {"cid": "CUST-0008", "name": "Hoang Linh", "first": "Linh", "last": "Hoang", "email": "linh.hoang@example.test", "phone": "84901234008", "city": "Vung Tau", "state": "Ba Ria-Vung Tau", "country": "VN"},
+    {"cid": "CUST-0001", "name": "Nguyen An", "first": "An", "last": "Nguyen", "email": "an.nguyen@example.test", "phone": "84901234001", "city": "Ho Chi Minh City", "state": "Ho Chi Minh", "country": "VN", "gender": 1},
+    {"cid": "CUST-0002", "name": "Tran Binh", "first": "Binh", "last": "Tran", "email": "binh.tran@example.test", "phone": "84901234002", "city": "Hanoi", "state": "Hanoi", "country": "VN", "gender": 1},
+    {"cid": "CUST-0003", "name": "Le Chi", "first": "Chi", "last": "Le", "email": "chi.le@example.test", "phone": "84901234003", "city": "Da Nang", "state": "Da Nang", "country": "VN", "gender": 2},
+    {"cid": "CUST-0004", "name": "Pham Dung", "first": "Dung", "last": "Pham", "email": "dung.pham@example.test", "phone": "84901234004", "city": "Can Tho", "state": "Can Tho", "country": "VN", "gender": 1},
+    {"cid": "CUST-0005", "name": "Vo Giang", "first": "Giang", "last": "Vo", "email": "giang.vo@example.test", "phone": "84901234005", "city": "Hai Phong", "state": "Hai Phong", "country": "VN", "gender": 2},
+    {"cid": "CUST-0006", "name": "Do Hanh", "first": "Hanh", "last": "Do", "email": "hanh.do@example.test", "phone": "84901234006", "city": "Nha Trang", "state": "Khanh Hoa", "country": "VN", "gender": 2},
+    {"cid": "CUST-0007", "name": "Bui Khoa", "first": "Khoa", "last": "Bui", "email": "khoa.bui@example.test", "phone": "84901234007", "city": "Bien Hoa", "state": "Dong Nai", "country": "VN", "gender": 1},
+    {"cid": "CUST-0008", "name": "Hoang Linh", "first": "Linh", "last": "Hoang", "email": "linh.hoang@example.test", "phone": "84901234008", "city": "Vung Tau", "state": "Ba Ria-Vung Tau", "country": "VN", "gender": 2},
 ]
 
 # =====================================================================
@@ -47,11 +47,11 @@ def write_csv(filename, fieldnames, rows):
 
 # =====================================================================
 # 1) META LEAD ADS (Graph API)
-# Expanded to include form_id and name hierarchy as returned by the API
 # =====================================================================
 def generate_meta_data(num_rows):
+    # Graph API primary node ID is simply 'id', not 'lead_id'
     fields = [
-        "lead_id", "created_time", "form_id", 
+        "id", "created_time", "form_id", 
         "campaign_id", "campaign_name", "adset_id", "adset_name", "ad_id", "ad_name",
         "field_email", "field_phone", "field_first_name", "field_last_name",
         "field_city", "field_state", "field_country"
@@ -61,7 +61,7 @@ def generate_meta_data(num_rows):
         p = PEOPLE[i % len(PEOPLE)]
         ts = Config.BASE_DATE + timedelta(hours=i*4, minutes=random.randint(0, 59))
         rows.append({
-            "lead_id": f"meta_lead_{i+1:08d}",
+            "id": f"32800000000{i+1:04d}",
             "created_time": ts.strftime("%Y-%m-%dT%H:%M:%S+0000"),
             "form_id": "890000123456789",
             "campaign_id": f"120990000000{random.randint(1, 4)}",
@@ -82,7 +82,6 @@ def generate_meta_data(num_rows):
 
 # =====================================================================
 # 2) TIKTOK MARKETING API (Reporting)
-# Refined field names to strictly match TikTok Integrated Reports API
 # =====================================================================
 def generate_tiktok_data(num_rows):
     fields = [
@@ -94,7 +93,8 @@ def generate_tiktok_data(num_rows):
     rows = []
     countries = ["VN", "VN", "VN", "VN", "SG", "TH"]
     for i in range(num_rows):
-        day = (Config.BASE_DATE + timedelta(days=i % 10)).strftime("%Y-%m-%d")
+        # TikTok API returns day reports as "YYYY-MM-DD 00:00:00" string
+        day = (Config.BASE_DATE + timedelta(days=i % 10)).strftime("%Y-%m-%d 00:00:00")
         impressions = random.randint(10000, 20000)
         clicks = int(impressions * random.uniform(0.01, 0.04))
         spend = round(clicks * random.uniform(0.3, 0.8), 2)
@@ -123,15 +123,14 @@ def generate_tiktok_data(num_rows):
 
 # =====================================================================
 # 3) GA4 (Google Analytics Data API)
-# Updated source/medium to sessionSource/sessionMedium to align with 
-# official GA4 Data API dimensional schemas.
 # =====================================================================
 def generate_ga4_data(num_rows):
+    # 'conversions' deprecated in favor of 'keyEvents' in modern GA4 schema
     fields = [
         "date", "eventName", "campaignId", "campaignName", "sessionSource", 
         "sessionMedium", "country", "city", "browser", "deviceCategory", 
         "platform", "sessionCampaignId", "sessionCampaignName", "transactionId",
-        "eventCount", "conversions", "totalRevenue", "engagementRate"
+        "eventCount", "keyEvents", "totalRevenue", "engagementRate"
     ]
     rows = []
     events = ["page_view", "view_item", "begin_checkout", "purchase"]
@@ -145,11 +144,11 @@ def generate_ga4_data(num_rows):
         
         is_purchase = event_name == "purchase"
         txid = f"ORD-{i+1:05d}" if is_purchase else ""
-        conversions = 1 if is_purchase else 0
+        key_events = 1 if is_purchase else 0
         revenue = round(random.uniform(450000, 950000), 2) if is_purchase else 0
         
         rows.append({
-            "date": dt.strftime("%Y-%m-%d"),
+            "date": dt.strftime("%Y%m%d"), # GA4 strictly uses YYYYMMDD
             "eventName": event_name,
             "campaignId": campaign_id,
             "campaignName": f"C360_Web_{random.randint(1,4)}",
@@ -164,16 +163,14 @@ def generate_ga4_data(num_rows):
             "sessionCampaignName": f"C360_Web_{random.randint(1,4)}",
             "transactionId": txid,
             "eventCount": random.randint(1, 5),
-            "conversions": conversions,
+            "keyEvents": key_events, 
             "totalRevenue": revenue,
             "engagementRate": round(random.uniform(0.35, 0.85), 4),
         })
     return fields, rows
 
 # =====================================================================
-# 4) ZALO OA API (oa/getprofile endpoint)
-# Mapped 'shared_*' to 'shared_info_*' to represent Zalo's nested 
-# JSON structure, and added user_is_follower.
+# 4) ZALO OA API (v3.0 user/detail endpoint)
 # =====================================================================
 def generate_zalo_data(num_rows):
     fields = [
@@ -191,7 +188,7 @@ def generate_zalo_data(num_rows):
             "user_id": str(567826391599986760 + i),
             "user_id_by_app": str(567826390000000000 + i),
             "display_name": p["name"],
-            "user_gender": 0,   # 0=Male, 1=Female, 2=Unknown (Zalo standard)
+            "user_gender": p["gender"], # 1 = Male, 2 = Female, 0 = Other/Unknown
             "is_sensitive": False,
             "user_is_follower": True,
             "shared_info_name": p["name"],
@@ -204,15 +201,15 @@ def generate_zalo_data(num_rows):
 
 # =====================================================================
 # 5) APPSFLYER RAW DATA (Pull API)
-# Highly accurate to AF Pull API schema. Minor randomization updates.
 # =====================================================================
 def generate_appsflyer_data(num_rows):
+    # 'carrier' replaced with 'operator' to match exact AF Raw Data Field Dictionary
     fields = [
         "attributed_touch_type", "attributed_touch_time", "install_time",
         "event_time", "event_name", "event_value", "event_revenue",
         "event_revenue_currency", "event_source", "media_source", "channel",
         "campaign", "campaign_id", "adset", "adset_id", "ad", "ad_id",
-        "country_code", "state", "city", "postal_code", "ip", "carrier",
+        "country_code", "state", "city", "postal_code", "ip", "operator",
         "language", "appsflyer_id", "advertising_id", "idfa", "android_id",
         "customer_user_id", "idfv", "platform", "device_type", "os_version",
         "app_version", "sdk_version", "app_id", "bundle_id", "user_agent",
@@ -256,7 +253,7 @@ def generate_appsflyer_data(num_rows):
             "city": p["city"],
             "postal_code": f"{700000 + random.randint(10, 99)}",
             "ip": f"103.21.{random.randint(10, 50)}.{random.randint(20, 99)}",
-            "carrier": random.choice(["Viettel", "MobiFone", "VinaPhone"]),
+            "operator": random.choice(["Viettel", "MobiFone", "VinaPhone"]),
             "language": "vi",
             "appsflyer_id": f"1740000000{random.randint(10,99)}-a1b2c3d4e5f6",
             "advertising_id": f"aa000000-1111-2222-3333-{i:012d}",
