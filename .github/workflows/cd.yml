@@ -25,7 +25,8 @@ name: CD
 #   DEPLOY_SSH_KEY   private key for the deploy user on the VNG Cloud VMs
 #   DB_PASSWORD      -> TF_VAR_db_password    (read by the app deploy scripts)
 #   REDIS_PASSWORD   -> TF_VAR_redis_password (optional; cache stays off if unset)
-#   VSTORAGE_ACCESS_KEY / VSTORAGE_SECRET_KEY -> S3/vStorage remote-state creds
+#   VSTORAGE_ACCESS_KEY / VSTORAGE_SECRET_KEY -> S3/vStorage remote-state creds AND
+#                        TF_VAR_access_key / TF_VAR_secret_key (tracking S3 sink)
 # GHCR pulls use the built-in GITHUB_TOKEN (packages: read).
 # The 'prod' GitHub Environment should carry required-reviewer protection so a
 # release (or manual prod rollback) waits for manual approval.
@@ -209,6 +210,8 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
           TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
+          TF_VAR_access_key: ${{ secrets.VSTORAGE_ACCESS_KEY }}
+          TF_VAR_secret_key: ${{ secrets.VSTORAGE_SECRET_KEY }}
           GH_TOKEN: ${{ github.token }}   # lets lib/record_deploy.sh call `gh api` (Deployments ledger)
         run: |
           # Invoke via `bash` (not ./) — scripts committed from Windows lack the
