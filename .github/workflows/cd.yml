@@ -15,7 +15,7 @@ name: CD
 #    run cd.yml -f ...`) to deploy/ROLL BACK any environment to any image tag:
 #      environment: uat | prod
 #      image_tag:   v1.2.3 | sha-<git> | latest   (immutable tags for rollback)
-#      services:    comma list (default: api,backend,ads,frontend)
+#      services:    comma list (default: api,backend,ads,frontend,tracking)
 #    This is the rollback path — pick a previously-built tag and redeploy it.
 #
 # It deploys by PULLING the image from GHCR — the module scripts run in ghcr
@@ -47,9 +47,9 @@ on:
         type: string
         required: true
       services:
-        description: "Comma-separated services to (re)deploy"
+        description: "Comma-separated services to (re)deploy (e.g. api,backend,ads,frontend,tracking)"
         type: string
-        default: "api,backend,ads,frontend"
+        default: "api,backend,ads,frontend,tracking"
         required: false
 
 permissions:
@@ -88,7 +88,7 @@ jobs:
           # sso-realm runs bootstrap-realm.py (idempotent): provisions the realm, the API's
           # admin roles + confidential client before the app steps. deploy-all.sh orders it
           # ahead of api via its STEPS list. Needs KEYCLOAK_ADMIN_PASSWORD in sso/.env (above).
-          DEFAULT_SVC="sso-realm,api,backend,ads,frontend"
+          DEFAULT_SVC="sso-realm,api,backend,ads,frontend,tracking"
           if [[ "$EVENT" == "workflow_dispatch" ]]; then
             svc="${IN_SERVICES:-$DEFAULT_SVC}"
             {

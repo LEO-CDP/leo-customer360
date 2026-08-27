@@ -47,6 +47,7 @@ jobs:
             ads-server: 'ads-server/**'
             backend-system: 'backend-system/**'
             customer360-api: 'customer360-api/**'
+            data-tracking-api: 'data-tracking-api/**'
             frontend-admin: 'frontend-admin/**'
             postgres: 'postgres/**'
             redis: 'redis/**'
@@ -58,7 +59,7 @@ jobs:
         id: select
         run: |
           if [[ "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo 'services=["ads-server","backend-system","customer360-api","frontend-admin","postgres","redis"]' >> "$GITHUB_OUTPUT"
+            echo 'services=["ads-server","backend-system","customer360-api","data-tracking-api","frontend-admin","postgres","redis"]' >> "$GITHUB_OUTPUT"
           else
             printf 'services=%s\n' '${{ steps.filter.outputs.changes }}' >> "$GITHUB_OUTPUT"
           fi
@@ -95,10 +96,11 @@ jobs:
           mkdir -p logs
           # Map each service to its test runner script(s).
           case "$svc" in
-            ads-server)      runners="ads-server/run_unit_tests.sh" ;;
-            customer360-api) runners="customer360-api/run_unit_tests.sh" ;;
-            backend-system)  runners="backend-system/identity_resolution/run_tests.sh backend-system/segmentation/run_tests.sh" ;;
-            *)               runners="" ;;
+            ads-server)        runners="ads-server/run_unit_tests.sh" ;;
+            customer360-api)   runners="customer360-api/run_unit_tests.sh" ;;
+            data-tracking-api) runners="data-tracking-api/run_unit_tests.sh" ;;
+            backend-system)    runners="backend-system/identity_resolution/run_tests.sh backend-system/segmentation/run_tests.sh" ;;
+            *)                 runners="" ;;
           esac
           log="logs/${svc}.log"; : > "$log"
           start=$(date +%s)
