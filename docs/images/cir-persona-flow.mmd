@@ -1,0 +1,9 @@
+flowchart TD
+    M["Resolved master profile"] --> F["Fetch master + domain inputs"]
+    F --> SCORE["Compute 6 component scores\nbehavior / engagement / financial\nloyalty / relationship / risk"]
+    SCORE --> CODE["persona_code + category +\nvalue tier + risk level + NBA"]
+    CODE --> A["Upsert shared archetype\ntenant + domain + persona_code"]
+    A --> P["Insert new cdp_customer_personas version\nDeactivate prior active version"]
+    P --> EX["Insert features + score details"]
+    EX --> H["Insert history when initial/name/score change"]
+    H --> U["Update master.current_persona_id\nname + summary"]

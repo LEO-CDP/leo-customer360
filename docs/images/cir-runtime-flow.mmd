@@ -1,0 +1,14 @@
+flowchart LR
+    SRC["Nguồn / integration bên ngoài"] --> STG["cdp_raw_profiles_stage\nstatus_code = 1"]
+    STG --> SENSOR["Dagster sensor\nidentity_resolution_poll_sensor\n30s mặc định"]
+    SENSOR --> JOB["identity_resolution_job"]
+    JOB --> OP["resolve_identities_op\nretry tối đa 2 lần, delay 10s"]
+    OP --> DAILY["run_daily_identity_resolution()\ndrain nhiều batch"]
+    DAILY --> RES["CustomerIdentityResolver\nrun_resolution_batch()"]
+    RES --> MASTER["cdp_master_profiles"]
+    RES --> LINKS["cdp_profile_links"]
+    RES --> PERSONA["PersonaResolutionEngine\nbest effort"]
+    PERSONA --> ARCH["persona archetype + versioned match"]
+    RES --> DONE["status_code = 3\ncommit transaction"]
+    MASTER --> API["customer360-api\nread / report / CRUD"]
+    LINKS --> API

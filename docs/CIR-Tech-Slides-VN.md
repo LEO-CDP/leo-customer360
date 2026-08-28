@@ -6,7 +6,7 @@ size: 16:9
 style: |
   section {
     font-family: "Inter", "Segoe UI", Roboto, Arial, sans-serif;
-    font-size: 24px;
+    font-size: 18px;
   }
 
   h1, h2, h3 {
@@ -14,6 +14,17 @@ style: |
     font-weight: 700;
   }
 
+  section.source-reference {
+    font-size: 16px;
+  }
+
+  img.cir-diagram {
+    display: block;
+    width: 100%;
+    height: 410px;
+    object-fit: contain;
+    margin: 0 auto;
+  }
 
   code {
     font-family: "JetBrains Mono", "Consolas", monospace;
@@ -25,409 +36,473 @@ style: |
 # Customer Identity Resolution (CIR)
 ## Trong nền tảng Customer 360
 
-Giải pháp hợp nhất danh tính khách hàng đa nguồn
-(AppsFlyer · MoEngage · Web Tracking · CRM · Google Analytics · Facebook)
+Tài liệu kỹ thuật tập trung vào `backend-system/identity_resolution`<br>
+Cập nhật: 2026-08-28
 
 ---
 
 ## Nội dung
 
-1. Giới thiệu Customer Identity Resolution trong Customer 360
-2. Nền tảng dữ liệu: nguồn dữ liệu, hành trình khách hàng, thuộc tính hồ sơ
-3. Kiến trúc chi tiết: thiết kế hệ thống, các bước xử lý, phương pháp ghép nối và hợp nhất dữ liệu
-4. Demo thực tế
+1. Phạm vi và mục tiêu
+2. Mô hình dữ liệu và metadata
+3. Luồng runtime thực tế
+4. Matching, link và hợp nhất
+5. Persona resolution
+6. Tenant, PII và vận hành
+7. Demo, giới hạn và tham chiếu mã nguồn
 
 ---
 
-# 1. Giới thiệu Customer Identity Resolution
+# 1. Phạm vi và mục tiêu
 
 ---
 
-## Vấn đề: dữ liệu khách hàng bị phân mảnh
+## CIR giải quyết vấn đề gì?
 
-Một khách hàng thực tế "chạm" vào doanh nghiệp qua **nhiều hệ thống độc lập**:
+Một khách hàng có thể xuất hiện ở nhiều hệ thống và nhiều touchpoint:
 
-- **AppsFlyer** – attribution quảng cáo mobile (Facebook/TikTok/Google/Grab Ads…)
-- **MoEngage** – engagement / marketing automation
-- **Web Tracking** – cookie trên website và Google Analytics 4 (GA4)
-- **Core Banking / KYC** – hệ thống lõi ngân hàng (retail & banking domain)
-- **QR Code & Landing Page** - sự kiện offline (PR event, tại điểm bán…)
+- AppsFlyer: mobile attribution và install
+- MoEngage: push / engagement
+- Web Tracking hoặc GA4-style events: browser và cookie
+- Core Banking, KYC, POS và các nguồn khác: tùy integration
 
-➡️ Mỗi hệ thống chỉ biết **một phần** của khách hàng → không có góc nhìn 360°.
+Các nguồn này ghi nhận các `raw profile` khác nhau. CIR liên kết các raw
+profile có cùng danh tính vào `master_profile_id` trong cùng `tenant_id` và
+`domain`.
 
----
-
-## Customer Identity Resolution (CIR) là gì?
-
-> **CIR** là quá trình **liên kết (link)** các bản ghi hồ sơ thô (raw profile) từ nhiều nguồn khác nhau, xác định chúng có **cùng thuộc về một khách hàng thực** hay không, và **hợp nhất (merge)** thành **một hồ sơ "vàng" duy nhất** (Golden/Master Profile).
-
-**Mục tiêu trong Customer 360:**
-- Một khách hàng = **một `master_profile_id`** duy nhất, xuyên suốt mọi kênh, mọi domain (retail/banking/real_estate/travel)
-- Nền tảng cho: personalization, scoring models (lead/churn/CLV), segmentation, analytics
+> Các nguồn ingestion là hệ thống bên ngoài phạm vi của package này. Package
+> CIR nhận dữ liệu sau khi integration đã ghi vào staging.
 
 ---
 
-## Vì sao Customer Identity Resolution (CIR) rất quan trọng?
+## Kết quả của CIR
 
-- Người dùng VN dùng **nhiều app/thiết bị** (Zalo, app ngân hàng, app bán lẻ, web,...) → danh tính bị tách rời qua `device_id`, `cookie_id`, số điện thoại, email, phone, social media accounts
-- Ngân hàng số & bán lẻ đa kênh cần **tuân thủ dữ liệu cá nhân** (Nghị định 13/2023/NĐ-CP về bảo vệ dữ liệu cá nhân) → CIR phải xử lý PII đã **hash/ẩn danh**
-- Chiến dịch marketing đa kênh (Facebook/TikTok/Google/Grab Ads) cần đo lường **hiệu quả thực sự trên một khách hàng**, không tính trùng theo từng thiết bị/click
+- `cdp_raw_profiles_stage`: hàng đợi raw profile đầu vào.
+- `cdp_master_profiles`: hồ sơ golden/resolved.
+- `cdp_profile_links`: lineage từ từng raw profile tới master profile.
+- `status_code = 3`: raw profile đã được xử lý; `status_code = 1`: còn mới.
+- Persona được tính sau khi master profile được tạo hoặc cập nhật.
 
----
-
-# 2. Nền tảng dữ liệu
-
----
-
-## Nguồn dữ liệu (Data Sources)
-
-| Nguồn | Domain | Định danh mang theo |
-|---|---|---|
-| **AppsFlyer** | Mobile App | `device_id`, `advertising_id` (IDFA/GAID) |
-| **MoEngage** | Mobile App | `external_customer_id`, `email` /  `hashed email`, `phone` /  `hashed phone`, `push_token`, `user_id` |
-| **Web Tracking** | Landing Page | `cookie_id`, `email`  /  `hashed email`, , `phone` /  `hashed phone` |
-| **Core Banking / KYC** | Core Banking | `phone_number`, `national_id`, `device_id` |
-
-Tất cả đổ về **một bảng staging duy nhất**: `cdp_raw_profiles_stage`
-(đa tenant – `tenant_id`, đa domain – `bán lẻ` / `media` /`banking`/`bất động sản`/`du lịch`/`giáo dục`)
+Resolver xử lý theo phạm vi `tenant_id + domain`. Đây là phạm vi matching của
+code, không phải một bước hợp nhất xuyên domain.
 
 ---
 
-## Hành trình khách hàng (Customer Journey Mapping)
-
-Một khách hàng thực đi qua nhiều **điểm chạm (touchpoint)**, mỗi điểm chạm sinh ra **một raw profile riêng**:
-
-```mermaid
-graph LR
-    A["install<br/>(ẩn danh: chỉ có<br/>device_id/advertising_id)"] --> B["login<br/>(email/phone)"]
-    B --> C["product_view<br/>(retail banking)"]
-    B --> D["kyc_completed<br/>(banking: national_id)"]
-    D --> E["loan_application<br/>(banking)"]
-    C --> F["Remarketing<br/>(web/app)"]
-```
-
-- Điểm chạm đầu (`install`) **không có PII** — chỉ có định danh thiết bị/quảng cáo -> Anonymous Profile
-- Các điểm chạm sau (`login`, `kyc_completed`…) **trên cùng thiết bị** mới có danh tính thật
-- CIR phải **liên kết  các Anonymous Profile vào 1 Master Profile** → đây chính là cơ chế tạo ra "duplicate" cần hợp nhất
+# 2. Mô hình dữ liệu và metadata
 
 ---
 
-## Thuộc tính hồ sơ chính (Key Profile Attributes)
+## Các bảng chính
 
-* **Định danh cá nhân** *(SHA-256, không lưu PII thô)*
-  `email`, `phone_number`, `national_id` — **các matching key CIR**
-  `full_name` — cũng được hash/lưu để hiển thị, nhưng **không dùng để matching** (tên trùng rất phổ biến → rủi ro merge nhầm 2 người khác nhau)
+| Bảng | Vai trò trong CIR |
+|---|---|
+| `cdp_raw_profiles_stage` | Landing zone; chứa identity, device, attribution, event payload và trạng thái xử lý |
+| `cdp_master_profiles` | Golden profile; giữ scalar identity, các mảng device/ad/cookie và map external ID |
+| `cdp_domain_profiles` | Thuộc tính theo domain trong `domain_attributes` JSONB, ví dụ `national_id`, `kyc_status` |
+| `cdp_profile_links` | Quan hệ raw → master, gồm `match_score`, `match_method`, `status` |
+| `cdp_profile_attributes` | Catalog và cấu hình matching/consolidation |
+| `cdp_id_resolution_status` | Một dòng trạng thái throttle cho helper real-time; không phải bảng queue |
 
-* **Định danh thiết bị** *(gộp thành mảng)*
-  `device_ids[]`, `advertising_ids[]`, `cookie_ids[]`
+Các bảng persona mở rộng kết quả matching:
 
-* **Định danh theo nguồn dữ liệu** *(JSONB theo `source_system`)*
-  `external_ids{}`, `push_tokens{}`
-
-* **Metadata thuộc tính** (`cdp_profile_attributes`)
-  Quản lý ~70 thuộc tính: **matching rule**, **merge rule**, **PII**, **attribute group**.
-
-* **Seed mặc định**
-  Khởi tạo **7 thuộc tính định danh** (`email`/`phone_number`/`national_id`/`external_customer_id`/`device_id`/`advertising_id`/`cookie_id`) cho Identity Resolution cùng **merge policy** mặc định (recency, KYC-first, source priority). `full_name` **không** nằm trong 7 thuộc tính này.
-
-
----
-
-# 3. Kiến trúc chi tiết
+- `cdp_persona_archetypes`: archetype dùng chung theo tenant/domain/code.
+- `cdp_customer_personas`: bản ghi match persona có version cho từng master.
+- `cdp_persona_features`, `cdp_persona_score_details`: explainability.
+- `cdp_persona_history`: lịch sử thay đổi persona có ý nghĩa.
 
 ---
 
-## Sơ đồ kiến trúc hệ thống
+## Metadata-driven, nhưng cần phân biệt catalog và runtime
 
-```mermaid
-graph TD
-    A["Nguồn dữ liệu<br/>AppsFlyer/MoEngage/Web/Core Banking"] --> B["Data Ingestion Worker"]
-    B --> C["cdp_raw_profiles_stage<br/>(PostgreSQL 16, status_code=1)"]
-
-    B -- "sau mỗi insert" --> T["IdentityResolutionTrigger<br/>.attempt_trigger()"]
-    T -- "FOR UPDATE NOWAIT<br/>throttle N giây" --> ST["cdp_id_resolution_status"]
-    T -- "nếu qua throttle" --> R["CustomerIdentityResolver<br/>.run_resolution_batch()"]
-
-    S["Lịch trình hàng ngày<br/>(Cron/Dagster, drain-loop)"] --> R
-
-    M["cdp_profile_attributes<br/>(matching rules)"] --> R
-    C -- "đọc status_code=1" --> R
-    R --> E["cdp_master_profiles"]
-    R --> F["cdp_profile_links"]
-    R -- "status_code=3" --> C
-
-    E --> G["Customer 360 View"]
-    F --> G
-    G --> H["FastAPI Reporting API"]
-```
-
----
-
-## Nguyên tắc thiết kế CIR: Metadata-driven
-
-### Mọi quy tắc được cấu hình bằng Metadata
-
-* Không **hard-code** trong source code
-* Quy tắc đọc động từ bảng **`cdp_profile_attributes`**
-* Mỗi thuộc tính định nghĩa:
-  * **Matching Rule**: `matching_rule`, `matching_threshold`
-  * **Merge Policy**: `consolidation_rule`, `consolidation_config`
-* Thay đổi quy tắc chỉ cần **UPDATE metadata**, không cần deploy
-* Resolver chỉ sử dụng các rule **ACTIVE**
+Resolver đọc các dòng thỏa điều kiện:
 
 ```sql
-SELECT attribute_internal_code, matching_rule, consolidation_rule
-FROM cdp_profile_attributes
+SELECT attribute_internal_code,
+       matching_rule,
+       matching_threshold,
+       consolidation_rule,
+       consolidation_config
+FROM customer360.cdp_profile_attributes
 WHERE is_identity_resolution = TRUE
-  AND status = 'ACTIVE';
+  AND status = 'ACTIVE'
+  AND matching_rule IS NOT NULL
+  AND matching_rule <> 'none';
 ```
 
-> **Lợi ích:** Linh hoạt, dễ mở rộng và dễ bảo trì.
+Metadata là nơi cấu hình, nhưng code vẫn quyết định cách map dữ liệu:
+
+- `RAW_PROFILE_COLUMNS` là tập cột mà resolver thực sự đọc từ staging.
+- `SCALAR_MERGE_FIELDS` hiện chỉ gồm `full_name`, `email`, `phone_number`.
+- `national_id` và `kyc_status` được đọc/ghi trong `cdp_domain_profiles`.
+- Device, advertising và cookie ID được tích lũy vào các mảng trên master.
+- `external_customer_id` được lưu trong `external_ids` theo `source_system`.
+
+Vì vậy, thêm một dòng metadata không tự động làm mọi cột staging trở thành matching key nếu cột đó chưa được đưa vào projection và logic merge của resolver.
 
 ---
 
-## Quy trình xử lý Identity Resolution
+## Các rule hiện có trong seed SQL
+
+| Attribute | Rule trong metadata | Lưu ở master / domain |
+|---|---|---|
+| `email` | `exact` | `cdp_master_profiles.email` |
+| `phone_number` | `exact` | `cdp_master_profiles.phone_number` |
+| `national_id` | `exact` | `cdp_domain_profiles.domain_attributes` |
+| `external_customer_id` | `exact`, khóa theo source | `cdp_master_profiles.external_ids` JSONB |
+| `device_id` | `exact`, so với `ANY(device_ids)` | `cdp_master_profiles.device_ids` TEXT[] |
+| `advertising_id` | `exact`, so với `ANY(advertising_ids)` | `cdp_master_profiles.advertising_ids` TEXT[] |
+| `cookie_id` | `exact`, so với `ANY(cookie_ids)` | `cdp_master_profiles.cookie_ids` TEXT[] |
+
+`full_name` được catalog hóa nhưng `is_identity_resolution = FALSE`, vì tên
+chung, đặc biệt tên Việt Nam, không đủ tin cậy để quyết định cùng một người.
+
+### Trạng thái các rule fuzzy
+
+Resolver có code cho `fuzzy_trgm` và `fuzzy_dmetaphone`, đồng thời PostgreSQL được bật `pg_trgm` và `fuzzystrmatch`. Tuy nhiên, các rule fuzzy và address được catalog trong seed hiện không nằm trong tập cột mà `RAW_PROFILE_COLUMNS`
+đọc để match. Chúng không nên được trình bày là đường chạy fuzzy mặc định đang hoạt động trong production.
+
+---
+
+# 3. Luồng runtime thực tế
+
+---
+
+## Kiến trúc triển khai hiện tại
+
+<img class="cir-diagram" src="images/cir-runtime-flow.svg" alt="Kiến trúc triển khai CIR">
+
+### Điểm quan trọng
+
+- `backend-system/Dockerfile` chạy Dagster webserver/daemon và load CIR từ
+  `backend-system/workspace.yaml`.
+- Sensor phát `RunRequest()` mỗi `CIR_POLL_INTERVAL_SECONDS` (mặc định 30 giây).
+  Mỗi op gọi daily drain, xử lý các batch tối đa `CIR_BATCH_SIZE` (mặc định
+  5.000) cho đến khi staging hết dữ liệu.
+- Dagster retry ở cấp op; resolver rollback transaction khi lỗi.
+
+---
+
+## Entry point thay thế và đường chưa được nối
+
+| Entry point | Trạng thái |
+|---|---|
+| `dagster_defs.py` → sensor → job/op | Đường chạy chính của image `backend-system` |
+| `daily_job.py` | Có thể gọi độc lập từ cron, Airflow hoặc CLI; được Dagster gọi trong runtime hiện tại |
+| `worker.py` | Loop in-process thay thế, gọi trực tiếp `execute_in_process()`; không phải command trong Dockerfile hiện tại |
+| `IdentityResolutionTrigger.attempt_trigger()` | Helper throttle bằng row lock; hiện không có production caller trong repository |
+| PostgreSQL trigger `cdp_trigger_process_new_raw_profiles` | Không có định nghĩa trigger đang chạy trong SQL hiện tại |
+
+Do đó, diagram chính không nối ingestion trực tiếp vào
+`IdentityResolutionTrigger`. Nếu integration gọi helper này trong tương lai,
+đó sẽ là một đường near-real-time bổ sung, không phải đường mặc định hiện tại.
+
+---
+
+## Một resolution batch làm gì?
 
 ```text
-Raw Profile
-      │
-      ▼
-1. Load Matching & Merge Rules
-      │
-      ▼
-2. Tìm Master Profile phù hợp
-      │
- ┌────┴────┐
- │         │
- ▼         ▼
-Match   Không Match
- │         │
- ▼         ▼
-Merge   Tạo Master mới
- │         │
- └────┬────┘
-      ▼
-Tạo Profile Link
-      ▼
-Đánh dấu Processed
-      ▼
-COMMIT (Idempotent)
+1. Đọc active rules từ cdp_profile_attributes
+2. Lấy danh sách tenant từ sys_tenant
+3. Với từng tenant, SET app.tenant_id
+4. Đọc tối đa CIR_BATCH_SIZE raw profile có status_code = 1
+5. Với từng raw profile:
+   a. Tạo các điều kiện match từ metadata
+   b. Tìm master cùng tenant và cùng domain
+   c. Có match: insert link + cập nhật master
+   d. Không match: tạo master + insert link NewMaster
+   e. Tính persona best effort cho master vừa xử lý
+   f. Đổi raw profile sang status_code = 3
+6. COMMIT toàn bộ batch; lỗi thì ROLLBACK và raise
 ```
 
-### Đặc điểm
-
-* **Match** → cập nhật Customer 360 theo **Merge Policy**
-* **Không Match** → tạo **Master Profile** mới
-* **An toàn khi retry** nhờ **idempotent** và **unique constraint** `(tenant_id, raw_profile_id)`
-
+`run_resolution_batch()` dùng `return_details=True`: các điều kiện match được project thành cột `m_0`, `m_1`, ...; ứng viên có số điều kiện đúng cao nhất được chọn. Điều kiện được nối bằng `OR`, không phải yêu cầu mọi identifier
+đều phải cùng đúng.
 
 ---
 
-## CIR — Chính sách hợp nhất dữ liệu (Merge Policy)
-
-Khi nhiều nguồn cùng cập nhật một thuộc tính, **CIR** sẽ áp dụng **Merge Policy (`consolidation_rule`)** để chọn giá trị cuối cùng.
-
-| **Merge Policy**      | **Nguyên tắc**                               |
-| --------------------- | -------------------------------------------- |
-| **Most Recent**       | Ưu tiên dữ liệu mới nhất                     |
-| **Verified First**    | Ưu tiên dữ liệu đã xác thực (KYC)            |
-| **Verified → Recent** | Ưu tiên KYC, nếu bằng nhau thì chọn mới nhất |
-| **Source Priority**   | Ưu tiên theo thứ tự nguồn dữ liệu            |
-| **Non-Null**          | Chỉ cập nhật khi giá trị hiện tại rỗng       |
-| **Overwrite**         | Luôn ghi đè bằng dữ liệu mới                 |
-| **Append Distinct**   | Gộp danh sách, loại bỏ giá trị trùng         |
+# 4. Matching, link và hợp nhất
 
 ---
 
-## CIR — Ví dụ áp dụng Merge Policy
+## Quyết định match
 
-| **Thuộc tính**         | **Merge Policy**    |
-| ---------------------- | ------------------- |
-| `email`                | **Verified First**  |
-| `phone_number`         | **Verified First**  |
-| `national_id`          | **Verified First**  |
-| `external_customer_id` | **Source Priority** |
-| `device_id`            | **Source Priority** |
-| `advertising_id`       | **Source Priority** |
-| `cookie_id`            | **Source Priority** |
+Với mỗi raw profile, resolver:
 
-> **Lợi ích:** Dữ liệu Customer 360 luôn **chính xác, nhất quán và đáng tin cậy**, dù được đồng bộ từ nhiều hệ thống khác nhau.
->
-> **Lưu ý:** bảng trên là **merge policy** (chọn giá trị nào để hiển thị/lưu) — khác với **matching rule** (dùng để xác định 2 raw profile có cùng 1 người hay không). `full_name` không có mặt ở cả 2 bảng: không phải matching key, và cũng không có merge policy riêng (chỉ giữ giá trị non-null đầu tiên, kiểu `COALESCE`) — vì `is_identity_resolution = FALSE` khiến resolver không load bất kỳ config nào cho thuộc tính này.
+1. Bỏ qua rule nếu raw value rỗng.
+2. Tạo điều kiện tương ứng với kiểu field:
+   - scalar exact: `master_column = raw_value`;
+   - array identity: `raw_value = ANY(master_array)`;
+   - external ID: `external_ids` chứa cặp `source_system → value`;
+   - domain attribute: `EXISTS` trên `cdp_domain_profiles` của cùng domain.
+3. Chỉ tìm trong `WHERE tenant_id = raw.tenant_id AND domain = raw.domain`.
+4. Ghi `match_method` dạng `DynamicMatch:email,device_id` và
+   `match_score = số điều kiện đúng / số điều kiện có giá trị`.
 
----
-
-## CIR — Cấu hình Merge Policy (`consolidation_config`)
-
-`consolidation_config` (JSONB) định nghĩa chi tiết cách hợp nhất dữ liệu cho từng thuộc tính.
-
-**Ví dụ cấu hình cho `email`:**
-
-```json
-{
-  "verified_field": "kyc_status",
-  "verified_event_names": ["kyc-completed"],
-  "fallback_mode": "most_recent",
-  "timestamp_field": "updated_at"
-}
-```
-
-### Ý nghĩa
-
-* **Verified First:** ưu tiên dữ liệu đã xác thực (KYC).
-* Nếu **raw profile** không có `kyc_status`, CIR sử dụng sự kiện `kyc-completed` làm bằng chứng xác thực.
-* Nếu chưa xác thực, áp dụng **fallback** (ví dụ: chọn dữ liệu mới nhất).
+`match_score` là tín hiệu link theo các rule hiện tại, không phải mô hình xác
+suất đã calibration. CIR hiện chưa có Bayesian, Fellegi-Sunter hay global
+identity graph scoring. Link `NewMaster` được tạo với `match_score = NULL`.
 
 ---
 
-## CIR — Kiểm thử Merge Policy
+## Cập nhật master profile
 
-Hệ thống đã kiểm thử đầy đủ **7 Merge Policy**, bao gồm các trường hợp biên:
+Khi match một master hiện có:
 
-* ✅ Sai cấu hình `fallback_mode`
-* ✅ Đệ quy vô hạn
-* ✅ Timestamp khác múi giờ
-* ✅ Khác chữ hoa/thường của `source_system`
-* ✅ Thuộc tính tùy biến chưa được SELECT
+- `full_name`, `email`, `phone_number` được xử lý như scalar.
+- `device_id`, `advertising_id`, `cookie_id` được append-distinct vào TEXT[].
+- `external_customer_id` được ghi vào JSONB `external_ids` dưới key là
+  `source_system`.
+- `push_token` được ghi vào `push_tokens` theo source.
+- `source_systems` được append-distinct.
+- `communication_preferences` trong `event_payload` được merge vào JSONB nếu
+  có.
+- `national_id` và các domain value được upsert vào
+  `cdp_domain_profiles.domain_attributes`.
 
-> **Kết quả:** Merge Policy hoạt động ổn định, nhất quán và an toàn trong quá trình Identity Resolution.
-
-
----
-
-## Identity Resolution — Các phương pháp ghép nối
-
-| Phương pháp | Dùng cho | Điều kiện |
-| --- | --- | --- |
-| **Exact Match** | `email`, `phone`, `national_id`, `external_customer_id` | `col = value` |
-| **Fuzzy (Trigram)** | Văn bản thô *(chưa active cho thuộc tính nào trong seed hiện tại)* | `similarity >= threshold` |
-| **Double Metaphone** | Họ tên phát âm gần giống *(chưa active cho thuộc tính nào trong seed hiện tại)* | `dmetaphone(col) = dmetaphone(value)` |
-| **Array Match** | `device_id`, `advertising_id`, `cookie_id` | `value = ANY(array)` |
-| **JSONB Match** | `external_customer_id` theo từng nguồn | `external_ids @> {...}` |
+Mọi thao tác link và update nằm trong cùng transaction với việc đổi trạng thái
+raw profile.
 
 ---
 
-## Identity Resolution — Bảo vệ PII & Chuẩn AdTech
+## Consolidation policy: ý định metadata và hành vi hiện tại
 
-### Chuẩn xử lý PII
+Các strategy mà resolver hỗ trợ cho scalar là:
 
-- PII (`email`, `phone`, `national_id`, `full_name`) được **hash bằng SHA-256** trước khi lưu trữ.
-- Chuẩn hóa dữ liệu (lowercase, trim, E.164...) **trước khi hash** để tăng tỷ lệ match.
-- Cột `is_hashed BOOLEAN` trên `cdp_master_profiles` đánh dấu hồ sơ có PII đã hash.
-- **Ràng buộc:** `is_hashed = TRUE` ⇒ `persona_name` **bắt buộc khác NULL** (CHECK constraint DB + tự sinh ở tầng Python — `persona.py`) — nhãn dễ đọc, không phải PII, thay thế `full_name` (giờ chỉ còn là hash) cho mục đích duyệt/tìm kiếm ngữ nghĩa. Ví dụ: `"Savvy Retail Shopper (TikTok Ads) #4f2a9c"`.
-
----
-
-## Quy tắc ghép nối
-
-| Loại dữ liệu | Phương pháp |
-| --- | --- |
-| **PII đã hash** | ✅ Exact Match |
-| **Văn bản thô** | ✅ Fuzzy Match (Trigram, Double Metaphone) |
-
-### Tham chiếu chuẩn ngành
-
-- **Google Customer Match**: hỗ trợ upload PII đã hash bằng **SHA-256**.
-- **Google Enhanced Conversions**: yêu cầu chuẩn hóa dữ liệu trước khi hash và đối sánh bằng giá trị hash.
-- Mô hình này cũng được áp dụng rộng rãi trên các nền tảng AdTech/MarTech như **Meta Customer Match**.
-
-**Reference**
-
-- Google Customer Match  https://support.google.com/displayvideo/answer/9539301
-- Google Enhanced Conversions https://support.google.com/adspolicy/answer/9755941
-
----
-
-## Cơ chế Real-time vs Batch hàng ngày
-
-**Real-time (throttled), không phải DB trigger thật:**
-- Ingestion worker gọi `IdentityResolutionTrigger.attempt_trigger()` ngay sau insert
-- Dùng `SELECT ... FOR UPDATE NOWAIT` trên `cdp_id_resolution_status` → khoá theo hàng, nhiều worker song song vẫn an toàn
-- Nếu đã chạy trong N giây gần nhất → **bỏ qua** (throttle), không chặn luồng ingest
-- Lỗi xử lý CIR **không làm crash** worker ingest (bắt exception, rollback)
-
-**Batch hàng ngày (`daily_job.py`):**
-- Drain-loop: lặp `run_resolution_batch()` cho đến khi staging hết bản ghi `status_code=1`
-- Đảm bảo **không sót** bản ghi nếu real-time bị throttle bỏ qua liên tục
-
----
-
-## Đa tenant & đa domain (Multi-tenant / Multi-domain)
-
-- Mọi bảng đều có `tenant_id` — cách ly dữ liệu giữa các khách hàng doanh nghiệp (multi-tenant SaaS)
-- `domain` phân biệt **retail** vs **banking** trong cùng một tenant → **không hợp nhất** hồ sơ giữa hai domain (một người có thể là khách bán lẻ và khách vay ngân hàng, được resolve **riêng**)
-- Mọi câu query ghép nối luôn `WHERE tenant_id = %s AND domain = %s`
-- `cdp_profile_links` có unique constraint `(tenant_id, raw_profile_id)`
-
----
-
-# 4. Demo thực tế
-
----
-
-## Kịch bản demo
-
-`backend-system/identity_resolution/run-demo.sh` — một lệnh, chạy toàn bộ pipeline:
-
-1. Nạp cấu hình DB từ `.env`, dựng virtualenv, cài `requirements.txt`
-2. **`init_sample_data.py`** — sinh **1.000 raw profile** giả lập cho retail/banking, trải trên **cả 3 nguồn** (AppsFlyer/MoEngage/Web Tracking):
-   - Điểm chạm đầu (`install`) luôn ẩn danh qua **AppsFlyer**, qua 6 kênh quảng cáo (Facebook/TikTok/Google/Grab/FPT Play Ads, PR offline)
-   - Trộn domain retail/banking (40% banking)
-   - ~30% là **"duplicate" có chủ đích**: các touch tiếp theo (`login`/`purchase`/`kyc_completed`) round-robin qua **AppsFlyer/MoEngage/Web Tracking** — mỗi touch mang định danh riêng của nguồn (`push_token`, `cookie_id`/`ga_client_id`, `utm_*`…) nhưng luôn **chia sẻ cùng `device_id`** với `install` ban đầu, để CIR ghép đúng vào 1 master profile bất kể thứ tự xử lý (batch bị xáo trộn)
-   - PII được **hash SHA-256** trước khi insert (không lưu dữ liệu thật)
-3. **`run_demo_resolution.py`** — chạy `CustomerIdentityResolver` cho đến khi hết batch, in kết quả master profile
-4. **`seed_full_demo_data.py`** — làm giàu 700 master profile (CRM journey graph, quan hệ, giao dịch, `cdp_raw_events` hành vi, content items…) cho demo Customer 360 đầy đủ, không chỉ riêng CIR
-
----
-
-## Kết quả demo (đã verify thực tế)
-
-| Chỉ số | Giá trị |
+| Strategy | Hành vi |
 |---|---|
-| Raw profiles đầu vào | **1.000** |
-| Nguồn raw profile | AppsFlyer 800 · MoEngage 100 · Web Tracking 100 |
-| Master profiles tạo ra | **700** |
-| Master profile được hợp nhất (≥2 raw) | **234** |
-| Tỷ lệ trùng chủ đích | 30% (`duplicate_rate`) |
+| `overwrite` | Luôn lấy giá trị mới |
+| `non_null` | Giữ giá trị hiện tại nếu đã có |
+| `most_recent` | So sánh timestamp, ưu tiên giá trị mới hơn |
+| `verified_first` | Ưu tiên giá trị có bằng chứng verified; fallback theo config |
+| `verified_then_most_recent` | Verified trước, sau đó most recent |
+| `source_priority` | Xếp hạng source không phân biệt hoa thường |
+| `append_distinct` | Gộp giá trị/list, loại trùng |
 
-➡️ Chuỗi `install (device_id, AppsFlyer)` → `login/kyc_completed` trên **bất kỳ nguồn nào trong 3 nguồn** được **CIR nối lại đúng qua `device_id`** dùng chung, dù `install` ban đầu hoàn toàn ẩn danh.
+Seed SQL đặt:
 
-**Lưu ý kỹ thuật đã gặp:**
-- Phải đảm bảo `phone_number` sinh ngẫu nhiên **không trùng lặp giữa các khách hàng khác nhau** (rejection-sampling) vì đây là một CIR matching key thật sự — trùng lặp sẽ khiến resolver hợp nhất nhầm 2 người thật thành 1. `full_name` cũng được sinh không trùng lặp cho demo dễ đọc, nhưng **không ảnh hưởng đến kết quả CIR** vì `full_name` không phải là matching key.
-- Một touch chỉ chia sẻ **PII** (không chia sẻ `device_id`) với `install` ban đầu có thể bị xử lý **trước** touch AppsFlyer cùng `device_id` (thứ tự batch bị xáo trộn) → resolver tạo nhầm **2 master profile** cho cùng 1 người, rồi va lỗi `UniqueViolation` khi một trong hai sau đó cùng cập nhật một `email`. Khắc phục: mọi touch — kể cả MoEngage/Web Tracking — đều phải mang theo `device_id` dùng chung của khách hàng.
+- `email`, `phone_number`: `verified_first`, fallback `most_recent`, với
+  `kyc_status = verified` hoặc event `kyc-completed`.
+- `national_id`: `non_null` trong domain JSONB.
+- `external_customer_id`, `device_id`, `advertising_id`, `cookie_id`:   metadata có `source_priority`.
+---
+
+## Consolidation policy notes
+
+Lưu ý implementation: các identity graph field nói trên hiện được cập nhật
+bằng append-distinct hoặc ghi theo source key trong JSONB; `source_priority`
+không được áp dụng để loại bỏ một device/ad/cookie hay thay thế giá trị
+`external_ids` cũ trong `_link_and_update()`. Tài liệu không gọi đây là
+priority enforcement cho graph cho tới khi code thực sự thực hiện điều đó.
 
 ---
 
-## Kiểm tra kết quả bằng SQL
+## Idempotency và trạng thái queue
+
+- Chỉ `status_code = 1` được resolver lấy vào batch.
+- Sau khi link, persona và các cập nhật thành công, raw profile nhận
+  `status_code = 3` và `processed_at = NOW()`.
+- `cdp_profile_links` có `UNIQUE (tenant_id, raw_profile_id)` và matched link
+  dùng `ON CONFLICT DO NOTHING`.
+- Resolver không chuyển row sang `status_code = 2` trong code hiện tại, dù
+  schema comment mô tả giá trị `2` là in-progress.
+- Lỗi trong `run_resolution_batch()` rollback transaction và raise; Dagster
+  retry op hoặc vòng gọi tiếp theo sẽ thử lại.
+
+---
+
+# 5. Persona resolution
+
+---
+
+## Persona là lớp hiểu khách hàng sau matching
+
+Persona không quyết định raw profile có phải cùng một người hay không. Sau khi resolver đã có `master_profile_id`, `PersonaResolutionEngine.resolve_persona()` được gọi cho từng master:
+
+<img class="cir-diagram" src="images/cir-persona-flow.svg" alt="Luồng persona resolution">
+
+Các component score là score heuristic 0-100, cấu hình runtime từ `cdp_persona_config` với cache TTL mặc định 60 giây. `persona_score` có trọng số cho các component tích cực và phần đảo chiều của risk score.
+
+---
+
+## Versioning và archetype dùng chung
+
+- Một archetype dùng chung cho `(tenant_id, domain, persona_code)`.
+- Mỗi lần recompute tạo một row mới trong `cdp_customer_personas` với
+  `computed_version` tăng dần.
+- Chỉ row mới nhất của master là `is_active = TRUE`.
+- Database trigger cập nhật `matched_profile_count` trên archetype theo
+  `COUNT(DISTINCT master_profile_id)` của các match active.
+- `current_persona_id` trên master trỏ tới `persona_id` của match hiện tại,
+  không trỏ trực tiếp tới archetype.
+
+`match_score` trong `cdp_customer_personas` hiện là proxy từ
+`confidence_score`; embedding/lookalike similarity chuyên dụng chưa được nối
+vào computation.
+
+---
+
+## PII-safe persona label
+
+### Input và trách nhiệm
+
+- Resolver không hash PII. Integration phải chuẩn hóa/hash trước khi ghi nếu
+  chính sách nguồn yêu cầu; script demo dùng SHA-256 sau trim/lowercase.
+- `full_name`, `email`, `phone_number`, `national_id` trong demo là digest,
+  không phải plaintext.
+- `is_hashed = TRUE` yêu cầu `persona_name IS NOT NULL` bằng CHECK constraint.
+- `resolver.py` tạo label deterministic khi raw profile có giá trị trông như
+  SHA-256 digest.
+- Persona engine tạo lại label cho mọi master bằng các input không phải PII,
+  dùng `master_profile_id` làm seed ổn định.
+
+Nếu có `GOOGLE_GENAI_API_KEY` thật, `persona.py` có thể gọi Gemini để tạo phần
+label; prompt chỉ gửi domain và acquisition channel. SDK thiếu, key là placeholder, 
+network lỗi hoặc timeout đều fallback về generator offline. LLM không được phép làm hỏng CIR batch.
+
+---
+
+# 6. Tenant, PII và vận hành
+
+---
+
+## Multi-tenant và multi-domain
+
+- Resolver lấy tenant từ `sys_tenant`, sau đó gọi `SET app.tenant_id = <tenant>` trước các query tenant-scoped.
+- SQL matching luôn thêm tenant và domain; domain là điều kiện bắt buộc của
+  master lookup.
+- Migration `001_harden_tenant_rls_policies.sql` bật và FORCE RLS cho các bảng
+  CIR chính: master, raw stage, links, domain profiles, customer personas và
+  persona archetypes.
+- Các bảng explainability không tự mang `tenant_id`; chúng đi qua khóa
+  `persona_id` của bản ghi persona.
+- `cdp_id_resolution_status` là một row lock dùng chung, không có tenant
+  column; đây là lý do helper throttle không phải tenant-isolated scheduler.
+
+RLS là lớp bảo vệ bổ sung. Các integration vẫn phải truyền đúng tenant và
+không được coi domain filter là thay thế cho authorization.
+
+---
+
+## Retry, lock và failure isolation
+
+### Đường Dagster
+
+- Sensor tạo run theo chu kỳ.
+- Op có `RetryPolicy(max_retries=2, delay=10)`.
+- Resolver commit sau khi hoàn tất các row trong batch; exception làm rollback.
+- `PersonaResolutionEngine.resolve_persona()` bắt exception riêng và trả
+  `None`, để lỗi persona không rollback phần matching đang chạy.
+
+### Helper throttle hiện chưa được nối
+
+`IdentityResolutionTrigger` dùng:
 
 ```sql
--- Master profile theo domain (PII hiển thị là hash, persona_name là nhãn dễ đọc thay thế)
-SELECT master_profile_id, domain, full_name, email, phone_number, is_hashed, persona_name, source_systems
-FROM customer360.cdp_master_profiles
-WHERE tenant_id = '11111111-1111-1111-1111-111111111111'
-ORDER BY domain;
-
--- Trạng thái xử lý của từng raw profile
-SELECT raw_profile_id, source_system, domain, status_code
-FROM customer360.cdp_raw_profiles_stage
-WHERE tenant_id = '11111111-1111-1111-1111-111111111111';
-
--- Liên kết raw -> master
-SELECT * FROM customer360.cdp_profile_links
-WHERE tenant_id = '11111111-1111-1111-1111-111111111111';
+SELECT last_executed_at
+FROM customer360.cdp_id_resolution_status
+WHERE id = TRUE
+FOR UPDATE NOWAIT;
 ```
+
+Lock bận hoặc chưa đủ `throttle_seconds` (mặc định 5 giây) thì bỏ qua; nếu
+được phép, helper cập nhật `last_executed_at` và chạy một batch trên cùng
+connection. Đây là path dự phòng cho integration tương lai, chưa được
+database trigger gọi tự động.
 
 ---
 
-## Quan sát qua API báo cáo (customer360-api)
+## Cấu hình runtime
 
-FastAPI + SQLAlchemy 2, phản chiếu đúng dữ liệu demo:
+| Biến | Mặc định | Dùng ở đâu |
+|---|---:|---|
+| `DB_HOST` | `localhost` | Kết nối PostgreSQL |
+| `DB_NAME` | `cdp` trong `daily_job.py`; `customer360` trong scripts | Tùy entrypoint |
+| `DB_USER` | `postgres` | Kết nối PostgreSQL |
+| `DB_PASSWORD` | `postgres` trong `daily_job.py`; script fallback `password` | Kết nối PostgreSQL |
+| `DB_PORT` | `5432` | Kết nối PostgreSQL |
+| `DB_SCHEMA` | `customer360` | Schema CIR |
+| `CIR_BATCH_SIZE` | `5000` trong daily job/scripts | Số raw profile mỗi batch |
+| `CIR_POLL_INTERVAL_SECONDS` | `30` | Dagster sensor và `worker.py` |
+| `DAGSTER_HOME` | `/dagster_home` trong image | Run history; compose mount volume |
+| `GOOGLE_GENAI_API_KEY` | unset | Optional persona label generation |
+| `GOOGLE_GENAI_MODEL` | `gemini-3.5-flash` | Optional Gemini model |
 
-- `GET /api/v1/reporting/summary` — tổng số raw/master, tỷ lệ hợp nhất
-- `GET /api/v1/reporting/master-profiles/duplicates` — các master được hợp nhất từ ≥2 raw profile
-- `GET /api/v1/reporting/identity-graph/coverage` — độ phủ định danh (device/email/phone…) trên master profile
+Khi triển khai cần cấu hình `.env` thống nhất giữa compose và image. Không nên
+dựa vào các password fallback trong Python cho môi trường production.
 
-➡️ Cùng một nguồn sự thật (`customer360` schema) phục vụ cả **pipeline CIR** và **API báo cáo/ứng dụng**.
+---
+
+# 7. Demo, giới hạn và tham chiếu
+
+---
+
+## Demo reproducible
+
+Compose dev có service one-shot `cir-demo-seed`, dùng cùng image Dagster và
+chạy theo thứ tự:
+
+```text
+init_sample_data.py
+    -> tạo tenant demo, reset dữ liệu của tenant demo,
+       hash PII và insert 1.000 raw profiles status_code=1
+run_demo_resolution.py
+    -> drain CIR và in master/link/status summary
+seed_full_demo_data.py
+    -> làm giàu dữ liệu CRM, event, relation và demo persona
+```
+
+Dataset được sinh deterministic với `seed=42`: khoảng 70% là customer install
+đầu tiên và 30% là duplicate touch; domain gồm retail và banking; touch được
+phân bổ qua AppsFlyer, MoEngage và WebTracking. Các touch của cùng customer
+dùng chung `device_id`, giúp demo kiểm tra việc nối anonymous install với touch
+có PII đã hash.
+
+Không ghi một con số master-profile cố định vào kiến trúc nếu chưa chạy seed
+trên đúng database/config hiện tại. Kết quả demo phụ thuộc vào dữ liệu đã reset,
+metadata seed và trạng thái database.
+
+---
+
+## Giới hạn hiện tại cần nói rõ
+
+- Không có probabilistic/Bayesian matching; matching là OR giữa các active
+  conditions và chọn một candidate tốt nhất theo số điều kiện đúng.
+- Không có company/account identity resolution riêng; master là person/profile
+  resolution với các field hiện có.
+- Fuzzy matching được code hỗ trợ nhưng không phải đường mặc định hiệu lực của
+  dataset seed hiện tại vì projection và schema mapping chưa đầy đủ.
+- `identity_confidence_score` là field trong schema/catalog, nhưng resolver
+  không tự ghi một confidence model vào field này.
+- `status_code = 2` được mô tả trong schema nhưng không được resolver sử dụng.
+- `IdentityResolutionTrigger` và PostgreSQL trigger legacy chưa được nối vào
+  ingestion path trong repository.
+- Persona matching có archetype/version/history; embedding similarity chuyên
+  dụng và lookalike ranking vẫn là phần mở rộng, không phải CIR exact matching.
+- Hashing là trách nhiệm của ingestion; chỉ demo script chứng minh bước hash
+  trước insert, không phải mọi integration runtime.
+
+---
+
+<!-- _class: source-reference -->
+
+## Tham chiếu mã nguồn và SQL
+
+| Nội dung | File |
+|---|---|
+| Dagster job, sensor, retry | `backend-system/identity_resolution/dagster_defs.py` |
+| Container entrypoint và image | `backend-system/Dockerfile` |
+| Batch drain / DB connection | `backend-system/identity_resolution/identity_resolution/daily_job.py` |
+| Matching, link, merge, transaction | `backend-system/identity_resolution/identity_resolution/resolver.py` |
+| Tenant context | `backend-system/identity_resolution/identity_resolution/rls.py` |
+| Optional throttle helper | `backend-system/identity_resolution/identity_resolution/trigger_controller.py` |
+| Persona computation/persistence | `backend-system/identity_resolution/identity_resolution/persona_engine.py` |
+| PII-safe label | `backend-system/identity_resolution/identity_resolution/persona.py` |
+| Schema, indexes, constraints, persona tables | `database-init/database-schema.sql` |
+| Attribute catalog và CIR seed | `database-init/init-core-database.sql` |
+| FORCE RLS migration | `database-init/migrations/001_harden_tenant_rls_policies.sql` |
+| Demo seed và hash PII | `backend-system/identity_resolution/scripts/init_sample_data.py` |
+| Demo resolution | `backend-system/identity_resolution/scripts/run_demo_resolution.py` |
+| Workspace code locations | `backend-system/workspace.yaml` |
 
 ---
 
@@ -435,9 +510,8 @@ FastAPI + SQLAlchemy 2, phản chiếu đúng dữ liệu demo:
 
 ## Tổng kết
 
-- CIR biến **N bản ghi rời rạc, đa nguồn, đa kênh** thành **1 hồ sơ khách hàng duy nhất**
-- Thiết kế **metadata-driven**, **đa tenant/đa domain**, xử lý **real-time (throttled) + batch hàng ngày**
-- PII được **hash trước khi lưu** — tuân thủ bảo vệ dữ liệu cá nhân
-- Demo thực tế: **1.000 → 700** hồ sơ, verify end-to-end trên PostgreSQL 16 + pgvector
-
-**Nền tảng cho:** Customer 360 · Segmentation · Personalization · Lead/Churn/CLV Scoring
+- **Runtime:** Dagster sensor → job/op → daily drain → resolver
+- **Matching:** Metadata-driven; projection và merge logic quyết định dữ liệu
+- **Isolation:** Raw → master theo tenant + domain, xử lý trong transaction
+- **Persona:** Shared archetype, versioned assignment và explainability
+- **Scope:** PII-safe offline fallback; phân biệt running, supported và roadmap
