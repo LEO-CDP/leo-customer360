@@ -1,8 +1,14 @@
 -- SQLBook: Code
 -- =========================================================
--- Persona 360 + LEO CDP
+-- Persona360 Platform
 -- PostgreSQL 15+
 -- PostGIS + pgvector
+--
+-- Platform boundary:
+--   Persona360 owns human/persona identity, enrichment and provenance.
+--   Customer/profile platforms consume this data through an API, export or
+--   event contract. They do not share tables, tenant IDs or foreign keys with
+--   Persona360. `source_system` and `external_id` are opaque integration keys.
 --
 -- Core flow:
 --
@@ -20,8 +26,8 @@
 --        ↓
 --      ACTION
 --
--- Persona360 is the core schema.
--- LEO CDP is the contextual / experiential enrichment layer.
+-- Persona360 is an independent platform. LEO CDP is an optional experience
+-- and enrichment consumer, not a database dependency of this schema.
 -- =========================================================
 
 
@@ -85,7 +91,7 @@ CREATE TABLE IF NOT EXISTS persona360.sys_tenant (
 );
 
 COMMENT ON TABLE persona360.sys_tenant IS
-'Top-level tenant/workspace. Every tenant-scoped Persona360 + LEO entity belongs to a tenant.';
+'Top-level Persona360 account/workspace. This tenant is owned by Persona360 and is intentionally independent from any consumer platform tenant.';
 
 
 CREATE INDEX IF NOT EXISTS idx_sys_tenant_status
@@ -113,11 +119,20 @@ CREATE TABLE IF NOT EXISTS persona360.personas (
         REFERENCES persona360.sys_tenant(tenant_id)
         ON DELETE CASCADE,
 
-    -- historical_person / living_person / customer / public_figure
-    -- organization / brand / ai_persona / other
-    persona_type VARCHAR(50) NOT NULL,
+    -- historical_person / living_person / customer / end_user / public_figure
+    -- other human persona
+    persona_type VARCHAR(50) NOT NULL
+        CHECK (persona_type IN (
+            'HISTORICAL_PERSON',
+            'LIVING_PERSON',
+            'CUSTOMER',
+            'END_USER',
+            'PUBLIC_FIGURE',
+            'OTHER'
+        )),
 
-    canonical_name TEXT NOT NULL,
+    canonical_name TEXT NOT NULL
+        CHECK (btrim(canonical_name) <> ''),
 
     display_name TEXT,
 
@@ -162,7 +177,7 @@ CREATE TABLE IF NOT EXISTS persona360.personas (
 );
 
 COMMENT ON TABLE persona360.personas IS
-'Core Persona360 entity. A persona can represent a historical person, customer, living person, public figure, brand, or AI persona.';
+'Core human Persona360 entity. A persona represents a historical person, living person, customer, end user, public figure or other human profile.';
 
 CREATE INDEX IF NOT EXISTS idx_personas_tenant
     ON persona360.personas(tenant_id);
@@ -176,7 +191,16 @@ CREATE INDEX IF NOT EXISTS idx_personas_name
 
 CREATE INDEX IF NOT EXISTS idx_personas_embedding
     ON persona360.personas
-    USING hnsw (persona_embedding vector_cosine_ops);
+    USING hnsw (persona_embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64)
+    WHERE persona_embedding IS NOT NULL
+      AND status <> 'ARCHIVED';
+
+CREATE INDEX IF NOT EXISTS idx_personas_tenant_name
+    ON persona360.personas(tenant_id, canonical_name);
+
+CREATE INDEX IF NOT EXISTS idx_personas_tenant_status_id
+    ON persona360.personas(tenant_id, status, persona_id);
 
 
 DROP TRIGGER IF EXISTS trg_personas_updated_at
@@ -190,7 +214,7 @@ EXECUTE FUNCTION persona360.set_updated_at();
 
 -- =========================================================
 -- PERSONA IDENTITIES
--- Customer / platform / external identity resolution
+-- External identity resolution and platform integration boundary
 -- =========================================================
 
 CREATE TABLE IF NOT EXISTS persona360.persona_identities (
@@ -204,11 +228,14 @@ CREATE TABLE IF NOT EXISTS persona360.persona_identities (
         REFERENCES persona360.personas(persona_id)
         ON DELETE CASCADE,
 
-    source_system VARCHAR(100) NOT NULL,
+    source_system VARCHAR(100) NOT NULL
+        CHECK (btrim(source_system) <> ''),
 
-    identity_type VARCHAR(100) NOT NULL,
+    identity_type VARCHAR(100) NOT NULL
+        CHECK (btrim(identity_type) <> ''),
 
-    external_id TEXT NOT NULL,
+    external_id TEXT NOT NULL
+        CHECK (btrim(external_id) <> ''),
 
     normalized_value TEXT,
 
@@ -237,7 +264,7 @@ CREATE TABLE IF NOT EXISTS persona360.persona_identities (
 );
 
 COMMENT ON TABLE persona360.persona_identities IS
-'External identities used by Persona360 / CDP identity resolution.';
+'Opaque external identity keys used to resolve a human persona. source_system and external_id are integration data only; they do not reference a consumer platform table or tenant.';
 
 
 CREATE INDEX IF NOT EXISTS idx_persona_identity_persona
@@ -292,6 +319,13 @@ CREATE TABLE IF NOT EXISTS persona360.persona_attributes (
         CHECK (
             confidence IS NULL
             OR (confidence >= 0 AND confidence <= 1)
+        ),
+
+    CONSTRAINT chk_attribute_dates
+        CHECK (
+            valid_to IS NULL
+            OR valid_from IS NULL
+            OR valid_to >= valid_from
         )
 );
 
@@ -431,6 +465,13 @@ CREATE TABLE IF NOT EXISTS persona360.persona_relationships (
             OR (confidence >= 0 AND confidence <= 1)
         ),
 
+    CONSTRAINT chk_relationship_dates
+        CHECK (
+            valid_to IS NULL
+            OR valid_from IS NULL
+            OR valid_to >= valid_from
+        ),
+
     CONSTRAINT chk_relationship_self
         CHECK (persona_id <> related_persona_id)
 );
@@ -486,7 +527,14 @@ CREATE TABLE IF NOT EXISTS persona360.historical_places (
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_place_dates
+        CHECK (
+            valid_to IS NULL
+            OR valid_from IS NULL
+            OR valid_to >= valid_from
+        )
 );
 
 CREATE INDEX IF NOT EXISTS idx_places_tenant
@@ -539,7 +587,14 @@ CREATE TABLE IF NOT EXISTS persona360.historical_events (
 
     -- event date precision:
     -- DAY / MONTH / YEAR / APPROXIMATE / UNKNOWN
-    temporal_precision VARCHAR(30) DEFAULT 'DAY',
+    temporal_precision VARCHAR(30) NOT NULL DEFAULT 'DAY'
+        CHECK (temporal_precision IN (
+            'DAY',
+            'MONTH',
+            'YEAR',
+            'APPROXIMATE',
+            'UNKNOWN'
+        )),
 
     place_id UUID
         REFERENCES persona360.historical_places(place_id)
@@ -566,7 +621,10 @@ CREATE TABLE IF NOT EXISTS persona360.historical_events (
             end_date IS NULL
             OR start_date IS NULL
             OR end_date >= start_date
-        )
+        ),
+
+    CONSTRAINT chk_event_title
+        CHECK (btrim(title) <> '')
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_tenant
@@ -626,7 +684,7 @@ CREATE TABLE IF NOT EXISTS persona360.persona_events (
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    UNIQUE (
+    UNIQUE NULLS NOT DISTINCT (
         tenant_id,
         persona_id,
         event_id,
@@ -671,7 +729,17 @@ CREATE TABLE IF NOT EXISTS persona360.timelines (
 
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
 
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_timeline_dates
+        CHECK (
+            end_date IS NULL
+            OR start_date IS NULL
+            OR end_date >= start_date
+        ),
+
+    CONSTRAINT chk_timeline_title
+        CHECK (btrim(title) <> '')
 );
 
 CREATE TABLE IF NOT EXISTS persona360.timeline_items (
@@ -699,11 +767,15 @@ CREATE TABLE IF NOT EXISTS persona360.timeline_items (
 
     event_date DATE,
 
-    sequence_no INTEGER,
+    sequence_no INTEGER
+        CHECK (sequence_no IS NULL OR sequence_no >= 0),
 
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
 
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_timeline_item_title
+        CHECK (btrim(title) <> '')
 );
 
 CREATE INDEX IF NOT EXISTS idx_timelines_persona
@@ -732,7 +804,8 @@ CREATE TABLE IF NOT EXISTS persona360.documents (
         REFERENCES persona360.sys_tenant(tenant_id)
         ON DELETE CASCADE,
 
-    title TEXT NOT NULL,
+    title TEXT NOT NULL
+        CHECK (btrim(title) <> ''),
 
     document_type VARCHAR(100),
 
@@ -816,13 +889,16 @@ CREATE TABLE IF NOT EXISTS persona360.document_chunks (
         REFERENCES persona360.documents(document_id)
         ON DELETE CASCADE,
 
-    chunk_index INTEGER NOT NULL,
+    chunk_index INTEGER NOT NULL
+        CHECK (chunk_index >= 0),
 
     content TEXT NOT NULL,
 
-    token_count INTEGER,
+    token_count INTEGER
+        CHECK (token_count IS NULL OR token_count > 0),
 
-    page_number INTEGER,
+    page_number INTEGER
+        CHECK (page_number IS NULL OR page_number > 0),
 
     section_title TEXT,
 
@@ -848,7 +924,9 @@ CREATE INDEX IF NOT EXISTS idx_document_chunks_document
 
 CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding
     ON persona360.document_chunks
-    USING hnsw (embedding vector_cosine_ops);
+    USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64)
+    WHERE embedding IS NOT NULL;
 
 
 -- =========================================================
@@ -923,7 +1001,8 @@ CREATE TABLE IF NOT EXISTS persona360.embeddings (
 
     model_name VARCHAR(200) NOT NULL,
 
-    dimensions INTEGER NOT NULL,
+    dimensions INTEGER NOT NULL
+        CHECK (dimensions = 1536),
 
     embedding vector(1536) NOT NULL,
 
@@ -943,7 +1022,9 @@ CREATE INDEX IF NOT EXISTS idx_embeddings_entity
 
 CREATE INDEX IF NOT EXISTS idx_embeddings_vector
     ON persona360.embeddings
-    USING hnsw (embedding vector_cosine_ops);
+    USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64)
+    WHERE embedding IS NOT NULL;
 
 
 -- =========================================================
@@ -1085,7 +1166,10 @@ CREATE TABLE IF NOT EXISTS persona360.experience_sessions (
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_experience_dates
+        CHECK (ended_at IS NULL OR ended_at >= started_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_experience_participant
@@ -1150,7 +1234,10 @@ CREATE TABLE IF NOT EXISTS persona360.experience_events (
 
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
 
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_experience_event_duration
+        CHECK (duration_seconds IS NULL OR duration_seconds >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_experience_events_session
@@ -1216,7 +1303,14 @@ CREATE TABLE IF NOT EXISTS persona360.experience_actions (
 
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
 
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_action_dates
+        CHECK (
+            completed_at IS NULL
+            OR started_at IS NULL
+            OR completed_at >= started_at
+        )
 );
 
 CREATE INDEX IF NOT EXISTS idx_actions_subject
@@ -1264,7 +1358,16 @@ CREATE TABLE IF NOT EXISTS persona360.experience_routes (
 
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
 
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_route_measurements
+        CHECK (
+            (distance_meters IS NULL OR distance_meters >= 0)
+            AND (
+                estimated_duration_seconds IS NULL
+                OR estimated_duration_seconds >= 0
+            )
+        )
 );
 
 CREATE TABLE IF NOT EXISTS persona360.experience_route_stops (
@@ -1354,6 +1457,13 @@ CREATE TABLE IF NOT EXISTS persona360.persona_observations (
         CHECK (
             confidence IS NULL
             OR (confidence >= 0 AND confidence <= 1)
+        ),
+
+    CONSTRAINT chk_observation_dates
+        CHECK (
+            valid_to IS NULL
+            OR valid_from IS NULL
+            OR valid_to >= valid_from
         )
 );
 
@@ -1416,6 +1526,13 @@ CREATE TABLE IF NOT EXISTS persona360.agent_memory (
         CHECK (
             importance IS NULL
             OR (importance >= 0 AND importance <= 1)
+        ),
+
+    CONSTRAINT chk_memory_dates
+        CHECK (
+            valid_to IS NULL
+            OR valid_from IS NULL
+            OR valid_to >= valid_from
         )
 );
 
@@ -1428,7 +1545,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_memory_persona
 
 CREATE INDEX IF NOT EXISTS idx_agent_memory_embedding
     ON persona360.agent_memory
-    USING hnsw (embedding vector_cosine_ops);
+    USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64)
+    WHERE embedding IS NOT NULL;
 
 
 -- =========================================================
@@ -1550,7 +1669,9 @@ CREATE INDEX IF NOT EXISTS idx_rag_queries_persona
 
 CREATE INDEX IF NOT EXISTS idx_rag_queries_embedding
     ON persona360.rag_queries
-    USING hnsw(query_embedding vector_cosine_ops);
+    USING hnsw(query_embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64)
+    WHERE query_embedding IS NOT NULL;
 
 
 -- =========================================================
@@ -1763,8 +1884,296 @@ END $$;
 
 
 -- =========================================================
+-- TENANT INTEGRITY AND ISOLATION
+--
+-- Every entity keeps tenant_id beside its UUID.  The composite foreign keys
+-- below prevent a valid UUID from being linked across tenants, which a
+-- single-column foreign key cannot enforce.
+-- =========================================================
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_personas_tenant_persona
+    ON persona360.personas(tenant_id, persona_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_places_tenant_place
+    ON persona360.historical_places(tenant_id, place_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_events_tenant_event
+    ON persona360.historical_events(tenant_id, event_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_timelines_tenant_timeline
+    ON persona360.timelines(tenant_id, timeline_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_documents_tenant_document
+    ON persona360.documents(tenant_id, document_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_chunks_tenant_chunk
+    ON persona360.document_chunks(tenant_id, chunk_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_contexts_tenant_context
+    ON persona360.context_snapshots(tenant_id, context_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_experiences_tenant_experience
+    ON persona360.experience_sessions(tenant_id, experience_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_routes_tenant_route
+    ON persona360.experience_routes(tenant_id, route_id);
+
+
+CREATE OR REPLACE FUNCTION persona360.add_tenant_foreign_key(
+    p_child_table TEXT,
+    p_child_column TEXT,
+    p_parent_table TEXT,
+    p_on_delete TEXT DEFAULT 'NO ACTION'
+)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    constraint_name TEXT := format(
+        'fk_%s_%s_same_tenant',
+        p_child_table,
+        p_child_column
+    );
+    delete_action TEXT;
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = format('persona360.%I', p_child_table)::regclass
+          AND conname = constraint_name
+    ) THEN
+        RETURN;
+    END IF;
+
+    delete_action := CASE p_on_delete
+        WHEN 'CASCADE' THEN 'ON DELETE CASCADE'
+        WHEN 'SET NULL' THEN format(
+            'ON DELETE SET NULL (%I)',
+            p_child_column
+        )
+        ELSE 'ON DELETE NO ACTION'
+    END;
+
+    EXECUTE format(
+        'ALTER TABLE persona360.%I
+         ADD CONSTRAINT %I
+         FOREIGN KEY (tenant_id, %I)
+         REFERENCES persona360.%I (tenant_id, %I)
+         %s',
+        p_child_table,
+        constraint_name,
+        p_child_column,
+        p_parent_table,
+        CASE p_parent_table
+            WHEN 'personas' THEN 'persona_id'
+            WHEN 'historical_places' THEN 'place_id'
+            WHEN 'historical_events' THEN 'event_id'
+            WHEN 'timelines' THEN 'timeline_id'
+            WHEN 'documents' THEN 'document_id'
+            WHEN 'document_chunks' THEN 'chunk_id'
+            WHEN 'context_snapshots' THEN 'context_id'
+            WHEN 'experience_sessions' THEN 'experience_id'
+            WHEN 'experience_routes' THEN 'route_id'
+        END,
+        delete_action
+    );
+END;
+$$;
+
+
+SELECT persona360.add_tenant_foreign_key('personas', 'birth_place_id', 'historical_places', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('personas', 'death_place_id', 'historical_places', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('persona_identities', 'persona_id', 'personas', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('persona_attributes', 'persona_id', 'personas', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('beliefs', 'persona_id', 'personas', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('beliefs', 'source_document_id', 'documents', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('persona_relationships', 'persona_id', 'personas', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('persona_relationships', 'related_persona_id', 'personas', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('persona_relationships', 'source_document_id', 'documents', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('historical_events', 'place_id', 'historical_places', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('historical_events', 'source_document_id', 'documents', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('persona_events', 'persona_id', 'personas', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('persona_events', 'event_id', 'historical_events', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('timelines', 'persona_id', 'personas', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('timeline_items', 'timeline_id', 'timelines', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('timeline_items', 'event_id', 'historical_events', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('timeline_items', 'place_id', 'historical_places', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('documents', 'author_persona_id', 'personas', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('document_chunks', 'document_id', 'documents', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('quotes', 'persona_id', 'personas', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('quotes', 'document_id', 'documents', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('quotes', 'chunk_id', 'document_chunks', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('context_snapshots', 'subject_persona_id', 'personas', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('context_snapshots', 'target_persona_id', 'personas', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('context_snapshots', 'place_id', 'historical_places', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('context_snapshots', 'event_id', 'historical_events', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('context_snapshots', 'timeline_id', 'timelines', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_sessions', 'participant_persona_id', 'personas', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_sessions', 'target_persona_id', 'personas', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_sessions', 'current_context_id', 'context_snapshots', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_sessions', 'entry_place_id', 'historical_places', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_sessions', 'current_place_id', 'historical_places', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_events', 'experience_id', 'experience_sessions', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('experience_events', 'context_id', 'context_snapshots', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_events', 'place_id', 'historical_places', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_events', 'event_id', 'historical_events', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_actions', 'experience_id', 'experience_sessions', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_actions', 'subject_persona_id', 'personas', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_actions', 'place_id', 'historical_places', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_actions', 'context_id', 'context_snapshots', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_routes', 'target_persona_id', 'personas', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_route_stops', 'route_id', 'experience_routes', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('experience_route_stops', 'place_id', 'historical_places', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('experience_route_stops', 'event_id', 'historical_events', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('persona_observations', 'persona_id', 'personas', 'CASCADE');
+SELECT persona360.add_tenant_foreign_key('agent_memory', 'persona_id', 'personas', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('agent_memory', 'experience_id', 'experience_sessions', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('source_provenance', 'document_id', 'documents', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('source_provenance', 'chunk_id', 'document_chunks', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('rag_queries', 'persona_id', 'personas', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('rag_queries', 'experience_id', 'experience_sessions', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('rag_queries', 'context_id', 'context_snapshots', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('persona_evaluations', 'persona_id', 'personas', 'SET NULL');
+SELECT persona360.add_tenant_foreign_key('persona_evaluations', 'experience_id', 'experience_sessions', 'SET NULL');
+
+DROP FUNCTION persona360.add_tenant_foreign_key(TEXT, TEXT, TEXT, TEXT);
+
+
+CREATE OR REPLACE FUNCTION persona360.enable_tenant_rls(p_table_name TEXT)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    EXECUTE format('ALTER TABLE persona360.%I ENABLE ROW LEVEL SECURITY', p_table_name);
+    EXECUTE format('ALTER TABLE persona360.%I FORCE ROW LEVEL SECURITY', p_table_name);
+    EXECUTE format('DROP POLICY IF EXISTS tenant_isolation_policy ON persona360.%I', p_table_name);
+    EXECUTE format(
+        'CREATE POLICY tenant_isolation_policy ON persona360.%I
+         USING (tenant_id = NULLIF(btrim(current_setting(''app.tenant_id'', true)), '''')::uuid)
+         WITH CHECK (tenant_id = NULLIF(btrim(current_setting(''app.tenant_id'', true)), '''')::uuid)',
+        p_table_name
+    );
+END;
+$$;
+
+
+SELECT persona360.enable_tenant_rls(table_name)
+FROM unnest(ARRAY[
+    'sys_tenant',
+    'personas',
+    'persona_identities',
+    'persona_attributes',
+    'beliefs',
+    'persona_relationships',
+    'historical_places',
+    'historical_events',
+    'persona_events',
+    'timelines',
+    'timeline_items',
+    'documents',
+    'document_chunks',
+    'quotes',
+    'embeddings',
+    'context_snapshots',
+    'experience_sessions',
+    'experience_events',
+    'experience_actions',
+    'experience_routes',
+    'experience_route_stops',
+    'persona_observations',
+    'agent_memory',
+    'source_provenance',
+    'rag_queries',
+    'persona_evaluations'
+]) AS table_name;
+
+DROP FUNCTION persona360.enable_tenant_rls(TEXT);
+
+
+-- =========================================================
 -- COMMON VIEWS
 -- =========================================================
+
+
+-- =========================================================
+-- External Persona Enrichment Contract
+--
+-- One row per external identity. A consuming platform can resolve its own
+-- customer/user reference here without sharing its schema or tenant ID.
+-- In production this projection should be exposed by a Persona360 API,
+-- export or event consumer rather than by granting cross-platform DB access.
+-- =========================================================
+
+CREATE OR REPLACE VIEW persona360.v_persona_enrichment AS
+
+SELECT
+    i.source_system,
+    i.identity_type,
+    i.external_id,
+
+    p.persona_id,
+    p.persona_type,
+    p.canonical_name,
+    p.display_name,
+    p.given_name,
+    p.middle_name,
+    p.family_name,
+    p.gender,
+    p.nationality,
+    p.birth_date,
+    p.death_date,
+    p.summary,
+    p.updated_at AS persona_updated_at,
+
+    COALESCE(
+        jsonb_agg(
+            jsonb_build_object(
+                'attribute_key', a.attribute_key,
+                'attribute_value', a.attribute_value,
+                'source_type', a.source_type,
+                'confidence', a.confidence,
+                'observed_at', a.observed_at,
+                'valid_from', a.valid_from,
+                'valid_to', a.valid_to
+            )
+            ORDER BY a.attribute_key, a.observed_at DESC NULLS LAST, a.attribute_id
+        ) FILTER (WHERE a.attribute_id IS NOT NULL),
+        '[]'::jsonb
+    ) AS enrichment_attributes
+
+FROM persona360.persona_identities i
+
+JOIN persona360.personas p
+    ON p.tenant_id = i.tenant_id
+   AND p.persona_id = i.persona_id
+
+LEFT JOIN persona360.persona_attributes a
+    ON a.tenant_id = p.tenant_id
+   AND a.persona_id = p.persona_id
+
+GROUP BY
+    i.source_system,
+    i.identity_type,
+    i.external_id,
+    p.persona_id,
+    p.persona_type,
+    p.canonical_name,
+    p.display_name,
+    p.given_name,
+    p.middle_name,
+    p.family_name,
+    p.gender,
+    p.nationality,
+    p.birth_date,
+    p.death_date,
+    p.summary,
+    p.updated_at;
+
+ALTER VIEW persona360.v_persona_enrichment
+    SET (security_invoker = true);
+
+COMMENT ON VIEW persona360.v_persona_enrichment IS
+'Consumer-neutral Persona360 enrichment projection. External systems resolve opaque source_system/identity_type/external_id values here without a shared database schema or tenant identifier.';
 
 
 -- =========================================================
@@ -1807,16 +2216,23 @@ SELECT
 FROM persona360.context_snapshots c
 
 LEFT JOIN persona360.personas subject
-    ON subject.persona_id = c.subject_persona_id
+    ON subject.tenant_id = c.tenant_id
+   AND subject.persona_id = c.subject_persona_id
 
 LEFT JOIN persona360.personas target
-    ON target.persona_id = c.target_persona_id
+    ON target.tenant_id = c.tenant_id
+   AND target.persona_id = c.target_persona_id
 
 LEFT JOIN persona360.historical_places p
-    ON p.place_id = c.place_id
+    ON p.tenant_id = c.tenant_id
+   AND p.place_id = c.place_id
 
 LEFT JOIN persona360.historical_events e
-    ON e.event_id = c.event_id;
+    ON e.tenant_id = c.tenant_id
+   AND e.event_id = c.event_id;
+
+ALTER VIEW persona360.v_persona_context
+    SET (security_invoker = true);
 
 
 -- =========================================================
@@ -1825,49 +2241,65 @@ LEFT JOIN persona360.historical_events e
 
 CREATE OR REPLACE VIEW persona360.v_persona_knowledge AS
 
+WITH document_counts AS (
+    SELECT tenant_id, author_persona_id AS persona_id, COUNT(*) AS document_count
+    FROM persona360.documents
+    WHERE author_persona_id IS NOT NULL
+    GROUP BY tenant_id, author_persona_id
+), quote_counts AS (
+    SELECT tenant_id, persona_id, COUNT(*) AS quote_count
+    FROM persona360.quotes
+    GROUP BY tenant_id, persona_id
+), belief_counts AS (
+    SELECT tenant_id, persona_id, COUNT(*) AS belief_count
+    FROM persona360.beliefs
+    GROUP BY tenant_id, persona_id
+), relationship_counts AS (
+    SELECT tenant_id, persona_id, COUNT(*) AS relationship_count
+    FROM persona360.persona_relationships
+    GROUP BY tenant_id, persona_id
+), event_counts AS (
+    SELECT tenant_id, persona_id, COUNT(*) AS event_count
+    FROM persona360.persona_events
+    GROUP BY tenant_id, persona_id
+), timeline_counts AS (
+    SELECT tenant_id, persona_id, COUNT(*) AS timeline_count
+    FROM persona360.timelines
+    GROUP BY tenant_id, persona_id
+)
 SELECT
     p.persona_id,
     p.tenant_id,
     p.canonical_name,
     p.persona_type,
-
-    COUNT(DISTINCT d.document_id) AS document_count,
-
-    COUNT(DISTINCT q.quote_id) AS quote_count,
-
-    COUNT(DISTINCT b.belief_id) AS belief_count,
-
-    COUNT(DISTINCT r.relationship_id) AS relationship_count,
-
-    COUNT(DISTINCT pe.event_id) AS event_count,
-
-    COUNT(DISTINCT t.timeline_id) AS timeline_count
-
+    COALESCE(d.document_count, 0) AS document_count,
+    COALESCE(q.quote_count, 0) AS quote_count,
+    COALESCE(b.belief_count, 0) AS belief_count,
+    COALESCE(r.relationship_count, 0) AS relationship_count,
+    COALESCE(pe.event_count, 0) AS event_count,
+    COALESCE(t.timeline_count, 0) AS timeline_count
 FROM persona360.personas p
+LEFT JOIN document_counts d
+    ON d.tenant_id = p.tenant_id
+   AND d.persona_id = p.persona_id
+LEFT JOIN quote_counts q
+    ON q.tenant_id = p.tenant_id
+   AND q.persona_id = p.persona_id
+LEFT JOIN belief_counts b
+    ON b.tenant_id = p.tenant_id
+   AND b.persona_id = p.persona_id
+LEFT JOIN relationship_counts r
+    ON r.tenant_id = p.tenant_id
+   AND r.persona_id = p.persona_id
+LEFT JOIN event_counts pe
+    ON pe.tenant_id = p.tenant_id
+   AND pe.persona_id = p.persona_id
+LEFT JOIN timeline_counts t
+    ON t.tenant_id = p.tenant_id
+   AND t.persona_id = p.persona_id;
 
-LEFT JOIN persona360.documents d
-    ON d.author_persona_id = p.persona_id
-
-LEFT JOIN persona360.quotes q
-    ON q.persona_id = p.persona_id
-
-LEFT JOIN persona360.beliefs b
-    ON b.persona_id = p.persona_id
-
-LEFT JOIN persona360.persona_relationships r
-    ON r.persona_id = p.persona_id
-
-LEFT JOIN persona360.persona_events pe
-    ON pe.persona_id = p.persona_id
-
-LEFT JOIN persona360.timelines t
-    ON t.persona_id = p.persona_id
-
-GROUP BY
-    p.persona_id,
-    p.tenant_id,
-    p.canonical_name,
-    p.persona_type;
+ALTER VIEW persona360.v_persona_knowledge
+    SET (security_invoker = true);
 
 
 -- =========================================================
