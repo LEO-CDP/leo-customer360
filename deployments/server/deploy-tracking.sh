@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Deploy data-tracking-api (FastAPI event ingestion) onto its OWN "tracking" server VM.
+# Deploy data-tracking-api (FastAPI event ingestion) onto its OWN "tracking" server VM,
+# as N auto-load-balanced replicas behind a local nginx round-robin LB.
 #   ./deploy-tracking.sh <uat|prod>
 #
 # Minimal by design — deploys ONLY what the app actually uses:
@@ -8,10 +9,17 @@
 #     fails OPEN if Redis is absent, so this is best-effort. Reuses the existing api-box Redis
 #     (no dedicated instance); reached over the private VPC (open 6580 api<-tracking in
 #     ../server/overlays/<env>.tfvars extra_ingress).
+#   * nginx (on this box): a tiny local load balancer that owns host :8010 (what Caddy's
+#     DATA_UPSTREAM targets) and least_conn round-robins across the N app replicas, which
+#     live on a private docker bridge — so scaling is fully contained here (Caddy, the NLB,
+#     and the proxy overlays' data_upstream stay UNCHANGED, still just ip:8010).
 # The app is exposed publicly at https://<caddy_domain>/data via Caddy (../proxy) + the LB.
 #
 # Re-runnable. Target box = servers["$TRACKING_SERVER_KEY"] (default "tracking"). Overrides:
 #   BASTION_USER / SSH_KEY / TRACKING_SERVER_KEY / REDIS_SERVER_KEY
+#   TRACKING_REPLICAS (how many app instances behind the local LB; default uat=3, prod=5)
+#   TRACKING_LB_IMAGE (nginx image for the LB; default nginx:alpine)
+#   TRACKING_NETWORK  (private docker bridge name; default c360-tracking)
 #   BUILD_LOCAL (default 0 — data-tracking-api is now built + published to GHCR by CI, so it
 #               pulls the image; set BUILD_LOCAL=1 to build on the VM from source instead)
 #   S3_AUTO_CREATE_BUCKETS (default true — per-source buckets; see ../storage/README.md caveat)
@@ -30,6 +38,15 @@ SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 TRACKING_SERVER_KEY="${TRACKING_SERVER_KEY:-tracking}"
 REDIS_SERVER_KEY="${REDIS_SERVER_KEY:-api}"   # the box that runs the shared cache Redis (uat)
 MON_SERVER_KEY="${MON_SERVER_KEY:-api}"       # the box that runs Jaeger (uat = api box)
+
+# --- how many app replicas run behind the local nginx LB on THIS box (auto load-balance).
+#     Default per env; override with TRACKING_REPLICAS. The nginx LB owns host :8010 (what
+#     Caddy's DATA_UPSTREAM targets) and least_conn round-robins across the replicas. ---
+case "$ENV" in uat) DEFAULT_REPLICAS=3 ;; prod) DEFAULT_REPLICAS=5 ;; esac
+REPLICAS="${TRACKING_REPLICAS:-$DEFAULT_REPLICAS}"
+[[ "$REPLICAS" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: TRACKING_REPLICAS must be a positive integer (got '$REPLICAS')."; exit 1; }
+LB_IMAGE="${TRACKING_LB_IMAGE:-nginx:alpine}"
+NETWORK="${TRACKING_NETWORK:-c360-tracking}"
 
 # Read a tfvars value: content between quotes for strings (keeps '#'), or the bare token with
 # any trailing comment stripped for unquoted numbers/bools (same helper as deploy-api.sh).
@@ -113,6 +130,7 @@ PARAMS_B64="$(printf '%s\n' \
   "S3_ENDPOINT=$S3_ENDPOINT" "S3_REGION=$S3_REGION" "S3_ACCESS_KEY=$S3_ACCESS_KEY" "S3_SECRET_B64=$S3_SECRET_B64" "S3_AUTO_CREATE=$S3_AUTO_CREATE" \
   "REDIS_HOST=${REDIS_HOST:-}" "REDIS_PORT=${REDIS_PORT:-}" "REDIS_PW_B64=$REDIS_PW_B64" \
   "DEPLOY_MODE=$DEPLOY_MODE" "IMAGE=$IMAGE" "GHCR_USER=$GHCR_USER" "GHCR_TOKEN_B64=$GHCR_TOKEN_B64" "CONTAINER=$CONTAINER" "OTEL_B64=$OTEL_B64" \
+  "REPLICAS=$REPLICAS" "LB_IMAGE=$LB_IMAGE" "NETWORK=$NETWORK" \
   | base64 | tr -d '\n')"
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PARAMS_B64" <<'REMOTE'
 set -euo pipefail
@@ -121,6 +139,7 @@ S3_SECRET_KEY="$(printf %s "$S3_SECRET_B64" | base64 -d)"
 REDIS_PW="$(printf %s "${REDIS_PW_B64:-}" | base64 -d 2>/dev/null || true)"
 GHCR_TOKEN="$(printf %s "${GHCR_TOKEN_B64:-}" | base64 -d 2>/dev/null || true)"
 DEPLOY_MODE="${DEPLOY_MODE:-build}"; IMAGE="${IMAGE:-}"; GHCR_USER="${GHCR_USER:-token}"; CONTAINER="${CONTAINER:-customer360-tracking-api}"
+REPLICAS="${REPLICAS:-1}"; LB_IMAGE="${LB_IMAGE:-nginx:alpine}"; NETWORK="${NETWORK:-c360-tracking}"; LB_NAME="customer360-tracking-lb"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -162,15 +181,68 @@ else
   sudo docker build -t data-tracking-api /opt/c360/data-tracking-api
   RUN_IMG="data-tracking-api"
 fi
+echo "   pulling LB image $LB_IMAGE ..."
+sudo docker pull "$LB_IMAGE" >/dev/null
+
+# Private bridge so the LB reaches replicas by container name; replicas need NO host ports
+# and keep their built-in :8010 HEALTHCHECK (each listens on :8010 in its own namespace).
+# Outbound to S3/Redis/OTLP still works from the bridge via NAT (source IP = this box).
+sudo docker network inspect "$NETWORK" >/dev/null 2>&1 || sudo docker network create "$NETWORK" >/dev/null
+
+# Clean slate: drop the legacy single container (migration from --network host), any prior
+# replicas (also handles a REPLICAS decrease, e.g. prod 5 -> 3), and the old LB.
 sudo docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-sudo docker run -d --name "$CONTAINER" --restart unless-stopped --network host --env-file /opt/c360/tracking.env "$RUN_IMG"
+for c in $(sudo docker ps -aq --filter "name=${CONTAINER}-"); do sudo docker rm -f "$c" >/dev/null 2>&1 || true; done
+sudo docker rm -f "$LB_NAME" >/dev/null 2>&1 || true
+
+# Start N app replicas on the bridge and build the nginx upstream list from their names.
+echo "   starting $REPLICAS replica(s) ..."
+upstreams=""
+i=1
+while [ "$i" -le "$REPLICAS" ]; do
+  name="${CONTAINER}-${i}"
+  sudo docker run -d --name "$name" --restart unless-stopped \
+    --network "$NETWORK" --env-file /opt/c360/tracking.env "$RUN_IMG" >/dev/null
+  upstreams="${upstreams}    server ${name}:8010 max_fails=3 fail_timeout=10s;\n"
+  i=$((i+1))
+done
+
+# Generate the nginx least_conn round-robin config (retries the next replica on failure) and
+# start the LB on host :8010 — the single address Caddy's DATA_UPSTREAM already points at.
+lb_conf="$(mktemp)"
+printf 'upstream tracking_backends {\n    least_conn;\n%b}\n\n' "$upstreams" > "$lb_conf"
+cat >> "$lb_conf" <<'NGINX'
+server {
+    listen 8010;
+    # LB self-check (via admin tunnel): curl http://localhost:8010/lb-health
+    location = /lb-health { default_type text/plain; return 200 "ok\n"; }
+    location / {
+        proxy_pass http://tracking_backends;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+    }
+}
+NGINX
+sudo mv "$lb_conf" /opt/c360/tracking-lb.conf
+sudo chmod 644 /opt/c360/tracking-lb.conf
+sudo docker run -d --name "$LB_NAME" --restart unless-stopped \
+  --network "$NETWORK" -p 8010:8010 \
+  -v /opt/c360/tracking-lb.conf:/etc/nginx/conf.d/default.conf:ro "$LB_IMAGE" >/dev/null
+
 sleep 3
-sudo docker ps --filter name="$CONTAINER" --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
+echo "   --- app replicas ($REPLICAS) ---"
+sudo docker ps --filter "name=${CONTAINER}-" --format '   {{.Names}} ({{.Status}}) image={{.Image}}'
+echo "   --- load balancer (host :8010) ---"
+sudo docker ps --filter "name=${LB_NAME}" --format '   {{.Names}} ({{.Status}}) image={{.Image}}'
 REMOTE
 
-echo ">> Done. data-tracking-api is on the VM at :8010 (health: /health)."
+echo ">> Done. $REPLICAS data-tracking-api replica(s) behind the local nginx LB on :8010 (health: /health)."
 echo "   Public (Caddy /data + LB): https://beta.leocdp.com/data/api/v1/tracking/logs"
-echo "   Direct (admin tunnel): ssh -i $SSH_KEY -L 8010:localhost:8010 $BASTION  # http://localhost:8010/health"
+echo "   Direct (admin tunnel): ssh -i $SSH_KEY -L 8010:localhost:8010 $BASTION  # http://localhost:8010/health (via LB), /lb-health"
 
 # --- release ledger: record this deploy to the GitHub Deployments API (best-effort) ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/record_deploy.sh"
