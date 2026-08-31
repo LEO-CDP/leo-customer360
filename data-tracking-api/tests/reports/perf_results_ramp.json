@@ -1,0 +1,1266 @@
+{
+  "run_id": "perf-20260831T100254Z-7a216d8d",
+  "data_source_id": "abcdef00-0000-4000-8000-000000000001",
+  "bucket": "data-tracking-abcdef00-0000-4000-8000-000000000001",
+  "endpoint": "https://beta.leocdp.com/data/api/v1/tracking/logs",
+  "started_at": "2026-08-31T10:06:18.229877+00:00",
+  "total_seconds": 203.227,
+  "total_requests": 10000,
+  "steps": [
+    {
+      "rps": 10,
+      "requests": 200,
+      "achieved_rps": 10.0,
+      "wall_seconds": 19.97,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 56.0,
+        "p90": 132.5,
+        "p99": 416.8,
+        "max": 2026.0
+      },
+      "verify_latency_ms": {
+        "p50": 11.9,
+        "p90": 38.6,
+        "p99": 654.1,
+        "max": 1266.5
+      },
+      "errors": {}
+    },
+    {
+      "rps": 20,
+      "requests": 200,
+      "achieved_rps": 20.0,
+      "wall_seconds": 10.002,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 57.6,
+        "p90": 144.7,
+        "p99": 994.3,
+        "max": 1927.6
+      },
+      "verify_latency_ms": {
+        "p50": 11.2,
+        "p90": 17.9,
+        "p99": 92.9,
+        "max": 257.3
+      },
+      "errors": {}
+    },
+    {
+      "rps": 30,
+      "requests": 200,
+      "achieved_rps": 29.7,
+      "wall_seconds": 6.737,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 59.9,
+        "p90": 122.7,
+        "p99": 302.2,
+        "max": 518.2
+      },
+      "verify_latency_ms": {
+        "p50": 11.5,
+        "p90": 23.3,
+        "p99": 252.0,
+        "max": 259.1
+      },
+      "errors": {}
+    },
+    {
+      "rps": 40,
+      "requests": 200,
+      "achieved_rps": 38.3,
+      "wall_seconds": 5.217,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 64.4,
+        "p90": 187.4,
+        "p99": 1951.8,
+        "max": 3298.7
+      },
+      "verify_latency_ms": {
+        "p50": 11.4,
+        "p90": 18.1,
+        "p99": 65.6,
+        "max": 247.3
+      },
+      "errors": {}
+    },
+    {
+      "rps": 50,
+      "requests": 200,
+      "achieved_rps": 49.2,
+      "wall_seconds": 4.063,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 68.3,
+        "p90": 121.7,
+        "p99": 531.4,
+        "max": 1289.3
+      },
+      "verify_latency_ms": {
+        "p50": 12.2,
+        "p90": 22.0,
+        "p99": 46.2,
+        "max": 73.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 60,
+      "requests": 200,
+      "achieved_rps": 37.3,
+      "wall_seconds": 5.357,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 74.1,
+        "p90": 151.3,
+        "p99": 4036.3,
+        "max": 4759.1
+      },
+      "verify_latency_ms": {
+        "p50": 12.4,
+        "p90": 20.4,
+        "p99": 29.1,
+        "max": 33.4
+      },
+      "errors": {}
+    },
+    {
+      "rps": 70,
+      "requests": 200,
+      "achieved_rps": 61.1,
+      "wall_seconds": 3.273,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 127.2,
+        "p90": 238.9,
+        "p99": 712.2,
+        "max": 971.6
+      },
+      "verify_latency_ms": {
+        "p50": 18.0,
+        "p90": 42.6,
+        "p99": 64.3,
+        "max": 81.2
+      },
+      "errors": {}
+    },
+    {
+      "rps": 80,
+      "requests": 200,
+      "achieved_rps": 69.9,
+      "wall_seconds": 2.863,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 105.2,
+        "p90": 191.5,
+        "p99": 951.7,
+        "max": 1420.0
+      },
+      "verify_latency_ms": {
+        "p50": 15.1,
+        "p90": 25.6,
+        "p99": 48.4,
+        "max": 245.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 90,
+      "requests": 200,
+      "achieved_rps": 82.6,
+      "wall_seconds": 2.421,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 180.6,
+        "p90": 355.7,
+        "p99": 505.6,
+        "max": 587.7
+      },
+      "verify_latency_ms": {
+        "p50": 19.4,
+        "p90": 45.7,
+        "p99": 93.5,
+        "max": 120.6
+      },
+      "errors": {}
+    },
+    {
+      "rps": 100,
+      "requests": 200,
+      "achieved_rps": 71.4,
+      "wall_seconds": 2.801,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 185.1,
+        "p90": 269.6,
+        "p99": 1317.8,
+        "max": 2185.3
+      },
+      "verify_latency_ms": {
+        "p50": 17.7,
+        "p90": 42.7,
+        "p99": 79.7,
+        "max": 103.7
+      },
+      "errors": {}
+    },
+    {
+      "rps": 110,
+      "requests": 200,
+      "achieved_rps": 93.5,
+      "wall_seconds": 2.139,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 292.9,
+        "p90": 531.5,
+        "p99": 764.6,
+        "max": 963.6
+      },
+      "verify_latency_ms": {
+        "p50": 21.9,
+        "p90": 49.7,
+        "p99": 102.2,
+        "max": 112.6
+      },
+      "errors": {}
+    },
+    {
+      "rps": 120,
+      "requests": 200,
+      "achieved_rps": 65.9,
+      "wall_seconds": 3.036,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 393.5,
+        "p90": 1316.8,
+        "p99": 1858.2,
+        "max": 2062.2
+      },
+      "verify_latency_ms": {
+        "p50": 29.3,
+        "p90": 56.5,
+        "p99": 74.1,
+        "max": 94.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 130,
+      "requests": 200,
+      "achieved_rps": 97.6,
+      "wall_seconds": 2.05,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 253.5,
+        "p90": 371.8,
+        "p99": 566.0,
+        "max": 624.8
+      },
+      "verify_latency_ms": {
+        "p50": 21.1,
+        "p90": 47.4,
+        "p99": 128.6,
+        "max": 244.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 140,
+      "requests": 200,
+      "achieved_rps": 105.2,
+      "wall_seconds": 1.902,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 384.6,
+        "p90": 551.9,
+        "p99": 725.2,
+        "max": 808.2
+      },
+      "verify_latency_ms": {
+        "p50": 27.5,
+        "p90": 49.0,
+        "p99": 90.9,
+        "max": 95.1
+      },
+      "errors": {}
+    },
+    {
+      "rps": 150,
+      "requests": 200,
+      "achieved_rps": 75.4,
+      "wall_seconds": 2.651,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 476.5,
+        "p90": 1342.6,
+        "p99": 1671.6,
+        "max": 1848.9
+      },
+      "verify_latency_ms": {
+        "p50": 30.2,
+        "p90": 49.2,
+        "p99": 118.6,
+        "max": 272.2
+      },
+      "errors": {}
+    },
+    {
+      "rps": 160,
+      "requests": 200,
+      "achieved_rps": 63.5,
+      "wall_seconds": 3.148,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 432.6,
+        "p90": 1351.4,
+        "p99": 2130.4,
+        "max": 2593.5
+      },
+      "verify_latency_ms": {
+        "p50": 36.1,
+        "p90": 72.9,
+        "p99": 107.8,
+        "max": 125.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 170,
+      "requests": 200,
+      "achieved_rps": 94.5,
+      "wall_seconds": 2.116,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 320.7,
+        "p90": 516.9,
+        "p99": 791.0,
+        "max": 822.7
+      },
+      "verify_latency_ms": {
+        "p50": 21.7,
+        "p90": 48.3,
+        "p99": 82.6,
+        "max": 247.1
+      },
+      "errors": {}
+    },
+    {
+      "rps": 180,
+      "requests": 200,
+      "achieved_rps": 84.0,
+      "wall_seconds": 2.38,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 365.8,
+        "p90": 1165.5,
+        "p99": 1569.4,
+        "max": 1603.9
+      },
+      "verify_latency_ms": {
+        "p50": 31.2,
+        "p90": 51.2,
+        "p99": 266.9,
+        "max": 270.1
+      },
+      "errors": {}
+    },
+    {
+      "rps": 190,
+      "requests": 200,
+      "achieved_rps": 67.2,
+      "wall_seconds": 2.977,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 440.6,
+        "p90": 1447.1,
+        "p99": 1835.2,
+        "max": 2321.8
+      },
+      "verify_latency_ms": {
+        "p50": 43.3,
+        "p90": 2139.0,
+        "p99": 2309.4,
+        "max": 2350.9
+      },
+      "errors": {}
+    },
+    {
+      "rps": 200,
+      "requests": 200,
+      "achieved_rps": 89.6,
+      "wall_seconds": 2.232,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 559.1,
+        "p90": 1274.9,
+        "p99": 1466.4,
+        "max": 1630.2
+      },
+      "verify_latency_ms": {
+        "p50": 41.1,
+        "p90": 67.4,
+        "p99": 95.7,
+        "max": 99.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 210,
+      "requests": 200,
+      "achieved_rps": 57.2,
+      "wall_seconds": 3.495,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1173.3,
+        "p90": 2696.9,
+        "p99": 2971.7,
+        "max": 3313.7
+      },
+      "verify_latency_ms": {
+        "p50": 43.9,
+        "p90": 58.4,
+        "p99": 77.6,
+        "max": 293.5
+      },
+      "errors": {}
+    },
+    {
+      "rps": 220,
+      "requests": 200,
+      "achieved_rps": 90.7,
+      "wall_seconds": 2.204,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 670.7,
+        "p90": 1172.4,
+        "p99": 1382.4,
+        "max": 1533.6
+      },
+      "verify_latency_ms": {
+        "p50": 41.1,
+        "p90": 102.7,
+        "p99": 131.4,
+        "max": 152.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 230,
+      "requests": 200,
+      "achieved_rps": 61.6,
+      "wall_seconds": 3.246,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1290.4,
+        "p90": 2401.4,
+        "p99": 3002.5,
+        "max": 3025.3
+      },
+      "verify_latency_ms": {
+        "p50": 43.8,
+        "p90": 65.9,
+        "p99": 102.3,
+        "max": 110.9
+      },
+      "errors": {}
+    },
+    {
+      "rps": 240,
+      "requests": 200,
+      "achieved_rps": 58.9,
+      "wall_seconds": 3.398,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1343.4,
+        "p90": 1936.7,
+        "p99": 2225.3,
+        "max": 2696.3
+      },
+      "verify_latency_ms": {
+        "p50": 37.9,
+        "p90": 145.4,
+        "p99": 270.2,
+        "max": 301.4
+      },
+      "errors": {}
+    },
+    {
+      "rps": 250,
+      "requests": 200,
+      "achieved_rps": 40.5,
+      "wall_seconds": 4.94,
+      "accepted": 199,
+      "stored_ok": 199,
+      "success": 199,
+      "success_rate": 0.995,
+      "throttled": 0,
+      "failed": 1,
+      "send_latency_ms": {
+        "p50": 2196.4,
+        "p90": 3707.2,
+        "p99": 4099.2,
+        "max": 4727.6
+      },
+      "verify_latency_ms": {
+        "p50": 62.1,
+        "p90": 84.9,
+        "p99": 168.8,
+        "max": 285.2
+      },
+      "errors": {
+        "http:502": 1
+      }
+    },
+    {
+      "rps": 260,
+      "requests": 200,
+      "achieved_rps": 80.8,
+      "wall_seconds": 2.475,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1035.5,
+        "p90": 1803.8,
+        "p99": 2190.7,
+        "max": 2307.2
+      },
+      "verify_latency_ms": {
+        "p50": 42.4,
+        "p90": 97.3,
+        "p99": 257.0,
+        "max": 312.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 270,
+      "requests": 200,
+      "achieved_rps": 39.6,
+      "wall_seconds": 5.05,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 2195.4,
+        "p90": 4204.5,
+        "p99": 4563.2,
+        "max": 4787.2
+      },
+      "verify_latency_ms": {
+        "p50": 63.0,
+        "p90": 92.2,
+        "p99": 163.5,
+        "max": 296.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 280,
+      "requests": 200,
+      "achieved_rps": 49.3,
+      "wall_seconds": 4.056,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1062.8,
+        "p90": 2266.8,
+        "p99": 3194.5,
+        "max": 3535.9
+      },
+      "verify_latency_ms": {
+        "p50": 46.5,
+        "p90": 138.4,
+        "p99": 235.2,
+        "max": 243.9
+      },
+      "errors": {}
+    },
+    {
+      "rps": 290,
+      "requests": 200,
+      "achieved_rps": 73.7,
+      "wall_seconds": 2.715,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 770.6,
+        "p90": 1932.1,
+        "p99": 2326.5,
+        "max": 2595.1
+      },
+      "verify_latency_ms": {
+        "p50": 35.5,
+        "p90": 89.2,
+        "p99": 137.2,
+        "max": 268.7
+      },
+      "errors": {}
+    },
+    {
+      "rps": 300,
+      "requests": 200,
+      "achieved_rps": 65.9,
+      "wall_seconds": 3.035,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 704.3,
+        "p90": 2123.4,
+        "p99": 2462.4,
+        "max": 2521.1
+      },
+      "verify_latency_ms": {
+        "p50": 54.7,
+        "p90": 121.9,
+        "p99": 273.0,
+        "max": 277.0
+      },
+      "errors": {}
+    },
+    {
+      "rps": 310,
+      "requests": 200,
+      "achieved_rps": 56.8,
+      "wall_seconds": 3.524,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1883.8,
+        "p90": 2953.5,
+        "p99": 3235.0,
+        "max": 3320.4
+      },
+      "verify_latency_ms": {
+        "p50": 48.4,
+        "p90": 91.5,
+        "p99": 281.1,
+        "max": 328.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 320,
+      "requests": 200,
+      "achieved_rps": 63.5,
+      "wall_seconds": 3.148,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1489.2,
+        "p90": 2559.0,
+        "p99": 2767.1,
+        "max": 2859.9
+      },
+      "verify_latency_ms": {
+        "p50": 36.4,
+        "p90": 74.7,
+        "p99": 186.9,
+        "max": 246.4
+      },
+      "errors": {}
+    },
+    {
+      "rps": 330,
+      "requests": 200,
+      "achieved_rps": 69.1,
+      "wall_seconds": 2.893,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1189.6,
+        "p90": 2396.9,
+        "p99": 2698.3,
+        "max": 2763.2
+      },
+      "verify_latency_ms": {
+        "p50": 47.9,
+        "p90": 113.3,
+        "p99": 173.9,
+        "max": 294.3
+      },
+      "errors": {}
+    },
+    {
+      "rps": 340,
+      "requests": 200,
+      "achieved_rps": 48.8,
+      "wall_seconds": 4.101,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1470.7,
+        "p90": 3401.2,
+        "p99": 3825.0,
+        "max": 3912.7
+      },
+      "verify_latency_ms": {
+        "p50": 56.4,
+        "p90": 87.4,
+        "p99": 112.4,
+        "max": 120.7
+      },
+      "errors": {}
+    },
+    {
+      "rps": 350,
+      "requests": 200,
+      "achieved_rps": 61.0,
+      "wall_seconds": 3.279,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1900.2,
+        "p90": 2488.4,
+        "p99": 2926.5,
+        "max": 3010.7
+      },
+      "verify_latency_ms": {
+        "p50": 81.2,
+        "p90": 193.8,
+        "p99": 292.3,
+        "max": 314.4
+      },
+      "errors": {}
+    },
+    {
+      "rps": 360,
+      "requests": 200,
+      "achieved_rps": 33.1,
+      "wall_seconds": 6.036,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 2912.8,
+        "p90": 5032.0,
+        "p99": 5681.2,
+        "max": 5791.1
+      },
+      "verify_latency_ms": {
+        "p50": 74.6,
+        "p90": 185.5,
+        "p99": 470.0,
+        "max": 485.4
+      },
+      "errors": {}
+    },
+    {
+      "rps": 370,
+      "requests": 200,
+      "achieved_rps": 38.3,
+      "wall_seconds": 5.22,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 3079.9,
+        "p90": 4511.3,
+        "p99": 4928.5,
+        "max": 4992.4
+      },
+      "verify_latency_ms": {
+        "p50": 91.8,
+        "p90": 393.2,
+        "p99": 621.7,
+        "max": 634.4
+      },
+      "errors": {}
+    },
+    {
+      "rps": 380,
+      "requests": 200,
+      "achieved_rps": 40.2,
+      "wall_seconds": 4.975,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 2660.2,
+        "p90": 4256.8,
+        "p99": 4665.4,
+        "max": 4832.4
+      },
+      "verify_latency_ms": {
+        "p50": 58.6,
+        "p90": 104.5,
+        "p99": 162.4,
+        "max": 306.9
+      },
+      "errors": {}
+    },
+    {
+      "rps": 390,
+      "requests": 200,
+      "achieved_rps": 61.0,
+      "wall_seconds": 3.278,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1126.8,
+        "p90": 2190.6,
+        "p99": 2704.6,
+        "max": 2716.2
+      },
+      "verify_latency_ms": {
+        "p50": 52.1,
+        "p90": 169.6,
+        "p99": 319.1,
+        "max": 347.9
+      },
+      "errors": {}
+    },
+    {
+      "rps": 400,
+      "requests": 200,
+      "achieved_rps": 68.9,
+      "wall_seconds": 2.903,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1428.2,
+        "p90": 2386.1,
+        "p99": 2736.2,
+        "max": 2831.8
+      },
+      "verify_latency_ms": {
+        "p50": 38.7,
+        "p90": 58.8,
+        "p99": 283.4,
+        "max": 301.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 410,
+      "requests": 200,
+      "achieved_rps": 83.5,
+      "wall_seconds": 2.396,
+      "accepted": 199,
+      "stored_ok": 199,
+      "success": 199,
+      "success_rate": 0.995,
+      "throttled": 0,
+      "failed": 1,
+      "send_latency_ms": {
+        "p50": 801.7,
+        "p90": 1754.8,
+        "p99": 2029.2,
+        "max": 2064.0
+      },
+      "verify_latency_ms": {
+        "p50": 46.2,
+        "p90": 89.9,
+        "p99": 154.7,
+        "max": 166.0
+      },
+      "errors": {
+        "http:502": 1
+      }
+    },
+    {
+      "rps": 420,
+      "requests": 200,
+      "achieved_rps": 51.5,
+      "wall_seconds": 3.884,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1882.3,
+        "p90": 3150.4,
+        "p99": 3467.9,
+        "max": 3720.1
+      },
+      "verify_latency_ms": {
+        "p50": 48.3,
+        "p90": 76.0,
+        "p99": 129.6,
+        "max": 311.0
+      },
+      "errors": {}
+    },
+    {
+      "rps": 430,
+      "requests": 200,
+      "achieved_rps": 85.6,
+      "wall_seconds": 2.337,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1087.7,
+        "p90": 1736.3,
+        "p99": 1882.5,
+        "max": 1961.5
+      },
+      "verify_latency_ms": {
+        "p50": 144.1,
+        "p90": 276.3,
+        "p99": 351.7,
+        "max": 359.6
+      },
+      "errors": {}
+    },
+    {
+      "rps": 440,
+      "requests": 200,
+      "achieved_rps": 32.8,
+      "wall_seconds": 6.092,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 3988.3,
+        "p90": 5325.9,
+        "p99": 5666.2,
+        "max": 5893.8
+      },
+      "verify_latency_ms": {
+        "p50": 73.9,
+        "p90": 118.0,
+        "p99": 251.9,
+        "max": 580.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 450,
+      "requests": 200,
+      "achieved_rps": 39.9,
+      "wall_seconds": 5.015,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1960.0,
+        "p90": 3046.8,
+        "p99": 3381.4,
+        "max": 4705.2
+      },
+      "verify_latency_ms": {
+        "p50": 46.7,
+        "p90": 75.7,
+        "p99": 209.9,
+        "max": 1035.4
+      },
+      "errors": {}
+    },
+    {
+      "rps": 460,
+      "requests": 200,
+      "achieved_rps": 76.2,
+      "wall_seconds": 2.626,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 830.6,
+        "p90": 1776.5,
+        "p99": 2202.4,
+        "max": 2325.9
+      },
+      "verify_latency_ms": {
+        "p50": 41.2,
+        "p90": 147.2,
+        "p99": 170.0,
+        "max": 263.9
+      },
+      "errors": {}
+    },
+    {
+      "rps": 470,
+      "requests": 200,
+      "achieved_rps": 49.1,
+      "wall_seconds": 4.07,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1541.5,
+        "p90": 2714.2,
+        "p99": 3484.0,
+        "max": 3695.3
+      },
+      "verify_latency_ms": {
+        "p50": 41.6,
+        "p90": 67.6,
+        "p99": 140.8,
+        "max": 253.0
+      },
+      "errors": {}
+    },
+    {
+      "rps": 480,
+      "requests": 200,
+      "achieved_rps": 77.9,
+      "wall_seconds": 2.568,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 789.4,
+        "p90": 1929.9,
+        "p99": 2149.4,
+        "max": 2191.4
+      },
+      "verify_latency_ms": {
+        "p50": 58.7,
+        "p90": 87.0,
+        "p99": 109.5,
+        "max": 283.3
+      },
+      "errors": {}
+    },
+    {
+      "rps": 490,
+      "requests": 200,
+      "achieved_rps": 42.6,
+      "wall_seconds": 4.697,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 2910.6,
+        "p90": 4181.9,
+        "p99": 4548.2,
+        "max": 4560.9
+      },
+      "verify_latency_ms": {
+        "p50": 68.8,
+        "p90": 119.4,
+        "p99": 316.2,
+        "max": 472.8
+      },
+      "errors": {}
+    },
+    {
+      "rps": 500,
+      "requests": 200,
+      "achieved_rps": 25.2,
+      "wall_seconds": 7.95,
+      "accepted": 200,
+      "stored_ok": 200,
+      "success": 200,
+      "success_rate": 1.0,
+      "throttled": 0,
+      "failed": 0,
+      "send_latency_ms": {
+        "p50": 1876.9,
+        "p90": 3436.5,
+        "p99": 3842.4,
+        "max": 7581.3
+      },
+      "verify_latency_ms": {
+        "p50": 49.5,
+        "p90": 121.0,
+        "p99": 293.1,
+        "max": 437.1
+      },
+      "errors": {}
+    }
+  ],
+  "ceiling_rps": 500
+}

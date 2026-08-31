@@ -1,0 +1,39 @@
+{
+  "run_id": "perf-20260831T095855Z-55c5e23a",
+  "data_source_id": "abcdef00-0000-4000-8000-000000000001",
+  "bucket": "data-tracking-abcdef00-0000-4000-8000-000000000001",
+  "endpoint": "https://beta.leocdp.com/data/api/v1/tracking/logs",
+  "started_at": "2026-08-31T09:59:22.010379+00:00",
+  "total_seconds": 23.054,
+  "total_requests": 200,
+  "steps": [
+    {
+      "rps": 10,
+      "requests": 200,
+      "achieved_rps": 9.9,
+      "wall_seconds": 20.202,
+      "accepted": 184,
+      "stored_ok": 184,
+      "success": 184,
+      "success_rate": 0.92,
+      "throttled": 16,
+      "failed": 16,
+      "send_latency_ms": {
+        "p50": 49.5,
+        "p90": 135.9,
+        "p99": 580.8,
+        "max": 725.4
+      },
+      "verify_latency_ms": {
+        "p50": 12.6,
+        "p90": 36.3,
+        "p99": 963.9,
+        "max": 1113.7
+      },
+      "errors": {
+        "http:429": 16
+      }
+    }
+  ],
+  "ceiling_rps": null
+}

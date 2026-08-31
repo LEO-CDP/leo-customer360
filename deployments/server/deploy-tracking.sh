@@ -48,6 +48,15 @@ REPLICAS="${TRACKING_REPLICAS:-$DEFAULT_REPLICAS}"
 LB_IMAGE="${TRACKING_LB_IMAGE:-nginx:alpine}"
 NETWORK="${TRACKING_NETWORK:-c360-tracking}"
 
+# --- optional rate-limit override (app default 120 req / 60s per client IP as seen by the app).
+#     Convenience: TRACKING_RATE_LIMIT_RPS=<n> sets requests=<n>, window=1s (a hard n/second cap).
+#     Or set TRACKING_RATE_LIMIT_REQUESTS / TRACKING_RATE_LIMIT_WINDOW_SECONDS directly. Unset ->
+#     the app default. Written into /opt/c360/tracking.env; picked up on replica (re)start. ---
+RL_REQUESTS="${TRACKING_RATE_LIMIT_REQUESTS:-}"
+RL_WINDOW="${TRACKING_RATE_LIMIT_WINDOW_SECONDS:-}"
+if [[ -n "${TRACKING_RATE_LIMIT_RPS:-}" ]]; then RL_REQUESTS="$TRACKING_RATE_LIMIT_RPS"; RL_WINDOW="1"; fi
+[[ -n "$RL_REQUESTS" ]] && echo ">> Rate limit: $RL_REQUESTS req / ${RL_WINDOW:-60}s per client IP" || echo ">> Rate limit: app default (120 req / 60s)"
+
 # Read a tfvars value: content between quotes for strings (keeps '#'), or the bare token with
 # any trailing comment stripped for unquoted numbers/bools (same helper as deploy-api.sh).
 tfval() {
@@ -130,7 +139,7 @@ PARAMS_B64="$(printf '%s\n' \
   "S3_ENDPOINT=$S3_ENDPOINT" "S3_REGION=$S3_REGION" "S3_ACCESS_KEY=$S3_ACCESS_KEY" "S3_SECRET_B64=$S3_SECRET_B64" "S3_AUTO_CREATE=$S3_AUTO_CREATE" \
   "REDIS_HOST=${REDIS_HOST:-}" "REDIS_PORT=${REDIS_PORT:-}" "REDIS_PW_B64=$REDIS_PW_B64" \
   "DEPLOY_MODE=$DEPLOY_MODE" "IMAGE=$IMAGE" "GHCR_USER=$GHCR_USER" "GHCR_TOKEN_B64=$GHCR_TOKEN_B64" "CONTAINER=$CONTAINER" "OTEL_B64=$OTEL_B64" \
-  "REPLICAS=$REPLICAS" "LB_IMAGE=$LB_IMAGE" "NETWORK=$NETWORK" \
+  "REPLICAS=$REPLICAS" "LB_IMAGE=$LB_IMAGE" "NETWORK=$NETWORK" "RL_REQUESTS=$RL_REQUESTS" "RL_WINDOW=$RL_WINDOW" \
   | base64 | tr -d '\n')"
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PARAMS_B64" <<'REMOTE'
 set -euo pipefail
@@ -140,6 +149,7 @@ REDIS_PW="$(printf %s "${REDIS_PW_B64:-}" | base64 -d 2>/dev/null || true)"
 GHCR_TOKEN="$(printf %s "${GHCR_TOKEN_B64:-}" | base64 -d 2>/dev/null || true)"
 DEPLOY_MODE="${DEPLOY_MODE:-build}"; IMAGE="${IMAGE:-}"; GHCR_USER="${GHCR_USER:-token}"; CONTAINER="${CONTAINER:-customer360-tracking-api}"
 REPLICAS="${REPLICAS:-1}"; LB_IMAGE="${LB_IMAGE:-nginx:alpine}"; NETWORK="${NETWORK:-c360-tracking}"; LB_NAME="customer360-tracking-lb"
+RL_REQUESTS="${RL_REQUESTS:-}"; RL_WINDOW="${RL_WINDOW:-}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -164,6 +174,10 @@ REDIS_PORT=${REDIS_PORT:-6580}
 REDIS_PASSWORD=$REDIS_PW
 REDIS_DB=0
 ENVR
+fi
+if [ -n "${RL_REQUESTS:-}" ]; then
+  echo "TRACKING_RATE_LIMIT_REQUESTS=$RL_REQUESTS" >> "$env_file"
+  [ -n "${RL_WINDOW:-}" ] && echo "TRACKING_RATE_LIMIT_WINDOW_SECONDS=$RL_WINDOW" >> "$env_file"
 fi
 sudo mkdir -p /opt/c360
 if [ -n "${OTEL_B64:-}" ]; then printf '%s' "$OTEL_B64" | base64 -d >> "$env_file"; fi
