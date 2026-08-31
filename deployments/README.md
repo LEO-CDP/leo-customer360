@@ -355,7 +355,7 @@ flowchart TB
 | pgAdmin | api box `10.100.1.5` | 5050 | Postgres admin/monitoring UI (`c360-pgadmin`); its own login, exposed **directly** on the LB (`LB :5050 → pgAdmin :5050`); plain HTTP (cleartext login — see the LB note); `pgadmin_data` volume, mem-capped |
 | Dagster | backend box `10.100.1.4` | 3000 | backend-system worker |
 | Portainer agent | backend `10.100.1.4` + tracking `10.100.1.8` | 9001 | `c360-portainer-agent`; lets the api-box Portainer manage these boxes too (private VPC, reached from `10.100.1.5`); registered as Portainer environments |
-| data-tracking-api | tracking box `10.100.1.8` | 8010 | FastAPI event ingestion (`--network host`) on its own dedicated `s-general-1x2` box; writes NDJSON to vStorage/S3; reuses the api-box Redis for IP rate-limit + session cache (fail-open); OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
+| data-tracking-api | tracking box `10.100.1.8` | 8010 | FastAPI event ingestion on its own dedicated `s-general-1x2` box, run as **N auto-load-balanced replicas** (uat 3 / prod 5, `TRACKING_REPLICAS`) on a private docker bridge behind a local **nginx** LB that owns `:8010` (least_conn round-robin); writes NDJSON to vStorage/S3; reuses the api-box Redis for IP rate-limit + session cache (fail-open); OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
 | PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` + `leo_ads` |
 
 ### Public endpoints — `beta.leocdp.com`
@@ -392,7 +392,9 @@ via the **LB IP** (see the HSTS note below).
 ### Tracking feature — bring-up (data-tracking-api)
 
 The web-tracking ingestion service (`data-tracking-api`) runs on its **own** vServer (server key
-`tracking`, private `10.100.1.8`). It is deliberately minimal — it uses only what the app needs:
+`tracking`, private `10.100.1.8`) as **N auto-load-balanced replicas** (uat 3 / prod 5) on a
+private docker bridge behind a local **nginx** LB that owns `:8010`. It is deliberately minimal —
+it uses only what the app needs:
 **vStorage/S3** (the durable NDJSON sink); optionally the **api-box Redis** for IP rate-limiting
 + session cache (fail-open if absent); and it exports **OpenTelemetry request traces** over OTLP to
 the **api-box Jaeger** (reusing the existing Jaeger — no new one). It is exposed publicly at
@@ -405,8 +407,9 @@ cd deployments/server && ./deploy.sh uat apply
 terraform output servers          # confirm the tracking box private ip (expected 10.100.1.8)
 #    If it differs, fix data_upstream (proxy overlay) + the 6580/4318 cidrs (server extra_ingress), re-apply.
 
-# 2) APP — run data-tracking-api (:8010), wired to S3 + the api-box Redis
-#    (pulls the CI-built image from GHCR by default; set BUILD_LOCAL=1 to build on the VM)
+# 2) APP — run data-tracking-api as N replicas behind the local nginx LB (:8010), wired to S3
+#    + the api-box Redis (pulls the CI-built image from GHCR; set BUILD_LOCAL=1 to build on the VM).
+#    Replica count defaults to uat 3 / prod 5 — override with TRACKING_REPLICAS=<n>.
 cd ../server && ./deploy-tracking.sh uat
 
 # 3) FRONT DOOR — add/refresh the beta.leocdp.com/data route in Caddy
@@ -433,6 +436,14 @@ cd ../monitoring && ./deploy-monitoring.sh uat
 - The tracking box is a **dedicated box**: its cross-box hops (Caddy→`:8010`, tracking→api-Redis
   `:6580`) are opened explicitly in `server/overlays/uat.tfvars` (`extra_ingress`) and applied
   out-of-band by step 1 (CD never runs infra Terraform).
+- **Scaling / load balancing** — the app runs as `TRACKING_REPLICAS` instances (default uat 3 /
+  prod 5) on a private docker bridge (`c360-tracking`), each still listening on `:8010` inside its
+  own namespace (built-in HEALTHCHECK intact). A tiny **nginx** container (`customer360-tracking-lb`)
+  owns host `:8010` — the single address Caddy's `data_upstream` already targets — and `least_conn`
+  round-robins across the replicas, retrying the next one on failure. So scaling is **fully contained
+  in `deploy-tracking.sh`**: the Caddy overlays, the NLB, and `data_upstream` are unchanged. Bump/lower
+  the count with `TRACKING_REPLICAS=<n> ./deploy-tracking.sh <env>` (re-runnable; a lower count removes
+  the surplus replicas). Replicas reach S3/Redis/Jaeger outbound via bridge NAT (source IP unchanged).
 - No dedicated LB listener — `/data` rides the existing `:443` Caddy passthrough.
 
 ### Changing the public domain
