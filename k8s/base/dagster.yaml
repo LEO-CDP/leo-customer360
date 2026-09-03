@@ -1,15 +1,16 @@
 # Dagster orchestrator (webserver + daemon via `dagster dev`, 9 code locations
 # from backend-system/workspace.yaml). Serves the GraphQL endpoint the API calls
-# to submit jobs. Needs a PVC for DAGSTER_HOME (SQLite run/event storage) and DB
-# access (envFrom).  Image built from the new backend-system/Dockerfile.
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: dagster-home
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources: { requests: { storage: 1Gi } }
----
+# to submit jobs.
+#
+# Phase 0 (deployments/docs/dagster-scaling-analysis.md §4): storage is ADAPTIVE.
+# entrypoint.sh runs render_dagster_instance.py at start, which probes the
+# backends and writes $DAGSTER_HOME/dagster.yaml accordingly:
+#   - shared PostgreSQL run/event/schedule storage IF the DB is reachable
+#     (creating the dedicated `dagster` DB if missing), else local SQLite;
+#   - S3/MinIO compute logs IF the bucket is reachable, else local logs.
+# So the orchestrator ALWAYS starts — with or without Postgres/S3. No PVC (the
+# SQLite fallback is ephemeral, fine for a single pod), no init container, no
+# instance ConfigMap.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,7 +18,7 @@ metadata:
   labels: { app: dagster }
 spec:
   replicas: 1
-  strategy: { type: Recreate } # single-writer DAGSTER_HOME on a RWO volume
+  strategy: { type: Recreate } # one daemon until Phase 1 splits webserver/daemon
   selector:
     matchLabels: { app: dagster }
   template:
@@ -27,11 +28,20 @@ spec:
       containers:
         - name: dagster
           image: customer360-dagster:local
-          command: ["dagster", "dev", "-w", "workspace.yaml", "-h", "0.0.0.0", "-p", "3000"]
+          # entrypoint.sh renders the adaptive instance config, then runs args.
+          command: ["/app/entrypoint.sh"]
+          args: ["dagster", "dev", "-w", "workspace.yaml", "-h", "0.0.0.0", "-p", "3000"]
           ports:
             - { containerPort: 3000, name: http }
           env:
             - { name: DAGSTER_HOME, value: /dagster_home }
+            # S3 compute-log credentials (boto3 chain) = the MinIO/vStorage keys.
+            # optional: a missing key must NOT block startup — the renderer then
+            # sees no S3 creds and falls back to local compute logs.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: c360-secrets, key: MINIO_ROOT_USER, optional: true } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: c360-secrets, key: MINIO_ROOT_PASSWORD, optional: true } }
           envFrom:
             - configMapRef: { name: c360-config }
             - secretRef: { name: c360-secrets }
@@ -39,11 +49,6 @@ spec:
             tcpSocket: { port: 3000 }
             initialDelaySeconds: 20
             periodSeconds: 10
-          volumeMounts:
-            - { name: dagster-home, mountPath: /dagster_home }
-      volumes:
-        - name: dagster-home
-          persistentVolumeClaim: { claimName: dagster-home }
 ---
 apiVersion: v1
 kind: Service

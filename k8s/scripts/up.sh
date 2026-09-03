@@ -39,6 +39,11 @@ bash "$DIR/build-load.sh"
 echo "==> applying overlays/local"
 kubectl --context "$KCTX" apply -k "$K8S/overlays/local"
 
+# Phase 0 moved Dagster storage to Postgres and dropped the dagster-home PVC.
+# `apply` doesn't prune removed resources, so delete any leftover from a
+# pre-Phase-0 cluster. No-op on fresh clusters.
+kubectl --context "$KCTX" -n customer360 delete pvc dagster-home --ignore-not-found
+
 echo "==> waiting for all core workloads to become ready (up to 8 min)"
 kubectl --context "$KCTX" -n customer360 wait --for=condition=Available \
   deploy --all --timeout=480s || true

@@ -52,6 +52,79 @@ dependency-install loop synchronized. The image must install the
 `requirements.txt` file from each of the nine task directories so every code
 location can load successfully at runtime.
 
+## Persistence layer — adaptive storage (scaling Phase 0)
+
+Dagster's instance config is **rendered at container start**, not baked, so the orchestrator boots
+**with or without** Postgres/S3 on every environment (local, UAT, PROD — Docker on vServer today).
+`entrypoint.sh` runs `scripts/render_dagster_instance.py`, which probes the backends and writes
+`$DAGSTER_HOME/dagster.yaml`, then `exec`s the Dagster command:
+
+- **Storage:** if the DB is reachable it uses **shared PostgreSQL** run/event/schedule storage in a
+  **dedicated `dagster` database** (created best-effort if missing — the `DB_USER` needs `CREATEDB`),
+  reusing the app's `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD`. If the DB is **unreachable or
+  absent**, it falls back to Dagster's **local SQLite** default. The renderer creates the database, so
+  no init container or deploy-time psql step is needed.
+- **Compute logs:** if `S3_ENDPOINT` + `MINIO_BUCKET` + credentials are set **and** the bucket answers
+  a `head_bucket`, logs go to **S3/MinIO** (`S3ComputeLogManager`, under the `dagster-compute-logs/`
+  prefix; creds come from `AWS_ACCESS_KEY_ID/_SECRET`, falling back to `MINIO_ROOT_USER/PASSWORD`; a
+  baked `/app/aws-config` with `AWS_CONFIG_FILE` forces S3 path-style). Otherwise it uses **local**
+  compute logs. The bucket must already exist — the manager does not create it.
+- **Never fails closed:** every probe is wrapped so any error just drops that backend to its local
+  default; a total render failure still leaves Dagster on SQLite + local logs. So a Postgres/S3 outage
+  degrades durability, never availability.
+- **Consequences:** the `customer360-dagster` image must be **rebuilt** (adds `dagster-postgres` +
+  `dagster-aws`, the entrypoint, and the renderer). On the Docker/VM path nothing else is required —
+  `deploy-backend.sh` just backs up the old `DAGSTER_HOME` and (re)runs the container.
+
+> **Durability note (SQLite fallback):** the container's `DAGSTER_HOME` is ephemeral (no volume), so
+> when it falls back to SQLite the run history does not survive a redeploy. That is fine for keeping
+> the service **available** during a Postgres outage; for durable history, restore Postgres and
+> redeploy so the renderer switches storage back automatically.
+
+## Migrating existing Dagster history to PostgreSQL (UAT / PROD)
+
+Switching storage to Postgres starts with an **empty** `dagster` database. If the current vServer
+already accumulated run history you want to keep, migrate it at cutover.
+
+**Know this first — the VM history is ephemeral.** The VM container runs with **no `DAGSTER_HOME`
+volume**, so its SQLite run/event/schedule storage lives only inside the container layer and is
+destroyed on every `docker rm`. `deploy-backend.sh` now **auto-backs it up** (`docker cp` →
+`/opt/c360/dagster-home-backup-<ts>.tar`) *before* replacing the container — but if you redeploy
+without that safeguard, the old history is gone. There is **no supported Dagster command** to move
+data between storage backends (`dagster instance migrate` only migrates the *schema* across versions).
+
+**What is actually in there:** operational metadata only — run/event history and sensor/schedule
+cursors. The business data (profiles, segments, analytics outputs) lives in the `customer360` DB + S3,
+**not** in Dagster storage. So losing it is low-impact; weigh the import risk accordingly.
+
+### Recommended: back up + start fresh
+Keep the `*.tar` backup for read-only reference and let Postgres start clean. Simplest and safest.
+
+### If you must import the history
+Run the best-effort importer **once**, per env, after the new (Postgres-backed) image is deployed so
+Dagster has created its tables:
+
+```bash
+# on the VM, in a maintenance window (daemon idle, no runs in flight)
+mkdir -p /tmp/old && tar -C /tmp/old -xf /opt/c360/dagster-home-backup-<ts>.tar   # -> /tmp/old/dagster_home
+# dry run first — reports row counts, writes nothing
+sudo docker run --rm --network host --env-file /opt/c360/backend.env -v /tmp/old:/old \
+  --entrypoint python customer360-dagster /app/scripts/migrate_dagster_sqlite_to_postgres.py \
+  --old-dagster-home /old/dagster_home --dry-run
+# then drop --dry-run to commit
+```
+
+The script routes SQLite tables to same-named Postgres tables, copying intersecting columns with
+`ON CONFLICT DO NOTHING`. **Caveats:** best-effort and Dagster-version-sensitive — always dry-run and
+compare counts, and rehearse on a **staging copy** of the DB before PROD.
+
+### After cutover — sensor cursors reset
+Fresh schedule storage means `identity_resolution` / `segmentation` poll-sensor **cursors start empty**.
+On the next tick each sensor re-establishes a baseline (it does not replay all history), so expect one
+"catch-up" evaluation. Watch the first ticks for unexpected duplicate runs; the CIR/segmentation
+sensors are cursor-guarded, so a single re-baseline is normal. Import (above) preserves the cursors and
+avoids this.
+
 ## Deployment architecture
 
 `backend-system` is currently deployed as **one Docker image** containing all
