@@ -44,6 +44,24 @@ import sys
 import psycopg2
 from psycopg2.extras import execute_values
 
+# Schema/bookkeeping/runtime tables that must NOT be copied across backends.
+# `alembic_version` tracks the storage schema-migration revision — importing the
+# SQLite value into the (independently-migrated) Postgres DB would give Alembic
+# multiple heads and break future `dagster instance migrate`. The rest are
+# instance identity, rebuildable indexes, or ephemeral runtime state the new
+# instance owns and re-derives. Only real history (runs, events, tags, ticks,
+# snapshots, instigators, assets) is migrated.
+EXCLUDE_TABLES = {
+    "alembic_version",
+    "instance_info",
+    "secondary_indexes",
+    "daemon_heartbeats",
+    "concurrency_limits",
+    "concurrency_slots",
+    "pending_steps",
+    "kvs",
+}
+
 
 def pg_connect():
     return psycopg2.connect(
@@ -118,7 +136,7 @@ def main() -> int:
         con = sqlite3.connect(path)
         try:
             for table in sqlite_tables(con):
-                if table not in targets:
+                if table in EXCLUDE_TABLES or table not in targets:
                     skipped.add(table)
                     continue
                 n = migrate_table(con, pg_cur, table, targets[table], args.dry_run)
