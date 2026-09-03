@@ -47,6 +47,21 @@ DB_PORT="$( (cd "$pg" && terraform output -raw db_port 2>/dev/null) || echo 5432
 : "${DB_NAME:?missing db_name}"; : "${DB_USER:?missing db_username}"; : "${DB_PASS:?missing db_password}"; : "${DB_HOST:?could not read db_host from ../postgres outputs (is it applied?)}"
 echo ">> DB: ${DB_NAME}@${DB_HOST}:${DB_PORT} (user ${DB_USER})"
 
+# --- Object storage (vStorage / S3) from the ../storage deployment. OPTIONAL:
+#     if unset, the container's renderer falls back to local compute logs. The
+#     first bucket for this env holds Dagster compute logs (under a prefix). ---
+store="../storage"
+S3_ENDPOINT="$(tfval s3_endpoint "$store/overlays/$ENV.tfvars")"
+S3_REGION="$(tfval region "$store/overlays/$ENV.tfvars")"; S3_REGION="${S3_REGION:-us-east-1}"
+S3_BUCKET="$(tfval bucket_names "$store/overlays/$ENV.tfvars")"   # first quoted bucket name
+S3_ACCESS_KEY="${TF_VAR_access_key:-$(tfval access_key "$store/terraform.tfvars")}"
+S3_SECRET_KEY="${TF_VAR_secret_key:-$(tfval secret_key "$store/terraform.tfvars")}"
+if [[ -n "$S3_ENDPOINT" && -n "$S3_BUCKET" && -n "$S3_ACCESS_KEY" && -n "$S3_SECRET_KEY" ]]; then
+  echo ">> S3: $S3_ENDPOINT bucket=$S3_BUCKET (region $S3_REGION, path-style) — compute logs -> vStorage"
+else
+  echo ">> S3: not fully configured — compute logs will use the local default"
+fi
+
 # --- CD image source: pull the CI-built image from GHCR by default; set
 #     BUILD_LOCAL=1 to fall back to shipping source + building on the VM. ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
@@ -67,11 +82,33 @@ fi
 
 # --- build + run on the VM (values passed as positional args; password base64'd) ---
 echo ">> Installing Docker (if needed), building, and (re)starting the container ..."
-PW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" <<'REMOTE'
+# The full backend.env is passed as ONE base64 blob ($1, always non-empty), so it
+# is immune to ssh flattening dropping empty positional args (which shifts every
+# later param). Only IMAGE + the GHCR token — which may be empty in BUILD_LOCAL /
+# no-token mode — are passed as the LAST positional args, where a collapse is
+# harmless (they are unused in build mode and default to empty otherwise).
+ENV_CONTENT="$(cat <<ENVBODY
+DB_HOST=$DB_HOST
+DB_PORT=$DB_PORT
+DB_NAME=$DB_NAME
+DB_USER=$DB_USER
+DB_PASSWORD=$DB_PASS
+DB_SCHEMA=$DB_NAME
+S3_ENDPOINT=$S3_ENDPOINT
+S3_ENDPOINT_URL=$S3_ENDPOINT
+S3_REGION=$S3_REGION
+S3_FORCE_PATH_STYLE=true
+MINIO_BUCKET=$S3_BUCKET
+AWS_ACCESS_KEY_ID=$S3_ACCESS_KEY
+AWS_SECRET_ACCESS_KEY=$S3_SECRET_KEY
+S3_ACCESS_KEY_ID=$S3_ACCESS_KEY
+S3_SECRET_ACCESS_KEY=$S3_SECRET_KEY
+ENVBODY
+)"
+ENV_B64="$(printf %s "$ENV_CONTENT" | base64 | tr -d '\n')"
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ENV_B64" "$DEPLOY_MODE" "$GHCR_USER" "$IMAGE" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" <<'REMOTE'
 set -euo pipefail
-DB_HOST="$1"; DB_PORT="$2"; DB_NAME="$3"; DB_USER="$4"; DB_PW="$(printf %s "$5" | base64 -d)"
-DEPLOY_MODE="${6:-build}"; IMAGE="${7:-}"; GHCR_USER="${8:-token}"; GHCR_TOKEN="$(printf %s "${9:-}" | base64 -d 2>/dev/null || true)"
+ENV_B64="$1"; DEPLOY_MODE="$2"; GHCR_USER="${3:-token}"; IMAGE="${4:-}"; GHCR_TOKEN="$(printf %s "${5:-}" | base64 -d 2>/dev/null || true)"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -79,14 +116,7 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 umask 077
 env_file="$(mktemp)"
-cat > "$env_file" <<ENVF
-DB_HOST=$DB_HOST
-DB_PORT=$DB_PORT
-DB_NAME=$DB_NAME
-DB_USER=$DB_USER
-DB_PASSWORD=$DB_PW
-DB_SCHEMA=$DB_NAME
-ENVF
+printf %s "$ENV_B64" | base64 -d > "$env_file"
 sudo mkdir -p /opt/c360
 sudo mv "$env_file" /opt/c360/backend.env
 sudo chmod 600 /opt/c360/backend.env
