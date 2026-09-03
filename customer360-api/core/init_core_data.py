@@ -34,7 +34,10 @@ logger = logging.getLogger(__name__)
 # System-default segments seeded for every new tenant. json_rules mirrors the
 # jQuery QueryBuilder rule tree an admin would build in the UI; sql_rules is
 # the equivalent translated WHERE-clause fragment against cdp_master_profiles.
-DEFAULT_SEGMENTS: list[dict[str, Any]] = [
+#
+# Organized by domain so a fresh environment has useful out-of-the-box audience
+# templates for retail/ecommerce, travel, education, and real estate use cases.
+COMMON_SEGMENTS: list[dict[str, Any]] = [
     {
         "segment_tag": "new_customer",
         "segment_name": "New Customers",
@@ -129,6 +132,480 @@ DEFAULT_SEGMENTS: list[dict[str, Any]] = [
         },
         "sql_rules": "predictive_clv > 2500 AND customer_since < (CURRENT_DATE - INTERVAL '365 days')",
     },
+    {
+        "segment_tag": "high_engagement",
+        "segment_name": "High Engagement",
+        "description": "Profiles with consistently high engagement scores.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [{"field": "engagement_score", "operator": "greater_or_equal", "value": 75}],
+        },
+        "sql_rules": "engagement_score >= 75",
+    },
+    {
+        "segment_tag": "low_engagement",
+        "segment_name": "Low Engagement",
+        "description": "Profiles that may need re-engagement due to low interaction.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [{"field": "engagement_score", "operator": "less", "value": 30}],
+        },
+        "sql_rules": "engagement_score < 30",
+    },
+    {
+        "segment_tag": "promoters",
+        "segment_name": "Promoters",
+        "description": "Profiles with strong NPS advocacy signals.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [{"field": "latest_nps_score", "operator": "greater_or_equal", "value": 9}],
+        },
+        "sql_rules": "latest_nps_score >= 9",
+    },
+    {
+        "segment_tag": "detractors",
+        "segment_name": "Detractors",
+        "description": "Profiles with low NPS scores that may need service recovery.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [{"field": "latest_nps_score", "operator": "less", "value": 7}],
+        },
+        "sql_rules": "latest_nps_score < 7",
+    },
+    {
+        "segment_tag": "hot_leads",
+        "segment_name": "Hot Leads",
+        "description": "Prospects with high conversion probability.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "lifecycle_stage", "operator": "in", "value": ["prospect", "lead"]},
+                {"field": "lead_conversion_probability", "operator": "greater_or_equal", "value": 0.7},
+            ],
+        },
+        "sql_rules": "lifecycle_stage IN ('prospect', 'lead') AND lead_conversion_probability >= 0.7",
+    },
+    {
+        "segment_tag": "identity_review_needed",
+        "segment_name": "Needs Identity Review",
+        "description": "Profiles with low identity confidence scores.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [{"field": "identity_confidence_score", "operator": "less", "value": 0.6}],
+        },
+        "sql_rules": "identity_confidence_score < 0.6",
+    },
+    {
+        "segment_tag": "profile_enrichment_needed",
+        "segment_name": "Needs Profile Enrichment",
+        "description": "Profiles missing important data fields.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [{"field": "profile_completeness_score", "operator": "less", "value": 70}],
+        },
+        "sql_rules": "profile_completeness_score < 70",
+    },
+]
+
+RETAIL_SEGMENTS: list[dict[str, Any]] = [
+    {
+        "segment_tag": "retail_store_loyalists",
+        "segment_name": "Store-First Shoppers",
+        "description": "Retail customers who mostly shop in physical stores.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["retail"]},
+                {"field": "preferred_channel", "operator": "in", "value": ["In-Store", "POS", "Store"]},
+            ],
+        },
+        "sql_rules": "domain = 'retail' AND preferred_channel IN ('In-Store', 'POS', 'Store')",
+    },
+    {
+        "segment_tag": "retail_discount_seekers",
+        "segment_name": "Retail Discount Seekers",
+        "description": "Retail customers acquired through discount-heavy channels.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["retail"]},
+                {
+                    "field": "acquisition_source",
+                    "operator": "in",
+                    "value": ["coupon", "affiliate", "paid_social", "deal_site"],
+                },
+            ],
+        },
+        "sql_rules": "domain = 'retail' AND acquisition_source IN ('coupon', 'affiliate', 'paid_social', 'deal_site')",
+    },
+    {
+        "segment_tag": "retail_high_basket_value",
+        "segment_name": "High-Spend Retail Customers",
+        "description": "Retail customers with high predicted lifetime value.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["retail"]},
+                {"field": "predictive_clv", "operator": "greater_or_equal", "value": 1500},
+            ],
+        },
+        "sql_rules": "domain = 'retail' AND predictive_clv >= 1500",
+    },
+    {
+        "segment_tag": "retail_at_risk_regulars",
+        "segment_name": "At-Risk Retail Regulars",
+        "description": "Frequent retail customers who may stop buying soon.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["retail"]},
+                {"field": "churn_risk_tier", "operator": "in", "value": ["high", "critical"]},
+                {"field": "last_activity_at", "operator": "less", "value": "-14 days"},
+            ],
+        },
+        "sql_rules": "domain = 'retail' AND churn_risk_tier IN ('high', 'critical') AND last_activity_at < (now() - INTERVAL '14 days')",
+    },
+    {
+        "segment_tag": "retail_omnichannel_shoppers",
+        "segment_name": "Retail Omnichannel Shoppers",
+        "description": "Retail customers active across multiple identity touchpoints.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["retail"]},
+                {"field": "linked_raw_profile_count", "operator": "greater_or_equal", "value": 3},
+                {"field": "engagement_score", "operator": "greater_or_equal", "value": 60},
+            ],
+        },
+        "sql_rules": "domain = 'retail' AND linked_raw_profile_count >= 3 AND engagement_score >= 60",
+    },
+]
+
+ECOMMERCE_SEGMENTS: list[dict[str, Any]] = [
+    {
+        "segment_tag": "ecommerce_new_visitors",
+        "segment_name": "New Online Customers",
+        "description": "Online-first customers who converted in the last 30 days.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["retail"]},
+                {"field": "preferred_channel", "operator": "in", "value": ["Website", "Mobile App"]},
+                {"field": "customer_since", "operator": "greater_or_equal", "value": "-30 days"},
+            ],
+        },
+        "sql_rules": (
+            "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App') "
+            "AND customer_since >= (CURRENT_DATE - INTERVAL '30 days')"
+        ),
+    },
+    {
+        "segment_tag": "ecommerce_power_buyers",
+        "segment_name": "Top Online Customers",
+        "description": "Online-first customers with very high predicted value.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["retail"]},
+                {"field": "preferred_channel", "operator": "in", "value": ["Website", "Mobile App"]},
+                {"field": "predictive_clv", "operator": "greater", "value": 2000},
+            ],
+        },
+        "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App') AND predictive_clv > 2000",
+    },
+    {
+        "segment_tag": "ecommerce_conversion_nudge",
+        "segment_name": "Likely Online Buyers",
+        "description": "Prospects likely to buy soon through web or app channels.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["retail"]},
+                {"field": "preferred_channel", "operator": "in", "value": ["Website", "Mobile App"]},
+                {"field": "lead_conversion_probability", "operator": "greater_or_equal", "value": 0.45},
+                {"field": "lifecycle_stage", "operator": "in", "value": ["prospect", "lead"]},
+            ],
+        },
+        "sql_rules": (
+            "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App') "
+            "AND lead_conversion_probability >= 0.45 AND lifecycle_stage IN ('prospect', 'lead')"
+        ),
+    },
+    {
+        "segment_tag": "ecommerce_churn_watch",
+        "segment_name": "Online Churn Watchlist",
+        "description": "Online customers showing early churn risk signs.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["retail"]},
+                {"field": "preferred_channel", "operator": "in", "value": ["Website", "Mobile App"]},
+                {"field": "churn_risk_tier", "operator": "in", "value": ["medium", "high", "critical"]},
+            ],
+        },
+        "sql_rules": "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App') AND churn_risk_tier IN ('medium', 'high', 'critical')",
+    },
+    {
+        "segment_tag": "ecommerce_reactivation_90d",
+        "segment_name": "Inactive Online Customers (90+ Days)",
+        "description": "Online customers with no activity for at least 90 days.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["retail"]},
+                {"field": "preferred_channel", "operator": "in", "value": ["Website", "Mobile App"]},
+                {"field": "last_activity_at", "operator": "less", "value": "-90 days"},
+            ],
+        },
+        "sql_rules": (
+            "domain = 'retail' AND preferred_channel IN ('Website', 'Mobile App') "
+            "AND last_activity_at < (now() - INTERVAL '90 days')"
+        ),
+    },
+]
+
+TRAVEL_SEGMENTS: list[dict[str, Any]] = [
+    {
+        "segment_tag": "travel_frequent_travelers",
+        "segment_name": "Frequent Travelers",
+        "description": "Travel customers with frequent and high engagement activity.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["travel"]},
+                {"field": "engagement_score", "operator": "greater_or_equal", "value": 70},
+                {"field": "linked_raw_profile_count", "operator": "greater_or_equal", "value": 3},
+            ],
+        },
+        "sql_rules": "domain = 'travel' AND engagement_score >= 70 AND linked_raw_profile_count >= 3",
+    },
+    {
+        "segment_tag": "travel_premium_travelers",
+        "segment_name": "Premium Travelers",
+        "description": "Travel customers with high lifetime value potential.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["travel"]},
+                {"field": "predictive_clv", "operator": "greater", "value": 2500},
+            ],
+        },
+        "sql_rules": "domain = 'travel' AND predictive_clv > 2500",
+    },
+    {
+        "segment_tag": "travel_booking_dropout_risk",
+        "segment_name": "Travel Booking Dropout Risk",
+        "description": "Travel leads with high intent but signs of drop-off.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["travel"]},
+                {"field": "lifecycle_stage", "operator": "in", "value": ["prospect", "lead"]},
+                {"field": "lead_conversion_probability", "operator": "greater_or_equal", "value": 0.5},
+                {"field": "last_activity_at", "operator": "less", "value": "-14 days"},
+            ],
+        },
+        "sql_rules": (
+            "domain = 'travel' AND lifecycle_stage IN ('prospect', 'lead') "
+            "AND lead_conversion_probability >= 0.5 AND last_activity_at < (now() - INTERVAL '14 days')"
+        ),
+    },
+    {
+        "segment_tag": "travel_loyalty_growth",
+        "segment_name": "Growing Travel Loyalists",
+        "description": "Established travel customers with medium-to-high value potential.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["travel"]},
+                {"field": "customer_since", "operator": "less", "value": "-365 days"},
+                {"field": "predictive_clv", "operator": "greater_or_equal", "value": 800},
+                {"field": "predictive_clv", "operator": "less", "value": 2500},
+            ],
+        },
+        "sql_rules": (
+            "domain = 'travel' AND customer_since < (CURRENT_DATE - INTERVAL '365 days') "
+            "AND predictive_clv >= 800 AND predictive_clv < 2500"
+        ),
+    },
+    {
+        "segment_tag": "travel_churn_alert",
+        "segment_name": "Travel Churn Alert",
+        "description": "Travel customers with high immediate churn risk.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["travel"]},
+                {"field": "churn_risk_tier", "operator": "in", "value": ["high", "critical"]},
+            ],
+        },
+        "sql_rules": "domain = 'travel' AND churn_risk_tier IN ('high', 'critical')",
+    },
+]
+
+EDUCATION_SEGMENTS: list[dict[str, Any]] = [
+    {
+        "segment_tag": "education_high_intent_leads",
+        "segment_name": "High-Intent Education Leads",
+        "description": "Education-domain prospects with strong enrollment intent.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["education"]},
+                {"field": "lifecycle_stage", "operator": "in", "value": ["prospect", "lead"]},
+                {"field": "lead_conversion_probability", "operator": "greater_or_equal", "value": 0.65},
+            ],
+        },
+        "sql_rules": (
+            "domain = 'education' AND lifecycle_stage IN ('prospect', 'lead') "
+            "AND lead_conversion_probability >= 0.65"
+        ),
+    },
+    {
+        "segment_tag": "education_active_learners",
+        "segment_name": "Education Active Learners",
+        "description": "Recently active learners with high engagement.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["education"]},
+                {"field": "engagement_score", "operator": "greater_or_equal", "value": 70},
+                {"field": "last_activity_at", "operator": "greater_or_equal", "value": "-14 days"},
+            ],
+        },
+        "sql_rules": "domain = 'education' AND engagement_score >= 70 AND last_activity_at >= (now() - INTERVAL '14 days')",
+    },
+    {
+        "segment_tag": "education_completion_risk",
+        "segment_name": "Learners at Dropout Risk",
+        "description": "Learners with low engagement and high dropout risk signals.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["education"]},
+                {"field": "engagement_score", "operator": "less", "value": 40},
+                {"field": "churn_risk_tier", "operator": "in", "value": ["medium", "high", "critical"]},
+            ],
+        },
+        "sql_rules": "domain = 'education' AND engagement_score < 40 AND churn_risk_tier IN ('medium', 'high', 'critical')",
+    },
+    {
+        "segment_tag": "education_alumni_advocates",
+        "segment_name": "Alumni Advocates",
+        "description": "Long-tenure education customers with strong advocacy signals.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["education"]},
+                {"field": "customer_since", "operator": "less", "value": "-365 days"},
+                {"field": "latest_nps_score", "operator": "greater_or_equal", "value": 9},
+            ],
+        },
+        "sql_rules": "domain = 'education' AND customer_since < (CURRENT_DATE - INTERVAL '365 days') AND latest_nps_score >= 9",
+    },
+    {
+        "segment_tag": "education_reenrollment_candidates",
+        "segment_name": "Re-enrollment Candidates",
+        "description": "Previously engaged learners likely to return.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["education"]},
+                {"field": "last_activity_at", "operator": "less", "value": "-120 days"},
+                {"field": "lead_conversion_probability", "operator": "greater_or_equal", "value": 0.4},
+            ],
+        },
+        "sql_rules": "domain = 'education' AND last_activity_at < (now() - INTERVAL '120 days') AND lead_conversion_probability >= 0.4",
+    },
+]
+
+REAL_ESTATE_SEGMENTS: list[dict[str, Any]] = [
+    {
+        "segment_tag": "real_estate_hot_buyers",
+        "segment_name": "Real Estate Hot Buyers",
+        "description": "High-intent real estate leads prioritized for fast follow-up.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["real_estate"]},
+                {"field": "lead_grade", "operator": "in", "value": ["A", "Hot"]},
+            ],
+        },
+        "sql_rules": "domain = 'real_estate' AND lead_grade IN ('A', 'Hot')",
+    },
+    {
+        "segment_tag": "real_estate_investor_profile",
+        "segment_name": "Investor-Like Property Buyers",
+        "description": "Real estate profiles with high investment value potential.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["real_estate"]},
+                {"field": "predictive_clv", "operator": "greater", "value": 3000},
+            ],
+        },
+        "sql_rules": "domain = 'real_estate' AND predictive_clv > 3000",
+    },
+    {
+        "segment_tag": "real_estate_nurture_long_cycle",
+        "segment_name": "Long-Cycle Property Leads",
+        "description": "Early-stage real estate leads in a long consideration journey.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["real_estate"]},
+                {"field": "lifecycle_stage", "operator": "in", "value": ["prospect", "lead"]},
+                {"field": "lead_conversion_probability", "operator": "greater_or_equal", "value": 0.35},
+                {"field": "last_activity_at", "operator": "less", "value": "-30 days"},
+            ],
+        },
+        "sql_rules": (
+            "domain = 'real_estate' AND lifecycle_stage IN ('prospect', 'lead') "
+            "AND lead_conversion_probability >= 0.35 AND last_activity_at < (now() - INTERVAL '30 days')"
+        ),
+    },
+    {
+        "segment_tag": "real_estate_tour_ready",
+        "segment_name": "Tour-Ready Property Leads",
+        "description": "Real estate leads showing strong readiness for a property tour.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["real_estate"]},
+                {"field": "engagement_score", "operator": "greater_or_equal", "value": 65},
+                {"field": "lead_conversion_probability", "operator": "greater_or_equal", "value": 0.55},
+            ],
+        },
+        "sql_rules": "domain = 'real_estate' AND engagement_score >= 65 AND lead_conversion_probability >= 0.55",
+    },
+    {
+        "segment_tag": "real_estate_mortgage_risk",
+        "segment_name": "At-Risk Property Buyers",
+        "description": "Real estate profiles with risk signals and negative sentiment.",
+        "json_rules": {
+            "condition": "AND",
+            "rules": [
+                {"field": "domain", "operator": "in", "value": ["real_estate"]},
+                {"field": "churn_risk_tier", "operator": "in", "value": ["medium", "high", "critical"]},
+                {"field": "overall_sentiment_score", "operator": "less", "value": 0},
+            ],
+        },
+        "sql_rules": "domain = 'real_estate' AND churn_risk_tier IN ('medium', 'high', 'critical') AND overall_sentiment_score < 0",
+    },
+]
+
+def _with_domain(segments: Sequence[dict[str, Any]], domain: str) -> list[dict[str, Any]]:
+    """Returns a copy of each segment with explicit cdp_segments.domain."""
+    return [{**seg, "domain": domain} for seg in segments]
+
+
+DEFAULT_SEGMENTS: list[dict[str, Any]] = [
+    *_with_domain(COMMON_SEGMENTS, "all"),
+    *_with_domain(RETAIL_SEGMENTS, "retail"),
+    *_with_domain(ECOMMERCE_SEGMENTS, "retail"),
+    *_with_domain(TRAVEL_SEGMENTS, "travel"),
+    *_with_domain(EDUCATION_SEGMENTS, "education"),
+    *_with_domain(REAL_ESTATE_SEGMENTS, "real_estate"),
 ]
 
 
@@ -177,6 +654,7 @@ def seed_default_segments_with_breakdown(
         rows_to_insert = [
             {
                 "tenant_id": tenant_id,
+                "domain": seg["domain"],
                 "segment_tag": seg["segment_tag"],
                 "segment_name": seg["segment_name"],
                 "description": seg["description"],
