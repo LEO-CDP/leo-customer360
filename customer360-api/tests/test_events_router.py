@@ -127,7 +127,7 @@ class EventsCreateTests(unittest.TestCase):
             json={
                 "tenant_id": tenant_id,
                 "domain": "retail",
-                "source_system": "MoEngage",
+                "source_system": "OneSignal",
                 "event_name": "purchase",
                 "event_category": "COMMERCE",
                 "email": hashed_email,
@@ -139,7 +139,7 @@ class EventsCreateTests(unittest.TestCase):
         body = response.json()
         self.assertIsNotNone(body["raw_profile_id"])
         self.assertIsNone(body["master_profile_id"])
-        self.assertEqual(body["source_system"], "MoEngage")
+        self.assertEqual(body["source_system"], "OneSignal")
         self.assertEqual(body["event_name"], "purchase")
 
         self.assertEqual(len(fake_session.added), 2)
@@ -187,7 +187,7 @@ class EventsCreateTests(unittest.TestCase):
             advertising_id=None,
             cookie_id=None,
             session_id=None,
-            source_system="MoEngage",
+            source_system="OneSignal",
             event_dedup_key="msg-001",
             channel="mobile_app",
             platform=None,
@@ -215,7 +215,7 @@ class EventsCreateTests(unittest.TestCase):
             json={
                 "tenant_id": str(tenant_id),
                 "domain": "retail",
-                "source_system": "MoEngage",
+                "source_system": "OneSignal",
                 "event_dedup_key": "msg-001",
                 "event_name": "purchase",
                 "event_category": "COMMERCE",
@@ -248,7 +248,7 @@ class EventsCreateTests(unittest.TestCase):
                 {
                     "tenant_id": tenant_id,
                     "domain": "retail",
-                    "source_system": "MoEngage",
+                    "source_system": "OneSignal",
                     "event_name": "purchase",
                     "event_category": "COMMERCE",
                     "email": "a" * 64,
@@ -279,7 +279,7 @@ class EventsCreateTests(unittest.TestCase):
             advertising_id=None,
             cookie_id=None,
             session_id=None,
-            source_system="MoEngage",
+            source_system="OneSignal",
             event_dedup_key="bulk-msg-001",
             channel="mobile_app",
             platform=None,
@@ -308,7 +308,7 @@ class EventsCreateTests(unittest.TestCase):
                 {
                     "tenant_id": str(tenant_id),
                     "domain": "retail",
-                    "source_system": "MoEngage",
+                    "source_system": "OneSignal",
                     "event_dedup_key": "bulk-msg-001",
                     "event_name": "purchase",
                     "event_category": "COMMERCE",

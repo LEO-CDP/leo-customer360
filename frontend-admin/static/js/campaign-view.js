@@ -26,7 +26,7 @@ window.C360 = window.C360 || {};
 
   var PLATFORM_ICONS = {
     Google: "🔍", Meta: "📘", TikTok: "🎵",
-    Zalo: "💬", AppsFlyer: "📱", YouTube: "▶️"
+    Zalo: "💬", Adjust: "📱", YouTube: "▶️"
   };
 
   var CHANNEL_ICONS = {

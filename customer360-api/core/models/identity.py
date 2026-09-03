@@ -2,7 +2,7 @@
 
 Mirrors the ``MASTER PROFILES & IDENTITY RESOLUTION`` section of
 core-customer360/database-schema.sql: ``cdp_master_profiles`` (golden
-record), ``cdp_raw_profiles_stage`` (AppsFlyer/MoEngage/Web Tracking landing
+record), ``cdp_raw_profiles_stage`` (Adjust/OneSignal/Web Tracking landing
 zone) and ``cdp_profile_links`` (raw -> master links).
 
 ``CdpProfileAttribute`` is the full attribute catalog for
@@ -133,7 +133,7 @@ class CdpMasterProfile(Base):
 
 
 class CdpRawProfileStage(Base):
-    """Landing zone for inbound AppsFlyer / MoEngage / Web Tracking / CoreBanking / POS events."""
+    """Landing zone for inbound Adjust / OneSignal / Web Tracking / CoreBanking / POS events."""
 
     __tablename__ = "cdp_raw_profiles_stage"
 

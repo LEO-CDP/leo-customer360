@@ -1,0 +1,74 @@
+Field group,Field name,API name,Field class,Description,Sample Data,Format,Part of main raw data report schema,Report delivery method,Push API,Data Locker,Export data/Pull API
+Attribution,Attributed touch type,attributed_touch_type,Adjust attribution,Attributed touch type for conversion,click,Enum,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Attributed touch time,attributed_touch_time,Adjust attribution,Timestamp of attributed touch,2026-08-05 14:30:00,DateTime,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Click time,click_time,Adjust attribution,Timestamp of click touch,2026-08-05 14:00:00,DateTime,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Install time,install_time,Adjust attribution,First open time after install or reattribution,2026-08-05 14:30:00,DateTime,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Media source,media_source,Adjust attribution,Attributed media source,google_ads,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Campaign,campaign,Adjust attribution,Campaign name,Summer Sale 2026,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Campaign ID,campaign_id,Adjust attribution,Campaign identifier from source network,camp_12345,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Campaign type,campaign_type,Adjust attribution,Campaign context such as UA Organic or Retargeting,UA,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Match type,match_type,Adjust attribution,Attribution match method,id_matching,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Is organic,is_organic,Adjust attribution,Whether conversion is organic,false,Boolean,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Facebook campaign ID,fb_campaign_id,Network mapping,Network campaign id for Facebook,120012300123,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Agency,agency,Adjust attribution,Agency or partner name,digital_agency,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Channel,channel,Adjust attribution,Marketing channel,social,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Keywords,keywords,Adjust attribution,Keyword terms used by source network,running shoes,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Adset ID,adset_id,Network mapping,Ad set identifier,set_8899,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Adset,adset,Network mapping,Ad set name,Prospecting iOS,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Facebook adset ID,fb_adset_id,Network mapping,Facebook adset identifier,120045600789,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Facebook adset name,fb_adset_name,Network mapping,Facebook adset name,Prospecting VN,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Facebook ad ID,fb_ad_id,Network mapping,Facebook ad identifier,120078900111,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Facebook ad name,fb_ad_name,Network mapping,Facebook ad name,Promo Video A,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Ad ID,ad_id,Network mapping,Ad identifier from network,ad_50001,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Ad name,ad_name,Network mapping,Ad name from network,Back To School Banner,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Ad type,ad_type,Network mapping,Ad type from network,banner,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Site ID,site_id,Adjust attribution,Publisher site identifier,publisher_123,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Sub site ID,sub_site_id,Adjust attribution,Sub publisher identifier,sub_pub_456,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Sub parameter 1,sub_param_1,Adjust attribution,Custom sub parameter 1 from attribution link,seg_a,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Sub parameter 2,sub_param_2,Adjust attribution,Custom sub parameter 2 from attribution link,exp_2,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Sub parameter 3,sub_param_3,Adjust attribution,Custom sub parameter 3 from attribution link,creative_9,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Sub parameter 4,sub_param_4,Adjust attribution,Custom sub parameter 4 from attribution link,slot_top,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Sub parameter 5,sub_param_5,Adjust attribution,Custom sub parameter 5 from attribution link,geo_vn,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Cost model,cost_model,Adjust attribution,Cost model from source network,CPI,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Cost value,cost_value,Adjust attribution,Cost value reported by source network,3.2500,Decimal string,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Cost currency,cost_currency,Adjust attribution,Cost currency code,USD,ISO-4217,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,HTTP referrer,http_referrer,Adjust attribution,Referrer URL for click request,https://example.com/referrer,String URL,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,Advertising ID,advertising_id,Adjust SDK,Resettable advertising id such as GAID,38400000-8cf0-11bd-b23e-10b96e40000d,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,IDFA,idfa,Adjust SDK,Apple advertising identifier,00000000-0000-0000-0000-000000000000,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,IDFV,idfv,Adjust SDK,Apple vendor identifier,A1B2C3D4-E5F6-7890-1234-56789ABCDEFF,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,Platform,platform,Adjust SDK,Device platform,iOS,Enum,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,Device type,device_type,Adjust SDK,Device category,phone,Enum,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,OS version,os_version,Adjust SDK,Operating system version,18.5,String,Yes,Simulator CSV export,N/A,N/A,Yes
+App,App version,app_version,Adjust SDK,Application version string,1.2.3,String,Yes,Simulator CSV export,N/A,N/A,Yes
+App,SDK version,sdk_version,Adjust SDK,Adjust SDK version,6.14.1,String,Yes,Simulator CSV export,N/A,N/A,Yes
+App,App ID,app_id,Adjust SDK,Adjust app token or app identifier,com.example.app,String,Yes,Simulator CSV export,N/A,N/A,Yes
+App,App name,app_name,Adjust SDK,Application name,Sample App,String,Yes,Simulator CSV export,N/A,N/A,Yes
+App,Bundle ID,bundle_id,Adjust SDK,iOS bundle id or Android package id,com.example.app,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Google Play broadcast referrer,gp_broadcast_referrer,Store referrer,Google Play broadcast referrer raw value,utm_source=google,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Protect360,Blocked reason,blocked_reason,Protect360,Fraud block reason if available,install_hijacking,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Protect360,Blocked reason value,blocked_reason_value,Protect360,Additional block reason context,site_id_123,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,Operator,operator,Adjust SDK,Network operator from device,Viettel,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,Carrier,carrier,Adjust SDK,Carrier name from device,Viettel,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,Network type,network_type,Adjust SDK,Connection type such as wifi or cellular,wifi,Enum,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,WiFi,wifi,Adjust SDK,Whether device used WiFi,true,Boolean,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,Language,language,Adjust SDK,Device locale language,vi-VN,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device location,Country code,country_code,Geo from IP,Country code derived from IP,VN,ISO-3166-1 alpha-2,Yes,Simulator CSV export,N/A,N/A,Yes
+Device location,State,state,Geo from IP,State or province derived from IP,Ho Chi Minh,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device location,City,city,Geo from IP,City derived from IP,Ho Chi Minh City,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device location,Postal code,postal_code,Geo from IP,Postal code derived from IP,700000,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device location,IP,ip,Geo from IP,IPv4 or IPv6 address,203.0.113.10,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,User agent short,ua,Adjust SDK,User agent captured by ingestion pipeline,Mozilla/5.0,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,WiFi MAC address,wifi_mac_address,Adjust SDK,WiFi MAC address if available,11:22:33:44:55:66,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,IMEI,imei,Adjust SDK,Device IMEI if available,490154203237518,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,Android ID,android_id,Adjust SDK,Android device id,a1b2c3d4e5f6a7b8,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,Customer user ID,customer_user_id,Adjust SDK,App owned customer identifier,user_12345,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Is retargeting,is_retargeting,Adjust attribution,Whether event is under retargeting,false,Boolean,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Reattribution touch time,reattr_touch_time,Adjust attribution,Retargeting touch timestamp,2026-08-08 10:15:00,DateTime,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Reattribution touch type,reattr_touch_type,Adjust attribution,Retargeting touch type,click,Enum,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Is primary attribution,is_primary_attribution,Adjust attribution,Primary attribution flag,true,Boolean,Yes,Simulator CSV export,N/A,N/A,Yes
+Privacy,ATT status,att,Adjust SDK,iOS ATT status,authorized,Enum,Yes,Simulator CSV export,N/A,N/A,Yes
+Attribution,Conversion type,conversion_type,Adjust attribution,Conversion classification,install,Enum,Yes,Simulator CSV export,N/A,N/A,Yes
+Event,Event time,event_time,Adjust event,Timestamp when event occurred,2026-08-05 15:00:00,DateTime,Yes,Simulator CSV export,N/A,N/A,Yes
+Event,Event name,event_name,Adjust event,In app event name or lifecycle event,login,String,Yes,Simulator CSV export,N/A,N/A,Yes
+Event,Event value,event_value,Adjust event,JSON payload for event details,{"trigger":"retargeting"},JSON string,Yes,Simulator CSV export,N/A,N/A,Yes
+Device info,Adjust device ID official name,adid,Adjust SDK official terminology,Official Adjust device identifier name not emitted by current simulator,123456789012345678901234, String,No,Official term reference,N/A,N/A,No

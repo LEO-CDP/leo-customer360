@@ -161,9 +161,9 @@ def generate_fuzzy_match_profiles(num_groups: int = 5) -> list[dict]:
         email = f"test_customer_{group_idx:03d}@example.com"
         phone = f"09{1000000 + group_idx:08d}"
         
-        # Create canonical profile (AppsFlyer install, no PII yet)
+        # Create canonical profile (Adjust install, no PII yet)
         profiles.append({
-            "source_system": "AppsFlyer",
+            "source_system": "Adjust",
             "channel": "mobile_app",
             "domain": "retail",
             "device_id": f"device-fuzzy-{group_idx:03d}-001",
@@ -177,9 +177,9 @@ def generate_fuzzy_match_profiles(num_groups: int = 5) -> list[dict]:
             # No PII on install
         })
         
-        # Variation 1: AppsFlyer login touch - canonical address/company
+        # Variation 1: Adjust login touch - canonical address/company
         profiles.append({
-            "source_system": "AppsFlyer",
+            "source_system": "Adjust",
             "channel": "mobile_app",
             "domain": "retail",
             "device_id": f"device-fuzzy-{group_idx:03d}-001",
@@ -200,11 +200,11 @@ def generate_fuzzy_match_profiles(num_groups: int = 5) -> list[dict]:
             "event_time": datetime.now() - timedelta(days=20),
         })
         
-        # Variation 2: MoEngage push engagement - fuzzy address variant
+        # Variation 2: OneSignal push engagement - fuzzy address variant
         addr_variant = rng.choice(ADDRESS_VARIATIONS.get(base_addr, [base_addr]))
         company_variant = rng.choice(COMPANY_VARIATIONS.get(base_company, [base_company]))
         profiles.append({
-            "source_system": "MoEngage",
+            "source_system": "OneSignal",
             "channel": "mobile_app",
             "domain": "retail",
             "device_id": f"device-fuzzy-{group_idx:03d}-001",  # Same device (cross-source key)

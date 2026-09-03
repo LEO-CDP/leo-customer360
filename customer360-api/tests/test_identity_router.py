@@ -155,7 +155,7 @@ def _fake_raw_profile(**overrides) -> SimpleNamespace:
         "tenant_id": DEMO_TENANT_ID,
         "user_id": None,
         "domain": "retail",
-        "source_system": "moengage",
+        "source_system": "onesignal",
         "channel": "mobile_app",
         "external_customer_id": None,
         "full_name": None,

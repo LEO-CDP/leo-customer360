@@ -61,8 +61,8 @@ Cập nhật: 2026-08-28
 
 Một khách hàng có thể xuất hiện ở nhiều hệ thống và nhiều touchpoint:
 
-- AppsFlyer: mobile attribution và install
-- MoEngage: push / engagement
+- Adjust: mobile attribution và install
+- OneSignal: push / engagement
 - Web Tracking hoặc GA4-style events: browser và cookie
 - Core Banking, KYC, POS và các nguồn khác: tùy integration
 
@@ -453,7 +453,7 @@ seed_full_demo_data.py
 
 Dataset được sinh deterministic với `seed=42`: khoảng 70% là customer install
 đầu tiên và 30% là duplicate touch; domain gồm retail và banking; touch được
-phân bổ qua AppsFlyer, MoEngage và WebTracking. Các touch của cùng customer
+phân bổ qua CRM và Google Analytics. Các touch của cùng customer
 dùng chung `device_id`, giúp demo kiểm tra việc nối anonymous install với touch
 có PII đã hash.
 

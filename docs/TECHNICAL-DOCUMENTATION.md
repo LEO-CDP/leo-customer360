@@ -4,7 +4,7 @@
 
 **Customer 360** is the **identity resolution and unified customer profile (golden record)** component of a composable CDP (Customer Data Platform), built on **PostgreSQL 16** and extended with `pgvector` (semantic search / AI embeddings) and `PostGIS` (geospatial queries). It gives retail, banking, and B2B businesses:
 
-- **A single, unified customer identity** across mobile apps, web, POS, core banking, and third-party attribution/engagement tools (AppsFlyer, MoEngage, GA4).
+- **A single, unified customer identity** across mobile apps, web, POS, core banking, and third-party attribution/engagement tools (Google Analytics, Brevo, ...).
 - **Autonomous duplicate resolution** via metadata-driven matching rules (exact and fuzzy, using identity-graph fields where available) — no code deploy needed to add a new identifier.
 - **One activatable record** instead of siloed per-channel views, ready for segmentation and campaign tooling.
 - **Full lineage/audit** of every golden record: which raw profiles were merged, by which rule, with what confidence.
@@ -14,10 +14,10 @@ This document describes the **as-built** architecture, verified directly against
 ## 2. Concrete Use Cases
 
 ### UC1 — Multi-channel ad attribution unification (Retail / Mobile Attribution)
-A user installs an app from a Facebook/TikTok/Google ad (AppsFlyer records an `install` event with only an anonymous `device_id`/`advertising_id`). Later they log in or purchase (a `login`/`purchase` event reveals `full_name`/`email`/`phone_number` **on the same `device_id`**). CIR can link these raw records into **one master profile** through the configured identity fields and identity collections, so marketing knows there is exactly **one real customer** behind multiple touchpoints — avoiding double counting and giving accurate CAC/ROAS per channel (`acquisition_source`/`acquisition_campaign`).
+A user installs an app from a Facebook/TikTok/Google ad (Google Analytics records an `install` event with only an anonymous `device_id`/`advertising_id`). Later they log in or purchase (a `login`/`purchase` event reveals `full_name`/`email`/`phone_number` **on the same `device_id`**). CIR can link these raw records into **one master profile** through the configured identity fields and identity collections, so marketing knows there is exactly **one real customer** behind multiple touchpoints — avoiding double counting and giving accurate CAC/ROAS per channel (`acquisition_source`/`acquisition_campaign`).
 
 ### UC2 — Digital banking: linking eKYC profiles across devices
-A banking customer interacts through the mobile app (AppsFlyer) then completes KYC through the core banking system (`kyc_completed` event carrying `national_id`). CIR matches configured identifiers such as `device_id`, `phone_number`, and `national_id` to merge both sources, updating `kyc_status`, `cif_number`, `account_numbers`, `risk_segment` on the same golden record — supporting **AML/risk scoring** and digital-banking personalization without manual reconciliation across core systems.
+A banking customer interacts through the mobile app (Google Analytics) then completes KYC through the core banking system (`kyc_completed` event carrying `national_id`). CIR matches configured identifiers such as `device_id`, `phone_number`, and `national_id` to merge both sources, updating `kyc_status`, `cif_number`, `account_numbers`, `risk_segment` on the same golden record — supporting **AML/risk scoring** and digital-banking personalization without manual reconciliation across core systems.
 
 ### UC3 — B2B marketing attribution & customer journey
 Uses the CRM journey graph to answer questions like: *"All Contacts in the Finance industry touched by Campaign X, which Lead they converted from, and which Opportunity they are currently linked to"* — joining `crm_lead → crm_campaign_member → crm_campaign`, `crm_contact → crm_account → crm_industry`, `crm_contact → crm_opportunity` (example SQL in [README.md](../README.md)).
@@ -49,8 +49,8 @@ Using `persona_embedding` (master profile) or `embedding` (CRM/graph_edges), sim
 ```mermaid
 flowchart TB
     subgraph SOURCES["Source systems (outside this repo)"]
-        AF[AppsFlyer\nmobile attribution]
-        ME[MoEngage\nengagement]
+        AF[Google Analytics\nattribution]
+        ME[Brevo\nengagement]
         WT[Web Tracking / GA4]
         POS[POS]
         CB[Core Banking]
@@ -107,7 +107,7 @@ flowchart TB
 ```
 
 **How to read this diagram:**
-- **One golden record, many sources** — AppsFlyer/MoEngage/Web/POS/Core Banking all land in a single staging table; nothing is siloed per channel.
+- **One golden record, many sources** — Google Analytics/Web/POS/Core Banking all land in a single staging table; nothing is siloed per channel.
 - **Identity resolution is a separate, swappable worker** ([`backend-system/identity_resolution/`](../backend-system/identity_resolution)), not baked into the API — it writes to Postgres directly via `psycopg2`, independent of `customer360-api`.
 - **One API contract** ([`customer360-api/`](../customer360-api)) governs all reads/writes to the schema, backed by Redis for latency and Keycloak for SSO/authorization.
 - **Backend pipelines are Dagster-orchestrated** ([`backend-system/`](../backend-system)) — `customer360-api` submits Dagster job runs asynchronously through the Dagster GraphQL API (`core/utils/dagster_client.py`) instead of running long batch work inline inside an HTTP request.
@@ -118,7 +118,7 @@ flowchart TB
 ### 3.2 Data Flow: Ingest → Identity Resolution → Activation
 
 1. **Raw profile ingestion** (`cdp_raw_profiles_stage`, `cdp_raw_events`)
-   - External services (AppsFlyer, MoEngage, POS, core banking, GA4) send events or profile snapshots.
+   - External services (Google Analytics, POS, CRM,...) send events or profile snapshots.
    - Land in staging tables with `source_system`, `domain` (`retail`/`banking`/`travel`/`real_estate`), and optional PII (email, phone, name).
    - Status tracked via `status_code` / `cdp_id_resolution_status`.
 
@@ -242,7 +242,7 @@ Each placeholder service exists so `customer360-api/core/utils/dagster_client.py
 #### `cdp_raw_profiles_stage` — Raw ingestion
 Raw profile snapshots from external sources, not yet merged.
 - `tenant_id`, `raw_profile_id` (UUID) — primary key.
-- `source_system`: `appsflyer`, `moengage`, `pos`, `banking_core`, `ga4`, ...
+- `source_system`: `Google Analytics`, `onesignal`, `pos`, `banking_core`, ...
 - `domain`: validated against the `sys_domain` catalog at the application layer; current seeds include `retail`, `banking`, `travel`, `real_estate`, `media`, and `education`, with additional catalog domains supported.
 - `status_code`: tracks pending / processing / resolved / error state, cross-referenced with `cdp_id_resolution_status`.
 - PII fields (hashed where applicable): `email_sha256`, `phone_sha256`, plain name fields.
@@ -457,7 +457,7 @@ Container and Compose health monitoring covers:
 | `scoring`, `data_synch`, `email_engine`, `notification_engine`, `campaign_activation`, `personalization` are placeholders | Their Dagster jobs exist and are wired into `customer360-api`'s Dagster client config, but contain no real business logic yet (each just logs "started" → sleeps → logs "done") | The wiring (job names, workspace registration) is ready for real implementations to be dropped in. |
 | CORS is hardcoded, not configurable | `allow_origins=["*"]` in `app.py` has no environment override | Any production CORS hardening requires a code change. |
 | Persona naming depends on an optional external LLM call | If `GOOGLE_GENAI_API_KEY` is unset or the Gemini API is unreachable, persona names fall back to a deterministic offline generator | This is intentional graceful degradation, not a bug — but persona name "quality" will vary based on whether the key is configured. |
-| No phonetic/graph-based matching in the live CIR resolver | Only exact and Levenshtein-style fuzzy matching are implemented today | A device-ID graph walk (e.g. AppsFlyer `advertising_id` → login → purchase all on one device) is described conceptually (UC1/UC2) but not yet a distinct `matching_rule='graph'` implementation in `resolver.py` — verify against current `resolver.py` before relying on this in a specific deployment. |
+| No phonetic/graph-based matching in the live CIR resolver | Only exact and Levenshtein-style fuzzy matching are implemented today | A device-ID graph walk (e.g. Google Analytics `advertising_id` → login → purchase all on one device) is described conceptually (UC1/UC2) but not yet a distinct `matching_rule='graph'` implementation in `resolver.py` — verify against current `resolver.py` before relying on this in a specific deployment. |
 | MinIO is dev-only | MinIO (S3-compatible) is wired into the development Compose variants for local file-based event ingestion | Production `tracking-api` uses a real S3 bucket; MinIO is intentionally absent from `docker-compose.yml`. |
 
 ### 7.2 Suggested Next Steps

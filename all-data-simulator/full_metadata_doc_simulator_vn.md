@@ -54,7 +54,7 @@ Meta Lead Ads\\
 TikTok Ads\\
 Google Analytics 4\\
 Zalo Official Account\\
-AppsFlyer Pull API}}
+Adjust Pull API}}
 & $\longrightarrow$ &
 \fcolorbox{black}{gray!10}{\parbox{0.18\linewidth}{\centering
 	{Fields}\\[3pt]
@@ -83,7 +83,7 @@ Merge customer identities}}
 | `tiktok_cir_api.csv` | TikTok Ads | Một dòng cho mỗi ad và ngày báo cáo |
 | `ga4_cir_api.csv` | Google Analytics 4 | Một dòng event/report tổng hợp giả lập |
 | `zalo_cir_api.csv` | Zalo Official Account | Một dòng profile người dùng |
-| `appsflyer_cir_api.csv` | AppsFlyer | Một event trong ứng dụng trên mỗi dòng |
+| `adjust_cir_api.csv` | Adjust | Một event trong ứng dụng trên mỗi dòng |
 
 ### Danh mục generator
 
@@ -93,7 +93,7 @@ Merge customer identities}}
 | `generate_tiktok_data` | `tiktok_cir_api.csv` |
 | `generate_ga4_data` | `ga4_cir_api.csv` |
 | `generate_zalo_data` | `zalo_cir_api.csv` |
-| `generate_appsflyer_data` | `appsflyer_cir_api.csv` |
+| `generate_adjust_data` | `adjust_cir_api.csv` |
 
 ### Metadata runtime và output
 
@@ -123,7 +123,7 @@ không sử dụng bản ghi của một cá nhân.
 
 | Attribute | Type | Ví dụ | Mục đích |
 |---|---|---|---|
-| `cid` | string | `CUST-0001` | Khóa customer giả lập; xuất hiện trong `customer_user_id` của AppsFlyer và JSON `event_value` |
+| `cid` | string | `CUST-0001` | Khóa customer giả lập; xuất hiện trong `customer_user_id` của Adjust và JSON `event_value` |
 | `name` | string | `Nguyen An` | Tên hiển thị đầy đủ cho Meta và Zalo |
 | `first` | string | `An` | Tên gọi trong Meta lead |
 | `last` | string | `Nguyen` | Họ trong Meta lead |
@@ -136,7 +136,7 @@ không sử dụng bản ghi của một cá nhân.
 
 Việc liên kết identity là dữ liệu giả lập. Các platform ID thực tế không được dùng
 làm customer key dùng chung. Các CIR key được mô phỏng mạnh nhất là email, phone,
-name và cặp `customer_user_id`/`event_value.customer_id` của AppsFlyer.
+name và cặp `customer_user_id`/`event_value.customer_id` của Adjust.
 
 \newpage
 
@@ -450,14 +450,14 @@ shared-info đã chọn thành các column CSV.
 - Documentation Zalo được render qua portal dùng nhiều JavaScript; cần đối chiếu field
   response với example v3.0 trực tiếp trước khi dùng CSV này làm integration fixture.
 
-## 7. Metadata AppsFlyer Pull API Raw Data
+## 7. Metadata Adjust Pull API Raw Data
 
 ### Nguồn tài liệu API
 
-- Pull API raw data: [AppsFlyer Pull API raw data](https://support.appsflyer.com/hc/en-us/articles/360007530258-Pull-API-raw-data)
-- Raw data field dictionary: [AppsFlyer raw data field dictionary](https://support.appsflyer.com/hc/en-us/articles/208387843-Raw-data-field-dictionary)
+- Pull API raw data: [Adjust Pull API raw data](https://support.adjust.com/hc/en-us/articles/360007530258-Pull-API-raw-data)
+- Raw data field dictionary: [Adjust raw data field dictionary](https://support.adjust.com/hc/en-us/articles/208387843-Raw-data-field-dictionary)
 
-AppsFlyer raw-data report sử dụng schema rộng và phụ thuộc vào từng report. Field có thể
+Adjust raw-data report sử dụng schema rộng và phụ thuộc vào từng report. Field có thể
 rỗng hoặc không khả dụng tùy report type, platform, attribution source, privacy setting
 và delivery method. Trình mô phỏng này mô hình hóa in-app-event report với một tập field
 Pull API canonical đã chọn.
@@ -466,11 +466,11 @@ Pull API canonical đã chọn.
 
 | Hạng mục | Giá trị |
 |---|---|
-| File | `appsflyer_cir_api.csv` |
-| Grain | Một AppsFlyer in-app event giả lập |
+| File | `adjust_cir_api.csv` |
+| Grain | Một Adjust in-app event giả lập |
 | Số dòng | `Config.NUM_ROWS` |
 | Identity field | `customer_user_id`, JSON `event_value.customer_id`, device identifier |
-| Event set | `af_login`, `af_content_view`, `af_add_to_cart`, `af_purchase` |
+| Event set | `adj_login`, `adj_content_view`, `adj_add_to_cart`, `adj_purchase` |
 | Định dạng thời gian | `YYYY-MM-DD HH:MM:SS`, không có timezone rõ ràng |
 | Định dạng event value | JSON string; row purchase có `customer_id` và `order_id` |
 | Revenue currency | Cố định là `VND` với row có revenue giả lập |
@@ -483,7 +483,7 @@ Pull API canonical đã chọn.
 | `attributed_touch_time` | string datetime | non-null | Install time trừ ngẫu nhiên từ 5 đến 60 phút |
 | `install_time` | string datetime | non-null | Ngày cơ sở cộng ngẫu nhiên 0 đến 5 ngày và 1 đến 12 giờ |
 | `event_time` | string datetime | non-null | Install time cộng ngẫu nhiên từ 5 đến 120 phút |
-| `event_name` | string enum-like | non-null | AppsFlyer event name random từ bộ bốn event |
+| `event_name` | string enum-like | non-null | Adjust event name random từ bộ bốn event |
 | `event_value` | string JSON | non-null | JSON chứa `customer_id`; row purchase có thêm `order_id` |
 | `event_revenue` | decimal | non-null | Từ 100.000 đến 500.000 với purchase; `0` trong các row khác |
 | `event_revenue_currency` | string currency code | non-null | Cố định là `VND` |
@@ -491,26 +491,26 @@ Pull API canonical đã chọn.
 | `media_source` | string enum-like | non-null | Chọn random `facebook`, `tiktok`, `googleadwords_int` hoặc `zalo` |
 | `channel` | string | non-null | Label hiển thị random: `Facebook Ads`, `TikTok Ads`, `Google Ads` hoặc `Zalo` |
 | `campaign` | string | non-null | Tên campaign giả lập; hậu tố random từ 1 đến 4 |
-| `campaign_id` | string | non-null | ID AppsFlyer giả lập dạng `AF-CAMP-NNN` |
+| `campaign_id` | string | non-null | ID Adjust giả lập dạng `ADJ-CAMP-NNN` |
 | `adset` | string | non-null | Tên ad set giả lập; hậu tố random từ 1 đến 5 |
-| `adset_id` | string | non-null | ID ad set giả lập dạng `AF-AS-NNN` |
+| `adset_id` | string | non-null | ID ad set giả lập dạng `ADJ-AS-NNN` |
 | `ad` | string | non-null | Tên creative giả lập; hậu tố random từ 1 đến 7 |
-| `ad_id` | string | non-null | ID ad giả lập dạng `AF-AD-NNN` |
+| `ad_id` | string | non-null | ID ad giả lập dạng `ADJ-AD-NNN` |
 | `country_code` | string ISO-like code | non-null | Country của người giả lập dùng chung, hiện là `VN` |
 | `state` | string | non-null | State/province của người giả lập dùng chung |
 | `city` | string | non-null | City của người giả lập dùng chung |
 | `postal_code` | string | non-null | Postal code giả lập dạng sáu chữ số, từ 700010 đến 700099 |
 | `ip` | string IPv4-like | non-null | Địa chỉ dạng IPv4 giả lập bắt đầu bằng `103.21.` |
-| `operator` | string | non-null | Chọn random `Viettel`, `MobiFone` hoặc `VinaPhone`; dùng đúng tên field trong AppsFlyer dictionary hiện tại |
+| `operator` | string | non-null | Chọn random `Viettel`, `MobiFone` hoặc `VinaPhone`; dùng đúng tên field trong Adjust dictionary hiện tại |
 | `language` | string BCP-47-like | non-null | Cố định là `vi` |
-| `appsflyer_id` | string | non-null | ID trông giống ID do SDK sinh; segment hai chữ số random nên không đảm bảo unique |
+| `adjust_id` | string | non-null | ID trông giống ID do SDK sinh; segment hai chữ số random nên không đảm bảo unique |
 | `advertising_id` | string UUID-like | non-null | Advertising ID có thể reset giả lập; hậu tố theo row index giúp unique trong simulator |
 | `idfa` | string | rỗng trên Android | Advertising identifier iOS giả lập; rỗng khi `is_android` là `True` |
 | `android_id` | string | rỗng trên iOS | Android identifier giả lập; rỗng khi `is_android` là `False` |
-| `customer_user_id` | string | non-null | `cid` giả lập dùng chung; AppsFlyer-to-CIR key mạnh nhất |
+| `customer_user_id` | string | non-null | `cid` giả lập dùng chung; Adjust-to-CIR key mạnh nhất |
 | `idfv` | string | rỗng trên Android | iOS vendor identifier giả lập; rỗng khi `is_android` là `True` |
 | `platform` | string enum-like | non-null | `android` hoặc `ios`, được chọn bởi `is_android` |
-| `device_type` | string | non-null | Nhãn device model giả lập; AppsFlyer dictionary cho biết field này đã deprecated/không còn được populate và nên dùng device model trong report hiện tại |
+| `device_type` | string | non-null | Nhãn device model giả lập; Adjust dictionary cho biết field này đã deprecated/không còn được populate và nên dùng device model trong report hiện tại |
 | `os_version` | string | non-null | Android random `14`/`15` hoặc iOS random `17.6`/`16.7` |
 | `app_version` | string | non-null | Cố định là `6.8.1` |
 | `sdk_version` | string | non-null | Cố định là `6.15.0` |
@@ -522,13 +522,13 @@ Pull API canonical đã chọn.
 
 ### Giới hạn của trình mô phỏng
 
-- Đây là một subset được chọn từ AppsFlyer main schema, không phải bản export đầy đủ
+- Đây là một subset được chọn từ Adjust main schema, không phải bản export đầy đủ
   của raw-data field dictionary.
-- Timestamp string không có timezone, trong khi timezone thực tế của AppsFlyer phụ thuộc
+- Timestamp string không có timezone, trong khi timezone thực tế của Adjust phụ thuộc
   delivery method và account setting.
 - Các giá trị attribution hierarchy được random độc lập và không mô hình hóa entity
   campaign ổn định.
-- `appsflyer_id` có thể collision vì chỉ dùng một suffix random giới hạn; không dùng nó
+- `adjust_id` có thể collision vì chỉ dùng một suffix random giới hạn; không dùng nó
   làm unique key được đảm bảo trong test.
 - Device identifier là dữ liệu giả lập và không được hiểu là device identity thực tế.
 
@@ -542,11 +542,11 @@ Pull API canonical đã chọn.
 | TikTok | Không có | Advertiser/campaign hierarchy và country | Không |
 | GA4 | Không có trong schema hiện tại; GA4 production có thể dùng `user_id` không chứa PII | City, country, campaign/source context, traffic dimension tùy chọn sinh từ UTM | Không |
 | Zalo | `shared_info_phone` | Name, city, address | Không |
-| AppsFlyer | `customer_user_id`, `event_value.customer_id` | Original URL, device identifier, geography | Có, nhưng được nhúng trong field chứ không phải column riêng |
+| Adjust | `customer_user_id`, `event_value.customer_id` | Original URL, device identifier, geography | Có, nhưng được nhúng trong field chứ không phải column riêng |
 
 ### Mapping row-người dùng giả lập dự kiến
 
-- Meta, GA4, Zalo và AppsFlyer chọn người dùng dùng chung theo chu kỳ.
+- Meta, GA4, Zalo và Adjust chọn người dùng dùng chung theo chu kỳ.
 - Với `20` row và `8` người, vị trí người dùng sẽ lặp lại sau mỗi tám row.
 - TikTok row là quan sát quảng cáo tổng hợp và cố ý không có identity cấp cá nhân.
 - CIR thực tế nên normalize email và phone trước khi matching; name, city và device
@@ -578,7 +578,7 @@ Thuật toán đọc các file CSV sau từ `./all-data-simulator/platform_cir_c
 |---|---|---|
 | `meta_cir_api.csv` | Một lead | Cung cấp email và phone để nối identity |
 | `zalo_cir_api.csv` | Một profile user | Cung cấp phone để nối identity |
-| `appsflyer_cir_api.csv` | Một in-app event | Cung cấp `customer_user_id`, device ID và transaction ID |
+| `adjust_cir_api.csv` | Một in-app event | Cung cấp `customer_user_id`, device ID và transaction ID |
 | `ga4_cir_api.csv` | Một event/report row | Nối bằng `transactionId` khi có giá trị |
 | `tiktok_cir_api.csv` | Một ad/reporting-day row | Dữ liệu aggregate; không có identity cấp customer |
 
@@ -599,12 +599,12 @@ Identifier được namespace theo prefix để tránh collision giữa các lo�
 
 | Prefix | Ví dụ | Ý nghĩa |
 |---|---|---|
-| `CUID:` | `CUID:CUST-0001` | Customer ID trong CDP Master Profile bridge hoặc AppsFlyer |
+| `CUID:` | `CUID:CUST-0001` | Customer ID trong CDP Master Profile bridge hoặc Adjust |
 | `EMAIL:` | `EMAIL:an.nguyen@example.test` | Email identity |
 | `PHONE:` | `PHONE:84901234001` | Phone identity |
 | `META:` | `META:328000000000001` | Meta lead ID |
 | `ZALO:` | `ZALO:567826391599986760` | Zalo user ID |
-| `AF:` | `AF:174000000010-a1b2c3d4e5f6` | AppsFlyer ID |
+| `ADJ:` | `ADJ:174000000010-a1b2c3d4e5f6` | Adjust ID |
 | `TXN:` | `TXN:ORD-00003` | Transaction/order ID |
 
 ### 9.3. CDP Master Profile bridge giả lập
@@ -619,7 +619,7 @@ CUID:cuid <-> PHONE:phone
 ```
 
 Bridge này tạo điểm nối trung tâm giữa dữ liệu có PII-like field từ Meta/Zalo và
-`customer_user_id` từ AppsFlyer. Dữ liệu thực tế phải được normalize trước khi tạo
+`customer_user_id` từ Adjust. Dữ liệu thực tế phải được normalize trước khi tạo
 key và phải tuân thủ tenant boundary, consent và privacy policy.
 
 ### 9.4. Quy tắc nối theo từng nguồn
@@ -649,18 +649,18 @@ Với mỗi row có `shared_info_phone`:
 Zalo hiện chỉ dùng phone làm join key; `display_name`, address và city chỉ nằm trong
 timeline record.
 
-#### AppsFlyer
+#### Adjust
 
 Với mỗi row:
 
-1. Tạo `CUID:<customer_user_id>` và `AF:<appsflyer_id>`.
-2. Union customer ID với AppsFlyer ID.
+1. Tạo `CUID:<customer_user_id>` và `ADJ:<adjust_id>`.
+2. Union customer ID với Adjust ID.
 3. Parse `event_value` từ JSON string.
 4. Nếu JSON có `order_id`, tạo `TXN:<order_id>` và union transaction với CUID.
-5. Gắn raw row vào node AppsFlyer.
+5. Gắn raw row vào node Adjust.
 
 Nếu `event_value` không phải JSON hợp lệ, parser bỏ qua transaction link nhưng vẫn
-giữ lại AppsFlyer record.
+giữ lại Adjust record.
 
 #### GA4
 
@@ -696,7 +696,7 @@ Kết quả mỗi profile có dạng khái niệm:
   "identifiers": ["CUID:CUST-0001", "EMAIL:...", "META:..."],
   "timeline": [
     {"platform": "Meta Lead Ads", "data": {"...": "..."}},
-    {"platform": "AppsFlyer", "data": {"...": "..."}}
+    {"platform": "Adjust", "data": {"...": "..."}}
   ]
 }
 ```
@@ -714,7 +714,7 @@ Load CSV sources
 Create CDP Master Profile bridge: CUID <-> EMAIL/PHONE
       |
       v
-Add Meta, Zalo, AppsFlyer and GA4 identity edges
+Add Meta, Zalo, Adjust and GA4 identity edges
       |
       v
 Find roots with path compression
@@ -738,7 +738,7 @@ Return unified profiles with cross-platform timeline
 - Union là quan hệ bắc cầu: một key sai có thể làm nhiều record bị over-merge.
 - CDP Master Profile bridge đang hard-code trong test và chưa có tenant isolation, audit trail hoặc
   consent enforcement.
-- AppsFlyer `appsflyer_id` và device identifier là key kỹ thuật; không nên dùng riêng
+- Adjust `adjust_id` và device identifier là key kỹ thuật; không nên dùng riêng
   chúng làm customer identity chắc chắn.
 - GA4 row không có `transactionId` sẽ không được nối vào profile trong implementation
   hiện tại, dù row có thể có `user_id` hoặc hash identity.

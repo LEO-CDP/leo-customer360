@@ -460,7 +460,7 @@ Three small integration changes:
 
 ---
 
-## Phase 4: Dagster pipeline nhập dữ liệu thực từ AppsFlyer API & GA4 Data API
+## Phase 4: Dagster pipeline nhập dữ liệu thực từ Adjust API & GA4 Data API
 
 FOLDER: `backend-system/data_synch/`
 
@@ -475,20 +475,23 @@ Replace the placeholder `data_synch_job` with real ops. Follow the same structur
 
 ---
 
-### Task 4.1: AppsFlyer Pull-API Op
+### Task 4.1: Adjust Pull-API Op
 
-**Target file:** `backend-system/data_synch/ops/appsflyer_pull.py`
+**Target file:** `backend-system/data_synch/ops/adjust_pull.py`
 
-Implement `appsflyer_pull_op` using AppsFlyer Pull API v5:
+Implement `adjust_pull_op` using Adjust Pull API v5:
 
 ```
-Endpoint: GET https://hq1.appsflyer.com/api/raw-data/export/app/{app_id}/
-          installs_report/v5?from=<date>&to=<date>&timezone=Asia/Ho_Chi_Minh
-Auth:     Bearer token from env AF_API_TOKEN
-Output:   CSV stream → parse rows → upsert into crm_campaign_performance_daily
+Endpoint: GET https://automate.adjust.com/reports-service/report
+                    ?app_token__in=<ADJUST_APP_TOKEN>
+                    &date_period=<from>:<to>
+                    &dimensions=day,campaign,campaign_id_network
+                    &metrics=impressions,clicks,installs,cost
+Auth:     Bearer token from env ADJUST_API_TOKEN
+Output:   JSON payload (`rows`) → parse rows → upsert into crm_campaign_performance_daily
           (match campaign via metadata->>'utm_campaign' == campaign_code.lower())
 Columns mapped:
-  Install Time → report_date
+    day → report_date
   Cost → spend (convert currency if needed)
   Impressions, Clicks, Installs → impressions, clicks, conversions
   Revenue → revenue_estimated
@@ -557,7 +560,7 @@ Fetches once per job run and passes the dict to both ops via Dagster's op output
 Define the following:
 
 ```python
-@job(name="data_synch_appsflyer_job")   # runs appsflyer_pull_op only
+@job(name="data_synch_adjust_job")   # runs adjust_pull_op only
 @job(name="data_synch_ga4_job")          # runs ga4_pull_op only
 @job(name="data_synch_job")              # runs both in sequence (replaces placeholder)
 
@@ -580,15 +583,15 @@ Add:
 ```
 dagster>=1.9,<2
 google-analytics-data>=0.18
-requests>=2.31           # AppsFlyer Pull API HTTP client
+requests>=2.31           # Adjust Pull API HTTP client
 psycopg2-binary>=2.9
 python-dotenv>=1.0
 ```
 
 **Environment variables** (document in `backend-system/data_synch/.env.example`):
 ```
-AF_API_TOKEN=               # AppsFlyer Pull API v5 bearer token
-AF_APP_ID=                  # e.g. id123456789
+ADJUST_API_TOKEN=           # Adjust Reports API bearer token
+ADJUST_APP_TOKEN=           # Adjust app token used in report filters
 GA4_PROPERTY_ID=            # numeric GA4 property id
 GA4_SERVICE_ACCOUNT_JSON=   # base64-encoded service account JSON
 DATA_SYNCH_LOOKBACK_DAYS=7

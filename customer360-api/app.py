@@ -58,7 +58,7 @@ app = FastAPI(
         "CRUD + reporting API over the customer360 PostgreSQL schema "
         "(core-customer360/database-schema.sql), covering CRM entities and "
         "the full Customer Identity Resolution (CIR) pipeline: raw profile "
-        "staging (AppsFlyer/MoEnger/...), master profiles, "
+        "staging (Adjust/OneSignal/...), master profiles, "
         "profile links, matching-rule metadata, and resolution reporting."
     ),
     version=settings.api_version,

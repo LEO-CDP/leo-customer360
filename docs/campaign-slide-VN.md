@@ -25,7 +25,7 @@ style: |
 ## Trong nền tảng Customer 360
 
 Đo lường hiệu quả chiến dịch đa kênh theo thời gian thực
-(Google Ads · Meta · TikTok · Zalo · AppsFlyer · YouTube · GA4 UTM)
+(Google Ads · Meta · TikTok · Zalo · Adjust · YouTube · GA4 UTM)
 
 ---
 
@@ -34,7 +34,7 @@ style: |
 1. Vấn đề: chiến dịch đa kênh không có góc nhìn thống nhất
 2. Kiến trúc hệ thống tổng thể
 3. Cơ sở dữ liệu: schema & view
-4. AppsFlyer và GA4 UTM Tracking
+4. Adjust và GA4 UTM Tracking
 5. Demo dữ liệu mẫu (8 chiến dịch thực tế)
 6. Backend: Models → Schemas → Repository → API
 7. Unit Tests
@@ -56,7 +56,7 @@ Một doanh nghiệp chạy cùng lúc nhiều chiến dịch trên nhiều nề
 | **Meta Ads** | Paid Social (Facebook/Instagram) | Meta Pixel + Conversions API |
 | **TikTok Ads** | Short Video, In-Feed | TikTok Pixel |
 | **Zalo Ads** | Zalo Social | Zalo OA Analytics |
-| **AppsFlyer** | Mobile App (iOS/Android) | Deep Link + In-App Event |
+| **Adjust** | Mobile App (iOS/Android) | Deep Link + In-App Event |
 | **YouTube** | Video Brand Awareness | GA4 UTM (`utm_medium=video`) |
 
 ➡️ Không có **một bảng điều khiển thống nhất** → không so sánh được ROAS, CPA, CTR giữa các kênh.
@@ -114,7 +114,7 @@ Một doanh nghiệp chạy cùng lúc nhiều chiến dịch trên nhiều nề
 | **Nội dung** | `name`, `description`, `keywords[]`, `lang` | Mô tả chiến dịch |
 | **Thời gian** | `start_date`, `end_date` | Khoảng chạy |
 | **Tài chính** | `budget_amount` (NUMERIC 18,2), `currency` (CHAR 3) | Ngân sách |
-| **Tracking** | `metadata` JSONB | UTM params, AppsFlyer config |
+| **Tracking** | `metadata` JSONB | UTM params, Adjust config |
 | **Bảo mật** | `tenant_id`, RLS policy | Cách ly đa tenant |
 
 ---
@@ -166,7 +166,7 @@ GROUP BY c.tenant_id, c.campaign_id, ...
 
 ---
 
-# 4. AppsFlyer & GA4 UTM Tracking
+# 4. Adjust & GA4 UTM Tracking
 
 ---
 
@@ -193,23 +193,23 @@ GROUP BY c.tenant_id, c.campaign_id, ...
 
 ---
 
-## AppsFlyer — Mobile Attribution
+## Adjust — Mobile Attribution
 
-AppsFlyer theo dõi **hành trình cài đặt và in-app event** trên mobile:
+Adjust theo dõi **hành trình cài đặt và in-app event** trên mobile:
 
 ```
 [Quảng cáo TikTok/Google/Meta]
         ↓ click
-[AppsFlyer Deep Link]
+[Adjust Deep Link]
         ↓ install detected
 [crm_campaign_performance_daily]
-    campaign_id = "BANK-CLV-AF-005"
-    platform    = "AppsFlyer"
+  campaign_id = "BANK-CLV-ADJ-005"
+    platform    = "Adjust"
     conversions = số lượt install đủ điều kiện
     spend       = chi phí attribution (CPI model)
 ```
 
-- `platform = "AppsFlyer"` → `tracking_platform = "appsflyer"` trong metadata
+- `platform = "Adjust"` → `tracking_platform = "adjust"` trong metadata
 - Metric profile đặc trưng: **CTR cao hơn** (~6%), **CVR cao hơn** (~15%) do retargeting người dùng đã cài
 
 ---
@@ -222,7 +222,7 @@ AppsFlyer theo dõi **hành trình cài đặt và in-app event** trên mobile:
 | **Meta** | 15K–60K | 1.8% | 5% | CPM + Conversions API |
 | **TikTok** | 20K–80K | 1.2% | 3% | CPM |
 | **Zalo** | 5K–25K | 2.5% | 6% | CPC |
-| **AppsFlyer** | 3K–15K | **6%** | **15%** | Retargeting (CPI) |
+| **Adjust** | 3K–15K | **6%** | **15%** | Retargeting (CPI) |
 | **YouTube** | 30K–120K | 0.5% | 1.5% | CPV Brand |
 
 ---
@@ -239,7 +239,7 @@ AppsFlyer theo dõi **hành trình cài đặt và in-app event** trên mobile:
 | `RETAIL-MEGA-META-002` | Paid Social | Meta | Conversions | 320M VND | Active |
 | `RE-AWARE-TIKTOK-003` | Paid Social | TikTok | Awareness | 180M VND | Active |
 | `TRAVEL-Q1-ZALO-004` | Paid Social | Zalo | Leads | 150M VND | Paused |
-| `BANK-CLV-AF-005` | Push Notification | AppsFlyer | Retention | 200M VND | Active |
+| `BANK-CLV-ADJ-005` | Push Notification | Adjust | Retention | 200M VND | Active |
 | `RETAIL-EMAIL-006` | Email | Google | Conversions | 80M VND | Completed |
 | `RE-YT-BRAND-007` | Video | YouTube | Awareness | 250M VND | Active |
 | `TRAVEL-PMAX-008` | Paid Search | Google | Conversions | 400M VND | Draft |
@@ -475,6 +475,6 @@ Seed ✅
 ## Tiếp theo
 
 - **Phase 3**: Frontend dashboard (Handlebars + Chart.js)
-- **Phase 4**: Dagster pipeline nhập dữ liệu thực từ AppsFlyer API & GA4 Data API
+- **Phase 4**: Dagster pipeline nhập dữ liệu thực từ Adjust API & GA4 Data API
 - **Phase 5**: AI-powered campaign recommendation
   (dựa trên ROAS / CVR / lifecycle stage từ CIR master profiles)

@@ -135,7 +135,7 @@ The backend uses a layered data architecture.
                  |                      |
                  | CRM / Web / Mobile   |
                  | POS / E-commerce     |
-                 | AppsFlyer / Zalo     |
+                 | Adjust / Zalo     |
                  | Forms / Surveys      |
                  +----------+-----------+
                             |

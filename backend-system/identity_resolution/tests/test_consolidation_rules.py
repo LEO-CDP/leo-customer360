@@ -142,12 +142,12 @@ class TestScalarConsolidationHelpers:
     def test_source_priority_prefers_higher_ranked_source(self, mock_conn):
         resolver = make_resolver(mock_conn)
         current_master = {"source_systems": ["core_banking"], "updated_at": datetime(2026, 7, 1, tzinfo=timezone.utc)}
-        raw_profile = {"source_system": "moengage", "created_at": datetime(2026, 7, 2, tzinfo=timezone.utc)}
+        raw_profile = {"source_system": "onesignal", "created_at": datetime(2026, 7, 2, tzinfo=timezone.utc)}
         rule = IdentityRule(
             "external_customer_id",
             "exact",
             consolidation_rule="source_priority",
-            consolidation_config={"source_priority": ["core_banking", "crm", "moengage"]},
+            consolidation_config={"source_priority": ["core_banking", "crm", "onesignal"]},
         )
 
         result = resolver._resolve_scalar_consolidation(
@@ -244,16 +244,16 @@ class TestScalarConsolidationHelpers:
         assert result == "new-id"
 
     def test_source_priority_matching_is_case_insensitive(self, mock_conn):
-        """Real source_system values are PascalCase (e.g. 'AppsFlyer'); config
+        """Real source_system values are PascalCase (e.g. 'Adjust'); config
         authors may not match casing exactly -- ranking must still work."""
         resolver = make_resolver(mock_conn)
-        current_master = {"source_systems": ["MoEngage"], "updated_at": datetime(2026, 7, 1, tzinfo=timezone.utc)}
+        current_master = {"source_systems": ["OneSignal"], "updated_at": datetime(2026, 7, 1, tzinfo=timezone.utc)}
         raw_profile = {"source_system": "CoreBanking", "created_at": datetime(2026, 7, 2, tzinfo=timezone.utc)}
         rule = IdentityRule(
             "external_customer_id",
             "exact",
             consolidation_rule="source_priority",
-            consolidation_config={"source_priority": ["corebanking", "moengage"]},
+            consolidation_config={"source_priority": ["corebanking", "onesignal"]},
         )
 
         result = resolver._resolve_scalar_consolidation(
@@ -343,7 +343,7 @@ class TestConsolidationInLinkUpdate:
             "raw_profile_id": "r1",
             "tenant_id": "t1",
             "domain": "banking",
-            "source_system": "moengage",
+            "source_system": "onesignal",
             "created_at": datetime(2026, 7, 2, tzinfo=timezone.utc),
             "full_name": "New Name",
             "email": "new@example.com",
@@ -377,7 +377,7 @@ class TestConsolidationInLinkUpdate:
                 "phone_number",
                 "exact",
                 consolidation_rule="source_priority",
-                consolidation_config={"source_priority": ["core_banking", "moengage"]},
+                consolidation_config={"source_priority": ["core_banking", "onesignal"]},
             ),
             IdentityRule("national_id", "exact", consolidation_rule="overwrite"),
         ]

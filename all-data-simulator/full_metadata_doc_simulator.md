@@ -53,7 +53,7 @@ Meta Lead Ads\\
 TikTok Ads\\
 Google Analytics 4\\
 Zalo Official Account\\
-AppsFlyer Pull API}}
+Adjust Pull API}}
 & $\longrightarrow$ &
 \fcolorbox{black}{gray!10}{\parbox{0.18\linewidth}{\centering
 	{Fields}\\[3pt]
@@ -82,7 +82,7 @@ Merge customer identities}}
 | `tiktok_cir_api.csv` | TikTok Ads | One ad/reporting-day row |
 | `ga4_cir_api.csv` | Google Analytics 4 | One synthetic event/report row |
 | `zalo_cir_api.csv` | Zalo Official Account | One user profile row |
-| `appsflyer_cir_api.csv` | AppsFlyer | One in-app event row |
+| `adjust_cir_api.csv` | Adjust | One in-app event row |
 
 ### Generator index
 
@@ -92,7 +92,7 @@ Merge customer identities}}
 | `generate_tiktok_data` | `tiktok_cir_api.csv` |
 | `generate_ga4_data` | `ga4_cir_api.csv` |
 | `generate_zalo_data` | `zalo_cir_api.csv` |
-| `generate_appsflyer_data` | `appsflyer_cir_api.csv` |
+| `generate_adjust_data` | `adjust_cir_api.csv` |
 
 ### Runtime and output metadata
 
@@ -122,7 +122,7 @@ does not use a person record.
 
 | Attribute | Type | Example | Purpose |
 |---|---|---|---|
-| `cid` | string | `CUST-0001` | Synthetic customer key; appears in AppsFlyer `customer_user_id` and JSON `event_value` |
+| `cid` | string | `CUST-0001` | Synthetic customer key; appears in Adjust `customer_user_id` and JSON `event_value` |
 | `name` | string | `Nguyen An` | Full display name for Meta and Zalo |
 | `first` | string | `An` | Meta lead first name |
 | `last` | string | `Nguyen` | Meta lead last name |
@@ -134,7 +134,7 @@ does not use a person record.
 | `gender` | integer | `1` | Zalo user gender simulation: code comments define `1` male, `2` female, `0` other/unknown |
 
 Identity linkage is synthetic. Real platform IDs are not used as a shared customer key.
-The strongest simulated CIR keys are email, phone, name, and the AppsFlyer
+The strongest simulated CIR keys are email, phone, name, and the Adjust
 `customer_user_id`/`event_value.customer_id` pair.
 
 \newpage
@@ -459,14 +459,14 @@ attributes into CSV columns.
 
 \newpage
 
-## 7. AppsFlyer Pull API Raw-Data Metadata
+## 7. Adjust Pull API Raw-Data Metadata
 
 ### Source contract
 
-- Pull API raw data: [AppsFlyer Pull API raw data](https://support.appsflyer.com/hc/en-us/articles/360007530258-Pull-API-raw-data)
-- Raw data field dictionary: [AppsFlyer raw data field dictionary](https://support.appsflyer.com/hc/en-us/articles/208387843-Raw-data-field-dictionary)
+- Pull API raw data: [Adjust Pull API raw data](https://support.adjust.com/hc/en-us/articles/360007530258-Pull-API-raw-data)
+- Raw data field dictionary: [Adjust raw data field dictionary](https://support.adjust.com/hc/en-us/articles/208387843-Raw-data-field-dictionary)
 
-AppsFlyer raw-data reports use a broad, report-dependent schema. Fields can be empty
+Adjust raw-data reports use a broad, report-dependent schema. Fields can be empty
 or unavailable depending on report type, platform, attribution source, privacy settings,
 and delivery method. This simulator models an in-app-event report with a selected set
 of canonical Pull API field names.
@@ -475,11 +475,11 @@ of canonical Pull API field names.
 
 | Item | Value |
 |---|---|
-| File | `appsflyer_cir_api.csv` |
-| Grain | One synthetic AppsFlyer in-app event |
+| File | `adjust_cir_api.csv` |
+| Grain | One synthetic Adjust in-app event |
 | Rows | `Config.NUM_ROWS` |
 | Identity fields | `customer_user_id`, JSON `event_value.customer_id`, device identifiers |
-| Event set | `af_login`, `af_content_view`, `af_add_to_cart`, `af_purchase` |
+| Event set | `adj_login`, `adj_content_view`, `adj_add_to_cart`, `adj_purchase` |
 | Time format | `YYYY-MM-DD HH:MM:SS` without an explicit timezone |
 | Event value format | JSON string; purchase rows include `customer_id` and `order_id` |
 | Revenue currency | Fixed `VND` for rows with synthetic revenue |
@@ -492,7 +492,7 @@ of canonical Pull API field names.
 | `attributed_touch_time` | string datetime | non-null | Install time minus a random 5 to 60 minutes |
 | `install_time` | string datetime | non-null | Base date plus random 0 to 5 days and 1 to 12 hours |
 | `event_time` | string datetime | non-null | Install time plus random 5 to 120 minutes |
-| `event_name` | string enum-like | non-null | Random AppsFlyer event name from the four-event set |
+| `event_name` | string enum-like | non-null | Random Adjust event name from the four-event set |
 | `event_value` | string JSON | non-null | JSON containing `customer_id`; purchase rows also contain `order_id` |
 | `event_revenue` | decimal | non-null | Random 100,000 to 500,000 for purchase rows; `0` otherwise |
 | `event_revenue_currency` | string currency code | non-null | Fixed `VND` |
@@ -500,26 +500,26 @@ of canonical Pull API field names.
 | `media_source` | string enum-like | non-null | Random `facebook`, `tiktok`, `googleadwords_int`, or `zalo` |
 | `channel` | string | non-null | Random display label: `Facebook Ads`, `TikTok Ads`, `Google Ads`, or `Zalo` |
 | `campaign` | string | non-null | Synthetic campaign name; random suffix from 1 to 4 |
-| `campaign_id` | string | non-null | Synthetic AppsFlyer campaign ID `AF-CAMP-NNN` |
+| `campaign_id` | string | non-null | Synthetic Adjust campaign ID `ADJ-CAMP-NNN` |
 | `adset` | string | non-null | Synthetic ad set name; random suffix from 1 to 5 |
-| `adset_id` | string | non-null | Synthetic ad set ID `AF-AS-NNN` |
+| `adset_id` | string | non-null | Synthetic ad set ID `ADJ-AS-NNN` |
 | `ad` | string | non-null | Synthetic creative name; random suffix from 1 to 7 |
-| `ad_id` | string | non-null | Synthetic ad ID `AF-AD-NNN` |
+| `ad_id` | string | non-null | Synthetic ad ID `ADJ-AD-NNN` |
 | `country_code` | string ISO-like code | non-null | Shared person's country, currently `VN` |
 | `state` | string | non-null | Shared person's state/province |
 | `city` | string | non-null | Shared person's city |
 | `postal_code` | string | non-null | Synthetic six-digit-looking postal code from 700010 to 700099 |
 | `ip` | string IPv4-like | non-null | Synthetic IPv4-like address beginning `103.21.` |
-| `operator` | string | non-null | Random `Viettel`, `MobiFone`, or `VinaPhone`; AppsFlyer field dictionary name used by current code |
+| `operator` | string | non-null | Random `Viettel`, `MobiFone`, or `VinaPhone`; Adjust field dictionary name used by current code |
 | `language` | string BCP-47-like | non-null | Fixed `vi` |
-| `appsflyer_id` | string | non-null | Synthetic SDK-generated-looking ID; random two-digit segment means uniqueness is not guaranteed |
+| `adjust_id` | string | non-null | Synthetic SDK-generated-looking ID; random two-digit segment means uniqueness is not guaranteed |
 | `advertising_id` | string UUID-like | non-null | Synthetic resettable advertising ID; row-index suffix makes this simulator-unique |
 | `idfa` | string | empty on Android | Synthetic iOS advertising identifier; empty when `is_android` is true |
 | `android_id` | string | empty on iOS | Synthetic Android identifier; empty when `is_android` is false |
-| `customer_user_id` | string | non-null | Shared synthetic `cid`, strongest AppsFlyer-to-CIR key |
+| `customer_user_id` | string | non-null | Shared synthetic `cid`, strongest Adjust-to-CIR key |
 | `idfv` | string | empty on Android | Synthetic iOS vendor identifier; empty when `is_android` is true |
 | `platform` | string enum-like | non-null | `android` or `ios`, selected by `is_android` |
-| `device_type` | string | non-null | Synthetic device model label; AppsFlyer field dictionary notes this field is deprecated/unpopulated in favor of device model in current reports |
+| `device_type` | string | non-null | Synthetic device model label; Adjust field dictionary notes this field is deprecated/unpopulated in favor of device model in current reports |
 | `os_version` | string | non-null | Random Android `14`/`15` or iOS `17.6`/`16.7` |
 | `app_version` | string | non-null | Fixed `6.8.1` |
 | `sdk_version` | string | non-null | Fixed `6.15.0` |
@@ -531,13 +531,13 @@ of canonical Pull API field names.
 
 ### Simulator limitations
 
-- This is a selected subset of the AppsFlyer main schema, not a complete raw-data field
+- This is a selected subset of the Adjust main schema, not a complete raw-data field
   dictionary export.
 - The timestamp strings omit timezone information even though delivery method and account
-  settings affect real AppsFlyer timestamp timezone behavior.
+  settings affect real Adjust timestamp timezone behavior.
 - Attribution hierarchy values are independently randomized and are not a stable campaign
   entity model.
-- `appsflyer_id` can collide because only a limited random suffix is used; do not use it
+- `adjust_id` can collide because only a limited random suffix is used; do not use it
   as a guaranteed unique key in tests.
 - Device identifiers are synthetic and must not be interpreted as real device identity.
 
@@ -551,11 +551,11 @@ of canonical Pull API field names.
 | TikTok | None | Advertiser/campaign hierarchy and country only | No |
 | GA4 | None in current schema; production GA4 may use non-PII `user_id` | City, country, campaign/source context, optional UTM-derived traffic dimensions | No |
 | Zalo | `shared_info_phone` | Name, city, address | No |
-| AppsFlyer | `customer_user_id`, `event_value.customer_id` | Original URL, device identifiers, geography | Yes, embedded in fields rather than as a column |
+| Adjust | `customer_user_id`, `event_value.customer_id` | Original URL, device identifiers, geography | Yes, embedded in fields rather than as a column |
 
 ### Expected synthetic row-to-person mapping
 
-- Meta, GA4, Zalo, and AppsFlyer select shared people cyclically.
+- Meta, GA4, Zalo, and Adjust select shared people cyclically.
 - With `20` rows and `8` people, person positions repeat after every eight rows.
 - TikTok rows are aggregate advertising observations and intentionally have no person-level
   identity.

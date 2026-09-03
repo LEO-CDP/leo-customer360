@@ -2,7 +2,7 @@
 # End-to-end Customer Identity Resolution (CIR) demo:
 #   1. Loads DB config from .env (see core-customer360/dev-start-pgsql.sh)
 #   2. Creates/reuses a virtualenv and installs requirements.txt
-#   3. Seeds sample AppsFlyer / MoEngage / Web Tracking raw profiles
+#   3. Seeds sample Adjust / OneSignal / Web Tracking raw profiles
 #      (retail + banking domains)
 #   4. Runs identity resolution batch(es) against them
 #   5. Prints the resulting master profiles + ready-to-use psql commands so
@@ -56,7 +56,7 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 echo "📥 Installing requirements..."
 "$VENV_PYTHON" -m pip install -q -r requirements.txt
 
-echo "🌱 Seeding sample AppsFlyer / MoEngage / Web Tracking data (retail + banking)..."
+echo "🌱 Seeding sample Adjust / OneSignal / Web Tracking data (retail + banking)..."
 "$VENV_PYTHON" scripts/init_sample_data.py
 
 echo "⚙️  Running Customer Identity Resolution..."

@@ -143,7 +143,7 @@ class TestFindMasterProfile:
             "raw_profile_id": "r1",
             "tenant_id": "t1",
             "domain": "retail",
-            "source_system": "MoEngage",
+            "source_system": "OneSignal",
             "external_customer_id": "moe-999",
         }
         rules = [IdentityRule("external_customer_id", "exact")]
@@ -153,7 +153,7 @@ class TestFindMasterProfile:
         assert result == "master-3"
         query, params = mock_cursor.execute.call_args[0]
         assert "external_ids @> jsonb_build_object(%s::text, %s::text)" in query
-        assert params == ("t1", "retail", "MoEngage", "moe-999")
+        assert params == ("t1", "retail", "OneSignal", "moe-999")
 
     def test_jsonb_keyed_field_skipped_without_source_system(self, mock_cursor, mock_conn):
         resolver = make_resolver(mock_conn)
@@ -276,7 +276,7 @@ class TestLinkAndUpdate:
             "cookie_id": None,
             "external_customer_id": "af-1",
             "push_token": "push-token-1",
-            "source_system": "AppsFlyer",
+            "source_system": "Adjust",
         }
 
         resolver._link_and_update(mock_cursor, raw_profile, "master-1")
@@ -370,7 +370,7 @@ class TestCreateMasterAndLink:
             "cookie_id": "cookie-2",
             "external_customer_id": "moe-2",
             "push_token": "push-2",
-            "source_system": "MoEngage",
+            "source_system": "OneSignal",
         }
 
         new_id = resolver._create_master_and_link(mock_cursor, raw_profile)
@@ -383,12 +383,12 @@ class TestCreateMasterAndLink:
         assert "RETURNING master_profile_id" in insert_query
         assert insert_params[0] == "t1"
         assert insert_params[1] == "retail"
-        assert insert_params[5].adapted == {"MoEngage": "moe-2"}  # external_ids
+        assert insert_params[5].adapted == {"OneSignal": "moe-2"}  # external_ids
         assert insert_params[6] == ["dev-2"]  # device_ids
         assert insert_params[7] == ["adv-2"]  # advertising_ids
         assert insert_params[8] == ["cookie-2"]  # cookie_ids
-        assert insert_params[9].adapted == {"MoEngage": "push-2"}  # push_tokens
-        assert insert_params[10] == ["MoEngage"]  # source_systems
+        assert insert_params[9].adapted == {"OneSignal": "push-2"}  # push_tokens
+        assert insert_params[10] == ["OneSignal"]  # source_systems
         assert insert_params[11] == "r2"  # first_seen_raw_profile_id
         # Plaintext full_name here (not a SHA-256 hex digest) -> not flagged hashed, no persona_name.
         assert insert_params[12] is False  # is_hashed
@@ -411,7 +411,7 @@ class TestCreateMasterAndLink:
             "national_id": None,
             "device_id": "dev-3",
             "media_source": "Facebook Ads",
-            "source_system": "AppsFlyer",
+            "source_system": "Adjust",
         }
 
         resolver._create_master_and_link(mock_cursor, raw_profile)
@@ -506,7 +506,7 @@ class TestRunResolutionBatch:
                 "raw_profile_id": "r2",
                 "tenant_id": "t1",
                 "domain": "retail",
-                "source_system": "AppsFlyer",
+                "source_system": "Adjust",
                 "full_name": "Tran Thi B",
                 "email": "b@example.com",
                 "phone_number": "5551234567",
@@ -597,7 +597,7 @@ class TestPersonaEngineWiring:
                 "raw_profile_id": "r2",
                 "tenant_id": "t1",
                 "domain": "retail",
-                "source_system": "AppsFlyer",
+                "source_system": "Adjust",
                 "full_name": "Tran Thi B",
                 "email": "b@example.com",
                 "phone_number": None,
