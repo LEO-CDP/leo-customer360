@@ -52,26 +52,34 @@ dependency-install loop synchronized. The image must install the
 `requirements.txt` file from each of the nine task directories so every code
 location can load successfully at runtime.
 
-## Persistence layer (Postgres storage — scaling Phase 0)
+## Persistence layer — adaptive storage (scaling Phase 0)
 
-Dagster run/event/schedule storage lives in the **shared PostgreSQL** server, not a local SQLite
-file. This is configured by `backend-system/dagster.yaml` (the Dagster **instance** config, distinct
-from `k8s/base/dagster.yaml` which is the k8s manifest), baked into `DAGSTER_HOME` by the Dockerfile:
+Dagster's instance config is **rendered at container start**, not baked, so the orchestrator boots
+**with or without** Postgres/S3 on every environment (local, UAT, PROD — Docker on vServer today).
+`entrypoint.sh` runs `scripts/render_dagster_instance.py`, which probes the backends and writes
+`$DAGSTER_HOME/dagster.yaml`, then `exec`s the Dagster command:
 
-- Storage targets a **dedicated `dagster` database** on the same PG server; the connection reuses the
-  app's `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` env (only the DB name is fixed to `dagster`).
-- The `dagster` database must **pre-exist** — Dagster auto-creates its *tables* but not the *database*.
-  In k8s an init container (`create-dagster-db`) creates it idempotently; on the VM path
-  `deployments/server/deploy-backend.sh` creates it before starting the container via a one-shot
-  `postgres:16-alpine` psql client (the `DB_USER` needs `CREATEDB`).
-- Consequences: the `customer360-dagster` image must be **rebuilt** (Dockerfile added `dagster-postgres`
-  and the baked `dagster.yaml`), and the k8s Deployment **no longer uses the `dagster-home` PVC**
-  (the single-writer SQLite volume is gone — the prerequisite for running >1 Dagster replica later).
-- Compute logs: **in k8s** they go to S3/MinIO via `S3ComputeLogManager`, layered on top of the baked
-  config by the `dagster-instance` ConfigMap (`k8s/base/dagster.yaml`); credentials map from the
-  MinIO/vStorage secret and a baked `/app/aws-config` (`AWS_CONFIG_FILE`) forces S3 path-style. The
-  **single-pod VM path** keeps local compute logs (adequate until it scales). The compute-log bucket
-  (`MINIO_BUCKET`, under the `dagster-compute-logs/` prefix) must already exist.
+- **Storage:** if the DB is reachable it uses **shared PostgreSQL** run/event/schedule storage in a
+  **dedicated `dagster` database** (created best-effort if missing — the `DB_USER` needs `CREATEDB`),
+  reusing the app's `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD`. If the DB is **unreachable or
+  absent**, it falls back to Dagster's **local SQLite** default. The renderer creates the database, so
+  no init container or deploy-time psql step is needed.
+- **Compute logs:** if `S3_ENDPOINT` + `MINIO_BUCKET` + credentials are set **and** the bucket answers
+  a `head_bucket`, logs go to **S3/MinIO** (`S3ComputeLogManager`, under the `dagster-compute-logs/`
+  prefix; creds come from `AWS_ACCESS_KEY_ID/_SECRET`, falling back to `MINIO_ROOT_USER/PASSWORD`; a
+  baked `/app/aws-config` with `AWS_CONFIG_FILE` forces S3 path-style). Otherwise it uses **local**
+  compute logs. The bucket must already exist — the manager does not create it.
+- **Never fails closed:** every probe is wrapped so any error just drops that backend to its local
+  default; a total render failure still leaves Dagster on SQLite + local logs. So a Postgres/S3 outage
+  degrades durability, never availability.
+- **Consequences:** the `customer360-dagster` image must be **rebuilt** (adds `dagster-postgres` +
+  `dagster-aws`, the entrypoint, and the renderer). On the Docker/VM path nothing else is required —
+  `deploy-backend.sh` just backs up the old `DAGSTER_HOME` and (re)runs the container.
+
+> **Durability note (SQLite fallback):** the container's `DAGSTER_HOME` is ephemeral (no volume), so
+> when it falls back to SQLite the run history does not survive a redeploy. That is fine for keeping
+> the service **available** during a Postgres outage; for durable history, restore Postgres and
+> redeploy so the renderer switches storage back automatically.
 
 ## Migrating existing Dagster history to PostgreSQL (UAT / PROD)
 
@@ -101,7 +109,7 @@ Dagster has created its tables:
 mkdir -p /tmp/old && tar -C /tmp/old -xf /opt/c360/dagster-home-backup-<ts>.tar   # -> /tmp/old/dagster_home
 # dry run first — reports row counts, writes nothing
 sudo docker run --rm --network host --env-file /opt/c360/backend.env -v /tmp/old:/old \
-  customer360-dagster python /app/scripts/migrate_dagster_sqlite_to_postgres.py \
+  --entrypoint python customer360-dagster /app/scripts/migrate_dagster_sqlite_to_postgres.py \
   --old-dagster-home /old/dagster_home --dry-run
 # then drop --dry-run to commit
 ```

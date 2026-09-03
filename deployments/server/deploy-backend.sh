@@ -114,23 +114,10 @@ if sudo docker ps -a --format '{{.Names}}' | grep -qx backend-system; then
     rm -f "$bak"; echo "   (nothing to back up, or copy failed — continuing)"
   fi
 fi
-# Ensure the dedicated `dagster` metadata database exists before the orchestrator
-# starts. Dagster auto-creates its TABLES but not the DATABASE; the k8s path does
-# this in an init container, the VM path does it here with a one-shot psql client
-# (no psql needed on the host). Idempotent; the DB user needs CREATEDB.
-echo "   ensuring 'dagster' database exists on ${DB_HOST}:${DB_PORT} ..."
-sudo docker run --rm --network host \
-  -e PGHOST="$DB_HOST" -e PGPORT="$DB_PORT" -e PGUSER="$DB_USER" \
-  -e PGPASSWORD="$DB_PW" -e PGDATABASE=postgres \
-  postgres:16-alpine sh -c '
-    set -e
-    until pg_isready >/dev/null 2>&1; do echo "   waiting for postgres..."; sleep 2; done
-    if psql -tAc "SELECT 1 FROM pg_database WHERE datname='\''dagster'\''" | grep -q 1; then
-      echo "   database dagster already exists"
-    else
-      echo "   creating database dagster"; createdb dagster
-    fi
-  '
+# NOTE: the container's entrypoint (render_dagster_instance.py) ensures the
+# dedicated `dagster` database exists and picks storage adaptively — shared
+# PostgreSQL if reachable, else local SQLite — so the deploy does NOT hard-depend
+# on Postgres being up. Nothing to do here.
 sudo docker rm -f backend-system >/dev/null 2>&1 || true
 sudo docker run -d --name backend-system --restart unless-stopped --network host --env-file /opt/c360/backend.env "$RUN_IMG"
 sleep 3

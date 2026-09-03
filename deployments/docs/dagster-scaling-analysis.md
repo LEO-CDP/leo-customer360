@@ -426,16 +426,16 @@ spec:
 
 ## 10. Phased rollout
 
-1. **Phase 0 — storage (no topology change).** ✅ **Storage step implemented** — run/event/schedule
-   storage now targets the shared PostgreSQL (dedicated `dagster` DB) via
-   [`backend-system/dagster.yaml`](../../backend-system/dagster.yaml) (baked into `DAGSTER_HOME` by the
-   Dockerfile); the k8s Deployment ([`k8s/base/dagster.yaml`](../../k8s/base/dagster.yaml)) drops the
-   single-writer SQLite RWO PVC and adds an idempotent init container that `CREATE DATABASE dagster`.
-   Dagster auto-creates its tables on first boot. Still one `dagster dev` pod. **Reversible.**
-   ✅ **Compute logs → S3/MinIO implemented (k8s)** — a `dagster-instance` ConfigMap layers
-   `S3ComputeLogManager` on top of the baked config so logs land in object storage (any pod can serve
-   them); creds map from the MinIO/vStorage secret and a baked AWS config forces S3 path-style. The
-   single-pod VM path keeps local compute logs (fine until it scales). Phase 0 is now complete.
+1. **Phase 0 — storage (no topology change). ✅ Implemented, adaptive & fail-open.** The instance
+   config is **rendered at container start** by `entrypoint.sh` →
+   [`scripts/render_dagster_instance.py`](../../backend-system/scripts/render_dagster_instance.py),
+   which probes the backends and writes `$DAGSTER_HOME/dagster.yaml`:
+   **shared PostgreSQL** run/event/schedule storage (dedicated `dagster` DB, created best-effort) **if
+   the DB is reachable, else local SQLite**; **S3/MinIO compute logs** (`S3ComputeLogManager`, path-style)
+   **if the bucket answers, else local logs**. Every probe is wrapped, so a Postgres/S3 outage degrades
+   durability, never availability — the orchestrator **always boots** on local, UAT and PROD (Docker on
+   vServer today), with or without those backends. No baked config, no init container, no PVC, no
+   deploy-time psql step. Still one `dagster dev` container. **Reversible.**
    **Existing-data cutover:** the old SQLite run history is operational metadata (business data lives
    in the customer360 DB + S3) and the VM's `DAGSTER_HOME` is ephemeral — `deploy-backend.sh` auto-backs
    it up before redeploy, and a best-effort importer
