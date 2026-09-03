@@ -3,7 +3,7 @@ core-customer360/database-schema.sql that ``init_sample_data.py`` +
 ``run_demo_resolution.py`` do NOT already exercise.
 
 Those two scripts only cover the Customer Identity Resolution (CIR) slice:
-AppsFlyer raw-profile ingestion -> resolved ``cdp_master_profiles`` rows. This
+Adjust raw-profile ingestion -> resolved ``cdp_master_profiles`` rows. This
 script MUST run AFTER ``run_demo_resolution.py`` (see ``run-demo.sh``) so it
 can enrich the already-resolved master profiles and link new demo rows to
 real ``master_profile_id`` values. It covers:
@@ -15,25 +15,25 @@ real ``master_profile_id`` values. It covers:
 2. Relations: ``cdp_relation_types`` (friend/colleague/family/customer-contact)
    + ``cdp_relations`` linking real resolved master profiles together.
 3. ``crm_customer_contacts`` (CS/call-center/email interaction log) and
-   ``crm_transactions`` (retail purchases, banking transfers/payments --
+    ``crm_transactions`` (retail purchases, education enrollments/tuition payments --
    including a couple of NOT-YET-identity-resolved rows with
    ``master_profile_id = NULL``, the same async-backfill pattern used by
    ``cdp_raw_events``).
 4. ``cdp_raw_events``: sample behavioral events spanning every
    ``event_category`` seeded in ``cdp_event_catalog`` (GENERAL/FEEDBACK/
-   COMMERCE/FINANCE/STOCK_TRADING/TRAVEL/REAL_ESTATE), including a few
+    COMMERCE/EDUCATION/TRAVEL/REAL_ESTATE), including a few
    travel/real_estate events with NO master profile yet (domains not
-   otherwise represented among the AppsFlyer-only CIR demo profiles).
+   otherwise represented among the Adjust-only CIR demo profiles).
 5. ``graph_edges``: a handful of edges spanning several relation partitions
    (``belongs_to``, ``converted``, ``has``, ``belongs_to_industry``,
    ``is_connected_to``, ``is_from``).
 6. ``cdp_master_profiles`` enrichment: fills in every column NOT already set
    by ``CustomerIdentityResolver`` -- lifecycle/engagement tracking
    (customer_since/last_activity_at/preferred_channel/lifecycle_stage/
-   persona_summary), the full ML scoring block (lead/churn/CLV/CX/data
-   quality), retail-only attrs (loyalty_id/membership_tier/
-   preferred_store_code) for retail-domain profiles, banking-only attrs
-   (cif_number/account_numbers/kyc_status/risk_segment) for banking-domain
+    persona_summary), the full ML scoring block (lead/churn/CLV/CX/data
+    quality), retail-only attrs (loyalty_id/membership_tier/
+    preferred_store_code) for retail-domain profiles, education-only attrs
+    (student_id/institution_name/course_completion_rate/learning_mode) for education-domain
    profiles, acquisition_source/acquisition_campaign (joined back from the
    raw profile that first created the master, via first_seen_raw_profile_id),
    segmentation_tags/attributes/gender/address/profile_picture_url.
@@ -66,12 +66,12 @@ tables (see init_sample_data.py's hash_pii()): ``secondary_emails``/
 city/country only (no street). ``gender`` and ``profile_picture_url`` ARE
 populated -- neither is independently identifying PII.
 
-Exception: retail-domain master profiles ARE given plaintext
-``full_name``/``first_name``/``last_name``/``email``/``phone_number`` (and
-``is_hashed`` is set to ``FALSE``) -- retail/e-commerce apps routinely
-display the customer's own name/contact info back to them, so the demo
-reflects that instead of an unreadable hash. Banking (and every other)
-domain keeps the hashed-PII-only policy from init_sample_data.py /
+Global demo exception: master-profile name fields
+``full_name``/``first_name``/``last_name`` are rewritten as synthetic
+plaintext values for readability in cross-region demos (VN/EU/US naming
+mix). Retail profiles also carry plaintext ``email``/``phone_number`` (and
+``is_hashed`` is set to ``FALSE``). Other domains may still keep hashed
+values in additional PII columns inherited from init_sample_data.py /
 run_demo_resolution.py.
 
 Note: ``crm_lead``/``crm_contact`` DO get plaintext first/last name/email/
@@ -153,6 +153,11 @@ PERSONA_EMBEDDING_DIM = 768
 # Demo invariant: every resolved master profile must have >10 behavioral events.
 MIN_EVENTS_PER_MASTER_PROFILE = 11
 
+def canonical_demo_domain(domain: str | None) -> str:
+    if not domain:
+        return "retail"
+    return domain
+
 
 def _table(name: str) -> str:
     return f"{DB_SCHEMA}.{name}" if DB_SCHEMA else name
@@ -192,19 +197,40 @@ def realistic_event_days_ago(rng: random.Random, max_days: int = 365) -> int:
 # --------------------------------------------------------------------------
 
 INDUSTRIES = [
-    ("Banking & Financial Services", "Retail and commercial banking, wealth management."),
+    ("Education & EdTech", "Online learning platforms, universities, and career upskilling providers."),
     ("Retail & E-commerce", "Omni-channel retail, marketplaces and D2C brands."),
     ("Real Estate", "Residential and commercial property developers/agencies."),
     ("Travel & Hospitality", "Airlines, OTAs, hotel groups and tour operators."),
 ]
 
 ACCOUNTS = [
-    ("Sacombank Digital", "Banking & Financial Services"),
-    ("Techcombank Wealth Partners", "Banking & Financial Services"),
-    ("VinMart Retail Group", "Retail & E-commerce"),
-    ("Saigon Co.op Omnichannel", "Retail & E-commerce"),
-    ("Danh Khoi Real Estate", "Real Estate"),
-    ("Vietravel Holdings", "Travel & Hospitality"),
+    ("NexaLearn", "Education & EdTech"),
+    ("BrightForge", "Education & EdTech"),
+    ("UrbanNest", "Retail & E-commerce"),
+    ("MarketSpring", "Retail & E-commerce"),
+    ("TerraPeak", "Real Estate"),
+    ("Voyara", "Travel & Hospitality"),
+
+    ("Skillora", "Education & EdTech"),
+    ("Learnova", "Education & EdTech"),
+    ("Cartiva", "Retail & E-commerce"),
+    ("Shopora", "Retail & E-commerce"),
+    ("Propella", "Real Estate"),
+    ("Tripvera", "Travel & Hospitality"),
+
+    ("Eduvia", "Education & EdTech"),
+    ("Mindora", "Education & EdTech"),
+    ("Mercanta", "Retail & E-commerce"),
+    ("Vendora", "Retail & E-commerce"),
+    ("Estatera", "Real Estate"),
+    ("Roamora", "Travel & Hospitality"),
+
+    ("Knowlytic", "Education & EdTech"),
+    ("Skillverse", "Education & EdTech"),
+    ("Retailio", "Retail & E-commerce"),
+    ("Commerza", "Retail & E-commerce"),
+    ("Landora", "Real Estate"),
+    ("Journeva", "Travel & Hospitality"),
 ]
 
 LEAD_SOURCES = [
@@ -218,13 +244,13 @@ LEAD_SOURCES = [
 # (name, campaign_code, status, channel, platform, objective, budget_vnd, start_offset, end_offset, utm_source, utm_medium)
 CAMPAIGNS = [
     (
-        "Q4 Banking App Install - Google UAC",
-        "BANK-Q4-GOOG-UAC-001",
+        "Q4 Education App Enrollment - Google UAC",
+        "EDU-Q4-GOOG-UAC-001",
         "Active",
         "Paid Search",
         "Google",
-        "App Install",
-        500_000_000,
+        "Enrollments",
+        420_000_000,
         -60, 30,
         "google", "cpc",
     ),
@@ -262,15 +288,15 @@ CAMPAIGNS = [
         "zalo", "paid_social",
     ),
     (
-        "Banking CLV Push - AppsFlyer Retargeting",
-        "BANK-CLV-AF-005",
+        "Education Course Completion Push - Adjust Retargeting",
+        "EDU-RET-ADJ-005",
         "Active",
         "Push Notification",
-        "AppsFlyer",
+        "Adjust",
         "Retention",
-        200_000_000,
+        180_000_000,
         -20, 40,
-        "appsflyer", "push",
+        "adjust", "push",
     ),
     (
         "Retail Email Re-engagement",
@@ -284,15 +310,15 @@ CAMPAIGNS = [
         "email", "email",
     ),
     (
-        "Real Estate YouTube Brand - GA4 Tracked",
-        "RE-YT-BRAND-007",
+        "Education Webinar Funnel - C360 Tracker",
+        "EDU-WEBINAR-C360-007",
         "Active",
-        "Video",
-        "YouTube",
-        "Awareness",
-        250_000_000,
-        -15, 75,
-        "youtube", "video",
+        "Owned Media",
+        "C360Tracker",
+        "Engagement",
+        140_000_000,
+        -25, 60,
+        "c360_tracker", "owned",
     ),
     (
         "Travel Recovery - Google Performance Max",
@@ -307,16 +333,115 @@ CAMPAIGNS = [
     ),
 ]
 
-LEAD_FIRST_NAMES = ("Minh", "Linh", "Huy", "Trang", "Khoa", "My", "Duc", "Anh")
-LEAD_LAST_NAMES = ("Nguyen", "Tran", "Le", "Pham", "Hoang", "Vo", "Bui", "Dang")
+LEAD_FIRST_NAMES = (
+    # Vietnam
+    "Minh", "Linh", "Huy", "Trang", "Khoa", "My", "Duc", "Anh",
+    "Hoa", "Tuan", "Thao", "Nam", "Phuong", "Quang", "Vy", "Long",
 
-# Retail-domain cdp_master_profiles get plaintext PII (unlike banking, which
-# stays SHA-256 hashed per init_sample_data.py's hash_pii() policy) -- retail
-# apps commonly show the customer's own name/contact info back to them, so
-# the demo should reflect that instead of an unreadable hash. See
-# enrich_master_profiles()'s retail branch.
-RETAIL_PII_FIRST_NAMES = ("Minh", "Linh", "Huy", "Trang", "Khoa", "My", "Duc", "Anh", "Hoa", "Tuan", "Thao", "Nam")
-RETAIL_PII_LAST_NAMES = ("Nguyen", "Tran", "Le", "Pham", "Hoang", "Vo", "Bui", "Dang", "Do", "Ho", "Ngo", "Duong")
+    # United States / Canada
+    "Emma", "Noah", "Olivia", "Liam", "Sophia", "Mason", "Ava", "Ethan",
+    "Amelia", "James", "Chloe", "Benjamin", "Harper", "Lucas", "Mia", "Henry",
+
+    # Europe
+    "Luca", "Sofia", "Mateo", "Elena", "Hugo", "Nora", "Marta", "Leo",
+    "Ines", "Jonas", "Clara", "Felix", "Anna", "Theo", "Mila", "Arthur",
+
+    # International
+    "Alex", "Daniel", "Maria", "David", "Laura", "Samuel", "Julia", "Max",
+)
+
+LEAD_LAST_NAMES = (
+    # Vietnam
+    "Nguyen", "Tran", "Le", "Pham", "Hoang", "Vo", "Bui", "Dang",
+    "Do", "Ho", "Ngo", "Duong", "Phan", "Vu", "Huynh", "Truong",
+
+    # United States / Canada
+    "Smith", "Johnson", "Williams", "Brown", "Jones", "Miller", "Davis",
+    "Wilson", "Anderson", "Taylor", "Thomas", "Moore", "Jackson", "Martin",
+    "Thompson", "White",
+
+    # Europe
+    "Schmidt", "Rossi", "Novak", "Dubois", "Kovacs", "Muller", "Garcia",
+    "Silva", "Moreau", "Ionescu", "Laurent", "Fischer", "Weber", "Costa",
+    "Santos", "Bianchi",
+
+    # International
+    "Morgan", "Carter", "Parker", "Bennett", "Cooper", "Reed",
+)
+
+
+VN_PROFILE_FIRST_NAMES = (
+    "Minh", "Linh", "Huy", "Trang", "Khoa", "My", "Duc", "Anh",
+    "Hoa", "Tuan", "Thao", "Nam", "Phuong", "Quang", "Vy", "Long",
+    "Nhi", "Thuy", "Dat", "Mai", "Bao", "Son", "Hung", "Lan",
+)
+
+VN_PROFILE_LAST_NAMES = (
+    "Nguyen", "Tran", "Le", "Pham", "Hoang", "Vo", "Bui", "Dang",
+    "Do", "Ho", "Ngo", "Duong", "Phan", "Vu", "Huynh", "Truong",
+    "Dang", "Dinh", "Mai", "Ta", "Cao", "Ly",
+)
+
+
+EU_PROFILE_FIRST_NAMES = (
+    "Luca", "Sofia", "Mateo", "Elena", "Hugo", "Nora", "Marta", "Leo",
+    "Ines", "Jonas", "Clara", "Felix", "Anna", "Theo", "Mila", "Arthur",
+    "Louis", "Amelie", "Marco", "Giulia", "Lorenzo", "Chiara",
+    "Nicolas", "Emma", "Freya", "Oscar",
+)
+
+EU_PROFILE_LAST_NAMES = (
+    "Rossi", "Novak", "Schmidt", "Dubois", "Kovacs", "Muller",
+    "Garcia", "Silva", "Moreau", "Ionescu", "Laurent", "Fischer",
+    "Weber", "Costa", "Santos", "Bianchi", "Martin", "Bernard",
+    "Fontana", "Romano", "Lefevre", "Petrov", "Horvat", "Keller",
+)
+
+
+US_PROFILE_FIRST_NAMES = (
+    "Emma", "Olivia", "Ava", "Liam", "Noah", "Mason", "Amelia", "James",
+    "Ethan", "Chloe", "Sophia", "Jackson", "Mia", "Lucas", "Harper",
+    "Benjamin", "Ella", "Alexander", "Evelyn", "Daniel", "Scarlett",
+    "Henry", "Grace", "Michael", "Lily", "William", "Emily",
+)
+
+US_PROFILE_LAST_NAMES = (
+    "Smith", "Johnson", "Williams", "Brown", "Jones", "Miller",
+    "Davis", "Wilson", "Anderson", "Taylor", "Thomas", "Moore",
+    "Jackson", "Martin", "Thompson", "White", "Harris", "Clark",
+    "Lewis", "Walker", "Hall", "Allen", "Young", "King",
+)
+
+def build_global_profile_name(rng: random.Random) -> tuple[str, str, str, str]:
+    locale = rng.choices(("vn", "eu", "us"), weights=(0.35, 0.35, 0.30), k=1)[0]
+    if locale == "vn":
+        first_name = rng.choice(VN_PROFILE_FIRST_NAMES)
+        last_name = rng.choice(VN_PROFILE_LAST_NAMES)
+        full_name = f"{last_name} {first_name}"
+    elif locale == "eu":
+        first_name = rng.choice(EU_PROFILE_FIRST_NAMES)
+        last_name = rng.choice(EU_PROFILE_LAST_NAMES)
+        full_name = f"{first_name} {last_name}"
+    else:
+        first_name = rng.choice(US_PROFILE_FIRST_NAMES)
+        last_name = rng.choice(US_PROFILE_LAST_NAMES)
+        full_name = f"{first_name} {last_name}"
+    return first_name, last_name, full_name, locale
+
+
+def email_token(value: str) -> str:
+    token = "".join(ch.lower() if ch.isalnum() else "." for ch in value)
+    while ".." in token:
+        token = token.replace("..", ".")
+    return token.strip(".")
+
+
+def tracking_platform_for_campaign(platform: str) -> str:
+    return {
+        "Adjust": "adjust",
+        "Google": "ga4",
+        "C360Tracker": "c360_tracker",
+    }.get(platform, platform.lower().replace(" ", "_"))
 
 
 def seed_relation_types(cursor) -> None:
@@ -341,7 +466,10 @@ def seed_crm_entities(cursor) -> dict:
     """Seeds the CRM journey graph and returns a dict of the demo entity ids
     keyed by kind (for cross-referencing from graph_edges)."""
     logger.info("Seeding CRM journey graph (industries/accounts/lead sources/leads/campaigns/...)...")
-    ids: dict = {"industry": {}, "account": {}, "lead_source": {}, "lead": [], "campaign": {}, "contact": [], "opportunity": []}
+    ids: dict = {
+        "industry": {}, "account": {}, "lead_source": {}, "lead": [],
+        "campaign": {}, "contact": [], "contact_account_names": [], "opportunity": [],
+    }
 
     for name, description in INDUSTRIES:
         industry_id = demo_id(f"crm_industry:{name}")
@@ -409,7 +537,7 @@ def seed_crm_entities(cursor) -> dict:
                     "utm_medium": utm_medium,
                     "utm_campaign": campaign_code.lower(),
                     "utm_content": f"{platform.lower()}-{objective.lower().replace(' ', '_')}",
-                    "tracking_platform": "appsflyer" if platform == "AppsFlyer" else "ga4",
+                    "tracking_platform": tracking_platform_for_campaign(platform),
                 }),
             ),
         )
@@ -438,12 +566,42 @@ def seed_crm_entities(cursor) -> dict:
         )
         ids["lead"].append(lead_id)
 
+    # Keep downstream fixture mapping resilient even if ACCOUNTS display names
+    # are changed during demo customization.
+    industry_accounts: dict[str, list[str]] = {
+        "Education & EdTech": [],
+        "Retail & E-commerce": [],
+        "Real Estate": [],
+        "Travel & Hospitality": [],
+    }
+    for account_name, industry_name in ACCOUNTS:
+        if account_name in ids["account"]:
+            industry_accounts.setdefault(industry_name, []).append(account_name)
+
+    all_seeded_accounts = list(ids["account"].keys())
+    if not all_seeded_accounts:
+        raise RuntimeError("No CRM accounts were seeded; verify ACCOUNTS fixture integrity.")
+
+    fallback_account = all_seeded_accounts[0]
+
+    def _pick_account(industry_name: str, index: int = 0) -> str:
+        pool = industry_accounts.get(industry_name) or []
+        if index < len(pool):
+            return pool[index]
+        if pool:
+            return pool[0]
+        return fallback_account
+
     contact_defs = [
-        ("Sacombank Digital", 0), ("Techcombank Wealth Partners", 1),
-        ("VinMart Retail Group", 2), ("Saigon Co.op Omnichannel", 3),
-        ("Danh Khoi Real Estate", 4), ("Vietravel Holdings", 5),
+        (_pick_account("Education & EdTech", 0), 0), (_pick_account("Education & EdTech", 1), 1),
+        (_pick_account("Retail & E-commerce", 0), 2), (_pick_account("Retail & E-commerce", 1), 3),
+        (_pick_account("Real Estate", 0), 4), (_pick_account("Travel & Hospitality", 0), 5),
     ]
     for account_name, lead_index in contact_defs:
+        account_id = ids["account"].get(account_name)
+        if account_id is None:
+            logger.warning("Skipping crm_contact seed for unknown account '%s'.", account_name)
+            continue
         contact_id = demo_id(f"crm_contact:{account_name}")
         first_name = rng.choice(LEAD_FIRST_NAMES)
         last_name = rng.choice(LEAD_LAST_NAMES)
@@ -457,20 +615,25 @@ def seed_crm_entities(cursor) -> dict:
             (
                 contact_id, DEMO_TENANT_ID, first_name, last_name,
                 f"{first_name.lower()}.{last_name.lower()}@{account_name.lower().split()[0]}.example.com",
-                f"09{rng.randint(10000000, 99999999)}", ids["account"][account_name],
+                f"09{rng.randint(10000000, 99999999)}", account_id,
                 f"Primary contact at {account_name}, converted from a demo lead.",
                 Json({"converted_from_lead_id": ids["lead"][lead_index]}),
             ),
         )
         ids["contact"].append(contact_id)
+        ids["contact_account_names"].append(account_name)
 
     opportunity_defs = [
-        ("Sacombank Digital", "Digital Banking Platform Renewal", 1_200_000_000, "negotiation", 45),
-        ("VinMart Retail Group", "Loyalty Program Expansion", 350_000_000, "proposal", 30),
-        ("Danh Khoi Real Estate", "CRM + Customer 360 Rollout", 800_000_000, "qualification", 90),
-        ("Vietravel Holdings", "Booking Personalization Engine", 600_000_000, "closed_won", -10),
+        (_pick_account("Education & EdTech", 0), "Learner Retention Analytics Rollout", 900_000_000, "negotiation", 45),
+        (_pick_account("Retail & E-commerce", 0), "Loyalty Program Expansion", 350_000_000, "proposal", 30),
+        (_pick_account("Real Estate", 0), "CRM + Customer 360 Rollout", 800_000_000, "qualification", 90),
+        (_pick_account("Travel & Hospitality", 0), "Booking Personalization Engine", 600_000_000, "closed_won", -10),
     ]
     for account_name, opp_name, value, stage, close_offset in opportunity_defs:
+        account_id = ids["account"].get(account_name)
+        if account_id is None:
+            logger.warning("Skipping crm_opportunity seed for unknown account '%s'.", account_name)
+            continue
         opportunity_id = demo_id(f"crm_opportunity:{opp_name}")
         cursor.execute(
             f"""
@@ -480,7 +643,7 @@ def seed_crm_entities(cursor) -> dict:
             ON CONFLICT (opportunity_id) DO UPDATE SET stage = EXCLUDED.stage, value = EXCLUDED.value;
             """,
             (
-                opportunity_id, DEMO_TENANT_ID, ids["account"][account_name], opp_name, value, stage,
+                opportunity_id, DEMO_TENANT_ID, account_id, opp_name, value, stage,
                 datetime.now().date() + timedelta(days=close_offset),
                 f"Demo opportunity with {account_name}.",
             ),
@@ -535,30 +698,31 @@ _PLATFORM_PROFILE = {
     "Meta":       ((15_000, 60_000), 0.018, 0.05, 900_000),
     "TikTok":     ((20_000, 80_000), 0.012, 0.03, 600_000),
     "Zalo":       ((5_000, 25_000), 0.025, 0.06, 800_000),
-    "AppsFlyer":  ((3_000, 15_000), 0.060, 0.15, 500_000),  # re-targeting: higher CVR
+    "Adjust":  ((3_000, 15_000), 0.060, 0.15, 500_000),  # re-targeting: higher CVR
+    "C360Tracker": ((10_000, 55_000), 0.035, 0.09, 750_000),
     "YouTube":    ((30_000, 120_000), 0.005, 0.015, 1_500_000),
 }
 _DEFAULT_PROFILE = ((5_000, 20_000), 0.03, 0.05, 700_000)
 
 DATA_SOURCES = [
     {
-        "name": "AppsFlyer Mobile Attribution",
-        "slug": "appsflyer-mobile-attribution",
+        "name": "Adjust Mobile Attribution",
+        "slug": "adjust-mobile-attribution",
         "source_type": 5,
         "status": 1,
-        "data_source_url": "https://hq1.appsflyer.com",
-        "thumbnail_url": "https://cdn.example.com/connectors/appsflyer.png",
+        "data_source_url": "https://automate.adjust.com/reports-service/report",
+        "thumbnail_url": "https://cdn.example.com/connectors/adjust.png",
         "collect_directly": True,
         "first_party_data": True,
         "journey_level": 3,
         "journey_map_id": "journey-mobile-attribution",
         "touchpoint_hub_id": "touchpoint-mobile-ads",
-        "security_code": "AF-DEMO-SECURE",
+        "security_code": "ADJ-DEMO-SECURE",
         "total_tracked_event": 120000,
         "avg_daily_event": 3200,
         "avg_events_per_profile": 26.75,
-        "access_tokens": {"default": "appsflyer_demo_token"},
-        "data_source_hosts": ["hq1.appsflyer.com", "events.appsflyer.com"],
+        "access_tokens": {"api_token": "adjust_demo_token"},
+        "data_source_hosts": ["automate.adjust.com", "app.adjust.com"],
         "javascript_tags": [],
         "qr_code_data": {},
     },
@@ -579,8 +743,11 @@ DATA_SOURCES = [
         "avg_daily_event": 2400,
         "avg_events_per_profile": 18.90,
         "access_tokens": {"measurement_id": "G-DEMO360"},
-        "data_source_hosts": ["www.google-analytics.com", "analytics.google.com"],
-        "javascript_tags": ["gtag('config', 'G-DEMO360')"],
+        "data_source_hosts": ["www.googletagmanager.com", "www.google-analytics.com", "analytics.google.com"],
+        "javascript_tags": [
+            "<script async src='https://www.googletagmanager.com/gtag/js?id=G-DEMO360'></script>",
+            "gtag('config', 'G-DEMO360')",
+        ],
         "qr_code_data": {
             "target_url": "https://analytics.google.com",
             "tracking_url": "https://analytics.google.com?utm_source=google-analytics-4&utm_medium=qr_code&utm_campaign=c360_datasource",
@@ -589,24 +756,27 @@ DATA_SOURCES = [
         },
     },
     {
-        "name": "MoEngage Journey Events",
-        "slug": "moengage-journey-events",
-        "source_type": 3,
+        "name": "C360 Tracker",
+        "slug": "c360-tracker",
+        "source_type": 1,
         "status": 1,
-        "data_source_url": "https://dashboard-01.moengage.com",
-        "thumbnail_url": "https://cdn.example.com/connectors/moengage.png",
+        "data_source_url": "https://tracker.customer360.local/collect",
+        "thumbnail_url": "https://cdn.example.com/connectors/c360-tracker.png",
         "collect_directly": True,
-        "first_party_data": False,
-        "journey_level": 2,
-        "journey_map_id": "journey-engagement",
-        "touchpoint_hub_id": "touchpoint-push",
-        "security_code": "MOE-DEMO-SECURE",
-        "total_tracked_event": 64000,
-        "avg_daily_event": 1700,
-        "avg_events_per_profile": 14.20,
-        "access_tokens": {"workspace": "moengage_demo_workspace"},
-        "data_source_hosts": ["api-01.moengage.com"],
-        "javascript_tags": [],
+        "first_party_data": True,
+        "journey_level": 3,
+        "journey_map_id": "journey-c360-tracker",
+        "touchpoint_hub_id": "touchpoint-c360-tracker",
+        "security_code": "C360-DEMO-SECURE",
+        "total_tracked_event": 86000,
+        "avg_daily_event": 2100,
+        "avg_events_per_profile": 16.8,
+        "access_tokens": {"write_key": "c360_tracker_demo_key"},
+        "data_source_hosts": ["tracker.customer360.local"],
+        "javascript_tags": [
+            "window.c360Tracker=window.c360Tracker||{track:function(){return true;}};",
+            "c360Tracker.track('page_view', {tenant: 'demo'});",
+        ],
         "qr_code_data": {},
     },
 ]
@@ -672,7 +842,7 @@ def seed_campaign_performance_daily(cursor, campaign_ids: dict) -> None:
     so the script is fully idempotent.  Only days where the campaign was
     already running (start_date <= today) are inserted.
     """
-    logger.info("Seeding crm_campaign_performance_daily with AppsFlyer/GA4-style metrics...")
+    logger.info("Seeding crm_campaign_performance_daily with Adjust/GA4/C360 Tracker-style metrics...")
     today = datetime.now().date()
 
     for (name, campaign_code, status, channel, platform, objective,
@@ -846,13 +1016,14 @@ def seed_relations(cursor, master_profiles: list) -> None:
 
     by_domain = {}
     for m in master_profiles:
-        by_domain.setdefault(m["domain"], []).append(m)
+        normalized_domain = canonical_demo_domain(m["domain"])
+        by_domain.setdefault(normalized_domain, []).append(m)
     domains = list(by_domain.keys())
 
     # Link first two profiles within each domain (if enough profiles exist).
     for domain, members in by_domain.items():
         if len(members) >= 2:
-            relation_code = "family" if domain == "banking" else "friend"
+            relation_code = "colleague" if domain == "education" else "friend"
             _link(members[0]["master_profile_id"], members[1]["master_profile_id"], relation_code)
 
     # Cross-domain customer-contact links between the first profile of a few domains.
@@ -891,10 +1062,6 @@ RETAIL_TRANSACTIONS = [
     ("POS", "purchase", "product", "Retail Store Purchase", (100_000, 2_000_000), "pos"),
     ("WebStore", "purchase", "product", "Online Order", (150_000, 3_000_000), "web"),
 ]
-BANKING_TRANSACTIONS = [
-    ("CoreBanking", "transfer", "account", "Interbank Transfer", (500_000, 20_000_000), "mobile_app"),
-    ("CoreBanking", "bill_payment", "account", "Utility Bill Payment", (100_000, 1_500_000), "internet_banking"),
-]
 REAL_ESTATE_TRANSACTIONS = [
     ("PropertyPortal", "property_inquiry", "property", "Property Inquiry", (1_000_000_000, 5_000_000_000), "web"),
 ]
@@ -906,22 +1073,25 @@ MEDIA_TRANSACTIONS = [
 ]
 EDUCATION_TRANSACTIONS = [
     ("LearningPlatform", "course_enrollment", "course", "Course Enrollment", (500_000, 5_000_000), "web"),
+    ("LearningPlatform", "tuition_payment", "course", "Tuition Payment", (1_000_000, 15_000_000), "web"),
+    ("LearningPlatform", "certification_fee", "certificate", "Certification Exam Fee", (300_000, 3_000_000), "mobile_app"),
 ]
+
+DOMAIN_TRANSACTION_CATALOG = {
+    "retail": RETAIL_TRANSACTIONS,
+    "education": EDUCATION_TRANSACTIONS,
+    "real_estate": REAL_ESTATE_TRANSACTIONS,
+    "travel": TRAVEL_TRANSACTIONS,
+    "media": MEDIA_TRANSACTIONS,
+}
 
 
 def seed_transactions(cursor, master_profiles: list) -> None:
     logger.info("Seeding crm_transactions per domain...")
     for m in master_profiles:
         rng = stable_rng(f"transactions:{m['master_profile_id']}")
-        domain = m["domain"]
-        catalog = {
-            "retail": RETAIL_TRANSACTIONS,
-            "banking": BANKING_TRANSACTIONS,
-            "real_estate": REAL_ESTATE_TRANSACTIONS,
-            "travel": TRAVEL_TRANSACTIONS,
-            "media": MEDIA_TRANSACTIONS,
-            "education": EDUCATION_TRANSACTIONS,
-        }.get(domain)
+        domain = canonical_demo_domain(m["domain"])
+        catalog = DOMAIN_TRANSACTION_CATALOG.get(domain)
         if catalog is None:
             continue
         # Bug fix: this loop previously sat unreachable after `continue`, so
@@ -973,13 +1143,13 @@ RETAIL_EVENTS = [
     ("COMMERCE", "purchase", (200_000, 2_000_000), "product", True),
     ("FEEDBACK", "submit-csat-form", None, None, False),
 ]
-BANKING_EVENTS = [
+EDUCATION_EVENTS = [
     ("GENERAL", "user-login", None, None, False),
-    ("GENERAL", "dashboard-view", None, None, False),
-    ("FINANCE", "fund-transfer", (500_000, 20_000_000), "account", True),
-    ("FINANCE", "bill-payment", (100_000, 1_500_000), "account", True),
-    ("STOCK_TRADING", "trade-executed", (1_000_000, 50_000_000), "security", True),
-    ("FEEDBACK", "submit-satisfaction-survey", None, None, False),
+    ("EDUCATION", "course-started", None, "course", False),
+    ("EDUCATION", "lesson-completed", None, "lesson", False),
+    ("EDUCATION", "assignment-submitted", None, "assignment", False),
+    ("EDUCATION", "exam-booked", (300_000, 3_000_000), "certificate", True),
+    ("FEEDBACK", "submit-csat-form", None, None, False),
 ]
 MEDIA_EVENTS = [
     ("GENERAL", "user-login", None, None, False),
@@ -987,12 +1157,42 @@ MEDIA_EVENTS = [
     ("GENERAL", "search", None, None, False),
     ("FEEDBACK", "submit-csat-form", None, None, False),
 ]
-EDUCATION_EVENTS = [
-    ("GENERAL", "user-login", None, None, False),
-    ("EDUCATION", "course-started", None, "course", False),
-    ("EDUCATION", "assignment-submitted", None, "assignment", False),
+REAL_ESTATE_EVENTS = [
+    ("GENERAL", "view-property", None, "property", False),
+    ("GENERAL", "search", None, None, False),
+    ("REAL_ESTATE", "request-property-tour", None, "property", False),
     ("FEEDBACK", "submit-csat-form", None, None, False),
 ]
+TRAVEL_EVENTS = [
+    ("GENERAL", "search-flight", None, None, False),
+    ("TRAVEL", "booking", (1_000_000, 8_000_000), "booking", True),
+    ("GENERAL", "itinerary-view", None, "booking", False),
+    ("FEEDBACK", "submit-csat-form", None, None, False),
+]
+
+DOMAIN_EVENT_CATALOG = {
+    "retail": RETAIL_EVENTS,
+    "education": EDUCATION_EVENTS,
+    "media": MEDIA_EVENTS,
+    "real_estate": REAL_ESTATE_EVENTS,
+    "travel": TRAVEL_EVENTS,
+}
+
+DOMAIN_EVENT_SOURCE_SYSTEM = {
+    "retail": "Adjust",
+    "education": "GoogleAnalytics",
+    "media": "C360Tracker",
+    "real_estate": "C360Tracker",
+    "travel": "C360Tracker",
+}
+
+DOMAIN_EVENT_CHANNEL = {
+    "retail": "mobile_app",
+    "education": "web",
+    "media": "web",
+    "real_estate": "web",
+    "travel": "mobile_app",
+}
 
 # Anonymous (no resolved profile yet) events for domains not otherwise
 # represented in a given CIR demo dataset.
@@ -1007,21 +1207,22 @@ UNRESOLVED_EVENTS = [
 
 
 def seed_raw_profiles_for_anonymous_events(cursor) -> dict:
-    """Creates raw profiles for anonymous/unresolved events (travel/real_estate domains).
-    
+    """Creates raw profiles for anonymous/unresolved events.
+
     Returns a dict mapping (domain, device_id) to raw_profile_id so events can reference them.
     """
-    logger.info("Seeding raw profiles for anonymous events (travel/real_estate)...")
+    logger.info("Seeding raw profiles for anonymous events (travel/real_estate/media/education)...")
     raw_profile_map = {}
     rng = stable_rng("anonymous_raw_profiles")
-    
-    # Create raw profiles for travel and real_estate domains
-    for domain, _, _, _, _, _ in UNRESOLVED_EVENTS:
+
+    # Create raw profiles per unique unresolved-event domain.
+    unresolved_domains = sorted({domain for domain, *_rest in UNRESOLVED_EVENTS})
+    for domain in unresolved_domains:
         # Create a few raw profiles per domain for variety
         for i in range(3):
             device_id = f"demo-anon-device-{domain}-{i}-{rng.randint(1000, 9999)}"
             raw_profile_id = str(uuid.uuid4())
-            
+
             cursor.execute(
                 f"""
                 INSERT INTO {_table('cdp_raw_profiles_stage')}
@@ -1030,23 +1231,26 @@ def seed_raw_profiles_for_anonymous_events(cursor) -> dict:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
                 """,
                 (
-                    raw_profile_id, DEMO_TENANT_ID, domain, "WebTracking", "web",
+                    raw_profile_id, DEMO_TENANT_ID, domain, "C360Tracker", "web",
                     device_id, "page-view", 1,
                 ),
             )
             raw_profile_map[(domain, device_id)] = raw_profile_id
-    
+
     return raw_profile_map
 
 
-def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict = None) -> None:
+def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict | None = None) -> None:
     logger.info(
         "Seeding cdp_raw_events for all master profiles (minimum %d events/profile)...",
         MIN_EVENTS_PER_MASTER_PROFILE,
     )
     for m in master_profiles:
         rng = stable_rng(f"events:{m['master_profile_id']}")
-        catalog = RETAIL_EVENTS if m["domain"] == "retail" else BANKING_EVENTS
+        domain = canonical_demo_domain(m["domain"])
+        catalog = DOMAIN_EVENT_CATALOG.get(domain, RETAIL_EVENTS)
+        source_system = DOMAIN_EVENT_SOURCE_SYSTEM.get(domain, "C360Tracker")
+        event_channel = DOMAIN_EVENT_CHANNEL.get(domain, "web")
         for category, event_name, value_range, entity_type, is_conversion in catalog:
             cursor.execute(
                 f"""
@@ -1056,9 +1260,9 @@ def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict = None)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                 """,
                 (
-                    DEMO_TENANT_ID, m["domain"], m["master_profile_id"], m["first_seen_raw_profile_id"],
-                    "AppsFlyer" if m["domain"] == "retail" else "CoreBanking",
-                    "mobile_app", category, event_name, is_conversion, entity_type,
+                    DEMO_TENANT_ID, domain, m["master_profile_id"], m["first_seen_raw_profile_id"],
+                    source_system,
+                    event_channel, category, event_name, is_conversion, entity_type,
                     rng.randint(*value_range) if value_range else None, "VND",
                     datetime.now() - timedelta(days=realistic_event_days_ago(rng), hours=rng.randint(0, 23)),
                 ),
@@ -1076,18 +1280,18 @@ def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict = None)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                 """,
                 (
-                    DEMO_TENANT_ID, m["domain"], m["master_profile_id"], m["first_seen_raw_profile_id"],
-                    "AppsFlyer" if m["domain"] == "retail" else "CoreBanking",
-                    "mobile_app", category, event_name, is_conversion, entity_type,
+                    DEMO_TENANT_ID, domain, m["master_profile_id"], m["first_seen_raw_profile_id"],
+                    source_system,
+                    event_channel, category, event_name, is_conversion, entity_type,
                     rng.randint(*value_range) if value_range else None, "VND",
                     datetime.now() - timedelta(days=realistic_event_days_ago(rng), hours=rng.randint(0, 23)),
                 ),
             )
 
-    logger.info("Seeding anonymous cdp_raw_events for travel/real_estate domains (no resolved profile yet)...")
+    logger.info("Seeding anonymous cdp_raw_events for travel/real_estate/media/education domains (no resolved profile yet)...")
     if raw_profile_map is None:
         raw_profile_map = {}
-    
+
     rng = stable_rng("unresolved_events")
     for domain, category, event_name, value_range, entity_type, is_conversion in UNRESOLVED_EVENTS:
         # Use device_ids from our raw_profile_map to ensure FK constraint is satisfied
@@ -1098,7 +1302,7 @@ def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict = None)
         else:
             # Fallback: should not happen if raw_profile_map was properly populated
             continue
-        
+
         cursor.execute(
             f"""
             INSERT INTO {_table('cdp_raw_events')}
@@ -1107,7 +1311,7 @@ def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict = None)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """,
             (
-                DEMO_TENANT_ID, domain, device_id, raw_profile_id, "WebTracking", "web",
+                DEMO_TENANT_ID, domain, device_id, raw_profile_id, "C360Tracker", "web",
                 category, event_name, is_conversion, entity_type,
                 rng.randint(*value_range) if value_range else None, "VND",
                 datetime.now() - timedelta(days=realistic_event_days_ago(rng, max_days=365)),
@@ -1253,10 +1457,10 @@ def seed_graph_edges(cursor, crm_ids: dict, master_profiles: list) -> None:
 # graph_edges join).
 CONTACT_MASTER_LINK_ACCOUNTS = (
     # (account_name, contact_defs index, domain, master_profiles index within that domain)
-    ("Sacombank Digital", 0, "banking", 0),
-    ("Techcombank Wealth Partners", 1, "banking", 1),
-    ("VinMart Retail Group", 2, "retail", 0),
-    ("Saigon Co.op Omnichannel", 3, "retail", 1),
+    ("education_account_1", 0, "education", 0),
+    ("education_account_2", 1, "education", 1),
+    ("retail_account_1", 2, "retail", 0),
+    ("retail_account_2", 3, "retail", 1),
 )
 
 
@@ -1276,17 +1480,23 @@ def link_crm_contacts_to_master_profiles(cursor, crm_ids: dict, master_profiles:
       3. ``crm_contact.metadata->>'linked_master_profile_id'`` -- quick
          lookup from the CRM-contact side without a graph_edges join.
     """
-    banking = [m["master_profile_id"] for m in master_profiles if m["domain"] == "banking"]
-    retail = [m["master_profile_id"] for m in master_profiles if m["domain"] == "retail"]
-    domain_pools = {"banking": banking, "retail": retail}
+    education = [m["master_profile_id"] for m in master_profiles if canonical_demo_domain(m["domain"]) == "education"]
+    retail = [m["master_profile_id"] for m in master_profiles if canonical_demo_domain(m["domain"]) == "retail"]
+    domain_pools = {"education": education, "retail": retail}
     contacts = crm_ids["contact"]
+    contact_account_names = crm_ids.get("contact_account_names") or []
 
     metadata = Json({"demo_tenant": DEMO_TENANT_ID})
     links = []
-    for account_name, contact_index, domain, pool_index in CONTACT_MASTER_LINK_ACCOUNTS:
+    for _account_name, contact_index, domain, pool_index in CONTACT_MASTER_LINK_ACCOUNTS:
         pool = domain_pools.get(domain)
         if pool is None or contact_index >= len(contacts) or pool_index >= len(pool):
             continue
+        account_name = (
+            contact_account_names[contact_index]
+            if contact_index < len(contact_account_names)
+            else _account_name
+        )
         links.append((pool[pool_index], contacts[contact_index], account_name))
 
     if not links:
@@ -1330,15 +1540,30 @@ def link_crm_contacts_to_master_profiles(cursor, crm_ids: dict, master_profiles:
 # --------------------------------------------------------------------------
 
 RETAIL_CHANNELS = ("Mobile App", "Website")
-BANKING_CHANNELS = ("Internet Banking App", "Mobile App", "Branch")
+EDUCATION_CHANNELS = ("Learning Platform", "Mobile App", "Website", "Instructor Portal")
 REAL_ESTATE_CHANNELS = ("Property Portal", "Mobile App", "Office Visit")
 TRAVEL_CHANNELS = ("Airline App", "OTA Website", "Mobile App")
 MEDIA_CHANNELS = ("Streaming App", "Website", "Mobile App")
-EDUCATION_CHANNELS = ("Learning Platform", "Mobile App", "Website")
 LIFECYCLE_STAGES = ("prospect", "lead", "customer", "vip", "dormant", "churn_risk")
 OCCUPATIONS = ("engineer", "teacher", "business_owner", "student", "civil_servant", "sales_professional")
 INCOME_SEGMENTS = ("low", "medium", "high")
 CITIES = ("Ho Chi Minh City", "Hanoi", "Da Nang", "Can Tho")
+
+DOMAIN_PREFERRED_CHANNELS = {
+    "retail": RETAIL_CHANNELS,
+    "education": EDUCATION_CHANNELS,
+    "real_estate": REAL_ESTATE_CHANNELS,
+    "travel": TRAVEL_CHANNELS,
+    "media": MEDIA_CHANNELS,
+}
+
+DOMAIN_CLV_CONFIG = {
+    "retail": {"multiplier": 1, "high": 3000, "medium": 1000},
+    "education": {"multiplier": 3, "high": 7000, "medium": 2500},
+    "real_estate": {"multiplier": 5, "high": 25000, "medium": 8000},
+    "travel": {"multiplier": 2, "high": 6000, "medium": 2000},
+    "media": {"multiplier": 1, "high": 2500, "medium": 800},
+}
 
 
 def _make_persona_summary(domain: str, lifecycle_stage: str, preferred_channel: str, rng: random.Random) -> str:
@@ -1360,19 +1585,12 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
     logger.info("Enriching %d master profiles with lifecycle/ML-scoring/domain-specific fields...", len(master_profiles))
     for m in master_profiles:
         master_id = m["master_profile_id"]
-        domain = m["domain"]
+        domain = canonical_demo_domain(m["domain"])
         rng = stable_rng(f"enrich:{master_id}")
 
         lifecycle_stage = rng.choice(LIFECYCLE_STAGES)
         is_established_customer = lifecycle_stage in ("customer", "vip", "dormant", "churn_risk")
-        preferred_channel = rng.choice(
-            RETAIL_CHANNELS if domain == "retail" else
-            BANKING_CHANNELS if domain == "banking" else
-            REAL_ESTATE_CHANNELS if domain == "real_estate" else
-            TRAVEL_CHANNELS if domain == "travel" else
-            MEDIA_CHANNELS if domain == "media" else
-            EDUCATION_CHANNELS
-        )
+        preferred_channel = rng.choice(DOMAIN_PREFERRED_CHANNELS.get(domain, EDUCATION_CHANNELS))
         # customer_since: back-date by 0-365 days for established customers (realistic year-over-year retention)
         customer_since = (
             (m["created_at"] - timedelta(days=rng.randint(0, 365))).date() if is_established_customer else None
@@ -1398,10 +1616,11 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
         )
         lead_conversion_probability = round(rng.uniform(0, 1), 4)
         lead_grade = "Hot" if lead_conversion_probability >= 0.7 else "Warm" if lead_conversion_probability >= 0.4 else "Cold"
-        historical_clv = round(rng.uniform(500, 5000) * (10 if domain == "banking" else 1), 2)
+        clv_config = DOMAIN_CLV_CONFIG.get(domain, DOMAIN_CLV_CONFIG["retail"])
+        historical_clv = round(rng.uniform(500, 5000) * clv_config["multiplier"], 2)
         predictive_clv = round(historical_clv * rng.uniform(1.0, 1.8), 2)
-        clv_high_threshold = 30000 if domain == "banking" else 3000
-        clv_medium_threshold = 10000 if domain == "banking" else 1000
+        clv_high_threshold = clv_config["high"]
+        clv_medium_threshold = clv_config["medium"]
         clv_segment = "high" if predictive_clv > clv_high_threshold else "medium" if predictive_clv > clv_medium_threshold else "low"
         engagement_score = round(rng.uniform(0, 100), 2)
         latest_nps_score = rng.randint(0, 10)
@@ -1422,13 +1641,14 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             "cx_scoring_model": "v1", "data_quality_model": "v1",
             "identity_resolution_scoring_model": "v1",
         })
+        first_name, last_name, full_name, name_locale = build_global_profile_name(rng)
         gender = rng.choice(("male", "female", "other"))
         address = Json({"city": rng.choice(CITIES), "country": "VN"})
         profile_picture_url = f"https://api.dicebear.com/7.x/identicon/svg?seed={master_id}"
         persona_summary = _make_persona_summary(domain, lifecycle_stage, preferred_channel, rng)
 
         set_clauses = [
-            "lifecycle_stage = %s", "preferred_channel = %s", "customer_since = %s",
+            "domain = %s", "lifecycle_stage = %s", "preferred_channel = %s", "customer_since = %s",
             "last_activity_at = %s", "churn_probability = %s", "churn_risk_tier = %s",
             "lead_conversion_probability = %s", "lead_grade = %s", "historical_clv = %s",
             "predictive_clv = %s", "clv_segment = %s", "engagement_score = %s",
@@ -1438,6 +1658,7 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             "attributes = COALESCE(attributes, '{}'::jsonb) || %s",
             "model_versions = %s", "scores_updated_at = NOW()", "gender = %s", "address = %s",
             "profile_picture_url = %s", "persona_summary = %s",
+            "full_name = %s", "first_name = %s", "last_name = %s",
             # acquisition_source/acquisition_campaign: genuinely derivable from the
             # raw profile that first created this master, via first_seen_raw_profile_id.
             f"""acquisition_source = COALESCE(acquisition_source, (
@@ -1450,58 +1671,42 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
             ))""",
         ]
         params = [
-            lifecycle_stage, preferred_channel, customer_since, last_activity_at,
+            domain, lifecycle_stage, preferred_channel, customer_since, last_activity_at,
             churn_probability, churn_risk_tier, lead_conversion_probability, lead_grade,
             historical_clv, predictive_clv, clv_segment, engagement_score, latest_nps_score,
             average_csat, overall_sentiment_score, profile_completeness_score,
             identity_confidence_score, segmentation_tags, communication_preferences, attributes, model_versions,
             gender, address, profile_picture_url, persona_summary,
+            full_name, first_name, last_name,
         ]
         domain_attributes: dict[str, object] = {}
 
         if domain == "retail":
-            # Retail profiles show real (plaintext) PII in the demo -- see
-            # RETAIL_PII_FIRST_NAMES/RETAIL_PII_LAST_NAMES above.
-            first_name = rng.choice(RETAIL_PII_FIRST_NAMES)
-            last_name = rng.choice(RETAIL_PII_LAST_NAMES)
-            full_name = f"{last_name} {first_name}"
-            email = f"{first_name.lower()}.{last_name.lower()}.{master_id[:8]}@example.com"
+            email = f"{email_token(first_name)}.{email_token(last_name)}.{master_id[:8]}@example.com"
             phone_number = f"09{rng.randint(10000000, 99999999)}"
             set_clauses.extend([
-                "full_name = %s", "first_name = %s", "last_name = %s",
                 "email = %s", "phone_number = %s", "is_hashed = FALSE",
             ])
-            params.extend([full_name, first_name, last_name, email, phone_number])
+            params.extend([email, phone_number])
 
             domain_attributes = {
                 "loyalty_id": f"LOY-{master_id[:8]}",
                 "membership_tier": rng.choice(("Silver", "Gold", "Platinum")),
                 "preferred_store_code": f"STORE-{rng.randint(1, 20):03d}",
             }
-        elif domain == "banking":
-            # Realistic KYC distribution: ~70% verified, ~15% pending, ~10% unverified, ~5% rejected
-            kyc_rand = rng.random()
-            if kyc_rand < 0.70:
-                kyc_status = "verified"
-            elif kyc_rand < 0.85:
-                kyc_status = "pending"
-            elif kyc_rand < 0.95:
-                kyc_status = "unverified"
-            else:
-                kyc_status = "rejected"
-            # Risk segment reflects compliance/operational risk: ~60% low, ~30% medium, ~10% high
-            risk_segment_rand = rng.random()
-            if risk_segment_rand < 0.60:
-                risk_segment = "low"
-            elif risk_segment_rand < 0.90:
-                risk_segment = "medium"
-            else:
-                risk_segment = "high"
+        elif domain == "education":
+            completion_rate = round(rng.uniform(0.35, 0.98), 4)
             domain_attributes = {
-                "cif_number": f"CIF{rng.randint(10_000_000, 99_999_999)}",
-                "account_numbers": [f"{rng.randint(1000000000, 9999999999)}" for _ in range(rng.randint(1, 2))],
-                "kyc_status": kyc_status,
-                "risk_segment": risk_segment,
+                "student_id": f"STU-{rng.randint(100000, 999999)}",
+                "institution_name": rng.choice(("Demo University", "Demo Online Academy", "Demo Polytechnic")),
+                "learning_mode": rng.choice(("self_paced", "instructor_led", "hybrid")),
+                "name_locale": name_locale,
+                "course_completion_rate": completion_rate,
+                "enrolled_programs": rng.sample(
+                    ["Data Analytics Certificate", "AI Foundations", "Digital Marketing", "Business English"],
+                    k=rng.randint(1, 2),
+                ),
+                "certification_goal": rng.choice(("none", "ielts", "aws", "pmp")),
             }
         elif domain == "real_estate":
             domain_attributes = {
@@ -1523,11 +1728,6 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
                     ["news", "sports", "entertainment", "documentary", "music"],
                     k=rng.randint(1, 3),
                 ),
-            }
-        elif domain == "education":
-            domain_attributes = {
-                "student_id": f"STU-{rng.randint(100000, 999999)}",
-                "institution_name": rng.choice(("Demo University", "Demo Online Academy", "Demo Polytechnic")),
             }
         else:
             # Catch-all for any future domain; do nothing domain-specific.
@@ -1639,21 +1839,21 @@ ICP_ARCHETYPES = [
         "persona_summary": "ICP for the H2 2026 Subscribe & Save program: steady repeat buyers of everyday essentials, moderate spend, strong loyalty-program participation.",
         "centroid": {"behavior": 60, "engagement": 55, "financial": 70, "loyalty": 85, "relationship": 60, "risk": 15},
     },
-    # -- banking --
+    # -- education --
     {
-        "domain": "banking", "persona_code": "banking_premium_wealth_client_fy2026",
-        "persona_name": "Premium Wealth Management Client -- FY2026",
-        "persona_category": "Champion", "product": "Premium Wealth Management Package",
+        "domain": "education", "persona_code": "education_enterprise_lms_sponsor_fy2026",
+        "persona_name": "Enterprise LMS Sponsor -- FY2026",
+        "persona_category": "Champion", "product": "Enterprise LMS + Outcome Analytics",
         "campaign_period": "2026-01-01 to 2026-12-31",
-        "persona_summary": "ICP for the FY2026 premium wealth-management push: high-net-worth, low-risk, deeply loyal relationship-banking clients.",
+        "persona_summary": "ICP for FY2026 enterprise learning contracts: high-LTV organizations sponsoring multi-seat upskilling programs.",
         "centroid": {"behavior": 70, "engagement": 65, "financial": 92, "loyalty": 88, "relationship": 75, "risk": 8},
     },
     {
-        "domain": "banking", "persona_code": "banking_digital_first_young_saver_2026",
-        "persona_name": "Digital-First Young Saver -- 2026 Robo-Advisor Launch",
-        "persona_category": "Growth Potential", "product": "Digital Savings + Robo-Advisor",
+        "domain": "education", "persona_code": "education_mobile_first_exam_prep_2026",
+        "persona_name": "Mobile-First Exam Prep Learner -- 2026",
+        "persona_category": "Growth Potential", "product": "Digital Exam Prep + Mentorship",
         "campaign_period": "2026-01-01 to 2026-12-31",
-        "persona_summary": "ICP for the 2026 digital savings + robo-advisor launch: mobile-first young savers, modest balances, high app engagement, still building tenure.",
+        "persona_summary": "ICP for 2026 mobile exam-prep programs: younger learners with high app engagement and growing conversion potential.",
         "centroid": {"behavior": 80, "engagement": 85, "financial": 45, "loyalty": 50, "relationship": 40, "risk": 25},
     },
     # -- insurance --

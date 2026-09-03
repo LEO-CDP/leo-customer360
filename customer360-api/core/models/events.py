@@ -1,8 +1,8 @@
 """High-volume behavioral/transactional event fact model.
 
 Mirrors ``cdp_raw_events`` in core-customer360/database-schema.sql: a
-range-partitioned (monthly, by event_time) event stream fed by AppsFlyer/
-MoEngage/Web Tracking/CoreBanking/POS/... ingestion, used to power the
+range-partitioned (monthly, by event_time) event stream fed by Adjust/
+OneSignal/Web Tracking/CoreBanking/POS/... ingestion, used to power the
 Customer 360 profile dashboard's engagement summary / cross-channel
 activity / timeline / top-interests widgets (see core/crud/profile360.py).
 

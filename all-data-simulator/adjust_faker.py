@@ -4,6 +4,7 @@ import json
 import random
 import unicodedata
 from datetime import timedelta
+from urllib.parse import quote_plus
 from faker import Faker
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -48,7 +49,7 @@ class PersonaList(BaseModel):
 # ---------------------------------------------------------
 # 2. Media Source Config
 # ---------------------------------------------------------
-# Real AppsFlyer partner IDs / display names + how each network's data
+# Real Adjust partner IDs / display names + how each network's data
 # actually shows up on a Pull API raw-data report. This drives which
 # columns get populated for a given row -- e.g. fb_* columns are only
 # ever non-empty when media_source is a Facebook/Meta placement, ASA
@@ -91,6 +92,13 @@ ORGANIC_INSTALL_RATE = 0.25
 # Share of paid, non-organic users who come back later via a retargeting
 # (re-engagement) campaign touch.
 RETARGETING_RATE = 0.18
+
+
+def _build_adjust_tracker_token(length: int = 8) -> str:
+    """Returns a pseudo tracker token used in synthetic Adjust-style
+    install-referrer payloads (adj_t=...)."""
+    alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+    return "".join(random.choice(alphabet) for _ in range(length))
 
 # ---------------------------------------------------------
 # 3. AI Manager (Gemini AI Integration for Campaigns & Personas)
@@ -276,7 +284,7 @@ class DeviceManager:
             # ATT (App Tracking Transparency) status. iOS 14.5+ requires an explicit
             # prompt; industry opt-in rates hover around 20-30%. IDFA is only a real
             # value when the user has authorized tracking (status == 3) -- otherwise
-            # AppsFlyer receives a zeroed-out IDFA, same as Apple returns it.
+            # Adjust receives a zeroed-out IDFA, same as Apple returns it.
             att_status = random.choices(
                 ["not_determined", "restricted", "denied", "authorized"],
                 weights=[15, 5, 55, 25],
@@ -478,7 +486,8 @@ class UserJourneySimulator:
         })
 
         current_time = reattr_touch_time + timedelta(minutes=random.randint(1, 15))
-        events.append(self._build_event_row(reengage_row, current_time, "af_app_reopen", {"trigger": "retargeting"}))
+        # Keep event naming neutral/Adjust-compatible (avoid AppsFlyer "af_" prefix).
+        events.append(self._build_event_row(reengage_row, current_time, "app_reopen", {"trigger": "retargeting"}))
 
         if random.random() < 0.6:
             current_time += timedelta(minutes=random.randint(1, 10))
@@ -529,9 +538,11 @@ class UserJourneySimulator:
             if is_organic:
                 gp_broadcast_referrer = "utm_source=google-play&utm_medium=organic"
             else:
+                encoded_source = quote_plus(media_source)
+                encoded_campaign = quote_plus(campaign.campaign)
                 gp_broadcast_referrer = (
-                    f"utm_source={media_source}&utm_medium=cpi&utm_campaign={campaign.campaign}"
-                    f"&af_tranid={fake.uuid4()}"
+                    f"utm_source={encoded_source}&utm_medium=cpi&utm_campaign={encoded_campaign}"
+                    f"&adj_t={_build_adjust_tracker_token()}"
                 )
 
         row = {
@@ -592,7 +603,7 @@ class UserJourneySimulator:
 # ---------------------------------------------------------
 # 7. Simulator Application (Main Orchestrator)
 # ---------------------------------------------------------
-class AppsFlyerSimulatorApp:
+class AdjustSimulatorApp:
     def __init__(self, api_key: str, output_file: str):
         shared_fake = Faker('vi_VN')
         self.ai_manager = AIManager(api_key, fake=shared_fake)
@@ -639,7 +650,7 @@ class AppsFlyerSimulatorApp:
         print("Simulation complete!")
 
     def _upload_to_s3(self) -> None:
-        bucket_name = os.getenv("APPSFLYER_S3_BUCKET", "appsflyer-data")
+        bucket_name = os.getenv("ADJUST_S3_BUCKET", "adjust-data")
         try:
             object_name = S3DataUtil().upload_file(self.output_file, bucket_name)
             print(f"Uploaded to s3://{bucket_name}/{object_name}")
@@ -652,15 +663,15 @@ class AppsFlyerSimulatorApp:
 # ---------------------------------------------------------
 if __name__ == "__main__":
     API_KEY = os.getenv("GEMINI_API_KEY", "")
-    print("Starting Bank123 AppsFlyer In-App Event Simulation...")
+    print("Starting Bank123 Adjust In-App Event Simulation...")
     if API_KEY:
         print(f"Using Gemini API Key: {API_KEY[:4]}**** (hidden for security)")
     else:
         print("No GEMINI_API_KEY found -- running in offline fallback mode.")
 
-    app = AppsFlyerSimulatorApp(
+    app = AdjustSimulatorApp(
         api_key=API_KEY,
-        output_file="bank123_appsflyer_in_app_events.csv"
+        output_file="bank123_adjust_in_app_events.csv"
     )
 
     app.run(num_users=10)

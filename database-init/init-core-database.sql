@@ -310,7 +310,7 @@ INSERT INTO customer360.cdp_profile_attributes (
 
     -- IDENTITY_GRAPH (cross-channel device/ad/cookie/external identifiers)
     ('external_ids', 'external_ids', 'External System IDs', 'Map of source_system to that source external customer id (deterministic matching).', 'IDENTITY_GRAPH', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 160),
-    ('external_customer_id', 'external_ids', 'External Customer ID (raw)', 'Per-source customer id on cdp_raw_profiles_stage (AppsFlyer customer_user_id / core banking CIF / MoEngage unique_id); identity-resolution matching key, consolidated into external_ids.', 'IDENTITY_GRAPH', 'cdp_raw_profiles_stage', 'TEXT', 'all', FALSE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 170),
+    ('external_customer_id', 'external_ids', 'External Customer ID (raw)', 'Per-source customer id on cdp_raw_profiles_stage (CRM or External Platform unique_id for user); identity-resolution matching key, consolidated into external_ids.', 'IDENTITY_GRAPH', 'cdp_raw_profiles_stage', 'TEXT', 'all', FALSE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 170),
     ('device_ids', 'device_ids', 'Device IDs', 'Consolidated array of device identifiers (IDFV/Android ID/app instance id).', 'IDENTITY_GRAPH', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 180),
     ('device_id', 'device_ids', 'Device ID (raw)', 'Raw per-event device id on cdp_raw_profiles_stage; identity-resolution matching key, consolidated into device_ids.', 'IDENTITY_GRAPH', 'cdp_raw_profiles_stage', 'TEXT', 'all', FALSE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 190),
     ('advertising_ids', 'advertising_ids', 'Advertising IDs', 'Consolidated array of mobile advertising identifiers (IDFA/GAID) for retargeting.', 'IDENTITY_GRAPH', 'cdp_master_profiles', 'ARRAY', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 200),
@@ -523,9 +523,9 @@ SET
     consolidation_config = CASE attribute_internal_code
         WHEN 'email' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"verified_event_names":["kyc-completed"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
         WHEN 'phone_number' THEN '{"mode":"verified_first","verified_field":"kyc_status","verified_values":["verified"],"verified_event_names":["kyc-completed"],"fallback_mode":"most_recent","timestamp_field":"updated_at"}'::jsonb
-        WHEN 'external_customer_id' THEN '{"mode":"source_priority","source_priority":["CoreBanking","POS","WebTracking","AppsFlyer","MoEngage"]}'::jsonb
-        WHEN 'device_id' THEN '{"mode":"source_priority","source_priority":["WebTracking","AppsFlyer","MoEngage"]}'::jsonb
-        WHEN 'advertising_id' THEN '{"mode":"source_priority","source_priority":["WebTracking","AppsFlyer","MoEngage"]}'::jsonb
+        WHEN 'external_customer_id' THEN '{"mode":"source_priority","source_priority":["CoreBanking","POS","WebTracking","Adjust","OneSignal"]}'::jsonb
+        WHEN 'device_id' THEN '{"mode":"source_priority","source_priority":["WebTracking","Adjust","OneSignal"]}'::jsonb
+        WHEN 'advertising_id' THEN '{"mode":"source_priority","source_priority":["WebTracking","Adjust","OneSignal"]}'::jsonb
         WHEN 'cookie_id' THEN '{"mode":"source_priority","source_priority":["WebTracking"]}'::jsonb
         ELSE consolidation_config
     END,
@@ -747,6 +747,7 @@ INSERT INTO customer360.sys_data_source (
     collect_directly,
     first_party_data,
     journey_level,
+    journey_map_id,
     touchpoint_hub_id,
     security_code,
     total_tracked_event,
@@ -769,57 +770,60 @@ INSERT INTO customer360.sys_data_source (
     TRUE,
     TRUE,
     3,
+    'journey-web-analytics',
     'touchpoint-web',
     'GA4-DEMO-SECURE',
     98000,
     2400,
     18.90,
     '{"measurement_id": "G-DEMO360"}'::jsonb,
-    ARRAY['www.google-analytics.com', 'analytics.google.com'],
-    ARRAY['gtag(''config'', ''G-DEMO360'')'],
+    ARRAY['www.googletagmanager.com', 'www.google-analytics.com', 'analytics.google.com'],
+    ARRAY['<script async src=''https://www.googletagmanager.com/gtag/js?id=G-DEMO360''></script>', 'gtag(''config'', ''G-DEMO360'')'],
     '{"target_url": "https://analytics.google.com", "tracking_url": "https://analytics.google.com?utm_source=google-analytics-4&utm_medium=qr_code&utm_campaign=c360_datasource", "qr_code_url": "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=https%3A%2F%2Fanalytics.google.com%3Futm_source%3Dgoogle-analytics-4%26utm_medium%3Dqr_code%26utm_campaign%3Dc360_datasource", "generated_at": "2026-08-07T00:00:00Z"}'::jsonb
 ),
 (
     'a2222222-2222-2222-2222-222222222222'::uuid,
     '11111111-1111-1111-1111-111111111111'::uuid,
-    'AppsFlyer Mobile Attribution',
-    'appsflyer-mobile-attribution',
+    'Adjust Mobile Attribution',
+    'adjust-mobile-attribution',
     5,
     1,
-    'https://hq1.appsflyer.com',
-    'https://cdn.example.com/connectors/appsflyer.png',
+    'https://automate.adjust.com/reports-service/report',
+    'https://cdn.example.com/connectors/adjust.png',
     TRUE,
     TRUE,
     3,
+    'journey-mobile-attribution',
     'touchpoint-mobile-ads',
-    'AF-DEMO-SECURE',
+    'ADJ-DEMO-SECURE',
     120000,
     3200,
     26.75,
-    '{"default": "appsflyer_demo_token"}'::jsonb,
-    ARRAY['hq1.appsflyer.com', 'events.appsflyer.com'],
+    '{"api_token": "adjust_demo_token"}'::jsonb,
+    ARRAY['automate.adjust.com', 'app.adjust.com'],
     ARRAY[]::text[],
     '{}'::jsonb
 ),
 (
     'a3333333-3333-3333-3333-333333333333'::uuid,
     '11111111-1111-1111-1111-111111111111'::uuid,
-    'MoEngage Journey Events',
-    'moengage-journey-events',
+    'OneSignal Journey Events',
+    'onesignal-journey-events',
     3,
     1,
-    'https://dashboard-01.moengage.com',
-    'https://cdn.example.com/connectors/moengage.png',
+    'https://api.onesignal.com',
+    'https://cdn.example.com/connectors/onesignal.png',
     TRUE,
     FALSE,
     2,
+    'journey-engagement',
     'touchpoint-push',
-    'MOE-DEMO-SECURE',
+    'ONS-DEMO-SECURE',
     64000,
     1700,
     14.20,
-    '{"workspace": "moengage_demo_workspace"}'::jsonb,
-    ARRAY['api-01.moengage.com'],
+    '{"app_api_key": "os_v2_app_demo_key"}'::jsonb,
+    ARRAY['api.onesignal.com', 'dashboard.onesignal.com'],
     ARRAY[]::text[],
     '{}'::jsonb
 )
@@ -832,6 +836,7 @@ ON CONFLICT (tenant_id, slug) DO UPDATE SET
     collect_directly = EXCLUDED.collect_directly,
     first_party_data = EXCLUDED.first_party_data,
     journey_level = EXCLUDED.journey_level,
+    journey_map_id = EXCLUDED.journey_map_id,
     touchpoint_hub_id = EXCLUDED.touchpoint_hub_id,
     security_code = EXCLUDED.security_code,
     total_tracked_event = EXCLUDED.total_tracked_event,

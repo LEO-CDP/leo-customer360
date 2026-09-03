@@ -6,7 +6,7 @@ This is the Python OOP replacement for the PostgreSQL stored procedure
 multi-tenant ``customer360`` schema defined in
 ``core-customer360/database-schema.sql`` (``cdp_raw_profiles_stage``,
 ``cdp_master_profiles``, ``cdp_profile_links``), which stores profile data
-ingested from AppsFlyer, MoEngage and Web Tracking for retail, banking,
+ingested from Adjust, OneSignal and Web Tracking for retail, banking,
 real_estate, travel, media, and education domains.
 
 Matching rules are read dynamically from the ``cdp_profile_attributes``
@@ -69,7 +69,7 @@ ARRAY_IDENTITY_FIELDS = {
 }
 
 # Per-source-system customer identifiers, consolidated into a JSONB map on the
-# master profile: {"AppsFlyer": "...", "MoEngage": "...", ...}.
+# master profile: {"Adjust": "...", "OneSignal": "...", ...}.
 JSONB_KEYED_IDENTITY_FIELDS = {
     "external_customer_id": "external_ids",
 }
@@ -291,7 +291,7 @@ class CustomerIdentityResolver:
     @staticmethod
     def _source_priority_rank(source_system: Optional[str], priority: Sequence[str]) -> int:
         """Lower rank wins. Matching is case-insensitive so config/casing
-        drift (e.g. 'AppsFlyer' vs 'appsflyer') never silently breaks this
+        drift (e.g. 'Adjust' vs 'adjust') never silently breaks this
         policy -- values not found in ``priority`` rank last."""
         if not source_system:
             return len(priority)

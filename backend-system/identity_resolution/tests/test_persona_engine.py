@@ -44,7 +44,7 @@ def _profile(**overrides):
         "customer_since": date.today() - timedelta(days=365),
         "last_activity_at": datetime.now() - timedelta(days=1),
         "preferred_channel": "Mobile App",
-        "source_systems": ["AppsFlyer", "WebTracking"],
+        "source_systems": ["Adjust", "WebTracking"],
         "secondary_emails": [],
         "secondary_phones": [],
         "historical_clv": 2000.0,

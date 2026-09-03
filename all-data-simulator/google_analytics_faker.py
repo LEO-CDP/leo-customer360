@@ -34,7 +34,7 @@ def generate_google_analytics_event(days_ago=0):
         "platform": platform,
         "event_time": event_time.strftime("%Y-%m-%d %H:%M:%S"),
         "event_name": event_name,
-        "appsflyer_id": str(uuid.uuid4()), # Unique AF device identifier
+        "adjust_id": str(uuid.uuid4()), # Unique device identifier
         "customer_user_id": fake.uuid4() if random.random() > 0.3 else None, # 70% logged-in users
         "ip": fake.ipv4(),
         "wifi": random.choice([True, False]),

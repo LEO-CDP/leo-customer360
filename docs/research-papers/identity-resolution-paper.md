@@ -57,7 +57,7 @@ This intermediate table acts as the landing zone for raw customer traces from he
 - `raw_profile_id` (UUID, primary key): unique identifier for each raw profile event.
 - `tenant_id` (UUID): tenant partitioning key for multi-tenant isolation.
 - `domain` (TEXT): business domain context (for example: `retail`, `banking`, `travel`).
-- `source_system` (TEXT): upstream origin system (for example: `POS`, `AppsFlyer`, `MoEngage`, `CRM`).
+- `source_system` (TEXT): upstream origin system (for example: `POS`, `Google Analytics`, `CRM`).
 - `external_customer_id` (TEXT): source-local customer identifier.
 - `email`, `phone_number`, `national_id` (TEXT): personal identifiers; values can be plaintext or one-way SHA-256 hashes.
 - `full_name`, `first_name`, `last_name` (TEXT): source name fields.

@@ -55,7 +55,7 @@ def build_identity_graph():
     # ---------------------------------------------------------
     # A. SIMULATED CRM BRIDGE (CUID <-> PII)
     # In reality, this comes from your Postgres/backend DB.
-    # We reconstruct it here to bridge AppsFlyer/GA4 with Meta/Zalo.
+    # We reconstruct it here to bridge Adjust/GA4 with Meta/Zalo.
     # ---------------------------------------------------------
     crm_users = [
         {"cuid": "CUST-0001", "email": "an.nguyen@example.test", "phone": "84901234001"},
@@ -114,17 +114,17 @@ def build_identity_graph():
             graph.add_record(id_zalo, "Zalo OA", row)
 
     # ---------------------------------------------------------
-    # D. APPSFLYER
+    # D. ADJUST
     # Primary join keys: CUID, Transaction ID (from event_value JSON)
     # ---------------------------------------------------------
-    af_data = load_csv("appsflyer_cir_api.csv")
-    for row in af_data:
+    adjust_data = load_csv("adjust_cir_api.csv")
+    for row in adjust_data:
         cuid = row.get("customer_user_id")
-        af_id = row.get("appsflyer_id")
+        adjust_id = row.get("adjust_id")
         id_cuid = f"CUID:{cuid}"
-        id_af = f"AF:{af_id}"
+        id_adjust = f"ADJ:{adjust_id}"
         
-        graph.union(id_cuid, id_af)
+        graph.union(id_cuid, id_adjust)
         
         # Extract nested Transaction ID if it's a purchase
         try:
@@ -136,7 +136,7 @@ def build_identity_graph():
         except json.JSONDecodeError:
             pass
             
-        graph.add_record(id_af, "AppsFlyer", row)
+        graph.add_record(id_adjust, "Adjust", row)
 
     # ---------------------------------------------------------
     # E. GA4

@@ -242,9 +242,9 @@ def generate_zalo_data(num_rows):
     return fields, rows
 
 # =====================================================================
-# 5) APPSFLYER RAW DATA (Pull API)
+# 5) ADJUST RAW DATA (Pull API)
 # =====================================================================
-def generate_appsflyer_data(num_rows):
+def generate_adjust_data(num_rows):
     # 'carrier' replaced with 'operator' to match exact AF Raw Data Field Dictionary
     fields = [
         "attributed_touch_type", "attributed_touch_time", "install_time",
@@ -252,14 +252,14 @@ def generate_appsflyer_data(num_rows):
         "event_revenue_currency", "event_source", "media_source", "channel",
         "campaign", "campaign_id", "adset", "adset_id", "ad", "ad_id",
         "country_code", "state", "city", "postal_code", "ip", "operator",
-        "language", "appsflyer_id", "advertising_id", "idfa", "android_id",
+        "language", "adjust_id", "advertising_id", "idfa", "android_id",
         "customer_user_id", "idfv", "platform", "device_type", "os_version",
         "app_version", "sdk_version", "app_id", "bundle_id", "user_agent",
         "http_referrer", "original_url"
     ]
     rows = []
     media_sources = ["facebook", "tiktok", "googleadwords_int", "zalo"]
-    events = ["af_login", "af_content_view", "af_add_to_cart", "af_purchase"]
+    events = ["adj_login", "adj_content_view", "adj_add_to_cart", "adj_purchase"]
     
     for i in range(num_rows):
         p = PEOPLE[i % len(PEOPLE)]
@@ -267,7 +267,7 @@ def generate_appsflyer_data(num_rows):
         event_ts = install_ts + timedelta(minutes=random.randint(5, 120))
         
         event_name = random.choice(events)
-        is_purchase = event_name == "af_purchase"
+        is_purchase = event_name == "adj_purchase"
         revenue = round(random.uniform(100000, 500000), 2) if is_purchase else 0
         
         is_android = random.choice([True, False])
@@ -285,11 +285,11 @@ def generate_appsflyer_data(num_rows):
             "media_source": random.choice(media_sources),
             "channel": random.choice(["Facebook Ads", "TikTok Ads", "Google Ads", "Zalo"]),
             "campaign": f"C360_App_{random.randint(1,4)}",
-            "campaign_id": f"AF-CAMP-{random.randint(1,4):03d}",
+            "campaign_id": f"ADJ-CAMP-{random.randint(1,4):03d}",
             "adset": f"AdSet_{random.randint(1,5)}",
-            "adset_id": f"AF-AS-{random.randint(1,5):03d}",
+            "adset_id": f"ADJ-AS-{random.randint(1,5):03d}",
             "ad": f"Creative_{random.randint(1,7)}",
-            "ad_id": f"AF-AD-{random.randint(1,7):03d}",
+            "ad_id": f"ADJ-AD-{random.randint(1,7):03d}",
             "country_code": p["country"],
             "state": p["state"],
             "city": p["city"],
@@ -297,7 +297,7 @@ def generate_appsflyer_data(num_rows):
             "ip": f"103.21.{random.randint(10, 50)}.{random.randint(20, 99)}",
             "operator": random.choice(["Viettel", "MobiFone", "VinaPhone"]),
             "language": "vi",
-            "appsflyer_id": f"1740000000{random.randint(10,99)}-a1b2c3d4e5f6",
+            "adjust_id": f"1740000000{random.randint(10,99)}-a1b2c3d4e5f6",
             "advertising_id": f"aa000000-1111-2222-3333-{i:012d}",
             "idfa": "" if is_android else f"IDFA-{i+1:012d}",
             "android_id": f"ANDROID-{i+1:012d}" if is_android else "",
@@ -325,7 +325,7 @@ if __name__ == "__main__":
         "tiktok_cir_api.csv": generate_tiktok_data(Config.NUM_ROWS),
         "ga4_cir_api.csv": generate_ga4_data(Config.NUM_ROWS),
         "zalo_cir_api.csv": generate_zalo_data(Config.NUM_ROWS),
-        "appsflyer_cir_api.csv": generate_appsflyer_data(Config.NUM_ROWS),
+        "adjust_cir_api.csv": generate_adjust_data(Config.NUM_ROWS),
     }
 
     generated_paths = []

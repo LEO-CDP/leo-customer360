@@ -182,8 +182,8 @@ class SysMetadataTests(unittest.TestCase):
             SysDataSource(
                 data_source_id=uuid.uuid4(),
                 tenant_id=tenant_id,
-                name="AppsFlyer",
-                slug="appsflyer",
+                name="Adjust",
+                slug="adjust",
                 source_type=2,
                 status=1,
             )
@@ -195,8 +195,8 @@ class SysMetadataTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(len(body), 1)
-        self.assertEqual(body[0]["name"], "AppsFlyer")
-        self.assertEqual(body[0]["slug"], "appsflyer")
+        self.assertEqual(body[0]["name"], "Adjust")
+        self.assertEqual(body[0]["slug"], "adjust")
 
     def test_metadata_data_sources_create_returns_created_resource(self):
         mock_db = MagicMock()
@@ -380,8 +380,8 @@ class SysMetadataTests(unittest.TestCase):
         data_source = SysDataSource(
             data_source_id=uuid.uuid4(),
             tenant_id=tenant_id,
-            name="AppsFlyer",
-            slug="appsflyer",
+            name="Adjust",
+            slug="adjust",
             source_type=2,
             status=1,
         )

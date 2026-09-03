@@ -131,7 +131,7 @@ docker compose --profile dev up -d --build
 The same six long-running services, **plus** `cir-demo-seed`, a one-shot job (`restart: "no"`)
 that waits for `postgres` to be healthy, then runs, in order:
 
-1. `identity_resolution/scripts/init_sample_data.py` — seeds 1000 synthetic AppsFlyer raw profiles
+1. `identity_resolution/scripts/init_sample_data.py` — seeds 1000 synthetic Adjust raw profiles
    (retail + banking, ~30% deliberate duplicates).
 2. `identity_resolution/scripts/run_demo_resolution.py` — drains them through identity resolution.
 3. `identity_resolution/scripts/seed_full_demo_data.py` — seeds the full CRM journey graph,

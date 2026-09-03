@@ -3,7 +3,7 @@ a summary of the resulting master profiles so you can verify the results
 yourself (e.g. via psql) afterwards.
 
 Intended to run after scripts/init_sample_data.py has seeded sample
-AppsFlyer / MoEngage / Web Tracking raw profiles, but also works as a
+Adjust / OneSignal / Web Tracking raw profiles, but also works as a
 general "process everything pending right now" utility.
 """
 

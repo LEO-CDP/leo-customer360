@@ -699,7 +699,7 @@ CREATE INDEX IF NOT EXISTS idx_crm_industry_tenant ON customer360.crm_industry (
 -- LEO CDP MASTER PROFILE SCHEMA (PostgreSQL 16+)
 -- ============================================================================
 -- Description: Golden customer profile containing the consolidated ("resolved")
--- identity across multiple data sources (AppsFlyer, MoEngage, Web Tracking / GA4,
+-- identity across multiple data sources (Adjust, OneSignal, Web Tracking / GA4,
 -- POS, Core Banking, etc.) for both retail and banking domains.
 -- ============================================================================
 
@@ -760,15 +760,15 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- Identifiers resolved and merged from cdp_raw_profiles_stage.
     -- ------------------------------------------------------------------------
     -- Maps a source_system to its own customer identifier (Deterministic matching).
-    -- e.g: appsflyer_id, google_ads_id, zalo_user_id, moengage_id, firebase_id, etc.
+    -- e.g: adjust_id, google_ads_id, zalo_user_id, onesignal_id, firebase_id, etc.
     external_ids JSONB DEFAULT '{}'::JSONB,
     -- Hardware or app-specific identifiers for mobile attribution (IDFV, Android ID).
     device_ids TEXT[] DEFAULT ARRAY[]::TEXT[],
-    -- Mobile advertising identifiers for retargeting campaigns (AppsFlyer IDFA/GAID).
+    -- Mobile advertising identifiers for retargeting campaigns (Adjust IDFA/GAID).
     advertising_ids TEXT[] DEFAULT ARRAY[]::TEXT[],
     -- Anonymous browser cookies for web tracking and session stitching.
     cookie_ids TEXT[] DEFAULT ARRAY[]::TEXT[],
-    -- Stored tokens for push notification services (MoEngage, Firebase).
+    -- Stored tokens for push notification services (OneSignal, Firebase).
     -- Format: {"fcm": "token_string", "apns": "token_string"}
     push_tokens JSONB DEFAULT '{}'::JSONB,
 
@@ -1223,8 +1223,8 @@ CREATE TRIGGER trg_sync_domain_attribute_catalog
 
 
 -- Raw profiles staging
--- Landing zone for every inbound source: AppsFlyer (mobile attribution/install
--- events), MoEngage (engagement/push events), Web Tracking / GA4 (browser
+-- Landing zone for every inbound source: Adjust (mobile attribution/install
+-- events), OneSignal (engagement/push events), Web Tracking / GA4 (browser
 -- events), and domain-specific sources like POS or Core Banking, for both the
 -- retail and banking domains.
 CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
@@ -1235,7 +1235,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     user_id UUID REFERENCES customer360.sys_user(user_id),
     -- Validated against sys_domain at the API layer, see cdp_master_profiles.domain above.
     domain TEXT NOT NULL DEFAULT 'banking',
-    source_system TEXT NOT NULL,        -- 'AppsFlyer' | 'MoEngage' | 'WebTracking' | 'CoreBanking' | 'POS' | ...
+    source_system TEXT NOT NULL,        -- 'Adjust' | 'OneSignal' | 'WebTracking' | 'CoreBanking' | 'POS' | ...
     channel TEXT,                       -- 'mobile_app' | 'web' | 'pos' | 'call_center' | ...
 
     -- Core identity fields as reported by the source
@@ -1246,7 +1246,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
             'organization'
         )
     ) DEFAULT 'individual',
-    external_customer_id TEXT, -- AppsFlyer customer_user_id / MoEngage unique_id / core banking CIF / loyalty_id
+    external_customer_id TEXT, -- Adjust customer_user_id / OneSignal unique_id / core banking CIF / loyalty_id
     full_name TEXT,
     first_name TEXT,
     last_name TEXT,
@@ -1264,7 +1264,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     country TEXT,
     company_name TEXT,
 
-    -- Device & marketing identity (AppsFlyer / MoEngage / Web Tracking)
+    -- Device & marketing identity (Adjust / OneSignal / Web Tracking)
     device_id TEXT, -- IDFV / Android ID / app instance id
     advertising_id TEXT, -- IDFA / GAID
     platform TEXT, -- ios | android | web
@@ -1276,8 +1276,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     ip_address INET,
     user_agent TEXT,
 
-    -- Granular AppsFlyer device/app identifiers and metadata (see
-    -- all-data-simulator/data-dictionary/appsflyer-metadata.md sections 3.2/3.4).
+    -- Granular Adjust device/app identifiers and metadata (see
+    -- all-data-simulator/data-dictionary/adjust-metadata.md sections 3.2/3.4).
     -- idfa/idfv/android_id/imei are the raw per-platform values that ingestion
     -- maps onto device_id/advertising_id above for CIR matching; kept here too
     -- for lineage/audit and as a fallback if the mapping needs to be redone.
@@ -1288,7 +1288,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     att TEXT, -- iOS 14+ ATT status: not_determined | denied | authorized | restricted
     device_type TEXT, -- phone | tablet | other
     os_version TEXT,
-    sdk_version TEXT, -- AppsFlyer SDK version
+    sdk_version TEXT, -- Adjust SDK version
     app_id TEXT,
     app_name TEXT,
     bundle_id TEXT,
@@ -1299,8 +1299,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     language TEXT, -- device locale, e.g. vi-VN
     gp_broadcast_referrer TEXT,
 
-    -- Marketing attribution (AppsFlyer install/campaign touch + Web UTM).
-    -- See appsflyer-metadata.md section 3.1; sub_param_1..5 and other rarely
+    -- Marketing attribution (Adjust install/campaign touch + Web UTM).
+    -- See adjust-metadata.md section 3.1; sub_param_1..5 and other rarely
     -- used custom link params are intentionally not broken out into columns
     -- here -- they land in event_payload instead.
     media_source TEXT,
@@ -1341,7 +1341,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     utm_medium TEXT,
     utm_campaign TEXT,
 
-    -- Protect360 fraud signals (see appsflyer-metadata.md section 3.8)
+    -- Protect360 fraud signals (see adjust-metadata.md section 3.8)
     blocked_reason TEXT,
     blocked_reason_value TEXT,
 
@@ -1354,7 +1354,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     created_at TIMESTAMP DEFAULT now()
 );
 
-COMMENT ON TABLE customer360.cdp_raw_profiles_stage IS 'Landing zone for every inbound source (AppsFlyer, MoEngage, Web Tracking/GA4, POS, Core Banking, ...) before Customer Identity Resolution (CIR). Carries per-source identity + marketing attribution (including granular AppsFlyer device/attribution/Protect360 fields, see appsflyer-metadata.md) and a processing-queue status_code (1 new -> 2 in-progress -> 3 processed).';
+COMMENT ON TABLE customer360.cdp_raw_profiles_stage IS 'Landing zone for every inbound source (Adjust, OneSignal, Web Tracking/GA4, POS, Core Banking, ...) before Customer Identity Resolution (CIR). Carries per-source identity + marketing attribution (including granular Adjust device/attribution/Protect360 fields, see adjust-metadata.md) and a processing-queue status_code (1 new -> 2 in-progress -> 3 processed).';
 
 -- Links (raw → master)
 CREATE TABLE IF NOT EXISTS customer360.cdp_profile_links (
@@ -1844,7 +1844,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_events (
     session_id TEXT,
 
     -- Source & channel of the event.
-    source_system TEXT NOT NULL, -- 'AppsFlyer' | 'MoEngage' | 'WebTracking' | 'CoreBanking' | 'POS' | 'PMS' | 'GDS' | ...
+    source_system TEXT NOT NULL, -- 'Adjust' | 'OneSignal' | 'WebTracking' | 'CoreBanking' | 'POS' | 'PMS' | 'GDS' | ...
     -- Optional idempotency key from ingestion caller; when present it is
     -- unique per (tenant_id, source_system) to make repeated retries safe.
     event_dedup_key TEXT,
@@ -1853,7 +1853,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_events (
     ip_address INET,
     user_agent TEXT,
 
-    -- Marketing attribution snapshot (AppsFlyer/Web Tracking), carried directly
+    -- Marketing attribution snapshot (Adjust/Web Tracking), carried directly
     -- on the event row -- same rationale as the identity columns above -- so
     -- campaign/revenue reporting never needs to join back to
     -- cdp_raw_profiles_stage. Full attribution detail lives there.
@@ -2676,7 +2676,7 @@ CREATE INDEX IF NOT EXISTS idx_cdp_mp_data_quality ON customer360.cdp_master_pro
 -- composite GIN indexes in the future.
 -- -------------------------------------------------------------------------
 
--- Deterministic external IDs (e.g., {"appsflyer_id": "...", "ga_client_id": "..."})
+-- Deterministic external IDs (e.g., {"adjust_id": "...", "ga_client_id": "..."})
 CREATE INDEX IF NOT EXISTS idx_cdp_mp_external_ids ON customer360.cdp_master_profiles USING GIN (external_ids);
 
 -- Secondary contacts
@@ -2728,7 +2728,7 @@ CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_national_id ON customer360.cdp
 WHERE
     national_id IS NOT NULL;
 
--- Granular AppsFlyer device identifiers (fallback lookups / lineage; not
+-- Granular Adjust device identifiers (fallback lookups / lineage; not
 -- active CIR matching keys -- see device_id/advertising_id above for those).
 CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_idfa ON customer360.cdp_raw_profiles_stage (idfa)
 WHERE

@@ -22,8 +22,8 @@ echo "Installing dependencies from requirements.txt"
 "$PYTHON_BIN" -m pip install --upgrade pip
 "$PYTHON_BIN" -m pip install -r requirements.txt
 
-echo "Running appsflyer_faker.py"
-"$PYTHON_BIN" appsflyer_faker.py
+echo "Running adjust_faker.py"
+"$PYTHON_BIN" adjust_faker.py
 
 echo "Running google_analytics_faker.py"
 "$PYTHON_BIN" google_analytics_faker.py
