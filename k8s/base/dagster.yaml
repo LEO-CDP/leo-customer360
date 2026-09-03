@@ -1,14 +1,44 @@
 # Dagster orchestrator (webserver + daemon via `dagster dev`, 9 code locations
 # from backend-system/workspace.yaml). Serves the GraphQL endpoint the API calls
-# to submit jobs. Needs a PVC for DAGSTER_HOME (SQLite run/event storage) and DB
-# access (envFrom).  Image built from the new backend-system/Dockerfile.
+# to submit jobs.
+#
+# Phase 0 of the scaling plan (deployments/docs/dagster-scaling-analysis.md §4):
+#   - run/event/schedule storage lives in the SHARED PostgreSQL (dedicated
+#     `dagster` DB), removing the single-writer SQLite RWO PVC.
+#   - compute logs go to S3/MinIO (S3ComputeLogManager) so any pod can serve
+#     them — the last prerequisite before webserver replicas > 1.
+#
+# The instance config is provided by the `dagster-instance` ConfigMap below and
+# mounted over the image-baked DAGSTER_HOME/dagster.yaml (which the VM path uses
+# with local logs). Keep the `storage:` block here in sync with the baked
+# backend-system/dagster.yaml.
 apiVersion: v1
-kind: PersistentVolumeClaim
+kind: ConfigMap
 metadata:
-  name: dagster-home
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources: { requests: { storage: 1Gi } }
+  name: dagster-instance
+  labels: { app: dagster }
+data:
+  dagster.yaml: |
+    storage:
+      postgres:
+        postgres_db:
+          username: { env: DB_USER }
+          password: { env: DB_PASSWORD }
+          hostname: { env: DB_HOST }
+          db_name: dagster
+          port: { env: DB_PORT }
+    # Compute logs → object storage so they are not stranded on one pod's disk.
+    # Credentials come from the boto3 env chain (AWS_ACCESS_KEY_ID / _SECRET,
+    # mapped from the MinIO/vStorage secret in the Deployment); endpoint + bucket
+    # reuse the app's existing S3 config keys. Bucket must already exist.
+    compute_logs:
+      module: dagster_aws.s3.compute_log_manager
+      class: S3ComputeLogManager
+      config:
+        bucket: { env: MINIO_BUCKET }
+        prefix: dagster-compute-logs
+        endpoint_url: { env: S3_ENDPOINT }
+        skip_empty_files: true
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -17,13 +47,40 @@ metadata:
   labels: { app: dagster }
 spec:
   replicas: 1
-  strategy: { type: Recreate } # single-writer DAGSTER_HOME on a RWO volume
+  strategy: { type: Recreate } # one daemon until Phase 1 splits webserver/daemon
   selector:
     matchLabels: { app: dagster }
   template:
     metadata:
       labels: { app: dagster }
     spec:
+      initContainers:
+        # Ensure the dedicated `dagster` metadata database exists before Dagster
+        # boots. Idempotent: connects to the maintenance `postgres` database on
+        # the same server with the app's DB_* credentials and CREATEs `dagster`
+        # only if missing. Requires the DB user to have CREATEDB (the customer360
+        # owner does). Dagster then auto-creates its own tables on first start.
+        - name: create-dagster-db
+          image: postgres:16-alpine
+          envFrom:
+            - configMapRef: { name: c360-config }
+            - secretRef: { name: c360-secrets }
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              export PGPASSWORD="$DB_PASSWORD"
+              until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER"; do
+                echo "waiting for postgres at $DB_HOST:$DB_PORT ..."; sleep 2
+              done
+              if psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -tAc \
+                   "SELECT 1 FROM pg_database WHERE datname='dagster'" | grep -q 1; then
+                echo "database 'dagster' already exists"
+              else
+                echo "creating database 'dagster'"
+                psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres \
+                     -c "CREATE DATABASE dagster"
+              fi
       containers:
         - name: dagster
           image: customer360-dagster:local
@@ -32,6 +89,13 @@ spec:
             - { containerPort: 3000, name: http }
           env:
             - { name: DAGSTER_HOME, value: /dagster_home }
+            # Force S3 path-style addressing for the compute-log manager (MinIO/vStorage).
+            - { name: AWS_CONFIG_FILE, value: /app/aws-config }
+            # boto3 credentials for S3ComputeLogManager = the MinIO/vStorage keys.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: c360-secrets, key: MINIO_ROOT_USER } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: c360-secrets, key: MINIO_ROOT_PASSWORD } }
           envFrom:
             - configMapRef: { name: c360-config }
             - secretRef: { name: c360-secrets }
@@ -40,10 +104,14 @@ spec:
             initialDelaySeconds: 20
             periodSeconds: 10
           volumeMounts:
-            - { name: dagster-home, mountPath: /dagster_home }
+            # Override the image-baked DAGSTER_HOME/dagster.yaml with the instance
+            # config above (adds S3 compute logs). subPath = single-file mount.
+            - name: dagster-instance
+              mountPath: /dagster_home/dagster.yaml
+              subPath: dagster.yaml
       volumes:
-        - name: dagster-home
-          persistentVolumeClaim: { claimName: dagster-home }
+        - name: dagster-instance
+          configMap: { name: dagster-instance }
 ---
 apiVersion: v1
 kind: Service

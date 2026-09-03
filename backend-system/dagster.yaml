@@ -1,0 +1,28 @@
+# Dagster instance configuration (backend-system).
+#
+# Phase 0 of the scaling plan (deployments/docs/dagster-scaling-analysis.md §4):
+# run / event-log / schedule storage moves OFF the local SQLite file in
+# DAGSTER_HOME and onto the SHARED PostgreSQL server, so the webserver and
+# daemon can later run as separate, replicated processes (Phase 1).
+#
+# The connection reuses the app's existing DB_* environment (provided by the
+# c360-config ConfigMap + c360-secrets Secret, and by backend-system/.env on the
+# VM path) — only the database NAME is fixed to a DEDICATED `dagster` database so
+# Dagster's tables never co-mingle with the customer360 application schema. The
+# `dagster` database is created by the init step in k8s/base/dagster.yaml (k8s)
+# or once by hand on the managed vDB (VM/VKS).
+#
+# The single top-level `storage: postgres:` block configures run storage, event
+# log storage and schedule storage together. Run launcher and run coordinator
+# belong to later phases. S3 compute logs are added ON TOP of this file IN K8S
+# only, via the `dagster-instance` ConfigMap in k8s/base/dagster.yaml (which
+# mounts over this baked file); the single-pod VM path keeps local compute logs.
+
+storage:
+  postgres:
+    postgres_db:
+      username: { env: DB_USER }
+      password: { env: DB_PASSWORD }
+      hostname: { env: DB_HOST }
+      db_name: dagster
+      port: { env: DB_PORT }

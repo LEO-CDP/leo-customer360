@@ -100,6 +100,37 @@ else
   sudo docker build -t customer360-dagster /opt/c360/backend-system
   RUN_IMG="customer360-dagster"
 fi
+# Preserve the OLD instance's Dagster storage before replacing the container. The
+# old container ran with an EPHEMERAL DAGSTER_HOME (no -v mount), so its SQLite
+# run/event/schedule history lives ONLY inside the container layer — copy it out
+# now or `docker rm` destroys it. Import later with
+# backend-system/scripts/migrate_dagster_sqlite_to_postgres.py (see deployment.md).
+if sudo docker ps -a --format '{{.Names}}' | grep -qx backend-system; then
+  ts="$(date -u +%Y%m%d-%H%M%S)"; bak="/opt/c360/dagster-home-backup-$ts.tar"
+  echo "   backing up old DAGSTER_HOME -> $bak"
+  if sudo docker cp backend-system:/dagster_home - > "$bak" 2>/dev/null; then
+    echo "   backup saved ($(du -h "$bak" | cut -f1))"
+  else
+    rm -f "$bak"; echo "   (nothing to back up, or copy failed — continuing)"
+  fi
+fi
+# Ensure the dedicated `dagster` metadata database exists before the orchestrator
+# starts. Dagster auto-creates its TABLES but not the DATABASE; the k8s path does
+# this in an init container, the VM path does it here with a one-shot psql client
+# (no psql needed on the host). Idempotent; the DB user needs CREATEDB.
+echo "   ensuring 'dagster' database exists on ${DB_HOST}:${DB_PORT} ..."
+sudo docker run --rm --network host \
+  -e PGHOST="$DB_HOST" -e PGPORT="$DB_PORT" -e PGUSER="$DB_USER" \
+  -e PGPASSWORD="$DB_PW" -e PGDATABASE=postgres \
+  postgres:16-alpine sh -c '
+    set -e
+    until pg_isready >/dev/null 2>&1; do echo "   waiting for postgres..."; sleep 2; done
+    if psql -tAc "SELECT 1 FROM pg_database WHERE datname='\''dagster'\''" | grep -q 1; then
+      echo "   database dagster already exists"
+    else
+      echo "   creating database dagster"; createdb dagster
+    fi
+  '
 sudo docker rm -f backend-system >/dev/null 2>&1 || true
 sudo docker run -d --name backend-system --restart unless-stopped --network host --env-file /opt/c360/backend.env "$RUN_IMG"
 sleep 3
