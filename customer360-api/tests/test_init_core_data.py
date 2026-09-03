@@ -41,6 +41,16 @@ class _ScalarResult:
 
 
 class SeedDefaultSegmentsTests(unittest.TestCase):
+    def test_default_segments_have_valid_domains(self):
+        allowed_domains = {"all", "retail", "travel", "education", "real_estate"}
+
+        self.assertGreaterEqual(len(DEFAULT_SEGMENTS), 25)
+        for segment in DEFAULT_SEGMENTS:
+            self.assertIn("domain", segment)
+            self.assertIn(segment["domain"], allowed_domains)
+            if segment["segment_tag"].startswith("ecommerce_"):
+                self.assertEqual(segment["domain"], "retail")
+
     def test_no_tenants_inserts_nothing(self):
         session = FakeDBSession(script=[_AllResult([])])
 
