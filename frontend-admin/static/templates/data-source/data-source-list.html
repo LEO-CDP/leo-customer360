@@ -126,7 +126,7 @@
 						<input id="datasource-add-first-party-data" type="checkbox" checked class="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500/30" />
 						First-Party Data
 					</label>
-				</div>
+			</div>
 
 			<div>
 				<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Data Source Hosts (comma-separated)</label>
@@ -165,9 +165,40 @@
 
 		<div id="datasource-detail-body" class="text-xs text-slate-700 grid grid-cols-2 gap-3"></div>
 
+		<div id="datasource-detail-javascript-tags-field" class="hidden mt-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
+			<label for="datasource-detail-javascript-tags" class="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Javascript Tags</label>
+			<textarea id="datasource-detail-javascript-tags" rows="14" readonly spellcheck="false" class="mt-1.5 w-full resize-y rounded-xl border border-slate-200/80 bg-white px-3.5 py-2.5 text-xs font-mono leading-relaxed text-slate-700 shadow-sm outline-none"></textarea>
+		</div>
+
 		<div class="flex items-center justify-between mt-6 pt-4 border-t border-slate-100">
 			<button id="btn-datasource-detail-delete" class="border border-red-200 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors shadow-sm">Delete</button>
 			<button id="btn-datasource-detail-done" class="border border-slate-200/80 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Close</button>
 		</div>
 	</div>
 </div>
+
+<script id="c360-tracker-template" type="text/x-handlebars-template">
+(function() { 	
+	// Observer ID
+	window.leoObserverId = "{{dataSourceId}}";
+	
+	// Default batch size of Event Tracking
+	window.leoObserverBatchSize = 10;
+	
+	// CDN of JS
+	window.leoObserverLogDomain = "{{leoObserverLogDomain}}";
+  	window.leoObserverCdnDomain = "{{leoObserverCdnDomain}}";
+	
+	// Data Touchpoint Metadata 
+	window.srcTouchpointName = encodeURIComponent(document.title);
+	window.srcTouchpointUrl = encodeURIComponent(location.href);
+
+	// the main proxy CDP JS
+	var leoproxyJsPath = '/js/leo-observer/leo.proxy.min.js';
+    var src = location.protocol + '//' + window.leoObserverCdnDomain + leoproxyJsPath;
+    var jsNode = document.createElement('script');
+    jsNode.async=true; jsNode.defer=true; jsNode.src = src;
+    var s = document.getElementsByTagName('script')[0];
+    s.parentNode.insertBefore(jsNode, s);
+})();
+</script>

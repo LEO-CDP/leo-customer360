@@ -227,11 +227,27 @@ window.C360 = window.C360 || {};
     ].join("");
   }
 
+  function updateJavascriptTagsField(item) {
+    var isWebJs = Number(item.source_type) === 1;
+    var $field = $("#datasource-detail-javascript-tags-field");
+    var $textarea = $("#datasource-detail-javascript-tags");
+
+    $field.toggleClass("hidden", !isWebJs);
+    $textarea.val("");
+    if (!isWebJs) return;
+
+    var templateElement = document.getElementById("c360-tracker-template");
+    if (templateElement) {
+      $textarea.val(String(templateElement.textContent || "").trim());
+    }
+  }
+
   function openDetailModal(item) {
     var body = $("#datasource-detail-body");
     var hosts = Array.isArray(item.data_source_hosts) ? item.data_source_hosts.join(", ") : "-";
-    var tags = Array.isArray(item.javascript_tags) ? item.javascript_tags.join(", ") : "-";
-    var accessTokens = item.access_tokens ? JSON.stringify(item.access_tokens, null, 2) : "{}";
+    var accessTokensField = Number(item.source_type) === 2
+      ? field("Access Tokens", item.access_tokens ? JSON.stringify(item.access_tokens, null, 2) : "{}")
+      : "";
 
     var qrSection = "";
     if (Number(item.source_type) === 1 || (item.qr_code_data && typeof item.qr_code_data === "object" && Object.keys(item.qr_code_data).length > 0)) {
@@ -253,13 +269,13 @@ window.C360 = window.C360 || {};
       field("Average Daily Event", item.avg_daily_event) +
       field("Average Events Per Profile", item.avg_events_per_profile) +
       field("Hosts", hosts) +
-      field("Javascript Tags", tags) +
-      field("Access Tokens", accessTokens) +
+      accessTokensField +
       field("Created At", item.created_at) +
       field("Updated At", item.updated_at) +
       qrSection
     );
 
+    updateJavascriptTagsField(item);
     $("#datasource-detail-modal").removeClass("hidden");
   }
 
