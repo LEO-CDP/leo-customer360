@@ -35,8 +35,8 @@ The tracking code below represents the production-standard integration snippet f
 <script>
 // (1) CDP_EVENT_OBSERVER: load JavaScript code for [Data Touchpoint]
 (function() { 	
-    // Observer ID (from sys_data_source.data_source_id)
-    window.leoObserverId = "{{dataSourceId}}";
+    // C360 Source ID (from sys_data_source.data_source_id)
+    window.leoC360SourceId = "{{dataSourceId}}";
     
     // Default batch size of Event Tracking (10 events per flush)
     window.leoObserverBatchSize = 10;
@@ -244,7 +244,7 @@ The self-invoking function `(function() { ... })()` configures the execution env
 
 | Configuration Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `window.leoObserverId` | `sys_data_source.data_source_id` | Unique UUID matching the target `sys_data_source` connector record. |
+| `window.leoC360SourceId` | `sys_data_source.data_source_id` | Unique UUID matching the target `sys_data_source` connector record. |
 | `window.leoObserverBatchSize` | `10` | Buffer capacity before flushing events over HTTP. Use `1` for immediate transmission. |
 | `window.leoObserverLogDomain` | `beta.leocdp.com` | Domain handling event ingestion endpoints (`/data/api/v1/tracking/logs`). |
 | `window.leoObserverTrackingUri` | `/data/api/v1/tracking/logs` | Canonical ingestion URI path for tracking logs. |

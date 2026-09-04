@@ -179,6 +179,15 @@
             cartCount++;
             cartButton.textContent = `Cart (${cartCount})`;
             message.textContent = `${product.name} added to your cart.`;
+            if (window.LeoObserver && typeof window.LeoObserver.recordEventConversion === 'function') {
+                LeoObserver.recordEventConversion(
+                    'order_' + Date.now(),
+                    product.price,
+                    'USD',
+                    [{ id: product.id, name: product.name, price: product.price, quantity: 1 }],
+                    { item_name: product.name, item_id: product.id }
+                );
+            }
         });
         cartButton.addEventListener('click', () => {
             message.textContent = cartCount ? `You have ${cartCount} item${cartCount === 1 ? '' : 's'} in your cart.` : 'Your cart is empty.';
@@ -188,27 +197,21 @@
     <script>
         // (1) CDP_EVENT_OBSERVER: load JavaScript code for [C360 Tracker]
         (function () {
-            // Observer ID (from sys_data_source.data_source_id)
-            window.leoObserverId = "15dc39d4-ae42-5c60-9c77-66f05dcae448";
+            // Data Source ID (from sys_data_source.data_source_id)
+            window.leoC360DataSourceId = "15dc39d4-ae42-5c60-9c77-66f05dcae448";
 
             // Default batch size of Event Tracking
-            window.leoObserverBatchSize = 10;
+            window.leoTrackingBatchSize = 10;
 
             // Tracking Log Domain and Endpoint URI
-            window.leoObserverLogDomain = "c360.example.com";
-            window.leoObserverTrackingUri = "/data/api/v1/tracking/logs";
-            window.leoObserverTrackingEndpoint = "https://" + window.leoObserverLogDomain + window.leoObserverTrackingUri;
-
-            // CDN of JS
-            window.leoObserverCdnDomain = "gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main";
-
+            window.leoTrackingEndpoint = "https://c360.example.com/data/api/v1/tracking/logs";
+   
             // Data Touchpoint Metadata 
             window.srcTouchpointName = encodeURIComponent(document.title);
             window.srcTouchpointUrl = encodeURIComponent(location.href);
 
             // Dynamic Loader for the Main Proxy CDP JS
-            var leoproxyJsPath = '/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js';
-            var src = location.protocol + '//' + window.leoObserverCdnDomain + leoproxyJsPath;
+            var src = "https://c360.example.com/data/cdp-sdk/observer/leo.proxy.js";
             var jsNode = document.createElement('script');
             jsNode.async = true;
             jsNode.defer = true;
@@ -217,161 +220,13 @@
             s.parentNode.insertBefore(jsNode, s);
         })();
 
-        var parseDataUTM = window.parseDataUTM || function () {
-            if (location.search.indexOf('utm_') > 0) {
-                var search = location.search.substring(1);
-                var json = decodeURI(search).replace(/"/g, '\\"').replace(/&/g, '","').replace(/=/g, '":"');
-                return JSON.parse('{"' + json + '"}');
-            }
-            return {};
-        };
-
-        // (2) CDP EVENT OBSERVER: set-up all event tracking functions
-        var LeoObserver = window.LeoObserver || {};
-
-        // (2.1) function to track View Event "PageView"
-        LeoObserver.recordEventPageView = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordViewEvent("page-view", eventData);
-        };
-
-        // (2.2) function to track View Event "ContentView"
-        LeoObserver.recordEventContentView = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordViewEvent("content-view", eventData);
-        };
-
-        // (2.3) function to track Action Event "Logout"
-        LeoObserver.recordEventLogout = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordActionEvent("logout", eventData);
-        };
-
-        // (2.4) function to track Action Event "Search"
-        LeoObserver.recordEventSearch = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordActionEvent("search", eventData);
-        };
-
-        // (2.5) function to track View Event "ItemView"
-        LeoObserver.recordEventItemView = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordViewEvent("item-view", eventData);
-        };
-
-        // (2.6) function to track Action Event "ClickDetails"
-        LeoObserver.recordEventClickDetails = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordActionEvent("click-details", eventData);
-        };
-
-        // (2.7) function to track Action Event "SubmitContact"
-        LeoObserver.recordEventSubmitContact = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordActionEvent("submit-contact", eventData);
-        };
-
-        // (2.8) function to track Action Event "RegisterAccount"
-        LeoObserver.recordEventRegisterAccount = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordActionEvent("register-account", eventData);
-        };
-
-        // (2.9) function to track Action Event "UserLogin"
-        LeoObserver.recordEventUserLogin = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordActionEvent("user-login", eventData);
-        };
-
-        // (2.10) function to track Action Event "ShortLinkClick"
-        LeoObserver.recordEventShortLinkClick = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordActionEvent("short-link-click", eventData);
-        };
-
-        // (2.11) function to track View Event "Login"
-        LeoObserver.recordEventLogin = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordViewEvent("login-success", eventData);
-        };
-
-        // (2.12) function to track Action Event "AskQuestion"
-        LeoObserver.recordEventAskQuestion = function (eventData) {
-            eventData = eventData ? eventData : {};
-            LeoObserverProxy.recordActionEvent("ask-question", eventData);
-        };
-
-        // (2.13) function to track Conversion / Purchase Event
-        LeoObserver.recordEventConversion = function (transactionId, transactionValue, currencyCode, items, eventData) {
-            eventData = eventData ? eventData : {};
-            items = items ? items : [];
-            LeoObserverProxy.recordConversionEvent("purchase", eventData, transactionId, items, transactionValue, currencyCode || "USD");
-        };
-
-        // (2.14) function to track Customer Feedback (CSAT, NPS, Survey)
-        LeoObserver.recordEventFeedback = function (feedbackType, feedbackData) {
-            feedbackData = feedbackData ? feedbackData : {};
-            LeoObserverProxy.recordFeedbackEvent(feedbackType || "submit-survey", feedbackData);
-        };
-
-        // (2.15) function to update customer profile identity (for CIR & Personalization)
-        LeoObserver.updateProfileBySession = function (profileData, extData) {
-            profileData = profileData ? profileData : {};
-            LeoObserverProxy.updateProfileBySession(profileData, extData);
-        };
-
-        // (2.16) function to get customer personalization recommendations
-        LeoObserver.getPersonalization = function (slotId, callback) {
-            LeoObserverProxy.getPersonalization(slotId, callback);
-        };
-
-        // (3) CDP EVENT OBSERVER is ready
+        // ready
         function leoObserverProxyReady(session) {
             // auto tracking when CDP JS is ready
-            LeoObserver.recordEventPageView(parseDataUTM());
-
-            // set tracking CDP web visitor ID into all a[href] nodes for cross-domain tracking
-            LeoObserverProxy.synchLeoVisitorId(function (vid) {
-                var aNodes = document.querySelectorAll('a');
-                [].forEach.call(aNodes, function (aNode) {
-                    var hrefUrl = aNode.href || "";
-                    var check = hrefUrl.indexOf('http') >= 0 && hrefUrl.indexOf(location.host) < 0;
-                    if (check) {
-                        if (hrefUrl.indexOf('?') > 0) hrefUrl += ("&leosyn=" + vid);
-                        else hrefUrl += ("?leosyn=" + vid);
-                        aNode.href = hrefUrl;
-                    }
-                });
-                if (typeof window.synchLeoCdpToGA4 === "function") {
-                    window.synchLeoCdpToGA4(vid);
-                }
-            });
+            if (window.LeoObserver && typeof window.LeoObserver.recordEventPageView === 'function') {
+                LeoObserver.recordEventPageView();
+            }
         }
-
-        // track users when they click any link in the web-page
-        LeoObserver.addTrackingAllLinks = function () {
-            setTimeout(function () {
-                document.querySelectorAll('a').forEach(function (e) {
-                    e.addEventListener('click', function () {
-                        var url = e.getAttribute('href') || "";
-                        var data = { 'url': url, 'link-text': e.innerText };
-                        LeoObserver.recordEventClickDetails(data);
-                    });
-                });
-            }, 1500);
-        };
-
-        // track users when they click any button in the web-page
-        LeoObserver.addTrackingAllButtons = function () {
-            setTimeout(function () {
-                document.querySelectorAll('button').forEach(function (e) {
-                    e.addEventListener('click', function () {
-                        var data = { 'button-text': e.innerText };
-                        LeoObserver.recordEventClickDetails(data);
-                    });
-                });
-            }, 1600);
-        };
     </script>
 </body>
 

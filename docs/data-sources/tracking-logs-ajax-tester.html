@@ -834,7 +834,7 @@
         var dsId = document.getElementById("sdk-datasource-id").value.trim() || "11111111-1111-1111-1111-111111111111";
 
         sdkLog("INIT", "info", "Configuring Web SDK globals (obsid: " + dsId + ", logDomain: " + logDomain + ")...");
-        window.leoObserverId = dsId;
+        window.leoC360SourceId = dsId;
         window.leoObserverBatchSize = 1; // flush immediately for live test visibility
         window.leoObserverLogDomain = logDomain;
         window.leoObserverTrackingUri = "/data/api/v1/tracking/logs";

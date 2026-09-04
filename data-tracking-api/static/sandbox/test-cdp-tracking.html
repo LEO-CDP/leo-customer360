@@ -513,7 +513,7 @@
             Object.entries(observerFields).map(([key, $field]) => [key, $field.val().trim()])
         );
 
-        window.leoObserverId = observerConfig.id;
+        window.leoC360SourceId = observerConfig.id;
         window.leoObserverBatchSize = 1;
         window.leoObserverLogDomain = observerConfig.logDomain;
         window.leoObserverTrackingUri = "/data/api/v1/tracking/logs";
