@@ -155,6 +155,19 @@ if ! command -v docker >/dev/null 2>&1; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
   sudo systemctl enable --now docker
 fi
+# Reclaim disk before we write/pull anything. Each deploy pulls a new SHA-pinned image
+# and the old ones pile up until a small VM fills its disk ("No space left on device"
+# on the very first env-file write). This runs before any disk write (the heredoc streams
+# over stdin) so it recovers even from an already-full disk. The currently-running
+# tracking + LB containers still hold their images here, so `image prune -a` keeps them
+# and drops only the stale ones. Best-effort: never fail the deploy on cleanup.
+if command -v docker >/dev/null 2>&1; then
+  echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
+  sudo docker container prune -f  >/dev/null 2>&1 || true
+  sudo docker image prune -a -f   >/dev/null 2>&1 || true
+  sudo docker builder prune -a -f >/dev/null 2>&1 || true
+  echo "   reclaiming disk (df after):  $(df -h --output=avail / | tail -1 | tr -d ' ') free"
+fi
 umask 077
 env_file="$(mktemp)"
 cat > "$env_file" <<ENVF
