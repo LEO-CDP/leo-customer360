@@ -390,13 +390,13 @@ window.C360 = window.C360 || {};
           var cfg = (C360.config && C360.config.current) || {};
           var serverCfg = window.C360_SERVER_CONFIG || {};
           var configuredLogDomain = cfg.leoObserverLogDomain || serverCfg.leoObserverLogDomain;
-          var configuredCdnDomain = cfg.leoObserverCdnDomain || serverCfg.leoObserverCdnDomain || "cdn.jsdelivr.net/gh/USPA-Technology/leo-cdp-static-files@v0.9.5";
+          var configuredCdnDomain = cfg.leoObserverCdnDomain || serverCfg.leoObserverCdnDomain || "gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main";
           
           var logDomain = configuredLogDomain;
           if (!logDomain) {
             logDomain = (item.data_source_hosts && item.data_source_hosts.length)
               ? item.data_source_hosts[0]
-              : "datahub4uspa.leocdp.net";
+              : "beta.leocdp.com";
           }
           var cdnDomain = configuredCdnDomain;
           var scriptBody = compiled({

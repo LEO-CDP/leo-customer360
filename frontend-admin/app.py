@@ -59,10 +59,15 @@ APP_HOST = os.getenv("HOST", "0.0.0.0")
 APP_PORT = int(os.getenv("PORT", "8890"))
 
 # Leo Observer Web SDK tracking environment constants
-LEO_OBSERVER_LOG_DOMAIN = os.getenv("LEO_OBSERVER_LOG_DOMAIN", "datahub4uspa.leocdp.net")
+LEO_OBSERVER_LOG_DOMAIN = os.getenv("LEO_OBSERVER_LOG_DOMAIN", "beta.leocdp.com")
+LEO_OBSERVER_TRACKING_URI = os.getenv("LEO_OBSERVER_TRACKING_URI", "/data/api/v1/tracking/logs")
+LEO_OBSERVER_TRACKING_ENDPOINT = os.getenv(
+    "LEO_OBSERVER_TRACKING_ENDPOINT",
+    f"https://{LEO_OBSERVER_LOG_DOMAIN}{LEO_OBSERVER_TRACKING_URI}"
+)
 LEO_OBSERVER_CDN_DOMAIN = os.getenv(
     "LEO_OBSERVER_CDN_DOMAIN",
-    "cdn.jsdelivr.net/gh/USPA-Technology/leo-cdp-static-files@v0.9.5"
+    "gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main",
 )
 
 
@@ -138,6 +143,8 @@ async def index(request: Request):
         "cache_bust": cb,
         "build_version": build_version,
         "leo_observer_log_domain": LEO_OBSERVER_LOG_DOMAIN,
+        "leo_observer_tracking_uri": LEO_OBSERVER_TRACKING_URI,
+        "leo_observer_tracking_endpoint": LEO_OBSERVER_TRACKING_ENDPOINT,
         "leo_observer_cdn_domain": LEO_OBSERVER_CDN_DOMAIN
     }
     
@@ -174,8 +181,17 @@ if static_dir.exists():
     # frontend directly with uvicorn as well as behind that proxy.
     if FRONTEND_ROOT_PATH and FRONTEND_ROOT_PATH != "/":
         app.mount(f"{FRONTEND_ROOT_PATH}/static", StaticFiles(directory=str(static_dir)), name="prefixed-static")
-else:
-    logger.warning(f"Static Directory missing at path: {static_dir}")
+
+# Mount Web SDK from data-tracking-api under /cdp-sdk and /static/c360-web-sdk aliases
+tracking_sdk_dir = BASE_DIR.parent / "data-tracking-api" / "static" / "c360-web-sdk"
+if tracking_sdk_dir.exists():
+    app.mount("/cdp-sdk", StaticFiles(directory=str(tracking_sdk_dir)), name="cdp-sdk")
+    app.mount("/static/c360-web-sdk", StaticFiles(directory=str(tracking_sdk_dir)), name="c360-web-sdk")
+    if FRONTEND_ROOT_PATH and FRONTEND_ROOT_PATH != "/":
+        app.mount(f"{FRONTEND_ROOT_PATH}/cdp-sdk", StaticFiles(directory=str(tracking_sdk_dir)), name="prefixed-cdp-sdk")
+        app.mount(f"{FRONTEND_ROOT_PATH}/static/c360-web-sdk", StaticFiles(directory=str(tracking_sdk_dir)), name="prefixed-c360-web-sdk")
+elif (static_dir / "c360-tracker").exists():
+    app.mount("/cdp-sdk", StaticFiles(directory=str(static_dir / "c360-tracker")), name="cdp-sdk")
 
 if __name__ == "__main__":
     import uvicorn

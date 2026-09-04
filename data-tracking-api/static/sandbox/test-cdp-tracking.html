@@ -494,9 +494,9 @@
     <script>
 
         const observerDefaults = {
-            id: "4TzBusBXNVkS7Pc3AVT7Ix",
-            logDomain: "datahub4uspa.leocdp.net",
-            cdnDomain: "cdn.jsdelivr.net/gh/USPA-Technology/leo-cdp-static-files@v0.9.5"
+            id: "11111111-1111-1111-1111-111111111111",
+            logDomain: "beta.leocdp.com",
+            cdnDomain: "gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main"
         };
 
         const observerFields = {
@@ -514,9 +514,12 @@
         );
 
         window.leoObserverId = observerConfig.id;
-        window.leoObserverBatchSize = 10;
+        window.leoObserverBatchSize = 1;
         window.leoObserverLogDomain = observerConfig.logDomain;
+        window.leoObserverTrackingUri = "/data/api/v1/tracking/logs";
+        window.leoObserverTrackingEndpoint = "https://" + observerConfig.logDomain + window.leoObserverTrackingUri;
         window.leoObserverCdnDomain = observerConfig.cdnDomain;
+        window.leoCdpProxyPath = "../c360-web-sdk/html/cdp-event-proxy.html";
 
         window.srcTouchpointName =
             encodeURIComponent(document.title);
@@ -526,17 +529,28 @@
 
 
         /*
-         * Load LEO Observer asynchronously.
+         * Load LEO Observer asynchronously (local relative path first, CDN fallback).
          */
+        const localSdkPath = "../c360-web-sdk/observer/leo.proxy.js";
+        const cdnSdkPath = `https://${window.leoObserverCdnDomain}/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js`;
 
-        $.getScript(
-            `https://${window.leoObserverCdnDomain}/js/leo-observer/leo.proxy.min.js`
-        ).done(() => {
-            setSdkStatus("ready", "SDK Ready");
-            if (typeof window.leoObserverProxyReady === "function") {
-                window.leoObserverProxyReady();
-            }
-        }).fail(() => setSdkStatus("error", "SDK Load Failed"));
+        $.getScript(localSdkPath)
+            .done(() => {
+                setSdkStatus("ready", "SDK Ready (Local)");
+                if (typeof window.leoObserverProxyReady === "function") {
+                    window.leoObserverProxyReady();
+                }
+            })
+            .fail(() => {
+                $.getScript(cdnSdkPath)
+                    .done(() => {
+                        setSdkStatus("ready", "SDK Ready (CDN)");
+                        if (typeof window.leoObserverProxyReady === "function") {
+                            window.leoObserverProxyReady();
+                        }
+                    })
+                    .fail(() => setSdkStatus("error", "SDK Load Failed"));
+            });
 
 
         function setSdkStatus(
@@ -786,13 +800,19 @@
                 utm: parseUTM(),
                 referrer: document.referrer || null
             }),
-            [EventName.USER_LOGIN]: () => LeoObserver.recordEventUserLogin({
-                ...customer,
-                loginId: $("#login-id").val().trim(),
-                email: $("#email").val().trim(),
-                phone: $("#phone").val().trim(),
-                facebookUserId: $("#facebook-user-id").val().trim()
-            }),
+            [EventName.USER_LOGIN]: () => {
+                const customerData = {
+                    ...customer,
+                    loginId: $("#login-id").val().trim(),
+                    email: $("#email").val().trim(),
+                    phone: $("#phone").val().trim(),
+                    facebookUserId: $("#facebook-user-id").val().trim()
+                };
+                if (window.LeoObserverProxy && typeof window.LeoObserverProxy.updateProfileBySession === "function") {
+                    window.LeoObserverProxy.updateProfileBySession(customerData);
+                }
+                return LeoObserver.recordEventUserLogin(customerData);
+            },
             [EventName.ITEM_VIEW]: () => LeoObserver.recordEventItemView({ product }),
             [EventName.ADD_TO_CART]: () => {
                 if (!shoppingCartItems.length) shoppingCartItems.push(product);

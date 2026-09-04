@@ -37,6 +37,8 @@
             var OBSERVE_WITH_FINGERPRINT = true;
 
             var LEO_LOG_URL = '';
+            var PREFIX_EVENT_TRACKING_URL = '';
+            var PREFIX_SESSION_INIT_URL = '';
             var PREFIX_UPDATE_PROFILE_URL = '';
             var PREFIX_EVENT_VIEW_URL = '';
             var PREFIX_EVENT_ACTION_URL = '';
@@ -60,7 +62,7 @@
                 var hash = window.location.hash || '';
 
                 if (!hash || hash.length <= 1) {
-                    console.error('[LeoProxy] ROOT_DOMAIN is empty');
+                    console.error('[LeoProxy] ROOT_DOMAIN is empty in hash');
                     return false;
                 }
 
@@ -68,16 +70,9 @@
 
                 /*
                  * Expected:
-                 *
                  * #ROOT_DOMAIN_PARENT_ORIGIN
-                 *
                  * Or:
-                 *
                  * #ROOT_DOMAIN_PARENT_ORIGIN_VISITOR_ID
-                 *
-                 * Example:
-                 *
-                 * #cdp.example.com_https://www.example.com_abc123...
                  */
 
                 var toks = raw.split('_');
@@ -90,66 +85,49 @@
                 ROOT_DOMAIN = toks[0];
                 PARENT_ORIGIN = toks[1];
 
+                try {
+                    PARENT_ORIGIN = decodeURIComponent(PARENT_ORIGIN);
+                } catch(e) {}
+                PARENT_ORIGIN = PARENT_ORIGIN.replace(/\/+$/, '');
+
                 if (toks.length >= 3) {
                     var injectedVisitorId = toks.slice(2).join('_');
+                    try {
+                        injectedVisitorId = decodeURIComponent(injectedVisitorId);
+                    } catch(e) {}
 
                     if (
                         typeof injectedVisitorId === 'string' &&
-                        injectedVisitorId.length > 20
+                        injectedVisitorId.length > 5
                     ) {
                         INJECTED_VISITOR_ID = injectedVisitorId;
                     }
                 }
 
-                /*
-                 * Remove trailing slash if somebody supplied one.
-                 */
                 ROOT_DOMAIN = ROOT_DOMAIN.replace(/\/+$/, '');
+                var protocol = location.protocol === 'http:' ? 'http:' : 'https:';
+                if (ROOT_DOMAIN.indexOf('http://') === 0 || ROOT_DOMAIN.indexOf('https://') === 0) {
+                    LEO_LOG_URL = ROOT_DOMAIN;
+                    ROOT_DOMAIN = ROOT_DOMAIN.replace(/^https?:\/\//, '');
+                } else {
+                    LEO_LOG_URL = protocol + '//' + ROOT_DOMAIN;
+                }
 
-                /*
-                 * Normalize parent origin.
-                 *
-                 * We expect:
-                 *
-                 * https://www.example.com
-                 *
-                 * not:
-                 *
-                 * https://www.example.com/
-                 */
-                PARENT_ORIGIN = PARENT_ORIGIN.replace(/\/+$/, '');
+                // Official LeoCDP v1.0 tracking logs API endpoint
+                PREFIX_EVENT_TRACKING_URL = LEO_LOG_URL + '/data/api/v1/tracking/logs';
+                PREFIX_SESSION_INIT_URL = PREFIX_EVENT_TRACKING_URL;
+                PREFIX_UPDATE_PROFILE_URL = PREFIX_EVENT_TRACKING_URL;
+                PREFIX_EVENT_VIEW_URL = PREFIX_EVENT_TRACKING_URL;
+                PREFIX_EVENT_ACTION_URL = PREFIX_EVENT_TRACKING_URL;
+                PREFIX_EVENT_CONVERSION_URL = PREFIX_EVENT_TRACKING_URL;
+                PREFIX_EVENT_FEEDBACK_URL = PREFIX_EVENT_TRACKING_URL;
 
-                LEO_LOG_URL = '//' + ROOT_DOMAIN;
-
-                PREFIX_UPDATE_PROFILE_URL =
-                    LEO_LOG_URL + '/data/api/v1/tracking/logs';
-
-                PREFIX_EVENT_VIEW_URL =
-                    LEO_LOG_URL + '/data/api/v1/tracking/logs';
-
-                PREFIX_EVENT_ACTION_URL =
-                    LEO_LOG_URL + '/data/api/v1/tracking/logs';
-
-                PREFIX_EVENT_CONVERSION_URL =
-                    LEO_LOG_URL + '/data/api/v1/tracking/logs';
-
-                PREFIX_EVENT_FEEDBACK_URL =
-                    LEO_LOG_URL + '/data/api/v1/tracking/logs';
-
-                console.info(
-                    '[LeoProxy] ROOT_DOMAIN =',
-                    ROOT_DOMAIN
-                );
-
-                console.info(
-                    '[LeoProxy] PARENT_ORIGIN =',
-                    PARENT_ORIGIN
-                );
+                console.info('[LeoProxy] ROOT_DOMAIN =', ROOT_DOMAIN);
+                console.info('[LeoProxy] PARENT_ORIGIN =', PARENT_ORIGIN);
+                console.info('[LeoProxy] TRACKING_ENDPOINT =', PREFIX_EVENT_TRACKING_URL);
 
                 if (INJECTED_VISITOR_ID) {
-                    console.info(
-                        '[LeoProxy] INJECTED_VISITOR_ID detected'
-                    );
+                    console.info('[LeoProxy] Cross-domain INJECTED_VISITOR_ID detected:', INJECTED_VISITOR_ID);
                 }
 
                 return true;
@@ -452,6 +430,31 @@
 
                         break;
 
+                    case 'getPersonalization':
+
+                        if (
+                            observerAvailable() &&
+                            typeof window.LeoEventObserver.getPersonalization === 'function'
+                        ) {
+                            try {
+                                window.LeoEventObserver.getPersonalization(
+                                    data.slotId,
+                                    data.params,
+                                    function (result) {
+                                        sendMessage({
+                                            event: 'leoPersonalization',
+                                            slotId: data.slotId,
+                                            data: result
+                                        });
+                                    }
+                                );
+                            } catch (error) {
+                                console.error('[LeoProxy] getPersonalization failed:', error);
+                            }
+                        }
+
+                        break;
+
                     default:
 
                         console.debug(
@@ -706,15 +709,24 @@
                             OBSERVER_READY = true;
 
                             /*
-                             * Notify parent iframe is ready.
+                             * Notify parent iframe is loaded and ready.
                              */
+                            var activeSessionKey = typeof window.LeoEventObserver.getSessionKey === 'function'
+                                ? window.LeoEventObserver.getSessionKey(true) : '';
+                            var activeVisitorId = window.LeoEventObserver.visitorId || (
+                                typeof window.LeoEventObserver.getVisitorId === 'function' ? window.LeoEventObserver.getVisitorId() : ''
+                            );
+
                             setTimeout(
                                 function () {
-
-                                    sendMessage(
-                                        'LeoObserverProxyLoaded'
-                                    );
-
+                                    sendMessage('LeoObserverProxyLoaded');
+                                    sendMessage({
+                                        event: 'LeoObserverProxyReady',
+                                        sessionKey: activeSessionKey,
+                                        visitorId: activeVisitorId,
+                                        fingerprintId: window.LeoEventObserver.fingerprintId || ''
+                                    });
+                                    sendMessage('LeoObserverProxyReady');
                                 },
                                 0
                             );
@@ -750,77 +762,72 @@
             // ============================================================
 
             function loadLeoObserver() {
+                var cbKey = String(Date.now());
+                
+                // Primary path: relative to proxy html (works across any host/domain)
+                var primaryUrl = '../observer/leo.observer.js?cb=' + cbKey;
+                var fallbackUrl1 = '/static/c360-web-sdk/observer/leo.observer.js?cb=' + cbKey;
+                var fallbackUrl2 = '/c360-web-sdk/observer/leo.observer.js?cb=' + cbKey;
+                var fallbackUrl3 = '/cdp-sdk/observer/leo.observer.js?cb=' + cbKey;
 
-                var cbKey =
-                    String(Date.now());
-
-                var leoObserverJsUrl =
-                    'https://gcore.jsdelivr.net/gh/' +
-                    'USPA-Technology/' +
-                    'leo-cdp-static-files@v0.9.5/' +
-                    'js/leo-observer/leo.observer.min.js' +
-                    '?cb=' +
-                    cbKey;
-
-                if (isDevelopmentEnvironment()) {
-
-                    console.info(
-                        '------------ C360 DEV MODE TRUE ------------'
+                function doLoadObserverScript(url, onFail) {
+                    console.info('[LeoProxy] Loading observer from:', url);
+                    loadScript(
+                        url,
+                        {
+                            timeout: 10000,
+                            callback: function () {
+                                console.info('[LeoProxy] Observer script loaded successfully');
+                                codeIsReady();
+                            },
+                            onError: function (err) {
+                                console.warn('[LeoProxy] Failed loading ' + url + ':', err);
+                                if (typeof onFail === 'function') {
+                                    onFail();
+                                } else {
+                                    sendMessage('LeoObserverProxyError-ScriptLoadFailed');
+                                }
+                            }
+                        }
                     );
-
-                    /*
-                     * IMPORTANT:
-                     *
-                     * If this iframe itself is HTTPS,
-                     * browsers will block HTTP localhost resources
-                     * as mixed content.
-                     *
-                     * Prefer HTTPS locally, for example:
-                     *
-                     * https://localhost:8890/...
-                     *
-                     * or serve the iframe itself over HTTP in development.
-                     */
-                    leoObserverJsUrl =
-                        'http://localhost:8890/' +
-                        'static/c360-tracker/' +
-                        'observer/leo.observer.js' +
-                        '?cb=' +
-                        Date.now();
                 }
 
-                console.info(
-                    '[LeoProxy] Loading observer:',
-                    leoObserverJsUrl
-                );
-
-                loadScript(
-                    leoObserverJsUrl,
-                    {
-                        timeout: 15000,
-
-                        callback: function () {
-
-                            console.info(
-                                '[LeoProxy] Observer script loaded'
-                            );
-
-                            codeIsReady();
-                        },
-
-                        onError: function (error) {
-
-                            console.error(
-                                '[LeoProxy] Observer script failed:',
-                                error
-                            );
-
-                            sendMessage(
-                                'LeoObserverProxyError-ScriptLoadFailed'
-                            );
-                        }
+                function ensureFingerprintAndLoad() {
+                    if (typeof window.Fingerprint2 === 'undefined') {
+                        // Load fallback local hash.js if cdnjs was blocked
+                        loadScript('../observer/hash.js?cb=' + cbKey, {
+                            timeout: 5000,
+                            callback: function() {
+                                doLoadObserverScript(primaryUrl, function() {
+                                    doLoadObserverScript(fallbackUrl1, function() {
+                                        doLoadObserverScript(fallbackUrl2, function() {
+                                            doLoadObserverScript(fallbackUrl3);
+                                        });
+                                    });
+                                });
+                            },
+                            onError: function() {
+                                doLoadObserverScript(primaryUrl, function() {
+                                    doLoadObserverScript(fallbackUrl1, function() {
+                                        doLoadObserverScript(fallbackUrl2, function() {
+                                            doLoadObserverScript(fallbackUrl3);
+                                        });
+                                    });
+                                });
+                            }
+                        });
+                    } else {
+                        doLoadObserverScript(primaryUrl, function() {
+                            doLoadObserverScript(fallbackUrl1, function() {
+                                doLoadObserverScript(fallbackUrl2, function() {
+                                    doLoadObserverScript(fallbackUrl3);
+                                });
+                            });
+                        });
                     }
-                );
+                }
+
+                ensureFingerprintAndLoad();
             }
 
             // ============================================================

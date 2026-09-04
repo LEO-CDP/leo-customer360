@@ -32,8 +32,10 @@ window.C360 = window.C360 || {};
     userId: "",
     idToken: "",
     devUser: null,
-    leoObserverLogDomain: "localhost:8890",
-    leoObserverCdnDomain: "localhost:8890"
+    leoObserverLogDomain: "beta.leocdp.com",
+    leoObserverTrackingUri: "/data/api/v1/tracking/logs",
+    leoObserverTrackingEndpoint: "https://beta.leocdp.com/data/api/v1/tracking/logs",
+    leoObserverCdnDomain: "gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main"
   };
 
   var PERSONA_CATEGORY_OPTIONS = [
@@ -118,6 +120,8 @@ window.C360 = window.C360 || {};
       multiTenantEnabled: readBool(localStorage.getItem(STORAGE_KEYS.multiTenantEnabled), DEFAULTS.multiTenantEnabled),
       tenantOptions: tenantOptions,
       leoObserverLogDomain: serverConfig.leoObserverLogDomain || DEFAULTS.leoObserverLogDomain,
+      leoObserverTrackingUri: serverConfig.leoObserverTrackingUri || DEFAULTS.leoObserverTrackingUri,
+      leoObserverTrackingEndpoint: serverConfig.leoObserverTrackingEndpoint || DEFAULTS.leoObserverTrackingEndpoint,
       leoObserverCdnDomain: serverConfig.leoObserverCdnDomain || DEFAULTS.leoObserverCdnDomain
     };
   }

@@ -1,7 +1,9 @@
 """FastAPI entrypoint for the CDP data-tracking log service."""
 
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
 from core.routers.tracking import router as tracking_router
@@ -16,11 +18,25 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
 app.include_router(tracking_router, prefix="/api/v1")
+app.include_router(tracking_router, prefix="/data/api/v1")
+
+BASE_DIR = Path(__file__).resolve().parent
+static_dir = BASE_DIR / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    c360_sdk_dir = static_dir / "c360-web-sdk"
+    if c360_sdk_dir.exists():
+        app.mount("/c360-web-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="c360-web-sdk")
+        app.mount("/cdp-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="cdp-sdk")
+        app.mount("/data-tracking-api/static/c360-web-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="data-tracking-c360-web-sdk")
+    sandbox_dir = static_dir / "sandbox"
+    if sandbox_dir.exists():
+        app.mount("/sandbox", StaticFiles(directory=str(sandbox_dir), html=True), name="sandbox")
 
 
 @app.get("/", tags=["Health"])

@@ -41,8 +41,12 @@ The tracking code below represents the production-standard integration snippet f
     // Default batch size of Event Tracking (10 events per flush)
     window.leoObserverBatchSize = 10;
     
-    // Ingestion Log Domain and CDN of JS
-    window.leoObserverLogDomain = "{{leoObserverLogDomain}}";
+    // Ingestion Log Domain and Endpoint Configuration
+    window.leoObserverLogDomain = "{{leoObserverLogDomain}}"; // e.g. "beta.leocdp.com"
+    window.leoObserverTrackingUri = "/data/api/v1/tracking/logs";
+    window.leoObserverTrackingEndpoint = "https://" + window.leoObserverLogDomain + window.leoObserverTrackingUri;
+    
+    // CDN of JS
     window.leoObserverCdnDomain = "{{leoObserverCdnDomain}}";
     
     // Data Touchpoint Metadata 
@@ -50,7 +54,7 @@ The tracking code below represents the production-standard integration snippet f
     window.srcTouchpointUrl = encodeURIComponent(location.href);
 
     // Dynamic Loader for the Main Proxy CDP JS
-    var leoproxyJsPath = '/js/leo-observer/leo.proxy.min.js';
+    var leoproxyJsPath = '/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js';
     var src = location.protocol + '//' + window.leoObserverCdnDomain + leoproxyJsPath;
     var jsNode = document.createElement('script');
     jsNode.async = true; 
@@ -145,6 +149,30 @@ LeoObserver.recordEventAskQuestion = function(eventData) {
     LeoObserverProxy.recordActionEvent("ask-question", eventData);
 };
 
+// (2.13) function to track Conversion / Purchase Event
+LeoObserver.recordEventConversion = function(transactionId, transactionValue, currencyCode, items, eventData) {
+    eventData = eventData ? eventData : {};
+    items = items ? items : [];
+    LeoObserverProxy.recordConversionEvent("purchase", eventData, transactionId, items, transactionValue, currencyCode || "USD");
+};
+
+// (2.14) function to track Customer Feedback (CSAT, NPS, Survey)
+LeoObserver.recordEventFeedback = function(feedbackType, feedbackData) {
+    feedbackData = feedbackData ? feedbackData : {};
+    LeoObserverProxy.recordFeedbackEvent(feedbackType || "submit-survey", feedbackData);
+};
+
+// (2.15) function to update customer profile identity (for CIR & Personalization)
+LeoObserver.updateProfileBySession = function(profileData, extData) {
+    profileData = profileData ? profileData : {};
+    LeoObserverProxy.updateProfileBySession(profileData, extData);
+};
+
+// (2.16) function to get customer personalization recommendations
+LeoObserver.getPersonalization = function(slotId, callback) {
+    LeoObserverProxy.getPersonalization(slotId, callback);
+};
+
 // (3) CDP EVENT OBSERVER is ready callback
 function leoObserverProxyReady(session) {
     // Auto-track initial page-view with marketing UTM campaign parameters
@@ -158,6 +186,16 @@ function leoObserverProxyReady(session) {
             var check = hrefUrl.indexOf('http') >= 0 && hrefUrl.indexOf(location.host) < 0;
             if (check) {
                 if (hrefUrl.indexOf('?') > 0) hrefUrl += ("&leosyn=" + vid);
+                else hrefUrl += ("?leosyn=" + vid);
+                aNode.href = hrefUrl;
+            }
+        });
+        // Synchronize Visitor ID to Google Analytics 4 if GA4 connector hook is present
+        if (typeof window.synchLeoCdpToGA4 === "function") {
+            window.synchLeoCdpToGA4(vid);
+        }
+    });
+}
                 else hrefUrl += ("?leosyn=" + vid);
                 aNode.href = hrefUrl;
             }
@@ -208,8 +246,10 @@ The self-invoking function `(function() { ... })()` configures the execution env
 | :--- | :--- | :--- |
 | `window.leoObserverId` | `sys_data_source.data_source_id` | Unique UUID matching the target `sys_data_source` connector record. |
 | `window.leoObserverBatchSize` | `10` | Buffer capacity before flushing events over HTTP. Use `1` for immediate transmission. |
-| `window.leoObserverLogDomain` | Ingestion Host | Domain handling event ingestion endpoints (`/etv`, `/eta`, `/etc`). |
-| `window.leoObserverCdnDomain` | CDN Host | CDN origin hosting `leo.proxy.min.js` and `cdp-event-proxy.html`. |
+| `window.leoObserverLogDomain` | `beta.leocdp.com` | Domain handling event ingestion endpoints (`/data/api/v1/tracking/logs`). |
+| `window.leoObserverTrackingUri` | `/data/api/v1/tracking/logs` | Canonical ingestion URI path for tracking logs. |
+| `window.leoObserverTrackingEndpoint` | `https://beta.leocdp.com/data/api/v1/tracking/logs` | Full absolute URL endpoint for event ingestion. |
+| `window.leoObserverCdnDomain` | CDN Host | Origin hosting observer proxy scripts and event iframe. |
 | `window.srcTouchpointName` | `document.title` | URL-encoded human-readable touchpoint name. |
 | `window.srcTouchpointUrl` | `location.href` | URL-encoded current document URL. |
 
@@ -233,6 +273,13 @@ Provides high-level semantic wrappers around lower-level proxy methods:
   - `logout`: User sign-out session termination.
   - `short-link-click`: Promotional shortened URL navigation.
   - `ask-question`: Chatbot, AI assistant, or FAQ interaction.
+* **Conversion Events (`LeoObserver.recordEventConversion`)**:
+  - `purchase`: Complete order checkout with transaction ID, monetary value, tax, currency, and line items.
+* **Feedback Events (`LeoObserver.recordEventFeedback`)**:
+  - `submit-survey` / `submit-nps` / `submit-csat`: Customer sentiment and satisfaction feedback.
+* **Personalization & Profile Linkage**:
+  - `updateProfileBySession`: Sends customer identities (email, phone, name, loginId) for Customer Identity Resolution (CIR).
+  - `getPersonalization(slotId, callback)`: Queries real-time personalized recommendations for the active visitor.
 
 ### 3.4 Lifecycle Callback (`leoObserverProxyReady`)
 When the observer proxy iframe successfully initialises and resolves the visitor fingerprint:
@@ -243,7 +290,19 @@ When the observer proxy iframe successfully initialises and resolves the visitor
 
 ---
 
-## 4. Identity Linking & Customer Resolution
+## 4. Testing & Verification Tool
+
+An interactive browser-based testing console is available at:
+👉 **[`tracking-logs-ajax-tester.html`](tracking-logs-ajax-tester.html)**
+
+It allows you to:
+1. **Send Direct Ingestion Requests**: Test `POST https://beta.leocdp.com/data/api/v1/tracking/logs` with instant schema presets for all event types.
+2. **Run Live Web SDK Simulation**: Initialize the observer proxy live in-browser, track events, inspect visitor ID (`leocdp_vid`) resolution, and verify cross-domain `&leosyn=` link decoration in real time.
+3. **Inspect S3 Staging Acknowledgements**: View transport latency, HTTP status codes, and durable storage partition metadata.
+
+---
+
+## 5. Identity Linking & Customer Resolution
 
 To link the anonymous browser visitor with a known customer profile (e.g., upon login, order submission, or email signup), invoke `updateProfileBySession`:
 
@@ -262,19 +321,19 @@ Downstream, Customer Identity Resolution (CIR) merges the temporary `cookie_id` 
 
 ---
 
-## 5. Deployment Instructions
+## 6. Deployment Instructions
 
-### 5.1 Direct HTML Embed
+### 6.1 Direct HTML Embed
 Place the complete `<script>` tag directly in your website master template immediately before the closing `</head>` tag or before `</body>`.
 
-### 5.2 Google Tag Manager (GTM)
+### 6.2 Google Tag Manager (GTM)
 1. In GTM, navigate to **Tags** $\rightarrow$ **New**.
 2. Select **Custom HTML** as the tag type.
 3. Paste the complete script from Section 2 into the HTML editor.
 4. Set the trigger to **All Pages (Page View)**.
 5. Save and publish the GTM container.
 
-### 5.3 Single Page Applications (SPA: React, Vue, Next.js)
+### 6.3 Single Page Applications (SPA: React, Vue, Next.js)
 In single page applications, URL route changes do not trigger a browser page reload. Listen to router navigation events to trigger page views manually:
 
 ```javascript
@@ -288,7 +347,7 @@ router.events.on('routeChangeComplete', (url) => {
 
 ---
 
-## 6. Offline-to-Online QR Code Bridging
+## 7. Offline-to-Online QR Code Bridging
 
 For physical retail, print collateral, packaging, and in-store signage, Type 1 sources can generate dynamic QR tracking codes stored in `sys_data_source.qr_code_data`:
 
@@ -305,7 +364,7 @@ When scanned by a mobile device, the tracking URL initiates a session with prede
 
 ---
 
-## 7. Security & Domain Controls
+## 8. Security & Domain Controls
 
 - **Origin Whitelisting (`data_source_hosts`)**: Enforces strict origin validation. Only domains declared in `data_source_hosts` (e.g. `["brand.com", "shop.brand.com"]`) are permitted to transmit telemetry for this `data_source_id`.
 - **First-Party Cookies (`first_party_data: true`)**: The SDK operates via a first-party partitioned cookie (`_leo_vid`) on the host domain, ensuring compliance with browser tracking prevention (ITP, Privacy Sandbox).

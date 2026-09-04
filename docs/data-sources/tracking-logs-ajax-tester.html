@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LeoCDP Tracking Logs AJAX Tester</title>
+  <title>LeoCDP Web SDK &amp; Tracking Logs Testing Console</title>
   <style>
     :root {
       color-scheme: light;
@@ -14,6 +14,8 @@
       --soft: #f4f7fb;
       --blue: #2459d6;
       --blue-dark: #1742a6;
+      --cyan: #0891b2;
+      --cyan-dark: #0e7490;
       --green: #087443;
       --red: #b42318;
       --shadow: 0 22px 55px rgba(26, 42, 74, 0.12);
@@ -25,39 +27,71 @@
       min-height: 100vh;
       color: var(--ink);
       background: #edf3fa;
-      font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
-    .shell { max-width: 1280px; margin: 0 auto; padding: 32px 20px 56px; }
+    .shell { max-width: 1360px; margin: 0 auto; padding: 28px 20px 60px; }
     .hero {
       display: flex;
       justify-content: space-between;
-      gap: 24px;
+      gap: 20px;
       align-items: flex-end;
       margin-bottom: 22px;
     }
     .eyebrow {
-      margin: 0 0 8px;
+      margin: 0 0 6px;
       color: var(--blue);
       font-size: 12px;
       font-weight: 800;
-      letter-spacing: .13em;
+      letter-spacing: .12em;
       text-transform: uppercase;
     }
-    h1 { margin: 0; font-size: clamp(28px, 4vw, 44px); line-height: 1.04; letter-spacing: -.035em; }
-    .lede { max-width: 720px; margin: 12px 0 0; color: var(--muted); }
-    .endpoint-chip {
+    h1 { margin: 0; font-size: clamp(26px, 3.5vw, 38px); line-height: 1.1; letter-spacing: -.03em; }
+    .lede { max-width: 780px; margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+    .endpoint-badge {
       flex: 0 0 auto;
-      padding: 12px 14px;
+      padding: 10px 14px;
       border: 1px solid #c8d7f5;
       border-radius: 12px;
       color: #173f9d;
       background: #f5f8ff;
       font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      overflow-wrap: anywhere;
+      text-align: right;
+    }
+    .endpoint-badge strong { display: block; color: var(--blue); font-size: 11px; text-transform: uppercase; }
+
+    /* Mode Navigation Tabs */
+    .tabs-nav {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 18px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #e2e8f0;
+      width: fit-content;
+    }
+    .tab-btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 13px;
+      transition: all .15s ease;
+    }
+    .tab-btn.active {
+      background: #ffffff;
+      color: var(--blue);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     }
 
-    .layout { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); gap: 20px; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    .layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 20px; }
     .panel {
       min-width: 0;
       padding: 22px;
@@ -66,12 +100,12 @@
       background: var(--panel);
       box-shadow: var(--shadow);
     }
-    .panel h2 { margin: 0 0 4px; font-size: 18px; letter-spacing: -.02em; }
-    .panel-note { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+    .panel h2 { margin: 0 0 4px; font-size: 17px; letter-spacing: -.02em; }
+    .panel-note { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
     .section-label {
       display: block;
-      margin: 18px 0 7px;
-      color: #42516a;
+      margin: 16px 0 8px;
+      color: #334155;
       font-size: 11px;
       font-weight: 800;
       letter-spacing: .08em;
@@ -81,8 +115,8 @@
     label { display: block; color: #42516a; font-size: 12px; font-weight: 700; }
     input, textarea, select {
       width: 100%;
-      margin-top: 6px;
-      padding: 11px 12px;
+      margin-top: 5px;
+      padding: 10px 12px;
       border: 1px solid #cbd5e1;
       border-radius: 10px;
       color: var(--ink);
@@ -90,34 +124,60 @@
       font: inherit;
       outline: none;
     }
-    textarea { min-height: 165px; resize: vertical; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    textarea { min-height: 175px; resize: vertical; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     input:focus, textarea:focus, select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(36, 89, 214, .14); }
-    .hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
-    .toolbar { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
-    button {
+    .hint { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+
+    /* Preset Event Pills */
+    .presets-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+      margin-bottom: 12px;
+    }
+    .pill {
+      padding: 5px 10px;
+      border: 1px solid #d0d7e5;
+      border-radius: 8px;
+      background: #f8fafc;
+      color: #334155;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      transition: all .12s ease;
+    }
+    .pill:hover { background: #eef2ff; border-color: #c7d2fe; color: var(--blue); }
+    .pill.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    button.btn {
       border: 0;
       border-radius: 10px;
-      padding: 10px 14px;
+      padding: 10px 16px;
       color: #fff;
       background: var(--blue);
       cursor: pointer;
       font: 700 13px/1.2 inherit;
       transition: background .15s ease, transform .15s ease, opacity .15s ease;
     }
-    button:hover { background: var(--blue-dark); }
-    button:active { transform: translateY(1px); }
-    button.secondary { color: #334155; background: #e8eef7; }
-    button.secondary:hover { background: #dbe5f2; }
-    button.danger { color: #991b1b; background: #fee4e2; }
-    button.danger:hover { background: #fecaca; }
-    button:disabled { cursor: wait; opacity: .6; }
+    button.btn:hover { background: var(--blue-dark); }
+    button.btn:active { transform: translateY(1px); }
+    button.btn.cyan { background: var(--cyan); }
+    button.btn.cyan:hover { background: var(--cyan-dark); }
+    button.btn.secondary { color: #334155; background: #e8eef7; }
+    button.btn.secondary:hover { background: #dbe5f2; }
+    button.btn.danger { color: #991b1b; background: #fee4e2; }
+    button.btn.danger:hover { background: #fecaca; }
+    button.btn:disabled { cursor: wait; opacity: .6; }
+
     .status {
       display: flex;
       align-items: center;
       gap: 9px;
-      min-height: 44px;
-      margin-bottom: 16px;
-      padding: 11px 13px;
+      min-height: 42px;
+      margin-bottom: 14px;
+      padding: 10px 13px;
       border-radius: 10px;
       color: #475569;
       background: var(--soft);
@@ -128,20 +188,22 @@
     .status.success::before { background: #16a34a; }
     .status.error { color: var(--red); background: #fff1f0; }
     .status.error::before { background: #dc2626; }
+
     .meta {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 10px;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }
-    .meta-card { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
-    .meta-card small { display: block; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-    .meta-card strong { display: block; margin-top: 3px; overflow-wrap: anywhere; font: 700 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .meta-card { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+    .meta-card small { display: block; color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    .meta-card strong { display: block; margin-top: 2px; overflow-wrap: anywhere; font: 700 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
     pre.output {
-      min-height: 360px;
-      max-height: 620px;
+      min-height: 380px;
+      max-height: 640px;
       margin: 0;
-      padding: 15px;
+      padding: 14px;
       overflow: auto;
       border: 1px solid #1e293b;
       border-radius: 12px;
@@ -151,16 +213,38 @@
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
-    .warning { margin-top: 16px; padding: 12px 13px; border-left: 3px solid #f59e0b; color: #7c4a03; background: #fffbeb; font-size: 12px; }
-    .footer-note { margin-top: 20px; color: var(--muted); font-size: 12px; }
-    @media (max-width: 900px) {
+
+    /* Live SDK Runner Console */
+    .sdk-console {
+      min-height: 240px;
+      max-height: 360px;
+      margin-top: 12px;
+      padding: 12px;
+      overflow: auto;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      background: #090d16;
+      color: #86efac;
+      font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .sdk-log-entry { margin: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 2px; }
+    .sdk-log-time { color: #64748b; margin-right: 6px; }
+    .sdk-log-tag { padding: 1px 4px; border-radius: 4px; font-size: 10px; font-weight: bold; margin-right: 6px; }
+    .sdk-log-tag.info { background: #1e3a8a; color: #93c5fd; }
+    .sdk-log-tag.send { background: #065f46; color: #a7f3d0; }
+    .sdk-log-tag.ready { background: #701a75; color: #f5d0fe; }
+
+    .warning-box { margin-top: 14px; padding: 10px 12px; border-left: 3px solid #f59e0b; color: #7c4a03; background: #fffbeb; font-size: 12px; border-radius: 0 8px 8px 0; }
+    .footer-note { margin-top: 16px; color: var(--muted); font-size: 11px; }
+
+    @media (max-width: 960px) {
       .hero { display: block; }
-      .endpoint-chip { margin-top: 18px; }
+      .endpoint-badge { margin-top: 14px; text-align: left; }
       .layout { grid-template-columns: 1fr; }
     }
-    @media (max-width: 560px) {
-      .shell { padding: 22px 12px 36px; }
-      .panel { padding: 16px; border-radius: 14px; }
+    @media (max-width: 600px) {
+      .shell { padding: 16px 10px 36px; }
+      .panel { padding: 14px; border-radius: 12px; }
       .grid-2, .meta { grid-template-columns: 1fr; }
     }
   </style>
@@ -169,84 +253,242 @@
   <main class="shell">
     <header class="hero">
       <div>
-        <p class="eyebrow">LeoCDP / Data Tracking API</p>
-        <h1>Tracking Logs AJAX Tester</h1>
-        <p class="lede">Send a controlled event batch to the beta tracking endpoint and inspect the exact HTTP response. This tool uses the same request envelope accepted by <code>data-tracking-api</code>.</p>
+        <p class="eyebrow">Customer 360 / Data Tracking API</p>
+        <h1>LeoCDP Web SDK &amp; Tracking Tester</h1>
+        <p class="lede">Test full client-side Web SDK events, cross-domain identity resolution, and direct HTTP tracking log ingestion against <code>https://beta.leocdp.com/data/api/v1/tracking/logs</code>.</p>
       </div>
-      <div class="endpoint-chip">POST<br>https://beta.leocdp.com/data/api/v1/tracking/logs</div>
+      <div class="endpoint-badge">
+        <strong>Tracking Ingest Endpoint</strong>
+        POST https://beta.leocdp.com/data/api/v1/tracking/logs
+      </div>
     </header>
 
-    <section class="layout">
-      <form id="request-form" class="panel">
-        <h2>Request Builder</h2>
-        <p class="panel-note">Only <code>data_source_id</code> and a non-empty <code>events</code> array are required by the API.</p>
+    <!-- Navigation Tabs -->
+    <nav class="tabs-nav" aria-label="Testing Modes">
+      <button class="tab-btn active" data-tab="direct-api">1. Direct AJAX / REST API Tester</button>
+      <button class="tab-btn" data-tab="live-sdk">2. Live Web SDK Client-Side Runner</button>
+      <button class="tab-btn" data-tab="event-reference">3. Full Event Catalog Reference</button>
+    </nav>
 
-        <label>
-          Endpoint URL
-          <input id="endpoint" type="url" value="https://beta.leocdp.com/data/api/v1/tracking/logs" required>
-        </label>
-        <p class="hint">The default is the beta endpoint. Change this for a local or reverse-proxy deployment.</p>
+    <!-- TAB 1: Direct AJAX / REST API Tester -->
+    <div id="tab-direct-api" class="tab-content active">
+      <section class="layout">
+        <form id="request-form" class="panel">
+          <h2>Request Builder</h2>
+          <p class="panel-note">Send schema-valid event batches accepted by <code>data-tracking-api</code>.</p>
 
-        <div class="grid-2">
           <label>
-            Data source ID *
-            <input id="data-source-id" type="text" placeholder="11111111-1111-1111-1111-111111111111" required>
+            Endpoint URL
+            <input id="endpoint" type="url" value="https://beta.leocdp.com/data/api/v1/tracking/logs" required>
           </label>
+          <p class="hint">The production/beta endpoint. For local docker dev, you can use <code>http://localhost:8010/api/v1/tracking/logs</code>.</p>
+
+          <div class="grid-2">
+            <label>
+              Data Source ID *
+              <input id="data-source-id" type="text" value="11111111-1111-1111-1111-111111111111" required>
+            </label>
+            <label>
+              Session ID
+              <input id="session-id" type="text" placeholder="s_k9z2a1_8829">
+            </label>
+          </div>
+
           <label>
-            Session ID
-            <input id="session-id" type="text" placeholder="web-session-123">
+            User ID (Login ID / Profile ID)
+            <input id="user-id" type="text" placeholder="USR-884920">
           </label>
-        </div>
 
-        <label>
-          User ID
-          <input id="user-id" type="text" placeholder="customer-456">
-        </label>
+          <span class="section-label">Select Web SDK Event Preset</span>
+          <div class="presets-bar">
+            <button type="button" class="pill active" data-preset="page-view">Page View</button>
+            <button type="button" class="pill" data-preset="content-view">Content View</button>
+            <button type="button" class="pill" data-preset="item-view">Item / Product</button>
+            <button type="button" class="pill" data-preset="click-details">Click Details</button>
+            <button type="button" class="pill" data-preset="search">Search</button>
+            <button type="button" class="pill" data-preset="submit-contact">Submit Contact</button>
+            <button type="button" class="pill" data-preset="register-account">Register</button>
+            <button type="button" class="pill" data-preset="user-login">User Login</button>
+            <button type="button" class="pill" data-preset="logout">Logout</button>
+            <button type="button" class="pill" data-preset="conversion">Purchase / Conversion</button>
+            <button type="button" class="pill" data-preset="feedback">CSAT / NPS Feedback</button>
+            <button type="button" class="pill" data-preset="profile-update">Profile Update (CIR)</button>
+            <button type="button" class="pill" data-preset="full-journey">Full Journey Batch (4 Events)</button>
+          </div>
 
-        <span class="section-label">Event batch</span>
-        <label>
-          Events JSON *
-          <textarea id="events" spellcheck="false">[
-  {
-    "event_name": "page_view",
-    "event_time": "2026-09-04T12:30:00Z",
-    "page_url": "https://example.test/landing",
-    "page_title": "Example landing page",
-    "utm_source": "tester",
-    "utm_medium": "ajax",
-    "utm_campaign": "tracking-api-check"
-  }
-]</textarea>
-        </label>
-        <div class="toolbar">
-          <button id="send-button" type="submit">Send tracking batch</button>
-          <button id="sample-page-view" class="secondary" type="button">Page-view sample</button>
-          <button id="sample-action" class="secondary" type="button">Action sample</button>
-          <button id="clear-button" class="danger" type="button">Clear events</button>
-        </div>
+          <label>
+            Events Payload (JSON Array) *
+            <textarea id="events" spellcheck="false"></textarea>
+          </label>
 
-        <div class="warning"><strong>Browser note:</strong> opening this file directly with <code>file://</code> may be blocked by CORS. Serve the repository over HTTP, or use the beta API's approved origin and CORS policy.</div>
-        <p class="footer-note">The API may rate-limit repeated requests and may reject bot-like User-Agent values. Do not place production secrets in this page.</p>
-      </form>
+          <div class="toolbar">
+            <button id="send-button" class="btn" type="submit">Send Tracking Batch</button>
+            <button id="format-button" class="btn secondary" type="button">Format JSON</button>
+            <button id="clear-button" class="btn danger" type="button">Clear</button>
+          </div>
 
-      <section class="panel" aria-live="polite">
-        <h2>Response Inspector</h2>
-        <p class="panel-note">The response body and transport metadata appear here after each request.</p>
-        <div id="status" class="status">Ready. No request has been sent.</div>
-        <div class="meta">
-          <div class="meta-card"><small>HTTP status</small><strong id="http-status">-</strong></div>
-          <div class="meta-card"><small>Duration</small><strong id="duration">-</strong></div>
-          <div class="meta-card"><small>Event count</small><strong id="event-count">-</strong></div>
-        </div>
-        <pre id="response" class="output">Response JSON will appear here.</pre>
+          <div class="warning-box">
+            <strong>Cross-Domain Security Note:</strong> Opening via <code>file://</code> may trigger browser CORS blocks. Serve the directory over HTTP/HTTPS, or use the server's approved reverse proxy.
+          </div>
+          <p class="footer-note">The API enforces rate limits per client IP and verifies bot signatures.</p>
+        </form>
+
+        <section class="panel" aria-live="polite">
+          <h2>Response Inspector</h2>
+          <p class="panel-note">Transport metadata and S3 persistence acknowledgment.</p>
+          <div id="status" class="status">Ready. Select an event preset and click Send Tracking Batch.</div>
+          <div class="meta">
+            <div class="meta-card"><small>HTTP Status</small><strong id="http-status">-</strong></div>
+            <div class="meta-card"><small>Latency</small><strong id="duration">-</strong></div>
+            <div class="meta-card"><small>Events Staged</small><strong id="event-count">-</strong></div>
+          </div>
+          <pre id="response" class="output">Response JSON will appear here...</pre>
+        </section>
       </section>
-    </section>
+    </div>
+
+    <!-- TAB 2: Live Web SDK Client-Side Runner -->
+    <div id="tab-live-sdk" class="tab-content">
+      <section class="layout">
+        <div class="panel">
+          <h2>Web SDK Live Simulation</h2>
+          <p class="panel-note">Execute real client-side <code>LeoObserver</code> and <code>LeoObserverProxy</code> functions in this browser window.</p>
+
+          <div class="grid-2">
+            <div>
+              <label>Log Domain (Proxy Origin)</label>
+              <input id="sdk-log-domain" type="text" value="beta.leocdp.com">
+            </div>
+            <div>
+              <label>Data Source ID</label>
+              <input id="sdk-datasource-id" type="text" value="11111111-1111-1111-1111-111111111111">
+            </div>
+          </div>
+
+          <span class="section-label">Live SDK Event Dispatchers</span>
+          <div class="toolbar" style="margin-top: 4px;">
+            <button type="button" class="btn cyan" id="btn-sdk-init">1. Initialize SDK Proxy</button>
+            <button type="button" class="btn secondary" id="btn-sdk-pageview">Track PageView</button>
+            <button type="button" class="btn secondary" id="btn-sdk-contentview">Track ContentView</button>
+            <button type="button" class="btn secondary" id="btn-sdk-itemview">Track ItemView</button>
+            <button type="button" class="btn secondary" id="btn-sdk-search">Track Search</button>
+            <button type="button" class="btn secondary" id="btn-sdk-click">Track Click Details</button>
+            <button type="button" class="btn secondary" id="btn-sdk-contact">Track Submit Contact</button>
+            <button type="button" class="btn secondary" id="btn-sdk-register">Track Register Account</button>
+            <button type="button" class="btn secondary" id="btn-sdk-login">Track User Login</button>
+            <button type="button" class="btn secondary" id="btn-sdk-question">Track Ask Question</button>
+            <button type="button" class="btn secondary" id="btn-sdk-conversion">Track Purchase Conversion</button>
+            <button type="button" class="btn secondary" id="btn-sdk-feedback">Track CSAT / NPS</button>
+            <button type="button" class="btn secondary" id="btn-sdk-profile">Update Profile (CIR)</button>
+            <button type="button" class="btn secondary" id="btn-sdk-personalization">Query Personalization</button>
+            <button type="button" class="btn secondary" id="btn-sdk-synch">Synch Cross-Domain Links</button>
+            <button type="button" class="btn danger" id="btn-sdk-clear-log">Clear Log</button>
+          </div>
+
+          <!-- Personalization Card Preview -->
+          <div id="personalization-preview" style="margin-top: 14px; padding: 12px; border: 1px solid #c7d2fe; border-radius: 10px; background: #f5f8ff; display: none;">
+            <div style="font-size: 11px; font-weight: 800; color: #3730a3; text-transform: uppercase; margin-bottom: 4px;">Dynamic Customer Personalization Response</div>
+            <pre id="personalization-result" style="margin: 0; font-size: 11px; font-family: monospace; color: #1e1b4b; white-space: pre-wrap;"></pre>
+          </div>
+
+          <span class="section-label">Simulated Web Page Outbound Links</span>
+          <p class="hint" style="margin-bottom: 8px;">Click "Synch Cross-Domain Links" to see these URLs dynamically decorated with <code>&amp;leosyn=&lt;vid&gt;</code> for cross-domain identity stitching:</p>
+          <div style="display: flex; flex-direction: column; gap: 6px;" id="sample-links-container">
+            <a href="https://shop.example.com/checkout" target="_blank" class="pill" style="display:inline-block; width:fit-content; text-decoration:none;">Outbound Link: https://shop.example.com/checkout</a>
+            <a href="https://portal.partner.org/login?ref=1" target="_blank" class="pill" style="display:inline-block; width:fit-content; text-decoration:none;">Outbound Link: https://portal.partner.org/login?ref=1</a>
+          </div>
+
+          <div class="warning-box" style="margin-top: 16px;">
+            <strong>Cross-Domain Handshake:</strong> The proxy loads <code>/cdp-sdk/html/cdp-event-proxy.html</code> inside an invisible iframe. The iframe resolves the persistent visitor ID and returns it to the parent window via <code>postMessage</code>.
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>SDK Client Execution Log</h2>
+          <p class="panel-note">Real-time trace of proxy postMessages, session initialization, and visitor ID state.</p>
+          
+          <div class="meta">
+            <div class="meta-card"><small>SDK Status</small><strong id="sdk-state-status">Uninitialized</strong></div>
+            <div class="meta-card"><small>Visitor ID (vid)</small><strong id="sdk-state-vid">-</strong></div>
+            <div class="meta-card"><small>Session Key (ctxsk)</small><strong id="sdk-state-session">-</strong></div>
+          </div>
+
+          <div id="sdk-log-window" class="sdk-console">
+            <div class="sdk-log-entry"><span class="sdk-log-time">00:00:00</span> <span class="sdk-log-tag info">SYSTEM</span> SDK Simulator loaded. Click "1. Initialize SDK Proxy" to start.</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- TAB 3: Full Event Catalog Reference -->
+    <div id="tab-event-reference" class="tab-content">
+      <section class="panel">
+        <h2>Web SDK Event Catalog Reference</h2>
+        <p class="panel-note">Comprehensive specification of standard events captured by the LeoCDP Web SDK.</p>
+
+        <div class="grid-2" style="gap: 16px;">
+          <div style="background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 16px;">
+            <h3 style="margin: 0 0 8px; font-size: 14px; color: var(--blue);">1. View Events</h3>
+            <ul style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.8;">
+              <li><code>page-view</code>: Triggered on initial document load with marketing UTM parameters.</li>
+              <li><code>content-view</code>: Article, blog post, or knowledge base read engagement.</li>
+              <li><code>item-view</code>: E-commerce product catalog or SKU detail display.</li>
+              <li><code>login-success</code>: Successful authentication screen display.</li>
+            </ul>
+          </div>
+
+          <div style="background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 16px;">
+            <h3 style="margin: 0 0 8px; font-size: 14px; color: var(--cyan);">2. Action &amp; Interaction Events</h3>
+            <ul style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.8;">
+              <li><code>click-details</code>: Generic button, link, or tab click interaction.</li>
+              <li><code>search</code>: Internal site search queries, filters, and result counts.</li>
+              <li><code>submit-contact</code>: Contact form or lead generation submission.</li>
+              <li><code>register-account</code>: New user account registration.</li>
+              <li><code>user-login</code> &amp; <code>logout</code>: Authentication session state changes.</li>
+              <li><code>ask-question</code>: Conversational AI query or support bot interaction.</li>
+            </ul>
+          </div>
+
+          <div style="background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 16px;">
+            <h3 style="margin: 0 0 8px; font-size: 14px; color: var(--green);">3. Conversion &amp; E-Commerce</h3>
+            <ul style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.8;">
+              <li><code>purchase</code> / <code>checkout</code>: Complete order conversion with monetary value, tax, currency, and line items.</li>
+              <li><code>add-to-cart</code>: Shopping cart additions for abandoned cart tracking.</li>
+              <li><code>short-link-click</code>: Inbound campaign link attribution.</li>
+            </ul>
+          </div>
+
+          <div style="background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 16px;">
+            <h3 style="margin: 0 0 8px; font-size: 14px; color: #701a75;">4. Identity &amp; Personalization</h3>
+            <ul style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.8;">
+              <li><code>profile-update</code>: Customer identity linkage (email, phone, name, CRM ID) for CIR.</li>
+              <li><code>submit-survey</code> / <code>submit-nps</code>: Customer sentiment and feedback scoring.</li>
+              <li><code>getPersonalization</code>: Slot-based dynamic content recommendations.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </div>
   </main>
 
   <script>
     (function () {
       "use strict";
 
+      // Tab Switching Logic
+      var tabButtons = document.querySelectorAll(".tab-btn");
+      tabButtons.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          tabButtons.forEach(function (b) { b.classList.remove("active"); });
+          document.querySelectorAll(".tab-content").forEach(function (c) { c.classList.remove("active"); });
+          btn.classList.add("active");
+          var tabId = "tab-" + btn.getAttribute("data-tab");
+          var targetTab = document.getElementById(tabId);
+          if (targetTab) targetTab.classList.add("active");
+        });
+      });
+
+      // --- TAB 1: Direct Ingestion AJAX Tester ---
       var form = document.getElementById("request-form");
       var endpoint = document.getElementById("endpoint");
       var dataSourceId = document.getElementById("data-source-id");
@@ -269,42 +511,247 @@
         events.value = JSON.stringify(value, null, 2);
       }
 
-      document.getElementById("sample-page-view").addEventListener("click", function () {
-        setEvents([{
-          event_name: "page_view",
-          event_time: new Date().toISOString(),
-          page_url: window.location.href,
-          page_title: document.title || "Tracking API tester",
-          utm_source: "tester",
-          utm_medium: "ajax",
-          utm_campaign: "tracking-api-check"
-        }]);
+      // Catalog of realistic, production-standard Web SDK event payloads
+      var EVENT_PRESETS = {
+        "page-view": [{
+          "event_name": "page_view",
+          "event_time": new Date().toISOString(),
+          "page_url": window.location.href,
+          "page_title": document.title || "Example Web Store",
+          "referrer_url": document.referrer || "https://google.com/search?q=customer+360",
+          "utm_source": "google",
+          "utm_medium": "cpc",
+          "utm_campaign": "summer_sale_2026",
+          "utm_term": "customer cdp platform",
+          "utm_content": "header_banner",
+          "event_data": {
+            "browser": "Chrome",
+            "language": navigator.language || "en-US",
+            "screen_resolution": (window.screen.width + "x" + window.screen.height)
+          }
+        }],
+
+        "content-view": [{
+          "event_name": "content_view",
+          "event_time": new Date().toISOString(),
+          "page_url": "https://example.com/insights/omnichannel-cdp-trends",
+          "page_title": "Top Omnichannel CDP Trends 2026",
+          "event_data": {
+            "content_id": "art_2026_09",
+            "content_category": "Industry Insights",
+            "author": "Dr. Sarah Taylor",
+            "word_count": 1850,
+            "read_time_seconds": 124
+          }
+        }],
+
+        "item-view": [{
+          "event_name": "item_view",
+          "event_time": new Date().toISOString(),
+          "page_url": "https://example.com/catalog/wireless-noise-cancelling-headphones",
+          "page_title": "AudioPro Wireless Noise Cancelling Headphones",
+          "event_data": {
+            "item_id": "PROD-9921",
+            "sku": "AP-WNC-BLK",
+            "item_name": "AudioPro Wireless Noise Cancelling Headphones",
+            "item_category": "Electronics > Audio",
+            "brand": "AudioPro",
+            "price": 249.99,
+            "currency": "USD",
+            "in_stock": true
+          }
+        }],
+
+        "click-details": [{
+          "event_name": "click_details",
+          "event_time": new Date().toISOString(),
+          "page_url": window.location.href,
+          "event_data": {
+            "element_id": "btn-add-to-cart",
+            "element_tag": "BUTTON",
+            "button_text": "Add to Shopping Cart",
+            "target_url": "#checkout",
+            "click_x": 420,
+            "click_y": 780
+          }
+        }],
+
+        "search": [{
+          "event_name": "search",
+          "event_time": new Date().toISOString(),
+          "event_data": {
+            "search_query": "noise cancelling bluetooth earbuds",
+            "category_filter": "Headphones",
+            "results_count": 28,
+            "sort_order": "highest_rated"
+          }
+        }],
+
+        "submit-contact": [{
+          "event_name": "submit_contact",
+          "event_time": new Date().toISOString(),
+          "event_data": {
+            "form_id": "contact_sales_form",
+            "first_name": "Alexander",
+            "last_name": "Graham",
+            "email": "alex.graham@enterprise.com",
+            "phone_number": "+15550188",
+            "company": "Enterprise Systems Inc",
+            "inquiry_type": "Product Demonstration",
+            "message": "We would like to schedule a platform demo for 50,000 unified profiles."
+          }
+        }],
+
+        "register-account": [{
+          "event_name": "register_account",
+          "event_time": new Date().toISOString(),
+          "event_data": {
+            "user_id": "USR-882910",
+            "username": "agraham",
+            "email": "alex.graham@enterprise.com",
+            "registration_channel": "Web Self-Serve",
+            "loyalty_tier": "Standard"
+          }
+        }],
+
+        "user-login": [{
+          "event_name": "user_login",
+          "event_time": new Date().toISOString(),
+          "event_data": {
+            "user_id": "USR-882910",
+            "login_method": "SSO_Keycloak",
+            "login_status": "success",
+            "mfa_verified": true
+          }
+        }],
+
+        "logout": [{
+          "event_name": "logout",
+          "event_time": new Date().toISOString(),
+          "event_data": {
+            "user_id": "USR-882910",
+            "session_duration_seconds": 1840,
+            "exit_reason": "user_initiated"
+          }
+        }],
+
+        "conversion": [{
+          "event_name": "purchase",
+          "event_time": new Date().toISOString(),
+          "page_url": "https://example.com/checkout/thank-you?order=ORD-2026-9912",
+          "transaction_id": "ORD-2026-9912",
+          "transaction_value": 319.98,
+          "currency_code": "USD",
+          "event_data": {
+            "order_id": "ORD-2026-9912",
+            "subtotal": 289.98,
+            "tax": 20.00,
+            "shipping": 10.00,
+            "payment_method": "credit_card",
+            "coupon_code": "SUMMER26"
+          },
+          "shopping_cart_items": [
+            { "sku": "AP-WNC-BLK", "name": "AudioPro Headphones", "price": 249.99, "quantity": 1 },
+            { "sku": "AP-CASE-SLV", "name": "Protective Carry Case", "price": 39.99, "quantity": 1 }
+          ]
+        }],
+
+        "feedback": [{
+          "event_name": "submit_survey",
+          "event_time": new Date().toISOString(),
+          "event_data": {
+            "survey_id": "post_checkout_csat_v1",
+            "csat_score": 5,
+            "nps_rating": 10,
+            "feedback_comment": "Seamless checkout experience and instant confirmation!"
+          }
+        }],
+
+        "profile-update": [{
+          "event_name": "profile_update",
+          "event_time": new Date().toISOString(),
+          "profile_data": {
+            "loginId": "USR-882910",
+            "email": "alex.graham@enterprise.com",
+            "phone_number": "+15550188",
+            "first_name": "Alexander",
+            "last_name": "Graham",
+            "company": "Enterprise Systems Inc",
+            "job_title": "Head of Growth",
+            "preferred_language": "en"
+          }
+        }],
+
+        "full-journey": [
+          {
+            "event_name": "page_view",
+            "event_time": new Date(Date.now() - 180000).toISOString(),
+            "page_url": "https://example.com/products",
+            "page_title": "Catalog Landing Page",
+            "utm_source": "google",
+            "utm_campaign": "search_acquisition"
+          },
+          {
+            "event_name": "search",
+            "event_time": new Date(Date.now() - 120000).toISOString(),
+            "event_data": { "query": "wireless noise cancelling", "results": 14 }
+          },
+          {
+            "event_name": "item_view",
+            "event_time": new Date(Date.now() - 60000).toISOString(),
+            "event_data": { "sku": "AP-WNC-BLK", "name": "AudioPro Headphones", "price": 249.99 }
+          },
+          {
+            "event_name": "purchase",
+            "event_time": new Date().toISOString(),
+            "transaction_id": "ORD-2026-JOURNEY-01",
+            "transaction_value": 249.99,
+            "currency_code": "USD",
+            "shopping_cart_items": [{ "sku": "AP-WNC-BLK", "quantity": 1, "price": 249.99 }]
+          }
+        ]
+      };
+
+      // Wire preset pills
+      var pills = document.querySelectorAll(".pill[data-preset]");
+      pills.forEach(function (pill) {
+        pill.addEventListener("click", function () {
+          pills.forEach(function (p) { p.classList.remove("active"); });
+          pill.classList.add("active");
+          var key = pill.getAttribute("data-preset");
+          if (EVENT_PRESETS[key]) {
+            setEvents(EVENT_PRESETS[key]);
+            setStatus("Loaded preset: " + key, "");
+          }
+        });
       });
 
-      document.getElementById("sample-action").addEventListener("click", function () {
-        setEvents([{
-          event_name: "click-details",
-          event_time: new Date().toISOString(),
-          event_data: {
-            element: "tracking-api-tester",
-            action: "manual_test",
-            label: "Action sample"
-          }
-        }]);
+      // Default to page-view preset
+      setEvents(EVENT_PRESETS["page-view"]);
+
+      document.getElementById("format-button").addEventListener("click", function () {
+        try {
+          var parsed = JSON.parse(events.value);
+          setEvents(parsed);
+          setStatus("JSON formatted successfully.", "success");
+        } catch (e) {
+          setStatus("Invalid JSON: " + e.message, "error");
+        }
       });
 
       document.getElementById("clear-button").addEventListener("click", function () {
         events.value = "[]";
         eventCount.textContent = "0";
+        setStatus("Cleared events array.", "");
       });
 
       form.addEventListener("submit", async function (event) {
         event.preventDefault();
-        setStatus("Sending request...", "");
+        setStatus("Transmitting batch to endpoint...", "");
         sendButton.disabled = true;
         httpStatus.textContent = "-";
         duration.textContent = "-";
-        response.textContent = "";
+        response.textContent = "Sending request...";
 
         var parsedEvents;
         try {
@@ -330,7 +777,10 @@
         try {
           var result = await fetch(endpoint.value.trim(), {
             method: "POST",
-            headers: { "Content-Type": "application/json", "Accept": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            },
             body: JSON.stringify(payload)
           });
           var elapsed = Math.round(performance.now() - startedAt);
@@ -342,15 +792,274 @@
           duration.textContent = elapsed + " ms";
           eventCount.textContent = String(parsedEvents.length);
           response.textContent = typeof parsedBody === "string" ? parsedBody : JSON.stringify(parsedBody, null, 2);
-          setStatus(result.ok ? "Request accepted by the tracking endpoint." : "The endpoint returned an error.", result.ok ? "success" : "error");
+          setStatus(
+            result.ok ? "Success! Batch stored and partition acknowledged." : ("Endpoint rejected request with HTTP " + result.status),
+            result.ok ? "success" : "error"
+          );
         } catch (error) {
           duration.textContent = Math.round(performance.now() - startedAt) + " ms";
-          response.textContent = error.stack || error.message;
-          setStatus("Network or CORS error. Check the endpoint and browser origin.", "error");
+          response.textContent = (error.stack || error.message) + "\n\nTip: If testing from file:// or cross-origin, ensure server CORS permits this origin.";
+          setStatus("Network / CORS error: " + error.message, "error");
         } finally {
           sendButton.disabled = false;
         }
       });
+
+
+      // --- TAB 2: Live Web SDK In-Browser Runner ---
+      var sdkLogWindow = document.getElementById("sdk-log-window");
+      var sdkStateStatus = document.getElementById("sdk-state-status");
+      var sdkStateVid = document.getElementById("sdk-state-vid");
+      var sdkStateSession = document.getElementById("sdk-state-session");
+
+      function sdkLog(tag, type, message) {
+        var now = new Date();
+        var timeStr = now.toTimeString().split(" ")[0] + "." + String(now.getMilliseconds()).padStart(3, "0");
+        var div = document.createElement("div");
+        div.className = "sdk-log-entry";
+        div.innerHTML = '<span class="sdk-log-time">' + timeStr + '</span> ' +
+          '<span class="sdk-log-tag ' + type + '">' + tag + '</span> ' +
+          '<span>' + message + '</span>';
+        sdkLogWindow.appendChild(div);
+        sdkLogWindow.scrollTop = sdkLogWindow.scrollHeight;
+      }
+
+      document.getElementById("btn-sdk-clear-log").addEventListener("click", function () {
+        sdkLogWindow.innerHTML = "";
+      });
+
+      // 1. Initialize Web SDK Proxy live on page
+      document.getElementById("btn-sdk-init").addEventListener("click", function () {
+        var logDomain = document.getElementById("sdk-log-domain").value.trim() || "beta.leocdp.com";
+        var dsId = document.getElementById("sdk-datasource-id").value.trim() || "11111111-1111-1111-1111-111111111111";
+
+        sdkLog("INIT", "info", "Configuring Web SDK globals (obsid: " + dsId + ", logDomain: " + logDomain + ")...");
+        window.leoObserverId = dsId;
+        window.leoObserverBatchSize = 1; // flush immediately for live test visibility
+        window.leoObserverLogDomain = logDomain;
+        window.leoObserverTrackingUri = "/data/api/v1/tracking/logs";
+        window.leoObserverTrackingEndpoint = "https://" + logDomain + window.leoObserverTrackingUri;
+        window.srcTouchpointName = encodeURIComponent(document.title);
+        window.srcTouchpointUrl = encodeURIComponent(location.href);
+
+        window.leoObserverProxyReady = function (session) {
+          sdkLog("READY", "ready", "Proxy handshake complete! Session key: " + (session.sessionKey || "-") + ", Visitor ID: " + (session.visitorId || "-"));
+          sdkStateStatus.textContent = "Ready";
+          sdkStateVid.textContent = session.visitorId || "-";
+          sdkStateSession.textContent = session.sessionKey || "-";
+        };
+
+        // Inject proxy script with cascade fallbacks
+        var existingProxy = document.getElementById("leo-live-proxy-script");
+        if (existingProxy) existingProxy.parentNode.removeChild(existingProxy);
+
+        var loadUrls = [
+          "/static/c360-web-sdk/observer/leo.proxy.js?cb=" + Date.now(),
+          "/cdp-sdk/observer/leo.proxy.js?cb=" + Date.now(),
+          "../../data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js?cb=" + Date.now(),
+          "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js"
+        ];
+
+        function tryLoadProxy(urls) {
+          if (!urls.length) {
+            sdkLog("PROXY", "error", "All Web SDK load attempts failed.");
+            return;
+          }
+          var nextSrc = urls.shift();
+          var script = document.createElement("script");
+          script.id = "leo-live-proxy-script";
+          script.src = nextSrc;
+          script.onload = function () {
+            sdkLog("PROXY", "info", "Loaded proxy script from: " + nextSrc + ". Awaiting iframe handshake...");
+          };
+          script.onerror = function () {
+            sdkLog("PROXY", "warn", "Failed loading from " + nextSrc + ". Trying next path...");
+            if (script.parentNode) script.parentNode.removeChild(script);
+            tryLoadProxy(urls);
+          };
+          document.head.appendChild(script);
+        }
+
+        tryLoadProxy(loadUrls);
+      });
+
+      // 2. Live PageView
+      document.getElementById("btn-sdk-pageview").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var evtData = { "test_event": "page_view", "url": location.href, "title": document.title };
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.recordViewEvent('page-view', ...)");
+        window.LeoObserverProxy.recordViewEvent("page-view", evtData);
+      });
+
+      // 3. Live ContentView
+      document.getElementById("btn-sdk-contentview").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var evtData = { "article_id": "art_sample_01", "category": "Tech News", "read_time": 60 };
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.recordViewEvent('content-view', ...)");
+        window.LeoObserverProxy.recordViewEvent("content-view", evtData);
+      });
+
+      // 4. Live ItemView
+      document.getElementById("btn-sdk-itemview").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var evtData = { "item_id": "SKU-9921", "name": "Studio Headphones", "price": 199.99, "currency": "USD" };
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.recordViewEvent('item-view', ...)");
+        window.LeoObserverProxy.recordViewEvent("item-view", evtData);
+      });
+
+      // 5. Live Search
+      document.getElementById("btn-sdk-search").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var evtData = { "query": "omnichannel cdp customer 360", "results": 42 };
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.recordActionEvent('search', ...)");
+        window.LeoObserverProxy.recordActionEvent("search", evtData);
+      });
+
+      // 6. Live Click Details
+      document.getElementById("btn-sdk-click").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var evtData = { "element_id": "demo-interactive-btn", "label": "Download Whitepaper" };
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.recordActionEvent('click-details', ...)");
+        window.LeoObserverProxy.recordActionEvent("click-details", evtData);
+      });
+
+      // 7. Live Submit Contact
+      document.getElementById("btn-sdk-contact").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var evtData = { "form_name": "request_demo", "email": "alex@enterprise.com", "company": "Enterprise Corp" };
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.recordActionEvent('submit-contact', ...)");
+        window.LeoObserverProxy.recordActionEvent("submit-contact", evtData);
+      });
+
+      // 8. Live Register Account
+      document.getElementById("btn-sdk-register").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var evtData = { "user_id": "USR-99201", "username": "alexg", "tier": "Standard" };
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.recordActionEvent('register-account', ...)");
+        window.LeoObserverProxy.recordActionEvent("register-account", evtData);
+      });
+
+      // 9. Live User Login
+      document.getElementById("btn-sdk-login").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var evtData = { "user_id": "USR-99201", "method": "SSO" };
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.recordActionEvent('user-login', ...)");
+        window.LeoObserverProxy.recordActionEvent("user-login", evtData);
+      });
+
+      // 10. Live Ask Question
+      document.getElementById("btn-sdk-question").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var evtData = { "question": "What is Customer 360 CDP architecture?", "topic": "product_faq" };
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.recordActionEvent('ask-question', ...)");
+        window.LeoObserverProxy.recordActionEvent("ask-question", evtData);
+      });
+
+      // 11. Live Conversion
+      document.getElementById("btn-sdk-conversion").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var txId = "ORD-" + Math.floor(100000 + Math.random() * 900000);
+        var items = [{ "sku": "SKU-9921", "quantity": 1, "price": 199.99 }];
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.recordConversionEvent('purchase', txId: " + txId + ")");
+        window.LeoObserverProxy.recordConversionEvent("purchase", { "payment": "card" }, txId, items, 199.99, "USD");
+      });
+
+      // 12. Live Feedback (CSAT)
+      document.getElementById("btn-sdk-feedback").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var feedbackData = { "score": 5, "survey": "onboarding_csat", "comment": "Excellent unified user tracking!" };
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.recordFeedbackEvent('submit-survey', ...)");
+        window.LeoObserverProxy.recordFeedbackEvent("submit-survey", feedbackData);
+      });
+
+      // 13. Live Profile Update (CIR)
+      document.getElementById("btn-sdk-profile").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        var profile = {
+          "loginId": "USR-SIMULATED-882",
+          "email": "alex@enterprise.com",
+          "phone": "+15550199",
+          "firstName": "Alexander",
+          "lastName": "Graham"
+        };
+        sdkLog("SEND", "send", "Dispatching LeoObserverProxy.updateProfileBySession(...) for CIR customer linking");
+        window.LeoObserverProxy.updateProfileBySession(profile);
+      });
+
+      // 14. Live Personalization Query
+      document.getElementById("btn-sdk-personalization").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        sdkLog("QUERY", "info", "Querying LeoObserverProxy.getPersonalization('home_hero_banner', callback)...");
+        window.LeoObserverProxy.getPersonalization("home_hero_banner", function (res) {
+          sdkLog("READY", "ready", "Personalization payload received for slot 'home_hero_banner'!");
+          var preview = document.getElementById("personalization-preview");
+          var output = document.getElementById("personalization-result");
+          preview.style.display = "block";
+          output.textContent = JSON.stringify(res, null, 2);
+        });
+      });
+
+      // 15. Live Cross-Domain Link Synch
+      document.getElementById("btn-sdk-synch").addEventListener("click", function () {
+        if (!window.LeoObserverProxy) {
+          sdkLog("WARN", "error", "SDK not initialized. Click '1. Initialize SDK Proxy' first.");
+          return;
+        }
+        sdkLog("SYNCH", "info", "Calling LeoObserverProxy.synchLeoVisitorId(callback)...");
+        window.LeoObserverProxy.synchLeoVisitorId(function (vid) {
+          sdkLog("SYNCH", "ready", "Resolved Visitor ID: " + vid + ". Decorating outbound links...");
+          var links = document.querySelectorAll("#sample-links-container a");
+          links.forEach(function (a) {
+            var href = a.getAttribute("href") || "";
+            if (href.indexOf("&leosyn=") < 0 && href.indexOf("?leosyn=") < 0) {
+              var newHref = href + (href.indexOf("?") > 0 ? "&leosyn=" : "?leosyn=") + vid;
+              a.setAttribute("href", newHref);
+              a.textContent = "Outbound Link: " + newHref;
+            }
+          });
+          sdkLog("SYNCH", "send", "Outbound links tagged with &leosyn=" + vid);
+        });
+      });
+
     }());
   </script>
 </body>
