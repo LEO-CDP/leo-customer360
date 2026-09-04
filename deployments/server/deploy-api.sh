@@ -135,8 +135,10 @@ if ! command -v docker >/dev/null 2>&1; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
   sudo systemctl enable --now docker
 fi
+sudo mkdir -p /opt/c360
+sudo install -d -m 700 -o "$(id -un)" -g "$(id -gn)" /opt/c360/.tmp
 umask 077
-env_file="$(mktemp)"
+env_file="$(mktemp /opt/c360/.tmp/api.env.XXXXXX)"
 cat > "$env_file" <<ENVF
 ENVIRONMENT=production
 DB_HOST=$DB_HOST
@@ -171,7 +173,6 @@ ENVS
 else
   echo "SSO_LOGIN=false" >> "$env_file"
 fi
-sudo mkdir -p /opt/c360
 if [ -n "$OTEL_B64" ]; then printf '%s' "$OTEL_B64" | base64 -d >> "$env_file"; fi
 sudo mv "$env_file" /opt/c360/api.env
 sudo chmod 600 /opt/c360/api.env
