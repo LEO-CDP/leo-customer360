@@ -27,3 +27,6 @@ jaeger_upstream = "127.0.0.1:4686"
 # PRIVATE cross-box ip, NOT 127.0.0.1. Assumes DHCP gives the tracking box 10.100.1.8 — verify
 # with `cd ../server && terraform output servers` and correct if it differs.
 data_upstream = "10.100.1.8:8010"
+
+# Parent origin allowed to embed the hidden c360 web SDK iframe.
+sdk_frame_ancestor = "https://beta.leocdp.com"

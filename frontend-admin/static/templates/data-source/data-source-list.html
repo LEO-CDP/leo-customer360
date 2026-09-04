@@ -451,8 +451,8 @@
 <script id="c360-tracker-template" type="text/x-handlebars-template">
 // (1) CDP_EVENT_OBSERVER: load JavaScript code for [{{dataSourceName}}]
 (function() { 	
-    // Observer ID (from sys_data_source.data_source_id)
-    window.leoObserverId = "{{dataSourceId}}";
+    // C360 Source ID (from sys_data_source.data_source_id)
+    window.leoC360SourceId = "{{dataSourceId}}";
     
     // Default batch size of Event Tracking
     window.leoObserverBatchSize = 10;

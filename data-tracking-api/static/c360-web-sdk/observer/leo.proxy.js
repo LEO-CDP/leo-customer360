@@ -48,26 +48,108 @@
 
 // LEO Proxy : collect and send events to LEO CDP server via cross-domain iframe
 (function() {
-	var leoObserverId = window.leoObserverId || "";
-	if(typeof window.leoObserverBatchSize !== 'number') {
-		window.leoObserverBatchSize = 10;
+	var leoC360SourceId = window.leoC360DataSourceId || window.leoC360SourceId || window.leoDataSourceId || "";
+	var batchSize = typeof window.leoTrackingBatchSize === 'number'
+		? window.leoTrackingBatchSize
+		: (typeof window.leoObserverBatchSize === 'number' ? window.leoObserverBatchSize : 10);
+	window.leoObserverBatchSize = batchSize;
+	window.leoTrackingBatchSize = batchSize;
+	if (leoC360SourceId) {
+		window.leoC360SourceId = leoC360SourceId;
+		window.leoC360DataSourceId = leoC360SourceId;
 	}
+
 	var TIME_TO_ADD_PROXY_IFRAME = typeof window.leoProxyDelay === 'number' ? window.leoProxyDelay : 300; // delay to avoid blocking page load
     
-    if (typeof window.LeoObserverProxy === "undefined" && typeof leoObserverId === 'string' ) {
+    if (typeof window.LeoObserverProxy === "undefined") {
     	
     	// Resolve parent origin cleanly (including port)
     	var leoProxyOrigin = window.location.origin || (window.location.protocol + '//' + window.location.host);
+    	var isParentHttps = window.location.protocol === "https:";
+
+    	// Detect script source to automatically resolve CDN / proxy paths
+    	var scriptSrc = "";
+    	if (document.currentScript && document.currentScript.src) {
+    		scriptSrc = document.currentScript.src;
+    	} else {
+    		var scripts = document.getElementsByTagName('script');
+    		for (var sIdx = scripts.length - 1; sIdx >= 0; sIdx--) {
+    			var sSrc = scripts[sIdx].src || '';
+    			if (sSrc.indexOf('leo.proxy.js') >= 0 || sSrc.indexOf('c360-web-sdk') >= 0) {
+    				scriptSrc = sSrc;
+    				break;
+    			}
+    		}
+    	}
+
+    	var scriptOrigin = "";
+    	if (scriptSrc) {
+    		try {
+    			var parsedScript = new URL(scriptSrc, window.location.href);
+    			scriptOrigin = parsedScript.origin;
+    		} catch(e) {}
+    		if (!scriptOrigin) {
+    			var sMatch = scriptSrc.match(/^(https?:\/\/[^/]+)(\/.*)?$/i);
+    			if (sMatch) {
+    				scriptOrigin = sMatch[1];
+    			}
+    		}
+    	}
+
+    	// Extract tracking endpoint if provided
+    	var trackingEndpoint = window.leoTrackingEndpoint || window.leoObserverTrackingEndpoint || "";
+    	var endpointOrigin = "";
+    	var endpointHost = "";
+    	if (trackingEndpoint) {
+    		try {
+    			var parsedEp = new URL(trackingEndpoint, window.location.href);
+    			endpointOrigin = parsedEp.origin;
+    			endpointHost = parsedEp.host;
+    		} catch(e) {}
+    		if (!endpointHost) {
+    			var epMatch = trackingEndpoint.match(/^(https?:\/\/)?([^/]+)(\/.*)?$/i);
+    			if (epMatch) {
+    				endpointHost = epMatch[2];
+    				endpointOrigin = (epMatch[1] || (isParentHttps ? "https://" : "http://")) + epMatch[2];
+    			}
+    		}
+    	}
     	
-    	// Normalize log domain (defaults to beta.leocdp.com)
-    	var rawLogDomain = window.leoObserverLogDomain || "beta.leocdp.com";
-    	var logProtocol = rawLogDomain.indexOf("http://") === 0 ? "http://" : "https://";
+    	// Normalize log domain (order: leoTrackingEndpoint host -> leoObserverLogDomain -> script origin host -> beta.leocdp.com)
+    	var rawLogDomain = endpointHost || window.leoObserverLogDomain || (scriptOrigin ? (scriptOrigin.split('://')[1] || '') : "beta.leocdp.com");
+    	var logProtocol;
+    	if (isParentHttps) {
+    		logProtocol = "https://";
+    	} else if (rawLogDomain.indexOf("http://") === 0) {
+    		logProtocol = "http://";
+    	} else if (rawLogDomain.indexOf("https://") === 0) {
+    		logProtocol = "https://";
+    	} else {
+    		logProtocol = window.location.protocol ? (window.location.protocol + "//") : "https://";
+    	}
+
     	var cleanLogDomain = rawLogDomain.replace(/^https?:\/\//, "").replace(/\/+$/, "");
     	var targetPostMessage = logProtocol + cleanLogDomain;
     	
-    	// Allow custom proxy path or default to standard /cdp-sdk/html/cdp-event-proxy.html
-        var proxyPath = window.leoCdpProxyPath || "/cdp-sdk/html/cdp-event-proxy.html";
-        var proxyHtmlUrl = targetPostMessage + proxyPath + "#";
+		// Resolve proxy HTML URL with canonical iframe path.
+        var proxyPath = window.leoCdpProxyPath || "";
+        var proxyHtmlUrl = "";
+        if (proxyPath) {
+        	if (proxyPath.indexOf("http://") === 0 || proxyPath.indexOf("https://") === 0) {
+        		proxyHtmlUrl = proxyPath + "#";
+        	} else if (proxyPath.charAt(0) === "/") {
+        		proxyHtmlUrl = targetPostMessage + proxyPath + "#";
+        	} else {
+        		proxyHtmlUrl = targetPostMessage + "/" + proxyPath + "#";
+        	}
+        } else {
+        	proxyHtmlUrl = targetPostMessage + "/cdp-sdk/html/cdp-event-proxy.html#";
+        }
+
+        if (isParentHttps) {
+        	proxyHtmlUrl = proxyHtmlUrl.replace(/^http:\/\//i, "https://");
+        	targetPostMessage = targetPostMessage.replace(/^http:\/\//i, "https://");
+        }
 
         var LeoObserverProxy = { 
         	'synchLeoVisitorCallback' : false,
@@ -80,6 +162,7 @@
         window.LeoObserverProxy = LeoObserverProxy;
         window.LeoIframeProxy = false;
         
+        var pendingEvents = [];
         var iframeId = "leotech_event_proxy";
         setTimeout(function(){
         	var node = document.getElementById(iframeId);
@@ -130,11 +213,30 @@
 
         // Put message to the queue in the child iframe
         var putEventToQueue = function(msg) {
-        	if(window.LeoIframeProxy && window.LeoIframeProxy.contentWindow){
+        	if (!LeoObserverProxy.isReady || !window.LeoIframeProxy || !window.LeoIframeProxy.contentWindow) {
+        		pendingEvents.push(msg);
+        		return;
+        	}
+        	try {
+        		window.LeoIframeProxy.contentWindow.postMessage(msg, targetPostMessage);
+        	} catch(err) {
         		try {
-        			window.LeoIframeProxy.contentWindow.postMessage(msg, targetPostMessage);
-        		} catch(err) {
         			window.LeoIframeProxy.contentWindow.postMessage(msg, '*');
+        		} catch(e) {}
+        	}
+        };
+
+        var flushPendingEvents = function() {
+        	if (window.LeoIframeProxy && window.LeoIframeProxy.contentWindow && pendingEvents.length > 0) {
+        		while (pendingEvents.length > 0) {
+        			var queuedMsg = pendingEvents.shift();
+        			try {
+        				window.LeoIframeProxy.contentWindow.postMessage(queuedMsg, targetPostMessage);
+        			} catch(err) {
+        				try {
+        					window.LeoIframeProxy.contentWindow.postMessage(queuedMsg, '*');
+        				} catch(e) {}
+        			}
         		}
         	}
         };
@@ -160,6 +262,7 @@
             } 
             else if (eventType === "LeoObserverProxyReady" || (typeof data === 'string' && data.indexOf("LeoObserverProxyReady") === 0)) {
             	LeoObserverProxy.isReady = true;
+            	flushPendingEvents();
             	var sessionContext = {
             		sessionKey: (eventPayload && eventPayload.sessionKey) || LeoObserverProxy.sessionKey || '',
             		visitorId: (eventPayload && eventPayload.visitorId) || LeoObserverProxy.visitorId || '',
@@ -228,7 +331,10 @@
             var mediaHost = extractRootDomain(document.location.href);
 			var tpname = window.srcTouchpointName || document.title || "";
             var tpurl = window.srcTouchpointUrl || document.location.href || "";
-            var batchSize = typeof window.leoObserverBatchSize === 'number' ? window.leoObserverBatchSize : 10;
+            var currentBatch = typeof window.leoTrackingBatchSize === 'number'
+            	? window.leoTrackingBatchSize
+            	: (typeof window.leoObserverBatchSize === 'number' ? window.leoObserverBatchSize : batchSize);
+            var currentObsId = window.leoC360DataSourceId || window.leoC360SourceId || window.leoDataSourceId || leoC360SourceId || "";
 
 			var screen = "";
 			if(window.screen) {
@@ -237,8 +343,8 @@
 			            
             // Tracking parameters
             var params = {
-                'obsid': leoObserverId,
-                'batchsize': batchSize,
+                'obsid': currentObsId,
+                'batchsize': currentBatch,
                 'mediahost': mediaHost,
 				'screen': screen,
                 'tprefurl': encodeURIComponent(tprefurl),
@@ -434,6 +540,57 @@
         };
         LeoObserver.getPersonalization = LeoObserver.getPersonalization || function(slotId, callback) {
             LeoObserverProxy.getPersonalization(slotId, callback);
+        };
+        LeoObserver.synchLeoVisitorId = LeoObserver.synchLeoVisitorId || function(callback) {
+            LeoObserverProxy.synchLeoVisitorId(callback);
+        };
+        LeoObserver.getVisitorId = LeoObserver.getVisitorId || function() {
+            return LeoObserverProxy.getVisitorId();
+        };
+        LeoObserver.getSessionKey = LeoObserver.getSessionKey || function() {
+            return LeoObserverProxy.getSessionKey();
+        };
+        LeoObserver.isReady = LeoObserver.isReady || function() {
+            return !!LeoObserverProxy.isReady;
+        };
+        LeoObserver.track = LeoObserver.track || function(metricName, eventData, eventType) {
+            eventType = eventType || "action";
+            if (eventType === "view") {
+                LeoObserverProxy.recordViewEvent(metricName || "page-view", eventData || {});
+            } else if (eventType === "conversion") {
+                LeoObserverProxy.recordConversionEvent(metricName || "conversion", eventData || {});
+            } else if (eventType === "feedback") {
+                LeoObserverProxy.recordFeedbackEvent(metricName || "feedback", eventData || {});
+            } else {
+                LeoObserverProxy.recordActionEvent(metricName || "action", eventData || {});
+            }
+        };
+        LeoObserver.addTrackingAllLinks = LeoObserver.addTrackingAllLinks || function() {
+            setTimeout(function () {
+                var links = document.querySelectorAll('a');
+                for (var i = 0; i < links.length; i++) {
+                    (function(aNode) {
+                        aNode.addEventListener('click', function() {
+                            var url = aNode.getAttribute('href') || "";
+                            var text = aNode.innerText || aNode.textContent || "";
+                            LeoObserver.recordEventClickDetails({ 'url': url, 'link-text': text });
+                        });
+                    })(links[i]);
+                }
+            }, 500);
+        };
+        LeoObserver.addTrackingAllButtons = LeoObserver.addTrackingAllButtons || function() {
+            setTimeout(function () {
+                var buttons = document.querySelectorAll('button');
+                for (var i = 0; i < buttons.length; i++) {
+                    (function(btnNode) {
+                        btnNode.addEventListener('click', function() {
+                            var text = btnNode.innerText || btnNode.textContent || "";
+                            LeoObserver.recordEventClickDetails({ 'button-text': text });
+                        });
+                    })(buttons[i]);
+                }
+            }, 500);
         };
 
         window.LeoObserver = LeoObserver;

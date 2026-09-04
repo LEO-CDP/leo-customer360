@@ -48,9 +48,11 @@ NET_UP="$(tfval netdata_upstream "$ovl")";   NET_UP="${NET_UP:-127.0.0.1:4199}"
 PORT_UP="$(tfval portainer_upstream "$ovl")";PORT_UP="${PORT_UP:-127.0.0.1:9443}"
 JAE_UP="$(tfval jaeger_upstream "$ovl")";     JAE_UP="${JAE_UP:-127.0.0.1:4686}"   # -> oauth2-jaeger (SSO) -> Jaeger
 DATA_UP="$(tfval data_upstream "$ovl")";      DATA_UP="${DATA_UP:-10.100.1.8:8010}" # -> data-tracking-api on its own box (/data)
+SDK_FRAME_ANCESTOR="$(tfval sdk_frame_ancestor "$ovl")"
 
 : "${DOMAIN:?set caddy_domain in $ovl (e.g. cdp.example.com)}"
 : "${EMAIL:?set acme_email in $ovl (Let’s Encrypt account email)}"
+: "${SDK_FRAME_ANCESTOR:?set sdk_frame_ancestor in $ovl (e.g. https://beta.leocdp.com for UAT)}"
 
 # --- discover the target VM's floating IP from ../server outputs (by for_each key) ---
 SERVERS_JSON="$( (cd ../server && terraform workspace select "$ENV" >/dev/null 2>&1 && terraform output -json servers 2>/dev/null) || true )"
@@ -72,11 +74,12 @@ PARAMS_B64="$(printf '%s\n' \
   "ACTION=$ACTION" "IMG=$IMG" "DOMAIN=$DOMAIN" "EMAIL=$EMAIL" \
   "API_UP=$API_UP" "KC_UP=$KC_UP" "FE_UP=$FE_UP" "ADS_UP=$ADS_UP" \
   "DAG_UP=$DAG_UP" "NET_UP=$NET_UP" "PORT_UP=$PORT_UP" "JAE_UP=$JAE_UP" "DATA_UP=$DATA_UP" \
+  "SDK_FRAME_ANCESTOR=$SDK_FRAME_ANCESTOR" \
   "CADDYFILE_B64=$CADDYFILE_B64" | base64 | tr -d '\n')"
 
 echo ">> Target (caddy): $BASTION   [$ACTION]"
 echo "   domain: https://$DOMAIN   image: $IMG"
-echo "   routes: / -> $FE_UP   /c360api -> $API_UP   /auth -> $KC_UP   /ads -> $ADS_UP   /data -> $DATA_UP"
+echo "   routes: / -> $FE_UP   /c360api -> $API_UP   /auth -> $KC_UP   /ads -> $ADS_UP   /cdp-sdk -> $DATA_UP   /data -> $DATA_UP"
 
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PARAMS_B64" <<'REMOTE'
 set -euo pipefail
@@ -93,6 +96,7 @@ printf %s "$CADDYFILE_B64" | base64 -d | sudo tee /opt/c360/caddy/Caddyfile >/de
 
 # env the Caddyfile placeholders resolve against
 env_args=(
+  -e SDK_FRAME_ANCESTOR="$SDK_FRAME_ANCESTOR"
   -e CADDY_DOMAIN="$DOMAIN" -e ACME_EMAIL="$EMAIL"
   -e API_UPSTREAM="$API_UP" -e KC_UPSTREAM="$KC_UP" -e FRONTEND_UPSTREAM="$FE_UP"
   -e ADS_UPSTREAM="$ADS_UP" -e DAGSTER_UPSTREAM="$DAG_UP"

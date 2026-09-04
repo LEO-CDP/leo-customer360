@@ -104,7 +104,7 @@ Set the configuration globals before loading the proxy script:
 
 ```html
 <script>
-	window.leoObserverId = "YOUR_OBSERVER_ID";
+	window.leoC360SourceId = "YOUR_C360_SOURCE_ID";
 	window.leoObserverLogDomain = "data.example.com";
 
 	// Optional. Defaults to 10. Use 1 to send events individually.
@@ -114,6 +114,10 @@ Set the configuration globals before loading the proxy script:
 	window.srcTouchpointName = document.title;
 	window.srcTouchpointUrl = window.location.href;
 
+	// Optional for reverse proxies that expose tracking API under /data/*.
+	// Example public URI: https://c360.example.com/data/cdp-sdk/html/cdp-event-proxy.html
+	window.leoCdpProxyPath = "/data/cdp-sdk/html/cdp-event-proxy.html";
+
 	// The callback is invoked after the iframe has initialized its context session.
 	window.leoObserverProxyReady = function () {
 		console.log("LEO observer ready");
@@ -122,7 +126,7 @@ Set the configuration globals before loading the proxy script:
 <script src="https://YOUR_CDN_DOMAIN/js/leo-observer/leo.proxy.min.js"></script>
 ```
 
-`leoObserverId` and `leoObserverLogDomain` are required. The CDN domain is the
+`leoC360SourceId` and `leoObserverLogDomain` are required. The CDN domain is the
 host serving `leo.proxy.min.js`; it is not read by the proxy as a runtime
 configuration value. The page must be served over HTTPS when using the normal
 HTTPS log and CDN endpoints.
@@ -346,7 +350,7 @@ from the GTM UI and fire LEO events from GTM triggers alongside GA4/Ads tags.
 
    ```html
    <script>
-   	window.leoObserverId = "{{LEO Observer ID}}"; // GTM variable
+	window.leoC360SourceId = "{{LEO C360 Source ID}}"; // GTM variable
    	window.leoObserverLogDomain = "{{LEO Log Domain}}"; // GTM variable
    	window.leoObserverProxyReady = function () {
    		window.dataLayer.push({ event: "leo_observer_ready" });
@@ -355,7 +359,7 @@ from the GTM UI and fire LEO events from GTM triggers alongside GA4/Ads tags.
    <script src="https://YOUR_CDN_DOMAIN/js/leo-observer/leo.proxy.min.js"></script>
    ```
 
-   Define `LEO Observer ID` / `LEO Log Domain` as GTM constant or environment
+	Define `LEO C360 Source ID` / `LEO Log Domain` as GTM constant or environment
    variables so staging/production containers can point at different
    observer IDs without editing tag HTML.
 
@@ -435,7 +439,7 @@ type LeoObserverProxy = {
 declare global {
 	interface Window {
 		LeoObserverProxy?: LeoObserverProxy;
-		leoObserverId?: string;
+		leoC360SourceId?: string;
 		leoObserverLogDomain?: string;
 		leoObserverProxyReady?: () => void;
 	}
@@ -444,12 +448,12 @@ declare global {
 const LeoObserverContext = createContext<LeoObserverProxy | null>(null);
 
 export function LeoObserverProvider({
-	observerId,
+	sourceId,
 	logDomain,
 	cdnDomain,
 	children,
 }: {
-	observerId: string;
+	sourceId: string;
 	logDomain: string;
 	cdnDomain: string;
 	children: ReactNode;
@@ -461,7 +465,7 @@ export function LeoObserverProvider({
 		if (loadedRef.current) return;
 		loadedRef.current = true;
 
-		window.leoObserverId = observerId;
+		window.leoC360SourceId = sourceId;
 		window.leoObserverLogDomain = logDomain;
 		window.leoObserverProxyReady = () => setProxy(window.LeoObserverProxy ?? null);
 
@@ -476,7 +480,7 @@ export function LeoObserverProvider({
 			// "load once" design (re-injecting it on route changes creates
 			// duplicate iframes/visitor IDs).
 		};
-	}, [observerId, logDomain, cdnDomain]);
+	}, [sourceId, logDomain, cdnDomain]);
 
 	return <LeoObserverContext.Provider value={proxy}>{children}</LeoObserverContext.Provider>;
 }
@@ -497,7 +501,7 @@ a page/component that needs to send events:
 export default function App() {
 	return (
 		<LeoObserverProvider
-			observerId={import.meta.env.VITE_LEO_OBSERVER_ID}
+			sourceId={import.meta.env.VITE_LEO_OBSERVER_ID}
 			logDomain={import.meta.env.VITE_LEO_LOG_DOMAIN}
 			cdnDomain={import.meta.env.VITE_LEO_CDN_DOMAIN}
 		>
@@ -575,6 +579,9 @@ validation accepts digits, spaces, plus signs, and dashes, with 7 to 15 digits.
 
 1. The proxy waits approximately 500 ms, then appends a hidden iframe at
 	 `https://<log-domain>/cdp-sdk/html/cdp-event-proxy.html`.
+	 In deployments that forward `/data/*` to the tracking service with prefix
+	 stripping, configure `window.leoCdpProxyPath` as
+	 `/data/cdp-sdk/html/cdp-event-proxy.html`.
 2. The iframe reads the log domain and parent origin from its URL hash, loads
 	 FingerprintJS2 2.1.5, and loads the observer implementation.
 3. The iframe initializes a context session with `GET /cxs-pf-init` when no
@@ -613,7 +620,7 @@ by the browser and does not expose a response to page JavaScript.
 
 | Symptom | Checks |
 | --- | --- |
-| `LeoObserverProxy` is undefined | Confirm the proxy script loaded, `leoObserverId` is a string, and the globals were assigned before the script tag. |
+| `LeoObserverProxy` is undefined | Confirm the proxy script loaded, `leoC360SourceId` is a string, and the globals were assigned before the script tag. |
 | Ready callback never runs | Inspect the hidden iframe, CDN loading errors, `/cxs-pf-init`, CORS headers, and browser console errors. |
 | Events disappear | Wait for `leoObserverProxyReady`, verify `leoObserverBatchSize`, and keep the page open long enough for the batch timer or unload flush. |
 | Profile update has no effect | Confirm the profile object is a plain object, the log domain is reachable, and the request to `/cxs-pf-update` is accepted by the server. |

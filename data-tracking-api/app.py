@@ -3,6 +3,7 @@
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
@@ -27,16 +28,38 @@ app.include_router(tracking_router, prefix="/data/api/v1")
 
 BASE_DIR = Path(__file__).resolve().parent
 static_dir = BASE_DIR / "static"
+c360_sdk_dir = static_dir / "c360-web-sdk"
+cdp_event_proxy_html = c360_sdk_dir / "html"
+cdp_proxy_file = cdp_event_proxy_html / "cdp-event-proxy.html"
+
+
+def _serve_proxy_file() -> FileResponse:
+    return FileResponse(
+        path=str(cdp_proxy_file),
+        media_type="text/html",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+@app.get("/cdp-sdk/html/cdp-event-proxy.html", response_class=FileResponse, tags=["Web SDK"])
+def get_cdp_event_proxy() -> FileResponse:
+    return _serve_proxy_file()
+
+
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-    c360_sdk_dir = static_dir / "c360-web-sdk"
+    app.mount("/data/static", StaticFiles(directory=str(static_dir)), name="data-static")
     if c360_sdk_dir.exists():
-        app.mount("/c360-web-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="c360-web-sdk")
         app.mount("/cdp-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="cdp-sdk")
+        app.mount("/data/cdp-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="data-cdp-sdk")
         app.mount("/data-tracking-api/static/c360-web-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="data-tracking-c360-web-sdk")
     sandbox_dir = static_dir / "sandbox"
     if sandbox_dir.exists():
         app.mount("/sandbox", StaticFiles(directory=str(sandbox_dir), html=True), name="sandbox")
+        app.mount("/data/sandbox", StaticFiles(directory=str(sandbox_dir), html=True), name="data-sandbox")
 
 
 @app.get("/", tags=["Health"])

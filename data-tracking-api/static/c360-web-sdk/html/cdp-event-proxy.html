@@ -178,12 +178,22 @@
                         targetOrigin
                     );
                 } catch (error) {
-                    console.error(
-                        '[LeoProxy] postMessage failed:',
-                        error
-                    );
+                    try {
+                        window.parent.postMessage(
+                            message,
+                            '*'
+                        );
+                    } catch (e) {
+                        console.error(
+                            '[LeoProxy] postMessage failed:',
+                            error
+                        );
+                    }
                 }
             }
+
+            window.sendMessage = sendMessage;
+            window.__leoObserverProxySendMessage = sendMessage;
 
             // ============================================================
             // PARSE INCOMING MESSAGE
@@ -340,15 +350,21 @@
                  */
                 if (
                     synchVisitorCall !== false &&
-                    observerAvailable() &&
-                    typeof window.LeoEventObserver.visitorId !== 'undefined'
+                    observerAvailable()
                 ) {
-                    sendMessage(
-                        'synchLeoVisitorId-' +
-                        window.LeoEventObserver.visitorId
+                    var synchVid = window.LeoEventObserver.visitorId || (
+                        typeof window.LeoEventObserver.getVisitorId === 'function'
+                            ? window.LeoEventObserver.getVisitorId()
+                            : ''
                     );
+                    if (synchVid) {
+                        sendMessage(
+                            'synchLeoVisitorId-' +
+                            synchVid
+                        );
 
-                    synchVisitorCall = false;
+                        synchVisitorCall = false;
+                    }
                 }
 
                 /*
@@ -396,13 +412,12 @@
                     case 'getContextSession':
 
                         if (
-                            data.params &&
                             observerAvailable() &&
                             typeof window.LeoEventObserver.getContextSession === 'function'
                         ) {
                             try {
                                 window.LeoEventObserver.getContextSession(
-                                    data.params
+                                    data.params || {}
                                 );
                             } catch (error) {
                                 console.error(

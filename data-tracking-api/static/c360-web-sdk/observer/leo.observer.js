@@ -375,6 +375,10 @@
     }
 
     global.LeoCorsRequest = LeoCorsRequest;
+    global.BatchManager = BatchManager;
+    global.LeoObserverConfig = CONFIG;
+    global.hasOwn = hasOwn;
+    global.toSafeParamValue = toSafeParamValue;
 
 })(typeof window === 'undefined' ? this : window);
 
@@ -773,9 +777,71 @@ var leoSessionStringKey = "leoctxsk";
 var leoVisitorIdStringKey = "leocdp_vid";
 
 (function(global, undefined) {
+    'use strict';
+
     var LeoEventObserver = {'fingerprintId' : ""};
     var sessionKey = false;
     var debug = false;
+
+    function hasOwn(obj, key) {
+        return Object.prototype.hasOwnProperty.call(obj, key);
+    }
+
+    function toSafeParamValue(value) {
+        if (value === null || typeof value === 'undefined') {
+            return '';
+        }
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+            return value;
+        }
+        if (typeof value === 'object') {
+            try {
+                return JSON.stringify(value);
+            } catch (e) {
+                return String(value);
+            }
+        }
+        return String(value);
+    }
+
+    function sendMessage(message) {
+        if (typeof global.__leoObserverProxySendMessage === 'function') {
+            global.__leoObserverProxySendMessage(message);
+        } else if (typeof window !== 'undefined' && typeof window.__leoObserverProxySendMessage === 'function') {
+            window.__leoObserverProxySendMessage(message);
+        } else if (typeof global.sendMessage === 'function' && global.sendMessage !== sendMessage) {
+            global.sendMessage(message);
+        } else if (typeof window !== 'undefined' && typeof window.sendMessage === 'function' && window.sendMessage !== sendMessage) {
+            window.sendMessage(message);
+        } else if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
+            try {
+                window.parent.postMessage(message, '*');
+            } catch (e) {
+                if (window.console && window.console.error) {
+                    window.console.error('[LeoObserver] postMessage failed:', e);
+                }
+            }
+        }
+    }
+
+    var BatchManager = global.BatchManager || {
+        enqueue: function(url, data, batchSize) {
+            if (global.LeoCorsRequest && typeof global.LeoCorsRequest.batchSend === 'function') {
+                global.LeoCorsRequest.batchSend(url, data, batchSize);
+            }
+        }
+    };
+
+    var CONFIG = global.LeoObserverConfig || { DEBUG: false };
+    function log(msg, type) {
+        if (!global.console) return;
+        var prefix = "[LeoCDP] ";
+        if (type === 'error') {
+            global.console.error(prefix + msg);
+        } else if (CONFIG.DEBUG || debug) {
+            global.console.log(prefix + msg);
+        }
+    }
 
     function debugLog(data){
     	if(debug && window.console){
@@ -786,6 +852,9 @@ var leoVisitorIdStringKey = "leocdp_vid";
     function setSessionKey(key){
     	sessionKey = key;
     	lscache.set(leoSessionStringKey, sessionKey);
+        if (global.LeoCorsRequest && typeof global.LeoCorsRequest.setSessionKey === 'function') {
+            global.LeoCorsRequest.setSessionKey(sessionKey);
+        }
     }
     
     function getSessionKey(autoResfresh){
@@ -834,16 +903,36 @@ var leoVisitorIdStringKey = "leocdp_vid";
     
 
     function generateVisitorId() {
-    	if(typeof INJECTED_VISITOR_ID === 'string') {
-    		return INJECTED_VISITOR_ID;
+        var injectedVid = (typeof global.INJECTED_VISITOR_ID === 'string' && global.INJECTED_VISITOR_ID)
+            || (typeof INJECTED_VISITOR_ID === 'string' && INJECTED_VISITOR_ID)
+            || (global.LeoEventObserver && global.LeoEventObserver.visitorId)
+            || (typeof window !== 'undefined' && typeof window.injectedVisitorId === 'string' && window.injectedVisitorId);
+    	if(typeof injectedVid === 'string' && injectedVid.length > 5) {
+    		return injectedVid;
     	} else {
-    		var d = new Date().getTime();
-	        var uuid = 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-	            var r = (d + Math.random() * 16) % 16 | 0;
-	            d = Math.floor(d / 16);
-	            return (c == 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-	        });
-	        return uuid;
+            var cryptoObj = (global.crypto || global.msCrypto);
+            if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+                var bytes = new Uint8Array(16);
+                cryptoObj.getRandomValues(bytes);
+
+                // RFC 4122 version 4 + variant bits
+                bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+                var hex = [];
+                for (var i = 0; i < bytes.length; i++) {
+                    hex.push((bytes[i] + 0x100).toString(16).substr(1));
+                }
+                return hex.join('');
+            }
+
+            // Fallback for very old environments without crypto support
+            var d = new Date().getTime();
+            return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = (d % 16) | 0;
+                d = Math.floor(d / 16);
+                return (c == 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
     	}
     }
     
@@ -851,9 +940,14 @@ var leoVisitorIdStringKey = "leocdp_vid";
         var key = leoVisitorIdStringKey;
         var uuid =  lscache.get(key); 
         
-        if(typeof INJECTED_VISITOR_ID === 'string' && typeof uuid === 'string') {
-        	if(uuid !== INJECTED_VISITOR_ID) {
-        		uuid = INJECTED_VISITOR_ID;
+        var injectedVid = (typeof global.INJECTED_VISITOR_ID === 'string' && global.INJECTED_VISITOR_ID)
+            || (typeof INJECTED_VISITOR_ID === 'string' && INJECTED_VISITOR_ID)
+            || (global.LeoEventObserver && global.LeoEventObserver.visitorId)
+            || (typeof window !== 'undefined' && typeof window.injectedVisitorId === 'string' && window.injectedVisitorId);
+
+        if(typeof injectedVid === 'string' && injectedVid.length > 5 && typeof uuid === 'string') {
+        	if(uuid !== injectedVid) {
+        		uuid = injectedVid;
         		lscache.set(key, uuid);
         	}
         }
@@ -872,7 +966,9 @@ var leoVisitorIdStringKey = "leocdp_vid";
         }
 
         var activeSessionKey = getSessionKey(true);
-        LeoCorsRequest.setSessionKey(activeSessionKey);
+        if (global.LeoCorsRequest && typeof global.LeoCorsRequest.setSessionKey === 'function') {
+            global.LeoCorsRequest.setSessionKey(activeSessionKey);
+        }
 
         var payload = {};
         for (var key in params) {
@@ -895,9 +991,11 @@ var leoVisitorIdStringKey = "leocdp_vid";
         payload.eventType = eventType;
         if (params.screen) payload.screen = params.screen;
 
-        var targetUrl = typeof PREFIX_EVENT_TRACKING_URL === 'string' && PREFIX_EVENT_TRACKING_URL ? PREFIX_EVENT_TRACKING_URL : (
-            typeof PREFIX_EVENT_VIEW_URL === 'string' && PREFIX_EVENT_VIEW_URL ? PREFIX_EVENT_VIEW_URL : '/data/api/v1/tracking/logs'
-        );
+        var targetUrl = (typeof global.PREFIX_EVENT_TRACKING_URL === 'string' && global.PREFIX_EVENT_TRACKING_URL)
+            ? global.PREFIX_EVENT_TRACKING_URL
+            : (typeof PREFIX_EVENT_TRACKING_URL === 'string' && PREFIX_EVENT_TRACKING_URL
+                ? PREFIX_EVENT_TRACKING_URL
+                : ((typeof PREFIX_EVENT_VIEW_URL === 'string' && PREFIX_EVENT_VIEW_URL) ? PREFIX_EVENT_VIEW_URL : '/data/api/v1/tracking/logs'));
 
         if (eventType === "action" && typeof PREFIX_EVENT_ACTION_URL === 'string' && PREFIX_EVENT_ACTION_URL) {
             targetUrl = PREFIX_EVENT_ACTION_URL;
@@ -907,8 +1005,11 @@ var leoVisitorIdStringKey = "leocdp_vid";
             targetUrl = PREFIX_EVENT_FEEDBACK_URL;
         }
 
-        BatchManager.enqueue(targetUrl, payload, batchSize);
-        if (CONFIG.DEBUG) {
+        var batchMgr = global.BatchManager || BatchManager;
+        if (batchMgr && typeof batchMgr.enqueue === 'function') {
+            batchMgr.enqueue(targetUrl, payload, batchSize);
+        }
+        if (CONFIG.DEBUG || debug) {
             log("LeoEventObserver queued " + eventType + " event for: " + targetUrl, "debug");
         }
     };
@@ -919,6 +1020,10 @@ var leoVisitorIdStringKey = "leocdp_vid";
         }
 
         var activeSessionKey = getSessionKey(true);
+        if (global.LeoCorsRequest && typeof global.LeoCorsRequest.setSessionKey === 'function') {
+            global.LeoCorsRequest.setSessionKey(activeSessionKey);
+        }
+
         var payload = {};
         for (var key in params) {
             if (!hasOwn(params, key)) {
@@ -943,12 +1048,17 @@ var leoVisitorIdStringKey = "leocdp_vid";
             } catch(e) {}
         }
 
-        var targetUrl = typeof PREFIX_UPDATE_PROFILE_URL === 'string' && PREFIX_UPDATE_PROFILE_URL ? PREFIX_UPDATE_PROFILE_URL : (
-            typeof PREFIX_EVENT_TRACKING_URL === 'string' && PREFIX_EVENT_TRACKING_URL ? PREFIX_EVENT_TRACKING_URL : '/data/api/v1/tracking/logs'
-        );
+        var targetUrl = (typeof global.PREFIX_UPDATE_PROFILE_URL === 'string' && global.PREFIX_UPDATE_PROFILE_URL)
+            ? global.PREFIX_UPDATE_PROFILE_URL
+            : (typeof PREFIX_UPDATE_PROFILE_URL === 'string' && PREFIX_UPDATE_PROFILE_URL
+                ? PREFIX_UPDATE_PROFILE_URL
+                : ((typeof PREFIX_EVENT_TRACKING_URL === 'string' && PREFIX_EVENT_TRACKING_URL) ? PREFIX_EVENT_TRACKING_URL : '/data/api/v1/tracking/logs'));
 
         // Immediate flush for profile updates so identity resolution happens promptly
-        BatchManager.enqueue(targetUrl, payload, 1);
+        var batchMgr = global.BatchManager || BatchManager;
+        if (batchMgr && typeof batchMgr.enqueue === 'function') {
+            batchMgr.enqueue(targetUrl, payload, 1);
+        }
     };
 
     var getPersonalization = function(slotId, params, callback) {
@@ -984,7 +1094,11 @@ var leoVisitorIdStringKey = "leocdp_vid";
             normalized[key] = toSafeParamValue(value);
         }
 
-        if (OBSERVE_WITH_FINGERPRINT) {
+        var observeWithFingerprint = (typeof global.OBSERVE_WITH_FINGERPRINT !== 'undefined')
+            ? global.OBSERVE_WITH_FINGERPRINT
+            : ((typeof OBSERVE_WITH_FINGERPRINT !== 'undefined') ? OBSERVE_WITH_FINGERPRINT : true);
+
+        if (observeWithFingerprint) {
             var fingerprint = lscache.get("leocdp_fgp") || LeoEventObserver.fingerprintId || "";
             if (fingerprint) {
                 normalized.fgp = fingerprint;

@@ -17,3 +17,6 @@ logs/
 docs/release-documents/
 
 backups
+
+node_modules
+*/node_modules/

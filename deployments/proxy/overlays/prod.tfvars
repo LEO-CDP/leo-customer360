@@ -5,7 +5,7 @@
 # entry) by default; give it its own box by pointing caddy_server_key elsewhere.
 
 caddy_server_key = "frontend"           # prod: run Caddy on the frontend box (or a dedicated "proxy" key)
-caddy_domain     = "leocdp.com"         # prod public host — CHANGE as needed (e.g. app.leocdp.com)
+caddy_domain     = "c360.leocdp.com"    # prod public host; issuer/redirects derive from this
 acme_email       = "admin@leocdp.com"   # Let's Encrypt account email — CHANGE to a real monitored inbox
 caddy_image      = "caddy:2-alpine"
 
@@ -24,3 +24,6 @@ jaeger_upstream = "127.0.0.1:4686"
 # data-tracking-api served under /data. Dedicated box in prod too — FILL with that box's
 # PRIVATE ip from ../server (prod) outputs once the "tracking" server key is provisioned.
 data_upstream = "10.101.1.15:8010" # <-- set the real tracking-box private ip
+
+# Parent origin allowed to embed the hidden c360 web SDK iframe.
+sdk_frame_ancestor = "https://c360.leocdp.com"
