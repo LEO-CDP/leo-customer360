@@ -266,7 +266,7 @@ window.C360 = window.C360 || {};
       $("#btn-segment-form-save").prop("disabled", true).addClass("opacity-60");
       request.done(function () {
         closeSegmentForm();
-        loadList(false);
+        loadList(false, true);
         if (savedSegmentId && savedSegmentId === currentSegmentId) loadDetail(savedSegmentId);
         showToast(editingSegmentId ? "Segment updated" : "Segment created", "success");
       }).fail(function (xhr) {
@@ -312,6 +312,17 @@ window.C360 = window.C360 || {};
     rowId: function (vm) { return vm.segment_id; },
     rowSelectorClass: "segment-row",
     resourceLabel: "segment",
+    clientSide: true,
+    clientSideLimit: 500,
+    clientFilters: {
+      q: function (vm, value) {
+        var needle = String(value || "").toLowerCase().trim();
+        if (!needle) return true;
+        return (vm.segment_name || "").toLowerCase().indexOf(needle) !== -1 ||
+          (vm.segment_tag || "").toLowerCase().indexOf(needle) !== -1 ||
+          (vm.description || "").toLowerCase().indexOf(needle) !== -1;
+      }
+    },
     fetch: function (params) {
       return api("/segments/", params).done(function (segments) {
         (segments || []).forEach(function (segment) { segmentsById[segment.segment_id] = segment; });
@@ -374,7 +385,10 @@ window.C360 = window.C360 || {};
     });
   }
 
-  function loadList(append) { return listDtv.load(append); }
+  function loadList(append, forceReload) {
+    if (forceReload && listDtv.resetClientCache) listDtv.resetClientCache();
+    return listDtv.load(append, forceReload);
+  }
 
   function loadMatchedProfiles(segmentId, append) {
     if (!matchedDtv) return;
@@ -414,7 +428,7 @@ window.C360 = window.C360 || {};
 
   function load() {
     showList();
-    loadList(false);
+    loadList(false, true);
   }
 
   // Polling config for the async recompute-all job (see
@@ -508,7 +522,7 @@ window.C360 = window.C360 || {};
         showToast("Segment refresh job submitted (run " + response.run_id + ")...", "info");
         pollRecomputeStatus(response.run_id, 1, {
           buttonSelector: "#btn-segments-refresh",
-          onSuccess: function () { loadList(false); }
+          onSuccess: function () { loadList(false, true); }
         });
       })
       .fail(function (xhr) {
@@ -533,7 +547,7 @@ window.C360 = window.C360 || {};
             if (currentSegmentId === segmentId && !$("#segment-view-detail").hasClass("hidden")) {
               loadDetail(segmentId);
             } else {
-              loadList(false);
+              loadList(false, true);
             }
           }
         });
@@ -547,6 +561,7 @@ window.C360 = window.C360 || {};
   function bindEvents() {
     listDtv.bindRowClick();
     listDtv.bindLoadMore();
+    listDtv.bindSearch("#segments-search-input", "q", 300);
     // Matched-profiles rows share the ".profile-row" click delegation
     // already bound once by C360.profileListView.bindEvents() (both tables render
     // the same profile columns/rowVm) -- only "load more" needs re-binding

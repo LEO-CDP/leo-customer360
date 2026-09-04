@@ -195,6 +195,15 @@ window.C360 = window.C360 || {};
       });
     }
 
+    function resetClientCache() {
+      state.allItems = null;
+    }
+
+    function reload() {
+      resetClientCache();
+      return load(false);
+    }
+
     function loadClientSide() {
       setLoading(true);
       setEmpty(false);
@@ -208,10 +217,13 @@ window.C360 = window.C360 || {};
         .fail(function (xhr) { setLoading(false); if (o.onError) o.onError(xhr); });
     }
 
-    function load(append) {
+    function load(append, forceReload) {
       ensureHeadRendered();
 
       if (o.clientSide) {
+        if (forceReload) {
+          state.allItems = null;
+        }
         if (state.allItems) {
           appendItems(applyClientFilters(state.allItems), false);
           return $.Deferred().resolve().promise();
@@ -391,6 +403,8 @@ window.C360 = window.C360 || {};
 
     return {
       load: load,
+      reload: reload,
+      resetClientCache: resetClientCache,
       setFilter: setFilter,
       bindSearch: bindSearch,
       bindSelect: bindSelect,
