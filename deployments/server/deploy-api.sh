@@ -135,10 +135,21 @@ if ! command -v docker >/dev/null 2>&1; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
   sudo systemctl enable --now docker
 fi
-sudo mkdir -p /opt/c360
-sudo install -d -m 700 -o "$(id -un)" -g "$(id -gn)" /opt/c360/.tmp
+# Reclaim disk before we write/pull anything. Each deploy pulls a new SHA-pinned image
+# and the old ones pile up until a small VM fills its disk ("No space left on device"
+# on the very first env-file write). This runs before any disk write (the heredoc streams
+# over stdin) so it recovers even from an already-full disk. The currently-running
+# customer360-api still holds its image here, so `image prune -a` keeps it and drops only
+# the stale ones. Best-effort: never fail the deploy on cleanup.
+if command -v docker >/dev/null 2>&1; then
+  echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
+  sudo docker container prune -f  >/dev/null 2>&1 || true
+  sudo docker image prune -a -f   >/dev/null 2>&1 || true
+  sudo docker builder prune -a -f >/dev/null 2>&1 || true
+  echo "   reclaiming disk (df after):  $(df -h --output=avail / | tail -1 | tr -d ' ') free"
+fi
 umask 077
-env_file="$(mktemp /opt/c360/.tmp/api.env.XXXXXX)"
+env_file="$(mktemp)"
 cat > "$env_file" <<ENVF
 ENVIRONMENT=production
 DB_HOST=$DB_HOST
@@ -173,6 +184,7 @@ ENVS
 else
   echo "SSO_LOGIN=false" >> "$env_file"
 fi
+sudo mkdir -p /opt/c360
 if [ -n "$OTEL_B64" ]; then printf '%s' "$OTEL_B64" | base64 -d >> "$env_file"; fi
 sudo mv "$env_file" /opt/c360/api.env
 sudo chmod 600 /opt/c360/api.env
