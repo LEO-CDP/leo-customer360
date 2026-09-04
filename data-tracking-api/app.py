@@ -44,23 +44,8 @@ def _serve_proxy_file() -> FileResponse:
     )
 
 
-@app.get("/cdp-event-proxy.html", response_class=FileResponse, tags=["Web SDK"])
+@app.get("/cdp-sdk/html/cdp-event-proxy.html", response_class=FileResponse, tags=["Web SDK"])
 def get_cdp_event_proxy() -> FileResponse:
-    return _serve_proxy_file()
-
-
-@app.get("/cdp-event-proxy.html/", response_class=FileResponse, tags=["Web SDK"])
-def get_cdp_event_proxy_slash() -> FileResponse:
-    return _serve_proxy_file()
-
-
-@app.get("/data/cdp-event-proxy.html", response_class=FileResponse, tags=["Web SDK"])
-def get_data_cdp_event_proxy() -> FileResponse:
-    return _serve_proxy_file()
-
-
-@app.get("/data/cdp-event-proxy.html/", response_class=FileResponse, tags=["Web SDK"])
-def get_data_cdp_event_proxy_slash() -> FileResponse:
     return _serve_proxy_file()
 
 

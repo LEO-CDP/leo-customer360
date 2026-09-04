@@ -114,6 +114,10 @@ Set the configuration globals before loading the proxy script:
 	window.srcTouchpointName = document.title;
 	window.srcTouchpointUrl = window.location.href;
 
+	// Optional for reverse proxies that expose tracking API under /data/*.
+	// Example public URI: https://c360.example.com/data/cdp-sdk/html/cdp-event-proxy.html
+	window.leoCdpProxyPath = "/data/cdp-sdk/html/cdp-event-proxy.html";
+
 	// The callback is invoked after the iframe has initialized its context session.
 	window.leoObserverProxyReady = function () {
 		console.log("LEO observer ready");
@@ -575,6 +579,9 @@ validation accepts digits, spaces, plus signs, and dashes, with 7 to 15 digits.
 
 1. The proxy waits approximately 500 ms, then appends a hidden iframe at
 	 `https://<log-domain>/cdp-sdk/html/cdp-event-proxy.html`.
+	 In deployments that forward `/data/*` to the tracking service with prefix
+	 stripping, configure `window.leoCdpProxyPath` as
+	 `/data/cdp-sdk/html/cdp-event-proxy.html`.
 2. The iframe reads the log domain and parent origin from its URL hash, loads
 	 FingerprintJS2 2.1.5, and loads the observer implementation.
 3. The iframe initializes a context session with `GET /cxs-pf-init` when no

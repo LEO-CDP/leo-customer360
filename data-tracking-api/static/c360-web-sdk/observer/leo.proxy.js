@@ -83,18 +83,15 @@
     	}
 
     	var scriptOrigin = "";
-    	var scriptBasePath = "";
     	if (scriptSrc) {
     		try {
     			var parsedScript = new URL(scriptSrc, window.location.href);
     			scriptOrigin = parsedScript.origin;
-    			scriptBasePath = parsedScript.pathname.replace(/\/observer\/[^/]+$/, "");
     		} catch(e) {}
     		if (!scriptOrigin) {
     			var sMatch = scriptSrc.match(/^(https?:\/\/[^/]+)(\/.*)?$/i);
     			if (sMatch) {
     				scriptOrigin = sMatch[1];
-    				scriptBasePath = (sMatch[2] || "").replace(/\/observer\/[^/]+$/, "");
     			}
     		}
     	}
@@ -134,7 +131,7 @@
     	var cleanLogDomain = rawLogDomain.replace(/^https?:\/\//, "").replace(/\/+$/, "");
     	var targetPostMessage = logProtocol + cleanLogDomain;
     	
-    	// Resolve proxy HTML URL (handles /cdp-sdk/html/cdp-event-proxy.html or custom /data/cdp-sdk/...)
+		// Resolve proxy HTML URL with canonical iframe path.
         var proxyPath = window.leoCdpProxyPath || "";
         var proxyHtmlUrl = "";
         if (proxyPath) {
@@ -145,8 +142,6 @@
         	} else {
         		proxyHtmlUrl = targetPostMessage + "/" + proxyPath + "#";
         	}
-        } else if (scriptBasePath) {
-        	proxyHtmlUrl = (scriptOrigin || targetPostMessage) + scriptBasePath + "/html/cdp-event-proxy.html#";
         } else {
         	proxyHtmlUrl = targetPostMessage + "/cdp-sdk/html/cdp-event-proxy.html#";
         }

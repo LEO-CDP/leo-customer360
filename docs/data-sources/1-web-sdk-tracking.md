@@ -10,7 +10,7 @@ sequenceDiagram
     actor User as Visitor Browser
     participant Host as Host Website
     participant Proxy as leo.proxy.js
-    participant Iframe as cdp-event-proxy.html
+    participant Iframe as /cdp-sdk/html/cdp-event-proxy.html
     participant Observer as leo.observer.js
     participant Log as LEO Log Domain
     participant API as customer360-api /events

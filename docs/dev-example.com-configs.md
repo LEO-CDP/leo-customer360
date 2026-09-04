@@ -150,27 +150,10 @@ server {
     proxy_read_timeout 600s;
   }
 
-  # c360 web SDK: serve the cross-origin iframe and its observer assets from
-  # data-tracking-api instead of the admin frontend catch-all.
-  location = /cdp-event-proxy.html {
-    proxy_pass http://c360_tracking_api;
-    proxy_hide_header X-Frame-Options;
-    add_header Content-Security-Policy "frame-ancestors https://example.com" always;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-Port $server_port;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-  }
-
-  location ^~ /cdp-sdk/ {
-    proxy_pass http://c360_tracking_api;
-    proxy_hide_header X-Frame-Options;
-    add_header Content-Security-Policy "frame-ancestors https://example.com" always;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-Forwarded-Port $server_port;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-  }
+  # c360 web SDK iframe endpoint is served by data-tracking-api at
+  # /cdp-sdk/html/cdp-event-proxy.html. Public URL can be prefixed with /data
+  # (for example /data/cdp-sdk/html/cdp-event-proxy.html) because this block
+  # strips /data before forwarding to the upstream service.
 
   # Dagster UI: use `dagster dev ... --path-prefix /dagster`.
   location = /dagster {

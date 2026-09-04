@@ -42,7 +42,7 @@
 
 	# The web SDK iframe must reach data-tracking-api, not the frontend catch-all.
 	# SAMEORIGIN cannot allow an iframe embedded by a different origin.
-	@cdp_sdk path /cdp-event-proxy.html /cdp-sdk/*
+	@cdp_sdk path /cdp-sdk/*
 	handle @cdp_sdk {
 		header {
 			-X-Frame-Options
