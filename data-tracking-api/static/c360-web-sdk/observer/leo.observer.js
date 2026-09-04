@@ -910,13 +910,29 @@ var leoVisitorIdStringKey = "leocdp_vid";
     	if(typeof injectedVid === 'string' && injectedVid.length > 5) {
     		return injectedVid;
     	} else {
-    		var d = new Date().getTime();
-	        var uuid = 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-	            var r = (d + Math.random() * 16) % 16 | 0;
-	            d = Math.floor(d / 16);
-	            return (c == 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-	        });
-	        return uuid;
+            var cryptoObj = (global.crypto || global.msCrypto);
+            if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+                var bytes = new Uint8Array(16);
+                cryptoObj.getRandomValues(bytes);
+
+                // RFC 4122 version 4 + variant bits
+                bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+                var hex = [];
+                for (var i = 0; i < bytes.length; i++) {
+                    hex.push((bytes[i] + 0x100).toString(16).substr(1));
+                }
+                return hex.join('');
+            }
+
+            // Fallback for very old environments without crypto support
+            var d = new Date().getTime();
+            return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = (d % 16) | 0;
+                d = Math.floor(d / 16);
+                return (c == 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
     	}
     }
     
