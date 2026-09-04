@@ -31,7 +31,9 @@ window.C360 = window.C360 || {};
     tenantOptions: [],
     userId: "",
     idToken: "",
-    devUser: null
+    devUser: null,
+    leoObserverLogDomain: "localhost:8890",
+    leoObserverCdnDomain: "localhost:8890"
   };
 
   var PERSONA_CATEGORY_OPTIONS = [
@@ -114,7 +116,9 @@ window.C360 = window.C360 || {};
       devUser: storedDevUser,
       theme: localStorage.getItem(STORAGE_KEYS.theme) || DEFAULTS.theme,
       multiTenantEnabled: readBool(localStorage.getItem(STORAGE_KEYS.multiTenantEnabled), DEFAULTS.multiTenantEnabled),
-      tenantOptions: tenantOptions
+      tenantOptions: tenantOptions,
+      leoObserverLogDomain: serverConfig.leoObserverLogDomain || DEFAULTS.leoObserverLogDomain,
+      leoObserverCdnDomain: serverConfig.leoObserverCdnDomain || DEFAULTS.leoObserverCdnDomain
     };
   }
 

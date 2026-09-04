@@ -180,7 +180,9 @@
     window.C360_SERVER_CONFIG = Object.freeze({
       // Injected server-rendered environment settings
       apiBase: "{{ api_base }}",
-      tenantId: "{{ tenant_id }}"
+      tenantId: "{{ tenant_id }}",
+      leoObserverLogDomain: "{{ leo_observer_log_domain }}",
+      leoObserverCdnDomain: "{{ leo_observer_cdn_domain }}"
     });
   </script>
   <script src="{{ static_base }}/js/common/config.js?cb={{ cache_bust }}"></script>

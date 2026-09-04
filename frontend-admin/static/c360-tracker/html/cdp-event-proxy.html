@@ -1,180 +1,891 @@
-<html>
-<!-- By Trieu Nguyen (Thomas), creator of LEOCDP.com, copyright: 2020  -->
+<!DOCTYPE html>
+<html lang="en">
+
 <head>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/fingerprintjs2/2.1.5/fingerprint2.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!--
+        LEO CDP Event Proxy
+        By Trieu Nguyen (Thomas)
+        Creator of LEOCDP.com
+        Copyright 2020
+    -->
+
+    <!-- FingerprintJS2 must be loaded before leo.observer.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fingerprintjs2/2.1.5/fingerprint2.min.js"
+        crossorigin="anonymous">
+        </script>
 </head>
+
 <body>
-	<div id="leoproxy" ></div>
-	<script type="text/javascript" >
-		// global configs
-		var ROOT_DOMAIN = '';
-		var PARENT_ORIGIN = '*';
-		var INJECTED_VISITOR_ID = false;
-		
-	 	if (location.hash.length > 0) {
-	 		var toks = location.hash.substring(1).split('_');
-            ROOT_DOMAIN = toks[0];
-            PARENT_ORIGIN = toks[1];
-            
-            // injection from server
-            if(toks.length === 3){
-            	var tok = toks[2];
-            	if(typeof tok === "string" && tok.length > 20 ){
-            		INJECTED_VISITOR_ID = tok;
-            	}
-            }
-			console.info('leoproxy OBS ROOT_DOMAIN = ' + ROOT_DOMAIN)
-			console.info('leoproxy PARENT_ORIGIN = ' + PARENT_ORIGIN)
-        } else {
-        	console.error('leoproxy ROOT_DOMAIN is empty')
-        }
- 
-        var LEO_LOG_URL = '//' + ROOT_DOMAIN;
-        
-        // base URL
-        var PREFIX_SESSION_INIT_URL = LEO_LOG_URL + "/cxs-pf-init";
-        var PREFIX_UPDATE_PROFILE_URL = LEO_LOG_URL + "/cxs-pf-update";
-        var PREFIX_EVENT_VIEW_URL = LEO_LOG_URL + "/etv";
-        var PREFIX_EVENT_ACTION_URL = LEO_LOG_URL + "/eta";
-        var PREFIX_EVENT_CONVERSION_URL = LEO_LOG_URL + "/etc";
-        var PREFIX_EVENT_FEEDBACK_URL = LEO_LOG_URL + "/efb";
-        
-        // configs
-        var OBSERVE_WITH_FINGERPRINT = true;
-        
-         // addEventListener support for IE8
-        function bindEvent(element, eventName, eventHandler) {
-            if (element.addEventListener) {
-                element.addEventListener(eventName, eventHandler, false);
-            } else if (element.attachEvent) {
-                element.attachEvent('on' + eventName, eventHandler);
-            }
-        }
+    <div id="leoproxy"></div>
 
-        // Send a message to the parent
-        var sendMessage = function (msg) {
-            // Make sure you are sending a string, and to stringify JSON window.parent.postMessage(msg, '*');
-            //console.log('Send a message to the observer proxy ' + msg);
-            
-            window.parent.postMessage(msg, PARENT_ORIGIN);
-        };
-        
-        // Listen to messages from parent window
-        bindEvent(window, 'message', function (e) {
-        	//console.log("===> iframe.e.origin " + e.origin + " data " + e.data)
-        	var json = {};
-        	try {
-        		json = JSON.parse(e.data)
-        	}
-        	catch(e){
-        		console.error(e)
-        	}        	
-        	if(typeof json.call ==='string') {
-        		proxyCallHandler(json)
-        	}
-        });
-
-        function loadScript(src, callback) {
-		  	var s,r,t;
-		  	r = false;
-		  	s = document.createElement('script');
-		  	s.type = 'text/javascript';
-		  	s.src = src;
-		  	s.async = true;
-		  	s.onload = s.onreadystatechange = function() {
-		    	if (!r && (!this.readyState || this.readyState == 'complete')) {
-		      		r = true;
-		      		if(callback) callback();
-		    	}
-		  	};
-		  	document.getElementById('leoproxy').appendChild(s);
-		}
-    </script>
-    
     <script>
-        (function() {
+        (function () {
+            'use strict';
+
+            // ============================================================
+            // GLOBAL CONFIG
+            // ============================================================
+
+            var ROOT_DOMAIN = '';
+            var PARENT_ORIGIN = '';
+
+            var INJECTED_VISITOR_ID = false;
+
+            var OBSERVE_WITH_FINGERPRINT = true;
+
+            var LEO_LOG_URL = '';
+            var PREFIX_UPDATE_PROFILE_URL = '';
+            var PREFIX_EVENT_VIEW_URL = '';
+            var PREFIX_EVENT_ACTION_URL = '';
+            var PREFIX_EVENT_CONVERSION_URL = '';
+            var PREFIX_EVENT_FEEDBACK_URL = '';
+
+            var OBSERVER_SCRIPT_LOADED = false;
+            var OBSERVER_READY = false;
+
             var queueTracking = [];
             var queueUpdating = [];
+
             var synchVisitorCall = false;
             var queueScheduled = false;
+
+            // ============================================================
+            // PARSE HASH CONFIG
+            // ============================================================
+
+            function parseConfig() {
+                var hash = window.location.hash || '';
+
+                if (!hash || hash.length <= 1) {
+                    console.error('[LeoProxy] ROOT_DOMAIN is empty');
+                    return false;
+                }
+
+                var raw = hash.substring(1);
+
+                /*
+                 * Expected:
+                 *
+                 * #ROOT_DOMAIN_PARENT_ORIGIN
+                 *
+                 * Or:
+                 *
+                 * #ROOT_DOMAIN_PARENT_ORIGIN_VISITOR_ID
+                 *
+                 * Example:
+                 *
+                 * #cdp.example.com_https://www.example.com_abc123...
+                 */
+
+                var toks = raw.split('_');
+
+                if (toks.length < 2) {
+                    console.error('[LeoProxy] Invalid configuration hash:', raw);
+                    return false;
+                }
+
+                ROOT_DOMAIN = toks[0];
+                PARENT_ORIGIN = toks[1];
+
+                if (toks.length >= 3) {
+                    var injectedVisitorId = toks.slice(2).join('_');
+
+                    if (
+                        typeof injectedVisitorId === 'string' &&
+                        injectedVisitorId.length > 20
+                    ) {
+                        INJECTED_VISITOR_ID = injectedVisitorId;
+                    }
+                }
+
+                /*
+                 * Remove trailing slash if somebody supplied one.
+                 */
+                ROOT_DOMAIN = ROOT_DOMAIN.replace(/\/+$/, '');
+
+                /*
+                 * Normalize parent origin.
+                 *
+                 * We expect:
+                 *
+                 * https://www.example.com
+                 *
+                 * not:
+                 *
+                 * https://www.example.com/
+                 */
+                PARENT_ORIGIN = PARENT_ORIGIN.replace(/\/+$/, '');
+
+                LEO_LOG_URL = '//' + ROOT_DOMAIN;
+
+                PREFIX_UPDATE_PROFILE_URL =
+                    LEO_LOG_URL + '/data/api/v1/tracking/logs';
+
+                PREFIX_EVENT_VIEW_URL =
+                    LEO_LOG_URL + '/data/api/v1/tracking/logs';
+
+                PREFIX_EVENT_ACTION_URL =
+                    LEO_LOG_URL + '/data/api/v1/tracking/logs';
+
+                PREFIX_EVENT_CONVERSION_URL =
+                    LEO_LOG_URL + '/data/api/v1/tracking/logs';
+
+                PREFIX_EVENT_FEEDBACK_URL =
+                    LEO_LOG_URL + '/data/api/v1/tracking/logs';
+
+                console.info(
+                    '[LeoProxy] ROOT_DOMAIN =',
+                    ROOT_DOMAIN
+                );
+
+                console.info(
+                    '[LeoProxy] PARENT_ORIGIN =',
+                    PARENT_ORIGIN
+                );
+
+                if (INJECTED_VISITOR_ID) {
+                    console.info(
+                        '[LeoProxy] INJECTED_VISITOR_ID detected'
+                    );
+                }
+
+                return true;
+            }
+
+            // ============================================================
+            // EVENT BINDING
+            // ============================================================
+
+            function bindEvent(element, eventName, eventHandler) {
+                if (!element) {
+                    return;
+                }
+
+                if (element.addEventListener) {
+                    element.addEventListener(
+                        eventName,
+                        eventHandler,
+                        false
+                    );
+                } else if (element.attachEvent) {
+                    element.attachEvent(
+                        'on' + eventName,
+                        eventHandler
+                    );
+                }
+            }
+
+            // ============================================================
+            // SEND MESSAGE TO PARENT
+            // ============================================================
+
+            function sendMessage(message) {
+                if (!window.parent || window.parent === window) {
+                    return;
+                }
+
+                /*
+                 * Use configured parent origin whenever possible.
+                 * '*' is only a fallback for backwards compatibility.
+                 */
+                var targetOrigin =
+                    PARENT_ORIGIN || '*';
+
+                try {
+                    window.parent.postMessage(
+                        message,
+                        targetOrigin
+                    );
+                } catch (error) {
+                    console.error(
+                        '[LeoProxy] postMessage failed:',
+                        error
+                    );
+                }
+            }
+
+            // ============================================================
+            // PARSE INCOMING MESSAGE
+            // ============================================================
+
+            function normalizeMessage(data) {
+                if (data === null || typeof data === 'undefined') {
+                    return null;
+                }
+
+                /*
+                 * postMessage can send:
+                 *
+                 *   string
+                 *   object
+                 */
+
+                if (typeof data === 'object') {
+                    return data;
+                }
+
+                if (typeof data === 'string') {
+                    /*
+                     * Ignore ordinary strings that are not JSON.
+                     */
+                    try {
+                        return JSON.parse(data);
+                    } catch (error) {
+                        return null;
+                    }
+                }
+
+                return null;
+            }
+
+            // ============================================================
+            // VALIDATE MESSAGE ORIGIN
+            // ============================================================
+
+            function isAllowedMessage(event) {
+                if (!event) {
+                    return false;
+                }
+
+                /*
+                 * Always make sure the message actually came from
+                 * the parent window.
+                 */
+                if (event.source !== window.parent) {
+                    console.warn(
+                        '[LeoProxy] Ignored message from non-parent source'
+                    );
+
+                    return false;
+                }
+
+                /*
+                 * If we know the parent origin, enforce it.
+                 */
+                if (
+                    PARENT_ORIGIN &&
+                    PARENT_ORIGIN !== '*' &&
+                    event.origin !== PARENT_ORIGIN
+                ) {
+                    console.warn(
+                        '[LeoProxy] Ignored message from unexpected origin:',
+                        event.origin
+                    );
+
+                    return false;
+                }
+
+                return true;
+            }
+
+            // ============================================================
+            // OBSERVER ACCESS
+            // ============================================================
+
+            function observerAvailable() {
+                return (
+                    !!window.LeoEventObserver
+                );
+            }
+
+            function observerReadyForTracking() {
+                return (
+                    observerAvailable() &&
+                    typeof window.LeoEventObserver.doTracking === 'function'
+                );
+            }
+
+            function observerReadyForProfile() {
+                return (
+                    observerAvailable() &&
+                    typeof window.LeoEventObserver.updateProfile === 'function'
+                );
+            }
+
+            // ============================================================
+            // QUEUE PROCESSING
+            // ============================================================
 
             function processQueue() {
                 queueScheduled = false;
 
-                while (queueTracking.length) {
-                    var data = queueTracking.pop();
-                    if (data && data.eventType && data.params && window.LeoEventObserver && typeof window.LeoEventObserver.doTracking === 'function') {
-                        window.LeoEventObserver.doTracking(data.eventType, data.params);
+                /*
+                 * Tracking events
+                 */
+                while (
+                    queueTracking.length &&
+                    observerReadyForTracking()
+                ) {
+                    var trackingData =
+                        queueTracking.shift();
+
+                    try {
+                        window.LeoEventObserver.doTracking(
+                            trackingData.eventType,
+                            trackingData.params
+                        );
+                    } catch (error) {
+                        console.error(
+                            '[LeoProxy] doTracking failed:',
+                            error
+                        );
                     }
                 }
 
-                while (queueUpdating.length) {
-                    var data = queueUpdating.pop();
-                    if (data && data.params && window.LeoEventObserver && typeof window.LeoEventObserver.updateProfile === 'function') {
-                        window.LeoEventObserver.updateProfile(data.params);
+                /*
+                 * Profile updates
+                 */
+                while (
+                    queueUpdating.length &&
+                    observerReadyForProfile()
+                ) {
+                    var profileData =
+                        queueUpdating.shift();
+
+                    try {
+                        window.LeoEventObserver.updateProfile(
+                            profileData.params
+                        );
+                    } catch (error) {
+                        console.error(
+                            '[LeoProxy] updateProfile failed:',
+                            error
+                        );
                     }
                 }
 
-                if (synchVisitorCall !== false && window.LeoEventObserver && typeof window.LeoEventObserver.visitorId !== 'undefined') {
-                    sendMessage('synchLeoVisitorId-' + window.LeoEventObserver.visitorId);
+                /*
+                 * Synchronize visitor ID back to the parent.
+                 */
+                if (
+                    synchVisitorCall !== false &&
+                    observerAvailable() &&
+                    typeof window.LeoEventObserver.visitorId !== 'undefined'
+                ) {
+                    sendMessage(
+                        'synchLeoVisitorId-' +
+                        window.LeoEventObserver.visitorId
+                    );
+
                     synchVisitorCall = false;
                 }
+
+                /*
+                 * If the observer is not ready yet, don't lose queued calls.
+                 * They will be flushed again once the observer is ready.
+                 */
             }
 
             function scheduleQueueFlush() {
                 if (queueScheduled) {
                     return;
                 }
+
                 queueScheduled = true;
-                setTimeout(processQueue, 0);
+
+                setTimeout(
+                    processQueue,
+                    0
+                );
             }
 
-            var proxyCallHandler = function(data) {
+            // ============================================================
+            // HANDLE CALL FROM PARENT
+            // ============================================================
+
+            function proxyCallHandler(data) {
                 if (!data || typeof data !== 'object') {
                     return;
                 }
 
-                if (data.call === 'doTracking' && data.eventType && data.params) {
-                    queueTracking.push(data);
-                    scheduleQueueFlush();
-                } else if (data.call === 'getContextSession' && data.params && window.LeoEventObserver && typeof window.LeoEventObserver.getContextSession === 'function') {
-                    window.LeoEventObserver.getContextSession(data.params);
-                } else if (data.call === 'updateProfile' && data.params) {
-                    queueUpdating.push(data);
-                    scheduleQueueFlush();
-                } else if (data.call === 'synchLeoVisitorId') {
-                    synchVisitorCall = data;
-                    scheduleQueueFlush();
-                }
-            };
+                switch (data.call) {
 
-            var codeIsReady = function() {
-                if (!window.LeoEventObserver || typeof window.LeoEventObserver.initFingerprint !== 'function') {
+                    case 'doTracking':
+
+                        if (
+                            data.eventType &&
+                            data.params
+                        ) {
+                            queueTracking.push(data);
+                            scheduleQueueFlush();
+                        }
+
+                        break;
+
+                    case 'getContextSession':
+
+                        if (
+                            data.params &&
+                            observerAvailable() &&
+                            typeof window.LeoEventObserver.getContextSession === 'function'
+                        ) {
+                            try {
+                                window.LeoEventObserver.getContextSession(
+                                    data.params
+                                );
+                            } catch (error) {
+                                console.error(
+                                    '[LeoProxy] getContextSession failed:',
+                                    error
+                                );
+                            }
+                        }
+
+                        break;
+
+                    case 'updateProfile':
+
+                        if (data.params) {
+                            queueUpdating.push(data);
+                            scheduleQueueFlush();
+                        }
+
+                        break;
+
+                    case 'synchLeoVisitorId':
+
+                        synchVisitorCall = data;
+                        scheduleQueueFlush();
+
+                        break;
+
+                    default:
+
+                        console.debug(
+                            '[LeoProxy] Unknown call:',
+                            data.call
+                        );
+
+                        break;
+                }
+            }
+
+            // ============================================================
+            // MESSAGE LISTENER
+            // ============================================================
+
+            bindEvent(
+                window,
+                'message',
+                function (event) {
+
+                    if (!isAllowedMessage(event)) {
+                        return;
+                    }
+
+                    var json =
+                        normalizeMessage(event.data);
+
+                    if (!json) {
+                        return;
+                    }
+
+                    if (
+                        typeof json.call === 'string'
+                    ) {
+                        proxyCallHandler(json);
+                    }
+                }
+            );
+
+            // ============================================================
+            // SCRIPT LOADER
+            // ============================================================
+
+            function loadScript(src, options) {
+
+                options =
+                    options || {};
+
+                var callback =
+                    options.callback || function () { };
+
+                var onError =
+                    options.onError || function () { };
+
+                var timeout =
+                    typeof options.timeout === 'number'
+                        ? options.timeout
+                        : 15000;
+
+                var script =
+                    document.createElement('script');
+
+                var completed = false;
+
+                script.type = 'text/javascript';
+                script.src = src;
+
+                /*
+                 * Do not force async execution here.
+                 *
+                 * We explicitly control when the script is inserted,
+                 * and we need a deterministic load callback.
+                 */
+                script.async = false;
+
+                function finishSuccess() {
+
+                    if (completed) {
+                        return;
+                    }
+
+                    completed = true;
+
+                    clearTimeout(timer);
+
+                    callback(script);
+                }
+
+                function finishError(error) {
+
+                    if (completed) {
+                        return;
+                    }
+
+                    completed = true;
+
+                    clearTimeout(timer);
+
+                    onError(
+                        error || new Error(
+                            'Failed to load ' + src
+                        )
+                    );
+                }
+
+                script.onload =
+                    finishSuccess;
+
+                script.onreadystatechange =
+                    function () {
+
+                        if (
+                            !completed &&
+                            (
+                                script.readyState === 'loaded' ||
+                                script.readyState === 'complete'
+                            )
+                        ) {
+                            finishSuccess();
+                        }
+                    };
+
+                script.onerror =
+                    finishError;
+
+                var container =
+                    document.getElementById(
+                        'leoproxy'
+                    );
+
+                if (!container) {
+                    finishError(
+                        new Error(
+                            '#leoproxy element not found'
+                        )
+                    );
+
                     return;
                 }
 
-                window.LeoEventObserver.initFingerprint(function(fingerprintId) {
-                    window.LeoEventObserver.visitorId = window.LeoEventObserver.getVisitorId();
-                    window.LeoEventObserver.fingerprintId = fingerprintId || '';
+                container.appendChild(script);
 
-                    setTimeout(function() {
-                        sendMessage('LeoObserverProxyLoaded');
-                    }, 0);
+                var timer =
+                    setTimeout(
+                        function () {
 
-                    scheduleQueueFlush();
-                });
-            };
+                            finishError(
+                                new Error(
+                                    'Script load timeout: ' +
+                                    src
+                                )
+                            );
 
-            var cbKey = '20251215';
-            var leoObserverJsUrl = 'https://gcore.jsdelivr.net/gh/USPA-Technology/leo-cdp-static-files@v0.9.5/js/leo-observer/leo.observer.min.js?cb=' + cbKey;
-            var isDev = ROOT_DOMAIN.indexOf('.example.com') > 0;
-
-            if (isDev) {
-                console.log('------------ LEOCDP DEV MODE TRUE ------------');
-                leoObserverJsUrl = 'https://obs.example.com/public/js/leo-observer-src/leo.observer.js?cb=' + (new Date().getTime());
+                        },
+                        timeout
+                    );
             }
 
-            loadScript(leoObserverJsUrl, codeIsReady);
+            // ============================================================
+            // CHECK DEVELOPMENT MODE
+            // ============================================================
+
+            function isDevelopmentEnvironment() {
+
+                if (!ROOT_DOMAIN) {
+                    return false;
+                }
+
+                return (
+                    ROOT_DOMAIN.indexOf(
+                        '.example.com'
+                    ) >= 0 ||
+
+                    ROOT_DOMAIN.indexOf(
+                        'localhost'
+                    ) >= 0 ||
+
+                    ROOT_DOMAIN.indexOf(
+                        '127.0.0.1'
+                    ) >= 0
+                );
+            }
+
+            // ============================================================
+            // INITIALIZE OBSERVER
+            // ============================================================
+
+            function codeIsReady() {
+
+                if (!observerAvailable()) {
+
+                    console.error(
+                        '[LeoProxy] LeoEventObserver was not created by observer script'
+                    );
+
+                    sendMessage(
+                        'LeoObserverProxyError-ObserverNotFound'
+                    );
+
+                    return;
+                }
+
+                if (
+                    typeof window.LeoEventObserver.initFingerprint !== 'function'
+                ) {
+
+                    console.error(
+                        '[LeoProxy] LeoEventObserver.initFingerprint() is unavailable'
+                    );
+
+                    sendMessage(
+                        'LeoObserverProxyError-InitFingerprintNotFound'
+                    );
+
+                    return;
+                }
+
+                OBSERVER_SCRIPT_LOADED = true;
+
+                /*
+                 * Injected visitor ID can take precedence over
+                 * fingerprint-generated identity.
+                 */
+                if (INJECTED_VISITOR_ID) {
+                    window.LeoEventObserver.visitorId =
+                        INJECTED_VISITOR_ID;
+                }
+
+                /*
+                 * Fingerprint initialization
+                 */
+                try {
+
+                    window.LeoEventObserver.initFingerprint(
+                        function (fingerprintId) {
+
+                            /*
+                             * Only use generated visitor ID when
+                             * the server did not inject one.
+                             */
+                            if (
+                                !INJECTED_VISITOR_ID &&
+                                typeof window.LeoEventObserver.getVisitorId === 'function'
+                            ) {
+                                window.LeoEventObserver.visitorId =
+                                    window.LeoEventObserver.getVisitorId();
+                            }
+
+                            window.LeoEventObserver.fingerprintId =
+                                fingerprintId || '';
+
+                            OBSERVER_READY = true;
+
+                            /*
+                             * Notify parent iframe is ready.
+                             */
+                            setTimeout(
+                                function () {
+
+                                    sendMessage(
+                                        'LeoObserverProxyLoaded'
+                                    );
+
+                                },
+                                0
+                            );
+
+                            /*
+                             * Flush calls that arrived
+                             * before observer initialization.
+                             */
+                            scheduleQueueFlush();
+                        }
+                    );
+
+                } catch (error) {
+
+                    console.error(
+                        '[LeoProxy] initFingerprint failed:',
+                        error
+                    );
+
+                    sendMessage(
+                        'LeoObserverProxyError-' +
+                        (
+                            error && error.message
+                                ? error.message
+                                : 'initFingerprint failed'
+                        )
+                    );
+                }
+            }
+
+            // ============================================================
+            // LOAD OBSERVER
+            // ============================================================
+
+            function loadLeoObserver() {
+
+                var cbKey =
+                    String(Date.now());
+
+                var leoObserverJsUrl =
+                    'https://gcore.jsdelivr.net/gh/' +
+                    'USPA-Technology/' +
+                    'leo-cdp-static-files@v0.9.5/' +
+                    'js/leo-observer/leo.observer.min.js' +
+                    '?cb=' +
+                    cbKey;
+
+                if (isDevelopmentEnvironment()) {
+
+                    console.info(
+                        '------------ C360 DEV MODE TRUE ------------'
+                    );
+
+                    /*
+                     * IMPORTANT:
+                     *
+                     * If this iframe itself is HTTPS,
+                     * browsers will block HTTP localhost resources
+                     * as mixed content.
+                     *
+                     * Prefer HTTPS locally, for example:
+                     *
+                     * https://localhost:8890/...
+                     *
+                     * or serve the iframe itself over HTTP in development.
+                     */
+                    leoObserverJsUrl =
+                        'http://localhost:8890/' +
+                        'static/c360-tracker/' +
+                        'observer/leo.observer.js' +
+                        '?cb=' +
+                        Date.now();
+                }
+
+                console.info(
+                    '[LeoProxy] Loading observer:',
+                    leoObserverJsUrl
+                );
+
+                loadScript(
+                    leoObserverJsUrl,
+                    {
+                        timeout: 15000,
+
+                        callback: function () {
+
+                            console.info(
+                                '[LeoProxy] Observer script loaded'
+                            );
+
+                            codeIsReady();
+                        },
+
+                        onError: function (error) {
+
+                            console.error(
+                                '[LeoProxy] Observer script failed:',
+                                error
+                            );
+
+                            sendMessage(
+                                'LeoObserverProxyError-ScriptLoadFailed'
+                            );
+                        }
+                    }
+                );
+            }
+
+            // ============================================================
+            // INITIALIZE
+            // ============================================================
+
+            function init() {
+
+                if (!parseConfig()) {
+                    return;
+                }
+
+                /*
+                 * Make initialization asynchronous so the DOM and
+                 * externally loaded dependencies are ready.
+                 */
+                setTimeout(
+                    function () {
+
+                        loadLeoObserver();
+
+                    },
+                    0
+                );
+            }
+
+            init();
+
+            // ============================================================
+            // OPTIONAL DEBUG API
+            // ============================================================
+
+            /*
+             * Expose a small read-only-ish debug object.
+             * Useful while testing iframe integration.
+             */
+            window.LeoObserverProxy = {
+
+                getStatus: function () {
+
+                    return {
+                        rootDomain: ROOT_DOMAIN,
+                        parentOrigin: PARENT_ORIGIN,
+                        observerScriptLoaded:
+                            OBSERVER_SCRIPT_LOADED,
+                        observerReady:
+                            OBSERVER_READY,
+                        trackingQueueLength:
+                            queueTracking.length,
+                        profileQueueLength:
+                            queueUpdating.length,
+                        visitorId:
+                            observerAvailable()
+                                ? window.LeoEventObserver.visitorId
+                                : null,
+                        fingerprintId:
+                            observerAvailable()
+                                ? window.LeoEventObserver.fingerprintId
+                                : null
+                    };
+                }
+            };
+
         })();
     </script>
 </body>
+
+</html>

@@ -1,204 +1,609 @@
 <!--
-	=============================================================================
-	DATA SOURCE CATALOG VIEW CARD
-	=============================================================================
+  =============================================================================
+  DATA SOURCE CATALOG VIEW CARD (sys_data_source)
+  =============================================================================
+  Modeled directly on scoring-model-list.html & metadata/attributes-list.html:
+  same header/search/filter layout, same shared C360.DataTableView component,
+  unified Add/Edit/Detail modal patterns -- rendered by static/js/data-source-view.js.
 -->
 <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
 
-	<div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
-		<div class="flex items-center gap-3">
-			<div class="p-2 bg-cyan-50 text-cyan-600 rounded-xl">
-				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
-					<path stroke-linecap="round" stroke-linejoin="round" d="M3 7.5h18M3 12h18M3 16.5h18M4.5 7.5v9a1.5 1.5 0 001.5 1.5h12a1.5 1.5 0 001.5-1.5v-9" />
-				</svg>
-			</div>
-			<div>
-				<h1 class="text-base font-bold text-slate-900 tracking-tight">Data Sources</h1>
-				<p class="text-xs text-slate-400 mt-0.5">Connector metadata and ingestion configuration</p>
-			</div>
-		</div>
+  <!-- Header Section -->
+  <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
 
-		<div class="flex flex-wrap items-center gap-2.5">
-			<div class="relative">
-				<span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
-					<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
-				</span>
-				<input id="datasources-search-input" type="search" name="datasource_search"
-					placeholder="Search name, slug, url..." autocomplete="off" autocorrect="off" spellcheck="false" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
-			</div>
+    <!-- Title & Icon -->
+    <div class="flex items-center gap-3">
+      <div class="p-2 bg-cyan-50 text-cyan-600 rounded-xl">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 7.5h18M3 12h18M3 16.5h18M4.5 7.5v9a1.5 1.5 0 001.5 1.5h12a1.5 1.5 0 001.5-1.5v-9" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-base font-bold text-slate-900 tracking-tight">Data Sources</h1>
+        <p class="text-xs text-slate-400 mt-0.5">Connector metadata, tracking touchpoints, and ingestion configuration</p>
+      </div>
+    </div>
 
-			<select id="datasources-status-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
-				<option value="">All status</option>
-				<option value="1">Active</option>
-				<option value="0">Inactive</option>
-			</select>
+    <!-- Filter Controls & Actions -->
+    <div class="flex flex-wrap items-center gap-2.5">
 
-			<button id="btn-datasource-add" class="inline-flex items-center gap-1.5 bg-cyan-600 text-white rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-cyan-700 transition-colors shadow-sm shadow-cyan-100">
-				<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-				<span>Add Data Source</span>
-			</button>
-		</div>
-	</div>
+      <!-- Search Input with Icon -->
+      <div class="relative">
+        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+        </span>
+        <input id="datasources-search-input" type="search" name="datasource_search"
+            placeholder="Search name, slug, url, host…" autocomplete="off" autocorrect="off" spellcheck="false" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
 
-	<div class="overflow-x-auto">
-		<table class="w-full text-sm text-left">
-			<thead id="datasources-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
-			<tbody id="datasources-tbody" class="divide-y divide-slate-100"></tbody>
-		</table>
-	</div>
+      <!-- Source Type Filter -->
+      <select id="datasources-type-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All types</option>
+        <option value="1">Web JS (Client-side)</option>
+        <option value="2">Data Connector API (Pull)</option>
+        <option value="3">Data Webhook API (Push)</option>
+        <option value="4">S3 File Connector (Batch)</option>
+        <option value="5">Mobile SDK</option>
+      </select>
 
-	<div id="datasources-loading" class="p-12 flex justify-center">
-		<div class="spinner"></div>
-	</div>
+      <!-- Status Filter -->
+      <select id="datasources-status-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All status</option>
+        <option value="1">Active</option>
+        <option value="0">Inactive</option>
+      </select>
 
-	<div id="datasources-empty" class="hidden p-12 text-center text-sm text-slate-400">
-		<div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">🧩</div>
-		<div class="font-medium text-slate-600">No data sources found</div>
-		<p class="text-xs text-slate-400 mt-1">Create a connector to start tracking ingest sources.</p>
-	</div>
+      <!-- Refresh Data Sources -->
+      <button id="btn-datasource-refresh" type="button" class="group inline-flex items-center gap-1.5 border border-slate-200/80 bg-white hover:bg-slate-50 hover:border-slate-300 active:bg-slate-100 text-slate-700 hover:text-slate-900 active:scale-[0.98] rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1 transition-all shadow-sm" title="Refresh data sources">
+        <svg class="w-3.5 h-3.5 text-slate-400 group-hover:text-cyan-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+        <span>Refresh</span>
+      </button>
 
-	<div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
-		<span id="datasources-count-label" class="font-medium"></span>
-	</div>
+      <!-- Add Data Source Button -->
+      <button id="btn-datasource-add" type="button" class="group inline-flex items-center gap-1.5 bg-cyan-600 hover:bg-cyan-700 active:bg-cyan-800 text-white rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1 hover:shadow-md hover:shadow-cyan-100 active:scale-[0.98] transition-all">
+        <svg class="w-3.5 h-3.5 transition-transform group-hover:rotate-90 duration-200" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+        <span>Add Data Source</span>
+      </button>
+
+    </div>
+
+  </div>
+
+  <!-- Table Container -->
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm text-left">
+      <thead id="datasources-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
+      <tbody id="datasources-tbody" class="divide-y divide-slate-100"></tbody>
+    </table>
+  </div>
+
+  <!-- Loading State -->
+  <div id="datasources-loading" class="p-12 flex justify-center">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- Empty State -->
+  <div id="datasources-empty" class="hidden p-12 text-center text-sm text-slate-400">
+    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">🧩</div>
+    <div class="font-medium text-slate-600">No data sources matched your filters</div>
+    <p class="text-xs text-slate-400 mt-1">Try adjusting your search query, status, or type selection.</p>
+  </div>
+
+  <!-- Footer Count -->
+  <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
+    <span id="datasources-count-label" class="font-medium"></span>
+  </div>
+
 </div>
 
+<!--
+  =============================================================================
+  DATA SOURCE FORM MODAL (Add / Edit)
+  Creates or updates a customer360.sys_data_source row via
+  POST/PATCH /metadata/data-sources (see data-source-view.js).
+  =============================================================================
+-->
 <div id="datasource-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-	<div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 border border-slate-100 max-h-[90vh] overflow-y-auto">
-		<div class="flex items-center gap-3 mb-5 pb-3 border-b border-slate-100">
-			<div class="p-2 bg-cyan-50 text-cyan-600 rounded-xl">
-				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-			</div>
-			<div>
-				<h2 class="text-base font-bold text-slate-900 tracking-tight">Create Data Source</h2>
-				<p class="text-xs text-slate-400">Creates a sys_data_source record for this tenant</p>
-			</div>
-		</div>
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 border border-slate-100 max-h-[90vh] overflow-y-auto">
 
-		<div class="space-y-4">
-			<div class="grid grid-cols-2 gap-3">
-				<div>
-					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Name *</label>
-					<input id="datasource-add-name" type="text" placeholder="e.g. Google Analytics 4" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
-				</div>
-				<div>
-					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Slug *</label>
-					<input id="datasource-add-slug" type="text" placeholder="e.g. google-analytics-4" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
-				</div>
-			</div>
+    <!-- Modal Header -->
+    <div class="flex items-center gap-3 mb-5 pb-3 border-b border-slate-100">
+      <div class="p-2 bg-cyan-50 text-cyan-600 rounded-xl">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+      </div>
+      <div>
+        <h2 id="datasource-form-title" class="text-base font-bold text-slate-900 tracking-tight">Create Data Source</h2>
+        <p id="datasource-form-subtitle" class="text-xs text-slate-400">Creates a sys_data_source record for this tenant</p>
+      </div>
+    </div>
 
-			<div class="grid grid-cols-2 gap-3">
-				<div>
-					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Source Type</label>
-					<select id="datasource-add-source-type" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
-						<option value="1">1 - Web JavaScript Code (Client-side tracking)</option>
-						<option value="2" selected>2 - Data Connector API (Server-side Pull/Sync)</option>
-						<option value="3">3 - Data Webhook API (Server-side Push)</option>
-						<option value="4">4 - S3 File Connector (Batch File Processing)</option>
-						<option value="5">5 - Mobile SDK Code (iOS/Android/Flutter tracking)</option>
-					</select>
-				</div>
-				<div>
-					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Status</label>
-					<select id="datasource-add-status" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
-						<option value="1">Active</option>
-						<option value="0">Inactive</option>
-					</select>
-				</div>
-			</div>
+    <!-- Form Fields -->
+    <div class="space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Name *</label>
+          <input id="datasource-add-name" type="text" placeholder="e.g. Google Analytics 4" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Slug *</label>
+          <input id="datasource-add-slug" type="text" placeholder="e.g. google-analytics-4" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+      </div>
 
-			<div class="grid grid-cols-2 gap-3">
-				<div>
-					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Data Source URL</label>
-					<input id="datasource-add-url" type="text" placeholder="https://..." class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
-				</div>
-				<div>
-					<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Thumbnail URL</label>
-					<input id="datasource-add-thumbnail-url" type="text" placeholder="https://..." class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
-				</div>
-			</div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Source Type *</label>
+          <select id="datasource-add-source-type" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
+            <option value="1">1 - Web JavaScript Code (Client-side tracking)</option>
+            <option value="2" selected>2 - Data Connector API (Server-side Pull/Sync)</option>
+            <option value="3">3 - Data Webhook API (Server-side Push)</option>
+            <option value="4">4 - S3 File Connector (Batch File Processing)</option>
+            <option value="5">5 - Mobile SDK Code (iOS/Android/Flutter tracking)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Status</label>
+          <select id="datasource-add-status" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
+            <option value="1">Active</option>
+            <option value="0">Inactive</option>
+          </select>
+        </div>
+      </div>
 
-			<div class="grid grid-cols-2 gap-3 items-end">
-					<label class="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
-						<input id="datasource-add-collect-directly" type="checkbox" checked class="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500/30" />
-						Collect Directly
-					</label>
-					<label class="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
-						<input id="datasource-add-first-party-data" type="checkbox" checked class="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500/30" />
-						First-Party Data
-					</label>
-			</div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label id="datasource-add-url-label" class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Data Source URL</label>
+          <input id="datasource-add-url" type="text" placeholder="https://..." class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Thumbnail URL</label>
+          <input id="datasource-add-thumbnail-url" type="text" placeholder="https://..." class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+      </div>
 
-			<div>
-				<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Data Source Hosts (comma-separated)</label>
-				<input id="datasource-add-hosts" type="text" placeholder="api.example.com, events.example.com" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
-			</div>
+      <div class="grid grid-cols-2 gap-3 items-end pt-1">
+        <label class="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+          <input id="datasource-add-collect-directly" type="checkbox" checked class="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500/30" />
+          <span>Collect Directly</span>
+        </label>
+        <label class="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+          <input id="datasource-add-first-party-data" type="checkbox" checked class="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500/30" />
+          <span>First-Party Data</span>
+        </label>
+      </div>
 
-			<div>
-				<label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Access Tokens (JSON Object)</label>
-				<textarea id="datasource-add-access-tokens" rows="2" placeholder='{"measurement_id": "G-DEMO360"}' class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none"></textarea>
-			</div>
+      <div>
+        <label id="datasource-add-hosts-label" class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Data Source Hosts (comma-separated)</label>
+        <input id="datasource-add-hosts" type="text" placeholder="api.example.com, events.example.com" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
 
-			<div id="datasource-add-error" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5"></div>
-		</div>
+      <div>
+        <label id="datasource-add-tokens-label" class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Access Tokens &amp; Credentials (JSON Object)</label>
+        <textarea id="datasource-add-access-tokens" rows="2" placeholder='{"measurement_id": "G-DEMO360"}' class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none resize-none"></textarea>
+      </div>
 
-		<div class="flex items-center justify-end gap-2.5 mt-6 pt-4 border-t border-slate-100">
-			<button id="btn-datasource-add-cancel" class="border border-slate-200/80 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Cancel</button>
-			<button id="btn-datasource-add-save" class="bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl px-4 py-2 text-xs font-semibold transition-colors shadow-sm shadow-cyan-100">Save Data Source</button>
-		</div>
-	</div>
+      <div id="datasource-add-error" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5"></div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="flex items-center justify-between gap-2.5 mt-6 pt-4 border-t border-slate-100">
+      <button id="btn-datasource-form-delete" type="button" class="hidden border border-red-200 bg-white hover:bg-red-50 hover:border-red-300 text-red-600 active:bg-red-100 rounded-xl px-4 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 transition-all shadow-sm">
+        Delete
+      </button>
+      <div class="flex items-center gap-2.5 ml-auto">
+        <button id="btn-datasource-add-cancel" type="button" class="border border-slate-200/80 bg-white hover:bg-slate-50 hover:border-slate-300 active:bg-slate-100 text-slate-700 hover:text-slate-900 rounded-xl px-4 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 transition-all shadow-sm">
+          Cancel
+        </button>
+        <button id="btn-datasource-add-save" type="button" class="bg-cyan-600 hover:bg-cyan-700 active:bg-cyan-800 text-white rounded-xl px-4 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1 hover:shadow-md hover:shadow-cyan-100 active:scale-[0.98] transition-all">
+          <span id="datasource-form-save-label">Save Data Source</span>
+        </button>
+      </div>
+    </div>
+
+  </div>
 </div>
 
-<div id="datasource-detail-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-	<div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6 border border-slate-100 max-h-[90vh] overflow-y-auto">
-		<div class="flex items-center justify-between mb-5 pb-3 border-b border-slate-100">
-			<div class="flex items-center gap-3">
-				<div class="p-2 bg-cyan-50 text-cyan-600 rounded-xl">
-					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H20.25m0 0v6.75m0-6.75L12 14.25l-3.75-3.75L3.75 15" /></svg>
-				</div>
-				<div>
-					<h2 class="text-base font-bold text-slate-900 tracking-tight">Data Source Detail</h2>
-					<p class="text-xs text-slate-400">Metadata snapshot from sys_data_source</p>
-				</div>
-			</div>
-			<button id="btn-datasource-detail-close" class="text-slate-500 hover:text-slate-700 transition-colors">✕</button>
-		</div>
+<!--
+  =============================================================================
+  DATA SOURCE DETAIL MODAL (16:9 Aspect Ratio Inspector)
+  Displays full connector snapshot, volume analytics, tracking tags, and QR code.
+  =============================================================================
+-->
+<div id="datasource-detail-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 lg:p-8">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl aspect-video max-h-[92vh] border border-slate-100 flex flex-col overflow-hidden">
 
-		<div id="datasource-detail-body" class="text-xs text-slate-700 grid grid-cols-2 gap-3"></div>
+    <!-- Modal Header -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
+      <div class="flex items-center gap-3.5 min-w-0">
+        <div class="w-10 h-10 shrink-0 bg-cyan-50 text-cyan-600 rounded-xl flex items-center justify-center ring-1 ring-cyan-500/10 shadow-2xs text-lg">
+          <span id="detail-datasource-icon">🌐</span>
+        </div>
+        <div class="min-w-0">
+          <div class="flex items-center gap-2.5">
+            <h2 id="detail-datasource-name" class="text-base font-bold text-slate-900 tracking-tight truncate leading-tight">Data Source Detail</h2>
+            <span id="detail-datasource-slug" class="inline-flex items-center text-[11px] font-mono font-medium text-slate-600 bg-slate-100 border border-slate-200/80 rounded-md px-2 py-0.5 tracking-tight">-</span>
+          </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span id="detail-datasource-type-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide">Type</span>
+            <span id="detail-datasource-status-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide">Status</span>
+            <span id="detail-datasource-mode-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-cyan-50 text-cyan-700">Mode</span>
+          </div>
+        </div>
+      </div>
+      <button id="btn-datasource-detail-close" type="button" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 active:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 transition-all text-sm font-semibold" title="Close modal">✕</button>
+    </div>
 
-		<div id="datasource-detail-javascript-tags-field" class="hidden mt-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
-			<label for="datasource-detail-javascript-tags" class="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Javascript Tags</label>
-			<textarea id="datasource-detail-javascript-tags" rows="14" readonly spellcheck="false" class="mt-1.5 w-full resize-y rounded-xl border border-slate-200/80 bg-white px-3.5 py-2.5 text-xs font-mono leading-relaxed text-slate-700 shadow-sm outline-none"></textarea>
-		</div>
+    <!-- Modal Body (16:9 scrollable workspace) -->
+    <div class="p-6 overflow-y-auto flex-1 space-y-5">
 
-		<div class="flex items-center justify-between mt-6 pt-4 border-t border-slate-100">
-			<button id="btn-datasource-detail-delete" class="border border-red-200 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors shadow-sm">Delete</button>
-			<button id="btn-datasource-detail-done" class="border border-slate-200/80 bg-white rounded-xl px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Close</button>
-		</div>
-	</div>
+      <!-- Volume KPI Metrics Grid -->
+      <div class="grid grid-cols-3 gap-3.5">
+        <div class="p-3.5 bg-slate-50/70 rounded-xl border border-slate-100/90 hover:bg-slate-50 transition-colors">
+          <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Total Tracked Events</div>
+          <div class="flex items-baseline gap-1.5">
+            <span id="detail-total-events" class="text-lg sm:text-xl font-bold font-mono text-slate-900">0</span>
+            <span class="text-xs text-slate-400">events</span>
+          </div>
+        </div>
+        <div class="p-3.5 bg-slate-50/70 rounded-xl border border-slate-100/90 hover:bg-slate-50 transition-colors">
+          <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Average Daily Events</div>
+          <div class="flex items-baseline gap-1.5">
+            <span id="detail-daily-events" class="text-lg sm:text-xl font-bold font-mono text-slate-900">0</span>
+            <span class="text-xs text-slate-400">events/day</span>
+          </div>
+        </div>
+        <div class="p-3.5 bg-slate-50/70 rounded-xl border border-slate-100/90 hover:bg-slate-50 transition-colors">
+          <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Avg Events / Profile</div>
+          <div class="flex items-baseline gap-1.5">
+            <span id="detail-events-per-profile" class="text-lg sm:text-xl font-bold font-mono text-slate-900">0.00</span>
+            <span class="text-xs text-slate-400">avg</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Connector Configuration & Technical Endpoints Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs">
+        <div class="p-3.5 rounded-xl border border-slate-100 bg-slate-50/50 space-y-2.5">
+          <div>
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Data Source URL</span>
+            <div id="detail-datasource-url" class="mt-0.5 text-slate-700 font-mono break-all">-</div>
+          </div>
+          <div>
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Thumbnail URL</span>
+            <div id="detail-datasource-thumbnail" class="mt-0.5 text-slate-700 font-mono break-all">-</div>
+          </div>
+          <div>
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ingestion Hosts</span>
+            <div id="detail-datasource-hosts" class="mt-0.5 text-slate-700 font-mono break-words">-</div>
+          </div>
+        </div>
+
+        <div class="p-3.5 rounded-xl border border-slate-100 bg-slate-50/50 space-y-2.5">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Data Source ID</span>
+              <div id="detail-datasource-id" class="mt-0.5 text-slate-600 font-mono text-[11px] truncate">-</div>
+            </div>
+            <div>
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Tenant ID</span>
+              <div id="detail-datasource-tenant" class="mt-0.5 text-slate-600 font-mono text-[11px] truncate">-</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Created At</span>
+              <div id="detail-datasource-created" class="mt-0.5 text-slate-700 font-mono">-</div>
+            </div>
+            <div>
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Updated At</span>
+              <div id="detail-datasource-updated" class="mt-0.5 text-slate-700 font-mono">-</div>
+            </div>
+          </div>
+          <div>
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Access Tokens (JSON)</span>
+            <pre id="detail-datasource-tokens" class="mt-1 p-2 bg-slate-900 text-slate-200 rounded-lg text-[11px] font-mono overflow-x-auto max-h-24">{}</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Source Type 1: Web JavaScript Tracking SDK Snippet -->
+      <div id="datasource-integration-type-1" class="hidden rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>
+            <label for="datasource-detail-javascript-tags" class="text-[11px] uppercase tracking-wider text-indigo-900 font-bold">Web SDK: JavaScript Tracking Tags</label>
+          </div>
+          <button id="btn-datasource-detail-copy-tags" type="button" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:text-indigo-900 bg-white hover:bg-indigo-50 border border-indigo-200/80 rounded-lg transition-all shadow-2xs focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+            <svg class="w-3.5 h-3.5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
+            <span class="copy-tags-label">Copy Web Tag</span>
+          </button>
+        </div>
+        <p class="text-xs text-slate-600 mb-2.5">
+			Add this JavaScript snippet just before the closing <code>&lt;/body&gt;</code> tag on your website, or add it through Google Tag Manager (GTM) to start tracking visitor activity.
+		</p>
+        <textarea id="datasource-detail-javascript-tags" rows="14" readonly spellcheck="false" class="w-full resize-y rounded-xl border border-indigo-200/70 bg-white px-3.5 py-2.5 text-xs font-mono leading-relaxed text-slate-800 shadow-inner outline-none focus:ring-2 focus:ring-indigo-500/20"></textarea>
+      </div>
+
+      <!-- Source Type 2: Data Connector API (Pull/Sync) Guide -->
+      <div id="datasource-integration-type-2" class="hidden rounded-xl border border-cyan-200/80 bg-cyan-50/40 p-4">
+        <div class="flex items-center gap-2 mb-2 pb-2 border-b border-cyan-100 text-cyan-900 font-bold text-xs">
+          <svg class="w-4 h-4 text-cyan-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+          <span class="text-[11px] uppercase tracking-wider font-bold">Data Connector API: Server-side Pull / Sync Configuration</span>
+        </div>
+        <p class="text-xs text-slate-600 mb-3">This data source operates in <strong>Server-side Pull</strong> mode. Background ingestion workers periodically poll and pull conversion, transaction, and engagement events using the configured credentials.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div class="p-3 bg-white rounded-xl border border-cyan-100 shadow-2xs">
+            <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Target Endpoint / Service</span>
+            <span id="detail-type2-endpoint" class="font-mono text-cyan-800 break-all font-semibold">-</span>
+          </div>
+          <div class="p-3 bg-white rounded-xl border border-cyan-100 shadow-2xs">
+            <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Ingestion Mode &amp; Scheduler</span>
+            <span class="inline-flex items-center gap-1.5 text-emerald-700 font-semibold"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Server-to-Server Scheduled Pull</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Source Type 3: Data Webhook API (Server Push) Guide -->
+      <div id="datasource-integration-type-3" class="hidden rounded-xl border border-fuchsia-200/80 bg-fuchsia-50/40 p-4">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-fuchsia-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" /></svg>
+            <span class="text-[11px] uppercase tracking-wider text-fuchsia-900 font-bold">Data Webhook API: Server-side Push Endpoint</span>
+          </div>
+          <button id="btn-datasource-detail-copy-curl" type="button" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-fuchsia-700 hover:text-fuchsia-900 bg-white hover:bg-fuchsia-50 border border-fuchsia-200/80 rounded-lg transition-all shadow-2xs focus:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500">
+            <svg class="w-3.5 h-3.5 text-fuchsia-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
+            <span class="copy-curl-label">Copy cURL</span>
+          </button>
+        </div>
+        <p class="text-xs text-slate-600 mb-2.5">Push real-time customer event payloads via HTTP POST directly to the CDP ingestion router.</p>
+        <pre id="detail-type3-curl" class="p-3 bg-slate-900 text-fuchsia-200 rounded-xl text-xs font-mono overflow-x-auto leading-relaxed border border-slate-800 shadow-inner"></pre>
+      </div>
+
+      <!-- Source Type 4: S3 File Batch Connector Guide -->
+      <div id="datasource-integration-type-4" class="hidden rounded-xl border border-amber-200/80 bg-amber-50/40 p-4">
+        <div class="flex items-center gap-2 mb-2 pb-2 border-b border-amber-100 text-amber-900 font-bold text-xs">
+          <svg class="w-4 h-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" /></svg>
+          <span class="text-[11px] uppercase tracking-wider font-bold">S3 File Connector: Batch Ingestion Archive</span>
+        </div>
+        <p class="text-xs text-slate-600 mb-3">Upload bulk event logs, raw customer identities, or purchase exports to the S3 bucket path. Files are automatically partitioned and imported into staging tables.</p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div class="p-3 bg-white rounded-xl border border-amber-100 shadow-2xs">
+            <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Target Storage URI</span>
+            <span id="detail-type4-uri" class="font-mono text-amber-900 break-all font-semibold">-</span>
+          </div>
+          <div class="p-3 bg-white rounded-xl border border-amber-100 shadow-2xs">
+            <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Supported File Formats</span>
+            <span class="font-mono text-slate-700 font-semibold">.CSV, .JSONL, .PARQUET</span>
+          </div>
+          <div class="p-3 bg-white rounded-xl border border-amber-100 shadow-2xs">
+            <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Batch Schedule</span>
+            <span class="text-slate-700 font-semibold">Scheduled Partition Ingest</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Source Type 5: Mobile SDK Code (iOS / Android / Flutter) Guide -->
+      <div id="datasource-integration-type-5" class="hidden rounded-xl border border-violet-200/80 bg-violet-50/40 p-4">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" /></svg>
+            <span class="text-[11px] uppercase tracking-wider text-violet-900 font-bold">Mobile SDK Code: iOS, Android &amp; Flutter</span>
+          </div>
+          <button id="btn-datasource-detail-copy-mobile" type="button" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-violet-700 hover:text-violet-900 bg-white hover:bg-violet-50 border border-violet-200/80 rounded-lg transition-all shadow-2xs focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+            <svg class="w-3.5 h-3.5 text-violet-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
+            <span class="copy-mobile-label">Copy Mobile Code</span>
+          </button>
+        </div>
+        <p class="text-xs text-slate-600 mb-2.5">Initialize the Mobile SDK in your mobile app startup lifecycle to track app sessions, screen views, and user actions.</p>
+        <pre id="detail-type5-code" class="p-3 bg-slate-900 text-violet-200 rounded-xl text-xs font-mono overflow-x-auto leading-relaxed border border-slate-800 shadow-inner"></pre>
+      </div>
+
+      <!-- QR Code Tracking Section -->
+      <div id="datasource-detail-qr-field" class="hidden rounded-xl border border-cyan-200/80 bg-cyan-50/40 p-4 shadow-sm">
+        <div class="flex items-center gap-2 mb-3 pb-2 border-b border-cyan-100 text-cyan-900 font-bold text-xs">
+          <svg class="w-4 h-4 text-cyan-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+          <span>QR Code Ingestion &amp; Tracking Details</span>
+        </div>
+        <div class="flex flex-wrap sm:flex-nowrap gap-4 items-start">
+          <div id="detail-qr-img-wrapper" class="flex-shrink-0 p-2 bg-white rounded-xl border border-slate-200/80 shadow-sm">
+            <img id="detail-qr-img" src="" alt="QR Code" class="w-24 h-24 object-contain" />
+          </div>
+          <div class="space-y-2 flex-grow min-w-0 text-xs">
+            <div>
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Target URL</span>
+              <a id="detail-qr-target" href="#" target="_blank" rel="noopener noreferrer" class="text-cyan-600 hover:underline break-all font-mono">-</a>
+            </div>
+            <div>
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Tracking URL (with UTM)</span>
+              <a id="detail-qr-tracking" href="#" target="_blank" rel="noopener noreferrer" class="text-cyan-600 hover:underline break-all font-mono">-</a>
+            </div>
+            <div>
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Generated At</span>
+              <span id="detail-qr-generated" class="text-slate-700 font-mono">-</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Modal Footer -->
+    <div class="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/40 shrink-0">
+      <button id="btn-datasource-detail-delete" type="button" class="group inline-flex items-center gap-1.5 border border-red-200 bg-white hover:bg-red-50 hover:border-red-300 active:bg-red-100 text-red-600 hover:text-red-700 rounded-xl px-4 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 transition-all shadow-sm active:scale-[0.98]">
+        <svg class="w-3.5 h-3.5 text-red-500 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+        <span>Delete</span>
+      </button>
+      <div class="flex items-center gap-2.5">
+        <button id="btn-datasource-detail-edit" type="button" class="group inline-flex items-center gap-1.5 border border-cyan-200/90 bg-cyan-50/70 hover:bg-cyan-100 hover:border-cyan-300 active:bg-cyan-200/60 text-cyan-700 hover:text-cyan-800 rounded-xl px-4 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 transition-all shadow-sm active:scale-[0.98]">
+          <svg class="w-3.5 h-3.5 text-cyan-600 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
+          <span>Edit Connector</span>
+        </button>
+        <button id="btn-datasource-detail-done" type="button" class="border border-slate-200/80 bg-white hover:bg-slate-50 hover:border-slate-300 active:bg-slate-100 text-slate-700 hover:text-slate-900 rounded-xl px-4 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 transition-all shadow-sm">
+          Close
+        </button>
+      </div>
+    </div>
+
+  </div>
 </div>
 
+<!-- Handlebars Template for Observer JS Code Snippet (LeoCDP v1.0 Standard) -->
 <script id="c360-tracker-template" type="text/x-handlebars-template">
+// (1) CDP_EVENT_OBSERVER: load JavaScript code for [{{dataSourceName}}]
 (function() { 	
-	// Observer ID
-	window.leoObserverId = "{{dataSourceId}}";
-	
-	// Default batch size of Event Tracking
-	window.leoObserverBatchSize = 10;
-	
-	// CDN of JS
-	window.leoObserverLogDomain = "{{leoObserverLogDomain}}";
-  	window.leoObserverCdnDomain = "{{leoObserverCdnDomain}}";
-	
-	// Data Touchpoint Metadata 
-	window.srcTouchpointName = encodeURIComponent(document.title);
-	window.srcTouchpointUrl = encodeURIComponent(location.href);
+    // Observer ID
+    window.leoObserverId = "{{dataSourceId}}";
+    
+    // Default batch size of Event Tracking
+    window.leoObserverBatchSize = 10;
+    
+    // CDN of JS
+    window.leoObserverLogDomain = "{{leoObserverLogDomain}}";
+    window.leoObserverCdnDomain = "{{leoObserverCdnDomain}}";
+    
+    // Data Touchpoint Metadata 
+    window.srcTouchpointName = encodeURIComponent(document.title);
+    window.srcTouchpointUrl = encodeURIComponent(location.href);
 
-	// the main proxy CDP JS
-	var leoproxyJsPath = '/js/leo-observer/leo.proxy.min.js';
+    // the main proxy CDP JS
+    var leoproxyJsPath = '/static/c360-tracker/observer/leo.proxy.js';
     var src = location.protocol + '//' + window.leoObserverCdnDomain + leoproxyJsPath;
     var jsNode = document.createElement('script');
-    jsNode.async=true; jsNode.defer=true; jsNode.src = src;
+    jsNode.async = true; 
+    jsNode.defer = true; 
+    jsNode.src = src;
     var s = document.getElementsByTagName('script')[0];
     s.parentNode.insertBefore(jsNode, s);
 })();
+
+var parseDataUTM = window.parseDataUTM || function () {
+    if (location.search.indexOf('utm_') > 0) {
+        var search = location.search.substring(1);
+        var json = decodeURI(search).replace(/"/g, '\\"').replace(/&/g, '","').replace(/=/g, '":"');
+        return JSON.parse('{"' + json + '"}');
+    }
+};
+    
+// (2) CDP EVENT OBSERVER: set-up all event tracking functions
+var LeoObserver = window.LeoObserver || {};
+
+// (2.1) function to track View Event "PageView"
+LeoObserver.recordEventPageView = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordViewEvent("page-view", eventData);
+};
+
+// (2.2) function to track View Event "ContentView"
+LeoObserver.recordEventContentView = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordViewEvent("content-view", eventData);
+};
+
+// (2.3) function to track Action Event "Logout"
+LeoObserver.recordEventLogout = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordActionEvent("logout", eventData);
+};
+
+// (2.4) function to track Action Event "Search"
+LeoObserver.recordEventSearch = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordActionEvent("search", eventData);
+};
+
+// (2.5) function to track View Event "ItemView"
+LeoObserver.recordEventItemView = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordViewEvent("item-view", eventData);
+};
+
+// (2.6) function to track Action Event "ClickDetails"
+LeoObserver.recordEventClickDetails = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordActionEvent("click-details", eventData);
+};
+
+// (2.7) function to track Action Event "SubmitContact"
+LeoObserver.recordEventSubmitContact = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordActionEvent("submit-contact", eventData);
+};
+
+// (2.8) function to track Action Event "RegisterAccount"
+LeoObserver.recordEventRegisterAccount = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordActionEvent("register-account", eventData);
+};
+
+// (2.9) function to track Action Event "UserLogin"
+LeoObserver.recordEventUserLogin = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordActionEvent("user-login", eventData);
+};
+
+// (2.10) function to track Action Event "ShortLinkClick"
+LeoObserver.recordEventShortLinkClick = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordActionEvent("short-link-click", eventData);
+};
+
+// (2.11) function to track View Event "Login"
+LeoObserver.recordEventLogin = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordViewEvent("login-success", eventData);
+};
+
+// (2.12) function to track Action Event "AskQuestion"
+LeoObserver.recordEventAskQuestion = function(eventData) {
+    eventData = eventData ? eventData : {};
+    LeoObserverProxy.recordActionEvent("ask-question", eventData);
+};
+
+// (3) CDP EVENT OBSERVER is ready
+function leoObserverProxyReady(session) {
+    // auto tracking when CDP JS is ready
+    LeoObserver.recordEventPageView(parseDataUTM());
+    
+    // set tracking CDP web visitor ID into all a[href] nodes
+    LeoObserverProxy.synchLeoVisitorId(function(vid) {
+        var aNodes = document.querySelectorAll('a');
+        [].forEach.call(aNodes, function(aNode) {
+            var hrefUrl = aNode.href || "";
+            var check = hrefUrl.indexOf('http') >= 0 && hrefUrl.indexOf(location.host) < 0;
+            if (check) {
+                if (hrefUrl.indexOf('?') > 0) hrefUrl += ("&leosyn=" + vid);
+                else hrefUrl += ("?leosyn=" + vid);
+                aNode.href = hrefUrl;
+            }
+        });
+        if (typeof window.synchLeoCdpToGA4 === "function") {
+            window.synchLeoCdpToGA4(vid);
+        }
+    });
+}
+
+// track users when they click any link in the web-page
+LeoObserver.addTrackingAllLinks = function() {
+    setTimeout(function() {
+        document.querySelectorAll('a').forEach(function (e) {
+            e.addEventListener('click', function() {
+                var url = e.getAttribute('href') || "";
+                var data = { 'url': url, 'link-text': e.innerText };
+                LeoObserver.recordEventClickDetails(data);
+            });
+        });
+    }, 1500);
+};
+
+// track users when they click any button in the web-page
+LeoObserver.addTrackingAllButtons = function() {
+    setTimeout(function() {
+        document.querySelectorAll('button').forEach(function (e) {
+            e.addEventListener('click', function() {
+                var data = { 'button-text': e.innerText };
+                LeoObserver.recordEventClickDetails(data);
+            });
+        });
+    }, 1600);
+};
 </script>

@@ -39,6 +39,10 @@ BASE_DIR = Path(__file__).resolve().parent
 env_path = BASE_DIR / ".env"
 if env_path.is_file():
     load_dotenv(env_path)
+else:
+    root_env_path = BASE_DIR.parent / ".env"
+    if root_env_path.is_file():
+        load_dotenv(root_env_path)
 
 # BUILD_VERSION is embedded by the Docker build and remains stable for the
 # lifetime of the image. Local non-container development uses the fallback.
@@ -53,6 +57,13 @@ API_BASE = f"{API_HOSTNAME}/api/v1"
 TENANT_ID = os.getenv("FRONTEND_TENANT_ID", "11111111-1111-1111-1111-111111111111")
 APP_HOST = os.getenv("HOST", "0.0.0.0")
 APP_PORT = int(os.getenv("PORT", "8890"))
+
+# Leo Observer Web SDK tracking environment constants
+LEO_OBSERVER_LOG_DOMAIN = os.getenv("LEO_OBSERVER_LOG_DOMAIN", "datahub4uspa.leocdp.net")
+LEO_OBSERVER_CDN_DOMAIN = os.getenv(
+    "LEO_OBSERVER_CDN_DOMAIN",
+    "cdn.jsdelivr.net/gh/USPA-Technology/leo-cdp-static-files@v0.9.5"
+)
 
 
 FRONTEND_ROOT_PATH = os.getenv(
@@ -125,7 +136,9 @@ async def index(request: Request):
         "tenant_id": tenant_id,
         "static_base": STATIC_BASE,
         "cache_bust": cb,
-        "build_version": build_version
+        "build_version": build_version,
+        "leo_observer_log_domain": LEO_OBSERVER_LOG_DOMAIN,
+        "leo_observer_cdn_domain": LEO_OBSERVER_CDN_DOMAIN
     }
     
     try:

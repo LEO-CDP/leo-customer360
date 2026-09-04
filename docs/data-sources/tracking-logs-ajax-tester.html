@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LeoCDP Tracking Logs AJAX Tester</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #64748b;
+      --line: #d9e1ec;
+      --panel: #ffffff;
+      --soft: #f4f7fb;
+      --blue: #2459d6;
+      --blue-dark: #1742a6;
+      --green: #087443;
+      --red: #b42318;
+      --shadow: 0 22px 55px rgba(26, 42, 74, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background: #edf3fa;
+      font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .shell { max-width: 1280px; margin: 0 auto; padding: 32px 20px 56px; }
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      align-items: flex-end;
+      margin-bottom: 22px;
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 0; font-size: clamp(28px, 4vw, 44px); line-height: 1.04; letter-spacing: -.035em; }
+    .lede { max-width: 720px; margin: 12px 0 0; color: var(--muted); }
+    .endpoint-chip {
+      flex: 0 0 auto;
+      padding: 12px 14px;
+      border: 1px solid #c8d7f5;
+      border-radius: 12px;
+      color: #173f9d;
+      background: #f5f8ff;
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .layout { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); gap: 20px; }
+    .panel {
+      min-width: 0;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .panel h2 { margin: 0 0 4px; font-size: 18px; letter-spacing: -.02em; }
+    .panel-note { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+    .section-label {
+      display: block;
+      margin: 18px 0 7px;
+      color: #42516a;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    label { display: block; color: #42516a; font-size: 12px; font-weight: 700; }
+    input, textarea, select {
+      width: 100%;
+      margin-top: 6px;
+      padding: 11px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      color: var(--ink);
+      background: #fbfdff;
+      font: inherit;
+      outline: none;
+    }
+    textarea { min-height: 165px; resize: vertical; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    input:focus, textarea:focus, select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(36, 89, 214, .14); }
+    .hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: #fff;
+      background: var(--blue);
+      cursor: pointer;
+      font: 700 13px/1.2 inherit;
+      transition: background .15s ease, transform .15s ease, opacity .15s ease;
+    }
+    button:hover { background: var(--blue-dark); }
+    button:active { transform: translateY(1px); }
+    button.secondary { color: #334155; background: #e8eef7; }
+    button.secondary:hover { background: #dbe5f2; }
+    button.danger { color: #991b1b; background: #fee4e2; }
+    button.danger:hover { background: #fecaca; }
+    button:disabled { cursor: wait; opacity: .6; }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 44px;
+      margin-bottom: 16px;
+      padding: 11px 13px;
+      border-radius: 10px;
+      color: #475569;
+      background: var(--soft);
+      font-size: 13px;
+    }
+    .status::before { width: 9px; height: 9px; border-radius: 50%; background: #94a3b8; content: ""; }
+    .status.success { color: var(--green); background: #ecfdf3; }
+    .status.success::before { background: #16a34a; }
+    .status.error { color: var(--red); background: #fff1f0; }
+    .status.error::before { background: #dc2626; }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .meta-card { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+    .meta-card small { display: block; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    .meta-card strong { display: block; margin-top: 3px; overflow-wrap: anywhere; font: 700 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    pre.output {
+      min-height: 360px;
+      max-height: 620px;
+      margin: 0;
+      padding: 15px;
+      overflow: auto;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      color: #dbeafe;
+      background: #0f172a;
+      font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .warning { margin-top: 16px; padding: 12px 13px; border-left: 3px solid #f59e0b; color: #7c4a03; background: #fffbeb; font-size: 12px; }
+    .footer-note { margin-top: 20px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 900px) {
+      .hero { display: block; }
+      .endpoint-chip { margin-top: 18px; }
+      .layout { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .shell { padding: 22px 12px 36px; }
+      .panel { padding: 16px; border-radius: 14px; }
+      .grid-2, .meta { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">LeoCDP / Data Tracking API</p>
+        <h1>Tracking Logs AJAX Tester</h1>
+        <p class="lede">Send a controlled event batch to the beta tracking endpoint and inspect the exact HTTP response. This tool uses the same request envelope accepted by <code>data-tracking-api</code>.</p>
+      </div>
+      <div class="endpoint-chip">POST<br>https://beta.leocdp.com/data/api/v1/tracking/logs</div>
+    </header>
+
+    <section class="layout">
+      <form id="request-form" class="panel">
+        <h2>Request Builder</h2>
+        <p class="panel-note">Only <code>data_source_id</code> and a non-empty <code>events</code> array are required by the API.</p>
+
+        <label>
+          Endpoint URL
+          <input id="endpoint" type="url" value="https://beta.leocdp.com/data/api/v1/tracking/logs" required>
+        </label>
+        <p class="hint">The default is the beta endpoint. Change this for a local or reverse-proxy deployment.</p>
+
+        <div class="grid-2">
+          <label>
+            Data source ID *
+            <input id="data-source-id" type="text" placeholder="11111111-1111-1111-1111-111111111111" required>
+          </label>
+          <label>
+            Session ID
+            <input id="session-id" type="text" placeholder="web-session-123">
+          </label>
+        </div>
+
+        <label>
+          User ID
+          <input id="user-id" type="text" placeholder="customer-456">
+        </label>
+
+        <span class="section-label">Event batch</span>
+        <label>
+          Events JSON *
+          <textarea id="events" spellcheck="false">[
+  {
+    "event_name": "page_view",
+    "event_time": "2026-09-04T12:30:00Z",
+    "page_url": "https://example.test/landing",
+    "page_title": "Example landing page",
+    "utm_source": "tester",
+    "utm_medium": "ajax",
+    "utm_campaign": "tracking-api-check"
+  }
+]</textarea>
+        </label>
+        <div class="toolbar">
+          <button id="send-button" type="submit">Send tracking batch</button>
+          <button id="sample-page-view" class="secondary" type="button">Page-view sample</button>
+          <button id="sample-action" class="secondary" type="button">Action sample</button>
+          <button id="clear-button" class="danger" type="button">Clear events</button>
+        </div>
+
+        <div class="warning"><strong>Browser note:</strong> opening this file directly with <code>file://</code> may be blocked by CORS. Serve the repository over HTTP, or use the beta API's approved origin and CORS policy.</div>
+        <p class="footer-note">The API may rate-limit repeated requests and may reject bot-like User-Agent values. Do not place production secrets in this page.</p>
+      </form>
+
+      <section class="panel" aria-live="polite">
+        <h2>Response Inspector</h2>
+        <p class="panel-note">The response body and transport metadata appear here after each request.</p>
+        <div id="status" class="status">Ready. No request has been sent.</div>
+        <div class="meta">
+          <div class="meta-card"><small>HTTP status</small><strong id="http-status">-</strong></div>
+          <div class="meta-card"><small>Duration</small><strong id="duration">-</strong></div>
+          <div class="meta-card"><small>Event count</small><strong id="event-count">-</strong></div>
+        </div>
+        <pre id="response" class="output">Response JSON will appear here.</pre>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var form = document.getElementById("request-form");
+      var endpoint = document.getElementById("endpoint");
+      var dataSourceId = document.getElementById("data-source-id");
+      var sessionId = document.getElementById("session-id");
+      var userId = document.getElementById("user-id");
+      var events = document.getElementById("events");
+      var sendButton = document.getElementById("send-button");
+      var status = document.getElementById("status");
+      var httpStatus = document.getElementById("http-status");
+      var duration = document.getElementById("duration");
+      var eventCount = document.getElementById("event-count");
+      var response = document.getElementById("response");
+
+      function setStatus(message, kind) {
+        status.textContent = message;
+        status.className = "status" + (kind ? " " + kind : "");
+      }
+
+      function setEvents(value) {
+        events.value = JSON.stringify(value, null, 2);
+      }
+
+      document.getElementById("sample-page-view").addEventListener("click", function () {
+        setEvents([{
+          event_name: "page_view",
+          event_time: new Date().toISOString(),
+          page_url: window.location.href,
+          page_title: document.title || "Tracking API tester",
+          utm_source: "tester",
+          utm_medium: "ajax",
+          utm_campaign: "tracking-api-check"
+        }]);
+      });
+
+      document.getElementById("sample-action").addEventListener("click", function () {
+        setEvents([{
+          event_name: "click-details",
+          event_time: new Date().toISOString(),
+          event_data: {
+            element: "tracking-api-tester",
+            action: "manual_test",
+            label: "Action sample"
+          }
+        }]);
+      });
+
+      document.getElementById("clear-button").addEventListener("click", function () {
+        events.value = "[]";
+        eventCount.textContent = "0";
+      });
+
+      form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        setStatus("Sending request...", "");
+        sendButton.disabled = true;
+        httpStatus.textContent = "-";
+        duration.textContent = "-";
+        response.textContent = "";
+
+        var parsedEvents;
+        try {
+          parsedEvents = JSON.parse(events.value);
+          if (!Array.isArray(parsedEvents) || parsedEvents.length === 0) {
+            throw new Error("Events must be a non-empty JSON array.");
+          }
+        } catch (error) {
+          setStatus(error.message, "error");
+          response.textContent = error.stack || error.message;
+          sendButton.disabled = false;
+          return;
+        }
+
+        var payload = {
+          data_source_id: dataSourceId.value.trim(),
+          events: parsedEvents
+        };
+        if (sessionId.value.trim()) payload.session_id = sessionId.value.trim();
+        if (userId.value.trim()) payload.user_id = userId.value.trim();
+
+        var startedAt = performance.now();
+        try {
+          var result = await fetch(endpoint.value.trim(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          var elapsed = Math.round(performance.now() - startedAt);
+          var body = await result.text();
+          var parsedBody;
+          try { parsedBody = body ? JSON.parse(body) : null; } catch (error) { parsedBody = body; }
+
+          httpStatus.textContent = result.status + " " + result.statusText;
+          duration.textContent = elapsed + " ms";
+          eventCount.textContent = String(parsedEvents.length);
+          response.textContent = typeof parsedBody === "string" ? parsedBody : JSON.stringify(parsedBody, null, 2);
+          setStatus(result.ok ? "Request accepted by the tracking endpoint." : "The endpoint returned an error.", result.ok ? "success" : "error");
+        } catch (error) {
+          duration.textContent = Math.round(performance.now() - startedAt) + " ms";
+          response.textContent = error.stack || error.message;
+          setStatus("Network or CORS error. Check the endpoint and browser origin.", "error");
+        } finally {
+          sendButton.disabled = false;
+        }
+      });
+    }());
+  </script>
+</body>
+</html>
