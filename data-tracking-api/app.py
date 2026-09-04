@@ -30,8 +30,9 @@ static_dir = BASE_DIR / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     c360_sdk_dir = static_dir / "c360-web-sdk"
+    cdp_event_proxy_html = c360_sdk_dir / "html"
     if c360_sdk_dir.exists():
-        app.mount("/c360-web-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="c360-web-sdk")
+        app.mount("/cdp-event-proxy.html", StaticFiles(directory=str(cdp_event_proxy_html), html=True), name="c360-web-sdk")
         app.mount("/cdp-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="cdp-sdk")
         app.mount("/data-tracking-api/static/c360-web-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="data-tracking-c360-web-sdk")
     sandbox_dir = static_dir / "sandbox"

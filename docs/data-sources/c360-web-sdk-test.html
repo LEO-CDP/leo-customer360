@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sample Shop</title>
+    <style>
+        :root {
+            --ink: #172033;
+            --muted: #667085;
+            --brand: #635bff;
+            --bg: #f6f7fb;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font: 16px system-ui, -apple-system, Segoe UI, sans-serif;
+            color: var(--ink);
+            background: var(--bg);
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 22px 7%;
+            background: #fff;
+            border-bottom: 1px solid #e7e9ef;
+        }
+
+        .logo {
+            font-size: 1.35rem;
+            font-weight: 800;
+            color: var(--brand);
+        }
+
+        header button {
+            border: 0;
+            background: #eef0ff;
+            color: var(--brand);
+            padding: 10px 15px;
+            border-radius: 22px;
+            cursor: pointer;
+            font-weight: 700;
+        }
+
+        main {
+            max-width: 1120px;
+            margin: 0 auto;
+            padding: 48px 24px;
+        }
+
+        .hero {
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: clamp(2rem, 5vw, 3.5rem);
+        }
+
+        .hero p {
+            margin: 0;
+            color: var(--muted);
+        }
+
+        .products {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+        }
+
+        .card {
+            overflow: hidden;
+            background: #fff;
+            border: 1px solid #e7e9ef;
+            border-radius: 16px;
+            box-shadow: 0 5px 18px #1720330b;
+        }
+
+        .product-image {
+            display: grid;
+            place-items: center;
+            height: 170px;
+            font-size: 4.5rem;
+            background: linear-gradient(135deg, #edf0ff, #fef2e8);
+        }
+
+        .details {
+            padding: 18px;
+        }
+
+        .details h2 {
+            margin: 0 0 6px;
+            font-size: 1.1rem;
+        }
+
+        .details p {
+            min-height: 44px;
+            margin: 0 0 15px;
+            color: var(--muted);
+            font-size: .9rem;
+        }
+
+        .buy {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .price {
+            font-weight: 800;
+        }
+
+        .buy button {
+            border: 0;
+            border-radius: 8px;
+            padding: 10px 13px;
+            background: var(--brand);
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .buy button:hover {
+            background: #5149df;
+        }
+
+        #message {
+            min-height: 24px;
+            margin-top: 25px;
+            color: #18804b;
+            font-weight: 600;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div class="logo">Northstar Market</div><button id="cart" type="button">Cart (0)</button>
+    </header>
+    <main>
+        <section class="hero">
+            <h1>Everyday essentials.</h1>
+            <p>A small storefront for testing product views, cart actions, and sample customer events.</p>
+        </section>
+        <section class="products" id="products" aria-label="Products"></section>
+        <div id="message" role="status"></div>
+    </main>
+    <script>
+        const products = [
+            { id: 1, name: 'Cloud Runner Sneakers', price: 89, icon: '👟', description: 'Lightweight shoes for daily adventures.' },
+            { id: 2, name: 'Canvas Daypack', price: 54, icon: '🎒', description: 'A durable, roomy bag for work or travel.' },
+            { id: 3, name: 'Ceramic Travel Mug', price: 24, icon: '☕', description: 'Keep your coffee warm on the go.' },
+            { id: 4, name: 'Classic Watch', price: 120, icon: '⌚', description: 'Minimal style with a comfortable leather band.' }
+        ];
+        let cartCount = 0;
+        const productList = document.querySelector('#products');
+        const cartButton = document.querySelector('#cart');
+        const message = document.querySelector('#message');
+
+        products.forEach(product => {
+            const card = document.createElement('article');
+            card.className = 'card';
+            card.innerHTML = `<div class="product-image" aria-hidden="true">${product.icon}</div>
+				<div class="details"><h2>${product.name}</h2><p>${product.description}</p>
+				<div class="buy"><span class="price">$${product.price.toFixed(2)}</span><button type="button" data-id="${product.id}">Add to cart</button></div></div>`;
+            productList.appendChild(card);
+        });
+
+        productList.addEventListener('click', event => {
+            if (!event.target.matches('button')) return;
+            const product = products.find(item => item.id === Number(event.target.dataset.id));
+            cartCount++;
+            cartButton.textContent = `Cart (${cartCount})`;
+            message.textContent = `${product.name} added to your cart.`;
+        });
+        cartButton.addEventListener('click', () => {
+            message.textContent = cartCount ? `You have ${cartCount} item${cartCount === 1 ? '' : 's'} in your cart.` : 'Your cart is empty.';
+        });
+    </script>
+
+    <script>
+        // (1) CDP_EVENT_OBSERVER: load JavaScript code for [C360 Tracker]
+        (function () {
+            // Observer ID (from sys_data_source.data_source_id)
+            window.leoObserverId = "15dc39d4-ae42-5c60-9c77-66f05dcae448";
+
+            // Default batch size of Event Tracking
+            window.leoObserverBatchSize = 10;
+
+            // Tracking Log Domain and Endpoint URI
+            window.leoObserverLogDomain = "c360.example.com";
+            window.leoObserverTrackingUri = "/data/api/v1/tracking/logs";
+            window.leoObserverTrackingEndpoint = "https://" + window.leoObserverLogDomain + window.leoObserverTrackingUri;
+
+            // CDN of JS
+            window.leoObserverCdnDomain = "gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main";
+
+            // Data Touchpoint Metadata 
+            window.srcTouchpointName = encodeURIComponent(document.title);
+            window.srcTouchpointUrl = encodeURIComponent(location.href);
+
+            // Dynamic Loader for the Main Proxy CDP JS
+            var leoproxyJsPath = '/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js';
+            var src = location.protocol + '//' + window.leoObserverCdnDomain + leoproxyJsPath;
+            var jsNode = document.createElement('script');
+            jsNode.async = true;
+            jsNode.defer = true;
+            jsNode.src = src;
+            var s = document.getElementsByTagName('script')[0];
+            s.parentNode.insertBefore(jsNode, s);
+        })();
+
+        var parseDataUTM = window.parseDataUTM || function () {
+            if (location.search.indexOf('utm_') > 0) {
+                var search = location.search.substring(1);
+                var json = decodeURI(search).replace(/"/g, '\\"').replace(/&/g, '","').replace(/=/g, '":"');
+                return JSON.parse('{"' + json + '"}');
+            }
+            return {};
+        };
+
+        // (2) CDP EVENT OBSERVER: set-up all event tracking functions
+        var LeoObserver = window.LeoObserver || {};
+
+        // (2.1) function to track View Event "PageView"
+        LeoObserver.recordEventPageView = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordViewEvent("page-view", eventData);
+        };
+
+        // (2.2) function to track View Event "ContentView"
+        LeoObserver.recordEventContentView = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordViewEvent("content-view", eventData);
+        };
+
+        // (2.3) function to track Action Event "Logout"
+        LeoObserver.recordEventLogout = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordActionEvent("logout", eventData);
+        };
+
+        // (2.4) function to track Action Event "Search"
+        LeoObserver.recordEventSearch = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordActionEvent("search", eventData);
+        };
+
+        // (2.5) function to track View Event "ItemView"
+        LeoObserver.recordEventItemView = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordViewEvent("item-view", eventData);
+        };
+
+        // (2.6) function to track Action Event "ClickDetails"
+        LeoObserver.recordEventClickDetails = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordActionEvent("click-details", eventData);
+        };
+
+        // (2.7) function to track Action Event "SubmitContact"
+        LeoObserver.recordEventSubmitContact = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordActionEvent("submit-contact", eventData);
+        };
+
+        // (2.8) function to track Action Event "RegisterAccount"
+        LeoObserver.recordEventRegisterAccount = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordActionEvent("register-account", eventData);
+        };
+
+        // (2.9) function to track Action Event "UserLogin"
+        LeoObserver.recordEventUserLogin = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordActionEvent("user-login", eventData);
+        };
+
+        // (2.10) function to track Action Event "ShortLinkClick"
+        LeoObserver.recordEventShortLinkClick = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordActionEvent("short-link-click", eventData);
+        };
+
+        // (2.11) function to track View Event "Login"
+        LeoObserver.recordEventLogin = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordViewEvent("login-success", eventData);
+        };
+
+        // (2.12) function to track Action Event "AskQuestion"
+        LeoObserver.recordEventAskQuestion = function (eventData) {
+            eventData = eventData ? eventData : {};
+            LeoObserverProxy.recordActionEvent("ask-question", eventData);
+        };
+
+        // (2.13) function to track Conversion / Purchase Event
+        LeoObserver.recordEventConversion = function (transactionId, transactionValue, currencyCode, items, eventData) {
+            eventData = eventData ? eventData : {};
+            items = items ? items : [];
+            LeoObserverProxy.recordConversionEvent("purchase", eventData, transactionId, items, transactionValue, currencyCode || "USD");
+        };
+
+        // (2.14) function to track Customer Feedback (CSAT, NPS, Survey)
+        LeoObserver.recordEventFeedback = function (feedbackType, feedbackData) {
+            feedbackData = feedbackData ? feedbackData : {};
+            LeoObserverProxy.recordFeedbackEvent(feedbackType || "submit-survey", feedbackData);
+        };
+
+        // (2.15) function to update customer profile identity (for CIR & Personalization)
+        LeoObserver.updateProfileBySession = function (profileData, extData) {
+            profileData = profileData ? profileData : {};
+            LeoObserverProxy.updateProfileBySession(profileData, extData);
+        };
+
+        // (2.16) function to get customer personalization recommendations
+        LeoObserver.getPersonalization = function (slotId, callback) {
+            LeoObserverProxy.getPersonalization(slotId, callback);
+        };
+
+        // (3) CDP EVENT OBSERVER is ready
+        function leoObserverProxyReady(session) {
+            // auto tracking when CDP JS is ready
+            LeoObserver.recordEventPageView(parseDataUTM());
+
+            // set tracking CDP web visitor ID into all a[href] nodes for cross-domain tracking
+            LeoObserverProxy.synchLeoVisitorId(function (vid) {
+                var aNodes = document.querySelectorAll('a');
+                [].forEach.call(aNodes, function (aNode) {
+                    var hrefUrl = aNode.href || "";
+                    var check = hrefUrl.indexOf('http') >= 0 && hrefUrl.indexOf(location.host) < 0;
+                    if (check) {
+                        if (hrefUrl.indexOf('?') > 0) hrefUrl += ("&leosyn=" + vid);
+                        else hrefUrl += ("?leosyn=" + vid);
+                        aNode.href = hrefUrl;
+                    }
+                });
+                if (typeof window.synchLeoCdpToGA4 === "function") {
+                    window.synchLeoCdpToGA4(vid);
+                }
+            });
+        }
+
+        // track users when they click any link in the web-page
+        LeoObserver.addTrackingAllLinks = function () {
+            setTimeout(function () {
+                document.querySelectorAll('a').forEach(function (e) {
+                    e.addEventListener('click', function () {
+                        var url = e.getAttribute('href') || "";
+                        var data = { 'url': url, 'link-text': e.innerText };
+                        LeoObserver.recordEventClickDetails(data);
+                    });
+                });
+            }, 1500);
+        };
+
+        // track users when they click any button in the web-page
+        LeoObserver.addTrackingAllButtons = function () {
+            setTimeout(function () {
+                document.querySelectorAll('button').forEach(function (e) {
+                    e.addEventListener('click', function () {
+                        var data = { 'button-text': e.innerText };
+                        LeoObserver.recordEventClickDetails(data);
+                    });
+                });
+            }, 1600);
+        };
+    </script>
+</body>
+
+</html>

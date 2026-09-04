@@ -66,7 +66,7 @@
     	var targetPostMessage = logProtocol + cleanLogDomain;
     	
     	// Allow custom proxy path or default to standard /cdp-sdk/html/cdp-event-proxy.html
-        var proxyPath = window.leoCdpProxyPath || "/cdp-sdk/html/cdp-event-proxy.html";
+        var proxyPath = window.leoCdpProxyPath || "/cdp-event-proxy.html";
         var proxyHtmlUrl = targetPostMessage + proxyPath + "#";
 
         var LeoObserverProxy = { 

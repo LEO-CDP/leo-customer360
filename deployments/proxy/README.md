@@ -13,7 +13,8 @@ Client ──HTTPS──▶ LB :443 ─(TCP passthrough)─▶ Caddy :443 (api b
                                                   ├─ /            → frontend-admin :8890
                                                   ├─ /c360api/*    → customer360-api :8008   (prefix stripped)
                                                   ├─ /auth/*       → keycloak :8080          (KC serves under /auth)
-                                                  └─ /ads/*        → ads-server :9009        (prefix stripped)
+                                                  ├─ /ads/*        → ads-server :9009        (prefix stripped)
+                                                  └─ /cdp-sdk/*    → data-tracking-api :8010 (iframe + assets)
 ```
 
 The L4 NLB stays in front (it's the thing with the public IP), but for the app it now
@@ -40,6 +41,21 @@ Netdata) can stay on their existing LB ports, or move under Caddy later (see Cav
 > resolves (DNS A record) to the LB public IP, (2) the LB forwards **:80** to this box
 > (HTTP-01 challenge) and **:443** for traffic, (3) Caddy is running. Until all three
 > hold, Caddy runs but serves no HTTPS — that's expected while staging.
+
+### Web SDK iframe
+
+The hidden web SDK iframe is served by `data-tracking-api` at
+`/cdp-sdk/html/cdp-event-proxy.html`. The route must remain before the frontend
+catch-all in [`Caddyfile`](./Caddyfile). Caddy removes any upstream
+`X-Frame-Options` header and sends `Content-Security-Policy` with the parent
+origin configured by `sdk_frame_ancestor` in the environment overlay.
+
+`X-Frame-Options: SAMEORIGIN` is not sufficient when the embedding page and the
+iframe use different origins. Set `sdk_frame_ancestor` to the exact HTTPS origin
+of the embedding site, then redeploy Caddy.
+
+The current environment mapping is `https://beta.leocdp.com` for UAT and
+`https://c360.leocdp.com` for production.
 
 ---
 
@@ -137,6 +153,8 @@ Must return JSON with `"issuer":"https://beta.leocdp.com/auth/realms/customer360
 ```bash
 curl -sI https://beta.leocdp.com/                       # frontend (200)
 curl -s  https://beta.leocdp.com/c360api/api/v1/health  # api
+curl -sSI https://beta.leocdp.com/cdp-sdk/html/cdp-event-proxy.html \
+  | grep -Ei '^(HTTP/|content-security-policy:|x-frame-options:)'
 ```
 Then log in from the UI at `https://beta.leocdp.com/` — the whole OIDC round-trip should
 run over `https://beta.leocdp.com/auth`. Existing sessions are invalid (the issuer
@@ -165,6 +183,10 @@ LB no longer points at it.
   generated URLs (docs) correct.
 - **ads-server** is proxied under `/ads` with the prefix stripped — fine for its JSON
   API; if it serves UI assets it'd need its own base-path config.
+- **Web SDK iframe** is proxied under `/cdp-sdk` without stripping the prefix because
+  `data-tracking-api` mounts the SDK at that path. Its response allows only the origin
+  configured by `sdk_frame_ancestor`; do not replace this with `SAMEORIGIN` for a
+  cross-origin embedding site.
 - **Dagster / Portainer / Netdata** generate absolute URLs or have their own callback
   paths and do **not** sub-path cleanly without app-side config (`dagster --path-prefix`,
   `oauth2-proxy --proxy-prefix`, Portainer base href). By default they stay on their raw

@@ -372,6 +372,7 @@ via the **LB IP** (see the HSTS note below).
 | Keycloak | `https://beta.leocdp.com/auth` | Caddy `/auth/*` → keycloak :8080 |
 | ads-server (+ `/ads/docs`) | `https://beta.leocdp.com/ads` | Caddy `/ads/*` → ads :9009 (`root_path=/ads`) |
 | data-tracking-api (ingest) | `https://beta.leocdp.com/data` (POST `…/data/api/v1/tracking/logs`; health `…/data/health`) | Caddy `/data/*` → tracking :8010 |
+| c360 web SDK iframe | `https://beta.leocdp.com/cdp-sdk/html/cdp-event-proxy.html` | Caddy `/cdp-sdk/*` → tracking :8010; parent origin from `proxy/overlays/<env>.tfvars` |
 | Portainer (own login) | `https://103.245.254.29:9443` | LB direct → Portainer :9443 (self-signed TLS) |
 | Netdata (SSO) | `http://103.245.254.29:19999` | LB → oauth2-proxy :4199 → Netdata (Keycloak login) |
 | pgAdmin (own login) | `http://103.245.254.29:5050` | LB direct → pgAdmin :5050 (its own login as `admin@leocdp.com`; plain HTTP — cleartext) |
@@ -423,6 +424,7 @@ cd ../monitoring && ./deploy-monitoring.sh uat
 
 - Ingestion: `POST https://beta.leocdp.com/data/api/v1/tracking/logs` (Caddy `/data` → tracking `:8010`)
 - Health (GET): `https://beta.leocdp.com/data/health`
+- Web SDK iframe: `https://beta.leocdp.com/cdp-sdk/html/cdp-event-proxy.html` (Caddy `/cdp-sdk` → tracking `:8010`)
 - Traces: `data-tracking-api` appears in the Jaeger UI at `https://beta.leocdp.com/jaeger` (Keycloak SSO)
 
 **Notes**
@@ -486,7 +488,7 @@ Docs and the point-in-time `proxy/cutover-*.patch` are left untouched.
 The prod overlay differs from UAT: **each service runs on its own dedicated vServer**
 (api · sso · frontend · ads), cache is a **managed MemStore** and Postgres a **managed vDB**
 (no co-located containers), it has its **own VPC** (`10.101.0.0/16`) and public host
-(`leocdp.com`), deploys pull the **pinned `vX.Y.Z` release** image, and ops is **hardened** —
+(`c360.leocdp.com`), deploys pull the **pinned `vX.Y.Z` release** image, and ops is **hardened** —
 **pgAdmin and Netdata are both Keycloak-SSO-gated** via oauth2-proxy (only Portainer stays
 direct). The backend (Dagster) and tracking boxes are drawn **dashed** — designed in the
 overlays but not yet provisioned.
@@ -502,7 +504,7 @@ overlays but not yet provisioned.
 | Aspect | UAT | PROD |
 |--------|-----|------|
 | VPC / subnet | `c360-vpc-uat` · `10.100.1.0/24` | `c360-api-vpc-prod` · `10.101.1.0/24` (CIDR `10.101.0.0/16`) |
-| Public host | `beta.leocdp.com` | `leocdp.com` |
+| Public host | `beta.leocdp.com` | `c360.leocdp.com` |
 | Load balancer | (uat NLB) | `customer360-nlb-prod` (NLB_Small) |
 | customer360-api | api box `10.100.1.5` | dedicated `c360-api-prod-4x8` · `10.101.1.10` (s2-general-4x8) |
 | Keycloak (SSO) | container on the api box | dedicated `c360-api-prod-sso` · `10.101.1.11` (2x4) |
