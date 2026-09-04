@@ -6,128 +6,140 @@
 <div class="space-y-6">
 
   <!-- 1. Segment Metadata Card -->
-  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
+  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-xs p-6 sm:p-7 transition-all">
     
     <!-- Top Header Row -->
-    <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
-      <div class="flex items-start gap-3">
-        <div class="p-2 bg-indigo-50 text-indigo-600 rounded-xl mt-0.5">
+    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+      <div class="flex items-start gap-4 min-w-0">
+        <div class="w-12 h-12 shrink-0 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center ring-1 ring-indigo-500/10 shadow-xs">
           <!-- Folder / Tag Icon -->
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" /><path stroke-linecap="round" stroke-linejoin="round" d="M6 6h.008v.008H6V6z" /></svg>
+          <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" /><path stroke-linecap="round" stroke-linejoin="round" d="M6 6h.008v.008H6V6z" /></svg>
         </div>
-        <div>
-          <h1 class="text-base font-bold text-slate-900 tracking-tight">{{segment_name}}</h1>
-          <div class="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
-            <span>Tag:</span>
-            <code class="bg-slate-100 text-slate-700 font-mono text-[11px] rounded px-1.5 py-0.5 border border-slate-200/60">{{segment_tag}}</code>
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2.5 mb-1.5">
+            <h1 class="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight truncate leading-tight">{{segment_name}}</h1>
+            <span class="inline-flex items-center text-xs font-mono font-medium text-slate-600 bg-slate-100 border border-slate-200/80 rounded-md px-2 py-0.5 tracking-tight shadow-2xs">#{{segment_tag}}</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide shadow-2xs {{activeBadgeClass}}">{{activeLabel}}</span>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide shadow-2xs {{processedByBadgeClass}}">{{processedByLabel}}</span>
           </div>
         </div>
       </div>
 
-      <!-- Badges -->
-      <div class="flex items-center gap-2">
-        <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold shadow-sm {{activeBadgeClass}}">{{activeLabel}}</span>
-        <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold shadow-sm {{processedByBadgeClass}}">{{processedByLabel}}</span>
+      <!-- Action Buttons -->
+      <div class="flex items-center gap-2.5 self-start lg:self-center shrink-0">
+        <button id="btn-segment-detail-edit" type="button" class="inline-flex items-center gap-1.5 border border-slate-200/80 bg-white text-slate-700 hover:text-slate-900 hover:bg-slate-50 hover:border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1 transition-all shadow-xs">
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13l-3.384.966.966-3.384a4.5 4.5 0 011.13-1.897L16.862 4.487zM19.5 7.125L16.875 4.5M18 14.25V19.5A2.25 2.25 0 0115.75 21.75H5.25A2.25 2.25 0 013 19.5V9A2.25 2.25 0 015.25 6.75H10.5" /></svg>
+          <span>Edit segment</span>
+        </button>
+        <button id="btn-segment-detail-refresh" type="button" class="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200/80 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 active:bg-indigo-100/70 rounded-xl px-4 py-2.5 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1 transition-all shadow-xs">
+          <svg class="w-3.5 h-3.5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+          <span>Refresh data</span>
+        </button>
       </div>
-      <button id="btn-segment-detail-edit" type="button" class="inline-flex items-center gap-1.5 border border-slate-200/80 bg-white text-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">
-        <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13l-3.384.966.966-3.384a4.5 4.5 0 011.13-1.897L16.862 4.487zM19.5 7.125L16.875 4.5M18 14.25V19.5A2.25 2.25 0 0115.75 21.75H5.25A2.25 2.25 0 013 19.5V9A2.25 2.25 0 015.25 6.75H10.5" /></svg>
-        <span>Edit segment</span>
-      </button>
-      <button id="btn-segment-detail-refresh" type="button" class="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-slate-100 transition-colors shadow-sm">
-        <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
-        <span>Refresh data</span>
-      </button>
     </div>
 
     <!-- Description -->
     {{#if description}}
-    <p class="text-sm text-slate-600 mb-6 leading-relaxed bg-slate-50/50 p-3.5 rounded-xl border border-slate-100/80">{{description}}</p>
+    <div class="mt-4 p-4 rounded-xl bg-slate-50/70 border border-slate-100 text-sm text-slate-600 leading-relaxed">
+      {{description}}
+    </div>
     {{/if}}
 
     <!-- Metrics Grid -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm pt-2">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-100">
       
       <!-- Domain -->
-      <div class="p-3 bg-slate-50/50 rounded-xl border border-slate-100/80">
-        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Domain</div>
-        <div class="font-semibold text-slate-800 capitalize">{{domainLabel}}</div>
+      <div class="p-4 bg-slate-50/60 rounded-xl border border-slate-100/90 hover:bg-slate-50 transition-colors">
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Target Domain</div>
+        <div class="font-bold text-slate-900 capitalize text-sm sm:text-base">{{domainLabel}}</div>
       </div>
 
       <!-- Members -->
-      <div class="p-3 bg-slate-50/50 rounded-xl border border-slate-100/80">
-        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Members (stored)</div>
-        <div class="font-semibold text-slate-800">{{memberCountLabel}}</div>
+      <div class="p-4 bg-slate-50/60 rounded-xl border border-slate-100/90 hover:bg-slate-50 transition-colors">
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Audience Size</div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="font-bold text-slate-900 font-mono text-lg sm:text-xl">{{memberCountLabel}}</span>
+          <span class="text-xs text-slate-400 font-medium">profiles</span>
+        </div>
       </div>
 
       <!-- Last Computed -->
-      <div class="p-3 bg-slate-50/50 rounded-xl border border-slate-100/80">
+      <div class="p-4 bg-slate-50/60 rounded-xl border border-slate-100/90 hover:bg-slate-50 transition-colors">
         <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Last Computed</div>
-        <div class="font-semibold text-slate-800">{{lastComputedLabel}}</div>
+        <div class="font-semibold text-slate-800 text-xs sm:text-sm font-mono truncate" title="{{lastComputedLabel}}">{{lastComputedLabel}}</div>
       </div>
 
       <!-- Created -->
-      <div class="p-3 bg-slate-50/50 rounded-xl border border-slate-100/80">
-        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Created</div>
-        <div class="font-semibold text-slate-800">{{createdLabel}}</div>
+      <div class="p-4 bg-slate-50/60 rounded-xl border border-slate-100/90 hover:bg-slate-50 transition-colors">
+        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1">Created At</div>
+        <div class="font-semibold text-slate-800 text-xs sm:text-sm font-mono truncate" title="{{createdLabel}}">{{createdLabel}}</div>
       </div>
 
     </div>
   </div>
 
 
-  <!-- 2. Rule Definition Card -->
-  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
+  <!-- 2. Rule Definition Card (SQL Rules Column Only) -->
+  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-xs p-6 sm:p-7 transition-all">
     
-    <div class="flex items-center gap-2 mb-4">
-      <div class="p-1.5 bg-violet-50 text-violet-600 rounded-lg">
-        <!-- Code / Query Icon -->
-        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 shrink-0 bg-violet-50 text-violet-600 rounded-xl flex items-center justify-center ring-1 ring-violet-500/10 shadow-2xs">
+          <!-- Code / Query Icon -->
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>
+        </div>
+        <div>
+          <h3 class="font-bold text-slate-900 text-base">Audience SQL Query</h3>
+          <p class="text-xs text-slate-400 mt-0.5">PostgreSQL statement evaluated to segment master customer profiles</p>
+        </div>
       </div>
-      <h3 class="font-bold text-slate-900 text-base">Rule Definition</h3>
+
+      {{#if hasSqlRules}}
+      <button id="btn-copy-sql" type="button" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200/80 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 shadow-2xs" title="Copy SQL statement">
+        <svg class="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
+        <span class="copy-sql-text">Copy SQL</span>
+      </button>
+      {{/if}}
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      
-      <!-- SQL Rules Column -->
-      <div>
-        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-2 flex items-center gap-1.5">
-          <span>SQL Rules (WHERE clause)</span>
+    <!-- SQL Rule Window -->
+    {{#if hasSqlRules}}
+    <div class="rounded-xl overflow-hidden border border-slate-800 shadow-inner bg-slate-950">
+      <div class="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800 text-[11px] font-mono text-slate-400">
+        <div class="flex items-center gap-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-red-500/80 inline-block"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-500/80 inline-block"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block"></span>
         </div>
-        {{#if hasSqlRules}}
-        <pre class="text-xs font-mono bg-slate-900 text-slate-100 rounded-xl p-4 overflow-x-auto shadow-inner border border-slate-800 leading-relaxed">{{sql_rules}}</pre>
-        {{else}}
-        <div class="flex items-center justify-center p-6 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-slate-400 text-xs italic">
-          No SQL rules defined
-        </div>
-        {{/if}}
+        <span class="text-slate-400 font-semibold tracking-wide uppercase text-[10px]">Generated SQL</span>
       </div>
-
-      <!-- JSON QueryBuilder Column -->
-      <div>
-        <div class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-2 flex items-center gap-1.5">
-          <span>jQuery QueryBuilder Rules (JSON)</span>
-        </div>
-        {{#if hasJsonRules}}
-        <pre class="text-xs font-mono bg-slate-50 text-slate-700 border border-slate-200/80 rounded-xl p-4 overflow-x-auto shadow-sm leading-relaxed">{{json json_rules}}</pre>
-        {{else}}
-        <div class="flex items-center justify-center p-6 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-slate-400 text-xs italic">
-          No structured rules defined
-        </div>
-        {{/if}}
-      </div>
-
+      <pre id="segment-sql-content" class="text-xs sm:text-sm font-mono text-emerald-300 p-5 overflow-x-auto leading-relaxed tracking-wide selection:bg-indigo-500/40">{{#if final_generated_sql}}{{final_generated_sql}}{{else}}{{display_sql}}{{/if}}</pre>
     </div>
+    {{else}}
+    <div class="flex flex-col items-center justify-center p-8 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-slate-400 text-xs">
+      <div class="w-10 h-10 mb-2 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 text-lg">⚡</div>
+      <div class="font-medium text-slate-600">No SQL rules defined for this segment</div>
+      <p class="text-slate-400 mt-0.5">Click "Edit segment" to configure audience criteria using the rule builder.</p>
+    </div>
+    {{/if}}
+
+    <!-- Hidden JSON QueryBuilder Rules for internal state consistency -->
+    {{#if hasJsonRules}}
+    <div id="segment-json-rules-hidden" class="hidden" aria-hidden="true">{{json json_rules}}</div>
+    {{/if}}
   </div>
 
 
   <!-- 3. Matched Profiles Table Card -->
-  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
+  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden transition-all">
     
     <!-- Header -->
-    <div class="p-6 border-b border-slate-100 flex items-center gap-3">
-      <div class="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+    <div class="p-6 border-b border-slate-100 flex items-center gap-3.5">
+      <div class="w-10 h-10 shrink-0 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center ring-1 ring-emerald-500/10 shadow-2xs">
         <!-- Users / Profiles Icon -->
-        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>
       </div>
       <div>
         <h3 class="font-bold text-slate-900 text-base">Matched Profiles</h3>
@@ -138,7 +150,7 @@
     <!-- Table Container -->
     <div class="overflow-x-auto">
       <table class="w-full text-sm text-left">
-        <thead id="segment-matched-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
+        <thead id="segment-matched-thead" class="bg-slate-50/90 text-slate-500 text-xs uppercase tracking-wider font-semibold border-b border-slate-200/80 sticky top-0 z-10"></thead>
         <tbody id="segment-matched-tbody" class="divide-y divide-slate-100"></tbody>
       </table>
     </div>
@@ -156,8 +168,8 @@
     </div>
 
     <!-- Footer Pagination / Counts -->
-    <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
-      <span id="segment-matched-count-label" class="font-medium"></span>
+    <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/40">
+      <span id="segment-matched-count-label" class="font-medium text-slate-600"></span>
       <button id="btn-segment-matched-load-more" class="hidden border border-slate-200/80 bg-white rounded-lg px-3.5 py-1.5 font-semibold text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Load more</button>
     </div>
 

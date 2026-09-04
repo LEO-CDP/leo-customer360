@@ -111,8 +111,18 @@ html.dark .bg-slate-50\/30,
 html.dark .bg-slate-50\/40,
 html.dark .bg-slate-50\/50,
 html.dark .bg-slate-50\/60,
+html.dark .bg-slate-50\/70,
 html.dark .bg-slate-50\/80,
+html.dark .bg-slate-50\/90,
 html.dark .bg-slate-100 { background-color: #1f2937 !important; }
+
+/* In dark mode, ensure table header rows and sticky thead surfaces match dark theme cards */
+html.dark thead,
+html.dark thead th {
+  background-color: #1e293b !important;
+  color: #94a3b8 !important;
+  border-color: var(--c360-border) !important;
+}
 
 html.dark .text-slate-900 { color: #f8fafc !important; }
 html.dark .text-slate-800,
@@ -126,8 +136,11 @@ html.dark .border-slate-50,
 html.dark .border-slate-100,
 html.dark .border-slate-200,
 html.dark .border-slate-200\/60,
+html.dark .border-slate-200\/70,
 html.dark .border-slate-200\/80,
 html.dark .border-slate-300 { border-color: var(--c360-border) !important; }
+
+html.dark .bg-slate-100\/90 { background-color: #1e293b !important; }
 
 html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
   border-color: var(--c360-border) !important;
@@ -159,9 +172,32 @@ html.dark .ring-indigo-50 { --tw-ring-color: rgb(51 65 85 / 0.55) !important; }
 html.dark .hover\:bg-white:hover,
 html.dark .hover\:bg-slate-50:hover,
 html.dark .hover\:bg-slate-100:hover,
-html.dark .hover\:bg-slate-50\/60:hover {
+html.dark .hover\:bg-slate-50\/60:hover,
+html.dark .hover\:bg-slate-50\/70:hover {
   background-color: #334155 !important;
 }
+
+html.dark .hover\:bg-indigo-50\/80:hover {
+  background-color: rgb(49 46 129 / 0.35) !important;
+}
+
+html.dark .active\:bg-indigo-100\/70:active {
+  background-color: rgb(49 46 129 / 0.55) !important;
+}
+
+/* Badge colors for table cells in dark theme */
+html.dark .bg-green-100 { background-color: rgb(20 83 45 / 0.35) !important; }
+html.dark .text-green-700 { color: #86efac !important; }
+html.dark .bg-purple-100 { background-color: rgb(88 28 135 / 0.35) !important; }
+html.dark .text-purple-700 { color: #d8b4fe !important; }
+html.dark .bg-blue-100 { background-color: rgb(30 58 138 / 0.35) !important; }
+html.dark .text-blue-700 { color: #93c5fd !important; }
+html.dark .bg-yellow-100 { background-color: rgb(113 63 18 / 0.35) !important; }
+html.dark .text-yellow-700 { color: #fde047 !important; }
+html.dark .bg-orange-100 { background-color: rgb(124 45 18 / 0.35) !important; }
+html.dark .text-orange-700 { color: #fdba74 !important; }
+html.dark .bg-red-100 { background-color: rgb(127 29 29 / 0.35) !important; }
+html.dark .text-red-700 { color: #fca5a5 !important; }
 
 html.dark .hover\:border-slate-300:hover {
   border-color: #475569 !important;

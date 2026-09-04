@@ -1,6 +1,6 @@
 <!-- Table Body -->
 {{#each rows}}
-<tr class="hover:bg-slate-50/60 transition-colors border-b border-slate-100 last:border-0 group {{rowClass}}"{{#if clickable}} data-id="{{id}}" style="cursor: pointer;"{{/if}}>
+<tr class="hover:bg-slate-50/60 border-b border-slate-100 last:border-0 group transition-colors duration-150 {{rowClass}}"{{#if clickable}} data-id="{{id}}" style="cursor: pointer;"{{/if}}>
   {{#each cells}}
   <td class="px-6 py-4 {{class}}">
     {{#if isIdentity}}
@@ -11,9 +11,11 @@
         <div class="font-semibold text-slate-900 truncate group-hover:text-indigo-600 transition-colors">{{name}}</div>
         {{#if sub}}
         {{#if isTagSub}}
-        <span class="inline-block text-[11px] font-mono text-slate-500 bg-slate-100 border border-slate-200/60 rounded px-1.5 py-0.5 mt-0.5">{{sub}}</span>
+        <div class="mt-0.5">
+          <span class="inline-block text-[11px] font-mono text-slate-500 bg-slate-100 border border-slate-200/60 rounded px-1.5 py-0.5">{{sub}}</span>
+        </div>
         {{else}}
-        <div class="text-xs text-slate-400 mt-0.5">{{sub}}</div>
+        <div class="text-xs text-slate-400 font-mono mt-0.5 truncate">{{sub}}</div>
         {{/if}}
         {{/if}}
       </div>
@@ -22,7 +24,7 @@
     {{#if value}}
       <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold shadow-sm {{badgeClass}}">{{value}}</span>
     {{else}}
-      <span class="text-slate-300 font-mono">—</span>
+      <span class="text-slate-300 font-mono text-xs">—</span>
     {{/if}}
     {{else if isMetrics}}
     <div class="space-y-0.5">
@@ -35,38 +37,38 @@
     </div>
     {{else if isLink}}
     {{#if value}}
-      <span class="dtv-cell-link cursor-pointer text-sm font-semibold text-indigo-600 hover:text-indigo-800 hover:underline" data-link-value="{{linkValue}}">{{value}}</span>
+      <span class="dtv-cell-link cursor-pointer text-sm font-semibold text-indigo-600 hover:text-indigo-800 hover:underline transition-colors" data-link-value="{{linkValue}}">{{value}}</span>
     {{else}}
-      <span class="text-slate-300 font-mono">—</span>
+      <span class="text-slate-300 font-mono text-xs">—</span>
     {{/if}}
     {{else}}
     {{#if value}}
       <span class="text-sm text-slate-700 font-medium">{{value}}</span>
     {{else}}
-      <span class="text-slate-300 font-mono">—</span>
+      <span class="text-slate-300 font-mono text-xs">—</span>
     {{/if}}
     {{/if}}
   </td>
   {{/each}}
   
   {{#if clickable}}
-  <td class="px-6 py-4 text-right">
-    <div class="inline-flex items-center gap-4">
+  <td class="px-6 py-4 text-right whitespace-nowrap">
+    <div class="inline-flex items-center justify-end gap-3">
       {{#if editable}}
-      <button type="button" class="dtv-edit-btn inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-indigo-700 transition-colors" data-id="{{id}}">
+      <button type="button" class="dtv-edit-btn group/btn inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-indigo-700 transition-colors" data-id="{{id}}" title="{{editLabel}}">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
         <span>{{editLabel}}</span>
       </button>
       {{/if}}
       <span class="dtv-action-label inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 group-hover:text-indigo-700 transition-colors">
-      <span>{{actionLabel}}</span>
-      <svg class="w-3.5 h-3.5 transform group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+        <span>{{actionLabel}}</span>
+        <svg class="w-3.5 h-3.5 transform group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
       </span>
     </div>
   </td>
   {{else if editable}}
-  <td class="px-6 py-4 text-right">
-    <button type="button" class="dtv-edit-btn inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-700 transition-colors" data-id="{{id}}">
+  <td class="px-6 py-4 text-right whitespace-nowrap">
+    <button type="button" class="dtv-edit-btn group/btn inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-700 transition-colors" data-id="{{id}}" title="{{editLabel}}">
       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
       <span>{{editLabel}}</span>
     </button>

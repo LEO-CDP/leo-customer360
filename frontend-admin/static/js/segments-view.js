@@ -259,16 +259,22 @@ window.C360 = window.C360 || {};
         is_active: true
       };
       if (!editingSegmentId) payload.tenant_id = C360.config.current.tenantId;
+      var wasEditing = !!editingSegmentId;
+      var savedSegmentId = editingSegmentId;
       var request = editingSegmentId
         ? api("/segments/" + editingSegmentId, payload, "PATCH")
         : api("/segments/", payload, "POST");
-      var savedSegmentId = editingSegmentId;
       $("#btn-segment-form-save").prop("disabled", true).addClass("opacity-60");
-      request.done(function () {
+      request.done(function (response) {
         closeSegmentForm();
         loadList(false, true);
-        if (savedSegmentId && savedSegmentId === currentSegmentId) loadDetail(savedSegmentId);
-        showToast(editingSegmentId ? "Segment updated" : "Segment created", "success");
+        var targetSegmentId = savedSegmentId || (response && response.segment_id);
+        if (targetSegmentId && targetSegmentId === currentSegmentId) loadDetail(targetSegmentId);
+        showToast(wasEditing ? "Segment updated" : "Segment created", "success");
+        if (wasEditing && targetSegmentId) {
+          currentSegmentId = targetSegmentId;
+          refreshSegmentDetail();
+        }
       }).fail(function (xhr) {
         var detail = (xhr.responseJSON && xhr.responseJSON.detail) || "Could not save segment.";
         $error.removeClass("hidden").text(typeof detail === "string" ? detail : JSON.stringify(detail));
@@ -370,6 +376,7 @@ window.C360 = window.C360 || {};
   }
 
   function segmentDetailVm(s) {
+    var displaySql = s.final_generated_sql || s.sql_rules || "";
     return $.extend({}, s, {
       domainLabel: fmt.domainLabel(s.domain),
       processedByLabel: processedByLabel(s.processed_by) + (s.processed_by === "ai_agent" ? "" : " (SQL Query Builder)"),
@@ -380,7 +387,8 @@ window.C360 = window.C360 || {};
       lastComputedLabel: fmt.dateTime(s.last_computed_at),
       createdLabel: fmt.dateTime(s.created_at),
       updatedLabel: fmt.dateTime(s.updated_at),
-      hasSqlRules: !!s.sql_rules,
+      display_sql: displaySql,
+      hasSqlRules: !!displaySql,
       hasJsonRules: !!(s.json_rules && Object.keys(s.json_rules).length)
     });
   }
@@ -569,6 +577,19 @@ window.C360 = window.C360 || {};
     $(document).on("click", "#btn-back-to-segments", function () { C360.router.navigate("/segments"); });
     $(document).on("click", "#btn-segments-refresh", function () { refreshAllSegments(); });
     $(document).on("click", "#btn-segment-detail-refresh", function () { refreshSegmentDetail(); });
+    $(document).on("click", "#btn-copy-sql", function () {
+      var sql = $("#segment-sql-content").text().trim();
+      if (!sql) return;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(sql);
+      }
+      var $btn = $(this);
+      var $text = $btn.find(".copy-sql-text");
+      $text.text("Copied!");
+      setTimeout(function () {
+        $text.text("Copy SQL");
+      }, 1500);
+    });
     $(document).on("click", "#btn-segments-create", function () { openSegmentForm(null); });
     $(document).on("click", "#btn-segment-detail-edit", function () { openSegmentForm(segmentsById[currentSegmentId]); });
     $(document).on("click", "#btn-segment-form-save", submitSegmentForm);
