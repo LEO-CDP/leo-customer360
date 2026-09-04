@@ -162,7 +162,8 @@ fi
 # PostgreSQL if reachable, else local SQLite — so the deploy does NOT hard-depend
 # on Postgres being up. Nothing to do here.
 sudo docker rm -f backend-system >/dev/null 2>&1 || true
-sudo docker run -d --name backend-system --restart unless-stopped --network host --env-file /opt/c360/backend.env "$RUN_IMG"
+# --log-opt: cap the json-file log (unbounded by default) so it can't fill the VM disk.
+sudo docker run -d --name backend-system --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/backend.env "$RUN_IMG"
 sleep 3
 sudo docker ps --filter name=backend-system --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
 REMOTE

@@ -202,7 +202,8 @@ else
   RUN_IMG="customer360-api"
 fi
 sudo docker rm -f customer360-api >/dev/null 2>&1 || true
-sudo docker run -d --name customer360-api --restart unless-stopped --network host --env-file /opt/c360/api.env "$RUN_IMG"
+# --log-opt: cap the json-file log (unbounded by default) so it can't fill the VM disk.
+sudo docker run -d --name customer360-api --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/api.env "$RUN_IMG"
 sleep 3
 sudo docker ps --filter name=customer360-api --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
 REMOTE

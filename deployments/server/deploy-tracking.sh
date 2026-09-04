@@ -222,13 +222,19 @@ sudo docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 for c in $(sudo docker ps -aq --filter "name=${CONTAINER}-"); do sudo docker rm -f "$c" >/dev/null 2>&1 || true; done
 sudo docker rm -f "$LB_NAME" >/dev/null 2>&1 || true
 
+# Cap every container's logs. The default json-file driver grows UNBOUNDED, and this is a
+# high-volume ingestion path (the nginx LB logs one line per event, plus N app replicas),
+# so without rotation /var/lib/docker/containers/*/*-json.log fills the VM disk. 10m x 3
+# bounds each container to ~30 MB. Applied (below) to the replicas and the LB.
+LOG_OPTS="--log-opt max-size=10m --log-opt max-file=3"
+
 # Start N app replicas on the bridge and build the nginx upstream list from their names.
 echo "   starting $REPLICAS replica(s) ..."
 upstreams=""
 i=1
 while [ "$i" -le "$REPLICAS" ]; do
   name="${CONTAINER}-${i}"
-  sudo docker run -d --name "$name" --restart unless-stopped \
+  sudo docker run -d --name "$name" --restart unless-stopped $LOG_OPTS \
     --network "$NETWORK" --env-file /opt/c360/tracking.env "$RUN_IMG" >/dev/null
   upstreams="${upstreams}    server ${name}:8010 max_fails=3 fail_timeout=10s;\n"
   i=$((i+1))
@@ -256,7 +262,7 @@ server {
 NGINX
 sudo mv "$lb_conf" /opt/c360/tracking-lb.conf
 sudo chmod 644 /opt/c360/tracking-lb.conf
-sudo docker run -d --name "$LB_NAME" --restart unless-stopped \
+sudo docker run -d --name "$LB_NAME" --restart unless-stopped $LOG_OPTS \
   --network "$NETWORK" -p 8010:8010 \
   -v /opt/c360/tracking-lb.conf:/etc/nginx/conf.d/default.conf:ro "$LB_IMAGE" >/dev/null
 
