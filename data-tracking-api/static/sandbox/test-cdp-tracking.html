@@ -518,7 +518,7 @@
         window.leoObserverLogDomain = observerConfig.logDomain;
         window.leoObserverTrackingUri = "/data/api/v1/tracking/logs";
         window.leoObserverTrackingEndpoint = "https://" + observerConfig.logDomain + window.leoObserverTrackingUri;
-        window.leoObserverCdnDomain = observerConfig.cdnDomain;
+        window.leoObserverCdnJS = observerConfig.cdnDomain;
         window.leoCdpProxyPath = "/data/cdp-sdk/html/cdp-event-proxy.html";
 
         window.srcTouchpointName =
@@ -532,7 +532,7 @@
          * Load LEO Observer asynchronously (local relative path first, CDN fallback).
          */
         const localSdkPath = "../c360-web-sdk/observer/leo.proxy.js";
-        const cdnSdkPath = `https://${window.leoObserverCdnDomain}/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js`;
+        const cdnSdkPath = `https://${window.leoObserverCdnJS}/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js`;
 
         $.getScript(localSdkPath)
             .done(() => {

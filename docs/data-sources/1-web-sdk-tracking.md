@@ -47,7 +47,7 @@ The tracking code below represents the production-standard integration snippet f
     window.leoObserverTrackingEndpoint = "https://" + window.leoObserverLogDomain + window.leoObserverTrackingUri;
     
     // CDN of JS
-    window.leoObserverCdnDomain = "{{leoObserverCdnDomain}}";
+    window.leoObserverCdnJS = "{{leoObserverCdnJS}}";
     
     // Data Touchpoint Metadata 
     window.srcTouchpointName = encodeURIComponent(document.title);
@@ -55,7 +55,7 @@ The tracking code below represents the production-standard integration snippet f
 
     // Dynamic Loader for the Main Proxy CDP JS
     var leoproxyJsPath = '/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js';
-    var src = location.protocol + '//' + window.leoObserverCdnDomain + leoproxyJsPath;
+    var src = location.protocol + '//' + window.leoObserverCdnJS + leoproxyJsPath;
     var jsNode = document.createElement('script');
     jsNode.async = true; 
     jsNode.defer = true; 
@@ -249,7 +249,7 @@ The self-invoking function `(function() { ... })()` configures the execution env
 | `window.leoObserverLogDomain` | `beta.leocdp.com` | Domain handling event ingestion endpoints (`/data/api/v1/tracking/logs`). |
 | `window.leoObserverTrackingUri` | `/data/api/v1/tracking/logs` | Canonical ingestion URI path for tracking logs. |
 | `window.leoObserverTrackingEndpoint` | `https://beta.leocdp.com/data/api/v1/tracking/logs` | Full absolute URL endpoint for event ingestion. |
-| `window.leoObserverCdnDomain` | CDN Host | Origin hosting observer proxy scripts and event iframe. |
+| `window.leoObserverCdnJS` | CDN Host | Origin hosting observer proxy scripts and event iframe. |
 | `window.srcTouchpointName` | `document.title` | URL-encoded human-readable touchpoint name. |
 | `window.srcTouchpointUrl` | `location.href` | URL-encoded current document URL. |
 

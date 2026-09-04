@@ -65,9 +65,9 @@ LEO_OBSERVER_TRACKING_ENDPOINT = os.getenv(
     "LEO_OBSERVER_TRACKING_ENDPOINT",
     f"https://{LEO_OBSERVER_LOG_DOMAIN}{LEO_OBSERVER_TRACKING_URI}"
 )
-LEO_OBSERVER_CDN_DOMAIN = os.getenv(
-    "LEO_OBSERVER_CDN_DOMAIN",
-    "gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main",
+LEO_OBSERVER_CDN_JS = os.getenv(
+    "LEO_OBSERVER_CDN_JS",
+    "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js",
 )
 
 
@@ -145,7 +145,7 @@ async def index(request: Request):
         "leo_observer_log_domain": LEO_OBSERVER_LOG_DOMAIN,
         "leo_observer_tracking_uri": LEO_OBSERVER_TRACKING_URI,
         "leo_observer_tracking_endpoint": LEO_OBSERVER_TRACKING_ENDPOINT,
-        "leo_observer_cdn_domain": LEO_OBSERVER_CDN_DOMAIN
+        "leo_observer_cdn_js": LEO_OBSERVER_CDN_JS
     }
     
     try:

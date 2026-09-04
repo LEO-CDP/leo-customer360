@@ -383,6 +383,50 @@
         	}
         };
 
+		var getUtmParamsFromCurrentUrl = function() {
+			var utmParams = {};
+			var pageUrl = window.location.href || document.location.href || "";
+
+			if (!pageUrl) {
+				return utmParams;
+			}
+
+			try {
+				var parsedUrl = new URL(pageUrl);
+				parsedUrl.searchParams.forEach(function(value, key) {
+					if (/^utm_/i.test(key) && value !== "") {
+						utmParams[key] = value;
+					}
+				});
+			} catch (e) {
+				var queryIndex = pageUrl.indexOf('?');
+				if (queryIndex >= 0) {
+					var query = pageUrl.substring(queryIndex + 1).split('#')[0];
+					query.split('&').forEach(function(pair) {
+						if (!pair) return;
+						var parts = pair.split('=');
+						var key = decodeURIComponent(parts[0] || "");
+						var value = decodeURIComponent(parts.slice(1).join('=') || "");
+						if (/^utm_/i.test(key) && value !== "") {
+							utmParams[key] = value;
+						}
+					});
+				}
+			}
+
+			return utmParams;
+		};
+
+		var mergeUtmIntoEventData = function(eventData) {
+			var utmParams = getUtmParamsFromCurrentUrl();
+			for (var key in utmParams) {
+				if (Object.prototype.hasOwnProperty.call(utmParams, key) && typeof eventData[key] === 'undefined') {
+					eventData[key] = utmParams[key];
+				}
+			}
+			return eventData;
+		};
+
 		var initLeoContextSession = function(){
             var payload = JSON.stringify({
                 'call': 'getContextSession',
@@ -407,6 +451,10 @@
             if (typeof eventData !== "object" || eventData === null) {
             	eventData = {};
             }
+			var normalizedMetric = typeof metricName === 'string' ? metricName.toLowerCase() : '';
+			if (normalizedMetric === 'page-view' || normalizedMetric === 'pageview') {
+				eventData = mergeUtmIntoEventData(eventData);
+			}
             var params = getObserverParams(metricName, eventData);
             var payload = JSON.stringify({
                 'call': 'doTracking',

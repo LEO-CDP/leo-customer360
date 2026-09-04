@@ -390,7 +390,7 @@ window.C360 = window.C360 || {};
           var cfg = (C360.config && C360.config.current) || {};
           var serverCfg = window.C360_SERVER_CONFIG || {};
           var configuredLogDomain = cfg.leoObserverLogDomain || serverCfg.leoObserverLogDomain;
-          var configuredCdnDomain = cfg.leoObserverCdnDomain || serverCfg.leoObserverCdnDomain || "gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main";
+          var configuredCdnDomain = cfg.leoObserverCdnJS || serverCfg.leoObserverCdnJS || "gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main";
           
           var logDomain = configuredLogDomain;
           if (!logDomain) {
@@ -403,7 +403,7 @@ window.C360 = window.C360 || {};
             dataSourceId: item.data_source_id,
             dataSourceName: item.name || "Web Touchpoint",
             leoObserverLogDomain: logDomain,
-            leoObserverCdnDomain: cdnDomain
+            leoObserverCdnJS: cdnDomain
           });
           $textarea.val("<script>\n" + scriptBody.trim() + "\n<\/script>");
         } catch (e) {
