@@ -136,9 +136,9 @@ if ! command -v docker >/dev/null 2>&1; then
   sudo systemctl enable --now docker
 fi
 sudo mkdir -p /opt/c360
-sudo chown "$(id -un)" /opt/c360
+sudo install -d -m 700 -o "$(id -un)" -g "$(id -gn)" /opt/c360/.tmp
 umask 077
-env_file="$(mktemp /opt/c360/api.env.XXXXXX)"
+env_file="$(mktemp /opt/c360/.tmp/api.env.XXXXXX)"
 cat > "$env_file" <<ENVF
 ENVIRONMENT=production
 DB_HOST=$DB_HOST
