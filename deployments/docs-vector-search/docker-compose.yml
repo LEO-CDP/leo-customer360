@@ -1,0 +1,44 @@
+# Document Vector Search agent — vServer deployment. 1 CPU / 2 GB RAM.
+#
+# Fully local models (e5 embed + bge rerank + Qwen 0.5B generate); vectors live in
+# pgvector on the external VNGCloud vDB (configured via PG_* in .env). The container
+# SERVES only — deploy.sh builds the index first (docker compose run … enrich).
+# Model weights persist in a host-mounted ./models-<env> dir (fetched by deploy.sh).
+services:
+  docs-vector-search:
+    build:
+      context: ../../tools/docs-vector-search
+    image: leo-docs-vector-search:${IMAGE_TAG:-latest}
+    container_name: ${CONTAINER_NAME:-docs-vector-search}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CORPUS_DIR: /app/corpus
+      MODELS_DIR: /app/models
+    command: ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${API_PORT:-8080}:8000"
+    volumes:
+      - ../../docs:/app/corpus:ro              # docs corpus (read-only)
+      - ${MODELS_DIR_HOST:-./models}:/app/models  # model weights (host-persisted)
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s

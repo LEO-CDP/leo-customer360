@@ -1,48 +1,50 @@
 # docs-vector-search
 
-Graph-RAG over the LEO Customer 360 documentation corpus — semantic search + a
-question-answering agent that cites its sources. Modeled on `C:\vault-graph`.
-**Runs entirely on OpenAI** (chat + embeddings).
+Local-model Graph-RAG over the LEO Customer 360 docs corpus. Semantic search + a
+grounded question-answering agent, **fully local** (no hosted LLM), backed by
+**pgvector** on the VNGCloud **vDB**.
 
-Full design + rationale: [`deployments/document/ai-vector-search-plan.md`](../../deployments/document/ai-vector-search-plan.md).
+Design + rationale: [`deployments/docs/local-rag-implementation-plan.md`](../../deployments/docs/local-rag-implementation-plan.md).
 
-## How it works
+## Pipeline
 
 ```
 docs/ *.md
-  │  enrich.py   embed each doc + extract entities/relations (OpenAI), cache → data/embeddings.json
-  ▼
-agent.py        embed question → cosine top-k → expand along links + shared entities → answer with OpenAI, cite sources
-  ▼
-server.py       FastAPI: POST /ask, POST /search, GET /health   (index loaded once at startup)
+  │  chunk (heading-aware + token window)
+  │  embed passages — e5-small (fastembed/ONNX)
+  ▼  upsert → pgvector on the vDB
+enrich.py
+
+question → embed "query:" → pgvector top-20 → rerank (bge, top-5) → generate (Qwen2.5-0.5B) → answer + sources
+  agent.py / server.py
 ```
 
-`src/providers.py` is the single integration seam — `chat()` and `embed()`, both OpenAI:
-- **`chat()`** → `chat.completions` (`CHAT_MODEL`, default `gpt-4.1`); structured extraction via `response_format` json_schema.
-- **`embed()`** → `embeddings` (`EMBED_MODEL`, default `text-embedding-3-small`).
+Local model seams (`src/providers.py`), all lazy-loaded once:
+- **embed** — `intfloat/multilingual-e5-small` via fastembed (VN+EN; `query:`/`passage:` prefixes)
+- **rerank** — `BAAI/bge-reranker-base` via fastembed `TextCrossEncoder`
+- **generate** — `Qwen2.5-0.5B-Instruct` Q4 via `llama-cpp-python`
 
-## Credentials
+Vector store (`src/store.py`) — `rag.doc_chunks` table with a `vector(384)` column + HNSW cosine index.
 
-The OpenAI SDK only auto-reads `OPENAI_API_KEY`. This project also accepts the CI
-names, which take precedence:
+## Prerequisites
 
-| Env var | Kind | Used for |
-|---------|------|----------|
-| `LEO_OPENAI_API_KEY` | GitHub Actions **secret** | OpenAI API key (falls back to `OPENAI_API_KEY`) |
-| `LEO_OPENAI_MODEL_NAME` | GitHub Actions **variable** | chat model (falls back to `CHAT_MODEL`, then `gpt-4.1`) |
-
-The embeddings model is set separately via `EMBED_MODEL`.
+- PostgreSQL 15 (the vDB) with the **`vector` extension** available (`enrich` runs `CREATE EXTENSION IF NOT EXISTS vector`).
+- Python 3.12; a C toolchain for `llama-cpp-python` (the Dockerfile installs it).
+- Model weights downloaded into `./models/` (the Qwen GGUF; fastembed auto-downloads its ONNX models on first use into `./models/fastembed`).
 
 ## Quick start
 
 ```bash
 cd tools/docs-vector-search
-python -m venv .venv && . .venv/Scripts/activate     # (Linux/mac: source .venv/bin/activate)
+python -m venv .venv && . .venv/Scripts/activate
 pip install -r requirements.txt
-cp .env.example .env                                 # then set the OpenAI key/model
-export LEO_OPENAI_API_KEY=sk-...                     # or OPENAI_API_KEY
+cp .env.example .env                 # set PG_* (the vDB) and model paths
 
-python -m src.enrich                                 # build index (embeddings + graph)
+# Fetch the generator once (example):
+#   huggingface-cli download Qwen/Qwen2.5-0.5B-Instruct-GGUF \
+#     Qwen2.5-0.5B-Instruct-Q4_K_M.gguf --local-dir ./models
+
+python -m src.enrich                 # chunk → embed → upsert into pgvector
 python -m src.agent "How does identity resolution merge two profiles?"
 uvicorn src.server:app --port 8000
 
@@ -51,53 +53,26 @@ curl -s localhost:8000/search -H 'content-type: application/json' -d '{"query":"
 curl -s localhost:8000/ask    -H 'content-type: application/json' -d '{"question":"What is CIR?"}'
 ```
 
-> An OpenAI key is required for everything except `/health` — `enrich`, `/search`
-> (it embeds the query), and `/ask` all call OpenAI.
-
 ## Commands
 
 | Command | Does |
 |---------|------|
-| `python -m src.enrich` | embed changed docs + extract graph → `data/embeddings.json` (idempotent) |
-| `python -m src.enrich --no-extract` | embeddings only (skip the LLM extraction pass) |
-| `python -m src.enrich --dry-run` | show what would change, write nothing |
-| `python -m src.agent "…"` | one-shot question; `--top-k`, `--hops`, `--show-context` |
+| `python -m src.enrich` | chunk + embed changed chunks → upsert into pgvector; prune removed chunks (idempotent) |
+| `python -m src.enrich --dry-run` | report what would change, write nothing |
+| `python -m src.agent "…"` | one-shot question; or no args for a REPL |
 | `uvicorn src.server:app` | serve `/ask`, `/search`, `/health` |
 
 ## Endpoints
 
 | Endpoint | Body | Returns |
 |----------|------|---------|
-| `POST /ask` | `{question, top_k?, hops?}` | `{answer, sources[], used_docs[]}` (chat + embeddings) |
-| `POST /search` | `{query, top_k?}` | `{hits[]}` — ranked docs, embeddings only (no chat) |
-| `GET /health` | — | readiness, loaded doc count, models, index build time |
-
-## Deploy
-
-Docker (mirrors `vault-graph` — the corpus is bind-mounted):
-
-```bash
-docker build -t docs-vector-search tools/docs-vector-search
-docker run -p 8000:8000 \
-  -e LEO_OPENAI_API_KEY=sk-... -e LEO_OPENAI_MODEL_NAME=gpt-4.1 \
-  -v "$PWD/docs:/app/corpus:ro" \
-  docs-vector-search
-```
-
-In **GitHub Actions**, pass the secret + variable as env:
-
-```yaml
-    env:
-      LEO_OPENAI_API_KEY:    ${{ secrets.LEO_OPENAI_API_KEY }}
-      LEO_OPENAI_MODEL_NAME: ${{ vars.LEO_OPENAI_MODEL_NAME }}
-```
-
-Refresh the index when `docs/**` changes (a CI job or scheduled run). On GKE/Cloud
-Run use mounted secrets rather than `-e` flags.
+| `POST /ask` | `{question, top_n?, top_k?}` | grounded answer + cited sources |
+| `POST /search` | `{query, top_n?}` | reranked chunks (no generation) |
+| `GET /health` | — | chunk count, models |
 
 ## Notes
 
-- **Idempotent enrich:** a content hash over the human text skips unchanged docs. Changing `EMBED_MODEL` invalidates the whole cache (documents and queries must share one embedder).
-- **Graph metadata lives in the cache**, not in the source `.md` files. Entities/relations + link edges drive `expand()`.
-- **`/ask` returns JSON** (non-streaming) in this version; streaming is a documented enhancement.
-- **Multi-tenancy:** this indexes *public product docs*. If it ever indexes tenant/customer data, add a `tenant_id` + RLS and a tenant-keyed cache first — see the plan's §5.
+- **Idempotent enrich:** a content hash per chunk skips unchanged chunks. Changing `EMBED_MODEL` (or its dim) means you must set `EMBED_DIM` to match and recreate `rag.doc_chunks` (the `vector(N)` column is fixed-width).
+- **e5 prefixes:** `embed()` prepends `query:` / `passage:`. If a future fastembed version adds e5 prefixes itself, drop them here to avoid double-prefixing.
+- **RAM:** on a 1 vCPU / 2 GB box the vectors live in the vDB (off-box); e5 + reranker + Qwen ≈ 1.4 GB resident — tight, may need swap. Drop the reranker (`RERANK_ENABLED=false`) first if memory-constrained.
+- Deploy (UAT/PROD vServer): [`deployments/docs-vector-search`](../../deployments/docs-vector-search).

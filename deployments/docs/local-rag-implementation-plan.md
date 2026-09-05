@@ -2,7 +2,7 @@
 
 **Goal:** Run the **AI Chat API** ([`tools/docs-vector-search`](../../tools/docs-vector-search)) with **local models** — embedding + reranking + generation in-process on the 1 vCPU / 2 GB box — replacing the hosted OpenAI calls, while keeping a hosted **fallback** for generation when RAM is tight.
 
-**Targets:** the existing service (its `chat()` / `embed()` seams in `providers.py`) and the [`document-agent` vServer deploy](../document-agent/README.md) (1 CPU / 2 GB).
+**Targets:** the existing service (its `chat()` / `embed()` seams in `providers.py`) and the [`docs-vector-search` vServer deploy](../docs-vector-search/README.md) (1 CPU / 2 GB).
 
 **Corpus reality:** `docs/` has **Vietnamese and English** docs (e.g. `SAE-CIR-VN.md`, `campaign-slide-VN.md`), so the default embedder must be multilingual.
 
@@ -17,7 +17,7 @@
 | **Rerank (biggest quality win)** | `BAAI/bge-reranker-base` | ~280 MB | fastembed `TextCrossEncoder` / ONNX | cross-encode top-20 → top-3–5; +100–300 ms on CPU |
 | **Generate (default)** | `Qwen2.5-0.5B-Instruct` Q4_K_M (GGUF) | ~400–600 MB | `llama-cpp-python` (CPU) | best tiny model for grounded Q&A + Vietnamese; Apache-2.0 |
 | Generate (fallback) | OpenAI / GreenNode MaaS | — | HTTP (existing seam) | when RAM is tight, offload generation and keep embed+rerank local |
-| **Vector store** | **pgvector** on the existing VNGCloud **vDB** (PostgreSQL 15) | off-box | managed Postgres | reuses [`deployments/postgres`](../../deployments/postgres); HNSW cosine index; separate UAT/PROD instances; frees the app box's RAM |
+| **Vector store** | **pgvector** on the existing VNGCloud **vDB** (PostgreSQL 15) | off-box | managed Postgres | reuses [`deployments/postgres`](../postgres); HNSW cosine index; separate UAT/PROD instances; frees the app box's RAM |
 
 **Licensing:** Qwen2.5 (Apache-2.0), bge/e5 (MIT/Apache) — all fine for commercial use.
 
@@ -63,7 +63,7 @@ Re-introduce `EMBED_PROVIDER` (removed in the OpenAI-only pass) with local backe
 - `openai` (kept): existing `text-embedding-3-small` for a hosted option.
 
 ### 3.3 Vector store — `store.py` (new) → pgvector on the vDB
-Use **pgvector** in the existing VNGCloud **vDB** (PostgreSQL 15, provisioned by [`deployments/postgres`](../../deployments/postgres)). This moves the index **off** the 2 GB app box and reuses infra we already run — a strong reason to prefer it over an in-process store here.
+Use **pgvector** in the existing VNGCloud **vDB** (PostgreSQL 15, provisioned by [`deployments/postgres`](../postgres)). This moves the index **off** the 2 GB app box and reuses infra we already run — a strong reason to prefer it over an in-process store here.
 - **Extension (once per DB):** `CREATE EXTENSION IF NOT EXISTS vector;` — apply via `deployments/postgres/run-sql.sh`.
 - **Schema** (dedicated `rag` schema so it never collides with product tables):
   ```sql
@@ -167,7 +167,7 @@ pgvector>=0.3             # pgvector adapter for psycopg
 
 ---
 
-## 7. Deployment impact (`document-agent/`)
+## 7. Deployment impact (`docs-vector-search/`)
 
 - **Compose:** add a `models` named volume (`/app/models`), set `FASTEMBED_CACHE_DIR` + `QWEN_MODEL_PATH`, keep the **1 CPU / 2 GB** limits. For Profile B, document adding a **2 GB swapfile** on the host (`fallocate`/`swapon`) — container memory limit stays 2 GB but swap gives headroom.
 - **deploy.sh:** add a one-time model-fetch step (into the volume) before `up`; the enrich step now chunks + embeds locally (no API cost) and **upserts chunks into the vDB**.
@@ -218,4 +218,4 @@ pgvector>=0.3             # pgvector adapter for psycopg
 - Rerank: `BAAI/bge-reranker-base` (HF; via fastembed `TextCrossEncoder`). *Note:* `bge-reranker-v2-m3` is stronger for Vietnamese but ~600 MB — too big here; `base` is the size/quality compromise.
 - Generate: `Qwen2.5-0.5B-Instruct-GGUF` (Q4_K_M) (HF; via `llama-cpp-python`).
 - Store: **pgvector** on the VNGCloud vDB (PostgreSQL 15) via `psycopg` + the `pgvector` adapter; DDL applied with `deployments/postgres/run-sql.sh`.
-- Fits the [`docs-vector-search`](../../tools/docs-vector-search) seams (`chat()`/`embed()`) and the [`document-agent`](../document-agent/README.md) 1 CPU / 2 GB deploy.
+- Fits the [`docs-vector-search`](../../tools/docs-vector-search) seams (`chat()`/`embed()`) and the [`docs-vector-search`](../docs-vector-search/README.md) 1 CPU / 2 GB deploy.

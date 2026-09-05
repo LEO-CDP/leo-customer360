@@ -4,7 +4,7 @@ Builds the LEO Customer 360 documentation website from **every `*.md` in the rep
 using [Quartz v4](https://quartz.jzhao.xyz), deployed to GitHub Pages by
 `.github/workflows/deploy-docs.yml`.
 
-Full design + rationale: [`deployments/document/quartz-docs-site-plan.md`](../deployments/document/quartz-docs-site-plan.md).
+Full design + rationale: [`deployments/document/quartz-docs-site-plan.md`](../deployments/docs/quartz-docs-site-plan.md).
 
 ## What's here
 

@@ -1,36 +1,29 @@
-"""Corpus loading: discover markdown, extract human text, hash, and resolve links.
-
-Shared by enrich (build the index) and retriever (read fresh titles/bodies at
-query time), so the Doc model and loading live here once.
-"""
+"""Corpus loading + chunking: split docs into heading-aware, token-windowed
+passages so retrieval and reranking work on granular spans."""
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import frontmatter
 
-from .config import CORPUS_DIR, EMBED_MODEL, INDEX_PATH, REPO_ROOT
+from .config import CHUNK_OVERLAP, CHUNK_TOKENS, CORPUS_DIR, REPO_ROOT
 
-WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)")
-MDLINK_RE = re.compile(r"\]\(([^)]+\.md)[^)]*\)")
-AIGRAPH_RE = re.compile(r"<!--\s*ai-graph:start\s*-->.*?<!--\s*ai-graph:end\s*-->", re.S)
 H1_RE = re.compile(r"^#\s+(.+)$", re.M)
+HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$")
 
 
 @dataclass
-class Doc:
-    path: str  # repo-relative posix path, e.g. "docs/CIR-improvement.md"
+class Chunk:
+    id: str  # "<repo-relative path>#<ordinal>"
+    path: str
     title: str
-    body: str  # human text (frontmatter + any ai-graph block stripped)
+    heading: str
+    ordinal: int
+    text: str
     content_hash: str
-    links: list[str] = field(default_factory=list)  # resolved repo-relative doc paths
-    vector: list[float] | None = None  # filled from the index / enrichment
-    entities: list[str] = field(default_factory=list)
-    relations: list[str] = field(default_factory=list)
 
 
 def _title(post, path: Path) -> str:
@@ -40,66 +33,68 @@ def _title(post, path: Path) -> str:
     return m.group(1).strip() if m else path.stem
 
 
-def load_docs() -> list[Doc]:
-    """Load every *.md under CORPUS_DIR as a Doc, with links resolved between them."""
-    docs: dict[str, Doc] = {}
-    contents: dict[str, str] = {}
-    stem_index: dict[str, str] = {}
-
-    for path in sorted(CORPUS_DIR.rglob("*.md")):
-        post = frontmatter.loads(path.read_text(encoding="utf-8"))
-        rel = path.relative_to(REPO_ROOT).as_posix()
-        body = AIGRAPH_RE.sub("", post.content).strip()
-        doc = Doc(
-            path=rel,
-            title=_title(post, path),
-            body=body,
-            content_hash=hashlib.sha256(body.encode("utf-8")).hexdigest(),
-        )
-        docs[rel] = doc
-        contents[rel] = post.content
-        stem_index.setdefault(path.stem.lower(), rel)
-        stem_index.setdefault(doc.title.lower(), rel)
-
-    known = set(docs)
-    for rel, doc in docs.items():
-        doc_dir = (REPO_ROOT / rel).parent
-        targets: set[str] = set()
-        for m in MDLINK_RE.finditer(contents[rel]):  # relative markdown links to .md
-            try:
-                trel = (doc_dir / m.group(1)).resolve().relative_to(REPO_ROOT).as_posix()
-            except ValueError:
-                continue
-            if trel in known:
-                targets.add(trel)
-        for m in WIKILINK_RE.finditer(contents[rel]):  # [[wikilinks]] by stem/title
-            key = m.group(1).strip().lower()
-            if key in stem_index:
-                targets.add(stem_index[key])
-        doc.links = sorted(targets - {rel})
-
-    return list(docs.values())
+def _windows(text: str, max_tokens: int, overlap: int) -> list[str]:
+    """Greedy word-window split by approximate tokens (~4 chars/token) with overlap."""
+    words = text.split()
+    if not words:
+        return []
+    max_chars, ov_chars = max_tokens * 4, overlap * 4
+    out, cur, cur_len = [], [], 0
+    for w in words:
+        cur.append(w)
+        cur_len += len(w) + 1
+        if cur_len >= max_chars:
+            out.append(" ".join(cur))
+            tail, tl = [], 0
+            for tw in reversed(cur):  # carry an overlap tail into the next window
+                if tl >= ov_chars:
+                    break
+                tail.insert(0, tw)
+                tl += len(tw) + 1
+            cur, cur_len = tail, tl
+    if cur and (not out or " ".join(cur) != out[-1]):
+        out.append(" ".join(cur))
+    return out
 
 
-def read_index_cache() -> dict:
-    """Per-doc {hash, vector, entities, relations} keyed by path — but only if the
-    index was built with the current EMBED_MODEL (a model change invalidates all)."""
-    if not INDEX_PATH.exists():
-        return {}
-    cache = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
-    return cache.get("docs", {}) if cache.get("model") == EMBED_MODEL else {}
+def chunk_doc(path: Path) -> list[Chunk]:
+    post = frontmatter.loads(path.read_text(encoding="utf-8"))
+    rel = path.relative_to(REPO_ROOT).as_posix()
+    title = _title(post, path)
 
-
-def hydrate(docs: list[Doc], cached: dict) -> list[Doc]:
-    """Attach cached vectors/graph to docs whose content hash still matches; return
-    the docs that MISSED the cache (new or changed) for the caller to embed."""
-    misses = []
-    for d in docs:
-        prev = cached.get(d.path)
-        if prev and prev.get("hash") == d.content_hash and prev.get("vector"):
-            d.vector = prev["vector"]
-            d.entities = prev.get("entities", [])
-            d.relations = prev.get("relations", [])
+    # Split the body into (heading, text) sections, then window each section.
+    sections: list[tuple[str, list[str]]] = [(title, [])]
+    for line in post.content.splitlines():
+        m = HEADING_RE.match(line)
+        if m:
+            sections.append((m.group(1).strip(), []))
         else:
-            misses.append(d)
-    return misses
+            sections[-1][1].append(line)
+
+    chunks, ordinal = [], 0
+    for heading, lines in sections:
+        section_text = "\n".join(lines).strip()
+        for piece in _windows(section_text, CHUNK_TOKENS, CHUNK_OVERLAP):
+            piece = piece.strip()
+            if not piece:
+                continue
+            chunks.append(
+                Chunk(
+                    id=f"{rel}#{ordinal}",
+                    path=rel,
+                    title=title,
+                    heading=heading,
+                    ordinal=ordinal,
+                    text=piece,
+                    content_hash=hashlib.sha256(piece.encode("utf-8")).hexdigest(),
+                )
+            )
+            ordinal += 1
+    return chunks
+
+
+def load_chunks() -> list[Chunk]:
+    chunks = []
+    for path in sorted(CORPUS_DIR.rglob("*.md")):
+        chunks.extend(chunk_doc(path))
+    return chunks

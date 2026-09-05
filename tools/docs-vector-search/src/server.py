@@ -1,67 +1,81 @@
-"""FastAPI service — /ask, /search, /health. The index is loaded once at startup.
+"""FastAPI service — /ask, /search, /health. Models load once at startup; a DB
+connection is opened per request (safe under the threadpool; low concurrency on 1 vCPU).
 
   uvicorn src.server:app --port 8000
 """
 from __future__ import annotations
 
-import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from .agent import query
-from .config import CHAT_MODEL, EMBED_MODEL, HOPS, TOP_K
-from .retriever import Index
-
-_state: dict = {}
+from . import store
+from .agent import query, retrieve
+from .config import (
+    EMBED_MODEL,
+    QWEN_MODEL_PATH,
+    RERANK_ENABLED,
+    RERANK_MODEL,
+    RERANK_TOP_K,
+    RETRIEVE_TOP_N,
+)
+from .providers import embed, rerank
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    t0 = time.time()
-    _state["index"] = Index.load()
-    _state["build_seconds"] = round(time.time() - t0, 2)
+    # Warm the models so the first request isn't slow, and fail fast if a model
+    # or the DB is misconfigured.
+    embed(["warmup"], task="query")
+    if RERANK_ENABLED:
+        rerank("warmup", ["warmup"])
+    with store.connect() as conn:
+        app.state.doc_count = store.count(conn)
     yield
-    _state.clear()
 
 
-app = FastAPI(title="LEO Customer 360 — Docs Vector Search", lifespan=lifespan)
+app = FastAPI(title="LEO Customer 360 — Document Vector Search", lifespan=lifespan)
 
 
 class AskRequest(BaseModel):
     question: str
-    top_k: int = TOP_K
-    hops: int = HOPS
+    top_n: int = RETRIEVE_TOP_N
+    top_k: int = RERANK_TOP_K
 
 
 class SearchRequest(BaseModel):
     query: str
-    top_k: int = TOP_K
+    top_n: int = RETRIEVE_TOP_N
 
 
 @app.get("/health")
 def health():
-    index: Index | None = _state.get("index")
     return {
-        "status": "ok" if index else "loading",
-        "loaded_docs": len(index.docs) if index else 0,
-        "chat_model": CHAT_MODEL,
+        "status": "ok",
+        "loaded_chunks": getattr(app.state, "doc_count", None),
         "embed_model": EMBED_MODEL,
-        "build_seconds": _state.get("build_seconds"),
+        "rerank_model": RERANK_MODEL if RERANK_ENABLED else None,
+        "generator": QWEN_MODEL_PATH.rsplit("/", 1)[-1],
     }
 
 
 @app.post("/search")
 def search(req: SearchRequest):
-    """Pure semantic search — ranked docs, no LLM call (cheap)."""
-    hits = _state["index"].search(req.query, req.top_k)
+    """Semantic retrieve + rerank — ranked chunks, no generation."""
+    with store.connect() as conn:
+        hits = retrieve(req.query, conn, req.top_n)
     return {
-        "hits": [{"path": d.path, "title": d.title, "score": round(s, 4)} for d, s in hits]
+        "hits": [
+            {"path": h["path"], "title": h["title"], "heading": h["heading"],
+             "score": round(float(h.get("rerank", h["score"])), 4)}
+            for h in hits[: req.top_n]
+        ]
     }
 
 
 @app.post("/ask")
 def ask(req: AskRequest):
-    """Graph-RAG — grounded answer + cited sources (calls the chat model)."""
-    return query(req.question, _state["index"], req.top_k, req.hops)
+    """Full RAG — grounded answer + cited sources."""
+    with store.connect() as conn:
+        return query(req.question, conn, req.top_n, req.top_k)

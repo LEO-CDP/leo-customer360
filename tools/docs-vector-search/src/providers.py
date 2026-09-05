@@ -1,68 +1,76 @@
-"""External-model access — OpenAI only (chat + embeddings).
+"""Local-model seams — the only code that loads a model. All lazy-loaded once.
 
-`chat()` and `embed()` are the single integration seam for the rest of the
-package; everything else is plain compute over your own data. To add another
-provider later, branch inside these two functions.
+  embed()    -> fastembed e5-small (ONNX)          [query:/passage: prefixes]
+  rerank()   -> fastembed bge-reranker-base (ONNX)  [cross-encoder]
+  generate() -> llama-cpp-python Qwen2.5-0.5B (GGUF)
 """
 from __future__ import annotations
 
 import functools
-import json
 
-from .config import CHAT_MODEL, EMBED_MODEL, OPENAI_API_KEY
+from .config import (
+    EMBED_MODEL,
+    FASTEMBED_CACHE,
+    GEN_CTX,
+    GEN_MAX_TOKENS,
+    GEN_THREADS,
+    QWEN_MODEL_PATH,
+    RERANK_MODEL,
+)
 
 
+# --------------------------------------------------------------- embed (e5)
 @functools.lru_cache(maxsize=1)
-def _client():
-    from openai import OpenAI
+def _embedder():
+    from fastembed import TextEmbedding
 
-    return OpenAI(api_key=OPENAI_API_KEY)  # api_key=None → SDK falls back to OPENAI_API_KEY env
-
-
-def chat(system: str, user: str, *, schema: dict | None = None, max_tokens: int = 4096):
-    """With `schema`: force JSON structured output and return the parsed object.
-    Without: return the answer text."""
-    kwargs = {
-        "model": CHAT_MODEL,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        # max_completion_tokens (not the deprecated max_tokens) — the former is
-        # required by newer models (o-series / gpt-5.x) and accepted by gpt-4.x.
-        "max_completion_tokens": max_tokens,
-    }
-    if schema is not None:
-        kwargs["response_format"] = {
-            "type": "json_schema",
-            "json_schema": {"name": "extraction", "schema": schema, "strict": True},
-        }
-    content = _client().chat.completions.create(**kwargs).choices[0].message.content
-    return json.loads(content) if schema is not None else content
-
-
-_MAX_EMBED_TOKENS = 8000  # text-embedding-3 accepts up to 8192 — leave headroom
-
-
-@functools.lru_cache(maxsize=1)
-def _encoder():
-    import tiktoken
-
-    return tiktoken.get_encoding("cl100k_base")  # text-embedding-3 tokenizer
-
-
-def _truncate(text: str) -> str:
-    tokens = _encoder().encode(text)
-    if len(tokens) <= _MAX_EMBED_TOKENS:
-        return text
-    return _encoder().decode(tokens[:_MAX_EMBED_TOKENS])
+    return TextEmbedding(model_name=EMBED_MODEL, cache_dir=FASTEMBED_CACHE)
 
 
 def embed(texts: list[str], *, task: str = "document") -> list[list[float]]:
-    """Embed texts with OpenAI. `task` is accepted for call-site symmetry, but OpenAI
-    uses one endpoint for documents and queries. The same model must embed both.
-    Inputs are truncated to the model's token limit so long docs don't 400."""
+    """Embed texts. e5 requires a task prefix: `query:` for the question,
+    `passage:` for documents. Same model must embed both."""
     if not texts:
         return []
-    resp = _client().embeddings.create(model=EMBED_MODEL, input=[_truncate(t) for t in texts])
-    return [d.embedding for d in resp.data]
+    prefix = "query: " if task == "query" else "passage: "
+    return [[float(x) for x in v] for v in _embedder().embed([prefix + t for t in texts])]
+
+
+# ------------------------------------------------------------ rerank (bge)
+@functools.lru_cache(maxsize=1)
+def _reranker():
+    from fastembed.rerank.cross_encoder import TextCrossEncoder
+
+    return TextCrossEncoder(model_name=RERANK_MODEL, cache_dir=FASTEMBED_CACHE)
+
+
+def rerank(query: str, passages: list[str]) -> list[float]:
+    """Cross-encoder relevance scores (higher = more relevant), one per passage."""
+    if not passages:
+        return []
+    return [float(s) for s in _reranker().rerank(query, passages)]
+
+
+# ---------------------------------------------------------- generate (Qwen)
+@functools.lru_cache(maxsize=1)
+def _llm():
+    from llama_cpp import Llama
+
+    return Llama(
+        model_path=QWEN_MODEL_PATH,
+        n_ctx=GEN_CTX,
+        n_threads=GEN_THREADS,
+        verbose=False,
+    )
+
+
+def generate(system: str, user: str) -> str:
+    resp = _llm().create_chat_completion(
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        max_tokens=GEN_MAX_TOKENS,
+        temperature=0.2,
+    )
+    return resp["choices"][0]["message"]["content"].strip()

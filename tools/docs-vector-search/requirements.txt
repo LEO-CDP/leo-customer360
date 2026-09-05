@@ -1,9 +1,9 @@
-# Runs entirely on OpenAI (chat + embeddings).
-openai>=1.40
-tiktoken>=0.7          # truncate embed inputs to the model's token limit
+# Local-model Graph-RAG over pgvector. No hosted LLM.
+fastembed>=0.4            # ONNX embeddings (e5-small) + TextCrossEncoder reranker (bge)
+llama-cpp-python>=0.3     # CPU GGUF generation (Qwen2.5-0.5B-Instruct)
+psycopg[binary]>=3.2      # vDB (PostgreSQL) client
+pgvector>=0.3             # pgvector adapter for psycopg
 fastapi>=0.110
 uvicorn[standard]>=0.29
-numpy>=1.26
-python-dotenv>=1.0
 python-frontmatter>=1.1
-httpx>=0.27
+python-dotenv>=1.0

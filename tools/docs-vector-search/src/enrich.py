@@ -1,102 +1,52 @@
-"""Build / refresh the embeddings + graph index (data/embeddings.json).
+"""Build / refresh the index: chunk docs → embed (e5) → upsert into pgvector.
 
-Idempotent: a content hash over the human text means unchanged docs reuse their
-cached vector + graph and skip the embedder and the LLM entirely.
+Idempotent: a content hash per chunk means unchanged chunks skip the embedder;
+chunks that vanished from the corpus are pruned.
 
-  python -m src.enrich                # embed + extract graph + write
-  python -m src.enrich --no-extract   # embeddings only (no LLM calls)
-  python -m src.enrich --dry-run      # preview what would change, write nothing
+  python -m src.enrich              # embed changed chunks + upsert + prune
+  python -m src.enrich --dry-run    # report what would change, write nothing
 """
 from __future__ import annotations
 
 import argparse
-import json
 
-from .config import EMBED_MODEL, INDEX_PATH
-from .corpus import hydrate, load_docs, read_index_cache
-from .providers import chat, embed
-
-EXTRACT_SYSTEM = (
-    "Extract the key domain entities and typed relations from this documentation. "
-    "Entities are concrete nouns a reader would search for (systems, tables, "
-    "components, concepts). Each relation connects two entities with a short verb "
-    "phrase. Be precise; never invent facts that are not in the text."
-)
-GRAPH_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "entities": {"type": "array", "items": {"type": "string"}},
-        "relations": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "source": {"type": "string"},
-                    "relation": {"type": "string"},
-                    "target": {"type": "string"},
-                },
-                "required": ["source", "relation", "target"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    "required": ["entities", "relations"],
-    "additionalProperties": False,
-}
+from . import store
+from .config import PG_SCHEMA
+from .corpus import load_chunks
+from .providers import embed
 
 
-def build(*, dry_run: bool = False, extract: bool = True) -> None:
-    docs = load_docs()
-    fresh = hydrate(docs, read_index_cache())  # attaches cached vectors; returns misses
+def build(*, dry_run: bool = False, batch: int = 64) -> None:
+    chunks = load_chunks()
+    conn = store.connect()
+    store.init_schema(conn)
+    existing = store.existing_hashes(conn)
+    fresh = [c for c in chunks if existing.get(c.id) != c.content_hash]
 
-    print(f"{len(docs)} docs — {len(docs) - len(fresh)} unchanged, {len(fresh)} to (re)embed")
+    print(f"{len(chunks)} chunks — {len(chunks) - len(fresh)} unchanged, {len(fresh)} to (re)embed")
     if dry_run:
-        for d in fresh:
-            print(f"  would embed: {d.path}")
         return
 
-    if fresh:
-        for d, vector in zip(fresh, embed([d.body for d in fresh], task="document")):
-            d.vector = vector
-        if extract:
-            for d in fresh:
-                try:
-                    graph = chat(EXTRACT_SYSTEM, d.body[:12000], schema=GRAPH_SCHEMA)
-                    d.entities = graph.get("entities", [])
-                    d.relations = [
-                        f"{r['source']} — {r['relation']} — {r['target']}"
-                        for r in graph.get("relations", [])
-                    ]
-                    print(f"  graph: {d.path} ({len(d.entities)} entities)")
-                except Exception as e:  # noqa: BLE001 — one bad doc shouldn't abort the run
-                    print(f"  WARN extract failed for {d.path}: {e}")
+    for i in range(0, len(fresh), batch):
+        part = fresh[i : i + batch]
+        vectors = embed([c.text for c in part], task="document")
+        store.upsert(
+            conn,
+            [
+                (c.id, c.path, c.title, c.heading, c.ordinal, c.content_hash, c.text, v)
+                for c, v in zip(part, vectors)
+            ],
+        )
+        print(f"  embedded {min(i + batch, len(fresh))}/{len(fresh)}")
 
-    out = {
-        "model": EMBED_MODEL,
-        "dim": len(docs[0].vector) if docs and docs[0].vector else 0,
-        "docs": {
-            d.path: {
-                "hash": d.content_hash,
-                "title": d.title,
-                "vector": d.vector,
-                "entities": d.entities,
-                "relations": d.relations,
-                "links": d.links,
-            }
-            for d in docs
-        },
-    }
-    INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
-    INDEX_PATH.write_text(json.dumps(out), encoding="utf-8")
-    print(f"Wrote {INDEX_PATH} — {len(docs)} docs, dim={out['dim']}, model={EMBED_MODEL}")
+    pruned = store.prune(conn, [c.id for c in chunks])
+    print(f"Done — {store.count(conn)} chunks in {PG_SCHEMA}.doc_chunks (pruned {pruned}).")
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Build the docs vector + graph index.")
-    ap.add_argument("--dry-run", action="store_true", help="preview only, write nothing")
-    ap.add_argument("--no-extract", action="store_true", help="embeddings only, no LLM")
-    args = ap.parse_args()
-    build(dry_run=args.dry_run, extract=not args.no_extract)
+    ap = argparse.ArgumentParser(description="Build the docs vector index in pgvector.")
+    ap.add_argument("--dry-run", action="store_true", help="report only, write nothing")
+    build(dry_run=ap.parse_args().dry_run)
 
 
 if __name__ == "__main__":
