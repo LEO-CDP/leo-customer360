@@ -1,0 +1,113 @@
+name: Deploy Docs site to GitHub Pages
+
+# Runs on EVERY push to ANY branch, then detects whether any *.md (or the site's
+# own config) actually changed before building — so unrelated commits still
+# trigger the workflow but don't rebuild the docs.
+# The BUILD runs on every branch (validates the docs compile); the DEPLOY to
+# GitHub Pages happens ONLY from the repo's default branch — Pages can publish
+# just one version, so feature branches must not overwrite the live site.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  QUARTZ_REF: "v4.5.2"
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need history to diff the pushed range
+
+      - name: Detect markdown / config changes
+        id: check
+        run: |
+          # Manual runs always deploy.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          BEFORE="${{ github.event.before }}"
+          # New branch / first push / missing base → can't diff, so deploy.
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Deploy when the push touched any markdown, the ignore list, the
+          # collector/config, or this workflow.
+          if git diff --name-only "$BEFORE" "${{ github.sha }}" \
+               | grep -qE '(\.md$|^\.documentignore$|^docs-site/|^\.github/workflows/deploy-docs\.yml$)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report decision
+        run: echo "Docs deploy needed: ${{ steps.check.outputs.changed }}"
+
+  build:
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history → real created/modified dates
+
+      - name: Fetch Quartz engine (pinned)
+        run: git clone --depth 1 --branch "$QUARTZ_REF" https://github.com/jackyzha0/quartz.git .quartz-engine
+
+      - name: Inject project config
+        run: |
+          cp docs-site/quartz.config.ts .quartz-engine/quartz.config.ts
+          cp docs-site/quartz.layout.ts  .quartz-engine/quartz.layout.ts
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Collect markdown (whole repo → content/, structure-preserving)
+        working-directory: docs-site
+        run: |
+          npm ci
+          rm -rf ../.quartz-engine/content
+          node collect.mjs --repo .. --out ../.quartz-engine/content --inject-frontmatter
+
+      - name: Build Quartz
+        working-directory: .quartz-engine
+        run: |
+          npm ci
+          npx quartz build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .quartz-engine/public
+
+  deploy:
+    needs: build
+    # Publish only from the default branch — feature branches build but never deploy.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

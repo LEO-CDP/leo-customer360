@@ -1,0 +1,13 @@
+{
+  "name": "docs-site-collector",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Collects every *.md in the repo (honoring .documentignore), mirrors the tree into Quartz's content/, and injects frontmatter.",
+  "scripts": {
+    "collect": "node collect.mjs --repo .. --out ../.quartz-engine/content --inject-frontmatter"
+  },
+  "dependencies": {
+    "ignore": "^5.3.2"
+  }
+}

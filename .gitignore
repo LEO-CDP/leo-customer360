@@ -20,3 +20,6 @@ backups
 
 node_modules
 */node_modules/
+# Quartz docs-site build artifacts (docs-site/)
+.quartz-engine/
+docs-site/node_modules/
