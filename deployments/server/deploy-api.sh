@@ -148,8 +148,13 @@ if command -v docker >/dev/null 2>&1; then
   sudo docker builder prune -a -f >/dev/null 2>&1 || true
   echo "   reclaiming disk (df after):  $(df -h --output=avail / | tail -1 | tr -d ' ') free"
 fi
+# Write the temp env file onto the /opt/c360 data disk, not /tmp: the root partition can be
+# small/full even after the reclaim above, and keeping it on the same filesystem we mv to
+# makes that mv an atomic rename instead of a cross-device copy. (restores PR #31)
+sudo mkdir -p /opt/c360
+sudo install -d -m 700 -o "$(id -un)" -g "$(id -gn)" /opt/c360/.tmp
 umask 077
-env_file="$(mktemp)"
+env_file="$(mktemp /opt/c360/.tmp/api.env.XXXXXX)"
 cat > "$env_file" <<ENVF
 ENVIRONMENT=production
 DB_HOST=$DB_HOST
@@ -184,7 +189,6 @@ ENVS
 else
   echo "SSO_LOGIN=false" >> "$env_file"
 fi
-sudo mkdir -p /opt/c360
 if [ -n "$OTEL_B64" ]; then printf '%s' "$OTEL_B64" | base64 -d >> "$env_file"; fi
 sudo mv "$env_file" /opt/c360/api.env
 sudo chmod 600 /opt/c360/api.env
