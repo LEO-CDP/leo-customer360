@@ -10,7 +10,7 @@ from redis.exceptions import RedisError
 from app import app
 from core.config import Settings
 from core.redis_cache import RateLimitDecision, TrackingRequestProtection
-from core.routers.tracking import get_protection, get_tracking_service
+from core.routers.tracking import get_protection, get_storage, get_tracking_service
 from core.service import TrackingLogService, _collect_sessions
 from core.storage import StoredTrackingLog, build_tracking_object
 
@@ -187,3 +187,65 @@ def test_rate_limited_request_returns_retry_after_header():
     assert response.status_code == 429
     assert response.headers["retry-after"] == "17"
     assert not fake_storage.calls
+
+
+class _HealthStorage:
+    """Fake storage whose S3 probe can be made to fail on demand."""
+
+    def __init__(self, reachable=True):
+        self.reachable = reachable
+
+    def check_connection(self):
+        if not self.reachable:
+            raise RuntimeError("s3 down")
+
+
+class _HealthProtection:
+    """Fake protection whose Redis ping can be made to fail on demand."""
+
+    def __init__(self, reachable=True):
+        self.reachable = reachable
+
+    def ping(self):
+        return self.reachable
+
+
+def _get_health(*, s3=True, redis=True):
+    """Drive GET /health with S3/Redis probes overridden to the given states."""
+    app.dependency_overrides[get_storage] = lambda: _HealthStorage(reachable=s3)
+    app.dependency_overrides[get_protection] = lambda: _HealthProtection(reachable=redis)
+    try:
+        return TestClient(app).get("/health")
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_health_ok_when_all_dependencies_reachable():
+    response = _get_health(s3=True, redis=True)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["s3"] == "reachable"
+    assert data["redis"] == "reachable"
+
+
+def test_health_degraded_when_redis_down_but_s3_up():
+    # Redis fails open (rate limit + sessions), so the service is still usable.
+    response = _get_health(s3=True, redis=False)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert data["s3"] == "reachable"
+    assert data["redis"] == "unreachable"
+
+
+def test_health_error_503_when_s3_unreachable():
+    # S3 is the critical sink: no ingestion possible, so /health must fail.
+    response = _get_health(s3=False, redis=True)
+
+    assert response.status_code == 503
+    data = response.json()
+    assert data["status"] == "error"
+    assert data["s3"] == "unreachable"

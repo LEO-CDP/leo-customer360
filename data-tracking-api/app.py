@@ -1,13 +1,15 @@
 """FastAPI entrypoint for the CDP data-tracking log service."""
 
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
-from core.routers.tracking import router as tracking_router
+from core.redis_cache import TrackingRequestProtection
+from core.routers.tracking import get_protection, get_storage, router as tracking_router
+from core.storage import S3ObjectStorage
 
 app = FastAPI(
     title="Customer 360 Data Tracking API",
@@ -68,6 +70,35 @@ def root() -> dict[str, str]:
 
 
 @app.get("/health", tags=["Health"])
-def health() -> dict[str, str]:
-    """Return liveness and the selected object-storage mode."""
-    return {"status": "ok", "storage_mode": settings.object_storage_mode}
+def health(
+    response: Response,
+    storage: S3ObjectStorage = Depends(get_storage),
+    protection: TrackingRequestProtection = Depends(get_protection),
+) -> dict[str, str]:
+    """Report liveness plus dependency reachability.
+
+    S3 is the critical sink: if it is unreachable the service cannot ingest, so
+    /health answers 503 ("error"). Redis (rate limiting + session counters)
+    fails open, so an unreachable Redis is reported as "degraded" but keeps a
+    200 — ingestion still works without it.
+    """
+    try:
+        storage.check_connection()
+        s3_ok = True
+    except Exception:
+        s3_ok = False
+
+    redis_ok = protection.ping()
+
+    if not s3_ok:
+        response.status_code = 503
+        status = "error"
+    else:
+        status = "ok" if redis_ok else "degraded"
+
+    return {
+        "status": status,
+        "storage_mode": settings.object_storage_mode,
+        "s3": "reachable" if s3_ok else "unreachable",
+        "redis": "reachable" if redis_ok else "unreachable",
+    }

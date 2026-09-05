@@ -30,7 +30,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
@@ -120,20 +120,31 @@ class AdServerApplication:
     # Infrastructure
     # ------------------------------------------------------------------
 
-    def _check_database(self) -> None:
+    def _database_reachable(self) -> bool:
         """
-        Validate that PostgreSQL is reachable.
+        Graceful PostgreSQL connectivity probe: returns a bool instead of
+        raising, so the /health endpoint can answer 503 with a descriptive body
+        rather than an unhandled 500. Single source of truth for "can we reach
+        the DB" — `_check_database` (startup) wraps this and raises.
         """
 
         try:
             with self.engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
-
-            logger.info("PostgreSQL connection OK")
-
+            return True
         except Exception:
             logger.exception("PostgreSQL connection failed")
-            raise
+            return False
+
+    def _check_database(self) -> None:
+        """
+        Strict startup check: raise if PostgreSQL is unreachable.
+        """
+
+        if not self._database_reachable():
+            raise RuntimeError("PostgreSQL is not reachable")
+
+        logger.info("PostgreSQL connection OK")
 
     # ------------------------------------------------------------------
     # FastAPI application
@@ -248,16 +259,23 @@ class AdServerApplication:
             "docs": "/docs",
         }
 
-    def health(self) -> dict:
+    def health(self, response: Response) -> dict:
         """
-        General health endpoint.
+        Readiness health endpoint: verifies the PostgreSQL dependency is
+        reachable. Returns 503 (with database=unreachable) when it is not, so
+        the deploy health-gate and Docker healthcheck don't mark the ad server
+        healthy while it cannot serve. (Redis is not wired into the ad server
+        yet, so there is nothing else to probe.)
+        """
 
-        This intentionally remains cheap.
-        """
+        db_ok = self._database_reachable()
+        if not db_ok:
+            response.status_code = 503
 
         return {
-            "status": "ok",
+            "status": "ok" if db_ok else "error",
             "service": "leo-ad-server-api",
+            "database": "reachable" if db_ok else "unreachable",
         }
 
     def database_health(self) -> dict:

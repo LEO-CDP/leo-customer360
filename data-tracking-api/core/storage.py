@@ -74,6 +74,18 @@ class S3ObjectStorage:
         self.client = boto3.client("s3", **client_kwargs)
         self.auto_create_buckets = settings.s3_auto_create_buckets
 
+    def check_connection(self) -> None:
+        """Probe object-storage reachability for /health.
+
+        Issues a cheap ListBuckets against the configured endpoint, which also
+        validates credentials. Raises ObjectStorageError if the store cannot be
+        reached so the health endpoint can report it (S3 is the critical sink).
+        """
+        try:
+            self.client.list_buckets()
+        except (BotoCoreError, ClientError) as exc:
+            raise ObjectStorageError("Object storage is not reachable") from exc
+
     def store_tracking_logs(
         self,
         data_source_id: UUID,

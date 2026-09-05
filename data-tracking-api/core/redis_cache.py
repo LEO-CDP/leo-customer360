@@ -85,6 +85,19 @@ class TrackingRequestProtection:
             if pattern.strip()
         )
 
+    def ping(self) -> bool:
+        """Report Redis reachability for /health.
+
+        Returns False instead of raising: Redis backs rate limiting and session
+        counters, both of which fail open, so an unreachable Redis is a degraded
+        (not fatal) condition the health endpoint should surface without erroring.
+        """
+        try:
+            return bool(self.client.ping())
+        except redis.RedisError:
+            logger.warning("Redis health probe failed", exc_info=True)
+            return False
+
     def is_bot(self, user_agent: Optional[str]) -> bool:
         if not self.settings.tracking_bot_filter_enabled or not user_agent:
             return False
