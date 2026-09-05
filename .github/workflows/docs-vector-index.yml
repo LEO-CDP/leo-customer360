@@ -1,0 +1,64 @@
+name: Docs Vector Index
+
+# Builds / refreshes the docs-vector-search embeddings index against the current
+# docs/ using OpenAI, and uploads it as an artifact (`docs-embeddings-index`).
+# Runs on docs or tool changes and on demand. enrich is idempotent, so a run
+# with no doc changes re-embeds nothing.
+on:
+  push:
+    paths:
+      - "docs/**"
+      - "tools/docs-vector-search/**"
+      - ".github/workflows/docs-vector-index.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-vector-index-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: tools/docs-vector-search
+        run: pip install -r requirements.txt
+
+      - name: Check OpenAI key is available
+        id: key
+        env:
+          LEO_OPENAI_API_KEY: ${{ secrets.LEO_OPENAI_API_KEY }}
+        run: |
+          if [ -z "${LEO_OPENAI_API_KEY:-}" ]; then
+            echo "::warning::LEO_OPENAI_API_KEY is not set (e.g. a fork PR) — skipping index build."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build / refresh the index
+        if: steps.key.outputs.ok == 'true'
+        working-directory: tools/docs-vector-search
+        env:
+          LEO_OPENAI_API_KEY: ${{ secrets.LEO_OPENAI_API_KEY }}
+          LEO_OPENAI_MODEL_NAME: ${{ vars.LEO_OPENAI_MODEL_NAME }}
+        run: python -m src.enrich
+
+      - name: Upload index artifact
+        if: steps.key.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-embeddings-index
+          path: tools/docs-vector-search/data/embeddings.json
+          if-no-files-found: error
