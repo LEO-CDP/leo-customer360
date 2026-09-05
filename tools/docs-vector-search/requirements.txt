@@ -1,5 +1,6 @@
 # Runs entirely on OpenAI (chat + embeddings).
 openai>=1.40
+tiktoken>=0.7          # truncate embed inputs to the model's token limit
 fastapi>=0.110
 uvicorn[standard]>=0.29
 numpy>=1.26
