@@ -1,0 +1,1 @@
+# The enrich step writes embeddings.json here. This keeps the dir in git.

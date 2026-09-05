@@ -28,13 +28,13 @@ Retrieval is plain **cosine similarity over an in-memory numpy matrix** (`agent.
 |---|---|---|
 | Corpus | The repo's `docs/` markdown (same corpus as the [Quartz docs site](quartz-docs-site-plan.md)) | One source of truth; the docs site is the human view, this is the AI/programmatic view |
 | Architecture | Mirror vault-graph: **enrich → embed → cosine-retrieve → graph-expand → LLM-answer**, one FastAPI service | Proven, small, easy to operate; graph-expansion measurably improves recall on linked docs |
-| Answer/synthesis model | **`claude-opus-5`** via the Anthropic SDK (default); `claude-sonnet-5`/`claude-haiku-4-5` for cost | This environment's default for new AI apps; adaptive thinking + streaming + structured outputs |
-| Embeddings | A dedicated embeddings model behind a `embed()` seam — **Voyage AI `voyage-3`** (recommended) *or* Vertex `text-embedding-005` (faithful mirror) *or* a local model | **Anthropic has no first-party embeddings endpoint** — this must be a separate provider |
+| Answer/synthesis model | **OpenAI** (default `CHAT_PROVIDER=openai`; model from `LEO_OPENAI_MODEL_NAME`, default `gpt-4.1`); `anthropic` still selectable | Runs on OpenAI infra; structured extraction via `response_format` json_schema |
+| Embeddings | **OpenAI `text-embedding-3-small`** (default `EMBED_PROVIDER=openai`); `voyage`/`vertex`/`local`/`hash` also behind the `embed()` seam | OpenAI provides both chat and embeddings, so one provider + key covers the whole service |
 | Vector store | **Phase 1:** JSON embeddings cache + in-memory cosine (exact mirror). **Phase 2:** `pgvector` in the existing PostgreSQL | Ship fast with zero new infra; graduate to pgvector for scale + tenant scoping |
 | Home | New self-contained service `tools/docs-vector-search/` (mirrors `tools/vault-graph/`) | Clean separation; optionally mount `/ask` behind the existing `customer360-api` gateway |
 | Deploy | Dockerfile + an entry in `deployments/docker-compose*`, wired via the existing deploy scripts | Reuses this repo's proven CD path |
 
-The design is **provider-neutral at the seams**: `chat()` and `embed()` are the only two functions that touch an external model, so you can start on Claude + Voyage and swap either without touching the retrieval/graph code.
+The design keeps a **single integration seam**: `chat()` and `embed()` are the only two functions that touch an external model. **The implemented service runs entirely on OpenAI** (chat + embeddings); adding another provider later means branching inside those two functions.
 
 ---
 
@@ -51,7 +51,7 @@ flowchart TB
     Q(["POST /ask {question}"]) --> R["retrieve: embed(question) → cosine top-k"]
     R --> X["graph-expand: pull [[wikilink]] / entity neighbours"]
     X --> B["build context (token-budgeted)"]
-    B --> A["chat(): claude-opus-5 answers, cites sources"]
+    B --> A["chat(): gpt-4.1 answers, cites sources"]
     A --> O(["answer + sources[]"])
     C -.loaded at startup.-> R
   end
@@ -105,16 +105,18 @@ FastAPI + uvicorn; load the index once at startup, reuse per request.
 
 ---
 
-## 4. Models, providers, and the Anthropic SDK
+## 4. Models & providers (OpenAI)
+
+> **Implemented: OpenAI only.** Chat `gpt-4.1` (via `LEO_OPENAI_MODEL_NAME`) with structured extraction through `response_format` json_schema, and embeddings `text-embedding-3-small`. The discussion below is retained as design rationale; the `chat()`/`embed()` seam makes a future provider swap a localized change.
 
 **Answer synthesis & extraction — Claude via the official `anthropic` SDK.** Do **not** use an OpenAI-compatible shim (the reference used one only to reach Gemini).
 
-- Default model **`claude-opus-5`**; expose `CHAT_MODEL` so ops can drop to `claude-sonnet-5` (cheaper, near-Opus quality) or `claude-haiku-4-5` (cheapest — fine for the enrichment/extraction pass).
+- Chat model **`gpt-4.1`** by default (from `LEO_OPENAI_MODEL_NAME`, else `CHAT_MODEL`); the entity/relation extraction pass uses OpenAI structured outputs (`response_format` json_schema).
 - **Answer path:** stream it — `client.messages.stream(model=CHAT_MODEL, max_tokens=16000, thinking={"type":"adaptive"}, ...)` and read `get_final_message()`. Streaming avoids HTTP timeouts on long answers.
 - **Extraction path:** structured output — `client.messages.parse(..., output_config={"format": {...}})` (or a Pydantic model) so entities/relations validate against a schema and don't need regex parsing.
 - **Auth:** the SDK resolves `ANTHROPIC_API_KEY`, then `ANTHROPIC_AUTH_TOKEN`, then an `ant auth login` profile — a bare `anthropic.Anthropic()` works once a profile exists. If LEO-CDP runs on GCP and wants Claude through Vertex, swap the client for `AnthropicVertex(project_id=..., region=...)` — same `messages` surface, no other code change.
 
-**Embeddings — a separate provider (Anthropic has none).** Put it behind `embed()` and pick one:
+**Embeddings — OpenAI `text-embedding-3-small`** (default; `text-embedding-3-large` for higher quality). Kept behind the `embed()` seam for a future switch:
 
 | Option | Model | When |
 |---|---|---|
@@ -146,7 +148,7 @@ leo-customer360/
    │  ├─ enrich.py      # build/refresh the index
    │  ├─ retriever.py   # cosine + graph expand
    │  ├─ agent.py       # query() + CLI/REPL
-   │  ├─ providers.py   # chat() [Anthropic] + embed() [Voyage/Vertex/local]
+   │  ├─ providers.py   # chat() + embed(), both OpenAI (single seam)
    │  └─ server.py      # FastAPI: /ask /search /health
    ├─ data/embeddings.json           # Phase 1 cache (gitignored or committed — decide)
    ├─ requirements.txt   # anthropic, fastapi, uvicorn, numpy, python-frontmatter, httpx, (voyageai|google-cloud-aiplatform)
@@ -168,12 +170,10 @@ Wire it into `deployments/` the same way other services are: a service block in 
 `.env` (kept out of git), mirroring the reference's `.env` shape:
 
 ```
-CHAT_MODEL=claude-opus-5
-EMBED_PROVIDER=voyage            # voyage | vertex | local
-EMBED_MODEL=voyage-3
-ANTHROPIC_API_KEY=sk-ant-...     # or use an `ant auth login` profile / Vertex ADC
-VOYAGE_API_KEY=...               # if EMBED_PROVIDER=voyage
-# VERTEX_PROJECT=... VERTEX_LOCATION=us-central1   # if EMBED_PROVIDER=vertex
+# CI: secret LEO_OPENAI_API_KEY + variable LEO_OPENAI_MODEL_NAME (take precedence)
+LEO_OPENAI_API_KEY=sk-...         # or OPENAI_API_KEY=sk-...
+CHAT_MODEL=gpt-4.1                # overridden by LEO_OPENAI_MODEL_NAME when set
+EMBED_MODEL=text-embedding-3-small
 TOP_K=6
 HOPS=1
 CONTEXT_CHAR_BUDGET=24000
@@ -217,9 +217,9 @@ Never commit keys. In GKE/Cloud Run use workload identity / mounted secrets rath
 
 | Risk / decision | Note |
 |---|---|
-| **Embedding provider** | Anthropic has none — pick Voyage (recommended) / Vertex / local. Blocks Phase 0. |
+| **Embedding provider** | Resolved: **OpenAI `text-embedding-3-small`** — chat and embeddings both run on OpenAI. |
 | **Corpus sensitivity** | Public docs → no tenant scoping needed. Tenant/customer data → apply RLS + tenant-keyed cache from the start (see §5). **Confirm before Phase 2.** |
-| **Answer model cost** | `claude-opus-5` for quality vs `claude-sonnet-5`/`haiku` for volume — expose via `CHAT_MODEL`. |
+| **Answer model cost** | Set the OpenAI chat model via `LEO_OPENAI_MODEL_NAME` (a smaller model trades quality for volume/cost). |
 | **Cache-key isolation** | If serving multiple tenants, the response/embedding cache key **must** include `tenant_id` — this is the exact bug (`cache.py:140`) the code review flagged. |
 | **Index freshness** | Decide the re-enrich trigger: CI on `docs/**` change, a schedule, or manual. |
 | **Graph signal** | These docs have fewer `[[wikilinks]]` than an Obsidian vault; entity-overlap expansion carries the graph — validate it adds recall on this corpus, tune `hops`. |
@@ -233,5 +233,5 @@ Never commit keys. In GKE/Cloud Run use workload identity / mounted secrets rath
 - Reference retrieval: `rank()` = normalized numpy matrix · normalized query vector, `argsort` top-k; `expand()` = 1-hop `[[wikilink]]` neighbours; `build_context()` char-budgeted at 24000.
 - Reference models: chat `google/gemini-2.5-flash` (OpenAI-compatible Vertex surface); embeddings `text-embedding-005` (native `:predict`). Embeddings cached in `vault/.vault-graph/embeddings.json` (~21 MB), idempotent via content hash over human text.
 - Reference serving: one uvicorn process, graph loaded once; `/ask`, `/v1/chat/completions`, `/v1/embeddings`, `/health`; ADC mounted read-only in Docker; GKE/Cloud Run via workload identity.
-- **This build's models (per the `claude-api` skill):** synthesis/extraction via the official `anthropic` SDK, default `claude-opus-5` (adaptive thinking, streaming, `output_config.format` for structured extraction); embeddings via a **separate** provider (Anthropic has no embeddings endpoint).
+- **This build's models (as implemented):** runs entirely on **OpenAI** — chat `gpt-4.1` (from `LEO_OPENAI_MODEL_NAME`) with structured extraction via `response_format` json_schema; embeddings `text-embedding-3-small`. Credentials: `LEO_OPENAI_API_KEY` (CI secret) or `OPENAI_API_KEY`.
 - Target corpus: `docs/` — 35 markdown files across `data-sources/`, `database/`, `pandoc-notes/`, `release-documents/`, `research-papers/`, `code-review/` (see the [Quartz plan](quartz-docs-site-plan.md) for the full inventory).
