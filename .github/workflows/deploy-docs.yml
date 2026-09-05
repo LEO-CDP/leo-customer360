@@ -1,4 +1,4 @@
-name: Deploy Docs site to GitHub Pages
+name: Docs Site
 
 # Runs on EVERY push to ANY branch, then detects whether any *.md (or the site's
 # own config) actually changed before building — so unrelated commits still
