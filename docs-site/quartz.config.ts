@@ -88,7 +88,7 @@ const config: QuartzConfig = {
       Plugin.Static(),
       Plugin.Favicon(),
       Plugin.NotFoundPage(),
-      // Plugin.CustomOgImages(),  // enable once the build is green (adds time)
+      Plugin.CustomOgImages(),  // enable once the build is green (adds time)
     ],
   },
 }
