@@ -1,0 +1,49 @@
+# AI Chat API (docs-vector-search) — vServer deployment. 1 CPU / 2 GB RAM.
+#
+# Same sizing for UAT and PROD; the environment is chosen by deploy.sh, which
+# copies .env.<uat|prod> → .env (used for both compose interpolation and the
+# container's env). The container SERVES a prebuilt index (deploy.sh builds it
+# first with `... run … python -m src.enrich`), so startup is fast and healthy.
+services:
+  ai-chat-api:
+    build:
+      context: ../../../tools/docs-vector-search
+    image: leo-ai-chat-api:${IMAGE_TAG:-latest}
+    container_name: ${CONTAINER_NAME:-ai-chat-api}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CORPUS_DIR: /app/corpus
+      DATA_DIR: /app/data
+    # Serve only — the index is built by deploy.sh (overrides the image's
+    # "enrich && serve" CMD so serving doesn't block on the multi-minute build).
+    command: ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${API_PORT:-8080}:8000"
+    volumes:
+      - ../../../docs:/app/corpus:ro   # docs corpus (read-only)
+      - index-data:/app/data           # persisted index built by deploy.sh
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  index-data:

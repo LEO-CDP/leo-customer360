@@ -1,0 +1,4 @@
+# Real environment files hold the OpenAI secret — never commit them.
+.env
+.env.uat
+.env.prod
