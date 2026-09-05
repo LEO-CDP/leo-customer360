@@ -1,0 +1,48 @@
+# .documentignore — markdown files/folders excluded from the published docs site.
+# Consumed by docs-site/collect.mjs (see deployments/document/quartz-docs-site-plan.md).
+# Syntax: gitignore-style globs, one per line. '#' = comment. Leading '!' re-includes.
+
+# ── Safety net (git ls-files already skips these; kept for the fs-walk mode) ──
+node_modules/
+**/node_modules/
+dist/
+build/
+out/
+.next/
+.venv/
+__pycache__/
+vendor/
+coverage/
+
+# ── Tooling / CI / editor internals ──
+.git/
+.github/
+.idea/
+.vscode/
+.claude/
+
+# ── Agent & editor instruction files (internal, not documentation) ──
+CLAUDE.md
+**/CLAUDE.md
+AGENTS.md
+.cursorrules
+
+# ── Boilerplate that adds noise ──
+**/CHANGELOG.md
+**/LICENSE.md
+**/CODE_OF_CONDUCT.md
+# CONTRIBUTING.md          # kept by default — uncomment to hide
+
+# ── Slide-deck sources (Marp/reveal — the `---` separators render as one long page) ──
+docs/campaign-slide-VN.md
+docs/CIR-Tech-Slides-VN.md
+
+# ── Generator scaffolding READMEs (e.g. CRA / Vite per-package) ──
+# frontend/**/README.md    # example: hide noisy per-package READMEs
+# !frontend/README.md      # ...but keep the top-level one
+
+# ── The planning docs themselves (optional) ──
+# deployments/document/**  # uncomment if you don't want to publish these plans
+
+# NOTE: files with `draft: true` in frontmatter are dropped by Quartz's
+# RemoveDrafts() filter — use that for per-file opt-out instead of listing here.
