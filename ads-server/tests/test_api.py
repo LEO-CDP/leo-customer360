@@ -125,7 +125,7 @@ class TestHealthEndpoints:
         assert data["docs"] == "/docs"
 
     def test_health_endpoint(self, client):
-        """Test GET /health returns health status."""
+        """Test GET /health returns health status and probes the database."""
         response = client.get("/health")
 
         assert response.status_code == 200
@@ -133,6 +133,7 @@ class TestHealthEndpoints:
 
         assert data["status"] == "ok"
         assert data["service"] == "leo-ad-server-api"
+        assert data["database"] == "reachable"
 
     def test_database_health_endpoint(self, client):
         """Test GET /health/database checks database connectivity."""
