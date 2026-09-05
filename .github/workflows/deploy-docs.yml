@@ -56,7 +56,8 @@ jobs:
           fi
 
       - name: Report decision
-        run: echo "Docs deploy needed: ${{ steps.check.outputs.changed }}"
+        run: |
+          echo "Docs deploy needed: ${{ steps.check.outputs.changed }}"
 
   build:
     needs: detect
