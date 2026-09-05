@@ -1,6 +1,6 @@
 # AI Chat API — vServer deployment (UAT + PROD)
 
-Runs the **docs-vector-search** service ([`tools/docs-vector-search`](../../../tools/docs-vector-search)) — the OpenAI Graph-RAG "AI Chat API" — on a vServer via Docker Compose. **1 CPU / 2 GB RAM**, identical sizing for UAT and PROD.
+Runs the **docs-vector-search** service ([`tools/docs-vector-search`](../../tools/docs-vector-search)) — the OpenAI Graph-RAG "AI Chat API" — on a vServer via Docker Compose. **1 CPU / 2 GB RAM**, identical sizing for UAT and PROD.
 
 ```mermaid
 flowchart LR
@@ -36,7 +36,7 @@ The heavy compute (LLM + embeddings) is **offloaded to OpenAI** — the containe
 ## Deploy
 
 ```bash
-cd deployments/document/ai-chat-api
+cd deployments/document-agent
 
 # 1. Configure the environment (once per env)
 cp .env.uat.example .env.uat      # then edit: set LEO_OPENAI_API_KEY (+ model/port if needed)

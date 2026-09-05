@@ -7,7 +7,7 @@
 services:
   ai-chat-api:
     build:
-      context: ../../../tools/docs-vector-search
+      context: ../../tools/docs-vector-search
     image: leo-ai-chat-api:${IMAGE_TAG:-latest}
     container_name: ${CONTAINER_NAME:-ai-chat-api}
     restart: unless-stopped
@@ -22,7 +22,7 @@ services:
     ports:
       - "${API_PORT:-8080}:8000"
     volumes:
-      - ../../../docs:/app/corpus:ro   # docs corpus (read-only)
+      - ../../docs:/app/corpus:ro   # docs corpus (read-only)
       - index-data:/app/data           # persisted index built by deploy.sh
     deploy:
       resources:
