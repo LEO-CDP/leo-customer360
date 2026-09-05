@@ -1,30 +1,39 @@
+# Web framework and ASGI server
 fastapi>=0.111,<1
 uvicorn[standard]>=0.30,<1
+psutil
+
+# Database and ORM
 SQLAlchemy>=2.0,<3
 psycopg2-binary>=2.9,<3
+
+# Vector and caching libraries
+pgvector>=0.3,<1
+redis>=5.0,<6
+
+# Data validation and environment settings
 pydantic>=2.6,<3
 pydantic-settings>=2.2,<3
 pydantic[email]
 python-dotenv>=1.0,<2
-pgvector>=0.3,<1
-redis>=5.0,<6
 
-# database migrations. 
+# Added FastMCP for Model Context Protocol server capabilities
+fastmcp>=0.1.0
+
+# Database migrations. 
 alembic>=1.13.0,<2
 
 # Dev-mode local JWT issuance/verification (POST /auth/login) -- see
 # core/utils/security.py. Already a transitive dep via other packages, but
-# pinned explicitly since core/auth.py and core/routers/auth_api.py import
-# it directly now.
+# pinned explicitly since core/auth.py and core/routers/auth_api.py import it directly now.
 PyJWT>=2.3,<3
 
-# submit job execution into Dagster server
-dagster-graphql
+# Submit job execution into Dagster server
+dagster-graphql>=1.0,<2
 
 # Test-only dependencies (see ./run_unit_tests.sh)
 pytest>=7.4,<9
-httpx2>=2.9.1
-
+httpx>=0.27,<1
 
 # OpenTelemetry zero-code request tracing (OTLP -> Jaeger). Installed here; the
 # Dockerfile runs `opentelemetry-bootstrap -a install` to pull the matching

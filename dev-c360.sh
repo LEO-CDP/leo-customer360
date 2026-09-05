@@ -29,7 +29,7 @@
 #   ./dev-c360.sh                   Start/create services, sync .env, run
 #                                    seed-demo only when DB is empty; otherwise
 #                                    print DB status counts.
-#   ./dev-c360.sh --no-seed         Same, but skip the CIR demo data seed step.
+#   ./dev-c360.sh no-seed           Same, but skip the CIR demo data seed step.
 #   ./dev-c360.sh restart           Restart only customer360-api,
 #                                    backend-system, and frontend-admin.
 #   ./dev-c360.sh reset             DESTRUCTIVE: `docker compose down -v`
@@ -71,7 +71,7 @@ for arg in "$@"; do
     reset) ACTION="reset" ;;
     stop-all) ACTION="stop-all" ;;
     -y|--yes) SKIP_CONFIRM="true" ;;
-    --no-seed) SKIP_SEED="true" ;;
+    no-seed) SKIP_SEED="true" ;;
     -h|--help)
       sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'
       exit 0

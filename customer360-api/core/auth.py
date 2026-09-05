@@ -16,8 +16,9 @@ import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Security, status
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 
 from core.cache import get_redis_client
 from core.config import settings
@@ -443,3 +444,54 @@ def require_admin(request: Request) -> None:
     if "admin" not in {r.lower() for r in roles}:
         raise HTTPException(status_code=403, detail="This action requires the 'admin' role.")
 
+# ---------------------------------------------------------
+# MCP & System Metrics Setup (Redis API Key Protected)
+# ---------------------------------------------------------
+
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
+
+
+def resolve_mcp_tenant_id(api_key: str) -> str:
+    """Resolve tenant_id from Redis key mapping: ``apikey:{api_key}`` -> tenant_id."""
+    redis_client = get_redis_client()
+    if redis_client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MCP authentication backend unavailable"
+        )
+
+    try:
+        raw_tenant_id = redis_client.get(f"apikey:{api_key}")
+    except Exception:
+        logger.warning("Failed to verify MCP API key from Redis", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to verify MCP API key from Redis"
+        )
+
+    if raw_tenant_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing MCP API Key"
+        )
+
+    if isinstance(raw_tenant_id, bytes):
+        tenant_id = raw_tenant_id.decode("utf-8", errors="ignore").strip()
+    else:
+        tenant_id = str(raw_tenant_id).strip()
+
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid MCP API key tenant mapping"
+        )
+
+    return tenant_id
+
+async def verify_mcp_api_key(api_key: str = Security(api_key_header)):
+    """
+    Dependency to validate MCP API key and resolve mapped tenant_id from Redis.
+    Assumes key-value mapping: ``set apikey:{api_key} {tenant_id}``.
+    """
+    return resolve_mcp_tenant_id(api_key)
