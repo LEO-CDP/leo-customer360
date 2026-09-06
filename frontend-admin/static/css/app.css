@@ -38,6 +38,12 @@ html.dark {
 }
 
 html.c360-theme-dark {
+  --c360-bg: #0f172a;
+  --c360-text: #e2e8f0;
+  --c360-muted: #94a3b8;
+  --c360-card: #111827;
+  --c360-border: #334155;
+  --c360-scroll-thumb: #475569;
   --c360-qb-group-bg: color-mix(in srgb, #1d4ed8 28%, #111827 72%);
   --c360-qb-group-border: color-mix(in srgb, #60a5fa 32%, #334155 68%);
   --c360-qb-group-shadow: 0 1px 2px color-mix(in srgb, #020617 45%, transparent);
@@ -302,9 +308,6 @@ html.c360-theme-dark tr.group:hover .dtv-action-label { color: #00d32a; }
 html.c360-theme-dark .dtv-edit-btn,
 html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
 
-.bar-track { background: var(--c360-border); border-radius: 9999px; overflow: hidden; }
-.bar-fill { height: 100%; border-radius: 9999px; }
-
 /* 
  * Matrix heatmap Wrapper
  */
@@ -324,15 +327,41 @@ html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
   box-shadow: var(--c360-qb-group-shadow);
 }
 
+/* Docs panel container colors should follow app theme regardless of dark-class strategy. */
+#docs-chat-panel {
+  background: var(--c360-card);
+  border-color: var(--c360-border);
+  color: var(--c360-text);
+}
+
+#docs-chat-form {
+  border-top-color: var(--c360-border);
+}
+
+.docs-chat-header-bar {
+  border-bottom-color: color-mix(in srgb, #ffffff 26%, transparent);
+}
+
+#docs-chat-input {
+  background: color-mix(in srgb, var(--c360-card) 85%, var(--c360-bg) 15%);
+  border-color: var(--c360-border);
+  color: var(--c360-text);
+}
+
+#docs-chat-input::placeholder {
+  color: var(--c360-muted);
+}
+
+.docs-chat-disclaimer {
+  color: var(--c360-muted);
+}
+
 /*
  * Docs Assistant (RAG chatbot) widget -- see static/js/docs-chatbot-view.js and
  * static/templates/common/docs-chatbot.html. Layout classes come from Tailwind in
  * the template; these style the message bubbles, sources and typing indicator, and
  * remap for dark mode via the shared --c360-* variables.
  */
-#docs-chat-log::-webkit-scrollbar { width: 8px; }
-#docs-chat-log::-webkit-scrollbar-thumb { background: var(--c360-scroll-thumb); border-radius: 9999px; }
-
 .docs-chat-msg { display: flex; }
 .docs-chat-msg-user { justify-content: flex-end; }
 .docs-chat-msg-bot { justify-content: flex-start; }

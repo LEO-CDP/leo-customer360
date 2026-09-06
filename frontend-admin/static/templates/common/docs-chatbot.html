@@ -1,6 +1,6 @@
 <!--
   =============================================================================
-  DOCS ASSISTANT (RAG CHATBOT) WIDGET
+  LEO Assistant (RAG CHATBOT) WIDGET
   =============================================================================
   Floating "Ask the Docs" launcher + panel, available on every tab. Rendered
   into #docs-chatbot-root by main.js; behaviour lives in static/js/docs-chatbot-view.js.
@@ -16,15 +16,15 @@
   <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor">
     <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.7 9.7 0 01-4-.86L3 20l1.06-3.18A7.9 7.9 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
   </svg>
-  <span class="text-sm font-semibold">Ask the Docs</span>
+  <span class="text-sm font-semibold">Ask LEO</span>
 </button>
 
 <!-- Chat panel -->
 <div id="docs-chat-panel" role="dialog" aria-modal="false" aria-label="Documentation assistant"
-  class="hidden fixed bottom-5 right-5 z-40 w-[min(26rem,calc(100vw-2.5rem))] max-h-[min(38rem,calc(100vh-2.5rem))] flex flex-col rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden">
+  class="hidden fixed bottom-5 right-5 z-40 w-[min(26rem,calc(100vw-2.5rem))] max-h-[min(38rem,calc(100vh-2.5rem))] flex flex-col rounded-2xl border shadow-2xl overflow-hidden">
 
   <!-- Header -->
-  <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-gradient-to-br from-indigo-600 to-indigo-700 text-white">
+  <div class="docs-chat-header-bar flex items-center justify-between gap-3 px-4 py-3 border-b bg-gradient-to-br from-indigo-600 to-indigo-700 text-white">
     <div class="flex items-center gap-2.5 min-w-0">
       <div class="p-1.5 bg-white/15 rounded-lg shrink-0">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor">
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <div class="min-w-0">
-        <p class="text-sm font-bold leading-tight">Docs Assistant</p>
+        <p class="text-sm font-bold leading-tight">LEO Assistant</p>
         <p class="text-[11px] text-indigo-100 leading-tight">Grounded in the Customer 360 docs</p>
       </div>
     </div>
@@ -58,11 +58,11 @@
   </div>
 
   <!-- Input -->
-  <form id="docs-chat-form" class="border-t border-slate-100 dark:border-slate-700 p-3">
+  <form id="docs-chat-form" class="border-t p-3">
     <div class="flex items-end gap-2">
       <textarea id="docs-chat-input" rows="1" autocomplete="off"
-        placeholder="Ask a question…  (Enter to send, Shift+Enter for a new line)"
-        class="flex-1 resize-none max-h-28 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"></textarea>
+        placeholder="Ask a question…  (Enter to send)"
+        class="flex-1 resize-none max-h-28 rounded-xl border text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"></textarea>
       <button id="docs-chat-send" type="submit" title="Send"
         class="shrink-0 inline-flex items-center justify-center rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white w-10 h-10 transition-colors">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
@@ -70,6 +70,6 @@
         </svg>
       </button>
     </div>
-    <p class="mt-2 text-[10px] text-slate-400 text-center">Answers are AI-generated from the docs and may be imperfect — verify with the linked sources.</p>
+    <p class="docs-chat-disclaimer mt-2 text-[10px] text-center">Answers are AI-generated from the docs and may be imperfect — verify with the linked sources.</p>
   </form>
 </div>
