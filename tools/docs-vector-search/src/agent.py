@@ -12,9 +12,11 @@ from .config import CONTEXT_CHAR_BUDGET, RERANK_ENABLED, RERANK_TOP_K, RETRIEVE_
 from .providers import embed, generate, rerank
 
 ANSWER_SYSTEM = (
-    "You are a documentation assistant for LEO Customer 360. Answer ONLY from the "
-    "context below. If the answer is not in the context, say you don't know. Cite the "
-    "source titles you used in [brackets]. Be concise."
+    "You are a documentation assistant for LEO Customer 360. Use ONLY the context below — "
+    "never use outside or prior knowledge, even for general-knowledge questions. If the "
+    'answer is not clearly in the context, reply EXACTLY: "I don\'t know — that isn\'t in '
+    'the documentation." and nothing else. When the context does answer, be concise and '
+    "cite the source titles you used in [brackets]."
 )
 
 
