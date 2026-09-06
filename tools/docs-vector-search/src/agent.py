@@ -44,6 +44,9 @@ def query(question: str, conn, top_n: int = RETRIEVE_TOP_N, top_k: int = RERANK_
     answer = generate(ANSWER_SYSTEM, f"Context:\n\n{_build_context(hits)}\n\nQuestion: {question}")
     return {
         "answer": answer,
+        # The chunk texts the generator actually saw — exposed so evaluation (RAGAS
+        # faithfulness / context metrics) scores the same context the answer used.
+        "contexts": [h["text"] for h in hits],
         "sources": [
             {"path": h["path"], "title": h["title"], "heading": h["heading"]} for h in hits
         ],
