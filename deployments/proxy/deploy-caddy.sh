@@ -48,6 +48,7 @@ NET_UP="$(tfval netdata_upstream "$ovl")";   NET_UP="${NET_UP:-127.0.0.1:4199}"
 PORT_UP="$(tfval portainer_upstream "$ovl")";PORT_UP="${PORT_UP:-127.0.0.1:9443}"
 JAE_UP="$(tfval jaeger_upstream "$ovl")";     JAE_UP="${JAE_UP:-127.0.0.1:4686}"   # -> oauth2-jaeger (SSO) -> Jaeger
 DATA_UP="$(tfval data_upstream "$ovl")";      DATA_UP="${DATA_UP:-10.100.1.8:8010}" # -> data-tracking-api on its own box (/data)
+DOCS_UP="$(tfval docs_upstream "$ovl")";      DOCS_UP="${DOCS_UP:-10.100.1.7:8000}" # -> docs-vector-search on its own box (/docs-ai)
 SDK_FRAME_ANCESTOR="$(tfval sdk_frame_ancestor "$ovl")"
 
 : "${DOMAIN:?set caddy_domain in $ovl (e.g. cdp.example.com)}"
@@ -74,6 +75,7 @@ PARAMS_B64="$(printf '%s\n' \
   "ACTION=$ACTION" "IMG=$IMG" "DOMAIN=$DOMAIN" "EMAIL=$EMAIL" \
   "API_UP=$API_UP" "KC_UP=$KC_UP" "FE_UP=$FE_UP" "ADS_UP=$ADS_UP" \
   "DAG_UP=$DAG_UP" "NET_UP=$NET_UP" "PORT_UP=$PORT_UP" "JAE_UP=$JAE_UP" "DATA_UP=$DATA_UP" \
+  "DOCS_UP=$DOCS_UP" \
   "SDK_FRAME_ANCESTOR=$SDK_FRAME_ANCESTOR" \
   "CADDYFILE_B64=$CADDYFILE_B64" | base64 | tr -d '\n')"
 
@@ -102,6 +104,7 @@ env_args=(
   -e ADS_UPSTREAM="$ADS_UP" -e DAGSTER_UPSTREAM="$DAG_UP"
   -e NETDATA_UPSTREAM="$NET_UP" -e PORTAINER_UPSTREAM="$PORT_UP"
   -e JAEGER_UPSTREAM="$JAE_UP" -e DATA_UPSTREAM="$DATA_UP"
+  -e DOCS_UPSTREAM="$DOCS_UP"
 )
 sudo docker pull "$IMG" >/dev/null || true
 

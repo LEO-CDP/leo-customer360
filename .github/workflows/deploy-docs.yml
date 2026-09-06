@@ -76,6 +76,11 @@ jobs:
         run: |
           cp docs-site/quartz.config.ts .quartz-engine/quartz.config.ts
           cp docs-site/quartz.layout.ts  .quartz-engine/quartz.layout.ts
+          # Docs Assistant (RAG chatbot) component + its inline script and styles.
+          mkdir -p .quartz-engine/quartz/components/scripts .quartz-engine/quartz/components/styles
+          cp docs-site/quartz-components/DocsChatbot.tsx                 .quartz-engine/quartz/components/
+          cp docs-site/quartz-components/scripts/docs-chatbot.inline.ts  .quartz-engine/quartz/components/scripts/
+          cp docs-site/quartz-components/styles/docs-chatbot.scss        .quartz-engine/quartz/components/styles/
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -91,6 +96,11 @@ jobs:
 
       - name: Build Quartz
         working-directory: .quartz-engine
+        env:
+          # Baked into the chatbot component (data-* attrs). Override via repo Variables if the
+          # public docs API / site base differ. Defaults: UAT docs API + the GitHub Pages site.
+          DOCS_AI_PUBLIC_URL: ${{ vars.DOCS_AI_PUBLIC_URL || 'https://beta.leocdp.com/docs-ai' }}
+          DOCS_SITE_BASE: ${{ vars.DOCS_SITE_BASE || 'https://leo-cdp.github.io/leo-customer360' }}
         run: |
           npm ci
           npx quartz build

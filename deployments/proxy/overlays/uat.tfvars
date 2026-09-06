@@ -28,5 +28,11 @@ jaeger_upstream = "127.0.0.1:4686"
 # with `cd ../server && terraform output servers` and correct if it differs.
 data_upstream = "10.100.1.8:8010"
 
+# docs-vector-search served under /docs-ai (the public docs site's chatbot calls it cross-origin).
+# On its OWN box (server key "docs"), so a PRIVATE cross-box ip. Reachable from the api box (Caddy)
+# via the docs:8000 extra_ingress rule in ../server/overlays/uat.tfvars. Verify with
+# `cd ../server && terraform output servers`.
+docs_upstream = "10.100.1.7:8000"
+
 # Parent origin allowed to embed the hidden c360 web SDK iframe.
 sdk_frame_ancestor = "https://beta.leocdp.com"

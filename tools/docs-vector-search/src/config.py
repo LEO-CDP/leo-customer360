@@ -54,6 +54,20 @@ RETRIEVE_TOP_N = int(os.getenv("RETRIEVE_TOP_N", "20"))
 RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "5"))
 CONTEXT_CHAR_BUDGET = int(os.getenv("CONTEXT_CHAR_BUDGET", "6000"))  # small — 0.5B ctx
 
+# --- HTTP / browser access -------------------------------------------------------
+# CORS allow-list for browsers calling this API directly (the static docs site on
+# GitHub Pages). Server-side callers (the frontend-admin /ai proxy) are same-origin
+# and don't need this. Comma-separated exact origins; never "*" on an unauthenticated,
+# CPU-heavy endpoint. Default: the public docs site.
+CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv("CORS_ORIGINS", "https://leo-cdp.github.io").split(",")
+    if o.strip()
+]
+# Serialize expensive generation so concurrent /ask calls queue instead of thrashing
+# (and OOM-ing) the 1 vCPU box. Retrieval (/search) is unaffected.
+ASK_MAX_CONCURRENCY = int(os.getenv("ASK_MAX_CONCURRENCY", "1"))
+
 # Vector store — pgvector on the VNGCloud vDB (PostgreSQL 15)
 PG_HOST = os.getenv("PG_HOST", "localhost")
 PG_PORT = int(os.getenv("PG_PORT", "5432"))

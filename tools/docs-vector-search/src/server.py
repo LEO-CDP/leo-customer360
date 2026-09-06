@@ -5,14 +5,18 @@ connection is opened per request (safe under the threadpool; low concurrency on 
 """
 from __future__ import annotations
 
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import store
 from .agent import query, retrieve
 from .config import (
+    ASK_MAX_CONCURRENCY,
+    CORS_ORIGINS,
     EMBED_MODEL,
     QWEN_MODEL_PATH,
     RERANK_ENABLED,
@@ -21,6 +25,10 @@ from .config import (
     RETRIEVE_TOP_N,
 )
 from .providers import embed, rerank
+
+# Bound concurrent generation so parallel /ask calls queue instead of thrashing the
+# 1 vCPU box (endpoints run in a threadpool, so a threading primitive is the right fit).
+_ask_gate = threading.Semaphore(max(1, ASK_MAX_CONCURRENCY))
 
 
 @asynccontextmanager
@@ -36,6 +44,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="LEO Customer 360 — Document Vector Search", lifespan=lifespan)
+
+# Browser access from the static docs site (cross-origin). Exact origins only; no
+# credentials, so we stay off the wildcard-with-credentials trap.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["content-type"],
+    allow_credentials=False,
+    max_age=600,
+)
 
 
 class AskRequest(BaseModel):
@@ -77,5 +96,7 @@ def search(req: SearchRequest):
 @app.post("/ask")
 def ask(req: AskRequest):
     """Full RAG — grounded answer + cited sources."""
-    with store.connect() as conn:
+    # Serialize generation (see _ask_gate) so concurrent asks can't pile up resident
+    # memory on the small box; retrieval below is cheap and runs under the same gate.
+    with _ask_gate, store.connect() as conn:
         return query(req.question, conn, req.top_n, req.top_k)
