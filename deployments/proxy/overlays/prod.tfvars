@@ -25,5 +25,10 @@ jaeger_upstream = "127.0.0.1:4686"
 # PRIVATE ip from ../server (prod) outputs once the "tracking" server key is provisioned.
 data_upstream = "10.101.1.15:8010" # <-- set the real tracking-box private ip
 
+# docs-vector-search under /docs-ai (public docs site chatbot). Dedicated box in prod — FILL with
+# that box's PRIVATE ip from ../server (prod) outputs, and open docs:8000 <- caddy box in the prod
+# server overlay's extra_ingress.
+docs_upstream = "10.101.1.16:8000" # <-- set the real docs-box private ip
+
 # Parent origin allowed to embed the hidden c360 web SDK iframe.
 sdk_frame_ancestor = "https://c360.leocdp.com"

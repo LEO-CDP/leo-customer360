@@ -1,11 +1,13 @@
 import { PageLayout, SharedLayout } from "./quartz/cfg"
 import * as Component from "./quartz/components"
+// Project component injected into the cloned engine by .github/workflows/deploy-docs.yml.
+import DocsChatbot from "./quartz/components/DocsChatbot"
 
 // components shared across all pages
 export const sharedPageComponents: SharedLayout = {
   head: Component.Head(),
   header: [],
-  afterBody: [],
+  afterBody: [DocsChatbot()],
   footer: Component.Footer({
     links: {
       GitHub: "https://github.com/LEO-CDP/leo-customer360",
