@@ -1,61 +1,52 @@
-# docs-vector-search — RAGAS evaluation
+# docs-vector-search — evaluation
 
-A **real** RAG evaluation: it calls the running service's `POST /ask` for each question,
-captures the answer **and the exact contexts the generator saw** (the `/ask` response now
-returns `contexts`), then scores the pipeline with [RAGAS](https://docs.ragas.io).
+Two ways to evaluate the running service. The service is **local end-to-end**, so the
+default eval is local too.
 
-## Why a hosted judge for a local service
-
-The service is **fully local** (Qwen 0.5B generate, e5 embed, bge rerank). RAGAS metrics
-need a **strong judge model** to grade faithfulness/relevancy — a 0.5B model cannot reliably
-grade itself. So evaluation uses a stronger **hosted judge** (OpenAI via the repo's
-`LEO_OPENAI_API_KEY`). This is standard RAGAS practice: **the eval judge is not the
-production model.** Nothing about serving changes — the judge is used only to score.
-
-## Metrics
-
-| Metric | Needs `ground_truth`? | What it measures |
-|---|---|---|
-| `faithfulness` | no | are the answer's claims grounded in the retrieved contexts (no hallucination) |
-| `answer_relevancy` | no | does the answer actually address the question |
-| `context_recall` | yes | did retrieval fetch the info the reference answer needs |
-| `llm_context_precision_with_reference` | yes | are the retrieved contexts on-point (not noise) |
-| `answer_correctness` | yes | answer vs. reference answer |
-
-Rows in `dataset.jsonl` with a `ground_truth` get the reference-based metrics too; rows
-without still get faithfulness + answer_relevancy. **Expand `dataset.jsonl`** with more
-questions (EN + VN) and verified `ground_truth` answers drawn from `docs/` for a stronger
-signal — the seeded references are a starting point to review.
-
-## Run
-
+Point either at a running instance (SSH-tunnel the UAT box — its `:8000` is private):
 ```bash
-cd tools/docs-vector-search/test
-pip install -r requirements-test.txt
-
-# 1) Point at a running service. For the UAT box (port 8000 is not public), tunnel:
-#      ssh -i ~/.ssh/c360-api_ed25519 -L 8000:localhost:8000 leocdp360@<docs-box-ip>
-export SERVICE_URL=http://localhost:8000
-
-# 2) Judge creds (reuse the repo's OpenAI secret)
-export LEO_OPENAI_API_KEY=sk-...
-export RAGAS_LLM_MODEL=gpt-4o-mini            # optional
-export RAGAS_EMBED_MODEL=text-embedding-3-small
-# export OPENAI_BASE_URL=...                  # optional OpenAI-compatible gateway
-
-# 3a) Ad-hoc: print a score table + write ragas_report.json / ragas_tier1.csv / ragas_tier2.csv
-python ragas_eval.py
-
-# 3b) As a test gate (asserts per-metric thresholds; skips if no key/service)
-pytest -v -s
+ssh -i ~/.ssh/c360-api_ed25519 -L 8099:localhost:8000 leocdp360@<docs-box-ip>
+export SERVICE_URL=http://localhost:8099
 ```
 
-Thresholds are modest by default (local 0.5B generator). Tune per metric:
-`MIN_FAITHFULNESS`, `MIN_ANSWER_RELEVANCY`, `MIN_CONTEXT_RECALL`, `MIN_CONTEXT_PRECISION`.
+## 1. `local_eval.py` — fully local, no hosted judge (default)
+
+Judge-free, deterministic, **nothing leaves the box**. Hits `/search` + `/ask` and scores:
+
+| Metric | What / how |
+|---|---|
+| `retrieval hit@k` / `MRR` | is an expected source in `/search` top-k? (the biggest quality driver) |
+| `keyword_coverage` | fraction of a question's `must_contain` terms present in the answer |
+| `grounding_proxy` | fraction of the answer's content words found in the retrieved contexts — a judge-free stand-in for "faithfulness" |
+| `refusal_rate` | out-of-scope questions must be declined ("I don't know") |
+
+```bash
+pip install httpx                 # that's the only dep
+python local_eval.py              # prints a table, writes local_eval_report.json
+```
+
+Labels live in `dataset.jsonl` (`expect_source`, `must_contain`, `out_of_scope`). Expand it
+with more questions drawn from `docs/` to sharpen the signal.
+
+## 2. `ragas_eval.py` — LLM-judged metrics (opt-in, needs a judge)
+
+[RAGAS](https://docs.ragas.io) `faithfulness` / `answer_relevancy` / `context_precision` /
+`context_recall` / `answer_correctness` — these need a **capable judge LLM**. The local Qwen
+0.5B can't grade itself, so this path uses a **stronger judge**: OpenAI by default, or any
+**local** capable model via an OpenAI-compatible endpoint (e.g. Ollama `qwen2.5:7b` →
+`OPENAI_BASE_URL=http://localhost:11434/v1`). ⚠️ It sends each answer + retrieved context to
+that judge for grading.
+
+```bash
+pip install -r requirements-test.txt
+export LEO_OPENAI_API_KEY=sk-...            # or OPENAI_API_KEY; + OPENAI_BASE_URL for a gateway
+export RAGAS_LLM_MODEL=gpt-4o-mini          # or your judge model
+python ragas_eval.py                        # or: pytest -v -s
+```
 
 ## Files
-
-- `dataset.jsonl` — questions (+ optional `ground_truth`, `lang`).
-- `ragas_eval.py` — query the service → build `EvaluationDataset` → `evaluate` → report.
-- `test_ragas.py` — pytest gate over the metric means.
-- `requirements-test.txt` — RAGAS + judge deps (kept out of the service runtime image).
+- `local_eval.py` — fully-local eval (default).
+- `ragas_eval.py` / `test_ragas.py` — RAGAS (opt-in judge).
+- `dataset.jsonl` — shared question set (+ local-eval labels + optional `ground_truth`).
+- `requirements-test.txt` — RAGAS + judge deps (local_eval needs only `httpx`).
+- Latest scores: [`PERFORMANCE.md`](./PERFORMANCE.md).

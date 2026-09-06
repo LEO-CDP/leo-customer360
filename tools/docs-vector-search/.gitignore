@@ -5,3 +5,7 @@ __pycache__/
 # Downloaded model weights (fastembed ONNX + Qwen GGUF) — never commit.
 models/*
 !models/.gitkeep
+
+# eval outputs (generated)
+test/*_report.json
+test/ragas_*.csv

@@ -1,12 +1,15 @@
-{"question": "What is Customer Identity Resolution (CIR)?", "ground_truth": "Customer Identity Resolution (CIR) is the process of matching and merging records that belong to the same person across sources into a single unified customer profile, using deterministic and/or probabilistic matching on identifiers.", "lang": "en"}
-{"question": "How does identity resolution decide that two profiles are the same person?", "ground_truth": "It compares shared identifiers and attributes (e.g. email, phone, device/cookie ids) using matching rules; when they meet the match criteria the profiles are linked/merged into one identity.", "lang": "en"}
-{"question": "How does the platform keep one tenant's data isolated from another's?", "ground_truth": null, "lang": "en"}
-{"question": "What is a customer segment and how is it used?", "ground_truth": null, "lang": "en"}
-{"question": "What does the ad server (LEO Ad Server) do?", "ground_truth": null, "lang": "en"}
-{"question": "How are tracking events ingested and where are they stored?", "ground_truth": null, "lang": "en"}
-{"question": "What is a unified customer profile in Customer 360?", "ground_truth": null, "lang": "en"}
-{"question": "What database schema does the ad server use?", "ground_truth": "The ad server uses a dedicated schema named leo_ads in the shared Customer 360 database.", "lang": "en"}
-{"question": "CIR là gì trong hệ thống Customer 360?", "ground_truth": null, "lang": "vn"}
-{"question": "Phân khúc khách hàng (customer segment) được dùng để làm gì?", "ground_truth": null, "lang": "vn"}
-{"question": "Làm thế nào để hợp nhất hai hồ sơ khách hàng của cùng một người?", "ground_truth": null, "lang": "vn"}
-{"question": "How does segmentation evaluate which customers belong to a segment?", "ground_truth": null, "lang": "en"}
+# Eval set. Fields: question, ground_truth (optional, for ragas_eval), lang.
+# Local-eval labels: expect_source (substring or list matched vs retrieved /search paths),
+# must_contain (terms expected in the answer), out_of_scope (true -> answer must be a refusal).
+{"question": "What is Customer Identity Resolution (CIR)?", "expect_source": ["identity-resolution", "cir"], "must_contain": ["identity", "profile"], "ground_truth": "Customer Identity Resolution (CIR) matches and merges records that belong to the same person across sources into a single unified customer profile.", "lang": "en"}
+{"question": "How does identity resolution decide that two records are the same person?", "expect_source": ["identity-resolution", "cir"], "must_contain": ["match", "identifier"], "ground_truth": "It compares shared identifiers/attributes with matching rules; records that meet the criteria are linked/merged into one identity.", "lang": "en"}
+{"question": "What is a unified customer profile in Customer 360?", "expect_source": ["identity-resolution", "cir", "customer"], "must_contain": ["profile", "customer"], "ground_truth": null, "lang": "en"}
+{"question": "What is 'Persona as a Vector'?", "expect_source": ["persona", "vector"], "must_contain": ["persona", "vector"], "ground_truth": null, "lang": "en"}
+{"question": "How does the persona representation change after matching?", "expect_source": ["persona", "identity-resolution", "cir"], "must_contain": ["persona"], "ground_truth": null, "lang": "en"}
+{"question": "CIR là gì trong hệ thống Customer 360?", "expect_source": ["cir", "identity"], "must_contain": ["khách hàng"], "ground_truth": null, "lang": "vn"}
+{"question": "Persona được biểu diễn như thế nào trong marketing 8.0?", "expect_source": ["persona", "marketing"], "must_contain": ["persona"], "ground_truth": null, "lang": "vn"}
+{"question": "What does a marketing campaign slide cover?", "expect_source": ["campaign", "marketing"], "must_contain": ["campaign"], "ground_truth": null, "lang": "en"}
+{"question": "What is the goal of Customer 360?", "expect_source": ["roadmap", "customer", "identity"], "must_contain": ["customer"], "ground_truth": null, "lang": "en"}
+{"question": "How are customer records matched and merged?", "expect_source": ["identity-resolution", "cir"], "must_contain": ["match", "merge"], "ground_truth": null, "lang": "en"}
+{"question": "What is the weather in Hanoi today?", "out_of_scope": true, "must_contain": [], "ground_truth": null, "lang": "en"}
+{"question": "Who won the 2022 FIFA World Cup?", "out_of_scope": true, "must_contain": [], "ground_truth": null, "lang": "en"}
