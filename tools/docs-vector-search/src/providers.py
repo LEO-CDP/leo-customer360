@@ -1,6 +1,6 @@
 """Local-model seams — the only code that loads a model. All lazy-loaded once.
 
-  embed()    -> fastembed e5-small (ONNX)          [query:/passage: prefixes]
+  embed()    -> fastembed paraphrase-multilingual-MiniLM (ONNX)  [384-dim VN+EN]
   rerank()   -> fastembed bge-reranker-base (ONNX)  [cross-encoder]
   generate() -> llama-cpp-python Qwen2.5-0.5B (GGUF)
 """
@@ -27,13 +27,20 @@ def _embedder():
     return TextEmbedding(model_name=EMBED_MODEL, cache_dir=FASTEMBED_CACHE)
 
 
+# e5 models need "query:"/"passage:" task prefixes; other supported models
+# (e.g. sentence-transformers/paraphrase-multilingual-MiniLM) must NOT get them.
+_E5_PREFIX = "e5" in EMBED_MODEL.lower()
+
+
 def embed(texts: list[str], *, task: str = "document") -> list[list[float]]:
-    """Embed texts. e5 requires a task prefix: `query:` for the question,
-    `passage:` for documents. Same model must embed both."""
+    """Embed texts. For e5 models, prepend the task prefix (`query:` for the
+    question, `passage:` for documents); the same model must embed both."""
     if not texts:
         return []
-    prefix = "query: " if task == "query" else "passage: "
-    return [[float(x) for x in v] for v in _embedder().embed([prefix + t for t in texts])]
+    if _E5_PREFIX:
+        prefix = "query: " if task == "query" else "passage: "
+        texts = [prefix + t for t in texts]
+    return [[float(x) for x in v] for v in _embedder().embed(texts)]
 
 
 # ------------------------------------------------------------ rerank (bge)

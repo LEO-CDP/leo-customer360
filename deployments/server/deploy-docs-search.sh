@@ -3,7 +3,7 @@
 # and refresh the pgvector index on the shared vDB.
 #   ./deploy-docs-search.sh <uat|prod>
 #
-# Local-only models: multilingual-e5-small embed + bge-reranker-base rerank + Qwen2.5-0.5B
+# Local-only models: paraphrase-multilingual-MiniLM embed + bge-reranker-base rerank + Qwen2.5-0.5B
 # (GGUF) generate — no hosted-model dependency. Vectors live in pgvector on the shared vDB
 # (schema "rag"), off the app box. This is the CD path: it PULLS the CI-built image from GHCR
 # (set BUILD_LOCAL=1 to build on the VM from source). enrich (chunk -> embed -> upsert) runs
@@ -29,7 +29,7 @@ SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 DOCS_SERVER_KEY="${DOCS_SERVER_KEY:-docs}"
 DOCS_PORT="${DOCS_PORT:-8000}"
 DOCS_PG_SCHEMA="${DOCS_PG_SCHEMA:-rag}"
-DOCS_EMBED_MODEL="${DOCS_EMBED_MODEL:-intfloat/multilingual-e5-small}"
+DOCS_EMBED_MODEL="${DOCS_EMBED_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}"
 DOCS_EMBED_DIM="${DOCS_EMBED_DIM:-384}"
 DOCS_RERANK_ENABLED="${DOCS_RERANK_ENABLED:-true}"
 DOCS_RERANK_MODEL="${DOCS_RERANK_MODEL:-BAAI/bge-reranker-base}"
