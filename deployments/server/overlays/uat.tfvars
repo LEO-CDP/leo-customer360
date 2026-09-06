@@ -38,7 +38,7 @@ servers = {
     # Deployed by deployments/server/deploy-docs-search.sh (pulls the GHCR image, runs
     # enrich, then serves :8000). 2 GB is tight — the deploy script adds a swapfile;
     # set docs_rerank_enabled=false in that overlay to shed ~300 MB if it OOMs.
-    flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB
+    flavor_name    = "s-general-2x4" # 2 vCPU / 4 GB — resized so Qwen /ask generation fits (1x2 OOM-killed uvicorn). In-place change (0 destroy), reboots the box.
     root_disk_size = 20
     name           = "docs" # -> c360-api-uat-docs
   }
