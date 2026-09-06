@@ -69,7 +69,10 @@ const config: QuartzConfig = {
       Plugin.TableOfContents(),
       // "absolute" resolves [[wikilinks]] by full path — avoids the README.md
       // name collisions inherent in a whole-repo sweep.
-      Plugin.CrawlLinks({ markdownLinkResolution: "absolute" }),
+      // "relative" (not "absolute") so relative image paths in the docs
+      // (![](img.png), ![](sub/img.png)) resolve to the mirrored media next to
+      // each page. Verified: page-to-page links still resolve too.
+      Plugin.CrawlLinks({ markdownLinkResolution: "relative" }),
       Plugin.Description(),
       Plugin.Latex({ renderEngine: "katex" }),
     ],
