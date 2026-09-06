@@ -48,9 +48,9 @@ on:
         type: string
         required: true
       services:
-        description: "Comma-separated services to (re)deploy (e.g. api,backend,ads,frontend,tracking)"
+        description: "Comma-separated services to (re)deploy (e.g. api,backend,ads,frontend,tracking,docs-search)"
         type: string
-        default: "api,backend,ads,frontend,tracking"
+        default: "api,backend,ads,frontend,tracking,docs-search"
         required: false
 
 permissions:
@@ -89,7 +89,7 @@ jobs:
           # sso-realm runs bootstrap-realm.py (idempotent): provisions the realm, the API's
           # admin roles + confidential client before the app steps. deploy-all.sh orders it
           # ahead of api via its STEPS list. Needs KEYCLOAK_ADMIN_PASSWORD in sso/.env (above).
-          DEFAULT_SVC="sso-realm,api,backend,ads,frontend,tracking"
+          DEFAULT_SVC="sso-realm,api,backend,ads,frontend,tracking,docs-search"
           if [[ "$EVENT" == "workflow_dispatch" ]]; then
             svc="${IN_SERVICES:-$DEFAULT_SVC}"
             {

@@ -32,6 +32,16 @@ servers = {
     root_disk_size = 20
     name           = "tracking" # -> c360-api-uat-tracking
   }
+  "docs" = {
+    # docs-vector-search (local-model RAG: e5 embed + bge rerank + Qwen 0.5B, ~1.4 GB
+    # resident). Its OWN box so the model footprint can't starve the shared api box.
+    # Deployed by deployments/docs-vector-search/deploy.sh (pulls the GHCR image, runs
+    # enrich, then serves :8000). 2 GB is tight — the deploy script adds a swapfile;
+    # set docs_rerank_enabled=false in that overlay to shed ~300 MB if it OOMs.
+    flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB
+    root_disk_size = 20
+    name           = "docs" # -> c360-api-uat-docs
+  }
 }
 
 # All resolved from discover-catalog.py for THIS account's live AZ (HCM03-1C):

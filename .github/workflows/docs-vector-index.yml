@@ -1,64 +1,53 @@
-name: Docs Vector Index
+name: Docs Vector Refresh
 
-# Builds / refreshes the docs-vector-search embeddings index against the current
-# docs/ using OpenAI, and uploads it as an artifact (`docs-embeddings-index`).
-# Runs on docs or tool changes and on demand. enrich is idempotent, so a run
-# with no doc changes re-embeds nothing.
+# The docs-vector-search index (pgvector on the vDB) is refreshed by the CD
+# "docs-search" deploy step, which runs `enrich` ON the box — that is where the
+# vDB and the model weights live, so it can't run on a GitHub runner.
+#
+#   - CODE changes under tools/docs-vector-search/** flow through CI -> CD like any
+#     service (built, pushed, deployed + enriched).
+#   - DOCS-ONLY changes are path-ignored by CI, so this workflow covers them: on a
+#     docs/** change to main it DISPATCHES the CD docs-search deploy, which ships the
+#     new docs/, re-chunks + re-embeds them, and upserts into pgvector. enrich is
+#     content-hash idempotent, so unchanged docs re-embed nothing.
 on:
   push:
+    branches: [main]
     paths:
       - "docs/**"
-      - "tools/docs-vector-search/**"
       - ".github/workflows/docs-vector-index.yml"
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment whose index to refresh"
+        type: choice
+        options: [uat, prod]
+        default: uat
 
 permissions:
   contents: read
+  actions: write # to dispatch cd.yml
 
 concurrency:
-  group: docs-vector-index-${{ github.ref }}
+  group: docs-vector-refresh-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-index:
+  refresh:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        working-directory: tools/docs-vector-search
-        run: pip install -r requirements.txt
-
-      - name: Check OpenAI key is available
-        id: key
+      - name: Dispatch CD docs-search deploy (re-enrich the index)
         env:
-          LEO_OPENAI_API_KEY: ${{ secrets.LEO_OPENAI_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          ENVIRONMENT: ${{ inputs.environment || 'uat' }}
         run: |
-          if [ -z "${LEO_OPENAI_API_KEY:-}" ]; then
-            echo "::warning::LEO_OPENAI_API_KEY is not set (e.g. a fork PR) — skipping index build."
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build / refresh the index
-        if: steps.key.outputs.ok == 'true'
-        working-directory: tools/docs-vector-search
-        env:
-          LEO_OPENAI_API_KEY: ${{ secrets.LEO_OPENAI_API_KEY }}
-          LEO_OPENAI_MODEL_NAME: ${{ vars.LEO_OPENAI_MODEL_NAME }}
-        run: python -m src.enrich
-
-      - name: Upload index artifact
-        if: steps.key.outputs.ok == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: docs-embeddings-index
-          path: tools/docs-vector-search/data/embeddings.json
-          if-no-files-found: error
+          echo "Refreshing docs-vector-search index on '$ENVIRONMENT' (docs-only change on main)."
+          # image_tag=latest: a docs refresh changes DATA, not the code image — deploy
+          # the current main image and let enrich pick up the new docs/.
+          gh workflow run cd.yml \
+            -f environment="$ENVIRONMENT" \
+            -f image_tag=latest \
+            -f services=docs-search
