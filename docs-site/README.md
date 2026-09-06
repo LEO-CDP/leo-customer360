@@ -10,7 +10,7 @@ Full design + rationale: [`deployments/document/quartz-docs-site-plan.md`](../de
 
 | File | Purpose |
 |------|---------|
-| `collect.mjs` | Scans the repo for `*.md` (via `git ls-files`), filters by the root [`.documentignore`](../.documentignore), mirrors the tree into `content/` (structure preserved), and injects frontmatter where missing. |
+| `collect.mjs` | Scans the repo for `*.md` (via `git ls-files`), filters by the root [`.documentignore`](../.documentignore), mirrors the tree into `content/` (structure preserved), **also copies the media the docs embed — images, video, audio, PDF — alongside them** so `![](path)` and `![[embed]]` render, and injects frontmatter where missing. |
 | `quartz.config.ts` | Site config — title, `baseUrl`, theme, plugins (wikilinks, GFM, TOC, KaTeX, RSS/sitemap). |
 | `quartz.layout.ts` | Page layout — explorer, search, graph, backlinks. |
 | `package.json` | The collector's one dependency (`ignore`). |
