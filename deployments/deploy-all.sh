@@ -190,7 +190,7 @@ run_one() {  # <id> <action>
     frontend)      ssh_step frontend       deploy-frontend.sh deploy "$2" ;;
     ads)           ssh_step ads-server     deploy-ads.sh deploy "$2" ;;
     tracking)      ssh_step_env_only server deploy-tracking.sh "$2" ;;
-    docs-search)   ssh_step docs-vector-search deploy.sh deploy "$2" ;;
+    docs-search)   ssh_step_env_only server deploy-docs-search.sh "$2" ;;
     monitoring)    ssh_step monitoring     deploy-monitoring.sh deploy "$2" ;;
     backend)       ssh_step_env_only server deploy-backend.sh "$2" ;;
     api)           ssh_step_env_only server deploy-api.sh     "$2" ;;

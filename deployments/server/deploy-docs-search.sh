@@ -1,31 +1,42 @@
 #!/usr/bin/env bash
-# Deploy docs-vector-search (local-model RAG, FastAPI :8000) onto its DEDICATED
-# vServer and refresh the pgvector index on the shared vDB.
+# Deploy docs-vector-search (local-model RAG, FastAPI :8000) onto its OWN "docs" server VM
+# and refresh the pgvector index on the shared vDB.
+#   ./deploy-docs-search.sh <uat|prod>
 #
-#   uat  -> dedicated box, server key "docs" (../server/overlays/uat.tfvars)
-#   prod -> dedicated box, server key "docs" (../server/overlays/prod.tfvars)
+# Local-only models: multilingual-e5-small embed + bge-reranker-base rerank + Qwen2.5-0.5B
+# (GGUF) generate — no hosted-model dependency. Vectors live in pgvector on the shared vDB
+# (schema "rag"), off the app box. This is the CD path: it PULLS the CI-built image from GHCR
+# (set BUILD_LOCAL=1 to build on the VM from source). enrich (chunk -> embed -> upsert) runs
+# ON the box, where the vDB + model weights live; it also creates the rag schema + pgvector
+# extension idempotently, so no separate SQL bootstrap is needed.
 #
-#   ./deploy.sh <uat|prod>            # (re)deploy: pull image -> fetch model -> enrich -> serve
-#   ./deploy.sh <uat|prod> destroy    # remove the container
-#
-# This is the CD path: it PULLS the CI-built image from GHCR (set BUILD_LOCAL=1 to
-# build on the VM from source instead). enrich (chunk -> embed -> upsert) runs on
-# the box because that is where the vDB and the model weights live; it also creates
-# the `rag` schema + pgvector extension idempotently, so no separate SQL bootstrap
-# is needed. The reranker + Qwen 0.5B make the resident set ~1.4 GB — the remote
-# step adds a swapfile; set docs_rerank_enabled=false in the overlay to shed ~300 MB.
-#
-# DB creds come from ../postgres (outputs + TF_VAR_db_password). For local docker
-# compose dev instead, see docker-compose.yml + .env.uat.example (not this script).
+# Target box = servers["$DOCS_SERVER_KEY"] (default "docs"), defined in overlays/<env>.tfvars
+# and provisioned by this module's deploy.sh (apply). Overrides (env):
+#   BASTION_USER / SSH_KEY / DOCS_SERVER_KEY / DOCS_PORT / IMAGE_TAG / BUILD_LOCAL
+#   DOCS_EMBED_MODEL / DOCS_EMBED_DIM / DOCS_RERANK_ENABLED / DOCS_RERANK_MODEL
+#   DOCS_PG_SCHEMA / DOCS_GGUF_URL
+# DB creds come from ../postgres (outputs + TF_VAR_db_password). For local docker compose dev
+# instead, see tools/docs-vector-search/docker-compose.yml + .env.example.
 set -euo pipefail
-cd "$(dirname "$0")"             # deployments/docs-vector-search
-REPO_ROOT="$(cd ../.. && pwd)"  # repo root (contains docs/ and tools/docs-vector-search/)
+cd "$(dirname "$0")"           # deployments/server
+REPO_ROOT="$(cd ../.. && pwd)" # repo root (contains docs/ and tools/docs-vector-search/)
 
 ENV="${1:-}"; ACTION="${2:-deploy}"
-case "$ENV" in uat | prod) ;; *) echo "Usage: ./deploy.sh <uat|prod> [deploy|destroy]"; exit 1 ;; esac
+case "$ENV" in uat | prod) ;; *) echo "Usage: ./deploy-docs-search.sh <uat|prod> [deploy|destroy]"; exit 1 ;; esac
 
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
+DOCS_SERVER_KEY="${DOCS_SERVER_KEY:-docs}"
+DOCS_PORT="${DOCS_PORT:-8000}"
+DOCS_PG_SCHEMA="${DOCS_PG_SCHEMA:-rag}"
+DOCS_EMBED_MODEL="${DOCS_EMBED_MODEL:-intfloat/multilingual-e5-small}"
+DOCS_EMBED_DIM="${DOCS_EMBED_DIM:-384}"
+DOCS_RERANK_ENABLED="${DOCS_RERANK_ENABLED:-true}"
+DOCS_RERANK_MODEL="${DOCS_RERANK_MODEL:-BAAI/bge-reranker-base}"
+DOCS_GGUF_URL="${DOCS_GGUF_URL:-https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
+GGUF_NAME="Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+
+# Read a tfvars value: quoted-string content, or a bare token with a trailing comment stripped.
 tfval() {
   local line; line="$(grep -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null | head -1)"
   case "$line" in
@@ -34,27 +45,16 @@ tfval() {
   esac
 }
 
-ovl="overlays/${ENV}.tfvars"
-[[ -f "$ovl" ]] || { echo "ERROR: overlay $ovl not found."; exit 1; }
-SERVER_KEY="${DOCS_SERVER_KEY:-$(tfval docs_server_key "$ovl")}"; SERVER_KEY="${SERVER_KEY:-docs}"
-PORT="$(tfval docs_port "$ovl")"; PORT="${PORT:-8000}"
-DB_SCHEMA="$(tfval docs_pg_schema "$ovl")"; DB_SCHEMA="${DB_SCHEMA:-rag}"
-EMBED_MODEL="$(tfval docs_embed_model "$ovl")"; EMBED_MODEL="${EMBED_MODEL:-intfloat/multilingual-e5-small}"
-EMBED_DIM="$(tfval docs_embed_dim "$ovl")"; EMBED_DIM="${EMBED_DIM:-384}"
-RERANK_ENABLED="$(tfval docs_rerank_enabled "$ovl")"; RERANK_ENABLED="${RERANK_ENABLED:-true}"
-RERANK_MODEL="$(tfval docs_rerank_model "$ovl")"; RERANK_MODEL="${RERANK_MODEL:-BAAI/bge-reranker-base}"
-GGUF_URL="$(tfval docs_gguf_url "$ovl")"; GGUF_URL="${GGUF_URL:-https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
-GGUF_NAME="Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
-
-# --- resolve the target VM from ../server outputs ---
-SERVERS_JSON="$( (cd ../server && terraform workspace select "$ENV" >/dev/null 2>&1 && terraform output -json servers 2>/dev/null) || true )"
-[[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no ../server servers output for $ENV — deploy the server first."; exit 1; }
-FIP="$(printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get("floating_ip") for i in (s.get("internal_interfaces") or []) if i.get("floating_ip")), ""))' "$SERVER_KEY")"
-# The 'docs' box is provisioned out-of-band (CD never runs infra). If it isn't there
-# yet, SKIP rather than fail — otherwise a not-yet-provisioned box turns every CD run
-# red. Same philosophy as the sso-realm step; the next deploy picks the box up.
+# --- resolve the target VM by map key from THIS module's outputs ---
+terraform workspace select "$ENV" >/dev/null 2>&1 || { echo "ERROR: no '$ENV' server workspace — deploy the server first."; exit 1; }
+SERVERS_JSON="$(terraform output -json servers 2>/dev/null || true)"
+[[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no servers output."; exit 1; }
+srv_ip() { printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get(sys.argv[2]) for i in (s.get("internal_interfaces") or []) if i.get(sys.argv[2])), ""))' "$1" "$2"; }
+FIP="$(srv_ip "$DOCS_SERVER_KEY" floating_ip)"
+# The 'docs' box is provisioned by this module (overlays servers map). If it isn't there yet,
+# SKIP rather than fail — so CD stays green until the box is applied; the next run picks it up.
 if [[ -z "$FIP" ]]; then
-  echo "::warning::docs-search SKIPPED — no floating IP for server key '$SERVER_KEY' in '$ENV'. Add a '$SERVER_KEY' box to ../server/overlays/$ENV.tfvars and apply it out-of-band; CD will deploy it on the next run."
+  echo "::warning::docs-search SKIPPED — no floating IP for server key '$DOCS_SERVER_KEY' in '$ENV'. Add a '$DOCS_SERVER_KEY' box to overlays/$ENV.tfvars (servers, attach_floating) and apply this module; CD will deploy it on the next run."
   exit 0
 fi
 BASTION="${BASTION_USER:-leocdp360}@$FIP"
@@ -76,10 +76,10 @@ DB_HOST="$( (cd "$pg" && terraform workspace select "$ENV" >/dev/null 2>&1 && te
 DB_PORT="$( (cd "$pg" && terraform output -raw db_port 2>/dev/null) || echo 5432 )"
 : "${DB_NAME:?missing db_name}"; : "${DB_USER:?missing db_username}"; : "${DB_PASS:?missing db_password}"; : "${DB_HOST:?could not read db_host from ../postgres outputs}"
 
-echo ">> Target (docs): $BASTION :$PORT   vDB: ${DB_NAME}.${DB_SCHEMA}@${DB_HOST}:${DB_PORT}   rerank=$RERANK_ENABLED"
+echo ">> Target (docs): $BASTION :$DOCS_PORT   vDB: ${DB_NAME}.${DOCS_PG_SCHEMA}@${DB_HOST}:${DB_PORT}   rerank=$DOCS_RERANK_ENABLED"
 
-# --- CD image source: pull the CI-built image from GHCR by default; BUILD_LOCAL=1
-#     ships tools/docs-vector-search and builds on the VM (slow: llama-cpp-python). ---
+# --- CD image source: pull the CI-built image from GHCR by default; BUILD_LOCAL=1 ships
+#     tools/docs-vector-search and builds on the VM (slow: llama-cpp-python). ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
 SERVICE="docs-vector-search"
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
@@ -99,7 +99,7 @@ fi
 # --- ship the corpus (docs/**) so enrich can chunk + embed it on the box ---
 echo ">> Shipping docs/ corpus ..."
 tar -C "$REPO_ROOT" -czf - docs \
-  | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360/docs-vector-search && sudo chown "$(id -un)" /opt/c360/docs-vector-search && rm -rf /opt/c360/docs-vector-search/corpus && mkdir -p /opt/c360/docs-vector-search && tar -C /opt/c360/docs-vector-search -xzf - && mv /opt/c360/docs-vector-search/docs /opt/c360/docs-vector-search/corpus'
+  | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360/docs-vector-search && sudo chown "$(id -un)" /opt/c360/docs-vector-search && rm -rf /opt/c360/docs-vector-search/corpus && tar -C /opt/c360/docs-vector-search -xzf - && mv /opt/c360/docs-vector-search/docs /opt/c360/docs-vector-search/corpus'
 
 # env file built locally, shipped base64 (dodges ssh arg-flattening).
 ENVB64="$(printf '%s' "PG_HOST=$DB_HOST
@@ -107,18 +107,18 @@ PG_PORT=$DB_PORT
 PG_DATABASE=$DB_NAME
 PG_USER=$DB_USER
 PG_PASSWORD=$DB_PASS
-PG_SCHEMA=$DB_SCHEMA
+PG_SCHEMA=$DOCS_PG_SCHEMA
 CORPUS_DIR=/app/corpus
 MODELS_DIR=/app/models
-EMBED_MODEL=$EMBED_MODEL
-EMBED_DIM=$EMBED_DIM
-RERANK_ENABLED=$RERANK_ENABLED
-RERANK_MODEL=$RERANK_MODEL
+EMBED_MODEL=$DOCS_EMBED_MODEL
+EMBED_DIM=$DOCS_EMBED_DIM
+RERANK_ENABLED=$DOCS_RERANK_ENABLED
+RERANK_MODEL=$DOCS_RERANK_MODEL
 QWEN_MODEL_PATH=/app/models/$GGUF_NAME" | base64 | tr -d '\n')"
 
 echo ">> Fetching the model, refreshing the index (enrich), and (re)starting the container ..."
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' \
-  "$PORT" "$ENVB64" "$GGUF_URL" "$GGUF_NAME" "$DEPLOY_MODE" "$IMAGE" \
+  "$DOCS_PORT" "$ENVB64" "$DOCS_GGUF_URL" "$GGUF_NAME" "$DEPLOY_MODE" "$IMAGE" \
   "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$CONTAINER" <<'REMOTE'
 set -euo pipefail
 PORT="$1"; ENVB64="$2"; GGUF_URL="$3"; GGUF_NAME="$4"; DEPLOY_MODE="${5:-ghcr}"; IMAGE="${6:-}"
@@ -127,8 +127,8 @@ GHCR_USER="${7:-token}"; GHCR_TOKEN="$(printf %s "${8:-}" | base64 -d 2>/dev/nul
 command -v docker >/dev/null 2>&1 || { sudo apt-get update -qq; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io; sudo systemctl enable --now docker; }
 command -v curl   >/dev/null 2>&1 || { sudo apt-get update -qq; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl; }
 
-# 2 GB is tight for e5 + reranker + Qwen (~1.4 GB resident). Add a 2 GB swapfile
-# once so a transient spike can't OOM-kill the server. Idempotent + best-effort.
+# 2 GB is tight for e5 + reranker + Qwen (~1.4 GB resident). Add a 2 GB swapfile once so a
+# transient spike can't OOM-kill the server. Idempotent + best-effort.
 if [ -z "$(swapon --show 2>/dev/null)" ] && [ ! -f /swapfile ]; then
   echo "   adding 2G swapfile ..."
   sudo fallocate -l 2G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
@@ -165,8 +165,8 @@ fi
 
 VOLS=(-v "$CORPUS_DIR:/app/corpus:ro" -v "$MODELS_DIR:/app/models")
 
-# refresh the index first (chunk -> embed -> upsert into pgvector; creates the rag
-# schema idempotently). --rm so it never lingers holding RAM alongside the server.
+# refresh the index first (chunk -> embed -> upsert into pgvector; creates the rag schema
+# idempotently). --rm so it never lingers holding RAM alongside the server.
 echo "   enrich: building/refreshing the pgvector index ..."
 sudo docker run --rm --network host --env-file /opt/c360/docs-vector-search.env "${VOLS[@]}" "$RUN_IMG" python -m src.enrich
 
@@ -178,7 +178,7 @@ sleep 5
 curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && echo "   health OK (:$PORT/health)" || echo "   WARN: health not ready yet (models load on first request)"
 sudo docker ps --filter name="$CONTAINER" --format '   running: {{.Names}} ({{.Status}})'
 REMOTE
-echo ">> Done. Expose via the LB (add a 'docs' backend -> <box-ip>:$PORT) if it needs public access."
+echo ">> Done. Expose via the LB (add a 'docs' backend -> <box-ip>:$DOCS_PORT) if it needs public access."
 
 # --- release ledger: record this deploy to the GitHub Deployments API (best-effort) ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/record_deploy.sh"

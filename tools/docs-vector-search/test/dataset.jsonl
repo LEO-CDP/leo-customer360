@@ -1,0 +1,12 @@
+{"question": "What is Customer Identity Resolution (CIR)?", "ground_truth": "Customer Identity Resolution (CIR) is the process of matching and merging records that belong to the same person across sources into a single unified customer profile, using deterministic and/or probabilistic matching on identifiers.", "lang": "en"}
+{"question": "How does identity resolution decide that two profiles are the same person?", "ground_truth": "It compares shared identifiers and attributes (e.g. email, phone, device/cookie ids) using matching rules; when they meet the match criteria the profiles are linked/merged into one identity.", "lang": "en"}
+{"question": "How does the platform keep one tenant's data isolated from another's?", "ground_truth": null, "lang": "en"}
+{"question": "What is a customer segment and how is it used?", "ground_truth": null, "lang": "en"}
+{"question": "What does the ad server (LEO Ad Server) do?", "ground_truth": null, "lang": "en"}
+{"question": "How are tracking events ingested and where are they stored?", "ground_truth": null, "lang": "en"}
+{"question": "What is a unified customer profile in Customer 360?", "ground_truth": null, "lang": "en"}
+{"question": "What database schema does the ad server use?", "ground_truth": "The ad server uses a dedicated schema named leo_ads in the shared Customer 360 database.", "lang": "en"}
+{"question": "CIR là gì trong hệ thống Customer 360?", "ground_truth": null, "lang": "vn"}
+{"question": "Phân khúc khách hàng (customer segment) được dùng để làm gì?", "ground_truth": null, "lang": "vn"}
+{"question": "Làm thế nào để hợp nhất hai hồ sơ khách hàng của cùng một người?", "ground_truth": null, "lang": "vn"}
+{"question": "How does segmentation evaluate which customers belong to a segment?", "ground_truth": null, "lang": "en"}

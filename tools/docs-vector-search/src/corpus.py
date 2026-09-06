@@ -9,7 +9,7 @@ from pathlib import Path
 
 import frontmatter
 
-from .config import CHUNK_OVERLAP, CHUNK_TOKENS, CORPUS_DIR, REPO_ROOT
+from .config import CHUNK_OVERLAP, CHUNK_TOKENS, CORPUS_DIR
 
 H1_RE = re.compile(r"^#\s+(.+)$", re.M)
 HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$")
@@ -59,7 +59,9 @@ def _windows(text: str, max_tokens: int, overlap: int) -> list[str]:
 
 def chunk_doc(path: Path) -> list[Chunk]:
     post = frontmatter.loads(path.read_text(encoding="utf-8"))
-    rel = path.relative_to(REPO_ROOT).as_posix()
+    # Anchor the id/path to the corpus dir (stable across repo vs container, where the
+    # corpus is mounted at /app/corpus) — REPO_ROOT isn't an ancestor of CORPUS_DIR there.
+    rel = path.relative_to(CORPUS_DIR).as_posix()
     title = _title(post, path)
 
     # Split the body into (heading, text) sections, then window each section.

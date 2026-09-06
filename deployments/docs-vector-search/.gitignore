@@ -1,8 +1,0 @@
-# Real env files hold the vDB password — never commit.
-.env
-.env.uat
-.env.prod
-# Downloaded model weights (per-env), never commit.
-models/
-models-uat/
-models-prod/

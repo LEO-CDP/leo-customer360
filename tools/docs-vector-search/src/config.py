@@ -12,9 +12,12 @@ try:  # optional in CI/containers
 except Exception:  # noqa: BLE001
     pass
 
-# src/config.py → src → docs-vector-search → tools → <repo root>
-REPO_ROOT = Path(__file__).resolve().parents[3]
-PKG_ROOT = Path(__file__).resolve().parents[1]
+# Local layout: src/config.py → src → docs-vector-search → tools → <repo root>.
+# In the container the code lives at /app/src, so parents[3] doesn't exist — fall back
+# safely (CORPUS_DIR/MODELS_DIR are set via env there, so this default is never used).
+_HERE = Path(__file__).resolve()
+REPO_ROOT = _HERE.parents[3] if len(_HERE.parents) > 3 else _HERE.parent
+PKG_ROOT = _HERE.parents[1]
 
 # Where model weights (fastembed ONNX + Qwen GGUF) live — a volume in the container.
 MODELS_DIR = Path(os.getenv("MODELS_DIR", PKG_ROOT / "models")).resolve()
