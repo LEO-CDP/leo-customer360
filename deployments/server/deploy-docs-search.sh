@@ -35,6 +35,9 @@ DOCS_RERANK_ENABLED="${DOCS_RERANK_ENABLED:-true}"
 DOCS_RERANK_MODEL="${DOCS_RERANK_MODEL:-BAAI/bge-reranker-base}"
 # CORS origins for browsers hitting the API directly (the static docs site on GitHub Pages).
 DOCS_CORS_ORIGINS="${DOCS_CORS_ORIGINS:-https://leo-cdp.github.io}"
+# Per-IP /ask rate limit for public callers (via Caddy/XFF). Tune per env; 0 disables.
+DOCS_ASK_RATE_MAX="${DOCS_ASK_RATE_MAX:-10}"
+DOCS_ASK_RATE_WINDOW_SEC="${DOCS_ASK_RATE_WINDOW_SEC:-60}"
 DOCS_GGUF_URL="${DOCS_GGUF_URL:-https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 GGUF_NAME="Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
 
@@ -120,6 +123,8 @@ EMBED_DIM=$DOCS_EMBED_DIM
 RERANK_ENABLED=$DOCS_RERANK_ENABLED
 RERANK_MODEL=$DOCS_RERANK_MODEL
 CORS_ORIGINS=$DOCS_CORS_ORIGINS
+ASK_RATE_MAX=$DOCS_ASK_RATE_MAX
+ASK_RATE_WINDOW_SEC=$DOCS_ASK_RATE_WINDOW_SEC
 QWEN_MODEL_PATH=/app/models/$GGUF_NAME" | base64 | tr -d '\n')"
 
 echo ">> Fetching the model, refreshing the index (enrich), and (re)starting the container ..."

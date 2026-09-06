@@ -67,6 +67,12 @@ CORS_ORIGINS = [
 # Serialize expensive generation so concurrent /ask calls queue instead of thrashing
 # (and OOM-ing) the 1 vCPU box. Retrieval (/search) is unaffected.
 ASK_MAX_CONCURRENCY = int(os.getenv("ASK_MAX_CONCURRENCY", "1"))
+# Per-IP rate limit for /ask (the expensive, public-facing endpoint). Applied ONLY to
+# requests that arrive with X-Forwarded-For (i.e. via Caddy from the public internet);
+# the internal frontend-admin proxy sends no XFF and is exempt, so admin users aren't
+# throttled as one. 0 disables. Client IP is the rightmost XFF entry (the one Caddy set).
+ASK_RATE_MAX = int(os.getenv("ASK_RATE_MAX", "10"))
+ASK_RATE_WINDOW_SEC = int(os.getenv("ASK_RATE_WINDOW_SEC", "60"))
 
 # Vector store — pgvector on the VNGCloud vDB (PostgreSQL 15)
 PG_HOST = os.getenv("PG_HOST", "localhost")
