@@ -8,11 +8,12 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 | Folder | What it provisions |
 |--------|--------------------|
 | [`postgres`](./postgres) | Managed PostgreSQL vDB (`customer360` + `db_keycloak`), `run-sql.sh` schema/seed bootstrap |
-| [`server`](./server) | vServers (VMs): api box + backend box (uat); adds dedicated `sso` + `frontend` + `ads` boxes (prod) |
+| [`server`](./server) | vServers (VMs): api + backend + `tracking` + **`docs`** boxes (uat); adds dedicated `sso` + `frontend` + `ads` (+ `docs`) boxes (prod) |
 | [`cache`](./cache) | Redis — uat: container on the api box; prod: managed MemStore |
 | [`sso`](./sso) | Keycloak (SSO/OIDC) — uat: container on the api box; prod: dedicated vServer |
 | [`frontend`](./frontend) | frontend-admin (admin UI) — uat: container on the api box; prod: dedicated vServer |
 | [`ads-server`](./ads-server) | LEO Ad Server (schema `leo_ads`) — uat: container on the api box; prod: dedicated vServer |
+| [`docs-vector-search`](../tools/docs-vector-search) | AI docs Q&A — **local-model RAG** (paraphrase-multilingual embed + bge rerank + Qwen 0.5B), vectors in **pgvector** on the vDB (schema `rag`). Its **own dedicated `docs` box**; deploy: [`server/deploy-docs-search.sh`](./server/deploy-docs-search.sh) |
 | [`monitoring`](./monitoring) | Portainer (direct HTTPS) + Netdata (behind oauth2-proxy / Keycloak SSO) dashboards **+ Jaeger** (OpenTelemetry request-trace UI at `/jaeger`) **+ pgAdmin** (Postgres admin UI, direct on the LB with its own login) — on the api box |
 | [`load_balancer`](./load_balancer) | L4 NLB fronting api / dagster / keycloak / frontend / ads / monitoring |
 | [`proxy`](./proxy) | **Caddy** reverse proxy — TLS termination (auto Let's Encrypt) + single-host path routing. **Live** at `https://beta.leocdp.com` (fronts frontend `/`, api `/c360api`, keycloak `/auth`, ads `/ads`, jaeger `/jaeger`); [runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom) |
@@ -63,8 +64,10 @@ no-op when there is no drift.
 | 11 | SSO + apps | `api` | `server/deploy-api.sh` | `db-schema`, `cache`, `backend`, `sso-realm` (SSO optional) |
 | 12 | SSO + apps | `frontend` | `frontend/deploy-frontend.sh` | `server` |
 | 13 | SSO + apps | `ads` | `ads-server/deploy-ads.sh` | `server` + `db-schema` + `cache` |
-| 14 | SSO + apps | `monitoring` | `monitoring/deploy-monitoring.sh` | `server`; SSO gate needs `sso-realm` + `load-balancer` |
-| 15 | Demo data | `seed` *(optional)* | `server/seed_data.sh` | `api`/`db-schema`; opt-in via `--with seed` |
+| 14 | SSO + apps | `tracking` | `server/deploy-tracking.sh` | `server` (dedicated `tracking` box) + `storage` (+ `cache` optional) |
+| 15 | SSO + apps | `docs-search` | `server/deploy-docs-search.sh` | `server` (dedicated `docs` box) + `postgres` (pgvector `rag` schema) |
+| 16 | SSO + apps | `monitoring` | `monitoring/deploy-monitoring.sh` | `server`; SSO gate needs `sso-realm` + `load-balancer` |
+| 17 | Demo data | `seed` *(optional)* | `server/seed_data.sh` | `api`/`db-schema`; opt-in via `--with seed` |
 
 ### Flags
 
@@ -127,7 +130,9 @@ ghcr.io/leo-cdp/leo-customer360/<service>
 ```
 
 for `<service>` ∈ `customer360-api` · `backend-system` · `ads-server` · `frontend-admin`
-· `data-tracking-api` · `postgres` · `redis` (each has its own `Dockerfile`; a change under that folder builds it).
+· `data-tracking-api` · `docs-vector-search` · `postgres` · `redis` (each has its own `Dockerfile`; a change
+under that folder builds it — `docs-vector-search`'s source lives under [`tools/docs-vector-search`](../tools/docs-vector-search),
+so its build `context`/`file` are overridden in `ci.yml`).
 Tags come from `docker/metadata-action`:
 
 | Tag | From | When |
@@ -305,7 +310,10 @@ flowchart TB
     subgraph bebox["vServer c360-api-uat-backend · 10.100.1.4"]
       dagster["backend-system<br/>Dagster :3000"]
     end
-    pg[("Managed PostgreSQL vDB<br/>10.100.1.3:5432<br/>customer360 (RLS) · db_keycloak · leo_ads")]
+    subgraph docsbox["vServer c360-api-uat-docs · 10.100.1.7 (s-general-1x2)"]
+      docs["docs-vector-search (local-model RAG)<br/>:8000 · MiniLM embed + bge rerank + Qwen 0.5B<br/>(internal — SSH/tunnel, no public route yet)"]
+    end
+    pg[("Managed PostgreSQL vDB<br/>10.100.1.3:5432<br/>customer360 (RLS) · db_keycloak · leo_ads · rag (pgvector)")]
     subgraph mon["monitoring · on the api box"]
       oauth2["oauth2-proxy (SSO gate)<br/>:4199 → Netdata · :4686 → Jaeger · Keycloak"]
       portainer["Portainer<br/>:9443 · own login"]
@@ -328,6 +336,7 @@ flowchart TB
   kc -->|db_keycloak| pg
   ads -->|leo_ads| pg
   dagster -->|SQL| pg
+  docs -->|"pgvector · rag.doc_chunks"| pg
   lb -->|":9443 direct TLS"| portainer
   lb -.->|":19999 SSO"| oauth2
   lb -->|":5050 direct"| pgadmin
@@ -356,7 +365,8 @@ flowchart TB
 | Dagster | backend box `10.100.1.4` | 3000 | backend-system worker |
 | Portainer agent | backend `10.100.1.4` + tracking `10.100.1.8` | 9001 | `c360-portainer-agent`; lets the api-box Portainer manage these boxes too (private VPC, reached from `10.100.1.5`); registered as Portainer environments |
 | data-tracking-api | tracking box `10.100.1.8` | 8010 | FastAPI event ingestion on its own dedicated `s-general-1x2` box, run as **N auto-load-balanced replicas** (uat 3 / prod 5, `TRACKING_REPLICAS`) on a private docker bridge behind a local **nginx** LB that owns `:8010` (least_conn round-robin); writes NDJSON to vStorage/S3; reuses the api-box Redis for IP rate-limit + session cache (fail-open); OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
-| PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` + `leo_ads` |
+| docs-vector-search | docs box `10.100.1.7` | 8000 | AI docs Q&A — **local-model RAG**: `paraphrase-multilingual-MiniLM-L12-v2` embed (384-dim, VN+EN) + `bge-reranker-base` rerank + `Qwen2.5-0.5B` GGUF generate; vectors in **pgvector** on the vDB (schema `rag`, table `doc_chunks`); its OWN `s-general-1x2` box; **not behind the LB** (reached via SSH/tunnel — no public route yet); deploy `server/deploy-docs-search.sh` (pull GHCR image → `enrich` on box → serve) |
+| PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` + `leo_ads` + `rag` (pgvector, docs-vector-search) |
 
 ### Public endpoints — `beta.leocdp.com`
 
@@ -486,7 +496,7 @@ Docs and the point-in-time `proxy/cutover-*.patch` are left untouched.
 ## PROD deployment view
 
 The prod overlay differs from UAT: **each service runs on its own dedicated vServer**
-(api · sso · frontend · ads), cache is a **managed MemStore** and Postgres a **managed vDB**
+(api · sso · frontend · ads · docs), cache is a **managed MemStore** and Postgres a **managed vDB**
 (no co-located containers), it has its **own VPC** (`10.101.0.0/16`) and public host
 (`c360.leocdp.com`), deploys pull the **pinned `vX.Y.Z` release** image, and ops is **hardened** —
 **pgAdmin and Netdata are both Keycloak-SSO-gated** via oauth2-proxy (only Portainer stays
@@ -510,6 +520,7 @@ overlays but not yet provisioned.
 | Keycloak (SSO) | container on the api box | dedicated `c360-api-prod-sso` · `10.101.1.11` (2x4) |
 | frontend-admin + Caddy | on the api box | dedicated `c360-api-prod-frontend` · `10.101.1.12` (2x4) |
 | ads-server | container on the api box | dedicated `c360-api-prod-ads` · `10.101.1.13` (4x8) |
+| docs-vector-search | dedicated `c360-api-uat-docs` · `10.100.1.7` (s-general-1x2, 1 vCPU/2 GB) | dedicated `c360-api-prod-docs` (s2-general-2x4, 2 vCPU/4 GB) |
 | Redis / cache | container on the api box | **managed MemStore** `c360-redis-prod` (Redis 7, db 2x4), private |
 | PostgreSQL | managed vDB `10.100.1.3` | managed vDB `customer360-pg-prod` (PG 15, db 8x16) |
 | Image tag | `latest` / newest `sha-*` (tracks `main`) | pinned `vX.Y.Z` (a GitHub Release) |
