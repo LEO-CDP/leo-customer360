@@ -8,9 +8,14 @@
 // and injects frontmatter where missing. Never mutates repo files.
 
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import ignore from "ignore";
+
+// Media / embeddable assets a markdown page can render (images, video, audio, PDF).
+// Mirrored into content/ so `![](rel/path.png)` and `![[embed.png]]` resolve — Quartz's
+// Assets emitter copies non-markdown files from content/ to the built site.
+const MEDIA_RE = /\.(png|jpe?g|gif|svg|webp|avif|bmp|ico|mp4|webm|mov|m4v|ogv|mp3|wav|ogg|m4a|flac|pdf)$/i;
 
 const arg = (k, d) => {
   const i = process.argv.indexOf(k);
@@ -54,6 +59,18 @@ for (const rel of shown) {
   writeFileSync(dest, text);
 }
 
+// 3b. Mirror media/assets the docs embed (images, video, audio, PDF) so they render.
+// Binary-safe copy, same ignore filter as the docs; git ls-files skips untracked/ignored.
+const mediaFiles = execSync(`git -C "${REPO}" ls-files`, { encoding: "utf8" })
+  .split("\n")
+  .map((s) => s.trim())
+  .filter((f) => f && MEDIA_RE.test(f) && !ig.ignores(f));
+for (const rel of mediaFiles) {
+  const dest = join(OUT, rel);
+  mkdirSync(dirname(dest), { recursive: true });
+  copyFileSync(join(REPO, rel), dest);
+}
+
 // 4. Ensure a landing page at the site root (only if the repo has none).
 const indexDest = join(OUT, "index.md");
 if (!existsSync(indexDest)) {
@@ -69,7 +86,7 @@ if (!existsSync(indexDest)) {
   writeFileSync(indexDest, body);
 }
 
-console.log(`Collected ${shown.length}/${files.length} markdown files → ${OUT}`);
+console.log(`Collected ${shown.length}/${files.length} markdown + ${mediaFiles.length} media files → ${OUT}`);
 if (hidden.length) {
   console.log(`Excluded ${hidden.length} by .documentignore:`);
   for (const f of hidden) console.log(`  - ${f}`);
