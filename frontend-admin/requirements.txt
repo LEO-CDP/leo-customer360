@@ -3,6 +3,11 @@ uvicorn[standard]>=0.30,<1
 jinja2>=3.1,<4
 python-dotenv>=1.0,<2
 
+# Async HTTP client -- used by the /ai/* proxy that forwards the Docs Assistant
+# (chatbot) requests to tools/docs-vector-search over the private network, so the
+# browser stays same-origin (no CORS) and the docs box stays unexposed.
+httpx>=0.27,<1
+
 # OpenTelemetry zero-code request tracing (OTLP -> Jaeger). See the Dockerfile
 # (`opentelemetry-bootstrap -a install`) and deployments/lib/otel.sh.
 opentelemetry-distro>=0.48b0,<1

@@ -19,8 +19,9 @@ from pathlib import Path
 from typing import Dict
 from datetime import datetime, timezone
 
+import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, status
+from fastapi import Body, FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -77,6 +78,19 @@ FRONTEND_ROOT_PATH = os.getenv(
 ).rstrip("/")
 
 STATIC_BASE = f"{FRONTEND_ROOT_PATH}/static"
+
+# --- Docs Assistant (RAG chatbot) -------------------------------------------------
+# The browser talks to a same-origin /ai/* proxy (see the routes below); we forward
+# to the tools/docs-vector-search service over the private network. This keeps the
+# docs box unexposed to the internet and sidesteps CORS entirely.
+DOCS_SEARCH_URL = os.getenv("DOCS_SEARCH_URL", "http://127.0.0.1:8000").rstrip("/")
+DOCS_SEARCH_TIMEOUT = float(os.getenv("DOCS_SEARCH_TIMEOUT", "60"))  # /ask is slow on 1 vCPU
+DOCS_MAX_QUESTION_LEN = int(os.getenv("DOCS_MAX_QUESTION_LEN", "2000"))
+# Where the widget links its citations (source docs live on the public docs site).
+DOCS_SITE_BASE = os.getenv("DOCS_SITE_BASE", "https://leo-cdp.github.io/leo-customer360").rstrip("/")
+# The base path the browser uses to reach the proxy. Kept under the reverse-proxy
+# prefix so it resolves both standalone and behind Caddy (the frontend catch-all).
+DOCS_AI_BASE = f"{FRONTEND_ROOT_PATH}/ai" if (FRONTEND_ROOT_PATH and FRONTEND_ROOT_PATH != "/") else "/ai"
 
 # Static Asset Cache-Buster (Set at startup to allow static caching during runtime in production)
 # Replaced datetime.utcnow() with datetime.now(timezone.utc) to resolve Pylance deprecation warnings
@@ -145,7 +159,9 @@ async def index(request: Request):
         "leo_observer_log_domain": LEO_OBSERVER_LOG_DOMAIN,
         "leo_observer_tracking_uri": LEO_OBSERVER_TRACKING_URI,
         "leo_observer_tracking_endpoint": LEO_OBSERVER_TRACKING_ENDPOINT,
-        "leo_observer_cdn_js": LEO_OBSERVER_CDN_JS
+        "leo_observer_cdn_js": LEO_OBSERVER_CDN_JS,
+        "docs_ai_base": DOCS_AI_BASE,
+        "docs_site_base": DOCS_SITE_BASE,
     }
     
     try:
@@ -171,6 +187,68 @@ async def health():
         "api_base": API_BASE,
         "environment": "development" if IS_DEV else "production",
     }
+
+
+# --- Docs Assistant proxy ---------------------------------------------------------
+# Same-origin /ai/* endpoints that forward to tools/docs-vector-search. The browser
+# never talks to the docs box directly, so there is no CORS surface and the docs box
+# stays private. Registered under both /ai and FRONTEND_ROOT_PATH/ai (see below) so
+# they resolve standalone and behind the Caddy catch-all.
+async def _docs_request(method: str, path: str, payload: dict | None = None):
+    try:
+        async with httpx.AsyncClient(timeout=DOCS_SEARCH_TIMEOUT) as client:
+            resp = await client.request(method, f"{DOCS_SEARCH_URL}{path}", json=payload)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as err:
+        logger.warning("Docs service %s %s -> HTTP %s", method, path, err.response.status_code)
+        raise HTTPException(status_code=502, detail="The documentation service returned an error.")
+    except httpx.HTTPError as err:
+        logger.warning("Docs service %s %s unreachable: %s", method, path, err)
+        raise HTTPException(status_code=502, detail="The documentation service is unreachable.")
+
+
+async def ai_ask(payload: dict = Body(...)):
+    """Full RAG: grounded answer + cited sources."""
+    question = str(payload.get("question", "")).strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="question is required")
+    body: Dict[str, object] = {"question": question[:DOCS_MAX_QUESTION_LEN]}
+    if isinstance(payload.get("top_n"), int):
+        body["top_n"] = payload["top_n"]
+    if isinstance(payload.get("top_k"), int):
+        body["top_k"] = payload["top_k"]
+    return await _docs_request("POST", "/ask", body)
+
+
+async def ai_search(payload: dict = Body(...)):
+    """Semantic retrieve + rerank -- ranked chunks, no generation (fast)."""
+    query = str(payload.get("query", "")).strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="query is required")
+    body: Dict[str, object] = {"query": query[:DOCS_MAX_QUESTION_LEN]}
+    if isinstance(payload.get("top_n"), int):
+        body["top_n"] = payload["top_n"]
+    return await _docs_request("POST", "/search", body)
+
+
+async def ai_health():
+    """Passthrough of the docs service health (chunk count, models)."""
+    return await _docs_request("GET", "/health")
+
+
+# Register each handler at /ai/* and (behind the reverse proxy) FRONTEND_ROOT_PATH/ai/*.
+_AI_ROUTES = [
+    ("/ask", ai_ask, ["POST"]),
+    ("/search", ai_search, ["POST"]),
+    ("/health", ai_health, ["GET"]),
+]
+_AI_PREFIXES = ["/ai"]
+if FRONTEND_ROOT_PATH and FRONTEND_ROOT_PATH != "/":
+    _AI_PREFIXES.append(f"{FRONTEND_ROOT_PATH}/ai")
+for _prefix in _AI_PREFIXES:
+    for _suffix, _endpoint, _methods in _AI_ROUTES:
+        app.add_api_route(f"{_prefix}{_suffix}", _endpoint, methods=_methods, include_in_schema=False)
 
 
 # Static directory mounting (Mounted last to allow explicit routes higher precedence)

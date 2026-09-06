@@ -20,3 +20,16 @@ sso_login          = true      # match customer360-api (SSO_LOGIN=true)
 # Persist OpenTelemetry tracing ON for uat across redeploys (read by deploy-frontend.sh ->
 # lib/otel.sh; an explicit OTEL_ENABLED env var still overrides). Default without this is OFF on uat.
 otel_enabled = "true"
+
+# --- Docs Assistant (chatbot) -> docs-vector-search on the "docs" box -------------------
+# The browser calls the same-origin /ai/* proxy in frontend-admin, which forwards SERVER-SIDE
+# to the docs box over the PRIVATE network (no CORS; the docs box stays unexposed). Leave
+# docs_search_url EMPTY to auto-resolve the "docs" server's private fixed_ip:docs_search_port
+# from ../server outputs; set it explicitly only to override. NOTE: the api box (10.100.1.5,
+# where the frontend runs) must be allowed to reach docs:8000 — see the extra_ingress rule in
+# ../server/overlays/uat.tfvars (apply out-of-band with ./deploy.sh uat apply).
+docs_search_url        = ""      # empty -> auto-resolve from the "docs" box private IP
+docs_search_server_key = "docs"  # server key of the docs-vector-search box
+docs_search_port       = 8000
+# Where the chatbot links its citations (the public docs site on GitHub Pages).
+docs_site_base         = "https://leo-cdp.github.io/leo-customer360"

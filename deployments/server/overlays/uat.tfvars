@@ -99,6 +99,7 @@ ssh_ingress_cidr = "0.0.0.0/0" # <-- change to "<your-public-ip>/32"
 extra_ingress = [
   { port = 9001, cidr = "10.100.1.5/32" }, # Portainer agent   <- api box (Portainer)
   { port = 8010, cidr = "10.100.1.5/32" }, # data-tracking-api <- api box (Caddy /data)
+  { port = 8000, cidr = "10.100.1.5/32" }, # docs-vector-search <- api box (frontend-admin /ai proxy). Only the docs box listens on 8000.
   { port = 6580, cidr = "10.100.1.8/32" }, # api-box Redis      <- tracking box (rate-limit + session cache)
   { port = 4318, cidr = "10.100.1.8/32" }, # api-box Jaeger OTLP <- tracking box (request traces)
 ]

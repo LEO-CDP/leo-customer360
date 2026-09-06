@@ -35,7 +35,11 @@ window.C360 = window.C360 || {};
     leoObserverLogDomain: "beta.leocdp.com",
     leoObserverTrackingUri: "/data/api/v1/tracking/logs",
     leoObserverTrackingEndpoint: "https://beta.leocdp.com/data/api/v1/tracking/logs",
-    leoObserverCdnJS: "gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main"
+    leoObserverCdnJS: "gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main",
+    // Docs Assistant (RAG chatbot). docsAiBase is the same-origin proxy in app.py
+    // (forwards to tools/docs-vector-search); docsSiteBase is where citations link.
+    docsAiBase: "/ai",
+    docsSiteBase: "https://leo-cdp.github.io/leo-customer360"
   };
 
   var PERSONA_CATEGORY_OPTIONS = [
@@ -122,7 +126,9 @@ window.C360 = window.C360 || {};
       leoObserverLogDomain: serverConfig.leoObserverLogDomain || DEFAULTS.leoObserverLogDomain,
       leoObserverTrackingUri: serverConfig.leoObserverTrackingUri || DEFAULTS.leoObserverTrackingUri,
       leoObserverTrackingEndpoint: serverConfig.leoObserverTrackingEndpoint || DEFAULTS.leoObserverTrackingEndpoint,
-      leoObserverCdnJS: serverConfig.leoObserverCdnJS || DEFAULTS.leoObserverCdnJS
+      leoObserverCdnJS: serverConfig.leoObserverCdnJS || DEFAULTS.leoObserverCdnJS,
+      docsAiBase: serverConfig.docsAiBase || DEFAULTS.docsAiBase,
+      docsSiteBase: serverConfig.docsSiteBase || DEFAULTS.docsSiteBase
     };
   }
 
@@ -567,6 +573,35 @@ window.C360 = window.C360 || {};
     return roles.some(function (r) { return String(r).toLowerCase() === "admin"; });
   }
 
+  // --- Docs Assistant (RAG chatbot) client -------------------------------------
+  // Deliberately NOT api(): that helper targets customer360-api and injects
+  // tenant/auth headers the docs proxy neither needs nor wants. These hit the
+  // same-origin /ai/* proxy (app.py -> tools/docs-vector-search) and use fetch so
+  // the caller can pass an AbortController signal for single-inflight cancellation.
+  function docsFetch(path, body, signal) {
+    return fetch(CONFIG.docsAiBase + path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body || {}),
+      signal: signal
+    }).then(function (resp) {
+      if (!resp.ok) {
+        var err = new Error("HTTP " + resp.status);
+        err.status = resp.status;
+        throw err;
+      }
+      return resp.json();
+    });
+  }
+
+  function docsAsk(question, signal) {
+    return docsFetch("/ask", { question: question }, signal);
+  }
+
+  function docsSearch(query, topN, signal) {
+    return docsFetch("/search", { query: query, top_n: topN || 8 }, signal);
+  }
+
   C360.config = {
     get: getConfig,
     current: CONFIG,
@@ -589,6 +624,8 @@ window.C360 = window.C360 || {};
     themeLoader: themeLoader,
     getDataPeriodDays: getDataPeriodDays,
     isAdmin: isAdmin,
+    docsAsk: docsAsk,
+    docsSearch: docsSearch,
     personaCategoryOptions: PERSONA_CATEGORY_OPTIONS
   };
 

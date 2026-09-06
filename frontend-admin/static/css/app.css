@@ -289,3 +289,99 @@ html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
 }
 
 .hidden { display: none !important; }
+
+/*
+ * Docs Assistant (RAG chatbot) widget -- see static/js/docs-chatbot-view.js and
+ * static/templates/common/docs-chatbot.html. Layout classes come from Tailwind in
+ * the template; these style the message bubbles, sources and typing indicator, and
+ * remap for dark mode via the shared --c360-* variables.
+ */
+#docs-chat-log::-webkit-scrollbar { width: 8px; }
+#docs-chat-log::-webkit-scrollbar-thumb { background: var(--c360-scroll-thumb); border-radius: 9999px; }
+
+.docs-chat-msg { display: flex; }
+.docs-chat-msg-user { justify-content: flex-end; }
+.docs-chat-msg-bot { justify-content: flex-start; }
+
+.docs-chat-bubble {
+  max-width: 85%;
+  padding: 0.6rem 0.8rem;
+  border-radius: 1rem;
+  line-height: 1.45;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+.docs-chat-bubble-user {
+  background: #4f46e5;
+  color: #fff;
+  border-bottom-right-radius: 0.25rem;
+}
+.docs-chat-bubble-bot {
+  background: #f1f5f9;
+  color: var(--c360-text);
+  border-bottom-left-radius: 0.25rem;
+}
+html.dark .docs-chat-bubble-bot { background: #1e293b; }
+
+.docs-chat-answer { white-space: normal; }
+.docs-chat-error { color: #dc2626; }
+html.dark .docs-chat-error { color: #f87171; }
+
+.docs-chat-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--c360-muted);
+}
+
+/* three-dot typing indicator */
+.docs-chat-typing { display: inline-flex; gap: 3px; align-items: center; }
+.docs-chat-typing span {
+  width: 6px; height: 6px; border-radius: 9999px;
+  background: currentColor; opacity: 0.4;
+  animation: docs-chat-blink 1.2s infinite both;
+}
+.docs-chat-typing span:nth-child(2) { animation-delay: 0.2s; }
+.docs-chat-typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes docs-chat-blink {
+  0%, 80%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+
+.docs-chat-sources { margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.docs-chat-sources-title {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--c360-muted);
+}
+.docs-chat-source {
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--c360-border);
+  border-radius: 0.6rem;
+  background: var(--c360-card);
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.docs-chat-source:hover { border-color: #6366f1; background: color-mix(in srgb, #6366f1 8%, transparent); }
+.docs-chat-source-doc { font-size: 0.8rem; font-weight: 600; color: #4f46e5; }
+html.dark .docs-chat-source-doc { color: #a5b4fc; }
+.docs-chat-source-heading { font-size: 0.72rem; color: var(--c360-muted); }
+
+.docs-chat-suggestion {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--c360-border);
+  border-radius: 9999px;
+  background: var(--c360-card);
+  color: var(--c360-text);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.docs-chat-suggestion:hover { border-color: #6366f1; color: #4f46e5; }
+html.dark .docs-chat-suggestion:hover { color: #a5b4fc; }
