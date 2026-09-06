@@ -30,8 +30,9 @@ CORPUS_DIR = Path(os.getenv("CORPUS_DIR", REPO_ROOT / "docs")).resolve()
 CHUNK_TOKENS = int(os.getenv("CHUNK_TOKENS", "400"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
 
-# Embedding — local, via fastembed (ONNX). e5 needs query:/passage: prefixes.
-EMBED_MODEL = os.getenv("EMBED_MODEL", "intfloat/multilingual-e5-small")
+# Embedding — local, via fastembed (ONNX). Default is a 384-dim multilingual (VN+EN)
+# model that fastembed supports; e5 models (if set) get query:/passage: prefixes in providers.
+EMBED_MODEL = os.getenv("EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 EMBED_DIM = int(os.getenv("EMBED_DIM", "384"))
 
 # Reranking — local, via fastembed TextCrossEncoder.
