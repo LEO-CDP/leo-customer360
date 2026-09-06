@@ -9,7 +9,7 @@ you only have two public DNS domains available:
 | `id.example.com` | **Keycloak** identity provider / SSO |
 
 It builds on the existing [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md) and
-[devops-notes.md](devops-notes.md), but adapts them for the single-domain
+[devops-notes.md](../tooling/pandoc-notes/devops-notes.md), but adapts them for the single-domain
 API/frontend constraint.
 
 ---
@@ -93,7 +93,7 @@ This will place certificates under:
 ## 4. Add `frontend-admin` to `docker-compose.yml`
 
 Append the service below to the existing
-[`docker-compose.yml`](../docker-compose.yml). It reuses the same patterns as
+[`docker-compose.yml`](../../docker-compose.yml). It reuses the same patterns as
 `api` and `cir`.
 
 ```yaml
@@ -430,7 +430,7 @@ docker compose up -d --force-recreate api
 
 The API reads a custom `tenant_id` claim from the access token to
 auto-provision or resolve `sys_user` rows (see
-[`customer360-api/core/auth.py`](../customer360-api/core/auth.py)).
+[`customer360-api/core/auth.py`](../../customer360-api/core/auth.py)).
 
 Create a **realm** client scope or a dedicated protocol mapper on the
 `leocdp` client that publishes `tenant_id` as a hardcoded or user-attribute

@@ -5,7 +5,7 @@ Runs the job fully in-process via Dagster's own executor (no real Postgres
 needed) with segmentation.recompute functions mocked out, so these tests
 verify the Dagster wiring itself (op -> job -> success/output, sensor cursor/
 RunRequest/SkipReason behavior), not the recompute SQL itself (exercised
-manually against a real database -- see docs/PLAN-SEGMENTS-API-IMPROVEMENT.md).
+manually against a real database -- see docs/api-plans/PLAN-SEGMENTS-API-IMPROVEMENT.md).
 """
 
 import logging

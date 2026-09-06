@@ -4,7 +4,7 @@ Last updated: 2026-07-30
 
 ## 1. Default ports and host bindings
 
-The defaults below come from [.env.example](../.env.example). Copy that file to `.env` and adjust the values before the first run.
+The defaults below come from [.env.example](../../../.env.example). Copy that file to `.env` and adjust the values before the first run.
 
 | Service | Default host bind / port | Internal port | Notes |
 |---|---|---|---|
@@ -17,7 +17,7 @@ The defaults below come from [.env.example](../.env.example). Copy that file to 
 | C360 API | `127.0.0.1:8008` | 8008 | FastAPI app; all endpoints except `/health` require a bearer token |
 | C360 Frontend | `0.0.0.0:8890` | 8890 | Static admin UI served by frontend-admin |
 
-> The published ports are configurable through `.env` using `*_HOST_PORT` and `*_HOST_BIND` variables. The defaults in [.env.example](../.env.example) are loopback-only for safety.
+> The published ports are configurable through `.env` using `*_HOST_PORT` and `*_HOST_BIND` variables. The defaults in [.env.example](../../../.env.example) are loopback-only for safety.
 
 ## 2. Environment setup
 
@@ -32,7 +32,7 @@ At a minimum, set real values for:
 - `DB_PASSWORD`
 - `REDIS_PASSWORD`
 - `KEYCLOAK_ADMIN_PASSWORD`
-- `KEYCLOAK_CLIENT_SECRET` (create the client in Keycloak first; see [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md))
+- `KEYCLOAK_CLIENT_SECRET` (create the client in Keycloak first; see [DOCKER-COMPOSE-GUIDE.md](../../operations/DOCKER-COMPOSE-GUIDE.md))
 
 Recommended additional values for a local setup:
 
@@ -81,8 +81,8 @@ These commands can be run standalone (before `up`) or combined with `up -d --bui
 
 ## 4. Compose and networking notes
 
-- [docker-compose.yml](../docker-compose.yml) and [dev-docker-compose.yml](../dev-docker-compose.yml) share the same project name, container names, network, and volumes. Do not run both files at the same time.
-- `DB_HOST`, `REDIS_HOST`, and `SSO_LOGIN_URL` are overridden inside the `api` and `cir` containers to use the Docker service names `postgres`, `redis`, and `keycloak`. The `localhost` values in [.env.example](../.env.example) are only for host-run services.
+- [docker-compose.yml](../../../docker-compose.yml) and [dev-docker-compose.yml](../../../dev-docker-compose.yml) share the same project name, container names, network, and volumes. Do not run both files at the same time.
+- `DB_HOST`, `REDIS_HOST`, and `SSO_LOGIN_URL` are overridden inside the `api` and `cir` containers to use the Docker service names `postgres`, `redis`, and `keycloak`. The `localhost` values in [.env.example](../../../.env.example) are only for host-run services.
 - Keycloak 26 exposes `/health/*` on the management port `9000` internally; the published port remains `8080`.
 - The public-facing API and frontend bindings default to loopback. Change them to `0.0.0.0` only when the host is otherwise trusted or when a reverse proxy is in front of the stack.
 
@@ -177,7 +177,7 @@ The API will use the `.env` file and connect to `localhost:5432` (Postgres), `lo
 
 ### Development gotchas
 
-- **Keycloak setup**: Before you can authenticate against the API, you must create a Keycloak client. See [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md) for step-by-step instructions.
+- **Keycloak setup**: Before you can authenticate against the API, you must create a Keycloak client. See [DOCKER-COMPOSE-GUIDE.md](../../operations/DOCKER-COMPOSE-GUIDE.md) for step-by-step instructions.
 - **Bearer tokens**: All API endpoints except `/health`, `/api/v1/metadata`, and `/api/v1/auth/*` require a valid bearer token in both modes. Use the Keycloak web UI or admin API to generate test tokens.
 - **SSO_LOGIN=true**: Set this in `.env` to require real Keycloak tokens. Set to `false` for local testing without Keycloak -- call `POST /api/v1/auth/login` (DEFAULT_ROOT_USERNAME/PASSWORD) to get a dev JWT instead; `X-Tenant-Id`/`X-User-Id` headers alone no longer bypass auth.
 - **FRONTEND_API_HOSTNAME**: Must be reachable from your browser. If running behind a reverse proxy, update this to the proxy's public URL.

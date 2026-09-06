@@ -70,9 +70,9 @@ Use [dev-db-backup.sh](dev-db-backup.sh) to create a plain UTF-8 SQL backup from
 the running local PostgreSQL container:
 
 ```bash
-./docs/database/dev-db-backup.sh \
+./docs/operations/database/dev-db-backup.sh \
 	--env-file .env \
-	--output backups/customer360-uat.sql \
+	--output ../../../backups/customer360-uat.sql \
 	--data-mode inserts
 ```
 
@@ -90,7 +90,7 @@ PostgreSQL extensions in the target database. The import role must also have
 permission to create the `customer360` schema and application objects, or the
 schema must be prepared by an administrator first.
 
-In pgAdmin Query Tool, open [backups/customer360-uat.sql](../../backups/customer360-uat.sql)
+In pgAdmin Query Tool, open `backups/customer360-uat.sql`
 and execute it against a new or empty UAT database. Do not use the pgAdmin
 Restore dialog for this plain SQL file.
 

@@ -122,7 +122,7 @@ PORT="${DAGSTER_UI_PORT:-3000}"
 ###############################################################################
 log "DAGSTER_HOME=${DAGSTER_HOME}"
 log "Starting Dagster (webserver + daemon) on http://${HOST}:${PORT} ..."
-setsid "$VENV_DIR/bin/dagster" dev -w workspace.yaml -h "$HOST" -p "$PORT" >>"$LOG_FILE" 2>&1 &
+setsid "$VENV_PYTHON" -m dagster dev -w workspace.yaml -h "$HOST" -p "$PORT" >>"$LOG_FILE" 2>&1 &
 echo $! >"$PID_FILE"
 
 sleep 3

@@ -100,7 +100,7 @@ services:
   # ---------------------------------------------------------------------------
   # 3) MinIO - local S3-compatible object storage, DEV ONLY. Lets you test
   #    file-based event ingestion (e.g. importing events from CSV/JSON dropped
-  #    into a bucket, see docs/PLAN-EVENTS-API-IMPROVEMENTmd "Import from S3")
+  #    into a bucket, see docs/api-plans/PLAN-EVENTS-API-IMPROVEMENT.md "Import from S3")
   #    against a real S3 API without touching production S3. NOT present in
   #    docker-compose.yml -- production uses the real S3 bucket instead.
   # ---------------------------------------------------------------------------

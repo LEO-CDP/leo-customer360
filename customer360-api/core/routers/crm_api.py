@@ -4,7 +4,7 @@ router factory since they share a simple single-column UUID primary key.
 
 Also exposes a campaign analytics sub-router under /campaigns/analytics/
 for the Marketing Campaign Performance Dashboard (see
-docs/PLAN-CAMPAIGNS-DEV.md Phase 2).
+docs/api-plans/PLAN-CAMPAIGNS-DEV.md Phase 2).
 """
 
 import math

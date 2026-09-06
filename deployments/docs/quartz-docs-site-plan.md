@@ -291,12 +291,12 @@ cp docs-site/quartz.config.ts docs-site/quartz.layout.ts /tmp/quartz/
 
 ## 9. Pre-flight fixes (before first build)
 
-1. **Fix the malformed filename** — `docs/PLAN-EVENTS-API-IMPROVEMENTmd` → `docs/PLAN-EVENTS-API-IMPROVEMENT.md`. Without the `.md` extension `git ls-files '*.md'` never sees it, so it silently won't publish.
+1. **Fix the malformed filename** — `docs/api-plans/PLAN-EVENTS-API-IMPROVEMENT.md` → `docs/api-plans/PLAN-EVENTS-API-IMPROVEMENT.md`. Without the `.md` extension `git ls-files '*.md'` never sees it, so it silently won't publish.
    ```bash
-   git mv docs/PLAN-EVENTS-API-IMPROVEMENTmd docs/PLAN-EVENTS-API-IMPROVEMENT.md
+   git mv docs/api-plans/PLAN-EVENTS-API-IMPROVEMENT.md docs/api-plans/PLAN-EVENTS-API-IMPROVEMENT.md
    ```
 2. **Commit `.documentignore`** at the repo root (from §4); review the suggested exclusions for your repo.
-3. **Sanity-check `---`-fronted files** — slide decks like `docs/campaign-slide-VN.md` open with `---`; confirm that block is valid YAML frontmatter, not reveal.js/Marp separators. If a deck, mark it `draft: true` or accept it renders as one page.
+3. **Sanity-check `---`-fronted files** — slide decks like `docs/marketing/campaign-slide-VN.md` open with `---`; confirm that block is valid YAML frontmatter, not reveal.js/Marp separators. If a deck, mark it `draft: true` or accept it renders as one page.
 4. **Assets** (`.png`, `.svg`, `.pdf`) referenced by **relative** links are copied through by Quartz. Binaries not referenced by any shown page won't appear — expected.
 
 ---

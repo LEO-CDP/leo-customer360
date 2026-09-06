@@ -12,7 +12,7 @@ Code trong repository này không phải là một abstract demo. Đây là layo
 - browser-based admin UI trong `frontend-admin/` gọi API qua HTTP
 - các script khởi động bằng Docker và seed demo ở thư mục gốc của repository
 
-![](./docs/images/composable-cdp-architecture.png)
+![](./docs/architecture/images/composable-cdp-architecture.png)
 
 ## Những gì đã được triển khai
 
@@ -149,8 +149,8 @@ Repository có consolidated test runner:
 
 Đọc các tài liệu sau để có thêm context:
 
-- [`docs/TECHNICAL-DOCUMENTATION.md`](docs/TECHNICAL-DOCUMENTATION.md)
-- [`docs/DOCKER-COMPOSE-GUIDE.md`](docs/DOCKER-COMPOSE-GUIDE.md)
+- [`docs/architecture/TECHNICAL-DOCUMENTATION.md`](docs/architecture/TECHNICAL-DOCUMENTATION.md)
+- [`docs/operations/DOCKER-COMPOSE-GUIDE.md`](docs/operations/DOCKER-COMPOSE-GUIDE.md)
 - [`customer360-api/customer360-api.md`](customer360-api/customer360-api.md)
 - [`data-tracking-api/README.md`](data-tracking-api/README.md)
 - [`ads-server/README.md`](ads-server/README.md)

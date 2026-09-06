@@ -1,5 +1,5 @@
 """Segment membership (re)computation for ``cdp_segments`` (see
-core/models/segmentation.py and docs/PLAN-SEGMENTS-API-IMPROVEMENT.md).
+core/models/segmentation.py and docs/api-plans/PLAN-SEGMENTS-API-IMPROVEMENT.md).
 
 ``recompute_segment_membership`` is the shared implementation used by both
 the on-demand ``POST /segments/{id}/recompute`` endpoint (core/routers/

@@ -2,12 +2,12 @@
 
 Audience: DevOps engineers deploying/operating the stack, and backend
 engineers developing against it locally. Covers
-[`docker-compose.yml`](docker-compose.yml) and the host-run development Compose
+[`docker-compose.yml`](../../docker-compose.yml) and the host-run development Compose
 variants at the root of `core-customer360/`.
 
-For architecture/DB schema background see [README.md](README.md),
-[TECHNICAL-DOCUMENTATION.md](TECHNICAL-DOCUMENTATION.md), and
-[identity-resolution.md](identity-resolution.md). This guide only covers the
+For architecture/DB schema background see [repository README](../../README.md),
+[technical documentation](../architecture/TECHNICAL-DOCUMENTATION.md), and
+[CIR improvement notes](../identity-resolution/CIR-improvement.md). This guide only covers the
 containerized deployment.
 
 ---
@@ -16,8 +16,8 @@ containerized deployment.
 
 | Service | Image (built locally) | Role | Port (host) |
 |---|---|---|---|
-| `postgres` | `customer360-postgres:local` (postgis/postgis:16-3.5 + pgvector) | Primary datastore, auto-provisioned with [`database-schema.sql`](database-init/database-schema.sql) | `${POSTGRES_HOST_PORT:-5432}` → 5432 |
-| `redis` | `customer360-redis:local` (redis:8-alpine) | Response cache **and Keycloak token cache** for customer360-api (see [`core/cache.py`](customer360-api/core/cache.py) / [`core/auth.py`](customer360-api/core/auth.py)) | `${REDIS_HOST_PORT:-6580}` → 6580 |
+| `postgres` | `customer360-postgres:local` (postgis/postgis:16-3.5 + pgvector) | Primary datastore, auto-provisioned with [`database-schema.sql`](../../database-init/database-schema.sql) | `${POSTGRES_HOST_PORT:-5432}` → 5432 |
+| `redis` | `customer360-redis:local` (redis:8-alpine) | Response cache **and Keycloak token cache** for customer360-api (see [`core/cache.py`](../../customer360-api/core/cache.py) / [`core/auth.py`](../../customer360-api/core/auth.py)) | `${REDIS_HOST_PORT:-6580}` → 6580 |
 | `keycloak-db-init` | reuses `customer360-postgres:local` | **One-shot** job that creates the dedicated `db_keycloak` database on the shared `postgres` instance, then exits | none |
 | `keycloak` | `keycloak/keycloak:26.7` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
 | `dagster` | `customer360-dagster:local` (Python 3.11-slim) | Dagster webserver and daemon for all nine backend-system code locations, including identity resolution | `${DAGSTER_UI_PORT:-3000}` → 3000 |
@@ -61,7 +61,7 @@ flowchart LR
   service_healthy` requires the Compose Specification).
 - Ports `5432` / `6580` / `8008` / `8010` free on the host, **or** override them (see
   §4) — this matters on dev machines that already run `pgsql16_vector` /
-  another Redis via [`dev-start-pgsql.sh`](dev-start-pgsql.sh).
+  another Redis via [`dev-start-pgsql.sh`](../../dev-c360.sh).
 
 ---
 
@@ -83,9 +83,9 @@ Edit `.env` and set real values for at least:
   uses to introspect tokens (see §9 below to create it).
 - `LEO_GOOGLE_GENAI_API_KEY` — optional; leave the `YOUR_...` placeholder to keep
   CIR's persona-name generation fully offline/deterministic (see
-  [identity-resolution.md](identity-resolution.md)).
+  [CIR improvement notes](../identity-resolution/CIR-improvement.md)).
 
-`.env` is gitignored (see [`.gitignore`](.gitignore)) — never commit real
+`.env` is gitignored (see [`.gitignore`](../../.gitignore)) — never commit real
 credentials. `.env.example` is the committed template.
 
 > **How `.env` is used (important to understand before editing it):**
@@ -144,7 +144,7 @@ docker compose logs -f cir-demo-seed   # tail while running
 docker inspect -f '{{.State.ExitCode}}' customer360-cir-demo-seed   # expect 0
 ```
 
-It's idempotent (see [identity-resolution.md](identity-resolution.md) /
+It's idempotent (see [CIR improvement notes](../identity-resolution/CIR-improvement.md) /
 repo notes) — safe to re-run:
 
 ```bash
@@ -161,7 +161,7 @@ and the tracking API:
 docker compose -f dev-docker-compose.yml up -d --build
 ```
 
-When `SSO_LOGIN=false`, [`dev-c360.sh`](../dev-c360.sh) selects
+When `SSO_LOGIN=false`, [`dev-c360.sh`](../../dev-c360.sh) selects
 `dev-no-sso-docker-compose.yml`, which provides the same MinIO-backed tracking
 API without starting Keycloak. Both variants publish the tracking API at
 `${C360_TRACKING_API_PORT:-8010}` and connect it to the in-network Redis and
@@ -303,7 +303,7 @@ instance per host.)
 
 ## 6. Configuration reference
 
-All variables live in [`.env.example`](.env.example) — copy to `.env` and
+All variables live in [`.env.example`](../../.env.example) — copy to `.env` and
 tune per environment (dev/staging/prod). Highlights:
 
 | Variable | Default | Notes |
@@ -340,7 +340,7 @@ tune per environment (dev/staging/prod). Highlights:
 
 `/docker-entrypoint-initdb.d/` scripts (extensions + `database-schema.sql`)
 **only run once**, when `customer360-pgdata` is first created. This mirrors
-the same limitation as [`dev-start-pgsql.sh`](dev-start-pgsql.sh)'s
+the same limitation as [`dev-start-pgsql.sh`](../../dev-c360.sh)'s
 `SCHEMA_VERSION` gate for non-Docker dev.
 
 - **Fresh environment / OK to lose data (dev, CI):**
@@ -404,7 +404,7 @@ confidential client before `customer360-api` can validate any token.
    - Client ID: `leocdp` (must match `KEYCLOAK_CLIENT_ID`).
    - Client authentication: **On** — this makes it a confidential client with
      a secret, required for the introspection call in
-     [`core/auth.py`](customer360-api/core/auth.py).
+     [`core/auth.py`](../../customer360-api/core/auth.py).
    - Enable **Direct access grants** if you want to fetch test tokens via the
      `password` grant.
 4. **Clients → leocdp → Credentials** tab → copy the client secret into
@@ -429,7 +429,7 @@ curl -s http://localhost:${C360_API_PORT:-8008}/api/v1/reporting/summary \
 ```
 
 `/health` never requires a token; every other route does (see
-`EXEMPT_PATHS` in [`core/auth.py`](customer360-api/core/auth.py)). Valid
+`EXEMPT_PATHS` in [`core/auth.py`](../../customer360-api/core/auth.py)). Valid
 tokens are cached in Redis under `auth:token:<token>` (TTL = token `exp`), so
 repeat calls with the same token skip Keycloak entirely until it expires.
 
@@ -440,7 +440,7 @@ repeat calls with the same token skip Keycloak entirely until it expires.
 This Compose stack is independent of, and safe to run alongside, the existing
 non-Docker dev scripts:
 
-- [`dev-start-pgsql.sh`](dev-start-pgsql.sh) → container `pgsql16_vector`
+- [`dev-start-pgsql.sh`](../../dev-c360.sh) → container `pgsql16_vector`
 - `customer360-api/start.sh` / `stop.sh` → runs uvicorn directly on the host
 - `backend-system/identity_resolution/run-demo.sh` → runs the CIR scripts directly on the host
 

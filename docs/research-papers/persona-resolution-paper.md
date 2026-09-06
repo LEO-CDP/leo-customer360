@@ -585,4 +585,4 @@ In short, the current implementation is technically robust and ready to support 
 
 ---
 
-**References:** [persona_engine.py](../backend-system/identity_resolution/identity_resolution/persona_engine.py) | [database-schema.sql](../database-init/database-schema.sql)
+**References:** [persona_engine.py](../../backend-system/identity_resolution/identity_resolution/persona_engine.py) | [database-schema.sql](../../database-init/database-schema.sql)

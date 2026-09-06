@@ -43,11 +43,11 @@ At runtime, the risk score contributes both directly and indirectly:
 Implementation artifacts referenced in this note:
 
 - Risk computation logic:
-  [backend-system/identity_resolution/identity_resolution/persona_engine.py](../backend-system/identity_resolution/identity_resolution/persona_engine.py)
+  [backend-system/identity_resolution/identity_resolution/persona_engine.py](../../backend-system/identity_resolution/identity_resolution/persona_engine.py)
 - Demo data calibration:
-  [backend-system/identity_resolution/scripts/seed_full_demo_data.py](../backend-system/identity_resolution/scripts/seed_full_demo_data.py)
+  [backend-system/identity_resolution/scripts/seed_full_demo_data.py](../../backend-system/identity_resolution/scripts/seed_full_demo_data.py)
 - Persistence schema:
-  [database-init/database-schema.sql](../database-init/database-schema.sql)
+  [database-init/database-schema.sql](../../database-init/database-schema.sql)
 
 ## 2. Formal Definition of Risk Score
 
@@ -227,14 +227,14 @@ without dominating behavior, engagement, or value signals.
 ## 8. Parameter Governance and Change Protocol
 
 All relevant numeric parameters are centralized in
-[backend-system/identity_resolution/identity_resolution/persona_engine.py](../backend-system/identity_resolution/identity_resolution/persona_engine.py),
+[backend-system/identity_resolution/identity_resolution/persona_engine.py](../../backend-system/identity_resolution/identity_resolution/persona_engine.py),
 enabling controlled modifications.
 
 Recommended change protocol:
 
 1.  Modify constants only (no inline literals in business logic).
 2.  Update threshold-focused tests in
-    [backend-system/identity_resolution/tests/test_persona_engine.py](../backend-system/identity_resolution/tests/test_persona_engine.py).
+    [backend-system/identity_resolution/tests/test_persona_engine.py](../../backend-system/identity_resolution/tests/test_persona_engine.py).
 3.  Re-seed and recompute full distribution to detect category drift.
 4.  Record pre/post distributions for audit and rollback readiness.
 

@@ -20,7 +20,7 @@ A user installs an app from a Facebook/TikTok/Google ad (Google Analytics record
 A banking customer interacts through the mobile app (Google Analytics) then completes KYC through the core banking system (`kyc_completed` event carrying `national_id`). CIR matches configured identifiers such as `device_id`, `phone_number`, and `national_id` to merge both sources, updating `kyc_status`, `cif_number`, `account_numbers`, `risk_segment` on the same golden record — supporting **AML/risk scoring** and digital-banking personalization without manual reconciliation across core systems.
 
 ### UC3 — B2B marketing attribution & customer journey
-Uses the CRM journey graph to answer questions like: *"All Contacts in the Finance industry touched by Campaign X, which Lead they converted from, and which Opportunity they are currently linked to"* — joining `crm_lead → crm_campaign_member → crm_campaign`, `crm_contact → crm_account → crm_industry`, `crm_contact → crm_opportunity` (example SQL in [README.md](../README.md)).
+Uses the CRM journey graph to answer questions like: *"All Contacts in the Finance industry touched by Campaign X, which Lead they converted from, and which Opportunity they are currently linked to"* — joining `crm_lead → crm_campaign_member → crm_campaign`, `crm_contact → crm_account → crm_industry`, `crm_contact → crm_opportunity` (example SQL in [README.md](../../README.md)).
 
 ### UC4 — Identity Resolution operations dashboard (Data/BI team)
 Calls `GET /api/v1/reporting/summary` to build a real-time dashboard: how many raw profiles are `pending`, how many have been merged, duplicate rates by `source_system`/`domain` — helping detect pipeline issues early (e.g. raw profiles stuck at `status_code=1` too long) or poor data quality (matching rules too loose/too strict).
@@ -108,11 +108,11 @@ flowchart TB
 
 **How to read this diagram:**
 - **One golden record, many sources** — Google Analytics/Web/POS/Core Banking all land in a single staging table; nothing is siloed per channel.
-- **Identity resolution is a separate, swappable worker** ([`backend-system/identity_resolution/`](../backend-system/identity_resolution)), not baked into the API — it writes to Postgres directly via `psycopg2`, independent of `customer360-api`.
-- **One API contract** ([`customer360-api/`](../customer360-api)) governs all reads/writes to the schema, backed by Redis for latency and Keycloak for SSO/authorization.
-- **Backend pipelines are Dagster-orchestrated** ([`backend-system/`](../backend-system)) — `customer360-api` submits Dagster job runs asynchronously through the Dagster GraphQL API (`core/utils/dagster_client.py`) instead of running long batch work inline inside an HTTP request.
+- **Identity resolution is a separate, swappable worker** ([`backend-system/identity_resolution/`](../../backend-system/identity_resolution)), not baked into the API — it writes to Postgres directly via `psycopg2`, independent of `customer360-api`.
+- **One API contract** ([`customer360-api/`](../../customer360-api)) governs all reads/writes to the schema, backed by Redis for latency and Keycloak for SSO/authorization.
+- **Backend pipelines are Dagster-orchestrated** ([`backend-system/`](../../backend-system)) — `customer360-api` submits Dagster job runs asynchronously through the Dagster GraphQL API (`core/utils/dagster_client.py`) instead of running long batch work inline inside an HTTP request.
 - **Tracking ingestion and analytics are separate services** — `data-tracking-api` writes immutable hourly NDJSON objects to S3/MinIO, and the `analytics` Dagster job aggregates those objects into source totals and Redis-backed metrics.
-- **Ad serving is a separate API** ([`ads-server/`](../ads-server)) — it serves tenant-scoped placements and creatives and is deployed independently from the core Customer 360 Compose stack.
+- **Ad serving is a separate API** ([`ads-server/`](../../ads-server)) — it serves tenant-scoped placements and creatives and is deployed independently from the core Customer 360 Compose stack.
 - **The admin UI is a static single-page app** served by a thin FastAPI process — no server-side rendering of data, no direct database access from the UI tier.
 
 ### 3.2 Data Flow: Ingest → Identity Resolution → Activation
@@ -122,7 +122,7 @@ flowchart TB
    - Land in staging tables with `source_system`, `domain` (`retail`/`banking`/`travel`/`real_estate`), and optional PII (email, phone, name).
    - Status tracked via `status_code` / `cdp_id_resolution_status`.
 
-2. **Identity Resolution (CIR)** — [`backend-system/identity_resolution/`](../backend-system/identity_resolution)
+2. **Identity Resolution (CIR)** — [`backend-system/identity_resolution/`](../../backend-system/identity_resolution)
    - **Trigger:** the long-running `worker.py` polling loop, which drives `identity_resolution_job` in-process via Dagster's `execute_in_process()`, plus a `daily_job.py` batch entrypoint (cron/Airflow compatible) for scheduled full runs.
    - **Matching engine** (`identity_resolution/resolver.py`): loads active matching rules at runtime from `cdp_profile_attributes` (rows with `is_identity_resolution=true`).
      - **Exact match**: `national_id`, `email`, `phone_number` (SHA-256 hashed), plus `external_customer_id`/`device_id`/`advertising_id`/`cookie_id` (identity-graph fields).
@@ -135,18 +135,18 @@ flowchart TB
    - Holds ML score placeholders (`churn_probability`, `predictive_clv`, `lead_conversion_probability`, `engagement_score`) populated by an external scoring pipeline once implemented.
    - Holds `persona_embedding` (pgvector) for lookalike-audience/semantic search.
 
-4. **Tracking-log ingestion & analytics** — [`data-tracking-api/`](../data-tracking-api) accepts source events and writes immutable hourly NDJSON objects to S3 (MinIO in dev); the scheduled `analytics_job` reads those objects and updates source totals.
+4. **Tracking-log ingestion & analytics** — [`data-tracking-api/`](../../data-tracking-api) accepts source events and writes immutable hourly NDJSON objects to S3 (MinIO in dev); the scheduled `analytics_job` reads those objects and updates source totals.
 
 5. **Segmentation & activation** — via `customer360-api` + CRM tables
    - `POST /api/v1/segments/{id}/recompute` (on-demand, synchronous) or the scheduled `segmentation_job` (Dagster, polls for changes every `SEGMENTATION_POLL_INTERVAL_SECONDS`) recompute `cdp_segments` membership.
    - Marketing composes segments via CRM graph joins or `cdp_master_profiles` filters and activates against the resulting list.
 
-6. **Ad delivery** — [`ads-server/`](../ads-server)
+6. **Ad delivery** — [`ads-server/`](../../ads-server)
     - The standalone ad-serving API reads tenant-scoped campaigns, creatives, and placements and exposes the browser loader for client-side delivery.
 
 ### 3.3 Orchestration Architecture (Dagster)
 
-`backend-system/` is a single Dagster workspace ([`backend-system/workspace.yaml`](../backend-system/workspace.yaml)). Every subfolder is an independent, separately-deployable Python codebase (own `requirements.txt`) that registers one `dagster_defs.py` code location:
+`backend-system/` is a single Dagster workspace ([`backend-system/workspace.yaml`](../../backend-system/workspace.yaml)). Every subfolder is an independent, separately-deployable Python codebase (own `requirements.txt`) that registers one `dagster_defs.py` code location:
 
 ```
 backend-system/
@@ -471,9 +471,9 @@ Container and Compose health monitoring covers:
 
 ## References
 
-- [README.md](../README.md) — high-level overview, composable CDP rationale, architecture diagram.
-- [backend-system/README.md](../backend-system/README.md) — Dagster architecture notes (verify against `workspace.yaml` for the current full list of services).
-- [identity-resolution.md](identity-resolution.md) — CIR engine deep dive.
-- [PLAN-CRM-PROFILES-API-IMPROVEMENT.md](PLAN-CRM-PROFILES-API-IMPROVEMENT.md), [PLAN-SEGMENTS-API-IMPROVEMENT.md](PLAN-SEGMENTS-API-IMPROVEMENT.md), [PLAN-EVENTS-API-IMPROVEMENTmd](PLAN-EVENTS-API-IMPROVEMENTmd) — in-progress improvement plans.
-- [CIR-Tech-Slides-VN.md](CIR-Tech-Slides-VN.md) — tech talk slides (Vietnamese).
-- [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md) — detailed compose stack usage.
+- [README.md](../../README.md) — high-level overview, composable CDP rationale, architecture diagram.
+- [backend-system/README.md](../../backend-system/README.md) — Dagster architecture notes (verify against `workspace.yaml` for the current full list of services).
+- [CIR-improvement.md](../identity-resolution/CIR-improvement.md) — CIR engine deep dive.
+- [PLAN-CRM-PROFILES-API-IMPROVEMENT.md](../api-plans/PLAN-CRM-PROFILES-API-IMPROVEMENT.md), [PLAN-SEGMENTS-API-IMPROVEMENT.md](../api-plans/PLAN-SEGMENTS-API-IMPROVEMENT.md), [PLAN-EVENTS-API-IMPROVEMENT.md](../api-plans/PLAN-EVENTS-API-IMPROVEMENT.md) — in-progress improvement plans.
+- [CIR-Tech-Slides-VN.md](../identity-resolution/CIR-Tech-Slides-VN.md) — tech talk slides (Vietnamese).
+- [DOCKER-COMPOSE-GUIDE.md](../operations/DOCKER-COMPOSE-GUIDE.md) — detailed compose stack usage.

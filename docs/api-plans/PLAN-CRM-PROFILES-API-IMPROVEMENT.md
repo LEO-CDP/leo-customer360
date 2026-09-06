@@ -9,9 +9,9 @@ Rules:
 > **Correction (2026-07-28 review): the premise below was already out of date.**
 > `crm_customer_contacts` already has a full model/schema/CRUD router — it just
 > lives alongside the other "interaction" entities rather than in `crm.py`:
-> - Model: `CustomerContact` in [customer360-api/core/models/relations.py](../customer360-api/core/models/relations.py)
-> - Schemas: `CustomerContactCreate/Update/Read` in [customer360-api/core/schemas/relations.py](../customer360-api/core/schemas/relations.py)
-> - Router: `customer_contacts_router` (built via `build_crud_router`) in [customer360-api/core/routers/relations_api.py](../customer360-api/core/routers/relations_api.py), prefix `/customer-contacts`, tag `"Customer Interactions"`
+> - Model: `CustomerContact` in [customer360-api/core/models/relations.py](../../customer360-api/core/models/relations.py)
+> - Schemas: `CustomerContactCreate/Update/Read` in [customer360-api/core/schemas/relations.py](../../customer360-api/core/schemas/relations.py)
+> - Router: `customer_contacts_router` (built via `build_crud_router`) in [customer360-api/core/routers/relations_api.py](../../customer360-api/core/routers/relations_api.py), prefix `/customer-contacts`, tag `"Customer Interactions"`
 > - Already wired into `app.py` via `all_relations_routers`, and already used internally by `core/crud/profile360.py` (engagement summary / timeline endpoints).
 >
 > So **Phase 1 of this plan is already done** (see note in section 4). The only real remaining gap is the sync mechanism below.
@@ -60,7 +60,7 @@ This phase's stated goal already exists in the codebase, under slightly
 different file names than assumed above:
 
 1. **ORM model** — already defined as `CustomerContact` in
-   [customer360-api/core/models/relations.py](../customer360-api/core/models/relations.py)
+   [customer360-api/core/models/relations.py](../../customer360-api/core/models/relations.py)
    (not `models/crm.py`), matching the real `crm_customer_contacts` DDL:
    `contact_id`, `tenant_id`, `user_id`, `master_profile_id` (FK to
    `cdp_master_profiles`), `contact_type`, `contact_channel`,
@@ -68,12 +68,12 @@ different file names than assumed above:
 
 2. **Pydantic schemas** — already defined as `CustomerContactCreate` /
    `CustomerContactUpdate` / `CustomerContactRead` in
-   [customer360-api/core/schemas/relations.py](../customer360-api/core/schemas/relations.py)
+   [customer360-api/core/schemas/relations.py](../../customer360-api/core/schemas/relations.py)
    (not `schemas/crm.py`). Note `tenant_id` is a **required** field on
    create, and `contact_date` is server-generated (not settable on create).
 
 3. **Router** — already built via `build_crud_router()` in
-   [customer360-api/core/routers/relations_api.py](../customer360-api/core/routers/relations_api.py)
+   [customer360-api/core/routers/relations_api.py](../../customer360-api/core/routers/relations_api.py)
    (not `routers/crm_api.py`) as `customer_contacts_router`, prefix
    `/customer-contacts`, tag `"Customer Interactions"` (not
    `"CRM - Customer Interactions"`).

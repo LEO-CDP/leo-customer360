@@ -15,7 +15,7 @@
 ## 🎯 Ưu tiên ngắn hạn
 
 - **Kiểm soát truy cập theo `tenant_id`**: hiện Keycloak token đã xác thực *ai* gọi API, nhưng chưa map claim/role trong token sang giới hạn truy cập theo `tenant_id` — cần trước khi expose ra ngoài môi trường dev.
-- **Ingestion layer thật (Kafka/PubSub/RabbitMQ → `cdp_raw_profiles_stage`)**: hiện dữ liệu chỉ được nạp qua script hoặc `POST /api/v1/raw-profiles`; cần worker ingestion thật như mô tả trong [identity-resolution.md](identity-resolution.md).
+- **Ingestion layer thật (Kafka/PubSub/RabbitMQ → `cdp_raw_profiles_stage`)**: hiện dữ liệu chỉ được nạp qua script hoặc `POST /api/v1/raw-profiles`; cần worker ingestion thật như mô tả trong [CIR-improvement.md](../identity-resolution/CIR-improvement.md).
 - **Real-time trigger thật**: thay thế `IdentityResolutionTrigger` (gọi tường minh) bằng cơ chế trigger DB hoặc consumer event thật (`cdp_trigger_process_new_raw_profiles`).
 - **Lịch trình batch hằng ngày (2AM sweep)**: đóng gói `daily_job.py` thành cronjob/Airflow DAG chạy production thật, tích hợp với `airflow-ai-agent/`.
 
@@ -30,5 +30,5 @@
 
 - **Semantic search & lookalike audience** dựa trên `persona_embedding`/`graph_edges.embedding` — segmentation bằng ngôn ngữ tự nhiên (ví dụ: "khách hàng doanh nghiệp phần mềm, có >3 opportunity").
 - **Graph-based dashboard** trực quan hoá hành trình khách hàng (Lead → Contact → Opportunity) và identity graph (raw profile ↔ master profile).
-- **PostGIS / spatial intelligence**: tận dụng phần mở rộng không gian địa lý đã đề cập trong [README.md](README.md) cho các use case theo vị trí (ví dụ: `preferred_store_code`, phân khúc theo khu vực).
+- **PostGIS / spatial intelligence**: tận dụng phần mở rộng không gian địa lý đã đề cập trong [TECHNICAL-DOCUMENTATION.md](TECHNICAL-DOCUMENTATION.md) cho các use case theo vị trí (ví dụ: `preferred_store_code`, phân khúc theo khu vực).
 - **Data Quality tự động**: cảnh báo/khắc phục tự động khi `profile_completeness_score` hoặc `identity_confidence_score` thấp.

@@ -12,7 +12,7 @@ The code in this repo is not an abstract demo. It reflects a real platform layou
 - a browser-based admin UI in `frontend-admin/` that calls the API over HTTP
 - local Docker-based startup and demo seeding scripts in the repo root
 
-![](./docs/images/composable-cdp-architecture.png)
+![](./docs/architecture/images/composable-cdp-architecture.png)
 
 ## What is implemented today
 
@@ -149,8 +149,8 @@ This is the current project-level test entrypoint for the Customer 360 API, iden
 
 Start here for deeper context:
 
-- [`docs/TECHNICAL-DOCUMENTATION.md`](docs/TECHNICAL-DOCUMENTATION.md)
-- [`docs/DOCKER-COMPOSE-GUIDE.md`](docs/DOCKER-COMPOSE-GUIDE.md)
+- [`docs/architecture/TECHNICAL-DOCUMENTATION.md`](docs/architecture/TECHNICAL-DOCUMENTATION.md)
+- [`docs/operations/DOCKER-COMPOSE-GUIDE.md`](docs/operations/DOCKER-COMPOSE-GUIDE.md)
 - [`customer360-api/customer360-api.md`](customer360-api/customer360-api.md)
 - [`data-tracking-api/README.md`](data-tracking-api/README.md)
 - [`ads-server/README.md`](ads-server/README.md)

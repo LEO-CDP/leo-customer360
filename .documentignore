@@ -34,8 +34,8 @@ AGENTS.md
 # CONTRIBUTING.md          # kept by default — uncomment to hide
 
 # ── Slide-deck sources (Marp/reveal — the `---` separators render as one long page) ──
-docs/campaign-slide-VN.md
-docs/CIR-Tech-Slides-VN.md
+docs/marketing/campaign-slide-VN.md
+docs/identity-resolution/CIR-Tech-Slides-VN.md
 
 # ── Generator scaffolding READMEs (e.g. CRA / Vite per-package) ──
 # frontend/**/README.md    # example: hide noisy per-package READMEs

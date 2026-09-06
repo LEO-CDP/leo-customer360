@@ -5,7 +5,7 @@ Standalone reimplementation of customer360-api's
 (rather than imported) because this is a separately deployed service with
 its own ``requirements.txt``/venv -- see ``backend-system/README.md``'s
 "Independent code locations" section and
-``docs/PLAN-SEGMENTS-API-IMPROVEMENT.md`` Phase 3. Keep the SQL/semantics in
+``docs/api-plans/PLAN-SEGMENTS-API-IMPROVEMENT.md`` Phase 3. Keep the SQL/semantics in
 sync with that module if member_count/tag-sync behavior changes.
 
 Used by ``../dagster_defs.py``'s ``recompute_segments_op`` (one full pass
