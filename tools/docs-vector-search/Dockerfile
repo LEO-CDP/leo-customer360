@@ -8,10 +8,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-bake the default embed + rerank models into the image so the FIRST boot doesn't
+# download them at runtime — unauthenticated Hugging Face is ~10 min on the box, which
+# blew past the healthcheck. Baked OUTSIDE the mounted MODELS_DIR (a host volume would
+# shadow anything under /app/models). Keep these two names in sync with the config.py /
+# deploy defaults (EMBED_MODEL, RERANK_MODEL); an env override still downloads on demand.
+ENV FASTEMBED_CACHE=/app/model-cache/fastembed
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2', cache_dir='/app/model-cache/fastembed')" \
+ && python -c "from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder(model_name='BAAI/bge-reranker-base', cache_dir='/app/model-cache/fastembed')"
+
 COPY src ./src
 
-# Corpus is bind-mounted; model weights live in a mounted volume (fetched by the
-# deploy step) — neither is baked into the image.
+# Corpus is bind-mounted; the Qwen GGUF lives in a mounted volume (fetched by the deploy
+# step). The fastembed embed/rerank models are baked above (FASTEMBED_CACHE), not mounted.
 ENV CORPUS_DIR=/app/corpus \
     MODELS_DIR=/app/models
 

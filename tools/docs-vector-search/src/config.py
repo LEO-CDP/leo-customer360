@@ -21,7 +21,9 @@ PKG_ROOT = _HERE.parents[1]
 
 # Where model weights (fastembed ONNX + Qwen GGUF) live — a volume in the container.
 MODELS_DIR = Path(os.getenv("MODELS_DIR", PKG_ROOT / "models")).resolve()
-FASTEMBED_CACHE = str(MODELS_DIR / "fastembed")
+# Overridable so the image can point it at a baked path (models pre-fetched at build,
+# outside the mounted MODELS_DIR) — see the Dockerfile. Local default: under MODELS_DIR.
+FASTEMBED_CACHE = os.getenv("FASTEMBED_CACHE", str(MODELS_DIR / "fastembed"))
 
 # Corpus
 CORPUS_DIR = Path(os.getenv("CORPUS_DIR", REPO_ROOT / "docs")).resolve()
