@@ -3,6 +3,8 @@
 
 Customer 360 is the identity-resolution and golden-record layer for the LEO CDP platform. The repository combines a PostgreSQL-backed customer graph, a FastAPI read/write API, a Dagster orchestration workspace, and a thin admin frontend that consumes the API.
 
+> 📖 **Documentation site:** **https://leo-cdp.github.io/leo-customer360/** — every `*.md` in this repo, rendered and searchable with diagrams, images, and PDFs. Auto-built from `main` by [`.github/workflows/deploy-docs.yml`](.github/workflows/deploy-docs.yml).
+
 The code in this repo is not an abstract demo. It reflects a real platform layout with:
 
 - a PostgreSQL 16 schema for master profiles, raw profiles, links, CRM entities, personas, and segmentation metadata
