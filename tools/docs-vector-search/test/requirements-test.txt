@@ -1,0 +1,7 @@
+# RAGAS evaluation harness (separate from the service runtime — install only to run tests).
+ragas>=0.2,<0.3
+datasets>=2.16
+langchain-openai>=0.2      # judge LLM + embeddings wrappers for RAGAS
+httpx>=0.27               # calls the live service /ask, /search
+pandas>=2.0
+pytest>=8.0
