@@ -174,6 +174,9 @@
     </footer>
   </div>
 
+  <!-- Docs Assistant (RAG chatbot) mount point; widget markup injected by main.js -->
+  <div id="docs-chatbot-root"></div>
+
   <!-- Main configs for Customer 360 Admin -->
   <script>
     /* Customer 360 Admin -- Server-rendered config constants only */
@@ -184,7 +187,9 @@
       leoObserverLogDomain: "{{ leo_observer_log_domain }}",
       leoObserverTrackingUri: "{{ leo_observer_tracking_uri }}",
       leoObserverTrackingEndpoint: "{{ leo_observer_tracking_endpoint }}",
-      leoObserverCdnJS: "{{ leo_observer_cdn_js }}"
+      leoObserverCdnJS: "{{ leo_observer_cdn_js }}",
+      docsAiBase: "{{ docs_ai_base }}",
+      docsSiteBase: "{{ docs_site_base }}"
     });
   </script>
   <script src="{{ static_base }}/js/common/config.js?cb={{ cache_bust }}"></script>
@@ -216,6 +221,9 @@
   <script src="{{ static_base }}/js/scoring-model-view.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/system-user-view.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/placeholder-view.js?cb={{ cache_bust }}"></script>
+
+  <!-- Docs Assistant (RAG chatbot) widget -->
+  <script src="{{ static_base }}/js/docs-chatbot-view.js?cb={{ cache_bust }}"></script>
 
   <!-- load main.js last -->
   <script src="{{ static_base }}/js/main.js?cb={{ cache_bust }}"></script>

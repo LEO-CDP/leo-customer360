@@ -37,6 +37,14 @@ API_HOSTNAME="$(tfval frontend_api_hostname "$ovl")"
 ROOT_PATH="$(tfval frontend_root_path "$ovl")" # empty = serve at the LB root (no proxy prefix)
 TENANT="$(tfval frontend_tenant_id "$ovl")"; TENANT="${TENANT:-11111111-1111-1111-1111-111111111111}"
 SSO_LOGIN="$(tfval sso_login "$ovl")"; SSO_LOGIN="${SSO_LOGIN:-false}"
+# Docs Assistant (chatbot) -> docs-vector-search. The browser hits the same-origin /ai/*
+# proxy in the frontend, which forwards server-side to this URL over the PRIVATE network
+# (so the docs box stays unexposed, no CORS). If docs_search_url is empty it's auto-resolved
+# from the "docs" box's private fixed_ip below. docs_site_base is where citations link.
+DOCS_SEARCH_URL="$(tfval docs_search_url "$ovl")"
+DOCS_SEARCH_KEY="$(tfval docs_search_server_key "$ovl")"; DOCS_SEARCH_KEY="${DOCS_SEARCH_KEY:-docs}"
+DOCS_SEARCH_PORT="$(tfval docs_search_port "$ovl")"; DOCS_SEARCH_PORT="${DOCS_SEARCH_PORT:-8000}"
+DOCS_SITE_BASE="$(tfval docs_site_base "$ovl")"; DOCS_SITE_BASE="${DOCS_SITE_BASE:-https://leo-cdp.github.io/leo-customer360}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 : "${API_HOSTNAME:?set frontend_api_hostname in $ovl (the PUBLIC API URL the browser uses)}"
 
@@ -85,6 +93,23 @@ if [[ "$ENV" == "prod" ]]; then MON_IP="$(printf '%s' "$SERVERS_JSON" | python3 
 OTEL_ENABLED="${OTEL_ENABLED:-$(tfval otel_enabled "overlays/$ENV.tfvars")}"
 OTEL_LINES="$(otel_env_lines frontend-admin "$ENV" "$JAEGER_HOST")"
 
+# --- Docs Assistant target: resolve the "docs" box PRIVATE ip (fixed_ip):port unless the
+#     overlay pinned docs_search_url. Same servers-output idiom as FIP/MON_IP above. The
+#     api box must be allowed to reach docs:PORT (extra_ingress in ../server/overlays). ---
+if [[ -z "$DOCS_SEARCH_URL" ]]; then
+  DOCS_IP="$(printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get("fixed_ip") for i in (s.get("internal_interfaces") or []) if i.get("fixed_ip")), ""))' "$DOCS_SEARCH_KEY")"
+  if [[ -n "$DOCS_IP" ]]; then
+    DOCS_SEARCH_URL="http://$DOCS_IP:$DOCS_SEARCH_PORT"
+  else
+    echo "::warning::Docs Assistant: no '$DOCS_SEARCH_KEY' box fixed_ip in $ENV — DOCS_SEARCH_URL left unset; the /ai proxy will return 502 until the docs box is applied + deployed."
+  fi
+fi
+[[ -n "$DOCS_SEARCH_URL" ]] && echo "   Docs Assistant -> $DOCS_SEARCH_URL   (site links: $DOCS_SITE_BASE)"
+# Only emit DOCS_SEARCH_URL when known (empty would override app.py's default with a dead value).
+DOCS_LINES="DOCS_SITE_BASE=$DOCS_SITE_BASE"
+[[ -n "$DOCS_SEARCH_URL" ]] && DOCS_LINES="DOCS_SEARCH_URL=$DOCS_SEARCH_URL
+$DOCS_LINES"
+
 # Build the env file locally and ship it base64-encoded as ONE arg (avoids the
 # ssh arg-flattening trap where an empty/space value corrupts positional args).
 ENV_B64="$(printf '%s' "SSO_LOGIN=$SSO_LOGIN
@@ -93,6 +118,7 @@ FRONTEND_TENANT_ID=$TENANT
 FRONTEND_ROOT_PATH=$ROOT_PATH
 HOST=0.0.0.0
 PORT=$PORT
+$DOCS_LINES
 $OTEL_LINES" | base64 | tr -d '\n')"
 
 echo ">> Building + (re)starting the container ..."

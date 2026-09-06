@@ -211,6 +211,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       $("#persona-details-container").html(C360.templates.html("persona-details"));
       $("body").append(C360.templates.html("settings-modal"));
       $("body").append(C360.templates.html("login-screen"));
+      $("#docs-chatbot-root").html(C360.templates.html("docs-chatbot"));
 
       // apply the current theme (light/dark/system) to the page, and re-apply it
       C360.themeLoader(C360.config.current.theme, false);
@@ -228,6 +229,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       C360.dataSourceView.bindEvents();
       C360.scoringModelView.bindEvents();
       C360.systemUserView.bindEvents();
+      C360.docsChatbot.bindEvents();
 
       // Everything above is safe to set up pre-login (no authenticated API
       // calls). The rest only runs once a session exists -- see
