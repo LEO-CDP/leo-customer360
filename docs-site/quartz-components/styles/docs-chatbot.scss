@@ -65,15 +65,20 @@
   color: var(--light);
   background: var(--secondary);
 
+  // Explicit color (not just inherited): Quartz's global `p { color }` rule sets color
+  // directly on these <p> elements, and a direct rule beats inheritance — without this
+  // the title/subtitle fall back to body-text color on the accent header and vanish.
   .docs-chat-title {
     margin: 0;
     font-size: 0.9rem;
     font-weight: 700;
+    color: var(--light);
   }
   .docs-chat-subtitle {
     margin: 0.1rem 0 0;
     font-size: 0.7rem;
-    opacity: 0.85;
+    opacity: 0.9;
+    color: var(--light);
   }
   #docs-chat-close {
     border: none;
