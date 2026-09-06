@@ -75,4 +75,5 @@ curl -s localhost:8000/ask    -H 'content-type: application/json' -d '{"question
 - **Idempotent enrich:** a content hash per chunk skips unchanged chunks. Changing `EMBED_MODEL` (or its dim) means you must set `EMBED_DIM` to match and recreate `rag.doc_chunks` (the `vector(N)` column is fixed-width).
 - **e5 prefixes:** `embed()` prepends `query:` / `passage:`. If a future fastembed version adds e5 prefixes itself, drop them here to avoid double-prefixing.
 - **RAM:** on a 1 vCPU / 2 GB box the vectors live in the vDB (off-box); e5 + reranker + Qwen ≈ 1.4 GB resident — tight, may need swap. Drop the reranker (`RERANK_ENABLED=false`) first if memory-constrained.
-- Deploy (UAT/PROD vServer): [`deployments/docs-vector-search`](../../deployments/docs-vector-search).
+- **Deploy (UAT/PROD vServer):** [`deployments/server/deploy-docs-search.sh`](../../deployments/server/deploy-docs-search.sh) — pulls the CI-built GHCR image onto the dedicated `docs` box, runs `enrich`, serves. Wired into CD as the `docs-search` step; the box is defined in [`deployments/server/overlays`](../../deployments/server/overlays).
+- **Local dev (Docker):** [`docker-compose.yml`](docker-compose.yml) here — `docker compose run --rm docs-vector-search python -m src.enrich`, then `docker compose up`.

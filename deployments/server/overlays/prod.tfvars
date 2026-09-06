@@ -32,7 +32,7 @@ servers = {
     # docs-vector-search (local-model RAG: e5 embed + bge rerank + Qwen 0.5B). Dedicated
     # box. gen-2's smallest tier is 2x4 (no 1x2), which also gives comfortable headroom
     # for the ~1.4 GB model set (reranker stays on). Deployed by
-    # deployments/docs-vector-search/deploy.sh (pulls the GHCR image, runs enrich, serves :8000).
+    # deployments/server/deploy-docs-search.sh (pulls the GHCR image, runs enrich, serves :8000).
     flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB
     root_disk_size = 50
     name           = "docs" # -> c360-api-prod-docs
