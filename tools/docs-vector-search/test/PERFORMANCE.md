@@ -36,16 +36,17 @@ Measured 2026-09-06 (UAT, first live smoke), `curl` from the box (`localhost:800
 | Endpoint | Latency | Notes |
 |---|---|---|
 | `GET /health` | <100 ms | chunk count + model names |
-| `POST /search` | ~1–3 s | embed query + pgvector top-N + bge rerank (CPU) |
-| `POST /ask` (first call) | **15.3 s** | includes lazy Qwen load; grounded answer + 5 sources |
-| `POST /ask` (warm) | _TBD_ | re-measure once Qwen is resident |
+| `POST /search` | ~3 s | embed query + pgvector top-N + bge rerank (CPU) |
+| `POST /ask` (first call) | ~15–42 s | includes lazy Qwen load; grounded answer + 5 sources |
+| `POST /ask` (warm) | **~17–42 s** | measured; **dominated by Qwen 0.5B generation on 1 vCPU** — scales with answer length, not model load. To cut it: lower `GEN_MAX_TOKENS`, tune `GEN_THREADS`, or a bigger box. |
+| Boot to healthy (models cached) | **~1 s** | measured on restart with fastembed cache present — the state the **pre-bake** guarantees on any fresh box |
 
 ## Resource use (under `/ask`)
 
 | | |
 |---|---|
-| Mem used | ~1.14 GB / 1.97 GB (≈0.83 GB free); swap ~0 |
-| Verdict | Fits 2 GB with headroom while reranker on. Drop `DOCS_RERANK_ENABLED=false` to shed ~300 MB if it ever OOMs. |
+| Mem used | **~1.53 GiB / 1.92 GiB** resident under `/ask` (Qwen + embed + rerank all loaded); swap ~0; `restarts=0`, no OOM |
+| Verdict | Fits 2 GB but **tight** (~0.2 GB headroom) with everything resident. Drop `DOCS_RERANK_ENABLED=false` to shed ~300 MB if it OOMs under concurrency. |
 
 ## RAGAS scores
 
@@ -61,3 +62,4 @@ Run `python ragas_eval.py` (see [README](./README.md)); record the run here.
 |------|-------|--------|
 | 2026-09-06 | First successful live UAT deploy + smoke | 928 chunks; `/ask "What is CIR?"` → correct grounded answer, 15.3 s cold; retrieval EN + VN OK |
 | 2026-09-06 | Root-caused ~15 min first-boot | ~10 min reranker download (unauth HF) → **pre-bake models in image** |
+| 2026-09-06 | Redeploy on merged main + latency run | boot 1 s (cache warm); `/ask` warm 17–42 s (0.5B on 1 vCPU); `/search` ~3 s; mem 1.53/1.92 GiB, no OOM. Note: a concurrent CD deploy (docs-search is in the default set) collided with the manual redeploy — settled healthy. |
