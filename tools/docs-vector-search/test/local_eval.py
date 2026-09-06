@@ -80,6 +80,20 @@ def grounding(answer: str, contexts: list[str]) -> float | None:
     return sum(1 for w in words if w in ctx) / len(words)
 
 
+def _post(c, url: str, body: dict, tries: int = 4) -> dict:
+    """POST with retry — the 2 GB box can OOM-restart mid-/ask; wait for it to warm and retry."""
+    import time
+    for attempt in range(tries):
+        try:
+            r = c.post(url, json=body)
+            r.raise_for_status()
+            return r.json()
+        except Exception:  # noqa: BLE001
+            if attempt == tries - 1:
+                raise
+            time.sleep(25)  # container restart + model warm
+
+
 def run(dataset: Path = DATASET, service_url: str = SERVICE_URL) -> dict:
     rows = load(dataset)
     hits, mrrs, covs, grnds, refusals = [], [], [], [], []
@@ -87,10 +101,13 @@ def run(dataset: Path = DATASET, service_url: str = SERVICE_URL) -> dict:
     with httpx.Client(timeout=240.0) as c:
         for i, r in enumerate(rows, 1):
             q = r["question"]
-            paths = [h["path"] for h in c.post(f"{service_url}/search", json={"query": q, "top_n": TOP_K}).json().get("hits", [])][:TOP_K]
-            d = c.post(f"{service_url}/ask", json={"question": q}).json()
+            paths = [h["path"] for h in _post(c, f"{service_url}/search", {"query": q, "top_n": TOP_K}).get("hits", [])][:TOP_K]
+            d = _post(c, f"{service_url}/ask", {"question": q})
             ans, ctxs = d.get("answer", ""), d.get("contexts", [])
-            row = {"q": q, "lang": r.get("lang", "en"), "oos": bool(r.get("out_of_scope"))}
+            # keep the answer + cited source titles in the report so per-question detail
+            # can be inspected (and rendered) after the run, not just the scores.
+            row = {"q": q, "lang": r.get("lang", "en"), "oos": bool(r.get("out_of_scope")),
+                   "answer": ans, "sources": [s.get("title") for s in d.get("sources", [])]}
             if r.get("out_of_scope"):
                 ref = 1 if REFUSAL_RE.search(ans) else 0
                 refusals.append(ref)
