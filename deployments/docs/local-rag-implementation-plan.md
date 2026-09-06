@@ -2,7 +2,7 @@
 
 **Goal:** Run the **AI Chat API** ([`tools/docs-vector-search`](../../tools/docs-vector-search)) with **local models** — embedding + reranking + generation in-process on the 1 vCPU / 2 GB box — replacing the hosted OpenAI calls, while keeping a hosted **fallback** for generation when RAM is tight.
 
-**Targets:** the existing service (its `chat()` / `embed()` seams in `providers.py`) and the [`docs-vector-search` vServer deploy](../docs-vector-search/README.md) (1 CPU / 2 GB).
+**Targets:** the existing service (its `chat()` / `embed()` seams in `providers.py`) and the [`docs-vector-search` vServer deploy](../server/deploy-docs-search.sh) (1 CPU / 2 GB).
 
 **Corpus reality:** `docs/` has **Vietnamese and English** docs (e.g. `SAE-CIR-VN.md`, `campaign-slide-VN.md`), so the default embedder must be multilingual.
 
