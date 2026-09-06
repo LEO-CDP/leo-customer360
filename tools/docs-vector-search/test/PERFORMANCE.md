@@ -56,7 +56,8 @@ OpenAI/gateway judge stays available as an opt-in for LLM-judged faithfulness/re
 
 | Date | hit@5 | MRR | keyword coverage | grounding proxy | refusal rate | Notes |
 |------|-------|-----|------------------|-----------------|--------------|-------|
-| 2026-09-06 | **1.00** (10/10) | 0.83 | 0.90 | 0.82 | **0.50** ⚠️ | retrieval strong EN+VN; grounding good; **out-of-scope refusal unreliable** — the 0.5B answered "Who won the 2022 World Cup?" instead of declining → tighten the refusal prompt in `agent.py`. |
+| 2026-09-06 | **1.00** (10/10) | 0.83 | 0.90 | 0.82 | **0.50** ⚠️ | baseline: retrieval strong EN+VN; grounding good; **out-of-scope refusal unreliable** — the 0.5B answered "Who won the 2022 World Cup?" instead of declining. |
+| 2026-09-06 | 1.00 (10/10) | 0.83 | 0.80 | **0.90** | **1.00** ✅ | after the firmer refusal prompt (`agent.py` `ANSWER_SYSTEM`): **both** out-of-scope questions declined; grounding up 0.82→0.90 (outside knowledge forbidden); retrieval unchanged. Coverage dip 0.90→0.80 is a `must_contain` exact-match artifact, not a regression. |
 
 ## History
 
