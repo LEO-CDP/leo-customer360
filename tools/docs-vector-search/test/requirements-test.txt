@@ -1,7 +1,15 @@
-# RAGAS evaluation harness (separate from the service runtime — install only to run tests).
+# --- local_eval.py (fully local, no hosted judge) needs only httpx ---
+httpx>=0.27
+
+# --- ragas_eval.py (OPT-IN: LLM-judged metrics via an OpenAI/gateway judge) ---
+# ragas 0.2.x is NOT compatible with langchain 1.x (it imports
+# langchain_community.chat_models.vertexai, removed there) — pin the langchain 0.3.x line.
 ragas>=0.2,<0.3
+langchain>=0.3,<0.4
+langchain-community>=0.3,<0.4
+langchain-core>=0.3,<0.4
+langchain-openai>=0.2,<0.3
+openai>=1.40,<2
 datasets>=2.16
-langchain-openai>=0.2      # judge LLM + embeddings wrappers for RAGAS
-httpx>=0.27               # calls the live service /ask, /search
 pandas>=2.0
 pytest>=8.0

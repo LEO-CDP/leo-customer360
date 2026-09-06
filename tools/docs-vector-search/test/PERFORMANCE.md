@@ -48,13 +48,15 @@ Measured 2026-09-06 (UAT, first live smoke), `curl` from the box (`localhost:800
 | Mem used | **~1.53 GiB / 1.92 GiB** resident under `/ask` (Qwen + embed + rerank all loaded); swap ~0; `restarts=0`, no OOM |
 | Verdict | Fits 2 GB but **tight** (~0.2 GB headroom) with everything resident. Drop `DOCS_RERANK_ENABLED=false` to shed ~300 MB if it OOMs under concurrency. |
 
-## RAGAS scores
+## Quality eval — fully local (no hosted judge)
 
-Run `python ragas_eval.py` (see [README](./README.md)); record the run here.
+`python local_eval.py` (see [README](./README.md)) — judge-free, nothing leaves the box.
+The system is local end-to-end, so it's evaluated locally too. (`ragas_eval.py` with an
+OpenAI/gateway judge stays available as an opt-in for LLM-judged faithfulness/relevancy.)
 
-| Date | faithfulness | answer_relevancy | context_recall | context_precision | answer_correctness | Notes |
-|------|-------------|------------------|----------------|-------------------|--------------------|-------|
-| _pending_ | | | | | | first RAGAS run (judge: OpenAI) |
+| Date | hit@5 | MRR | keyword coverage | grounding proxy | refusal rate | Notes |
+|------|-------|-----|------------------|-----------------|--------------|-------|
+| 2026-09-06 | **1.00** (10/10) | 0.83 | 0.90 | 0.82 | **0.50** ⚠️ | retrieval strong EN+VN; grounding good; **out-of-scope refusal unreliable** — the 0.5B answered "Who won the 2022 World Cup?" instead of declining → tighten the refusal prompt in `agent.py`. |
 
 ## History
 
