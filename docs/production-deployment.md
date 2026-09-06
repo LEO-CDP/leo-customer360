@@ -539,7 +539,7 @@ curl -s https://cdp.example.com/api/v1/reporting/summary \
       IP-restricted at the Nginx level.
 - [ ] The `tenant_id` protocol mapper is configured so users are provisioned
       into the correct tenant.
-- [ ] `GOOGLE_GENAI_API_KEY` is removed or left as the placeholder unless the
+- [ ] `LEO_GOOGLE_GENAI_API_KEY` is removed or left as the placeholder unless the
       feature is required.
 
 ---

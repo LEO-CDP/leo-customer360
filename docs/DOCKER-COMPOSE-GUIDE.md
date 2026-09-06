@@ -81,7 +81,7 @@ Edit `.env` and set real values for at least:
   container.
 - `KEYCLOAK_CLIENT_SECRET` — secret of the confidential client customer360-api
   uses to introspect tokens (see §9 below to create it).
-- `GOOGLE_GENAI_API_KEY` — optional; leave the `YOUR_...` placeholder to keep
+- `LEO_GOOGLE_GENAI_API_KEY` — optional; leave the `YOUR_...` placeholder to keep
   CIR's persona-name generation fully offline/deterministic (see
   [identity-resolution.md](identity-resolution.md)).
 
@@ -332,7 +332,7 @@ tune per environment (dev/staging/prod). Highlights:
 | `TRACKING_RATE_LIMIT_FAIL_OPEN` | `true` | Allows ingestion when Redis is unavailable; set `false` for strict production enforcement. |
 | `TRACKING_BOT_FILTER_ENABLED` | `true` | Discards configured crawler user agents before storage and rate-limit accounting. |
 | `TRACKING_BOT_USER_AGENT_PATTERNS` | `googlebot,...` | Comma-separated, case-insensitive user-agent substrings to filter. |
-| `GOOGLE_GENAI_API_KEY` | placeholder | Leave as `YOUR_...` to keep CIR persona-name generation offline (see `identity_resolution/persona.py`). |
+| `LEO_GOOGLE_GENAI_API_KEY` | placeholder | Leave as `YOUR_...` to keep CIR persona-name generation offline (see `identity_resolution/persona.py`). |
 
 ---
 

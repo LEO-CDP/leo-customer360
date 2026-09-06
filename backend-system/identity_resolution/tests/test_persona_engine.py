@@ -237,7 +237,7 @@ class TestPersonaScoreAggregation:
 
 class TestComputePersona:
     def test_returns_populated_computation(self, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
         computation = compute_persona(_profile())
 
         assert computation.persona_name
@@ -250,19 +250,19 @@ class TestComputePersona:
         assert computation.features  # non-empty
 
     def test_persona_name_is_deterministic_per_master_profile_id(self, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
         first = compute_persona(_profile())
         second = compute_persona(_profile())
         assert first.persona_name == second.persona_name
 
     def test_persona_name_differs_across_master_profiles(self, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
         a = compute_persona(_profile(master_profile_id="11111111-1111-1111-1111-111111111111"))
         b = compute_persona(_profile(master_profile_id="22222222-2222-2222-2222-222222222222"))
         assert a.persona_name != b.persona_name
 
     def test_persona_summary_and_name_never_contain_raw_pii_fields(self, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
         profile = _profile()
         computation = compute_persona(profile)
         # The master_profile dict passed in never carries full_name/email/
@@ -274,7 +274,7 @@ class TestComputePersona:
             assert forbidden not in computation.persona_summary
 
     def test_uses_genai_when_configured(self, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", "a-real-key")
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", "a-real-key")
 
         class _FakeClient:
             def __init__(self):
@@ -310,7 +310,7 @@ class TestPersonaResolutionEngine:
         assert result is None
 
     def test_resolve_persona_inserts_persona_and_updates_master(self, mock_cursor, mock_conn, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
         master_row = _profile()
         mock_cursor.fetchall.return_value = []
         # fetchone is called in order: _fetch_master_profile, _fetch_current_persona,
@@ -341,7 +341,7 @@ class TestPersonaResolutionEngine:
         assert any("UPDATE customer360.cdp_customer_personas" in q and "is_active = FALSE" in q for q in executed_queries)
 
     def test_resolve_persona_skips_history_when_change_is_not_material(self, mock_cursor, mock_conn, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
         master_row = _profile()
         computation = compute_persona(master_row)
         mock_cursor.fetchall.return_value = []
@@ -360,7 +360,7 @@ class TestPersonaResolutionEngine:
         assert not any("INSERT INTO customer360.cdp_persona_history" in q for q in executed_queries)
 
     def test_resolve_persona_records_history_when_score_changes_materially(self, mock_cursor, mock_conn, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
         master_row = _profile()
         mock_cursor.fetchall.return_value = []
         mock_cursor.fetchone.side_effect = [
@@ -386,7 +386,7 @@ class TestPersonaResolutionEngine:
         assert result is None
 
     def test_resolve_persona_applies_db_config_override(self, mock_cursor, mock_conn, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
         master_row = _profile()
         mock_cursor.fetchall.return_value = [
             {
@@ -487,7 +487,7 @@ class TestPersonaArchetypeMatching:
         """End-to-end: the persona_archetype_id returned by the archetype
         upsert must be the one written onto the cdp_customer_personas match
         row (not, say, a freshly generated id)."""
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
         master_row = _profile()
         mock_cursor.fetchall.return_value = []
         mock_cursor.fetchone.side_effect = [

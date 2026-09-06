@@ -1,13 +1,17 @@
 # Environment configuration notes
 
-This repository uses a single root-level environment file, `.env`. The companion file `.env.example` is the canonical template and should stay aligned with the live `.env` file.
+The root `.env` file is the shared configuration for the Customer 360
+services. Use `.env.example` as its template. The `ads-server` service is
+independent and uses `ads-server/.env` from `ads-server/.env.example`.
 
 ## General guidance
 
 - Copy `.env.example` to `.env` before local development.
-- Docker Compose overrides `DB_HOST` and `REDIS_HOST` to the internal service names `postgres` and `redis` for containers running on the shared network.
-- `SSO_LOGIN=false` is the default for local development. Enable SSO only when Keycloak is configured and reachable.
-- `POSTGRES_HOST_BIND`, `REDIS_HOST_BIND`, `C360_API_HOST`, `KEYCLOAK_HOST_BIND`, and `MINIO_HOST_BIND` default to loopback. Change them only if you need access from other machines.
+- Compose overrides `DB_HOST`, `DB_PORT`, `REDIS_HOST`, and `REDIS_PORT` inside containers.
+- `*_HOST_BIND` controls the host interface for a published port.
+- `*_HOST_PORT` controls the host port for a published service.
+- Published services default to loopback. Change the bind address only when needed.
+- `SSO_LOGIN=false` keeps local authentication enabled without Keycloak.
 
 ## Database and cache
 
@@ -35,26 +39,31 @@ This repository uses a single root-level environment file, `.env`. The companion
 - `DB_POOL_RECYCLE_SECONDS`: Connection recycle interval. Default: `1800`
 - `DB_POOL_PRE_PING`: Enables SQLAlchemy pre-ping for connection health checks. Default: `true`
 - `DB_ECHO_SQL`: Enables SQL echo for debugging. Default: `false`
-- `C360_API_DEFAULT_PAGE_SIZE`: Default page size for API pagination. Default: `100`
-- `C360_API_MAX_PAGE_SIZE`: Maximum page size allowed by the API. Default: `1000`
-- `C360_API_HOST`: Host interface for the API server. Default: `0.0.0.0`
-- `C360_API_PORT`: Port for the API server. Default: `8008`
-- `UVICORN_RELOAD`: Enables auto-reload for the development server. Default: `false`
+- `API_DEFAULT_PAGE_SIZE`: Default API page size. Default: `100`
+- `API_MAX_PAGE_SIZE`: Maximum API page size. Default: `1000`
+- `C360_API_HOST`: Host bind address for the published API port. Default: `127.0.0.1`
 - `C360_API_PORT`: Host-published API port. Default: `8008`
-- `C360_API_HOST`: Bind address for the published API port. Default: `127.0.0.1`
+- `UVICORN_RELOAD`: Enables auto-reload for the development server. Default: `false`
 
 ## Frontend admin settings
 
-- `FRONTEND_API_HOSTNAME`: Browser-visible URL for the customer360 API. Default: `http://localhost:8008/c360api`
+- `FRONTEND_API_HOSTNAME`: Browser-visible API base URL. Default: `https://c360.example.com/c360api`
 - `FRONTEND_TENANT_ID`: Tenant identifier used by the admin UI. Default: `11111111-1111-1111-1111-111111111111`
-- `FRONTEND_HOST_BIND`: Bind address for the frontend service. Default: `0.0.0.0`
+- `FRONTEND_HOST_BIND`: Host bind address for the frontend port. Default: `127.0.0.1`
 - `FRONTEND_HOST_PORT`: Host-published frontend port. Default: `8890`
 - `FRONTEND_UVICORN_RELOAD`: Enables auto-reload for the frontend dev server. Default: `false`
+- `FRONTEND_ROOT_PATH`: URL prefix for the frontend. Default: `/c360`
+- `LEO_OBSERVER_LOG_DOMAIN`: Observer log domain. Default: `c360.example.com`
+- `LEO_OBSERVER_TRACKING_URI`: Observer tracking path. Default: `/data/api/v1/tracking/logs`
+- `LEO_OBSERVER_TRACKING_ENDPOINT`: Full observer tracking URL. Default: `https://c360.example.com/data/api/v1/tracking/logs`
+- `LEO_OBSERVER_CDN_JS`: Observer SDK URL.
 
 ## Identity resolution and background jobs
 
 - `CIR_BATCH_SIZE`: Batch size for identity resolution processing. Default: `5000`
 - `CIR_POLL_INTERVAL_SECONDS`: Interval between identity resolution worker polls. Default: `30`
+- `ANALYTICS_DATA_SOURCE_LIMIT`: Data sources processed per analytics run. Default: `10`
+- `ANALYTICS_LOCK_TTL_SECONDS`: Analytics Redis lock lifetime. Default: `3600`
 - `DAGSTER_UI_HOST`: Host interface for the Dagster UI. Default: `127.0.0.1`
 - `DAGSTER_UI_PORT`: Port for the Dagster UI. Default: `3000`
 
@@ -65,11 +74,13 @@ This repository uses a single root-level environment file, `.env`. The companion
 - `DEFAULT_ROOT_PASSWORD`: Local bootstrap admin password. Default: `change_me_root_password`
 - `DEV_JWT_SECRET`: Shared secret used for local JWT issuance when SSO is disabled. Default: `change_me_dev_jwt_secret_min_32_bytes_long`
 - `DEV_JWT_EXPIRES_MINUTES`: Token lifetime for local dev JWTs. Default: `480`
-- `SSO_LOGIN_URL`: Base URL of the Keycloak server. Default: `http://localhost:8080`
+- `C360_AUTH_RATE_LIMIT_MAX_ATTEMPTS`: Failed login attempts per window. Default: `10`
+- `C360_AUTH_RATE_LIMIT_WINDOW_SECONDS`: Login rate-limit window. Default: `60`
+- `SSO_LOGIN_URL`: Base URL of the Keycloak server. Default: `https://c360.example.com/auth`
 - `KEYCLOAK_REALM`: Keycloak realm name. Default: `leocdp`
 - `KEYCLOAK_CLIENT_ID`: Keycloak client ID. Default: `leocdp`
 - `KEYCLOAK_CLIENT_SECRET`: Keycloak client secret. Default: `change_me_keycloak_client_secret`
-- `KEYCLOAK_CALLBACK_URL`: OAuth callback URL. Default: `http://localhost:8008/auth/callback`
+- `KEYCLOAK_CALLBACK_URL`: OAuth callback URL. Default: `https://c360.example.com/`
 - `KEYCLOAK_VERIFY_SSL`: Whether to verify SSL certificates for Keycloak requests. Default: `false`
 
 ## Keycloak container settings
@@ -80,7 +91,7 @@ This repository uses a single root-level environment file, `.env`. The companion
 - `KEYCLOAK_HOST_BIND`: Bind address for the published Keycloak port. Default: `127.0.0.1`
 - `KEYCLOAK_VERSION`: Keycloak image tag. Default: `26.7`
 - `KEYCLOAK_COMMAND`: Startup command for the Keycloak container. Default: `start-dev`
-- `KEYCLOAK_HOSTNAME`: Public hostname advertised by Keycloak. Default: `localhost`
+- `KEYCLOAK_HOSTNAME`: Public hostname advertised by Keycloak. Default: `https://c360.example.com/auth`
 
 ## MinIO (development-only object storage)
 
@@ -104,12 +115,42 @@ This repository uses a single root-level environment file, `.env`. The companion
 - `S3_AUTO_CREATE_BUCKETS`: Create `data-tracking-[data_source_id]` on first write. Default: `true`
 - `TRACKING_REDIS_KEY_PREFIX`: Prefix for tracking session and rate-limit keys. Default: `data-tracking-api`
 - `TRACKING_SESSION_TTL_SECONDS`: Session metadata TTL. Default: `86400`
-- `TRACKING_RATE_LIMIT_REQUESTS` / `TRACKING_RATE_LIMIT_WINDOW_SECONDS`: Per-IP request window. Defaults: `120` / `60`
+- `TRACKING_RATE_LIMIT_REQUESTS` / `TRACKING_RATE_LIMIT_WINDOW_SECONDS`: Per-IP request window. Defaults: `1000` / `360`
 - `TRACKING_RATE_LIMIT_FAIL_OPEN`: Allow ingestion when Redis rate limiting is unavailable. Default: `true`; use `false` for strict enforcement.
 - `TRACKING_BOT_FILTER_ENABLED`: Enable configured user-agent filtering. Default: `true`
 - `TRACKING_BOT_USER_AGENT_PATTERNS`: Comma-separated case-insensitive user-agent substrings to discard.
 
 ## GenAI settings
 
-- `GOOGLE_GENAI_API_KEY`: API key for the Google GenAI integration. Default: `YOUR_GOOGLE_GENAI_API_KEY`
-- `GOOGLE_GENAI_MODEL`: Model identifier for the GenAI integration. Default: `gemini-3.5-flash-lite`
+- `LEO_GOOGLE_GENAI_API_KEY`: Google GenAI key. Default: `YOUR_GOOGLE_GENAI_API_KEY`
+- `LEO_GOOGLE_GENAI_MODEL`: Google GenAI model. Default: `gemini-3.5-flash-lite`
+- `LEO_OPENAI_API_KEY`: OpenAI key. Default: `YOUR_OPENAI_API_KEY`
+- `LEO_OPENAI_MODEL_NAME`: OpenAI model. Default: `gpt-5.6-luna`
+- `LEO_OPENAI_BASE_URL`: OpenAI-compatible API URL. Default: `YOUR_OPENAI_BASE_URL`
+
+## Independent ads-server settings
+
+These keys belong only to `ads-server/.env`. They are not part of the root
+global `.env` file.
+
+### Ad server API
+
+- `LEO_AD_API_HOST`: API listen address. Default: `localhost`
+- `LEO_AD_API_PORT`: API listen port. Default: `9009`
+- `LEO_AD_TRACKING_BASE_URL`: Customer 360 tracking API URL. Default: `http://localhost:8010`
+
+### Ad server PostgreSQL
+
+- `LEO_AD_DB_HOST`: PostgreSQL host. Default: `localhost`
+- `LEO_AD_DB_PORT`: PostgreSQL port. Default: `5432`
+- `LEO_AD_DB_USER`: PostgreSQL user. Default: `postgres`
+- `LEO_AD_DB_PASSWORD`: PostgreSQL password. Set a private value.
+- `LEO_AD_DB_NAME`: Database name. Default: `customer360`
+- `LEO_AD_DB_SCHEMA`: Ads schema. Default: `leo_ads`
+
+### Ad server Redis
+
+- `LEO_AD_REDIS_HOST`: Redis host. Default: `localhost`
+- `LEO_AD_REDIS_PORT`: Redis port. Default: `6580`
+- `LEO_AD_REDIS_DB`: Redis database number. Default: `0`
+- `LEO_AD_REDIS_PASSWORD`: Redis password. Set a private value.

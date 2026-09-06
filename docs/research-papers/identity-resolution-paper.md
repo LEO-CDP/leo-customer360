@@ -276,7 +276,7 @@ When PII fields (`full_name`, `email`, `phone_number`, `national_id`) arrive as 
    - `is_hashed = TRUE` is set on `cdp_master_profiles`
 
 2. **Persona generation**
-   - **LLM path (Gemini):** if `GOOGLE_GENAI_API_KEY` is configured, generate memorable non-PII names from non-sensitive context (domain, channel, source)
+   - **LLM path (Gemini):** if `LEO_GOOGLE_GENAI_API_KEY` is configured, generate memorable non-PII names from non-sensitive context (domain, channel, source)
    - **Deterministic offline fallback:** if no API key/network, derive a stable label from anchor identifiers (`device_id`, `advertising_id`, and similar), with a 6-character hash suffix
 
 ### 4.2 Sensitive Data Sequence Flow

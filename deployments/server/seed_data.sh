@@ -54,7 +54,7 @@ DB_HOST="$( (cd "$pg" && terraform workspace select "$ENV" >/dev/null 2>&1 && te
 DB_PORT="$( (cd "$pg" && terraform output -raw db_port 2>/dev/null) || echo 5432 )"
 : "${DB_NAME:?missing db_name}"; : "${DB_USER:?missing db_username}"; : "${DB_PASS:?missing db_password}"; : "${DB_HOST:?could not read db_host from ../postgres outputs}"
 # Optional: seed_full_demo_data's persona step can use GenAI if a key is present.
-GENAI_KEY="${GOOGLE_GENAI_API_KEY:-}"
+GENAI_KEY="${LEO_GOOGLE_GENAI_API_KEY:-}"
 
 echo ">> Seeding CIR demo data on $BASTION (server key $SEED_SERVER_KEY)"
 echo "   DB: ${DB_NAME}@${DB_HOST}:${DB_PORT} (user ${DB_USER})   tenant=${DEMO_TENANT_ID}"
@@ -83,7 +83,7 @@ sudo docker run --rm --network host \
   -e DB_HOST="$DB_HOST" -e DB_PORT="$DB_PORT" -e DB_NAME="$DB_NAME" -e DB_USER="$DB_USER" \
   -e DB_PASSWORD="$DB_PW" -e DB_SCHEMA="$DB_NAME" \
   -e PGOPTIONS="-c app.tenant_id=$TENANT" \
-  ${GK:+-e GOOGLE_GENAI_API_KEY="$GK"} \
+  ${GK:+-e LEO_GOOGLE_GENAI_API_KEY="$GK"} \
   backend-system sh -c '
     set -e
     echo "== init_sample_data =="   && python identity_resolution/scripts/init_sample_data.py &&

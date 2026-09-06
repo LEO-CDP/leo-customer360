@@ -871,11 +871,11 @@ def compute_persona(master_profile: Dict[str, Any]) -> PersonaComputation:
     persona_name = generate_persona_name(seed_profile)
 
     # Read via the `persona` module namespace (not copied bindings) so that
-    # monkeypatching persona.GOOGLE_GENAI_API_KEY in tests -- the same thing
+    # monkeypatching persona.LEO_GOOGLE_GENAI_API_KEY in tests -- the same thing
     # generate_persona_name/generate_persona_summary themselves read at call
     # time -- keeps this provider/model metadata consistent with what those
     # functions actually did.
-    provider_configured = persona._has_configured_api_key(persona.GOOGLE_GENAI_API_KEY)
+    provider_configured = persona._has_configured_api_key(persona.LEO_GOOGLE_GENAI_API_KEY)
     summary_stats = {
         "domain": domain,
         "lifecycle_stage": lifecycle_stage,
@@ -908,7 +908,7 @@ def compute_persona(master_profile: Dict[str, Any]) -> PersonaComputation:
         persona_name=persona_name,
         persona_summary=persona_summary,
         llm_provider="google-genai" if provider_configured else "offline-heuristic",
-        llm_model=persona.GOOGLE_GENAI_MODEL if provider_configured else "persona-engine-rule-based-v1",
+        llm_model=persona.LEO_GOOGLE_GENAI_MODEL if provider_configured else "persona-engine-rule-based-v1",
         lifecycle_stage=lifecycle_stage,
         match_score=round(confidence_score, 4),
         features=_build_features(master_profile),

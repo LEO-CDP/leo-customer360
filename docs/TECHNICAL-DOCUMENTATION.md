@@ -127,7 +127,7 @@ flowchart TB
    - **Matching engine** (`identity_resolution/resolver.py`): loads active matching rules at runtime from `cdp_profile_attributes` (rows with `is_identity_resolution=true`).
      - **Exact match**: `national_id`, `email`, `phone_number` (SHA-256 hashed), plus `external_customer_id`/`device_id`/`advertising_id`/`cookie_id` (identity-graph fields).
      - **Not a matching key**: `full_name` is hashed/stored like the other PII but has `is_identity_resolution=false` — common/shared names are too collision-prone to safely decide two raw profiles are the same person. Fuzzy matching (`fuzzy_trgm`/`fuzzy_dmetaphone`) is implemented in the resolver but not enabled for any attribute in the current seed.
-   - **Persona naming** (`identity_resolution/persona.py`): generates a human-readable `persona_name` for each merged, PII-hashed profile. If `GOOGLE_GENAI_API_KEY` is configured, it calls the Google Gemini API (`google-genai` SDK) to produce a natural-sounding label; otherwise (or if the call fails for any reason) it falls back to a deterministic, offline name generator — the pipeline never blocks on an external LLM call being available.
+   - **Persona naming** (`identity_resolution/persona.py`): generates a human-readable `persona_name` for each merged, PII-hashed profile. If `LEO_GOOGLE_GENAI_API_KEY` is configured, it calls the Google Gemini API (`google-genai` SDK) to produce a natural-sounding label; otherwise (or if the call fails for any reason) it falls back to a deterministic, offline name generator — the pipeline never blocks on an external LLM call being available.
    - **Merge**: collects matched raw profiles into one `cdp_master_profiles` record.
 
 3. **Golden record ready** (`cdp_master_profiles`)
@@ -252,7 +252,7 @@ Raw profile snapshots from external sources, not yet merged.
 #### `cdp_master_profiles` — Golden record (primary activation table)
 The single unified customer record used for activation and reporting.
 - `tenant_id`, `master_profile_id` (UUID) — primary key.
-- `persona_name`: human-readable label for a PII-hashed profile (LLM-generated via `persona.py` when `GOOGLE_GENAI_API_KEY` is set, otherwise a deterministic offline fallback).
+- `persona_name`: human-readable label for a PII-hashed profile (LLM-generated via `persona.py` when `LEO_GOOGLE_GENAI_API_KEY` is set, otherwise a deterministic offline fallback).
 - Unified identity fields: `first_name`, `last_name`, hashed `email`/`phone_number`.
 - Identity attribute collections: device IDs, advertising IDs, phone numbers, emails, national IDs associated with this person.
 - Aggregated behavior: channel touchpoints, domain scopes (which industries this customer has interacted with).
@@ -406,7 +406,7 @@ DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
 REDIS_HOST, REDIS_PORT (6580), REDIS_PASSWORD
 SSO_LOGIN, SSO_LOGIN_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET
 DAGSTER_GRAPHQL_HOST, DAGSTER_GRAPHQL_PORT
-GOOGLE_GENAI_API_KEY   # optional; enables LLM-generated persona names in identity_resolution
+LEO_GOOGLE_GENAI_API_KEY   # optional; enables LLM-generated persona names in identity_resolution
 FRONTEND_API_HOSTNAME, FRONTEND_TENANT_ID   # frontend-admin only
 ```
 
@@ -434,7 +434,7 @@ Container and Compose health monitoring covers:
 1. Check the worker container is running and its healthcheck is passing.
 2. `SELECT COUNT(*) FROM cdp_raw_profiles_stage WHERE status_code = 1;` to confirm there is pending work.
 3. `SELECT COUNT(*) FROM cdp_profile_attributes WHERE is_identity_resolution=true AND status='ACTIVE';` to confirm matching rules are loaded.
-4. Persona generation failures (e.g. `GOOGLE_GENAI_API_KEY` invalid) should not block merges — verify the offline fallback path in `persona.py` is being used if the Gemini API is unreachable.
+4. Persona generation failures (e.g. `LEO_GOOGLE_GENAI_API_KEY` invalid) should not block merges — verify the offline fallback path in `persona.py` is being used if the Gemini API is unreachable.
 
 **API route returns 422 on a seemingly valid literal path (e.g. a new custom GET route under a `build_crud_router()`-based router):**
 - This is a known routing-order pitfall: a literal-path GET route added *after* `build_crud_router()` builds `GET /segments/{item_id}` can be silently shadowed by it, since Starlette matches path shape + method in registration order. Fix is to reorder the route (see `core/routers/segment.py` for the applied pattern) — always smoke-test a new literal route against a running (restarted) server, not just a fresh `TestClient`.
@@ -456,7 +456,7 @@ Container and Compose health monitoring covers:
 | Identity-resolution job has no fan-out | One Dagster sensor submits runs for all tenants/domains | Scaling beyond one run would require partitioning work (e.g. by tenant or domain) across multiple Dagster runs/ops. |
 | `scoring`, `data_synch`, `email_engine`, `notification_engine`, `campaign_activation`, `personalization` are placeholders | Their Dagster jobs exist and are wired into `customer360-api`'s Dagster client config, but contain no real business logic yet (each just logs "started" → sleeps → logs "done") | The wiring (job names, workspace registration) is ready for real implementations to be dropped in. |
 | CORS is hardcoded, not configurable | `allow_origins=["*"]` in `app.py` has no environment override | Any production CORS hardening requires a code change. |
-| Persona naming depends on an optional external LLM call | If `GOOGLE_GENAI_API_KEY` is unset or the Gemini API is unreachable, persona names fall back to a deterministic offline generator | This is intentional graceful degradation, not a bug — but persona name "quality" will vary based on whether the key is configured. |
+| Persona naming depends on an optional external LLM call | If `LEO_GOOGLE_GENAI_API_KEY` is unset or the Gemini API is unreachable, persona names fall back to a deterministic offline generator | This is intentional graceful degradation, not a bug — but persona name "quality" will vary based on whether the key is configured. |
 | No phonetic/graph-based matching in the live CIR resolver | Only exact and Levenshtein-style fuzzy matching are implemented today | A device-ID graph walk (e.g. Google Analytics `advertising_id` → login → purchase all on one device) is described conceptually (UC1/UC2) but not yet a distinct `matching_rule='graph'` implementation in `resolver.py` — verify against current `resolver.py` before relying on this in a specific deployment. |
 | MinIO is dev-only | MinIO (S3-compatible) is wired into the development Compose variants for local file-based event ingestion | Production `tracking-api` uses a real S3 bucket; MinIO is intentionally absent from `docker-compose.yml`. |
 

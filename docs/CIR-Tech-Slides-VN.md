@@ -355,7 +355,7 @@ vào computation.
 - Persona engine tạo lại label cho mọi master bằng các input không phải PII,
   dùng `master_profile_id` làm seed ổn định.
 
-Nếu có `GOOGLE_GENAI_API_KEY` thật, `persona.py` có thể gọi Gemini để tạo phần
+Nếu có `LEO_GOOGLE_GENAI_API_KEY` thật, `persona.py` có thể gọi Gemini để tạo phần
 label; prompt chỉ gửi domain và acquisition channel. SDK thiếu, key là placeholder, 
 network lỗi hoặc timeout đều fallback về generator offline. LLM không được phép làm hỏng CIR batch.
 
@@ -424,8 +424,8 @@ database trigger gọi tự động.
 | `CIR_BATCH_SIZE` | `5000` trong daily job/scripts | Số raw profile mỗi batch |
 | `CIR_POLL_INTERVAL_SECONDS` | `30` | Dagster sensor và `worker.py` |
 | `DAGSTER_HOME` | `/dagster_home` trong image | Run history; compose mount volume |
-| `GOOGLE_GENAI_API_KEY` | unset | Optional persona label generation |
-| `GOOGLE_GENAI_MODEL` | `gemini-3.5-flash` | Optional Gemini model |
+| `LEO_GOOGLE_GENAI_API_KEY` | unset | Optional persona label generation |
+| `LEO_GOOGLE_GENAI_MODEL` | `gemini-3.5-flash` | Optional Gemini model |
 
 Khi triển khai cần cấu hình `.env` thống nhất giữa compose và image. Không nên
 dựa vào các password fallback trong Python cho môi trường production.

@@ -19,7 +19,7 @@ always gets the same persona_name -- idempotent/safe to (re)compute on
 every merge.
 
 Generation strategy:
-    1. If ``GOOGLE_GENAI_API_KEY`` is configured (see ``.env``), ask Google
+    1. If ``LEO_GOOGLE_GENAI_API_KEY`` is configured (see ``.env``), ask Google
        Gemini to craft a short, catchy persona archetype label -- the
        prompt only ever includes non-PII attributes (``domain``,
        acquisition channel), never the raw or hashed PII values themselves.
@@ -79,8 +79,8 @@ _ROLE_BY_DOMAIN = {
     "education": ("Learner", "Student", "Course Taker", "Lifelong Learner"),
 }
 
-GOOGLE_GENAI_API_KEY = os.getenv("GOOGLE_GENAI_API_KEY", None)
-GOOGLE_GENAI_MODEL = os.getenv("GOOGLE_GENAI_MODEL", "gemini-3.5-flash")
+LEO_GOOGLE_GENAI_API_KEY = os.getenv("LEO_GOOGLE_GENAI_API_KEY", None)
+LEO_GOOGLE_GENAI_MODEL = os.getenv("LEO_GOOGLE_GENAI_MODEL", "gemini-3.5-flash")
 # Bounds the worst-case latency of a single Gemini call (milliseconds) so a
 # slow/unreachable API can never stall the CIR resolution batch -- on
 # timeout the call raises and generate_persona_name() falls back offline.
@@ -119,10 +119,10 @@ def _get_genai_client():
     if _genai_client_initialized:
         return _genai_client
     _genai_client_initialized = True
-    if _GENAI_SDK_AVAILABLE and _has_configured_api_key(GOOGLE_GENAI_API_KEY):
+    if _GENAI_SDK_AVAILABLE and _has_configured_api_key(LEO_GOOGLE_GENAI_API_KEY):
         try:
             _genai_client = genai.Client(
-                api_key=GOOGLE_GENAI_API_KEY,
+                api_key=LEO_GOOGLE_GENAI_API_KEY,
                 http_options=genai_types.HttpOptions(timeout=_GENAI_TIMEOUT_MS),
             )
         except Exception:
@@ -166,7 +166,7 @@ def generate_persona_name(profile: Dict[str, Any]) -> str:
     whose real identity fields are hashed, e.g.
     ``"Savvy Retail Shopper (TikTok Ads) #4f2a9c"``.
 
-    If ``GOOGLE_GENAI_API_KEY`` is configured, this first tries Google
+    If ``LEO_GOOGLE_GENAI_API_KEY`` is configured, this first tries Google
     Gemini to craft the adjective/role wording (only non-PII attributes --
     ``domain`` and acquisition channel -- are ever sent in the prompt).
     Whenever GenAI is not configured, unavailable, or the call fails for any
@@ -183,7 +183,7 @@ def generate_persona_name(profile: Dict[str, Any]) -> str:
     digest = hashlib.sha256((seed or "unknown").encode("utf-8")).hexdigest()
     suffix = digest[:6]
 
-    if _has_configured_api_key(GOOGLE_GENAI_API_KEY):
+    if _has_configured_api_key(LEO_GOOGLE_GENAI_API_KEY):
         ai_label = _generate_with_genai(profile, suffix)
         if ai_label:
             return ai_label
@@ -231,7 +231,7 @@ def _generate_with_genai(profile: Dict[str, Any], suffix: str) -> Optional[str]:
     )
     try:
         response = client.models.generate_content(
-            model=GOOGLE_GENAI_MODEL,
+            model=LEO_GOOGLE_GENAI_MODEL,
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -285,7 +285,7 @@ def generate_persona_summary(stats: Dict[str, Any]) -> str:
     first (if configured), falls back to a deterministic offline template on
     any failure. Never raises.
     """
-    if _has_configured_api_key(GOOGLE_GENAI_API_KEY):
+    if _has_configured_api_key(LEO_GOOGLE_GENAI_API_KEY):
         ai_summary = _generate_summary_with_genai(stats)
         if ai_summary:
             return ai_summary
@@ -330,7 +330,7 @@ def _generate_summary_with_genai(stats: Dict[str, Any]) -> Optional[str]:
     )
     try:
         response = client.models.generate_content(
-            model=GOOGLE_GENAI_MODEL,
+            model=LEO_GOOGLE_GENAI_MODEL,
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",

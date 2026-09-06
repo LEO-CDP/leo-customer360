@@ -19,7 +19,7 @@ name: customer360
 #     is otherwise trusted, or put a reverse proxy in front instead.
 #   - `env_file: .env` is only attached to services that actually need the
 #     full app config (api, Dagster, demo seed) to avoid leaking unrelated secrets
-#     (e.g. GOOGLE_GENAI_API_KEY, KEYCLOAK_CLIENT_SECRET) into postgres/redis/keycloak.
+#     (e.g. LEO_GOOGLE_GENAI_API_KEY, KEYCLOAK_CLIENT_SECRET) into postgres/redis/keycloak.
 # =============================================================================
 
 x-logging: &default-logging

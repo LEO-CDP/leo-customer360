@@ -37,7 +37,7 @@ At a minimum, set real values for:
 Recommended additional values for a local setup:
 
 - `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` if you want the dev MinIO stack
-- `GOOGLE_GENAI_API_KEY` if you want live LLM-backed persona generation; otherwise the placeholder keeps CIR behavior deterministic/offline
+- `LEO_GOOGLE_GENAI_API_KEY` if you want live LLM-backed persona generation; otherwise the placeholder keeps CIR behavior deterministic/offline
 
 `.env` is gitignored; `.env.example` is the committed template.
 
@@ -214,7 +214,7 @@ cp .env.example .env
 #   - FRONTEND_API_HOSTNAME: https://api.customer360.example.com (public URL)
 #   - KEYCLOAK_HOSTNAME: customer360.example.com (public hostname)
 #   - SSO_LOGIN_URL: https://customer360.example.com/auth (or use SSO endpoint)
-#   - GOOGLE_GENAI_API_KEY: (optional) if using LLM features
+#   - LEO_GOOGLE_GENAI_API_KEY: (optional) if using LLM features
 ```
 
 ### Reverse proxy configuration (Nginx)

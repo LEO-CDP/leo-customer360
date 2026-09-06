@@ -17,7 +17,7 @@ from identity_resolution.persona import (
 @pytest.fixture(autouse=True)
 def _reset_genai_client_cache(monkeypatch):
     """Every test starts with a clean (un-cached) GenAI client state so
-    monkeypatching GOOGLE_GENAI_API_KEY / _get_genai_client behaves
+    monkeypatching LEO_GOOGLE_GENAI_API_KEY / _get_genai_client behaves
     predictably regardless of test order."""
     monkeypatch.setattr(persona, "_genai_client", None)
     monkeypatch.setattr(persona, "_genai_client_initialized", False)
@@ -103,7 +103,7 @@ class TestHasConfiguredApiKey:
 
 class TestGenerateWithGenAI:
     def test_uses_ai_label_when_client_available(self, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", "a-real-key")
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", "a-real-key")
         fake_client = MagicMock()
         fake_response = MagicMock()
         fake_response.parsed.persona_name = "Trendy Digital Shopper"
@@ -117,7 +117,7 @@ class TestGenerateWithGenAI:
         fake_client.models.generate_content.assert_called_once()
 
     def test_falls_back_offline_when_genai_call_raises(self, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", "a-real-key")
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", "a-real-key")
         fake_client = MagicMock()
         fake_client.models.generate_content.side_effect = RuntimeError("network down")
         monkeypatch.setattr(persona, "_get_genai_client", lambda: fake_client)
@@ -130,7 +130,7 @@ class TestGenerateWithGenAI:
         assert result == generate_persona_name(profile)
 
     def test_falls_back_offline_when_no_api_key_configured(self, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", None)
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
         fake_client = MagicMock()
         monkeypatch.setattr(persona, "_get_genai_client", lambda: fake_client)
 
@@ -141,7 +141,7 @@ class TestGenerateWithGenAI:
         fake_client.models.generate_content.assert_not_called()
 
     def test_empty_ai_label_falls_back_offline(self, monkeypatch):
-        monkeypatch.setattr(persona, "GOOGLE_GENAI_API_KEY", "a-real-key")
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", "a-real-key")
         fake_client = MagicMock()
         fake_response = MagicMock()
         fake_response.parsed.persona_name = "   "
