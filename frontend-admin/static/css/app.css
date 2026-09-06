@@ -8,6 +8,16 @@
   --c360-card: #ffffff;
   --c360-border: #e2e8f0;
   --c360-scroll-thumb: #cbd5e1;
+  --c360-qb-group-bg: color-mix(in srgb, #3b82f6 8%, #ffffff 92%);
+  --c360-qb-group-border: color-mix(in srgb, #3b82f6 28%, var(--c360-border) 72%);
+  --c360-qb-group-shadow: 0 1px 2px color-mix(in srgb, #0f172a 10%, transparent);
+  --c360-chat-accent: #4f46e5;
+  --c360-chat-accent-hover: #4338ca;
+  --c360-chat-on-accent: #ffffff;
+  --c360-chat-bot-bg: #f1f5f9;
+  --c360-chat-error: #dc2626;
+  --c360-chat-source-link: #4f46e5;
+  --c360-chat-source-link-hover: #4338ca;
 }
 
 html.dark {
@@ -17,7 +27,24 @@ html.dark {
   --c360-card: #111827;
   --c360-border: #334155;
   --c360-scroll-thumb: #475569;
+  --c360-qb-group-bg: color-mix(in srgb, #1d4ed8 28%, var(--c360-card) 72%);
+  --c360-qb-group-border: color-mix(in srgb, #60a5fa 32%, var(--c360-border) 68%);
+  --c360-qb-group-shadow: 0 1px 2px color-mix(in srgb, #020617 45%, transparent);
+  --c360-chat-bot-bg: #1e293b;
+  --c360-chat-error: #f87171;
+  --c360-chat-source-link: #a5b4fc;
+  --c360-chat-source-link-hover: #c7d2fe;
   color-scheme: dark;
+}
+
+html.c360-theme-dark {
+  --c360-qb-group-bg: color-mix(in srgb, #1d4ed8 28%, #111827 72%);
+  --c360-qb-group-border: color-mix(in srgb, #60a5fa 32%, #334155 68%);
+  --c360-qb-group-shadow: 0 1px 2px color-mix(in srgb, #020617 45%, transparent);
+  --c360-chat-bot-bg: #1e293b;
+  --c360-chat-error: #f87171;
+  --c360-chat-source-link: #a5b4fc;
+  --c360-chat-source-link-hover: #c7d2fe;
 }
 
 html:not(.dark) {
@@ -290,6 +317,13 @@ html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
 
 .hidden { display: none !important; }
 
+/* Segment Query Builder group panel: keep one class theme-safe across both modes. */
+.rules-group-container {
+  background: var(--c360-qb-group-bg);
+  border-color: var(--c360-qb-group-border);
+  box-shadow: var(--c360-qb-group-shadow);
+}
+
 /*
  * Docs Assistant (RAG chatbot) widget -- see static/js/docs-chatbot-view.js and
  * static/templates/common/docs-chatbot.html. Layout classes come from Tailwind in
@@ -312,20 +346,18 @@ html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
   overflow-wrap: anywhere;
 }
 .docs-chat-bubble-user {
-  background: #4f46e5;
-  color: #fff;
+  background: var(--c360-chat-accent);
+  color: var(--c360-chat-on-accent);
   border-bottom-right-radius: 0.25rem;
 }
 .docs-chat-bubble-bot {
-  background: #f1f5f9;
+  background: var(--c360-chat-bot-bg);
   color: var(--c360-text);
   border-bottom-left-radius: 0.25rem;
 }
-html.dark .docs-chat-bubble-bot { background: #1e293b; }
 
 .docs-chat-answer { white-space: normal; }
-.docs-chat-error { color: #dc2626; }
-html.dark .docs-chat-error { color: #f87171; }
+.docs-chat-error { color: var(--c360-chat-error); }
 
 .docs-chat-status {
   display: flex;
@@ -368,9 +400,12 @@ html.dark .docs-chat-error { color: #f87171; }
   text-decoration: none;
   transition: border-color 0.15s, background 0.15s;
 }
-.docs-chat-source:hover { border-color: #6366f1; background: color-mix(in srgb, #6366f1 8%, transparent); }
-.docs-chat-source-doc { font-size: 0.8rem; font-weight: 600; color: #4f46e5; }
-html.dark .docs-chat-source-doc { color: #a5b4fc; }
+.docs-chat-source:hover {
+  border-color: var(--c360-chat-accent-hover);
+  background: color-mix(in srgb, var(--c360-chat-accent) 8%, transparent);
+}
+.docs-chat-source-doc { font-size: 0.8rem; font-weight: 600; color: var(--c360-chat-source-link); }
+.docs-chat-source:hover .docs-chat-source-doc { color: var(--c360-chat-source-link-hover); }
 .docs-chat-source-heading { font-size: 0.72rem; color: var(--c360-muted); }
 
 .docs-chat-suggestion {
@@ -383,5 +418,7 @@ html.dark .docs-chat-source-doc { color: #a5b4fc; }
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
 }
-.docs-chat-suggestion:hover { border-color: #6366f1; color: #4f46e5; }
-html.dark .docs-chat-suggestion:hover { color: #a5b4fc; }
+.docs-chat-suggestion:hover {
+  border-color: var(--c360-chat-accent-hover);
+  color: var(--c360-chat-source-link-hover);
+}

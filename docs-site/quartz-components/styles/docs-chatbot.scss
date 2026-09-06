@@ -23,7 +23,7 @@
   font-weight: 600;
   color: var(--light);
   background: var(--secondary);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--dark) 22%, transparent);
   transition: filter 0.15s ease;
 
   &:hover {
@@ -48,7 +48,7 @@
   border: 1px solid var(--lightgray);
   border-radius: 0.9rem;
   background: var(--light);
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 10px 34px color-mix(in srgb, var(--dark) 32%, transparent);
   font-family: var(--bodyFont);
 
   &.hidden {
@@ -135,7 +135,7 @@
 }
 
 .docs-chat-error {
-  color: #e05252;
+  color: color-mix(in srgb, var(--dark) 15%, #e05252 85%);
 }
 
 .docs-chat-status {
