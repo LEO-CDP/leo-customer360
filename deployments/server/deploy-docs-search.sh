@@ -58,7 +58,10 @@ if [[ -z "$FIP" ]]; then
   exit 0
 fi
 BASTION="${BASTION_USER:-leocdp360}@$FIP"
-SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+# ServerAlive* keeps the long enrich SSH session (minutes of embedding on 1 vCPU, no
+# data flowing) from idle-dropping — a bare session exits 255 from a CI runner mid-enrich.
+SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+          -o ServerAliveInterval=30 -o ServerAliveCountMax=20)
 
 CONTAINER="customer360-docs-vector-search"
 if [[ "$ACTION" == "destroy" ]]; then
