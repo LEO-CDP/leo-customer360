@@ -6,9 +6,11 @@ connection is opened per request (safe under the threadpool; low concurrency on 
 from __future__ import annotations
 
 import threading
+import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -16,6 +18,8 @@ from . import store
 from .agent import query, retrieve
 from .config import (
     ASK_MAX_CONCURRENCY,
+    ASK_RATE_MAX,
+    ASK_RATE_WINDOW_SEC,
     CORS_ORIGINS,
     EMBED_MODEL,
     QWEN_MODEL_PATH,
@@ -29,6 +33,40 @@ from .providers import embed, rerank
 # Bound concurrent generation so parallel /ask calls queue instead of thrashing the
 # 1 vCPU box (endpoints run in a threadpool, so a threading primitive is the right fit).
 _ask_gate = threading.Semaphore(max(1, ASK_MAX_CONCURRENCY))
+
+# Per-IP sliding-window rate limit for /ask. Public requests arrive via Caddy, which
+# appends the real client to X-Forwarded-For; the internal frontend-admin proxy sends no
+# XFF and is exempt. Bounded by the number of distinct client IPs seen within the window.
+_rate_lock = threading.Lock()
+_rate_hits: dict[str, deque] = defaultdict(deque)
+
+
+def _client_ip(request: Request) -> str | None:
+    """Rightmost X-Forwarded-For entry (the peer Caddy actually saw). None => no XFF =>
+    an internal/trusted caller (the frontend-admin proxy), which is not rate-limited."""
+    xff = request.headers.get("x-forwarded-for")
+    return xff.split(",")[-1].strip() if xff else None
+
+
+def _enforce_rate_limit(request: Request) -> None:
+    if ASK_RATE_MAX <= 0:
+        return
+    ip = _client_ip(request)
+    if not ip:
+        return  # internal proxy caller — exempt
+    now = time.monotonic()
+    cutoff = now - ASK_RATE_WINDOW_SEC
+    with _rate_lock:
+        hits = _rate_hits[ip]
+        while hits and hits[0] < cutoff:
+            hits.popleft()
+        if len(hits) >= ASK_RATE_MAX:
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded — please wait a moment and try again.",
+                headers={"Retry-After": str(ASK_RATE_WINDOW_SEC)},
+            )
+        hits.append(now)
 
 
 @asynccontextmanager
@@ -94,8 +132,10 @@ def search(req: SearchRequest):
 
 
 @app.post("/ask")
-def ask(req: AskRequest):
+def ask(req: AskRequest, request: Request):
     """Full RAG — grounded answer + cited sources."""
+    # Per-IP rate limit for public callers (via Caddy/XFF); internal proxy is exempt.
+    _enforce_rate_limit(request)
     # Serialize generation (see _ask_gate) so concurrent asks can't pile up resident
     # memory on the small box; retrieval below is cheap and runs under the same gate.
     with _ask_gate, store.connect() as conn:
