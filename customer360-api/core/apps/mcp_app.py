@@ -31,8 +31,15 @@ def _attach_mcp_routes(mcp_server: FastMCP, target_app: FastAPI) -> None:
         target_app.mount("/", starlette_app)
         return
 
+    http_app_fn = getattr(mcp_server, "http_app", None)
+    if callable(http_app_fn):
+        # path="/" keeps MCP transport endpoints rooted at the sub-app mount point.
+        starlette_app = cast(ASGIApp, http_app_fn(path="/"))
+        target_app.mount("/", starlette_app)
+        return
+
     raise RuntimeError(
-        "FastMCP integration method not found. Expected `attach` or `get_starlette_app`."
+        "FastMCP integration method not found. Expected `attach`, `get_starlette_app`, or `http_app`."
     )
 
 
@@ -57,11 +64,11 @@ def create_mcp_app() -> FastAPI:
         finally:
             restore_tenant_context(context_token)
 
-    _attach_mcp_routes(mcp, mcp_app)
-
     @mcp_app.get("/health", tags=["MCP Health"])
     def mcp_health() -> dict:
         """Liveness probe for the MCP sub-application."""
         return {"service": "customer360-mcp", "status": "ok"}
+
+    _attach_mcp_routes(mcp, mcp_app)
 
     return mcp_app

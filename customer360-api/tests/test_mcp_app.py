@@ -29,6 +29,21 @@ class _FakeFastMCP:
         self.attached_to = target_app
 
 
+class _FakeFastMCPHttpOnly(_FakeFastMCP):
+    attach = None
+
+    def http_app(self, path="/"):
+        from fastapi import FastAPI
+
+        app = FastAPI()
+
+        @app.get("/")
+        def _root():
+            return {"ok": True, "path": path}
+
+        return app
+
+
 class _FakeResult:
     def __init__(self, rows):
         self._rows = rows
@@ -53,6 +68,18 @@ class _FakeSession:
 
 def test_create_mcp_app_exposes_health_endpoint(monkeypatch):
     monkeypatch.setattr(mcp_module, "FastMCP", _FakeFastMCP)
+
+    app = mcp_module.create_mcp_app()
+    app.dependency_overrides[mcp_module._bind_tenant_context] = lambda: None
+
+    response = TestClient(app).get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"service": "customer360-mcp", "status": "ok"}
+
+
+def test_create_mcp_app_exposes_health_endpoint_with_http_app_fallback(monkeypatch):
+    monkeypatch.setattr(mcp_module, "FastMCP", _FakeFastMCPHttpOnly)
 
     app = mcp_module.create_mcp_app()
     app.dependency_overrides[mcp_module._bind_tenant_context] = lambda: None

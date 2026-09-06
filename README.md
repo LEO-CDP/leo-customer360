@@ -123,7 +123,7 @@ The repo uses these primary entrypoints:
 
 ## Authentication and tenant context
 
-The API is auth-protected on nearly every route. The current implementation requires a valid bearer token on all non-exempt endpoints, and it resolves tenant/user context from the token or Keycloak-backed auth flow. The code now intentionally rejects header-only login shortcuts, so the runtime behavior matches the current API docs in `customer360-api/customer360-api.md`.
+The API is auth-protected on nearly every route. The current implementation requires a valid bearer token on all non-exempt endpoints, and it resolves tenant/user context from the token or Keycloak-backed auth flow. The code now intentionally rejects header-only login shortcuts, so the runtime behavior matches the current API docs in `customer360-api/README.md`.
 
 The usual local flow is:
 
@@ -151,7 +151,7 @@ Start here for deeper context:
 
 - [`docs/architecture/TECHNICAL-DOCUMENTATION.md`](docs/architecture/TECHNICAL-DOCUMENTATION.md)
 - [`docs/operations/DOCKER-COMPOSE-GUIDE.md`](docs/operations/DOCKER-COMPOSE-GUIDE.md)
-- [`customer360-api/customer360-api.md`](customer360-api/customer360-api.md)
+- [`customer360-api/README.md`](customer360-api/README.md)
 - [`data-tracking-api/README.md`](data-tracking-api/README.md)
 - [`ads-server/README.md`](ads-server/README.md)
 - [`backend-system/README.md`](backend-system/README.md)

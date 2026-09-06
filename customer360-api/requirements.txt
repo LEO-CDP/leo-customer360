@@ -17,8 +17,8 @@ pydantic-settings>=2.2,<3
 pydantic[email]
 python-dotenv>=1.0,<2
 
-# Added FastMCP for Model Context Protocol server capabilities
-fastmcp>=0.1.0
+# FastMCP 4.x API changed integration methods (uses http_app).
+fastmcp>=4.0.3,<5
 
 # Database migrations. 
 alembic>=1.13.0,<2
