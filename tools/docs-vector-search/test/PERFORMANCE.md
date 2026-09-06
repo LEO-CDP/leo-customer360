@@ -23,7 +23,7 @@ The server warms embed + rerank in the lifespan; Qwen loads lazily on the first 
 | Qwen GGUF fetch (deploy step, curl) | ~6 min first deploy, then host-cached | same (host-cached in `/opt/c360/docs-models`) |
 | Reranker download at boot (unauth HF) | **~10 min** (dominant cost) | **0** — baked into the image |
 | Embed download at boot | (cached after enrich) | **0** — baked |
-| **Time to healthy `:8000`** | **~15 min** (fresh box) | **expected ~1–2 min** (model loads only) |
+| **Time to healthy `:8000`** | **~15 min** (fresh box) | **22 s measured** — cold restart, load from baked cache, no download |
 
 > The reranker download from **unauthenticated** Hugging Face was the killer (~10 min on the
 > box). Fix: pre-bake the default embed + rerank models into the image at build time
@@ -63,3 +63,5 @@ Run `python ragas_eval.py` (see [README](./README.md)); record the run here.
 | 2026-09-06 | First successful live UAT deploy + smoke | 928 chunks; `/ask "What is CIR?"` → correct grounded answer, 15.3 s cold; retrieval EN + VN OK |
 | 2026-09-06 | Root-caused ~15 min first-boot | ~10 min reranker download (unauth HF) → **pre-bake models in image** |
 | 2026-09-06 | Redeploy on merged main + latency run | boot 1 s (cache warm); `/ask` warm 17–42 s (0.5B on 1 vCPU); `/search` ~3 s; mem 1.53/1.92 GiB, no OOM. Note: a concurrent CD deploy (docs-search is in the default set) collided with the manual redeploy — settled healthy. |
+| 2026-09-06 | **Pre-bake verified** on the pre-baked image (`sha-ec0479f`, `FASTEMBED_CACHE=/app/model-cache/fastembed`) | **cold restart boot-to-healthy = 22 s** (977 chunks), down from ~15 min — the reranker download is baked away. |
+| 2026-09-06 | CD `docs-search` failed (exit 255) | single SSH session idle-dropped ~6 min into enrich from the CI runner → added SSH keepalive (`ServerAliveInterval`). |
