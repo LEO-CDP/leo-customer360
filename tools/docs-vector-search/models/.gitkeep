@@ -1,0 +1,2 @@
+# Model weights (fastembed ONNX + Qwen GGUF) are downloaded here at deploy time.
+# This keeps the dir in git; the weights themselves are gitignored.

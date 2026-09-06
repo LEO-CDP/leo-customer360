@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+# Downloaded model weights (fastembed ONNX + Qwen GGUF) — never commit.
+models/*
+!models/.gitkeep

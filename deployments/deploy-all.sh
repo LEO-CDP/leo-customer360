@@ -46,7 +46,7 @@ ROOT="$(pwd)"
 
 # ---------------------------------------------------------------- step registry
 # Ordered list of step ids. PHASE/TITLE give the --list view its structure.
-STEPS=(storage postgres server db-schema cache sso backend load-balancer proxy sso-realm api frontend ads tracking monitoring seed)
+STEPS=(storage postgres server db-schema cache sso backend load-balancer proxy sso-realm api frontend ads tracking docs-search monitoring seed)
 
 # Steps NOT run by default (must be named via --with / --only / --from).
 OPTIONAL="seed"
@@ -56,7 +56,7 @@ phase_of() { case "$1" in
   db-schema)               echo "2 · database bootstrap";;
   cache|sso|backend)       echo "3 · data-plane containers";;
   load-balancer|proxy)     echo "4 · front door (LB + Caddy)";;
-  sso-realm|api|frontend|ads|tracking|monitoring) echo "5 · SSO realm + applications";;
+  sso-realm|api|frontend|ads|tracking|docs-search|monitoring) echo "5 · SSO realm + applications";;
   seed)                    echo "6 · demo data (optional)";;
 esac; }
 
@@ -75,6 +75,7 @@ title_of() { case "$1" in
   frontend)      echo "frontend-admin (admin UI)";;
   ads)           echo "ads-server (LEO Ad Server, schema leo_ads)";;
   tracking)      echo "data-tracking-api (event ingestion -> S3, /data)";;
+  docs-search)   echo "docs-vector-search (local-model RAG, pgvector on the vDB)";;
   monitoring)    echo "Portainer + Netdata (+ oauth2-proxy SSO gate)";;
   seed)          echo "CIR demo data seed (~1000 profiles, demo tenant)";;
 esac; }
@@ -189,6 +190,7 @@ run_one() {  # <id> <action>
     frontend)      ssh_step frontend       deploy-frontend.sh deploy "$2" ;;
     ads)           ssh_step ads-server     deploy-ads.sh deploy "$2" ;;
     tracking)      ssh_step_env_only server deploy-tracking.sh "$2" ;;
+    docs-search)   ssh_step docs-vector-search deploy.sh deploy "$2" ;;
     monitoring)    ssh_step monitoring     deploy-monitoring.sh deploy "$2" ;;
     backend)       ssh_step_env_only server deploy-backend.sh "$2" ;;
     api)           ssh_step_env_only server deploy-api.sh     "$2" ;;

@@ -1,0 +1,53 @@
+name: Docs Vector Refresh
+
+# The docs-vector-search index (pgvector on the vDB) is refreshed by the CD
+# "docs-search" deploy step, which runs `enrich` ON the box — that is where the
+# vDB and the model weights live, so it can't run on a GitHub runner.
+#
+#   - CODE changes under tools/docs-vector-search/** flow through CI -> CD like any
+#     service (built, pushed, deployed + enriched).
+#   - DOCS-ONLY changes are path-ignored by CI, so this workflow covers them: on a
+#     docs/** change to main it DISPATCHES the CD docs-search deploy, which ships the
+#     new docs/, re-chunks + re-embeds them, and upserts into pgvector. enrich is
+#     content-hash idempotent, so unchanged docs re-embed nothing.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs-vector-index.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment whose index to refresh"
+        type: choice
+        options: [uat, prod]
+        default: uat
+
+permissions:
+  contents: read
+  actions: write # to dispatch cd.yml
+
+concurrency:
+  group: docs-vector-refresh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dispatch CD docs-search deploy (re-enrich the index)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENVIRONMENT: ${{ inputs.environment || 'uat' }}
+        run: |
+          echo "Refreshing docs-vector-search index on '$ENVIRONMENT' (docs-only change on main)."
+          # image_tag=latest: a docs refresh changes DATA, not the code image — deploy
+          # the current main image and let enrich pick up the new docs/.
+          gh workflow run cd.yml \
+            -f environment="$ENVIRONMENT" \
+            -f image_tag=latest \
+            -f services=docs-search

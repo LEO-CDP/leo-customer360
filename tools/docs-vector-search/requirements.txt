@@ -1,0 +1,9 @@
+# Local-model Graph-RAG over pgvector. No hosted LLM.
+fastembed>=0.4            # ONNX embeddings (e5-small) + TextCrossEncoder reranker (bge)
+llama-cpp-python>=0.3     # CPU GGUF generation (Qwen2.5-0.5B-Instruct)
+psycopg[binary]>=3.2      # vDB (PostgreSQL) client
+pgvector>=0.3             # pgvector adapter for psycopg
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-frontmatter>=1.1
+python-dotenv>=1.0
