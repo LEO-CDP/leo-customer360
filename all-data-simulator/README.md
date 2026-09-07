@@ -82,4 +82,32 @@ stdout, and upload it via `S3DataUtil` to the `GA4_S3_BUCKET` bucket.
 
 ## Streaming Data Source: Website User to Apache Kafka topics: web-trueview-data, web-action-data
 
-TODO
+`web_user_simulator.py` simulates ecommerce visitors who see an ad, open a
+product, ask for a price or support, and purchase the product. The simulator
+sends one ordered event batch per user to the tracking API.
+
+```bash
+cd all-data-simulator
+export TRACKING_API_URL=http://localhost:8010/api/v1/tracking/logs
+export TRACKING_DATA_SOURCE_ID=11111111-1111-1111-1111-111111111111
+export LEO_OPENAI_API_KEY=your-api-key
+export LEO_OPENAI_MODEL_NAME=gpt-5.6-luna
+export OPENAI_REASONING_EFFORT=none
+python web_user_simulator.py --users 10 --verbose
+```
+
+`LEO_OPENAI_BASE_URL` can point to an OpenAI-compatible gateway. If no OpenAI
+key is configured, the simulator uses the same local journey in offline mode;
+use `--offline --dry-run` to inspect generated events without calling either
+the model or the tracking API.
+
+For `gpt-5.6-luna` function tools must be called with
+`OPENAI_REASONING_EFFORT=none`; this is the default because the simulator uses
+the Chat Completions tools interface.
+
+By default, after each successful API request the simulator waits 5 seconds,
+reads the returned object from local MinIO at `localhost:9000`, and compares
+every stored NDJSON event with the batch sent to the API. Configure the check
+with `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_ENDPOINT`, and
+`TRACKING_S3_VERIFY_WAIT_SECONDS`. Use `--s3-wait-seconds 10` for a longer
+flush window or `--no-s3-verify` when the API is backed by remote S3.

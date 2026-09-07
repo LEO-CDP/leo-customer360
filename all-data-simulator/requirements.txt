@@ -2,6 +2,7 @@ faker>=25,<26
 pydantic>=2,<3
 python-dotenv>=1.0,<2
 google-genai>=2.14.0
+openai>=1.40,<2
 faker
 minio
 kafka-python
