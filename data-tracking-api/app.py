@@ -25,6 +25,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def allow_private_network_preflight(request, call_next):
+    response = await call_next(request)
+    is_private_network_preflight = (
+        request.method == "OPTIONS"
+        and request.headers.get("access-control-request-private-network") == "true"
+    )
+    if is_private_network_preflight:
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
 app.include_router(tracking_router, prefix="/api/v1")
 app.include_router(tracking_router, prefix="/data/api/v1")
 
