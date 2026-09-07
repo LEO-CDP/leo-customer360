@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kết Quả Xổ Số - Clone</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/handlebars@4.7.8/dist/handlebars.min.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f8f9fa;
+        }
+
+        /* Header Logo Styling */
+        .logo-text-top {
+            color: #dc3545;
+            font-weight: bold;
+            font-size: 1.2rem;
+            line-height: 1;
+        }
+
+        .logo-text-main {
+            color: #a10000;
+            font-weight: 900;
+            font-size: 2rem;
+            line-height: 1;
+            margin-top: -5px;
+        }
+
+        .logo-text-sub {
+            color: #28a745;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        /* Navigation Bar Styling */
+        .navbar-custom {
+            background-color: #d10000;
+            /* Dark red background */
+        }
+
+        .navbar-custom .nav-link {
+            color: #ffffff;
+            font-weight: 600;
+            padding: 10px 15px;
+            font-size: 0.95rem;
+        }
+
+        .navbar-custom .nav-link:hover {
+            background-color: #a30000;
+            /* Darker hover effect */
+        }
+
+        /* Main Content Styling */
+        .breadcrumb-custom {
+            border: 1px solid #dee2e6;
+            padding: 8px 15px;
+            background-color: #fff;
+            color: #333;
+            font-size: 0.9rem;
+        }
+
+        .title-bar {
+            background-color: #d10000;
+            color: #fff;
+            padding: 8px 15px;
+            font-weight: bold;
+        }
+
+        .sub-links a {
+            color: #d10000;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+
+        .sub-links a:hover {
+            text-decoration: underline;
+        }
+
+        /* Table Styling */
+        .table-xs {
+            background-color: #fff;
+            margin-bottom: 0;
+        }
+
+        .table-xs td {
+            vertical-align: middle;
+            border-color: #dee2e6;
+        }
+
+        .prize-col {
+            width: 12%;
+            background-color: #f8f9fa;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .number-col {
+            font-weight: bold;
+            text-align: center;
+            font-size: 1.3rem;
+        }
+
+        .text-prize-special {
+            color: #ff0000;
+            font-size: 1.8rem;
+        }
+
+        .text-prize-7 {
+            color: #ff0000;
+            font-size: 1.4rem;
+        }
+
+        .code-col {
+            color: #0000ff;
+            font-size: 1.1rem;
+        }
+
+        /* Sidebar Styling */
+        .sidebar-box {
+            border: 1px solid #dee2e6;
+            background-color: #fff;
+            margin-bottom: 20px;
+        }
+
+        .sidebar-header {
+            background-color: #f1f1f1;
+            padding: 8px;
+            font-weight: bold;
+            color: #a10000;
+            text-align: center;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .sidebar-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .sidebar-list li {
+            padding: 5px 15px;
+            font-size: 0.9rem;
+        }
+
+        .sidebar-list li::before {
+            content: "■";
+            color: #333;
+            font-size: 0.6rem;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        /* Mock Ad Styling */
+        .mock-ad {
+            border: 1px solid #dee2e6;
+            padding: 20px;
+            background-color: #fff;
+            text-align: center;
+        }
+
+        .ad-slot-300x250 {
+            width: 300px;
+            height: 250px;
+            flex: 0 0 300px;
+            margin: 0 auto;
+            overflow: hidden;
+            background: #071d49;
+            text-align: left;
+        }
+
+        .ad-slot-300x250 a {
+            display: block;
+            width: 100%;
+            height: 100%;
+            color: #fff;
+            text-decoration: none;
+        }
+
+        .ad-slot-300x250 .ad-creative {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            isolation: isolate;
+        }
+
+        .ad-slot-300x250 .ad-creative::after {
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            background: linear-gradient(180deg, rgba(4, 25, 70, 0.05) 18%, rgba(4, 25, 70, 0.92) 100%);
+            content: "";
+        }
+
+        .ad-slot-300x250 .ad-image {
+            position: absolute;
+            inset: 0;
+            z-index: -2;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .ad-slot-300x250 .ad-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 3px 7px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.92);
+            color: #071d49;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .ad-slot-300x250 .ad-copy {
+            position: absolute;
+            right: 16px;
+            bottom: 16px;
+            left: 16px;
+        }
+
+        .ad-slot-300x250 .ad-brand {
+            margin: 0 0 3px;
+            color: #9ed7ff;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .ad-slot-300x250 .ad-headline {
+            margin: 0;
+            font-size: 1.35rem;
+            font-weight: 800;
+            line-height: 1.05;
+        }
+
+        .ad-slot-300x250 .ad-description {
+            margin: 5px 0 10px;
+            color: #e5efff;
+            font-size: 0.78rem;
+            line-height: 1.25;
+        }
+
+        .ad-slot-300x250 .ad-cta {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: #f58220;
+            color: #fff;
+            font-size: 0.72rem;
+            font-weight: 700;
+        }
+
+        .c360-settings-launcher {
+            border-top: 1px solid #dee2e6;
+            background: #fff;
+            padding: 12px 0 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container bg-white pt-2 pb-2">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <div class="logo-text-top">Xổ Số</div>
+                <div class="logo-text-main"> Example </div>
+                <div class="logo-text-sub">Chính xác từng giây</div>
+            </div>
+            <div>
+                <a id="login-link" href="#login" class="text-dark text-decoration-none me-2" data-c360-action="login">
+                    <i class="bi bi-person"></i> Đăng nhập
+                </a>
+                <a id="signup-link" href="#signup" class="text-dark text-decoration-none" data-c360-action="signup">Đăng ký</a>
+            </div>
+        </div>
+    </div>
+
+    <nav class="navbar navbar-expand-lg navbar-custom p-0 mb-3">
+        <div class="container">
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-toggle="navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul id="navi_menu" class="navbar-nav w-100 justify-content-between">
+                    <li class="nav-item"><a class="nav-link" href="#home" data-menu="home">🏠</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#xsmb" data-menu="xsmb">XSMB</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#xsmn" data-menu="xsmn">XSMN</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#xsmt" data-menu="xsmt">XSMT</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#vietlott" data-menu="vietlott">Vietlott</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#tra-cuu" data-menu="lookup">Tra Cứu XS</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#tk-loto" data-menu="loto-statistics">TK Loto</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#loto" data-menu="loto">Loto</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#thong-ke" data-menu="statistics">Thống Kê Xổ Số</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div id="main-container" class="container">
+        <div class="row">
+            <div class="col-lg-8 mb-4">
+                <div class="breadcrumb-custom mb-3">
+                    <span id="main-breadcrumb">KQXSM - Xổ số kiến thiết hôm nay - Xo So</span>
+                </div>
+
+                <div class="border bg-white">
+                    <div class="title-bar" id="lottery-title">
+                    </div>
+
+                    <div class="sub-links p-2 border-bottom">
+                        <a href="#" id="region-link">XSMB</a> &raquo;
+                        <a href="#" id="weekday-link">XSMB Chủ Nhật</a> &raquo;
+                        <a href="#" id="lottery-date" class="text-decoration-underline"></a>
+                    </div>
+
+                    <table class="table table-bordered table-xs">
+                        <tbody>
+                            <tr>
+                                <td class="prize-col" id="label-code">Mã ĐB</td>
+                                <td class="number-col code-col" id="row-code">
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="prize-col" id="label-db">G.ĐB</td>
+                                <td class="number-col text-prize-special" id="row-db">
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="prize-col" id="label-1">G.1</td>
+                                <td class="number-col" id="row-1">
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="prize-col" id="label-2">G.2</td>
+                                <td class="number-col" id="row-2">
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="prize-col" id="label-3">G.3</td>
+                                <td class="number-col" id="row-3">
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="prize-col" id="label-4">G.4</td>
+                                <td class="number-col" id="row-4">
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="prize-col" id="label-5">G.5</td>
+                                <td class="number-col" id="row-5">
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="prize-col" id="label-6">G.6</td>
+                                <td class="number-col" id="row-6">
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="prize-col" id="label-7">G.7</td>
+                                <td class="number-col text-prize-7" id="row-7">
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="col-lg-4">
+
+                <div class="sidebar-box">
+                    <div class="sidebar-header">Thống Kê Loto</div>
+                    <ul class="sidebar-list">
+                        <li>TK tổng hợp</li>
+                        <li>TK loto gan</li>
+                        <li>TK cặp loto cùng về</li>
+                        <li>TK loto kép</li>
+                        <li>TK loto đầu</li>
+                        <li>TK loto đuôi</li>
+                        <li>TK giải đặc biệt</li>
+                        <li>TK lần xuất hiện</li>
+                        <li>TK 00 - 99</li>
+                        <li>TK chu kỳ</li>
+                    </ul>
+                </div>
+
+                <div class="sidebar-box">
+                    <div class="sidebar-header">Thống Kê Vietlott</div>
+                    <div class="p-2 fw-bold" style="font-size:0.9rem;">■ TK xổ số Mega 6/45</div>
+                    <ul class="sidebar-list" style="margin-left:15px; list-style-type: '- ';">
+                        <li style="color:#666;">- TK lần xuất hiện</li>
+                        <li style="color:#666;">- TK theo thứ</li>
+                    </ul>
+                    <div class="p-2 fw-bold" style="font-size:0.9rem;">■ TK xổ số Keno</div>
+                    <ul class="sidebar-list" style="margin-left:15px;">
+                        <li style="color:#666;">- TK Keno cơ bản</li>
+                        <li style="color:#666;">- TK Keno bổ sung</li>
+                    </ul>
+                </div>
+
+                <div class="mock-ad mb-4">
+                    <div id="ads-holder" class="ad-slot-300x250" aria-label="Quảng cáo">
+                        <script id="ad-template" type="text/x-handlebars-template">
+                            <a href="{{destination.url}}" target="_blank" rel="noopener noreferrer" data-ad-click>
+                                <div class="ad-creative">
+                                    <img class="ad-image" src="{{creative.imageUrl}}" alt="{{creative.imageAlt}}" width="300" height="250" loading="eager">
+                                    <span class="ad-label">Quảng cáo</span>
+                                    <div class="ad-copy">
+                                        <p class="ad-brand">{{advertiser.name}}</p>
+                                        <h2 class="ad-headline">{{creative.headline}}</h2>
+                                        <p class="ad-description">{{creative.subheadline}}</p>
+                                        <span class="ad-cta">{{creative.cta}} &rsaquo;</span>
+                                    </div>
+                                </div>
+                            </a>
+                        </script>
+                    </div>
+                </div>
+
+                <div class="sidebar-box">
+                    <div class="sidebar-header">Nhận thông báo kết quả</div>
+                    <form id="lottery-alert-form" class="p-3" data-c360-form="lottery-alert">
+                        <label for="alert-email" class="visually-hidden">Email</label>
+                        <input id="alert-email" name="email" type="email" class="form-control form-control-sm mb-2" placeholder="Email của bạn" required>
+                        <button type="submit" class="btn btn-danger btn-sm w-100">Đăng ký nhận tin</button>
+                        <small id="alert-form-status" class="d-block text-muted mt-2" aria-live="polite"></small>
+                    </form>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <div class="c360-settings-launcher">
+        <button id="c360-settings-open" type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#c360-settings-modal">
+            SDK settings
+        </button>
+    </div>
+
+    <div id="c360-settings-modal" class="modal fade" tabindex="-1" aria-labelledby="c360-settings-title" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="c360-settings-title" class="modal-title fs-6">C360 Web SDK settings</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form id="c360-settings-form">
+                    <div class="modal-body">
+                        <p class="small text-muted">Values are stored in this browser and applied after reload.</p>
+                        <div class="mb-3">
+                            <label for="c360-settings-data-source-id" class="form-label small fw-semibold">Data source ID</label>
+                            <input id="c360-settings-data-source-id" class="form-control form-control-sm font-monospace" type="text" autocomplete="off" required>
+                        </div>
+                        <div class="mb-2">
+                            <label for="c360-settings-log-domain" class="form-label small fw-semibold">Observer log domain</label>
+                            <input id="c360-settings-log-domain" class="form-control form-control-sm font-monospace" type="text" placeholder="c360.example.com" autocomplete="off" required>
+                        </div>
+                        <div id="c360-settings-error" class="d-none small text-danger mt-2" role="alert"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary btn-sm">Save and reload</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+
+        (function (window, $, Handlebars) {
+            "use strict";
+
+        // Leo Observer SDK: load the real Customer 360 Web SDK for this demo.
+        (function () {
+            var defaults = {
+                dataSourceId: "1a93ae2d-0961-4992-b27d-15a703a44038",
+                logDomain: "c360.example.com"
+            };
+            var storageKeys = {
+                dataSourceId: "c360.demo.leoC360DataSourceId",
+                logDomain: "c360.demo.leoObserverLogDomain"
+            };
+
+            function readStoredValue(key, fallback) {
+                try {
+                    var storedValue = window.localStorage.getItem(key);
+                    return storedValue && storedValue.trim() ? storedValue.trim() : fallback;
+                } catch (error) {
+                    console.warn("[C360 SDK] Unable to read localStorage", key, error);
+                    return fallback;
+                }
+            }
+
+            function normalizeLogDomain(value) {
+                return String(value || "")
+                    .trim()
+                    .replace(/^https?:\/\//i, "")
+                    .replace(/\/+$/, "");
+            }
+
+            var dataSourceId = readStoredValue(storageKeys.dataSourceId, defaults.dataSourceId);
+            var logDomain = normalizeLogDomain(readStoredValue(storageKeys.logDomain, defaults.logDomain));
+            if (!logDomain) logDomain = defaults.logDomain;
+
+            window.C360DemoSettings = {
+                defaults: defaults,
+                storageKeys: storageKeys,
+                dataSourceId: dataSourceId,
+                logDomain: logDomain
+            };
+            window.leoC360DataSourceId = dataSourceId;
+            window.leoTrackingBatchSize = 10;
+            window.leoObserverLogDomain = logDomain;
+
+            var c360TrackingBase = "https://" + window.leoObserverLogDomain;
+            window.leoTrackingEndpoint = c360TrackingBase + "/data/api/v1/tracking/logs";
+            window.leoCdpProxyPath = "/data/cdp-sdk/html/cdp-event-proxy.html";
+            window.srcTouchpointName = encodeURIComponent(document.title);
+            window.srcTouchpointUrl = encodeURIComponent(location.href);
+
+            var src = "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js".trim();
+            if (src === "" || !/^(https?:)?\/\//i.test(src)) {
+                src = c360TrackingBase + "/data/cdp-sdk/observer/leo.proxy.js";
+            }
+
+            console.log("[C360 SDK] Loading Leo Observer proxy", {
+                dataSourceId: window.leoC360DataSourceId,
+                trackingEndpoint: window.leoTrackingEndpoint,
+                proxyScript: src
+            });
+
+            var jsNode = document.createElement('script');
+            jsNode.async = true;
+            jsNode.defer = true;
+            jsNode.src = src;
+            jsNode.onload = function () {
+                console.log("[C360 SDK] Leo Observer proxy script loaded", src);
+            };
+            jsNode.onerror = function (error) {
+                console.error("[C360 SDK] Leo Observer proxy script failed to load", src, error);
+            };
+            var firstScript = document.getElementsByTagName('script')[0];
+            firstScript.parentNode.insertBefore(jsNode, firstScript);
+        })();
+
+        // Called by leo.proxy.js after the cross-domain visitor/session proxy is ready.
+        // Page views are sent by loadLotteryInformation(); do not send another
+        // page view here or the initial page load will be recorded twice.
+        window.leoObserverProxyReady = function (session) {
+            console.log("[C360 SDK] Leo Observer proxy ready", {
+                session: session || null,
+                visitorId: window.LeoObserverProxy && window.LeoObserverProxy.visitorId,
+                sessionKey: window.LeoObserverProxy && window.LeoObserverProxy.sessionKey
+            });
+            C360DemoSDK.flushPendingPageViews();
+        }
+
+        function invokeObserver(observer, methodName, args) {
+            if (!observer || typeof observer[methodName] !== 'function') return false;
+            observer[methodName].apply(observer, args);
+            return true;
+        }
+
+        const OBSERVER_EVENT_HANDLERS = {
+            page_view: function (observer, payload) {
+                return invokeObserver(observer, 'recordEventPageView', [payload]);
+            },
+            content_view: function (observer, payload) {
+                return invokeObserver(observer, 'recordEventContentView', [payload]);
+            },
+            ui_click: function (observer, payload) {
+                return invokeObserver(observer, 'recordEventClickDetails', [payload]);
+            },
+            form_submit: function (observer, payload) {
+                return invokeObserver(observer, 'recordEventSubmitContact', [payload]);
+            },
+            user_login: function (observer, payload) {
+                return invokeObserver(observer, 'recordEventUserLogin', [payload]);
+            },
+            sign_up: function (observer, payload) {
+                return invokeObserver(observer, 'recordEventRegisterAccount', [payload]);
+            },
+            purchase: function (observer, payload) {
+                return invokeObserver(observer, 'recordEventConversion', [
+                    payload.transaction_id || ('demo-' + Date.now()),
+                    payload.value || 0,
+                    payload.currency || 'VND',
+                    payload.items || [],
+                    payload
+                ]);
+            },
+            ad_impression: function (observer, payload) {
+                return invokeObserver(observer, 'recordEventContentView', [payload]);
+            },
+            ad_clicked: function (observer, payload) {
+                return invokeObserver(observer, 'recordEventClickDetails', [payload]);
+            }
+        };
+
+        /*
+         * C360 event facade used by the demo journey. These calls are real
+         * LeoObserver methods when the proxy has loaded; the CustomEvent
+         * remains available for local debugging and automated smoke tests.
+         */
+        const C360DemoSDK = window.C360DemoSDK = {
+            pendingPageViews: [],
+
+            send: function (eventName, eventData) {
+                const observer = window.LeoObserver;
+                const payload = Object.assign({
+                    event: eventName,
+                    page_url: window.location.href,
+                    occurred_at: new Date().toISOString()
+                }, eventData || {});
+                const handler = OBSERVER_EVENT_HANDLERS[eventName];
+                const sentToObserver = handler ? handler(observer, payload) : false;
+
+                console.log("[C360 SDK] Event", eventName, {
+                    sentToLeoObserver: sentToObserver,
+                    payload: payload
+                });
+                window.dispatchEvent(new CustomEvent('c360:sdk-event', { detail: payload }));
+                return payload;
+            },
+
+            trackPageView: function (pageData) {
+                const pageView = {
+                    page_name: pageData.pageName,
+                    menu_key: pageData.menuKey,
+                    title: pageData.title
+                };
+
+                if (!window.LeoObserver || typeof window.LeoObserver.recordEventPageView !== 'function') {
+                    this.pendingPageViews.push(pageView);
+                    console.warn("[C360 SDK] Queued page_view until Leo Observer is ready", pageView);
+                    return pageView;
+                }
+
+                return this.send('page_view', pageView);
+            },
+
+            flushPendingPageViews: function () {
+                if (!window.LeoObserver || typeof window.LeoObserver.recordEventPageView !== 'function') {
+                    console.warn("[C360 SDK] Cannot flush page_views; Leo Observer is unavailable");
+                    return;
+                }
+
+                while (this.pendingPageViews.length) {
+                    const pageView = this.pendingPageViews.shift();
+                    console.log("[C360 SDK] Sending queued page_view after proxy-ready callback");
+                    this.send('page_view', pageView);
+                }
+            },
+
+            identifyUser: function (user, method) {
+                const observer = window.LeoObserver;
+
+                // Replace this with the production identity/profile call when available.
+                if (observer && typeof observer.updateProfileBySession === 'function') {
+                    observer.updateProfileBySession(user);
+                }
+
+                return this.send(method === 'signup' ? 'sign_up' : 'user_login', {
+                    user_id: user.user_id,
+                    email: user.email,
+                    method: method
+                });
+            },
+
+            trackClick: function (target, details) {
+                return this.send('ui_click', Object.assign({ target: target }, details || {}));
+            },
+
+            trackFormSubmit: function (formId, fields) {
+                return this.send('form_submit', { form_id: formId, fields: fields });
+            },
+
+            trackConversion: function (conversion) {
+                return this.send('purchase', conversion);
+            }
+        };
+
+        const LOTTERY_MENU_CONFIG = {
+            home: {
+                pageName: 'Lottery home',
+                title: 'KQXSM - Xổ số kiến thiết hôm nay',
+                breadcrumb: 'KQXSM - Xổ số kiến thiết hôm nay - Xo So',
+                region: 'XSMB',
+                weekday: 'XSMB hôm nay'
+            },
+            xsmb: {
+                pageName: 'Northern lottery results',
+                title: 'KQXSMB - Xổ số miền Bắc',
+                breadcrumb: 'KQXSMB - Kết quả xổ số miền Bắc hôm nay',
+                region: 'XSMB',
+                weekday: 'XSMB hôm nay'
+            },
+            xsmn: {
+                pageName: 'Southern lottery results',
+                title: 'KQXSMN - Xổ số miền Nam',
+                breadcrumb: 'KQXSMN - Kết quả xổ số miền Nam hôm nay',
+                region: 'XSMN',
+                weekday: 'XSMN hôm nay'
+            },
+            xsmt: {
+                pageName: 'Central lottery results',
+                title: 'KQXSMT - Xổ số miền Trung',
+                breadcrumb: 'KQXSMT - Kết quả xổ số miền Trung hôm nay',
+                region: 'XSMT',
+                weekday: 'XSMT hôm nay'
+            },
+            vietlott: {
+                pageName: 'Vietlott results',
+                title: 'Vietlott - Kết quả xổ số tự chọn',
+                breadcrumb: 'Vietlott - Kết quả quay số mới nhất',
+                region: 'Vietlott',
+                weekday: 'Vietlott hôm nay',
+                labels: { code: 'Mã kỳ', DB: 'Jackpot', '1': 'G.1', '2': 'G.2', '3': 'G.3', '4': 'G.4', '5': 'G.5', '6': 'G.6', '7': 'G.7' }
+            },
+            lookup: {
+                pageName: 'Lottery lookup',
+                title: 'Tra cứu xổ số',
+                breadcrumb: 'Tra cứu xổ số theo khu vực và ngày quay',
+                region: 'Tra cứu',
+                weekday: 'Kết quả gần đây'
+            },
+            'loto-statistics': {
+                pageName: 'Loto statistics',
+                title: 'Thống kê loto',
+                breadcrumb: 'Thống kê loto - Dữ liệu minh họa theo ngày',
+                region: 'TK Loto',
+                weekday: 'Thống kê hôm nay'
+            },
+            loto: {
+                pageName: 'Loto numbers',
+                title: 'Loto - Bộ số tham khảo',
+                breadcrumb: 'Loto - Các bộ số tham khảo hôm nay',
+                region: 'Loto',
+                weekday: 'Bộ số mới'
+            },
+            statistics: {
+                pageName: 'Lottery statistics',
+                title: 'Thống kê xổ số',
+                breadcrumb: 'Thống kê xổ số - Tổng hợp dữ liệu minh họa',
+                region: 'Thống kê',
+                weekday: 'Báo cáo hôm nay'
+            }
+        };
+
+        const LOTTERY_PRIZE_LAYOUT = [
+            { key: 'DB', count: 1, digits: 5 },
+            { key: '1', count: 1, digits: 5 },
+            { key: '2', count: 2, digits: 5 },
+            { key: '3', count: 6, digits: 5 },
+            { key: '4', count: 4, digits: 4 },
+            { key: '5', count: 6, digits: 4 },
+            { key: '6', count: 3, digits: 3 },
+            { key: '7', count: 4, digits: 2 }
+        ];
+
+        function randomNumber(digits) {
+            let value = '';
+            for (let index = 0; index < digits; index += 1) {
+                value += Math.floor(Math.random() * 10);
+            }
+            return value;
+        }
+
+        function randomCode() {
+            const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+            return randomNumber(1) + letters[Math.floor(Math.random() * letters.length)] + letters[Math.floor(Math.random() * letters.length)];
+        }
+
+        function buildRandomLotteryJson(menuKey) {
+            const config = LOTTERY_MENU_CONFIG[menuKey] || LOTTERY_MENU_CONFIG.home;
+            const labels = Object.assign({
+                code: 'Mã ĐB', DB: 'G.ĐB', '1': 'G.1', '2': 'G.2', '3': 'G.3',
+                '4': 'G.4', '5': 'G.5', '6': 'G.6', '7': 'G.7'
+            }, config.labels || {});
+            const prizes = {};
+
+            LOTTERY_PRIZE_LAYOUT.forEach(function (layout) {
+                prizes[layout.key] = Array.from({ length: layout.count }, function () {
+                    return randomNumber(layout.digits);
+                });
+            });
+
+            return {
+                menuKey: menuKey,
+                pageName: config.pageName,
+                title: config.title,
+                breadcrumb: config.breadcrumb,
+                region: config.region,
+                weekday: config.weekday,
+                date: new Intl.DateTimeFormat('vi-VN', { dateStyle: 'long' }).format(new Date()),
+                labels: labels,
+                codes: Array.from({ length: 6 }, randomCode),
+                prizes: prizes,
+                generatedAt: new Date().toISOString()
+            };
+        }
+
+        function renderLotteryRow(numbers, columns) {
+            let html = '';
+            for (let index = 0; index < numbers.length; index += columns) {
+                html += '<div class="d-flex justify-content-around">';
+                numbers.slice(index, index + columns).forEach(function (number) {
+                    html += '<span>' + number + '</span>';
+                });
+                html += '</div>';
+            }
+            return html;
+        }
+
+        function applyLotteryJson(lotteryData, shouldTrackPageView) {
+            $('#main-container').attr('data-active-menu', lotteryData.menuKey);
+            $('#navi_menu .nav-link').removeClass('active');
+            $('#navi_menu .nav-link[data-menu="' + lotteryData.menuKey + '"]').addClass('active');
+            $('#main-breadcrumb').text(lotteryData.breadcrumb);
+            $('#lottery-title').text(lotteryData.title);
+            $('#lottery-date').text(lotteryData.region + ' - ' + lotteryData.date);
+            $('#region-link').text(lotteryData.region);
+            $('#weekday-link').text(lotteryData.weekday);
+            $('#label-code').text(lotteryData.labels.code);
+            $('#row-code').html(renderLotteryRow(lotteryData.codes, lotteryData.codes.length));
+
+            Object.keys(lotteryData.prizes).forEach(function (prizeKey) {
+                $('#label-' + prizeKey).text(lotteryData.labels[prizeKey]);
+                $('#row-' + (prizeKey === 'DB' ? 'db' : prizeKey)).html(
+                    renderLotteryRow(lotteryData.prizes[prizeKey], lotteryData.prizes[prizeKey].length > 4 ? 3 : lotteryData.prizes[prizeKey].length)
+                );
+            });
+
+            if (shouldTrackPageView) {
+                C360DemoSDK.trackPageView(lotteryData);
+            } else {
+                console.log("[C360 SDK] Hash navigation rendered without page_view", {
+                    menuKey: lotteryData.menuKey,
+                    hash: '#' + lotteryData.menuKey
+                });
+            }
+            return lotteryData;
+        }
+
+        function loadLotteryInformation(menuKey, options) {
+            // Every navigation creates a fresh JSON payload so the demo feels like a live data source.
+            const lotteryData = buildRandomLotteryJson(menuKey || 'home');
+            return applyLotteryJson(lotteryData, options && options.trackPageView === true);
+        }
+
+        function loadAdvertisingBanner() {
+            // load ads information goes here
+            const adData = {
+                adId: "fpt-home-internet-300x250-01",
+                adFormat: "single_banner",
+                placement: {
+                    id: "lottery-sidebar-300x250",
+                    width: 300,
+                    height: 250,
+                    unit: "px"
+                },
+                advertiser: {
+                    id: "fpt-telecom",
+                    name: "FPT Telecom"
+                },
+                campaign: {
+                    id: "fpt-home-internet-2026",
+                    name: "Home Internet 2026"
+                },
+                creative: {
+                    id: "fpt-home-internet-fiber-01",
+                    headline: "Mạng khỏe, nhà vui",
+                    subheadline: "Internet FPT tốc độ cao cho cả gia đình.",
+                    cta: "Xem ưu đãi",
+                    imageUrl: "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=600&q=85",
+                    imageAlt: "Hệ thống máy chủ và mạng tốc độ cao"
+                },
+                destination: {
+                    type: "url",
+                    url: "https://fpt.vn"
+                },
+                tracking: {
+                    impressionEvent: "ad_impression",
+                    clickEvent: "ad_clicked"
+                }
+            };
+
+            const adTemplate = Handlebars.compile($('#ad-template').html());
+            const adHolder = document.getElementById('ads-holder');
+            const adMarkup = adTemplate(adData);
+            adHolder.innerHTML = adMarkup;
+
+            function trackAdEvent(eventType, extraData) {
+                const eventData = Object.assign({
+                    event: eventType,
+                    ad_id: adData.adId,
+                    campaign_id: adData.campaign.id,
+                    creative_id: adData.creative.id,
+                    placement_id: adData.placement.id,
+                    destination_url: adData.destination.url,
+                    occurred_at: new Date().toISOString()
+                }, extraData || {});
+
+                C360DemoSDK.send(eventType, eventData);
+                if (eventType.indexOf('ad_') === 0) {
+                    window.dispatchEvent(new CustomEvent('c360:ad-event', { detail: eventData }));
+                }
+            }
+
+            let impressionTracked = false;
+            let impressionTimer;
+
+            function trackImpression() {
+                if (impressionTracked) return;
+                impressionTracked = true;
+                trackAdEvent(adData.tracking.impressionEvent);
+            }
+
+            if ('IntersectionObserver' in window) {
+                const impressionObserver = new IntersectionObserver(function (entries) {
+                    const entry = entries[0];
+                    if (entry.isIntersecting) {
+                        impressionTimer = window.setTimeout(function () {
+                            trackImpression();
+                            impressionObserver.disconnect();
+                        }, 1000);
+                    } else if (impressionTimer) {
+                        window.clearTimeout(impressionTimer);
+                        impressionTimer = undefined;
+                    }
+                }, { threshold: 0.5 });
+                impressionObserver.observe(adHolder);
+            } else {
+                trackImpression();
+            }
+
+            adHolder.addEventListener('click', function (event) {
+                const link = event.target.closest('[data-ad-click]');
+                if (!link) return;
+                trackAdEvent(adData.tracking.clickEvent, { link_text: adData.creative.cta });
+            });
+        }
+
+        function normalizeLogDomainInput(value) {
+            return String(value || '')
+                .trim()
+                .replace(/^https?:\/\//i, '')
+                .replace(/\/+$/, '');
+        }
+
+        function initSettings() {
+            $('#c360-settings-data-source-id').val(window.C360DemoSettings.dataSourceId);
+            $('#c360-settings-log-domain').val(window.C360DemoSettings.logDomain);
+
+            $('#c360-settings-form').on('submit', function (event) {
+                event.preventDefault();
+                const dataSourceId = $('#c360-settings-data-source-id').val().trim();
+                const logDomain = normalizeLogDomainInput($('#c360-settings-log-domain').val());
+                const $error = $('#c360-settings-error');
+
+                $error.addClass('d-none').text('');
+                if (!dataSourceId || !logDomain) {
+                    $error.removeClass('d-none').text('Both settings are required.');
+                    return;
+                }
+
+                try {
+                    const storageKeys = window.C360DemoSettings.storageKeys;
+                    window.localStorage.setItem(storageKeys.dataSourceId, dataSourceId);
+                    window.localStorage.setItem(storageKeys.logDomain, logDomain);
+                    console.log('[C360 SDK] Settings saved; reloading with new configuration', {
+                        dataSourceId: dataSourceId,
+                        logDomain: logDomain
+                    });
+                    window.location.reload();
+                } catch (error) {
+                    console.error('[C360 SDK] Unable to save localStorage settings', error);
+                    $error.removeClass('d-none').text('Could not save settings in this browser.');
+                }
+            });
+        }
+
+        function initNavigation() {
+            $('#navi_menu').on('click', 'a[data-menu]', function (event) {
+                event.preventDefault();
+                const $menuLink = $(this);
+                const menuKey = $menuLink.data('menu');
+
+                C360DemoSDK.trackClick('navigation', {
+                    menu_key: menuKey,
+                    label: $menuLink.text().trim(),
+                    navigation_type: 'hash-change',
+                    hash: '#' + menuKey
+                });
+                loadLotteryInformation(menuKey, { trackPageView: false });
+                window.history.replaceState({}, '', '#' + menuKey);
+            });
+        }
+
+        function initAccountActions() {
+            $(document).on('click', '[data-c360-action]', function (event) {
+                event.preventDefault();
+                const action = $(this).data('c360-action');
+                C360DemoSDK.identifyUser({
+                    user_id: 'demo-user-001',
+                    email: action === 'signup' ? 'new-user@example.com' : 'returning-user@example.com'
+                }, action);
+            });
+        }
+
+        function initLotteryAlertForm() {
+            $('#lottery-alert-form').on('submit', function (event) {
+                event.preventDefault();
+                const email = $('#alert-email').val().trim();
+                C360DemoSDK.trackFormSubmit('lottery-alert', { email: email });
+                C360DemoSDK.identifyUser({ user_id: 'demo-subscriber', email: email }, 'signup');
+                C360DemoSDK.trackConversion({
+                    transaction_id: 'demo-subscription-' + Date.now(),
+                    value: 0,
+                    currency: 'VND',
+                    items: [{ item_id: 'lottery-alert-subscription', quantity: 1 }],
+                    conversion_type: 'newsletter_signup'
+                });
+                $('#alert-form-status').text('Đã đăng ký thành công (demo).');
+                this.reset();
+            });
+        }
+
+        function initProductTracking() {
+            $(document).on('click', '[data-product-id]', function () {
+                C360DemoSDK.trackConversion({
+                    transaction_id: 'demo-product-' + Date.now(),
+                    value: Number($(this).data('price')) || 0,
+                    currency: 'VND',
+                    items: [{ item_id: $(this).data('product-id'), quantity: 1 }],
+                    conversion_type: 'product_click'
+                });
+            });
+        }
+
+        function initPage() {
+            initSettings();
+            initNavigation();
+            initAccountActions();
+            initLotteryAlertForm();
+            initProductTracking();
+            loadAdvertisingBanner();
+            loadLotteryInformation('home', { trackPageView: true });
+        }
+
+        $(initPage);
+
+        })(window, window.jQuery, window.Handlebars);
+    </script>
+</body>
+
+</html>

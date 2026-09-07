@@ -59,6 +59,7 @@ window.C360 = window.C360 || {};
       cell.linkValue = col.valueField ? vm[col.valueField] : cell.value;
     } else {
       cell.value = col.field ? vm[col.field] : "";
+      cell.title = col.titleField ? vm[col.titleField] : "";
       if (col.type === "badge") cell.badgeClass = (col.classField ? vm[col.classField] : null) || col.badgeClass || "";
     }
     return cell;

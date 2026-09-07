@@ -55,7 +55,8 @@ window.C360 = window.C360 || {};
       typeBadgeClass: typeBadgeClass(m.model_type),
       statusLabel: fmt.titleCase(m.status),
       statusBadgeClass: statusBadgeClass(m.status),
-      scheduleLabel: m.schedule_definition || "\u2014",
+      scheduleLabel: formatCronSchedule(m.schedule_definition),
+      scheduleTitle: m.schedule_definition ? "Cron: " + m.schedule_definition : "",
       featureCountLabel: featureCountLabel(m.input_features),
       updatedLabel: fmt.dateTime(m.updated_at)
     });
@@ -69,7 +70,7 @@ window.C360 = window.C360 || {};
       },
       { label: "Type", type: "badge", field: "typeLabel", classField: "typeBadgeClass" },
       { label: "Status", type: "badge", field: "statusLabel", classField: "statusBadgeClass" },
-      { label: "Schedule", field: "scheduleLabel" },
+      { label: "Schedule", field: "scheduleLabel", titleField: "scheduleTitle" },
       { label: "Features", field: "featureCountLabel" },
       { label: "Updated", field: "updatedLabel" }
     ],
@@ -107,6 +108,13 @@ window.C360 = window.C360 || {};
 
   function load() { return dtv.load(false); }
 
+  function updateScheduleExplanation() {
+    var raw = $.trim($("#scoring-model-add-schedule").val());
+    $("#scoring-model-add-schedule-explanation")
+      .text(raw ? "Runs: " + formatCronSchedule(raw) : "")
+      .toggleClass("hidden", !raw);
+  }
+
   function parseCsvList(value) {
     return String(value || "")
       .split(",")
@@ -131,6 +139,7 @@ window.C360 = window.C360 || {};
     $("#scoring-model-add-type").val("classification");
     $("#scoring-model-add-status").val("ACTIVE");
     $("#scoring-model-add-schedule").val("");
+    updateScheduleExplanation();
     $("#scoring-model-add-features").val("");
     $("#scoring-model-add-hyperparameters").val("");
     $("#scoring-model-form-modal").removeClass("hidden");
@@ -153,6 +162,7 @@ window.C360 = window.C360 || {};
     $("#scoring-model-add-type").val(m.model_type);
     $("#scoring-model-add-status").val(m.status);
     $("#scoring-model-add-schedule").val(m.schedule_definition || "");
+    updateScheduleExplanation();
     $("#scoring-model-add-features").val((m.input_features || []).join(", "));
     $("#scoring-model-add-hyperparameters").val(m.hyperparameters && Object.keys(m.hyperparameters).length ? JSON.stringify(m.hyperparameters, null, 2) : "");
     $("#scoring-model-form-modal").removeClass("hidden");
@@ -241,6 +251,7 @@ window.C360 = window.C360 || {};
     $(document).on("click", "#btn-scoring-model-add-cancel", closeScoringModelModal);
     $(document).on("click", "#btn-scoring-model-add-save", submitScoringModelForm);
     $(document).on("click", "#btn-scoring-model-delete", deleteScoringModel);
+    $(document).on("input", "#scoring-model-add-schedule", updateScheduleExplanation);
     $(document).on("click", "#scoring-model-form-modal", function (e) {
       if (e.target === this) closeScoringModelModal();
     });

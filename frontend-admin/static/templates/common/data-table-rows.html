@@ -43,7 +43,7 @@
     {{/if}}
     {{else}}
     {{#if value}}
-      <span class="text-sm text-slate-700 font-medium">{{value}}</span>
+      <span class="text-sm text-slate-700 font-medium"{{#if title}} title="{{title}}"{{/if}}>{{value}}</span>
     {{else}}
       <span class="text-slate-300 font-mono text-xs">—</span>
     {{/if}}
