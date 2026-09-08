@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# Install OpenTelemetry auto-instrumentation for the detected packages (FastAPI, psycopg, …)
+# so `opentelemetry-instrument` (see CMD) traces requests with zero code changes.
+RUN opentelemetry-bootstrap -a install
 
 # Pre-bake the default embed + rerank models into the image so the FIRST boot doesn't
 # download them at runtime — unauthenticated Hugging Face is ~10 min on the box, which
@@ -26,4 +29,7 @@ ENV CORPUS_DIR=/app/corpus \
 
 EXPOSE 8000
 # Serve only — the index is built by the deploy step (docker compose run ... enrich).
-CMD ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000"]
+# opentelemetry-instrument wraps uvicorn for zero-code request tracing; it is a near-no-op when
+# OTEL_SDK_DISABLED=true (the UAT default). enrich overrides CMD (`python -m src.enrich`), so
+# only the long-lived server process is traced, not the batch index build.
+CMD ["opentelemetry-instrument", "uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000"]

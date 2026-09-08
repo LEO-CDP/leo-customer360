@@ -86,6 +86,10 @@ STATIC_BASE = f"{FRONTEND_ROOT_PATH}/static"
 DOCS_SEARCH_URL = os.getenv("DOCS_SEARCH_URL", "http://127.0.0.1:8000").rstrip("/")
 DOCS_SEARCH_TIMEOUT = float(os.getenv("DOCS_SEARCH_TIMEOUT", "60"))  # /ask is slow on 1 vCPU
 DOCS_MAX_QUESTION_LEN = int(os.getenv("DOCS_MAX_QUESTION_LEN", "2000"))
+# Shared secret sent as X-Internal-Auth so the docs service recognises this proxy as an
+# internal caller and exempts it from the public per-IP rate limit. Must match the docs
+# service's INTERNAL_API_SECRET; when unset, admin traffic is rate-limited like any client.
+DOCS_INTERNAL_SECRET = os.getenv("DOCS_INTERNAL_SECRET", "")
 # Where the widget links its citations (source docs live on the public docs site).
 DOCS_SITE_BASE = os.getenv("DOCS_SITE_BASE", "https://leo-cdp.github.io/leo-customer360").rstrip("/")
 # The base path the browser uses to reach the proxy. Kept under the reverse-proxy
@@ -195,9 +199,12 @@ async def health():
 # stays private. Registered under both /ai and FRONTEND_ROOT_PATH/ai (see below) so
 # they resolve standalone and behind the Caddy catch-all.
 async def _docs_request(method: str, path: str, payload: dict | None = None):
+    headers = {"X-Internal-Auth": DOCS_INTERNAL_SECRET} if DOCS_INTERNAL_SECRET else None
     try:
         async with httpx.AsyncClient(timeout=DOCS_SEARCH_TIMEOUT) as client:
-            resp = await client.request(method, f"{DOCS_SEARCH_URL}{path}", json=payload)
+            resp = await client.request(
+                method, f"{DOCS_SEARCH_URL}{path}", json=payload, headers=headers
+            )
             resp.raise_for_status()
             return resp.json()
     except httpx.HTTPStatusError as err:

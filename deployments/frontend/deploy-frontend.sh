@@ -109,6 +109,12 @@ fi
 DOCS_LINES="DOCS_SITE_BASE=$DOCS_SITE_BASE"
 [[ -n "$DOCS_SEARCH_URL" ]] && DOCS_LINES="DOCS_SEARCH_URL=$DOCS_SEARCH_URL
 $DOCS_LINES"
+# Shared secret the /ai proxy sends as X-Internal-Auth so the docs service exempts it from the
+# public rate limit. Must equal the docs deploy's DOCS_INTERNAL_SECRET; empty (default) => the
+# proxy is rate-limited like any client (fail-closed). Emit only when set.
+DOCS_INTERNAL_SECRET="${DOCS_INTERNAL_SECRET:-}"
+[[ -n "$DOCS_INTERNAL_SECRET" ]] && DOCS_LINES="DOCS_INTERNAL_SECRET=$DOCS_INTERNAL_SECRET
+$DOCS_LINES"
 
 # Build the env file locally and ship it base64-encoded as ONE arg (avoids the
 # ssh arg-flattening trap where an empty/space value corrupts positional args).

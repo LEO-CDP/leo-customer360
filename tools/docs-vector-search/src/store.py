@@ -66,7 +66,14 @@ def upsert(conn, rows: list[tuple]) -> None:
 
 
 def prune(conn, keep_ids: list[str]) -> int:
-    """Delete chunks whose id is no longer present in the corpus."""
+    """Delete chunks whose id is no longer present in the corpus.
+
+    Refuses to run on an empty keep-set: `WHERE NOT (id = ANY('{}'))` matches every row,
+    so an empty/mis-mounted corpus would silently wipe the whole index. Callers must guard
+    the empty case explicitly (see enrich.build); this is the last-line safety net.
+    """
+    if not keep_ids:
+        return 0
     with conn.cursor() as cur:
         cur.execute(f"DELETE FROM {PG_SCHEMA}.doc_chunks WHERE NOT (id = ANY(%s))", (keep_ids,))
         return cur.rowcount

@@ -102,6 +102,7 @@ extra_ingress = [
   { port = 8000, cidr = "10.100.1.5/32" }, # docs-vector-search <- api box (frontend-admin /ai proxy). Only the docs box listens on 8000.
   { port = 6580, cidr = "10.100.1.8/32" }, # api-box Redis      <- tracking box (rate-limit + session cache)
   { port = 4318, cidr = "10.100.1.8/32" }, # api-box Jaeger OTLP <- tracking box (request traces)
+  { port = 4318, cidr = "10.100.1.7/32" }, # api-box Jaeger OTLP <- docs box (docs-vector-search request traces)
 ]
 
 # LOGIN via cloud-init user_data. The VNG Ubuntu 24.04 image's ssh-keygen.service FAILS at

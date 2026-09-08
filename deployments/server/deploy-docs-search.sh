@@ -38,6 +38,15 @@ DOCS_CORS_ORIGINS="${DOCS_CORS_ORIGINS:-https://leo-cdp.github.io}"
 # Per-IP /ask rate limit for public callers (via Caddy/XFF). Tune per env; 0 disables.
 DOCS_ASK_RATE_MAX="${DOCS_ASK_RATE_MAX:-10}"
 DOCS_ASK_RATE_WINDOW_SEC="${DOCS_ASK_RATE_WINDOW_SEC:-60}"
+# Shared secret that lets the docs service treat the frontend-admin /ai proxy as an internal
+# caller (exempt from the public rate limit). EMPTY (default) => nobody is exempt (fail-closed):
+# admin AI traffic is rate-limited like any client. Set the SAME value as the frontend deploy's
+# DOCS_INTERNAL_SECRET — export it once before deploying, put it in both
+# deployments/{server,frontend}/.env, or provide one CI secret to both jobs.
+DOCS_INTERNAL_SECRET="${DOCS_INTERNAL_SECRET:-}"
+[[ -z "$DOCS_INTERNAL_SECRET" ]] && echo "::warning::docs-search: DOCS_INTERNAL_SECRET unset — the frontend-admin /ai proxy will be rate-limited like a public client; set it (same value on both deploys) to exempt the admin console."
+# Trusted reverse-proxy hops that append X-Forwarded-For (Caddy/LB in front = 1).
+DOCS_TRUSTED_PROXY_HOPS="${DOCS_TRUSTED_PROXY_HOPS:-1}"
 DOCS_GGUF_URL="${DOCS_GGUF_URL:-https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 GGUF_NAME="Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
 
@@ -109,6 +118,14 @@ echo ">> Shipping docs/ corpus ..."
 tar -C "$REPO_ROOT" -czf - docs \
   | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360/docs-vector-search && sudo chown "$(id -un)" /opt/c360/docs-vector-search && rm -rf /opt/c360/docs-vector-search/corpus && tar -C /opt/c360/docs-vector-search -xzf - && mv /opt/c360/docs-vector-search/docs /opt/c360/docs-vector-search/corpus'
 
+# OpenTelemetry (OTLP -> Jaeger) zero-code tracing lines. The docs box is dedicated (Jaeger is
+# NOT co-located on it), so point OTLP at the monitoring/api box's private fixed IP. UAT defaults
+# to disabled per policy in lib/otel.sh — deploy with OTEL_ENABLED=true to profile on demand.
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/otel.sh"
+MON_SERVER_KEY="${MON_SERVER_KEY:-api}"
+JAEGER_HOST="$(srv_ip "$MON_SERVER_KEY" fixed_ip)"; JAEGER_HOST="${JAEGER_HOST:-127.0.0.1}"
+OTEL_LINES="$(otel_env_lines "$SERVICE" "$ENV" "$JAEGER_HOST")"
+
 # env file built locally, shipped base64 (dodges ssh arg-flattening).
 ENVB64="$(printf '%s' "PG_HOST=$DB_HOST
 PG_PORT=$DB_PORT
@@ -125,7 +142,10 @@ RERANK_MODEL=$DOCS_RERANK_MODEL
 CORS_ORIGINS=$DOCS_CORS_ORIGINS
 ASK_RATE_MAX=$DOCS_ASK_RATE_MAX
 ASK_RATE_WINDOW_SEC=$DOCS_ASK_RATE_WINDOW_SEC
-QWEN_MODEL_PATH=/app/models/$GGUF_NAME" | base64 | tr -d '\n')"
+INTERNAL_API_SECRET=$DOCS_INTERNAL_SECRET
+TRUSTED_PROXY_HOPS=$DOCS_TRUSTED_PROXY_HOPS
+QWEN_MODEL_PATH=/app/models/$GGUF_NAME
+$OTEL_LINES" | base64 | tr -d '\n')"
 
 echo ">> Fetching the model, refreshing the index (enrich), and (re)starting the container ..."
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' \

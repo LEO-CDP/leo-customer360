@@ -64,15 +64,36 @@ CORS_ORIGINS = [
     for o in os.getenv("CORS_ORIGINS", "https://leo-cdp.github.io").split(",")
     if o.strip()
 ]
-# Serialize expensive generation so concurrent /ask calls queue instead of thrashing
-# (and OOM-ing) the 1 vCPU box. Retrieval (/search) is unaffected.
+# Serialize expensive generation so concurrent /ask + /search calls queue instead of
+# thrashing (and OOM-ing) the 1 vCPU box.
 ASK_MAX_CONCURRENCY = int(os.getenv("ASK_MAX_CONCURRENCY", "1"))
-# Per-IP rate limit for /ask (the expensive, public-facing endpoint). Applied ONLY to
-# requests that arrive with X-Forwarded-For (i.e. via Caddy from the public internet);
-# the internal frontend-admin proxy sends no XFF and is exempt, so admin users aren't
-# throttled as one. 0 disables. Client IP is the rightmost XFF entry (the one Caddy set).
+# Per-IP sliding-window rate limit for the CPU-heavy endpoints (/ask and /search).
+# Applied to every caller EXCEPT a trusted internal one that presents INTERNAL_API_SECRET
+# (see below). 0 disables. The client IP is derived from a trusted X-Forwarded-For hop
+# (TRUSTED_PROXY_HOPS); when forwarding info is missing/ambiguous the direct peer is used
+# and the request is still limited (fail closed) — absence of a header never exempts.
 ASK_RATE_MAX = int(os.getenv("ASK_RATE_MAX", "10"))
 ASK_RATE_WINDOW_SEC = int(os.getenv("ASK_RATE_WINDOW_SEC", "60"))
+# Number of trusted reverse-proxy hops that append to X-Forwarded-For (Caddy = 1). The
+# real client is the Nth entry from the right. A chain shorter than this is treated as
+# not-via-the-proxy and falls back to the direct peer (fail closed).
+TRUSTED_PROXY_HOPS = max(1, int(os.getenv("TRUSTED_PROXY_HOPS", "1")))
+# Shared secret that identifies a trusted internal caller (the frontend-admin proxy),
+# presented as the X-Internal-Auth header. EMPTY (default) => no caller is ever exempt,
+# so admin traffic is rate-limited too. Set the SAME value here and as the proxy's
+# DOCS_INTERNAL_SECRET to exempt the admin console from the public rate limit.
+INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
+# Worker/process count (uvicorn/gunicorn WEB_CONCURRENCY convention). The rate limiter and
+# concurrency gate are per-process in-memory, so per-worker budgets are divided by this to
+# keep the aggregate near ASK_RATE_MAX / ASK_MAX_CONCURRENCY. For an exact shared limit
+# across workers, run a single worker or back the limiter with a shared store (Redis).
+WEB_CONCURRENCY = max(1, int(os.getenv("WEB_CONCURRENCY", "1")))
+
+# Request-parameter caps (defence against CPU amplification via huge/negative values).
+TOP_N_MAX = int(os.getenv("TOP_N_MAX", "50"))
+TOP_K_MAX = int(os.getenv("TOP_K_MAX", "20"))
+# Max accepted question/query length (chars). Mirrors the frontend-admin proxy's cap.
+QUESTION_MAX_LEN = int(os.getenv("QUESTION_MAX_LEN", "2000"))
 
 # Vector store — pgvector on the VNGCloud vDB (PostgreSQL 15)
 PG_HOST = os.getenv("PG_HOST", "localhost")
