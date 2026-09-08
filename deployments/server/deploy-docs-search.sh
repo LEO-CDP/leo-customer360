@@ -38,6 +38,15 @@ DOCS_CORS_ORIGINS="${DOCS_CORS_ORIGINS:-https://leo-cdp.github.io}"
 # Per-IP /ask rate limit for public callers (via Caddy/XFF). Tune per env; 0 disables.
 DOCS_ASK_RATE_MAX="${DOCS_ASK_RATE_MAX:-10}"
 DOCS_ASK_RATE_WINDOW_SEC="${DOCS_ASK_RATE_WINDOW_SEC:-60}"
+# Shared secret that lets the docs service treat the frontend-admin /ai proxy as an internal
+# caller (exempt from the public rate limit). EMPTY (default) => nobody is exempt (fail-closed):
+# admin AI traffic is rate-limited like any client. Set the SAME value as the frontend deploy's
+# DOCS_INTERNAL_SECRET — export it once before deploying, put it in both
+# deployments/{server,frontend}/.env, or provide one CI secret to both jobs.
+DOCS_INTERNAL_SECRET="${DOCS_INTERNAL_SECRET:-}"
+[[ -z "$DOCS_INTERNAL_SECRET" ]] && echo "::warning::docs-search: DOCS_INTERNAL_SECRET unset — the frontend-admin /ai proxy will be rate-limited like a public client; set it (same value on both deploys) to exempt the admin console."
+# Trusted reverse-proxy hops that append X-Forwarded-For (Caddy/LB in front = 1).
+DOCS_TRUSTED_PROXY_HOPS="${DOCS_TRUSTED_PROXY_HOPS:-1}"
 DOCS_GGUF_URL="${DOCS_GGUF_URL:-https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 GGUF_NAME="Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
 
@@ -125,6 +134,8 @@ RERANK_MODEL=$DOCS_RERANK_MODEL
 CORS_ORIGINS=$DOCS_CORS_ORIGINS
 ASK_RATE_MAX=$DOCS_ASK_RATE_MAX
 ASK_RATE_WINDOW_SEC=$DOCS_ASK_RATE_WINDOW_SEC
+INTERNAL_API_SECRET=$DOCS_INTERNAL_SECRET
+TRUSTED_PROXY_HOPS=$DOCS_TRUSTED_PROXY_HOPS
 QWEN_MODEL_PATH=/app/models/$GGUF_NAME" | base64 | tr -d '\n')"
 
 echo ">> Fetching the model, refreshing the index (enrich), and (re)starting the container ..."
