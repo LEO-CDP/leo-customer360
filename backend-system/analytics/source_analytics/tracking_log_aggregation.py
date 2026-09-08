@@ -30,7 +30,9 @@ REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6580"))
 REDIS_DB = int(os.environ.get("REDIS_DB", "0"))
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
-S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL")
+# Host-run local Dagster uses the published MinIO port, while containerized
+# deployments can continue to use the shared S3_ENDPOINT_URL directly.
+S3_ENDPOINT_URL = os.environ.get("ANALYTICS_S3_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT_URL")
 S3_REGION = os.environ.get("S3_REGION", "us-east-1")
 S3_ACCESS_KEY_ID = os.environ.get("S3_ACCESS_KEY_ID")
 S3_SECRET_ACCESS_KEY = os.environ.get("S3_SECRET_ACCESS_KEY")

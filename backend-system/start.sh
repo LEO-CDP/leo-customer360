@@ -99,6 +99,11 @@ else
     log "${YELLOW}Warning: ${ENV_FILE} not found. Using default environment variables.${NC}"
 fi
 
+# Local host-run Dagster must reach the Docker-published MinIO API directly.
+# Keep S3_ENDPOINT_URL available for public/remote clients; analytics opts into
+# this local endpoint through its dedicated override.
+export ANALYTICS_S3_ENDPOINT_URL="${ANALYTICS_S3_ENDPOINT_URL:-http://localhost:9000}"
+
 ###############################################################################
 # DAGSTER_HOME must be an ABSOLUTE path (Dagster requirement). Default to a
 # persistent, gitignored directory under this service so run history

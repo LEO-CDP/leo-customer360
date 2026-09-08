@@ -4,6 +4,7 @@
 
 ```
 127.0.0.1 c360.example.com
+127.0.0.1 s3dev.example.com
 ```
 
 The applications must be configured for the public prefixes before starting
@@ -15,7 +16,7 @@ the services:
 - `frontend-admin`: `FRONTEND_ROOT_PATH=` and `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`
 - `data-tracking-api`: no root path; nginx strips `/data`
 - Dagster: start the UI with `--path-prefix /dagster`
-- MinIO console: `MINIO_BROWSER_REDIRECT_URL=https://c360.example.com/minio`
+- MinIO console: `MINIO_BROWSER_REDIRECT_URL=https://s3dev.example.com/minio/`
 
 With this configuration, the public endpoints are:
 
@@ -27,8 +28,21 @@ With this configuration, the public endpoints are:
 | ads-server and docs | `https://c360.example.com/ads` and `/ads/docs` | `127.0.0.1:9009` |
 | data-tracking-api | POST `https://c360.example.com/data/api/v1/tracking/logs`; health `https://c360.example.com/data/health` | `127.0.0.1:8010` |
 | Dagster UI | `https://c360.example.com/dagster` | `127.0.0.1:3000` |
-| MinIO S3 API | `https://c360.example.com/s3` | `127.0.0.1:9000` |
-| MinIO console | `https://c360.example.com/minio` | `127.0.0.1:9001` |
+| MinIO S3 API | `https://s3dev.example.com` | `127.0.0.1:9000` |
+| MinIO console | `https://s3dev.example.com/minio` | `127.0.0.1:9001` |
+
+Configure S3-compatible clients that run outside the MinIO host network with
+the public endpoint:
+
+```bash
+S3_ENDPOINT_URL=https://s3dev.example.com
+S3_BROWSER_REDIRECT_URL=https://s3dev.example.com/minio/
+S3_FORCE_PATH_STYLE=true
+```
+
+MinIO itself uses `http://minio:9000` internally for console authentication;
+`S3_ENDPOINT_URL=https://s3dev.example.com` remains the public endpoint for
+host-side clients and the tracking/analytics services.
 
 The cross-origin web SDK iframe is served by `data-tracking-api`, not the admin
 frontend. Because the embedding page is `https://example.com` and the iframe
@@ -169,21 +183,26 @@ server {
     proxy_read_timeout 600s;
   }
 
-  # MinIO S3 API: strip /s3 before forwarding to port 9000.
-  location = /s3 {
-    return 308 /s3/;
-  }
-
-  location ^~ /s3/ {
-    proxy_pass http://c360_minio_api/;
+  # All other paths go to the admin UI.
+  location / {
+    proxy_pass http://c360_frontend/;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-Port $server_port;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_read_timeout 600s;
+    access_log off;
   }
 
-  # MinIO web console: set MINIO_BROWSER_REDIRECT_URL to this public prefix.
+  listen 443 ssl http2;
+  ssl_certificate /home/thomas/0-uspa/localhost-ssl/example.com+5.pem;
+  ssl_certificate_key /home/thomas/0-uspa/localhost-ssl/example.com+5-key.pem;
+}
+
+# MinIO uses a dedicated local-dev hostname. The S3 API is served at the host
+# root, while the web console remains under /minio/ on the same hostname.
+server {
+  server_name s3dev.example.com;
+
   location = /minio {
     return 308 /minio/;
   }
@@ -197,14 +216,13 @@ server {
     proxy_read_timeout 600s;
   }
 
-  # All other paths go to the admin UI.
   location / {
-    proxy_pass http://c360_frontend/;
-    proxy_set_header Host $host;
+    proxy_pass http://c360_minio_api/;
+    proxy_set_header Host $http_host;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-Port $server_port;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    access_log off;
+    proxy_read_timeout 600s;
   }
 
   listen 443 ssl http2;

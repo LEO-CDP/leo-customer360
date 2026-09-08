@@ -928,8 +928,25 @@ class CustomerIdentityResolver:
             )
 
     def _create_master_and_link(self, cursor, raw_profile: Dict[str, Any]) -> str:
-        """Creates a brand new master profile when no match was found and
-        links the raw profile to it. Returns the new master_profile_id."""
+        """Create and link a master profile when no match was found.
+
+        A raw profile can remain in staging after a previous partially completed
+        batch, so reuse an existing link before creating another master profile.
+        """
+        existing_link_query = f"""
+            SELECT master_profile_id
+            FROM {self._table('cdp_profile_links')}
+            WHERE tenant_id = %s AND raw_profile_id = %s
+            LIMIT 1;
+        """
+        cursor.execute(
+            existing_link_query,
+            (raw_profile["tenant_id"], raw_profile["raw_profile_id"]),
+        )
+        existing_link = cursor.fetchone()
+        if existing_link:
+            return existing_link["master_profile_id"]
+
         source_system = raw_profile.get("source_system")
 
         external_ids = {}

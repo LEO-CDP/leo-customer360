@@ -355,7 +355,7 @@ class TestLinkAndUpdate:
 
 class TestCreateMasterAndLink:
     def test_creates_master_and_links(self, mock_cursor, mock_conn):
-        mock_cursor.fetchone.return_value = {"master_profile_id": "new-master-1"}
+        mock_cursor.fetchone.side_effect = [None, {"master_profile_id": "new-master-1"}]
         resolver = make_resolver(mock_conn)
         raw_profile = {
             "raw_profile_id": "r2",
@@ -376,9 +376,9 @@ class TestCreateMasterAndLink:
         new_id = resolver._create_master_and_link(mock_cursor, raw_profile)
 
         assert new_id == "new-master-1"
-        assert mock_cursor.execute.call_count == 2
+        assert mock_cursor.execute.call_count == 3
 
-        insert_query, insert_params = mock_cursor.execute.call_args_list[0][0]
+        insert_query, insert_params = mock_cursor.execute.call_args_list[1][0]
         assert "INSERT INTO customer360.cdp_master_profiles" in insert_query
         assert "RETURNING master_profile_id" in insert_query
         assert insert_params[0] == "t1"
@@ -394,12 +394,12 @@ class TestCreateMasterAndLink:
         assert insert_params[12] is False  # is_hashed
         assert insert_params[13] is None  # persona_name
 
-        link_query, link_params = mock_cursor.execute.call_args_list[1][0]
+        link_query, link_params = mock_cursor.execute.call_args_list[2][0]
         assert "INSERT INTO customer360.cdp_profile_links" in link_query
         assert link_params == ("t1", "r2", "new-master-1", None, "NewMaster")
 
     def test_sets_is_hashed_and_persona_name_when_pii_looks_hashed(self, mock_cursor, mock_conn):
-        mock_cursor.fetchone.return_value = {"master_profile_id": "new-master-2"}
+        mock_cursor.fetchone.side_effect = [None, {"master_profile_id": "new-master-2"}]
         resolver = make_resolver(mock_conn)
         raw_profile = {
             "raw_profile_id": "r3",
@@ -416,12 +416,12 @@ class TestCreateMasterAndLink:
 
         resolver._create_master_and_link(mock_cursor, raw_profile)
 
-        _, insert_params = mock_cursor.execute.call_args_list[0][0]
+        _, insert_params = mock_cursor.execute.call_args_list[1][0]
         assert insert_params[12] is True  # is_hashed
         assert insert_params[13] == generate_persona_name(raw_profile)  # persona_name
 
     def test_creates_master_with_national_id_upserts_domain_profile(self, mock_cursor, mock_conn):
-        mock_cursor.fetchone.return_value = {"master_profile_id": "new-master-3"}
+        mock_cursor.fetchone.side_effect = [None, {"master_profile_id": "new-master-3"}]
         resolver = make_resolver(mock_conn)
         raw_profile = {
             "raw_profile_id": "r4",
@@ -441,13 +441,28 @@ class TestCreateMasterAndLink:
 
         resolver._create_master_and_link(mock_cursor, raw_profile)
 
-        assert mock_cursor.execute.call_count == 3
-        upsert_query, upsert_params = mock_cursor.execute.call_args_list[1][0]
+        assert mock_cursor.execute.call_count == 4
+        upsert_query, upsert_params = mock_cursor.execute.call_args_list[2][0]
         assert "INSERT INTO customer360.cdp_domain_profiles" in upsert_query
         assert upsert_params[0] == "t1"
         assert upsert_params[1] == "new-master-3"
         assert upsert_params[2] == "banking"
         assert upsert_params[3].adapted == {"national_id": "079111222333"}
+
+    def test_reuses_existing_link_without_creating_duplicate_master(self, mock_cursor, mock_conn):
+        mock_cursor.fetchone.return_value = {"master_profile_id": "existing-master"}
+        resolver = make_resolver(mock_conn)
+
+        master_id = resolver._create_master_and_link(
+            mock_cursor,
+            {"raw_profile_id": "r5", "tenant_id": "t1"},
+        )
+
+        assert master_id == "existing-master"
+        assert mock_cursor.execute.call_count == 1
+        query, params = mock_cursor.execute.call_args[0]
+        assert "SELECT master_profile_id" in query
+        assert params == ("t1", "r5")
 
 
 class TestMarkAsProcessed:

@@ -13,6 +13,7 @@ import argparse
 import importlib
 import json
 import logging
+import math
 import os
 import random
 import time
@@ -28,6 +29,8 @@ from dotenv import load_dotenv
 
 LOGGER = logging.getLogger("web_user_simulator")
 DEFAULT_TRACKING_API_URL = "https://c360.example.com/data/api/v1/tracking/logs"
+DEFAULT_CUSTOMER360_API_URL = "https://c360.example.com/c360api/api/v1/"
+ANALYTICS_SCHEDULE_NAME = "analytics_hourly_schedule"
 DEFAULT_DATA_SOURCE_ID = "11111111-1111-1111-1111-111111111111"
 DEFAULT_OPENAI_MODEL = "gpt-5.6-luna"
 
@@ -172,11 +175,24 @@ class TrackingVerificationError(RuntimeError):
 	"""Raised when a tracking batch cannot be found or does not match."""
 
 
+class AnalyticsApiError(RuntimeError):
+	"""Raised when analytics cannot be triggered, completed, or verified."""
+
+
+class AgentJourneyError(RuntimeError):
+	"""Raised when an AI-directed user cannot complete a valid purchase journey."""
+
+
 @dataclass(frozen=True)
 class AgentConfig:
 	"""Runtime configuration for one simulator process."""
 
 	tracking_api_url: str = DEFAULT_TRACKING_API_URL
+	customer360_api_url: str = DEFAULT_CUSTOMER360_API_URL
+	customer360_api_token: str | None = None
+	customer360_username: str | None = None
+	customer360_password: str | None = None
+	customer360_tenant_id: str = DEFAULT_DATA_SOURCE_ID
 	data_source_id: UUID = UUID(DEFAULT_DATA_SOURCE_ID)
 	openai_api_key: str | None = None
 	openai_model: str = DEFAULT_OPENAI_MODEL
@@ -193,6 +209,24 @@ class AgentConfig:
 	s3_verify_retry_seconds: float = 2.0
 	s3_verify_attempts: int = 3
 	verify_s3: bool = True
+	analytics_poll_interval_seconds: float = 5.0
+	analytics_timeout_seconds: float = 300.0
+	verify_analytics: bool = True
+
+	def __post_init__(self) -> None:
+		"""Reject settings that would make polling or simulation non-terminating."""
+		if self.request_timeout_seconds <= 0:
+			raise ValueError("request_timeout_seconds must be greater than zero")
+		if self.max_steps < 1:
+			raise ValueError("max_steps must be at least 1")
+		if self.s3_verify_wait_seconds < 0 or self.s3_verify_retry_seconds < 0:
+			raise ValueError("S3 verification delays cannot be negative")
+		if self.s3_verify_attempts < 1:
+			raise ValueError("s3_verify_attempts must be at least 1")
+		if self.analytics_poll_interval_seconds < 0:
+			raise ValueError("analytics_poll_interval_seconds cannot be negative")
+		if self.analytics_timeout_seconds <= 0:
+			raise ValueError("analytics_timeout_seconds must be greater than zero")
 
 	@classmethod
 	def from_environment(cls) -> "AgentConfig":
@@ -210,6 +244,20 @@ class AgentConfig:
 		)
 		return cls(
 			tracking_api_url=os.getenv("TRACKING_API_URL", DEFAULT_TRACKING_API_URL),
+			customer360_api_url=os.getenv("CUSTOMER360_API_URL", DEFAULT_CUSTOMER360_API_URL).rstrip("/"),
+			customer360_api_token=(
+				os.getenv("CUSTOMER360_API_TOKEN")
+				or os.getenv("LEO_API_TOKEN")
+			),
+			customer360_username=(
+				os.getenv("CUSTOMER360_USERNAME")
+				or os.getenv("DEFAULT_ROOT_USERNAME")
+			),
+			customer360_password=(
+				os.getenv("CUSTOMER360_PASSWORD")
+				or os.getenv("DEFAULT_ROOT_PASSWORD")
+			),
+			customer360_tenant_id=os.getenv("CUSTOMER360_TENANT_ID", DEFAULT_DATA_SOURCE_ID),
 			data_source_id=UUID(os.getenv("TRACKING_DATA_SOURCE_ID", DEFAULT_DATA_SOURCE_ID)),
 			openai_api_key=os.getenv("LEO_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY"),
 			openai_model=(
@@ -230,6 +278,12 @@ class AgentConfig:
 			s3_verify_retry_seconds=float(os.getenv("TRACKING_S3_VERIFY_RETRY_SECONDS", "2")),
 			s3_verify_attempts=int(os.getenv("TRACKING_S3_VERIFY_ATTEMPTS", "3")),
 			verify_s3=os.getenv("TRACKING_S3_VERIFY_ENABLED", "true").lower()
+			in {"1", "true", "yes"},
+			analytics_poll_interval_seconds=float(
+				os.getenv("ANALYTICS_POLL_INTERVAL_SECONDS", "5")
+			),
+			analytics_timeout_seconds=float(os.getenv("ANALYTICS_TIMEOUT_SECONDS", "300")),
+			verify_analytics=os.getenv("ANALYTICS_VERIFY_ENABLED", "true").lower()
 			in {"1", "true", "yes"},
 		)
 
@@ -290,6 +344,194 @@ class TrackingLogClient:
 			return json.loads(response_body)
 		except json.JSONDecodeError as exc:
 			raise TrackingApiError("tracking API returned invalid JSON") from exc
+
+
+
+class AnalyticsApiClient:
+	"""Trigger analytics and read the data-source summary through Customer 360 API."""
+
+	def __init__(
+		self,
+		base_url: str,
+		timeout_seconds: float = 10.0,
+		token: str | None = None,
+		username: str | None = None,
+		password: str | None = None,
+		tenant_id: str | None = None,
+	):
+		self.base_url = base_url.rstrip("/")
+		self.timeout_seconds = timeout_seconds
+		self.token = token
+		self.username = username
+		self.password = password
+		self.tenant_id = tenant_id
+
+	def _login(self) -> None:
+		if self.token or not self.username or not self.password:
+			return
+		payload: dict[str, str] = {
+			"username": self.username,
+			"password": self.password,
+		}
+		if self.tenant_id:
+			payload["tenant_id"] = self.tenant_id
+		request = urllib.request.Request(
+			f"{self.base_url}/auth/login",
+			data=json.dumps(payload).encode("utf-8"),
+			headers={
+				"Accept": "application/json",
+				"Content-Type": "application/json",
+				"User-Agent": "leo-web-user-simulator/1.0",
+			},
+			method="POST",
+		)
+		try:
+			with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+				body = response.read().decode("utf-8")
+		except urllib.error.HTTPError as exc:
+			detail = exc.read().decode("utf-8", errors="replace")
+			raise AnalyticsApiError(f"Customer 360 login returned HTTP {exc.code}: {detail}") from exc
+		except urllib.error.URLError as exc:
+			raise AnalyticsApiError(f"Customer 360 login is unavailable: {exc.reason}") from exc
+		try:
+			login_response = json.loads(body)
+		except json.JSONDecodeError as exc:
+			raise AnalyticsApiError("Customer 360 login returned invalid JSON") from exc
+		self.token = login_response.get("access_token")
+		if not isinstance(self.token, str) or not self.token:
+			raise AnalyticsApiError("Customer 360 login did not return an access token")
+
+	def _request(self, method: str, path: str) -> dict[str, Any]:
+		self._login()
+		headers = {
+			"Accept": "application/json",
+			"User-Agent": "leo-web-user-simulator/1.0",
+		}
+		if self.token:
+			headers["Authorization"] = f"Bearer {self.token}"
+		request = urllib.request.Request(
+			f"{self.base_url}/{path.lstrip('/')}",
+			headers=headers,
+			method=method,
+		)
+		try:
+			with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+				body = response.read().decode("utf-8")
+		except urllib.error.HTTPError as exc:
+			detail = exc.read().decode("utf-8", errors="replace")
+			raise AnalyticsApiError(
+				f"Customer 360 analytics API returned HTTP {exc.code}: {detail}"
+			) from exc
+		except urllib.error.URLError as exc:
+			raise AnalyticsApiError(f"Customer 360 API is unavailable: {exc.reason}") from exc
+
+		try:
+			payload = json.loads(body)
+		except json.JSONDecodeError as exc:
+			raise AnalyticsApiError("Customer 360 API returned invalid JSON") from exc
+		if not isinstance(payload, dict):
+			raise AnalyticsApiError("Customer 360 API returned a non-object response")
+		return payload
+
+	def trigger_analytics_hourly_schedule(self) -> str:
+		"""Submit the API-managed run for ``analytics_hourly_schedule``."""
+		payload = self._request("POST", "/analytics/source-analytics/process")
+		run_id = payload.get("run_id")
+		if not isinstance(run_id, str) or not run_id:
+			raise AnalyticsApiError(
+				f"Analytics trigger did not return a run_id for {ANALYTICS_SCHEDULE_NAME}"
+			)
+		LOGGER.info(
+			"Triggered %s through Customer 360 API (run_id=%s)",
+			ANALYTICS_SCHEDULE_NAME,
+			run_id,
+		)
+		return run_id
+
+	def wait_for_analytics_schedule(self, run_id: str, poll_interval: float, timeout: float) -> dict[str, Any]:
+		"""Poll the submitted analytics run until Dagster reports success/failure."""
+		started_at = time.monotonic()
+		while True:
+			status = self._request("GET", f"/analytics/source-analytics/status/{run_id}")
+			run_status = status.get("status")
+			if run_status == "success":
+				LOGGER.info("%s completed successfully (run_id=%s)", ANALYTICS_SCHEDULE_NAME, run_id)
+				return status
+			if run_status == "failure":
+				raise AnalyticsApiError(
+					f"{ANALYTICS_SCHEDULE_NAME} failed (run_id={run_id}, "
+					f"raw_status={status.get('raw_status')})"
+				)
+			if time.monotonic() - started_at >= timeout:
+				raise AnalyticsApiError(
+					f"Timed out waiting for {ANALYTICS_SCHEDULE_NAME} after {timeout:.1f} seconds"
+				)
+			time.sleep(max(0.0, poll_interval))
+
+	def get_data_source_summary(self, data_source_id: UUID) -> dict[str, Any]:
+		"""Read the metrics updated by ``update_data_source_summary``."""
+		return self._request("GET", f"/metadata/data-sources/{data_source_id}")
+
+	def verify_data_source_summary(self, data_source_id: UUID) -> dict[str, Any]:
+		"""Require analytics metrics to be positive for the requested source."""
+		summary = self.get_data_source_summary(data_source_id)
+		try:
+			total_tracked_event = int(summary.get("total_tracked_event") or 0)
+			avg_daily_event = int(summary.get("avg_daily_event") or 0)
+			avg_events_per_profile = float(summary.get("avg_events_per_profile") or 0)
+		except (TypeError, ValueError) as exc:
+			raise AnalyticsApiError(
+				f"Data source {data_source_id} returned invalid analytics metrics"
+			) from exc
+
+		if total_tracked_event <= 0 or avg_daily_event <= 0 or avg_events_per_profile <= 0:
+			raise AnalyticsApiError(
+				f"Data source {data_source_id} analytics metrics were not updated: "
+				f"total_tracked_event={total_tracked_event}, "
+				f"avg_daily_event={avg_daily_event}, "
+				f"avg_events_per_profile={avg_events_per_profile}"
+			)
+		if str(summary.get("data_source_id")) != str(data_source_id):
+			raise AnalyticsApiError(
+				f"Analytics summary belongs to data source {summary.get('data_source_id')}, "
+				f"not {data_source_id}"
+			)
+		if not math.isfinite(avg_events_per_profile):
+			raise AnalyticsApiError(
+				f"Data source {data_source_id} returned a non-finite avg_events_per_profile"
+			)
+		return summary
+
+
+def trigger_analytics_and_verify(
+	config: AgentConfig,
+	analytics_client: AnalyticsApiClient | None = None,
+) -> dict[str, Any]:
+	"""Run analytics after MinIO verification and validate source metrics."""
+	client = analytics_client or AnalyticsApiClient(
+		config.customer360_api_url,
+		config.request_timeout_seconds,
+		config.customer360_api_token,
+		config.customer360_username,
+		config.customer360_password,
+		config.customer360_tenant_id,
+	)
+	run_id = client.trigger_analytics_hourly_schedule()
+	client.wait_for_analytics_schedule(
+		run_id,
+		config.analytics_poll_interval_seconds,
+		config.analytics_timeout_seconds,
+	)
+	summary = client.verify_data_source_summary(config.data_source_id)
+	LOGGER.info(
+		"Verified data source %s: total_tracked_event=%s avg_daily_event=%s "
+		"avg_events_per_profile=%s",
+		config.data_source_id,
+		summary.get("total_tracked_event"),
+		summary.get("avg_daily_event"),
+		summary.get("avg_events_per_profile"),
+	)
+	return summary
 
 
 class MinioTrackingVerifier:
@@ -495,7 +737,10 @@ class WebUserAgent:
 			self.profile.user_id,
 			self.config.max_steps,
 		)
-		return self.events
+		raise AgentJourneyError(
+			f"User {self.profile.user_id} did not complete a purchase journey "
+			f"within {self.config.max_steps} model steps"
+		)
 
 	def _system_prompt(self) -> str:
 		catalog = json.dumps(
@@ -577,6 +822,10 @@ class WebUserAgent:
 		)
 
 	def _purchase_product(self, arguments: dict[str, Any]) -> dict[str, Any]:
+		if not self._viewed_product or not self._asked_question:
+			raise AgentJourneyError(
+				"A product must be viewed and its price or support must be checked before purchase"
+			)
 		product = self._product_from_arguments(arguments)
 		quantity = max(1, min(int(arguments.get("quantity", 1)), 2))
 		total_price_vnd = product["price_vnd"] * quantity
@@ -658,30 +907,41 @@ def _build_profile(index: int, rng: random.Random) -> UserProfile:
 
 def run_simulation(config: AgentConfig, user_count: int, *, seed: int | None = None, dry_run: bool = False) -> int:
 	"""Run users, send their event batches, and return a process exit code."""
+	if user_count < 1:
+		raise ValueError("user_count must be at least 1")
 	rng = random.Random(seed)
 	tracker = TrackingLogClient(config.tracking_api_url, config.request_timeout_seconds)
-	client = _create_openai_client(config)
+	try:
+		client = _create_openai_client(config)
+	except (ImportError, RuntimeError, ValueError) as exc:
+		LOGGER.error("Could not initialize the OpenAI client: %s", exc)
+		return 1
 	verifier = None
 	if config.verify_s3 and not dry_run:
-		verifier = MinioTrackingVerifier(
-			config.minio_endpoint,
-			config.minio_access_key,
-			config.minio_secret_key,
-			config.minio_secure,
-		)
+		try:
+			verifier = MinioTrackingVerifier(
+				config.minio_endpoint,
+				config.minio_access_key,
+				config.minio_secret_key,
+				config.minio_secure,
+			)
+		except TrackingVerificationError as exc:
+			LOGGER.error("Could not initialize MinIO verification: %s", exc)
+			return 1
 	if client is None and not config.offline:
 		LOGGER.info("No OpenAI key configured; using offline ecommerce journeys")
 		config = replace(config, offline=True)
 
 	failed = 0
+	verified_event_batches = 0
 	for index in range(1, user_count + 1):
 		profile = _build_profile(index, rng)
 		agent = WebUserAgent(profile, config, rng=rng, openai_client=client)
-		events = agent.run()
-		if dry_run:
-			LOGGER.info("Dry run %s: %s", profile.user_id, json.dumps(events))
-			continue
 		try:
+			events = agent.run()
+			if dry_run:
+				LOGGER.info("Dry run %s: %s", profile.user_id, json.dumps(events))
+				continue
 			response = tracker.send(
 				data_source_id=config.data_source_id,
 				session_id=profile.session_id,
@@ -725,6 +985,7 @@ def run_simulation(config: AgentConfig, user_count: int, *, seed: int | None = N
 				response.get("object_key", "tracking API accepted"),
 			)
 			if stored_records is not None:
+				verified_event_batches += 1
 				print(
 					json.dumps(
 						{
@@ -739,9 +1000,39 @@ def run_simulation(config: AgentConfig, user_count: int, *, seed: int | None = N
 						indent=2,
 					)
 				)
-		except (TrackingApiError, TrackingVerificationError, KeyError) as exc:
+		except (AgentJourneyError, TrackingApiError, TrackingVerificationError, KeyError) as exc:
 			failed += 1
-			LOGGER.error("Could not send or verify events for %s: %s", profile.user_id, exc)
+			LOGGER.error("Could not complete user journey for %s: %s", profile.user_id, exc)
+		except Exception as exc:
+			failed += 1
+			LOGGER.error("Unexpected simulator failure for %s: %s", profile.user_id, exc)
+
+	if (
+		config.verify_analytics
+		and not dry_run
+		and verifier is not None
+		and failed == 0
+		and verified_event_batches == user_count
+	):
+		try:
+			summary = trigger_analytics_and_verify(config)
+			print(
+				json.dumps(
+					{
+						"analytics_schedule": ANALYTICS_SCHEDULE_NAME,
+						"data_source_id": str(config.data_source_id),
+						"total_tracked_event": summary.get("total_tracked_event"),
+						"avg_daily_event": summary.get("avg_daily_event"),
+						"avg_events_per_profile": summary.get("avg_events_per_profile"),
+					},
+					indent=2,
+				)
+			)
+		except AnalyticsApiError as exc:
+			failed += 1
+			LOGGER.error("Analytics verification failed: %s", exc)
+	elif config.verify_analytics and not dry_run and failed == 0 and verifier is None:
+		LOGGER.warning("Skipping analytics verification because MinIO verification is disabled")
 	return 1 if failed else 0
 
 
@@ -753,6 +1044,7 @@ def _parse_args() -> argparse.Namespace:
 	parser.add_argument("--tracking-url", default=None, help="Override TRACKING_API_URL")
 	parser.add_argument("--s3-wait-seconds", type=float, default=None)
 	parser.add_argument("--no-s3-verify", action="store_true", help="Skip the MinIO read-back check")
+	parser.add_argument("--no-analytics-verify", action="store_true", help="Skip Dagster analytics verification")
 	parser.add_argument("--offline", action="store_true", help="Do not call the OpenAI model")
 	parser.add_argument("--dry-run", action="store_true", help="Print generated events without calling the API")
 	parser.add_argument("--verbose", action="store_true")
@@ -774,6 +1066,8 @@ def main() -> int:
 		config = replace(config, s3_verify_wait_seconds=args.s3_wait_seconds)
 	if args.no_s3_verify:
 		config = replace(config, verify_s3=False)
+	if args.no_analytics_verify:
+		config = replace(config, verify_analytics=False)
 	if args.offline:
 		config = replace(config, offline=True)
 	logging.basicConfig(

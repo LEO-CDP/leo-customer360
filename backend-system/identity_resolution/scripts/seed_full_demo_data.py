@@ -112,6 +112,7 @@ import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote_plus, urlparse
 
 import psycopg2
 from dotenv import load_dotenv
@@ -444,6 +445,44 @@ def tracking_platform_for_campaign(platform: str) -> str:
     }.get(platform, platform.lower().replace(" ", "_"))
 
 
+def configured_url(name: str, fallback: str | None = None) -> str | None:
+    """Returns a trimmed URL from the environment, or a compatibility fallback."""
+    value = os.environ.get(name)
+    if value is None:
+        return fallback
+    value = value.strip()
+    return value or None
+
+
+def configured_hosts(name: str, data_source_url: str | None, fallback: list[str]) -> list[str]:
+    """Returns configured hosts, deriving one from the configured source URL when absent."""
+    value = os.environ.get(name)
+    if value is not None:
+        return [host.strip() for host in value.split(",") if host.strip()]
+    hostname = urlparse(data_source_url or "").hostname
+    return [hostname] if hostname else fallback
+
+
+def configured_qr_code_data(data_source_url: str | None, slug: str) -> dict:
+    """Build QR metadata from the same configured URL stored in the catalog."""
+    if not data_source_url:
+        return {}
+    tracking_url = (
+        f"{data_source_url}&utm_source={slug}&utm_medium=qr_code&utm_campaign=c360_datasource"
+        if "?" in data_source_url
+        else f"{data_source_url}?utm_source={slug}&utm_medium=qr_code&utm_campaign=c360_datasource"
+    )
+    return {
+        "target_url": data_source_url,
+        "tracking_url": tracking_url,
+        "qr_code_url": (
+            "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data="
+            f"{quote_plus(tracking_url)}"
+        ),
+        "generated_at": datetime.now().isoformat(),
+    }
+
+
 def seed_relation_types(cursor) -> None:
     logger.info("Seeding cdp_relation_types...")
     for code, description in (
@@ -710,8 +749,11 @@ DATA_SOURCES = [
         "slug": "adjust-mobile-attribution",
         "source_type": 5,
         "status": 1,
-        "data_source_url": "https://automate.adjust.com/reports-service/report",
-        "thumbnail_url": "https://cdn.example.com/connectors/adjust.png",
+        "data_source_url": configured_url(
+            "C360_ADJUST_DATA_SOURCE_URL",
+            "https://automate.adjust.com/reports-service/report",
+        ),
+        "thumbnail_url": configured_url("C360_ADJUST_DATA_SOURCE_THUMBNAIL_URL"),
         "collect_directly": True,
         "first_party_data": True,
         "journey_level": 3,
@@ -731,8 +773,11 @@ DATA_SOURCES = [
         "slug": "google-analytics-4",
         "source_type": 1,
         "status": 1,
-        "data_source_url": "https://analytics.google.com",
-        "thumbnail_url": "https://cdn.example.com/connectors/ga4.png",
+        "data_source_url": configured_url(
+            "C360_GA4_DATA_SOURCE_URL",
+            "https://analytics.google.com",
+        ),
+        "thumbnail_url": configured_url("C360_GA4_DATA_SOURCE_THUMBNAIL_URL"),
         "collect_directly": True,
         "first_party_data": True,
         "journey_level": 3,
@@ -748,20 +793,21 @@ DATA_SOURCES = [
             "<script async src='https://www.googletagmanager.com/gtag/js?id=G-DEMO360'></script>",
             "gtag('config', 'G-DEMO360')",
         ],
-        "qr_code_data": {
-            "target_url": "https://analytics.google.com",
-            "tracking_url": "https://analytics.google.com?utm_source=google-analytics-4&utm_medium=qr_code&utm_campaign=c360_datasource",
-            "qr_code_url": "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=https%3A%2F%2Fanalytics.google.com%3Futm_source%3Dgoogle-analytics-4%26utm_medium%3Dqr_code%26utm_campaign%3Dc360_datasource",
-            "generated_at": "2026-08-07T00:00:00Z",
-        },
+        "qr_code_data": configured_qr_code_data(
+            configured_url("C360_GA4_DATA_SOURCE_URL", "https://analytics.google.com"),
+            "google-analytics-4",
+        ),
     },
     {
         "name": "C360 Tracker",
         "slug": "c360-tracker",
         "source_type": 1,
         "status": 1,
-        "data_source_url": "https://tracker.customer360.local/collect",
-        "thumbnail_url": "https://cdn.example.com/connectors/c360-tracker.png",
+        "data_source_url": configured_url(
+            "C360_TRACKER_DATA_SOURCE_URL",
+            os.environ.get("LEO_OBSERVER_TRACKING_ENDPOINT"),
+        ),
+        "thumbnail_url": configured_url("C360_TRACKER_DATA_SOURCE_THUMBNAIL_URL"),
         "collect_directly": True,
         "first_party_data": True,
         "journey_level": 3,
@@ -772,7 +818,11 @@ DATA_SOURCES = [
         "avg_daily_event": 2100,
         "avg_events_per_profile": 16.8,
         "access_tokens": {"write_key": "c360_tracker_demo_key"},
-        "data_source_hosts": ["tracker.customer360.local"],
+        "data_source_hosts": configured_hosts(
+            "C360_TRACKER_DATA_SOURCE_HOSTS",
+            configured_url("C360_TRACKER_DATA_SOURCE_URL", os.environ.get("LEO_OBSERVER_TRACKING_ENDPOINT")),
+            ["tracker.customer360.local"],
+        ),
         "javascript_tags": [
             "window.c360Tracker=window.c360Tracker||{track:function(){return true;}};",
             "c360Tracker.track('page_view', {tenant: 'demo'});",

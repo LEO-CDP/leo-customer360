@@ -109,9 +109,16 @@ services:
     container_name: customer360-minio
     restart: unless-stopped
     <<: *default-hardening
+    env_file:
+      - .env
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      # MinIO's console backend must reach the S3 API over the Docker network.
+      # Host-side SDKs use S3_ENDPOINT_URL=https://s3dev.example.com instead.
+      MINIO_SERVER_URL: ${MINIO_INTERNAL_ENDPOINT:-http://minio:9000}
+      # Public URL of the MinIO Web Console through Nginx.
+      MINIO_BROWSER_REDIRECT_URL: ${S3_BROWSER_REDIRECT_URL:-https://s3dev.example.com/minio/}
     command: ["server", "/data", "--console-address", ":9001"]
     ports:
       # S3 API port.
