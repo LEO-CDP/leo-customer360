@@ -7,3 +7,9 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 python-frontmatter>=1.1
 python-dotenv>=1.0
+
+# OpenTelemetry zero-code request tracing (OTLP -> Jaeger). `opentelemetry-bootstrap -a install`
+# in the Dockerfile installs the FastAPI/psycopg instrumentors; deployments/lib/otel.sh emits the
+# OTEL_* env at deploy time. Matches customer360-api / ads-server / frontend-admin.
+opentelemetry-distro>=0.48b0,<1
+opentelemetry-exporter-otlp>=1.27,<2

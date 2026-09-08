@@ -118,6 +118,14 @@ echo ">> Shipping docs/ corpus ..."
 tar -C "$REPO_ROOT" -czf - docs \
   | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360/docs-vector-search && sudo chown "$(id -un)" /opt/c360/docs-vector-search && rm -rf /opt/c360/docs-vector-search/corpus && tar -C /opt/c360/docs-vector-search -xzf - && mv /opt/c360/docs-vector-search/docs /opt/c360/docs-vector-search/corpus'
 
+# OpenTelemetry (OTLP -> Jaeger) zero-code tracing lines. The docs box is dedicated (Jaeger is
+# NOT co-located on it), so point OTLP at the monitoring/api box's private fixed IP. UAT defaults
+# to disabled per policy in lib/otel.sh — deploy with OTEL_ENABLED=true to profile on demand.
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/otel.sh"
+MON_SERVER_KEY="${MON_SERVER_KEY:-api}"
+JAEGER_HOST="$(srv_ip "$MON_SERVER_KEY" fixed_ip)"; JAEGER_HOST="${JAEGER_HOST:-127.0.0.1}"
+OTEL_LINES="$(otel_env_lines "$SERVICE" "$ENV" "$JAEGER_HOST")"
+
 # env file built locally, shipped base64 (dodges ssh arg-flattening).
 ENVB64="$(printf '%s' "PG_HOST=$DB_HOST
 PG_PORT=$DB_PORT
@@ -136,7 +144,8 @@ ASK_RATE_MAX=$DOCS_ASK_RATE_MAX
 ASK_RATE_WINDOW_SEC=$DOCS_ASK_RATE_WINDOW_SEC
 INTERNAL_API_SECRET=$DOCS_INTERNAL_SECRET
 TRUSTED_PROXY_HOPS=$DOCS_TRUSTED_PROXY_HOPS
-QWEN_MODEL_PATH=/app/models/$GGUF_NAME" | base64 | tr -d '\n')"
+QWEN_MODEL_PATH=/app/models/$GGUF_NAME
+$OTEL_LINES" | base64 | tr -d '\n')"
 
 echo ">> Fetching the model, refreshing the index (enrich), and (re)starting the container ..."
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' \
