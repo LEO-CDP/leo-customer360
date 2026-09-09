@@ -13,6 +13,7 @@ each notable run (new corpus size, model change, box resize, RAGAS run).
 | Embed | `paraphrase-multilingual-MiniLM-L12-v2` (384-dim, VN+EN), fastembed/ONNX |
 | Rerank | `BAAI/bge-reranker-base`, fastembed cross-encoder |
 | Generate | `Qwen2.5-0.5B-Instruct` Q4_K_M, llama-cpp-python |
+| Local generation tuning | `DOCS_LLM_THREADS=2`, `DOCS_LLM_BATCH_SIZE=512`, memory-mapped GGUF |
 
 ## Startup (cold boot)
 
@@ -38,7 +39,7 @@ Measured 2026-09-06 (UAT, first live smoke), `curl` from the box (`localhost:800
 | `GET /health` | <100 ms | chunk count + model names |
 | `POST /search` | ~3 s | embed query + pgvector top-N + bge rerank (CPU) |
 | `POST /ask` (first call) | ~15–42 s | includes lazy Qwen load; grounded answer + 5 sources |
-| `POST /ask` (warm) | **~17–42 s** | measured; **dominated by Qwen 0.5B generation on 1 vCPU** — scales with answer length, not model load. To cut it: lower `GEN_MAX_TOKENS`, tune `GEN_THREADS`, or a bigger box. |
+| `POST /ask` (warm) | **~17–42 s** | historical UAT baseline; dominated by Qwen 0.5B generation. Current tuning uses `DOCS_GENERATION_MAX_TOKENS`, `DOCS_LLM_THREADS`, and `DOCS_LLM_BATCH_SIZE`. |
 | Boot to healthy (models cached) | **~1 s** | measured on restart with fastembed cache present — the state the **pre-bake** guarantees on any fresh box |
 
 ## Resource use (under `/ask`)
@@ -68,3 +69,4 @@ OpenAI/gateway judge stays available as an opt-in for LLM-judged faithfulness/re
 | 2026-09-06 | Redeploy on merged main + latency run | boot 1 s (cache warm); `/ask` warm 17–42 s (0.5B on 1 vCPU); `/search` ~3 s; mem 1.53/1.92 GiB, no OOM. Note: a concurrent CD deploy (docs-search is in the default set) collided with the manual redeploy — settled healthy. |
 | 2026-09-06 | **Pre-bake verified** on the pre-baked image (`sha-ec0479f`, `FASTEMBED_CACHE=/app/model-cache/fastembed`) | **cold restart boot-to-healthy = 22 s** (977 chunks), down from ~15 min — the reranker download is baked away. |
 | 2026-09-06 | CD `docs-search` failed (exit 255) | single SSH session idle-dropped ~6 min into enrich from the CI runner → added SSH keepalive (`ServerAliveInterval`). |
+| 2026-09-10 | Local CPU tuning validation | warm `/ask` improved from **7.98 s** to **7.34 s** (~8%) with `DOCS_LLM_THREADS=2`, `DOCS_LLM_BATCH_SIZE=512`, and `use_mmap=True`; health remained healthy with no OOM/restarts. |

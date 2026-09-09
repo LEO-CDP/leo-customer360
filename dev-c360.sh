@@ -4,7 +4,8 @@
 # Customer 360 Platform - local DEV bootstrap
 #
 # Starts the development stack in dev-docker-compose.yml (postgres + redis +
-# keycloak + minio + tracking-api) so customer360-api and
+# keycloak + minio + tracking-api) and the local docs-vector-search service so
+# customer360-api and
 # backend-system/identity_resolution (CIR) can be run directly on the host
 # against dockerized Postgres/Redis -- see
 # customer360-api/start.sh and backend-system/identity_resolution/run-demo.sh, and
@@ -15,13 +16,15 @@
 #      contains every key currently in '.env.example'.
 #   2. Starts (or resets) postgres/redis/keycloak/minio via
 #      `docker compose -f dev-docker-compose.yml`.
-#   3. Waits for postgres/redis/keycloak/minio/tracking-api containers to
+#   3. Builds the docs-vector-search index against the local PostgreSQL service
+#      and starts the AI service on DOCS_SEARCH_HOST_PORT.
+#   4. Waits for postgres/redis/keycloak/minio/tracking-api/docs-vector-search containers to
 #      report healthy, then waits for the one-shot `minio-init` bucket-bootstrap
 #      job to complete.
-#   4. Checks whether the Keycloak 'leocdp' realm exists yet; there is no
+#   5. Checks whether the Keycloak 'leocdp' realm exists yet; there is no
 #      automated realm/client seed script in this repo, so it prints manual
 #      setup instructions (DOCKER-COMPOSE-GUIDE.md section 9) when missing.
-#   5. Checks whether core demo tables are empty; if empty, runs the
+#   6. Checks whether core demo tables are empty; if empty, runs the
 #      seed-demo workflow via backend-system/identity_resolution/run-demo.sh.
 #      If not empty, prints current DB row-count status for key tables.
 #
@@ -33,8 +36,8 @@
 #   ./dev-c360.sh upgrade           Local DEV upgrade: refresh images/containers
 #                                    with current repo code and restart core
 #                                    host services (non-destructive).
-#   ./dev-c360.sh restart           Restart only customer360-api,
-#                                    backend-system, and frontend-admin.
+#   ./dev-c360.sh restart           Restart docs-vector-search,
+#                                    customer360-api, backend-system, and frontend-admin.
 #   ./dev-c360.sh reset             DESTRUCTIVE: `docker compose down -v`
 #                                    (drops the postgres/redis/minio volumes
 #                                    -- this also wipes Keycloak's
@@ -57,6 +60,10 @@ CIR_DIR="backend-system/identity_resolution"
 BACKEND_SYSTEM_DIR="backend-system"
 CUSTOMER360_API_DIR="customer360-api"
 FRONTEND_ADMIN_DIR="frontend-admin"
+DOCS_SEARCH_DIR="tools/docs-vector-search"
+DOCS_SEARCH_COMPOSE_FILE="$DOCS_SEARCH_DIR/docker-compose.yml"
+DOCS_SEARCH_ENV_FILE="$DOCS_SEARCH_DIR/.env"
+DOCS_SEARCH_CONTAINER="docs-vector-search"
 POSTGRES_CONTAINER="customer360-postgres"
 REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
@@ -89,19 +96,6 @@ done
 
 if [ "$ACTION" = "stop-all" ]; then
   bash "$SCRIPT_DIR/dev-stop-and-delete-all.sh"
-  exit 0
-fi
-
-if [ "$ACTION" = "restart" ]; then
-  echo "🔁 Restarting host services..."
-  echo "   - backend-system: ./${BACKEND_SYSTEM_DIR}/restart.sh"
-  (cd "$BACKEND_SYSTEM_DIR" && bash restart.sh)
-
-  echo "   - customer360-api: ./${CUSTOMER360_API_DIR}/restart.sh"
-  (cd "$CUSTOMER360_API_DIR" && bash restart.sh)
-
-  echo "   - frontend-admin: ./${FRONTEND_ADMIN_DIR}/restart.sh"
-  (cd "$FRONTEND_ADMIN_DIR" && bash restart.sh)
   exit 0
 fi
 
@@ -189,6 +183,166 @@ esac
 DC_CMD=("${DC[@]}" -f "$COMPOSE_FILE")
 echo "🔧 SSO_LOGIN=${SSO_LOGIN:-true} -> using compose file '${COMPOSE_FILE}'."
 
+DOCS_SEARCH_HOST_PORT="${DOCS_SEARCH_HOST_PORT:-8000}"
+DOCS_SEARCH_URL="${DOCS_SEARCH_URL:-http://127.0.0.1:${DOCS_SEARCH_HOST_PORT}}"
+DOCS_SEARCH_TIMEOUT="${DOCS_PROXY_TIMEOUT_SECONDS:-${DOCS_SEARCH_TIMEOUT:-120}}"
+DOCS_GEN_CTX="${DOCS_GENERATION_CONTEXT_TOKENS:-${DOCS_GEN_CTX:-2048}}"
+DOCS_GEN_MAX_TOKENS="${DOCS_GENERATION_MAX_TOKENS:-${DOCS_GEN_MAX_TOKENS:-256}}"
+
+docker_gpu_available() {
+  command -v nvidia-smi >/dev/null 2>&1 || return 1
+  nvidia-smi -L >/dev/null 2>&1 || return 1
+
+  # Compose's `gpus: all` requires either Docker's NVIDIA runtime or a
+  # registered NVIDIA CDI specification. Do not trust nvidia-smi alone.
+  local runtimes
+  runtimes="$(docker info --format '{{json .Runtimes}}' 2>/dev/null || true)"
+  if [[ "$runtimes" == *'"nvidia"'* ]]; then
+    return 0
+  fi
+  for cdi_spec in /etc/cdi/nvidia.yaml /var/run/cdi/nvidia.yaml; do
+    if [ -f "$cdi_spec" ] && grep -q "nvidia.com/gpu" "$cdi_spec"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+DOCS_GPU_REQUEST_VALUE="${DOCS_GPU_REQUEST:-}"
+if [ -z "$DOCS_GPU_REQUEST_VALUE" ]; then
+  if docker_gpu_available; then
+    DOCS_GPU_REQUEST="all"
+    DOCS_SEARCH_SERVICE="docs-vector-search-gpu"
+    echo "🎮 NVIDIA GPU and Docker GPU support detected -- enabling docs-service GPU access."
+  else
+    DOCS_GPU_REQUEST="0"
+    DOCS_SEARCH_SERVICE="docs-vector-search"
+    echo "🖥️  No usable NVIDIA GPU/Docker GPU support detected -- using CPU docs-service mode."
+  fi
+elif [ "$DOCS_GPU_REQUEST_VALUE" = "all" ]; then
+  if docker_gpu_available; then
+    DOCS_SEARCH_SERVICE="docs-vector-search-gpu"
+    echo "🎮 NVIDIA GPU and Docker GPU support detected -- enabling docs-service GPU access."
+  else
+    DOCS_GPU_REQUEST="0"
+    DOCS_SEARCH_SERVICE="docs-vector-search"
+    echo "⚠️  GPU was requested, but NVIDIA hardware/Docker GPU support is unavailable -- using CPU docs-service mode."
+  fi
+else
+  DOCS_GPU_REQUEST="0"
+  DOCS_SEARCH_SERVICE="docs-vector-search"
+  echo "🖥️  GPU disabled by DOCS_GPU_REQUEST=${DOCS_GPU_REQUEST_VALUE} -- using CPU docs-service mode."
+fi
+export DOCS_SEARCH_URL DOCS_SEARCH_TIMEOUT DOCS_GPU_REQUEST DOCS_SEARCH_SERVICE
+DOCS_DC_CMD=("${DC[@]}" --profile cpu --profile gpu --env-file "$DOCS_SEARCH_ENV_FILE" -f "$DOCS_SEARCH_COMPOSE_FILE")
+
+ensure_docs_env_file() {
+  if [ -f "$DOCS_SEARCH_ENV_FILE" ]; then
+    return
+  fi
+
+  echo "📄 '${DOCS_SEARCH_ENV_FILE}' not found -- creating local docs-service configuration..."
+  umask 077
+  cat > "$DOCS_SEARCH_ENV_FILE" <<EOF
+# Generated by dev-c360.sh. Edit this file to use a different vector database.
+PG_HOST=postgres
+PG_PORT=5432
+PG_DATABASE=${DB_NAME:-customer360}
+PG_USER=${DB_USER:-postgres}
+PG_PASSWORD=${DB_PASSWORD:-}
+PG_SCHEMA=rag
+API_PORT=${DOCS_SEARCH_HOST_PORT}
+DOCS_RERANK_ENABLED=${DOCS_RERANK_ENABLED:-true}
+DOCS_RERANK_MODEL=${DOCS_RERANK_MODEL:-BAAI/bge-reranker-base}
+DOCS_GENERATION_CONTEXT_TOKENS=${DOCS_GEN_CTX}
+DOCS_GENERATION_MAX_TOKENS=${DOCS_GEN_MAX_TOKENS}
+DOCS_LLM_THREADS=${DOCS_LLM_THREADS:-2}
+DOCS_LLM_BATCH_SIZE=${DOCS_LLM_BATCH_SIZE:-512}
+DOCS_EMBEDDING_PROVIDER=${DOCS_EMBEDDING_PROVIDER:-local}
+DOCS_EMBEDDING_MODEL=${DOCS_EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+DOCS_EMBEDDING_DIMENSIONS=${DOCS_EMBEDDING_DIMENSIONS:-384}
+DOCS_LLM_PROVIDER=${DOCS_LLM_PROVIDER:-local}
+DOCS_LLM_MODEL=${DOCS_LLM_MODEL:-gpt-5.6-luna}
+DOCS_OPENAI_API_KEY=${DOCS_OPENAI_API_KEY:-}
+DOCS_OPENAI_BASE_URL=${DOCS_OPENAI_BASE_URL:-https://api.openai.com/v1}
+DOCS_OPENAI_EMBEDDING_MODEL=${DOCS_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+DOCS_OPENAI_EMBEDDING_DIMENSIONS=${DOCS_OPENAI_EMBEDDING_DIMENSIONS:-384}
+DOCS_LOCAL_MODEL_PATH=${DOCS_LOCAL_MODEL_PATH:-/app/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf}
+INTERNAL_API_SECRET=${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-}}
+EOF
+}
+
+restart_host_services() {
+  echo "🔁 Restarting host services..."
+  echo "   - backend-system: ./${BACKEND_SYSTEM_DIR}/restart.sh"
+  (cd "$BACKEND_SYSTEM_DIR" && bash restart.sh)
+
+  echo "   - customer360-api: ./${CUSTOMER360_API_DIR}/restart.sh"
+  (cd "$CUSTOMER360_API_DIR" && bash restart.sh)
+
+  echo "   - frontend-admin: ./${FRONTEND_ADMIN_DIR}/restart.sh"
+  (cd "$FRONTEND_ADMIN_DIR" && bash restart.sh)
+}
+
+start_docs_service() {
+  ensure_docs_env_file
+  echo "🤖 Building local docs-vector-search image..."
+  "${DOCS_DC_CMD[@]}" build
+
+  echo "📚 Refreshing docs-vector-search index..."
+  "${DOCS_DC_CMD[@]}" run --rm "$DOCS_SEARCH_SERVICE" python -m src.enrich
+
+  local force_recreate="${1:-false}"
+  local up_args=(-d --build)
+  if [ "$force_recreate" = "true" ]; then
+    up_args+=(--force-recreate)
+  fi
+  echo "🤖 Starting docs-vector-search on http://127.0.0.1:${DOCS_SEARCH_HOST_PORT}..."
+  "${DOCS_DC_CMD[@]}" up "${up_args[@]}" "$DOCS_SEARCH_SERVICE"
+}
+
+restart_docs_service() {
+  ensure_docs_env_file
+  echo "🔁 Restarting docs-vector-search..."
+  "${DOCS_DC_CMD[@]}" up -d --build --force-recreate "$DOCS_SEARCH_SERVICE"
+}
+
+reset_docs_service() {
+  ensure_docs_env_file
+  echo "🗑️  Removing docs-vector-search container..."
+  "${DOCS_DC_CMD[@]}" down -v --remove-orphans
+}
+
+upgrade_docs_service() {
+  ensure_docs_env_file
+  echo "⬆️  Refreshing docs-vector-search image..."
+  "${DOCS_DC_CMD[@]}" pull --ignore-pull-failures || true
+  start_docs_service true
+}
+
+wait_for_docs_healthy() {
+  local max_attempts="${1:-90}"
+  local attempt=1
+  echo "⏳ Waiting for '${DOCS_SEARCH_CONTAINER}' to become healthy (max ${max_attempts} attempts)..."
+  until [ "$(docker inspect -f '{{.State.Health.Status}}' "$DOCS_SEARCH_CONTAINER" 2>/dev/null)" = "healthy" ]; do
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      echo "❌ Error: '${DOCS_SEARCH_CONTAINER}' did not become healthy after ${max_attempts} attempts." >&2
+      docker logs --tail=80 "$DOCS_SEARCH_CONTAINER" 2>/dev/null || true
+      exit 1
+    fi
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+  echo "🟢 '${DOCS_SEARCH_CONTAINER}' is healthy."
+}
+
+if [ "$ACTION" = "restart" ]; then
+  restart_docs_service
+  wait_for_docs_healthy
+  restart_host_services
+  exit 0
+fi
+
 # DB_PORT/REDIS_PORT are what host-run apps (customer360-api/start.sh,
 # backend-system/identity_resolution/run-demo.sh) connect through; *_HOST_PORT is
 # what docker-compose publishes. They must match when running against the
@@ -212,6 +366,7 @@ if [ "$ACTION" = "reset" ]; then
       exit 1
     fi
   fi
+  reset_docs_service
   echo "🗑️  Tearing down existing containers + volumes..."
   "${DC_CMD[@]}" down -v
 fi
@@ -298,6 +453,13 @@ if [[ "${SSO_LOGIN:-true}" == "true" ]]; then
   # health probes count), so give it a longer leash than the other services.
   wait_for_healthy "$KEYCLOAK_CONTAINER" 90
 fi
+
+if [ "$ACTION" = "upgrade" ]; then
+  upgrade_docs_service
+else
+  start_docs_service
+fi
+wait_for_docs_healthy
 
 # =============================================================================
 # 4) Keycloak realm check -- no automated realm/client seed script exists in
@@ -386,21 +548,6 @@ else
   seed_demo_if_empty
 fi
 
-# =============================================================================
-# 6) Restart host-run app services so local dev stack is ready end-to-end
-# =============================================================================
-restart_host_services() {
-  echo "🔁 Restarting host services..."
-  echo "   - backend-system: ./${BACKEND_SYSTEM_DIR}/restart.sh"
-  (cd "$BACKEND_SYSTEM_DIR" && bash restart.sh)
-
-  echo "   - customer360-api: ./${CUSTOMER360_API_DIR}/restart.sh"
-  (cd "$CUSTOMER360_API_DIR" && bash restart.sh)
-
-  echo "   - frontend-admin: ./${FRONTEND_ADMIN_DIR}/restart.sh"
-  (cd "$FRONTEND_ADMIN_DIR" && bash restart.sh)
-}
-
 get_host_service_status() {
   local pid_file="$1"
   local pid
@@ -417,12 +564,13 @@ get_host_service_status() {
 restart_host_services
 
 print_final_service_table() {
-  local postgres_status redis_status minio_status tracking_status
+  local postgres_status redis_status minio_status tracking_status docs_status
   local backend_status api_status frontend_status
   postgres_status="$(docker inspect -f '{{.State.Health.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || echo "unknown")"
   redis_status="$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER" 2>/dev/null || echo "unknown")"
   minio_status="$(docker inspect -f '{{.State.Health.Status}}' "$MINIO_CONTAINER" 2>/dev/null || echo "unknown")"
   tracking_status="$(docker inspect -f '{{.State.Health.Status}}' "$TRACKING_CONTAINER" 2>/dev/null || echo "unknown")"
+  docs_status="$(docker inspect -f '{{.State.Health.Status}}' "$DOCS_SEARCH_CONTAINER" 2>/dev/null || echo "unknown")"
   backend_status="$(get_host_service_status "$SCRIPT_DIR/$BACKEND_SYSTEM_DIR/.dagster.pid")"
   api_status="$(get_host_service_status "$SCRIPT_DIR/$CUSTOMER360_API_DIR/.uvicorn.pid")"
   frontend_status="$(get_host_service_status "$SCRIPT_DIR/$FRONTEND_ADMIN_DIR/.uvicorn.pid")"
@@ -435,6 +583,7 @@ print_final_service_table() {
   printf '%-12s | %-10s | %-25s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6580}"
   printf '%-12s | %-10s | %-25s\n' "minio" "$minio_status" "localhost:${MINIO_API_HOST_PORT:-9000} (console ${MINIO_CONSOLE_HOST_PORT:-9001})"
   printf '%-12s | %-10s | %-25s\n' "tracking-api" "$tracking_status" "localhost:${C360_TRACKING_API_PORT:-8010}"
+  printf '%-12s | %-10s | %-25s\n' "docs-ai" "$docs_status" "localhost:${DOCS_SEARCH_HOST_PORT} (/health)"
   printf '%-12s | %-10s | %-25s\n' "backend" "$backend_status" "localhost:${DAGSTER_UI_PORT:-3000}"
   printf '%-12s | %-10s | %-25s\n' "api" "$api_status" "localhost:${C360_API_PORT:-8008}"
   printf '%-12s | %-10s | %-25s\n' "frontend" "$frontend_status" "localhost:${FRONTEND_HOST_PORT:-8890}"

@@ -8,7 +8,12 @@ from __future__ import annotations
 import sys
 
 from . import store
-from .config import CONTEXT_CHAR_BUDGET, RERANK_ENABLED, RERANK_TOP_K, RETRIEVE_TOP_N
+from .config import (
+    CONTEXT_CHAR_BUDGET,
+    DOCS_RERANK_ENABLED,
+    RERANK_TOP_K,
+    RETRIEVE_TOP_N,
+)
 from .providers import embed, generate, rerank
 
 ANSWER_SYSTEM = (
@@ -50,7 +55,7 @@ def _build_context(hits: list[dict], budget: int = CONTEXT_CHAR_BUDGET) -> str:
 def retrieve(question: str, conn, top_n: int = RETRIEVE_TOP_N) -> list[dict]:
     """Embed the query → pgvector top-N → rerank (if enabled). Shared by /ask and /search."""
     hits = store.search(conn, embed([question], task="query")[0], top_n)
-    if RERANK_ENABLED and hits:
+    if DOCS_RERANK_ENABLED and hits:
         for h, s in zip(hits, rerank(question, [h["text"] for h in hits])):
             h["rerank"] = s
         hits.sort(key=lambda h: h["rerank"], reverse=True)

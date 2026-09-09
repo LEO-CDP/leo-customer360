@@ -13,7 +13,8 @@
 # Target box = servers["$DOCS_SERVER_KEY"] (default "docs"), defined in overlays/<env>.tfvars
 # and provisioned by this module's deploy.sh (apply). Overrides (env):
 #   BASTION_USER / SSH_KEY / DOCS_SERVER_KEY / DOCS_PORT / IMAGE_TAG / BUILD_LOCAL
-#   DOCS_EMBED_MODEL / DOCS_EMBED_DIM / DOCS_RERANK_ENABLED / DOCS_RERANK_MODEL
+#   DOCS_EMBEDDING_MODEL / DOCS_EMBEDDING_DIMENSIONS / DOCS_RERANK_ENABLED /
+#   DOCS_RERANK_MODEL / DOCS_LLM_PROVIDER / DOCS_LLM_MODEL
 #   DOCS_PG_SCHEMA / DOCS_GGUF_URL
 # DB creds come from ../postgres (outputs + TF_VAR_db_password). For local docker compose dev
 # instead, see tools/docs-vector-search/docker-compose.yml + .env.example.
@@ -29,10 +30,20 @@ SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 DOCS_SERVER_KEY="${DOCS_SERVER_KEY:-docs}"
 DOCS_PORT="${DOCS_PORT:-8000}"
 DOCS_PG_SCHEMA="${DOCS_PG_SCHEMA:-rag}"
-DOCS_EMBED_MODEL="${DOCS_EMBED_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}"
-DOCS_EMBED_DIM="${DOCS_EMBED_DIM:-384}"
+DOCS_EMBEDDING_MODEL="${DOCS_EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}"
+DOCS_EMBEDDING_DIMENSIONS="${DOCS_EMBEDDING_DIMENSIONS:-384}"
 DOCS_RERANK_ENABLED="${DOCS_RERANK_ENABLED:-true}"
 DOCS_RERANK_MODEL="${DOCS_RERANK_MODEL:-BAAI/bge-reranker-base}"
+DOCS_LLM_PROVIDER="${DOCS_LLM_PROVIDER:-local}"
+DOCS_LLM_MODEL="${DOCS_LLM_MODEL:-gpt-5.6-luna}"
+DOCS_GENERATION_CONTEXT_TOKENS="${DOCS_GENERATION_CONTEXT_TOKENS:-2048}"
+DOCS_GENERATION_MAX_TOKENS="${DOCS_GENERATION_MAX_TOKENS:-256}"
+DOCS_LLM_THREADS="${DOCS_LLM_THREADS:-2}"
+DOCS_LLM_BATCH_SIZE="${DOCS_LLM_BATCH_SIZE:-512}"
+DOCS_OPENAI_API_KEY="${DOCS_OPENAI_API_KEY:-}"
+DOCS_OPENAI_BASE_URL="${DOCS_OPENAI_BASE_URL:-https://api.openai.com/v1}"
+DOCS_OPENAI_EMBEDDING_MODEL="${DOCS_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}"
+DOCS_OPENAI_EMBEDDING_DIMENSIONS="${DOCS_OPENAI_EMBEDDING_DIMENSIONS:-384}"
 # CORS origins for browsers hitting the API directly (the static docs site on GitHub Pages).
 DOCS_CORS_ORIGINS="${DOCS_CORS_ORIGINS:-https://leo-cdp.github.io}"
 # Per-IP /ask rate limit for public callers (via Caddy/XFF). Tune per env; 0 disables.
@@ -41,10 +52,10 @@ DOCS_ASK_RATE_WINDOW_SEC="${DOCS_ASK_RATE_WINDOW_SEC:-60}"
 # Shared secret that lets the docs service treat the frontend-admin /ai proxy as an internal
 # caller (exempt from the public rate limit). EMPTY (default) => nobody is exempt (fail-closed):
 # admin AI traffic is rate-limited like any client. Set the SAME value as the frontend deploy's
-# DOCS_INTERNAL_SECRET — export it once before deploying, put it in both
+# DOCS_INTERNAL_AUTH_SECRET — export it once before deploying, put it in both
 # deployments/{server,frontend}/.env, or provide one CI secret to both jobs.
-DOCS_INTERNAL_SECRET="${DOCS_INTERNAL_SECRET:-}"
-[[ -z "$DOCS_INTERNAL_SECRET" ]] && echo "::warning::docs-search: DOCS_INTERNAL_SECRET unset — the frontend-admin /ai proxy will be rate-limited like a public client; set it (same value on both deploys) to exempt the admin console."
+DOCS_INTERNAL_AUTH_SECRET="${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-}}"
+[[ -z "$DOCS_INTERNAL_AUTH_SECRET" ]] && echo "::warning::docs-search: DOCS_INTERNAL_AUTH_SECRET unset — the frontend-admin /ai proxy will be rate-limited like a public client; set it (same value on both deploys) to exempt the admin console."
 # Trusted reverse-proxy hops that append X-Forwarded-For (Caddy/LB in front = 1).
 DOCS_TRUSTED_PROXY_HOPS="${DOCS_TRUSTED_PROXY_HOPS:-1}"
 DOCS_GGUF_URL="${DOCS_GGUF_URL:-https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
@@ -93,7 +104,7 @@ DB_HOST="$( (cd "$pg" && terraform workspace select "$ENV" >/dev/null 2>&1 && te
 DB_PORT="$( (cd "$pg" && terraform output -raw db_port 2>/dev/null) || echo 5432 )"
 : "${DB_NAME:?missing db_name}"; : "${DB_USER:?missing db_username}"; : "${DB_PASS:?missing db_password}"; : "${DB_HOST:?could not read db_host from ../postgres outputs}"
 
-echo ">> Target (docs): $BASTION :$DOCS_PORT   vDB: ${DB_NAME}.${DOCS_PG_SCHEMA}@${DB_HOST}:${DB_PORT}   rerank=$DOCS_RERANK_ENABLED"
+echo ">> Target (docs): $BASTION :$DOCS_PORT   vDB: ${DB_NAME}.${DOCS_PG_SCHEMA}@${DB_HOST}:${DB_PORT}   embedding=$DOCS_EMBEDDING_MODEL   rerank=$DOCS_RERANK_ENABLED   llm=$DOCS_LLM_PROVIDER/$DOCS_LLM_MODEL"
 
 # --- CD image source: pull the CI-built image from GHCR by default; BUILD_LOCAL=1 ships
 #     tools/docs-vector-search and builds on the VM (slow: llama-cpp-python). ---
@@ -135,16 +146,27 @@ PG_PASSWORD=$DB_PASS
 PG_SCHEMA=$DOCS_PG_SCHEMA
 CORPUS_DIR=/app/corpus
 MODELS_DIR=/app/models
-EMBED_MODEL=$DOCS_EMBED_MODEL
-EMBED_DIM=$DOCS_EMBED_DIM
-RERANK_ENABLED=$DOCS_RERANK_ENABLED
-RERANK_MODEL=$DOCS_RERANK_MODEL
+DOCS_EMBEDDING_PROVIDER=${DOCS_EMBEDDING_PROVIDER:-local}
+DOCS_EMBEDDING_MODEL=$DOCS_EMBEDDING_MODEL
+DOCS_EMBEDDING_DIMENSIONS=$DOCS_EMBEDDING_DIMENSIONS
+DOCS_RERANK_ENABLED=$DOCS_RERANK_ENABLED
+DOCS_RERANK_MODEL=$DOCS_RERANK_MODEL
+DOCS_GENERATION_CONTEXT_TOKENS=$DOCS_GENERATION_CONTEXT_TOKENS
+DOCS_GENERATION_MAX_TOKENS=$DOCS_GENERATION_MAX_TOKENS
+DOCS_LLM_THREADS=$DOCS_LLM_THREADS
+DOCS_LLM_BATCH_SIZE=$DOCS_LLM_BATCH_SIZE
+DOCS_LLM_PROVIDER=$DOCS_LLM_PROVIDER
+DOCS_LLM_MODEL=$DOCS_LLM_MODEL
+DOCS_OPENAI_API_KEY=$DOCS_OPENAI_API_KEY
+DOCS_OPENAI_BASE_URL=$DOCS_OPENAI_BASE_URL
+DOCS_OPENAI_EMBEDDING_MODEL=$DOCS_OPENAI_EMBEDDING_MODEL
+DOCS_OPENAI_EMBEDDING_DIMENSIONS=$DOCS_OPENAI_EMBEDDING_DIMENSIONS
 CORS_ORIGINS=$DOCS_CORS_ORIGINS
 ASK_RATE_MAX=$DOCS_ASK_RATE_MAX
 ASK_RATE_WINDOW_SEC=$DOCS_ASK_RATE_WINDOW_SEC
-INTERNAL_API_SECRET=$DOCS_INTERNAL_SECRET
+INTERNAL_API_SECRET=$DOCS_INTERNAL_AUTH_SECRET
 TRUSTED_PROXY_HOPS=$DOCS_TRUSTED_PROXY_HOPS
-QWEN_MODEL_PATH=/app/models/$GGUF_NAME
+DOCS_LOCAL_MODEL_PATH=/app/models/$GGUF_NAME
 $OTEL_LINES" | base64 | tr -d '\n')"
 
 echo ">> Fetching the model, refreshing the index (enrich), and (re)starting the container ..."

@@ -32,22 +32,62 @@ CORPUS_DIR = Path(os.getenv("CORPUS_DIR", REPO_ROOT / "docs")).resolve()
 CHUNK_TOKENS = int(os.getenv("CHUNK_TOKENS", "400"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
 
-# Embedding — local, via fastembed (ONNX). Default is a 384-dim multilingual (VN+EN)
-# model that fastembed supports; e5 models (if set) get query:/passage: prefixes in providers.
-EMBED_MODEL = os.getenv("EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-EMBED_DIM = int(os.getenv("EMBED_DIM", "384"))
+# Embedding — local fastembed by default. OpenAI-compatible embeddings are optional;
+# keep EMBED_DIM aligned with the existing pgvector column when switching providers.
+EMBED_PROVIDER = (os.getenv("DOCS_EMBEDDING_PROVIDER") or os.getenv("EMBED_PROVIDER", "local")).lower()
+EMBED_MODEL = os.getenv(
+    "DOCS_EMBEDDING_MODEL",
+    os.getenv("EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
+)
+EMBED_DIM = int(os.getenv("DOCS_EMBEDDING_DIMENSIONS") or os.getenv("EMBED_DIM", "384"))
+OPENAI_EMBEDDING_MODEL = os.getenv(
+    "DOCS_OPENAI_EMBEDDING_MODEL",
+    os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+)
+OPENAI_EMBEDDING_DIMENSIONS = int(
+    os.getenv("DOCS_OPENAI_EMBEDDING_DIMENSIONS")
+    or os.getenv("OPENAI_EMBEDDING_DIMENSIONS", str(EMBED_DIM))
+)
 
 # Reranking — local, via fastembed TextCrossEncoder.
-RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() == "true"
-RERANK_MODEL = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-base")
-
-# Generation — local, via llama-cpp-python (GGUF).
-QWEN_MODEL_PATH = os.getenv(
-    "QWEN_MODEL_PATH", str(MODELS_DIR / "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf")
+DOCS_RERANK_ENABLED = (
+    os.getenv("DOCS_RERANK_ENABLED") or os.getenv("RERANK_ENABLED", "true")
+).lower() == "true"
+DOCS_RERANK_MODEL = os.getenv(
+    "DOCS_RERANK_MODEL", os.getenv("RERANK_MODEL", "BAAI/bge-reranker-base")
 )
-GEN_MAX_TOKENS = int(os.getenv("GEN_MAX_TOKENS", "512"))
-GEN_CTX = int(os.getenv("GEN_CTX", "4096"))
-GEN_THREADS = int(os.getenv("GEN_THREADS", "0")) or None  # None → llama default
+
+# Generation — local Llama GGUF by default, or an OpenAI-compatible chat model.
+LLM_PROVIDER = (os.getenv("DOCS_LLM_PROVIDER") or os.getenv("LLM_PROVIDER", "local")).lower()
+DOCS_LOCAL_MODEL_PATH = os.getenv(
+    "DOCS_LOCAL_MODEL_PATH",
+    os.getenv("QWEN_MODEL_PATH", str(MODELS_DIR / "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf")),
+)
+GEN_MAX_TOKENS = int(
+    os.getenv("DOCS_GENERATION_MAX_TOKENS") or os.getenv("GEN_MAX_TOKENS", "256")
+)
+GEN_CTX = int(
+    os.getenv("DOCS_GENERATION_CONTEXT_TOKENS") or os.getenv("GEN_CTX", "2048")
+)
+DOCS_LLM_THREADS = int(os.getenv("DOCS_LLM_THREADS") or os.getenv("GEN_THREADS", "2"))
+DOCS_LLM_BATCH_SIZE = int(
+    os.getenv("DOCS_LLM_BATCH_SIZE") or os.getenv("LLAMA_N_BATCH", "512")
+)
+LLAMA_N_GPU_LAYERS = int(os.getenv("LLAMA_N_GPU_LAYERS", "-1"))
+OPENAI_CHAT_MODEL = os.getenv("DOCS_LLM_MODEL") or os.getenv("OPENAI_CHAT_MODEL") or os.getenv(
+    "LEO_OPENAI_MODEL_NAME", "gpt-5.6-luna"
+)
+OPENAI_API_KEY = (
+    os.getenv("DOCS_OPENAI_API_KEY")
+    or os.getenv("OPENAI_API_KEY")
+    or os.getenv("LEO_OPENAI_API_KEY", "")
+)
+OPENAI_BASE_URL = (
+    os.getenv("DOCS_OPENAI_BASE_URL")
+    or os.getenv("OPENAI_BASE_URL")
+    or os.getenv("LEO_OPENAI_BASE_URL", "https://api.openai.com/v1")
+).rstrip("/")
+OPENAI_TIMEOUT = float(os.getenv("OPENAI_TIMEOUT", "120"))
 
 # Retrieval
 RETRIEVE_TOP_N = int(os.getenv("RETRIEVE_TOP_N", "20"))
