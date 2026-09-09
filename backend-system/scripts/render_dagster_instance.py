@@ -121,9 +121,9 @@ S3_BLOCK = """compute_logs:
   module: dagster_aws.s3.compute_log_manager
   class: S3ComputeLogManager
   config:
-    bucket: { env: DAGSTER_LOGS_BUCKET }
+    bucket: { env: MINIO_BUCKET }
     prefix: dagster-compute-logs
-    endpoint_url: { env: DAGSTER_S3_ENDPOINT_URL }
+    endpoint_url: { env: S3_ENDPOINT_URL }
     skip_empty_files: true
 """
 

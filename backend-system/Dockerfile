@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir \
       dagster dagster-webserver dagster-graphql dagster-postgres dagster-aws psycopg2-binary
 
 COPY . /app
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Install each code location's own requirements if present.
 RUN for d in identity_resolution scoring segmentation analytics data_synch email_engine notification_engine campaign_activation personalization; do \
