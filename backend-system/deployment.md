@@ -4,6 +4,114 @@ This is the production runbook for the Dagster orchestration layer in
 `backend-system/`. It defines the supported topology, required state stores,
 release gates, deployment commands, rollback boundaries, and operational checks.
 
+## Server Requirements
+These requirements cover **Dagster only**: the webserver, exactly one daemon,
+the nine loaded code locations, and their in-process job execution. They do not
+include capacity for the Customer 360 API, Redis, Keycloak, PostgreSQL, load
+testing tools, or the S3 service. PostgreSQL and S3 remain mandatory external
+dependencies for production durability.
+
+The numbers below are starting requirements, not a performance guarantee. A
+production approval requires a load test with representative profile shape,
+segment selectivity, raw-profile batch size, and concurrent run count.
+
+### Mode 1: UAT - 1,000 virtual users
+
+UAT virtual users generate API and tracking traffic; they do not map one-to-one
+to Dagster runs. Size Dagster for the resulting queue depth and batch rate.
+
+| Resource | Requirement |
+|---|---|
+| Host | Dedicated Linux x86_64 VM or server |
+| CPU | 4 vCPU |
+| Memory | 8 GB RAM |
+| Local disk | 50 GB SSD, with at least 30 percent free |
+| Network | 1 Gbps private network; stable DNS and outbound HTTPS |
+| Dagster topology | 1 webserver, exactly 1 daemon, all 9 code locations |
+| External state | PostgreSQL and S3-compatible storage; not counted in this host size |
+| Expected concurrency | Start with 1 active data job and increase only after measurement |
+
+This profile is suitable for UAT validation of approximately 1,000 virtual
+users when Dagster jobs are short, database and S3 services are external, and
+the load generator is hosted separately. Do not run the load generator on the
+Dagster host.
+
+### Mode 2: Production - 5 million master profiles
+
+For 5 million profiles, use a dedicated Dagster host with room for Python
+processes and dataframe materialization:
+
+| Resource | Minimum starting point | Recommended starting point |
+|---|---:|---:|
+| CPU | 8 vCPU | 16 vCPU |
+| Memory | 32 GB RAM | 64 GB RAM |
+| Local disk | 200 GB SSD | 500 GB NVMe SSD |
+| Network | 1 Gbps private network | 10 Gbps private network where available |
+| Dagster topology | 1 webserver, exactly 1 daemon | 1 webserver, exactly 1 daemon |
+| External state | Dedicated PostgreSQL and S3-compatible storage | Managed, highly available PostgreSQL and S3 |
+
+The recommended profile assumes the current Compose implementation executes jobs from
+the Dagster deployment rather than isolated worker pods. It provides headroom
+for identity-resolution batches, segmentation queries, analytics processing,
+Dagster code-location processes, rolling deployment, and operating-system
+memory. It is not a guarantee that a full 5-million-profile recompute will
+finish within a target window.
+
+### 5-million-profile capacity gates
+
+Before production go-live, measure all of the following with production-shaped
+data:
+
+- Full identity-resolution drain time with `CIR_BATCH_SIZE=5000` and the
+  expected raw-profile arrival rate.
+- Full segmentation recompute time and peak resident memory for the largest
+  tenant and the highest-cardinality segment.
+- Analytics aggregation time, S3 read throughput, and peak local temporary
+  storage.
+- One scheduled run plus one API-triggered run, including database and S3
+  contention.
+- Recovery time after webserver, daemon, PostgreSQL, and S3 interruptions.
+
+The segmentation implementation currently materializes matching profile IDs in
+memory. At 5 million profiles, this can dominate RAM and PostgreSQL query time;
+the 64 GB recommendation must be validated, not assumed. If the benchmark
+exceeds memory or the service-level window, move execution to isolated Dagster
+run workers and change the query path to stream or page results before adding
+more webserver replicas.
+
+### Common host requirements
+
+- Docker Engine 24 or newer with the Docker Compose v2 plugin. The legacy
+  `docker-compose` v1 binary is not supported.
+- NTP/time synchronization enabled. Dagster schedules and analytics windows are
+  evaluated in UTC.
+- SSD-backed Docker storage with log rotation and at least 30 percent free disk.
+- Private access to PostgreSQL on `DB_HOST:DB_PORT` and the S3 endpoint over
+  TLS. The S3 credentials need bucket-check and object read/write permissions.
+- Dagster UI port `3000` exposed only through an authenticated reverse proxy,
+  private load balancer, VPN, or SSH tunnel.
+- Production image pinned by immutable digest, vulnerability-scanned, and
+  built outside the production host.
+- Secrets supplied through a protected secret store or a file with mode `0600`.
+- The Dagster webserver and daemon must use the same image and configuration;
+  never run more than one daemon.
+
+### Preflight checks
+
+```bash
+docker version
+docker compose version
+df -h /
+free -h
+timedatectl status
+
+docker compose config --quiet
+```
+
+Do not approve production from server size alone. Record the benchmark results,
+peak CPU/RAM/disk, queue depth, job duration, and recovery time for the chosen
+mode.
+
 ## Production decision
 
 The supported production topology is the root `docker-compose.yml` stack:
@@ -13,55 +121,16 @@ The supported production topology is the root `docker-compose.yml` stack:
 | `dagster` | 1 or more webservers | GraphQL/UI endpoint and code-location loading |
 | `dagster-daemon` | exactly 1 | Schedules, sensors, run queue, and run monitoring |
 | `dagster-db-init` | one-shot | Creates the dedicated `dagster` PostgreSQL database |
-| PostgreSQL | shared | Durable Dagster run, event, and schedule storage |
-| S3-compatible storage | shared | Durable compute logs |
+| PostgreSQL | shared external state | Durable Dagster run, event, and schedule storage |
+| S3-compatible storage | shared external state | Durable compute logs |
 
 Do not run two daemons. There is no daemon leader election in this deployment,
 so two daemon processes can launch duplicate schedule or sensor runs. Do not
 run multiple webservers against SQLite or a shared local filesystem.
 
-The VM deployment script and the current Kubernetes manifest still represent the
-legacy single-container `dagster dev` topology. They are not equivalent to the
-production Compose topology and must not be used for a production rollout until
-they are migrated to separate webserver and daemon workloads with shared
-PostgreSQL and object storage. This distinction is intentional and is called
-out below in the deployment sections.
+## Dagster workspace
 
-## Go-live prerequisites
-
-Complete these checks before the first production deployment:
-
-- A dedicated PostgreSQL database named by `DAGSTER_PG_DB` exists, or the
-  database init job's `DB_USER` has permission to create databases.
-- PostgreSQL accepts connections from both Dagster services using `DB_HOST`,
-  `DB_PORT`, `DB_USER`, and `DB_PASSWORD`.
-- The S3-compatible endpoint, bucket, region, and credentials are configured.
-  The bucket must already exist and the credentials must be able to check and
-  write objects. The Dagster renderer performs `head_bucket` before startup.
-- `DAGSTER_REQUIRE_S3=true` is explicitly set in the production environment.
-  Do not rely on the local-development default in `.env.example`.
-- The image is built in CI, tagged with an immutable Git SHA or digest, tested,
-  scanned, and promoted. Do not build unreviewed source on the production host.
-- The base image reference is pinned to a reviewed digest and the final image
-	passes vulnerability scanning. A mutable `python:3.11-slim*` tag is not a
-	sufficient production artifact by itself.
-- A PostgreSQL backup has completed and its restore procedure has been tested.
-- The release has a maintenance window or a documented rollback owner. Dagster
-  database migrations can make an older image unsafe to roll back to.
-
-Required production secrets must come from the deployment secret store or a
-root-owned file with mode `0600`. Never commit `.env`, print it in logs, or put
-credentials in a Dockerfile, image label, command argument, or ticket.
-
-The current Compose file attaches the complete `.env` file to the API and
-Dagster containers. Use this only on a trusted host and treat every value in
-that file as exposed to those processes. Before operating in a higher-risk
-multi-tenant environment, replace the broad `env_file` usage with explicit
-allowlisted variables and dedicated secrets for each service.
-
-## Important count: 9 tasks
-
-The repository currently contains **nine** Dagster task directories:
+The repository currently contains nine Dagster task directories:
 
 1. `analytics`
 2. `campaign_activation`
@@ -73,40 +142,10 @@ The repository currently contains **nine** Dagster task directories:
 8. `scoring`
 9. `segmentation`
 
-Every task directory contains a `dagster_defs.py` and `requirements.txt`.
-
-Current implementation status:
-
-| Task | Current status |
-|---|---|
-| `identity_resolution` | Implemented CIR job and optional poll sensor |
-| `segmentation` | Implemented segment recomputation job and poll sensor |
-| `analytics` | Hourly tracking-log aggregation job and UTC schedule |
-| `campaign_activation` | Placeholder Dagster job |
-| `data_synch` | Placeholder Dagster job |
-| `email_engine` | Placeholder Dagster job |
-| `notification_engine` | Placeholder Dagster job |
-| `personalization` | Placeholder Dagster job |
-| `scoring` | Placeholder Dagster job |
-
-### Workspace registration
-
-`backend-system/workspace.yaml` registers all nine locations:
-
-- `identity_resolution`
-- `scoring`
-- `segmentation`
-- `analytics`
-- `data_synch`
-- `email_engine`
-- `notification_engine`
-- `campaign_activation`
-- `personalization`
-
-Keep the workspace list and the `backend-system/Dockerfile`
-dependency-install loop synchronized. The image must install the
-`requirements.txt` file from each of the nine task directories so every code
-location can load successfully at runtime.
+`backend-system/workspace.yaml` registers all nine locations. Keep that list
+and the dependency-install loop in `backend-system/Dockerfile` synchronized.
+Every task directory must provide `dagster_defs.py` and `requirements.txt` so
+the unified image can load every code location.
 
 ## Persistence layer - PostgreSQL + object storage
 
