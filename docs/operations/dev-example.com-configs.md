@@ -50,6 +50,9 @@ origin is `https://c360.example.com`, do not use `X-Frame-Options: SAMEORIGIN`;
 use the iframe route's `frame-ancestors` policy below instead.
 
 ```nginx
+############# C360 local dev #######
+####################################
+
 # c360 web admin
 upstream c360_frontend {
   server 127.0.0.1:8890;
@@ -202,6 +205,13 @@ server {
 # root, while the web console remains under /minio/ on the same hostname.
 server {
   server_name s3dev.example.com;
+  
+  # Allow any size file to be uploaded to MinIO. Prevents HTTP 413 errors on large uploads.
+  client_max_body_size 0;
+  
+  # Disable buffering for smoother streaming and large file uploads
+  proxy_buffering off;
+  proxy_request_buffering off;
 
   location = /minio {
     return 308 /minio/;
@@ -214,6 +224,12 @@ server {
     proxy_set_header X-Forwarded-Port $server_port;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_read_timeout 600s;
+    
+    # REQUIRED WEBSOCKET HEADERS ADDED HERE
+    # Upgrades the HTTP connection to a WebSocket connection for MinIO Console components
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
   }
 
   location / {

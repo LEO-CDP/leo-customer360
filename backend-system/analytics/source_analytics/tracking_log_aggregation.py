@@ -1,6 +1,5 @@
 """Aggregate data-tracking JSONL objects into hourly Redis and source totals."""
 
-import hashlib
 import json
 import logging
 import os
@@ -47,8 +46,11 @@ SOURCE_STATE_PREFIX = "analytics:data-source-state:"
 SOURCE_DAILY_PREFIX = "analytics:data-source-daily:"
 SOURCE_PROFILE_HLL_PREFIX = "analytics:data-source-profiles-hll:"
 LOCK_TTL_SECONDS = int(os.environ.get("ANALYTICS_LOCK_TTL_SECONDS", "3600"))
+PROCESSED_OBJECT_TTL_SECONDS = int(
+    os.environ.get("ANALYTICS_PROCESSED_OBJECT_TTL_SECONDS", str(48 * 60 * 60))
+)
 _INCREMENT_IF_NEW_SCRIPT = """
-if redis.call('SETNX', KEYS[2], ARGV[1]) == 1 then
+if redis.call('SET', KEYS[2], ARGV[1], 'NX', 'EX', ARGV[4]) then
     redis.call('HINCRBY', KEYS[1], ARGV[2], ARGV[3])
     return 1
 end
@@ -186,11 +188,14 @@ def iter_hourly_objects(
     s3_client: Any,
     bucket: str,
     start_after: Optional[str] = None,
+    prefix: Optional[str] = None,
 ) -> Any:
     """List JSONL object keys and their UTC hour folder in a bucket."""
     try:
         paginator = s3_client.get_paginator("list_objects_v2")
         paginate_kwargs: dict[str, str] = {"Bucket": bucket}
+        if prefix:
+            paginate_kwargs["Prefix"] = prefix
         if start_after:
             paginate_kwargs["StartAfter"] = start_after
         for page in paginator.paginate(**paginate_kwargs):
@@ -212,6 +217,16 @@ def _source_daily_key(data_source_id: str) -> str:
 
 def _source_profile_hll_key(data_source_id: str) -> str:
     return f"{SOURCE_PROFILE_HLL_PREFIX}{data_source_id}"
+
+
+def current_system_gmt_hour() -> str:
+    """Return current system datetime in GMT with format yyyy-mm-dd-HH."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d-%H")
+
+
+def s3_json_cache_key(bucket: str, object_key: str) -> str:
+    """Build the Redis cache key from the S3 JSON object path."""
+    return f"s3://{bucket}/{object_key}"
 
 
 def _get_source_state_int(redis_client: Any, data_source_id: str, field: str) -> Optional[int]:
@@ -587,6 +602,7 @@ def increment_hourly_count(
     redis_client: Any,
     data_source_id: str,
     hour: str,
+    bucket: str,
     object_key: str,
     event_count: int,
 ) -> bool:
@@ -599,16 +615,17 @@ def increment_hourly_count(
         raise ValueError("event count cannot be negative")
 
     hourly_key = f"{data_source_id}-{hour}"
-    object_digest = hashlib.sha256(object_key.encode("utf-8")).hexdigest()
-    checkpoint_key = f"analytics:processed-tracking-object:{data_source_id}:{object_digest}"
+    checkpoint_key = s3_json_cache_key(bucket, object_key)
+    processed_at = current_system_gmt_hour()
     result = redis_client.eval(
         _INCREMENT_IF_NEW_SCRIPT,
         2,
         hourly_key,
         checkpoint_key,
-        "1",
+        processed_at,
         TRACKED_EVENT_FIELD,
         str(event_count),
+        str(PROCESSED_OBJECT_TTL_SECONDS),
     )
     return int(result) == 1
 
@@ -670,6 +687,7 @@ def process_tracking_logs(
     cache = redis_client if redis_client is not None else build_redis_client()
     write_log = log or logger.info
     run_id = run_id or str(uuid4())
+    current_hour = current_system_gmt_hour()
     source_items: list[tuple[str, str]] = []
     source_results: list[dict[str, Any]] = []
 
@@ -694,7 +712,14 @@ def process_tracking_logs(
         bucket = f"data-tracking-{data_source_id}"
         try:
             start_after = get_source_cursor(cache, data_source_id)
-            for hour, object_key in iter_hourly_objects(storage, bucket, start_after=start_after):
+            if not start_after or not start_after.startswith(f"{current_hour}/"):
+                start_after = None
+            for hour, object_key in iter_hourly_objects(
+                storage,
+                bucket,
+                start_after=start_after,
+                prefix=f"{current_hour}/",
+            ):
                 refresh_source_lock(cache, data_source_id, lock_token)
                 response = storage.get_object(Bucket=bucket, Key=object_key)
                 body = response["Body"]
@@ -705,7 +730,14 @@ def process_tracking_logs(
                     if close:
                         close()
 
-                if increment_hourly_count(cache, data_source_id, hour, object_key, event_count):
+                if increment_hourly_count(
+                    cache,
+                    data_source_id,
+                    hour,
+                    bucket,
+                    object_key,
+                    event_count,
+                ):
                     source_objects_processed += 1
                     source_increment += event_count
                     _increment_source_cached_total(cache, data_source_id, event_count)

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
+from core.buffered_storage import BufferedTrackingStorage
 from core.config import settings
 from core.schemas import TrackingLogRequest, TrackingLogResponse
 from core.service import TrackingLogService
@@ -13,6 +14,7 @@ from core.storage import ObjectStorageError, S3ObjectStorage, StoredTrackingLog,
 router = APIRouter(prefix="/tracking", tags=["Tracking Logs"])
 _storage: S3ObjectStorage | None = None
 _protection: TrackingRequestProtection | None = None
+_tracking_storage: BufferedTrackingStorage | None = None
 
 
 def get_storage() -> S3ObjectStorage:
@@ -29,11 +31,33 @@ def get_protection() -> TrackingRequestProtection:
     return _protection
 
 
-def get_tracking_service(
+def get_tracking_storage(
     storage: S3ObjectStorage = Depends(get_storage),
+) -> BufferedTrackingStorage:
+    global _tracking_storage
+    if _tracking_storage is None:
+        _tracking_storage = BufferedTrackingStorage(
+            storage=storage,
+            flush_interval_seconds=settings.time_to_flush_log,
+            max_queue_size=settings.tracking_log_queue_max_size,
+            flush_batch_size=settings.tracking_log_flush_batch_size,
+        )
+    return _tracking_storage
+
+
+def get_tracking_service(
+    storage: BufferedTrackingStorage = Depends(get_tracking_storage),
     protection: TrackingRequestProtection = Depends(get_protection),
 ) -> TrackingLogService:
     return TrackingLogService(storage, protection.session_cache)
+
+
+def shutdown_tracking_storage() -> None:
+    """Flush and stop the in-process tracking queue worker."""
+    global _tracking_storage
+    if _tracking_storage is not None:
+        _tracking_storage.close()
+        _tracking_storage = None
 
 
 @router.post("/logs", response_model=TrackingLogResponse, status_code=status.HTTP_201_CREATED)
@@ -62,7 +86,7 @@ def ingest_tracking_logs(
             received_at=datetime.now(timezone.utc),
         )
 
-    decision = protection.allow_request(request)
+    decision = protection.allow_request(request, payload.data_source_id)
     if not decision.allowed:
         response.headers["Retry-After"] = str(decision.retry_after_seconds)
         raise HTTPException(

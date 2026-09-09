@@ -30,6 +30,9 @@
 #                                    seed-demo only when DB is empty; otherwise
 #                                    print DB status counts.
 #   ./dev-c360.sh no-seed           Same, but skip the CIR demo data seed step.
+#   ./dev-c360.sh upgrade           Local DEV upgrade: refresh images/containers
+#                                    with current repo code and restart core
+#                                    host services (non-destructive).
 #   ./dev-c360.sh restart           Restart only customer360-api,
 #                                    backend-system, and frontend-admin.
 #   ./dev-c360.sh reset             DESTRUCTIVE: `docker compose down -v`
@@ -67,6 +70,7 @@ SKIP_CONFIRM="false"
 SKIP_SEED="false"
 for arg in "$@"; do
   case "$arg" in
+    upgrade) ACTION="upgrade" ;;
     restart) ACTION="restart" ;;
     reset) ACTION="reset" ;;
     stop-all) ACTION="stop-all" ;;
@@ -99,6 +103,12 @@ if [ "$ACTION" = "restart" ]; then
   echo "   - frontend-admin: ./${FRONTEND_ADMIN_DIR}/restart.sh"
   (cd "$FRONTEND_ADMIN_DIR" && bash restart.sh)
   exit 0
+fi
+
+# 'upgrade' refreshes all dev containers/images and restarts host services
+# without touching persistent volumes.
+if [ "$ACTION" = "upgrade" ]; then
+  SKIP_SEED="true"
 fi
 
 # --- docker compose v2 required (depends_on: condition: service_healthy) ---
@@ -206,8 +216,16 @@ if [ "$ACTION" = "reset" ]; then
   "${DC_CMD[@]}" down -v
 fi
 
-echo "🚀 Starting postgres + redis + keycloak + minio (${COMPOSE_FILE})..."
-"${DC_CMD[@]}" up -d --build
+if [ "$ACTION" = "upgrade" ]; then
+  echo "⬆️  Upgrading local dev services with latest repo state (${COMPOSE_FILE})..."
+  echo "   - Pulling latest base images (non-fatal when some images are local-only)..."
+  "${DC_CMD[@]}" pull --ignore-pull-failures || true
+  echo "   - Rebuilding and force-recreating containers without deleting volumes..."
+  "${DC_CMD[@]}" up -d --build --force-recreate
+else
+  echo "🚀 Starting postgres + redis + keycloak + minio (${COMPOSE_FILE})..."
+  "${DC_CMD[@]}" up -d --build
+fi
 
 # =============================================================================
 # 3) Wait for the healthchecked services, then for the one-shot minio-init
@@ -359,7 +377,11 @@ seed_demo_if_empty() {
 }
 
 if [ "$SKIP_SEED" = "true" ]; then
-  echo "⏭️  --no-seed set -- skipping CIR demo data seed check."
+  if [ "$ACTION" = "upgrade" ]; then
+    echo "⏭️  Upgrade mode -- skipping CIR demo data seed step."
+  else
+    echo "⏭️  --no-seed set -- skipping CIR demo data seed check."
+  fi
 else
   seed_demo_if_empty
 fi

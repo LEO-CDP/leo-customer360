@@ -3,6 +3,7 @@
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -73,6 +74,8 @@ class S3ObjectStorage:
 
         self.client = boto3.client("s3", **client_kwargs)
         self.auto_create_buckets = settings.s3_auto_create_buckets
+        self._known_buckets: set[str] = set()
+        self._known_buckets_lock = Lock()
 
     def check_connection(self) -> None:
         """Probe object-storage reachability for /health.
@@ -93,6 +96,25 @@ class S3ObjectStorage:
         received_at: datetime,
     ) -> StoredTrackingLog:
         bucket, object_key, body = build_tracking_object(data_source_id, events, received_at)
+        return self.store_prebuilt_tracking_object(
+            data_source_id=data_source_id,
+            bucket=bucket,
+            object_key=object_key,
+            body=body,
+            event_count=len(events),
+            received_at=received_at,
+        )
+
+    def store_prebuilt_tracking_object(
+        self,
+        data_source_id: UUID,
+        bucket: str,
+        object_key: str,
+        body: bytes,
+        event_count: int,
+        received_at: datetime,
+    ) -> StoredTrackingLog:
+        """Write a prebuilt NDJSON object to S3-compatible storage."""
         self._ensure_bucket(bucket)
         try:
             self.client.put_object(
@@ -109,11 +131,22 @@ class S3ObjectStorage:
             data_source_id=data_source_id,
             bucket=bucket,
             object_key=object_key,
-            event_count=len(events),
+            event_count=event_count,
             received_at=received_at,
         )
 
     def _ensure_bucket(self, bucket: str) -> None:
+        if bucket in self._known_buckets:
+            return
+
+        with self._known_buckets_lock:
+            if bucket in self._known_buckets:
+                return
+
+            self._ensure_bucket_remote(bucket)
+            self._known_buckets.add(bucket)
+
+    def _ensure_bucket_remote(self, bucket: str) -> None:
         try:
             self.client.head_bucket(Bucket=bucket)
             return

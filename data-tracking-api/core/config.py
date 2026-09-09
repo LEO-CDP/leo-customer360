@@ -53,6 +53,22 @@ class Settings(BaseSettings):
         default=1000,
         validation_alias=AliasChoices("TRACKING_MAX_EVENTS_PER_REQUEST", "tracking_max_events_per_request"),
     )
+    time_to_flush_log: int = Field(
+        default=5,
+        validation_alias=AliasChoices("TIME_TO_FLUSH_LOG", "time_to_flush_log"),
+    )
+    tracking_log_queue_max_size: int = Field(
+        default=1000,
+        validation_alias=AliasChoices(
+            "TRACKING_LOG_QUEUE_MAX_SIZE", "tracking_log_queue_max_size"
+        ),
+    )
+    tracking_log_flush_batch_size: int = Field(
+        default=200,
+        validation_alias=AliasChoices(
+            "TRACKING_LOG_FLUSH_BATCH_SIZE", "tracking_log_flush_batch_size"
+        ),
+    )
     redis_host: str = Field(
         default="localhost",
         validation_alias=AliasChoices("REDIS_HOST", "redis_host"),

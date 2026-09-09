@@ -9,7 +9,11 @@ from redis.exceptions import RedisError
 
 from app import app
 from core.config import Settings
-from core.redis_cache import RateLimitDecision, TrackingRequestProtection
+from core.redis_cache import (
+    RateLimitDecision,
+    TrackingRequestProtection,
+    build_rate_limit_key,
+)
 from core.routers.tracking import get_protection, get_storage, get_tracking_service
 from core.service import TrackingLogService, _collect_sessions
 from core.storage import StoredTrackingLog, build_tracking_object
@@ -46,8 +50,10 @@ class FakeRedis:
     def __init__(self, count=1, error=None):
         self.count = count
         self.error = error
+        self.eval_calls = []
 
-    def eval(self, *_args):
+    def eval(self, *args):
+        self.eval_calls.append(args)
         if self.error:
             raise self.error
         return self.count
@@ -62,7 +68,7 @@ class FakeProtection:
     def is_bot(self, _user_agent):
         return self.bot
 
-    def allow_request(self, _request):
+    def allow_request(self, _request, _data_source_id):
         return self.decision
 
 
@@ -134,16 +140,59 @@ def test_rate_limiter_rejects_after_limit_and_supports_fail_open():
         tracking_rate_limit_window_seconds=30,
         tracking_rate_limit_fail_open=False,
     )
-    request = type("Request", (), {"client": type("Client", (), {"host": "127.0.0.1"})()})()
+    request = type(
+        "Request",
+        (),
+        {
+            "client": type("Client", (), {"host": "127.0.0.1"})(),
+            "headers": {"origin": "https://c360.example.com"},
+        },
+    )()
 
-    denied = TrackingRequestProtection(settings, client=FakeRedis(count=2)).allow_request(request)
+    denied = TrackingRequestProtection(settings, client=FakeRedis(count=2)).allow_request(
+        request, SOURCE_ID
+    )
     assert denied == RateLimitDecision(allowed=False, retry_after_seconds=30)
 
     fail_open = TrackingRequestProtection(
         Settings(tracking_rate_limit_fail_open=True),
         client=FakeRedis(error=RedisError("redis down")),
-    ).allow_request(request)
+    ).allow_request(request, SOURCE_ID)
     assert fail_open.allowed
+
+
+def test_rate_limit_key_contains_ip_data_source_and_origin():
+    key = build_rate_limit_key(
+        "data-tracking-api",
+        "172.22.0.1",
+        SOURCE_ID,
+        "https://c360.example.com",
+    )
+
+    assert key == (
+        "data-tracking-api:rate:ip:172.22.0.1"
+        f":data-source:{SOURCE_ID}:origin:https://c360.example.com"
+    )
+
+
+def test_rate_limiter_passes_scoped_key_to_redis():
+    client = FakeRedis(count=1)
+    protection = TrackingRequestProtection(Settings(), client=client)
+    request = type(
+        "Request",
+        (),
+        {
+            "client": type("Client", (), {"host": "172.22.0.1"})(),
+            "headers": {"origin": "https://c360.example.com"},
+        },
+    )()
+
+    protection.allow_request(request, SOURCE_ID)
+
+    assert client.eval_calls[0][2] == (
+        "data-tracking-api:rate:ip:172.22.0.1"
+        f":data-source:{SOURCE_ID}:origin:https://c360.example.com"
+    )
 
 
 def test_bot_request_is_acknowledged_without_storage_or_rate_limit():

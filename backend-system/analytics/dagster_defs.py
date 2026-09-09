@@ -1,4 +1,4 @@
-"""Dagster definitions for hourly Customer 360 tracking-log analytics."""
+"""Dagster definitions for periodic Customer 360 tracking-log analytics."""
 
 import os
 import sys
@@ -43,8 +43,8 @@ def analytics_job() -> None:
 analytics_hourly_schedule = ScheduleDefinition(
     name="analytics_hourly_schedule",
     job=analytics_job,
-    cron_schedule="0 * * * *",
-    execution_timezone="UTC",
+    cron_schedule="*/3 * * * *",
+    execution_timezone="GMT",
     default_status=DefaultScheduleStatus.RUNNING,
 )
 

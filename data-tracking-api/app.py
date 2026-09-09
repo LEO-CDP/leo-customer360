@@ -1,5 +1,6 @@
 """FastAPI entrypoint for the CDP data-tracking log service."""
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import Depends, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,13 +9,27 @@ from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
 from core.redis_cache import TrackingRequestProtection
-from core.routers.tracking import get_protection, get_storage, router as tracking_router
+from core.routers.tracking import (
+    get_protection,
+    get_storage,
+    router as tracking_router,
+    shutdown_tracking_storage,
+)
 from core.storage import S3ObjectStorage
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        shutdown_tracking_storage()
 
 app = FastAPI(
     title="Customer 360 Data Tracking API",
     description="Ingests CDP tracking records into hourly S3-compatible objects.",
     version=settings.api_version,
+    lifespan=lifespan,
 )
 
 app.add_middleware(

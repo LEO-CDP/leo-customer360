@@ -1,5 +1,6 @@
 .git/
 .github/
+.env*
 
 # Large directories not needed by the postgres image build context.
 backend-system/
