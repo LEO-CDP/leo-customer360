@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""Render $DAGSTER_HOME/dagster.yaml adaptively at container start.
+"""Render the production Dagster instance config at container start.
 
-The instance uses shared PostgreSQL storage + S3/MinIO compute logs WHEN THEY ARE
-REACHABLE, and otherwise falls back to Dagster's local defaults (SQLite run/event/
-schedule storage + local compute logs) so the orchestrator ALWAYS starts — on
-local, UAT and PROD, with or without Postgres/S3.
-
-Never raises: any probe failure just drops that backend to its local default.
-Run by entrypoint.sh before the Dagster process starts.
+PostgreSQL is mandatory for shared run/event/schedule state. S3-compatible
+compute logs are mandatory when DAGSTER_REQUIRE_S3=true. A failed readiness
+probe stops the orchestrator instead of silently losing production state.
 """
 from __future__ import annotations
 
@@ -24,49 +20,46 @@ def log(msg: str) -> None:
 
 
 def postgres_ready() -> bool:
-    """True if we can connect to the dedicated dagster DB (creating it if needed)."""
+    """True if we can connect to the pre-provisioned dedicated Dagster DB."""
     host = os.environ.get("DB_HOST")
     if not host:
         return False
     try:
         import psycopg2
-    except Exception as e:  # driver missing -> local default
-        log(f"psycopg2 unavailable ({e}); using SQLite")
+    except Exception as e:
+        log(f"psycopg2 unavailable ({e})")
         return False
     base = dict(
         host=host,
-        port=int(os.environ.get("DB_PORT", "5432")),
+        port=os.environ.get("DB_PORT", "5432"),
         user=os.environ.get("DB_USER", "postgres"),
         password=os.environ.get("DB_PASSWORD", ""),
         connect_timeout=5,
     )
-    # Best-effort: create the dedicated database if it does not exist yet.
-    try:
-        c = psycopg2.connect(dbname="postgres", **base)
-        c.autocommit = True
-        with c.cursor() as cur:
-            cur.execute("SELECT 1 FROM pg_database WHERE datname=%s", (DAGSTER_DB,))
-            if not cur.fetchone():
-                cur.execute(f'CREATE DATABASE "{DAGSTER_DB}"')
-                log(f"created database {DAGSTER_DB!r}")
-        c.close()
-    except Exception as e:
-        log(f"could not ensure database {DAGSTER_DB!r} ({e})")
-    # Authoritative check: can we actually connect to the target database?
     try:
         psycopg2.connect(dbname=DAGSTER_DB, **base).close()
         return True
     except Exception as e:
-        log(f"postgres not reachable ({e}); using SQLite")
+        log(f"postgres database is not reachable ({e})")
         return False
 
 
 def s3_ready() -> bool:
     """True if the compute-log bucket is configured AND reachable."""
-    endpoint = os.environ.get("S3_ENDPOINT")
-    bucket = os.environ.get("MINIO_BUCKET")
-    key = os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("MINIO_ROOT_USER")
-    secret = os.environ.get("AWS_SECRET_ACCESS_KEY") or os.environ.get("MINIO_ROOT_PASSWORD")
+    endpoint = os.environ.get("DAGSTER_S3_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT")
+    bucket = os.environ.get("DAGSTER_LOGS_BUCKET") or os.environ.get("MINIO_BUCKET")
+    key = (
+        os.environ.get("DAGSTER_S3_ACCESS_KEY_ID")
+        or os.environ.get("AWS_ACCESS_KEY_ID")
+        or os.environ.get("S3_ACCESS_KEY_ID")
+        or os.environ.get("MINIO_ROOT_USER")
+    )
+    secret = (
+        os.environ.get("DAGSTER_S3_SECRET_ACCESS_KEY")
+        or os.environ.get("AWS_SECRET_ACCESS_KEY")
+        or os.environ.get("S3_SECRET_ACCESS_KEY")
+        or os.environ.get("MINIO_ROOT_PASSWORD")
+    )
     if not (endpoint and bucket and key and secret):
         return False
     try:
@@ -107,29 +100,33 @@ S3_BLOCK = """compute_logs:
   module: dagster_aws.s3.compute_log_manager
   class: S3ComputeLogManager
   config:
-    bucket: { env: MINIO_BUCKET }
+    bucket: { env: DAGSTER_LOGS_BUCKET }
     prefix: dagster-compute-logs
-    endpoint_url: { env: S3_ENDPOINT }
+    endpoint_url: { env: DAGSTER_S3_ENDPOINT_URL }
     skip_empty_files: true
 """
 
 HEADER = (
     "# AUTO-GENERATED at container start by scripts/render_dagster_instance.py.\n"
-    "# Adaptive: shared PostgreSQL + S3 compute logs when reachable, else local\n"
-    "# SQLite + local compute logs. Edit the renderer, not this file.\n"
+    "# Shared PostgreSQL is mandatory; S3 compute logs are required in production.\n"
+    "# Edit the renderer, not this file.\n"
 )
 
 
 def main() -> int:
     parts: list[str] = []
-    if postgres_ready():
-        parts.append(PG_BLOCK)
-        log("storage: PostgreSQL (shared)")
-    else:
-        log("storage: SQLite (local default)")
+    if not postgres_ready():
+        log("storage: PostgreSQL is unavailable; refusing to start")
+        return 1
+    parts.append(PG_BLOCK)
+    log("storage: PostgreSQL (shared)")
+
     if s3_ready():
         parts.append(S3_BLOCK)
         log("compute logs: S3 / MinIO")
+    elif os.environ.get("DAGSTER_REQUIRE_S3", "false").lower() in {"1", "true", "yes"}:
+        log("compute logs: S3 / MinIO is required but unavailable; refusing to start")
+        return 1
     else:
         log("compute logs: local (default)")
 
@@ -144,11 +141,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except Exception as e:  # never block Dagster startup
-        log(f"unexpected error ({e}); leaving Dagster on local defaults")
-        try:
-            with open(OUT, "w", encoding="utf-8") as f:
-                f.write("# render failed; using Dagster local defaults (SQLite + local logs)\n")
-        except Exception:
-            pass
-        sys.exit(0)
+    except Exception as e:
+        log(f"instance configuration failed: {e}")
+        sys.exit(1)
