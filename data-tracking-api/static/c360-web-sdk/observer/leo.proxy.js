@@ -57,6 +57,7 @@
 	if (leoC360SourceId) {
 		window.leoC360SourceId = leoC360SourceId;
 		window.leoC360DataSourceId = leoC360SourceId;
+		window.LEO_SESSION_NAMESPACE_UUID = leoC360SourceId;
 	}
 
 	var TIME_TO_ADD_PROXY_IFRAME = typeof window.leoProxyDelay === 'number' ? window.leoProxyDelay : 300; // delay to avoid blocking page load
@@ -188,6 +189,9 @@
     	        if( leosyn && leosyn.length > 5 ) {
     	        	iframeProxyUrl = iframeProxyUrl + '_' + encodeURIComponent(leosyn);
     	        }
+			if (leoC360SourceId) {
+				iframeProxyUrl = iframeProxyUrl + '_' + encodeURIComponent(leoC360SourceId);
+			}
 
     	        // Cross domain iframe
     	        var iframeProxy = document.createElement("iframe");
@@ -260,7 +264,8 @@
             if (eventType === "LeoObserverProxyLoaded") {
  				initLeoContextSession();
             } 
-            else if (eventType === "LeoObserverProxyReady" || (typeof data === 'string' && data.indexOf("LeoObserverProxyReady") === 0)) {
+			else if (eventType === "LeoObserverProxyReady" || (typeof data === 'string' && data.indexOf("LeoObserverProxyReady") === 0)) {
+				var wasReady = LeoObserverProxy.isReady;
             	LeoObserverProxy.isReady = true;
             	flushPendingEvents();
             	var sessionContext = {
@@ -274,17 +279,19 @@
             	if (sessionContext.visitorId) LeoObserverProxy.visitorId = sessionContext.visitorId;
             	if (sessionContext.fingerprintId) LeoObserverProxy.fingerprintId = sessionContext.fingerprintId;
 
-            	var f = window.leoObserverProxyReady;
-                if (typeof f === "function") {
-                	try {
-                		f(sessionContext);
-                	} catch(cbErr) {
-                		console.error("[LeoProxy] leoObserverProxyReady callback error:", cbErr);
-                	}
-                }
+				if (!wasReady) {
+					var f = window.leoObserverProxyReady;
+					if (typeof f === "function") {
+						try {
+							f(sessionContext);
+						} catch(cbErr) {
+							console.error("[LeoProxy] leoObserverProxyReady callback error:", cbErr);
+						}
+					}
 
-                if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
-                	window.dispatchEvent(new CustomEvent("leo_observer_ready", { detail: sessionContext }));
+					if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+						window.dispatchEvent(new CustomEvent("leo_observer_ready", { detail: sessionContext }));
+					}
                 }
             }
             else if (typeof data === 'string' && data.indexOf('synchLeoVisitorId') === 0) {
@@ -352,6 +359,12 @@
                 'tpurl': encodeURIComponent(tpurl),
                 'tpname': encodeURIComponent(tpname)
             };
+
+
+            if (typeof metricName === "string" && typeof eventData === "object" && eventData !== null) {
+                if (eventData.event_id) params['event_id'] = eventData.event_id;
+                params['event_time'] = eventData.event_time || eventData.occurred_at || new Date().toISOString();
+            }
             
             if(typeof metricName === "string" && typeof eventData === "object" && eventData !== null){
             	params['metric'] = metricName;                

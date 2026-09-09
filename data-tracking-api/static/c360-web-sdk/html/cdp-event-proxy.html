@@ -90,6 +90,16 @@
                 } catch(e) {}
                 PARENT_ORIGIN = PARENT_ORIGIN.replace(/\/+$/, '');
 
+                var configuredDataSourceId = '';
+                var lastToken = toks[toks.length - 1];
+                try {
+                    lastToken = decodeURIComponent(lastToken);
+                } catch(e) {}
+                if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(lastToken)) {
+                    configuredDataSourceId = lastToken;
+                    toks.pop();
+                }
+
                 if (toks.length >= 3) {
                     var injectedVisitorId = toks.slice(2).join('_');
                     try {
@@ -111,6 +121,12 @@
                     ROOT_DOMAIN = ROOT_DOMAIN.replace(/^https?:\/\//, '');
                 } else {
                     LEO_LOG_URL = protocol + '//' + ROOT_DOMAIN;
+                }
+
+                if (configuredDataSourceId) {
+                    window.leoC360DataSourceId = configuredDataSourceId;
+                    window.leoC360SourceId = configuredDataSourceId;
+                    window.LEO_SESSION_NAMESPACE_UUID = configuredDataSourceId;
                 }
 
                 // Official LeoCDP v1.0 tracking logs API endpoint
@@ -741,7 +757,6 @@
                                         visitorId: activeVisitorId,
                                         fingerprintId: window.LeoEventObserver.fingerprintId || ''
                                     });
-                                    sendMessage('LeoObserverProxyReady');
                                 },
                                 0
                             );
