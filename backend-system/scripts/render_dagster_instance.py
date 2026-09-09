@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Render $DAGSTER_HOME/dagster.yaml adaptively at container start.
+"""Render $DAGSTER_HOME/dagster.yaml at container start.
 
-The instance uses shared PostgreSQL storage + S3/MinIO compute logs WHEN THEY ARE
-REACHABLE, and otherwise falls back to Dagster's local defaults (SQLite run/event/
-schedule storage + local compute logs) so the orchestrator ALWAYS starts — on
-local, UAT and PROD, with or without Postgres/S3.
+Uses shared PostgreSQL + S3/MinIO compute logs when reachable, else Dagster's
+local defaults (SQLite + local logs). Always writes a bounded QueuedRunCoordinator
+and run_monitoring so orphaned runs are reaped instead of leaking their slot.
 
-Never raises: any probe failure just drops that backend to its local default.
+Never raises: any probe failure drops that backend to its local default.
 Run by entrypoint.sh before the Dagster process starts.
 """
 from __future__ import annotations
@@ -17,6 +16,10 @@ import sys
 DAGSTER_HOME = os.environ.get("DAGSTER_HOME", "/dagster_home")
 OUT = os.path.join(DAGSTER_HOME, "dagster.yaml")
 DAGSTER_DB = os.environ.get("DAGSTER_PG_DB", "dagster")
+
+# Concurrency cap and STARTING-run timeout; override via env.
+MAX_CONCURRENT_RUNS = os.environ.get("DAGSTER_MAX_CONCURRENT_RUNS", "2")
+RUN_START_TIMEOUT = os.environ.get("DAGSTER_RUN_START_TIMEOUT_SECONDS", "300")
 
 
 def log(msg: str) -> None:
@@ -113,10 +116,26 @@ S3_BLOCK = """compute_logs:
     skip_empty_files: true
 """
 
+# Bounded run queue (always written, regardless of storage backend).
+RUN_COORDINATOR_BLOCK = f"""run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: {MAX_CONCURRENT_RUNS}
+"""
+
+# Reap orphaned runs so a dead worker cannot keep holding its slot.
+RUN_MONITORING_BLOCK = f"""run_monitoring:
+  enabled: true
+  start_timeout_seconds: {RUN_START_TIMEOUT}
+  cancel_timeout_seconds: 180
+  max_resume_run_attempts: 0
+  poll_interval_seconds: 60
+"""
+
 HEADER = (
     "# AUTO-GENERATED at container start by scripts/render_dagster_instance.py.\n"
-    "# Adaptive: shared PostgreSQL + S3 compute logs when reachable, else local\n"
-    "# SQLite + local compute logs. Edit the renderer, not this file.\n"
+    "# Edit the renderer, not this file.\n"
 )
 
 
@@ -132,6 +151,12 @@ def main() -> int:
         log("compute logs: S3 / MinIO")
     else:
         log("compute logs: local (default)")
+
+    # Always bound the queue and enable the orphaned-run reaper.
+    parts.append(RUN_COORDINATOR_BLOCK)
+    parts.append(RUN_MONITORING_BLOCK)
+    log(f"run coordinator: QueuedRunCoordinator (max_concurrent_runs={MAX_CONCURRENT_RUNS})")
+    log(f"run monitoring: enabled (start_timeout={RUN_START_TIMEOUT}s)")
 
     os.makedirs(DAGSTER_HOME, exist_ok=True)
     body = "\n".join(parts) if parts else "# all backends fell back to local defaults\n"

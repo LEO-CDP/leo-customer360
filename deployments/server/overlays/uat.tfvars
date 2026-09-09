@@ -13,7 +13,7 @@ otel_enabled = "true"
 
 servers = {
   "1x2" = {
-    flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB — jump host + backend-system (Dagster)
+    flavor_name    = "s-general-2x4" # 2 vCPU / 4 GB - jump host + backend-system (Dagster); resized to stop run-worker OOM/swap. In-place (0 destroy), reboots box.
     root_disk_size = 20
     name           = "backend" # -> c360-api-uat-backend
   }
