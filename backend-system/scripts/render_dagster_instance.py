@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Render the production Dagster instance config at container start.
 
-PostgreSQL is mandatory for shared run/event/schedule state. S3-compatible
+PostgreSQL is mandatory for shared run/event/schedule state; S3-compatible
 compute logs are mandatory when DAGSTER_REQUIRE_S3=true. A failed readiness
 probe stops the orchestrator instead of silently losing production state.
+Always writes a bounded QueuedRunCoordinator and run_monitoring so orphaned
+runs are reaped instead of leaking their concurrency slot.
+
+Run by entrypoint.sh before the Dagster process starts.
 """
 from __future__ import annotations
 
@@ -13,6 +17,10 @@ import sys
 DAGSTER_HOME = os.environ.get("DAGSTER_HOME", "/dagster_home")
 OUT = os.path.join(DAGSTER_HOME, "dagster.yaml")
 DAGSTER_DB = os.environ.get("DAGSTER_PG_DB", "dagster")
+
+# Concurrency cap and STARTING-run timeout; override via env.
+MAX_CONCURRENT_RUNS = os.environ.get("DAGSTER_MAX_CONCURRENT_RUNS", "2")
+RUN_START_TIMEOUT = os.environ.get("DAGSTER_RUN_START_TIMEOUT_SECONDS", "300")
 
 
 def log(msg: str) -> None:
@@ -36,6 +44,19 @@ def postgres_ready() -> bool:
         password=os.environ.get("DB_PASSWORD", ""),
         connect_timeout=5,
     )
+    # Best-effort: create the dedicated database if it does not exist yet.
+    try:
+        c = psycopg2.connect(dbname="postgres", **base)
+        c.autocommit = True
+        with c.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_database WHERE datname=%s", (DAGSTER_DB,))
+            if not cur.fetchone():
+                cur.execute(f'CREATE DATABASE "{DAGSTER_DB}"')
+                log(f"created database {DAGSTER_DB!r}")
+        c.close()
+    except Exception as e:
+        log(f"could not ensure database {DAGSTER_DB!r} ({e})")
+    # Authoritative check: can we actually connect to the target database?
     try:
         psycopg2.connect(dbname=DAGSTER_DB, **base).close()
         return True
@@ -106,6 +127,23 @@ S3_BLOCK = """compute_logs:
     skip_empty_files: true
 """
 
+# Bounded run queue (always written, regardless of storage backend).
+RUN_COORDINATOR_BLOCK = f"""run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: {MAX_CONCURRENT_RUNS}
+"""
+
+# Reap orphaned runs so a dead worker cannot keep holding its slot.
+RUN_MONITORING_BLOCK = f"""run_monitoring:
+  enabled: true
+  start_timeout_seconds: {RUN_START_TIMEOUT}
+  cancel_timeout_seconds: 180
+  max_resume_run_attempts: 0
+  poll_interval_seconds: 60
+"""
+
 HEADER = (
     "# AUTO-GENERATED at container start by scripts/render_dagster_instance.py.\n"
     "# Shared PostgreSQL is mandatory; S3 compute logs are required in production.\n"
@@ -129,6 +167,12 @@ def main() -> int:
         return 1
     else:
         log("compute logs: local (default)")
+
+    # Always bound the queue and enable the orphaned-run reaper.
+    parts.append(RUN_COORDINATOR_BLOCK)
+    parts.append(RUN_MONITORING_BLOCK)
+    log(f"run coordinator: QueuedRunCoordinator (max_concurrent_runs={MAX_CONCURRENT_RUNS})")
+    log(f"run monitoring: enabled (start_timeout={RUN_START_TIMEOUT}s)")
 
     os.makedirs(DAGSTER_HOME, exist_ok=True)
     body = "\n".join(parts) if parts else "# all backends fell back to local defaults\n"
