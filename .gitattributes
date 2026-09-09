@@ -1,0 +1,6 @@
+# Keep files that run inside Linux containers as LF, so a Windows checkout
+# (git autocrlf) cannot bake a CRLF shebang into an image:
+#   #!/usr/bin/env bash^M  ->  env: 'bash\r': No such file or directory  -> exit 127
+*.sh text eol=lf
+*.py text eol=lf
+entrypoint.sh text eol=lf
