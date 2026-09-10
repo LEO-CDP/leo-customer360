@@ -364,7 +364,7 @@ flowchart TB
 | pgAdmin | api box `10.100.1.5` | 5050 | Postgres admin/monitoring UI (`c360-pgadmin`); its own login, exposed **directly** on the LB (`LB :5050 → pgAdmin :5050`); plain HTTP (cleartext login — see the LB note); `pgadmin_data` volume, mem-capped |
 | Dagster | backend box `10.100.1.4` | 3000 | backend-system worker |
 | Portainer agent | backend `10.100.1.4` + tracking `10.100.1.8` | 9001 | `c360-portainer-agent`; lets the api-box Portainer manage these boxes too (private VPC, reached from `10.100.1.5`); registered as Portainer environments |
-| data-tracking-api | tracking box `10.100.1.8` | 8010 | FastAPI event ingestion on its own dedicated `s-general-1x2` box, run as **N auto-load-balanced replicas** (uat 3 / prod 5, `TRACKING_REPLICAS`) on a private docker bridge behind a local **nginx** LB that owns `:8010` (least_conn round-robin); writes NDJSON to vStorage/S3; reuses the api-box Redis for IP rate-limit + session cache (fail-open); OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
+| data-tracking-api | tracking box `10.100.1.8` | 8010 | FastAPI event ingestion on its own dedicated `s-general-1x2` box, run as **N auto-load-balanced replicas** (uat 3 / prod 5, `TRACKING_REPLICAS`) on a private docker bridge behind a local **nginx** LB that owns `:8010` (least_conn round-robin); publishes dynamic batches to the shared Redis Streams consumer group and writes NDJSON asynchronously to vStorage/S3; rate-limit + session state remains fail-open, but Redis is required for durable enqueue; OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
 | docs-vector-search | docs box `10.100.1.7` | 8000 | AI docs Q&A — **local-model RAG**: `paraphrase-multilingual-MiniLM-L12-v2` embed (384-dim, VN+EN) + `bge-reranker-base` rerank + `Qwen2.5-0.5B` GGUF generate; vectors in **pgvector** on the vDB (schema `rag`, table `doc_chunks`); its OWN `s-general-1x2` box; **not behind the LB** (reached via SSH/tunnel — no public route yet); deploy `server/deploy-docs-search.sh` (pull GHCR image → `enrich` on box → serve) |
 | PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` + `leo_ads` + `rag` (pgvector, docs-vector-search) |
 
@@ -419,7 +419,7 @@ terraform output servers          # confirm the tracking box private ip (expecte
 #    If it differs, fix data_upstream (proxy overlay) + the 6580/4318 cidrs (server extra_ingress), re-apply.
 
 # 2) APP — run data-tracking-api as N replicas behind the local nginx LB (:8010), wired to S3
-#    + the api-box Redis (pulls the CI-built image from GHCR; set BUILD_LOCAL=1 to build on the VM).
+#    + the api-box Redis Streams broker (pulls the CI-built image from GHCR; set BUILD_LOCAL=1 to build on the VM).
 #    Replica count defaults to uat 3 / prod 5 — override with TRACKING_REPLICAS=<n>.
 cd ../server && ./deploy-tracking.sh uat
 
@@ -439,9 +439,11 @@ cd ../monitoring && ./deploy-monitoring.sh uat
 
 **Notes**
 
-- Redis is **optional** — the rate limiter fails open and the session cache no-ops if it's absent.
-  The tracking box reuses the existing api-box Redis (no dedicated instance); `deploy-tracking.sh`
-  resolves it from `../cache` and opens `6580` api-box←tracking (server `extra_ingress`).
+- Redis is **required** for the default `TRACKING_QUEUE_BACKEND=redis_stream` durable handoff.
+  Rate limiting and session metadata fail open when Redis is degraded, but ingestion returns a
+  retryable `503` instead of acknowledging an event that cannot be queued. The tracking box reuses
+  the existing api-box Redis (no dedicated instance); `deploy-tracking.sh` resolves it from
+  `../cache` and opens `6580` api-box←tracking (server `extra_ingress`).
 - **Jaeger tracing** reuses the existing api-box Jaeger — the app is OTEL-instrumented and exports
   OTLP to the monitoring box's `:4318` (on/off via `otel_enabled` in `server/overlays/<env>.tfvars`
   or `OTEL_ENABLED`). No Jaeger runs on the tracking box.

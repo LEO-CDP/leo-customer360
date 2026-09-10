@@ -85,7 +85,7 @@ Use **pgvector** in the existing VNGCloud **vDB** (PostgreSQL 15, provisioned by
 
 ### 3.4 Reranker — `reranker.py` (new)
 - fastembed `TextCrossEncoder("BAAI/bge-reranker-base")`; `rerank(query, [chunk_texts]) -> scores`; keep top `RERANK_TOP_K` (default 5).
-- Gated by `RERANK_ENABLED` (default `true`) so it can be dropped first under RAM pressure.
+- Gated by `DOCS_RERANK_ENABLED` (default `true`) so it can be dropped first under RAM pressure.
 
 ### 3.5 Generator — extend `chat()` (the seam returns)
 `CHAT_PROVIDER` with:
@@ -105,14 +105,14 @@ EMBED_PROVIDER=e5-small          # e5-small | bge-small | openai
 EMBED_MODEL=intfloat/multilingual-e5-small
 
 # Reranking
-RERANK_ENABLED=true
-RERANK_MODEL=BAAI/bge-reranker-base
+DOCS_RERANK_ENABLED=true
+DOCS_RERANK_MODEL=BAAI/bge-reranker-base
 RETRIEVE_TOP_N=20
 RERANK_TOP_K=5
 
 # Generation
 CHAT_PROVIDER=qwen-local         # qwen-local | openai | greennode
-QWEN_MODEL_PATH=/app/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf
+DOCS_LOCAL_MODEL_PATH=/app/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf
 # Fallback (hosted): LEO_OPENAI_API_KEY, LEO_OPENAI_MODEL_NAME, OPENAI_BASE_URL (GreenNode)
 
 # Chunking
@@ -161,7 +161,7 @@ pgvector>=0.3             # pgvector adapter for psycopg
 
 **Model weights (~1–1.4 GB)** — do **not** bake into the image (keeps it lean, avoids re-pushing on code changes). Instead mount a **`models` volume** and fetch on first boot:
 - fastembed auto-downloads its ONNX models to `FASTEMBED_CACHE_DIR`.
-- the Qwen GGUF is pulled once (huggingface-cli or curl) into `QWEN_MODEL_PATH`.
+- the Qwen GGUF is pulled once (huggingface-cli or curl) into `DOCS_LOCAL_MODEL_PATH`.
 
 `llama-cpp-python` needs a C/C++ toolchain to build in `python:3.12-slim` — either add build deps in a builder stage or use a prebuilt CPU wheel; only needed for Profile B.
 
@@ -169,7 +169,7 @@ pgvector>=0.3             # pgvector adapter for psycopg
 
 ## 7. Deployment impact (`docs-vector-search/`)
 
-- **Compose:** add a `models` named volume (`/app/models`), set `FASTEMBED_CACHE_DIR` + `QWEN_MODEL_PATH`, keep the **1 CPU / 2 GB** limits. For Profile B, document adding a **2 GB swapfile** on the host (`fallocate`/`swapon`) — container memory limit stays 2 GB but swap gives headroom.
+- **Compose:** add a `models` named volume (`/app/models`), set `FASTEMBED_CACHE_DIR` + `DOCS_LOCAL_MODEL_PATH`, keep the **1 CPU / 2 GB** limits. For Profile B, document adding a **2 GB swapfile** on the host (`fallocate`/`swapon`) — container memory limit stays 2 GB but swap gives headroom.
 - **deploy.sh:** add a one-time model-fetch step (into the volume) before `up`; the enrich step now chunks + embeds locally (no API cost) and **upserts chunks into the vDB**.
 - **vDB (pgvector):** one-time `CREATE EXTENSION vector` + the `rag.doc_chunks` DDL per env via `deployments/postgres/run-sql.sh` (UAT vDB and PROD vDB separately). The app connects with the vDB creds in `.env.<env>`; the index lives in the managed DB, so it **does not count against the app's 2 GB**. **Prerequisite:** confirm the VNGCloud vDB allows the `vector` extension — managed Postgres sometimes gates extensions; if it's unavailable, request it or run a pgvector-enabled Postgres.
 - **Latency on 1 vCPU:** embed query ~ms; rerank 20 chunks ~100–300 ms; Qwen 0.5B generation a few tokens/s → answers in a few seconds. Single CPU ⇒ **serialize** requests (low concurrency); acceptable for an internal API. Hosted generation (Profile A) is faster and frees the CPU.
@@ -185,7 +185,7 @@ pgvector>=0.3             # pgvector adapter for psycopg
 - [ ] Keep generation **hosted** (Profile A). Ship + measure retrieval quality vs the whole-doc baseline.
 
 **Phase 2 — local reranking.**
-- [ ] `reranker.py` (bge-reranker-base); wire retrieve-top-20 → rerank → top-5. `RERANK_ENABLED=true`.
+- [ ] `reranker.py` (bge-reranker-base); wire retrieve-top-20 → rerank → top-5. `DOCS_RERANK_ENABLED=true`.
 - [ ] Measure rerank lift + latency + RAM. Still Profile A.
 
 **Phase 3 — local generation (full local).**

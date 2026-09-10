@@ -15,7 +15,7 @@ RUN opentelemetry-bootstrap -a install
 # download them at runtime — unauthenticated Hugging Face is ~10 min on the box, which
 # blew past the healthcheck. Baked OUTSIDE the mounted MODELS_DIR (a host volume would
 # shadow anything under /app/models). Keep these two names in sync with the config.py /
-# deploy defaults (EMBED_MODEL, RERANK_MODEL); an env override still downloads on demand.
+# deploy defaults (DOCS_EMBEDDING_MODEL, DOCS_RERANK_MODEL); an env override still downloads on demand.
 ENV FASTEMBED_CACHE=/app/model-cache/fastembed
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2', cache_dir='/app/model-cache/fastembed')" \
  && python -c "from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder(model_name='BAAI/bge-reranker-base', cache_dir='/app/model-cache/fastembed')"

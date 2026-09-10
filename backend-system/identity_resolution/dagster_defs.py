@@ -22,6 +22,7 @@ ephemeral in-memory instance.
 
 import os
 import sys
+from datetime import datetime, timezone
 from typing import Optional
 
 # Dagster's `python_file` workspace loader (unlike `python dagster_defs.py`
@@ -33,13 +34,16 @@ from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dagster import (  # noqa: E402
-        Config,
+    Config,
     DefaultSensorStatus,
     Definitions,
+    DagsterRunStatus,
     OpExecutionContext,
     RetryPolicy,
     RunRequest,
+    RunsFilter,
     SensorEvaluationContext,
+    SkipReason,
     job,
     op,
     sensor,
@@ -50,7 +54,7 @@ from identity_resolution.daily_job import (  # noqa: E402
     run_daily_identity_resolution,
 )
 
-POLL_INTERVAL_SECONDS = int(os.environ.get("CIR_POLL_INTERVAL_SECONDS", "30"))
+POLL_INTERVAL_SECONDS = int(os.environ.get("CIR_POLL_INTERVAL_SECONDS", "60"))
 
 
 class IdentityResolutionConfig(Config):
@@ -84,9 +88,28 @@ def resolve_identities_op(context: OpExecutionContext, config: IdentityResolutio
     return processed
 
 
-@job(name="identity_resolution_job")
+@job(name="identity_resolution_job", tags={"backend_job": "identity_resolution"})
 def identity_resolution_job() -> None:
     resolve_identities_op()
+
+
+def _identity_resolution_run_active(context: SensorEvaluationContext) -> bool:
+    active_statuses = [
+        DagsterRunStatus.NOT_STARTED,
+        DagsterRunStatus.QUEUED,
+        DagsterRunStatus.STARTING,
+        DagsterRunStatus.STARTED,
+        DagsterRunStatus.CANCELING,
+    ]
+    return bool(
+        context.instance.get_runs(
+            filters=RunsFilter(
+                job_name="identity_resolution_job",
+                statuses=active_statuses,
+            ),
+            limit=1,
+        )
+    )
 
 
 @sensor(
@@ -100,7 +123,11 @@ def identity_resolution_poll_sensor(context: SensorEvaluationContext):
     The unified backend-system image runs the Dagster daemon, so this sensor is
     enabled by default and replaces the legacy worker.py polling loop.
     """
-    yield RunRequest()
+    if _identity_resolution_run_active(context):
+        return SkipReason("An identity resolution run is already queued or active")
+
+    run_slot = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M")
+    yield RunRequest(run_key=f"identity-resolution-{run_slot}")
 
 
 defs = Definitions(

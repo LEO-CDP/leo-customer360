@@ -12,9 +12,9 @@ name_prefix = "c360-api-uat"
 otel_enabled = "true"
 
 servers = {
-  "1x2" = {
-    flavor_name    = "s-general-2x4" # 2 vCPU / 4 GB - jump host + backend-system (Dagster); resized to stop run-worker OOM/swap. In-place (0 destroy), reboots box.
-    root_disk_size = 20
+  "backend" = {
+    flavor_name    = "s-general-4x8" # 4 vCPU / 8 GB - jump host + backend-system (Dagster). UAT Mode-1 target (deployment.md); up from 2x4 to stop code-server heartbeat deaths / run-worker OOM+swap that hung runs. In-place (0 destroy), reboots box.
+    root_disk_size = 20              # boot-volume resize is NOT in-place on vngcloud (needs console volume resize + growpart, or a recreate); kept at 20 (~10G free)
     name           = "backend" # -> c360-api-uat-backend
   }
   "api" = {
@@ -89,8 +89,9 @@ ssh_ingress_cidr = "0.0.0.0/0" # <-- change to "<your-public-ip>/32"
 # Intra-VPC ops ports on the shared Default secgroup (it opens nothing inbound by default).
 # The tracking box (server key "tracking", 10.100.1.8) is not co-located on the api box, so its
 # cross-box hops are opened explicitly (co-located services reach each other on 127.0.0.1). The
-# tracking-api only needs: Caddy -> its app port, and it -> the api-box Redis (rate-limit + session
-# cache; Redis is optional/fail-open). VERIFY IPs with `terraform output servers`; apply out-of-band
+# tracking-api only needs: Caddy -> its app port, and it -> the api-box Redis (Redis Streams broker,
+# rate-limit, and session cache). Redis is required for durable enqueue; rate-limit/session metadata
+# are fail-open when degraded. VERIFY IPs with `terraform output servers`; apply out-of-band
 # with `./deploy.sh uat apply` (CD never runs infra Terraform).
 #   * 9001 -> Portainer agent on the tracking box, reached by the Portainer box (api 10.100.1.5).
 #   * 8010 -> data-tracking-api on the tracking box, reached by Caddy on the api box (10.100.1.5) for /data.

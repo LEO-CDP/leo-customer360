@@ -230,6 +230,10 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6580
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
       DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
       DAGSTER_REQUIRE_S3: ${DAGSTER_REQUIRE_S3:-true}
       DAGSTER_LOGS_BUCKET: ${DAGSTER_LOGS_BUCKET:-customer360-dagster-logs}
@@ -242,6 +246,8 @@ services:
     command: ["dagster-webserver", "-w", "workspace.yaml", "-h", "0.0.0.0", "-p", "3000"]
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       dagster-db-init:
         condition: service_completed_successfully
@@ -283,6 +289,10 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6580
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
       DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
       DAGSTER_REQUIRE_S3: ${DAGSTER_REQUIRE_S3:-true}
       DAGSTER_LOGS_BUCKET: ${DAGSTER_LOGS_BUCKET:-customer360-dagster-logs}
@@ -295,6 +305,8 @@ services:
     command: ["dagster-daemon", "run", "-w", "workspace.yaml"]
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       dagster-db-init:
         condition: service_completed_successfully

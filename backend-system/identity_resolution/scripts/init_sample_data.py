@@ -189,9 +189,9 @@ def _build_customer(rng: random.Random, index: int, used_names: set, used_phones
         "onesignal_customer_id": f"onesignal_cust_{index:05d}",
         "push_token": f"fcm-push-{index:05d}-{rng.randint(1000, 9999)}",
         "onesignal_campaign": rng.choice(ONESIGNAL_CAMPAIGNS),
-        # Web Tracking: same person's browser identity (own visitor id,
+        # Web Tracking: same person's browser identity (own anonymous id,
         # cookie/GA client id, UTM attribution; matched back via shared PII).
-        "webtracking_visitor_id": f"webtracking_visitor_{index:05d}",
+        "webtracking_anonymous_id": f"webtracking_anonymous_{index:05d}",
         "cookie_id": f"cookie-{index:05d}-{rng.randint(1000, 9999)}",
         "ga_client_id": f"GA1.2.{rng.randint(1_000_000_000, 9_999_999_999)}.{rng.randint(1_000_000_000, 9_999_999_999)}",
         "utm": rng.choice(WEBTRACKING_UTM_SOURCES),
@@ -273,7 +273,7 @@ def _touch_event(rng: random.Random, customer: dict, event_time: datetime, sourc
         utm = customer["utm"]
         base.update({
             "channel": "web",
-            "external_customer_id": customer["webtracking_visitor_id"],
+            "external_customer_id": customer["webtracking_anonymous_id"],
             "cookie_id": customer["cookie_id"],
             "ga_client_id": customer["ga_client_id"],
             "utm_source": utm["utm_source"],

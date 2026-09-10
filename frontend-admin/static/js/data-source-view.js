@@ -110,13 +110,15 @@ window.C360 = window.C360 || {};
         avatarField: "typeIcon", avatarBg: "bg-cyan-100", avatarColor: "text-cyan-700", avatarTextClass: "text-base"
       },
       { label: "Type", type: "badge", field: "typeShortLabel", classField: "typeBadgeClass" },
-      { label: "Status", type: "badge", field: "statusLabel", classField: "statusBadgeClass" },
+      { label: "Volume Metrics", type: "metrics", field: "volumeMetrics" },
       { label: "Mode", type: "badge", field: "modeLabel", classField: "modeBadgeClass" },
-      { label: "Volume Metrics", type: "metrics", field: "volumeMetrics" }
+      { label: "Status", type: "badge", field: "statusLabel", classField: "statusBadgeClass" }
     ],
     rowVm: rowVm,
     rowId: function (vm) { return vm.data_source_id; },
-    rowClickable: false,
+    rowSelectorClass: "datasource-row",
+    rowClickable: true,
+    onRowClick: function (id) { viewDataSource(id); },
     onEdit: function (id) { viewDataSource(id); },
     editLabel: "View",
     resourceLabel: "data source",
@@ -229,8 +231,8 @@ window.C360 = window.C360 || {};
     $("#datasource-add-error").addClass("hidden").text("");
     $("#datasource-add-name").val("");
     $("#datasource-add-slug").val("");
-    $("#datasource-add-source-type").val("2");
-    updateFormFieldsForSourceType(2);
+    $("#datasource-add-source-type").val("1");
+    updateFormFieldsForSourceType(1);
     $("#datasource-add-status").val("1");
     $("#datasource-add-url").val("");
     $("#datasource-add-thumbnail-url").val("");

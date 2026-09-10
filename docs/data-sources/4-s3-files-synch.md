@@ -13,9 +13,10 @@ flowchart TD
     end
 
     subgraph TrackingAPI["data-tracking-api Tier"]
-        INGEST["POST /tracking/logs"]
-        BUFFER["In-Memory & Redis Buffer"]
-        FLUSHER["S3 Micro-batch Flusher"]
+        INGEST["POST /api/v1/tracking/logs"]
+        SCHEMA["Dynamic JSON + identity validation"]
+        STREAM["Redis Streams consumer group"]
+        WORKER["Background S3/MinIO worker"]
     end
 
     subgraph BatchETL["ETL & Dagster Orchestrator"]
@@ -29,7 +30,7 @@ flowchart TD
         RAW_PRF["cdp_raw_profiles_stage"]
     end
 
-    INGEST --> BUFFER --> FLUSHER --> PARQUET
+    INGEST --> SCHEMA --> STREAM --> WORKER --> JSONL
     PARQUET --> DISCOVER
     CSV --> DISCOVER
     JSONL --> DISCOVER
@@ -73,9 +74,11 @@ $$\text{s3://}\langle\text{bucket}\rangle\text{/raw/}\langle\text{tenant\_id}\ra
 ## 4. Ingestion Tier Integration (`data-tracking-api`)
 
 For extreme ingress spikes (e.g. 50,000+ events/sec during flash sales), client events route to `data-tracking-api`:
-- **Endpoint**: `POST /tracking/logs`
-- **Mechanism**: The tracking API validates tenant authorization and writes batches directly to S3 hourly partitions as compressed Parquet files, completely bypassing PostgreSQL during peak load.
-- **Compaction & Staging**: Scheduled Dagster pipelines subsequently read the Parquet partitions in bulk using fast vectorized loaders and stage records into `cdp_raw_events`.
+- **Endpoint**: `POST /api/v1/tracking/logs` (also exposed under `/data/api/v1/tracking/logs` behind the public proxy)
+- **Mechanism**: The tracking API validates dynamic JSON and supported customer identifiers, then returns `202 Accepted` after publishing the immutable batch to a Redis Stream. A consumer-group worker writes the batch to an S3-compatible object store without blocking the frontend on S3 latency.
+- **Object format**: Each batch is an immutable NDJSON object at `s3://data-tracking-<data_source_id>/YYYY-MM-DD-HH/<uuid>.jsonl`. Each line contains `data_source_id`, UTC `received_at`, and the original event, including normalized identity fields such as `session_id`, `anonymous_id`, `device_id`, `device_fingerprint`, and `user_id`.
+- **Delivery guarantees**: The worker acknowledges and removes a Redis Stream entry only after the S3/MinIO write succeeds. Failed or abandoned entries remain pending and can be reclaimed by another tracking-api replica.
+- **Downstream processing**: Scheduled Dagster analytics reads the immutable JSONL objects in bulk. The retained identity fields make the records available to downstream identity-resolution ingestion workflows without adding PostgreSQL work to the hot path.
 
 ---
 

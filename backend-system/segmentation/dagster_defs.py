@@ -47,10 +47,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dagster import (  # noqa: E402
     Config,
     DefaultSensorStatus,
+    DagsterRunStatus,
     Definitions,
     OpExecutionContext,
     RetryPolicy,
     RunRequest,
+    RunsFilter,
     SensorEvaluationContext,
     SkipReason,
     job,
@@ -63,7 +65,7 @@ from segmentation.recompute import (  # noqa: E402
     recompute_all_active_segments,
 )
 
-POLL_INTERVAL_SECONDS = int(os.environ.get("SEGMENTATION_POLL_INTERVAL_SECONDS", "10"))
+POLL_INTERVAL_SECONDS = int(os.environ.get("SEGMENTATION_POLL_INTERVAL_SECONDS", "60"))
 
 
 class RecomputeSegmentsConfig(Config):
@@ -105,9 +107,25 @@ def recompute_segments_op(context: OpExecutionContext, config: RecomputeSegments
     return summary
 
 
-@job(name="segmentation_job")
+@job(name="segmentation_job", tags={"backend_job": "segmentation"})
 def segmentation_job() -> None:
     recompute_segments_op()
+
+
+def _segmentation_run_active(context: SensorEvaluationContext) -> bool:
+    active_statuses = [
+        DagsterRunStatus.NOT_STARTED,
+        DagsterRunStatus.QUEUED,
+        DagsterRunStatus.STARTING,
+        DagsterRunStatus.STARTED,
+        DagsterRunStatus.CANCELING,
+    ]
+    return bool(
+        context.instance.get_runs(
+            filters=RunsFilter(job_name="segmentation_job", statuses=active_statuses),
+            limit=1,
+        )
+    )
 
 
 @sensor(
@@ -126,6 +144,9 @@ def segmentation_poll_sensor(context: SensorEvaluationContext):
     interval of staleness, and a no-op (skip) tick whenever nothing changed,
     so idle tenants don't pay for constant full-table recomputes.
     """
+    if _segmentation_run_active(context):
+        return SkipReason("A segmentation run is already queued or active")
+
     since_iso = context.cursor or None
     now_iso = datetime.now(timezone.utc).isoformat()
 

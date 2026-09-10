@@ -1,0 +1,101 @@
+{
+  "judge_free_dataset": {
+    "retrieval_hit@5": 1,
+    "retrieval_mrr": 0.808,
+    "keyword_coverage": 0.9,
+    "grounding_proxy": 0.817,
+    "in_scope_refusal": 0,
+    "oos_refusal_rate": 1,
+    "n_inscope": 10,
+    "n_oos": 2
+  },
+  "probes_before_top20": [
+    {
+      "q": "persona là gì vậy ?",
+      "refused": true
+    },
+    {
+      "q": "persona là gì?",
+      "refused": false
+    },
+    {
+      "q": "persona là gì",
+      "refused": false
+    },
+    {
+      "q": "what is persona?",
+      "refused": false
+    },
+    {
+      "q": "định nghĩa persona",
+      "refused": false
+    },
+    {
+      "q": "giải thích persona là gì",
+      "refused": false
+    },
+    {
+      "q": "CIR là gì?",
+      "refused": false
+    }
+  ],
+  "probes_before_refused": 1,
+  "after_top50": [
+    {
+      "q": "persona là gì vậy ?",
+      "expect": "answer",
+      "refused": false,
+      "ok": true
+    },
+    {
+      "q": "persona là gì?",
+      "expect": "answer",
+      "refused": false,
+      "ok": true
+    },
+    {
+      "q": "persona là gì",
+      "expect": "answer",
+      "refused": false,
+      "ok": true
+    },
+    {
+      "q": "what is persona?",
+      "expect": "answer",
+      "refused": false,
+      "ok": true
+    },
+    {
+      "q": "định nghĩa persona",
+      "expect": "answer",
+      "refused": false,
+      "ok": true
+    },
+    {
+      "q": "giải thích persona là gì",
+      "expect": "answer",
+      "refused": false,
+      "ok": true
+    },
+    {
+      "q": "CIR là gì?",
+      "expect": "answer",
+      "refused": false,
+      "ok": true
+    },
+    {
+      "q": "What is the weather in Hanoi today?",
+      "expect": "refuse",
+      "refused": true,
+      "ok": true
+    },
+    {
+      "q": "Who won the 2022 FIFA World Cup?",
+      "expect": "refuse",
+      "refused": true,
+      "ok": true
+    }
+  ],
+  "after_ok": 9,
+  "after_total": 9
+}

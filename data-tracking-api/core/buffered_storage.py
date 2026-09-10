@@ -15,6 +15,14 @@ from core.storage import S3ObjectStorage, StoredTrackingLog, build_tracking_obje
 logger = logging.getLogger(__name__)
 
 
+class TrackingQueueError(RuntimeError):
+    """Base error for failures while handing tracking data to a queue."""
+
+
+class TrackingQueueFullError(TrackingQueueError):
+    """Raised when a bounded local queue cannot accept another batch."""
+
+
 @dataclass(frozen=True)
 class QueuedTrackingObject:
     """One tracking object queued for asynchronous S3 upload."""
@@ -56,7 +64,8 @@ class BufferedTrackingStorage:
     ) -> StoredTrackingLog:
         """Queue one tracking object and return quickly to the caller.
 
-        If the queue is full, write synchronously to avoid dropping logs.
+        A full queue is reported to the caller instead of falling back to a
+        synchronous object-storage write on the request path.
         """
         bucket, object_key, body = build_tracking_object(data_source_id, events, received_at)
         queued = QueuedTrackingObject(
@@ -74,16 +83,9 @@ class BufferedTrackingStorage:
 
         try:
             self._queue.put_nowait(queued)
-        except Full:
-            logger.warning("Tracking queue full; writing synchronously")
-            return self.storage.store_prebuilt_tracking_object(
-                data_source_id=queued.data_source_id,
-                bucket=queued.bucket,
-                object_key=queued.object_key,
-                body=queued.body,
-                event_count=queued.event_count,
-                received_at=queued.received_at,
-            )
+        except Full as exc:
+            logger.warning("Tracking queue full; rejecting batch for retry")
+            raise TrackingQueueFullError("Tracking queue is full") from exc
 
         return StoredTrackingLog(
             data_source_id=queued.data_source_id,

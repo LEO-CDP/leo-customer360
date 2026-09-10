@@ -2,6 +2,7 @@ psycopg2-binary>=2.9,<3
 pytest>=7.4,<9
 pytest-cov>=4.1,<6
 python-dotenv>=1.0,<2
+redis>=5.0,<6
 google-genai>=2.14.0
 pydantic>=2,<3
 dagster>=1.9,<2

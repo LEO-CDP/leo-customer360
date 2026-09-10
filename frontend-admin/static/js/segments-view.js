@@ -327,7 +327,8 @@ window.C360 = window.C360 || {};
         return (vm.segment_name || "").toLowerCase().indexOf(needle) !== -1 ||
           (vm.segment_tag || "").toLowerCase().indexOf(needle) !== -1 ||
           (vm.description || "").toLowerCase().indexOf(needle) !== -1;
-      }
+      },
+      domain: function (vm, value) { return vm.domain === value; }
     },
     fetch: function (params) {
       return api("/segments/", params).done(function (segments) {
@@ -570,6 +571,7 @@ window.C360 = window.C360 || {};
     listDtv.bindRowClick();
     listDtv.bindLoadMore();
     listDtv.bindSearch("#segments-search-input", "q", 300);
+    listDtv.bindSelect("#segments-domain-filter", "domain");
     // Matched-profiles rows share the ".profile-row" click delegation
     // already bound once by C360.profileListView.bindEvents() (both tables render
     // the same profile columns/rowVm) -- only "load more" needs re-binding
