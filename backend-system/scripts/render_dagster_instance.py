@@ -19,7 +19,7 @@ OUT = os.path.join(DAGSTER_HOME, "dagster.yaml")
 DAGSTER_DB = os.environ.get("DAGSTER_PG_DB", "dagster")
 
 # Concurrency cap and STARTING-run timeout; override via env.
-MAX_CONCURRENT_RUNS = os.environ.get("DAGSTER_MAX_CONCURRENT_RUNS", "2")
+MAX_CONCURRENT_RUNS = os.environ.get("DAGSTER_MAX_CONCURRENT_RUNS", "10")
 RUN_START_TIMEOUT = os.environ.get("DAGSTER_RUN_START_TIMEOUT_SECONDS", "300")
 # Global max wall-clock per run; the monitoring daemon terminates + fails any run
 # that exceeds it, releasing its concurrency slot (a hung run can't hold a slot
