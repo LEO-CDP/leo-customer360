@@ -59,6 +59,7 @@ OpenAI/gateway judge stays available as an opt-in for LLM-judged faithfulness/re
 |------|-------|-----|------------------|-----------------|--------------|-------|
 | 2026-09-06 | **1.00** (10/10) | 0.83 | 0.90 | 0.82 | **0.50** ⚠️ | baseline: retrieval strong EN+VN; grounding good; **out-of-scope refusal unreliable** — the 0.5B answered "Who won the 2022 World Cup?" instead of declining. |
 | 2026-09-06 | 1.00 (10/10) | 0.83 | 0.80 | **0.90** | **1.00** ✅ | after the firmer refusal prompt (`agent.py` `ANSWER_SYSTEM`): **both** out-of-scope questions declined; grounding up 0.82→0.90 (outside knowledge forbidden); retrieval unchanged. Coverage dip 0.90→0.80 is a `must_contain` exact-match artifact, not a regression. |
+| 2026-09-10 | 1.00 (10/10) | 0.81 | 0.90 | 0.82 | 1.00 (OOS) ✅ | RAGAS + probe audit (UAT). The dataset scores perfect but is **all keyword-rich queries**, so it can't see the reported bug. **Bare/colloquial queries falsely refuse** (`persona là gì vậy?` → "I don't know" while a correct source card shows): root-caused to `RETRIEVE_TOP_N=20` starving the reranker (the definition chunk sits at vector-rank 21–50). Fix `RETRIEVE_TOP_N` 20→50; live re-test **9/9**, OOS refusal intact. See [`docs/docs-rag-uat-investigation-2026-09-10.md`](../docs/docs-rag-uat-investigation-2026-09-10.md). |
 
 ## History
 
@@ -70,3 +71,4 @@ OpenAI/gateway judge stays available as an opt-in for LLM-judged faithfulness/re
 | 2026-09-06 | **Pre-bake verified** on the pre-baked image (`sha-ec0479f`, `FASTEMBED_CACHE=/app/model-cache/fastembed`) | **cold restart boot-to-healthy = 22 s** (977 chunks), down from ~15 min — the reranker download is baked away. |
 | 2026-09-06 | CD `docs-search` failed (exit 255) | single SSH session idle-dropped ~6 min into enrich from the CI runner → added SSH keepalive (`ServerAliveInterval`). |
 | 2026-09-10 | Local CPU tuning validation | warm `/ask` improved from **7.98 s** to **7.34 s** (~8%) with `DOCS_LLM_THREADS=2`, `DOCS_LLM_BATCH_SIZE=512`, and `use_mmap=True`; health remained healthy with no OOM/restarts. |
+| 2026-09-10 | Root-caused "shows a source but answers *I don't know*" (bare VN query `persona là gì vậy?`) | The reranker was **starved**: `RETRIEVE_TOP_N=20` cut the pool before the definition chunk (vector-rank 21–50) could be reranked. Fix `RETRIEVE_TOP_N` 20→50 (generator `top_k` unchanged); live UAT re-test **9/9**, out-of-scope refusal preserved. Full write-up in `docs/docs-rag-uat-investigation-2026-09-10.md`. |

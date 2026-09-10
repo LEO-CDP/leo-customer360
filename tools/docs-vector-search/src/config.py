@@ -90,7 +90,11 @@ OPENAI_BASE_URL = (
 OPENAI_TIMEOUT = float(os.getenv("OPENAI_TIMEOUT", "120"))
 
 # Retrieval
-RETRIEVE_TOP_N = int(os.getenv("RETRIEVE_TOP_N", "20"))
+# Candidate pool the reranker sees. Kept wide: short / low-signal queries (esp. bare
+# Vietnamese like "persona là gì vậy?") rank the right chunk at vector-position 20–50, so
+# a pool of 20 starved the reranker and the answer fell back to "I don't know". top_k (what
+# the generator reads) is unchanged — this only widens what the reranker can pick from.
+RETRIEVE_TOP_N = int(os.getenv("RETRIEVE_TOP_N", "50"))
 RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "5"))
 CONTEXT_CHAR_BUDGET = int(os.getenv("CONTEXT_CHAR_BUDGET", "6000"))  # small — 0.5B ctx
 
