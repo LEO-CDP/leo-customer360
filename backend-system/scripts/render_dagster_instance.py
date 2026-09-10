@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Render $DAGSTER_HOME/dagster.yaml adaptively at container start.
+"""Render the production Dagster instance config at container start.
 
-The instance uses shared PostgreSQL storage + S3/MinIO compute logs WHEN THEY ARE
-REACHABLE, and otherwise falls back to Dagster's local defaults (SQLite run/event/
-schedule storage + local compute logs) so the orchestrator ALWAYS starts — on
-local, UAT and PROD, with or without Postgres/S3.
+PostgreSQL is mandatory for shared run/event/schedule state; S3-compatible
+compute logs are mandatory when DAGSTER_REQUIRE_S3=true. A failed readiness
+probe stops the orchestrator instead of silently losing production state.
+Always writes a bounded QueuedRunCoordinator and run_monitoring so orphaned
+runs are reaped instead of leaking their concurrency slot.
 
-Never raises: any probe failure just drops that backend to its local default.
 Run by entrypoint.sh before the Dagster process starts.
 """
 from __future__ import annotations
@@ -18,24 +18,32 @@ DAGSTER_HOME = os.environ.get("DAGSTER_HOME", "/dagster_home")
 OUT = os.path.join(DAGSTER_HOME, "dagster.yaml")
 DAGSTER_DB = os.environ.get("DAGSTER_PG_DB", "dagster")
 
+# Concurrency cap and STARTING-run timeout; override via env.
+MAX_CONCURRENT_RUNS = os.environ.get("DAGSTER_MAX_CONCURRENT_RUNS", "10")
+RUN_START_TIMEOUT = os.environ.get("DAGSTER_RUN_START_TIMEOUT_SECONDS", "300")
+# Global max wall-clock per run; the monitoring daemon terminates + fails any run
+# that exceeds it, releasing its concurrency slot (a hung run can't hold a slot
+# forever). Default 3h; override via env or the per-run dagster/max_runtime tag.
+MAX_RUNTIME_SECONDS = os.environ.get("DAGSTER_MAX_RUNTIME_SECONDS", "10800")
+
 
 def log(msg: str) -> None:
     print(f"[render-instance] {msg}", flush=True)
 
 
 def postgres_ready() -> bool:
-    """True if we can connect to the dedicated dagster DB (creating it if needed)."""
+    """True if we can connect to the pre-provisioned dedicated Dagster DB."""
     host = os.environ.get("DB_HOST")
     if not host:
         return False
     try:
         import psycopg2
-    except Exception as e:  # driver missing -> local default
-        log(f"psycopg2 unavailable ({e}); using SQLite")
+    except Exception as e:
+        log(f"psycopg2 unavailable ({e})")
         return False
     base = dict(
         host=host,
-        port=int(os.environ.get("DB_PORT", "5432")),
+        port=os.environ.get("DB_PORT", "5432"),
         user=os.environ.get("DB_USER", "postgres"),
         password=os.environ.get("DB_PASSWORD", ""),
         connect_timeout=5,
@@ -57,16 +65,26 @@ def postgres_ready() -> bool:
         psycopg2.connect(dbname=DAGSTER_DB, **base).close()
         return True
     except Exception as e:
-        log(f"postgres not reachable ({e}); using SQLite")
+        log(f"postgres database is not reachable ({e})")
         return False
 
 
 def s3_ready() -> bool:
     """True if the compute-log bucket is configured AND reachable."""
-    endpoint = os.environ.get("S3_ENDPOINT")
-    bucket = os.environ.get("MINIO_BUCKET")
-    key = os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("MINIO_ROOT_USER")
-    secret = os.environ.get("AWS_SECRET_ACCESS_KEY") or os.environ.get("MINIO_ROOT_PASSWORD")
+    endpoint = os.environ.get("DAGSTER_S3_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT")
+    bucket = os.environ.get("DAGSTER_LOGS_BUCKET") or os.environ.get("MINIO_BUCKET")
+    key = (
+        os.environ.get("DAGSTER_S3_ACCESS_KEY_ID")
+        or os.environ.get("AWS_ACCESS_KEY_ID")
+        or os.environ.get("S3_ACCESS_KEY_ID")
+        or os.environ.get("MINIO_ROOT_USER")
+    )
+    secret = (
+        os.environ.get("DAGSTER_S3_SECRET_ACCESS_KEY")
+        or os.environ.get("AWS_SECRET_ACCESS_KEY")
+        or os.environ.get("S3_SECRET_ACCESS_KEY")
+        or os.environ.get("MINIO_ROOT_PASSWORD")
+    )
     if not (endpoint and bucket and key and secret):
         return False
     try:
@@ -109,29 +127,58 @@ S3_BLOCK = """compute_logs:
   config:
     bucket: { env: MINIO_BUCKET }
     prefix: dagster-compute-logs
-    endpoint_url: { env: S3_ENDPOINT }
+    endpoint_url: { env: S3_ENDPOINT_URL }
     skip_empty_files: true
+"""
+
+# Bounded run queue (always written, regardless of storage backend).
+RUN_COORDINATOR_BLOCK = f"""run_coordinator:
+    module: dagster.core.run_coordinator
+    class: QueuedRunCoordinator
+    config:
+        max_concurrent_runs: {MAX_CONCURRENT_RUNS}
+        tag_concurrency_limits: [{{key: backend_job, value: {{applyLimitPerUniqueValue: true}}, limit: 1}}]
+"""
+
+# Reap orphaned runs so a dead worker cannot keep holding its slot.
+RUN_MONITORING_BLOCK = f"""run_monitoring:
+  enabled: true
+  start_timeout_seconds: {RUN_START_TIMEOUT}
+  cancel_timeout_seconds: 180
+  max_resume_run_attempts: 0
+  poll_interval_seconds: 60
+  max_runtime_seconds: {MAX_RUNTIME_SECONDS}
 """
 
 HEADER = (
     "# AUTO-GENERATED at container start by scripts/render_dagster_instance.py.\n"
-    "# Adaptive: shared PostgreSQL + S3 compute logs when reachable, else local\n"
-    "# SQLite + local compute logs. Edit the renderer, not this file.\n"
+    "# Shared PostgreSQL is mandatory; S3 compute logs are required in production.\n"
+    "# Edit the renderer, not this file.\n"
 )
 
 
 def main() -> int:
     parts: list[str] = []
-    if postgres_ready():
-        parts.append(PG_BLOCK)
-        log("storage: PostgreSQL (shared)")
-    else:
-        log("storage: SQLite (local default)")
+    if not postgres_ready():
+        log("storage: PostgreSQL is unavailable; refusing to start")
+        return 1
+    parts.append(PG_BLOCK)
+    log("storage: PostgreSQL (shared)")
+
     if s3_ready():
         parts.append(S3_BLOCK)
         log("compute logs: S3 / MinIO")
+    elif os.environ.get("DAGSTER_REQUIRE_S3", "false").lower() in {"1", "true", "yes"}:
+        log("compute logs: S3 / MinIO is required but unavailable; refusing to start")
+        return 1
     else:
         log("compute logs: local (default)")
+
+    # Always bound the queue and enable the orphaned-run reaper.
+    parts.append(RUN_COORDINATOR_BLOCK)
+    parts.append(RUN_MONITORING_BLOCK)
+    log(f"run coordinator: QueuedRunCoordinator (max_concurrent_runs={MAX_CONCURRENT_RUNS})")
+    log(f"run monitoring: enabled (start_timeout={RUN_START_TIMEOUT}s, max_runtime={MAX_RUNTIME_SECONDS}s)")
 
     os.makedirs(DAGSTER_HOME, exist_ok=True)
     body = "\n".join(parts) if parts else "# all backends fell back to local defaults\n"
@@ -144,11 +191,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except Exception as e:  # never block Dagster startup
-        log(f"unexpected error ({e}); leaving Dagster on local defaults")
-        try:
-            with open(OUT, "w", encoding="utf-8") as f:
-                f.write("# render failed; using Dagster local defaults (SQLite + local logs)\n")
-        except Exception:
-            pass
-        sys.exit(0)
+    except Exception as e:
+        log(f"instance configuration failed: {e}")
+        sys.exit(1)

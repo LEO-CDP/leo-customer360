@@ -43,8 +43,6 @@ volumes:
     name: customer360-pgdata
   customer360-redisdata:
     name: customer360-redisdata
-  customer360-dagsterdata:
-    name: customer360-dagsterdata
 
 services:
   # ---------------------------------------------------------------------------
@@ -190,7 +188,33 @@ services:
       start_period: 60s
 
   # ---------------------------------------------------------------------------
-  # 5) Dagster orchestrator - all nine backend-system code locations.
+  # 5) Dagster metadata database init - Dagster owns a dedicated database,
+  #    separate from the customer360 application database.
+  # ---------------------------------------------------------------------------
+  dagster-db-init:
+    image: customer360-postgres:local
+    container_name: customer360-dagster-db-init
+    restart: "no"
+    <<: *default-hardening
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - customer360-network
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        until pg_isready -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360}; do
+          echo "Waiting for PostgreSQL..."
+          sleep 2
+        done
+        psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360} -tc "SELECT 1 FROM pg_database WHERE datname = '$$DAGSTER_PG_DB'" | grep -q 1 || psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360} -c "CREATE DATABASE \"$$DAGSTER_PG_DB\""
+
+  # ---------------------------------------------------------------------------
+  # 6) Dagster webserver - all nine backend-system code locations.
   # ---------------------------------------------------------------------------
   dagster:
     build:
@@ -206,14 +230,29 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6580
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+      DAGSTER_REQUIRE_S3: ${DAGSTER_REQUIRE_S3:-true}
+      DAGSTER_LOGS_BUCKET: ${DAGSTER_LOGS_BUCKET:-customer360-dagster-logs}
+      DAGSTER_S3_ENDPOINT_URL: ${DAGSTER_S3_ENDPOINT_URL:-${S3_ENDPOINT_URL:-}}
+      DAGSTER_S3_ACCESS_KEY_ID: ${DAGSTER_S3_ACCESS_KEY_ID:-${S3_ACCESS_KEY_ID:-}}
+      DAGSTER_S3_SECRET_ACCESS_KEY: ${DAGSTER_S3_SECRET_ACCESS_KEY:-${S3_SECRET_ACCESS_KEY:-}}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-${DAGSTER_S3_ACCESS_KEY_ID:-}}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${DAGSTER_S3_SECRET_ACCESS_KEY:-}}
       DAGSTER_HOME: /dagster_home
+    command: ["dagster-webserver", "-w", "workspace.yaml", "-h", "0.0.0.0", "-p", "3000"]
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      dagster-db-init:
+        condition: service_completed_successfully
     ports:
       - "${DAGSTER_UI_HOST:-127.0.0.1}:${DAGSTER_UI_PORT:-3000}:3000"
-    volumes:
-      - customer360-dagsterdata:/dagster_home
     networks:
       - customer360-network
     deploy:
@@ -234,8 +273,53 @@ services:
       retries: 10
       start_period: 30s
 
+  # Dagster daemon is a singleton in production. It owns schedules, sensors,
+  # run monitoring, and the run queue; it must not expose the webserver port.
+  dagster-daemon:
+    build:
+      context: ./backend-system
+      dockerfile: Dockerfile
+    image: customer360-dagster:local
+    container_name: customer360-dagster-daemon
+    restart: unless-stopped
+    init: true
+    <<: *default-hardening
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6580
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+      DAGSTER_REQUIRE_S3: ${DAGSTER_REQUIRE_S3:-true}
+      DAGSTER_LOGS_BUCKET: ${DAGSTER_LOGS_BUCKET:-customer360-dagster-logs}
+      DAGSTER_S3_ENDPOINT_URL: ${DAGSTER_S3_ENDPOINT_URL:-${S3_ENDPOINT_URL:-}}
+      DAGSTER_S3_ACCESS_KEY_ID: ${DAGSTER_S3_ACCESS_KEY_ID:-${S3_ACCESS_KEY_ID:-}}
+      DAGSTER_S3_SECRET_ACCESS_KEY: ${DAGSTER_S3_SECRET_ACCESS_KEY:-${S3_SECRET_ACCESS_KEY:-}}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-${DAGSTER_S3_ACCESS_KEY_ID:-}}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${DAGSTER_S3_SECRET_ACCESS_KEY:-}}
+      DAGSTER_HOME: /dagster_home
+    command: ["dagster-daemon", "run", "-w", "workspace.yaml"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      dagster-db-init:
+        condition: service_completed_successfully
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+
   # ---------------------------------------------------------------------------
-  # 6) Customer 360 API (FastAPI) - CRUD + reporting over the customer360
+  # 7) Customer 360 API (FastAPI) - CRUD + reporting over the customer360
   #    schema, Redis-cached reads (see customer360-api/core/cache.py).
   # ---------------------------------------------------------------------------
   api:
@@ -254,6 +338,7 @@ services:
       DB_PORT: 5432
       REDIS_HOST: redis
       REDIS_PORT: 6580
+      DAGSTER_GRAPHQL_HOST: dagster
       SSO_LOGIN_URL: http://keycloak:8080
     depends_on:
       postgres:
@@ -261,6 +346,8 @@ services:
       redis:
         condition: service_healthy
       keycloak:
+        condition: service_healthy
+      dagster:
         condition: service_healthy
     ports:
       - "${C360_API_HOST:-127.0.0.1}:${C360_API_PORT:-8008}:8008"
@@ -285,7 +372,7 @@ services:
       start_period: 15s
 
   # ---------------------------------------------------------------------------
-  # 7) CDP data tracking API - writes hourly NDJSON batches to S3.
+  # 8) CDP data tracking API - writes hourly NDJSON batches to S3.
   #    Production uses the AWS credential chain; configure S3_* in .env.
   # ---------------------------------------------------------------------------
   tracking-api:

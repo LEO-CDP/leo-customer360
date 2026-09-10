@@ -90,6 +90,16 @@
                 } catch(e) {}
                 PARENT_ORIGIN = PARENT_ORIGIN.replace(/\/+$/, '');
 
+                var configuredDataSourceId = '';
+                var lastToken = toks[toks.length - 1];
+                try {
+                    lastToken = decodeURIComponent(lastToken);
+                } catch(e) {}
+                if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(lastToken)) {
+                    configuredDataSourceId = lastToken;
+                    toks.pop();
+                }
+
                 if (toks.length >= 3) {
                     var injectedVisitorId = toks.slice(2).join('_');
                     try {
@@ -111,6 +121,12 @@
                     ROOT_DOMAIN = ROOT_DOMAIN.replace(/^https?:\/\//, '');
                 } else {
                     LEO_LOG_URL = protocol + '//' + ROOT_DOMAIN;
+                }
+
+                if (configuredDataSourceId) {
+                    window.leoC360DataSourceId = configuredDataSourceId;
+                    window.leoC360SourceId = configuredDataSourceId;
+                    window.LEO_SESSION_NAMESPACE_UUID = configuredDataSourceId;
                 }
 
                 // Official LeoCDP v1.0 tracking logs API endpoint
@@ -346,21 +362,21 @@
                 }
 
                 /*
-                 * Synchronize visitor ID back to the parent.
+                 * Synchronize anonymous ID back to the parent.
                  */
                 if (
                     synchVisitorCall !== false &&
                     observerAvailable()
                 ) {
-                    var synchVid = window.LeoEventObserver.visitorId || (
-                        typeof window.LeoEventObserver.getVisitorId === 'function'
-                            ? window.LeoEventObserver.getVisitorId()
+                    var synchAnonymousId = window.LeoEventObserver.anonymousId || (
+                        typeof window.LeoEventObserver.getAnonymousId === 'function'
+                            ? window.LeoEventObserver.getAnonymousId()
                             : ''
                     );
-                    if (synchVid) {
+                    if (synchAnonymousId) {
                         sendMessage(
                             'synchLeoVisitorId-' +
-                            synchVid
+                            synchAnonymousId
                         );
 
                         synchVisitorCall = false;
@@ -690,11 +706,11 @@
                 OBSERVER_SCRIPT_LOADED = true;
 
                 /*
-                 * Injected visitor ID can take precedence over
+                 * Injected anonymous ID can take precedence over
                  * fingerprint-generated identity.
                  */
                 if (INJECTED_VISITOR_ID) {
-                    window.LeoEventObserver.visitorId =
+                    window.LeoEventObserver.anonymousId =
                         INJECTED_VISITOR_ID;
                 }
 
@@ -707,18 +723,18 @@
                         function (fingerprintId) {
 
                             /*
-                             * Only use generated visitor ID when
+                             * Only use generated anonymous ID when
                              * the server did not inject one.
                              */
                             if (
                                 !INJECTED_VISITOR_ID &&
-                                typeof window.LeoEventObserver.getVisitorId === 'function'
+                                typeof window.LeoEventObserver.getAnonymousId === 'function'
                             ) {
-                                window.LeoEventObserver.visitorId =
-                                    window.LeoEventObserver.getVisitorId();
+                                window.LeoEventObserver.anonymousId =
+                                    window.LeoEventObserver.getAnonymousId();
                             }
 
-                            window.LeoEventObserver.fingerprintId =
+                            window.LeoEventObserver.deviceFingerprint =
                                 fingerprintId || '';
 
                             OBSERVER_READY = true;
@@ -728,8 +744,8 @@
                              */
                             var activeSessionKey = typeof window.LeoEventObserver.getSessionKey === 'function'
                                 ? window.LeoEventObserver.getSessionKey(true) : '';
-                            var activeVisitorId = window.LeoEventObserver.visitorId || (
-                                typeof window.LeoEventObserver.getVisitorId === 'function' ? window.LeoEventObserver.getVisitorId() : ''
+                            var activeAnonymousId = window.LeoEventObserver.anonymousId || (
+                                typeof window.LeoEventObserver.getAnonymousId === 'function' ? window.LeoEventObserver.getAnonymousId() : ''
                             );
 
                             setTimeout(
@@ -738,10 +754,9 @@
                                     sendMessage({
                                         event: 'LeoObserverProxyReady',
                                         sessionKey: activeSessionKey,
-                                        visitorId: activeVisitorId,
-                                        fingerprintId: window.LeoEventObserver.fingerprintId || ''
+                                        anonymousId: activeAnonymousId,
+                                        deviceFingerprint: window.LeoEventObserver.deviceFingerprint || ''
                                     });
-                                    sendMessage('LeoObserverProxyReady');
                                 },
                                 0
                             );
@@ -894,13 +909,13 @@
                             queueTracking.length,
                         profileQueueLength:
                             queueUpdating.length,
-                        visitorId:
+                        anonymousId:
                             observerAvailable()
-                                ? window.LeoEventObserver.visitorId
+                            ? window.LeoEventObserver.anonymousId
                                 : null,
-                        fingerprintId:
+                        deviceFingerprint:
                             observerAvailable()
-                                ? window.LeoEventObserver.fingerprintId
+                            ? window.LeoEventObserver.deviceFingerprint
                                 : null
                     };
                 }

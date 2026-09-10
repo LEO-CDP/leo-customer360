@@ -233,10 +233,11 @@ materialized the entire `events` list into RAM; no request-body cap is configure
 POST balloons worker RSS and OOM-kills it, dropping all in-flight requests.
 
 <a id="h6"></a>
-**H6 — Empty-string identity 422-drops the whole batch.** `data-tracking-api/core/schemas.py:12-13`
-— `session_id`/`user_id` are `str | None` with `min_length=1`, so a very common empty-string
-value (before a session is established) is **not** `None`, fails validation, and rejects the
-entire batch of events. Use `min_length=1` only via a validator that treats `""` as `None`.
+**H6 — Empty-string identity 422-drops the whole batch (resolved in the current implementation).**
+The tracking API now intentionally rejects blank or malformed identity values and requires a
+usable batch- or event-level identity before enqueueing. Clients should omit an identity until it
+exists rather than send an empty string; bot-filtered requests are discarded before this service
+validation path.
 
 <a id="h7"></a>
 **H7 — ads-server read endpoints have no auth and no tenant scope.** `ads-server`: `GET /ads/{ad_id}`
@@ -315,8 +316,8 @@ engages. Parse a trusted `X-Forwarded-For`.
 | M15 | `.../resolver.py:1067` | Whole multi-tenant batch is one transaction, committed once at the end | One poison-pill profile rolls back all tenants' work; re-fails next run → platform stall |
 | M16 | `customer360-api/core/repositories/user_repository.py:203` | User-cache eviction happens on flush, **before** the router's `db.commit()` | Concurrent read repopulates cache with stale/uncommitted data for the TTL (~120s) |
 | M17 | `customer360-api/core/cache.py:93` | `json.loads(raw)` is outside the `RedisError` try/except | A corrupt/poisoned cache value raises → 500 on every hit, defeating fail-open |
-| M18 | `data-tracking-api/core/redis_cache.py:100` | Two synchronous Redis calls per ingest with 0.5s timeouts; fail-open still pays the timeout | Redis outage adds ~1s/req in the sync threadpool → saturation, dropped events |
-| M19 | `data-tracking-api/core/service.py:59` | Batch `session_id` overrides per-event id for **counting**, but storage keeps per-event id | Session counters permanently diverge from durable event data |
+| M18 | `data-tracking-api/core/redis_cache.py`, `data-tracking-api/core/redis_queue.py` | Redis rate/session calls and the durable Stream enqueue remain on the request path; only the S3 write is backgrounded | Redis broker degradation returns retryable `503` rather than acknowledging undurable data; rate/session operations remain fail-open where configured |
+| M19 | `data-tracking-api/core/service.py` | **Resolved:** session-cache aggregation now prefers event-level identity, matching the identity persisted to S3 | Prevents session counters from diverging from durable event data |
 | M20 | `data-tracking-api/core/storage.py:106` | `_ensure_bucket` does a `head_bucket` every request; any non-404 (e.g. 403) is fatal | Doubles S3 latency; spurious 503 → whole batch dropped when PutObject would succeed |
 | M21 | `data-tracking-api/core/storage.py:38` | Object key is `uuid4()`; no idempotency key | Client retry after a 503 writes a duplicate object → double-counted events |
 | M22 | `backend-system/personalization/dagster_defs.py:33` | Copy-paste: job defined as `@job(name="scoring_job")` | No `personalization_job` exists; submissions fail; two identical `scoring_job`s in Dagit |

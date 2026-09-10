@@ -17,6 +17,7 @@ over every ``is_active`` segment, across all tenants) and by
 import logging
 import os
 import re
+import sys
 from typing import Any, Callable, Optional
 
 import psycopg2
@@ -24,6 +25,14 @@ from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor
 
 from .rls import set_tenant_context
+
+_BACKEND_SYSTEM_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+if _BACKEND_SYSTEM_ROOT not in sys.path:
+    sys.path.insert(0, _BACKEND_SYSTEM_ROOT)
+
+from shared.redis_lock import acquire_redis_lease  # noqa: E402
 
 load_dotenv()
 
@@ -35,6 +44,14 @@ DB_USER = os.environ.get("DB_USER", "postgres")
 DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
 DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
+REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", "6580"))
+REDIS_DB = int(os.environ.get("REDIS_DB", "0"))
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
+SEGMENTATION_LOCK_KEY = "segmentation:recompute-run-lock"
+SEGMENTATION_LOCK_TTL_SECONDS = int(
+    os.environ.get("SEGMENTATION_LOCK_TTL_SECONDS", "1800")
+)
 
 # Defense-in-depth mirror of customer360-api's core/utils/sql_safety.py
 # validate_sql_where_fragment(): this service doesn't import customer360-api
@@ -90,6 +107,21 @@ def _connect():
     return psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT)
 
 
+def build_redis_client():
+    """Build the Redis client used to serialize full segment recomputes."""
+    import redis
+
+    return redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        db=REDIS_DB,
+        password=REDIS_PASSWORD,
+        decode_responses=True,
+        socket_connect_timeout=0.5,
+        socket_timeout=0.5,
+    )
+
+
 def _list_tenant_ids(cursor) -> list[str]:
     """List tenant IDs from the global catalog before tenant-scoped work."""
     set_tenant_context(cursor, None)
@@ -106,39 +138,57 @@ def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_frag
         set_tenant_context(cur, tenant_id)
         cur.execute(
             f"""
+            CREATE TEMP TABLE IF NOT EXISTS _c360_segment_matches (
+                master_profile_id UUID PRIMARY KEY
+            ) ON COMMIT DROP
+            """
+        )
+        cur.execute("TRUNCATE _c360_segment_matches")
+        cur.execute(
+            f"""
+            INSERT INTO _c360_segment_matches (master_profile_id)
             SELECT master_profile_id FROM {DB_SCHEMA}.cdp_master_profiles
             {_DOMAIN_ATTRIBUTES_JOIN_SQL.format(schema=DB_SCHEMA)}
             WHERE tenant_id = %(tenant_id)s AND status_code = 1 AND ({where_fragment})
             """,
             {"tenant_id": tenant_id},
         )
-        matched_ids = [str(row[0]) for row in cur.fetchall()]
 
         # Add the tag to newly-matching profiles that don't already carry it.
         cur.execute(
             f"""
-            UPDATE {DB_SCHEMA}.cdp_master_profiles
+            UPDATE {DB_SCHEMA}.cdp_master_profiles AS profiles
             SET segmentation_tags = array_append(COALESCE(segmentation_tags, ARRAY[]::text[]), %(tag)s),
                 updated_at = now()
-            WHERE tenant_id = %(tenant_id)s
-              AND master_profile_id = ANY(%(matched_ids)s::uuid[])
+            FROM _c360_segment_matches AS matches
+            WHERE profiles.tenant_id = %(tenant_id)s
+              AND profiles.master_profile_id = matches.master_profile_id
               AND NOT (%(tag)s = ANY(COALESCE(segmentation_tags, ARRAY[]::text[])))
             """,
-            {"tenant_id": tenant_id, "matched_ids": matched_ids, "tag": segment_tag},
+            {"tenant_id": tenant_id, "tag": segment_tag},
         )
 
         # Remove the tag from profiles that carry it but no longer match.
         cur.execute(
             f"""
-            UPDATE {DB_SCHEMA}.cdp_master_profiles
+            UPDATE {DB_SCHEMA}.cdp_master_profiles AS profiles
             SET segmentation_tags = array_remove(segmentation_tags, %(tag)s),
                 updated_at = now()
-            WHERE tenant_id = %(tenant_id)s
-              AND master_profile_id != ALL(%(matched_ids)s::uuid[])
-              AND %(tag)s = ANY(COALESCE(segmentation_tags, ARRAY[]::text[]))
+            WHERE profiles.tenant_id = %(tenant_id)s
+              AND %(tag)s = ANY(COALESCE(profiles.segmentation_tags, ARRAY[]::text[]))
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM _c360_segment_matches AS matches
+                  WHERE matches.master_profile_id = profiles.master_profile_id
+              )
             """,
-            {"tenant_id": tenant_id, "matched_ids": matched_ids, "tag": segment_tag},
+            {"tenant_id": tenant_id, "tag": segment_tag},
         )
+
+        cur.execute(
+            "SELECT COUNT(*) FROM _c360_segment_matches"
+        )
+        row = cur.fetchone()
 
         cur.execute(
             f"""
@@ -146,16 +196,23 @@ def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_frag
             SET member_count = %(member_count)s, last_computed_at = now(), updated_at = now()
             WHERE tenant_id = %(tenant_id)s AND segment_id = %(segment_id)s
             """,
-            {"tenant_id": tenant_id, "member_count": len(matched_ids), "segment_id": segment_id},
+            {
+                "tenant_id": tenant_id,
+                "member_count": int(row[0] if row else 0),
+                "segment_id": segment_id,
+            },
         )
 
-    return len(matched_ids)
+    return int(row[0] if row else 0)
 
 
 def recompute_all_active_segments(
     tenant_id: Optional[str] = None,
     segment_id: Optional[str] = None,
     log: Optional[Callable[..., None]] = None,
+    redis_client: Optional[Any] = None,
+    _lock_acquired: bool = False,
+    _lease: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Recomputes member_count/segmentation_tags for every ``is_active =
     true`` segment, optionally scoped to a single tenant and segment. This is the
@@ -185,6 +242,35 @@ def recompute_all_active_segments(
     if segment_id is not None and tenant_id is None:
         raise ValueError("tenant_id is required when segment_id is provided")
 
+    if not _lock_acquired:
+        cache = redis_client if redis_client is not None else build_redis_client()
+        lease = acquire_redis_lease(
+            cache,
+            SEGMENTATION_LOCK_KEY,
+            SEGMENTATION_LOCK_TTL_SECONDS,
+        )
+        if lease is None:
+            (log or logger.info)(
+                "Skipping segmentation recompute; another run owns the Redis lock"
+            )
+            return {
+                "tenant_id": tenant_id,
+                "segments_processed": 0,
+                "segments_skipped": 0,
+                "total_members": 0,
+            }
+        try:
+            return recompute_all_active_segments(
+                tenant_id=tenant_id,
+                segment_id=segment_id,
+                log=log,
+                redis_client=cache,
+                _lock_acquired=True,
+                _lease=lease,
+            )
+        finally:
+            lease.release()
+
     conn = _connect()
     segments_processed = 0
     segments_skipped = 0
@@ -210,6 +296,8 @@ def recompute_all_active_segments(
                 segments.extend(cur.fetchall())
 
         for segment in segments:
+            if _lease is not None:
+                _lease.refresh()
             sql_rules = segment["sql_rules"]
             if not _is_safe_where_fragment(sql_rules):
                 segments_skipped += 1

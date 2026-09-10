@@ -53,6 +53,56 @@ class Settings(BaseSettings):
         default=1000,
         validation_alias=AliasChoices("TRACKING_MAX_EVENTS_PER_REQUEST", "tracking_max_events_per_request"),
     )
+    time_to_flush_log: int = Field(
+        default=5,
+        validation_alias=AliasChoices("TIME_TO_FLUSH_LOG", "time_to_flush_log"),
+    )
+    tracking_log_queue_max_size: int = Field(
+        default=1000,
+        validation_alias=AliasChoices(
+            "TRACKING_LOG_QUEUE_MAX_SIZE", "tracking_log_queue_max_size"
+        ),
+    )
+    tracking_log_flush_batch_size: int = Field(
+        default=200,
+        validation_alias=AliasChoices(
+            "TRACKING_LOG_FLUSH_BATCH_SIZE", "tracking_log_flush_batch_size"
+        ),
+    )
+    tracking_queue_backend: Literal["redis_stream", "memory"] = Field(
+        default="redis_stream",
+        validation_alias=AliasChoices("TRACKING_QUEUE_BACKEND", "tracking_queue_backend"),
+    )
+    tracking_stream_name: str = Field(
+        default="data-tracking:events",
+        validation_alias=AliasChoices("TRACKING_STREAM_NAME", "tracking_stream_name"),
+    )
+    tracking_stream_group: str = Field(
+        default="s3-writers",
+        validation_alias=AliasChoices("TRACKING_STREAM_GROUP", "tracking_stream_group"),
+    )
+    tracking_stream_max_length: int = Field(
+        default=100000,
+        validation_alias=AliasChoices(
+            "TRACKING_STREAM_MAX_LENGTH", "tracking_stream_max_length"
+        ),
+    )
+    tracking_stream_claim_idle_ms: int = Field(
+        default=60000,
+        validation_alias=AliasChoices(
+            "TRACKING_STREAM_CLAIM_IDLE_MS", "tracking_stream_claim_idle_ms"
+        ),
+    )
+    tracking_stream_block_ms: int = Field(
+        default=1000,
+        validation_alias=AliasChoices("TRACKING_STREAM_BLOCK_MS", "tracking_stream_block_ms"),
+    )
+    tracking_stream_retry_seconds: float = Field(
+        default=1.0,
+        validation_alias=AliasChoices(
+            "TRACKING_STREAM_RETRY_SECONDS", "tracking_stream_retry_seconds"
+        ),
+    )
     redis_host: str = Field(
         default="localhost",
         validation_alias=AliasChoices("REDIS_HOST", "redis_host"),

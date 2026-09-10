@@ -57,6 +57,7 @@
 	if (leoC360SourceId) {
 		window.leoC360SourceId = leoC360SourceId;
 		window.leoC360DataSourceId = leoC360SourceId;
+		window.LEO_SESSION_NAMESPACE_UUID = leoC360SourceId;
 	}
 
 	var TIME_TO_ADD_PROXY_IFRAME = typeof window.leoProxyDelay === 'number' ? window.leoProxyDelay : 300; // delay to avoid blocking page load
@@ -155,9 +156,9 @@
         	'synchLeoVisitorCallback' : false,
         	'personalizationCallbacks': {},
         	'isReady': false,
-        	'visitorId': '',
+			 'anonymousId': '',
         	'sessionKey': '',
-        	'fingerprintId': ''
+			 'deviceFingerprint': ''
         };
         window.LeoObserverProxy = LeoObserverProxy;
         window.LeoIframeProxy = false;
@@ -188,6 +189,9 @@
     	        if( leosyn && leosyn.length > 5 ) {
     	        	iframeProxyUrl = iframeProxyUrl + '_' + encodeURIComponent(leosyn);
     	        }
+			if (leoC360SourceId) {
+				iframeProxyUrl = iframeProxyUrl + '_' + encodeURIComponent(leoC360SourceId);
+			}
 
     	        // Cross domain iframe
     	        var iframeProxy = document.createElement("iframe");
@@ -260,36 +264,39 @@
             if (eventType === "LeoObserverProxyLoaded") {
  				initLeoContextSession();
             } 
-            else if (eventType === "LeoObserverProxyReady" || (typeof data === 'string' && data.indexOf("LeoObserverProxyReady") === 0)) {
+			else if (eventType === "LeoObserverProxyReady" || (typeof data === 'string' && data.indexOf("LeoObserverProxyReady") === 0)) {
+				var wasReady = LeoObserverProxy.isReady;
             	LeoObserverProxy.isReady = true;
             	flushPendingEvents();
-            	var sessionContext = {
-            		sessionKey: (eventPayload && eventPayload.sessionKey) || LeoObserverProxy.sessionKey || '',
-            		visitorId: (eventPayload && eventPayload.visitorId) || LeoObserverProxy.visitorId || '',
-            		fingerprintId: (eventPayload && eventPayload.fingerprintId) || LeoObserverProxy.fingerprintId || '',
+				var sessionContext = {
+				 sessionKey: (eventPayload && eventPayload.sessionKey) || LeoObserverProxy.sessionKey || '',
+				 anonymousId: (eventPayload && eventPayload.anonymousId) || LeoObserverProxy.anonymousId || '',
+				 deviceFingerprint: (eventPayload && eventPayload.deviceFingerprint) || LeoObserverProxy.deviceFingerprint || '',
             		ready: true
             	};
 
             	if (sessionContext.sessionKey) LeoObserverProxy.sessionKey = sessionContext.sessionKey;
-            	if (sessionContext.visitorId) LeoObserverProxy.visitorId = sessionContext.visitorId;
-            	if (sessionContext.fingerprintId) LeoObserverProxy.fingerprintId = sessionContext.fingerprintId;
+				if (sessionContext.anonymousId) LeoObserverProxy.anonymousId = sessionContext.anonymousId;
+				if (sessionContext.deviceFingerprint) LeoObserverProxy.deviceFingerprint = sessionContext.deviceFingerprint;
 
-            	var f = window.leoObserverProxyReady;
-                if (typeof f === "function") {
-                	try {
-                		f(sessionContext);
-                	} catch(cbErr) {
-                		console.error("[LeoProxy] leoObserverProxyReady callback error:", cbErr);
-                	}
-                }
+				if (!wasReady) {
+					var f = window.leoObserverProxyReady;
+					if (typeof f === "function") {
+						try {
+							f(sessionContext);
+						} catch(cbErr) {
+							console.error("[LeoProxy] leoObserverProxyReady callback error:", cbErr);
+						}
+					}
 
-                if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
-                	window.dispatchEvent(new CustomEvent("leo_observer_ready", { detail: sessionContext }));
+					if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+						window.dispatchEvent(new CustomEvent("leo_observer_ready", { detail: sessionContext }));
+					}
                 }
             }
             else if (typeof data === 'string' && data.indexOf('synchLeoVisitorId') === 0) {
-            	var vid = data.substring('synchLeoVisitorId-'.length);
-            	LeoObserverProxy.visitorId = vid;
+				 var anonymousId = data.substring('synchLeoVisitorId-'.length);
+				 LeoObserverProxy.anonymousId = anonymousId;
             	if (typeof LeoObserverProxy.synchLeoVisitorCallback === 'function') {
             		LeoObserverProxy.synchLeoVisitorCallback(vid);
             	}
@@ -352,6 +359,12 @@
                 'tpurl': encodeURIComponent(tpurl),
                 'tpname': encodeURIComponent(tpname)
             };
+
+
+            if (typeof metricName === "string" && typeof eventData === "object" && eventData !== null) {
+                if (eventData.event_id) params['event_id'] = eventData.event_id;
+                params['event_time'] = eventData.event_time || eventData.occurred_at || new Date().toISOString();
+            }
             
             if(typeof metricName === "string" && typeof eventData === "object" && eventData !== null){
             	params['metric'] = metricName;                
@@ -437,8 +450,8 @@
 		
 		LeoObserverProxy.synchLeoVisitorId = function(callback) {
 			LeoObserverProxy.synchLeoVisitorCallback = callback;
-			if (LeoObserverProxy.visitorId && typeof callback === 'function') {
-				callback(LeoObserverProxy.visitorId);
+			if (LeoObserverProxy.anonymousId && typeof callback === 'function') {
+				callback(LeoObserverProxy.anonymousId);
 			}
             var payload = JSON.stringify({
                 'call': 'synchLeoVisitorId'
@@ -531,8 +544,8 @@
         };
 
         // Helpers to inspect resolved visitor & session identity
-        LeoObserverProxy.getVisitorId = function() {
-        	return LeoObserverProxy.visitorId || '';
+        LeoObserverProxy.getAnonymousId = function() {
+            return LeoObserverProxy.anonymousId || '';
         };
 
         LeoObserverProxy.getSessionKey = function() {
@@ -592,9 +605,10 @@
         LeoObserver.synchLeoVisitorId = LeoObserver.synchLeoVisitorId || function(callback) {
             LeoObserverProxy.synchLeoVisitorId(callback);
         };
-        LeoObserver.getVisitorId = LeoObserver.getVisitorId || function() {
-            return LeoObserverProxy.getVisitorId();
+		LeoObserver.getAnonymousId = LeoObserver.getAnonymousId || function() {
+			return LeoObserverProxy.getAnonymousId();
         };
+		LeoObserver.getVisitorId = LeoObserver.getVisitorId || LeoObserver.getAnonymousId;
         LeoObserver.getSessionKey = LeoObserver.getSessionKey || function() {
             return LeoObserverProxy.getSessionKey();
         };

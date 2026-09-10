@@ -28,6 +28,20 @@ class RateLimitDecision:
     retry_after_seconds: int = 0
 
 
+def build_rate_limit_key(
+    key_prefix: str,
+    client_ip: str,
+    data_source_id: UUID,
+    request_origin: Optional[str],
+) -> str:
+    """Build a rate-limit key scoped to IP, source, and HTTP origin."""
+    origin = (request_origin or "none").strip() or "none"
+    return (
+        f"{key_prefix}:rate:ip:{client_ip}"
+        f":data-source:{data_source_id}:origin:{origin}"
+    )
+
+
 class RedisSessionCache:
     """Caches non-PII session activity metadata with an expiry."""
 
@@ -104,10 +118,19 @@ class TrackingRequestProtection:
         normalized = user_agent.lower()
         return any(pattern in normalized for pattern in self.bot_patterns)
 
-    def allow_request(self, request: Request) -> RateLimitDecision:
-        """Consume one IP-window token, or apply the configured Redis fallback."""
+    def allow_request(
+        self,
+        request: Request,
+        data_source_id: UUID,
+    ) -> RateLimitDecision:
+        """Consume one scoped token, or apply the configured Redis fallback."""
         client_ip = request.client.host if request.client else "unknown"
-        key = f"{self.settings.tracking_redis_key_prefix}:rate:ip:{client_ip}"
+        key = build_rate_limit_key(
+            self.settings.tracking_redis_key_prefix,
+            client_ip,
+            data_source_id,
+            request.headers.get("origin"),
+        )
         try:
             count = int(
                 self.client.eval(

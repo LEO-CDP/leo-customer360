@@ -192,6 +192,7 @@
     var BatchManager = {
         queues: {},
         isFlushing: {},
+        seenEventIds: {},
 
         createPayload: function(items) {
             var eventsList = [];
@@ -239,15 +240,16 @@
 
                 var singleEvent = {
                     "event_name": evtName,
-                    "event_time": new Date().toISOString(),
+                    "event_time": it.event_time || it.occurred_at || new Date().toISOString(),
                     "page_url": pageUrl,
                     "page_title": pageTitle,
                     "referrer_url": refUrl,
-                    "visitor_id": it.visid || (global.LeoEventObserver ? global.LeoEventObserver.getVisitorId() : ""),
+                    "anonymous_id": it.anonymous_id || (global.LeoEventObserver ? global.LeoEventObserver.getAnonymousId() : ""),
                     "session_id": sessionKey,
-                    "fingerprint_id": it.fgp || lscache.get("leocdp_fgp") || "",
+                    "device_fingerprint": it.device_fingerprint || lscache.get("leocdp_fgp") || "",
                     "event_data": evtData
                 };
+                if (it.event_id) singleEvent.event_id = it.event_id;
 
                 // Elevate UTM parameters to top-level event for fast querying
                 if (evtData && typeof evtData === 'object') {
@@ -289,6 +291,20 @@
         },
 
         enqueue: function(url, data, batchSize) {
+            var eventId = data && data.event_id;
+            if (eventId) {
+                var now = Date.now();
+                for (var seenEventId in this.seenEventIds) {
+                    if (now - this.seenEventIds[seenEventId] >= 86400000) {
+                        delete this.seenEventIds[seenEventId];
+                    }
+                }
+                var seenAt = this.seenEventIds[eventId];
+                if (seenAt && now - seenAt < 86400000) {
+                    return;
+                }
+                this.seenEventIds[eventId] = now;
+            }
             if (!this.queues[url]) {
                 this.queues[url] = [];
             }
@@ -775,16 +791,172 @@
 
 var leoSessionStringKey = "leoctxsk";
 var leoVisitorIdStringKey = "leocdp_vid";
+var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
+    window.LEO_SESSION_NAMESPACE_UUID ||
+    window.leoC360DataSourceId ||
+    window.leoC360SourceId ||
+    window.leoDataSourceId
+)) || "";
 
 (function(global, undefined) {
     'use strict';
 
-    var LeoEventObserver = {'fingerprintId' : ""};
+    var LeoEventObserver = {'deviceFingerprint' : ""};
     var sessionKey = false;
     var debug = false;
+    var eventSequence = 0;
+
+    function uuidToBytes(uuid) {
+        var normalizedUuid = String(uuid || '').replace(/-/g, '');
+        if (!/^[0-9a-fA-F]{32}$/.test(normalizedUuid)) {
+            throw new Error('Invalid UUID namespace: ' + uuid);
+        }
+
+        var bytes = new Uint8Array(16);
+        for (var byteIndex = 0; byteIndex < 16; byteIndex += 1) {
+            bytes[byteIndex] = parseInt(normalizedUuid.substr(byteIndex * 2, 2), 16);
+        }
+        return bytes;
+    }
+
+    function bytesToUuid(bytes) {
+        var hex = [];
+        for (var byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
+            hex.push(bytes[byteIndex].toString(16).padStart(2, '0'));
+        }
+        hex = hex.join('');
+        return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' +
+            hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20, 32);
+    }
+
+    function encodeUtf8(value) {
+        if (typeof TextEncoder === 'function') {
+            return new TextEncoder().encode(value);
+        }
+
+        var encoded = unescape(encodeURIComponent(value));
+        var bytes = new Uint8Array(encoded.length);
+        for (var byteIndex = 0; byteIndex < encoded.length; byteIndex += 1) {
+            bytes[byteIndex] = encoded.charCodeAt(byteIndex);
+        }
+        return bytes;
+    }
+
+    function sha1(bytes) {
+        var bitLength = bytes.length * 8;
+        var paddedLength = ((bytes.length + 9 + 63) >> 6) << 6;
+        var message = new Uint8Array(paddedLength);
+        message.set(bytes);
+        message[bytes.length] = 0x80;
+        message[paddedLength - 4] = (bitLength >>> 24) & 0xff;
+        message[paddedLength - 3] = (bitLength >>> 16) & 0xff;
+        message[paddedLength - 2] = (bitLength >>> 8) & 0xff;
+        message[paddedLength - 1] = bitLength & 0xff;
+
+        var hashA = 0x67452301;
+        var hashB = 0xefcdab89;
+        var hashC = 0x98badcfe;
+        var hashD = 0x10325476;
+        var hashE = 0xc3d2e1f0;
+
+        for (var offset = 0; offset < paddedLength; offset += 64) {
+            var words = new Uint32Array(80);
+            for (var wordIndex = 0; wordIndex < 16; wordIndex += 1) {
+                var wordOffset = offset + wordIndex * 4;
+                words[wordIndex] = (message[wordOffset] << 24) |
+                    (message[wordOffset + 1] << 16) |
+                    (message[wordOffset + 2] << 8) |
+                    message[wordOffset + 3];
+            }
+            for (var expandedIndex = 16; expandedIndex < 80; expandedIndex += 1) {
+                var expandedWord = words[expandedIndex - 3] ^ words[expandedIndex - 8] ^
+                    words[expandedIndex - 14] ^ words[expandedIndex - 16];
+                words[expandedIndex] = (expandedWord << 1) | (expandedWord >>> 31);
+            }
+
+            var roundA = hashA;
+            var roundB = hashB;
+            var roundC = hashC;
+            var roundD = hashD;
+            var roundE = hashE;
+
+            for (var round = 0; round < 80; round += 1) {
+                var functionValue;
+                var roundConstant;
+                if (round < 20) {
+                    functionValue = (roundB & roundC) | ((~roundB) & roundD);
+                    roundConstant = 0x5a827999;
+                } else if (round < 40) {
+                    functionValue = roundB ^ roundC ^ roundD;
+                    roundConstant = 0x6ed9eba1;
+                } else if (round < 60) {
+                    functionValue = (roundB & roundC) | (roundB & roundD) | (roundC & roundD);
+                    roundConstant = 0x8f1bbcdc;
+                } else {
+                    functionValue = roundB ^ roundC ^ roundD;
+                    roundConstant = 0xca62c1d6;
+                }
+
+                var rotatedA = (roundA << 5) | (roundA >>> 27);
+                var temporary = (rotatedA + functionValue + roundE + roundConstant + words[round]) | 0;
+                roundE = roundD;
+                roundD = roundC;
+                roundC = (roundB << 30) | (roundB >>> 2);
+                roundB = roundA;
+                roundA = temporary;
+            }
+
+            hashA = (hashA + roundA) | 0;
+            hashB = (hashB + roundB) | 0;
+            hashC = (hashC + roundC) | 0;
+            hashD = (hashD + roundD) | 0;
+            hashE = (hashE + roundE) | 0;
+        }
+
+        var digest = new Uint8Array(20);
+        var hashes = [hashA, hashB, hashC, hashD, hashE];
+        for (var hashIndex = 0; hashIndex < hashes.length; hashIndex += 1) {
+            digest[hashIndex * 4] = (hashes[hashIndex] >>> 24) & 0xff;
+            digest[hashIndex * 4 + 1] = (hashes[hashIndex] >>> 16) & 0xff;
+            digest[hashIndex * 4 + 2] = (hashes[hashIndex] >>> 8) & 0xff;
+            digest[hashIndex * 4 + 3] = hashes[hashIndex] & 0xff;
+        }
+        return digest;
+    }
+
+    function uuidV5(name, namespaceUuid) {
+        var namespaceBytes = uuidToBytes(namespaceUuid);
+        var nameBytes = encodeUtf8(name);
+        var input = new Uint8Array(namespaceBytes.length + nameBytes.length);
+        input.set(namespaceBytes, 0);
+        input.set(nameBytes, namespaceBytes.length);
+
+        var uuidBytes = sha1(input).slice(0, 16);
+        uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x50;
+        uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80;
+        return bytesToUuid(uuidBytes);
+    }
+
+    function getSessionNamespaceUuid() {
+        var namespaceUuid = global.LEO_SESSION_NAMESPACE_UUID ||
+            global.leoC360DataSourceId || global.leoC360SourceId ||
+            global.leoDataSourceId || leoSessionNamespaceUuid;
+        if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(namespaceUuid)) {
+            throw new Error('A valid data source UUID is required for session generation');
+        }
+        return namespaceUuid;
+    }
 
     function hasOwn(obj, key) {
         return Object.prototype.hasOwnProperty.call(obj, key);
+    }
+
+    function createEventId() {
+        if (global.crypto && typeof global.crypto.randomUUID === 'function') {
+            return global.crypto.randomUUID();
+        }
+        eventSequence += 1;
+        return 'leo-' + Date.now().toString(36) + '-' + eventSequence.toString(36);
     }
 
     function toSafeParamValue(value) {
@@ -850,18 +1022,19 @@ var leoVisitorIdStringKey = "leocdp_vid";
     }
     
     function setSessionKey(key){
-    	sessionKey = key;
-    	lscache.set(leoSessionStringKey, sessionKey);
+        sessionKey = createLocalSessionId();
+        lscache.set(leoSessionStringKey, sessionKey);
         if (global.LeoCorsRequest && typeof global.LeoCorsRequest.setSessionKey === 'function') {
             global.LeoCorsRequest.setSessionKey(sessionKey);
         }
     }
     
     function getSessionKey(autoResfresh){
-    	sessionKey = lscache.get(leoSessionStringKey);
-		if(typeof sessionKey !== 'string' && autoResfresh === true){
-			sessionKey = "";
-		}
+        var generatedSessionKey = createLocalSessionId();
+        if (sessionKey !== generatedSessionKey) {
+            sessionKey = generatedSessionKey;
+            lscache.set(leoSessionStringKey, sessionKey);
+        }
     	return sessionKey;
     }
     
@@ -886,26 +1059,27 @@ var leoVisitorIdStringKey = "leocdp_vid";
     	        return;
     	    }
     
-    	    var values = components.map(function (component) {
-    	        return component && component.value;
-    	    }).filter(function (value) {
-    	        return typeof value !== 'undefined' && value !== null;
-    	    });
-    	    var fingerprintId = Fingerprint2.x64hash128(values.join(''), 31);
+        var values = components.map(function (component) {
+            return component && component.value;
+        }).filter(function (value) {
+            return typeof value !== 'undefined' && value !== null;
+        });
+        var deviceFingerprint = Fingerprint2.x64hash128(values.join(''), 31);
   
-    		lscache.set("leocdp_fgp", fingerprintId);
+            LeoEventObserver.deviceFingerprint = deviceFingerprint;
+            lscache.set("leocdp_fgp", deviceFingerprint);
 
-    		if (typeof callback === 'function') {
-    			callback(fingerprintId);
-    		}
-    	});
+            if (typeof callback === 'function') {
+                callback(deviceFingerprint);
+            }
+        });
     }
     
 
-    function generateVisitorId() {
+    function generateAnonymousId() {
         var injectedVid = (typeof global.INJECTED_VISITOR_ID === 'string' && global.INJECTED_VISITOR_ID)
             || (typeof INJECTED_VISITOR_ID === 'string' && INJECTED_VISITOR_ID)
-            || (global.LeoEventObserver && global.LeoEventObserver.visitorId)
+            || (global.LeoEventObserver && global.LeoEventObserver.anonymousId)
             || (typeof window !== 'undefined' && typeof window.injectedVisitorId === 'string' && window.injectedVisitorId);
     	if(typeof injectedVid === 'string' && injectedVid.length > 5) {
     		return injectedVid;
@@ -936,13 +1110,13 @@ var leoVisitorIdStringKey = "leocdp_vid";
     	}
     }
     
-    function getVisitorId() {
+    function getAnonymousId() {
         var key = leoVisitorIdStringKey;
         var uuid =  lscache.get(key); 
         
         var injectedVid = (typeof global.INJECTED_VISITOR_ID === 'string' && global.INJECTED_VISITOR_ID)
             || (typeof INJECTED_VISITOR_ID === 'string' && INJECTED_VISITOR_ID)
-            || (global.LeoEventObserver && global.LeoEventObserver.visitorId)
+            || (global.LeoEventObserver && global.LeoEventObserver.anonymousId)
             || (typeof window !== 'undefined' && typeof window.injectedVisitorId === 'string' && window.injectedVisitorId);
 
         if(typeof injectedVid === 'string' && injectedVid.length > 5 && typeof uuid === 'string') {
@@ -953,11 +1127,28 @@ var leoVisitorIdStringKey = "leocdp_vid";
         }
         
         if (typeof uuid !== 'string') {
-        	uuid = generateVisitorId();
+            uuid = generateAnonymousId();
             lscache.set(key, uuid);
         } 
 
         return uuid;
+    }
+
+    function getSessionKeyHint(date) {
+        var currentDate = date || new Date();
+        var month = String(currentDate.getMonth() + 1).padStart(2, '0');
+        var day = String(currentDate.getDate()).padStart(2, '0');
+        var hour = String(currentDate.getHours()).padStart(2, '0');
+        var bucket = currentDate.getMinutes() < 30 ? '0' : '1';
+        return currentDate.getFullYear() + '-' + month + '-' + day + '-' + hour + '-' + bucket;
+    }
+
+    function createLocalSessionId() {
+        var deviceFingerprint = lscache.get("leocdp_fgp") || LeoEventObserver.deviceFingerprint || "";
+        var anonymousId = getAnonymousId();
+        var sessionKeyHint = getSessionKeyHint();
+        var sessionSeed = [sessionKeyHint, deviceFingerprint, anonymousId].join('|');
+        return uuidV5(sessionSeed, getSessionNamespaceUuid());
     }
 
     var doTracking = function(eventType, params) {
@@ -986,8 +1177,10 @@ var leoVisitorIdStringKey = "leocdp_vid";
             batchSize = 1;
         }
 
-        payload.visid = getVisitorId();
+        payload.anonymous_id = getAnonymousId();
         payload.sessionKey = activeSessionKey;
+        payload.event_id = payload.event_id || createEventId();
+        payload.event_time = payload.event_time || payload.occurred_at || new Date().toISOString();
         payload.eventType = eventType;
         if (params.screen) payload.screen = params.screen;
 
@@ -1035,7 +1228,7 @@ var leoVisitorIdStringKey = "leocdp_vid";
             payload[key] = params[key];
         }
 
-        payload.visid = getVisitorId();
+        payload.anonymous_id = getAnonymousId();
         payload.sessionKey = activeSessionKey;
         payload.metric = "profile-update";
         payload.eventType = "action";
@@ -1063,11 +1256,11 @@ var leoVisitorIdStringKey = "leocdp_vid";
 
     var getPersonalization = function(slotId, params, callback) {
         var profile = lscache.get("leocdp_profile") || {};
-        var visitorId = getVisitorId();
+        var anonymousId = getAnonymousId();
         var sessionKey = getSessionKey(true);
         var personalizationContext = {
             slotId: slotId || 'default',
-            visitorId: visitorId,
+            anonymousId: anonymousId,
             sessionKey: sessionKey,
             profile: profile,
             recommendedItems: []
@@ -1099,9 +1292,9 @@ var leoVisitorIdStringKey = "leocdp_vid";
             : ((typeof OBSERVE_WITH_FINGERPRINT !== 'undefined') ? OBSERVE_WITH_FINGERPRINT : true);
 
         if (observeWithFingerprint) {
-            var fingerprint = lscache.get("leocdp_fgp") || LeoEventObserver.fingerprintId || "";
-            if (fingerprint) {
-                normalized.fgp = fingerprint;
+            var deviceFingerprint = lscache.get("leocdp_fgp") || LeoEventObserver.deviceFingerprint || "";
+            if (deviceFingerprint) {
+                normalized.device_fingerprint = deviceFingerprint;
             }
         }
 
@@ -1120,21 +1313,20 @@ var leoVisitorIdStringKey = "leocdp_vid";
     		setSessionKey(data.sessionKey);
     	}
     	
-    	var vid = getVisitorId();
-    	var newVisitorId = data && data.visitorId;
-    	if(typeof newVisitorId === "string" && newVisitorId.length > 5 && newVisitorId !== vid){
-    		lscache.set(leoVisitorIdStringKey, newVisitorId);
+        var currentAnonymousId = getAnonymousId();
+        var newAnonymousId = data && data.anonymousId;
+        if(typeof newAnonymousId === "string" && newAnonymousId.length > 5 && newAnonymousId !== currentAnonymousId){
+            lscache.set(leoVisitorIdStringKey, newAnonymousId);
     	}
     	
     	var contextPayload = {
     		event: "LeoObserverProxyReady",
     		sessionKey: getSessionKey(true),
-    		visitorId: getVisitorId(),
-    		fingerprintId: lscache.get("leocdp_fgp") || LeoEventObserver.fingerprintId || ""
+            anonymousId: getAnonymousId(),
+            deviceFingerprint: lscache.get("leocdp_fgp") || LeoEventObserver.deviceFingerprint || ""
     	};
 
 		sendMessage(contextPayload);
-		sendMessage("LeoObserverProxyReady");
         debugLog(data);
     }
 
@@ -1146,8 +1338,8 @@ var leoVisitorIdStringKey = "leocdp_vid";
         // Initialize and resolve active session context immediately
         var sessionData = {
             sessionKey: getSessionKey(true),
-            visitorId: getVisitorId(),
-            fingerprintId: lscache.get("leocdp_fgp") || LeoEventObserver.fingerprintId || "",
+            anonymousId: getAnonymousId(),
+            deviceFingerprint: lscache.get("leocdp_fgp") || LeoEventObserver.deviceFingerprint || "",
             status: 101,
             ready: true
         };
@@ -1161,7 +1353,9 @@ var leoVisitorIdStringKey = "leocdp_vid";
     LeoEventObserver.updateProfile = updateProfile;
     LeoEventObserver.getPersonalization = getPersonalization;
     LeoEventObserver.initFingerprint = initFingerprint;
-    LeoEventObserver.getVisitorId = getVisitorId;
+    LeoEventObserver.getAnonymousId = getAnonymousId;
+    // Preserve the public SDK method while using the canonical identity name internally.
+    LeoEventObserver.getVisitorId = getAnonymousId;
     LeoEventObserver.getSessionKey = getSessionKey;
 	LeoEventObserver.setSessionKey = setSessionKey;
 

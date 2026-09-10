@@ -45,6 +45,7 @@ DOCS_SEARCH_URL="$(tfval docs_search_url "$ovl")"
 DOCS_SEARCH_KEY="$(tfval docs_search_server_key "$ovl")"; DOCS_SEARCH_KEY="${DOCS_SEARCH_KEY:-docs}"
 DOCS_SEARCH_PORT="$(tfval docs_search_port "$ovl")"; DOCS_SEARCH_PORT="${DOCS_SEARCH_PORT:-8000}"
 DOCS_SITE_BASE="$(tfval docs_site_base "$ovl")"; DOCS_SITE_BASE="${DOCS_SITE_BASE:-https://leo-cdp.github.io/leo-customer360}"
+DOCS_PROXY_TIMEOUT_SECONDS="${DOCS_PROXY_TIMEOUT_SECONDS:-120}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 : "${API_HOSTNAME:?set frontend_api_hostname in $ovl (the PUBLIC API URL the browser uses)}"
 
@@ -106,14 +107,15 @@ if [[ -z "$DOCS_SEARCH_URL" ]]; then
 fi
 [[ -n "$DOCS_SEARCH_URL" ]] && echo "   Docs Assistant -> $DOCS_SEARCH_URL   (site links: $DOCS_SITE_BASE)"
 # Only emit DOCS_SEARCH_URL when known (empty would override app.py's default with a dead value).
-DOCS_LINES="DOCS_SITE_BASE=$DOCS_SITE_BASE"
+DOCS_LINES="DOCS_SITE_BASE=$DOCS_SITE_BASE
+DOCS_PROXY_TIMEOUT_SECONDS=$DOCS_PROXY_TIMEOUT_SECONDS"
 [[ -n "$DOCS_SEARCH_URL" ]] && DOCS_LINES="DOCS_SEARCH_URL=$DOCS_SEARCH_URL
 $DOCS_LINES"
 # Shared secret the /ai proxy sends as X-Internal-Auth so the docs service exempts it from the
-# public rate limit. Must equal the docs deploy's DOCS_INTERNAL_SECRET; empty (default) => the
+# public rate limit. Must equal the docs deploy's DOCS_INTERNAL_AUTH_SECRET; empty (default) => the
 # proxy is rate-limited like any client (fail-closed). Emit only when set.
-DOCS_INTERNAL_SECRET="${DOCS_INTERNAL_SECRET:-}"
-[[ -n "$DOCS_INTERNAL_SECRET" ]] && DOCS_LINES="DOCS_INTERNAL_SECRET=$DOCS_INTERNAL_SECRET
+DOCS_INTERNAL_AUTH_SECRET="${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-}}"
+[[ -n "$DOCS_INTERNAL_AUTH_SECRET" ]] && DOCS_LINES="DOCS_INTERNAL_AUTH_SECRET=$DOCS_INTERNAL_AUTH_SECRET
 $DOCS_LINES"
 
 # Build the env file locally and ship it base64-encoded as ONE arg (avoids the

@@ -96,7 +96,7 @@ double free or corruption (out)
 
 ### Mitigation options (deferred by decision)
 1. **Cheapest:** lower generation memory on the docs box — `GEN_CTX 4096→2048`, `GEN_MAX_TOKENS 512→256` (smaller KV cache, also faster); and raise the frontend proxy timeout `DOCS_SEARCH_TIMEOUT 60→120`. Trade-off: shorter answers.
-2. `RERANK_ENABLED=false` on the docs box frees ~300 MB (README's first lever); `/search` still works via vector similarity (ranking slightly worse).
+2. `DOCS_RERANK_ENABLED=false` on the docs box frees ~300 MB (README's first lever); `/search` still works via vector similarity (ranking slightly worse).
 3. **Robust:** resize the docs VM to 2 vCPU / 4 GB (terraform `flavor_name`, reboot, higher cost).
 
 ---

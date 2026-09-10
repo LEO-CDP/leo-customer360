@@ -24,11 +24,11 @@ from .config import (
     ASK_RATE_WINDOW_SEC,
     CORS_ORIGINS,
     EMBED_MODEL,
+    DOCS_LOCAL_MODEL_PATH,
+    DOCS_RERANK_ENABLED,
+    DOCS_RERANK_MODEL,
     INTERNAL_API_SECRET,
     QUESTION_MAX_LEN,
-    QWEN_MODEL_PATH,
-    RERANK_ENABLED,
-    RERANK_MODEL,
     RERANK_TOP_K,
     RETRIEVE_TOP_N,
     TOP_K_MAX,
@@ -119,7 +119,7 @@ async def lifespan(app: FastAPI):
     # Warm the models so the first request isn't slow, and fail fast if a model
     # or the DB is misconfigured.
     embed(["warmup"], task="query")
-    if RERANK_ENABLED:
+    if DOCS_RERANK_ENABLED:
         rerank("warmup", ["warmup"])
     with store.connect() as conn:
         app.state.doc_count = store.count(conn)
@@ -157,8 +157,8 @@ def health():
         "status": "ok",
         "loaded_chunks": getattr(app.state, "doc_count", None),
         "embed_model": EMBED_MODEL,
-        "rerank_model": RERANK_MODEL if RERANK_ENABLED else None,
-        "generator": QWEN_MODEL_PATH.rsplit("/", 1)[-1],
+        "rerank_model": DOCS_RERANK_MODEL if DOCS_RERANK_ENABLED else None,
+        "generator": DOCS_LOCAL_MODEL_PATH.rsplit("/", 1)[-1],
     }
 
 

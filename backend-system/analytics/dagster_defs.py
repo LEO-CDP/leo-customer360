@@ -1,4 +1,4 @@
-"""Dagster definitions for hourly Customer 360 tracking-log analytics."""
+"""Dagster definitions for periodic Customer 360 tracking-log analytics."""
 
 import os
 import sys
@@ -8,10 +8,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dagster import (  # noqa: E402
     DefaultScheduleStatus,
+    DagsterRunStatus,
     Definitions,
     OpExecutionContext,
     RetryPolicy,
     ScheduleDefinition,
+    ScheduleEvaluationContext,
+    RunsFilter,
     job,
     op,
 )
@@ -35,17 +38,34 @@ def aggregate_tracking_logs_op(context: OpExecutionContext) -> dict[str, int]:
     return summary
 
 
-@job(name="analytics_job")
+@job(name="analytics_job", tags={"backend_job": "analytics"})
 def analytics_job() -> None:
     aggregate_tracking_logs_op()
+
+
+def _analytics_run_active(context: ScheduleEvaluationContext) -> bool:
+    active_statuses = [
+        DagsterRunStatus.NOT_STARTED,
+        DagsterRunStatus.QUEUED,
+        DagsterRunStatus.STARTING,
+        DagsterRunStatus.STARTED,
+        DagsterRunStatus.CANCELING,
+    ]
+    return bool(
+        context.instance.get_runs(
+            filters=RunsFilter(job_name="analytics_job", statuses=active_statuses),
+            limit=1,
+        )
+    )
 
 
 analytics_hourly_schedule = ScheduleDefinition(
     name="analytics_hourly_schedule",
     job=analytics_job,
-    cron_schedule="0 * * * *",
-    execution_timezone="UTC",
+    cron_schedule="*/3 * * * *",
+    execution_timezone="GMT",
     default_status=DefaultScheduleStatus.RUNNING,
+    should_execute=lambda context: not _analytics_run_active(context),
 )
 
 

@@ -24,7 +24,7 @@ Repository hiện có bốn application service, ba Dagster job đang hoạt đ�
 | `backend-system/segmentation/` | Đã triển khai | Tính toán lại các segment đang hoạt động và đồng bộ dữ liệu member/tag về master profile |
 | `backend-system/analytics/` | Đã triển khai | Dagster job chạy mỗi giờ để aggregate tracking logs và cập nhật source totals |
 | `customer360-api/` | Đã triển khai | REST API chính cho identity, CRM, persona, reporting và metadata |
-| `data-tracking-api/` | Đã triển khai | Lưu tracking event bất biến vào các object S3/MinIO theo từng source và từng giờ |
+| `data-tracking-api/` | Đã triển khai | Đưa dynamic tracking event vào Redis Streams và ghi object S3/MinIO bất biến theo từng source và từng giờ |
 | `ads-server/` | Đã triển khai | FastAPI ad-serving API đa tenant với placement, campaign, creative và browser loader |
 | `frontend-admin/` | Đã triển khai | FastAPI shell cho UI, sử dụng client-side JS và API request |
 | `backend-system/scoring/`, `data_synch/`, `email_engine/`, `notification_engine/`, `campaign_activation/`, `personalization/` | Placeholder | Các Dagster scaffold có thể chạy, sẵn sàng bổ sung service logic |
@@ -36,7 +36,7 @@ Repository hiện có bốn application service, ba Dagster job đang hoạt đ�
 | [`database-init/`](database-init) | Nguồn schema: `database-schema.sql`, seed/init scripts và SQL views |
 | [`backend-system/`](backend-system) | Dagster workspace với chín code location: identity resolution, segmentation, analytics và sáu placeholder service |
 | [`customer360-api/`](customer360-api) | FastAPI service với router, auth, SQLAlchemy model và business logic |
-| [`data-tracking-api/`](data-tracking-api) | FastAPI ingestion service ghi tracking-log object theo giờ vào S3/MinIO |
+| [`data-tracking-api/`](data-tracking-api) | FastAPI ingestion service đưa event vào Redis Streams rồi ghi tracking-log object theo giờ vào S3/MinIO |
 | [`ads-server/`](ads-server) | FastAPI ad-serving service độc lập với database, cache và widget code riêng |
 | [`frontend-admin/`](frontend-admin) | Admin UI gọn, được FastAPI phục vụ và load từ static template |
 | [`all-data-simulator/`](all-data-simulator) | Công cụ tạo raw data tổng hợp và hỗ trợ upload lên S3/MinIO |

@@ -8,21 +8,55 @@
 ```
 
 The applications must be configured for the public prefixes before starting
-the services:
+the services. For the `/c360/ai/ask` flow, the browser calls the frontend-admin
+proxy; `DOCS_SEARCH_URL` is the private local upstream and must not be set to
+the public `/c360/ai/ask` URL:
 
 - `customer360-api`: `root_path=/c360api`
 - Keycloak: `KC_HTTP_RELATIVE_PATH=/auth`
 - `ads-server`: `LEO_AD_ROOT_PATH=/ads`
-- `frontend-admin`: `FRONTEND_ROOT_PATH=` and `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`
+- `frontend-admin`: `FRONTEND_ROOT_PATH=/c360`, `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`, and `DOCS_SEARCH_URL=http://127.0.0.1:8000`
+- `docs-vector-search`: start locally on `127.0.0.1:8000`; `dev-c360.sh` builds the image, refreshes the index, and starts it
 - `data-tracking-api`: no root path; nginx strips `/data`
 - Dagster: start the UI with `--path-prefix /dagster`
 - MinIO console: `MINIO_BROWSER_REDIRECT_URL=https://s3dev.example.com/minio/`
+
+For a local shell setup, the relevant entries in the repository root `.env`
+are:
+
+```dotenv
+FRONTEND_ROOT_PATH=/c360
+FRONTEND_API_HOSTNAME=https://c360.example.com/c360api
+DOCS_SEARCH_HOST_PORT=8000
+DOCS_SEARCH_URL=http://127.0.0.1:8000
+DOCS_SEARCH_TIMEOUT=120
+DOCS_GEN_CTX=2048
+DOCS_GEN_MAX_TOKENS=256
+DOCS_RERANK_ENABLED=true
+```
+
+Start the local AI service together with the rest of the development stack:
+
+```bash
+./dev-c360.sh
+curl -fsS http://127.0.0.1:8000/health
+```
+
+The browser-facing AI endpoint is then:
+
+```text
+https://c360.example.com/c360/ai/ask
+```
+
+Nginx routes that request to `frontend-admin`; `frontend-admin` forwards the
+request to `http://127.0.0.1:8000/ask`.
 
 With this configuration, the public endpoints are:
 
 | Service | Public URL | Local upstream |
 | --- | --- | --- |
-| frontend-admin (UI) | `https://c360.example.com/` | `127.0.0.1:8890` |
+| frontend-admin (UI) | `https://c360.example.com/c360/` | `127.0.0.1:8890` |
+| frontend-admin AI proxy | `https://c360.example.com/c360/ai/ask` | `127.0.0.1:8890` -> `127.0.0.1:8000/ask` |
 | customer360-api | `https://c360.example.com/c360api/api/v1` | `127.0.0.1:8008` |
 | Keycloak | `https://c360.example.com/auth` | `127.0.0.1:8080` |
 | ads-server and docs | `https://c360.example.com/ads` and `/ads/docs` | `127.0.0.1:9009` |
@@ -50,6 +84,9 @@ origin is `https://c360.example.com`, do not use `X-Frame-Options: SAMEORIGIN`;
 use the iframe route's `frame-ancestors` policy below instead.
 
 ```nginx
+############# C360 local dev #######
+####################################
+
 # c360 web admin
 upstream c360_frontend {
   server 127.0.0.1:8890;
@@ -92,6 +129,32 @@ upstream c360_minio_console {
 
 server {
   server_name c360.example.com;
+
+  # frontend-admin uses /c360 as its public root path. Keep the AI routes
+  # prefixed because FastAPI registers /c360/ai/* when FRONTEND_ROOT_PATH=/c360.
+  location = /c360 {
+    return 308 /c360/;
+  }
+
+  location ^~ /c360/ai/ {
+    proxy_pass http://c360_frontend;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Port $server_port;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 120s;
+  }
+
+  # Strip /c360 before forwarding the UI and static assets. The frontend app
+  # serves / and /static internally, while its generated URLs remain /c360/*.
+  location ^~ /c360/ {
+    proxy_pass http://c360_frontend/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Port $server_port;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 600s;
+  }
 
   # customer360-api: preserve /c360api for root_path and generated URLs.
   location = /c360api {
@@ -202,6 +265,13 @@ server {
 # root, while the web console remains under /minio/ on the same hostname.
 server {
   server_name s3dev.example.com;
+  
+  # Allow any size file to be uploaded to MinIO. Prevents HTTP 413 errors on large uploads.
+  client_max_body_size 0;
+  
+  # Disable buffering for smoother streaming and large file uploads
+  proxy_buffering off;
+  proxy_request_buffering off;
 
   location = /minio {
     return 308 /minio/;
@@ -214,6 +284,12 @@ server {
     proxy_set_header X-Forwarded-Port $server_port;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_read_timeout 600s;
+    
+    # REQUIRED WEBSOCKET HEADERS ADDED HERE
+    # Upgrades the HTTP connection to a WebSocket connection for MinIO Console components
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
   }
 
   location / {

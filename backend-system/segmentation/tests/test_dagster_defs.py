@@ -9,12 +9,22 @@ manually against a real database -- see docs/api-plans/PLAN-SEGMENTS-API-IMPROVE
 """
 
 import logging
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import dagster_defs
 from dagster import DagsterInstance, RunRequest, SkipReason, build_sensor_context
 from segmentation import recompute
 from segmentation.rls import set_tenant_context
+
+
+class FakeRedisLeaseClient:
+    def set(self, _key, _token, nx=False, ex=None):
+        assert nx is True
+        assert ex == recompute.SEGMENTATION_LOCK_TTL_SECONDS
+        return True
+
+    def eval(self, _script, *_args):
+        return 1
 
 
 def test_sets_parameterized_tenant_context():
@@ -148,7 +158,10 @@ class TestSegmentationRecomputeLogging:
         monkeypatch.setattr(recompute, "_recompute_one_segment", MagicMock(return_value=7))
         caplog.set_level(logging.INFO, logger=recompute.logger.name)
 
-        recompute.recompute_all_active_segments(tenant_id="tenant-1")
+        recompute.recompute_all_active_segments(
+            tenant_id="tenant-1",
+            redis_client=FakeRedisLeaseClient(),
+        )
 
         assert "Recomputed segment segment-1 (tenant tenant-1): member_count=7" in caplog.text
 
@@ -161,6 +174,7 @@ class TestSegmentationRecomputeLogging:
         recompute.recompute_all_active_segments(
             tenant_id="tenant-1",
             segment_id="segment-1",
+            redis_client=FakeRedisLeaseClient(),
         )
 
         select_sql, select_params = cursor.execute.call_args.args
@@ -175,3 +189,23 @@ class TestSegmentationRecomputeLogging:
             assert str(exc) == "tenant_id is required when segment_id is provided"
         else:
             raise AssertionError("segment_id without tenant_id should be rejected")
+
+    def test_recompute_one_segment_stages_matches_in_database(self):
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = (4,)
+
+        result = recompute._recompute_one_segment(
+            connection,
+            tenant_id="tenant-1",
+            segment_tag="segment_one",
+            where_fragment="status_code = 1",
+            segment_id="segment-1",
+        )
+
+        queries = [call.args[0] for call in cursor.execute.call_args_list]
+        assert result == 4
+        assert any("CREATE TEMP TABLE" in query for query in queries)
+        assert any("INSERT INTO _c360_segment_matches" in query for query in queries)
+        assert any("SELECT COUNT(*) FROM _c360_segment_matches" in query for query in queries)
+        cursor.fetchall.assert_not_called()

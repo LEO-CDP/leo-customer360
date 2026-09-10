@@ -1,10 +1,10 @@
 """Aggregate data-tracking JSONL objects into hourly Redis and source totals."""
 
-import hashlib
 import json
 import logging
 import os
 import re
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
@@ -13,6 +13,14 @@ from uuid import uuid4
 from dotenv import load_dotenv
 
 load_dotenv()
+
+_BACKEND_SYSTEM_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+if _BACKEND_SYSTEM_ROOT not in sys.path:
+    sys.path.insert(0, _BACKEND_SYSTEM_ROOT)
+
+from shared.redis_lock import acquire_redis_lease  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +32,11 @@ DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 # Non-positive means "no cap": process all active sources across all tenants.
 DATA_SOURCE_LIMIT = int(os.environ.get("ANALYTICS_DATA_SOURCE_LIMIT", "0"))
-MAX_WORKERS = int(os.environ.get("ANALYTICS_MAX_WORKERS", "8"))
+MAX_WORKERS = max(1, int(os.environ.get("ANALYTICS_MAX_WORKERS", "2")))
+SOURCE_BATCH_SIZE = max(1, int(os.environ.get("ANALYTICS_SOURCE_BATCH_SIZE", "16")))
+OBJECT_BATCH_SIZE = max(
+    1, int(os.environ.get("ANALYTICS_OBJECT_BATCH_SIZE", "500"))
+)
 DATAFRAME_ENGINE = os.environ.get("ANALYTICS_DATAFRAME_ENGINE", "auto").strip().lower()
 REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6580"))
@@ -39,6 +51,10 @@ S3_SECRET_ACCESS_KEY = os.environ.get("S3_SECRET_ACCESS_KEY")
 S3_SESSION_TOKEN = os.environ.get("S3_SESSION_TOKEN")
 S3_FORCE_PATH_STYLE = os.environ.get("S3_FORCE_PATH_STYLE", "false").lower() == "true"
 S3_MAX_POOL_CONNECTIONS = int(os.environ.get("ANALYTICS_S3_MAX_POOL_CONNECTIONS", "64"))
+ANALYTICS_LOCK_KEY = "analytics:tracking-log-run-lock"
+ANALYTICS_LOCK_TTL_SECONDS = int(
+    os.environ.get("ANALYTICS_RUN_LOCK_TTL_SECONDS", "3600")
+)
 
 TRACKED_EVENT_FIELD = "tracked-event"
 HOURLY_FOLDER_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2}-\d{2})/(.+\.jsonl)$")
@@ -47,8 +63,11 @@ SOURCE_STATE_PREFIX = "analytics:data-source-state:"
 SOURCE_DAILY_PREFIX = "analytics:data-source-daily:"
 SOURCE_PROFILE_HLL_PREFIX = "analytics:data-source-profiles-hll:"
 LOCK_TTL_SECONDS = int(os.environ.get("ANALYTICS_LOCK_TTL_SECONDS", "3600"))
+PROCESSED_OBJECT_TTL_SECONDS = int(
+    os.environ.get("ANALYTICS_PROCESSED_OBJECT_TTL_SECONDS", str(48 * 60 * 60))
+)
 _INCREMENT_IF_NEW_SCRIPT = """
-if redis.call('SETNX', KEYS[2], ARGV[1]) == 1 then
+if redis.call('SET', KEYS[2], ARGV[1], 'NX', 'EX', ARGV[4]) then
     redis.call('HINCRBY', KEYS[1], ARGV[2], ARGV[3])
     return 1
 end
@@ -186,11 +205,14 @@ def iter_hourly_objects(
     s3_client: Any,
     bucket: str,
     start_after: Optional[str] = None,
+    prefix: Optional[str] = None,
 ) -> Any:
     """List JSONL object keys and their UTC hour folder in a bucket."""
     try:
         paginator = s3_client.get_paginator("list_objects_v2")
         paginate_kwargs: dict[str, str] = {"Bucket": bucket}
+        if prefix:
+            paginate_kwargs["Prefix"] = prefix
         if start_after:
             paginate_kwargs["StartAfter"] = start_after
         for page in paginator.paginate(**paginate_kwargs):
@@ -212,6 +234,16 @@ def _source_daily_key(data_source_id: str) -> str:
 
 def _source_profile_hll_key(data_source_id: str) -> str:
     return f"{SOURCE_PROFILE_HLL_PREFIX}{data_source_id}"
+
+
+def current_system_gmt_hour() -> str:
+    """Return current system datetime in GMT with format yyyy-mm-dd-HH."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d-%H")
+
+
+def s3_json_cache_key(bucket: str, object_key: str) -> str:
+    """Build the Redis cache key from the S3 JSON object path."""
+    return f"s3://{bucket}/{object_key}"
 
 
 def _get_source_state_int(redis_client: Any, data_source_id: str, field: str) -> Optional[int]:
@@ -587,6 +619,7 @@ def increment_hourly_count(
     redis_client: Any,
     data_source_id: str,
     hour: str,
+    bucket: str,
     object_key: str,
     event_count: int,
 ) -> bool:
@@ -599,16 +632,17 @@ def increment_hourly_count(
         raise ValueError("event count cannot be negative")
 
     hourly_key = f"{data_source_id}-{hour}"
-    object_digest = hashlib.sha256(object_key.encode("utf-8")).hexdigest()
-    checkpoint_key = f"analytics:processed-tracking-object:{data_source_id}:{object_digest}"
+    checkpoint_key = s3_json_cache_key(bucket, object_key)
+    processed_at = current_system_gmt_hour()
     result = redis_client.eval(
         _INCREMENT_IF_NEW_SCRIPT,
         2,
         hourly_key,
         checkpoint_key,
-        "1",
+        processed_at,
         TRACKED_EVENT_FIELD,
         str(event_count),
+        str(PROCESSED_OBJECT_TTL_SECONDS),
     )
     return int(result) == 1
 
@@ -659,6 +693,8 @@ def process_tracking_logs(
     data_source_limit: int = DATA_SOURCE_LIMIT,
     run_id: Optional[str] = None,
     log: Optional[Callable[..., None]] = None,
+    _lock_acquired: bool = False,
+    _global_lease: Optional[Any] = None,
 ) -> dict[str, int]:
     """Process hourly JSONL logs for the catalog's first data sources.
 
@@ -670,6 +706,37 @@ def process_tracking_logs(
     cache = redis_client if redis_client is not None else build_redis_client()
     write_log = log or logger.info
     run_id = run_id or str(uuid4())
+
+    if not _lock_acquired:
+        global_lease = acquire_redis_lease(
+            cache,
+            ANALYTICS_LOCK_KEY,
+            ANALYTICS_LOCK_TTL_SECONDS,
+        )
+        if global_lease is None:
+            write_log("Skipping analytics run because another run owns the global lock")
+            return {
+                "sources_processed": 0,
+                "sources_skipped_running": 0,
+                "objects_processed": 0,
+                "events_added": 0,
+                "sources_total": 0,
+            }
+        try:
+            return process_tracking_logs(
+                s3_client=storage,
+                redis_client=cache,
+                db_connection=db_connection,
+                data_source_limit=data_source_limit,
+                run_id=run_id,
+                log=write_log,
+                _lock_acquired=True,
+                _global_lease=global_lease,
+            )
+        finally:
+            global_lease.release()
+
+    current_hour = current_system_gmt_hour()
     source_items: list[tuple[str, str]] = []
     source_results: list[dict[str, Any]] = []
 
@@ -694,7 +761,23 @@ def process_tracking_logs(
         bucket = f"data-tracking-{data_source_id}"
         try:
             start_after = get_source_cursor(cache, data_source_id)
-            for hour, object_key in iter_hourly_objects(storage, bucket, start_after=start_after):
+            if not start_after or not start_after.startswith(f"{current_hour}/"):
+                start_after = None
+            for hour, object_key in iter_hourly_objects(
+                storage,
+                bucket,
+                start_after=start_after,
+                prefix=f"{current_hour}/",
+            ):
+                if source_objects_processed >= OBJECT_BATCH_SIZE:
+                    write_log(
+                        "Pausing source %s after %d objects; next run resumes from the saved cursor",
+                        data_source_id,
+                        OBJECT_BATCH_SIZE,
+                    )
+                    break
+                if _global_lease is not None:
+                    _global_lease.refresh()
                 refresh_source_lock(cache, data_source_id, lock_token)
                 response = storage.get_object(Bucket=bucket, Key=object_key)
                 body = response["Body"]
@@ -705,7 +788,14 @@ def process_tracking_logs(
                     if close:
                         close()
 
-                if increment_hourly_count(cache, data_source_id, hour, object_key, event_count):
+                if increment_hourly_count(
+                    cache,
+                    data_source_id,
+                    hour,
+                    bucket,
+                    object_key,
+                    event_count,
+                ):
                     source_objects_processed += 1
                     source_increment += event_count
                     _increment_source_cached_total(cache, data_source_id, event_count)
@@ -812,18 +902,23 @@ def process_tracking_logs(
         finally:
             seed_connection.close()
 
-        if source_items:
-            worker_count = max(1, min(MAX_WORKERS, len(source_items)))
+        for source_batch_start in range(0, len(source_items), SOURCE_BATCH_SIZE):
+            source_batch = source_items[
+                source_batch_start : source_batch_start + SOURCE_BATCH_SIZE
+            ]
+            worker_count = max(1, min(MAX_WORKERS, len(source_batch)))
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 futures = {
                     executor.submit(_process_one_source, data_source_id, tenant_id): (
                         data_source_id,
                         tenant_id,
                     )
-                    for data_source_id, tenant_id in source_items
+                    for data_source_id, tenant_id in source_batch
                 }
                 for future in as_completed(futures):
                     result = future.result()
                     source_results.append(result)
+            if _global_lease is not None:
+                _global_lease.refresh()
 
     return _aggregate_source_results(source_results)

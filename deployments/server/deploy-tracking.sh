@@ -5,10 +5,10 @@
 #
 # Minimal by design — deploys ONLY what the app actually uses:
 #   * S3-compatible object storage (../storage — vStorage on VNG): the durable NDJSON sink.
-#   * Redis (../cache, on the api box): OPTIONAL — IP rate-limit + session cache. The app
-#     fails OPEN if Redis is absent, so this is best-effort. Reuses the existing api-box Redis
-#     (no dedicated instance); reached over the private VPC (open 6580 api<-tracking in
-#     ../server/overlays/<env>.tfvars extra_ingress).
+#   * Redis (../cache, on the api box): REQUIRED by the default Redis Streams tracking queue;
+#     IP rate-limit + session metadata still fail OPEN when Redis is degraded. Reuses the
+#     existing api-box Redis (no dedicated instance); reached over the private VPC (open 6580
+#     api<-tracking in ../server/overlays/<env>.tfvars extra_ingress).
 #   * nginx (on this box): a tiny local load balancer that owns host :8010 (what Caddy's
 #     DATA_UPSTREAM targets) and least_conn round-robins across the N app replicas, which
 #     live on a private docker bridge — so scaling is fully contained here (Caddy, the NLB,
@@ -94,12 +94,13 @@ echo ">> S3: $S3_ENDPOINT (region $S3_REGION, path-style, auto_create=$S3_AUTO_C
 #     stays off and the rate limiter fails open (the app still ingests to S3). ---
 cache="../cache"
 REDIS_PASS="${TF_VAR_redis_password:-$(tfval redis_password "$cache/terraform.tfvars")}"
-REDIS_HOST=""; REDIS_PORT=""
-if [[ -n "$REDIS_PASS" ]]; then
-  REDIS_HOST="$(srv_ip "$REDIS_SERVER_KEY" fixed_ip)"   # api box private IP (Redis --network host)
-  REDIS_PORT="$(tfval redis_port "$cache/overlays/$ENV.tfvars")"; REDIS_PORT="${REDIS_PORT:-6580}"
+REDIS_HOST="$(srv_ip "$REDIS_SERVER_KEY" fixed_ip)"   # api box private IP (Redis --network host)
+REDIS_PORT="$(tfval redis_port "$cache/overlays/$ENV.tfvars")"; REDIS_PORT="${REDIS_PORT:-6580}"
+if [[ -n "$REDIS_HOST" ]]; then
+  echo ">> Redis: ${REDIS_HOST}:${REDIS_PORT} (tracking stream + rate-limit + session cache)"
+else
+  echo ">> Redis: NOT CONFIGURED — Redis Streams enqueue will be unavailable; ingestion will return 503."
 fi
-if [[ -n "$REDIS_HOST" ]]; then echo ">> Redis: ${REDIS_HOST}:${REDIS_PORT} (rate-limit + session cache)"; else echo ">> Redis: not configured — caching off, rate limiter fails open."; fi
 
 # --- CD image source: pull the CI-built image from GHCR by default (data-tracking-api is now
 #     published by CI, like the other services); set BUILD_LOCAL=1 to build on the VM instead. ---
@@ -180,13 +181,13 @@ S3_SECRET_ACCESS_KEY=$S3_SECRET_KEY
 S3_FORCE_PATH_STYLE=true
 S3_AUTO_CREATE_BUCKETS=$S3_AUTO_CREATE
 ENVF
-if [ -n "${REDIS_HOST:-}" ] && [ -n "$REDIS_PW" ]; then
+if [ -n "${REDIS_HOST:-}" ]; then
   cat >> "$env_file" <<ENVR
 REDIS_HOST=$REDIS_HOST
 REDIS_PORT=${REDIS_PORT:-6580}
-REDIS_PASSWORD=$REDIS_PW
 REDIS_DB=0
 ENVR
+  [ -n "$REDIS_PW" ] && echo "REDIS_PASSWORD=$REDIS_PW" >> "$env_file"
 fi
 if [ -n "${RL_REQUESTS:-}" ]; then
   echo "TRACKING_RATE_LIMIT_REQUESTS=$RL_REQUESTS" >> "$env_file"

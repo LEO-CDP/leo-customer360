@@ -1,6 +1,7 @@
 """Tests for tracking-log aggregation and its Dagster wrapper."""
 
 from io import BytesIO
+import re
 from unittest.mock import MagicMock
 
 import dagster_defs
@@ -49,7 +50,20 @@ class FakePaginator:
 
     def paginate(self, **kwargs):
         self.calls.append(kwargs)
-        return self.pages
+        prefix = kwargs.get("Prefix")
+        if not prefix:
+            return self.pages
+        return [
+            {
+                **page,
+                "Contents": [
+                    item
+                    for item in page.get("Contents", [])
+                    if str(item.get("Key", "")).startswith(prefix)
+                ],
+            }
+            for page in self.pages
+        ]
 
 
 class FakeS3:
@@ -92,13 +106,14 @@ class FakeRedis:
         self.states = {}
         self.hll = {}
         self.locked = False
+        self.locked_keys = set()
 
-    def set(self, _key, _value, nx=False, ex=None):
+    def set(self, key, _value, nx=False, ex=None):
         assert nx is True
         assert ex == aggregation.LOCK_TTL_SECONDS
-        if self.locked:
+        if self.locked or key in self.locked_keys:
             return False
-        self.locked = True
+        self.locked_keys.add(key)
         return True
 
     def hset(self, key, mapping):
@@ -114,8 +129,8 @@ class FakeRedis:
     def pfcount(self, key):
         return len(self.hll.get(key, set()))
 
-    def exists(self, _key):
-        return int(self.locked)
+    def exists(self, key):
+        return int(self.locked or key in self.locked_keys)
 
     def eval(self, *args):
         self.eval_calls.append(args)
@@ -123,7 +138,7 @@ class FakeRedis:
         if "EXPIRE" in script:
             return 1
         if "DEL" in script:
-            self.locked = False
+            self.locked_keys.discard(args[2])
             return 1
         return next(self.results)
 
@@ -173,6 +188,21 @@ def test_count_jsonl_records_ignores_blank_lines_and_requires_objects():
     assert aggregation.count_jsonl_records(body, "hour/events.jsonl") == 2
 
 
+def test_current_system_gmt_hour_uses_required_format():
+    value = aggregation.current_system_gmt_hour()
+
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{2}", value)
+
+
+def test_s3_json_cache_key_uses_json_path():
+    key = aggregation.s3_json_cache_key(
+        "data-tracking-source-1",
+        "2026-08-25-08/first.jsonl",
+    )
+
+    assert key == "s3://data-tracking-source-1/2026-08-25-08/first.jsonl"
+
+
 def test_iter_hourly_objects_uses_last_processed_object_as_start_after():
     s3 = FakeS3({})
 
@@ -204,11 +234,15 @@ def test_process_tracking_logs_counts_new_objects_and_skips_checkpointed_objects
         }
     )
     redis_client = FakeRedis([1, 0])
+    redis_client.states["analytics:data-source-state:source-1"] = {
+        "last_processed_object": "2026-08-24-23/old.jsonl",
+    }
     monkeypatch.setattr(
         aggregation,
         "fetch_data_sources",
         MagicMock(return_value=[("source-1", "tenant-1")]),
     )
+    monkeypatch.setattr(aggregation, "current_system_gmt_hour", lambda: "2026-08-25-08")
 
     summary = aggregation.process_tracking_logs(
         s3_client=s3,
@@ -223,19 +257,28 @@ def test_process_tracking_logs_counts_new_objects_and_skips_checkpointed_objects
         "events_added": 2,
         "sources_total": 1,
     }
-    assert len(s3.get_calls) == 2
+    assert len(s3.get_calls) == 1
     increment_call = next(call for call in redis_client.eval_calls if "HINCRBY" in call[0])
-    assert increment_call[4:7] == ("1", "tracked-event", "2")
+    assert increment_call[3] == "s3://data-tracking-source-1/2026-08-25-08/first.jsonl"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{2}", str(increment_call[4]))
+    assert increment_call[5:8] == (
+        "tracked-event",
+        "2",
+        str(aggregation.PROCESSED_OBJECT_TTL_SECONDS),
+    )
     assert "total_tracked_event" in cursor.execute_calls[-1][0]
     assert "avg_daily_event" in cursor.execute_calls[-1][0]
     assert "avg_events_per_profile" in cursor.execute_calls[-1][0]
     assert cursor.execute_calls[-1][1] == (2, 2, 0.0, "source-1", "tenant-1")
     assert s3.paginate_calls == [
-        {"Bucket": "data-tracking-source-1"},
+        {
+            "Bucket": "data-tracking-source-1",
+            "Prefix": "2026-08-25-08/",
+        },
     ]
     assert redis_client.states["analytics:data-source-state:source-1"][
         "last_processed_hour"
-    ] == "2026-08-25-09"
+    ] == "2026-08-25-08"
     assert redis_client.states["analytics:data-source-state:source-1"][
         "status"
     ] == "completed"
@@ -266,7 +309,7 @@ def test_process_tracking_logs_skips_a_locked_source(monkeypatch):
     cursor = FakeCursor([[]], rowcount=1)
     connection = FakeConnection(cursor)
     redis_client = FakeRedis([])
-    redis_client.locked = True
+    redis_client.locked_keys.add(aggregation._source_lock_key("source-1"))
     monkeypatch.setattr(
         aggregation,
         "fetch_data_sources",
@@ -285,11 +328,40 @@ def test_process_tracking_logs_skips_a_locked_source(monkeypatch):
     assert connection.commits == 0
 
 
-def test_analytics_definitions_expose_hourly_utc_schedule():
+def test_process_tracking_logs_stops_at_object_batch_limit(monkeypatch):
+    cursor = FakeCursor([[]], rowcount=1)
+    connection = FakeConnection(cursor)
+    s3 = FakeS3(
+        {
+            "2026-08-25-08/first.jsonl": BytesIO(b'{"event": "page_view"}\n'),
+            "2026-08-25-09/second.jsonl": BytesIO(b'{"event": "purchase"}\n'),
+        }
+    )
+    redis_client = FakeRedis([1])
+    monkeypatch.setattr(aggregation, "OBJECT_BATCH_SIZE", 1)
+    monkeypatch.setattr(
+        aggregation,
+        "fetch_data_sources",
+        MagicMock(return_value=[("source-1", "tenant-1")]),
+    )
+    monkeypatch.setattr(aggregation, "current_system_gmt_hour", lambda: "2026-08-25-08")
+
+    summary = aggregation.process_tracking_logs(
+        s3_client=s3,
+        redis_client=redis_client,
+        db_connection=connection,
+    )
+
+    assert summary["objects_processed"] == 1
+    assert summary["events_added"] == 1
+    assert len(s3.get_calls) == 1
+
+
+def test_analytics_definitions_expose_three_minute_gmt_schedule():
     schedule = dagster_defs.defs.get_schedule_def("analytics_hourly_schedule")
 
-    assert schedule.cron_schedule == "0 * * * *"
-    assert schedule.execution_timezone == "UTC"
+    assert schedule.cron_schedule == "*/3 * * * *"
+    assert schedule.execution_timezone == "GMT"
 
 
 def test_summarize_bucket_metrics_counts_profiles_and_daily_average():
