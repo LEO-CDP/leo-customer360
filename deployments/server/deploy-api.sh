@@ -6,7 +6,7 @@
 # missing, builds the image, and (re)runs it as a container with --network host on :8008,
 # wired to the PRIVATE customer360 DB and to the backend box's Dagster GraphQL (:3000).
 # Re-runnable. Target box = servers["$API_SERVER_KEY"] (default "api"); the Dagster host is
-# servers["$BACKEND_SERVER_KEY"] (default "1x2") private IP. Overrides: BASTION_USER/SSH_KEY.
+# servers["$BACKEND_SERVER_KEY"] (default "backend") private IP. Overrides: BASTION_USER/SSH_KEY.
 set -euo pipefail
 cd "$(dirname "$0")"                 # deployments/server
 REPO_ROOT="$(cd ../.. && pwd)"       # repo root (contains customer360-api/)
@@ -20,7 +20,7 @@ esac
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 API_SERVER_KEY="${API_SERVER_KEY:-api}"
-BACKEND_SERVER_KEY="${BACKEND_SERVER_KEY:-1x2}"
+BACKEND_SERVER_KEY="${BACKEND_SERVER_KEY:-backend}"
 # Read a tfvars value: content between quotes for strings (keeps '#'), or the bare
 # token with any trailing comment stripped for unquoted numbers/bools (e.g. redis_port).
 tfval() {

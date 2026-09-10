@@ -12,9 +12,9 @@ name_prefix = "c360-api-uat"
 otel_enabled = "true"
 
 servers = {
-  "1x2" = {
-    flavor_name    = "s-general-2x4" # 2 vCPU / 4 GB - jump host + backend-system (Dagster); resized to stop run-worker OOM/swap. In-place (0 destroy), reboots box.
-    root_disk_size = 20
+  "backend" = {
+    flavor_name    = "s-general-4x8" # 4 vCPU / 8 GB - jump host + backend-system (Dagster). UAT Mode-1 target (deployment.md); up from 2x4 to stop code-server heartbeat deaths / run-worker OOM+swap that hung runs. In-place (0 destroy), reboots box.
+    root_disk_size = 20              # boot-volume resize is NOT in-place on vngcloud (needs console volume resize + growpart, or a recreate); kept at 20 (~10G free)
     name           = "backend" # -> c360-api-uat-backend
   }
   "api" = {

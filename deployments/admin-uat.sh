@@ -67,7 +67,7 @@ case "$ACTION" in
     ;;
   restart-backend)
     echo ">> Restarting backend-system (Dagster) on the backend box ..."
-    run_on "$(srv_ip 1x2)" 'sudo docker restart backend-system >/dev/null && sudo docker ps --filter name=backend-system --format "   {{.Names}} {{.Status}}"'
+    run_on "$(srv_ip backend)" 'sudo docker restart backend-system >/dev/null && sudo docker ps --filter name=backend-system --format "   {{.Names}} {{.Status}}"'
     ;;
 
   # --- read-only DB status (catalog live-row estimates: RLS-immune) ----------
