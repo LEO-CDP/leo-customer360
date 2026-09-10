@@ -69,6 +69,53 @@ The diagrams in this document show the intended logical data flow. Today, only
 `identity_resolution`, `segmentation`, and `analytics` contain implemented
 processing; the other six code locations are runnable placeholder jobs.
 
+## Workload controls
+
+The implemented jobs are deliberately bounded so a slow S3 bucket or a large
+tenant cannot monopolize a Dagster worker:
+
+- Dagster limits each `backend_job` tag value to one queued/active run. The
+    analytics schedule and segmentation/CIR sensors also skip a tick when their
+    job already has a queued or active run.
+- `identity_resolution` processes `CIR_BATCH_SIZE` raw profiles per database
+    batch (default `500`) and stops after `CIR_MAX_BATCHES_PER_RUN` batches
+    (default `10`). The next run continues from `status_code = 1` rows.
+- `analytics` uses at most `ANALYTICS_MAX_WORKERS` source workers (default
+    `2`), submits at most `ANALYTICS_SOURCE_BATCH_SIZE` sources at a time
+    (default `16`), and processes at most `ANALYTICS_OBJECT_BATCH_SIZE` objects
+    per source run (default `500`). Saved S3 cursors resume the next run.
+- Redis leases serialize the CIR staging drain, the analytics run and each
+    analytics data source, and the segmentation recompute. Leases have TTLs and
+    are refreshed during long work; release is ownership-safe, so a crashed
+    worker cannot leave a permanent database or S3 lock.
+- Segmentation keeps matching profile IDs in a PostgreSQL temporary table
+    instead of materializing the full membership set in Python RAM.
+
+The main tuning variables are `CIR_BATCH_SIZE`, `CIR_MAX_BATCHES_PER_RUN`,
+`CIR_LOCK_TTL_SECONDS`, `ANALYTICS_MAX_WORKERS`,
+`ANALYTICS_SOURCE_BATCH_SIZE`, `ANALYTICS_OBJECT_BATCH_SIZE`,
+`ANALYTICS_RUN_LOCK_TTL_SECONDS`, `ANALYTICS_LOCK_TTL_SECONDS`, and
+`SEGMENTATION_LOCK_TTL_SECONDS`. Redis is required for the coordination path;
+when it is unavailable, the affected job fails or skips rather than allowing
+overlapping database/S3 processing.
+
+### Redis deployment matrix
+
+All implemented Dagster tasks use the same variables: `REDIS_HOST`,
+`REDIS_PORT`, `REDIS_DB`, and optional `REDIS_PASSWORD`.
+
+| Runtime | Effective Redis configuration |
+|---|---|
+| Production-shaped Compose | `dagster` and `dagster-daemon` use the in-network `redis:6580`, inherit `REDIS_DB`, require `REDIS_PASSWORD`, and wait for the Redis health check. |
+| Host-run development | The root `.env` points to the published local Redis port `localhost:6580` with the configured password. |
+| VM deployment | `deploy-backend.sh` starts an append-only passwordless Redis on `127.0.0.1:6580` and injects `REDIS_HOST`, `REDIS_PORT`, and `REDIS_DB` into both Dagster containers. |
+| Kubernetes local/VKS | The Dagster Deployment imports Redis host/port/DB from `c360-config` and `REDIS_PASSWORD` from `c360-secrets`; VKS patches the managed Redis host and port. |
+
+Do not remove Redis from the Dagster deployment even if Dagster's own run
+storage is healthy: the analytics, identity-resolution, and segmentation
+business jobs use Redis leases and checkpoints independently of Dagster's
+PostgreSQL metadata store.
+
 ---
 
 ## Architecture
