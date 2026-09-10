@@ -444,6 +444,31 @@ def require_admin(request: Request) -> None:
     if "admin" not in {r.lower() for r in roles}:
         raise HTTPException(status_code=403, detail="This action requires the 'admin' role.")
 
+
+# Roles allowed to run tenant-admin actions (segment->CRM sync, campaign
+# activation, email config). Platform admins implicitly qualify.
+TENANT_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "tenant_admin", "admin"}
+
+
+def require_tenant(request: Request) -> str:
+    """Return the caller's tenant_id (set by auth_middleware) or raise 400."""
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="No tenant context found (missing X-Tenant-Id)")
+    return str(tenant_id)
+
+
+def require_tenant_admin(request: Request, action: str = "this action") -> None:
+    """Gate a tenant-admin action. Open in local dev (SSO off); otherwise the
+    caller must be authenticated and hold a tenant-admin role."""
+    if not SSO_LOGIN:
+        return
+    if not isinstance(getattr(request.state, "user", None), dict):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not {r.lower() for r in get_current_roles(request)} & TENANT_ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail=f"Tenant admin role required for {action}")
+
+
 # ---------------------------------------------------------
 # MCP & System Metrics Setup (Redis API Key Protected)
 # ---------------------------------------------------------

@@ -15,8 +15,10 @@ from core.init_core_data import init_core_data
 from core.routers.analytics_api import all_analytics_routers
 from core.routers.auth_api import all_auth_routers
 from core.routers.content_api import all_content_routers
+from core.routers.campaign_activation_api import all_campaign_activation_routers
 from core.routers.crm_api import all_crm_routers
 from core.routers.crm_sync_api import all_crm_sync_routers
+from core.routers.email_tracking_api import all_email_tracking_routers
 from core.routers.events_api import all_events_routers
 from core.routers.graph_api import router as graph_router
 from core.routers.identity_api import all_identity_routers
@@ -38,6 +40,12 @@ PUBLIC_PATHS = {
     "/api/v1/auth/login",
     "/api/v1/auth/callback",
     "/api/v1/auth/logout",
+    # Public email tracking: hit by recipient mail clients /
+    # email providers with no bearer token; tenant comes from the signed token.
+    "/api/v1/track/email/open",
+    "/api/v1/track/email/click",
+    "/api/v1/track/email/unsubscribe",
+    "/api/v1/track/email/webhook",
     "/mcp",
     "/mcp/",
     "/mcp/health",
@@ -76,6 +84,10 @@ def _include_api_routers(app: FastAPI) -> None:
     for r in all_crm_routers:
         app.include_router(r, prefix=API_PREFIX)
     for r in all_crm_sync_routers:
+        app.include_router(r, prefix=API_PREFIX)
+    for r in all_campaign_activation_routers:
+        app.include_router(r, prefix=API_PREFIX)
+    for r in all_email_tracking_routers:
         app.include_router(r, prefix=API_PREFIX)
     for r in all_segment_routers:
         app.include_router(r, prefix=API_PREFIX)

@@ -310,3 +310,67 @@ class SegmentSyncRun(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     finished_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+
+
+class CampaignDispatchLog(Base):
+    """Per-recipient email send ledger written by the email_engine job
+. UNIQUE(campaign_id, master_profile_id) makes re-runs
+    idempotent. Read-only from the API (dispatch-log evidence endpoint)."""
+
+    __tablename__ = "cdp_campaign_dispatch_logs"
+
+    dispatch_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id", ondelete="CASCADE"), nullable=False
+    )
+    master_profile_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_master_profiles.master_profile_id", ondelete="CASCADE"), nullable=False
+    )
+    template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_email_templates.template_id", ondelete="SET NULL")
+    )
+    recipient_email: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Pending")
+    provider: Mapped[Optional[str]] = mapped_column(String(100))
+    provider_message_id: Mapped[Optional[str]] = mapped_column(Text)
+    rendered_subject: Mapped[Optional[str]] = mapped_column(Text)
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    run_id: Mapped[Optional[str]] = mapped_column(Text)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    dispatched_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class EmailProviderConfig(Base):
+    """Per-tenant, dynamically-managed email dispatch configuration.
+
+    The email_engine resolves the active row at send time (Redis-cached, DB as
+    source of truth) instead of reading static SMTP env vars, so a tenant's
+    provider/credentials can change without a redeploy. ``smtp_password`` is a
+    secret -- protect it at rest (pgcrypto / a secret manager) in any non-dev
+    deployment; it is never returned by the read API."""
+
+    __tablename__ = "crm_email_provider_config"
+
+    config_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False, server_default="default")
+    provider: Mapped[str] = mapped_column(String(50), nullable=False, server_default="mock")
+    smtp_host: Mapped[Optional[str]] = mapped_column(Text)
+    smtp_port: Mapped[Optional[int]] = mapped_column(Integer)
+    smtp_username: Mapped[Optional[str]] = mapped_column(Text)
+    smtp_password: Mapped[Optional[str]] = mapped_column(Text)
+    smtp_use_tls: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    from_address: Mapped[Optional[str]] = mapped_column(Text)
+    from_name: Mapped[Optional[str]] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))

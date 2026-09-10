@@ -145,6 +145,25 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DAGSTER_EMAIL_ENGINE_REPOSITORY_NAME", "dagster_email_engine_repository_name"),
     )
 
+    dagster_campaign_activation_job_name: str = Field(
+        default="campaign_activation_job",
+        validation_alias=AliasChoices(
+            "DAGSTER_CAMPAIGN_ACTIVATION_JOB_NAME", "dagster_campaign_activation_job_name"
+        ),
+    )
+    dagster_campaign_activation_location_name: str = Field(
+        default="campaign_activation",
+        validation_alias=AliasChoices(
+            "DAGSTER_CAMPAIGN_ACTIVATION_LOCATION_NAME", "dagster_campaign_activation_location_name"
+        ),
+    )
+    dagster_campaign_activation_repository_name: str = Field(
+        default="__repository__",
+        validation_alias=AliasChoices(
+            "DAGSTER_CAMPAIGN_ACTIVATION_REPOSITORY_NAME", "dagster_campaign_activation_repository_name"
+        ),
+    )
+
     dagster_notification_engine_job_name: str = Field(
         default="notification_engine_job",
         validation_alias=AliasChoices(
@@ -162,6 +181,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "DAGSTER_NOTIFICATION_ENGINE_REPOSITORY_NAME", "dagster_notification_engine_repository_name"
         ),
+    )
+
+    # Email tracking: HMAC secret signing the open/click/
+    # unsubscribe tokens. MUST match backend-system email_engine's
+    # EMAIL_TRACKING_SECRET so tokens minted at send time verify here.
+    email_tracking_secret: str = Field(
+        default="leocdp-dev-tracking-secret",
+        validation_alias=AliasChoices("EMAIL_TRACKING_SECRET", "email_tracking_secret"),
     )
 
     # Redis response cache (see core/cache.py). Disconnected/misconfigured

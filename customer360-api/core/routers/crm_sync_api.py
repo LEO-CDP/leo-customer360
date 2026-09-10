@@ -18,8 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from core.auth import get_current_roles
-from core.config import settings
+from core.auth import require_tenant, require_tenant_admin
 from core.crud.crm_sync import sync_segment_to_crm
 from core.database import get_db
 from core.models.crm import SegmentSyncRun
@@ -28,36 +27,15 @@ from core.schemas.crm import SegmentCrmSyncResponse, SegmentSyncRunRead
 
 logger = logging.getLogger(__name__)
 
-# Same tenant-admin role set the segmentation admin endpoints gate on
-# (platform admins implicitly qualify). Segment -> CRM sync writes into
-# customer-facing crm_* tables, so it is a tenant-admin action, not open to
-# every authenticated caller.
-TENANT_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "tenant_admin", "admin"}
-
 crm_sync_router = APIRouter(prefix="/admin/crm", tags=["CRM - Segment Sync"])
 
 
 def _require_tenant(request: Request) -> str:
-    caller_tenant_id = getattr(request.state, "tenant_id", None)
-    if not caller_tenant_id:
-        raise HTTPException(
-            status_code=400,
-            detail="No tenant context found (missing X-Tenant-Id); CRM sync requires a tenant_id",
-        )
-    return str(caller_tenant_id)
+    return require_tenant(request)
 
 
 def _enforce_sync_permissions(request: Request) -> None:
-    """Tenant-admin gate, mirroring the segmentation admin endpoints. Local
-    dev (SSO disabled) is intentionally open for easier setup/testing."""
-    if not settings.sso_login:
-        return
-    payload = getattr(request.state, "user", None)
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=401, detail="Authentication required")
-    roles = {role.lower() for role in get_current_roles(request)}
-    if not roles & TENANT_ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Tenant admin role required to sync a segment to CRM")
+    require_tenant_admin(request, "segment sync")
 
 
 @crm_sync_router.post("/sync-segment/{segment_id}", response_model=SegmentCrmSyncResponse)

@@ -3048,6 +3048,84 @@ CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_tenant ON customer360.crm_s
 CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_segment ON customer360.crm_segment_sync_runs (segment_id);
 CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_tenant_started ON customer360.crm_segment_sync_runs (tenant_id, started_at DESC);
 
+-- --- Per-recipient email send ledger --------------------------
+CREATE TABLE IF NOT EXISTS customer360.cdp_campaign_dispatch_logs (
+    dispatch_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles(master_profile_id) ON DELETE CASCADE,
+    template_id UUID REFERENCES customer360.crm_email_templates(template_id) ON DELETE SET NULL,
+    recipient_email TEXT,
+    status VARCHAR(50) NOT NULL DEFAULT 'Pending',
+    provider VARCHAR(100),
+    provider_message_id TEXT,
+    rendered_subject TEXT,
+    error_message TEXT,
+    run_id TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    dispatched_at TIMESTAMP WITH TIME ZONE,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT chk_cdp_campaign_dispatch_status
+        CHECK (status IN ('Pending', 'Sent', 'Failed', 'Skipped', 'Suppressed')),
+    CONSTRAINT uq_cdp_campaign_dispatch_recipient UNIQUE (campaign_id, master_profile_id)
+);
+
+COMMENT ON TABLE customer360.cdp_campaign_dispatch_logs IS 'Per-recipient email send ledger written by the email_engine Dagster job: one row per (campaign_id, master_profile_id) with send status, provider message id, and rendered subject. UNIQUE(campaign_id, master_profile_id) makes re-runs idempotent (ON CONFLICT DO UPDATE).';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_campaign_dispatch_tenant ON customer360.cdp_campaign_dispatch_logs (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_campaign_dispatch_campaign ON customer360.cdp_campaign_dispatch_logs (campaign_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_campaign_dispatch_campaign_status ON customer360.cdp_campaign_dispatch_logs (campaign_id, status);
+CREATE INDEX IF NOT EXISTS idx_cdp_campaign_dispatch_profile ON customer360.cdp_campaign_dispatch_logs (master_profile_id);
+
+-- --- Per-tenant dynamic email dispatch config -----------------
+CREATE TABLE IF NOT EXISTS customer360.crm_email_provider_config (
+    config_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    name TEXT NOT NULL DEFAULT 'default',
+    provider VARCHAR(50) NOT NULL DEFAULT 'mock',
+    smtp_host TEXT,
+    smtp_port INTEGER,
+    smtp_username TEXT,
+    smtp_password TEXT,
+    smtp_use_tls BOOLEAN NOT NULL DEFAULT TRUE,
+    from_address TEXT,
+    from_name TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT chk_crm_email_provider_config_provider CHECK (provider IN ('mock', 'smtp')),
+    CONSTRAINT uq_crm_email_provider_config_name UNIQUE (tenant_id, name)
+);
+
+COMMENT ON TABLE customer360.crm_email_provider_config IS 'Per-tenant email dispatch configuration: provider + SMTP connection/envelope settings resolved by the email_engine at send time (DB is source of truth, Redis-cached). At most one active row per tenant (uq_crm_email_provider_config_active).';
+
+CREATE INDEX IF NOT EXISTS idx_crm_email_provider_config_tenant ON customer360.crm_email_provider_config (tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_email_provider_config_active
+    ON customer360.crm_email_provider_config (tenant_id) WHERE is_active;
+
+-- --- Email compliance suppression list ------------------------
+CREATE TABLE IF NOT EXISTS customer360.cdp_email_suppression (
+    suppression_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    email TEXT NOT NULL,
+    reason VARCHAR(50) NOT NULL,
+    campaign_id UUID REFERENCES customer360.crm_campaign(campaign_id) ON DELETE SET NULL,
+    source VARCHAR(100),
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT chk_cdp_email_suppression_reason
+        CHECK (reason IN ('hard_bounce', 'complaint', 'unsubscribe', 'manual'))
+);
+
+COMMENT ON TABLE customer360.cdp_email_suppression IS 'Compliance suppression list: an email here is never sent again for the tenant. Populated on hard bounce / spam complaint / unsubscribe; enforced by the email_engine eligibility query. Unique per (tenant, lower(email)).';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_email_suppression_tenant ON customer360.cdp_email_suppression (tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cdp_email_suppression_email
+    ON customer360.cdp_email_suppression (tenant_id, lower(email));
+
 ---------------------------------------------------
 -- ROW LEVEL SECURITY (RBAC / Multi-Tenant Isolation)
 ---------------------------------------------------
@@ -3123,7 +3201,10 @@ DECLARE
         'cdp_persona_archetypes',
         'crm_email_templates',
         'crm_campaign_content_items',
-        'crm_segment_sync_runs'
+        'crm_segment_sync_runs',
+        'cdp_campaign_dispatch_logs',
+        'crm_email_provider_config',
+        'cdp_email_suppression'
     ];
 BEGIN
     FOREACH t IN ARRAY tenant_tables LOOP

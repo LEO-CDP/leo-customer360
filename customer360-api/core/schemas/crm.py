@@ -455,6 +455,98 @@ class SegmentCrmSyncResponse(BaseModel):
     message: str
 
 
+DISPATCH_STATUS_PATTERN = "^(Pending|Sent|Failed|Skipped|Suppressed)$"
+EMAIL_PROVIDER_PATTERN = "^(mock|smtp)$"
+
+
+class EmailWebhookEvent(BaseModel):
+    """Normalized email provider callback. ``token`` is our tracking
+    token (echoed by the ESP from a custom arg set at send time) -- it carries
+    the tenant/campaign/profile so the callback correlates without a tenant
+    header. ``event`` is mapped to a governed cdp_event_catalog name."""
+
+    token: str = Field(..., description="Our tracking token echoed back by the provider.")
+    event: str = Field(..., description="delivered|bounce|complaint|open|click|unsubscribe")
+    email: Optional[str] = None
+    message_id: Optional[str] = Field(None, description="Provider message/event id, used for dedup when present.")
+    bounce_type: Optional[str] = Field(None, description="'hard' | 'soft' -- only hard bounces suppress.")
+    timestamp: Optional[str] = None
+
+
+class CampaignDispatchLogRead(BaseModel):
+    """One per-recipient email send ledger row (read-only evidence)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    dispatch_id: uuid.UUID
+    tenant_id: uuid.UUID
+    campaign_id: uuid.UUID
+    master_profile_id: uuid.UUID
+    template_id: Optional[uuid.UUID] = None
+    recipient_email: Optional[str] = None
+    status: str
+    provider: Optional[str] = None
+    provider_message_id: Optional[str] = None
+    rendered_subject: Optional[str] = None
+    error_message: Optional[str] = None
+    run_id: Optional[str] = None
+    attempt_count: int = 0
+    dispatched_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class CampaignActivationResponse(BaseModel):
+    """Result of ``POST /admin/campaigns/{id}/activate`` -- the submitted
+    campaign_activation Dagster run that will validate + snapshot + hand off to
+    the email send."""
+
+    campaign_id: uuid.UUID
+    run_id: str
+    status: str = "submitted"
+    message: str
+
+
+class EmailProviderConfigUpsert(BaseModel):
+    """Writable per-tenant email dispatch config. ``smtp_password`` is
+    write-only (accepted here, never returned by the read schema)."""
+
+    name: str = "default"
+    provider: str = Field(default="mock", pattern=EMAIL_PROVIDER_PATTERN)
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_use_tls: bool = True
+    from_address: Optional[str] = None
+    from_name: Optional[str] = None
+    is_active: bool = True
+    metadata_: Optional[dict] = None
+
+
+class EmailProviderConfigRead(BaseModel):
+    """Per-tenant email dispatch config WITHOUT the secret ``smtp_password``
+    (a ``smtp_password_set`` flag signals whether one is stored)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    config_id: uuid.UUID
+    tenant_id: uuid.UUID
+    name: str
+    provider: str
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_use_tls: bool = True
+    from_address: Optional[str] = None
+    from_name: Optional[str] = None
+    is_active: bool = True
+    smtp_password_set: bool = False
+    metadata_: Optional[dict] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 # ---------------------------------------------------------------------------
 # Campaign Analytics Schemas (Dashboard / Phase 1)
 # ---------------------------------------------------------------------------
