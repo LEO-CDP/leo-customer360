@@ -119,7 +119,7 @@ Outside the cluster, same VPC (unchanged):
 | frontend-admin (:8890) | `Deployment` + `Service` | static-ish; browser calls API/Keycloak via ingress |
 | keycloak (:8080, mgmt :9000) | `Deployment` (or `StatefulSet`) + `Service` | external DB `db_keycloak`; set `KC_HTTP_RELATIVE_PATH=/auth`; liveness on :9000 |
 | dagster / backend-system (:3000) | `Deployment` + `Service` | needs PG; if it needs run storage, add a PVC |
-| data-tracking-api (:8010) | `Deployment` + `Service` + **HPA** | ✅ **now built + published to GHCR by CI** (`ci.yml`); `deploy-tracking.sh` pulls it by default (`BUILD_LOCAL=0`). S3 creds + OTLP endpoint via `Secret`/env |
+| data-tracking-api (:8010) | `Deployment` + `Service` + **HPA** | ✅ **now built + published to GHCR by CI** (`ci.yml`); `deploy-tracking.sh` pulls it by default (`BUILD_LOCAL=0`). Redis Streams broker plus S3 creds and OTLP endpoint must be provided via `Secret`/env |
 | c360-redis container (uat) / MemStore (prod) | **Keep managed MemStore for both** (recommended) or in-cluster `StatefulSet` + PVC | managed removes stateful-in-cluster risk; RWO block volume only if in-cluster |
 | **Caddy** (path routing + TLS) | **Ingress + cert-manager** | deletes `proxy/`, `set-domain.sh`, the cutover runbook |
 | **L4 NLB** (manual listeners/backends) | `Service type=LoadBalancer` on the ingress → **one** VNG NLB | annotations pick package/scheme/security-groups; **do not** create one LB per service |

@@ -126,7 +126,7 @@ environment:
 | `TRACKING_DATA_SOURCE_ID` | Registered source UUID | Module fallback: `11111111-1111-1111-1111-111111111111`; use the seeded ID locally |
 | `MINIO_ENDPOINT` | S3-compatible endpoint without scheme | Derived from `MINIO_HOST_BIND` and `MINIO_API_HOST_PORT` |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO read-back credentials | None |
-| `TRACKING_S3_VERIFY_WAIT_SECONDS` | Initial storage flush wait | `5` |
+| `TRACKING_S3_VERIFY_WAIT_SECONDS` | Initial Redis-Stream-to-object-storage wait before read-back | `5` |
 | `TRACKING_S3_VERIFY_RETRY_SECONDS` | Delay between read-back attempts | `2` |
 | `TRACKING_S3_VERIFY_ATTEMPTS` | Number of read-back attempts | `3` |
 | `TRACKING_S3_VERIFY_ENABLED` | Enable MinIO verification | `true` |

@@ -244,9 +244,9 @@
                     "page_url": pageUrl,
                     "page_title": pageTitle,
                     "referrer_url": refUrl,
-                    "visitor_id": it.visid || (global.LeoEventObserver ? global.LeoEventObserver.getVisitorId() : ""),
+                    "anonymous_id": it.anonymous_id || (global.LeoEventObserver ? global.LeoEventObserver.getAnonymousId() : ""),
                     "session_id": sessionKey,
-                    "fingerprint_id": it.fgp || lscache.get("leocdp_fgp") || "",
+                    "device_fingerprint": it.device_fingerprint || lscache.get("leocdp_fgp") || "",
                     "event_data": evtData
                 };
                 if (it.event_id) singleEvent.event_id = it.event_id;
@@ -801,7 +801,7 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
 (function(global, undefined) {
     'use strict';
 
-    var LeoEventObserver = {'fingerprintId' : ""};
+    var LeoEventObserver = {'deviceFingerprint' : ""};
     var sessionKey = false;
     var debug = false;
     var eventSequence = 0;
@@ -1059,27 +1059,27 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     	        return;
     	    }
     
-    	    var values = components.map(function (component) {
-    	        return component && component.value;
-    	    }).filter(function (value) {
-    	        return typeof value !== 'undefined' && value !== null;
-    	    });
-    	    var fingerprintId = Fingerprint2.x64hash128(values.join(''), 31);
+        var values = components.map(function (component) {
+            return component && component.value;
+        }).filter(function (value) {
+            return typeof value !== 'undefined' && value !== null;
+        });
+        var deviceFingerprint = Fingerprint2.x64hash128(values.join(''), 31);
   
-            LeoEventObserver.fingerprintId = fingerprintId;
-    		lscache.set("leocdp_fgp", fingerprintId);
+            LeoEventObserver.deviceFingerprint = deviceFingerprint;
+            lscache.set("leocdp_fgp", deviceFingerprint);
 
-    		if (typeof callback === 'function') {
-    			callback(fingerprintId);
-    		}
-    	});
+            if (typeof callback === 'function') {
+                callback(deviceFingerprint);
+            }
+        });
     }
     
 
-    function generateVisitorId() {
+    function generateAnonymousId() {
         var injectedVid = (typeof global.INJECTED_VISITOR_ID === 'string' && global.INJECTED_VISITOR_ID)
             || (typeof INJECTED_VISITOR_ID === 'string' && INJECTED_VISITOR_ID)
-            || (global.LeoEventObserver && global.LeoEventObserver.visitorId)
+            || (global.LeoEventObserver && global.LeoEventObserver.anonymousId)
             || (typeof window !== 'undefined' && typeof window.injectedVisitorId === 'string' && window.injectedVisitorId);
     	if(typeof injectedVid === 'string' && injectedVid.length > 5) {
     		return injectedVid;
@@ -1110,13 +1110,13 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     	}
     }
     
-    function getVisitorId() {
+    function getAnonymousId() {
         var key = leoVisitorIdStringKey;
         var uuid =  lscache.get(key); 
         
         var injectedVid = (typeof global.INJECTED_VISITOR_ID === 'string' && global.INJECTED_VISITOR_ID)
             || (typeof INJECTED_VISITOR_ID === 'string' && INJECTED_VISITOR_ID)
-            || (global.LeoEventObserver && global.LeoEventObserver.visitorId)
+            || (global.LeoEventObserver && global.LeoEventObserver.anonymousId)
             || (typeof window !== 'undefined' && typeof window.injectedVisitorId === 'string' && window.injectedVisitorId);
 
         if(typeof injectedVid === 'string' && injectedVid.length > 5 && typeof uuid === 'string') {
@@ -1127,7 +1127,7 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
         }
         
         if (typeof uuid !== 'string') {
-        	uuid = generateVisitorId();
+            uuid = generateAnonymousId();
             lscache.set(key, uuid);
         } 
 
@@ -1144,10 +1144,10 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     }
 
     function createLocalSessionId() {
-        var fingerprintId = lscache.get("leocdp_fgp") || LeoEventObserver.fingerprintId || "";
-        var visitorId = getVisitorId();
+        var deviceFingerprint = lscache.get("leocdp_fgp") || LeoEventObserver.deviceFingerprint || "";
+        var anonymousId = getAnonymousId();
         var sessionKeyHint = getSessionKeyHint();
-        var sessionSeed = [sessionKeyHint, fingerprintId, visitorId].join('|');
+        var sessionSeed = [sessionKeyHint, deviceFingerprint, anonymousId].join('|');
         return uuidV5(sessionSeed, getSessionNamespaceUuid());
     }
 
@@ -1177,7 +1177,7 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
             batchSize = 1;
         }
 
-        payload.visid = getVisitorId();
+        payload.anonymous_id = getAnonymousId();
         payload.sessionKey = activeSessionKey;
         payload.event_id = payload.event_id || createEventId();
         payload.event_time = payload.event_time || payload.occurred_at || new Date().toISOString();
@@ -1228,7 +1228,7 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
             payload[key] = params[key];
         }
 
-        payload.visid = getVisitorId();
+        payload.anonymous_id = getAnonymousId();
         payload.sessionKey = activeSessionKey;
         payload.metric = "profile-update";
         payload.eventType = "action";
@@ -1256,11 +1256,11 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
 
     var getPersonalization = function(slotId, params, callback) {
         var profile = lscache.get("leocdp_profile") || {};
-        var visitorId = getVisitorId();
+        var anonymousId = getAnonymousId();
         var sessionKey = getSessionKey(true);
         var personalizationContext = {
             slotId: slotId || 'default',
-            visitorId: visitorId,
+            anonymousId: anonymousId,
             sessionKey: sessionKey,
             profile: profile,
             recommendedItems: []
@@ -1292,9 +1292,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
             : ((typeof OBSERVE_WITH_FINGERPRINT !== 'undefined') ? OBSERVE_WITH_FINGERPRINT : true);
 
         if (observeWithFingerprint) {
-            var fingerprint = lscache.get("leocdp_fgp") || LeoEventObserver.fingerprintId || "";
-            if (fingerprint) {
-                normalized.fgp = fingerprint;
+            var deviceFingerprint = lscache.get("leocdp_fgp") || LeoEventObserver.deviceFingerprint || "";
+            if (deviceFingerprint) {
+                normalized.device_fingerprint = deviceFingerprint;
             }
         }
 
@@ -1313,17 +1313,17 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     		setSessionKey(data.sessionKey);
     	}
     	
-    	var vid = getVisitorId();
-    	var newVisitorId = data && data.visitorId;
-    	if(typeof newVisitorId === "string" && newVisitorId.length > 5 && newVisitorId !== vid){
-    		lscache.set(leoVisitorIdStringKey, newVisitorId);
+        var currentAnonymousId = getAnonymousId();
+        var newAnonymousId = data && data.anonymousId;
+        if(typeof newAnonymousId === "string" && newAnonymousId.length > 5 && newAnonymousId !== currentAnonymousId){
+            lscache.set(leoVisitorIdStringKey, newAnonymousId);
     	}
     	
     	var contextPayload = {
     		event: "LeoObserverProxyReady",
     		sessionKey: getSessionKey(true),
-    		visitorId: getVisitorId(),
-    		fingerprintId: lscache.get("leocdp_fgp") || LeoEventObserver.fingerprintId || ""
+            anonymousId: getAnonymousId(),
+            deviceFingerprint: lscache.get("leocdp_fgp") || LeoEventObserver.deviceFingerprint || ""
     	};
 
 		sendMessage(contextPayload);
@@ -1338,8 +1338,8 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
         // Initialize and resolve active session context immediately
         var sessionData = {
             sessionKey: getSessionKey(true),
-            visitorId: getVisitorId(),
-            fingerprintId: lscache.get("leocdp_fgp") || LeoEventObserver.fingerprintId || "",
+            anonymousId: getAnonymousId(),
+            deviceFingerprint: lscache.get("leocdp_fgp") || LeoEventObserver.deviceFingerprint || "",
             status: 101,
             ready: true
         };
@@ -1353,7 +1353,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     LeoEventObserver.updateProfile = updateProfile;
     LeoEventObserver.getPersonalization = getPersonalization;
     LeoEventObserver.initFingerprint = initFingerprint;
-    LeoEventObserver.getVisitorId = getVisitorId;
+    LeoEventObserver.getAnonymousId = getAnonymousId;
+    // Preserve the public SDK method while using the canonical identity name internally.
+    LeoEventObserver.getVisitorId = getAnonymousId;
     LeoEventObserver.getSessionKey = getSessionKey;
 	LeoEventObserver.setSessionKey = setSessionKey;
 
