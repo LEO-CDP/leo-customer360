@@ -33,13 +33,16 @@ from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dagster import (  # noqa: E402
-        Config,
+    Config,
+    DagsterRunStatus,
     DefaultSensorStatus,
     Definitions,
     OpExecutionContext,
     RetryPolicy,
     RunRequest,
+    RunsFilter,
     SensorEvaluationContext,
+    SkipReason,
     job,
     op,
     sensor,
@@ -89,18 +92,40 @@ def identity_resolution_job() -> None:
     resolve_identities_op()
 
 
+# A run is still "in flight" in any of these non-terminal states. The poll sensor
+# skips while one exists so it never stacks a second run behind a slow/stuck one --
+# backpressure that stops the QUEUED backlog growing unbounded when arrival outpaces
+# drain (with max_concurrent_runs bounded). See UAT incident 2026-09-10.
+_ACTIVE_RUN_STATUSES = [
+    DagsterRunStatus.QUEUED,
+    DagsterRunStatus.NOT_STARTED,
+    DagsterRunStatus.STARTING,
+    DagsterRunStatus.STARTED,
+    DagsterRunStatus.CANCELING,
+]
+
+
 @sensor(
     job=identity_resolution_job,
     minimum_interval_seconds=POLL_INTERVAL_SECONDS,
     default_status=DefaultSensorStatus.RUNNING,
 )
 def identity_resolution_poll_sensor(context: SensorEvaluationContext):
-    """Requests a new identity_resolution_job run every poll interval.
+    """Requests a new identity_resolution_job run every poll interval, unless one
+    is already queued or running.
 
     The unified backend-system image runs the Dagster daemon, so this sensor is
-    enabled by default and replaces the legacy worker.py polling loop.
+    enabled by default and replaces the legacy worker.py polling loop. The
+    "already in flight" guard caps in-flight work at one run for this job: an
+    unconditional request every tick otherwise piles runs into the queue faster
+    than a bounded daemon can drain them.
     """
-    yield RunRequest()
+    if context.instance.get_runs(
+        filters=RunsFilter(job_name="identity_resolution_job", statuses=_ACTIVE_RUN_STATUSES),
+        limit=1,
+    ):
+        return SkipReason("identity_resolution_job already queued/in progress; skipping to avoid pileup")
+    return RunRequest()
 
 
 defs = Definitions(

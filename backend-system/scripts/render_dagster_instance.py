@@ -21,6 +21,10 @@ DAGSTER_DB = os.environ.get("DAGSTER_PG_DB", "dagster")
 # Concurrency cap and STARTING-run timeout; override via env.
 MAX_CONCURRENT_RUNS = os.environ.get("DAGSTER_MAX_CONCURRENT_RUNS", "2")
 RUN_START_TIMEOUT = os.environ.get("DAGSTER_RUN_START_TIMEOUT_SECONDS", "300")
+# Global max wall-clock per run; the monitoring daemon terminates + fails any run
+# that exceeds it, releasing its concurrency slot (a hung run can't hold a slot
+# forever). Default 3h; override via env or the per-run dagster/max_runtime tag.
+MAX_RUNTIME_SECONDS = os.environ.get("DAGSTER_MAX_RUNTIME_SECONDS", "10800")
 
 
 def log(msg: str) -> None:
@@ -142,6 +146,7 @@ RUN_MONITORING_BLOCK = f"""run_monitoring:
   cancel_timeout_seconds: 180
   max_resume_run_attempts: 0
   poll_interval_seconds: 60
+  max_runtime_seconds: {MAX_RUNTIME_SECONDS}
 """
 
 HEADER = (
@@ -172,7 +177,7 @@ def main() -> int:
     parts.append(RUN_COORDINATOR_BLOCK)
     parts.append(RUN_MONITORING_BLOCK)
     log(f"run coordinator: QueuedRunCoordinator (max_concurrent_runs={MAX_CONCURRENT_RUNS})")
-    log(f"run monitoring: enabled (start_timeout={RUN_START_TIMEOUT}s)")
+    log(f"run monitoring: enabled (start_timeout={RUN_START_TIMEOUT}s, max_runtime={MAX_RUNTIME_SECONDS}s)")
 
     os.makedirs(DAGSTER_HOME, exist_ok=True)
     body = "\n".join(parts) if parts else "# all backends fell back to local defaults\n"
