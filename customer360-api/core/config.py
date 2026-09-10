@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     api_default_page_size: int = 100
     api_max_page_size: int = 1000
 
+    # Segment -> CRM sync engine: profiles are resolved
+    # and upserted into crm_* tables in batches this size so a large segment
+    # never loads its whole membership into memory at once.
+    crm_sync_batch_size: int = Field(
+        default=500,
+        validation_alias=AliasChoices("CRM_SYNC_BATCH_SIZE", "crm_sync_batch_size"),
+    )
+
     # Dagster webserver GraphQL endpoint (backend-system/, `dagster dev` /
     # dagster-webserver deployment) -- shared by every backend-system code
     # location. Used to submit job runs asynchronously instead of running

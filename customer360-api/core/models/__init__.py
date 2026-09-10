@@ -6,12 +6,15 @@ from core.models.content import CdpContentItem
 from core.models.crm import (
     Account,
     Campaign,
+    CampaignContentItem,
     CampaignMember,
     Contact,
+    EmailTemplate,
     Industry,
     Lead,
     LeadSource,
     Opportunity,
+    SegmentSyncRun,
 )
 from core.models.graph import GraphEdge
 from core.models.identity import (
@@ -45,13 +48,16 @@ __all__ = [
     "Base",
     "Account",
     "Campaign",
+    "CampaignContentItem",
     "CampaignMember",
     "CdpContentItem",
     "Contact",
+    "EmailTemplate",
     "Industry",
     "Lead",
     "LeadSource",
     "Opportunity",
+    "SegmentSyncRun",
     "GraphEdge",
     "CdpCustomerPersona",
     "CdpDomainProfile",
