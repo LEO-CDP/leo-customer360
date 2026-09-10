@@ -1,10 +1,18 @@
 # Data-Tracking API - UAT Performance Test Report
 
 **Date:** 2026-08-31  **Environment:** UAT  **Target:** `https://beta.leocdp.com/data` (real endpoint)
-**Test:** stepped-RPS ramp with per-request S3 store verification
+**Test:** stepped-RPS ramp with asynchronous S3 store verification
 **Harness:** `data-tracking-api/tests/perf_uat_tracking.py`
 **Raw data:** [`perf_results_ramp.json`](./perf_results_ramp.json) (main ramp) - [`perf_results_10rps.json`](./perf_results_10rps.json) (initial strict-cap trial)
 **Run id:** `perf-20260831T100254Z-7a216d8d`
+
+> **Architecture note:** This report preserves the measurements from the
+> 2026-08-31 UAT run, but the deployment architecture has since moved to the
+> Redis Streams handoff. Current requests return `202 Accepted` after a batch
+> is durably enqueued; a consumer-group worker writes the NDJSON object to S3
+> and acknowledges the stream entry only after the write succeeds. The results
+> below are historical capacity data from the run and should not be read as a
+> description of a synchronous request-to-S3 path.
 
 ---
 
@@ -32,7 +40,7 @@ Deployed with `deployments/server/deploy-tracking.sh uat` (this session's multi-
 | Private network | docker bridge `c360-tracking` - replicas `172.18.0.2/.3/.4`, LB `172.18.0.5` |
 | Load balancer | `customer360-tracking-lb` (`nginx:alpine`) on host `:8010`, `least_conn`, `max_fails=3 fail_timeout=10s`, `proxy_next_upstream error timeout http_502/503/504` |
 | Durable sink (S3) | vStorage `https://hcm04.vstorage.vngcloud.vn`, region `us-east-1`, path-style; one bucket per source `data-tracking-<data_source_id>`, key `YYYY-MM-DD-HH/<uuid>.jsonl` |
-| Redis (rate-limit + session) | api box `10.100.1.5:6580` (shared; fail-open) |
+| Redis Streams + rate/session state | api box `10.100.1.5:6580` (shared; stream is required, rate/session metadata fail-open) |
 | Tracing | OTLP -> api-box Jaeger `http://10.100.1.5:4318`, sampler 1.0 |
 | Public path | `POST https://beta.leocdp.com/data/api/v1/tracking/logs` - health `/data/health` |
 | Front door | VNG NLB `:443` (L4) -> Caddy (TLS + `handle_path /data/*` strip) -> `DATA_UPSTREAM 10.100.1.8:8010` (nginx LB) |
@@ -49,25 +57,29 @@ flowchart LR
   A2["api-2 :8010"]
   A3["api-3 :8010"]
   S3[("vStorage S3<br/>bucket data-tracking-&lt;id&gt;<br/>YYYY-MM-DD-HH/uuid.jsonl")]
-  R[("Redis 10.100.1.5:6580<br/>rate-limit + session")]
+  R[("Redis 10.100.1.5:6580<br/>Redis Stream + rate/session state")]
+  W["Consumer-group workers<br/>one per tracking-api replica"]
 
   T -->|"1. POST /data/... (HTTPS)"| NLB --> CADDY -->|"DATA_UPSTREAM"| LB
   LB --> A1
   LB --> A2
   LB --> A3
-  A1 -->|"2. PUT .jsonl"| S3
-  A2 --> S3
-  A3 --> S3
+  A1 -->|"2. XADD batch"| R
+  A2 --> R
+  A3 --> R
+  R -->|"3. XREADGROUP / XAUTOCLAIM"| W
+  W -->|"4. background PUT .jsonl"| S3
   A1 -.->|rate-limit / session| R
   A2 -.-> R
   A3 -.-> R
-  T -.->|"3. async HEAD object (store-check)"| S3
+  T -.->|"5. async HEAD object (store-check)"| S3
 
   subgraph box["Tracking box 10.100.1.8 - bridge c360-tracking"]
     LB
     A1
     A2
     A3
+    W
   end
 ```
 
@@ -189,7 +201,7 @@ Legend: *Offered* = target RPS - *Achieved* = 200/step_wall - *Send* = POST late
 
 1. **Correctness:** every accepted event was durably persisted to S3 - the ingestion + object-write path is reliable under load (99.98% end-to-end).
 2. **Capacity:** sustained throughput ~ **100 events/sec** for the current 3-replica UAT box; the system degrades gracefully (latency up) rather than shedding load up to at least 500 offered RPS.
-3. **To push higher:** add replicas (`TRACKING_REPLICAS`) and/or a bigger box; re-run the ramp to find the new plateau. The likely limiter above ~100 RPS is the per-request S3 `PUT` on a small VM.
+3. **To push higher:** add replicas (`TRACKING_REPLICAS`) and/or a bigger box; re-run the ramp to find the new plateau. The current bottleneck should be evaluated across Redis Stream enqueue capacity, consumer-worker throughput, and S3 `PUT` capacity rather than assuming that every request performs the `PUT` inline.
 4. **Rate limiter caveat:** it is global (keyed on the LB IP) and fixed-window - set it well above expected peak, and do not set it equal to a target rate.
 
 ---

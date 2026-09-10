@@ -11,15 +11,19 @@ sequenceDiagram
     participant App as Mobile App Runtime (iOS / Android / Flutter)
     participant SDK as LeoCDP Mobile SDK
     participant Storage as SQLite Offline Queue
-    participant API as customer360-api /events
+    participant API as data-tracking-api /tracking/logs
+    participant Queue as Redis Streams
+    participant ObjectStore as S3 / MinIO NDJSON
     participant CIR as CIR Engine (Device Matching)
 
     User->>App: Launch App / View Screen
     App->>SDK: LeoCDP.trackScreenView("ProductDetails")
     SDK->>Storage: Persist Event locally (Crash Resilience)
-    SDK->>API: POST /api/v1/events (with device telemetry)
-    API-->>SDK: 201 Created (flush local queue)
-    API->>CIR: Link Device ID & Advertising ID to Master Profile
+    SDK->>API: POST /api/v1/tracking/logs (dynamic event + identity fields)
+    API->>Queue: XADD batch to consumer group
+    API-->>SDK: 202 Accepted (broker enqueue)
+    Queue->>ObjectStore: Background worker writes immutable JSONL
+    ObjectStore->>CIR: Downstream identity-resolution processing
 ```
 
 ---

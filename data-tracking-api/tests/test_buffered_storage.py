@@ -2,9 +2,12 @@
 
 import time
 from datetime import datetime, timezone
+from threading import Event
 from uuid import UUID
 
-from core.buffered_storage import BufferedTrackingStorage
+import pytest
+
+from core.buffered_storage import BufferedTrackingStorage, TrackingQueueFullError
 from core.storage import StoredTrackingLog
 
 SOURCE_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -95,3 +98,36 @@ def test_buffered_storage_close_flushes_pending_objects():
     assert len(fake_storage.calls) == 2
     assert fake_storage.calls[0]["event_count"] == 1
     assert fake_storage.calls[1]["event_count"] == 1
+
+
+def test_buffered_storage_rejects_full_queue_without_synchronous_s3_write():
+    started = Event()
+    release = Event()
+
+    class BlockingStorage(FakeS3Storage):
+        def store_prebuilt_tracking_object(self, *args, **kwargs):
+            started.set()
+            release.wait(timeout=2)
+            return super().store_prebuilt_tracking_object(*args, **kwargs)
+
+    fake_storage = BlockingStorage()
+    buffered = BufferedTrackingStorage(
+        storage=fake_storage,
+        flush_interval_seconds=60,
+        max_queue_size=1,
+        flush_batch_size=1,
+    )
+
+    try:
+        received_at = datetime(2026, 9, 9, 4, 10, tzinfo=timezone.utc)
+        buffered.store_tracking_logs(SOURCE_ID, [{"event": "a"}], received_at)
+        assert started.wait(timeout=2)
+        buffered.store_tracking_logs(SOURCE_ID, [{"event": "b"}], received_at)
+
+        with pytest.raises(TrackingQueueFullError):
+            buffered.store_tracking_logs(SOURCE_ID, [{"event": "c"}], received_at)
+
+        assert len(fake_storage.calls) == 0
+    finally:
+        release.set()
+        buffered.close(timeout_seconds=10)

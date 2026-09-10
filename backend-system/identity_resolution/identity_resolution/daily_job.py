@@ -7,13 +7,22 @@ batches by repeatedly calling ``CustomerIdentityResolver.run_resolution_batch()`
 
 import logging
 import os
-from datetime import datetime
+import sys
+from datetime import datetime, timezone
 
 import psycopg2
 from dotenv import load_dotenv
 
 from identity_resolution.resolver import CustomerIdentityResolver
 from identity_resolution.rls import set_tenant_context
+
+_BACKEND_SYSTEM_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+if _BACKEND_SYSTEM_ROOT not in sys.path:
+    sys.path.insert(0, _BACKEND_SYSTEM_ROOT)
+
+from shared.redis_lock import acquire_redis_lease  # noqa: E402
 
 load_dotenv()
 
@@ -26,7 +35,29 @@ DB_USER = os.environ.get("DB_USER", "postgres")
 DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
 DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
-BATCH_SIZE = int(os.environ.get("CIR_BATCH_SIZE", "5000"))
+BATCH_SIZE = max(1, min(int(os.environ.get("CIR_BATCH_SIZE", "500")), 5000))
+MAX_BATCHES_PER_RUN = max(1, int(os.environ.get("CIR_MAX_BATCHES_PER_RUN", "10")))
+REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", "6580"))
+REDIS_DB = int(os.environ.get("REDIS_DB", "0"))
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
+CIR_LOCK_KEY = "identity-resolution:staging-drain-lock"
+CIR_LOCK_TTL_SECONDS = int(os.environ.get("CIR_LOCK_TTL_SECONDS", "3600"))
+
+
+def build_redis_client():
+    """Build the Redis client used to serialize CIR drain runs."""
+    import redis
+
+    return redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        db=REDIS_DB,
+        password=REDIS_PASSWORD,
+        decode_responses=True,
+        socket_connect_timeout=0.5,
+        socket_timeout=0.5,
+    )
 
 
 def run_daily_identity_resolution() -> int:
@@ -35,27 +66,47 @@ def run_daily_identity_resolution() -> int:
     Returns:
         The total number of raw profiles processed across all batches.
     """
-    conn = psycopg2.connect(
-        host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
-    )
+    redis_client = build_redis_client()
+    lease = acquire_redis_lease(redis_client, CIR_LOCK_KEY, CIR_LOCK_TTL_SECONDS)
+    if lease is None:
+        logger.info("Skipping identity resolution; another drain run owns the Redis lock")
+        return 0
+
+    conn = None
     total_processed = 0
     try:
-        resolver = CustomerIdentityResolver(conn, schema=DB_SCHEMA, batch_size=BATCH_SIZE)
-        logger.info("[%s] Starting daily identity resolution run.", datetime.now())
+        conn = psycopg2.connect(
+            host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
+        )
+        resolver = CustomerIdentityResolver(
+            db_connection=conn,
+            schema=DB_SCHEMA,
+            batch_size=BATCH_SIZE,
+        )
+        logger.info("[%s] Starting daily identity resolution run.", datetime.now(timezone.utc))
 
-        while True:
+        for batch_number in range(1, MAX_BATCHES_PER_RUN + 1):
             processed = resolver.run_resolution_batch()
             total_processed += processed
             if processed < BATCH_SIZE:
                 break
+            lease.refresh()
+        else:
+            logger.info(
+                "CIR run reached its batch budget (%d batches x %d profiles); next run will continue",
+                MAX_BATCHES_PER_RUN,
+                BATCH_SIZE,
+            )
 
         logger.info(
             "[%s] Daily run complete. Total profiles processed: %d",
-            datetime.now(),
+            datetime.now(timezone.utc),
             total_processed,
         )
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
+        lease.release()
 
     return total_processed
 

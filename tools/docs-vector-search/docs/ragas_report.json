@@ -1,0 +1,13 @@
+{
+  "scores": {
+    "faithfulness": 0.5,
+    "answer_relevancy": 0.610670413379524,
+    "llm_context_precision_with_reference": NaN,
+    "context_recall": NaN,
+    "answer_correctness": NaN
+  },
+  "n_total": 12,
+  "n_labeled": 2,
+  "judge": "qwen2.5:3b",
+  "embed": "nomic-embed-text"
+}

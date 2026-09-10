@@ -134,8 +134,8 @@
         <div>
           <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Source Type *</label>
           <select id="datasource-add-source-type" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer">
-            <option value="1">1 - Web JavaScript Code (Client-side tracking)</option>
-            <option value="2" selected>2 - Data Connector API (Server-side Pull/Sync)</option>
+            <option value="1" selected >1 - Web JavaScript Code (Client-side tracking)</option>
+            <option value="2">2 - Data Connector API (Server-side Pull/Sync)</option>
             <option value="3">3 - Data Webhook API (Server-side Push)</option>
             <option value="4">4 - S3 File Connector (Batch File Processing)</option>
             <option value="5">5 - Mobile SDK Code (iOS/Android/Flutter tracking)</option>
@@ -205,12 +205,12 @@
 
 <!--
   =============================================================================
-  DATA SOURCE DETAIL MODAL (16:9 Aspect Ratio Inspector)
+  DATA SOURCE DETAIL MODAL (4:3 Aspect Ratio Inspector)
   Displays full connector snapshot, volume analytics, tracking tags, and QR code.
   =============================================================================
 -->
 <div id="datasource-detail-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 lg:p-8">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl aspect-video max-h-[92vh] border border-slate-100 flex flex-col overflow-hidden">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl aspect-[4/3] max-h-[95vh] border border-slate-100 flex flex-col overflow-hidden">
 
     <!-- Modal Header -->
     <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">

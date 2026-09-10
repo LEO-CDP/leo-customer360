@@ -107,6 +107,13 @@ independent and uses `ads-server/.env` from `ads-server/.env.example`.
 - `C360_TRACKING_API_HOST`: Bind address for the tracking API. Default: `127.0.0.1`
 - `C360_TRACKING_API_PORT`: Host-published tracking API port. Default: `8010`
 - `TRACKING_MAX_EVENTS_PER_REQUEST`: Maximum events accepted in one batch. Default: `1000`
+- `TRACKING_QUEUE_BACKEND`: `redis_stream` for the durable production handoff or `memory` for isolated tests. Default: `redis_stream`
+- `TRACKING_STREAM_NAME`: Redis Stream carrying immutable tracking batches. Default: `data-tracking:events`
+- `TRACKING_STREAM_GROUP`: Redis consumer group used by S3 workers. Default: `s3-writers`
+- `TRACKING_STREAM_MAX_LENGTH`: Hard Redis Stream work-queue capacity; acknowledged entries are deleted. Default: `100000`
+- `TRACKING_STREAM_BLOCK_MS`: Maximum worker wait for new stream entries. Default: `1000`
+- `TRACKING_STREAM_CLAIM_IDLE_MS`: Idle time before another worker can reclaim a pending entry. Default: `60000`
+- `TRACKING_STREAM_RETRY_SECONDS`: Delay before retrying a failed S3 write. Default: `1.0`
 - `OBJECT_STORAGE_MODE`: `s3` for production or `minio` for a host-run dev service.
 - `S3_ENDPOINT_URL`: S3-compatible endpoint; dev Compose sets this to `http://minio:9000`.
 - `S3_REGION`: AWS region. Default: `us-east-1`

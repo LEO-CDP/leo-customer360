@@ -4,10 +4,12 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
 from redis.exceptions import RedisError
 
 from app import app
+from core.buffered_storage import TrackingQueueFullError
 from core.config import Settings
 from core.redis_cache import (
     RateLimitDecision,
@@ -15,7 +17,7 @@ from core.redis_cache import (
     build_rate_limit_key,
 )
 from core.routers.tracking import get_protection, get_storage, get_tracking_service
-from core.service import TrackingLogService, _collect_sessions
+from core.service import IdentityValidationError, TrackingLogService, _collect_sessions
 from core.storage import StoredTrackingLog, build_tracking_object
 
 
@@ -74,13 +76,18 @@ class FakeProtection:
 
 def test_build_tracking_object_uses_utc_hour_folder_and_ndjson():
     received_at = datetime(2026, 8, 25, 21, 5, tzinfo=timezone.utc)
+    event = {
+        "event": "page_view",
+        "properties": {"cart": {"items": ["sku-1", "sku-2"]}},
+        "metadata": {"source": "web", "experiment": {"variant": 2}},
+    }
 
-    bucket, key, body = build_tracking_object(SOURCE_ID, [{"event": "page_view"}], received_at)
+    bucket, key, body = build_tracking_object(SOURCE_ID, [event], received_at)
 
     assert bucket == f"data-tracking-{SOURCE_ID}"
     assert key.startswith("2026-08-25-21/")
     assert key.endswith(".jsonl")
-    assert json.loads(body.decode().strip())["event"] == {"event": "page_view"}
+    assert json.loads(body.decode().strip())["event"] == event
 
 
 def test_ingest_tracking_logs_returns_object_location():
@@ -100,7 +107,7 @@ def test_ingest_tracking_logs_returns_object_location():
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     assert response.json()["bucket"] == f"data-tracking-{SOURCE_ID}"
     assert response.json()["event_count"] == 1
     assert response.json()["cached_session_count"] == 1
@@ -108,6 +115,115 @@ def test_ingest_tracking_logs_returns_object_location():
     assert fake_storage.calls[0][1][0]["session_id"] == "session-123"
     assert fake_storage.calls[0][1][0]["user_id"] == "user-456"
     assert fake_cache.calls[0][1] == {"session-123": (1, "user-456")}
+
+
+def test_ingest_preserves_dynamic_payload_and_all_batch_identities():
+    fake_storage = FakeStorage()
+    fake_cache = FakeSessionCache()
+    app.dependency_overrides[get_tracking_service] = lambda: TrackingLogService(fake_storage, fake_cache)
+    try:
+        response = TestClient(app).post(
+            "/api/v1/tracking/logs",
+            json={
+                "data_source_id": str(SOURCE_ID),
+                "anonymous_id": " anon-123 ",
+                "device_id": "device-456",
+                "device_fingerprint": "fingerprint-789",
+                "user_id": " user-012 ",
+                "metadata": {"source": "web", "campaign": {"name": "spring"}},
+                "events": [
+                    {
+                        "event_name": "purchase",
+                        "properties": {"items": [{"sku": "sku-1", "price": 12.5}]},
+                    }
+                ],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 202
+    stored_event = fake_storage.calls[0][1][0]
+    assert stored_event["anonymous_id"] == "anon-123"
+    assert stored_event["device_id"] == "device-456"
+    assert stored_event["device_fingerprint"] == "fingerprint-789"
+    assert stored_event["user_id"] == "user-012"
+    assert stored_event["metadata"]["campaign"]["name"] == "spring"
+    assert stored_event["properties"]["items"][0]["price"] == 12.5
+
+
+def test_ingest_accepts_canonical_web_sdk_identity_field_names():
+    fake_storage = FakeStorage()
+    fake_cache = FakeSessionCache()
+    app.dependency_overrides[get_tracking_service] = lambda: TrackingLogService(
+        fake_storage, fake_cache
+    )
+    try:
+        response = TestClient(app).post(
+            "/api/v1/tracking/logs",
+            json={
+                "data_source_id": str(SOURCE_ID),
+                "session_id": "sdk-session-123",
+                "events": [
+                    {
+                        "event_id": "sdk-event-123",
+                        "eventType": "view",
+                        "anonymous_id": "sdk-anonymous-123",
+                        "device_fingerprint": "sdk-fingerprint-123",
+                        "event_data": {"product_id": "sku-1"},
+                    }
+                ],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 202
+    stored_event = fake_storage.calls[0][1][0]
+    assert stored_event["event_id"] == "sdk-event-123"
+    assert stored_event["anonymous_id"] == "sdk-anonymous-123"
+    assert stored_event["device_fingerprint"] == "sdk-fingerprint-123"
+    assert stored_event["session_id"] == "sdk-session-123"
+    assert stored_event["event_data"]["product_id"] == "sku-1"
+
+
+def test_ingest_rejects_batches_without_identity():
+    fake_storage = FakeStorage()
+    app.dependency_overrides[get_tracking_service] = lambda: TrackingLogService(
+        fake_storage, FakeSessionCache()
+    )
+    try:
+        response = TestClient(app).post(
+            "/api/v1/tracking/logs",
+            json={"data_source_id": str(SOURCE_ID), "events": [{"event": "page_view"}]},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert "identifier" in response.json()["detail"]
+    assert not fake_storage.calls
+
+
+def test_ingest_rejects_invalid_identifier_values():
+    response = TestClient(app).post(
+        "/api/v1/tracking/logs",
+        json={
+            "data_source_id": str(SOURCE_ID),
+            "device_id": "\t\n",
+            "events": [{"event": "page_view"}],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_service_raises_identity_validation_error_for_unidentifiable_batch():
+    with pytest.raises(IdentityValidationError):
+        TrackingLogService(FakeStorage(), FakeSessionCache()).ingest(
+            SOURCE_ID,
+            [{"event": "page_view"}],
+        )
 
 
 def test_collect_sessions_aggregates_event_sessions_without_payloads():
@@ -122,6 +238,16 @@ def test_collect_sessions_aggregates_event_sessions_without_payloads():
     )
 
     assert sessions == {"s-1": (2, "u-1"), "s-2": (1, None)}
+
+
+def test_collect_sessions_prefers_event_identity_over_batch_identity():
+    sessions = _collect_sessions(
+        [{"session_id": "event-session", "user_id": "event-user"}],
+        session_id="batch-session",
+        user_id="batch-user",
+    )
+
+    assert sessions == {"event-session": (1, "event-user")}
 
 
 def test_googlebot_is_filtered_by_user_agent():
@@ -211,7 +337,7 @@ def test_bot_request_is_acknowledged_without_storage_or_rate_limit():
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     assert response.json()["filtered"] is True
     assert not fake_storage.calls
 
@@ -236,6 +362,32 @@ def test_rate_limited_request_returns_retry_after_header():
     assert response.status_code == 429
     assert response.headers["retry-after"] == "17"
     assert not fake_storage.calls
+
+
+def test_queue_saturation_returns_retryable_response():
+    class FullStorage:
+        def store_tracking_logs(self, _data_source_id, _events, _received_at):
+            raise TrackingQueueFullError("queue full")
+
+    fake_protection = FakeProtection()
+    app.dependency_overrides[get_tracking_service] = lambda: TrackingLogService(
+        FullStorage(), FakeSessionCache()
+    )
+    app.dependency_overrides[get_protection] = lambda: fake_protection
+    try:
+        response = TestClient(app).post(
+            "/api/v1/tracking/logs",
+            json={
+                "data_source_id": str(SOURCE_ID),
+                "session_id": "session-queue-full",
+                "events": [{"event": "page_view"}],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
 
 
 class _HealthStorage:

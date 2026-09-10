@@ -25,6 +25,7 @@ class StoredTrackingLog:
     object_key: str
     event_count: int
     received_at: datetime
+    queue_message_id: str | None = None
 
 
 def build_tracking_object(

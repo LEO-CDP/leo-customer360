@@ -116,7 +116,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Starts `postgres`, `redis`, `keycloak`, `dagster`, `api`, and `tracking-api`. The tracking API writes to configured AWS S3 and does not require a local MinIO container. First boot on a fresh
+Starts `postgres`, `redis`, `keycloak`, `dagster`, `api`, and `tracking-api`. The tracking API publishes batches to Redis Streams and writes them asynchronously to configured AWS S3; it does not require a local MinIO container in the production-shaped stack. First boot on a fresh
 `customer360-pgdata` volume runs `postgres/init/00-extensions.sql` then the
 full `database-schema.sql` automatically (Postgres' standard
 `/docker-entrypoint-initdb.d/` mechanism — **only runs once**, on an empty

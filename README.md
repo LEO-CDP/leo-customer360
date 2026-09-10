@@ -26,7 +26,7 @@ The current repo contains four application services, three active Dagster jobs, 
 | `backend-system/segmentation/` | Implemented | Recomputes active segments and syncs member/tag data back to master profiles |
 | `backend-system/analytics/` | Implemented | Hourly Dagster job that aggregates tracking logs and updates source totals |
 | `customer360-api/` | Implemented | Main REST API for identity, CRM, persona, reporting, and metadata |
-| `data-tracking-api/` | Implemented | Stores immutable tracking events in hourly per-source S3/MinIO objects |
+| `data-tracking-api/` | Implemented | Durably queues dynamic tracking events in Redis Streams and writes immutable hourly per-source S3/MinIO objects |
 | `ads-server/` | Implemented | Multi-tenant FastAPI ad-serving API with placements, campaigns, creatives, and a browser loader |
 | `frontend-admin/` | Implemented | FastAPI shell for the UI, backed by client-side JS and API requests |
 | `backend-system/scoring/`, `data_synch/`, `email_engine/`, `notification_engine/`, `campaign_activation/`, `personalization/` | Placeholder | Runnable Dagster scaffolds ready for their service logic |
@@ -38,7 +38,7 @@ The current repo contains four application services, three active Dagster jobs, 
 | [`database-init/`](database-init) | Schema source: `database-schema.sql`, seed/init scripts, and SQL views |
 | [`backend-system/`](backend-system) | Dagster workspace with nine code locations: identity resolution, segmentation, analytics, and six placeholder services |
 | [`customer360-api/`](customer360-api) | FastAPI service with routers, auth, SQLAlchemy models, and business logic |
-| [`data-tracking-api/`](data-tracking-api) | FastAPI ingestion service that writes hourly tracking-log objects to S3/MinIO |
+| [`data-tracking-api/`](data-tracking-api) | FastAPI ingestion service that queues dynamic events in Redis Streams and writes hourly tracking-log objects to S3/MinIO |
 | [`ads-server/`](ads-server) | Standalone FastAPI ad-serving service with its own database, cache, and widget code |
 | [`frontend-admin/`](frontend-admin) | Thin admin UI served by FastAPI and loaded from static templates |
 | [`all-data-simulator/`](all-data-simulator) | Synthetic raw data and optional S3/MinIO upload helpers |

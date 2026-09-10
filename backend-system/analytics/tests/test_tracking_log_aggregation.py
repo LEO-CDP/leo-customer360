@@ -106,13 +106,14 @@ class FakeRedis:
         self.states = {}
         self.hll = {}
         self.locked = False
+        self.locked_keys = set()
 
-    def set(self, _key, _value, nx=False, ex=None):
+    def set(self, key, _value, nx=False, ex=None):
         assert nx is True
         assert ex == aggregation.LOCK_TTL_SECONDS
-        if self.locked:
+        if self.locked or key in self.locked_keys:
             return False
-        self.locked = True
+        self.locked_keys.add(key)
         return True
 
     def hset(self, key, mapping):
@@ -128,8 +129,8 @@ class FakeRedis:
     def pfcount(self, key):
         return len(self.hll.get(key, set()))
 
-    def exists(self, _key):
-        return int(self.locked)
+    def exists(self, key):
+        return int(self.locked or key in self.locked_keys)
 
     def eval(self, *args):
         self.eval_calls.append(args)
@@ -137,7 +138,7 @@ class FakeRedis:
         if "EXPIRE" in script:
             return 1
         if "DEL" in script:
-            self.locked = False
+            self.locked_keys.discard(args[2])
             return 1
         return next(self.results)
 
@@ -308,7 +309,7 @@ def test_process_tracking_logs_skips_a_locked_source(monkeypatch):
     cursor = FakeCursor([[]], rowcount=1)
     connection = FakeConnection(cursor)
     redis_client = FakeRedis([])
-    redis_client.locked = True
+    redis_client.locked_keys.add(aggregation._source_lock_key("source-1"))
     monkeypatch.setattr(
         aggregation,
         "fetch_data_sources",
@@ -325,6 +326,35 @@ def test_process_tracking_logs_skips_a_locked_source(monkeypatch):
     assert summary["sources_skipped_running"] == 1
     assert summary["sources_total"] == 1
     assert connection.commits == 0
+
+
+def test_process_tracking_logs_stops_at_object_batch_limit(monkeypatch):
+    cursor = FakeCursor([[]], rowcount=1)
+    connection = FakeConnection(cursor)
+    s3 = FakeS3(
+        {
+            "2026-08-25-08/first.jsonl": BytesIO(b'{"event": "page_view"}\n'),
+            "2026-08-25-09/second.jsonl": BytesIO(b'{"event": "purchase"}\n'),
+        }
+    )
+    redis_client = FakeRedis([1])
+    monkeypatch.setattr(aggregation, "OBJECT_BATCH_SIZE", 1)
+    monkeypatch.setattr(
+        aggregation,
+        "fetch_data_sources",
+        MagicMock(return_value=[("source-1", "tenant-1")]),
+    )
+    monkeypatch.setattr(aggregation, "current_system_gmt_hour", lambda: "2026-08-25-08")
+
+    summary = aggregation.process_tracking_logs(
+        s3_client=s3,
+        redis_client=redis_client,
+        db_connection=connection,
+    )
+
+    assert summary["objects_processed"] == 1
+    assert summary["events_added"] == 1
+    assert len(s3.get_calls) == 1
 
 
 def test_analytics_definitions_expose_three_minute_gmt_schedule():
