@@ -138,14 +138,21 @@ if command -v docker >/dev/null 2>&1; then
 fi
 # 10G swap for the Dagster box: identity/segmentation run workers (Polars/pandas)
 # spike RAM; a swapfile absorbs the peak so the gRPC code server doesn't miss its
-# heartbeat and get OOM-killed mid-step (the failure that left runs hung). Idempotent.
-if ! sudo swapon --show=NAME --noheadings 2>/dev/null | grep -q '/swapfile'; then
-  [ -f /swapfile ] || { sudo fallocate -l 10G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=10240 status=none; sudo chmod 600 /swapfile; sudo mkswap /swapfile >/dev/null; }
+# heartbeat and get OOM-killed mid-step (the failure that left runs hung). Size-aware
+# + idempotent: (re)creates /swapfile only when it is missing or smaller than 10G
+# (a pre-existing 2G swapfile must not shadow the 10G we want).
+if [ "$(sudo stat -c%s /swapfile 2>/dev/null || echo 0)" -lt 10737418240 ]; then
+  sudo swapoff /swapfile 2>/dev/null || true
+  sudo rm -f /swapfile
+  sudo fallocate -l 10G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=10240 status=none
+  sudo chmod 600 /swapfile
+  sudo mkswap /swapfile >/dev/null
   sudo swapon /swapfile || true
   grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
-  echo "   swap: 10G /swapfile enabled"
+  echo "   swap: 10G /swapfile (re)created"
 else
-  echo "   swap: /swapfile already active"
+  sudo swapon /swapfile 2>/dev/null || true
+  echo "   swap: /swapfile already >=10G"
 fi
 umask 077
 env_file="$(mktemp)"
