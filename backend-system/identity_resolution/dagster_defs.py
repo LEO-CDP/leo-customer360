@@ -22,6 +22,7 @@ ephemeral in-memory instance.
 
 import os
 import sys
+from datetime import datetime, timezone
 from typing import Optional
 
 # Dagster's `python_file` workspace loader (unlike `python dagster_defs.py`
@@ -34,9 +35,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dagster import (  # noqa: E402
     Config,
-    DagsterRunStatus,
     DefaultSensorStatus,
     Definitions,
+    DagsterRunStatus,
     OpExecutionContext,
     RetryPolicy,
     RunRequest,
@@ -53,7 +54,7 @@ from identity_resolution.daily_job import (  # noqa: E402
     run_daily_identity_resolution,
 )
 
-POLL_INTERVAL_SECONDS = int(os.environ.get("CIR_POLL_INTERVAL_SECONDS", "30"))
+POLL_INTERVAL_SECONDS = int(os.environ.get("CIR_POLL_INTERVAL_SECONDS", "60"))
 
 
 class IdentityResolutionConfig(Config):
@@ -87,22 +88,28 @@ def resolve_identities_op(context: OpExecutionContext, config: IdentityResolutio
     return processed
 
 
-@job(name="identity_resolution_job")
+@job(name="identity_resolution_job", tags={"backend_job": "identity_resolution"})
 def identity_resolution_job() -> None:
     resolve_identities_op()
 
 
-# A run is still "in flight" in any of these non-terminal states. The poll sensor
-# skips while one exists so it never stacks a second run behind a slow/stuck one --
-# backpressure that stops the QUEUED backlog growing unbounded when arrival outpaces
-# drain (with max_concurrent_runs bounded). See UAT incident 2026-09-10.
-_ACTIVE_RUN_STATUSES = [
-    DagsterRunStatus.QUEUED,
-    DagsterRunStatus.NOT_STARTED,
-    DagsterRunStatus.STARTING,
-    DagsterRunStatus.STARTED,
-    DagsterRunStatus.CANCELING,
-]
+def _identity_resolution_run_active(context: SensorEvaluationContext) -> bool:
+    active_statuses = [
+        DagsterRunStatus.NOT_STARTED,
+        DagsterRunStatus.QUEUED,
+        DagsterRunStatus.STARTING,
+        DagsterRunStatus.STARTED,
+        DagsterRunStatus.CANCELING,
+    ]
+    return bool(
+        context.instance.get_runs(
+            filters=RunsFilter(
+                job_name="identity_resolution_job",
+                statuses=active_statuses,
+            ),
+            limit=1,
+        )
+    )
 
 
 @sensor(
@@ -111,21 +118,16 @@ _ACTIVE_RUN_STATUSES = [
     default_status=DefaultSensorStatus.RUNNING,
 )
 def identity_resolution_poll_sensor(context: SensorEvaluationContext):
-    """Requests a new identity_resolution_job run every poll interval, unless one
-    is already queued or running.
+    """Requests a new identity_resolution_job run every poll interval.
 
     The unified backend-system image runs the Dagster daemon, so this sensor is
-    enabled by default and replaces the legacy worker.py polling loop. The
-    "already in flight" guard caps in-flight work at one run for this job: an
-    unconditional request every tick otherwise piles runs into the queue faster
-    than a bounded daemon can drain them.
+    enabled by default and replaces the legacy worker.py polling loop.
     """
-    if context.instance.get_runs(
-        filters=RunsFilter(job_name="identity_resolution_job", statuses=_ACTIVE_RUN_STATUSES),
-        limit=1,
-    ):
-        return SkipReason("identity_resolution_job already queued/in progress; skipping to avoid pileup")
-    return RunRequest()
+    if _identity_resolution_run_active(context):
+        return SkipReason("An identity resolution run is already queued or active")
+
+    run_slot = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M")
+    yield RunRequest(run_key=f"identity-resolution-{run_slot}")
 
 
 defs = Definitions(

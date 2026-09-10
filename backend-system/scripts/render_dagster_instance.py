@@ -133,10 +133,11 @@ S3_BLOCK = """compute_logs:
 
 # Bounded run queue (always written, regardless of storage backend).
 RUN_COORDINATOR_BLOCK = f"""run_coordinator:
-  module: dagster.core.run_coordinator
-  class: QueuedRunCoordinator
-  config:
-    max_concurrent_runs: {MAX_CONCURRENT_RUNS}
+    module: dagster.core.run_coordinator
+    class: QueuedRunCoordinator
+    config:
+        max_concurrent_runs: {MAX_CONCURRENT_RUNS}
+        tag_concurrency_limits: [{{key: backend_job, value: {{applyLimitPerUniqueValue: true}}, limit: 1}}]
 """
 
 # Reap orphaned runs so a dead worker cannot keep holding its slot.
