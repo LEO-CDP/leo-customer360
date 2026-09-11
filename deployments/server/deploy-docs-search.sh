@@ -219,6 +219,19 @@ GHCR_USER="${7:-token}"; GHCR_TOKEN="$(printf %s "${8:-}" | base64 -d 2>/dev/nul
 command -v docker >/dev/null 2>&1 || { sudo apt-get update -qq; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io; sudo systemctl enable --now docker; }
 command -v curl   >/dev/null 2>&1 || { sudo apt-get update -qq; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl; }
 
+# Reclaim disk before we write/pull anything. The docs box is small and each deploy pulls a new
+# SHA-pinned image; stale images can fill the disk and make `docker pull` fail with "No space left
+# on device" while extracting a layer. The currently-running docs container still holds its image,
+# so `image prune -a` keeps that one and drops only the stale ones. Best-effort: never fail the
+# deploy on cleanup.
+if command -v docker >/dev/null 2>&1; then
+  echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
+  sudo docker container prune -f  >/dev/null 2>&1 || true
+  sudo docker image prune -a -f   >/dev/null 2>&1 || true
+  sudo docker builder prune -a -f >/dev/null 2>&1 || true
+  echo "   reclaiming disk (df after):  $(df -h --output=avail / | tail -1 | tr -d ' ') free"
+fi
+
 # 2 GB is tight for e5 + reranker + Qwen (~1.4 GB resident). Add a 2 GB swapfile once so a
 # transient spike can't OOM-kill the server. Idempotent + best-effort.
 if [ -z "$(swapon --show 2>/dev/null)" ] && [ ! -f /swapfile ]; then
