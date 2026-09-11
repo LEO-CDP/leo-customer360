@@ -15,8 +15,8 @@ the public `/c360/ai/ask` URL:
 - `customer360-api`: `root_path=/c360api`
 - Keycloak: `KC_HTTP_RELATIVE_PATH=/auth`
 - `ads-server`: `LEO_AD_ROOT_PATH=/ads`
-- `frontend-admin`: `FRONTEND_ROOT_PATH=/c360`, `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`, and `DOCS_SEARCH_URL=http://127.0.0.1:8000`
-- `docs-vector-search`: start locally on `127.0.0.1:8000`; `dev-c360.sh` builds the image, refreshes the index, and starts it
+- `frontend-admin`: `FRONTEND_ROOT_PATH=/c360`, `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`, and `DOCS_SEARCH_URL=http://127.0.0.1:8001`
+- `docs-vector-search`: start locally on `127.0.0.1:8001`; `dev-c360.sh` builds the image, refreshes the index, and starts it
 - `data-tracking-api`: no root path; nginx strips `/data`
 - Dagster: start the UI with `--path-prefix /dagster`
 - MinIO console: `MINIO_BROWSER_REDIRECT_URL=https://s3dev.example.com/minio/`
@@ -27,11 +27,10 @@ are:
 ```dotenv
 FRONTEND_ROOT_PATH=/c360
 FRONTEND_API_HOSTNAME=https://c360.example.com/c360api
-DOCS_SEARCH_HOST_PORT=8000
-DOCS_SEARCH_URL=http://127.0.0.1:8000
+DOCS_SEARCH_HOST_PORT=8001
+DOCS_SEARCH_URL=http://127.0.0.1:8001
 DOCS_SEARCH_TIMEOUT=120
-DOCS_GEN_CTX=2048
-DOCS_GEN_MAX_TOKENS=256
+DOCS_LLM_MAX_OUTPUT_TOKENS=256
 DOCS_RERANK_ENABLED=true
 ```
 
@@ -39,7 +38,7 @@ Start the local AI service together with the rest of the development stack:
 
 ```bash
 ./dev-c360.sh
-curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8001/health
 ```
 
 The browser-facing AI endpoint is then:
@@ -49,14 +48,14 @@ https://c360.example.com/c360/ai/ask
 ```
 
 Nginx routes that request to `frontend-admin`; `frontend-admin` forwards the
-request to `http://127.0.0.1:8000/ask`.
+request to `http://127.0.0.1:8001/ask`.
 
 With this configuration, the public endpoints are:
 
 | Service | Public URL | Local upstream |
 | --- | --- | --- |
 | frontend-admin (UI) | `https://c360.example.com/c360/` | `127.0.0.1:8890` |
-| frontend-admin AI proxy | `https://c360.example.com/c360/ai/ask` | `127.0.0.1:8890` -> `127.0.0.1:8000/ask` |
+| frontend-admin AI proxy | `https://c360.example.com/c360/ai/ask` | `127.0.0.1:8890` -> `127.0.0.1:8001/ask` |
 | customer360-api | `https://c360.example.com/c360api/api/v1` | `127.0.0.1:8008` |
 | Keycloak | `https://c360.example.com/auth` | `127.0.0.1:8080` |
 | ads-server and docs | `https://c360.example.com/ads` and `/ads/docs` | `127.0.0.1:9009` |

@@ -25,6 +25,7 @@ name: CD
 #   DEPLOY_SSH_KEY   private key for the deploy user on the VNG Cloud VMs
 #   DB_PASSWORD      -> TF_VAR_db_password    (read by the app deploy scripts)
 #   REDIS_PASSWORD   -> TF_VAR_redis_password (optional; cache stays off if unset)
+#   DOCS_OPENAI_API_KEY -> docs-vector-search OpenAI embeddings and LLM
 #   VSTORAGE_ACCESS_KEY / VSTORAGE_SECRET_KEY -> S3/vStorage remote-state creds AND
 #                        TF_VAR_access_key / TF_VAR_secret_key (tracking S3 sink)
 # GHCR pulls use the built-in GITHUB_TOKEN (packages: read).
@@ -212,6 +213,7 @@ jobs:
           TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
           TF_VAR_access_key: ${{ secrets.VSTORAGE_ACCESS_KEY }}
           TF_VAR_secret_key: ${{ secrets.VSTORAGE_SECRET_KEY }}
+          DOCS_OPENAI_API_KEY: ${{ secrets.DOCS_OPENAI_API_KEY }}
           GH_TOKEN: ${{ github.token }}   # lets lib/record_deploy.sh call `gh api` (Deployments ledger)
         run: |
           # Invoke via `bash` (not ./) — scripts committed from Windows lack the

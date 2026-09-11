@@ -300,7 +300,7 @@ Add an async proxy so the browser stays same-origin and the docs box stays priva
 import httpx
 from fastapi import Body, HTTPException
 
-DOCS_SEARCH_URL = os.getenv("DOCS_SEARCH_URL", "http://127.0.0.1:8000").rstrip("/")
+DOCS_SEARCH_URL = os.getenv("DOCS_SEARCH_URL", "http://127.0.0.1:8001").rstrip("/")
 DOCS_TIMEOUT = float(os.getenv("DOCS_SEARCH_TIMEOUT", "60"))   # /ask can be slow on 1 vCPU
 MAX_Q_LEN = 2000
 
@@ -621,7 +621,7 @@ live, else every call fails a preflight / is unreachable.
 | `CORS_ORIGINS` | docs-vector-search (`config.py`) | Allowed browser origins | `https://leo-cdp.github.io` |
 | `DOCS_CORS_ORIGINS` | `deploy-docs-search.sh` | Ships `CORS_ORIGINS` to the box | same |
 | `docs_upstream` | `overlays/*.tfvars` + `deploy-caddy.sh` | Docs box private ip:8000 | — |
-| `DOCS_SEARCH_URL` | frontend-admin (`app.py`) | Where the proxy forwards | `http://127.0.0.1:8000` |
+| `DOCS_SEARCH_URL` | frontend-admin (`app.py`) | Where the proxy forwards locally | `http://127.0.0.1:8001` |
 | `DOCS_SEARCH_TIMEOUT` | frontend-admin | Proxy timeout (s) | `60` |
 | `DOCS_SITE_BASE` | frontend-admin | For out-links to docs-site | `https://leo-cdp.github.io/leo-customer360` |
 | `docs_ai_base` (derived) | frontend-admin index | Widget → same-origin proxy base | `${FRONTEND_ROOT_PATH}/ai` |

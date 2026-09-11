@@ -1,5 +1,4 @@
-"""Runtime configuration (env-driven, with an optional .env). Fully local models
-+ pgvector on the vDB."""
+"""Runtime configuration for the provider-agnostic docs RAG service."""
 from __future__ import annotations
 
 import os
@@ -32,62 +31,105 @@ CORPUS_DIR = Path(os.getenv("CORPUS_DIR", REPO_ROOT / "docs")).resolve()
 CHUNK_TOKENS = int(os.getenv("CHUNK_TOKENS", "400"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
 
-# Embedding — local fastembed by default. OpenAI-compatible embeddings are optional;
-# keep EMBED_DIM aligned with the existing pgvector column when switching providers.
-EMBED_PROVIDER = (os.getenv("DOCS_EMBEDDING_PROVIDER") or os.getenv("EMBED_PROVIDER", "local")).lower()
-EMBED_MODEL = os.getenv(
-    "DOCS_EMBEDDING_MODEL",
-    os.getenv("EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
+def _provider(value: str) -> str:
+    aliases = {
+        "google": "gemini",
+        "google_gemini": "gemini",
+        "google-gemini": "gemini",
+    }
+    normalized = value.strip().lower()
+    return aliases.get(normalized, normalized)
+
+
+# Embedding — hosted OpenAI by default. Each provider owns its model and vector
+# dimension; the active values are selected from the provider-specific settings.
+EMBED_PROVIDER = _provider(
+    os.getenv("DOCS_EMBEDDING_PROVIDER", "openai")
 )
-EMBED_DIM = int(os.getenv("DOCS_EMBEDDING_DIMENSIONS") or os.getenv("EMBED_DIM", "384"))
 OPENAI_EMBEDDING_MODEL = os.getenv(
-    "DOCS_OPENAI_EMBEDDING_MODEL",
-    os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+    "DOCS_OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
 )
 OPENAI_EMBEDDING_DIMENSIONS = int(
-    os.getenv("DOCS_OPENAI_EMBEDDING_DIMENSIONS")
-    or os.getenv("OPENAI_EMBEDDING_DIMENSIONS", str(EMBED_DIM))
+    os.getenv("DOCS_OPENAI_EMBEDDING_DIMENSIONS", "384")
 )
+GEMINI_EMBEDDING_MODEL = os.getenv(
+    "DOCS_GEMINI_EMBEDDING_MODEL", "gemini-embedding-001"
+)
+GEMINI_EMBEDDING_DIMENSIONS = int(
+    os.getenv("DOCS_GEMINI_EMBEDDING_DIMENSIONS", "384")
+)
+LOCAL_EMBEDDING_MODEL = os.getenv(
+    "DOCS_LOCAL_EMBEDDING_MODEL",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+)
+LOCAL_EMBEDDING_DIMENSIONS = int(os.getenv("DOCS_LOCAL_EMBEDDING_DIMENSIONS", "384"))
 
-# Reranking — local, via fastembed TextCrossEncoder.
-DOCS_RERANK_ENABLED = (
-    os.getenv("DOCS_RERANK_ENABLED") or os.getenv("RERANK_ENABLED", "true")
-).lower() == "true"
-DOCS_RERANK_MODEL = os.getenv(
-    "DOCS_RERANK_MODEL", os.getenv("RERANK_MODEL", "BAAI/bge-reranker-base")
-)
+_EMBEDDING_MODELS = {
+    "openai": (OPENAI_EMBEDDING_MODEL, OPENAI_EMBEDDING_DIMENSIONS),
+    "gemini": (GEMINI_EMBEDDING_MODEL, GEMINI_EMBEDDING_DIMENSIONS),
+    "local": (LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_DIMENSIONS),
+}
+if EMBED_PROVIDER not in _EMBEDDING_MODELS:
+    raise ValueError(f"Unsupported DOCS_EMBEDDING_PROVIDER: {EMBED_PROVIDER}")
+EMBED_MODEL, EMBED_DIM = _EMBEDDING_MODELS[EMBED_PROVIDER]
 
-# Generation — local Llama GGUF by default, or an OpenAI-compatible chat model.
-LLM_PROVIDER = (os.getenv("DOCS_LLM_PROVIDER") or os.getenv("LLM_PROVIDER", "local")).lower()
-DOCS_LOCAL_MODEL_PATH = os.getenv(
-    "DOCS_LOCAL_MODEL_PATH",
-    os.getenv("QWEN_MODEL_PATH", str(MODELS_DIR / "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf")),
+# Reranking — hosted OpenAI by default, or local via fastembed TextCrossEncoder.
+DOCS_RERANK_ENABLED = os.getenv("DOCS_RERANK_ENABLED", "true").lower() == "true"
+DOCS_RERANK_PROVIDER = _provider(os.getenv("DOCS_RERANK_PROVIDER", "openai"))
+DOCS_RERANK_MODEL = os.getenv("DOCS_RERANK_MODEL", "BAAI/bge-reranker-base")
+
+# Generation — OpenAI by default. Each provider owns its model settings.
+LLM_PROVIDER = _provider(
+    os.getenv("DOCS_LLM_PROVIDER", "openai")
 )
-GEN_MAX_TOKENS = int(
-    os.getenv("DOCS_GENERATION_MAX_TOKENS") or os.getenv("GEN_MAX_TOKENS", "256")
+DOCS_LLM_MAX_OUTPUT_TOKENS = int(os.getenv("DOCS_LLM_MAX_OUTPUT_TOKENS", "256"))
+LOCAL_LLM_CONTEXT_TOKENS = int(os.getenv("DOCS_LOCAL_LLM_CONTEXT_TOKENS", "2048"))
+LOCAL_LLM_THREADS = int(os.getenv("DOCS_LOCAL_LLM_THREADS", "2"))
+LOCAL_LLM_BATCH_SIZE = int(os.getenv("DOCS_LOCAL_LLM_BATCH_SIZE", "512"))
+LOCAL_LLM_GPU_LAYERS = int(os.getenv("DOCS_LOCAL_LLM_GPU_LAYERS", "-1"))
+LOCAL_LLM_MODEL_PATH = os.getenv(
+    "DOCS_LOCAL_LLM_MODEL_PATH",
+    str(MODELS_DIR / "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"),
 )
-GEN_CTX = int(
-    os.getenv("DOCS_GENERATION_CONTEXT_TOKENS") or os.getenv("GEN_CTX", "2048")
-)
-DOCS_LLM_THREADS = int(os.getenv("DOCS_LLM_THREADS") or os.getenv("GEN_THREADS", "2"))
-DOCS_LLM_BATCH_SIZE = int(
-    os.getenv("DOCS_LLM_BATCH_SIZE") or os.getenv("LLAMA_N_BATCH", "512")
-)
-LLAMA_N_GPU_LAYERS = int(os.getenv("LLAMA_N_GPU_LAYERS", "-1"))
-OPENAI_CHAT_MODEL = os.getenv("DOCS_LLM_MODEL") or os.getenv("OPENAI_CHAT_MODEL") or os.getenv(
-    "LEO_OPENAI_MODEL_NAME", "gpt-5.6-luna"
-)
+OPENAI_LLM_MODEL = os.getenv("DOCS_OPENAI_LLM_MODEL", "gpt-5.6-luna")
+OPENAI_RERANK_MODEL = os.getenv("DOCS_OPENAI_RERANK_MODEL", "gpt-4o-mini")
 OPENAI_API_KEY = (
-    os.getenv("DOCS_OPENAI_API_KEY")
-    or os.getenv("OPENAI_API_KEY")
-    or os.getenv("LEO_OPENAI_API_KEY", "")
+    os.getenv("DOCS_OPENAI_API_KEY", "")
 )
-OPENAI_BASE_URL = (
-    os.getenv("DOCS_OPENAI_BASE_URL")
-    or os.getenv("OPENAI_BASE_URL")
-    or os.getenv("LEO_OPENAI_BASE_URL", "https://api.openai.com/v1")
+OPENAI_API_BASE_URL = os.getenv(
+    "DOCS_OPENAI_API_BASE_URL", "https://api.openai.com/v1"
 ).rstrip("/")
-OPENAI_TIMEOUT = float(os.getenv("OPENAI_TIMEOUT", "120"))
+OPENAI_REQUEST_TIMEOUT_SECONDS = float(
+    os.getenv("DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS", "120")
+)
+OPENAI_RERANK_TIMEOUT_SECONDS = float(
+    os.getenv("DOCS_OPENAI_RERANK_TIMEOUT_SECONDS", "8")
+)
+DOCS_RERANK_OPENAI_FALLBACK = _provider(
+    os.getenv("DOCS_RERANK_OPENAI_FALLBACK", "vector")
+)
+GEMINI_LLM_MODEL = os.getenv("DOCS_GEMINI_LLM_MODEL", "gemini-2.5-flash")
+GEMINI_API_KEY = (
+    os.getenv("DOCS_GEMINI_API_KEY", "")
+)
+GEMINI_API_BASE_URL = (
+    os.getenv(
+        "DOCS_GEMINI_API_BASE_URL",
+        "https://generativelanguage.googleapis.com/v1beta",
+    )
+).rstrip("/")
+GEMINI_REQUEST_TIMEOUT_SECONDS = float(
+    os.getenv("DOCS_GEMINI_REQUEST_TIMEOUT_SECONDS", "120")
+)
+
+if LLM_PROVIDER not in {"openai", "gemini", "local"}:
+    raise ValueError(f"Unsupported DOCS_LLM_PROVIDER: {LLM_PROVIDER}")
+if DOCS_RERANK_PROVIDER not in {"openai", "local"}:
+    raise ValueError(f"Unsupported DOCS_RERANK_PROVIDER: {DOCS_RERANK_PROVIDER}")
+if DOCS_RERANK_OPENAI_FALLBACK not in {"local", "vector"}:
+    raise ValueError(
+        f"Unsupported DOCS_RERANK_OPENAI_FALLBACK: {DOCS_RERANK_OPENAI_FALLBACK}"
+    )
 
 # Retrieval
 # Candidate pool the reranker sees. Kept wide: short / low-signal queries (esp. bare
@@ -108,14 +150,9 @@ CORS_ORIGINS = [
     for o in os.getenv("CORS_ORIGINS", "https://leo-cdp.github.io").split(",")
     if o.strip()
 ]
-# Serialize expensive generation so concurrent /ask + /search calls queue instead of
-# thrashing (and OOM-ing) the 1 vCPU box.
-ASK_MAX_CONCURRENCY = int(os.getenv("ASK_MAX_CONCURRENCY", "1"))
-# Per-IP sliding-window rate limit for the CPU-heavy endpoints (/ask and /search).
-# Applied to every caller EXCEPT a trusted internal one that presents INTERNAL_API_SECRET
-# (see below). 0 disables. The client IP is derived from a trusted X-Forwarded-For hop
-# (TRUSTED_PROXY_HOPS); when forwarding info is missing/ambiguous the direct peer is used
-# and the request is still limited (fail closed) — absence of a header never exempts.
+# Per-IP and browser sliding-window rate limit for the CPU-heavy endpoints (/ask and
+# /search). Redis is the source of truth so limits work across workers and replicas.
+# 0 disables the limiter; otherwise Redis must be reachable.
 ASK_RATE_MAX = int(os.getenv("ASK_RATE_MAX", "10"))
 ASK_RATE_WINDOW_SEC = int(os.getenv("ASK_RATE_WINDOW_SEC", "60"))
 # Number of trusted reverse-proxy hops that append to X-Forwarded-For (Caddy = 1). The
@@ -127,11 +164,19 @@ TRUSTED_PROXY_HOPS = max(1, int(os.getenv("TRUSTED_PROXY_HOPS", "1")))
 # so admin traffic is rate-limited too. Set the SAME value here and as the proxy's
 # DOCS_INTERNAL_SECRET to exempt the admin console from the public rate limit.
 INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
-# Worker/process count (uvicorn/gunicorn WEB_CONCURRENCY convention). The rate limiter and
-# concurrency gate are per-process in-memory, so per-worker budgets are divided by this to
-# keep the aggregate near ASK_RATE_MAX / ASK_MAX_CONCURRENCY. For an exact shared limit
-# across workers, run a single worker or back the limiter with a shared store (Redis).
-WEB_CONCURRENCY = max(1, int(os.getenv("WEB_CONCURRENCY", "1")))
+
+# Redis-backed request limiting. The local Docker stack resolves ``redis`` on the shared
+# customer360-network; production deployment supplies the API-box Redis address.
+DOCS_REDIS_HOST = os.getenv("DOCS_REDIS_HOST", "redis")
+DOCS_REDIS_PORT = int(os.getenv("DOCS_REDIS_PORT", "6580"))
+DOCS_REDIS_DB = int(os.getenv("DOCS_REDIS_DB", "0"))
+DOCS_REDIS_PASSWORD = os.getenv("DOCS_REDIS_PASSWORD") or os.getenv("REDIS_PASSWORD", "")
+DOCS_REDIS_CONNECT_TIMEOUT_SECONDS = float(
+    os.getenv("DOCS_REDIS_CONNECT_TIMEOUT_SECONDS", "1")
+)
+DOCS_REDIS_SOCKET_TIMEOUT_SECONDS = float(
+    os.getenv("DOCS_REDIS_SOCKET_TIMEOUT_SECONDS", "1")
+)
 
 # Request-parameter caps (defence against CPU amplification via huge/negative values).
 TOP_N_MAX = int(os.getenv("TOP_N_MAX", "50"))

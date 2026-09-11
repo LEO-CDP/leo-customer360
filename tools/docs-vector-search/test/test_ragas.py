@@ -4,7 +4,7 @@ Runs the live-service RAGAS evaluation (see ragas_eval.py) and asserts each metr
 clears a threshold. Thresholds are modest by default because the generator is a local
 Qwen 0.5B; tune via env (MIN_FAITHFULNESS, MIN_ANSWER_RELEVANCY, ...).
 
-    export SERVICE_URL=http://localhost:8000
+    export SERVICE_URL=http://localhost:8001
     export LEO_OPENAI_API_KEY=sk-...          # judge
     pytest tools/docs-vector-search/test -v -s
 

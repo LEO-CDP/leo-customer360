@@ -4,15 +4,15 @@ Flow: for each question in dataset.jsonl, call the running service's POST /ask,
 collect (question, answer, retrieved_contexts, reference), then score with RAGAS.
 
     # point at the service (SSH-tunnel the UAT box if needed:
-    #   ssh -L 8000:localhost:8000 leocdp360@<docs-box-ip>)
-    export SERVICE_URL=http://localhost:8000
+    #   ssh -L 8001:localhost:8001 leocdp360@<docs-box-ip>)
+    export SERVICE_URL=http://localhost:8001
 
     # RAGAS needs a JUDGE model. The service is fully local (Qwen 0.5B) and far too
     # small to grade itself, so evaluation uses a stronger hosted judge — standard
     # RAGAS practice (eval judge != production model). Reuses the repo's OpenAI creds.
     export LEO_OPENAI_API_KEY=sk-...            # or OPENAI_API_KEY
     export RAGAS_LLM_MODEL=gpt-4o-mini          # optional (default below)
-    export RAGAS_EMBED_MODEL=text-embedding-3-small
+    export RAGAS_EMBEDDING_MODEL=text-embedding-3-small
     export OPENAI_BASE_URL=...                  # optional (OpenAI-compatible gateway)
 
     python ragas_eval.py                        # prints a table, writes ragas_report.{json,csv}
@@ -32,7 +32,7 @@ import httpx
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_DATASET = HERE / "dataset.jsonl"
-SERVICE_URL = os.getenv("SERVICE_URL", "http://localhost:8000")
+SERVICE_URL = os.getenv("SERVICE_URL", "http://localhost:8001")
 
 
 # --------------------------------------------------------------------------- data
@@ -86,7 +86,7 @@ def build_judge():
         )
     base_url = os.getenv("OPENAI_BASE_URL") or None
     llm_model = os.getenv("RAGAS_LLM_MODEL", "gpt-4o-mini")
-    embed_model = os.getenv("RAGAS_EMBED_MODEL", "text-embedding-3-small")
+    embed_model = os.getenv("RAGAS_EMBEDDING_MODEL", "text-embedding-3-small")
     llm = LangchainLLMWrapper(
         ChatOpenAI(model=llm_model, api_key=api_key, base_url=base_url, temperature=0)
     )

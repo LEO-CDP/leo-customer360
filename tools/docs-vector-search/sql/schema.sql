@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS rag.doc_chunks (
     ordinal      int,
     content_hash text,
     text         text NOT NULL,
-    embedding    vector(384) NOT NULL   -- e5-small / bge-small dim; keep in sync with EMBED_DIM
+    embedding    vector(384) NOT NULL   -- keep in sync with the selected provider's embedding dimensions
 );
 
 CREATE INDEX IF NOT EXISTS doc_chunks_embed_idx

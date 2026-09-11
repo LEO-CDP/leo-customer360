@@ -183,11 +183,9 @@ esac
 DC_CMD=("${DC[@]}" -f "$COMPOSE_FILE")
 echo "🔧 SSO_LOGIN=${SSO_LOGIN:-true} -> using compose file '${COMPOSE_FILE}'."
 
-DOCS_SEARCH_HOST_PORT="${DOCS_SEARCH_HOST_PORT:-8000}"
+DOCS_SEARCH_HOST_PORT="${DOCS_SEARCH_HOST_PORT:-8001}"
 DOCS_SEARCH_URL="${DOCS_SEARCH_URL:-http://127.0.0.1:${DOCS_SEARCH_HOST_PORT}}"
 DOCS_SEARCH_TIMEOUT="${DOCS_PROXY_TIMEOUT_SECONDS:-${DOCS_SEARCH_TIMEOUT:-120}}"
-DOCS_GEN_CTX="${DOCS_GENERATION_CONTEXT_TOKENS:-${DOCS_GEN_CTX:-2048}}"
-DOCS_GEN_MAX_TOKENS="${DOCS_GENERATION_MAX_TOKENS:-${DOCS_GEN_MAX_TOKENS:-256}}"
 
 docker_gpu_available() {
   command -v nvidia-smi >/dev/null 2>&1 || return 1
@@ -213,6 +211,7 @@ if [ -z "$DOCS_GPU_REQUEST_VALUE" ]; then
   if docker_gpu_available; then
     DOCS_GPU_REQUEST="all"
     DOCS_SEARCH_SERVICE="docs-vector-search-gpu"
+    DOCS_SEARCH_CONTAINER="docs-vector-search-gpu"
     echo "🎮 NVIDIA GPU and Docker GPU support detected -- enabling docs-service GPU access."
   else
     DOCS_GPU_REQUEST="0"
@@ -222,6 +221,7 @@ if [ -z "$DOCS_GPU_REQUEST_VALUE" ]; then
 elif [ "$DOCS_GPU_REQUEST_VALUE" = "all" ]; then
   if docker_gpu_available; then
     DOCS_SEARCH_SERVICE="docs-vector-search-gpu"
+    DOCS_SEARCH_CONTAINER="docs-vector-search-gpu"
     echo "🎮 NVIDIA GPU and Docker GPU support detected -- enabling docs-service GPU access."
   else
     DOCS_GPU_REQUEST="0"
@@ -252,24 +252,82 @@ PG_USER=${DB_USER:-postgres}
 PG_PASSWORD=${DB_PASSWORD:-}
 PG_SCHEMA=rag
 API_PORT=${DOCS_SEARCH_HOST_PORT}
+# --- Providers and models ---
+# DEFAULT RUN CONFIGURATION: OpenAI is selected for embeddings and generation.
+# Set DOCS_OPENAI_API_KEY before running enrich, /search, or /ask.
 DOCS_RERANK_ENABLED=${DOCS_RERANK_ENABLED:-true}
 DOCS_RERANK_MODEL=${DOCS_RERANK_MODEL:-BAAI/bge-reranker-base}
-DOCS_GENERATION_CONTEXT_TOKENS=${DOCS_GEN_CTX}
-DOCS_GENERATION_MAX_TOKENS=${DOCS_GEN_MAX_TOKENS}
-DOCS_LLM_THREADS=${DOCS_LLM_THREADS:-2}
-DOCS_LLM_BATCH_SIZE=${DOCS_LLM_BATCH_SIZE:-512}
-DOCS_EMBEDDING_PROVIDER=${DOCS_EMBEDDING_PROVIDER:-local}
-DOCS_EMBEDDING_MODEL=${DOCS_EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
-DOCS_EMBEDDING_DIMENSIONS=${DOCS_EMBEDDING_DIMENSIONS:-384}
-DOCS_LLM_PROVIDER=${DOCS_LLM_PROVIDER:-local}
-DOCS_LLM_MODEL=${DOCS_LLM_MODEL:-gpt-5.6-luna}
+DOCS_LLM_MAX_OUTPUT_TOKENS=${DOCS_LLM_MAX_OUTPUT_TOKENS:-256}
+DOCS_EMBEDDING_PROVIDER=${DOCS_EMBEDDING_PROVIDER:-openai}
+DOCS_LLM_PROVIDER=${DOCS_LLM_PROVIDER:-openai}
+# REQUIRED DEFAULT CREDENTIAL: set this secret to use the default OpenAI providers.
 DOCS_OPENAI_API_KEY=${DOCS_OPENAI_API_KEY:-}
-DOCS_OPENAI_BASE_URL=${DOCS_OPENAI_BASE_URL:-https://api.openai.com/v1}
+# OpenAI embedding and LLM settings.
+DOCS_OPENAI_API_BASE_URL=${DOCS_OPENAI_API_BASE_URL:-https://api.openai.com/v1}
+DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS=${DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS:-120}
 DOCS_OPENAI_EMBEDDING_MODEL=${DOCS_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
 DOCS_OPENAI_EMBEDDING_DIMENSIONS=${DOCS_OPENAI_EMBEDDING_DIMENSIONS:-384}
-DOCS_LOCAL_MODEL_PATH=${DOCS_LOCAL_MODEL_PATH:-/app/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf}
+DOCS_OPENAI_LLM_MODEL=${DOCS_OPENAI_LLM_MODEL:-gpt-5.6-luna}
+# Optional Gemini embedding and LLM settings.
+DOCS_GEMINI_API_KEY=${DOCS_GEMINI_API_KEY:-}
+DOCS_GEMINI_API_BASE_URL=${DOCS_GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
+DOCS_GEMINI_REQUEST_TIMEOUT_SECONDS=${DOCS_GEMINI_REQUEST_TIMEOUT_SECONDS:-120}
+DOCS_GEMINI_EMBEDDING_MODEL=${DOCS_GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
+DOCS_GEMINI_EMBEDDING_DIMENSIONS=${DOCS_GEMINI_EMBEDDING_DIMENSIONS:-384}
+DOCS_GEMINI_LLM_MODEL=${DOCS_GEMINI_LLM_MODEL:-gemini-2.5-flash}
+# Optional local fastembed embedding and Qwen LLM settings.
+DOCS_LOCAL_EMBEDDING_MODEL=${DOCS_LOCAL_EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+DOCS_LOCAL_EMBEDDING_DIMENSIONS=${DOCS_LOCAL_EMBEDDING_DIMENSIONS:-384}
+DOCS_LOCAL_LLM_MODEL_PATH=${DOCS_LOCAL_LLM_MODEL_PATH:-/app/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf}
+DOCS_LOCAL_LLM_CONTEXT_TOKENS=${DOCS_LOCAL_LLM_CONTEXT_TOKENS:-2048}
+DOCS_LOCAL_LLM_THREADS=${DOCS_LOCAL_LLM_THREADS:-2}
+DOCS_LOCAL_LLM_BATCH_SIZE=${DOCS_LOCAL_LLM_BATCH_SIZE:-512}
+DOCS_LOCAL_LLM_GPU_LAYERS=${DOCS_LOCAL_LLM_GPU_LAYERS:--1}
+# --- Retrieval / chunking ---
+RETRIEVE_TOP_N=${RETRIEVE_TOP_N:-50}
+RERANK_TOP_K=${RERANK_TOP_K:-5}
+CHUNK_TOKENS=${CHUNK_TOKENS:-400}
+CHUNK_OVERLAP=${CHUNK_OVERLAP:-50}
+CONTEXT_CHAR_BUDGET=${CONTEXT_CHAR_BUDGET:-6000}
+# --- HTTP / browser access ---
+CORS_ORIGINS=${CORS_ORIGINS:-https://leo-cdp.github.io}
+ASK_RATE_MAX=${ASK_RATE_MAX:-10}
+ASK_RATE_WINDOW_SEC=${ASK_RATE_WINDOW_SEC:-60}
+TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-1}
+TOP_N_MAX=${TOP_N_MAX:-50}
+TOP_K_MAX=${TOP_K_MAX:-20}
+QUESTION_MAX_LEN=${QUESTION_MAX_LEN:-2000}
+DOCS_REDIS_HOST=${DOCS_REDIS_HOST:-redis}
+DOCS_REDIS_PORT=${DOCS_REDIS_PORT:-6580}
+DOCS_REDIS_DB=${DOCS_REDIS_DB:-0}
+DOCS_REDIS_PASSWORD=${DOCS_REDIS_PASSWORD:-${REDIS_PASSWORD:-}}
+DOCS_REDIS_CONNECT_TIMEOUT_SECONDS=${DOCS_REDIS_CONNECT_TIMEOUT_SECONDS:-1}
+DOCS_REDIS_SOCKET_TIMEOUT_SECONDS=${DOCS_REDIS_SOCKET_TIMEOUT_SECONDS:-1}
 INTERNAL_API_SECRET=${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-}}
 EOF
+}
+
+load_docs_provider_env() {
+  local line key value
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" != DOCS_*\=* ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    export "$key=$value"
+  done < "$DOCS_SEARCH_ENV_FILE"
+}
+
+validate_docs_provider_credentials() {
+  local embedding_provider llm_provider
+  embedding_provider="$(sed -n 's/^DOCS_EMBEDDING_PROVIDER=//p' "$DOCS_SEARCH_ENV_FILE" | head -1)"
+  llm_provider="$(sed -n 's/^DOCS_LLM_PROVIDER=//p' "$DOCS_SEARCH_ENV_FILE" | head -1)"
+  if [[ "$embedding_provider" == "openai" || "$llm_provider" == "openai" ]] && \
+     ! grep -q '^DOCS_OPENAI_API_KEY=.' "$DOCS_SEARCH_ENV_FILE"; then
+    echo "❌ DOCS_OPENAI_API_KEY is required because DOCS_EMBEDDING_PROVIDER or DOCS_LLM_PROVIDER is openai." >&2
+    echo "   Set it in '$DOCS_SEARCH_ENV_FILE' or select local/gemini providers." >&2
+    exit 1
+  fi
 }
 
 restart_host_services() {
@@ -286,6 +344,8 @@ restart_host_services() {
 
 start_docs_service() {
   ensure_docs_env_file
+  load_docs_provider_env
+  validate_docs_provider_credentials
   echo "🤖 Building local docs-vector-search image..."
   "${DOCS_DC_CMD[@]}" build
 
@@ -303,18 +363,23 @@ start_docs_service() {
 
 restart_docs_service() {
   ensure_docs_env_file
+  load_docs_provider_env
+  validate_docs_provider_credentials
   echo "🔁 Restarting docs-vector-search..."
   "${DOCS_DC_CMD[@]}" up -d --build --force-recreate "$DOCS_SEARCH_SERVICE"
 }
 
 reset_docs_service() {
   ensure_docs_env_file
+  load_docs_provider_env
   echo "🗑️  Removing docs-vector-search container..."
   "${DOCS_DC_CMD[@]}" down -v --remove-orphans
 }
 
 upgrade_docs_service() {
   ensure_docs_env_file
+  load_docs_provider_env
+  validate_docs_provider_credentials
   echo "⬆️  Refreshing docs-vector-search image..."
   "${DOCS_DC_CMD[@]}" pull --ignore-pull-failures || true
   start_docs_service true

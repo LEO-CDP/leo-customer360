@@ -48,7 +48,7 @@ NET_UP="$(tfval netdata_upstream "$ovl")";   NET_UP="${NET_UP:-127.0.0.1:4199}"
 PORT_UP="$(tfval portainer_upstream "$ovl")";PORT_UP="${PORT_UP:-127.0.0.1:9443}"
 JAE_UP="$(tfval jaeger_upstream "$ovl")";     JAE_UP="${JAE_UP:-127.0.0.1:4686}"   # -> oauth2-jaeger (SSO) -> Jaeger
 DATA_UP="$(tfval data_upstream "$ovl")";      DATA_UP="${DATA_UP:-10.100.1.8:8010}" # -> data-tracking-api on its own box (/data)
-DOCS_UP="$(tfval docs_upstream "$ovl")";      DOCS_UP="${DOCS_UP:-10.100.1.7:8000}" # -> docs-vector-search on its own box (/docs-ai)
+DOCS_UP="$(tfval docs_upstream "$ovl")";      DOCS_UP="${DOCS_UP:-10.100.1.7:8001}" # -> docs-vector-search on its own box (/docs-ai)
 SDK_FRAME_ANCESTOR="$(tfval sdk_frame_ancestor "$ovl")"
 
 : "${DOMAIN:?set caddy_domain in $ovl (e.g. cdp.example.com)}"

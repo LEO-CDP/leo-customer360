@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Deploy docs-vector-search (local-model RAG, FastAPI :8000) onto its OWN "docs" server VM
+# Deploy docs-vector-search (provider-agnostic RAG, FastAPI :8001) onto its OWN "docs" server VM
 # and refresh the pgvector index on the shared vDB.
 #   ./deploy-docs-search.sh <uat|prod>
 #
-# Local-only models: paraphrase-multilingual-MiniLM embed + bge-reranker-base rerank + Qwen2.5-0.5B
-# (GGUF) generate — no hosted-model dependency. Vectors live in pgvector on the shared vDB
+# OpenAI is the default; Gemini and local fastembed/Qwen can be selected independently. Vectors
+# live in pgvector on the shared vDB
 # (schema "rag"), off the app box. This is the CD path: it PULLS the CI-built image from GHCR
 # (set BUILD_LOCAL=1 to build on the VM from source). enrich (chunk -> embed -> upsert) runs
 # ON the box, where the vDB + model weights live; it also creates the rag schema + pgvector
@@ -13,8 +13,8 @@
 # Target box = servers["$DOCS_SERVER_KEY"] (default "docs"), defined in overlays/<env>.tfvars
 # and provisioned by this module's deploy.sh (apply). Overrides (env):
 #   BASTION_USER / SSH_KEY / DOCS_SERVER_KEY / DOCS_PORT / IMAGE_TAG / BUILD_LOCAL
-#   DOCS_EMBEDDING_MODEL / DOCS_EMBEDDING_DIMENSIONS / DOCS_RERANK_ENABLED /
-#   DOCS_RERANK_MODEL / DOCS_LLM_PROVIDER / DOCS_LLM_MODEL
+#   DOCS_EMBEDDING_PROVIDER / DOCS_LLM_PROVIDER / DOCS_*_EMBEDDING_* /
+#   DOCS_*_LLM_* / DOCS_RERANK_ENABLED / DOCS_RERANK_MODEL
 #   DOCS_PG_SCHEMA / DOCS_GGUF_URL
 # DB creds come from ../postgres (outputs + TF_VAR_db_password). For local docker compose dev
 # instead, see tools/docs-vector-search/docker-compose.yml + .env.example.
@@ -25,25 +25,49 @@ REPO_ROOT="$(cd ../.. && pwd)" # repo root (contains docs/ and tools/docs-vector
 ENV="${1:-}"; ACTION="${2:-deploy}"
 case "$ENV" in uat | prod) ;; *) echo "Usage: ./deploy-docs-search.sh <uat|prod> [deploy|destroy]"; exit 1 ;; esac
 
+# Keep CI-injected provider secrets authoritative if a developer's optional local
+# deployments/server/.env also exists on the runner.
+_DOCS_OPENAI_API_KEY_FROM_ENV="${DOCS_OPENAI_API_KEY:-}"
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
+if [[ -n "$_DOCS_OPENAI_API_KEY_FROM_ENV" ]]; then
+  DOCS_OPENAI_API_KEY="$_DOCS_OPENAI_API_KEY_FROM_ENV"
+fi
+unset _DOCS_OPENAI_API_KEY_FROM_ENV
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 DOCS_SERVER_KEY="${DOCS_SERVER_KEY:-docs}"
-DOCS_PORT="${DOCS_PORT:-8000}"
+DOCS_PORT="${DOCS_PORT:-8001}"
 DOCS_PG_SCHEMA="${DOCS_PG_SCHEMA:-rag}"
-DOCS_EMBEDDING_MODEL="${DOCS_EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}"
-DOCS_EMBEDDING_DIMENSIONS="${DOCS_EMBEDDING_DIMENSIONS:-384}"
+DOCS_EMBEDDING_PROVIDER="${DOCS_EMBEDDING_PROVIDER:-openai}"
 DOCS_RERANK_ENABLED="${DOCS_RERANK_ENABLED:-true}"
 DOCS_RERANK_MODEL="${DOCS_RERANK_MODEL:-BAAI/bge-reranker-base}"
-DOCS_LLM_PROVIDER="${DOCS_LLM_PROVIDER:-local}"
-DOCS_LLM_MODEL="${DOCS_LLM_MODEL:-gpt-5.6-luna}"
-DOCS_GENERATION_CONTEXT_TOKENS="${DOCS_GENERATION_CONTEXT_TOKENS:-2048}"
-DOCS_GENERATION_MAX_TOKENS="${DOCS_GENERATION_MAX_TOKENS:-256}"
-DOCS_LLM_THREADS="${DOCS_LLM_THREADS:-2}"
-DOCS_LLM_BATCH_SIZE="${DOCS_LLM_BATCH_SIZE:-512}"
+DOCS_LLM_PROVIDER="${DOCS_LLM_PROVIDER:-openai}"
+DOCS_LLM_MAX_OUTPUT_TOKENS="${DOCS_LLM_MAX_OUTPUT_TOKENS:-256}"
 DOCS_OPENAI_API_KEY="${DOCS_OPENAI_API_KEY:-}"
-DOCS_OPENAI_BASE_URL="${DOCS_OPENAI_BASE_URL:-https://api.openai.com/v1}"
+DOCS_OPENAI_API_BASE_URL="${DOCS_OPENAI_API_BASE_URL:-https://api.openai.com/v1}"
+DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS="${DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS:-120}"
 DOCS_OPENAI_EMBEDDING_MODEL="${DOCS_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}"
 DOCS_OPENAI_EMBEDDING_DIMENSIONS="${DOCS_OPENAI_EMBEDDING_DIMENSIONS:-384}"
+DOCS_OPENAI_LLM_MODEL="${DOCS_OPENAI_LLM_MODEL:-gpt-5.6-luna}"
+DOCS_GEMINI_API_KEY="${DOCS_GEMINI_API_KEY:-}"
+DOCS_GEMINI_API_BASE_URL="${DOCS_GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}"
+DOCS_GEMINI_REQUEST_TIMEOUT_SECONDS="${DOCS_GEMINI_REQUEST_TIMEOUT_SECONDS:-120}"
+DOCS_GEMINI_EMBEDDING_MODEL="${DOCS_GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}"
+DOCS_GEMINI_EMBEDDING_DIMENSIONS="${DOCS_GEMINI_EMBEDDING_DIMENSIONS:-384}"
+DOCS_GEMINI_LLM_MODEL="${DOCS_GEMINI_LLM_MODEL:-gemini-2.5-flash}"
+DOCS_LOCAL_EMBEDDING_MODEL="${DOCS_LOCAL_EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}"
+DOCS_LOCAL_EMBEDDING_DIMENSIONS="${DOCS_LOCAL_EMBEDDING_DIMENSIONS:-384}"
+DOCS_LOCAL_LLM_MODEL_PATH="${DOCS_LOCAL_LLM_MODEL_PATH:-/app/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf}"
+DOCS_LOCAL_LLM_CONTEXT_TOKENS="${DOCS_LOCAL_LLM_CONTEXT_TOKENS:-2048}"
+DOCS_LOCAL_LLM_THREADS="${DOCS_LOCAL_LLM_THREADS:-2}"
+DOCS_LOCAL_LLM_BATCH_SIZE="${DOCS_LOCAL_LLM_BATCH_SIZE:-512}"
+DOCS_LOCAL_LLM_GPU_LAYERS="${DOCS_LOCAL_LLM_GPU_LAYERS:--1}"
+DOCS_REDIS_HOST="${DOCS_REDIS_HOST:-}"
+DOCS_REDIS_PORT="${DOCS_REDIS_PORT:-6580}"
+DOCS_REDIS_DB="${DOCS_REDIS_DB:-0}"
+DOCS_REDIS_PASSWORD="${DOCS_REDIS_PASSWORD:-${REDIS_PASSWORD:-${TF_VAR_redis_password:-}}}"
+DOCS_REDIS_CONNECT_TIMEOUT_SECONDS="${DOCS_REDIS_CONNECT_TIMEOUT_SECONDS:-1}"
+DOCS_REDIS_SOCKET_TIMEOUT_SECONDS="${DOCS_REDIS_SOCKET_TIMEOUT_SECONDS:-1}"
+[[ -z "$DOCS_REDIS_HOST" ]] && echo "::warning::docs-search: DOCS_REDIS_HOST is unset; configure a Redis endpoint reachable from the docs box before starting the service."
 # CORS origins for browsers hitting the API directly (the static docs site on GitHub Pages).
 DOCS_CORS_ORIGINS="${DOCS_CORS_ORIGINS:-https://leo-cdp.github.io}"
 # Per-IP /ask rate limit for public callers (via Caddy/XFF). Tune per env; 0 disables.
@@ -75,6 +99,7 @@ terraform workspace select "$ENV" >/dev/null 2>&1 || { echo "ERROR: no '$ENV' se
 SERVERS_JSON="$(terraform output -json servers 2>/dev/null || true)"
 [[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no servers output."; exit 1; }
 srv_ip() { printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get(sys.argv[2]) for i in (s.get("internal_interfaces") or []) if i.get(sys.argv[2])), ""))' "$1" "$2"; }
+DOCS_REDIS_HOST="${DOCS_REDIS_HOST:-$(srv_ip "${DOCS_REDIS_SERVER_KEY:-api}" fixed_ip)}"
 FIP="$(srv_ip "$DOCS_SERVER_KEY" floating_ip)"
 # The 'docs' box is provisioned by this module (overlays servers map). If it isn't there yet,
 # SKIP rather than fail — so CD stays green until the box is applied; the next run picks it up.
@@ -104,7 +129,7 @@ DB_HOST="$( (cd "$pg" && terraform workspace select "$ENV" >/dev/null 2>&1 && te
 DB_PORT="$( (cd "$pg" && terraform output -raw db_port 2>/dev/null) || echo 5432 )"
 : "${DB_NAME:?missing db_name}"; : "${DB_USER:?missing db_username}"; : "${DB_PASS:?missing db_password}"; : "${DB_HOST:?could not read db_host from ../postgres outputs}"
 
-echo ">> Target (docs): $BASTION :$DOCS_PORT   vDB: ${DB_NAME}.${DOCS_PG_SCHEMA}@${DB_HOST}:${DB_PORT}   embedding=$DOCS_EMBEDDING_MODEL   rerank=$DOCS_RERANK_ENABLED   llm=$DOCS_LLM_PROVIDER/$DOCS_LLM_MODEL"
+echo ">> Target (docs): $BASTION :$DOCS_PORT   vDB: ${DB_NAME}.${DOCS_PG_SCHEMA}@${DB_HOST}:${DB_PORT}   embedding=$DOCS_EMBEDDING_PROVIDER   rerank=$DOCS_RERANK_ENABLED   llm=$DOCS_LLM_PROVIDER"
 
 # --- CD image source: pull the CI-built image from GHCR by default; BUILD_LOCAL=1 ships
 #     tools/docs-vector-search and builds on the VM (slow: llama-cpp-python). ---
@@ -146,27 +171,41 @@ PG_PASSWORD=$DB_PASS
 PG_SCHEMA=$DOCS_PG_SCHEMA
 CORPUS_DIR=/app/corpus
 MODELS_DIR=/app/models
-DOCS_EMBEDDING_PROVIDER=${DOCS_EMBEDDING_PROVIDER:-local}
-DOCS_EMBEDDING_MODEL=$DOCS_EMBEDDING_MODEL
-DOCS_EMBEDDING_DIMENSIONS=$DOCS_EMBEDDING_DIMENSIONS
+DOCS_EMBEDDING_PROVIDER=$DOCS_EMBEDDING_PROVIDER
 DOCS_RERANK_ENABLED=$DOCS_RERANK_ENABLED
 DOCS_RERANK_MODEL=$DOCS_RERANK_MODEL
-DOCS_GENERATION_CONTEXT_TOKENS=$DOCS_GENERATION_CONTEXT_TOKENS
-DOCS_GENERATION_MAX_TOKENS=$DOCS_GENERATION_MAX_TOKENS
-DOCS_LLM_THREADS=$DOCS_LLM_THREADS
-DOCS_LLM_BATCH_SIZE=$DOCS_LLM_BATCH_SIZE
 DOCS_LLM_PROVIDER=$DOCS_LLM_PROVIDER
-DOCS_LLM_MODEL=$DOCS_LLM_MODEL
+DOCS_LLM_MAX_OUTPUT_TOKENS=$DOCS_LLM_MAX_OUTPUT_TOKENS
 DOCS_OPENAI_API_KEY=$DOCS_OPENAI_API_KEY
-DOCS_OPENAI_BASE_URL=$DOCS_OPENAI_BASE_URL
+DOCS_OPENAI_API_BASE_URL=$DOCS_OPENAI_API_BASE_URL
+DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS=$DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS
 DOCS_OPENAI_EMBEDDING_MODEL=$DOCS_OPENAI_EMBEDDING_MODEL
 DOCS_OPENAI_EMBEDDING_DIMENSIONS=$DOCS_OPENAI_EMBEDDING_DIMENSIONS
+DOCS_OPENAI_LLM_MODEL=$DOCS_OPENAI_LLM_MODEL
+DOCS_GEMINI_API_KEY=$DOCS_GEMINI_API_KEY
+DOCS_GEMINI_API_BASE_URL=$DOCS_GEMINI_API_BASE_URL
+DOCS_GEMINI_REQUEST_TIMEOUT_SECONDS=$DOCS_GEMINI_REQUEST_TIMEOUT_SECONDS
+DOCS_GEMINI_EMBEDDING_MODEL=$DOCS_GEMINI_EMBEDDING_MODEL
+DOCS_GEMINI_EMBEDDING_DIMENSIONS=$DOCS_GEMINI_EMBEDDING_DIMENSIONS
+DOCS_GEMINI_LLM_MODEL=$DOCS_GEMINI_LLM_MODEL
+DOCS_LOCAL_EMBEDDING_MODEL=$DOCS_LOCAL_EMBEDDING_MODEL
+DOCS_LOCAL_EMBEDDING_DIMENSIONS=$DOCS_LOCAL_EMBEDDING_DIMENSIONS
+DOCS_LOCAL_LLM_MODEL_PATH=$DOCS_LOCAL_LLM_MODEL_PATH
+DOCS_LOCAL_LLM_CONTEXT_TOKENS=$DOCS_LOCAL_LLM_CONTEXT_TOKENS
+DOCS_LOCAL_LLM_THREADS=$DOCS_LOCAL_LLM_THREADS
+DOCS_LOCAL_LLM_BATCH_SIZE=$DOCS_LOCAL_LLM_BATCH_SIZE
+DOCS_LOCAL_LLM_GPU_LAYERS=$DOCS_LOCAL_LLM_GPU_LAYERS
+DOCS_REDIS_HOST=$DOCS_REDIS_HOST
+DOCS_REDIS_PORT=$DOCS_REDIS_PORT
+DOCS_REDIS_DB=$DOCS_REDIS_DB
+DOCS_REDIS_PASSWORD=$DOCS_REDIS_PASSWORD
+DOCS_REDIS_CONNECT_TIMEOUT_SECONDS=$DOCS_REDIS_CONNECT_TIMEOUT_SECONDS
+DOCS_REDIS_SOCKET_TIMEOUT_SECONDS=$DOCS_REDIS_SOCKET_TIMEOUT_SECONDS
 CORS_ORIGINS=$DOCS_CORS_ORIGINS
 ASK_RATE_MAX=$DOCS_ASK_RATE_MAX
 ASK_RATE_WINDOW_SEC=$DOCS_ASK_RATE_WINDOW_SEC
 INTERNAL_API_SECRET=$DOCS_INTERNAL_AUTH_SECRET
 TRUSTED_PROXY_HOPS=$DOCS_TRUSTED_PROXY_HOPS
-DOCS_LOCAL_MODEL_PATH=/app/models/$GGUF_NAME
 $OTEL_LINES" | base64 | tr -d '\n')"
 
 echo ">> Fetching the model, refreshing the index (enrich), and (re)starting the container ..."
@@ -193,17 +232,22 @@ MODELS_DIR=/opt/c360/docs-models
 CORPUS_DIR=/opt/c360/docs-vector-search/corpus
 sudo mkdir -p "$MODELS_DIR"; sudo chown "$(id -un)" "$MODELS_DIR"
 
-# generator weights: fetch once, reuse across deploys (fastembed ONNX self-downloads into $MODELS_DIR/fastembed)
-if [ ! -s "$MODELS_DIR/$GGUF_NAME" ]; then
-  echo "   fetching $GGUF_NAME ..."
-  curl -fL --retry 3 -o "$MODELS_DIR/$GGUF_NAME.part" "$GGUF_URL"
-  mv "$MODELS_DIR/$GGUF_NAME.part" "$MODELS_DIR/$GGUF_NAME"
-else
-  echo "   model present: $GGUF_NAME"
-fi
-
 umask 077; env_file="$(mktemp)"; printf '%s' "$ENVB64" | base64 -d > "$env_file"
 sudo mkdir -p /opt/c360; sudo mv "$env_file" /opt/c360/docs-vector-search.env; sudo chmod 600 /opt/c360/docs-vector-search.env
+
+# Qwen is optional. Fetch its GGUF only when local generation is selected; hosted
+# providers should not require a multi-hundred-megabyte local model download.
+if grep -qx 'DOCS_LLM_PROVIDER=local' /opt/c360/docs-vector-search.env; then
+  if [ ! -s "$MODELS_DIR/$GGUF_NAME" ]; then
+    echo "   fetching $GGUF_NAME ..."
+    curl -fL --retry 3 -o "$MODELS_DIR/$GGUF_NAME.part" "$GGUF_URL"
+    mv "$MODELS_DIR/$GGUF_NAME.part" "$MODELS_DIR/$GGUF_NAME"
+  else
+    echo "   model present: $GGUF_NAME"
+  fi
+else
+  echo "   skipping Qwen GGUF (DOCS_LLM_PROVIDER is not local)"
+fi
 
 if [ "$DEPLOY_MODE" = "ghcr" ]; then
   echo "   pulling $IMAGE ..."
@@ -223,7 +267,7 @@ VOLS=(-v "$CORPUS_DIR:/app/corpus:ro" -v "$MODELS_DIR:/app/models")
 echo "   enrich: building/refreshing the pgvector index ..."
 sudo docker run --rm --network host --env-file /opt/c360/docs-vector-search.env "${VOLS[@]}" "$RUN_IMG" python -m src.enrich
 
-# then serve (image default CMD: uvicorn src.server:app --port 8000)
+# then serve (image default CMD: uvicorn src.server:app --port 8001)
 sudo docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 sudo docker run -d --name "$CONTAINER" --restart unless-stopped --network host \
   --env-file /opt/c360/docs-vector-search.env "${VOLS[@]}" "$RUN_IMG"

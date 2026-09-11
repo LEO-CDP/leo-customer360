@@ -62,7 +62,7 @@ renders **one aggregated table** into the run summary, and sends the Brevo email
 | `backend-system` | `./backend-system`  | 3000 | `identity_resolution/run_tests.sh` + `segmentation/run_tests.sh` | `ghcr.io/leo-cdp/leo-customer360/customer360-dagster` |
 | `customer360-api`| `./customer360-api` | 8008 | `run_unit_tests.sh`                                     | `ghcr.io/leo-cdp/leo-customer360/customer360-api`  |
 | `frontend-admin` | `./frontend-admin`  | 8890 | *(none — reported as skip)*                             | `ghcr.io/leo-cdp/leo-customer360/frontend-admin`   |
-| `docs-vector-search` | `./tools/docs-vector-search` | 8000 | `run_unit_tests.sh` (py_compile)             | `ghcr.io/leo-cdp/leo-customer360/docs-vector-search` |
+| `docs-vector-search` | `./tools/docs-vector-search` | 8001 | `run_unit_tests.sh` (py_compile)             | `ghcr.io/leo-cdp/leo-customer360/docs-vector-search` |
 
 > **`docs-vector-search`** is the only service whose source lives under `tools/`, so its
 > `build-and-push` step overrides the build **context** (`./tools/docs-vector-search`) and
