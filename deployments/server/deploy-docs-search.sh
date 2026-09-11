@@ -242,16 +242,11 @@ if command -v docker >/dev/null 2>&1; then
       img_repo="${img_repo%:*}" # drop optional :tag from the leaf only (keeps registry port)
     fi
     current_img_id="$(sudo docker inspect --format '{{.Image}}' "$CONTAINER" 2>/dev/null || true)"
-    if [ -n "$current_img_id" ]; then
-      sudo docker image ls --format '{{.ID}}' "$img_repo" \
-        | awk -v keep="$current_img_id" '$1 != keep' \
-        | sort -u \
-        | xargs -r sudo docker image rm -f >/dev/null 2>&1 || true
-    else
-      sudo docker image ls --format '{{.ID}}' "$img_repo" \
-        | sort -u \
-        | xargs -r sudo docker image rm -f >/dev/null 2>&1 || true
-    fi
+    target_img_id="$(sudo docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || true)"
+    sudo docker image ls --format '{{.ID}}' "$img_repo" \
+      | awk -v keep1="$current_img_id" -v keep2="$target_img_id" '$1 != keep1 && $1 != keep2' \
+      | sort -u \
+      | xargs -r sudo docker image rm -f >/dev/null 2>&1 || true
   fi
   sudo docker image prune -f      >/dev/null 2>&1 || true
   sudo docker builder prune -f    >/dev/null 2>&1 || true
