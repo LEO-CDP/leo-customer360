@@ -94,7 +94,14 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         return
     rank = {"passed": 0, "skipped": 1, "error": 2, "failed": 3}
     emoji = {"passed": "✅", "skipped": "⏭️", "error": "💥", "failed": "❌"}
-    outcome, duration = {}, {}
+
+    def _skip_reason(rep) -> str:
+        # A skip report's longrepr is (file, lineno, "Skipped: <reason>").
+        lr = getattr(rep, "longrepr", None)
+        text = str(lr[2]) if isinstance(lr, tuple) and len(lr) == 3 else (str(lr) if lr else "")
+        return text.replace("Skipped: ", "", 1).strip()
+
+    outcome, duration, reason = {}, {}, {}
     for status in ("passed", "failed", "error", "skipped"):
         for rep in terminalreporter.stats.get(status, []):
             nodeid = getattr(rep, "nodeid", None)
@@ -103,12 +110,19 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
             if nodeid not in outcome or rank[status] >= rank[outcome[nodeid]]:
                 outcome[nodeid] = status
             duration[nodeid] = duration.get(nodeid, 0.0) + (getattr(rep, "duration", 0.0) or 0.0)
+            if status == "skipped":
+                reason[nodeid] = _skip_reason(rep)
 
     counts = {"passed": 0, "failed": 0, "error": 0, "skipped": 0}
     for st in outcome.values():
         counts[st] += 1
+
+    def _detail(nid) -> str:
+        return reason.get(nid, "").replace("|", "\\|").replace("\n", " ").strip()
+
     rows = sorted(
-        ((", ".join(_CASE_BY_NODEID.get(nid, [])) or "-", nid.split("::", 1)[-1], st, duration.get(nid, 0.0))
+        ((", ".join(_CASE_BY_NODEID.get(nid, [])) or "-", nid.split("::", 1)[-1], st,
+          duration.get(nid, 0.0), _detail(nid))
          for nid, st in outcome.items()),
         key=lambda r: (r[0], r[1]),
     )
@@ -119,11 +133,20 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         f"**{overall}** — {counts['passed']} passed · {counts['skipped']} skipped · "
         f"{counts['failed']} failed · {counts['error']} error  ·  target `{BASE_URL or '(unset)'}`",
         "",
-        "| Case | Test | Result | Time |",
-        "| --- | --- | --- | --- |",
-        *[f"| {cases} | `{name}` | {emoji[st]} {st} | {dur:.2f}s |" for cases, name, st, dur in rows],
+        "| Case | Test | Result | Time | Reason (why skipped) |",
+        "| --- | --- | --- | --- | --- |",
+        *[f"| {cases} | `{name}` | {emoji[st]} {st} | {dur:.2f}s | {detail or '—'} |"
+          for cases, name, st, dur, detail in rows],
         "",
     ]
+    if counts["skipped"]:
+        lines += [
+            "> **Skips are intentional, env-gated** (not failures): routing/write tests "
+            "(`test_routing_e2e.py`, Route A/B/C) need `E2E_ALLOW_DATA_WRITES=1` because they "
+            "write to `crm_*` tables on the shared UAT tenant; the cross-tenant isolation test "
+            "needs `E2E_TENANT_ID_B` + `E2E_BEARER_TOKEN_B`. See `tests/e2e/TEST_PLAN.md`.",
+            "",
+        ]
     try:
         with open(path, "a", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
