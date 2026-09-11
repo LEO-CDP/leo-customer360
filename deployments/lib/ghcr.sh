@@ -52,3 +52,20 @@ resolve_tag() {
   if [ -z "$t" ] && command -v tfval >/dev/null 2>&1; then t="$(tfval image_tag "$ovl" 2>/dev/null)"; fi
   printf '%s' "${t:-latest}"
 }
+
+# docker_pull_retry <image-ref>
+#   Pull an image, retrying on transient failure: a freshly built GHCR digest can
+#   404 briefly while the registry catches up. Linear backoff, 5 attempts, then
+#   exit 1 (runs in the caller's shell via source, so it aborts the deploy).
+docker_pull_retry() {
+  local image="$1" attempt=1
+  while ! sudo docker pull "$image"; do
+    if [ "$attempt" -ge 5 ]; then
+      echo "   ERROR: docker pull failed after $attempt attempts: $image" >&2
+      exit 1
+    fi
+    echo "   pull failed (attempt $attempt/5); retrying in $((attempt * 10))s ..." >&2
+    sleep $((attempt * 10))
+    attempt=$((attempt + 1))
+  done
+}

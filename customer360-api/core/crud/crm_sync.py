@@ -339,6 +339,10 @@ def _upsert_transactions(db: Session, schema: str, tenant_id: str, profile: dict
     written = 0
     for index, fact in enumerate(_transaction_facts(profile)):
         source_system = _clean(fact.get("source_system")) or "segment_sync"
+        # ponytail: positional fallback for facts with no source_transaction_id.
+        # Re-sync stays idempotent only while the source facts keep their order;
+        # reordering id-less facts would create new rows. Facts carrying a real
+        # source_transaction_id are always stable.
         source_transaction_id = _clean(fact.get("source_transaction_id")) or f"{master_profile_id}:{index}"
         transaction_id = _deterministic_id(
             tenant_id, "transaction", source_system, source_transaction_id
@@ -429,12 +433,11 @@ def sync_segment_to_crm(
     tenant_str = str(tenant_id)
     segment_str = str(segment.segment_id)
 
-    # Reuse the segmentation recompute so membership/segment_tag are fresh before
-    # resolving members. Skipped in dry-run to keep it side-effect free.
+    # ponytail: no lock guards two concurrent syncs of the same segment. They
+    # converge (deterministic PKs + ON CONFLICT) but can race on recompute /
+    # ON CONFLICT; add a pg_advisory_xact_lock on (tenant_id, segment_id) here
+    # if one segment ever syncs concurrently.
     recomputed = False
-    if not dry_run:
-        recompute_segment_membership(db, segment)
-        recomputed = True
 
     counts = {"matched": 0, "customer": 0, "lead": 0, "contact": 0, "skipped": 0, "error": 0}
     detail = {
@@ -475,21 +478,37 @@ def sync_segment_to_crm(
         )
 
     try:
+        # Recompute membership/segment_tag before resolving members (skipped in
+        # dry-run to stay side-effect free). Inside the try so a recompute
+        # failure is audited as a Failed run instead of a silent 500.
+        if not dry_run:
+            recompute_segment_membership(db, segment)
+            recomputed = True
+
+        # ponytail: the whole segment syncs in ONE transaction -- batch_size
+        # bounds the SELECT fetch (keyset pagination), not the write/lock
+        # footprint, which spans every member until the final commit. Fine at
+        # current scale; for very large segments commit per batch (idempotent
+        # PKs let a resumed re-run converge) or checkpoint the run.
         for profile in _iter_segment_members(db, tenant_str, where_fragment, batch_size):
             counts["matched"] += 1
             route = classify_route(profile.get("lifecycle_stage"))
             try:
+                # Per-member write tallies stay local until the savepoint commits
+                # cleanly, then fold into `detail` -- so a member whose upsert
+                # raises (and rolls back to the savepoint) never inflates the
+                # audited write counts.
+                cc_written = tx_written = leads_written = contacts_written = 0
+                new_lead_source: Optional[uuid.UUID] = None
                 with db.begin_nested():
                     if route == ROUTE_CUSTOMER:
                         counts["customer"] += 1
                         if dry_run:
-                            detail["customer_contacts_written"] += 1 if _customer_contact_eligible(profile) else 0
-                            detail["transactions_written"] += len(_transaction_facts(profile))
+                            cc_written = 1 if _customer_contact_eligible(profile) else 0
+                            tx_written = len(_transaction_facts(profile))
                         else:
-                            detail["customer_contacts_written"] += _upsert_customer_contact(
-                                db, schema, tenant_str, profile, segment_str
-                            )
-                            detail["transactions_written"] += _upsert_transactions(db, schema, tenant_str, profile)
+                            cc_written = _upsert_customer_contact(db, schema, tenant_str, profile, segment_str)
+                            tx_written = _upsert_transactions(db, schema, tenant_str, profile)
                     elif route == ROUTE_LEAD:
                         if not _has_identity(profile):
                             counts["skipped"] += 1
@@ -497,24 +516,29 @@ def sync_segment_to_crm(
                             counts["lead"] += 1
                             source_name = _clean(profile.get("acquisition_source")) or DEFAULT_LEAD_SOURCE_NAME
                             if dry_run:
-                                detail["leads_written"] += 1
+                                leads_written = 1
                             else:
-                                lead_source_id = _upsert_lead_source(db, schema, tenant_str, source_name)
-                                if lead_source_id not in lead_source_ids_seen:
-                                    lead_source_ids_seen.add(lead_source_id)
-                                    detail["lead_sources_written"] += 1
-                                _upsert_lead(db, schema, tenant_str, profile, lead_source_id, segment_str)
-                                detail["leads_written"] += 1
+                                new_lead_source = _upsert_lead_source(db, schema, tenant_str, source_name)
+                                _upsert_lead(db, schema, tenant_str, profile, new_lead_source, segment_str)
+                                leads_written = 1
                     else:  # ROUTE_CONTACT
                         if not _has_identity(profile):
                             counts["skipped"] += 1
                         else:
                             counts["contact"] += 1
                             if dry_run:
-                                detail["contacts_written"] += 1
+                                contacts_written = 1
                             else:
                                 _upsert_contact(db, schema, tenant_str, profile, segment_str)
-                                detail["contacts_written"] += 1
+                                contacts_written = 1
+                # Savepoint committed: only now count these rows as written.
+                detail["customer_contacts_written"] += cc_written
+                detail["transactions_written"] += tx_written
+                detail["leads_written"] += leads_written
+                detail["contacts_written"] += contacts_written
+                if new_lead_source is not None and new_lead_source not in lead_source_ids_seen:
+                    lead_source_ids_seen.add(new_lead_source)
+                    detail["lead_sources_written"] += 1
             except Exception:
                 counts["error"] += 1
                 logger.warning(

@@ -46,10 +46,18 @@ class _Savepoint:
 
 
 class _FakeSession:
-    def __init__(self, member_rows: list[dict], fail_upsert_for: Optional[set] = None):
+    def __init__(
+        self,
+        member_rows: list[dict],
+        fail_upsert_for: Optional[set] = None,
+        fail_tx_for: Optional[set] = None,
+    ):
         self._member_rows = member_rows
         self._select_done = False
         self.fail_upsert_for = fail_upsert_for or set()
+        # master_profile_ids whose crm_transactions upsert (only) should raise --
+        # to exercise contact-succeeds-then-transactions-fails savepoint rollback.
+        self.fail_tx_for = fail_tx_for or set()
         self.executed: list[tuple[str, Optional[dict[str, Any]]]] = []
         self.added: list[Any] = []
         self.committed = 0
@@ -65,6 +73,15 @@ class _FakeSession:
                 return _FakeResult([])
             self._select_done = True
             return _FakeResult(list(self._member_rows))
+        # Fail only the crm_transactions upsert for a member -- its earlier
+        # customer-contact upsert in the same savepoint already succeeded.
+        if (
+            self.fail_tx_for
+            and "crm_transactions" in sql
+            and params
+            and params.get("master_profile_id") in self.fail_tx_for
+        ):
+            raise RuntimeError("simulated transaction upsert error")
         # Upsert INSERTs: optionally simulate a per-member DB error.
         if params and params.get("master_profile_id") in self.fail_upsert_for:
             raise RuntimeError("simulated upsert error")
@@ -294,6 +311,44 @@ class SyncRoutingTests(unittest.TestCase):
         self.assertEqual(counts["customer"], 2)
         # The run still completes (per-member error isolated via savepoint).
         self.assertEqual(session.added[0].status, "Completed")
+
+    def test_detail_write_counts_exclude_rolled_back_member(self):
+        segment = _segment()
+        good = _member(
+            lifecycle_stage="customer", engagement_score=5,
+            attributes={"transactions": [{"source_system": "POS", "source_transaction_id": "g", "amount": 1}]},
+        )
+        bad_id = uuid.uuid4()
+        bad = _member(
+            master_profile_id=bad_id, lifecycle_stage="customer", engagement_score=5,
+            attributes={"transactions": [{"source_system": "POS", "source_transaction_id": "b", "amount": 1}]},
+        )
+        # bad member: its customer-contact upsert succeeds, then its transaction
+        # upsert raises -> the whole per-member savepoint rolls back.
+        session = _FakeSession([good, bad], fail_tx_for={str(bad_id)})
+
+        result = sync_segment_to_crm(session, segment, tenant_id=segment.tenant_id)
+
+        self.assertEqual(result["route_counts"]["customer"], 2)
+        self.assertEqual(result["route_counts"]["error"], 1)
+        # Only the good member's writes are tallied; the rolled-back member's
+        # contact write (which briefly succeeded) must NOT inflate detail.
+        self.assertEqual(result["detail"]["customer_contacts_written"], 1)
+        self.assertEqual(result["detail"]["transactions_written"], 1)
+
+    def test_recompute_failure_is_audited_as_failed_run(self):
+        segment = _segment()
+        session = _FakeSession([_member(lifecycle_stage="lead", acquisition_source="ref")])
+
+        with patch.object(crm_sync, "recompute_segment_membership", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                sync_segment_to_crm(session, segment, tenant_id=segment.tenant_id)
+
+        # A recompute failure is audited as a committed Failed run, not a silent 500.
+        self.assertEqual(len(session.added), 1)
+        self.assertEqual(session.added[0].status, "Failed")
+        self.assertTrue(session.rolled_back)
+        self.assertTrue(session.committed)
 
 
 class SyncDryRunTests(unittest.TestCase):

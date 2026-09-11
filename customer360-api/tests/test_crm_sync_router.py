@@ -189,6 +189,33 @@ class SyncRunAuditRouterTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_list_sync_runs_returns_rows_for_own_tenant(self):
+        tenant_id = uuid.uuid4()
+        rows = [self._run_row(tenant_id), self._run_row(tenant_id)]
+
+        class _Result:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return rows
+
+        fake_db = SimpleNamespace(execute=lambda stmt: _Result())
+        client = self._client(fake_db, tenant_id=str(tenant_id))
+
+        response = client.get("/admin/crm/sync-runs?limit=5")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body), 2)
+        self.assertEqual(body[0]["matched_count"], 3)
+
+    def test_list_sync_runs_rejects_out_of_range_limit(self):
+        # limit is validated by FastAPI (ge=1, le=100) before the handler runs.
+        fake_db = SimpleNamespace(execute=lambda stmt: None)
+        client = self._client(fake_db, tenant_id=str(uuid.uuid4()))
+        self.assertEqual(client.get("/admin/crm/sync-runs?limit=0").status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()

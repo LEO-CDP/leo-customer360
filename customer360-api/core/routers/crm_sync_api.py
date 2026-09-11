@@ -44,7 +44,12 @@ def _require_tenant(request: Request) -> str:
             status_code=400,
             detail="No tenant context found (missing X-Tenant-Id); CRM sync requires a tenant_id",
         )
-    return str(caller_tenant_id)
+    try:
+        # Normalize + validate up front so a malformed header is a clean 400,
+        # not a 500 from a later uuid.UUID() cast.
+        return str(uuid.UUID(str(caller_tenant_id)))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="X-Tenant-Id is not a valid UUID") from exc
 
 
 def _enforce_sync_permissions(request: Request) -> None:
