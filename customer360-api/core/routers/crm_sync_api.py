@@ -31,7 +31,18 @@ crm_sync_router = APIRouter(prefix="/admin/crm", tags=["CRM - Segment Sync"])
 
 
 def _require_tenant(request: Request) -> str:
-    return require_tenant(request)
+    caller_tenant_id = getattr(request.state, "tenant_id", None)
+    if not caller_tenant_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No tenant context found (missing X-Tenant-Id); CRM sync requires a tenant_id",
+        )
+    try:
+        # Normalize + validate up front so a malformed header is a clean 400,
+        # not a 500 from a later uuid.UUID() cast.
+        return str(uuid.UUID(str(caller_tenant_id)))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="X-Tenant-Id is not a valid UUID") from exc
 
 
 def _enforce_sync_permissions(request: Request) -> None:

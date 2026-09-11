@@ -146,18 +146,7 @@ sudo mkdir -p /opt/c360; sudo mv "$env_file" /opt/c360/ads.env; sudo chmod 600 /
 if [ "$DEPLOY_MODE" = "ghcr" ]; then
   echo "   pulling $IMAGE ..."
   [ -n "$GHCR_TOKEN" ] && printf %s "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
-  # Retry the pull: a freshly built GHCR digest can transiently 404 while the
-  # registry catches up, even though it exists — back off and try again.
-  pull_attempt=1
-  while ! sudo docker pull "$IMAGE"; do
-    if [ "$pull_attempt" -ge 5 ]; then
-      echo "   ERROR: docker pull failed after $pull_attempt attempts: $IMAGE" >&2
-      exit 1
-    fi
-    echo "   pull failed (attempt $pull_attempt/5); retrying in $((pull_attempt * 10))s ..." >&2
-    sleep $((pull_attempt * 10))
-    pull_attempt=$((pull_attempt + 1))
-  done
+  docker_pull_retry "$IMAGE"
   RUN_IMG="$IMAGE"
 else
   sed -i 's/ --mount=[^ ]*//g' /opt/c360/ads-server/Dockerfile   # docker.io: no buildx
