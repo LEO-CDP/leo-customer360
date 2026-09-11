@@ -243,10 +243,19 @@ if command -v docker >/dev/null 2>&1; then
     fi
     current_img_id="$(sudo docker inspect --format '{{.Image}}' "$CONTAINER" 2>/dev/null || true)"
     target_img_id="$(sudo docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || true)"
+    keep_ids_file="$(mktemp)"
+    {
+      [ -n "$current_img_id" ] && echo "$current_img_id"
+      [ -n "$target_img_id" ] && echo "$target_img_id"
+      sudo docker container ls -a --format '{{.Image}}' \
+        | xargs -r -n1 sudo docker image inspect --format '{{.Id}}' 2>/dev/null || true
+    } | sort -u > "$keep_ids_file"
     sudo docker image ls --format '{{.Repository}} {{.ID}}' \
-      | awk -v repo="$img_repo" -v keep1="$current_img_id" -v keep2="$target_img_id" '$1 == repo && $2 != keep1 && $2 != keep2 { print $2 }' \
+      | awk -v repo="$img_repo" '$1 == repo { print $2 }' \
       | sort -u \
+      | grep -Fvx -f "$keep_ids_file" \
       | xargs -r sudo docker image rm -f >/dev/null 2>&1 || true
+    rm -f "$keep_ids_file"
   fi
   sudo docker image prune -f      >/dev/null 2>&1 || true
   sudo docker builder prune -f    >/dev/null 2>&1 || true
