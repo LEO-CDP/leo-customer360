@@ -230,35 +230,13 @@ fi
 
 # Reclaim disk before model/image operations. Each deploy pulls a new SHA-pinned image
 # and old layers accumulate on the small docs VM until pull/extract fails with
-# "No space left on device". Scope removals to this service's image repo + dangling
-# layers so we do not remove unrelated service images on shared hosts.
+# "No space left on device". Use dangling-only Docker prunes so shared hosts keep
+# unrelated unused images/tags that may be needed by other services.
 if command -v docker >/dev/null 2>&1; then
   echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
-  sudo docker container prune -f  >/dev/null 2>&1 || true
-  if [ "$DEPLOY_MODE" = "ghcr" ] && [ -n "$IMAGE" ]; then
-    img_repo="${IMAGE%@*}"     # drop optional @sha256:digest
-    image_leaf="${img_repo##*/}"
-    if [[ "$image_leaf" == *:* ]]; then
-      img_repo="${img_repo%:*}" # drop optional :tag from the leaf only (keeps registry port)
-    fi
-    current_img_id="$(sudo docker inspect --format '{{.Image}}' "$CONTAINER" 2>/dev/null || true)"
-    target_img_id="$(sudo docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || true)"
-    keep_ids_file="$(mktemp)"
-    {
-      [ -n "$current_img_id" ] && echo "$current_img_id"
-      [ -n "$target_img_id" ] && echo "$target_img_id"
-      sudo docker container ls -a --format '{{.Image}}' \
-        | xargs -r -n1 sudo docker image inspect --format '{{.Id}}' 2>/dev/null || true
-    } | sort -u > "$keep_ids_file"
-    sudo docker image ls --format '{{.Repository}} {{.ID}}' \
-      | awk -v repo="$img_repo" '$1 == repo { print $2 }' \
-      | sort -u \
-      | grep -Fvx -f "$keep_ids_file" \
-      | xargs -r sudo docker image rm -f >/dev/null 2>&1 || true
-    rm -f "$keep_ids_file"
-  fi
-  sudo docker image prune -f      >/dev/null 2>&1 || true
-  sudo docker builder prune -f    >/dev/null 2>&1 || true
+  sudo docker container prune -f >/dev/null 2>&1 || true
+  sudo docker image prune -f     >/dev/null 2>&1 || true
+  sudo docker builder prune -f   >/dev/null 2>&1 || true
   echo "   reclaiming disk (df after):  $(df -h --output=avail / | tail -1 | tr -d ' ') free"
 fi
 
