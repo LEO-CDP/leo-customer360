@@ -236,7 +236,11 @@ if command -v docker >/dev/null 2>&1; then
   echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
   sudo docker container prune -f  >/dev/null 2>&1 || true
   if [ "$DEPLOY_MODE" = "ghcr" ] && [ -n "$IMAGE" ]; then
-    img_repo="$(printf '%s' "$IMAGE" | sed -E 's#[@:].*$##')"
+    img_repo="${IMAGE%@*}"     # drop optional @sha256:digest
+    image_leaf="${img_repo##*/}"
+    if [[ "$image_leaf" == *:* ]]; then
+      img_repo="${img_repo%:*}" # drop optional :tag from the leaf only (keeps registry port)
+    fi
     sudo docker image ls --format '{{.ID}}' "$img_repo" \
       | sort -u \
       | xargs -r sudo docker image rm -f >/dev/null 2>&1 || true
