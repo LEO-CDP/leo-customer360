@@ -247,6 +247,10 @@ if command -v docker >/dev/null 2>&1; then
         | awk -v keep="$current_img_id" '$1 != keep' \
         | sort -u \
         | xargs -r sudo docker image rm -f >/dev/null 2>&1 || true
+    else
+      sudo docker image ls --format '{{.ID}}' "$img_repo" \
+        | sort -u \
+        | xargs -r sudo docker image rm -f >/dev/null 2>&1 || true
     fi
   fi
   sudo docker image prune -f      >/dev/null 2>&1 || true
