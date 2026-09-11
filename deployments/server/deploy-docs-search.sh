@@ -243,8 +243,8 @@ if command -v docker >/dev/null 2>&1; then
     fi
     current_img_id="$(sudo docker inspect --format '{{.Image}}' "$CONTAINER" 2>/dev/null || true)"
     target_img_id="$(sudo docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || true)"
-    sudo docker image ls --format '{{.ID}}' "$img_repo" \
-      | awk -v keep1="$current_img_id" -v keep2="$target_img_id" '$1 != keep1 && $1 != keep2' \
+    sudo docker image ls --format '{{.Repository}} {{.ID}}' \
+      | awk -v repo="$img_repo" -v keep1="$current_img_id" -v keep2="$target_img_id" '$1 == repo && $2 != keep1 && $2 != keep2 { print $2 }' \
       | sort -u \
       | xargs -r sudo docker image rm -f >/dev/null 2>&1 || true
   fi
