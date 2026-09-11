@@ -63,13 +63,19 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "case(*ids): TEST_PLAN.md case id(s) this test covers")
 
 
+# nodeid -> [TEST_PLAN case ids], populated at collection for the run summary.
+_CASE_BY_NODEID: dict = {}
+
+
 def pytest_collection_modifyitems(config, items):
+    for item in items:
+        _CASE_BY_NODEID[item.nodeid] = [str(a) for m in item.iter_markers(name="case") for a in m.args]
     requested = [r.strip() for r in config.getoption("--case") if r.strip()]
     if not requested:
         return
     kept, deselected = [], []
     for item in items:
-        ids = [str(a) for m in item.iter_markers(name="case") for a in m.args]
+        ids = _CASE_BY_NODEID.get(item.nodeid, [])
         if any(cid == tok or cid.startswith(tok) for cid in ids for tok in requested):
             kept.append(item)
         else:
@@ -77,6 +83,52 @@ def pytest_collection_modifyitems(config, items):
     if deselected:
         config.hook.pytest_deselected(items=deselected)
         items[:] = kept
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Write a Markdown run summary (case id, test, result, time) to
+    GITHUB_STEP_SUMMARY (CI) or E2E_SUMMARY_MD (local) so E2E results are visible
+    on the GitHub Actions run's Summary tab. No-op when neither is set."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY") or os.environ.get("E2E_SUMMARY_MD")
+    if not path:
+        return
+    rank = {"passed": 0, "skipped": 1, "error": 2, "failed": 3}
+    emoji = {"passed": "✅", "skipped": "⏭️", "error": "💥", "failed": "❌"}
+    outcome, duration = {}, {}
+    for status in ("passed", "failed", "error", "skipped"):
+        for rep in terminalreporter.stats.get(status, []):
+            nodeid = getattr(rep, "nodeid", None)
+            if not nodeid:
+                continue
+            if nodeid not in outcome or rank[status] >= rank[outcome[nodeid]]:
+                outcome[nodeid] = status
+            duration[nodeid] = duration.get(nodeid, 0.0) + (getattr(rep, "duration", 0.0) or 0.0)
+
+    counts = {"passed": 0, "failed": 0, "error": 0, "skipped": 0}
+    for st in outcome.values():
+        counts[st] += 1
+    rows = sorted(
+        ((", ".join(_CASE_BY_NODEID.get(nid, [])) or "-", nid.split("::", 1)[-1], st, duration.get(nid, 0.0))
+         for nid, st in outcome.items()),
+        key=lambda r: (r[0], r[1]),
+    )
+    overall = "❌ FAILED" if (counts["failed"] or counts["error"]) else ("✅ PASSED" if outcome else "⚠️ NO TESTS")
+    lines = [
+        "## E2E — SCRUM-93 / SCRUM-94 (customer360-api → UAT)",
+        "",
+        f"**{overall}** — {counts['passed']} passed · {counts['skipped']} skipped · "
+        f"{counts['failed']} failed · {counts['error']} error  ·  target `{BASE_URL or '(unset)'}`",
+        "",
+        "| Case | Test | Result | Time |",
+        "| --- | --- | --- | --- |",
+        *[f"| {cases} | `{name}` | {emoji[st]} {st} | {dur:.2f}s |" for cases, name, st, dur in rows],
+        "",
+    ]
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+    except Exception:
+        pass
 
 
 def _auth_headers() -> dict:
