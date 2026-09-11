@@ -230,11 +230,18 @@ fi
 
 # Reclaim disk before model/image operations. Each deploy pulls a new SHA-pinned image
 # and old layers accumulate on the small docs VM until pull/extract fails with
-# "No space left on device". Best-effort: never fail the deploy on cleanup.
+# "No space left on device". Scope removals to this service's image repo + dangling
+# layers so we do not remove unrelated service images on shared hosts.
 if command -v docker >/dev/null 2>&1; then
   echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
   sudo docker container prune -f  >/dev/null 2>&1 || true
-  sudo docker image prune -a -f   >/dev/null 2>&1 || true
+  if [ "$DEPLOY_MODE" = "ghcr" ] && [ -n "$IMAGE" ]; then
+    img_repo="$(printf '%s' "$IMAGE" | sed -E 's#[@:].*$##')"
+    sudo docker image ls --format '{{.ID}}' "$img_repo" \
+      | sort -u \
+      | xargs -r sudo docker image rm -f >/dev/null 2>&1 || true
+  fi
+  sudo docker image prune -f      >/dev/null 2>&1 || true
   sudo docker builder prune -a -f >/dev/null 2>&1 || true
   echo "   reclaiming disk (df after):  $(df -h --output=avail / | tail -1 | tr -d ' ') free"
 fi
