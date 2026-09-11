@@ -201,3 +201,42 @@ net: 0 lines cut — P4 kept intentionally (ticket DoD + file consistency).
 ```
 
 **Overall: approve — all findings resolved.** Correct, well-tested, tenant-safe, and faithful to both tickets. C1/TC1/Q1 are fixed in code; PF1 and TC2 are documented as tracked ceilings (PF1 = per-batch commit when large segments arrive; TC2 = a scratch-DB migration up/down CI job). Suite green at **29 passed**.
+
+---
+
+## 12. Parent-epic alignment — [SCRUM-92](https://leocdp.atlassian.net/browse/SCRUM-92) (added 2026-09-11)
+
+Reviewed the branch against the **parent story** SCRUM-92 *"Agentic Outbound Email Marketing Execution Engine"* through the ponytail (over-engineering) and code-review (correctness/NFR) lenses. SCRUM-92 is an **8-subtask epic**; this branch implements **only SUBTASK-01 (SCRUM-93) + SUBTASK-02 (SCRUM-94)**. The other six are `To Do` and out of this branch's scope.
+
+### Subtask scope map
+| Subtask | Status | This branch |
+|---|---|---|
+| 01 Schema & Migration Foundation | In Progress | ✅ implemented |
+| 02 Segment-ID CRM Sync Engine | In Progress | ✅ implemented |
+| 03 AI Email Template Authoring (Gemini/OpenAI) | To Do | ⛔ out of scope |
+| 04 AI Campaign Strategy & Draft | To Do | ⛔ out of scope |
+| 05 Dagster dispatch modernization | To Do | ⛔ out of scope |
+| 06 Tracking / Webhooks / Compliance | To Do | ⛔ out of scope |
+| 07 C360 feedback & performance rollups | To Do | ⛔ out of scope |
+| 08 E2E automated test suite | To Do | 🟡 seeded — `tests/e2e` covers 01/02 |
+
+### Epic Gate checklist (A–D), for the parts 01/02 own
+| Item | Status | Note |
+|---|---|---|
+| **A. Naming** — handler `verb_noun_scope` | ✅ | epic's own example is `sync_segment_crm`; our router fn is literally `sync_segment_crm`. Tables `crm_*`/`cdp_*`/`sys_*` ✓ |
+| A. env var naming | 🟡 nit (N1) | epic suggests `CRM_EMAIL_*`/provider-standard; ours is `CRM_SYNC_BATCH_SIZE` (sync-domain, defensible; no change) |
+| **B. Schema** — templates/campaign/lead FK/content-items/sync-runs + FK+unique+RLS + fwd/rollback | ✅ | all delivered |
+| B. `cdp_campaign_dispatch_logs` idempotency keys | ⏭️ N2 | dispatch concern → SUBTASK-06 (correctly untouched) |
+| **C. Backend** — `POST …/sync-segment/{id}` + dry-run, recompute-before-sync, exact routing, idempotent upserts | ✅ | rest of C (AI/dispatch/tracking/feedback) = 03–07 |
+| **D. Env config** — `CRM_EMAIL_*`/AI/SMTP/webhook | ⏭️ | belong to 03–06; correctly **not** added (YAGNI) |
+
+### Ponytail lens
+- **P4 vindicated:** the unused `EmailTemplate` / `CampaignContentItem` Create/Update schemas are epic-mandated foundation consumed by SUBTASK-03/04 — not speculation.
+- **`backend-system/data_synch` Dagster job deliberately not built** (N3): the synchronous API engine satisfies SCRUM-94's AC; the async/Dagster path is the documented PF1 ceiling, to add only when scale demands. Building it now would be duplicate work.
+- **Zero scope creep into 03–08** — no AI/SMTP/webhook/dispatch code. `Lean. Ship.`
+
+### Code-review lens (SCRUM-92 NFR beta gates)
+Tenant isolation & RLS ✅ · SQL safety for generated filters ✅ · audit logging for **sync** ✅ (`crm_segment_sync_runs`) · secrets management ✅ (E2E reuses existing repo secrets). Deliverability circuit breaker + dispatch/webhook audit = SUBTASK-05/06 (out of scope). Correctness already hardened (§8/§9); 29 unit + 21 E2E green on UAT + CI green.
+
+### Verdict
+**SUBTASK-01 & 02 correctly and completely implement SCRUM-92's foundation + sync requirements** — exact naming, exact routing, idempotent/tenant-safe/audited, migrations that roll back, and no over-building into the six later subtasks. Non-actionable notes for future subtasks: **N1** (`CRM_SYNC_*` vs `CRM_EMAIL_*`), **N2** (`cdp_campaign_dispatch_logs` idempotency → 06), **N3** (`data_synch` Dagster job → optional async path).
