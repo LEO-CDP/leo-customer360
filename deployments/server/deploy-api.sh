@@ -195,7 +195,7 @@ sudo chmod 600 /opt/c360/api.env
 if [ "$DEPLOY_MODE" = "ghcr" ]; then
   echo "   pulling $IMAGE ..."
   [ -n "$GHCR_TOKEN" ] && printf %s "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
-  sudo docker pull "$IMAGE"
+  docker_pull_retry "$IMAGE"
   RUN_IMG="$IMAGE"
 else
   echo "   building image (a few minutes on a small box)..."

@@ -15,6 +15,9 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
+APPROVAL_STATUS_PATTERN = "^(Draft|InReview|Approved|Rejected)$"
+
+
 class CampaignBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None
@@ -31,6 +34,14 @@ class CampaignBase(BaseModel):
     end_date: Optional[date] = None
     budget_amount: Optional[Decimal] = None
     currency: Optional[str] = "VND"
+    # Email-marketing links + human-approval gate.
+    segment_id: Optional[uuid.UUID] = None
+    template_id: Optional[uuid.UUID] = None
+    approval_status: Optional[str] = Field(default=None, pattern=APPROVAL_STATUS_PATTERN)
+    approved_by: Optional[uuid.UUID] = None
+    approved_at: Optional[datetime] = None
+    strategy_summary: Optional[str] = None
+    ai_plan: Optional[dict] = None
     metadata_: Optional[dict] = None
 
 
@@ -53,6 +64,13 @@ class CampaignUpdate(BaseModel):
     end_date: Optional[date] = None
     budget_amount: Optional[Decimal] = None
     currency: Optional[str] = None
+    segment_id: Optional[uuid.UUID] = None
+    template_id: Optional[uuid.UUID] = None
+    approval_status: Optional[str] = Field(default=None, pattern=APPROVAL_STATUS_PATTERN)
+    approved_by: Optional[uuid.UUID] = None
+    approved_at: Optional[datetime] = None
+    strategy_summary: Optional[str] = None
+    ai_plan: Optional[dict] = None
     metadata_: Optional[dict] = None
 
 
@@ -98,6 +116,7 @@ class CampaignMemberRead(CampaignMemberBase):
 class LeadBase(BaseModel):
     tenant_id: uuid.UUID
     user_id: Optional[uuid.UUID] = None
+    lead_source_id: Optional[uuid.UUID] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     email: Optional[str] = None
@@ -114,6 +133,7 @@ class LeadCreate(LeadBase):
 
 class LeadUpdate(BaseModel):
     user_id: Optional[uuid.UUID] = None
+    lead_source_id: Optional[uuid.UUID] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     email: Optional[str] = None
@@ -289,6 +309,150 @@ class IndustryUpdate(BaseModel):
 class IndustryRead(IndustryBase):
     model_config = ConfigDict(from_attributes=True)
     industry_id: uuid.UUID
+
+
+# ---------------------------------------------------------------------------
+# Agentic Email Marketing Schemas
+# ---------------------------------------------------------------------------
+
+SYNC_RUN_STATUS_PATTERN = "^(Pending|Running|Completed|Failed)$"
+
+
+class EmailTemplateBase(BaseModel):
+    tenant_id: uuid.UUID
+    name: str
+    subject: Optional[str] = None
+    html_body: Optional[str] = None
+    text_body: Optional[str] = None
+    variables: dict = Field(default_factory=dict)
+    # NOT NULL DEFAULT 'Draft' in the DB, so a real default (not None) is used
+    # here -- the generic create path does model_dump() without exclude_unset.
+    status: str = Field(default="Draft", pattern=APPROVAL_STATUS_PATTERN)
+    created_by: Optional[uuid.UUID] = None
+    approved_by: Optional[uuid.UUID] = None
+    approved_at: Optional[datetime] = None
+    metadata_: Optional[dict] = None
+
+
+class EmailTemplateCreate(EmailTemplateBase):
+    pass
+
+
+class EmailTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    subject: Optional[str] = None
+    html_body: Optional[str] = None
+    text_body: Optional[str] = None
+    variables: Optional[dict] = None
+    status: Optional[str] = Field(default=None, pattern=APPROVAL_STATUS_PATTERN)
+    created_by: Optional[uuid.UUID] = None
+    approved_by: Optional[uuid.UUID] = None
+    approved_at: Optional[datetime] = None
+    metadata_: Optional[dict] = None
+
+
+class EmailTemplateRead(EmailTemplateBase):
+    model_config = ConfigDict(from_attributes=True)
+    template_id: uuid.UUID
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class CampaignContentItemBase(BaseModel):
+    tenant_id: uuid.UUID
+    campaign_id: uuid.UUID
+    content_item_id: uuid.UUID
+    position: int = 0
+    role: Optional[str] = None
+    metadata_: Optional[dict] = None
+
+
+class CampaignContentItemCreate(CampaignContentItemBase):
+    pass
+
+
+class CampaignContentItemUpdate(BaseModel):
+    position: Optional[int] = None
+    role: Optional[str] = None
+    metadata_: Optional[dict] = None
+
+
+class CampaignContentItemRead(CampaignContentItemBase):
+    model_config = ConfigDict(from_attributes=True)
+    campaign_content_item_id: uuid.UUID
+    created_at: Optional[datetime] = None
+
+
+class SegmentSyncRunBase(BaseModel):
+    tenant_id: uuid.UUID
+    segment_id: uuid.UUID
+    triggered_by: Optional[uuid.UUID] = None
+    status: str = Field(default="Pending", pattern=SYNC_RUN_STATUS_PATTERN)
+    dry_run: bool = False
+    matched_count: int = 0
+    customer_count: int = 0
+    lead_count: int = 0
+    contact_count: int = 0
+    skipped_count: int = 0
+    error_count: int = 0
+    error_message: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    metadata_: Optional[dict] = None
+
+
+class SegmentSyncRunCreate(SegmentSyncRunBase):
+    pass
+
+
+class SegmentSyncRunUpdate(BaseModel):
+    status: Optional[str] = Field(default=None, pattern=SYNC_RUN_STATUS_PATTERN)
+    dry_run: Optional[bool] = None
+    matched_count: Optional[int] = None
+    customer_count: Optional[int] = None
+    lead_count: Optional[int] = None
+    contact_count: Optional[int] = None
+    skipped_count: Optional[int] = None
+    error_count: Optional[int] = None
+    error_message: Optional[str] = None
+    finished_at: Optional[datetime] = None
+    metadata_: Optional[dict] = None
+
+
+class SegmentSyncRunRead(SegmentSyncRunBase):
+    model_config = ConfigDict(from_attributes=True)
+    sync_run_id: uuid.UUID
+
+
+class SegmentSyncRouteCounts(BaseModel):
+    """Per-routing-bucket counts for one segment -> CRM sync run.
+
+    ``matched`` = resolved segment members; ``customer``/``lead``/``contact`` =
+    members routed to each lifecycle bucket; ``skipped`` = lead/contact-routed
+    members with no usable identity field; ``error`` = members whose upsert
+    raised (a subset already tallied in a route/skipped bucket)."""
+
+    matched: int = 0
+    customer: int = 0
+    lead: int = 0
+    contact: int = 0
+    skipped: int = 0
+    error: int = 0
+
+
+class SegmentCrmSyncResponse(BaseModel):
+    """Result of ``POST /admin/crm/sync-segment/{segment_id}`` -- the audited
+    sync-run summary the marketer sees, plus the per-target write breakdown
+    (``detail``) recorded in ``crm_segment_sync_runs.metadata``."""
+
+    sync_run_id: uuid.UUID
+    segment_id: uuid.UUID
+    tenant_id: uuid.UUID
+    status: str
+    dry_run: bool
+    route_counts: SegmentSyncRouteCounts
+    detail: dict = Field(default_factory=dict)
+    message: str
 
 
 # ---------------------------------------------------------------------------

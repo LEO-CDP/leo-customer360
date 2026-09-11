@@ -2910,6 +2910,144 @@ CREATE INDEX IF NOT EXISTS idx_graph_edges_is_driven_by_created_at ON customer36
 
 CREATE INDEX IF NOT EXISTS idx_graph_edges_belongs_to_industry_created_at ON customer360.graph_edges_belongs_to_industry (created_at);
 
+-- ==========================================================
+-- Agentic Email Marketing Schema
+-- ==========================================================
+-- Relational structure behind the outbound email marketing flow
+-- (segment -> CRM sync -> AI template draft -> AI campaign draft -> human
+-- approval -> dispatch). Placed after all referenced tables (sys_user,
+-- crm_campaign, crm_lead, crm_lead_source, cdp_segments, cdp_content_items)
+-- so foreign keys resolve. See docs/action-plans/AGENTIC-EMAIL-MARKETING-FLOW.md.
+-- The ALTER/ADD CONSTRAINT statements are guarded so this section is safe to
+-- re-run against an already-migrated database (run-sql.sh re-applies the schema).
+
+-- Email template library authored by AI agents and gated by human review.
+CREATE TABLE IF NOT EXISTS customer360.crm_email_templates (
+    template_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    name TEXT NOT NULL,
+    subject TEXT,
+    html_body TEXT,
+    text_body TEXT,
+    -- Declared placeholders/merge variables (e.g. unsubscribe_url, first_name).
+    variables JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- Draft -> InReview -> Approved / Rejected review lifecycle.
+    status VARCHAR(50) NOT NULL DEFAULT 'Draft',
+    created_by UUID REFERENCES customer360.sys_user(user_id),
+    approved_by UUID REFERENCES customer360.sys_user(user_id),
+    approved_at TIMESTAMP WITH TIME ZONE,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT chk_crm_email_templates_status
+        CHECK (status IN ('Draft', 'InReview', 'Approved', 'Rejected'))
+);
+
+COMMENT ON TABLE customer360.crm_email_templates IS 'Email template library for the agentic outbound flow: subject/html/text body plus declared merge variables, authored (often by an AI agent) as Draft and moved through InReview -> Approved/Rejected before a campaign can use it.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_email_templates_tenant ON customer360.crm_email_templates (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_email_templates_tenant_status ON customer360.crm_email_templates (tenant_id, status);
+
+-- Extend crm_campaign with segment/template links, the AI planning fields, and
+-- the human-approval gate that keeps AI-created campaigns out of execution.
+ALTER TABLE customer360.crm_campaign
+    ADD COLUMN IF NOT EXISTS segment_id UUID,
+    ADD COLUMN IF NOT EXISTS template_id UUID,
+    ADD COLUMN IF NOT EXISTS approval_status VARCHAR(50) DEFAULT 'Draft',
+    ADD COLUMN IF NOT EXISTS approved_by UUID,
+    ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE,
+    ADD COLUMN IF NOT EXISTS strategy_summary TEXT,
+    ADD COLUMN IF NOT EXISTS ai_plan JSONB;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_segment' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
+        ALTER TABLE customer360.crm_campaign ADD CONSTRAINT fk_crm_campaign_segment
+            FOREIGN KEY (segment_id) REFERENCES customer360.cdp_segments(segment_id) ON DELETE SET NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_template' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
+        ALTER TABLE customer360.crm_campaign ADD CONSTRAINT fk_crm_campaign_template
+            FOREIGN KEY (template_id) REFERENCES customer360.crm_email_templates(template_id) ON DELETE SET NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_approved_by' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
+        ALTER TABLE customer360.crm_campaign ADD CONSTRAINT fk_crm_campaign_approved_by
+            FOREIGN KEY (approved_by) REFERENCES customer360.sys_user(user_id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_crm_campaign_approval_status' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
+        ALTER TABLE customer360.crm_campaign ADD CONSTRAINT chk_crm_campaign_approval_status
+            CHECK (approval_status IN ('Draft', 'InReview', 'Approved', 'Rejected'));
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_segment ON customer360.crm_campaign (segment_id);
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_template ON customer360.crm_campaign (template_id);
+
+-- Give crm_lead the lead_source_id relation the sync engine populates.
+ALTER TABLE customer360.crm_lead
+    ADD COLUMN IF NOT EXISTS lead_source_id UUID;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_lead_lead_source' AND conrelid = 'customer360.crm_lead'::regclass) THEN
+        ALTER TABLE customer360.crm_lead ADD CONSTRAINT fk_crm_lead_lead_source
+            FOREIGN KEY (lead_source_id) REFERENCES customer360.crm_lead_source(lead_source_id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_crm_lead_lead_source ON customer360.crm_lead (lead_source_id);
+
+-- Campaign <-> content-item relation: which cdp_content_items a campaign uses,
+-- in what order (position) and role (e.g. hero, body, footer).
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_content_items (
+    campaign_content_item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    content_item_id UUID NOT NULL REFERENCES customer360.cdp_content_items(content_item_id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    role VARCHAR(50),
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    -- A content item appears at most once per campaign (idempotent linking).
+    CONSTRAINT uq_crm_campaign_content UNIQUE (campaign_id, content_item_id)
+);
+
+COMMENT ON TABLE customer360.crm_campaign_content_items IS 'Relation table linking a crm_campaign to the cdp_content_items it uses, with ordering (position) and role; unique per (campaign_id, content_item_id) so re-planning a campaign cannot duplicate content links.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_content_tenant ON customer360.crm_campaign_content_items (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_content_campaign ON customer360.crm_campaign_content_items (campaign_id);
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_content_item ON customer360.crm_campaign_content_items (content_item_id);
+
+-- Audit trail: one row per segment-sync execution with per-routing-bucket
+-- counts (customer / lead / contact), for idempotency evidence and dashboards.
+CREATE TABLE IF NOT EXISTS customer360.crm_segment_sync_runs (
+    sync_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    segment_id UUID NOT NULL REFERENCES customer360.cdp_segments(segment_id) ON DELETE CASCADE,
+    triggered_by UUID REFERENCES customer360.sys_user(user_id),
+    status VARCHAR(50) NOT NULL DEFAULT 'Pending',
+    -- dry_run = true means counts were computed but no crm_* rows were written.
+    dry_run BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Frozen membership size for this run, then per routing bucket.
+    matched_count INTEGER NOT NULL DEFAULT 0,
+    customer_count INTEGER NOT NULL DEFAULT 0,
+    lead_count INTEGER NOT NULL DEFAULT 0,
+    contact_count INTEGER NOT NULL DEFAULT 0,
+    skipped_count INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    finished_at TIMESTAMP WITH TIME ZONE,
+    metadata JSONB,
+    CONSTRAINT chk_crm_segment_sync_runs_status
+        CHECK (status IN ('Pending', 'Running', 'Completed', 'Failed'))
+);
+
+COMMENT ON TABLE customer360.crm_segment_sync_runs IS 'Audit record for each segment -> CRM sync execution: routing-bucket counts (customer/lead/contact), skipped/error counts, dry-run flag, and timing, produced by the sync engine.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_tenant ON customer360.crm_segment_sync_runs (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_segment ON customer360.crm_segment_sync_runs (segment_id);
+CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_tenant_started ON customer360.crm_segment_sync_runs (tenant_id, started_at DESC);
+
 ---------------------------------------------------
 -- ROW LEVEL SECURITY (RBAC / Multi-Tenant Isolation)
 ---------------------------------------------------
@@ -2982,7 +3120,10 @@ DECLARE
         'cdp_segments',
         'cdp_content_items',
         'cdp_customer_personas',
-        'cdp_persona_archetypes'
+        'cdp_persona_archetypes',
+        'crm_email_templates',
+        'crm_campaign_content_items',
+        'crm_segment_sync_runs'
     ];
 BEGIN
     FOREACH t IN ARRAY tenant_tables LOOP

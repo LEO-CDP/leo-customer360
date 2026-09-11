@@ -208,7 +208,7 @@ sudo mkdir -p /opt/c360; sudo mv "$env_file" /opt/c360/docs-vector-search.env; s
 if [ "$DEPLOY_MODE" = "ghcr" ]; then
   echo "   pulling $IMAGE ..."
   [ -n "$GHCR_TOKEN" ] && printf %s "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
-  sudo docker pull "$IMAGE"
+  docker_pull_retry "$IMAGE"
   RUN_IMG="$IMAGE"
 else
   sed -i 's/ --mount=[^ ]*//g' /opt/c360/tools/docs-vector-search/Dockerfile 2>/dev/null || true

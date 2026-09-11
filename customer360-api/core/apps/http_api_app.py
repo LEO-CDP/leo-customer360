@@ -16,6 +16,7 @@ from core.routers.analytics_api import all_analytics_routers
 from core.routers.auth_api import all_auth_routers
 from core.routers.content_api import all_content_routers
 from core.routers.crm_api import all_crm_routers
+from core.routers.crm_sync_api import all_crm_sync_routers
 from core.routers.events_api import all_events_routers
 from core.routers.graph_api import router as graph_router
 from core.routers.identity_api import all_identity_routers
@@ -73,6 +74,8 @@ def _include_api_routers(app: FastAPI) -> None:
         app.include_router(r, prefix=API_PREFIX)
     app.include_router(graph_router, prefix=API_PREFIX)
     for r in all_crm_routers:
+        app.include_router(r, prefix=API_PREFIX)
+    for r in all_crm_sync_routers:
         app.include_router(r, prefix=API_PREFIX)
     for r in all_segment_routers:
         app.include_router(r, prefix=API_PREFIX)

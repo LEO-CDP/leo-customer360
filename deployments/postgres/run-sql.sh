@@ -85,7 +85,8 @@ if [[ -d "$APP_SQL_DIR" ]]; then
   done < <(find "$APP_SQL_DIR" -maxdepth 1 -type f -iname '*.sql' | sort)
 fi
 if [[ -d "$MIGRATIONS_DIR" ]]; then
-  while IFS= read -r f; do FILES+=("$f"); done < <(find "$MIGRATIONS_DIR" -type f -iname '*.sql' | sort)
+  # Forward migrations only; *.down.sql are rollbacks, run by hand, never on deploy.
+  while IFS= read -r f; do FILES+=("$f"); done < <(find "$MIGRATIONS_DIR" -type f -iname '*.sql' ! -iname '*.down.sql' | sort)
 fi
 if [[ ${#FILES[@]} -eq 0 ]]; then echo "No *.sql found under $PG_SQL_DIR or $APP_SQL_DIR — nothing to run."; exit 0; fi
 echo "Running ${#FILES[@]} SQL script(s) via psql on ${BASTION} against ${DB_NAME}@${HOST}:${PORT} (user ${DB_USER}):"

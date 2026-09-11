@@ -148,7 +148,7 @@ sudo chmod 600 /opt/c360/frontend.env
 if [ "$DEPLOY_MODE" = "ghcr" ]; then
   echo "   pulling $IMAGE ..."
   [ -n "$GHCR_TOKEN" ] && printf %s "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
-  sudo docker pull "$IMAGE"
+  docker_pull_retry "$IMAGE"
   RUN_IMG="$IMAGE"
 else
   # docker.io has no buildx -> strip the BuildKit `RUN --mount` (pip-cache only).
