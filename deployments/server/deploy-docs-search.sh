@@ -154,7 +154,7 @@ fi
 # --- ship the corpus (docs/**) so enrich can chunk + embed it on the box ---
 echo ">> Shipping docs/ corpus ..."
 tar -C "$REPO_ROOT" -czf - docs \
-  | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360/docs-vector-search && sudo chown -R "$(id -un)" /opt/c360/docs-vector-search && rm -rf /opt/c360/docs-vector-search/corpus && tar -C /opt/c360/docs-vector-search -xzf - && mv /opt/c360/docs-vector-search/docs /opt/c360/docs-vector-search/corpus'
+  | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360/docs-vector-search && sudo chown -R "$(id -un)" /opt/c360/docs-vector-search && sudo rm -rf /opt/c360/docs-vector-search/corpus /opt/c360/docs-vector-search/docs && sudo tar -C /opt/c360/docs-vector-search -xzf - && sudo mv /opt/c360/docs-vector-search/docs /opt/c360/docs-vector-search/corpus && sudo chown -R "$(id -un)" /opt/c360/docs-vector-search/corpus'
 
 # OpenTelemetry (OTLP -> Jaeger) zero-code tracing lines. The docs box is dedicated (Jaeger is
 # NOT co-located on it), so point OTLP at the monitoring/api box's private fixed IP. UAT defaults
