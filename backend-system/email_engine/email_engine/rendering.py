@@ -15,6 +15,8 @@ import re
 from typing import Optional
 from urllib.parse import quote
 
+from .tracking import sign_click_url
+
 _PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 _HREF_PATTERN = re.compile(r'href=(["\'])(.*?)\1', re.IGNORECASE)
 
@@ -55,7 +57,10 @@ def rewrite_links_for_click_tracking(
             return match.group(0)
         if url.startswith(click_base_url):
             return match.group(0)
-        wrapped = f"{click_base_url}?u={quote(token, safe='')}&url={quote(url, safe='')}"
+        # Sign the destination (k=) so the click endpoint can reject a swapped
+        # URL -- without this the redirect is an open redirect.
+        k = sign_click_url(url)
+        wrapped = f"{click_base_url}?u={quote(token, safe='')}&url={quote(url, safe='')}&k={quote(k, safe='')}"
         return f"href={quote_char}{wrapped}{quote_char}"
 
     return _HREF_PATTERN.sub(_wrap, html_body)

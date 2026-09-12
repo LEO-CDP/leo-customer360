@@ -17,10 +17,12 @@ Returns a per-status count summary. Each recipient runs inside its own SAVEPOINT
 so one bad row never aborts the whole batch.
 """
 
+import html
 import logging
 import os
 from typing import Callable, Iterator, Optional
 
+from psycopg2 import errors
 from psycopg2.extras import RealDictCursor
 
 from .adapters import DispatchAdapter, build_adapter
@@ -152,10 +154,16 @@ def _suppressed_emails(cur, tenant_id: str, emails: list) -> set:
         result = {row["email"] for row in cur.fetchall()}
         cur.execute("RELEASE SAVEPOINT suppression_lookup")
         return result
-    except Exception as exc:  # noqa: BLE001 - table absent or transient; treat as none suppressed.
+    except errors.UndefinedTable as exc:
+        # Suppression table not deployed yet -> tolerate (nothing to suppress).
         cur.execute("ROLLBACK TO SAVEPOINT suppression_lookup")
-        logger.debug("suppression lookup skipped: %s", exc)
+        logger.warning("suppression table absent; treating none as suppressed: %s", exc)
         return set()
+    except Exception:
+        # Any other error (transient/timeout/deadlock): FAIL CLOSED -- do not send
+        # a batch whose suppression state is unknown (compliance).
+        cur.execute("ROLLBACK TO SAVEPOINT suppression_lookup")
+        raise
 
 
 def _current_status(cur, campaign_id: str, master_profile_id: str) -> Optional[str]:
@@ -233,7 +241,10 @@ def _render_for_recipient(template: dict, profile: dict, urls: dict) -> dict:
         "unsubscribe_url": urls.get("unsubscribe", ""),
     }
     subject = render_string(template.get("subject"), context)
-    html_body = render_string(template.get("html_body"), context)
+    # HTML-escape merge values for the HTML body so a profile field containing
+    # markup can't inject into the email HTML (subject/text stay plain).
+    html_context = {k: html.escape(str(v)) for k, v in context.items()}
+    html_body = render_string(template.get("html_body"), html_context)
     text_body = render_string(template.get("text_body"), context)
     if urls.get("click_base") and urls.get("token"):
         html_body = rewrite_links_for_click_tracking(html_body, urls["click_base"], urls["token"])
@@ -252,7 +263,23 @@ def send_campaign(
 ) -> dict:
     """Execute one Approved campaign's email send. See module docstring."""
     conn = connect()
+    got_lock = False
     try:
+        # H2: serialize dispatch per campaign (advisory-lock classid 1) so a
+        # Dagster retry, re-activation, or concurrent run cannot double-SEND --
+        # the ledger dedups rows, not the actual emails. If another run holds the
+        # lock, skip this run rather than block/duplicate.
+        with conn.cursor() as lock_cur:
+            lock_cur.execute("SELECT pg_try_advisory_lock(1, hashtext(%s))", (str(campaign_id),))
+            got_lock = bool(lock_cur.fetchone()[0])
+        conn.commit()
+        if not got_lock:
+            log(f"email_engine: campaign {campaign_id} dispatch already in progress; skipping this run")
+            return {
+                "campaign_id": campaign_id, "tenant_id": tenant_id, "provider": None,
+                "total": 0, "sent": 0, "failed": 0, "skipped": 0, "suppressed": 0,
+                "already_sent": 0, "skipped_locked": True,
+            }
         # Resolve the tenant's dispatch config (Redis -> DB -> env/mock) once per
         # run and build the adapter from it, unless a test injected one.
         if adapter is None:
@@ -307,6 +334,13 @@ def send_campaign(
         )
         return summary
     finally:
+        if got_lock:
+            try:
+                with conn.cursor() as lock_cur:
+                    lock_cur.execute("SELECT pg_advisory_unlock(1, hashtext(%s))", (str(campaign_id),))
+                conn.commit()
+            except Exception:  # noqa: BLE001 - closing the connection releases it anyway.
+                pass
         conn.close()
 
 

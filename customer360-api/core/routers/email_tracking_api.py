@@ -15,10 +15,12 @@ also add the recipient to ``cdp_email_suppression`` (see core/crud/email_trackin
 """
 
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import APIRouter, Header, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
+from core.config import settings
 from core.crud.email_tracking import (
     add_suppression,
     record_engagement_event,
@@ -30,6 +32,8 @@ from core.utils.email_tracking import (
     TRANSPARENT_GIF,
     WEBHOOK_EVENT_TO_NAME,
     decode_tracking_token,
+    verify_click_url,
+    verify_webhook_signature,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,9 +56,10 @@ def _safe_record(decoded: dict, event_name: str, *, dedup_key: str, payload: dic
 
 
 @email_tracking_router.get("/open")
-def track_open(u: str = Query(..., description="Tracking token.")):
-    """Open-tracking pixel: records email-opened, always returns a 1x1 GIF."""
-    decoded = decode_tracking_token(u)
+def track_open(u: Optional[str] = Query(None, description="Tracking token.")):
+    """Open-tracking pixel: records email-opened, always returns a 1x1 GIF
+    (even for a missing/invalid token -- never errors the mail client)."""
+    decoded = decode_tracking_token(u) if u else None
     if decoded:
         _safe_record(decoded, "email-opened",
                      dedup_key=f"{decoded['campaign_id']}:{decoded['master_profile_id']}:email-opened")
@@ -62,16 +67,21 @@ def track_open(u: str = Query(..., description="Tracking token.")):
 
 
 @email_tracking_router.get("/click")
-def track_click(u: str = Query(...), url: str = Query(..., description="Original destination URL.")):
+def track_click(
+    u: Optional[str] = Query(None),
+    url: Optional[str] = Query(None, description="Original destination URL."),
+    k: Optional[str] = Query(None, description="HMAC of url, minted at send time (anti open-redirect)."),
+):
     """Click-tracking redirect: records email-clicked, 302s to the original URL
-    (http/https only, to avoid being abused as an open redirect to other schemes)."""
-    decoded = decode_tracking_token(u)
+    ONLY when its signature ``k`` verifies (so the destination can't be swapped
+    into an open redirect) and it is http/https; otherwise redirects to '/'."""
+    decoded = decode_tracking_token(u) if u else None
+    trusted_url = bool(url) and url.lower().startswith(("http://", "https://")) and verify_click_url(url, k)
     if decoded:
         _safe_record(decoded, "email-clicked",
                      dedup_key=f"{decoded['campaign_id']}:{decoded['master_profile_id']}:email-clicked",
-                     payload={"url": url})
-    target = url if url.lower().startswith(("http://", "https://")) else "/"
-    return RedirectResponse(target, status_code=302, headers=_NO_STORE)
+                     payload={"url": url if trusted_url else None})
+    return RedirectResponse(url if trusted_url else "/", status_code=302, headers=_NO_STORE)
 
 
 @email_tracking_router.get("/unsubscribe", response_class=HTMLResponse)
@@ -95,10 +105,32 @@ def unsubscribe(u: str = Query(...)):
 
 
 @email_tracking_router.post("/webhook")
-def email_webhook(payload: EmailWebhookEvent, provider: str = Query("generic")):
+async def email_webhook(
+    request: Request,
+    provider: str = Query("generic"),
+    x_webhook_signature: Optional[str] = Header(None),
+):
     """Email provider callback (delivery/bounce/complaint/open/click). Correlates
     via the echoed token, records the event (deduped), and updates suppression on
-    hard bounce / complaint. Always 200 so the provider does not retry-storm."""
+    hard bounce / complaint. Always 200 on accepted input so the provider does not
+    retry-storm.
+
+    AUTHENTICITY: the request body must carry a valid HMAC-SHA256 signature
+    (``X-Webhook-Signature``) over the raw body, keyed by
+    CRM_EMAIL_WEBHOOK_SIGNING_SECRET -- otherwise a holder of a (public) tracking
+    token could forge bounce/complaint callbacks and poison the suppression list.
+    The endpoint is disabled (503) when the secret is unset (fail closed)."""
+    secret = settings.email_webhook_signing_secret
+    if not secret:
+        return JSONResponse({"status": "disabled", "reason": "webhook signing secret not configured"}, status_code=503)
+    raw = await request.body()
+    if not verify_webhook_signature(raw, x_webhook_signature, secret):
+        return JSONResponse({"status": "rejected", "reason": "invalid signature"}, status_code=401)
+    try:
+        payload = EmailWebhookEvent.model_validate_json(raw)
+    except Exception:  # noqa: BLE001 - malformed body after a valid signature.
+        return JSONResponse({"status": "rejected", "reason": "invalid payload"}, status_code=400)
+
     decoded = decode_tracking_token(payload.token)
     if not decoded:
         return {"status": "ignored", "reason": "missing or invalid token"}
@@ -116,7 +148,10 @@ def email_webhook(payload: EmailWebhookEvent, provider: str = Query("generic")):
     if reason == "hard_bounce" and (payload.bounce_type or "").strip().lower() == "soft":
         reason = None
     if reason:
-        email = payload.email or resolve_recipient_email(
+        # Resolve the address from OUR dispatch ledger via the signed token --
+        # never from the (untrusted) payload -- so a caller can't suppress an
+        # arbitrary address it doesn't own.
+        email = resolve_recipient_email(
             decoded["tenant_id"], decoded["campaign_id"], decoded["master_profile_id"]
         )
         if email:

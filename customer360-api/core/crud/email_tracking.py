@@ -35,11 +35,13 @@ def _session_for_tenant(tenant_id: str):
 
 
 def _resolve_raw_profile_id(db, tenant_id: str, master_profile_id: str) -> Optional[str]:
+    # Prefer an ACTIVE link but fall back to any link, so engagement from
+    # sync-created leads/contacts (which may have no ACTIVE link) isn't dropped.
     row = db.execute(
         text(
             "SELECT raw_profile_id FROM customer360.cdp_profile_links "
-            "WHERE tenant_id = :t AND master_profile_id = :m AND status = 'ACTIVE' "
-            "ORDER BY created_at LIMIT 1"
+            "WHERE tenant_id = :t AND master_profile_id = :m "
+            "ORDER BY (status = 'ACTIVE') DESC, created_at LIMIT 1"
         ),
         {"t": tenant_id, "m": master_profile_id},
     ).first()
@@ -96,13 +98,18 @@ def record_engagement_event(
     'inserted' | 'duplicate' | 'skipped_no_raw_profile'."""
     db = _session_for_tenant(tenant_id)
     try:
-        if dedup_key and _dedup_exists(db, tenant_id, dedup_key):
-            return "duplicate"
+        if dedup_key:
+            # Serialize same-key callbacks (xact advisory lock, classid 2) so a
+            # concurrent duplicate can't slip past the check-then-insert and
+            # inflate metrics; the lock releases on commit/rollback.
+            db.execute(text("SELECT pg_advisory_xact_lock(2, hashtext(:k))"), {"k": dedup_key})
+            if _dedup_exists(db, tenant_id, dedup_key):
+                return "duplicate"
 
         raw_profile_id = _resolve_raw_profile_id(db, tenant_id, master_profile_id)
         if raw_profile_id is None:
-            logger.info("email event %s: no raw profile link for master %s; event row skipped",
-                        event_name, master_profile_id)
+            logger.warning("email event %s: no profile link for master %s; event row skipped (metric under-count)",
+                           event_name, master_profile_id)
             return "skipped_no_raw_profile"
 
         payload = dict(event_payload or {})

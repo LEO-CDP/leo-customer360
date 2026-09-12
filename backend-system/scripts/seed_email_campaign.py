@@ -127,6 +127,11 @@ def _tag_sample_profiles(cur, tenant_id, segment_tag, count):
 
 
 def main():
+    # Guard: this seeds an Approved campaign and (with TAG_PROFILES>0) tags REAL
+    # active profiles into it -> a live send once the campaign is activated.
+    # Require an explicit opt-in so it can never run unattended against prod.
+    if os.environ.get("SEED_ALLOW") != "1":
+        sys.exit("Refusing to seed: set SEED_ALLOW=1 to confirm (dev/test only; never prod).")
     tenant_id = os.environ.get("TENANT_ID")
     if not tenant_id:
         sys.exit("TENANT_ID env is required.")

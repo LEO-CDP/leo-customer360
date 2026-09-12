@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Any, Optional
 
 from fastapi import HTTPException, Request, Security, status
@@ -451,11 +452,16 @@ TENANT_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "tenant_a
 
 
 def require_tenant(request: Request) -> str:
-    """Return the caller's tenant_id (set by auth_middleware) or raise 400."""
+    """Return the caller's tenant_id (set by auth_middleware), normalized +
+    validated as a UUID, or raise 400 -- a malformed value must not 500 a later
+    ``uuid.UUID()`` cast."""
     tenant_id = getattr(request.state, "tenant_id", None)
     if not tenant_id:
         raise HTTPException(status_code=400, detail="No tenant context found (missing X-Tenant-Id)")
-    return str(tenant_id)
+    try:
+        return str(uuid.UUID(str(tenant_id)))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="X-Tenant-Id is not a valid UUID") from exc
 
 
 def require_tenant_admin(request: Request, action: str = "this action") -> None:

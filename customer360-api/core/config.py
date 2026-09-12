@@ -190,6 +190,13 @@ class Settings(BaseSettings):
         default="leocdp-dev-tracking-secret",
         validation_alias=AliasChoices("EMAIL_TRACKING_SECRET", "email_tracking_secret"),
     )
+    # HMAC secret the provider signs delivery/bounce/complaint webhooks with
+    # (verified in core/routers/email_tracking_api.py). Empty -> the /webhook
+    # endpoint is disabled (503), so a misconfig can't accept forged callbacks.
+    email_webhook_signing_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("CRM_EMAIL_WEBHOOK_SIGNING_SECRET", "email_webhook_signing_secret"),
+    )
 
     # Redis response cache (see core/cache.py). Disconnected/misconfigured
     # Redis never breaks the API -- it just disables caching (fail open).

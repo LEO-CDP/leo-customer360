@@ -27,6 +27,10 @@ stay green without a deployment.
 | `E2E_TIMEOUT` | no | `60` | Per-request timeout (seconds). |
 | `E2E_ALLOW_DATA_WRITES` | no | (off) | `1` enables the opt-in routing tests (`test_routing_e2e.py`) that write to `crm_*` tables. Off by default. |
 | `E2E_TENANT_ID_B` / `E2E_BEARER_TOKEN_B` | no | — | A second tenant's id + token; enables the real cross-tenant isolation checks (S94-13/14). |
+| `E2E_EMAIL_TRACKING_SECRET` | no | `leocdp-dev-tracking-secret` | HMAC secret for minting email tracking tokens; must match the deployment's `EMAIL_TRACKING_SECRET`. Used by the SCRUM-98 tracking tests. |
+| `E2E_CAMPAIGN_ID` | no | — | An existing **Approved** campaign (with template + segment); enables the opt-in real activation test S97-07. |
+
+> **SCRUM-97/98 (email execution + tracking) are deploy-gated:** those cases probe the public `GET /track/email/open` and **skip** with "…not deployed on target" when the deployment predates `feat/SCRUM-92/subtask-05-06`. They run for real once this branch is deployed (e.g. the CI `e2e` stage after a UAT deploy). Select them with `CASES="S97 S98" ./test.sh`.
 
 **Auth modes** (see `core/auth.py`):
 - **SSO on** — set `E2E_BEARER_TOKEN` (+ `E2E_TENANT_ID` matching the token).

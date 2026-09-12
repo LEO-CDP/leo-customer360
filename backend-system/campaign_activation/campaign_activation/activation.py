@@ -100,7 +100,20 @@ def activate_campaign(
                     f"template {campaign['template_id']} is not Approved (status={template_status!r})"
                 )
 
-            snapshot_count = _segment_snapshot_count(cur, tenant_id, str(campaign["segment_id"]))
+            # Validate the segment row exists (mirror the template check) so a
+            # dangling/deleted segment_id fails HERE, not one job away in email_engine.
+            cur.execute(
+                f"SELECT segment_tag FROM {DB_SCHEMA}.cdp_segments "
+                f"WHERE segment_id = %(segment_id)s AND tenant_id = %(tenant_id)s",
+                {"segment_id": str(campaign["segment_id"]), "tenant_id": tenant_id},
+            )
+            seg_row = cur.fetchone()
+            if not seg_row or not seg_row.get("segment_tag"):
+                raise CampaignActivationError(
+                    f"segment {campaign['segment_id']} not found or has no segment_tag"
+                )
+
+            segment_size = _segment_snapshot_count(cur, tenant_id, str(campaign["segment_id"]))
 
             cur.execute(
                 f"UPDATE {DB_SCHEMA}.crm_campaign SET status = 'Running' "
@@ -109,12 +122,13 @@ def activate_campaign(
             )
         conn.commit()
 
-        log(f"campaign_activation: campaign {campaign_id} Approved, segment snapshot={snapshot_count} members")
+        log(f"campaign_activation: campaign {campaign_id} Approved, segment size={segment_size} "
+            f"(pre-eligibility; email_engine filters no-email / opt-out / suppressed)")
 
         summary = {
             "campaign_id": campaign_id,
             "tenant_id": tenant_id,
-            "snapshot_count": snapshot_count,
+            "snapshot_count": segment_size,
             "email_engine_run_id": None,
         }
         if trigger_email:

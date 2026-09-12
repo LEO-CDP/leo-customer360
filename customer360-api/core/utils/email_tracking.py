@@ -15,11 +15,17 @@ out (constant-time compare), so a forged/tampered token is rejected.
 import base64
 import hashlib
 import hmac
+import logging
 from typing import Optional
 
 from core.config import settings
 
 _SIG_LEN = 20
+
+if settings.email_tracking_secret == "leocdp-dev-tracking-secret":  # pragma: no cover
+    logging.getLogger(__name__).warning(
+        "EMAIL_TRACKING_SECRET is the insecure dev default; set a strong value in prod."
+    )
 
 # 1x1 fully-transparent GIF returned by the open-pixel endpoint.
 TRANSPARENT_GIF = base64.b64decode(
@@ -55,6 +61,27 @@ SUPPRESSION_EVENTS = {
 
 def _sign(raw: str, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), raw.encode("utf-8"), hashlib.sha256).hexdigest()[:_SIG_LEN]
+
+
+def verify_click_url(url: str, sig: Optional[str], secret: Optional[str] = None) -> bool:
+    """True if ``sig`` is the valid HMAC of ``url`` -- proves the click
+    destination was minted by us and hasn't been swapped (anti open-redirect).
+    The main token signs tenant/campaign/profile only; this signs the URL."""
+    if not url or not sig:
+        return False
+    secret = secret if secret is not None else settings.email_tracking_secret
+    return hmac.compare_digest(sig, _sign(url, secret))
+
+
+def verify_webhook_signature(raw_body: bytes, signature: Optional[str], secret: str) -> bool:
+    """Verify a provider webhook HMAC-SHA256 over the raw request body.
+    Accepts a bare hex digest or a ``sha256=<hex>`` prefixed one. Fails closed
+    when the secret or signature is missing."""
+    if not secret or not signature:
+        return False
+    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    provided = signature.split("=", 1)[1] if signature.startswith("sha256=") else signature
+    return hmac.compare_digest(provided.strip(), expected)
 
 
 def decode_tracking_token(token: str, secret: Optional[str] = None) -> Optional[dict]:

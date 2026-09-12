@@ -17,10 +17,17 @@ implement the SAME format independently -- keep them in sync. Format::
 import base64
 import hashlib
 import hmac
+import logging
 import os
 
-TRACKING_SECRET = os.environ.get("EMAIL_TRACKING_SECRET", "leocdp-dev-tracking-secret")
+_DEFAULT_SECRET = "leocdp-dev-tracking-secret"
+TRACKING_SECRET = os.environ.get("EMAIL_TRACKING_SECRET", _DEFAULT_SECRET)
 _SIG_LEN = 20
+
+if TRACKING_SECRET == _DEFAULT_SECRET:  # pragma: no cover
+    logging.getLogger(__name__).warning(
+        "EMAIL_TRACKING_SECRET is the insecure dev default; set a strong value in prod (tokens are forgeable otherwise)."
+    )
 
 
 def _sign(raw: str, secret: str) -> str:
@@ -38,3 +45,10 @@ def encode_tracking_token(
     raw = f"{tenant_id}|{campaign_id}|{master_profile_id}"
     payload = f"{raw}|{_sign(raw, secret)}"
     return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def sign_click_url(url: str, *, secret: str = TRACKING_SECRET) -> str:
+    """HMAC of a click destination, emitted as the ``k`` param so the click
+    endpoint can prove the URL wasn't swapped (anti open-redirect). The main
+    token signs tenant/campaign/profile only; this binds the destination."""
+    return _sign(url, secret)

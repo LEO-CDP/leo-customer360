@@ -1,4 +1,4 @@
-# E2E Test Plan — SCRUM-93 & SCRUM-94
+# E2E Test Plan — SCRUM-93 / 94 / 97 / 98
 
 Traceable plan mapping **every acceptance criterion** of both tickets to concrete
 test cases across all test types, with the execution method, expected result, and
@@ -168,3 +168,37 @@ psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.dow
 **Automated E2E (default, no writes):** S93-01..09, S94-01..16.
 **Automated E2E (opt-in writes, self-cleaning):** R-A1..R-D1.
 **DB smoke / unit:** S93-10..14, S94 routing logic.
+
+---
+
+## 8. SCRUM-97 — Dagster Execution Modernization (campaign activation + email dispatch)
+
+> **Deploy gate:** these hit endpoints added on `feat/SCRUM-92/subtask-05-06`. They **skip** with "…not deployed on target (SCRUM-97/98)" when the target still runs a pre-05/06 build (the probe: public `GET /track/email/open` must return 200). They run for real once this branch is deployed — e.g. via the CI `e2e` stage after a UAT deploy. Run: `CASES=S97 ./test.sh`.
+
+| ID | AC | Scenario | Type | Method | Expected | Cleanup |
+|----|----|----------|------|--------|----------|---------|
+| S97-01 | guard | `POST /admin/campaigns/{unknown}/activate` | Negative | E2E | 404 | none |
+| S97-02 | authz | Activate without auth | Security | E2E | 401/403 (SSO) or 400 | none |
+| S97-03 | approval gate | Activate a **Draft** campaign | Negative | E2E | 409 (not Approved) | delete campaign |
+| S97-04 | integrity | Activate **Approved** campaign missing template/segment | Negative | E2E | 409 (needs both) | delete campaign |
+| S97-05 | audit | `GET /admin/campaigns/{id}/dispatch-logs` for a fresh campaign | Positive | E2E | 200 `[]` | delete campaign |
+| S97-06 | config | `GET /admin/email-provider-config` | Positive | E2E | 200 (config or null) | none |
+| S97-07 | DoD | Activate a real Approved campaign (template+segment) → Dagster run | Positive | E2E (opt-in `E2E_CAMPAIGN_ID`) | 200 `run_id` (or 503 if Dagster down) | run is idempotent; ledger dedups |
+| S97-U | idempotency/retry/failure | send-pipeline logic (dispatch idempotency, savepoints, suppression, adapters) | Unit | `email_engine/tests/*` | — | n/a |
+
+> The full send (render → dispatch → `cdp_campaign_dispatch_logs`) is orchestrated by Dagster and needs an Approved campaign + **Approved template** + segment + recipients; the template has no public CRUD endpoint, so a full E2E can't be seeded via API — S97-07 is opt-in against an existing campaign, and the dispatch/idempotency/adapter logic is covered exhaustively by the `email_engine` unit suite.
+
+## 9. SCRUM-98 — Tracking, Webhooks & Compliance (public endpoints)
+
+> Tokens are minted for **synthetic random** (tenant, campaign, profile) ids using `E2E_EMAIL_TRACKING_SECRET` (must match the deployment; UAT default), so these exercise the contract + security fixes with **zero data footprint** (a random profile has no `cdp_profile_links` row → events skipped, no suppression written). Run: `CASES=S98 ./test.sh`.
+
+| ID | AC | Scenario | Type | Method | Expected |
+|----|----|----------|------|--------|----------|
+| S98-01 | tracking | Open pixel returns a 1×1 GIF (valid / missing / bad token) | Positive/Boundary | E2E | 200 `image/gif` always |
+| S98-02 | tracking | Click redirects to the signed destination | Positive | E2E | 302 → the URL |
+| S98-03 | security | **Open redirect blocked** — forged/absent `k` or non-http scheme | Security | E2E | 302 → `/` |
+| S98-04 | security | **Webhook fail-closed** — forged/unsigned callback | Security | E2E | 401 (bad sig) or 503 (disabled); never 200-suppress |
+| S98-05 | compliance | Unsubscribe confirms (valid token) / rejects invalid token | Positive/Negative | E2E | 200 HTML / 400 |
+| S98-U | dedup/suppression | dedup atomicity, suppression `ON CONFLICT`, ledger-address resolution, signature verify | Unit | `tests/test_email_tracking.py` | — |
+
+**Automated E2E (deploy-gated, no footprint):** S97-01..06, S98-01..05. **Opt-in:** S97-07 (`E2E_CAMPAIGN_ID`). **Unit:** S97-U, S98-U.

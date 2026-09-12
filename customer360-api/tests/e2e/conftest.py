@@ -12,6 +12,9 @@ Data safety: a per-test ``track`` fixture DELETEs every resource it is handed
 shared UAT tenant. Deleting a segment cascades its crm_segment_sync_runs rows.
 """
 
+import base64
+import hashlib
+import hmac
 import os
 import uuid
 
@@ -31,6 +34,10 @@ VERIFY_TLS = os.environ.get("E2E_VERIFY_TLS", "true").strip().lower() not in ("f
 TIMEOUT = float(os.environ.get("E2E_TIMEOUT", "60"))
 # Opt-in gate for tests that write to crm_* target tables (Route A/B/C).
 ALLOW_DATA_WRITES = os.environ.get("E2E_ALLOW_DATA_WRITES", "").strip().lower() in ("1", "true", "yes")
+
+# HMAC secret for minting email tracking tokens; must match the deployment's
+# EMAIL_TRACKING_SECRET (UAT leaves it at this default).
+EMAIL_TRACKING_SECRET = os.environ.get("E2E_EMAIL_TRACKING_SECRET", "leocdp-dev-tracking-secret")
 
 # DELETE endpoints for each resource kind the suite creates (relative to API_PREFIX).
 DELETE_PATHS = {
@@ -278,3 +285,32 @@ def segment_id(client, tenant_id, p):
     sid = resp.json()["segment_id"]
     yield sid
     client.delete(p(f"/segments/{sid}"))
+
+
+@pytest.fixture(scope="session")
+def email_feature(unauth_client, p):
+    """Skip SCRUM-97/98 tests when the target doesn't serve the email
+    execution/tracking endpoints yet (e.g. UAT still on a pre-subtask-05/06
+    build) -- the public open-pixel returns 200 only when they're deployed."""
+    r = unauth_client.get(p("/track/email/open"))
+    if r.status_code != 200:
+        pytest.skip("email tracking/execution endpoints not deployed on target (SCRUM-97/98)")
+
+
+@pytest.fixture(scope="session")
+def mint_token():
+    """Build a signed email tracking token (tenant|campaign|profile), matching
+    backend-system email_engine's format, keyed by EMAIL_TRACKING_SECRET."""
+    def _mint(tenant_id, campaign_id, master_profile_id, secret=EMAIL_TRACKING_SECRET):
+        raw = f"{tenant_id}|{campaign_id}|{master_profile_id}"
+        sig = hmac.new(secret.encode(), raw.encode(), hashlib.sha256).hexdigest()[:20]
+        return base64.urlsafe_b64encode(f"{raw}|{sig}".encode()).decode().rstrip("=")
+    return _mint
+
+
+@pytest.fixture(scope="session")
+def sign_click_url():
+    """Build the click-URL signature (``k=``) the click endpoint verifies."""
+    def _sign(url, secret=EMAIL_TRACKING_SECRET):
+        return hmac.new(secret.encode(), url.encode(), hashlib.sha256).hexdigest()[:20]
+    return _sign
