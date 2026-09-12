@@ -50,11 +50,10 @@ def activate_campaign(campaign_id: uuid.UUID, request: Request, db: Session = De
     campaign = db.get(Campaign, campaign_id)
     if campaign is None or str(campaign.tenant_id) != tenant_id:
         raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
+
     if (campaign.approval_status or "").strip() != "Approved":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Campaign is not Approved (approval_status={campaign.approval_status!r})",
-        )
+        raise HTTPException(status_code=409, detail=f"Campaign is not Approved (approval_status={campaign.approval_status!r})",)
+
     if not campaign.template_id or not campaign.segment_id:
         raise HTTPException(status_code=409, detail="Campaign needs both a template_id and a segment_id.")
 
