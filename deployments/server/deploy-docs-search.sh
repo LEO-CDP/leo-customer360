@@ -228,6 +228,18 @@ if [ -z "$(swapon --show 2>/dev/null)" ] && [ ! -f /swapfile ]; then
   grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
 fi
 
+# Reclaim disk before model/image operations. Each deploy pulls a new SHA-pinned image
+# and old layers accumulate on the small docs VM until pull/extract fails with
+# "No space left on device". Use dangling-only Docker prunes so shared hosts keep
+# unrelated unused images/tags that may be needed by other services.
+if command -v docker >/dev/null 2>&1; then
+  echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
+  sudo docker container prune -f >/dev/null 2>&1 || true
+  sudo docker image prune -f     >/dev/null 2>&1 || true
+  sudo docker builder prune -f   >/dev/null 2>&1 || true
+  echo "   reclaiming disk (df after):  $(df -h --output=avail / | tail -1 | tr -d ' ') free"
+fi
+
 MODELS_DIR=/opt/c360/docs-models
 CORPUS_DIR=/opt/c360/docs-vector-search/corpus
 sudo mkdir -p "$MODELS_DIR"; sudo chown "$(id -un)" "$MODELS_DIR"
