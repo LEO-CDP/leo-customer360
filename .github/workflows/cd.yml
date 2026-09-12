@@ -216,6 +216,7 @@ jobs:
           TF_VAR_secret_key: ${{ secrets.VSTORAGE_SECRET_KEY }}
           DOCS_OPENAI_API_KEY: ${{ secrets.DOCS_OPENAI_API_KEY }}
           DOCS_INTERNAL_AUTH_SECRET: ${{ secrets.DOCS_INTERNAL_AUTH_SECRET }}
+          PORTAINER_ADMIN_PASSWORD: ${{ secrets.PORTAINER_ADMIN_PASSWORD }}   # monitoring step: auto-registers Portainer agent envs
           GH_TOKEN: ${{ github.token }}   # lets lib/record_deploy.sh call `gh api` (Deployments ledger)
         run: |
           # Invoke via `bash` (not ./) — scripts committed from Windows lack the
