@@ -67,7 +67,6 @@ DOCS_REDIS_DB="${DOCS_REDIS_DB:-0}"
 DOCS_REDIS_PASSWORD="${DOCS_REDIS_PASSWORD:-${REDIS_PASSWORD:-${TF_VAR_redis_password:-}}}"
 DOCS_REDIS_CONNECT_TIMEOUT_SECONDS="${DOCS_REDIS_CONNECT_TIMEOUT_SECONDS:-1}"
 DOCS_REDIS_SOCKET_TIMEOUT_SECONDS="${DOCS_REDIS_SOCKET_TIMEOUT_SECONDS:-1}"
-[[ -z "$DOCS_REDIS_HOST" ]] && echo "::warning::docs-search: DOCS_REDIS_HOST is unset; configure a Redis endpoint reachable from the docs box before starting the service."
 # CORS origins for browsers hitting the API directly (the static docs site on GitHub Pages).
 DOCS_CORS_ORIGINS="${DOCS_CORS_ORIGINS:-https://leo-cdp.github.io}"
 # Per-IP /ask rate limit for public callers (via Caddy/XFF). Tune per env; 0 disables.
@@ -100,6 +99,7 @@ SERVERS_JSON="$(terraform output -json servers 2>/dev/null || true)"
 [[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no servers output."; exit 1; }
 srv_ip() { printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get(sys.argv[2]) for i in (s.get("internal_interfaces") or []) if i.get(sys.argv[2])), ""))' "$1" "$2"; }
 DOCS_REDIS_HOST="${DOCS_REDIS_HOST:-$(srv_ip "${DOCS_REDIS_SERVER_KEY:-api}" fixed_ip)}"
+[[ -z "$DOCS_REDIS_HOST" ]] && echo "::warning::docs-search: DOCS_REDIS_HOST is unset; configure a Redis endpoint reachable from the docs box before starting the service."
 FIP="$(srv_ip "$DOCS_SERVER_KEY" floating_ip)"
 # The 'docs' box is provisioned by this module (overlays servers map). If it isn't there yet,
 # SKIP rather than fail — so CD stays green until the box is applied; the next run picks it up.
