@@ -88,9 +88,9 @@ Use **pgvector** in the existing VNGCloud **vDB** (PostgreSQL 15, provisioned by
 - Gated by `DOCS_RERANK_ENABLED` (default `true`) so it can be dropped first under RAM pressure.
 
 ### 3.5 Generator — extend `chat()` (the seam returns)
-`CHAT_PROVIDER` with:
-- `qwen-local` (default target): `llama-cpp-python` loads `Qwen2.5-0.5B-Instruct-Q4_K_M.gguf`; **strict grounded system prompt** — *"Answer only from the context below; if it's not there, say you don't know. Cite the source titles."* Low temperature, small `max_tokens`.
-- `openai` / `greennode` (fallback): existing HTTP path; GreenNode is OpenAI-compatible, so it reuses the OpenAI client with a `base_url` override.
+`DOCS_LLM_PROVIDER` with:
+- `local`: `llama-cpp-python` loads the path in `DOCS_LOCAL_LLM_MODEL_PATH`; **strict grounded system prompt** — *"Answer only from the context below; if it's not there, say you don't know. Cite the source titles."* Low temperature, small output budget.
+- `openai` / `gemini`: hosted generation through the provider-specific API settings in the configuration below.
 
 ### 3.6 Serve — `server.py` unchanged in shape
 Same `/ask`, `/search`, `/health`; `/ask` now runs retrieve → rerank → generate. Load models **once at startup** (fastembed + llama model are the expensive part) and reuse.
@@ -100,9 +100,14 @@ Same `/ask`, `/search`, `/health`; `/ask` now runs retrieve → rerank → gener
 ## 4. Config (env-driven seams)
 
 ```
-# Embedding
-EMBED_PROVIDER=e5-small          # e5-small | bge-small | openai
-EMBED_MODEL=intfloat/multilingual-e5-small
+# Embedding provider selection
+DOCS_EMBEDDING_PROVIDER=openai   # openai | gemini | local
+DOCS_OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+DOCS_OPENAI_EMBEDDING_DIMENSIONS=384
+DOCS_GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+DOCS_GEMINI_EMBEDDING_DIMENSIONS=384
+DOCS_LOCAL_EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+DOCS_LOCAL_EMBEDDING_DIMENSIONS=384
 
 # Reranking
 DOCS_RERANK_ENABLED=true
@@ -110,10 +115,19 @@ DOCS_RERANK_MODEL=BAAI/bge-reranker-base
 RETRIEVE_TOP_N=20
 RERANK_TOP_K=5
 
-# Generation
-CHAT_PROVIDER=qwen-local         # qwen-local | openai | greennode
-DOCS_LOCAL_MODEL_PATH=/app/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf
-# Fallback (hosted): LEO_OPENAI_API_KEY, LEO_OPENAI_MODEL_NAME, OPENAI_BASE_URL (GreenNode)
+# Generation provider selection
+DOCS_LLM_PROVIDER=openai         # openai | gemini | local
+DOCS_LLM_MAX_OUTPUT_TOKENS=256
+DOCS_OPENAI_LLM_MODEL=gpt-5.6-luna
+DOCS_OPENAI_API_KEY=...           # secret
+DOCS_OPENAI_API_BASE_URL=https://api.openai.com/v1
+DOCS_GEMINI_LLM_MODEL=gemini-2.5-flash
+DOCS_GEMINI_API_KEY=...           # secret
+DOCS_GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+DOCS_LOCAL_LLM_MODEL_PATH=/app/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf
+DOCS_LOCAL_LLM_CONTEXT_TOKENS=2048
+DOCS_LOCAL_LLM_THREADS=2
+DOCS_LOCAL_LLM_BATCH_SIZE=512
 
 # Chunking
 CHUNK_TOKENS=400
@@ -129,7 +143,7 @@ PG_SCHEMA=rag
 RETRIEVE_TOP_N=20
 
 # Model cache (fastembed downloads ONNX here)
-FASTEMBED_CACHE_DIR=/app/models/fastembed
+FASTEMBED_CACHE=/app/models/fastembed
 ```
 
 ---
@@ -160,8 +174,8 @@ pgvector>=0.3             # pgvector adapter for psycopg
 ```
 
 **Model weights (~1–1.4 GB)** — do **not** bake into the image (keeps it lean, avoids re-pushing on code changes). Instead mount a **`models` volume** and fetch on first boot:
-- fastembed auto-downloads its ONNX models to `FASTEMBED_CACHE_DIR`.
-- the Qwen GGUF is pulled once (huggingface-cli or curl) into `DOCS_LOCAL_MODEL_PATH`.
+- fastembed auto-downloads its ONNX models to `FASTEMBED_CACHE`.
+- the Qwen GGUF is pulled once (huggingface-cli or curl) into `DOCS_LOCAL_LLM_MODEL_PATH`.
 
 `llama-cpp-python` needs a C/C++ toolchain to build in `python:3.12-slim` — either add build deps in a builder stage or use a prebuilt CPU wheel; only needed for Profile B.
 
@@ -169,7 +183,7 @@ pgvector>=0.3             # pgvector adapter for psycopg
 
 ## 7. Deployment impact (`docs-vector-search/`)
 
-- **Compose:** add a `models` named volume (`/app/models`), set `FASTEMBED_CACHE_DIR` + `DOCS_LOCAL_MODEL_PATH`, keep the **1 CPU / 2 GB** limits. For Profile B, document adding a **2 GB swapfile** on the host (`fallocate`/`swapon`) — container memory limit stays 2 GB but swap gives headroom.
+- **Compose:** add a `models` named volume (`/app/models`), set the `DOCS_LOCAL_*` model/cache settings, keep the **1 CPU / 2 GB** limits. For Profile B, document adding a **2 GB swapfile** on the host (`fallocate`/`swapon`) — container memory limit stays 2 GB but swap gives headroom.
 - **deploy.sh:** add a one-time model-fetch step (into the volume) before `up`; the enrich step now chunks + embeds locally (no API cost) and **upserts chunks into the vDB**.
 - **vDB (pgvector):** one-time `CREATE EXTENSION vector` + the `rag.doc_chunks` DDL per env via `deployments/postgres/run-sql.sh` (UAT vDB and PROD vDB separately). The app connects with the vDB creds in `.env.<env>`; the index lives in the managed DB, so it **does not count against the app's 2 GB**. **Prerequisite:** confirm the VNGCloud vDB allows the `vector` extension — managed Postgres sometimes gates extensions; if it's unavailable, request it or run a pgvector-enabled Postgres.
 - **Latency on 1 vCPU:** embed query ~ms; rerank 20 chunks ~100–300 ms; Qwen 0.5B generation a few tokens/s → answers in a few seconds. Single CPU ⇒ **serialize** requests (low concurrency); acceptable for an internal API. Hosted generation (Profile A) is faster and frees the CPU.
@@ -180,7 +194,7 @@ pgvector>=0.3             # pgvector adapter for psycopg
 
 **Phase 1 — local retrieval (biggest correctness win, safe RAM).**
 - [ ] `chunk.py` (heading + token-window chunking).
-- [ ] `embed()` → add `e5-small` (fastembed, prefixes); default `EMBED_PROVIDER=e5-small`.
+- [ ] `embed()` → support the provider-specific OpenAI, Gemini, and local fastembed models; default `DOCS_EMBEDDING_PROVIDER=openai`.
 - [ ] Enable pgvector on the vDB (`CREATE EXTENSION vector` + `rag.doc_chunks` DDL via `run-sql.sh`); `store.py` upserts chunks+vectors; `retriever` runs the `<=>` top-N query.
 - [ ] Keep generation **hosted** (Profile A). Ship + measure retrieval quality vs the whole-doc baseline.
 
@@ -189,8 +203,8 @@ pgvector>=0.3             # pgvector adapter for psycopg
 - [ ] Measure rerank lift + latency + RAM. Still Profile A.
 
 **Phase 3 — local generation (full local).**
-- [ ] `chat()` → add `qwen-local` (llama-cpp-python, GGUF, strict grounded prompt).
-- [ ] Configure swap; run Profile B; measure RAM/latency/quality. Keep hosted fallback (`CHAT_PROVIDER=openai|greennode`) one env-flip away.
+- [ ] `chat()` → support `DOCS_LLM_PROVIDER=local` (llama-cpp-python, GGUF, strict grounded prompt).
+- [ ] Configure swap; run Profile B; measure RAM/latency/quality. Keep hosted fallback (`DOCS_LLM_PROVIDER=openai|gemini`) one env-flip away.
 
 ---
 

@@ -3,9 +3,9 @@
 Two ways to evaluate the running service. The service is **local end-to-end**, so the
 default eval is local too.
 
-Point either at a running instance (SSH-tunnel the UAT box — its `:8000` is private):
+Point either at a running instance (SSH-tunnel the UAT box — its `:8001` is private):
 ```bash
-ssh -i ~/.ssh/c360-api_ed25519 -L 8099:localhost:8000 leocdp360@<docs-box-ip>
+ssh -i ~/.ssh/c360-api_ed25519 -L 8001:localhost:8001 leocdp360@<docs-box-ip>
 export SERVICE_URL=http://localhost:8099
 ```
 
@@ -41,6 +41,7 @@ that judge for grading.
 pip install -r requirements-test.txt
 export LEO_OPENAI_API_KEY=sk-...            # or OPENAI_API_KEY; + OPENAI_BASE_URL for a gateway
 export RAGAS_LLM_MODEL=gpt-4o-mini          # or your judge model
+export RAGAS_EMBEDDING_MODEL=text-embedding-3-small
 python ragas_eval.py                        # or: pytest -v -s
 ```
 

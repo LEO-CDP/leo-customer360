@@ -1,6 +1,6 @@
 # Docs RAG — UAT investigation & fix: "shows the right source but answers *I don't know*"
 
-**Date:** 2026-09-10 · **Env:** UAT (`beta.leocdp.com/docs-ai` → docs box `10.100.1.7:8000`)
+**Date:** 2026-09-10 · **Env:** UAT (`beta.leocdp.com/docs-ai` → docs box `10.100.1.7:8001`)
 **Service:** `docs-vector-search` — pgvector + `paraphrase-multilingual-MiniLM-L12-v2` embed + `bge-reranker-base` rerank + `Qwen2.5-0.5B-Instruct` generate · **1017 chunks**
 
 ---
@@ -38,7 +38,7 @@ The UI shows *sources* (retrieval ran) but 4 of the 5 are unrelated DevOps/deplo
 
 ## 2. Method
 
-The service `:8000` is internal-only; it is reachable publicly through Caddy at `https://beta.leocdp.com/docs-ai/*` (`handle_path` strips the prefix → `/ask`, `/search`). Everything below hits that route (paced for the 10 req/60 s per-IP rate limit).
+The service `:8001` is internal-only; it is reachable publicly through Caddy at `https://beta.leocdp.com/docs-ai/*` (`handle_path` strips the prefix → `/ask`, `/search`). Everything below hits that route (paced for the 10 req/60 s per-IP rate limit).
 
 Three lenses, all against the **live UAT** service:
 
@@ -198,7 +198,7 @@ Raw per-row scores: `ragas_tier1.csv`, `ragas_report.json`.
 
 1. **Deploy the fix to UAT** — redeploy `docs-vector-search` (`deployments/server/deploy-docs-search.sh uat`, or the CD `docs-search` step). The code change is config-only; no re-`enrich` needed. Until redeploy, the default remains 20. *(The live validation above used per-request `top_n=50`, which the API already accepts up to `TOP_N_MAX=50`.)*
 2. **Add the real failure mode to the eval set** — the current `dataset.jsonl` is all keyword-rich "leading" queries and scores a perfect 1.0, hiding this class of bug. Add bare/colloquial queries as regression guards, e.g. `persona là gì vậy ?`, `persona là gì`, `what is persona?`, `định nghĩa persona`, `CIR là gì?` (label `must_contain: ["persona"]` / `["identity"]`). These would have caught the regression.
-3. **Generation quality (separate track).** With good retrieval the 0.5B still gives thin/tautological Vietnamese answers ("persona là một mô hình nhân vật"). If answer quality matters, that's the generator, not retrieval — options: a larger local model, or the OpenAI-compatible provider seam (`DOCS_LLM_PROVIDER=openai`) already in `providers.py`. Out of scope for this fix.
+3. **Generation quality (separate track).** With good retrieval the 0.5B still gives thin/tautological Vietnamese answers ("persona là một mô hình nhân vật"). If answer quality matters, that's the generator, not retrieval — options: a larger local model, or the OpenAI provider seam (`DOCS_LLM_PROVIDER=openai`, `DOCS_OPENAI_LLM_MODEL=...`) already in `providers.py`. Out of scope for this fix.
 4. **Optional:** consider `RETRIEVE_TOP_N=40` if the extra rerank latency ever matters — 40 also covers this case with margin — but 50 = `TOP_N_MAX` is the safe default.
 
 ---

@@ -3,7 +3,7 @@
 Hits the running service's /search + /ask and scores with deterministic, judge-free
 checks. This is the local-only alternative to ragas_eval.py (which needs an LLM judge).
 
-    export SERVICE_URL=http://localhost:8000     # or an SSH tunnel to the box
+    export SERVICE_URL=http://localhost:8001     # or an SSH tunnel to the box
     python local_eval.py
 
 Metrics (all computed locally from the service's own outputs):
@@ -32,7 +32,7 @@ except Exception:  # noqa: BLE001
 
 HERE = Path(__file__).resolve().parent
 DATASET = HERE / "dataset.jsonl"
-SERVICE_URL = os.getenv("SERVICE_URL", "http://localhost:8000")
+SERVICE_URL = os.getenv("SERVICE_URL", "http://localhost:8001")
 TOP_K = int(os.getenv("EVAL_TOP_K", "5"))
 
 REFUSAL_RE = re.compile(

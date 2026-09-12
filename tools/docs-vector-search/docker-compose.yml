@@ -1,7 +1,7 @@
 # docs-vector-search — LOCAL DEVELOPMENT only. 1 CPU / 2 GB RAM.
 #
-# Local models are the default (fastembed + Qwen GGUF); OpenAI-compatible
-# embeddings/chat are opt-in through the provider environment variables. Vectors
+# OpenAI is the default; Gemini and local fastembed/Qwen are selected independently
+# through the provider environment variables. Vectors
 # live in pgvector (point PG_* in .env at any pgvector Postgres).
 # The container SERVES only; build the index first with the selected profile:
 #   docker compose --profile cpu run --rm docs-vector-search python -m src.enrich
@@ -28,23 +28,43 @@ x-docs-vector-search: &docs-vector-search
   environment:
     CORPUS_DIR: /app/corpus
     MODELS_DIR: /app/models
-    DOCS_EMBEDDING_PROVIDER: ${DOCS_EMBEDDING_PROVIDER:-${EMBED_PROVIDER:-local}}
-    DOCS_EMBEDDING_MODEL: ${DOCS_EMBEDDING_MODEL:-${EMBED_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}}
-    DOCS_EMBEDDING_DIMENSIONS: ${DOCS_EMBEDDING_DIMENSIONS:-${EMBED_DIM:-384}}
+    DOCS_EMBEDDING_PROVIDER: ${DOCS_EMBEDDING_PROVIDER:-openai}
     DOCS_RERANK_ENABLED: ${DOCS_RERANK_ENABLED:-${RERANK_ENABLED:-true}}
+    DOCS_RERANK_PROVIDER: ${DOCS_RERANK_PROVIDER:-openai}
     DOCS_RERANK_MODEL: ${DOCS_RERANK_MODEL:-${RERANK_MODEL:-BAAI/bge-reranker-base}}
-    DOCS_OPENAI_EMBEDDING_MODEL: ${DOCS_OPENAI_EMBEDDING_MODEL:-${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}}
-    DOCS_OPENAI_EMBEDDING_DIMENSIONS: ${DOCS_OPENAI_EMBEDDING_DIMENSIONS:-${OPENAI_EMBEDDING_DIMENSIONS:-384}}
-    DOCS_LLM_PROVIDER: ${DOCS_LLM_PROVIDER:-${LLM_PROVIDER:-local}}
-    DOCS_LLM_MODEL: ${DOCS_LLM_MODEL:-${OPENAI_CHAT_MODEL:-${LEO_OPENAI_MODEL_NAME:-gpt-5.6-luna}}}
-    DOCS_OPENAI_API_KEY: ${DOCS_OPENAI_API_KEY:-${OPENAI_API_KEY:-${LEO_OPENAI_API_KEY:-}}}
-    DOCS_OPENAI_BASE_URL: ${DOCS_OPENAI_BASE_URL:-${OPENAI_BASE_URL:-${LEO_OPENAI_BASE_URL:-https://api.openai.com/v1}}}
-    DOCS_LOCAL_MODEL_PATH: ${DOCS_LOCAL_MODEL_PATH:-${QWEN_MODEL_PATH:-/app/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf}}
-    OPENAI_TIMEOUT: ${OPENAI_TIMEOUT:-120}
-    LLAMA_N_GPU_LAYERS: ${LLAMA_N_GPU_LAYERS:--1}
-  command: ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000"]
+    DOCS_OPENAI_RERANK_MODEL: ${DOCS_OPENAI_RERANK_MODEL:-gpt-4o-mini}
+    DOCS_RERANK_OPENAI_FALLBACK: ${DOCS_RERANK_OPENAI_FALLBACK:-vector}
+    DOCS_LLM_PROVIDER: ${DOCS_LLM_PROVIDER:-openai}
+    DOCS_LLM_MAX_OUTPUT_TOKENS: ${DOCS_LLM_MAX_OUTPUT_TOKENS:-256}
+    DOCS_OPENAI_API_KEY: ${DOCS_OPENAI_API_KEY:-}
+    DOCS_OPENAI_API_BASE_URL: ${DOCS_OPENAI_API_BASE_URL:-https://api.openai.com/v1}
+    DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS: ${DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS:-120}
+    DOCS_OPENAI_RERANK_TIMEOUT_SECONDS: ${DOCS_OPENAI_RERANK_TIMEOUT_SECONDS:-8}
+    DOCS_OPENAI_EMBEDDING_MODEL: ${DOCS_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+    DOCS_OPENAI_EMBEDDING_DIMENSIONS: ${DOCS_OPENAI_EMBEDDING_DIMENSIONS:-384}
+    DOCS_OPENAI_LLM_MODEL: ${DOCS_OPENAI_LLM_MODEL:-gpt-5.6-luna}
+    DOCS_GEMINI_API_KEY: ${DOCS_GEMINI_API_KEY:-}
+    DOCS_GEMINI_API_BASE_URL: ${DOCS_GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
+    DOCS_GEMINI_REQUEST_TIMEOUT_SECONDS: ${DOCS_GEMINI_REQUEST_TIMEOUT_SECONDS:-120}
+    DOCS_GEMINI_EMBEDDING_MODEL: ${DOCS_GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
+    DOCS_GEMINI_EMBEDDING_DIMENSIONS: ${DOCS_GEMINI_EMBEDDING_DIMENSIONS:-384}
+    DOCS_GEMINI_LLM_MODEL: ${DOCS_GEMINI_LLM_MODEL:-gemini-2.5-flash}
+    DOCS_LOCAL_EMBEDDING_MODEL: ${DOCS_LOCAL_EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+    DOCS_LOCAL_EMBEDDING_DIMENSIONS: ${DOCS_LOCAL_EMBEDDING_DIMENSIONS:-384}
+    DOCS_LOCAL_LLM_MODEL_PATH: ${DOCS_LOCAL_LLM_MODEL_PATH:-/app/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf}
+    DOCS_LOCAL_LLM_CONTEXT_TOKENS: ${DOCS_LOCAL_LLM_CONTEXT_TOKENS:-2048}
+    DOCS_LOCAL_LLM_THREADS: ${DOCS_LOCAL_LLM_THREADS:-2}
+    DOCS_LOCAL_LLM_BATCH_SIZE: ${DOCS_LOCAL_LLM_BATCH_SIZE:-512}
+    DOCS_LOCAL_LLM_GPU_LAYERS: ${DOCS_LOCAL_LLM_GPU_LAYERS:--1}
+    DOCS_REDIS_HOST: ${DOCS_REDIS_HOST:-redis}
+    DOCS_REDIS_PORT: ${DOCS_REDIS_PORT:-6580}
+    DOCS_REDIS_DB: ${DOCS_REDIS_DB:-0}
+    DOCS_REDIS_PASSWORD: ${DOCS_REDIS_PASSWORD:-${REDIS_PASSWORD:-}}
+    DOCS_REDIS_CONNECT_TIMEOUT_SECONDS: ${DOCS_REDIS_CONNECT_TIMEOUT_SECONDS:-1}
+    DOCS_REDIS_SOCKET_TIMEOUT_SECONDS: ${DOCS_REDIS_SOCKET_TIMEOUT_SECONDS:-1}
+  command: ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8001"]
   ports:
-    - "${API_PORT:-8080}:8000"
+    - "${API_PORT:-8001}:8001"
   volumes:
     - ../../docs:/app/corpus:ro
     - ${MODELS_DIR_HOST:-./models}:/app/models
@@ -63,7 +83,7 @@ x-docs-vector-search: &docs-vector-search
       - CMD
       - python
       - -c
-      - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)
+      - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)
     interval: 30s
     timeout: 5s
     retries: 3
@@ -78,5 +98,5 @@ services:
   docs-vector-search-gpu:
     <<: *docs-vector-search
     profiles: ["gpu"]
-    container_name: ${CONTAINER_NAME:-docs-vector-search}
+    container_name: ${GPU_CONTAINER_NAME:-docs-vector-search-gpu}
     gpus: all

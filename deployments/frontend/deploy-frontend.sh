@@ -43,7 +43,7 @@ SSO_LOGIN="$(tfval sso_login "$ovl")"; SSO_LOGIN="${SSO_LOGIN:-false}"
 # from the "docs" box's private fixed_ip below. docs_site_base is where citations link.
 DOCS_SEARCH_URL="$(tfval docs_search_url "$ovl")"
 DOCS_SEARCH_KEY="$(tfval docs_search_server_key "$ovl")"; DOCS_SEARCH_KEY="${DOCS_SEARCH_KEY:-docs}"
-DOCS_SEARCH_PORT="$(tfval docs_search_port "$ovl")"; DOCS_SEARCH_PORT="${DOCS_SEARCH_PORT:-8000}"
+DOCS_SEARCH_PORT="$(tfval docs_search_port "$ovl")"; DOCS_SEARCH_PORT="${DOCS_SEARCH_PORT:-8001}"
 DOCS_SITE_BASE="$(tfval docs_site_base "$ovl")"; DOCS_SITE_BASE="${DOCS_SITE_BASE:-https://leo-cdp.github.io/leo-customer360}"
 DOCS_PROXY_TIMEOUT_SECONDS="${DOCS_PROXY_TIMEOUT_SECONDS:-120}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"

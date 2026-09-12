@@ -3,6 +3,7 @@ fastembed>=0.4            # ONNX embeddings (e5-small) + TextCrossEncoder rerank
 llama-cpp-python>=0.3     # CPU GGUF generation (Qwen2.5-0.5B-Instruct)
 psycopg[binary]>=3.2      # vDB (PostgreSQL) client
 pgvector>=0.3             # pgvector adapter for psycopg
+redis>=5.0                 # distributed request limiting
 fastapi>=0.110
 uvicorn[standard]>=0.29
 python-frontmatter>=1.1
