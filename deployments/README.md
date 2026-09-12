@@ -365,7 +365,7 @@ flowchart TB
 | Dagster | backend box `10.100.1.4` | 3000 | backend-system worker |
 | Portainer agent | backend `10.100.1.4` + tracking `10.100.1.8` | 9001 | `c360-portainer-agent`; lets the api-box Portainer manage these boxes too (private VPC, reached from `10.100.1.5`); registered as Portainer environments |
 | data-tracking-api | tracking box `10.100.1.8` | 8010 | FastAPI event ingestion on its own dedicated `s-general-1x2` box, run as **N auto-load-balanced replicas** (uat 3 / prod 5, `TRACKING_REPLICAS`) on a private docker bridge behind a local **nginx** LB that owns `:8010` (least_conn round-robin); publishes dynamic batches to the shared Redis Streams consumer group and writes NDJSON asynchronously to vStorage/S3; rate-limit + session state remains fail-open, but Redis is required for durable enqueue; OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
-| docs-vector-search | docs box `10.100.1.7` | 8001 | AI docs Q&A — **local-model RAG**: `paraphrase-multilingual-MiniLM-L12-v2` embed (384-dim, VN+EN) + `bge-reranker-base` rerank + `Qwen2.5-0.5B` GGUF generate; vectors in **pgvector** on the vDB (schema `rag`, table `doc_chunks`); its OWN `s-general-1x2` box; **not behind the LB** (reached via SSH/tunnel — no public route yet); deploy `server/deploy-docs-search.sh` (pull GHCR image → `enrich` on box → serve) |
+| docs-vector-search | docs box `10.100.1.7` | 8001 | AI docs Q&A — **local-model RAG**: `paraphrase-multilingual-MiniLM-L12-v2` embed (384-dim, VN+EN) + `bge-reranker-base` rerank + `Qwen2.5-0.5B` GGUF generate; vectors in **pgvector** on the vDB (schema `rag`, table `doc_chunks`); its OWN `s-general-2x4` box; **not behind the LB** (reached via SSH/tunnel — no public route yet); deploy `server/deploy-docs-search.sh` (pull GHCR image → start dedicated no-auth Redis for rate limiting on the same host network → `enrich` on box → serve) |
 | PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` + `leo_ads` + `rag` (pgvector, docs-vector-search) |
 
 ### Public endpoints — `beta.leocdp.com`
@@ -522,7 +522,7 @@ overlays but not yet provisioned.
 | Keycloak (SSO) | container on the api box | dedicated `c360-api-prod-sso` · `10.101.1.11` (2x4) |
 | frontend-admin + Caddy | on the api box | dedicated `c360-api-prod-frontend` · `10.101.1.12` (2x4) |
 | ads-server | container on the api box | dedicated `c360-api-prod-ads` · `10.101.1.13` (4x8) |
-| docs-vector-search | dedicated `c360-api-uat-docs` · `10.100.1.7` (s-general-1x2, 1 vCPU/2 GB) | dedicated `c360-api-prod-docs` (s2-general-2x4, 2 vCPU/4 GB) |
+| docs-vector-search | dedicated `c360-api-uat-docs` · `10.100.1.7` (s-general-2x4, 2 vCPU/4 GB) | dedicated `c360-api-prod-docs` (s2-general-2x4, 2 vCPU/4 GB) |
 | Redis / cache | container on the api box | **managed MemStore** `c360-redis-prod` (Redis 7, db 2x4), private |
 | PostgreSQL | managed vDB `10.100.1.3` | managed vDB `customer360-pg-prod` (PG 15, db 8x16) |
 | Image tag | `latest` / newest `sha-*` (tracks `main`) | pinned `vX.Y.Z` (a GitHub Release) |

@@ -5,6 +5,10 @@
 **Scope:** Add a documentation chat-bot ("Ask the Docs") agent to **`docs-site`** (public Quartz site) and **`frontend-admin`** (Customer 360 admin SPA), both consuming the RAG API served by **`tools/docs-vector-search`**.
 **Status:** Plan / design — no code written yet.
 
+> Historical note (2026-09-12): this plan contains pre-standardization examples that use
+> docs-search port `8000`. Current deployment defaults are `8001`, and docs-search now runs
+> a dedicated no-auth local Redis for rate limiting.
+
 > This is a build plan, not a review. It specifies the exact files to add/change in each of the
 > three components, the request/response contract, the two integration paths (public vs. proxied),
 > and the deployment + testing steps. Code snippets are illustrative and match the existing idioms

@@ -21,6 +21,9 @@ x-docs-vector-search: &docs-vector-search
     context: .
   image: leo-docs-vector-search:${IMAGE_TAG:-latest}
   restart: unless-stopped
+  depends_on:
+    docs-rate-limit-redis:
+      condition: service_healthy
   networks:
     - customer360-network
   env_file:
@@ -56,10 +59,10 @@ x-docs-vector-search: &docs-vector-search
     DOCS_LOCAL_LLM_THREADS: ${DOCS_LOCAL_LLM_THREADS:-2}
     DOCS_LOCAL_LLM_BATCH_SIZE: ${DOCS_LOCAL_LLM_BATCH_SIZE:-512}
     DOCS_LOCAL_LLM_GPU_LAYERS: ${DOCS_LOCAL_LLM_GPU_LAYERS:--1}
-    DOCS_REDIS_HOST: ${DOCS_REDIS_HOST:-redis}
+    DOCS_REDIS_HOST: ${DOCS_REDIS_HOST:-docs-rate-limit-redis}
     DOCS_REDIS_PORT: ${DOCS_REDIS_PORT:-6580}
     DOCS_REDIS_DB: ${DOCS_REDIS_DB:-0}
-    DOCS_REDIS_PASSWORD: ${DOCS_REDIS_PASSWORD:-${REDIS_PASSWORD:-}}
+    DOCS_REDIS_PASSWORD: ${DOCS_REDIS_PASSWORD:-}
     DOCS_REDIS_CONNECT_TIMEOUT_SECONDS: ${DOCS_REDIS_CONNECT_TIMEOUT_SECONDS:-1}
     DOCS_REDIS_SOCKET_TIMEOUT_SECONDS: ${DOCS_REDIS_SOCKET_TIMEOUT_SECONDS:-1}
   command: ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8001"]
@@ -90,6 +93,32 @@ x-docs-vector-search: &docs-vector-search
     start_period: 60s
 
 services:
+  docs-rate-limit-redis:
+    image: redis:7-alpine
+    container_name: ${DOCS_REDIS_CONTAINER_NAME:-docs-rate-limit-redis}
+    restart: unless-stopped
+    networks:
+      - customer360-network
+    command:
+      - redis-server
+      - --port
+      - "${DOCS_REDIS_PORT:-6580}"
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -p ${DOCS_REDIS_PORT:-6580} ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   docs-vector-search:
     <<: *docs-vector-search
     profiles: ["cpu"]

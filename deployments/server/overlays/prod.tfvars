@@ -32,7 +32,7 @@ servers = {
     # docs-vector-search (local-model RAG: e5 embed + bge rerank + Qwen 0.5B). Dedicated
     # box. gen-2's smallest tier is 2x4 (no 1x2), which also gives comfortable headroom
     # for the ~1.4 GB model set (reranker stays on). Deployed by
-    # deployments/server/deploy-docs-search.sh (pulls the GHCR image, runs enrich, serves :8000).
+    # deployments/server/deploy-docs-search.sh (pulls the GHCR image, runs enrich, serves :8001).
     flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB
     root_disk_size = 50
     name           = "docs" # -> c360-api-prod-docs
@@ -80,3 +80,10 @@ user_name = "leocdp360"
 
 # security_group is REQUIRED by the provider. Only the project "Default" secgroup exists.
 security_group = ["secg-7c1e85ec-8028-460a-8592-99463f198831"] # "Default"
+
+# Cross-box docs assistant hop. In prod, Caddy runs on the frontend box by default
+# (proxy/overlays/prod.tfvars caddy_server_key="frontend"), and forwards /docs-ai/*
+# to docs-vector-search on the docs box. Keep this in sync with docs_upstream.
+extra_ingress = [
+  { port = 8001, cidr = "10.101.1.12/32" }, # docs-vector-search <- frontend/caddy box private IP
+]

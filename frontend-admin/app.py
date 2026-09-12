@@ -83,7 +83,7 @@ STATIC_BASE = f"{FRONTEND_ROOT_PATH}/static"
 # The browser talks to a same-origin /ai/* proxy (see the routes below); we forward
 # to the tools/docs-vector-search service over the private network. This keeps the
 # docs box unexposed to the internet and sidesteps CORS entirely.
-DOCS_SEARCH_URL = os.getenv("DOCS_SEARCH_URL", "http://127.0.0.1:8000").rstrip("/")
+DOCS_SEARCH_URL = os.getenv("DOCS_SEARCH_URL", "http://127.0.0.1:8001").rstrip("/")
 DOCS_SEARCH_TIMEOUT = float(
     os.getenv("DOCS_PROXY_TIMEOUT_SECONDS") or os.getenv("DOCS_SEARCH_TIMEOUT", "120")
 )  # /ask is slow on 1 vCPU

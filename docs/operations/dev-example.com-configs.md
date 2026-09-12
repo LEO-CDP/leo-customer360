@@ -32,6 +32,9 @@ DOCS_SEARCH_URL=http://127.0.0.1:8001
 DOCS_SEARCH_TIMEOUT=120
 DOCS_LLM_MAX_OUTPUT_TOKENS=256
 DOCS_RERANK_ENABLED=true
+DOCS_REDIS_HOST=docs-rate-limit-redis
+DOCS_REDIS_PORT=6580
+DOCS_REDIS_PASSWORD=
 ```
 
 Start the local AI service together with the rest of the development stack:

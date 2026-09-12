@@ -5,6 +5,10 @@
 **Companion:** [`docs-chatbot-agent-implementation-plan.md`](docs-chatbot-agent-implementation-plan.md) (design + full file list).
 **Outcome:** ✅ Chatbot **live in UAT** for search + sources. ❌ Generated answers (`/ask`) blocked by a docs-box OOM (deferred). ⚠️ Deployment is a working-tree build — **not durable until PR #44 is merged**.
 
+> Historical note (2026-09-12): this report captures an earlier UAT state where docs-search
+> was exposed on port `8000`. Current deployment defaults are `8001`, with a dedicated no-auth
+> local Redis used for docs-search rate limiting.
+
 ---
 
 ## 1. Executive summary

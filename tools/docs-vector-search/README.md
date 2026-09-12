@@ -23,7 +23,7 @@ Provider seams (`src/providers.py`), all loaded lazily:
 - **embed** — OpenAI `text-embedding-3-small` by default; Gemini `gemini-embedding-001` or fastembed locally
 - **rerank** — OpenAI `gpt-4o-mini` in one batched request by default; local `BAAI/bge-reranker-base` via fastembed is available with `DOCS_RERANK_PROVIDER=local`
 - **generate** — OpenAI `gpt-5.6-luna` by default; Gemini `gemini-2.5-flash` or Qwen GGUF locally
-- **request limiting** — Redis-backed atomic IP and browser buckets shared across workers; `/ask` and `/search` run asynchronously around the blocking RAG work
+- **request limiting** — Redis-backed atomic IP and browser buckets shared across workers; local Docker runs a dedicated no-auth Redis service (`docs-rate-limit-redis`) for `/ask` and `/search`
 
 Vector store (`src/store.py`) — `rag.doc_chunks` table with a `vector(384)` column + HNSW cosine index.
 
@@ -88,5 +88,5 @@ curl -s localhost:8001/ask    -H 'content-type: application/json' -d '{"question
 - **OpenAI rerank safety:** candidate text is sent to the configured OpenAI-compatible endpoint as untrusted data and the response must contain exactly one finite score from 0 to 100 per candidate. The hosted call has its own short timeout (`DOCS_OPENAI_RERANK_TIMEOUT_SECONDS`, default 8 seconds), and the service never warms it at startup.
 - **e5 prefixes:** when a local e5 model is selected, `embed()` prepends `query:` / `passage:`. If a future fastembed version adds e5 prefixes itself, drop them here to avoid double-prefixing.
 - **RAM:** on a 1 vCPU / 2 GB box the vectors live in the vDB (off-box); local fastembed + reranker + Qwen can reach ≈ 1.4 GB resident — tight, may need swap. Hosted OpenAI/Gemini generation avoids the Qwen footprint. Drop the reranker (`DOCS_RERANK_ENABLED=false`) first if memory-constrained.
-- **Deploy (UAT/PROD vServer):** [`deployments/server/deploy-docs-search.sh`](../../deployments/server/deploy-docs-search.sh) — pulls the CI-built GHCR image onto the dedicated `docs` box, runs `enrich`, serves. Wired into CD as the `docs-search` step; the box is defined in [`deployments/server/overlays`](../../deployments/server/overlays).
-- **Local dev (Docker):** [`docker-compose.yml`](docker-compose.yml) here — `docker compose run --rm docs-vector-search python -m src.enrich`, then `docker compose up`.
+- **Deploy (UAT/PROD vServer):** [`deployments/server/deploy-docs-search.sh`](../../deployments/server/deploy-docs-search.sh) — pulls the CI-built GHCR image onto the dedicated `docs` box, starts a dedicated no-auth local Redis container for rate limiting (`customer360-docs-rate-limit-redis`), runs `enrich`, serves. Wired into CD as the `docs-search` step; the box is defined in [`deployments/server/overlays`](../../deployments/server/overlays).
+- **Local dev (Docker):** [`docker-compose.yml`](docker-compose.yml) here — includes a dedicated no-auth Redis service (`docs-rate-limit-redis`) on the same Docker network, so rate limiting works without shared stack credentials.

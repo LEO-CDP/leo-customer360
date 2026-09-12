@@ -24,7 +24,7 @@ name: CD
 # Required repo secrets:
 #   DEPLOY_SSH_KEY   private key for the deploy user on the VNG Cloud VMs
 #   DB_PASSWORD      -> TF_VAR_db_password    (read by the app deploy scripts)
-#   REDIS_PASSWORD   -> TF_VAR_redis_password (optional; cache stays off if unset)
+#   REDIS_PASSWORD   -> TF_VAR_redis_password (optional; used by API/tracking cache paths; docs-search uses dedicated no-auth local Redis)
 #   DOCS_OPENAI_API_KEY -> docs-vector-search OpenAI embeddings and LLM
 #   DOCS_INTERNAL_AUTH_SECRET -> shared secret for the frontend-admin /ai proxy (optional)
 #   VSTORAGE_ACCESS_KEY / VSTORAGE_SECRET_KEY -> S3/vStorage remote-state creds AND

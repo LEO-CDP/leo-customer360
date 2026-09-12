@@ -36,7 +36,7 @@ servers = {
     # docs-vector-search (local-model RAG: e5 embed + bge rerank + Qwen 0.5B, ~1.4 GB
     # resident). Its OWN box so the model footprint can't starve the shared api box.
     # Deployed by deployments/server/deploy-docs-search.sh (pulls the GHCR image, runs
-    # enrich, then serves :8000). 2 GB is tight — the deploy script adds a swapfile;
+    # enrich, then serves :8001). 2 GB is tight — the deploy script adds a swapfile;
     # set docs_rerank_enabled=false in that overlay to shed ~300 MB if it OOMs.
     flavor_name    = "s-general-2x4" # 2 vCPU / 4 GB — resized so Qwen /ask generation fits (1x2 OOM-killed uvicorn). In-place change (0 destroy), reboots the box.
     root_disk_size = 20
@@ -100,7 +100,7 @@ ssh_ingress_cidr = "0.0.0.0/0" # <-- change to "<your-public-ip>/32"
 extra_ingress = [
   { port = 9001, cidr = "10.100.1.5/32" }, # Portainer agent   <- api box (Portainer)
   { port = 8010, cidr = "10.100.1.5/32" }, # data-tracking-api <- api box (Caddy /data)
-  { port = 8000, cidr = "10.100.1.5/32" }, # docs-vector-search <- api box (frontend-admin /ai proxy). Only the docs box listens on 8000.
+  { port = 8001, cidr = "10.100.1.5/32" }, # docs-vector-search <- api box (frontend-admin /ai proxy). Only the docs box listens on 8001.
   { port = 6580, cidr = "10.100.1.8/32" }, # api-box Redis      <- tracking box (rate-limit + session cache)
   { port = 4318, cidr = "10.100.1.8/32" }, # api-box Jaeger OTLP <- tracking box (request traces)
   { port = 4318, cidr = "10.100.1.7/32" }, # api-box Jaeger OTLP <- docs box (docs-vector-search request traces)
