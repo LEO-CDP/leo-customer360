@@ -316,6 +316,11 @@ load_docs_provider_env() {
     value="${line#*=}"
     export "$key=$value"
   done < "$DOCS_SEARCH_ENV_FILE"
+
+  # docs-search owns its local limiter Redis; do not inherit the authenticated
+  # customer360 cache settings from the root .env.
+  export DOCS_REDIS_HOST=docs-rate-limit-redis
+  export DOCS_REDIS_PASSWORD=
 }
 
 validate_docs_provider_credentials() {
