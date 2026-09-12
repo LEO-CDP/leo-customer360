@@ -68,8 +68,26 @@ def test_openai_rerank_scores_all_passages_in_one_request(monkeypatch):
     assert scores == [91.0, 4.0]
     assert calls[0][0] == "chat/completions"
     assert calls[0][1]["model"] == "gpt-4o-mini"
+    assert calls[0][1]["response_format"] == {"type": "json_object"}
     assert "[0]\nCIR definition" in calls[0][1]["messages"][1]["content"]
     assert "[1]\ndeployment notes" in calls[0][1]["messages"][1]["content"]
+
+
+def test_openai_rerank_accepts_content_parts(monkeypatch):
+    def fake_request(path, payload, **kwargs):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": [{"type": "text", "text": '{"scores": [80]}'}]
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(providers, "_openai_request", fake_request)
+
+    assert providers._openai_rerank("query", ["passage"]) == [80.0]
 
 
 def test_openai_rerank_failure_preserves_vector_order_by_default(monkeypatch):
