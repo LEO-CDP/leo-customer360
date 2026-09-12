@@ -204,6 +204,7 @@ jobs:
         with:
           context: ${{ matrix.service == 'postgres' && '.' || (matrix.service == 'docs-vector-search' && './tools/docs-vector-search') || format('./{0}', matrix.service) }}
           file: ${{ matrix.service == 'docs-vector-search' && './tools/docs-vector-search/Dockerfile' || format('./{0}/Dockerfile', matrix.service) }}
+          target: ${{ matrix.service == 'docs-vector-search' && 'hosted' || '' }}
           # Push on the default branch and on release tags; build-only elsewhere.
           push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}

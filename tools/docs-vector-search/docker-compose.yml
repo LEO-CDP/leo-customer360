@@ -19,6 +19,7 @@ networks:
 x-docs-vector-search: &docs-vector-search
   build:
     context: .
+    target: ${DOCS_IMAGE_TARGET:-hosted}
   image: leo-docs-vector-search:${IMAGE_TAG:-latest}
   restart: unless-stopped
   depends_on:

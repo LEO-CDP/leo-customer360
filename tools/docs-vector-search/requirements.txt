@@ -1,6 +1,4 @@
-# Local-model Graph-RAG over pgvector. No hosted LLM.
-fastembed>=0.4            # ONNX embeddings (e5-small) + TextCrossEncoder reranker (bge)
-llama-cpp-python>=0.3     # CPU GGUF generation (Qwen2.5-0.5B-Instruct)
+# Hosted-provider RAG stack. Optional local-model packages are in requirements-local.txt.
 psycopg[binary]>=3.2      # vDB (PostgreSQL) client
 pgvector>=0.3             # pgvector adapter for psycopg
 redis>=5.0                 # distributed request limiting

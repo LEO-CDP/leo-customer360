@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Optional local embedding/reranking and GGUF generation providers.
+fastembed>=0.4
+llama-cpp-python>=0.3

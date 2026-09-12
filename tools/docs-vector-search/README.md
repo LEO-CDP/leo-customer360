@@ -31,6 +31,8 @@ Vector store (`src/store.py`) — `rag.doc_chunks` table with a `vector(384)` co
 
 - PostgreSQL 15 (the vDB) with the **`vector` extension** available (`enrich` runs `CREATE EXTENSION IF NOT EXISTS vector`).
 - Python 3.12; a C toolchain for `llama-cpp-python` only when using local Qwen generation.
+- The default Docker/CI image is the hosted-provider target and does not include local ML
+  packages or model weights. Set `DOCS_IMAGE_TARGET=local` for the optional offline image.
 - **Default run configuration:** `DOCS_EMBEDDING_PROVIDER=openai` and `DOCS_LLM_PROVIDER=openai`.
   Set `DOCS_OPENAI_API_KEY` in `.env` before running `enrich`, `/search`, or `/ask`.
 - Gemini mode requires `DOCS_GEMINI_API_KEY` when selected.
@@ -48,6 +50,7 @@ Provider configuration is explicit: use `DOCS_OPENAI_EMBEDDING_MODEL` and
 cd tools/docs-vector-search
 python -m venv .venv && . .venv/Scripts/activate
 pip install -r requirements.txt
+# Local providers only: pip install -r requirements-local.txt
 cp .env.example .env                 # set PG_* (the vDB) and the selected provider key
 # Default configuration: set DOCS_OPENAI_API_KEY in .env.
 
@@ -90,3 +93,6 @@ curl -s localhost:8001/ask    -H 'content-type: application/json' -d '{"question
 - **RAM:** on a 1 vCPU / 2 GB box the vectors live in the vDB (off-box); local fastembed + reranker + Qwen can reach ≈ 1.4 GB resident — tight, may need swap. Hosted OpenAI/Gemini generation avoids the Qwen footprint. Drop the reranker (`DOCS_RERANK_ENABLED=false`) first if memory-constrained.
 - **Deploy (UAT/PROD vServer):** [`deployments/server/deploy-docs-search.sh`](../../deployments/server/deploy-docs-search.sh) — pulls the CI-built GHCR image onto the dedicated `docs` box, starts a dedicated no-auth local Redis container for rate limiting (`customer360-docs-rate-limit-redis`), runs `enrich`, serves. Wired into CD as the `docs-search` step; the box is defined in [`deployments/server/overlays`](../../deployments/server/overlays).
 - **Local dev (Docker):** [`docker-compose.yml`](docker-compose.yml) here — includes a dedicated no-auth Redis service (`docs-rate-limit-redis`) on the same Docker network, so rate limiting works without shared stack credentials.
+- **Docker image profiles:** `docker build --target hosted .` builds the small production image.
+  Set `DOCS_IMAGE_TARGET=local` before `docker compose build` to include fastembed,
+  llama-cpp-python, and the pre-baked embedding/reranking weights.

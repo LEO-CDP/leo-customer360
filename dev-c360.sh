@@ -389,8 +389,7 @@ upgrade_docs_service() {
   ensure_docs_env_file
   load_docs_provider_env
   validate_docs_provider_credentials
-  echo "⬆️  Refreshing docs-vector-search image..."
-  "${DOCS_DC_CMD[@]}" pull --ignore-pull-failures || true
+  echo "⬆️  Rebuilding docs-vector-search image from local source..."
   start_docs_service true
 }
 
@@ -447,8 +446,7 @@ fi
 
 if [ "$ACTION" = "upgrade" ]; then
   echo "⬆️  Upgrading local dev services with latest repo state (${COMPOSE_FILE})..."
-  echo "   - Pulling latest base images (non-fatal when some images are local-only)..."
-  "${DC_CMD[@]}" pull --ignore-pull-failures || true
+  echo "   - Reusing cached external images; Compose will pull only missing images..."
   echo "   - Rebuilding and force-recreating containers without deleting volumes..."
   "${DC_CMD[@]}" up -d --build --force-recreate
 else

@@ -12,7 +12,8 @@
 #
 # Target box = servers["$DOCS_SERVER_KEY"] (default "docs"), defined in overlays/<env>.tfvars
 # and provisioned by this module's deploy.sh (apply). Overrides (env):
-#   BASTION_USER / SSH_KEY / DOCS_SERVER_KEY / DOCS_PORT / IMAGE_TAG / BUILD_LOCAL
+#   BASTION_USER / SSH_KEY / DOCS_SERVER_KEY / DOCS_PORT / IMAGE_TAG / BUILD_LOCAL /
+#   DOCS_IMAGE_TARGET (hosted|local; used with BUILD_LOCAL=1)
 #   DOCS_EMBEDDING_PROVIDER / DOCS_LLM_PROVIDER / DOCS_*_EMBEDDING_* /
 #   DOCS_*_LLM_* / DOCS_RERANK_ENABLED / DOCS_RERANK_MODEL
 #   DOCS_PG_SCHEMA / DOCS_GGUF_URL
@@ -67,6 +68,22 @@ DOCS_LOCAL_LLM_CONTEXT_TOKENS="${DOCS_LOCAL_LLM_CONTEXT_TOKENS:-2048}"
 DOCS_LOCAL_LLM_THREADS="${DOCS_LOCAL_LLM_THREADS:-2}"
 DOCS_LOCAL_LLM_BATCH_SIZE="${DOCS_LOCAL_LLM_BATCH_SIZE:-512}"
 DOCS_LOCAL_LLM_GPU_LAYERS="${DOCS_LOCAL_LLM_GPU_LAYERS:--1}"
+DOCS_IMAGE_TARGET="${DOCS_IMAGE_TARGET:-}"
+if [[ -z "$DOCS_IMAGE_TARGET" ]]; then
+  case "$DOCS_EMBEDDING_PROVIDER:$DOCS_RERANK_PROVIDER:$DOCS_RERANK_OPENAI_FALLBACK:$DOCS_LLM_PROVIDER" in
+    *local*) DOCS_IMAGE_TARGET="local" ;;
+    *) DOCS_IMAGE_TARGET="hosted" ;;
+  esac
+fi
+case "$DOCS_IMAGE_TARGET" in
+  hosted | local) ;;
+  *) echo "ERROR: DOCS_IMAGE_TARGET must be 'hosted' or 'local'."; exit 1 ;;
+esac
+if [[ "$DOCS_IMAGE_TARGET" == "hosted" ]]; then
+  case "$DOCS_EMBEDDING_PROVIDER:$DOCS_RERANK_PROVIDER:$DOCS_RERANK_OPENAI_FALLBACK:$DOCS_LLM_PROVIDER" in
+    *local*) echo "ERROR: Local providers require DOCS_IMAGE_TARGET=local."; exit 1 ;;
+  esac
+fi
 DOCS_REDIS_HOST="${DOCS_REDIS_HOST:-127.0.0.1}"
 DOCS_REDIS_PORT="${DOCS_REDIS_PORT:-6580}"
 DOCS_REDIS_DB="${DOCS_REDIS_DB:-0}"
@@ -153,6 +170,10 @@ else
   DEPLOY_MODE="ghcr"
   IMAGE="$(image_ref "$SERVICE" "$(resolve_tag "overlays/$ENV.tfvars")")"
   echo ">> Image: $IMAGE   (pull from GHCR; BUILD_LOCAL=1 to build on the VM)"
+fi
+if [[ "$DEPLOY_MODE" == "ghcr" && "$DOCS_IMAGE_TARGET" == "local" ]]; then
+  echo "ERROR: CI publishes the hosted docs-search image only. Use BUILD_LOCAL=1 for local providers."
+  exit 1
 fi
 
 # --- ship the corpus (docs/**) so enrich can chunk + embed it on the box ---
@@ -297,7 +318,8 @@ if [ "$DEPLOY_MODE" = "ghcr" ]; then
   RUN_IMG="$IMAGE"
 else
   sed -i 's/ --mount=[^ ]*//g' /opt/c360/tools/docs-vector-search/Dockerfile 2>/dev/null || true
-  sudo docker build -t customer360-docs-vector-search-local /opt/c360/tools/docs-vector-search
+  sudo docker build --target "$DOCS_IMAGE_TARGET" \
+    -t customer360-docs-vector-search-local /opt/c360/tools/docs-vector-search
   RUN_IMG="customer360-docs-vector-search-local"
 fi
 
