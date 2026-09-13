@@ -30,7 +30,7 @@ answer model and returns the exact context and sources used.
 
 Provider seams (`src/providers.py`), with local models loaded lazily:
 - **embed** — OpenAI `text-embedding-3-small` by default; Gemini `gemini-embedding-001` or fastembed locally
-- **rerank** — OpenAI `gpt-4o-mini` in one batched request by default; local `BAAI/bge-reranker-base` via fastembed is available with `DOCS_RERANK_PROVIDER=local`
+- **rerank** — OpenAI `gpt-5-nano` in one batched request by default; local `BAAI/bge-reranker-base` via fastembed is available with `DOCS_RERANK_PROVIDER=local`
 - **generate** — OpenAI `gpt-5.6-luna` by default; Gemini `gemini-2.5-flash` or Qwen GGUF locally
 - **request limiting** — Redis-backed atomic IP and browser sliding-window buckets shared across workers; local Docker runs a dedicated no-auth Redis service (`docs-rate-limit-redis`) for `/ask` and `/search`
 
@@ -100,7 +100,7 @@ curl -s localhost:8001/ask    -H 'content-type: application/json' -d '{"question
 | `GET /health` | — | loaded chunk count and active provider/model configuration |
 
 `question` and `query` are limited to 2,000 characters by default. `top_n` is capped at
-50 and `top_k` at 20; the defaults are `top_n = 50`, `top_k = 5`. Both `/ask` and `/search`
+50 and `top_k` at 20; the defaults are `top_n = 40`, `top_k = 8`, with 5 chunks sent to the generator. Both `/ask` and `/search`
 are protected by the Redis limiter unless a valid `X-Internal-Auth` secret is configured
 for a trusted internal caller. CORS uses an exact origin allow-list and does not enable
 credentials. The API does not expose an unauthenticated wildcard CORS policy.
