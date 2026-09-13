@@ -117,7 +117,8 @@ RERANK_TOP_K=5
 
 # Generation provider selection
 DOCS_LLM_PROVIDER=openai         # openai | gemini | local
-DOCS_LLM_MAX_OUTPUT_TOKENS=256
+DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS=1024
+DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS=512
 DOCS_OPENAI_LLM_MODEL=gpt-5.6-luna
 DOCS_OPENAI_API_KEY=...           # secret
 DOCS_OPENAI_API_BASE_URL=https://api.openai.com/v1

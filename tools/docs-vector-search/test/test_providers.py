@@ -33,7 +33,7 @@ def test_gemini_generation_maps_system_instruction_and_answer(monkeypatch):
     monkeypatch.setattr(providers, "_gemini_request", fake_request)
     monkeypatch.setattr(providers, "LLM_PROVIDER", "gemini")
     monkeypatch.setattr(providers, "GEMINI_LLM_MODEL", "gemini-test-model")
-    monkeypatch.setattr(providers, "DOCS_LLM_MAX_OUTPUT_TOKENS", 17)
+    monkeypatch.setattr(providers, "DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS", 17)
 
     answer = providers.generate("system rules", "user question")
 
@@ -98,3 +98,74 @@ def test_openai_rerank_failure_preserves_vector_order_by_default(monkeypatch):
     )
 
     assert providers.rerank("query", ["first", "second"]) == [0.0, 0.0]
+
+
+def test_openai_generation_retries_empty_completion_and_accepts_content_parts(monkeypatch):
+    calls = []
+    responses = [
+        {
+            "choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+            "usage": {"completion_tokens": 256},
+        },
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "Grounded "},
+                            {"type": "text", "text": "answer."},
+                        ]
+                    },
+                    "finish_reason": "stop",
+                }
+            ]
+        },
+    ]
+
+    def fake_request(path, payload, **kwargs):
+        calls.append((path, payload))
+        return responses.pop(0)
+
+    monkeypatch.setattr(providers, "_openai_request", fake_request)
+    monkeypatch.setattr(providers, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(providers, "OPENAI_LLM_MODEL", "gpt-5.6-luna")
+    monkeypatch.setattr(providers, "DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS", 256)
+
+    assert providers.generate("rules", "question") == "Grounded answer."
+    assert calls[0][1]["max_completion_tokens"] == 1024
+    assert calls[1][1]["max_completion_tokens"] == 2048
+
+
+def test_openai_generation_never_returns_blank_answer(monkeypatch):
+    def fake_request(path, payload, **kwargs):
+        return {
+            "choices": [{"message": {"content": ""}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 0},
+        }
+
+    monkeypatch.setattr(providers, "_openai_request", fake_request)
+    monkeypatch.setattr(providers, "LLM_PROVIDER", "openai")
+    monkeypatch.setattr(providers, "OPENAI_LLM_MODEL", "gpt-5.6-luna")
+
+    try:
+        providers.generate("rules", "question")
+    except RuntimeError as exc:
+        assert "no visible answer" in str(exc)
+    else:
+        raise AssertionError("blank generation was returned to the caller")
+
+
+def test_local_generation_uses_the_safe_qwen_output_budget(monkeypatch):
+    calls = []
+
+    class FakeModel:
+        def create_chat_completion(self, **kwargs):
+            calls.append(kwargs)
+            return {"choices": [{"message": {"content": "Local answer."}}]}
+
+    monkeypatch.setattr(providers, "LLM_PROVIDER", "local")
+    monkeypatch.setattr(providers, "DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS", 512)
+    monkeypatch.setattr(providers, "_llm", lambda: FakeModel())
+
+    assert providers.generate("rules", "question") == "Local answer."
+    assert calls[0]["max_tokens"] == 512
