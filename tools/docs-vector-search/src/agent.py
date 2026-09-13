@@ -11,6 +11,8 @@ from . import store
 from .config import (
     CONTEXT_CHAR_BUDGET,
     DOCS_RERANK_ENABLED,
+    FINAL_CONTEXT_TOP_K,
+    RERANK_CANDIDATES,
     RERANK_TOP_K,
     RETRIEVE_TOP_N,
 )
@@ -56,14 +58,16 @@ def retrieve(question: str, conn, top_n: int = RETRIEVE_TOP_N) -> list[dict]:
     """Embed the query → pgvector top-N → rerank (if enabled). Shared by /ask and /search."""
     hits = store.search(conn, embed([question], task="query")[0], top_n)
     if DOCS_RERANK_ENABLED and hits:
-        for h, s in zip(hits, rerank(question, [h["text"] for h in hits])):
+        candidates = hits[:RERANK_CANDIDATES]
+        for h, s in zip(candidates, rerank(question, [h["text"] for h in candidates])):
             h["rerank"] = s
-        hits.sort(key=lambda h: h["rerank"], reverse=True)
+        ranked = sorted(candidates, key=lambda h: h["rerank"], reverse=True)
+        hits[: len(ranked)] = ranked
     return hits
 
 
 def query(question: str, conn, top_n: int = RETRIEVE_TOP_N, top_k: int = RERANK_TOP_K) -> dict:
-    hits = retrieve(question, conn, top_n)[:top_k]
+    hits = retrieve(question, conn, top_n)[: min(top_k, FINAL_CONTEXT_TOP_K)]
     user_msg = (
         f"{_CTX_OPEN}\n{_fence(_build_context(hits))}\n{_CTX_CLOSE}\n\n"
         f"{_Q_OPEN}\n{_fence(question)}\n{_Q_CLOSE}"

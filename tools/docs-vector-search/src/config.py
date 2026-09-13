@@ -92,7 +92,7 @@ LOCAL_LLM_MODEL_PATH = os.getenv(
     str(MODELS_DIR / "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"),
 )
 OPENAI_LLM_MODEL = os.getenv("DOCS_OPENAI_LLM_MODEL", "gpt-5.6-luna")
-OPENAI_RERANK_MODEL = os.getenv("DOCS_OPENAI_RERANK_MODEL", "gpt-4o-mini")
+OPENAI_RERANK_MODEL = os.getenv("DOCS_OPENAI_RERANK_MODEL", "gpt-5-nano")
 OPENAI_API_KEY = (
     os.getenv("DOCS_OPENAI_API_KEY", "")
 )
@@ -136,8 +136,10 @@ if DOCS_RERANK_OPENAI_FALLBACK not in {"local", "vector"}:
 # Vietnamese like "persona là gì vậy?") rank the right chunk at vector-position 20–50, so
 # a pool of 20 starved the reranker and the answer fell back to "I don't know". top_k (what
 # the generator reads) is unchanged — this only widens what the reranker can pick from.
-RETRIEVE_TOP_N = int(os.getenv("RETRIEVE_TOP_N", "50"))
-RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "5"))
+RETRIEVE_TOP_N = int(os.getenv("RETRIEVE_TOP_N", "40"))
+RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "40"))
+RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "8"))
+FINAL_CONTEXT_TOP_K = int(os.getenv("FINAL_CONTEXT_TOP_K", "5"))
 CONTEXT_CHAR_BUDGET = int(os.getenv("CONTEXT_CHAR_BUDGET", "6000"))  # small — 0.5B ctx
 
 # --- HTTP / browser access -------------------------------------------------------
