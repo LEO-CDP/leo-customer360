@@ -1,4 +1,4 @@
-"""FastAPI service — /ask, /search, /health. Models load once at startup; a DB
+"""FastAPI service — /ask, /search, /reindex, /health. Models load once at startup; a DB
 connection is opened per request (safe under the threadpool; low concurrency on 1 vCPU).
 
     uvicorn src.server:app --port 8001
@@ -16,6 +16,11 @@ from pydantic import BaseModel, Field
 
 from . import store
 from .agent import query, retrieve
+from .indexing import (
+    IndexingService,
+    ReindexInProgressError,
+    ReindexJobManager,
+)
 from .config import (
     CORS_ORIGINS,
     EMBED_PROVIDER,
@@ -26,6 +31,8 @@ from .config import (
     DOCS_RERANK_PROVIDER,
     GEMINI_EMBEDDING_MODEL,
     GEMINI_LLM_MODEL,
+    HYBRID_SEARCH_ENABLED,
+    INTERNAL_API_SECRET,
     LLM_PROVIDER,
     OPENAI_LLM_MODEL,
     OPENAI_EMBEDDING_MODEL,
@@ -69,6 +76,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="LEO Customer 360 — Document Vector Search", lifespan=lifespan)
 
+
+def _update_loaded_chunk_count(result) -> None:
+    app.state.doc_count = result.indexed_chunks
+
+
+reindex_jobs = ReindexJobManager(IndexingService(), on_completed=_update_loaded_chunk_count)
+
 # Browser access from the static docs site (cross-origin). Exact origins only; no
 # credentials, so we stay off the wildcard-with-credentials trap.
 app.add_middleware(
@@ -90,6 +104,14 @@ class AskRequest(BaseModel):
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=QUESTION_MAX_LEN)
     top_n: int = Field(RETRIEVE_TOP_N, ge=1, le=TOP_N_MAX)
+
+
+def _require_reindex_access(request: Request) -> None:
+    if not INTERNAL_API_SECRET or not limiter.is_internal(request):
+        raise HTTPException(
+            status_code=403,
+            detail="Reindex requires the configured X-Internal-Auth credential.",
+        )
 
 
 @app.get("/health")
@@ -115,6 +137,7 @@ def health():
         ) if DOCS_RERANK_ENABLED else None,
         "llm_provider": LLM_PROVIDER,
         "generator": generator,
+        "hybrid_search": HYBRID_SEARCH_ENABLED,
     }
 
 
@@ -144,3 +167,28 @@ async def ask(req: AskRequest, request: Request):
     result = await asyncio.to_thread(_query_sync, req.question, req.top_n, req.top_k)
     _log.info("/ask completed in %.2fs question_chars=%d sources=%d", time.perf_counter() - started, len(req.question), len(result["sources"]))
     return result
+
+
+@app.post("/reindex", status_code=202)
+async def reindex(request: Request):
+    """Start a protected asynchronous scan and reindex of the configured CORPUS_DIR."""
+    _require_reindex_access(request)
+    try:
+        job = await reindex_jobs.start()
+    except ReindexInProgressError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(exc), "job_id": exc.job_id},
+        ) from exc
+    _log.info("/reindex accepted job_id=%s", job.id)
+    return job.as_dict()
+
+
+@app.get("/reindex/{job_id}")
+async def reindex_status(job_id: str, request: Request):
+    """Return the status and result of a previously submitted reindex job."""
+    _require_reindex_access(request)
+    job = reindex_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Reindex job was not found.")
+    return job.as_dict()

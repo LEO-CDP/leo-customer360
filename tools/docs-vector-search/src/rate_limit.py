@@ -64,7 +64,7 @@ class RedisRequestLimiter:
             await self.client.ping()
 
     async def enforce(self, request: Request) -> None:
-        if not self.enabled or self._is_internal(request):
+        if not self.enabled or self.is_internal(request):
             return
         keys = [
             f"docs:ratelimit:ip:{self._digest(self._client_ip(request))}",
@@ -97,7 +97,7 @@ class RedisRequestLimiter:
         return hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()[:32]
 
     @staticmethod
-    def _is_internal(request: Request) -> bool:
+    def is_internal(request: Request) -> bool:
         supplied = request.headers.get("x-internal-auth", "")
         return bool(INTERNAL_API_SECRET and hmac.compare_digest(supplied, INTERNAL_API_SECRET))
 

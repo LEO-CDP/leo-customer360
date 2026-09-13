@@ -13,8 +13,23 @@ CREATE TABLE IF NOT EXISTS rag.doc_chunks (
     ordinal      int,
     content_hash text,
     text         text NOT NULL,
-    embedding    vector(384) NOT NULL   -- keep in sync with the selected provider's embedding dimensions
+    embedding    vector(384) NOT NULL,  -- keep in sync with the selected provider's embedding dimensions
+    search_vector tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('simple', coalesce(title, '')), 'A') ||
+        setweight(to_tsvector('simple', coalesce(heading, '')), 'B') ||
+        setweight(to_tsvector('simple', coalesce(text, '')), 'C')
+    ) STORED
 );
+
+ALTER TABLE rag.doc_chunks
+    ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('simple', coalesce(title, '')), 'A') ||
+        setweight(to_tsvector('simple', coalesce(heading, '')), 'B') ||
+        setweight(to_tsvector('simple', coalesce(text, '')), 'C')
+    ) STORED;
 
 CREATE INDEX IF NOT EXISTS doc_chunks_embed_idx
     ON rag.doc_chunks USING hnsw (embedding vector_cosine_ops);
+
+CREATE INDEX IF NOT EXISTS doc_chunks_search_idx
+    ON rag.doc_chunks USING gin (search_vector);
