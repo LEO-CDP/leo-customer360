@@ -141,6 +141,9 @@ RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "40"))
 RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "8"))
 FINAL_CONTEXT_TOP_K = int(os.getenv("FINAL_CONTEXT_TOP_K", "5"))
 CONTEXT_CHAR_BUDGET = int(os.getenv("CONTEXT_CHAR_BUDGET", "6000"))  # small — 0.5B ctx
+HYBRID_SEARCH_ENABLED = os.getenv("HYBRID_SEARCH_ENABLED", "true").lower() == "true"
+KEYWORD_SEARCH_TOP_N = int(os.getenv("KEYWORD_SEARCH_TOP_N", "80"))
+RRF_RANK_CONSTANT = int(os.getenv("RRF_RANK_CONSTANT", "60"))
 
 # --- HTTP / browser access -------------------------------------------------------
 # CORS allow-list for browsers calling this API directly (the static docs site on

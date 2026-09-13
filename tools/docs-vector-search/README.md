@@ -17,16 +17,22 @@ docs/ *.md
   ▼  upsert → pgvector on the vDB
 enrich.py
 
-question → embed → pgvector top-N → rerank → top-K context → grounded generation → answer + sources
+question → embed ─┬→ pgvector candidates ─┐
+                  └→ PostgreSQL FTS ──────┴→ RRF fusion → rerank → grounded generation
   agent.py / server.py
 ```
 
-`src.corpus` loads Markdown files recursively, preserves frontmatter titles and headings,
-and splits each section into overlapping word windows. `src.enrich` hashes each chunk,
+`src.corpus` scans `CORPUS_DIR` recursively and accepts only regular files with the exact
+lowercase `.md` extension. It parses those files into structural blocks, preserves frontmatter
+titles and full heading paths, and splits each section into overlapping windows without breaking tables,
+lists, or fenced code blocks. `src.enrich` hashes each chunk,
 embeds only changed chunks, upserts them into `rag.doc_chunks`, and prunes chunks removed
-from the corpus. Retrieval uses cosine similarity; reranking is optional. `/search` returns
-ranked chunks without generation, while `/ask` sends only the selected context to the
-answer model and returns the exact context and sources used.
+from the corpus. Retrieval combines semantic vector candidates with PostgreSQL full-text
+keyword candidates using reciprocal-rank fusion (RRF), then optionally reranks the merged
+pool. The FTS index uses the `simple` configuration so English and Vietnamese terms,
+including diacritics and product names, are indexed without English stop-word or stemming
+assumptions. `/search` returns ranked chunks without generation, while `/ask` sends only the
+selected context to the answer model and returns the exact context and sources used.
 
 Provider seams (`src/providers.py`), with local models loaded lazily:
 - **embed** — OpenAI `text-embedding-3-small` by default; Gemini `gemini-embedding-001` or fastembed locally
@@ -34,9 +40,10 @@ Provider seams (`src/providers.py`), with local models loaded lazily:
 - **generate** — OpenAI `gpt-5.6-luna` by default; Gemini `gemini-2.5-flash` or Qwen GGUF locally
 - **request limiting** — Redis-backed atomic IP and browser sliding-window buckets shared across workers; local Docker runs a dedicated no-auth Redis service (`docs-rate-limit-redis`) for `/ask` and `/search`
 
-Vector store (`src/store.py`) — `rag.doc_chunks` table with a provider-selected `vector(384)` column
-and HNSW cosine index. The default hosted OpenAI and Gemini configurations both request 384
-dimensions; local embeddings must also produce 384 dimensions.
+Document repository (`src/store.py`) — `rag.doc_chunks` has a provider-selected `vector(384)`
+column with an HNSW cosine index and a generated `tsvector` column with a GIN index. The
+default hosted OpenAI and Gemini configurations both request 384 dimensions; local embeddings
+must also produce 384 dimensions.
 
 ## Prerequisites
 
@@ -71,7 +78,7 @@ cp .env.example .env                 # set PG_* (the vDB) and the selected provi
 #   huggingface-cli download Qwen/Qwen2.5-0.5B-Instruct-GGUF \
 #     Qwen2.5-0.5B-Instruct-Q4_K_M.gguf --local-dir ./models
 
-python -m src.enrich                 # chunk → embed → upsert into pgvector
+python -m src.enrich                 # scan .md → chunk → embed → upsert into pgvector + FTS
 python -m src.enrich --dry-run       # report changes without writing the index
 python -m src.agent "How does identity resolution merge two profiles?"
 uvicorn src.server:app --port 8001
@@ -79,13 +86,17 @@ uvicorn src.server:app --port 8001
 curl -s localhost:8001/health
 curl -s localhost:8001/search -H 'content-type: application/json' -d '{"query":"tenant isolation"}'
 curl -s localhost:8001/ask    -H 'content-type: application/json' -d '{"question":"What is CIR?"}'
+# INTERNAL_API_SECRET must be configured for these administrative calls.
+curl -s -X POST localhost:8001/reindex -H "X-Internal-Auth: $INTERNAL_API_SECRET"
+# Use the returned job id to poll until status is completed or failed.
+curl -s localhost:8001/reindex/<job_id> -H "X-Internal-Auth: $INTERNAL_API_SECRET"
 ```
 
 ## Commands
 
 | Command | Does |
 |---------|------|
-| `python -m src.enrich` | chunk + embed changed chunks → upsert into pgvector; prune removed chunks (idempotent) |
+| `python -m src.enrich` | scan only `.md` files, chunk + embed changed chunks → upsert into pgvector/FTS; prune removed chunks (idempotent) |
 | `python -m src.enrich --dry-run` | report what would change, write nothing |
 | `python -m src.agent "…"` | one-shot question; or no args for a REPL |
 | `uvicorn src.server:app --host 0.0.0.0 --port 8001` | serve `/ask`, `/search`, `/health` |
@@ -97,6 +108,8 @@ curl -s localhost:8001/ask    -H 'content-type: application/json' -d '{"question
 |----------|------|---------|
 | `POST /ask` | `{question, top_n?, top_k?}` | grounded answer + cited sources |
 | `POST /search` | `{query, top_n?}` | reranked chunks (no generation) |
+| `POST /reindex` | no body; `X-Internal-Auth` required | `202` with an asynchronous job record |
+| `GET /reindex/{job_id}` | `X-Internal-Auth` required | job status, counts, and error/result |
 | `GET /health` | — | loaded chunk count and active provider/model configuration |
 
 `question` and `query` are limited to 2,000 characters by default. `top_n` is capped at
@@ -105,9 +118,17 @@ are protected by the Redis limiter unless a valid `X-Internal-Auth` secret is co
 for a trusted internal caller. CORS uses an exact origin allow-list and does not enable
 credentials. The API does not expose an unauthenticated wildcard CORS policy.
 
+`POST /reindex` scans the server's configured `CORPUS_DIR`, indexes only lowercase `.md`
+files, and runs asynchronously so it does not block the request worker. A second request while
+one job is queued or running returns `409` with the active `job_id`. Reindex is restricted to
+the configured `INTERNAL_API_SECRET`; the secret should be supplied only by a trusted backend
+client, never by browser JavaScript. Poll `GET /reindex/{job_id}` for `completed` or `failed`
+and inspect the returned counts.
+
 ## Notes
 
 - **Idempotent enrich:** a content hash per chunk skips unchanged chunks. A missing or empty corpus is rejected and cannot prune the existing index. Changing embedding provider/model/dimension requires a matching vector dimension and a full rebuild of `rag.doc_chunks`; vectors from different embedding models are not interchangeable, even at the same dimension.
+- **Hybrid retrieval:** `HYBRID_SEARCH_ENABLED=true` combines vector candidates with up to `KEYWORD_SEARCH_TOP_N` exact-term candidates. `RRF_RANK_CONSTANT` controls how quickly rank influence decays. Run `python -m src.enrich` once after deploying this version so existing rows receive the generated FTS values and GIN index.
 - **Independent providers:** `DOCS_EMBEDDING_PROVIDER` and `DOCS_LLM_PROVIDER` each accept `openai`, `gemini`, or `local`; reranking accepts `openai` or `local`. Provider names also accept `google`, `google_gemini`, and `google-gemini` as aliases for Gemini.
 - **Reranking:** OpenAI reranking makes one batched request for the complete candidate pool. Its response must contain exactly one finite score from 0 to 100 per candidate, in original order, and the request has an 8-second default timeout. If it fails, `DOCS_RERANK_OPENAI_FALLBACK=vector` preserves pgvector order without local BGE; set it to `local` when quality is preferred over latency. Local BGE is slower and is loaded only when selected.
 - **Grounding and prompt safety:** the answer agent fences retrieved documents and the user question as untrusted data, strips fence tokens, and instructs the generator to answer only from retrieved context. When the context is insufficient, it returns the documented exact "I don't know" response rather than using outside knowledge.

@@ -1,4 +1,4 @@
-"""RAG agent: embed query → pgvector top-N → rerank → grounded answer + sources.
+"""RAG application service: hybrid retrieve → rerank → grounded answer + sources.
 
   python -m src.agent "How does identity resolution merge two profiles?"
   python -m src.agent                    # interactive REPL
@@ -6,16 +6,21 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from . import store
 from .config import (
     CONTEXT_CHAR_BUDGET,
     DOCS_RERANK_ENABLED,
     FINAL_CONTEXT_TOP_K,
+    HYBRID_SEARCH_ENABLED,
+    KEYWORD_SEARCH_TOP_N,
     RERANK_CANDIDATES,
     RERANK_TOP_K,
     RETRIEVE_TOP_N,
 )
+from .store import DocumentChunkRepository
 from .providers import embed, generate, rerank
 
 ANSWER_SYSTEM = (
@@ -54,41 +59,72 @@ def _build_context(hits: list[dict], budget: int = CONTEXT_CHAR_BUDGET) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
-def retrieve(question: str, conn, top_n: int = RETRIEVE_TOP_N) -> list[dict]:
-    """Embed the query → pgvector top-N → rerank (if enabled). Shared by /ask and /search."""
-    hits = store.search(conn, embed([question], task="query")[0], top_n)
-    if DOCS_RERANK_ENABLED and hits:
+@dataclass
+class RagAgent:
+    """Application service for hybrid retrieval, grounding, and answer generation."""
+
+    repository: DocumentChunkRepository
+    embedder: Callable = embed
+    generator: Callable = generate
+    reranker: Callable = rerank
+    hybrid_enabled: bool = HYBRID_SEARCH_ENABLED
+    keyword_top_n: int = KEYWORD_SEARCH_TOP_N
+
+    def retrieve(self, question: str, top_n: int = RETRIEVE_TOP_N) -> list[dict]:
+        query_vector = self.embedder([question], task="query")[0]
+        if self.hybrid_enabled:
+            hits = self.repository.retrieve(question, query_vector, top_n, self.keyword_top_n)
+        else:
+            hits = self.repository.vector_search(query_vector, top_n)
+        if not DOCS_RERANK_ENABLED or not hits:
+            return hits
+
         candidates = hits[:RERANK_CANDIDATES]
-        for h, s in zip(candidates, rerank(question, [h["text"] for h in candidates])):
-            h["rerank"] = s
-        ranked = sorted(candidates, key=lambda h: h["rerank"], reverse=True)
+        scores = self.reranker(question, [hit["text"] for hit in candidates])
+        for hit, score in zip(candidates, scores):
+            hit["rerank"] = score
+        ranked = sorted(candidates, key=lambda hit: hit["rerank"], reverse=True)
         hits[: len(ranked)] = ranked
-    return hits
+        return hits
+
+    def answer(
+        self,
+        question: str,
+        top_n: int = RETRIEVE_TOP_N,
+        top_k: int = RERANK_TOP_K,
+    ) -> dict:
+        hits = self.retrieve(question, top_n)[: min(top_k, FINAL_CONTEXT_TOP_K)]
+        user_msg = (
+            f"{_CTX_OPEN}\n{_fence(_build_context(hits))}\n{_CTX_CLOSE}\n\n"
+            f"{_Q_OPEN}\n{_fence(question)}\n{_Q_CLOSE}"
+        )
+        answer = self.generator(ANSWER_SYSTEM, user_msg)
+        return {
+            "answer": answer,
+            # The generator sees these exact contexts, which keeps evaluation honest.
+            "contexts": [hit["text"] for hit in hits],
+            "sources": [
+                {"path": hit["path"], "title": hit["title"], "heading": hit["heading"]}
+                for hit in hits
+            ],
+        }
+
+
+def retrieve(question: str, conn, top_n: int = RETRIEVE_TOP_N) -> list[dict]:
+    """Compatibility wrapper for callers that have a database connection."""
+    return RagAgent(DocumentChunkRepository(conn)).retrieve(question, top_n)
 
 
 def query(question: str, conn, top_n: int = RETRIEVE_TOP_N, top_k: int = RERANK_TOP_K) -> dict:
-    hits = retrieve(question, conn, top_n)[: min(top_k, FINAL_CONTEXT_TOP_K)]
-    user_msg = (
-        f"{_CTX_OPEN}\n{_fence(_build_context(hits))}\n{_CTX_CLOSE}\n\n"
-        f"{_Q_OPEN}\n{_fence(question)}\n{_Q_CLOSE}"
-    )
-    answer = generate(ANSWER_SYSTEM, user_msg)
-    return {
-        "answer": answer,
-        # The chunk texts the generator actually saw — exposed so evaluation (RAGAS
-        # faithfulness / context metrics) scores the same context the answer used.
-        "contexts": [h["text"] for h in hits],
-        "sources": [
-            {"path": h["path"], "title": h["title"], "heading": h["heading"]} for h in hits
-        ],
-    }
+    """Compatibility wrapper for the public /ask flow."""
+    return RagAgent(DocumentChunkRepository(conn)).answer(question, top_n, top_k)
 
 
 def main() -> None:
     conn = store.connect()
 
     def ask(q: str) -> None:
-        result = query(q, conn)
+        result = RagAgent(DocumentChunkRepository(conn)).answer(q)
         print("\n" + result["answer"] + "\n\nSources:")
         for s in result["sources"]:
             print(f"  - {s['title']} — {s['heading']}  ({s['path']})")
