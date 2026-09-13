@@ -256,6 +256,7 @@ API_PORT=${DOCS_SEARCH_HOST_PORT}
 # DEFAULT RUN CONFIGURATION: OpenAI is selected for embeddings and generation.
 # Set DOCS_OPENAI_API_KEY before running enrich, /search, or /ask.
 DOCS_RERANK_ENABLED=${DOCS_RERANK_ENABLED:-true}
+DOCS_RERANK_PROVIDER=${DOCS_RERANK_PROVIDER:-openai}
 DOCS_RERANK_MODEL=${DOCS_RERANK_MODEL:-BAAI/bge-reranker-base}
 DOCS_LLM_MAX_OUTPUT_TOKENS=${DOCS_LLM_MAX_OUTPUT_TOKENS:-256}
 DOCS_EMBEDDING_PROVIDER=${DOCS_EMBEDDING_PROVIDER:-openai}
@@ -267,7 +268,10 @@ DOCS_OPENAI_API_BASE_URL=${DOCS_OPENAI_API_BASE_URL:-https://api.openai.com/v1}
 DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS=${DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS:-120}
 DOCS_OPENAI_EMBEDDING_MODEL=${DOCS_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
 DOCS_OPENAI_EMBEDDING_DIMENSIONS=${DOCS_OPENAI_EMBEDDING_DIMENSIONS:-384}
+DOCS_OPENAI_RERANK_MODEL=${DOCS_OPENAI_RERANK_MODEL:-gpt-4o-mini}
+DOCS_OPENAI_RERANK_TIMEOUT_SECONDS=${DOCS_OPENAI_RERANK_TIMEOUT_SECONDS:-8}
 DOCS_OPENAI_LLM_MODEL=${DOCS_OPENAI_LLM_MODEL:-gpt-5.6-luna}
+DOCS_RERANK_OPENAI_FALLBACK=${DOCS_RERANK_OPENAI_FALLBACK:-vector}
 # Optional Gemini embedding and LLM settings.
 DOCS_GEMINI_API_KEY=${DOCS_GEMINI_API_KEY:-}
 DOCS_GEMINI_API_BASE_URL=${DOCS_GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
@@ -297,10 +301,10 @@ TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-1}
 TOP_N_MAX=${TOP_N_MAX:-50}
 TOP_K_MAX=${TOP_K_MAX:-20}
 QUESTION_MAX_LEN=${QUESTION_MAX_LEN:-2000}
-DOCS_REDIS_HOST=${DOCS_REDIS_HOST:-redis}
+DOCS_REDIS_HOST=${DOCS_REDIS_HOST:-docs-rate-limit-redis}
 DOCS_REDIS_PORT=${DOCS_REDIS_PORT:-6580}
 DOCS_REDIS_DB=${DOCS_REDIS_DB:-0}
-DOCS_REDIS_PASSWORD=${DOCS_REDIS_PASSWORD:-${REDIS_PASSWORD:-}}
+DOCS_REDIS_PASSWORD=${DOCS_REDIS_PASSWORD:-}
 DOCS_REDIS_CONNECT_TIMEOUT_SECONDS=${DOCS_REDIS_CONNECT_TIMEOUT_SECONDS:-1}
 DOCS_REDIS_SOCKET_TIMEOUT_SECONDS=${DOCS_REDIS_SOCKET_TIMEOUT_SECONDS:-1}
 INTERNAL_API_SECRET=${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-}}
@@ -316,6 +320,11 @@ load_docs_provider_env() {
     value="${line#*=}"
     export "$key=$value"
   done < "$DOCS_SEARCH_ENV_FILE"
+
+  # docs-search owns its local limiter Redis; do not inherit the authenticated
+  # customer360 cache settings from the root .env.
+  export DOCS_REDIS_HOST=docs-rate-limit-redis
+  export DOCS_REDIS_PASSWORD=
 }
 
 validate_docs_provider_credentials() {
@@ -380,8 +389,7 @@ upgrade_docs_service() {
   ensure_docs_env_file
   load_docs_provider_env
   validate_docs_provider_credentials
-  echo "⬆️  Refreshing docs-vector-search image..."
-  "${DOCS_DC_CMD[@]}" pull --ignore-pull-failures || true
+  echo "⬆️  Rebuilding docs-vector-search image from local source..."
   start_docs_service true
 }
 
@@ -438,8 +446,7 @@ fi
 
 if [ "$ACTION" = "upgrade" ]; then
   echo "⬆️  Upgrading local dev services with latest repo state (${COMPOSE_FILE})..."
-  echo "   - Pulling latest base images (non-fatal when some images are local-only)..."
-  "${DC_CMD[@]}" pull --ignore-pull-failures || true
+  echo "   - Reusing cached external images; Compose will pull only missing images..."
   echo "   - Rebuilding and force-recreating containers without deleting volumes..."
   "${DC_CMD[@]}" up -d --build --force-recreate
 else

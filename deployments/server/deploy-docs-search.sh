@@ -12,10 +12,13 @@
 #
 # Target box = servers["$DOCS_SERVER_KEY"] (default "docs"), defined in overlays/<env>.tfvars
 # and provisioned by this module's deploy.sh (apply). Overrides (env):
-#   BASTION_USER / SSH_KEY / DOCS_SERVER_KEY / DOCS_PORT / IMAGE_TAG / BUILD_LOCAL
+#   BASTION_USER / SSH_KEY / DOCS_SERVER_KEY / DOCS_PORT / IMAGE_TAG / BUILD_LOCAL /
+#   DOCS_IMAGE_TARGET (hosted|local; used with BUILD_LOCAL=1)
 #   DOCS_EMBEDDING_PROVIDER / DOCS_LLM_PROVIDER / DOCS_*_EMBEDDING_* /
 #   DOCS_*_LLM_* / DOCS_RERANK_ENABLED / DOCS_RERANK_MODEL
 #   DOCS_PG_SCHEMA / DOCS_GGUF_URL
+#   DOCS_REDIS_HOST / DOCS_REDIS_PORT / DOCS_REDIS_DB
+#   DOCS_REDIS_IMAGE (optional, default redis:7-alpine)
 # DB creds come from ../postgres (outputs + TF_VAR_db_password). For local docker compose dev
 # instead, see tools/docs-vector-search/docker-compose.yml + .env.example.
 set -euo pipefail
@@ -39,7 +42,10 @@ DOCS_PORT="${DOCS_PORT:-8001}"
 DOCS_PG_SCHEMA="${DOCS_PG_SCHEMA:-rag}"
 DOCS_EMBEDDING_PROVIDER="${DOCS_EMBEDDING_PROVIDER:-openai}"
 DOCS_RERANK_ENABLED="${DOCS_RERANK_ENABLED:-true}"
+DOCS_RERANK_PROVIDER="${DOCS_RERANK_PROVIDER:-openai}"
 DOCS_RERANK_MODEL="${DOCS_RERANK_MODEL:-BAAI/bge-reranker-base}"
+DOCS_OPENAI_RERANK_TIMEOUT_SECONDS="${DOCS_OPENAI_RERANK_TIMEOUT_SECONDS:-8}"
+DOCS_RERANK_OPENAI_FALLBACK="${DOCS_RERANK_OPENAI_FALLBACK:-vector}"
 DOCS_LLM_PROVIDER="${DOCS_LLM_PROVIDER:-openai}"
 DOCS_LLM_MAX_OUTPUT_TOKENS="${DOCS_LLM_MAX_OUTPUT_TOKENS:-256}"
 DOCS_OPENAI_API_KEY="${DOCS_OPENAI_API_KEY:-}"
@@ -47,6 +53,7 @@ DOCS_OPENAI_API_BASE_URL="${DOCS_OPENAI_API_BASE_URL:-https://api.openai.com/v1}
 DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS="${DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS:-120}"
 DOCS_OPENAI_EMBEDDING_MODEL="${DOCS_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}"
 DOCS_OPENAI_EMBEDDING_DIMENSIONS="${DOCS_OPENAI_EMBEDDING_DIMENSIONS:-384}"
+DOCS_OPENAI_RERANK_MODEL="${DOCS_OPENAI_RERANK_MODEL:-gpt-4o-mini}"
 DOCS_OPENAI_LLM_MODEL="${DOCS_OPENAI_LLM_MODEL:-gpt-5.6-luna}"
 DOCS_GEMINI_API_KEY="${DOCS_GEMINI_API_KEY:-}"
 DOCS_GEMINI_API_BASE_URL="${DOCS_GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}"
@@ -61,10 +68,26 @@ DOCS_LOCAL_LLM_CONTEXT_TOKENS="${DOCS_LOCAL_LLM_CONTEXT_TOKENS:-2048}"
 DOCS_LOCAL_LLM_THREADS="${DOCS_LOCAL_LLM_THREADS:-2}"
 DOCS_LOCAL_LLM_BATCH_SIZE="${DOCS_LOCAL_LLM_BATCH_SIZE:-512}"
 DOCS_LOCAL_LLM_GPU_LAYERS="${DOCS_LOCAL_LLM_GPU_LAYERS:--1}"
-DOCS_REDIS_HOST="${DOCS_REDIS_HOST:-}"
+DOCS_IMAGE_TARGET="${DOCS_IMAGE_TARGET:-}"
+if [[ -z "$DOCS_IMAGE_TARGET" ]]; then
+  case "$DOCS_EMBEDDING_PROVIDER:$DOCS_RERANK_PROVIDER:$DOCS_RERANK_OPENAI_FALLBACK:$DOCS_LLM_PROVIDER" in
+    *local*) DOCS_IMAGE_TARGET="local" ;;
+    *) DOCS_IMAGE_TARGET="hosted" ;;
+  esac
+fi
+case "$DOCS_IMAGE_TARGET" in
+  hosted | local) ;;
+  *) echo "ERROR: DOCS_IMAGE_TARGET must be 'hosted' or 'local'."; exit 1 ;;
+esac
+if [[ "$DOCS_IMAGE_TARGET" == "hosted" ]]; then
+  case "$DOCS_EMBEDDING_PROVIDER:$DOCS_RERANK_PROVIDER:$DOCS_RERANK_OPENAI_FALLBACK:$DOCS_LLM_PROVIDER" in
+    *local*) echo "ERROR: Local providers require DOCS_IMAGE_TARGET=local."; exit 1 ;;
+  esac
+fi
+DOCS_REDIS_HOST="${DOCS_REDIS_HOST:-127.0.0.1}"
 DOCS_REDIS_PORT="${DOCS_REDIS_PORT:-6580}"
 DOCS_REDIS_DB="${DOCS_REDIS_DB:-0}"
-DOCS_REDIS_PASSWORD="${DOCS_REDIS_PASSWORD:-${REDIS_PASSWORD:-${TF_VAR_redis_password:-}}}"
+DOCS_REDIS_PASSWORD="${DOCS_REDIS_PASSWORD:-}"
 DOCS_REDIS_CONNECT_TIMEOUT_SECONDS="${DOCS_REDIS_CONNECT_TIMEOUT_SECONDS:-1}"
 DOCS_REDIS_SOCKET_TIMEOUT_SECONDS="${DOCS_REDIS_SOCKET_TIMEOUT_SECONDS:-1}"
 # CORS origins for browsers hitting the API directly (the static docs site on GitHub Pages).
@@ -98,8 +121,6 @@ terraform workspace select "$ENV" >/dev/null 2>&1 || { echo "ERROR: no '$ENV' se
 SERVERS_JSON="$(terraform output -json servers 2>/dev/null || true)"
 [[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no servers output."; exit 1; }
 srv_ip() { printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get(sys.argv[2]) for i in (s.get("internal_interfaces") or []) if i.get(sys.argv[2])), ""))' "$1" "$2"; }
-DOCS_REDIS_HOST="${DOCS_REDIS_HOST:-$(srv_ip "${DOCS_REDIS_SERVER_KEY:-api}" fixed_ip)}"
-[[ -z "$DOCS_REDIS_HOST" ]] && echo "::warning::docs-search: DOCS_REDIS_HOST is unset; configure a Redis endpoint reachable from the docs box before starting the service."
 FIP="$(srv_ip "$DOCS_SERVER_KEY" floating_ip)"
 # The 'docs' box is provisioned by this module (overlays servers map). If it isn't there yet,
 # SKIP rather than fail — so CD stays green until the box is applied; the next run picks it up.
@@ -114,9 +135,11 @@ SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/n
           -o ServerAliveInterval=30 -o ServerAliveCountMax=20)
 
 CONTAINER="customer360-docs-vector-search"
+REDIS_CONTAINER="customer360-docs-rate-limit-redis"
+REDIS_IMAGE="${DOCS_REDIS_IMAGE:-redis:7-alpine}"
 if [[ "$ACTION" == "destroy" ]]; then
-  echo ">> Removing $CONTAINER on $BASTION ..."
-  ssh "${SSH_OPTS[@]}" "$BASTION" "sudo docker rm -f $CONTAINER >/dev/null 2>&1; echo '   removed'"
+  echo ">> Removing $CONTAINER and $REDIS_CONTAINER on $BASTION ..."
+  ssh "${SSH_OPTS[@]}" "$BASTION" "sudo docker rm -f $CONTAINER $REDIS_CONTAINER >/dev/null 2>&1 || true; echo '   removed'"
   exit 0
 fi
 
@@ -148,11 +171,15 @@ else
   IMAGE="$(image_ref "$SERVICE" "$(resolve_tag "overlays/$ENV.tfvars")")"
   echo ">> Image: $IMAGE   (pull from GHCR; BUILD_LOCAL=1 to build on the VM)"
 fi
+if [[ "$DEPLOY_MODE" == "ghcr" && "$DOCS_IMAGE_TARGET" == "local" ]]; then
+  echo "ERROR: CI publishes the hosted docs-search image only. Use BUILD_LOCAL=1 for local providers."
+  exit 1
+fi
 
 # --- ship the corpus (docs/**) so enrich can chunk + embed it on the box ---
 echo ">> Shipping docs/ corpus ..."
 tar -C "$REPO_ROOT" -czf - docs \
-  | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360/docs-vector-search && sudo chown "$(id -un)" /opt/c360/docs-vector-search && rm -rf /opt/c360/docs-vector-search/corpus && tar -C /opt/c360/docs-vector-search -xzf - && mv /opt/c360/docs-vector-search/docs /opt/c360/docs-vector-search/corpus'
+  | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360/docs-vector-search && sudo chown -R "$(id -un)" /opt/c360/docs-vector-search && sudo rm -rf /opt/c360/docs-vector-search/corpus /opt/c360/docs-vector-search/docs && sudo tar -C /opt/c360/docs-vector-search -xzf - && sudo mv /opt/c360/docs-vector-search/docs /opt/c360/docs-vector-search/corpus && sudo chown -R "$(id -un)" /opt/c360/docs-vector-search/corpus'
 
 # OpenTelemetry (OTLP -> Jaeger) zero-code tracing lines. The docs box is dedicated (Jaeger is
 # NOT co-located on it), so point OTLP at the monitoring/api box's private fixed IP. UAT defaults
@@ -173,7 +200,10 @@ CORPUS_DIR=/app/corpus
 MODELS_DIR=/app/models
 DOCS_EMBEDDING_PROVIDER=$DOCS_EMBEDDING_PROVIDER
 DOCS_RERANK_ENABLED=$DOCS_RERANK_ENABLED
+DOCS_RERANK_PROVIDER=$DOCS_RERANK_PROVIDER
 DOCS_RERANK_MODEL=$DOCS_RERANK_MODEL
+DOCS_OPENAI_RERANK_TIMEOUT_SECONDS=$DOCS_OPENAI_RERANK_TIMEOUT_SECONDS
+DOCS_RERANK_OPENAI_FALLBACK=$DOCS_RERANK_OPENAI_FALLBACK
 DOCS_LLM_PROVIDER=$DOCS_LLM_PROVIDER
 DOCS_LLM_MAX_OUTPUT_TOKENS=$DOCS_LLM_MAX_OUTPUT_TOKENS
 DOCS_OPENAI_API_KEY=$DOCS_OPENAI_API_KEY
@@ -181,6 +211,7 @@ DOCS_OPENAI_API_BASE_URL=$DOCS_OPENAI_API_BASE_URL
 DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS=$DOCS_OPENAI_REQUEST_TIMEOUT_SECONDS
 DOCS_OPENAI_EMBEDDING_MODEL=$DOCS_OPENAI_EMBEDDING_MODEL
 DOCS_OPENAI_EMBEDDING_DIMENSIONS=$DOCS_OPENAI_EMBEDDING_DIMENSIONS
+DOCS_OPENAI_RERANK_MODEL=$DOCS_OPENAI_RERANK_MODEL
 DOCS_OPENAI_LLM_MODEL=$DOCS_OPENAI_LLM_MODEL
 DOCS_GEMINI_API_KEY=$DOCS_GEMINI_API_KEY
 DOCS_GEMINI_API_BASE_URL=$DOCS_GEMINI_API_BASE_URL
@@ -211,10 +242,13 @@ $OTEL_LINES" | base64 | tr -d '\n')"
 echo ">> Fetching the model, refreshing the index (enrich), and (re)starting the container ..."
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' \
   "$DOCS_PORT" "$ENVB64" "$DOCS_GGUF_URL" "$GGUF_NAME" "$DEPLOY_MODE" "$IMAGE" \
-  "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$CONTAINER" <<'REMOTE'
+  "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$CONTAINER" \
+  "$REDIS_CONTAINER" "$REDIS_IMAGE" <<'REMOTE'
 set -euo pipefail
 PORT="$1"; ENVB64="$2"; GGUF_URL="$3"; GGUF_NAME="$4"; DEPLOY_MODE="${5:-ghcr}"; IMAGE="${6:-}"
 GHCR_USER="${7:-token}"; GHCR_TOKEN="$(printf %s "${8:-}" | base64 -d 2>/dev/null || true)"; CONTAINER="${9:-customer360-docs-vector-search}"
+REDIS_CONTAINER="${10:-customer360-docs-rate-limit-redis}"
+REDIS_IMAGE="${11:-redis:7-alpine}"
 
 command -v docker >/dev/null 2>&1 || { sudo apt-get update -qq; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io; sudo systemctl enable --now docker; }
 command -v curl   >/dev/null 2>&1 || { sudo apt-get update -qq; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl; }
@@ -248,6 +282,21 @@ sudo mkdir -p "$MODELS_DIR"; sudo chown "$(id -un)" "$MODELS_DIR"
 umask 077; env_file="$(mktemp)"; printf '%s' "$ENVB64" | base64 -d > "$env_file"
 sudo mkdir -p /opt/c360; sudo mv "$env_file" /opt/c360/docs-vector-search.env; sudo chmod 600 /opt/c360/docs-vector-search.env
 
+redis_host="$(awk -F= '$1=="DOCS_REDIS_HOST"{print $2}' /opt/c360/docs-vector-search.env | tail -1)"
+redis_port="$(awk -F= '$1=="DOCS_REDIS_PORT"{print $2}' /opt/c360/docs-vector-search.env | tail -1)"
+redis_host="${redis_host:-127.0.0.1}"
+redis_port="${redis_port:-6580}"
+if [ "$redis_host" = "127.0.0.1" ] || [ "$redis_host" = "localhost" ]; then
+  echo "   starting local Redis for rate limiting (${redis_host}:${redis_port}, no auth) ..."
+  sudo docker rm -f "$REDIS_CONTAINER" >/dev/null 2>&1 || true
+  sudo docker pull "$REDIS_IMAGE" >/dev/null
+  sudo docker run -d --name "$REDIS_CONTAINER" --restart unless-stopped \
+    --network host --log-opt max-size=10m --log-opt max-file=3 \
+    "$REDIS_IMAGE" redis-server --port "$redis_port" --save "" --appendonly no >/dev/null
+else
+  echo "   using external Redis for rate limiting at ${redis_host}:${redis_port}"
+fi
+
 # Qwen is optional. Fetch its GGUF only when local generation is selected; hosted
 # providers should not require a multi-hundred-megabyte local model download.
 if grep -qx 'DOCS_LLM_PROVIDER=local' /opt/c360/docs-vector-search.env; then
@@ -269,7 +318,8 @@ if [ "$DEPLOY_MODE" = "ghcr" ]; then
   RUN_IMG="$IMAGE"
 else
   sed -i 's/ --mount=[^ ]*//g' /opt/c360/tools/docs-vector-search/Dockerfile 2>/dev/null || true
-  sudo docker build -t customer360-docs-vector-search-local /opt/c360/tools/docs-vector-search
+  sudo docker build --target "$DOCS_IMAGE_TARGET" \
+    -t customer360-docs-vector-search-local /opt/c360/tools/docs-vector-search
   RUN_IMG="customer360-docs-vector-search-local"
 fi
 

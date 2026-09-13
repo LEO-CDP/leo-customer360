@@ -165,12 +165,12 @@ TRUSTED_PROXY_HOPS = max(1, int(os.getenv("TRUSTED_PROXY_HOPS", "1")))
 # DOCS_INTERNAL_SECRET to exempt the admin console from the public rate limit.
 INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 
-# Redis-backed request limiting. The local Docker stack resolves ``redis`` on the shared
-# customer360-network; production deployment supplies the API-box Redis address.
-DOCS_REDIS_HOST = os.getenv("DOCS_REDIS_HOST", "redis")
+# Redis-backed request limiting. Local Docker runs a dedicated no-auth Redis service
+# (docs-rate-limit-redis) on the same network; server deployment defaults to localhost.
+DOCS_REDIS_HOST = os.getenv("DOCS_REDIS_HOST", "docs-rate-limit-redis")
 DOCS_REDIS_PORT = int(os.getenv("DOCS_REDIS_PORT", "6580"))
 DOCS_REDIS_DB = int(os.getenv("DOCS_REDIS_DB", "0"))
-DOCS_REDIS_PASSWORD = os.getenv("DOCS_REDIS_PASSWORD") or os.getenv("REDIS_PASSWORD", "")
+DOCS_REDIS_PASSWORD = os.getenv("DOCS_REDIS_PASSWORD", "")
 DOCS_REDIS_CONNECT_TIMEOUT_SECONDS = float(
     os.getenv("DOCS_REDIS_CONNECT_TIMEOUT_SECONDS", "1")
 )

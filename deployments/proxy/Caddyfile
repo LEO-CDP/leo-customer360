@@ -75,7 +75,7 @@
 	# --- docs RAG chatbot under /docs-ai (the static docs site on GitHub Pages calls this
 	#     cross-origin; the API sets CORS to allow that origin). STRIPPED (handle_path): the
 	#     service has no root_path, so /docs-ai/ask -> the app sees /ask. $DOCS_UPSTREAM is the
-	#     docs box PRIVATE ip:8000 (its own box). NOTE: this fronts a 1 vCPU LLM — /ask is
+	#     docs box PRIVATE ip:8001 (its own box). NOTE: this fronts a 1 vCPU LLM — /ask is
 	#     CPU-heavy and can OOM the box; rate-limit before heavy public use (needs the
 	#     caddy-ratelimit plugin) and/or size the docs box up. ---
 	handle_path /docs-ai/* {

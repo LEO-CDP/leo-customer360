@@ -10,3 +10,9 @@ frontend_api_hostname = "http://PROD_LB_ADDRESS:80"
 frontend_root_path = ""
 frontend_tenant_id = "11111111-1111-1111-1111-111111111111"
 sso_login          = true
+
+# Docs Assistant (chatbot) target. Leave URL empty to auto-resolve the docs box private IP.
+docs_search_url        = ""
+docs_search_server_key = "docs"
+docs_search_port       = 8001
+docs_site_base         = "https://leo-cdp.github.io/leo-customer360"

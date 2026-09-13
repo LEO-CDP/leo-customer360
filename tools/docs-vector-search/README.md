@@ -1,8 +1,10 @@
 # docs-vector-search
 
-Provider-agnostic Graph-RAG over the LEO Customer 360 docs corpus. Semantic search + a
-grounded question-answering agent backed by **pgvector** on the VNGCloud **vDB**.
-OpenAI is the default; Gemini and local open-source models such as Qwen are optional.
+Provider-agnostic Graph-RAG over the LEO Customer 360 documentation corpus. The service
+provides semantic search and grounded question answering backed by **pgvector** on the
+VNGCloud **vDB**. OpenAI is the default provider; Gemini and local open-source models such
+as Qwen are optional and can be selected independently for embeddings, reranking, and
+generation.
 
 Design + rationale: [`deployments/docs/local-rag-implementation-plan.md`](../../deployments/docs/local-rag-implementation-plan.md).
 
@@ -15,22 +17,35 @@ docs/ *.md
   ▼  upsert → pgvector on the vDB
 enrich.py
 
-question → embed → pgvector top-N → rerank (bge, top-K) → generate (OpenAI / Gemini / Qwen) → answer + sources
+question → embed → pgvector top-N → rerank → top-K context → grounded generation → answer + sources
   agent.py / server.py
 ```
 
-Provider seams (`src/providers.py`), all loaded lazily:
+`src.corpus` loads Markdown files recursively, preserves frontmatter titles and headings,
+and splits each section into overlapping word windows. `src.enrich` hashes each chunk,
+embeds only changed chunks, upserts them into `rag.doc_chunks`, and prunes chunks removed
+from the corpus. Retrieval uses cosine similarity; reranking is optional. `/search` returns
+ranked chunks without generation, while `/ask` sends only the selected context to the
+answer model and returns the exact context and sources used.
+
+Provider seams (`src/providers.py`), with local models loaded lazily:
 - **embed** — OpenAI `text-embedding-3-small` by default; Gemini `gemini-embedding-001` or fastembed locally
 - **rerank** — OpenAI `gpt-4o-mini` in one batched request by default; local `BAAI/bge-reranker-base` via fastembed is available with `DOCS_RERANK_PROVIDER=local`
 - **generate** — OpenAI `gpt-5.6-luna` by default; Gemini `gemini-2.5-flash` or Qwen GGUF locally
-- **request limiting** — Redis-backed atomic IP and browser buckets shared across workers; `/ask` and `/search` run asynchronously around the blocking RAG work
+- **request limiting** — Redis-backed atomic IP and browser sliding-window buckets shared across workers; local Docker runs a dedicated no-auth Redis service (`docs-rate-limit-redis`) for `/ask` and `/search`
 
-Vector store (`src/store.py`) — `rag.doc_chunks` table with a `vector(384)` column + HNSW cosine index.
+Vector store (`src/store.py`) — `rag.doc_chunks` table with a provider-selected `vector(384)` column
+and HNSW cosine index. The default hosted OpenAI and Gemini configurations both request 384
+dimensions; local embeddings must also produce 384 dimensions.
 
 ## Prerequisites
 
 - PostgreSQL 15 (the vDB) with the **`vector` extension** available (`enrich` runs `CREATE EXTENSION IF NOT EXISTS vector`).
-- Python 3.12; a C toolchain for `llama-cpp-python` only when using local Qwen generation.
+- Python 3.12; a C/C++ toolchain is needed only when installing `llama-cpp-python` for local Qwen generation.
+- The default Docker/CI image is the `hosted` target and does not include local ML packages or model weights.
+  Set `DOCS_IMAGE_TARGET=local` when using a local embedding, reranker, or Qwen provider.
+- Redis is required when `ASK_RATE_MAX > 0` (the default). If Redis is unavailable, `/ask` and `/search`
+  return `503` instead of bypassing the limiter.
 - **Default run configuration:** `DOCS_EMBEDDING_PROVIDER=openai` and `DOCS_LLM_PROVIDER=openai`.
   Set `DOCS_OPENAI_API_KEY` in `.env` before running `enrich`, `/search`, or `/ask`.
 - Gemini mode requires `DOCS_GEMINI_API_KEY` when selected.
@@ -48,6 +63,7 @@ Provider configuration is explicit: use `DOCS_OPENAI_EMBEDDING_MODEL` and
 cd tools/docs-vector-search
 python -m venv .venv && . .venv/Scripts/activate
 pip install -r requirements.txt
+# Local providers only: pip install -r requirements-local.txt
 cp .env.example .env                 # set PG_* (the vDB) and the selected provider key
 # Default configuration: set DOCS_OPENAI_API_KEY in .env.
 
@@ -56,6 +72,7 @@ cp .env.example .env                 # set PG_* (the vDB) and the selected provi
 #     Qwen2.5-0.5B-Instruct-Q4_K_M.gguf --local-dir ./models
 
 python -m src.enrich                 # chunk → embed → upsert into pgvector
+python -m src.enrich --dry-run       # report changes without writing the index
 python -m src.agent "How does identity resolution merge two profiles?"
 uvicorn src.server:app --port 8001
 
@@ -71,7 +88,8 @@ curl -s localhost:8001/ask    -H 'content-type: application/json' -d '{"question
 | `python -m src.enrich` | chunk + embed changed chunks → upsert into pgvector; prune removed chunks (idempotent) |
 | `python -m src.enrich --dry-run` | report what would change, write nothing |
 | `python -m src.agent "…"` | one-shot question; or no args for a REPL |
-| `uvicorn src.server:app` | serve `/ask`, `/search`, `/health` |
+| `uvicorn src.server:app --host 0.0.0.0 --port 8001` | serve `/ask`, `/search`, `/health` |
+| `bash run_unit_tests.sh` | byte-compile every module without importing heavy local-provider dependencies |
 
 ## Endpoints
 
@@ -79,14 +97,30 @@ curl -s localhost:8001/ask    -H 'content-type: application/json' -d '{"question
 |----------|------|---------|
 | `POST /ask` | `{question, top_n?, top_k?}` | grounded answer + cited sources |
 | `POST /search` | `{query, top_n?}` | reranked chunks (no generation) |
-| `GET /health` | — | chunk count, models |
+| `GET /health` | — | loaded chunk count and active provider/model configuration |
+
+`question` and `query` are limited to 2,000 characters by default. `top_n` is capped at
+50 and `top_k` at 20; the defaults are `top_n = 50`, `top_k = 5`. Both `/ask` and `/search`
+are protected by the Redis limiter unless a valid `X-Internal-Auth` secret is configured
+for a trusted internal caller. CORS uses an exact origin allow-list and does not enable
+credentials. The API does not expose an unauthenticated wildcard CORS policy.
 
 ## Notes
 
-- **Idempotent enrich:** a content hash per chunk skips unchanged chunks. Changing embedding provider/model/dim means you must set the matching dimensions and recreate or fully rebuild `rag.doc_chunks` (vectors from different embedding models are not interchangeable, even at the same dimension).
-- **Independent providers:** `DOCS_EMBEDDING_PROVIDER` and `DOCS_LLM_PROVIDER` each accept `openai`, `gemini`, or `local`; reranking accepts `openai` or `local`. OpenAI reranking makes one request for the full candidate pool, avoiding the 54-second local BGE CPU path. If that request fails, `DOCS_RERANK_OPENAI_FALLBACK=vector` keeps the pgvector order without invoking local BGE; set it to `local` when quality is preferred over latency.
-- **OpenAI rerank safety:** candidate text is sent to the configured OpenAI-compatible endpoint as untrusted data and the response must contain exactly one finite score from 0 to 100 per candidate. The hosted call has its own short timeout (`DOCS_OPENAI_RERANK_TIMEOUT_SECONDS`, default 8 seconds), and the service never warms it at startup.
+- **Idempotent enrich:** a content hash per chunk skips unchanged chunks. A missing or empty corpus is rejected and cannot prune the existing index. Changing embedding provider/model/dimension requires a matching vector dimension and a full rebuild of `rag.doc_chunks`; vectors from different embedding models are not interchangeable, even at the same dimension.
+- **Independent providers:** `DOCS_EMBEDDING_PROVIDER` and `DOCS_LLM_PROVIDER` each accept `openai`, `gemini`, or `local`; reranking accepts `openai` or `local`. Provider names also accept `google`, `google_gemini`, and `google-gemini` as aliases for Gemini.
+- **Reranking:** OpenAI reranking makes one batched request for the complete candidate pool. Its response must contain exactly one finite score from 0 to 100 per candidate, in original order, and the request has an 8-second default timeout. If it fails, `DOCS_RERANK_OPENAI_FALLBACK=vector` preserves pgvector order without local BGE; set it to `local` when quality is preferred over latency. Local BGE is slower and is loaded only when selected.
+- **Grounding and prompt safety:** the answer agent fences retrieved documents and the user question as untrusted data, strips fence tokens, and instructs the generator to answer only from retrieved context. When the context is insufficient, it returns the documented exact "I don't know" response rather than using outside knowledge.
+- **Observability:** the runtime Docker image includes OpenTelemetry auto-instrumentation for FastAPI and psycopg. Deployment emits OTLP settings for request tracing; tracing can be disabled with the deployment's `OTEL_ENABLED` configuration.
 - **e5 prefixes:** when a local e5 model is selected, `embed()` prepends `query:` / `passage:`. If a future fastembed version adds e5 prefixes itself, drop them here to avoid double-prefixing.
 - **RAM:** on a 1 vCPU / 2 GB box the vectors live in the vDB (off-box); local fastembed + reranker + Qwen can reach ≈ 1.4 GB resident — tight, may need swap. Hosted OpenAI/Gemini generation avoids the Qwen footprint. Drop the reranker (`DOCS_RERANK_ENABLED=false`) first if memory-constrained.
-- **Deploy (UAT/PROD vServer):** [`deployments/server/deploy-docs-search.sh`](../../deployments/server/deploy-docs-search.sh) — pulls the CI-built GHCR image onto the dedicated `docs` box, runs `enrich`, serves. Wired into CD as the `docs-search` step; the box is defined in [`deployments/server/overlays`](../../deployments/server/overlays).
-- **Local dev (Docker):** [`docker-compose.yml`](docker-compose.yml) here — `docker compose run --rm docs-vector-search python -m src.enrich`, then `docker compose up`.
+- **Deploy (UAT/PROD vServer):** [`deployments/server/deploy-docs-search.sh`](../../deployments/server/deploy-docs-search.sh) — resolves the dedicated `docs` VM, pulls the CI-built GHCR `hosted` image by default, ships the `docs/` corpus, starts a dedicated no-auth local Redis container (`customer360-docs-rate-limit-redis`), runs `enrich` on the VM, and starts the server. The script can build locally with `BUILD_LOCAL=1`; local providers require `DOCS_IMAGE_TARGET=local`. It is wired into CD as the `docs-search` step, and the VM is defined in [`deployments/server/overlays`](../../deployments/server/overlays).
+- **Local dev (Docker):** [`docker-compose.yml`](docker-compose.yml) here — includes a dedicated no-auth Redis service (`docs-rate-limit-redis`) on the same Docker network, so rate limiting works without shared stack credentials.
+- **Docker image targets:** `docker build --target hosted .` builds the small production image.
+  Set `DOCS_IMAGE_TARGET=local` before `docker compose --profile cpu build` or
+  `docker compose --profile gpu build` to include fastembed, `llama-cpp-python`, and
+  pre-baked embedding/reranking weights. Compose serves only; build or refresh the index first:
+  `docker compose --profile cpu run --rm docs-vector-search python -m src.enrich`.
+- **Deployment order:** index before serving. The image's default command serves the API;
+  deployment runs `python -m src.enrich` as a separate, temporary container so indexing does
+  not compete with the long-lived server for memory.

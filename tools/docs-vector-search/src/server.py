@@ -29,6 +29,7 @@ from .config import (
     LLM_PROVIDER,
     OPENAI_LLM_MODEL,
     OPENAI_EMBEDDING_MODEL,
+    OPENAI_RERANK_MODEL,
     QUESTION_MAX_LEN,
     RERANK_TOP_K,
     RETRIEVE_TOP_N,
@@ -109,7 +110,9 @@ def health():
         "embedding_provider": EMBED_PROVIDER,
         "embed_model": embed_model,
         "rerank_provider": DOCS_RERANK_PROVIDER if DOCS_RERANK_ENABLED else None,
-        "rerank_model": DOCS_RERANK_MODEL if DOCS_RERANK_ENABLED else None,
+        "rerank_model": (
+            OPENAI_RERANK_MODEL if DOCS_RERANK_PROVIDER == "openai" else DOCS_RERANK_MODEL
+        ) if DOCS_RERANK_ENABLED else None,
         "llm_provider": LLM_PROVIDER,
         "generator": generator,
     }

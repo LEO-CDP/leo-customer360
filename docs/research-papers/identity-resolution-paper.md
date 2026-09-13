@@ -1,422 +1,323 @@
 ---
 title: "Customer Identity Resolution for Multi-Source Customer Data"
-subtitle: "Design and operations based on the current schema and source code"
+subtitle: "How the current Customer 360 implementation matches, merges, and enriches profiles"
 author: "Trieu Nguyen"
-date: 2026-08-04
+date: 2026-09-13
 geometry: "a4paper,margin=1.5cm"
 fontsize: "9.5pt"
 linestretch: "1.0"
 mainfont: "DejaVu Serif"
 ---
 
+# How does identity resolution merge two profiles from multi data sources ?
+
+It does not merge two raw rows directly. It processes each raw profile in order, finds the best existing master profile within the same tenant and business domain, and then either links and consolidates the raw row into that master or creates a new master. Therefore, when two source records describe the same customer, the first record normally creates the master profile and the second record is matched to it through one or more configured identity attributes.
+
+For example:
+
+```text
+Adjust record A:      email = H, device_id = D1, source_system = Adjust
+                           |
+                           v
+                    create master M
+                    email = H, device_ids = [D1]
+                           ^
+                           |
+Web Tracking record B: email = H, cookie_id = C1, source_system = WebTracking
+                           |
+                           v
+                    link B -> M and consolidate
+                    device_ids = [D1], cookie_ids = [C1]
+```
+
+Here `H` can be the same SHA-256 digest in both rows. The resolver does not reverse the digest. It uses equality of the stored values as a deterministic match, records the raw-to-master relationship, preserves the source identifiers, and leaves an auditable lineage path from the master back to both raw records.
+
 ## Abstract
 
-Customer Identity Resolution (CIR) is the process of linking customer records from multiple systems into a single unified profile. In this implementation, inbound data is first written to a staging table and then processed by a Python resolver driven by metadata rules. The objective is to maintain exactly one master profile per customer within each tenant and domain, while preserving flexibility when new data sources or matching rules are introduced.
+Customer Identity Resolution (CIR) converts heterogeneous source observations into a tenant-scoped Customer 360 master profile. The current implementation uses a PostgreSQL staging queue, a Python resolver, metadata-driven matching rules, explicit row-level tenant context, and a link table that records every raw-to-master decision. Matching is intentionally separate from downstream persona resolution: the resolver first answers whether a raw observation belongs to an existing identity, then computes an explainable, versioned persona for the resulting master profile.
 
-## 1. Scope
+This paper describes the implementation present in `database-init/database-schema.sql`, `database-init/init-core-database.sql`, and `backend-system/identity_resolution/identity_resolution/`. It also identifies schema capabilities that are present but not yet part of the active resolver path, so the design description does not overstate current behavior.
 
-This paper is based on components that already exist in the repository:
+## 1. Problem and Design Answer
 
-- PostgreSQL schema in `database-init/database-schema.sql`
-- Resolver module in `backend-system/identity_resolution/identity_resolution/resolver.py`
-- Trigger controller in `backend-system/identity_resolution/identity_resolution/trigger_controller.py`
-- Persona logic in `backend-system/identity_resolution/identity_resolution/persona.py`
+Multiple systems observe the same person under different identifiers. A mobile attribution platform may know a device and an external customer ID; a web tracker may know a cookie; a CRM or banking system may know an email, phone number, or national ID. CIR must decide whether each observation belongs to an existing customer, preserve the observation, and update the unified profile without allowing data to cross tenant or domain boundaries.
 
-### Main Flow (Identity Resolution Context)
+The current solution follows this sequence:
 
-```text
-Raw Profiles
-  -> Staging and Validation
-  -> Identity Resolution Engine (this paper)
-       -> Rule Loading from Metadata
-       -> Candidate Matching (exact/fuzzy)
-       -> Master Profile Merge or Create
-       -> Link and Audit Updates
-  -> Unified Customer Profile
-  -> Persona Resolution Engine (downstream)
-  -> Customer360 Master Profile
-```
+1. Land every source observation in `cdp_raw_profiles_stage`.
+2. Load active matching and consolidation metadata from `cdp_profile_attributes`.
+3. Select new rows for one tenant at a time and set the PostgreSQL tenant context.
+4. Build candidate predicates for each populated, active identity attribute.
+5. Search only master profiles in the same tenant and domain.
+6. Rank the matching candidates by the proportion of satisfied predicates.
+7. Link the raw row to the best candidate and merge its data, or create a new master and first link.
+8. Recompute the resulting profile's persona, mark the raw row processed, and commit the batch.
 
-| Stage | Purpose | Output |
+The main invariant is an application-level goal: one logical customer master per tenant and domain. The database strictly enforces that a raw profile has at most one link per tenant through `UNIQUE (tenant_id, raw_profile_id)`, while the master table stores the consolidated record and lineage. A master-to-master merge is a separate operation and is not performed by the current `CustomerIdentityResolver` batch.
+
+## 2. Data Model
+
+### 2.1 Raw staging: `cdp_raw_profiles_stage`
+
+This table is the queue and source-lineage record for inbound observations. It includes:
+
+- `raw_profile_id`, `tenant_id`, `user_id`, and `domain` for identity, ownership, and scope.
+- `source_system` and `channel` for source and delivery context.
+- Core identifiers such as `external_customer_id`, `email`, `phone_number`, `national_id`, and name fields.
+- Address components, company information, device identifiers, advertising IDs, cookies, GA client/session IDs, and push tokens.
+- Attribution fields such as `media_source`, campaign data, UTM data, and Adjust metadata.
+- `event_name`, `event_time`, and `event_payload` for the original event and extensible business attributes.
+- `status_code`, `processed_at`, and `created_at` for queue processing.
+
+The schema documents `status_code = 1` as new, `2` as in progress, `3` as processed, `0` as inactive, and `-1` as delete. The current resolver selects only `status_code = 1` and changes successfully handled rows to `3`; it does not currently mark failed rows as `4`.
+
+### 2.2 Golden identity: `cdp_master_profiles`
+
+This is the durable identity record. It contains:
+
+- `master_profile_id`, `tenant_id`, and `domain` as the primary identity, scope, and business classification.
+- Core profile fields such as `full_name`, `email`, `phone_number`, `address` as JSONB, `company_name`, and demographic fields.
+- Consolidated identity collections: `external_ids` as a source-keyed JSONB map, `device_ids`, `advertising_ids`, and `cookie_ids` as arrays, and `push_tokens` as JSONB.
+- Lineage fields: `source_systems`, `first_seen_raw_profile_id`, `linked_raw_profile_count`, and `last_identity_resolved_at`.
+- Lifecycle, engagement, CLV, churn, data-quality, and identity-confidence fields populated by other pipelines or the persona engine.
+- `is_hashed`, `persona_name`, `persona_summary`, and `current_persona_id` for privacy-aware display and persona linkage.
+
+The database check constraint requires `persona_name` whenever `is_hashed = TRUE`. The resolver satisfies that constraint by generating a non-PII label when a populated PII field looks like a 64-character SHA-256 hexadecimal digest.
+
+### 2.3 Domain context: `cdp_domain_profiles`
+
+Domain-specific data no longer belongs in arbitrary scalar columns on the master row. A master can have one domain profile per `sys_domain`, enforced by `UNIQUE (master_profile_id, domain_id)`. The domain profile stores `domain_attributes` JSONB, lifecycle and engagement data, persona information, analytics, and activity timestamps.
+
+This is where values such as banking `national_id`, `kyc_status`, `cif_number`, retail loyalty fields, travel loyalty data, media subscriptions, and education identifiers are stored. The resolver reads and writes domain attributes through the domain profile when a matching or consolidation rule references them.
+
+### 2.4 Raw-to-master lineage: `cdp_profile_links`
+
+Each link records the decision for one raw observation:
+
+- `tenant_id`, `raw_profile_id`, and `master_profile_id` identify the relationship.
+- `match_score` stores the computed score for a matched candidate; a newly created master uses a null score.
+- `match_method` records `DynamicMatch:<fields>` for a candidate match or `NewMaster` for creation.
+- `status` supports `ACTIVE`, `HISTORICAL`, `UNLINKED`, and `SUPERSEDED`, with un-link metadata for future split and correction workflows.
+
+The unique `(tenant_id, raw_profile_id)` constraint makes retry behavior idempotent at the link level. The current resolver uses `ON CONFLICT DO NOTHING` when adding a link and checks for an existing link before creating a new master after a partial retry.
+
+### 2.5 Metadata: `cdp_profile_attributes`
+
+The attribute catalog describes where a field lives and how it participates in CIR. Relevant columns are:
+
+- `attribute_internal_code` and `master_profile_column` for the raw attribute and consolidated destination.
+- `source_table`, `domain_scope`, `is_pii`, and `status` for catalog and governance metadata.
+- `is_identity_resolution`, `matching_rule`, and `matching_threshold` for candidate matching.
+- `consolidation_rule` and `consolidation_config` for conflict resolution.
+- `blocked_values`, `blocked_patterns`, `value_limit`, and `limit_timeframe` for identifier-governance metadata used by surrounding platform workflows.
+
+The resolver loads rows where `is_identity_resolution = TRUE`, `status = 'ACTIVE'`, and `matching_rule` is neither null nor `none`. The catalog contains domain information, but the resolver's rule query is global; it does not add a `domain_scope` predicate. Domain isolation is enforced during candidate matching and domain-attribute access, not by selecting a different ruleset for each domain.
+
+## 3. End-to-End Resolution Flow
+
+### Step 1: Ingest and stage
+
+Connectors write observations from Adjust, OneSignal, Web Tracking/GA4, POS, Core Banking, CRM, and other sources to `cdp_raw_profiles_stage`. The raw row remains the source of truth for the observation, including the original event payload and attribution information. A source may normalize values before insertion; the demo seeder hashes normalized PII so the same logical value from different systems produces the same digest without storing plaintext.
+
+### Step 2: Load active rules
+
+`CustomerIdentityResolver._get_active_rules()` reads the active rule metadata once at the beginning of a batch. A rule has a matching family and may also have a consolidation policy. The catalog seeds exact matching for email, phone, external customer ID, device ID, advertising ID, and cookie ID, plus exact or fuzzy address components, company-name trigram matching, and banking national-ID matching through domain JSONB. In the current batch implementation, however, `RAW_PROFILE_COLUMNS` does not project the address or company fields, so those catalog rules are not evaluated until the resolver's raw-column projection is extended. The fields currently available to the active matching path include the core keys and `national_id`.
+
+`fuzzy_dmetaphone` is supported by the resolver and the `fuzzystrmatch` PostgreSQL extension, but it is not a default seeded rule in `init-core-database.sql`. Names are deliberately not an active default identity key: shared names are too collision-prone to establish identity by themselves.
+
+### Step 3: Establish tenant context
+
+The batch clears the tenant context while enumerating tenant IDs, then calls `SET app.tenant_id = <tenant>` before reading or mutating rows for each tenant. PostgreSQL RLS is enabled and forced for tenant-owned CDP tables. Policies compare `tenant_id` with `current_setting('app.tenant_id', true)` and fail closed when the setting is empty.
+
+The resolver also includes explicit `tenant_id` predicates in its key queries. This defense in depth matters because PostgreSQL superuser or `BYPASSRLS` connections can bypass RLS; production application roles should be non-superuser roles without `BYPASSRLS`.
+
+### Step 4: Select a new raw row
+
+For each tenant, `_fetch_unprocessed_profiles()` selects an explicit list of raw columns where `tenant_id = %s` and `status_code = 1`, limited by `batch_size`. The production daily entry point bounds `CIR_BATCH_SIZE` to 1 through 5,000 and defaults to 500. It repeats the batch operation up to `CIR_MAX_BATCHES_PER_RUN`, defaulting to 10, so a large backlog is drained incrementally rather than in one unbounded transaction.
+
+### Step 5: Build candidate predicates
+
+The resolver ignores empty incoming values and creates an `OR` predicate for each populated active rule:
+
+| Rule family | Current SQL behavior | Example |
 | --- | --- | --- |
-| Raw Profiles | Ingest events and profile traces from source systems | Staging-ready records |
-| Identity Resolution | Match, merge, and link records per tenant/domain | Unified customer profile |
-| Downstream Persona Resolution | Enrich profile with persona intelligence | Persona fields, scores, and embeddings |
-| Customer360 Master Profile | Persist durable customer truth for activation | Single customer view for operations |
+| `exact` scalar | `master_column = incoming_value` | email or phone |
+| `exact` array identity | `incoming_value = ANY(master_array)` | device, advertising, or cookie ID |
+| `exact` source-keyed ID | JSONB containment with the incoming `source_system` as key | `external_ids @> jsonb_build_object(source_system, id)` |
+| `exact` domain attribute | `EXISTS` over the tenant and domain-matched `cdp_domain_profiles` row | banking national ID |
+| `fuzzy_trgm` | `similarity(column, incoming_value) >= threshold` | address line or company name |
+| `fuzzy_dmetaphone` | `dmetaphone(column) = dmetaphone(incoming_value)` | phonetic comparison when enabled |
 
-## 2. Core Data Model and Data Enrichment Structure
+The resulting predicates are combined with `OR`, not `AND`. This means one trusted matching signal can be sufficient, while several signals increase the candidate score. The candidate query always constrains the master row by both `tenant_id` and `domain`.
 
-The database stores entities and relationships required by the resolution lifecycle. This section summarizes the core tables, key fields, and their operational role in enrichment.
+The current active path is therefore a configurable hybrid matcher, not a fixed weighted identity model. Thresholds are metadata-driven, but the candidate score is currently the number of satisfied predicates divided by the number of predicates built for the incoming row. The resolver orders by this score and takes one candidate. There is no explicit deterministic tie-breaker after equal scores, so equal-score candidates remain an operational risk that should be addressed before high-stakes production use.
 
-### 2.1 Table `cdp_raw_profiles_stage` (Raw staging table)
+### Step 6: Link and consolidate a match
 
-This intermediate table acts as the landing zone for raw customer traces from heterogeneous source systems before identity resolution.
+When a candidate is found, the resolver inserts a row into `cdp_profile_links` and updates the existing master. The merge behavior is field-specific:
 
-**Important fields:**
+- `full_name`, `email`, and `phone_number` are scalar fields. Without consolidation metadata, the resolver uses `COALESCE` semantics and does not replace an existing value with a null value.
+- Configured strategies include `non_null`, `overwrite`, `most_recent`, `verified_first`, `verified_then_most_recent`, `source_priority`, and `append_distinct`.
+- `most_recent` compares an incoming timestamp field, then `event_time` or `created_at`, with the master timestamp.
+- `verified_first` can use a configured verification field and values, or configured verified event names such as a KYC-completed event. If both sides have the same verification state, it uses its configured fallback.
+- `source_priority` ranks the incoming source against the configured source list.
+- Device, advertising, and cookie values are appended to their master arrays only when not already present.
+- `external_customer_id` and `push_token` are written into source-keyed JSONB maps.
+- `source_systems` is extended with a distinct source name.
+- `communication_preferences` in the raw event payload are merged into the master JSONB document.
+- `national_id` and `kyc_status` are consolidated in the domain profile's `domain_attributes` JSONB rather than in master scalar columns.
 
-- `raw_profile_id` (UUID, primary key): unique identifier for each raw profile event.
-- `tenant_id` (UUID): tenant partitioning key for multi-tenant isolation.
-- `domain` (TEXT): business domain context (for example: `retail`, `banking`, `travel`).
-- `source_system` (TEXT): upstream origin system (for example: `POS`, `Google Analytics`, `CRM`).
-- `external_customer_id` (TEXT): source-local customer identifier.
-- `email`, `phone_number`, `national_id` (TEXT): personal identifiers; values can be plaintext or one-way SHA-256 hashes.
-- `full_name`, `first_name`, `last_name` (TEXT): source name fields.
-- `device_id`, `advertising_id`, `cookie_id`, `push_token` (TEXT): digital/device identifiers for cross-channel resolution.
-- `event_name`, `event_time` (TIMESTAMPTZ), `event_payload` (JSONB): event semantics, timestamp, and extensible attributes for enrichment.
-- `status_code` (SMALLINT, default `1`): queue lifecycle (`1` ready, `2` processing, `3` processed, `4` failed).
-- `processed_at` (TIMESTAMPTZ): completion timestamp.
+The resolver preserves the incoming domain on the master row. It does not merge two different domain masters merely because an identifier happens to be equal; the candidate query requires the same domain.
 
-### 2.2 Table `cdp_master_profiles` (Master/Golden profile)
+### Step 7: Create a new master when no candidate exists
 
-This table stores the canonical customer profile after merge, normalization, and enrichment across all sources.
+If no condition matches, `_create_master_and_link()` creates a `cdp_master_profiles` row. It initializes the source-keyed external ID map, identity arrays, push-token map, source-system list, and `first_seen_raw_profile_id`. It then inserts a `NewMaster` link and stores a national ID in the corresponding domain profile when present.
 
-**Important fields:**
+A raw row with no populated active matching attribute also follows the no-candidate path. This is intentional: the resolver does not invent an identity from empty data. It does mean that rule completeness and upstream normalization are important operational prerequisites.
 
-- `master_profile_id` (UUID, primary key): golden profile identifier.
-- `tenant_id` (UUID), `domain` (TEXT): strict data scoping dimensions.
-- `full_name`, `first_name`, `last_name`, `email`, `phone_number`, `national_id`, `address` (TEXT): consolidated identity fields.
-- `secondary_emails`, `secondary_phones` (JSONB): retained alternate contact points to preserve channel reach.
-- `external_ids` (JSONB): source-to-external ID map to support reverse synchronization.
-- `device_ids`, `advertising_ids`, `cookie_ids` (TEXT[]): deduplicated device identity arrays.
-- `push_tokens` (JSONB): push-token map for notification platforms.
-- `is_hashed` (BOOLEAN, default `FALSE`): indicates that sensitive PII values are hashed.
-- `persona_name` (TEXT): non-PII identity label generated by deterministic logic or LLM.
-- `persona_summary` (TEXT): short behavior narrative used in personalization workflows.
-- `persona_embedding` (VECTOR(768)): embedding vector for semantic retrieval and lookalike targeting.
-- `updated_at` (TIMESTAMPTZ): last update timestamp.
-- `first_seen_raw_profile_id` (UUID): lineage reference to the first raw record that created this master profile.
-- `source_systems` (TEXT[]): set of contributing source systems.
+### Step 8: Recompute persona and finish the transaction
 
-### 2.3 Table `cdp_profile_links` (Profile-link table)
+Persona resolution is enabled by default. After either a match or a new-master creation, `PersonaResolutionEngine.resolve_persona()` reads the resolved master and its domain attributes, computes a fresh result, and persists it. Only then does the resolver mark the raw row as processed and commit the transaction. Any resolver exception rolls back the transaction.
 
-This table stores the active 1-to-N relationship between a master profile and its contributing raw profiles.
+The persona engine catches its own exceptions and returns `None`, so a persona failure is logged without aborting otherwise successful identity matching work. This is a deliberate boundary: CIR establishes identity first; persona enrichment is downstream and non-blocking.
 
-**Important fields:**
+## 4. Persona Resolution After Identity Matching
 
-- `link_id` (BIGSERIAL, primary key): unique link record identifier.
-- `tenant_id` (UUID): tenant partition key.
-- `raw_profile_id` (UUID, UNIQUE): one raw profile maps to one active master profile at a time.
-- `master_profile_id` (UUID): target master profile.
-- `match_score` (NUMERIC): confidence score in range [0.0, 1.0].
-- `match_method` (TEXT): algorithm/method label (for example: `exact_email`, `fuzzy_trgm_name`).
-- `status` (VARCHAR): link state (`ACTIVE`, `HISTORICAL`).
+Persona resolution is not an identity match and must not be used as evidence that two raw records represent the same person. It is an interpretation of one already-resolved master profile.
 
-### 2.4 Table `cdp_profile_attributes` (Attribute metadata registry)
+### 4.1 Scoring
 
-This registry controls matching and consolidation behavior at the attribute level.
+The pure `compute_persona()` function calculates six component scores on a 0-100 scale:
 
-**Important fields:**
+- Behavior from lifecycle stage and existing engagement.
+- Engagement from last-activity recency and source-system breadth.
+- Financial value from predictive CLV, falling back to historical CLV.
+- Loyalty from membership tier and customer tenure.
+- Relationship from source-system breadth and secondary contacts.
+- Risk from churn probability, risk segment, and KYC status.
 
-- `attribute_internal_code` (VARCHAR, primary key): internal key aligned with staging columns.
-- `master_profile_column` (VARCHAR): target column on `cdp_master_profiles`.
-- `is_identity_resolution` (BOOLEAN): whether the attribute participates in identity matching.
-- `matching_rule` (VARCHAR): matching method (`exact`, `fuzzy_trgm`, `fuzzy_dmetaphone`, `none`).
-- `matching_threshold` (NUMERIC): threshold for fuzzy matching.
-- `consolidation_rule` (VARCHAR): merge strategy (`most_recent`, `verified_first`, `source_priority`, `non_null`, `append_distinct`, `overwrite`).
+The default positive weights are behavior 0.20, engagement 0.20, financial 0.20, loyalty 0.15, and relationship 0.10. The risk weight is 0.15 and is applied as `100 - risk_score`, so higher risk reduces the overall persona score. Thresholds, weights, and scoring constants are loaded from `cdp_persona_config` with in-code defaults and a short-lived cache.
 
-### 2.5 Table `cdp_identity_index` (Flattened identity index)
+The result includes a persona code and category, customer value tier, risk level, next-best action, component scores, confidence score, and explainability features. The current lookalike `match_score` is a confidence-score proxy; a dedicated embedding-distance calculation is not yet wired into the engine.
 
-This index accelerates exact-match lookups by flattening JSON/array identifiers, reducing scans over complex nested fields under high throughput.
+### 4.2 Persistence and history
 
-**Important fields:**
+The engine upserts one shared `cdp_persona_archetypes` row per `(tenant_id, domain, persona_code)`. It then inserts a versioned `cdp_customer_personas` assignment for the master profile, deactivates prior assignments, and updates `cdp_master_profiles.current_persona_id`, `persona_name`, and `persona_summary`.
 
-- `identity_index_id` (UUID, primary key): identity index record identifier.
-- `tenant_id` (UUID): tenant scope.
-- `master_profile_id` (UUID): owner master profile.
-- `identifier_type` (VARCHAR): identifier type (for example: `email`, `phone`, `cookie_id`).
-- `identifier_value` (TEXT), `identifier_value_normalized` (TEXT): raw and normalized forms for stable exact matching.
-- `is_blocked` (BOOLEAN): blocks invalid/synthetic values (for example: `anonymous`, `null`, `void`).
+The supporting tables preserve explainability:
 
----
+- `cdp_persona_features` stores the signals used for one computation.
+- `cdp_persona_score_details` stores component values, weights, formulas, and explanations.
+- `cdp_persona_history` stores initial and material persona changes.
 
-## 3. Processing Mechanism
+The relationship is many-to-many over time and across profiles: many master profiles can reference one shared archetype, while one master profile can receive many versioned assignments. The database trigger maintains each archetype's active matched-profile count.
 
-Customer Identity Resolution is orchestrated by `CustomerIdentityResolver` in `resolver.py`. The pipeline is metadata-driven through `cdp_profile_attributes`, which provides strong flexibility and maintainability while preserving strict multi-tenant isolation.
+The schema reserves `persona_embedding VECTOR(768)` on the shared archetype and an IVFFlat cosine index for future semantic or lookalike retrieval. The current persona computation does not generate or persist an embedding, so the paper treats this as available schema infrastructure rather than an active CIR matching step.
 
-### 3.1 Detailed Step-by-Step Processing
+## 5. Execution and Concurrency
 
-Each batch executes a sequential seven-step flow:
+### 5.1 Near-real-time triggering
 
-1. **Load active rules**
-   - Query `cdp_profile_attributes` for attributes where `is_identity_resolution = TRUE`, `status = 'ACTIVE'`, and `matching_rule` is defined and not `none`.
+`IdentityResolutionTrigger.attempt_trigger()` uses the single-row `cdp_id_resolution_status` table as a throttle state. It tries to lock the row with `FOR UPDATE NOWAIT`:
 
-2. **Fetch unprocessed staging records**
-   - Query `cdp_raw_profiles_stage` with `status_code = 1`, limited by configured `batch_size` (default: 1,000 records).
+1. If another worker owns the lock, it rolls back and returns `False` immediately.
+2. If the row is missing, it logs the initialization problem and returns `False`.
+3. If the last execution is less than `throttle_seconds` ago, it rolls back and defers the work.
+4. Otherwise, it updates `last_executed_at` and runs one resolver batch.
 
-3. **Set secure tenant context**
-   - For each raw row, execute `SELECT set_config('app.tenant_id', ...)` to activate PostgreSQL RLS and prevent cross-tenant leakage.
+The default throttle interval is five seconds. The controller catches errors so an ingestion request is not blocked by a resolution failure. The status table is a runtime support table initialized defensively by `backend-system/identity_resolution/scripts/init_sample_data.py` and represented in the API model.
 
-4. **Build dynamic matching query**
-   - Construct SQL `OR` conditions from available staged attributes:
-     - Device arrays (`device_id`, `advertising_id`, `cookie_id`): `= ANY(array_column)`
-     - Source-keyed IDs (`external_customer_id`): `external_ids @> jsonb_build_object(source_system, value)`
-     - Exact match: `=`
-     - Trigram fuzzy match: `similarity(column, value) >= threshold`
-     - Phonetic fuzzy match: `dmetaphone(column) = dmetaphone(value)`
+### 5.2 Scheduled draining
 
-5. **Find candidate master profile**
-   - Execute scoped SQL with mandatory partition filters:
-     - `WHERE tenant_id = :tenant_id AND domain = :domain AND (dynamic_conditions) LIMIT 1`
+`daily_job.py` provides the durable backlog path. It acquires a Redis lease under `identity-resolution:staging-drain-lock`, opens PostgreSQL, executes bounded resolver batches, refreshes the lease after full batches, and releases the lease in `finally`. The Redis lease serializes complete staging drains across workers; the per-row PostgreSQL throttle remains the near-real-time coordination mechanism.
 
-6. **Merge or create master profile**
-   - **If a master profile is found:**
-     - Insert link in `cdp_profile_links` with `match_score = 1.0`, `match_method = 'DynamicMatch'`
-     - Merge scalar attributes according to configured `consolidation_rule`
-     - Union/append arrays and JSON maps (`source_systems`, `external_ids`, `push_tokens`, and related fields)
-     - Detect hashed PII and, when needed, set `is_hashed = TRUE` and generate `persona_name`
-   - **If no master profile is found:**
-     - Create new row in `cdp_master_profiles`, preserving `first_seen_raw_profile_id`
-     - Insert first link with `match_method = 'NewMaster'`
+### 5.3 Transaction and retry behavior
 
-7. **Mark processed and commit**
-   - Update staging row to `status_code = 3` and set `processed_at = NOW()`
-   - Commit transaction at batch end; on failure, rollback
+One resolver invocation processes up to `batch_size` rows per tenant in a single database transaction. A successful invocation commits all changes. An exception rolls back the transaction. The processed status and unique raw-profile link prevent normal retries from repeatedly linking the same raw observation, while the pre-create link check handles a partially completed path.
 
-### 3.2 Resolution Execution Flow
+## 6. Privacy and Tenant Safety
+
+The demo and hashed-match ingestion path normalizes and SHA-256 hashes PII before persistence. `profile_looks_hashed()` identifies a populated `full_name`, `email`, `phone_number`, or `national_id` that matches the 64-character hexadecimal digest pattern. It sets `is_hashed` and creates a readable, non-PII persona label.
+
+Persona naming has two fallback-safe paths:
+
+1. If a real `LEO_GOOGLE_GENAI_API_KEY` is configured, Gemini receives only non-PII context such as domain and acquisition channel.
+2. Otherwise, or when the SDK, network, key, quota, or response fails, an offline deterministic generator creates a domain role plus a stable six-character suffix.
+
+The persona engine similarly sends only computed statistics to the optional LLM. It never passes raw profile PII to the LLM. The database check constraint ensures that a hashed master cannot be left without a display label.
+
+Tenant safety has two layers:
+
+- PostgreSQL RLS policies use `app.tenant_id` on master profiles, staging, links, domain profiles, identity indexes, persona tables, and other tenant-owned tables. The hardening migration enables and forces those policies and fails closed when the context is unset.
+- Resolver SQL also filters by tenant. Candidate matching additionally filters by domain, and domain-attribute subqueries repeat tenant and master checks.
+
+The runtime database role must not be a superuser or have `BYPASSRLS`; otherwise PostgreSQL will bypass the policy regardless of `FORCE ROW LEVEL SECURITY`.
+
+## 7. Schema Capabilities Not Yet in the Active Batch Path
+
+The database contains useful structures that should be distinguished from the current Python batch implementation:
+
+- `cdp_identity_index` provides a unique tenant/type/normalized-identifier key and indexes for O(1)-style exact lookup. The current `CustomerIdentityResolver` still matches against master scalar fields, arrays, JSONB, and domain-profile JSONB; it does not populate or query this index in the active path.
+- `cdp_profile_merge_history` stores source and target master snapshots for master-to-master merges and possible unmerge/split operations. The current raw-profile resolver does not write this table.
+- `linked_raw_profile_count` and `last_identity_resolved_at` are schema/catalog fields intended for lineage and reporting. The current resolver links rows but does not update those denormalized fields in its shown batch logic.
+- `address` is JSONB on the master, while the resolver's current scalar consolidation set is limited to `full_name`, `email`, and `phone_number`. The catalog seeds address matching rules, but the current raw-column projection omits those fields, and address consolidation into the master address document is not implemented by this resolver path.
+- `first_name` and `last_name` are stored fields, but the seeded catalog does not enable them as identity keys.
+
+These distinctions provide a practical roadmap: normalize and index active identifiers, implement deterministic tie-breaking, update lineage counters atomically, and add a controlled master-merge/unmerge workflow before treating those schema capabilities as production behavior.
+
+## 8. Worked Example
+
+Assume tenant `T` and domain `retail` contain this first observation:
 
 ```text
-[Start Batch Resolution]
-           |
-           v
-(1) Load active rules from cdp_profile_attributes
-           |
-           v
-(2) Fetch cdp_raw_profiles_stage where status_code = 1
-           |
-      +----+----+
-      |         |
- [No rows]   [Rows found]
-      |         |
-      v         v
-   (Exit)   Iterate each raw profile
-                |
-                v
-          (3) SELECT set_config('app.tenant_id', ...)
-                |
-                v
-          (4) Build dynamic matching SQL
-                |
-                v
-          (5) Query cdp_master_profiles (tenant/domain scoped)
-                |
-          +-----+-----+
-          |           |
-      [Matched]   [No match]
-          |           |
-          v           v
- (6A) Insert link and merge   (6B) Create master profile,
-      using consolidation           set first_seen_raw_profile_id,
-      rules                         insert first link
-          \           /
-           +---------+
-                |
-                v
-          (7) Update status_code = 3 and processed_at
-                |
-                v
-          More rows in batch?
-            /        \
-          Yes        No
-          /           \
-       Continue      Commit transaction
+raw A
+  source_system       = Adjust
+  email               = sha256(normalized customer email)
+  device_id           = D1
+  media_source        = TikTok Ads
 ```
 
-### 3.3 Matching Rules and Data Examples
+No `retail` master in tenant `T` satisfies an active predicate, so CIR creates master `M`, stores the email, initializes `device_ids = [D1]`, records `source_systems = [Adjust]`, and inserts `A -> M` with `match_method = NewMaster`.
 
-The system supports four rule families controlled by `matching_rule` in `cdp_profile_attributes`.
-
-#### 1. `exact` rule
-
-Used for stable high-precision identifiers. Matching uses `=` or array containment semantics where applicable.
-
-- **Inbound staging:**
-  - `email`: `nguyena@gmail.com`
-  - `phone_number`: `+84901234567`
-- **Existing master:**
-  - `email`: `nguyena@gmail.com`
-  - `phone_number`: `+84901234567`
-- **Outcome:** deterministic match; row is linked to existing master profile.
-
-#### 2. `fuzzy_trgm` rule
-
-Used for typo-tolerant text fields such as names or addresses. It relies on PostgreSQL `pg_trgm` similarity with configurable threshold.
-
-- **Inbound staging:**
-  - `full_name`: `Nguyen Van A`
-  - `address`: `123 Duong Le Loi, Phuong 1, Quan 1, TPHCM`
-- **Existing master:**
-  - `full_name`: `Nguyen Van A`
-  - `address`: `123 Le Loi, P.1, Q.1, TP HCM`
-- **Outcome:** similarity exceeds threshold (for example, 0.65), so records are treated as same customer.
-
-#### 3. `fuzzy_dmetaphone` rule
-
-Used for phonetic matching of names with small spelling variations.
-
-- **Inbound staging:** `first_name = Smith`
-- **Existing master:** `first_name = Smyth`
-- **Outcome:** both map to equivalent phonetic code, producing a successful match.
-
-#### 4. `none` rule
-
-Attribute is excluded from identity matching and used only for post-match enrichment.
-
----
-
-## 4. Sensitive Data Handling (Privacy and Hashed PII)
-
-To align with personal-data regulations and ad-tech hashed matching patterns, the engine supports one-way SHA-256 PII payloads (64 hex characters).
-
-### 4.1 Detection and Persona Name Generation
-
-When PII fields (`full_name`, `email`, `phone_number`, `national_id`) arrive as hashes, plaintext display is impossible. Therefore, `persona.py` triggers a non-PII naming path:
-
-1. **Automatic detection**
-   - Regex `^[0-9a-f]{64}$` identifies hashed values
-   - `is_hashed = TRUE` is set on `cdp_master_profiles`
-
-2. **Persona generation**
-   - **LLM path (Gemini):** if `LEO_GOOGLE_GENAI_API_KEY` is configured, generate memorable non-PII names from non-sensitive context (domain, channel, source)
-   - **Deterministic offline fallback:** if no API key/network, derive a stable label from anchor identifiers (`device_id`, `advertising_id`, and similar), with a 6-character hash suffix
-
-### 4.2 Sensitive Data Sequence Flow
+Later, Web Tracking produces:
 
 ```text
-[Inbound Raw Profile]
-       |
-       v
-(Validate PII using ^[0-9a-f]{64}$)
-       |
-       +--> [Plaintext PII] --> is_hashed = FALSE (retain normal naming path)
-       |
-       +--> [SHA-256 PII] --> is_hashed = TRUE
-                               |
-                               v
-                       Generate persona_name
-                               |
-                        +------+------+
-                        |             |
-                    [Gemini]      [Local fallback]
-                        |             |
-                        +------+------+
-                               |
-                               v
-                       [Master Profile Output]
-                       persona_name = "Digital Banking User #a1b2c3"
+raw B
+  source_system       = WebTracking
+  email               = the same SHA-256 digest
+  cookie_id            = C1
+  event_name           = login
 ```
 
-### 4.3 Example Data (Hashed vs Plaintext)
+The resolver builds an exact email condition and an exact cookie condition. The cookie condition cannot match because `C1` is not yet on `M`, but the email condition matches. The candidate score is `1 / 2 = 0.5`, and the method includes the field that matched. CIR inserts `B -> M`, retains the existing master email, appends `C1` to `cookie_ids`, adds `WebTracking` to `source_systems`, recomputes the persona for `M`, marks `B` as processed, and commits.
 
-| Attribute | Plaintext Input | Hashed Input (SHA-256) | Stored in Master |
-| --- | --- | --- | --- |
-| `full_name` | `Nguyen Van An` | `9f86d08188...15b0f00a08` | `9f86d08188...15b0f00a08` |
-| `email` | `an.nguyen@gmail.com` | `d081884c7d...c15b0f00a08` | `d081884c7d...c15b0f00a08` |
-| `is_hashed` | `FALSE` | `TRUE` | `TRUE` |
-| `persona_name` | `NULL` | auto-generated | `Savvy Retail Shopper #4f2a9c` |
+The example shows why match score and identity confidence are different concepts. The link score describes the conditions satisfied for this raw observation; the persona assignment's confidence score describes the resolved master snapshot used by persona scoring. Neither score alone proves that two unrelated masters should be merged.
 
----
+## 9. Evaluation and Operational Recommendations
 
-## 5. Triggering and Throttling
+The implementation is strong in the following areas:
 
-To sustain performance under continuous ingestion, the architecture combines near-real-time triggering with periodic batch processing.
+- Explicit tenant and domain scoping at the candidate boundary.
+- Metadata-driven matching and per-field consolidation.
+- Preservation of raw lineage and cross-channel identifiers.
+- Retry-aware links and transaction rollback.
+- Optional, failure-contained persona enrichment.
+- Privacy-aware hashed PII handling with an offline fallback.
+- Redis serialization for scheduled backlog drains and PostgreSQL NOWAIT throttling for frequent triggers.
 
-### 5.1 Row-Lock Throttling Mechanism
+Before making the system a high-confidence production identity graph, the following controls should be completed or measured:
 
-The system avoids direct PL/pgSQL triggers to reduce lock contention. Instead, the ingestion worker invokes `IdentityResolutionTrigger.attempt_trigger()` after writes:
+1. Add deterministic tie-breaking after candidate score ordering, preferably using identifier priority and stable master creation time.
+2. Add calibrated, weighted match policies and review thresholds for fuzzy signals; an `OR` query with a single weak fuzzy match should not have the same operational meaning as an exact trusted identifier.
+3. Populate and query `cdp_identity_index` for high-volume exact lookups, with normalization and blocked-value handling applied consistently.
+4. Reconcile and maintain `linked_raw_profile_count` and `last_identity_resolved_at` as part of the same transaction as link creation.
+5. Implement explicit failed-row handling, retry limits, and dead-letter monitoring if ingestion requires durable failure states.
+6. Add a master-to-master merge, unmerge, and audit workflow using `cdp_profile_merge_history`.
+7. Add integration tests for RLS with a non-superuser role, because a superuser connection bypasses RLS and cannot validate tenant isolation.
+8. Measure precision, recall, false merges, false splits, backlog age, candidate latency, and persona enrichment latency separately.
 
-1. Runtime state is controlled by single-row table `cdp_id_resolution_status`.
-2. `SELECT ... FOR UPDATE NOWAIT` is used:
-   - If lock is held by another worker, current trigger call exits immediately (no blocking).
-   - If elapsed time from prior run is below `throttle_seconds` (default: 5 seconds), trigger is deferred for micro-batching.
-3. If conditions pass, worker updates `last_executed_at` and runs `run_resolution_batch()`.
+## 10. Conclusion
 
-### 5.2 Trigger and Throttling Control Flow
+The current Customer 360 solution merges multi-source profiles through a controlled raw-to-master process. A raw observation is scoped to its tenant and domain, compared with configured identity signals, linked to the best candidate when one exists, and consolidated without discarding source lineage. A non-match creates a new master rather than forcing an uncertain association. The result is then enriched by a separate, versioned persona engine.
 
-```text
-[Ingestion worker inserts staging rows]
-                 |
-                 v
-      attempt_trigger(tenant_id, domain)
-                 |
-                 v
-SELECT ... FOR UPDATE NOWAIT on cdp_id_resolution_status
-          +---------------+----------------+
-          |                                |
- [Lock held by other worker]      [Lock acquired]
-          |                                |
-          v                                v
-      Skip immediately            Check elapsed interval
-                                          |
-                              +-----------+-----------+
-                              |                       |
-                       [Below threshold]      [Threshold passed]
-                              |                       |
-                              v                       v
-                           Defer             Update last_executed_at
-                                             Run run_resolution_batch()
-```
-
-### 5.3 Operational Status Example
-
-Table `cdp_id_resolution_status`:
-
-| `id` | `last_executed_at` | `updated_at` | Runtime Interpretation |
-| --- | --- | --- | --- |
-| `TRUE` | `2026-08-04 10:00:00+07` | `2026-08-04 10:00:00+07` | Run at `10:00:02` is throttled (`< 5s`), run at `10:00:06` is accepted |
-
----
-
-## 6. Operational Best Practices
-
-1. **Idempotency and integrity**
-   - Process only staging rows with `status_code = 1`
-   - Move processed rows to `status_code = 3` with `processed_at = NOW()`
-   - `UNIQUE(tenant_id, raw_profile_id)` on `cdp_profile_links` prevents duplicate links on retries
-
-2. **Tenant and domain security boundaries**
-   - All generated SQL enforces `WHERE tenant_id = :tenant_id AND domain = :domain`
-   - This prevents cross-tenant and cross-domain leakage
-
-3. **Data normalization before matching**
-   - Phone values should follow E.164 format (for example, `+84901234567`)
-   - Email values should be lowercased and trimmed before staging
-
-4. **Failure handling and queue monitoring**
-   - Alert on excessive `status_code = 1` backlog
-   - Alert on recurrent `status_code = 4` failures
-
----
-
-## 7. Conclusion and Solution Evaluation
-
-The Customer Identity Resolution implementation in this Customer 360 architecture is metadata-driven, tenant-aware, and operationally practical. It supports both near-real-time micro-batching and scheduled high-throughput batch execution, while producing stable golden profiles without introducing database bottlenecks.
-
-### 7.1 Use Case Application Matrix
-
-| Business Use Case | Core Technical Requirement | C360 CIR Resolution Mechanism |
-| --- | --- | --- |
-| Cross-channel identity stitching | Link Web/App/POS/CRM/Ads records | Exact/fuzzy matching on contact identifiers plus accumulation of `device_ids`, `cookie_ids`, `advertising_ids`, and `external_ids` |
-| Multi-tenant and multi-domain governance | Strict data partition by tenant/domain | Hard SQL scope filters and PostgreSQL RLS |
-| Privacy-preserving hashed PII and ad-tech matching | Support SHA-256 payloads without plaintext exposure | Hash detection, `is_hashed` flagging, non-PII persona naming via Gemini/local fallback, optional embedding enrichment |
-| Dirty data and typo tolerance | Resolve identities under spelling variations | `fuzzy_trgm` and `fuzzy_dmetaphone` rules with configurable thresholds |
-| Attribute conflict handling | Resolve contradictory source values | Field-level `consolidation_rule`: `verified_first`, `most_recent`, `source_priority`, `append_distinct`, and others |
-
----
-
-### 7.2 Detailed Comparison with Commercial Alternative (Twilio Segment Unify vs Native C360 CIR)
-
-| Comparison Dimension | Native Customer 360 CIR Engine | Twilio Segment Unify (Personas) |
-| --- | --- | --- |
-| Deployment and governance | Native PostgreSQL 16 (on-prem/private cloud), full infrastructure and data control, no vendor lock-in | Managed SaaS, data traverses vendor infrastructure and governance model |
-| Matching engine | Hybrid matching: exact + trigram fuzzy + phonetic fuzzy, metadata-driven | Primarily deterministic identity graph around `userId`/`anonymousId`; limited native fuzzy matching |
-| Multi-tenant isolation | Database-level isolation with RLS and strict tenant/domain scoping | Workspace/source-level separation; can become costly at large tenant counts |
-| Consolidation strategy | Per-field configurable merge policies (`most_recent`, `verified_first`, `source_priority`, `append_distinct`, `overwrite`) | Simpler trait-priority/last-write defaults |
-| Privacy and AI enrichment | Native SHA-256 handling, persona name generation with Gemini, embedding generation for semantic use cases | Usually requires extra custom transformations/functions outside core flow |
-| Total cost of ownership | Primarily infra and worker cost; no MTU licensing growth curve | MTU-based pricing; cost scales rapidly with user volume |
-| Ingestion latency and throughput | Flexible near-real-time micro-batching or scheduled batch | Strong event-driven SaaS near-real-time model |
-
----
-
-### 7.3 Final Summary
-
-By combining metadata-driven flexibility, secure hashed-PII handling, and strict tenant isolation at the database layer, the Native C360 CIR Engine provides a strong and cost-efficient foundation for large-scale identity unification. The design is particularly suitable for organizations that require full data ownership, transparent matching logic, and low long-term TCO while still supporting advanced personalization and analytics workflows.
+This separation gives the platform a clear logical flow: staging preserves evidence, CIR makes the identity decision, master and link tables preserve the decision, and persona resolution adds explainable business interpretation. The schema already provides foundations for indexed identity lookup and reversible master merges, while the current implementation correctly documents those as follow-on capabilities rather than silently treating them as completed behavior.
