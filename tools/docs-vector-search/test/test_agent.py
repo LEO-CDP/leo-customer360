@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.agent import RagAgent
+from src.agent import ANSWER_SYSTEM, RagAgent
 
 
 def _hit(chunk_id: str, text: str) -> dict:
@@ -49,3 +49,30 @@ def test_rag_agent_injects_hybrid_retrieval_and_generation_dependencies():
     assert result["answer"].startswith("CIR is")
     assert result["contexts"] == ["CIR is Customer Identity Resolution."]
     assert result["sources"][0]["path"] == "guide.md"
+
+
+def test_answer_prompt_requires_bilingual_grounded_non_empty_output():
+    assert "same language as the question" in ANSWER_SYSTEM
+    assert "Do not return JSON, XML, analysis," in ANSWER_SYSTEM
+    assert "or an empty response." in ANSWER_SYSTEM
+    assert "I don't know — that isn't in the documentation." in ANSWER_SYSTEM
+
+
+def test_rag_agent_rejects_empty_generator_output():
+    class FakeRepository:
+        def retrieve(self, question, query_vector, limit, keyword_limit):
+            return [_hit("a", "Grounding evidence.")]
+
+    agent = RagAgent(
+        repository=FakeRepository(),
+        embedder=lambda texts, *, task: [[1.0]],
+        reranker=lambda question, passages: [1.0],
+        generator=lambda system_prompt, user_message: "  ",
+    )
+
+    try:
+        agent.answer("What is this?", top_n=1, top_k=1)
+    except RuntimeError as exc:
+        assert "empty response" in str(exc)
+    else:
+        raise AssertionError("empty generated answer was accepted")

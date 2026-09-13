@@ -39,7 +39,7 @@ Measured 2026-09-06 (UAT, first live smoke), `curl` from the box (`localhost:800
 | `GET /health` | <100 ms | chunk count + model names |
 | `POST /search` | ~3 s | embed query + pgvector top-N + bge rerank (CPU) |
 | `POST /ask` (first call) | ~15–42 s | includes lazy Qwen load; grounded answer + 5 sources |
-| `POST /ask` (warm) | **~17–42 s** | historical UAT baseline; dominated by Qwen 0.5B generation. Current tuning uses `DOCS_LLM_MAX_OUTPUT_TOKENS`, `DOCS_LOCAL_LLM_THREADS`, and `DOCS_LOCAL_LLM_BATCH_SIZE`. |
+| `POST /ask` (warm) | **~17–42 s** | historical UAT baseline; dominated by Qwen 0.5B generation. Current tuning uses `DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS`, `DOCS_LOCAL_LLM_THREADS`, and `DOCS_LOCAL_LLM_BATCH_SIZE`. |
 | Boot to healthy (models cached) | **~1 s** | measured on restart with fastembed cache present — the state the **pre-bake** guarantees on any fresh box |
 
 ## Resource use (under `/ask`)

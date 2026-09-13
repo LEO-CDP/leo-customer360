@@ -82,8 +82,13 @@ DOCS_RERANK_MODEL = os.getenv("DOCS_RERANK_MODEL", "BAAI/bge-reranker-base")
 LLM_PROVIDER = _provider(
     os.getenv("DOCS_LLM_PROVIDER", "openai")
 )
-DOCS_LLM_MAX_OUTPUT_TOKENS = int(os.getenv("DOCS_LLM_MAX_OUTPUT_TOKENS", "256"))
 LOCAL_LLM_CONTEXT_TOKENS = int(os.getenv("DOCS_LOCAL_LLM_CONTEXT_TOKENS", "2048"))
+DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS = int(
+    os.getenv("DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS", "1024")
+)
+DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS = int(
+    os.getenv("DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS", "512")
+)
 LOCAL_LLM_THREADS = int(os.getenv("DOCS_LOCAL_LLM_THREADS", "2"))
 LOCAL_LLM_BATCH_SIZE = int(os.getenv("DOCS_LOCAL_LLM_BATCH_SIZE", "512"))
 LOCAL_LLM_GPU_LAYERS = int(os.getenv("DOCS_LOCAL_LLM_GPU_LAYERS", "-1"))
@@ -124,6 +129,15 @@ GEMINI_REQUEST_TIMEOUT_SECONDS = float(
 
 if LLM_PROVIDER not in {"openai", "gemini", "local"}:
     raise ValueError(f"Unsupported DOCS_LLM_PROVIDER: {LLM_PROVIDER}")
+if DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS < 1:
+    raise ValueError("DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS must be positive")
+if DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS < 1:
+    raise ValueError("DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS must be positive")
+if DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS >= LOCAL_LLM_CONTEXT_TOKENS:
+    raise ValueError(
+        "DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS must be smaller than "
+        "LOCAL_LLM_CONTEXT_TOKENS so Qwen retains prompt space"
+    )
 if DOCS_RERANK_PROVIDER not in {"openai", "local"}:
     raise ValueError(f"Unsupported DOCS_RERANK_PROVIDER: {DOCS_RERANK_PROVIDER}")
 if DOCS_RERANK_OPENAI_FALLBACK not in {"local", "vector"}:

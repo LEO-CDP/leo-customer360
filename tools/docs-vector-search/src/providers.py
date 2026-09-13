@@ -23,7 +23,8 @@ from .config import (
     EMBED_DIM,
     EMBED_MODEL,
     FASTEMBED_CACHE,
-    DOCS_LLM_MAX_OUTPUT_TOKENS,
+    DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS,
+    DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS,
     LOCAL_LLM_BATCH_SIZE,
     LOCAL_LLM_CONTEXT_TOKENS,
     LOCAL_LLM_GPU_LAYERS,
@@ -305,26 +306,84 @@ def _llm():
     )
 
 
+def _content_text(content) -> str:
+    """Normalize string and provider content-part formats into visible answer text."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and isinstance(part.get("text"), str):
+                parts.append(part["text"])
+        return "".join(parts).strip()
+    return ""
+
+
+def _openai_answer(response: dict) -> tuple[str, str | None]:
+    try:
+        choice = response["choices"][0]
+        message = choice["message"]
+        return _content_text(message.get("content")), choice.get("finish_reason")
+    except (KeyError, IndexError, TypeError, AttributeError) as exc:
+        raise RuntimeError("OpenAI chat response did not contain a message") from exc
+
+
+def _generation_diagnostic(response: dict, finish_reason: str | None) -> str:
+    usage = response.get("usage") if isinstance(response, dict) else None
+    refusal = None
+    try:
+        refusal = response["choices"][0]["message"].get("refusal")
+    except (KeyError, IndexError, TypeError, AttributeError):
+        pass
+    details = [f"finish_reason={finish_reason or 'unknown'}"]
+    if refusal:
+        details.append(f"refusal={refusal!r}")
+    if isinstance(usage, dict):
+        details.append(f"completion_tokens={usage.get('completion_tokens', 'unknown')}")
+    return ", ".join(details)
+
+
+def _openai_generation(system: str, user: str, max_tokens: int) -> dict:
+    payload = {
+        "model": OPENAI_LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    if OPENAI_LLM_MODEL.lower().startswith("gpt-5"):
+        payload["max_completion_tokens"] = max_tokens
+    else:
+        payload["max_tokens"] = max_tokens
+        payload["temperature"] = 0.2
+    return _openai_request("chat/completions", payload)
+
+
 def generate(system: str, user: str) -> str:
     """Generate an answer through the configured OpenAI, Gemini, or local provider."""
     if LLM_PROVIDER == "openai":
-        payload = {
-            "model": OPENAI_LLM_MODEL,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        }
-        if OPENAI_LLM_MODEL.lower().startswith("gpt-5"):
-            payload["max_completion_tokens"] = DOCS_LLM_MAX_OUTPUT_TOKENS
-        else:
-            payload["max_tokens"] = DOCS_LLM_MAX_OUTPUT_TOKENS
-            payload["temperature"] = 0.2
-        response = _openai_request("chat/completions", payload)
-        try:
-            return response["choices"][0]["message"]["content"].strip()
-        except (KeyError, IndexError, AttributeError) as exc:
-            raise RuntimeError("OpenAI chat response did not contain an answer") from exc
+        # Reasoning models can spend a small completion budget before emitting visible
+        # text. Keep the configured value as the floor, but retry once only when blank.
+        max_tokens = max(DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS, 1024)
+        response = _openai_generation(system, user, max_tokens)
+        answer, finish_reason = _openai_answer(response)
+        if not answer:
+            retry_tokens = max(max_tokens * 2, 1024)
+            _log.warning(
+                "OpenAI generation returned no visible text (%s); retrying with %d tokens",
+                _generation_diagnostic(response, finish_reason),
+                retry_tokens,
+            )
+            response = _openai_generation(system, user, retry_tokens)
+            answer, finish_reason = _openai_answer(response)
+        if not answer:
+            raise RuntimeError(
+                "OpenAI chat response contained no visible answer "
+                f"({_generation_diagnostic(response, finish_reason)})"
+            )
+        return answer
     if LLM_PROVIDER == "gemini":
         response = _gemini_request(
             f"models/{quote(GEMINI_LLM_MODEL, safe='')}:generateContent",
@@ -332,16 +391,19 @@ def generate(system: str, user: str) -> str:
                 "systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": user}]}],
                 "generationConfig": {
-                    "maxOutputTokens": DOCS_LLM_MAX_OUTPUT_TOKENS,
+                    "maxOutputTokens": DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS,
                     "temperature": 0.2,
                 },
             },
         )
         try:
             parts = response["candidates"][0]["content"]["parts"]
-            return "".join(part["text"] for part in parts).strip()
+            answer = _content_text(parts)
         except (KeyError, IndexError, TypeError, AttributeError) as exc:
             raise RuntimeError("Gemini response did not contain an answer") from exc
+        if not answer:
+            raise RuntimeError("Gemini response contained no visible answer")
+        return answer
     if LLM_PROVIDER != "local":
         raise RuntimeError(f"Unsupported LLM_PROVIDER: {LLM_PROVIDER}")
 
@@ -350,7 +412,10 @@ def generate(system: str, user: str) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        max_tokens=DOCS_LLM_MAX_OUTPUT_TOKENS,
+        max_tokens=DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS,
         temperature=0.2,
     )
-    return resp["choices"][0]["message"]["content"].strip()
+    answer = _content_text(resp["choices"][0]["message"].get("content"))
+    if not answer:
+        raise RuntimeError("Local model response contained no visible answer")
+    return answer
