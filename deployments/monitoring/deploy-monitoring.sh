@@ -187,7 +187,8 @@ if [[ "$P_GATED" == "true" || "$N_GATED" == "true" || "$J_GATED" == "true" || "$
   : "${OAUTH2_PROXY_CLIENT_SECRET:?client secret still empty after bootstrap — check Keycloak}"
 
   if [[ -z "${OAUTH2_PROXY_COOKIE_SECRET:-}" ]]; then
-    OAUTH2_PROXY_COOKIE_SECRET="$(openssl rand -base64 32)"
+    # oauth2-proxy needs exactly 16/24/32 bytes; hex 16 = 32 chars (base64 32 = 44 chars, rejected).
+    OAUTH2_PROXY_COOKIE_SECRET="$(openssl rand -hex 16)"
     printf 'OAUTH2_PROXY_COOKIE_SECRET=%s\n' "$OAUTH2_PROXY_COOKIE_SECRET" >> ./.env
     echo ">> Generated OAUTH2_PROXY_COOKIE_SECRET (saved to .env)."
   fi
