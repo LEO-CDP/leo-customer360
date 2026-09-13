@@ -21,11 +21,19 @@ from typing import Optional
 from core.config import settings
 
 _SIG_LEN = 20
+_DEFAULT_SECRET = "leocdp-dev-tracking-secret"
+_IS_PROD = settings.environment.strip().lower() in ("prod", "production")
 
-if settings.email_tracking_secret == "leocdp-dev-tracking-secret":  # pragma: no cover
+if settings.email_tracking_secret == _DEFAULT_SECRET:  # pragma: no cover
     logging.getLogger(__name__).warning(
         "EMAIL_TRACKING_SECRET is the insecure dev default; set a strong value in prod."
     )
+
+
+def _insecure_default(secret: str) -> bool:
+    """In prod, the well-known dev default must not be trusted -- treat tokens/
+    click sigs as invalid (fail closed) so a misconfig can't be exploited."""
+    return _IS_PROD and secret == _DEFAULT_SECRET
 
 # 1x1 fully-transparent GIF returned by the open-pixel endpoint.
 TRANSPARENT_GIF = base64.b64decode(
@@ -70,6 +78,8 @@ def verify_click_url(url: str, sig: Optional[str], secret: Optional[str] = None)
     if not url or not sig:
         return False
     secret = secret if secret is not None else settings.email_tracking_secret
+    if _insecure_default(secret):
+        return False
     return hmac.compare_digest(sig, _sign(url, secret))
 
 
@@ -91,6 +101,8 @@ def decode_tracking_token(token: str, secret: Optional[str] = None) -> Optional[
     if not token:
         return None
     secret = secret if secret is not None else settings.email_tracking_secret
+    if _insecure_default(secret):
+        return None
     try:
         padded = token + "=" * (-len(token) % 4)
         decoded = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")

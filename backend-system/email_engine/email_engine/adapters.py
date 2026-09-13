@@ -17,6 +17,7 @@ Adding a provider (e.g. SES) later = one more subclass + a branch in
 import logging
 import os
 import smtplib
+import ssl
 import uuid
 from dataclasses import dataclass
 from email.message import EmailMessage
@@ -59,10 +60,9 @@ class MockDispatchAdapter(DispatchAdapter):
 
 
 class SMTPDispatchAdapter(DispatchAdapter):
-    """Real SMTP send. Connection settings come from a resolved config dict
-    (``provider_config.load_email_config`` -- DB/Redis) when provided, else from
-    static SMTP_* env vars. A connection is opened per ``send`` (simple +
-    retry-safe for the batch sizes this beta targets)."""
+    """Real SMTP send. Settings come from a resolved config dict
+    (``provider_config.load_email_config``) when provided, else from static
+    SMTP_* env vars. One connection per ``send`` (fine at this beta's batch sizes)."""
 
     provider_name = "smtp"
 
@@ -102,7 +102,9 @@ class SMTPDispatchAdapter(DispatchAdapter):
         try:
             with smtplib.SMTP(self.host, self.port, timeout=self.timeout) as server:
                 if self.use_tls:
-                    server.starttls()
+                    # Verified TLS (cert + hostname) -- bare starttls() uses an
+                    # unauthenticated context, exposing the login to a MITM.
+                    server.starttls(context=ssl.create_default_context())
                 if self.username and self.password:
                     server.login(self.username, self.password)
                 server.send_message(message)
@@ -114,10 +116,9 @@ class SMTPDispatchAdapter(DispatchAdapter):
 
 def build_adapter(config: Optional[dict] = None) -> DispatchAdapter:
     """Return the dispatch adapter for a resolved provider config dict (from
-    ``provider_config.load_email_config`` -- DB/Redis). With no config, falls
-    back to ``EMAIL_DISPATCH_ADAPTER`` env (default ``mock``). Unknown providers
-    fall back to mock with a warning so a typo never silently drops a run into a
-    real-send path."""
+    ``provider_config.load_email_config``). With no config, falls back to
+    ``EMAIL_DISPATCH_ADAPTER`` env (default ``mock``). An unknown provider falls
+    back to mock with a warning, so a typo never silently starts real sends."""
     if config is not None:
         provider = (config.get("provider") or "mock").strip().lower()
     else:

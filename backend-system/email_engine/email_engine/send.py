@@ -265,10 +265,11 @@ def send_campaign(
     conn = connect()
     got_lock = False
     try:
-        # H2: serialize dispatch per campaign (advisory-lock classid 1) so a
-        # Dagster retry, re-activation, or concurrent run cannot double-SEND --
-        # the ledger dedups rows, not the actual emails. If another run holds the
-        # lock, skip this run rather than block/duplicate.
+        # H2: serialize dispatch per campaign (advisory lock, classid 1) so a
+        # retry / re-activation / concurrent run can't double-SEND -- the ledger
+        # dedups rows, not emails. Another run holds it -> skip, don't block.
+        # ponytail: key is hashtext(campaign_id) (int32); a rare id collision
+        # under-sends (skipped_locked), never double-sends -- fine for beta.
         with conn.cursor() as lock_cur:
             lock_cur.execute("SELECT pg_try_advisory_lock(1, hashtext(%s))", (str(campaign_id),))
             got_lock = bool(lock_cur.fetchone()[0])
@@ -377,6 +378,9 @@ def _process_batch(conn, adapter, tenant_id, campaign_id, template_id, template,
                 else:
                     urls = _tracking_urls(tenant_id, campaign_id, master_profile_id)
                     rendered = _render_for_recipient(template, profile, urls)
+                    # ponytail: send precedes the ledger commit, so a crash in
+                    # between re-sends this recipient next run -- at-least-once,
+                    # accepted.
                     result = adapter.send(
                         to_email=email, subject=rendered["subject"],
                         html_body=rendered["html_body"], text_body=rendered["text_body"],
