@@ -53,9 +53,9 @@ jobs:
           for r in $runners; do
             name="${r%/run_*.sh}"
             if bash "$r" > "logs/$(echo "$name" | tr / _).log" 2>&1; then
-              echo "  [OK]   $name" >> unit.txt
+              echo "  ✅ $name" >> unit.txt
             else
-              echo "  [FAIL] $name" >> unit.txt
+              echo "  ❌ $name" >> unit.txt
               fail=1
             fi
           done
@@ -108,9 +108,9 @@ jobs:
           for u in $urls; do
             code=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' "$u")
             if [ "$code" = "200" ]; then
-              echo "  [OK]   $u ($code)" >> health.txt
+              echo "  ✅ $u ($code)" >> health.txt
             else
-              echo "  [FAIL] $u ($code)" >> health.txt
+              echo "  ❌ $u ($code)" >> health.txt
               fail=1
             fi
           done
@@ -127,13 +127,26 @@ jobs:
           REPO: ${{ github.repository }}
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          overall="OK"
-          { [ "$UNIT_FAIL" = "1" ] || [ "$HEALTH_FAIL" = "1" ] || [ "$E2E_RESULT" = "FAIL" ]; } && overall="FAIL"
-          icon="[OK]"; [ "$overall" = "FAIL" ] && icon="[FAIL]"
+          overall="OK"; st="success"
+          if [ "$UNIT_FAIL" = "1" ] || [ "$HEALTH_FAIL" = "1" ] || [ "$E2E_RESULT" = "FAIL" ]; then
+            overall="FAIL"; st="failure"
+          fi
+          # Non-success → name the failed legs (per-item details follow below).
+          reason=""
+          if [ "$st" = "failure" ]; then
+            legs=""
+            [ "$UNIT_FAIL" = "1" ]      && legs="$legs unit"
+            [ "$E2E_RESULT" = "FAIL" ]  && legs="$legs e2e"
+            [ "$HEALTH_FAIL" = "1" ]    && legs="$legs health"
+            reason="Reason: failed leg(s):${legs} — see details below."
+          fi
+          echo "status=${st}" >> "$GITHUB_OUTPUT"
+          echo "overall=${overall}" >> "$GITHUB_OUTPUT"
           {
             echo "text<<TG_EOF"
-            echo "${icon} Scheduled checks — ${overall}"
+            echo "Scheduled checks — ${overall}"
             echo "Repo: ${REPO}"
+            [ -n "$reason" ] && { echo ""; echo "$reason"; }
             echo ""
             echo "Unit tests:"
             cat unit.txt 2>/dev/null || echo "  (none)"
@@ -148,7 +161,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           # Mirror to the run's Step Summary.
           { echo "## Scheduled checks — ${overall}"; echo '```'; cat unit.txt health.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          echo "overall=$overall" >> "$GITHUB_OUTPUT"
 
       - name: Notify Telegram
         if: always()
@@ -156,6 +168,7 @@ jobs:
         with:
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: ${{ steps.sum.outputs.status }}
           message: ${{ steps.sum.outputs.text }}
 
       - name: Fail the run if any check failed

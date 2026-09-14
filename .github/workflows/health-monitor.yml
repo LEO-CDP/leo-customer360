@@ -75,13 +75,14 @@ jobs:
           # Still down after >5 min — build the alert (re-probe once for the current code).
           {
             echo "text<<TG_EOF"
-            echo "[ALERT] Service(s) unhealthy > 5 min:"
+            echo "Service(s) unhealthy > 5 min:"
             echo ""
             for u in $cand; do
-              echo "  - $u  ($(probe "$u"))"
+              echo "  ❌ $u  ($(probe "$u"))"
             done
             echo ""
-            echo "Checked from GitHub Actions health-monitor."
+            echo "Reason: each URL above returned a non-200 status on the initial probe"
+            echo "and every 60s re-probe across the >5-min confirmation window."
             echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo "TG_EOF"
           } >> "$GITHUB_OUTPUT"
@@ -93,6 +94,7 @@ jobs:
         with:
           bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: failure
           message: ${{ steps.probe.outputs.text }}
 
       - name: Fail the run when an alert fired
