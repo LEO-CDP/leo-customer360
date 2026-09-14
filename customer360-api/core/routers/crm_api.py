@@ -77,11 +77,27 @@ def _block_edit_of_approved_campaign(db: Session, campaign: Campaign, payload: d
         )
 
 
+def _validate_create_campaign_starts_in_draft(db: Session, payload: dict) -> None:
+    """Refuses generic POST /campaigns writes that try to bypass the draft-review
+    workflow by setting approval metadata up front."""
+    if payload.get("approval_status") not in (None, "Draft"):
+        raise ValueError(
+            "Campaigns created via POST /campaigns must start in Draft; use the campaign draft "
+            "approval workflow to change approval_status"
+        )
+    if payload.get("approved_by") is not None or payload.get("approved_at") is not None:
+        raise ValueError(
+            "Campaign approval metadata may not be set via POST /campaigns; use the campaign "
+            "draft approval workflow instead"
+        )
+
+
 campaigns_router = build_crud_router(
     model=Campaign,
     pk_field="campaign_id",
     pk_type=uuid.UUID,
     create_schema=CampaignCreate,
+    create_validator=_validate_create_campaign_starts_in_draft,
     update_schema=CampaignUpdate,
     read_schema=CampaignRead,
     prefix="/campaigns",
