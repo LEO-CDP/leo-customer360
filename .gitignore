@@ -27,3 +27,6 @@ node_modules
 docs-site/node_modules/
 
 .ua
+.claude/
+.specify/
+specs/

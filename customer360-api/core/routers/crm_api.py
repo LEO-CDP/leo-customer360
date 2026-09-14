@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from core.database import get_db
 from core.models.crm import Account, Campaign, CampaignMember, Contact, Industry, Lead, LeadSource, Opportunity
+from core.repositories.campaign_draft_repository import CampaignDraftRepository
 from core.repositories.campaign_repository import CampaignRepository
 from core.routers._generic import build_crud_router
 from core.schemas.crm import (
@@ -52,6 +53,14 @@ from core.schemas.crm import (
     TopCampaignItem,
 )
 
+def _attach_campaign_content_items(db: Session, campaign: Campaign) -> None:
+    """Enriches GET /campaigns/{id} with its content plan (specs/002-ai-campaign-draft-creation),
+    via a join against crm_campaign_content_items/cdp_content_items -- see
+    core.repositories.campaign_draft_repository.list_campaign_content_items."""
+    repo = CampaignDraftRepository(db)
+    campaign.content_items = repo.list_campaign_content_items(campaign.tenant_id, campaign.campaign_id)
+
+
 campaigns_router = build_crud_router(
     model=Campaign,
     pk_field="campaign_id",
@@ -61,6 +70,7 @@ campaigns_router = build_crud_router(
     read_schema=CampaignRead,
     prefix="/campaigns",
     tags=["CRM - Campaigns"],
+    read_hook=_attach_campaign_content_items,
 )
 
 campaign_members_router = build_crud_router(

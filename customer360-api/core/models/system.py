@@ -50,6 +50,32 @@ sys_organization_table = Table(
 # Full ORM Models
 # =============================================================================
 
+class SysAuditLog(Base):
+    """Compliance/audit trail (see database-schema.sql's "Audit Log"
+    section): one row per user/API action, before/after JSONB snapshots.
+
+    Only the subset of columns this API currently writes to is mapped here
+    (audit_id/tenant_id/user_id/action/resource_type/resource_id/before_data/
+    after_data/created_at); every other real column (success, error_code,
+    trace_id, ...) keeps its own DB default on insert.
+    """
+
+    __tablename__ = "sys_audit_log"
+
+    audit_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    resource_type: Mapped[str] = mapped_column(Text, nullable=False)
+    resource_id: Mapped[Optional[str]] = mapped_column(Text)
+    before_data: Mapped[Optional[dict]] = mapped_column(JSONB)
+    after_data: Mapped[Optional[dict]] = mapped_column(JSONB)
+    changed_fields: Mapped[Optional[dict]] = mapped_column(JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=False), server_default=text("now()"))
+
+
 class SysUser(Base):
     """Core application user/staff account.
     Stores identity and profile metadata (name, email, phone, etc.).

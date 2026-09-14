@@ -290,6 +290,38 @@ class Settings(BaseSettings):
         ),
     )
 
+    # AI-assisted email template authoring (specs/001-ai-email-template-authoring).
+    # Provider credentials are read from environment only, never persisted --
+    # see that feature's plan.md Constraints.
+    crm_email_ai_provider: str = Field(
+        default="gemini",
+        validation_alias=AliasChoices("CRM_EMAIL_AI_PROVIDER", "crm_email_ai_provider"),
+    )
+    openai_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("OPENAI_API_KEY", "openai_api_key"),
+    )
+    openai_model: str = Field(
+        default="gpt-5.6-luna",
+        validation_alias=AliasChoices("OPENAI_MODEL", "openai_model"),
+    )
+    gemini_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("GEMINI_API_KEY", "gemini_api_key"),
+    )
+    gemini_model: str = Field(
+        default="gemini-2.5-flash",
+        validation_alias=AliasChoices("GEMINI_MODEL", "gemini_model"),
+    )
+    crm_email_max_subject_length: int = Field(
+        default=150,
+        validation_alias=AliasChoices("CRM_EMAIL_MAX_SUBJECT_LENGTH", "crm_email_max_subject_length"),
+    )
+    crm_email_max_body_length: int = Field(
+        default=20000,
+        validation_alias=AliasChoices("CRM_EMAIL_MAX_BODY_LENGTH", "crm_email_max_body_length"),
+    )
+
     @property
     def database_url(self) -> str:
         return (

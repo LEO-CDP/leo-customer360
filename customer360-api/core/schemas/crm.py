@@ -50,6 +50,14 @@ class CampaignCreate(CampaignBase):
 
 
 class CampaignUpdate(BaseModel):
+    """Deliberately excludes the AI campaign draft governance fields
+    (segment_id, template_id, approval_status, approved_by, approved_at,
+    strategy_summary, ai_plan) -- those may only change via the dedicated
+    campaign_draft_api.py endpoints (create_draft/edit_draft/approve/reject),
+    which enforce the state machine, audit trail, and optimistic-concurrency
+    guard. Allowing them here would let a plain PATCH /campaigns/{id} set
+    e.g. approval_status=Approved directly, bypassing all of that."""
+
     user_id: Optional[uuid.UUID] = None
     campaign_code: Optional[str] = None
     name: Optional[str] = None
@@ -64,20 +72,89 @@ class CampaignUpdate(BaseModel):
     end_date: Optional[date] = None
     budget_amount: Optional[Decimal] = None
     currency: Optional[str] = None
-    segment_id: Optional[uuid.UUID] = None
-    template_id: Optional[uuid.UUID] = None
-    approval_status: Optional[str] = Field(default=None, pattern=APPROVAL_STATUS_PATTERN)
-    approved_by: Optional[uuid.UUID] = None
-    approved_at: Optional[datetime] = None
-    strategy_summary: Optional[str] = None
-    ai_plan: Optional[dict] = None
     metadata_: Optional[dict] = None
+
+
+# ---------------------------------------------------------------------------
+# AI Campaign Strategy and Draft Creation Schemas (specs/002-ai-campaign-draft-creation)
+# Defined before CampaignRead so its content_items field can reference
+# CampaignDraftContentItemRead directly (no forward-ref/model_rebuild needed).
+# Named distinctly from CampaignContentItemRead below (a different, unrelated
+# response shape for the crm_campaign_content_items relation table) to avoid
+# the two classes silently shadowing each other under the same name.
+# ---------------------------------------------------------------------------
+
+class CampaignDraftContentItemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    content_item_id: uuid.UUID
+    position: int
+    role: Optional[str] = None
+    title: Optional[str] = None
+    item_type: Optional[str] = None
+    cta_url: Optional[str] = None
+
+
+class CampaignContentItemInput(BaseModel):
+    content_item_id: uuid.UUID
+    position: Optional[int] = None
+    role: Optional[str] = None
 
 
 class CampaignRead(CampaignBase):
     model_config = ConfigDict(from_attributes=True)
     campaign_id: uuid.UUID
     created_at: Optional[datetime] = None
+    # AI Campaign Strategy and Draft Creation (specs/002-ai-campaign-draft-creation)
+    segment_id: Optional[uuid.UUID] = None
+    template_id: Optional[uuid.UUID] = None
+    approval_status: Optional[str] = None
+    approved_by: Optional[uuid.UUID] = None
+    approved_at: Optional[datetime] = None
+    strategy_summary: Optional[str] = None
+    ai_plan: Optional[dict] = None
+    updated_at: Optional[datetime] = None
+    content_items: Optional[list[CampaignDraftContentItemRead]] = None
+
+
+class CampaignDraftRequest(BaseModel):
+    segment_id: uuid.UUID
+    template_id: uuid.UUID
+    objective: str
+    budget_time_constraints: Optional[str] = None
+
+
+class CampaignDraftResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    campaign_id: uuid.UUID
+    status: Optional[str] = None
+    approval_status: str
+    segment_id: Optional[uuid.UUID] = None
+    template_id: Optional[uuid.UUID] = None
+    name: Optional[str] = None
+    objective: Optional[str] = None
+    strategy_summary: Optional[str] = None
+    ai_plan: Optional[dict] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    approved_by: Optional[uuid.UUID] = None
+    approved_at: Optional[datetime] = None
+    content_items: list[CampaignDraftContentItemRead] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class EditCampaignDraftRequest(BaseModel):
+    objective: Optional[str] = None
+    strategy_summary: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    content_items: Optional[list[CampaignContentItemInput]] = None
+
+
+class RejectCampaignDraftRequest(BaseModel):
+    reason: Optional[str] = None
 
 
 class CampaignMemberBase(BaseModel):
