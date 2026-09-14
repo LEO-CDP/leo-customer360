@@ -146,6 +146,30 @@ class CreateDraftTests(unittest.TestCase):
             return patch("core.repositories.campaign_draft_repository.generate_campaign_plan", side_effect=side_effect)
         return patch("core.repositories.campaign_draft_repository.generate_campaign_plan", return_value=plan)
 
+    def test_create_draft_commits_read_transaction_before_calling_ai(self):
+        """Bug fix regression: the DB transaction must not be held open
+        across the (up to ~30s) AI HTTP call. Verifies the session is
+        already committed -- releasing its pooled connection -- by the time
+        generate_campaign_plan() is invoked."""
+        committed_before_ai_call = []
+
+        def _capture_and_generate(*_args, **_kwargs):
+            committed_before_ai_call.append(self.session.committed)
+            return _valid_generated_plan()
+
+        with self._patch_segment(_fake_segment()), self._patch_template(_fake_template()), self._patch_generate(
+            side_effect=_capture_and_generate
+        ):
+            self.repo.create_draft(
+                tenant_id=DEMO_TENANT_ID,
+                created_by=None,
+                segment_id=DEMO_SEGMENT_ID,
+                template_id=DEMO_TEMPLATE_ID,
+                objective="Objective",
+            )
+
+        self.assertEqual(committed_before_ai_call, [True])
+
     def test_create_draft_success_persists_campaign_content_and_audit_row(self):
         with self._patch_segment(_fake_segment()), self._patch_template(_fake_template()), self._patch_generate(
             _valid_generated_plan(content_item_ids=[str(CONTENT_ITEM_1), str(CONTENT_ITEM_2)])
@@ -338,6 +362,34 @@ class ApproveRejectTests(unittest.TestCase):
         review_rows = [obj for obj in self.session.added if type(obj).__name__ == "CampaignReview"]
         self.assertEqual(review_rows[0].decision, "reject")
         self.assertEqual(review_rows[0].reason, "Bad tone")
+
+    def test_approve_blocked_when_campaign_already_approved(self):
+        self.campaign.approval_status = APPROVAL_STATUS_APPROVED
+        with self._patch_get_campaign():
+            with self.assertRaises(CampaignDraftApprovalBlockedError):
+                self.repo.approve(DEMO_TENANT_ID, self.campaign.campaign_id, uuid.uuid4())
+        self.assertEqual(self.session.added, [])
+
+    def test_approve_blocked_when_campaign_rejected(self):
+        self.campaign.approval_status = APPROVAL_STATUS_REJECTED
+        with self._patch_get_campaign():
+            with self.assertRaises(CampaignDraftApprovalBlockedError):
+                self.repo.approve(DEMO_TENANT_ID, self.campaign.campaign_id, uuid.uuid4())
+        self.assertEqual(self.session.added, [])
+
+    def test_reject_blocked_when_campaign_already_rejected(self):
+        self.campaign.approval_status = APPROVAL_STATUS_REJECTED
+        with self._patch_get_campaign():
+            with self.assertRaises(CampaignDraftApprovalBlockedError):
+                self.repo.reject(DEMO_TENANT_ID, self.campaign.campaign_id, uuid.uuid4())
+        self.assertEqual(self.session.added, [])
+
+    def test_reject_blocked_when_campaign_already_approved(self):
+        self.campaign.approval_status = APPROVAL_STATUS_APPROVED
+        with self._patch_get_campaign():
+            with self.assertRaises(CampaignDraftApprovalBlockedError):
+                self.repo.reject(DEMO_TENANT_ID, self.campaign.campaign_id, uuid.uuid4())
+        self.assertEqual(self.session.added, [])
 
 
 class CandidateContentItemFilteringTests(unittest.TestCase):

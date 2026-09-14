@@ -275,5 +275,28 @@ class CampaignCrudTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
 
 
+class BlockEditOfApprovedCampaignTests(unittest.TestCase):
+    """crm_api._block_edit_of_approved_campaign: the update_validator wired
+    into the real campaigns_router (not exercised by CampaignRouterTests
+    above, which builds its own bare build_crud_router() without it) that
+    stops PATCH /campaigns/{id} from silently editing an Approved campaign
+    -- those edits must go through campaign_draft_api's edit_draft instead,
+    which re-reviews and audits the change."""
+
+    def test_raises_for_approved_campaign(self):
+        from core.routers.crm_api import _block_edit_of_approved_campaign
+
+        campaign = SimpleNamespace(campaign_id=uuid.uuid4(), approval_status="Approved")
+        with self.assertRaises(ValueError):
+            _block_edit_of_approved_campaign(None, campaign, {"name": "New name"})
+
+    def test_allows_edit_for_non_approved_campaign(self):
+        from core.routers.crm_api import _block_edit_of_approved_campaign
+
+        for status in ("Draft", "InReview", "Rejected"):
+            campaign = SimpleNamespace(campaign_id=uuid.uuid4(), approval_status=status)
+            _block_edit_of_approved_campaign(None, campaign, {"name": "New name"})  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()

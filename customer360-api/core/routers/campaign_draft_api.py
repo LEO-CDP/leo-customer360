@@ -172,7 +172,7 @@ def reject_campaign_draft(
         campaign = repo.reject(tenant_id, campaign_id, reviewer_id, reason=payload.reason)
     except CampaignDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except CampaignDraftConflictError as exc:
+    except (CampaignDraftApprovalBlockedError, CampaignDraftConflictError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return _build_response(repo, campaign)

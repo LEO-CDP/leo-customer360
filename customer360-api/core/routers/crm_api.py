@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from core.database import get_db
 from core.models.crm import Account, Campaign, CampaignMember, Contact, Industry, Lead, LeadSource, Opportunity
-from core.repositories.campaign_draft_repository import CampaignDraftRepository
+from core.repositories.campaign_draft_repository import APPROVAL_STATUS_APPROVED, CampaignDraftRepository
 from core.repositories.campaign_repository import CampaignRepository
 from core.routers._generic import build_crud_router
 from core.schemas.crm import (
@@ -61,6 +61,22 @@ def _attach_campaign_content_items(db: Session, campaign: Campaign) -> None:
     campaign.content_items = repo.list_campaign_content_items(campaign.tenant_id, campaign.campaign_id)
 
 
+def _block_edit_of_approved_campaign(db: Session, campaign: Campaign, payload: dict) -> None:
+    """Refuses the generic PATCH /campaigns/{id} once a campaign is Approved
+    (specs/002-ai-campaign-draft-creation): editing name/dates/budget/etc.
+    here would silently bypass the re-review workflow -- no audit row, no
+    approval-status demotion, no optimistic-concurrency guard, unlike
+    CampaignDraftRepository.edit_draft(). approval_status itself is already
+    excluded from CampaignUpdate, so this only needs to catch edits to an
+    already-Approved row; edits before approval remain unrestricted here."""
+    if campaign.approval_status == APPROVAL_STATUS_APPROVED:
+        raise ValueError(
+            f"Campaign '{campaign.campaign_id}' is Approved; edit it via "
+            "PATCH /campaigns/{campaign_id}/draft (campaign_draft_api) instead, "
+            "which re-reviews the change and records it in the campaign's history"
+        )
+
+
 campaigns_router = build_crud_router(
     model=Campaign,
     pk_field="campaign_id",
@@ -71,6 +87,7 @@ campaigns_router = build_crud_router(
     prefix="/campaigns",
     tags=["CRM - Campaigns"],
     read_hook=_attach_campaign_content_items,
+    update_validator=_block_edit_of_approved_campaign,
 )
 
 campaign_members_router = build_crud_router(

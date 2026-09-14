@@ -576,7 +576,7 @@ profile_attributes_router = build_crud_router(
     create_validator=lambda db, payload: validate_domain_value(
         db, payload.get("domain_scope"), field_name="domain_scope", allow_all=True
     ),
-    update_validator=lambda db, payload: validate_domain_value(
+    update_validator=lambda db, obj, payload: validate_domain_value(
         db, payload.get("domain_scope"), field_name="domain_scope", allow_all=True
     ),
 )

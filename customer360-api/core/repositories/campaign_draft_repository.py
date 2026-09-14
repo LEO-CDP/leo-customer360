@@ -14,7 +14,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from core.ai_providers.base import AIProviderError
@@ -29,6 +29,17 @@ APPROVAL_STATUS_DRAFT = "Draft"
 APPROVAL_STATUS_IN_REVIEW = "InReview"
 APPROVAL_STATUS_APPROVED = "Approved"
 APPROVAL_STATUS_REJECTED = "Rejected"
+
+
+def _utc_now_naive() -> datetime:
+    """sys_audit_log.created_at is `timestamp without time zone` (DB-clock-
+    dependent server_default now()), unlike crm_campaign_reviews.created_at
+    (`timestamptz`). list_campaign_history() re-labels the naive value as UTC
+    to sort the two streams together -- which is only correct if the value
+    really is a UTC wall-clock reading. Passing this explicitly at insert
+    time (instead of relying on the server default) guarantees that,
+    independent of the DB session's timezone GUC."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class CampaignDraftValidationError(ValueError):
@@ -51,8 +62,10 @@ class CampaignTemplateNotFoundError(LookupError):
 
 
 class CampaignDraftApprovalBlockedError(RuntimeError):
-    """Raised when approve() is refused (template no longer Approved, or a
-    linked content item is no longer active -- FR-013/FR-016)."""
+    """Raised when approve() or reject() is refused: the campaign isn't
+    InReview (only InReview campaigns may be approved/rejected), the linked
+    template is no longer Approved, or a linked content item is no longer
+    active -- FR-013/FR-016."""
 
 
 class CampaignDraftConflictError(RuntimeError):
@@ -84,13 +97,33 @@ class CampaignDraftRepository:
         and the segment's own segment_tag / the marketer's stated objective
         when either is supplied (US3); returns an empty list -- not
         fabricated items -- when nothing overlaps."""
-        stmt = select(CdpContentItem).where(CdpContentItem.tenant_id == tenant_id, CdpContentItem.status_code == 1)
+        conditions = [CdpContentItem.tenant_id == tenant_id, CdpContentItem.status_code == 1]
+
+        objective_keywords = {word.lower() for word in (objective or "").split() if len(word) > 3}
+
+        if segment_tag or objective_keywords:
+            # SQL-side pre-filter so a large content table doesn't have to be
+            # pulled into Python wholesale as the inventory grows. This is a
+            # permissive superset of the _matches() check below (array-as-
+            # text ILIKE instead of exact case-insensitive tag equality) --
+            # _matches() remains the authoritative filter, applied after, so
+            # this can only narrow the DB round-trip, never change the result.
+            keywords = objective_keywords or set()
+            or_clauses = []
+            if segment_tag:
+                or_clauses.append(func.array_to_string(CdpContentItem.segment_tags, ",").ilike(f"%{segment_tag}%"))
+            for keyword in keywords:
+                or_clauses.append(CdpContentItem.title.ilike(f"%{keyword}%"))
+                or_clauses.append(func.coalesce(CdpContentItem.summary, "").ilike(f"%{keyword}%"))
+                or_clauses.append(func.array_to_string(CdpContentItem.segment_tags, ",").ilike(f"%{keyword}%"))
+            if or_clauses:
+                conditions.append(or_(*or_clauses))
+
+        stmt = select(CdpContentItem).where(*conditions)
         items = list(self.session.execute(stmt).scalars().all())
 
         if not segment_tag and not objective:
             return items
-
-        objective_keywords = {word.lower() for word in (objective or "").split() if len(word) > 3}
 
         def _matches(item: CdpContentItem) -> bool:
             tags = {tag.lower() for tag in (item.segment_tags or [])}
@@ -113,12 +146,21 @@ class CampaignDraftRepository:
         budget_time_constraints: Optional[str] = None,
     ) -> Campaign:
         """FR-001–FR-006, FR-008: resolve segment + Approved template, build
-        the closed candidate content list, generate the plan, validate the
-        schedule window, then persist campaign + content plan + audit row in
-        one transaction. Raises CampaignSegmentNotFoundError/
-        CampaignTemplateNotFoundError (404) or CampaignDraftValidationError
-        (409/422/502-mapped by the router) on any refusal -- nothing is
-        persisted on those paths."""
+        the closed candidate content list, call the AI, validate the schedule
+        window, then persist campaign + content plan + audit row. Raises
+        CampaignSegmentNotFoundError/CampaignTemplateNotFoundError (404) or
+        CampaignDraftValidationError (409/422/502-mapped by the router) on
+        any refusal -- nothing is persisted on those paths.
+
+        Reads and the write are deliberately two separate transactions on
+        this session, not one: the AI call in between is an HTTP request
+        that can take up to ~30s, and holding a DB transaction (and its
+        pooled connection) open for that whole span starves the pool under
+        concurrent requests and risks Postgres killing the transaction
+        mid-write on a slow response. The intermediate commit() ends the
+        read-only transaction with nothing pending; core/database.py's
+        after_begin listener reapplies the RLS tenant/user GUCs when the
+        write below implicitly starts a new one."""
         segment_repo = SegmentRepository(self.session)
         segment = segment_repo.get_segment(segment_id)
         if segment is None:
@@ -143,9 +185,17 @@ class CampaignDraftRepository:
             {"content_item_id": str(item.content_item_id), "title": item.title, "item_type": item.item_type}
             for item in candidate_items
         ]
+        # Extract everything still needed after the AI call as plain values
+        # now, while the ORM objects are still attached -- nothing below
+        # this point touches segment/template/candidate_items again.
+        segment_name = segment.segment_name
+        valid_content_ids = {str(item.content_item_id) for item in candidate_items}
+
+        # End the read-only transaction (nothing pending) before the AI call.
+        self.session.commit()
 
         brief = CampaignPlanBrief(
-            segment_context={"segment_id": str(segment_id), "segment_name": segment.segment_name},
+            segment_context={"segment_id": str(segment_id), "segment_name": segment_name},
             objective=objective,
             budget_time_constraints=budget_time_constraints,
         )
@@ -161,9 +211,9 @@ class CampaignDraftRepository:
 
         # Defense-in-depth (FR-006): discard any AI-returned id not in the
         # candidate list, even though the prompt already instructs against it.
-        valid_content_ids = {str(item.content_item_id) for item in candidate_items}
         selected_ids = [cid for cid in generated.content_item_ids if cid in valid_content_ids]
 
+        # New transaction for the write.
         campaign = Campaign(
             tenant_id=tenant_id,
             user_id=created_by,
@@ -207,6 +257,7 @@ class CampaignDraftRepository:
                 action="CREATE",
                 resource_type="crm_campaign",
                 resource_id=str(campaign.campaign_id),
+                created_at=_utc_now_naive(),
                 after_data={
                     "name": generated.name,
                     "objective": objective,
@@ -258,7 +309,7 @@ class CampaignDraftRepository:
         this request first read it."""
         current = self.session.execute(
             select(Campaign.updated_at, Campaign.approval_status)
-            .where(Campaign.campaign_id == campaign.campaign_id)
+            .where(Campaign.campaign_id == campaign.campaign_id, Campaign.tenant_id == campaign.tenant_id)
             .with_for_update()
         ).first()
         if current is not None and current.updated_at != expected_updated_at:
@@ -361,6 +412,7 @@ class CampaignDraftRepository:
                 action="UPDATE",
                 resource_type="crm_campaign",
                 resource_id=str(campaign_id),
+                created_at=_utc_now_naive(),
                 before_data=before_data,
                 after_data=after_data,
             )
@@ -375,6 +427,11 @@ class CampaignDraftRepository:
         still Approved and every linked content item is still active before
         recording the approval; refuses (naming the blocker) otherwise."""
         campaign = self.get_campaign(tenant_id, campaign_id)
+        if campaign.approval_status != APPROVAL_STATUS_IN_REVIEW:
+            raise CampaignDraftApprovalBlockedError(
+                f"Campaign '{campaign_id}' is not InReview (current approval_status: "
+                f"{campaign.approval_status}); only InReview campaigns can be approved"
+            )
         expected_updated_at = campaign.updated_at
 
         if campaign.template_id is not None:
@@ -394,7 +451,10 @@ class CampaignDraftRepository:
             active_ids = {
                 item.content_item_id
                 for item in self.session.execute(
-                    select(CdpContentItem).where(CdpContentItem.content_item_id.in_(content_item_ids))
+                    select(CdpContentItem).where(
+                        CdpContentItem.content_item_id.in_(content_item_ids),
+                        CdpContentItem.tenant_id == tenant_id,
+                    )
                 )
                 .scalars()
                 .all()
@@ -426,6 +486,11 @@ class CampaignDraftRepository:
         for campaigns (unlike email templates) -- a subsequent edit resubmits
         to InReview (see edit_draft)."""
         campaign = self.get_campaign(tenant_id, campaign_id)
+        if campaign.approval_status != APPROVAL_STATUS_IN_REVIEW:
+            raise CampaignDraftApprovalBlockedError(
+                f"Campaign '{campaign_id}' is not InReview (current approval_status: "
+                f"{campaign.approval_status}); only InReview campaigns can be rejected"
+            )
         self._check_not_concurrently_modified(campaign, campaign.updated_at)
         self.session.add(
             CampaignReview(

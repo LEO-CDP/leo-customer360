@@ -313,14 +313,6 @@ class Settings(BaseSettings):
         default="gemini-2.5-flash",
         validation_alias=AliasChoices("GEMINI_MODEL", "gemini_model"),
     )
-    crm_email_max_subject_length: int = Field(
-        default=150,
-        validation_alias=AliasChoices("CRM_EMAIL_MAX_SUBJECT_LENGTH", "crm_email_max_subject_length"),
-    )
-    crm_email_max_body_length: int = Field(
-        default=20000,
-        validation_alias=AliasChoices("CRM_EMAIL_MAX_BODY_LENGTH", "crm_email_max_body_length"),
-    )
 
     @property
     def database_url(self) -> str:
