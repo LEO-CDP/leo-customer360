@@ -64,7 +64,7 @@ tables; (d) SQLAlchemy models + Pydantic schemas updated.
 |----|----|----------|------|--------|----------|---------|
 | S93-01 | d | Create campaign with new EM columns (`segment_id`, `approval_status`, `strategy_summary`, `ai_plan`) and read back | Positive | E2E | 201; all fields persist + round-trip on GET | delete campaign |
 | S93-02 | d | `ai_plan` JSONB round-trips as a nested object | Positive | E2E | GET returns identical dict | delete campaign |
-| S93-03 | d | `approval_status` accepts each of Draft/InReview/Approved/Rejected | Boundary | E2E | 201 for each | delete campaigns |
+| S93-03 | d | Generic `POST /campaigns` rejects non-Draft `approval_status` values | Negative | Unit + deploy-gated E2E | 422 once the draft-only guard is deployed; unit suite is the source-of-truth | none (or delete probe row) |
 | S93-04 | d | `approval_status = "Bogus"` rejected | Negative | E2E | 422 (Pydantic pattern) | none (not created) |
 | S93-05 | b | `crm_campaign.segment_id` FK → non-existent segment | Integrity | E2E | 4xx (FK violation surfaced) or SET NULL semantics documented | delete campaign if created |
 | S93-06 | d | `crm_lead.lead_source_id` set on create + read back | Positive | E2E | 201; `lead_source_id` persists | delete lead, lead-source |
@@ -180,7 +180,7 @@ psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.dow
 | S97-01 | guard | `POST /admin/campaigns/{unknown}/activate` | Negative | E2E | 404 | none |
 | S97-02 | authz | Activate without auth | Security | E2E | 401/403 (SSO) or 400 | none |
 | S97-03 | approval gate | Activate a **Draft** campaign | Negative | E2E | 409 (not Approved) | delete campaign |
-| S97-04 | integrity | Activate **Approved** campaign missing template/segment | Negative | E2E | 409 (needs both) | delete campaign |
+| S97-04 | integrity | Activate **Approved** campaign missing template/segment | Negative | Unit | 409 (needs both) | n/a |
 | S97-05 | audit | `GET /admin/campaigns/{id}/dispatch-logs` for a fresh campaign | Positive | E2E | 200 `[]` | delete campaign |
 | S97-06 | config | `GET /admin/email-provider-config` | Positive | E2E | 200 (config or null) | none |
 | S97-07 | DoD | Activate a real Approved campaign (template+segment) → Dagster run | Positive | E2E (opt-in `E2E_CAMPAIGN_ID`) | 200 `run_id` (or 503 if Dagster down) | run is idempotent; ledger dedups |

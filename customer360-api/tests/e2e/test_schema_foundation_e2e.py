@@ -1,6 +1,6 @@
 """SCRUM-93 E2E -- email-marketing schema foundation, via the API surface that
 depends on it. Covers TEST_PLAN.md S93-01..09: the crm_campaign email-marketing
-columns round-trip, approval_status constraint + boundary, campaign/segment and
+columns round-trip, approval_status guard/validation, campaign/segment and
 lead/lead-source FK enforcement, and that crm_segment_sync_runs is queryable +
 tenant-scoped. Migration up/down + RLS + crm_campaign_content_items are DB-level
 (see TEST_PLAN.md §6). Skipped unless E2E_BASE_URL is set.
@@ -47,7 +47,11 @@ def test_campaign_email_marketing_columns_round_trip(client, p, tenant_id, segme
 # --- S93-03: generic create must start in Draft ---------------------------
 @pytest.mark.case("S93-03")
 @pytest.mark.parametrize("status", NON_DRAFT_APPROVAL_STATUSES)
-def test_campaign_create_rejects_non_draft_approval_status(client, p, tenant_id, status):
+def test_campaign_create_rejects_non_draft_approval_status(
+    client, p, tenant_id, status, campaign_create_starts_in_draft_feature
+):
+    if not campaign_create_starts_in_draft_feature:
+        pytest.skip("generic POST /campaigns draft-only guard not deployed on target yet")
     r = client.post(p("/campaigns/"), json=_campaign_body(tenant_id, approval_status=status))
     assert r.status_code == 422, r.text
 

@@ -288,6 +288,35 @@ def segment_id(client, tenant_id, p):
 
 
 @pytest.fixture(scope="session")
+def campaign_create_starts_in_draft_feature(client, p, tenant_id):
+    """Probe whether the target deployment enforces the generic POST /campaigns
+    draft-only approval guard present in source.
+
+    The live UAT environment can lag the branch under test. When it still accepts
+    `approval_status="Approved"` directly, tests that depend on the newer guard
+    should skip instead of failing the whole CI run. Any probe row is deleted
+    immediately to avoid leaving artifacts behind.
+    """
+    payload = {
+        "tenant_id": tenant_id,
+        "name": f"E2E draft-guard probe {uuid.uuid4().hex[:8]}",
+        "approval_status": "Approved",
+    }
+    resp = client.post(p("/campaigns/"), json=payload)
+    if resp.status_code == 422:
+        return True
+    if resp.status_code in (200, 201):
+        try:
+            campaign_id = resp.json().get("campaign_id")
+            if campaign_id:
+                client.delete(p(f"/campaigns/{campaign_id}"))
+        except Exception:
+            pass
+        return False
+    pytest.fail(f"draft-guard probe returned {resp.status_code}: {resp.text}")
+
+
+@pytest.fixture(scope="session")
 def email_feature(unauth_client, p):
     """Skip SCRUM-97/98 tests when the target doesn't serve the email
     execution/tracking endpoints yet (e.g. UAT still on a pre-subtask-05/06
