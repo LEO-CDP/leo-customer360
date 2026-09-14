@@ -7,6 +7,9 @@ uses cosine distance (`<=>`); keyword search uses a multilingual-safe `simple`
 """
 from __future__ import annotations
 
+import psycopg
+from pgvector.psycopg import register_vector
+
 from .retrieval import ReciprocalRankFusion
 from .config import (
     EMBED_DIM,
@@ -20,9 +23,6 @@ from .config import (
 
 
 def connect():
-    import psycopg
-    from pgvector.psycopg import register_vector
-
     conn = psycopg.connect(pg_dsn(), autocommit=True)
     conn.execute("CREATE EXTENSION IF NOT EXISTS vector")  # idempotent; needed before register
     register_vector(conn)

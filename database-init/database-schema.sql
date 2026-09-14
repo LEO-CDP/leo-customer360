@@ -2525,6 +2525,27 @@ COMMENT ON TABLE customer360.cdp_segments IS 'Segmentation/Audience Builder meta
 CREATE INDEX IF NOT EXISTS idx_cdp_segments_tenant ON customer360.cdp_segments (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_cdp_segments_json_rules ON customer360.cdp_segments USING GIN (json_rules);
 
+-- ============================================================================
+-- AI Campaign Draft Review (specs/002-ai-campaign-draft-creation)
+-- ============================================================================
+-- Records reviewer approve/reject decisions on a campaign draft. The
+-- crm_campaign segment/template/approval_status columns and the
+-- crm_campaign_content_items relation table are defined later in this file
+-- (Agentic Email Marketing Schema section), after crm_email_templates exists.
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_reviews (
+    review_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    reviewer_id UUID NOT NULL REFERENCES customer360.sys_user(user_id),
+    decision VARCHAR(10) NOT NULL CHECK (decision IN ('approve', 'reject')),
+    reason TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+COMMENT ON TABLE customer360.crm_campaign_reviews IS 'One row per reviewer approve/reject decision on a campaign draft -- approval_status may only ever change via a row inserted here or the automatic edit-after-approval/-rejection reversion in campaign_draft_repository (FR-010).';
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_reviews_campaign ON customer360.crm_campaign_reviews (campaign_id);
+
 ---------------------------------------------------
 -- GRAPH EDGES (Partitioned by Relation)
 ---------------------------------------------------
@@ -2982,6 +3003,12 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_crm_campaign_segment ON customer360.crm_campaign (segment_id);
 CREATE INDEX IF NOT EXISTS idx_crm_campaign_template ON customer360.crm_campaign (template_id);
 
+-- Bumped by CampaignDraftRepository on every approve/reject/edit_draft write;
+-- backs its optimistic-concurrency guard (re-reads this column immediately
+-- before committing to detect a concurrent reviewer's write).
+ALTER TABLE customer360.crm_campaign
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT now();
+
 -- Give crm_lead the lead_source_id relation the sync engine populates.
 ALTER TABLE customer360.crm_lead
     ADD COLUMN IF NOT EXISTS lead_source_id UUID;
@@ -3201,6 +3228,7 @@ DECLARE
         'cdp_persona_archetypes',
         'crm_email_templates',
         'crm_campaign_content_items',
+        'crm_campaign_reviews',
         'crm_segment_sync_runs',
         'cdp_campaign_dispatch_logs',
         'crm_email_provider_config',

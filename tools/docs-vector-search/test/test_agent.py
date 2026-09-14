@@ -52,6 +52,8 @@ def test_rag_agent_injects_hybrid_retrieval_and_generation_dependencies():
 
 
 def test_answer_prompt_requires_bilingual_grounded_non_empty_output():
+    assert "technical support specialist" in ANSWER_SYSTEM
+    assert "Finish every sentence and thought" in ANSWER_SYSTEM
     assert "same language as the question" in ANSWER_SYSTEM
     assert "Do not return JSON, XML, analysis," in ANSWER_SYSTEM
     assert "or an empty response." in ANSWER_SYSTEM

@@ -1,0 +1,102 @@
+name: Health monitor
+
+# Probes the live services and alerts Telegram only when a URL stays unhealthy for
+# MORE THAN 5 MINUTES — a transient blip that recovers inside the confirmation
+# window is ignored. The alert lists exactly which URLs are down (+ status code).
+#
+# How ">5 min" is enforced without cross-run state: on each run, any URL that is
+# not 200 is re-probed every 60s for 6 rounds (~6 min elapsed). Only URLs that
+# fail the initial probe AND all 6 rounds are alerted.
+#
+# Config:
+#   secrets.TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID   alert destination
+#   vars.HEALTH_CHECK_URLS   space/newline-separated URLs (overrides the default set)
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # every 15 min (a down site is confirmed over a >5-min window before alerting)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: health-monitor      # a run can take ~6 min confirming; never overlap
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Probe + confirm sustained downtime
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for the composite action)
+        uses: actions/checkout@v4
+
+      - name: Probe and confirm
+        id: probe
+        env:
+          URLS: ${{ vars.HEALTH_CHECK_URLS }}
+        run: |
+          set +e
+          default_urls="https://beta.leocdp.com/health \
+                        https://beta.leocdp.com/c360api/health \
+                        https://beta.leocdp.com/data/health \
+                        https://beta.leocdp.com/ads/health \
+                        https://beta.leocdp.com/ai/health \
+                        https://beta.leocdp.com/auth/realms/customer360"
+          urls="${URLS:-$default_urls}"
+          probe() { curl -sS -m 10 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null; }
+
+          # Round 0 — quick probe; collect the currently-unhealthy URLs.
+          cand=""
+          for u in $urls; do
+            [ "$(probe "$u")" = "200" ] || cand="$cand $u"
+          done
+          if [ -z "$cand" ]; then
+            echo "all healthy"; echo "alert=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "initially unhealthy:$cand — confirming over >5 min..."
+
+          # Confirm — re-probe only the candidates every 60s for 6 rounds (~6 min).
+          # A URL that returns 200 in ANY round is dropped as a transient blip.
+          for i in 1 2 3 4 5 6; do
+            sleep 60
+            next=""
+            for u in $cand; do
+              [ "$(probe "$u")" = "200" ] || next="$next $u"
+            done
+            cand="$next"
+            [ -z "$cand" ] && break
+          done
+          if [ -z "$cand" ]; then
+            echo "recovered within the window; no alert"; echo "alert=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          # Still down after >5 min — build the alert (re-probe once for the current code).
+          {
+            echo "text<<TG_EOF"
+            echo "Service(s) unhealthy > 5 min:"
+            echo ""
+            for u in $cand; do
+              echo "  ❌ $u  ($(probe "$u"))"
+            done
+            echo ""
+            echo "Reason: each URL above returned a non-200 status on the initial probe"
+            echo "and every 60s re-probe across the >5-min confirmation window."
+            echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "TG_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "alert=true" >> "$GITHUB_OUTPUT"
+
+      - name: Alert Telegram
+        if: ${{ steps.probe.outputs.alert == 'true' }}
+        uses: ./.github/actions/telegram-notify
+        with:
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: failure
+          message: ${{ steps.probe.outputs.text }}
+
+      - name: Fail the run when an alert fired
+        if: ${{ steps.probe.outputs.alert == 'true' }}
+        run: exit 1

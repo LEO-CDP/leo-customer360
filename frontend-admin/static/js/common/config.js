@@ -581,7 +581,11 @@ window.C360 = window.C360 || {};
   function docsFetch(path, body, signal) {
     return fetch(CONFIG.docsAiBase + path, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      headers: {
+        "content-type": "application/json",
+        "accept": "application/json"
+      },
       body: JSON.stringify(body || {}),
       signal: signal
     }).then(function (resp) {

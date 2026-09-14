@@ -1,0 +1,263 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    {
+      "type": "text", "id": "title", "x": 60, "y": 30, "width": 760, "height": 32,
+      "text": "LEO CDP  ·  CI/CD  +  service health  →  Telegram",
+      "originalText": "LEO CDP  ·  CI/CD  +  service health  →  Telegram",
+      "fontSize": 24, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#1e40af", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200001, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "text", "id": "subtitle", "x": 60, "y": 68, "width": 820, "height": 22,
+      "text": "GitHub events and >5-min outages push to one Telegram chat  ·  one-way (no chat back)",
+      "originalText": "GitHub events and >5-min outages push to one Telegram chat  ·  one-way (no chat back)",
+      "fontSize": 15, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200002, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": null, "lineHeight": 1.25
+    },
+
+    {
+      "type": "text", "id": "lbl_sources", "x": 70, "y": 110, "width": 300, "height": 20,
+      "text": "SOURCES", "originalText": "SOURCES",
+      "fontSize": 14, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#94a3b8", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200003, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": null, "lineHeight": 1.25
+    },
+
+    {
+      "type": "rectangle", "id": "g_wf", "x": 70, "y": 140, "width": 270, "height": 100,
+      "strokeColor": "#c2410c", "backgroundColor": "#fed7aa", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200010, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": [{"id": "t_wf", "type": "text"}], "link": null, "locked": false, "roundness": {"type": 3}
+    },
+    {
+      "type": "text", "id": "t_wf", "x": 85, "y": 163, "width": 240, "height": 54,
+      "text": "GitHub CI/CD workflows\nCI · CD · Admin (UAT)\nDocs Site / Vector",
+      "originalText": "GitHub CI/CD workflows\nCI · CD · Admin (UAT)\nDocs Site / Vector",
+      "fontSize": 14, "fontFamily": 3, "textAlign": "center", "verticalAlign": "middle",
+      "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200011, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": "g_wf", "lineHeight": 1.25
+    },
+
+    {
+      "type": "rectangle", "id": "g_sched", "x": 70, "y": 270, "width": 270, "height": 110,
+      "strokeColor": "#1e3a5f", "backgroundColor": "#93c5fd", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200020, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": [{"id": "t_sched", "type": "text"}], "link": null, "locked": false, "roundness": {"type": 3}
+    },
+    {
+      "type": "text", "id": "t_sched", "x": 85, "y": 293, "width": 240, "height": 64,
+      "text": "Scheduled checks — every 2h\n· unit tests · E2E → UAT\n· health snapshot",
+      "originalText": "Scheduled checks — every 2h\n· unit tests · E2E → UAT\n· health snapshot",
+      "fontSize": 14, "fontFamily": 3, "textAlign": "center", "verticalAlign": "middle",
+      "strokeColor": "#1e3a5f", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200021, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": "g_sched", "lineHeight": 1.3
+    },
+
+    {
+      "type": "rectangle", "id": "g_health", "x": 70, "y": 420, "width": 270, "height": 110,
+      "strokeColor": "#b45309", "backgroundColor": "#fef3c7", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200030, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": [{"id": "t_health", "type": "text"}], "link": null, "locked": false, "roundness": {"type": 3}
+    },
+    {
+      "type": "text", "id": "t_health", "x": 85, "y": 443, "width": 240, "height": 64,
+      "text": "Health monitor — every 15m\nalert only if a site is\nunhealthy > 5 min",
+      "originalText": "Health monitor — every 15m\nalert only if a site is\nunhealthy > 5 min",
+      "fontSize": 14, "fontFamily": 3, "textAlign": "center", "verticalAlign": "middle",
+      "strokeColor": "#92400e", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200031, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": "g_health", "lineHeight": 1.3
+    },
+
+    {
+      "type": "rectangle", "id": "g_act", "x": 470, "y": 250, "width": 210, "height": 120,
+      "strokeColor": "#1e3a5f", "backgroundColor": "#3b82f6", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200040, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": [{"id": "t_act", "type": "text"}], "link": null, "locked": false, "roundness": {"type": 3}
+    },
+    {
+      "type": "text", "id": "t_act", "x": 485, "y": 285, "width": 180, "height": 50,
+      "text": "telegram-notify\ncomposite action",
+      "originalText": "telegram-notify\ncomposite action",
+      "fontSize": 15, "fontFamily": 3, "textAlign": "center", "verticalAlign": "middle",
+      "strokeColor": "#ffffff", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200041, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": "g_act", "lineHeight": 1.25
+    },
+
+    {
+      "type": "ellipse", "id": "g_tg", "x": 800, "y": 245, "width": 230, "height": 130,
+      "strokeColor": "#1e3a5f", "backgroundColor": "#60a5fa", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200050, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": [{"id": "t_tg", "type": "text"}], "link": null, "locked": false
+    },
+    {
+      "type": "text", "id": "t_tg", "x": 840, "y": 297, "width": 150, "height": 26,
+      "text": "Telegram chat",
+      "originalText": "Telegram chat",
+      "fontSize": 16, "fontFamily": 3, "textAlign": "center", "verticalAlign": "middle",
+      "strokeColor": "#ffffff", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200051, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": "g_tg", "lineHeight": 1.25
+    },
+
+    {
+      "type": "ellipse", "id": "g_team", "x": 1090, "y": 260, "width": 180, "height": 100,
+      "strokeColor": "#c2410c", "backgroundColor": "#fed7aa", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200060, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": [{"id": "t_team", "type": "text"}], "link": null, "locked": false
+    },
+    {
+      "type": "text", "id": "t_team", "x": 1110, "y": 298, "width": 140, "height": 24,
+      "text": "Team (Telegram)",
+      "originalText": "Team (Telegram)",
+      "fontSize": 14, "fontFamily": 3, "textAlign": "center", "verticalAlign": "middle",
+      "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200061, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": "g_team", "lineHeight": 1.25
+    },
+
+    {
+      "type": "rectangle", "id": "g_svc", "x": 470, "y": 560, "width": 470, "height": 150,
+      "strokeColor": "#1e40af", "backgroundColor": "#dbeafe", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200070, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": [{"id": "t_svc", "type": "text"}], "link": null, "locked": false, "roundness": {"type": 3}
+    },
+    {
+      "type": "text", "id": "t_svc", "x": 485, "y": 583, "width": 440, "height": 104,
+      "text": "Live services — beta.leocdp.com\nfrontend /health · api /c360api/health\ntracking /data/health · ads /ads/health\ndocs-search /ai/health · keycloak /auth/realms",
+      "originalText": "Live services — beta.leocdp.com\nfrontend /health · api /c360api/health\ntracking /data/health · ads /ads/health\ndocs-search /ai/health · keycloak /auth/realms",
+      "fontSize": 14, "fontFamily": 3, "textAlign": "center", "verticalAlign": "middle",
+      "strokeColor": "#1e40af", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200071, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": "g_svc", "lineHeight": 1.35
+    },
+    {
+      "type": "text", "id": "note_docs", "x": 470, "y": 720, "width": 470, "height": 20,
+      "text": "docs-search has no public route — probed via the frontend /ai proxy",
+      "originalText": "docs-search has no public route — probed via the frontend /ai proxy",
+      "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
+      "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200072, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": null, "lineHeight": 1.25
+    },
+
+    {
+      "type": "arrow", "id": "a_wf_act", "x": 340, "y": 190, "width": 122, "height": 95,
+      "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200100, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false,
+      "points": [[0, 0], [122, 95]],
+      "startBinding": {"elementId": "g_wf", "focus": 0, "gap": 4},
+      "endBinding": {"elementId": "g_act", "focus": 0, "gap": 8},
+      "startArrowhead": null, "endArrowhead": "arrow"
+    },
+    {
+      "type": "arrow", "id": "a_sched_act", "x": 340, "y": 325, "width": 122, "height": -15,
+      "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200110, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false,
+      "points": [[0, 0], [122, -15]],
+      "startBinding": {"elementId": "g_sched", "focus": 0, "gap": 4},
+      "endBinding": {"elementId": "g_act", "focus": 0, "gap": 8},
+      "startArrowhead": null, "endArrowhead": "arrow"
+    },
+    {
+      "type": "arrow", "id": "a_health_act", "x": 340, "y": 470, "width": 122, "height": -135,
+      "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200120, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false,
+      "points": [[0, 0], [122, -135]],
+      "startBinding": {"elementId": "g_health", "focus": 0, "gap": 4},
+      "endBinding": {"elementId": "g_act", "focus": 0, "gap": 8},
+      "startArrowhead": null, "endArrowhead": "arrow"
+    },
+    {
+      "type": "arrow", "id": "a_act_tg", "x": 680, "y": 310, "width": 112, "height": 0,
+      "strokeColor": "#1e3a5f", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200130, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false,
+      "points": [[0, 0], [112, 0]],
+      "startBinding": {"elementId": "g_act", "focus": 0, "gap": 8},
+      "endBinding": {"elementId": "g_tg", "focus": 0, "gap": 8},
+      "startArrowhead": null, "endArrowhead": "arrow"
+    },
+    {
+      "type": "text", "id": "lbl_notify", "x": 702, "y": 284, "width": 92, "height": 18,
+      "text": "notify / alert", "originalText": "notify / alert",
+      "fontSize": 12, "fontFamily": 3, "textAlign": "center", "verticalAlign": "middle",
+      "strokeColor": "#475569", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200131, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": null, "lineHeight": 1.25
+    },
+    {
+      "type": "arrow", "id": "a_tg_team", "x": 1030, "y": 310, "width": 52, "height": 0,
+      "strokeColor": "#1e3a5f", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200140, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false,
+      "points": [[0, 0], [52, 0]],
+      "startBinding": {"elementId": "g_tg", "focus": 0, "gap": 8},
+      "endBinding": {"elementId": "g_team", "focus": 0, "gap": 8},
+      "startArrowhead": null, "endArrowhead": "arrow"
+    },
+    {
+      "type": "arrow", "id": "a_health_svc", "x": 205, "y": 534, "width": 257, "height": 101,
+      "strokeColor": "#b45309", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200150, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": [{"id": "lbl_probe", "type": "text"}], "link": null, "locked": false,
+      "points": [[0, 0], [0, 101], [257, 101]],
+      "startBinding": {"elementId": "g_health", "focus": 0, "gap": 4},
+      "endBinding": {"elementId": "g_svc", "focus": 0, "gap": 8},
+      "startArrowhead": null, "endArrowhead": "arrow"
+    },
+    {
+      "type": "text", "id": "lbl_probe", "x": 225, "y": 610, "width": 170, "height": 18,
+      "text": "probe /health (6×60s)", "originalText": "probe /health (6×60s)",
+      "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "middle",
+      "strokeColor": "#b45309", "backgroundColor": "#ffffff", "fillStyle": "solid",
+      "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100, "angle": 0,
+      "seed": 200151, "version": 1, "versionNonce": 1, "isDeleted": false, "groupIds": [],
+      "boundElements": null, "link": null, "locked": false, "containerId": null, "lineHeight": 1.25
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff",
+    "gridSize": 20
+  },
+  "files": {}
+}

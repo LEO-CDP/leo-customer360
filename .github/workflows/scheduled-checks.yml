@@ -1,0 +1,176 @@
+name: Scheduled checks
+
+# Every 2 hours: run the unit-test suites, the customer360-api E2E suite against
+# UAT, and HTTP health probes of the live services, then post ONE summary to
+# Telegram. Also runnable on demand from the Actions tab.
+#
+# Config:
+#   secrets.TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID   Telegram destination
+#   secrets.KEYCLOAK_CLIENT_SECRET / KC_TEST_USER_PASSWORD   enable the E2E leg
+#   vars.HEALTH_CHECK_URLS   space/newline-separated health URLs (overrides default)
+#   vars.E2E_* / E2E_ALLOW_DATA_WRITES   same knobs as CI's E2E job
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'   # every 2 hours, on the hour (UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-checks
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Unit + E2E + health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # --- Unit tests: same runner set CI gates on. ---
+      - name: Run unit tests
+        id: unit
+        run: |
+          set +e
+          runners="ads-server/run_unit_tests.sh \
+                   customer360-api/run_unit_tests.sh \
+                   data-tracking-api/run_unit_tests.sh \
+                   backend-system/identity_resolution/run_tests.sh \
+                   backend-system/segmentation/run_tests.sh \
+                   tools/docs-vector-search/run_unit_tests.sh"
+          mkdir -p logs
+          fail=0
+          : > unit.txt
+          for r in $runners; do
+            name="${r%/run_*.sh}"
+            if bash "$r" > "logs/$(echo "$name" | tr / _).log" 2>&1; then
+              echo "  ✅ $name" >> unit.txt
+            else
+              echo "  ❌ $name" >> unit.txt
+              fail=1
+            fi
+          done
+          echo "fail=$fail" >> "$GITHUB_OUTPUT"
+          cat unit.txt
+
+      # --- E2E against UAT (skips cleanly when secrets absent). Mirrors CI's E2E. ---
+      - name: Run E2E against UAT
+        id: e2e
+        env:
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL || 'https://beta.leocdp.com/c360api' }}
+          E2E_TENANT_ID: ${{ vars.E2E_TENANT_ID || '11111111-1111-1111-1111-111111111111' }}
+          E2E_KC_TOKEN_URL: ${{ vars.E2E_KC_TOKEN_URL || 'https://beta.leocdp.com/auth/realms/customer360/protocol/openid-connect/token' }}
+          E2E_KC_CLIENT_ID: ${{ vars.E2E_KC_CLIENT_ID || 'customer360-api' }}
+          E2E_SSO_USERNAME: ${{ vars.E2E_SSO_USERNAME || 'c360admin' }}
+          E2E_ALLOW_DATA_WRITES: ${{ vars.E2E_ALLOW_DATA_WRITES }}
+          E2E_KC_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+          E2E_SSO_PASSWORD: ${{ secrets.KC_TEST_USER_PASSWORD }}
+        run: |
+          set +e
+          if [ -z "$E2E_KC_CLIENT_SECRET" ] || [ -z "$E2E_SSO_PASSWORD" ]; then
+            echo "result=skipped (no secrets)" >> "$GITHUB_OUTPUT"
+            echo "E2E secrets not configured; skipping."
+            exit 0
+          fi
+          pip install -q -r customer360-api/requirements.txt
+          if bash customer360-api/tests/e2e/test.sh; then
+            echo "result=OK" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=FAIL" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --- Health probes of the live services. ---
+      - name: Probe service health
+        id: health
+        env:
+          URLS: ${{ vars.HEALTH_CHECK_URLS }}
+        run: |
+          set +e
+          # Public services fronted by Caddy on beta.leocdp.com (all verified 200).
+          default_urls="https://beta.leocdp.com/health \
+                        https://beta.leocdp.com/c360api/health \
+                        https://beta.leocdp.com/data/health \
+                        https://beta.leocdp.com/ads/health \
+                        https://beta.leocdp.com/ai/health \
+                        https://beta.leocdp.com/auth/realms/customer360"
+          urls="${URLS:-$default_urls}"
+          fail=0
+          : > health.txt
+          for u in $urls; do
+            code=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' "$u")
+            if [ "$code" = "200" ]; then
+              echo "  ✅ $u ($code)" >> health.txt
+            else
+              echo "  ❌ $u ($code)" >> health.txt
+              fail=1
+            fi
+          done
+          echo "fail=$fail" >> "$GITHUB_OUTPUT"
+          cat health.txt
+
+      - name: Build summary
+        id: sum
+        if: always()
+        env:
+          UNIT_FAIL: ${{ steps.unit.outputs.fail }}
+          E2E_RESULT: ${{ steps.e2e.outputs.result }}
+          HEALTH_FAIL: ${{ steps.health.outputs.fail }}
+          REPO: ${{ github.repository }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          overall="OK"; st="success"
+          if [ "$UNIT_FAIL" = "1" ] || [ "$HEALTH_FAIL" = "1" ] || [ "$E2E_RESULT" = "FAIL" ]; then
+            overall="FAIL"; st="failure"
+          fi
+          # Non-success → name the failed legs (per-item details follow below).
+          reason=""
+          if [ "$st" = "failure" ]; then
+            legs=""
+            [ "$UNIT_FAIL" = "1" ]      && legs="$legs unit"
+            [ "$E2E_RESULT" = "FAIL" ]  && legs="$legs e2e"
+            [ "$HEALTH_FAIL" = "1" ]    && legs="$legs health"
+            reason="Reason: failed leg(s):${legs} — see details below."
+          fi
+          echo "status=${st}" >> "$GITHUB_OUTPUT"
+          echo "overall=${overall}" >> "$GITHUB_OUTPUT"
+          {
+            echo "text<<TG_EOF"
+            echo "Scheduled checks — ${overall}"
+            echo "Repo: ${REPO}"
+            [ -n "$reason" ] && { echo ""; echo "$reason"; }
+            echo ""
+            echo "Unit tests:"
+            cat unit.txt 2>/dev/null || echo "  (none)"
+            echo ""
+            echo "E2E (UAT): ${E2E_RESULT:-n/a}"
+            echo ""
+            echo "Health:"
+            cat health.txt 2>/dev/null || echo "  (none)"
+            echo ""
+            echo "${URL}"
+            echo "TG_EOF"
+          } >> "$GITHUB_OUTPUT"
+          # Mirror to the run's Step Summary.
+          { echo "## Scheduled checks — ${overall}"; echo '```'; cat unit.txt health.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify Telegram
+        if: always()
+        uses: ./.github/actions/telegram-notify
+        with:
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: ${{ steps.sum.outputs.status }}
+          message: ${{ steps.sum.outputs.text }}
+
+      - name: Fail the run if any check failed
+        if: ${{ steps.sum.outputs.overall == 'FAIL' }}
+        run: exit 1

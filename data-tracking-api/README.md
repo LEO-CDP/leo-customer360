@@ -17,6 +17,10 @@ claimed by another tracking-api replica after a worker failure.
 
 ## Run locally with MinIO
 
+The service targets Python 3.12. Its Docker image uses `python:3.12-slim`, and
+local development should use Python 3.12 or newer within the dependency ranges
+declared in `requirements.txt`.
+
 The root `dev-docker-compose.yml` starts `customer360-minio` and this service
 on port `8010` when the service is enabled in the compose file:
 

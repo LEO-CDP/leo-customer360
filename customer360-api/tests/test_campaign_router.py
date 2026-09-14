@@ -275,5 +275,54 @@ class CampaignCrudTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
 
 
+class BlockEditOfApprovedCampaignTests(unittest.TestCase):
+    """crm_api._block_edit_of_approved_campaign: the update_validator wired
+    into the real campaigns_router (not exercised by CampaignRouterTests
+    above, which builds its own bare build_crud_router() without it) that
+    stops PATCH /campaigns/{id} from silently editing an Approved campaign
+    -- those edits must go through campaign_draft_api's edit_draft instead,
+    which re-reviews and audits the change."""
+
+    def test_raises_for_approved_campaign(self):
+        from core.routers.crm_api import _block_edit_of_approved_campaign
+
+        campaign = SimpleNamespace(campaign_id=uuid.uuid4(), approval_status="Approved")
+        with self.assertRaises(ValueError):
+            _block_edit_of_approved_campaign(None, campaign, {"name": "New name"})
+
+    def test_allows_edit_for_non_approved_campaign(self):
+        from core.routers.crm_api import _block_edit_of_approved_campaign
+
+        for status in ("Draft", "InReview", "Rejected"):
+            campaign = SimpleNamespace(campaign_id=uuid.uuid4(), approval_status=status)
+            _block_edit_of_approved_campaign(None, campaign, {"name": "New name"})  # must not raise
+
+
+class ValidateCreateCampaignStartsInDraftTests(unittest.TestCase):
+    def test_raises_for_non_draft_approval_status(self):
+        from core.routers.crm_api import _validate_create_campaign_starts_in_draft
+
+        with self.assertRaisesRegex(ValueError, "must start in Draft"):
+            _validate_create_campaign_starts_in_draft(None, {"approval_status": "Approved"})
+
+    def test_raises_for_approval_metadata(self):
+        from core.routers.crm_api import _validate_create_campaign_starts_in_draft
+
+        with self.assertRaisesRegex(ValueError, "approval metadata may not be set"):
+            _validate_create_campaign_starts_in_draft(
+                None,
+                {
+                    "approval_status": "Draft",
+                    "approved_by": uuid.uuid4(),
+                },
+            )
+
+    def test_allows_draft_or_unspecified_status_without_metadata(self):
+        from core.routers.crm_api import _validate_create_campaign_starts_in_draft
+
+        _validate_create_campaign_starts_in_draft(None, {})
+        _validate_create_campaign_starts_in_draft(None, {"approval_status": "Draft"})
+
+
 if __name__ == "__main__":
     unittest.main()

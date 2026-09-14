@@ -1,0 +1,60 @@
+name: Telegram notify
+description: Post a plain-text message to a Telegram chat via the Bot API. No-op (with a warning) when the bot token or chat id is missing, so it never fails a caller job.
+
+inputs:
+  bot-token:
+    description: Telegram bot token (secrets.TELEGRAM_BOT_TOKEN)
+    required: true
+  chat-id:
+    description: "Target chat id(s) — one or many, separated by comma / semicolon / whitespace / newline (secrets.TELEGRAM_CHAT_ID)"
+    required: true
+  message:
+    description: Message text (plain text; truncated to Telegram's 4096-char limit)
+    required: true
+  status:
+    description: "Leading icon: start (🔵) | success (✅) | failure (❌) | warning (⚠️) | info (ℹ️)"
+    required: false
+    default: info
+
+runs:
+  using: composite
+  steps:
+    - name: Send Telegram message
+      shell: bash
+      env:
+        BOT_TOKEN: ${{ inputs.bot-token }}
+        CHAT_ID: ${{ inputs.chat-id }}
+        TEXT: ${{ inputs.message }}
+        STATUS: ${{ inputs.status }}
+      run: |
+        if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+          echo "::warning::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set; skipping Telegram notification."
+          exit 0
+        fi
+        # Prefix a status icon (colour cue — Telegram can't colour text itself).
+        case "$STATUS" in
+          start)   icon="🔵" ;;
+          success) icon="✅" ;;
+          failure) icon="❌" ;;
+          warning) icon="⚠️" ;;
+          *)       icon="ℹ️" ;;
+        esac
+        # Telegram hard-limits messages to 4096 chars.
+        TEXT="${icon} ${TEXT:0:3990}"
+        # Fan out to one or many chat ids (comma / semicolon / whitespace / newline separated).
+        sent=0; failed=0
+        for cid in $(printf '%s' "$CHAT_ID" | tr ',;' '  '); do
+          [ -z "$cid" ] && continue
+          code=$(curl -sS -o /tmp/tg.out -w '%{http_code}' \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${cid}" \
+            --data-urlencode "text=${TEXT}" \
+            --data "disable_web_page_preview=true")
+          if [ "$code" = "200" ]; then
+            sent=$((sent + 1))
+          else
+            failed=$((failed + 1))
+            echo "::warning::Telegram sendMessage to ${cid} returned HTTP ${code}: $(cat /tmp/tg.out)"
+          fi
+        done
+        echo "Telegram: sent=${sent} failed=${failed}"
