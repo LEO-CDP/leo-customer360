@@ -1,0 +1,38 @@
+name: Telegram notify
+description: Post a plain-text message to a Telegram chat via the Bot API. No-op (with a warning) when the bot token or chat id is missing, so it never fails a caller job.
+
+inputs:
+  bot-token:
+    description: Telegram bot token (secrets.TELEGRAM_BOT_TOKEN)
+    required: true
+  chat-id:
+    description: Target chat id (secrets.TELEGRAM_CHAT_ID)
+    required: true
+  message:
+    description: Message text (plain text; truncated to Telegram's 4096-char limit)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Send Telegram message
+      shell: bash
+      env:
+        BOT_TOKEN: ${{ inputs.bot-token }}
+        CHAT_ID: ${{ inputs.chat-id }}
+        TEXT: ${{ inputs.message }}
+      run: |
+        if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+          echo "::warning::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set; skipping Telegram notification."
+          exit 0
+        fi
+        # Telegram hard-limits messages to 4096 chars.
+        TEXT="${TEXT:0:4000}"
+        code=$(curl -sS -o /tmp/tg.out -w '%{http_code}' \
+          "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+          --data-urlencode "chat_id=${CHAT_ID}" \
+          --data-urlencode "text=${TEXT}" \
+          --data "disable_web_page_preview=true")
+        if [ "$code" != "200" ]; then
+          echo "::warning::Telegram sendMessage returned HTTP ${code}: $(cat /tmp/tg.out)"
+        fi

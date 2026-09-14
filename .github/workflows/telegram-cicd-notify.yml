@@ -1,0 +1,75 @@
+name: Telegram CI/CD notify
+
+# Fan-in notifier: every start and finish of the platform's CI/CD workflows is
+# forwarded to Telegram. Add new workflows to the `workflows:` list to cover them
+# — no edits needed in the workflows themselves.
+#
+# Required secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - CD
+      - Admin (UAT)
+      - Docs Site
+      - Docs Vector Refresh
+    types: [requested, completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tg-notify-${{ github.event.workflow_run.id }}-${{ github.event.action }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: Forward to Telegram
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for the composite action)
+        uses: actions/checkout@v4
+
+      - name: Compose message
+        id: msg
+        env:
+          ACTION: ${{ github.event.action }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          WF_EVENT: ${{ github.event.workflow_run.event }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          STATUS: ${{ github.event.workflow_run.status }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          ACTOR: ${{ github.event.workflow_run.actor.login }}
+          RUN_NUM: ${{ github.event.workflow_run.run_number }}
+          URL: ${{ github.event.workflow_run.html_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$ACTION" = "requested" ]; then
+            icon="[start]"; state="started"
+          else
+            case "$CONCLUSION" in
+              success)             icon="[OK]";      state="succeeded" ;;
+              failure|timed_out)   icon="[FAIL]";    state="failed" ;;
+              cancelled|skipped)   icon="[skip]";    state="$CONCLUSION" ;;
+              *)                   icon="[done]";    state="${CONCLUSION:-completed}" ;;
+            esac
+          fi
+          {
+            echo "text<<TG_EOF"
+            echo "${icon} ${WF_NAME} ${state}"
+            echo ""
+            echo "Repo:   ${REPO}"
+            echo "Branch: ${BRANCH}"
+            echo "Trigger:${WF_EVENT} by ${ACTOR}"
+            echo "Run:    #${RUN_NUM}"
+            echo "${URL}"
+            echo "TG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Telegram
+        uses: ./.github/actions/telegram-notify
+        with:
+          bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          message: ${{ steps.msg.outputs.text }}
