@@ -536,20 +536,6 @@ DISPATCH_STATUS_PATTERN = "^(Pending|Sent|Failed|Skipped|Suppressed)$"
 EMAIL_PROVIDER_PATTERN = "^(mock|smtp)$"
 
 
-class EmailWebhookEvent(BaseModel):
-    """Normalized email provider callback. ``token`` is our tracking
-    token (echoed by the ESP from a custom arg set at send time) -- it carries
-    the tenant/campaign/profile so the callback correlates without a tenant
-    header. ``event`` is mapped to a governed cdp_event_catalog name."""
-
-    token: str = Field(..., description="Our tracking token echoed back by the provider.")
-    event: str = Field(..., description="delivered|bounce|complaint|open|click|unsubscribe")
-    email: Optional[str] = None
-    message_id: Optional[str] = Field(None, description="Provider message/event id, used for dedup when present.")
-    bounce_type: Optional[str] = Field(None, description="'hard' | 'soft' -- only hard bounces suppress.")
-    timestamp: Optional[str] = None
-
-
 class CampaignDispatchLogRead(BaseModel):
     """One per-recipient email send ledger row (read-only evidence)."""
 

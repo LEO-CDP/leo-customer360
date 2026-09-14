@@ -90,6 +90,84 @@ window and receive `429` plus `Retry-After` when the limit is exceeded.
 
 OpenAPI is available at `/docs`; liveness is available at `/health`.
 
+## Email tracking
+
+The data-tracking service also owns the public email callbacks:
+
+
+The reverse proxy exposes the same routes under `/data`, so production email
+links should use `EMAIL_PUBLIC_BASE_URL=https://<host>/data/api/v1`. Valid
+email tokens are converted into the same `TrackingLogRequest` flow as web SDK
+events. Each callback is written as an immutable NDJSON event in the tenant's
+S3 tracking partition, where Dagster can process campaign, recipient, and
+suppression metadata asynchronously. The data-tracking service no longer
+writes email engagement or suppression rows through customer360-api.
+
+### Email click example
+
+The email engine signs both the tracking token (`u`) and the destination URL
+(`k`). The public link uses the same `/data/api/v1` prefix as the tracking-log
+endpoint:
+
+```text
+GET https://c360.example.com/data/api/v1/track/email/click
+    ?u=<signed-tenant-campaign-profile-token>
+    &url=https%3A%2F%2Fexample.test%2Foffer
+    &k=<hmac-of-the-exact-url>
+```
+
+Only signed `http` and `https` destinations are followed. Invalid or missing
+signatures redirect to `/`, while a valid click is persisted to S3 as the
+following canonical event shape:
+
+```json
+{
+  "data_source_id": "11111111-1111-1111-1111-111111111111",
+  "user_id": "master-profile-456",
+  "metadata": {"source": "email", "campaign_id": "campaign-123"},
+  "events": [
+    {
+      "event_name": "email-clicked",
+      "page_url": "https://example.test/offer",
+      "properties": {
+        "tracking_channel": "email",
+        "tenant_id": "11111111-1111-1111-1111-111111111111",
+        "campaign_id": "campaign-123",
+        "master_profile_id": "master-profile-456",
+        "event_dedup_key": "campaign-123:master-profile-456:email-clicked",
+        "url": "https://example.test/offer"
+      }
+    }
+  ]
+}
+```
+
+### Email webhook example
+
+Provider callbacks must include the HMAC signature in `X-Webhook-Signature`.
+The provider body remains small and provider-specific; the data-tracking API
+normalizes it into the same request envelope before S3 storage:
+
+```http
+POST /data/api/v1/track/email/webhook?provider=ses
+Content-Type: application/json
+X-Webhook-Signature: <hmac-sha256-of-raw-body>
+```
+
+```json
+{
+  "token": "<signed-tenant-campaign-profile-token>",
+  "event": "bounce",
+  "email": "recipient@example.test",
+  "bounce_type": "hard",
+  "message_id": "provider-message-123"
+}
+```
+
+The normalized event has `event_name: "email-bounced"` and stores
+`suppression_reason: "hard_bounce"` under `events[0].properties`. Dagster can
+then process suppression and campaign analytics from the immutable S3 object.
+
 ## Queue configuration
 
 `TRACKING_QUEUE_BACKEND=redis_stream` is the production default. The Redis

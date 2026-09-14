@@ -23,6 +23,8 @@ import pytest
 
 BASE_URL = os.environ.get("E2E_BASE_URL", "").rstrip("/")
 API_PREFIX = os.environ.get("E2E_API_PREFIX", "/api/v1")
+TRACKING_BASE_URL = os.environ.get("E2E_TRACKING_BASE_URL", "").rstrip("/")
+TRACKING_API_PREFIX = os.environ.get("E2E_TRACKING_API_PREFIX", "/api/v1")
 BEARER_TOKEN = os.environ.get("E2E_BEARER_TOKEN", "").strip()
 TENANT_ID = os.environ.get("E2E_TENANT_ID", "").strip()
 USER_ID = os.environ.get("E2E_USER_ID", "").strip()
@@ -198,6 +200,26 @@ def unauth_client():
 
 
 @pytest.fixture(scope="session")
+def email_client():
+    """Unauthenticated client for the public data-tracking email routes."""
+    if not TRACKING_BASE_URL:
+        pytest.skip("E2E_TRACKING_BASE_URL not set")
+    with httpx.Client(
+        base_url=TRACKING_BASE_URL,
+        timeout=TIMEOUT,
+        follow_redirects=True,
+        verify=VERIFY_TLS,
+    ) as c:
+        yield c
+
+
+@pytest.fixture(scope="session")
+def email_p():
+    """Prefix a public email-tracking route on data-tracking-api."""
+    return lambda path: f"{TRACKING_API_PREFIX}{path}"
+
+
+@pytest.fixture(scope="session")
 def tenant_id():
     if not TENANT_ID:
         pytest.skip("E2E_TENANT_ID not set (required to build request bodies)")
@@ -288,13 +310,40 @@ def segment_id(client, tenant_id, p):
 
 
 @pytest.fixture(scope="session")
-def email_feature(unauth_client, p):
-    """Skip SCRUM-97/98 tests when the target doesn't serve the email
-    execution/tracking endpoints yet (e.g. UAT still on a pre-subtask-05/06
-    build) -- the public open-pixel returns 200 only when they're deployed."""
-    r = unauth_client.get(p("/track/email/open"))
+def campaign_create_starts_in_draft_feature(client, p, tenant_id):
+    """Probe whether the target deployment enforces the generic POST /campaigns
+    draft-only approval guard present in source.
+
+    The live UAT environment can lag the branch under test. When it still accepts
+    `approval_status="Approved"` directly, tests that depend on the newer guard
+    should skip instead of failing the whole CI run. Any probe row is deleted
+    immediately to avoid leaving artifacts behind.
+    """
+    payload = {
+        "tenant_id": tenant_id,
+        "name": f"E2E draft-guard probe {uuid.uuid4().hex[:8]}",
+        "approval_status": "Approved",
+    }
+    resp = client.post(p("/campaigns/"), json=payload)
+    if resp.status_code == 422:
+        return True
+    if resp.status_code in (200, 201):
+        try:
+            campaign_id = resp.json().get("campaign_id")
+            if campaign_id:
+                client.delete(p(f"/campaigns/{campaign_id}"))
+        except Exception:
+            pass
+        return False
+    pytest.fail(f"draft-guard probe returned {resp.status_code}: {resp.text}")
+
+
+@pytest.fixture(scope="session")
+def email_feature(email_client, email_p):
+    """Skip email-tracking tests when data-tracking-api is not deployed."""
+    r = email_client.get(email_p("/track/email/open"))
     if r.status_code != 200:
-        pytest.skip("email tracking/execution endpoints not deployed on target (SCRUM-97/98)")
+        pytest.skip("email tracking endpoints not deployed on E2E_TRACKING_BASE_URL")
 
 
 @pytest.fixture(scope="session")

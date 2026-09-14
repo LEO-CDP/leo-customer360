@@ -1,6 +1,8 @@
 """HTTP routes for CDP tracking-log ingestion."""
 
 from datetime import datetime, timezone
+from typing import Any, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
@@ -75,6 +77,47 @@ def shutdown_tracking_storage() -> None:
         _tracking_storage = None
 
 
+def ingest_tracking_request(
+    payload: TrackingLogRequest,
+    service: TrackingLogService,
+) -> tuple[StoredTrackingLog, int]:
+    """Persist one validated tracking request through the S3-backed service."""
+    return service.ingest(
+        payload.data_source_id,
+        payload.events,
+        session_id=payload.session_id,
+        anonymous_id=payload.anonymous_id,
+        device_id=payload.device_id,
+        device_fingerprint=payload.device_fingerprint,
+        user_id=payload.user_id,
+        metadata=payload.metadata,
+    )
+
+
+def build_tracking_request(
+    data_source_id: UUID,
+    events: list[dict[str, Any]],
+    *,
+    session_id: Optional[str] = None,
+    anonymous_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+    device_fingerprint: Optional[str] = None,
+    user_id: Optional[str] = None,
+    metadata: Optional[dict[str, Any]] = None,
+) -> TrackingLogRequest:
+    """Build the canonical request envelope used by every tracking source."""
+    return TrackingLogRequest(
+        data_source_id=data_source_id,
+        session_id=session_id,
+        anonymous_id=anonymous_id,
+        device_id=device_id,
+        device_fingerprint=device_fingerprint,
+        user_id=user_id,
+        metadata=metadata or {},
+        events=events,
+    )
+
+
 @router.post("/logs", response_model=TrackingLogResponse, status_code=status.HTTP_202_ACCEPTED)
 def ingest_tracking_logs(
     payload: TrackingLogRequest,
@@ -111,16 +154,7 @@ def ingest_tracking_logs(
         )
 
     try:
-        stored, cached_session_count = service.ingest(
-            payload.data_source_id,
-            payload.events,
-            session_id=payload.session_id,
-            anonymous_id=payload.anonymous_id,
-            device_id=payload.device_id,
-            device_fingerprint=payload.device_fingerprint,
-            user_id=payload.user_id,
-            metadata=payload.metadata,
-        )
+        stored, cached_session_count = ingest_tracking_request(payload, service)
         return TrackingLogResponse(
             data_source_id=stored.data_source_id,
             bucket=stored.bucket,

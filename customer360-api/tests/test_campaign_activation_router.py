@@ -31,7 +31,7 @@ class CampaignActivationRouterTests(unittest.TestCase):
         @self.app.middleware("http")
         async def _inject_identity(request, call_next):
             request.state.tenant_id = self.tenant_id
-            # SSO is forced on in CI; inject a tenant-admin so we reach the handler.
+            # Standalone router tests inject the identity the production middleware would set.
             request.state.user = {"roles": ["tenant_admin"]}
             return await call_next(request)
 

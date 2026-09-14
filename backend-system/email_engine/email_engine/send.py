@@ -35,8 +35,8 @@ from .tracking import encode_tracking_token
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = int(os.environ.get("EMAIL_ENGINE_BATCH_SIZE", "500"))
-# Public base for the tracking endpoints, e.g.
-# "https://track.example.com/c360api/api/v1". Empty -> tracking URLs omitted
+# Public base for the data-tracking-api endpoints, e.g.
+# "https://track.example.com/data/api/v1". Empty -> tracking URLs omitted
 # (mock runs / tests still send; they just carry no pixel/click wrapping).
 PUBLIC_BASE_URL = os.environ.get("EMAIL_PUBLIC_BASE_URL", "").rstrip("/")
 

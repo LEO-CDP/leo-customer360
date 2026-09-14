@@ -44,6 +44,15 @@ elif [ -z "${E2E_BASE_URL:-}" ]; then
 fi
 : "${E2E_BASE_URL:?E2E_BASE_URL not set (via .env or environment)}"
 
+# Resolve the interpreter before token minting so every Python operation uses
+# the same environment as pytest. The normal path is the venv created by the
+# customer360 unit runner; a system interpreter is only a fallback for an
+# explicitly prepared environment.
+VENV_PY="$API_HOME/.venv/Scripts/python.exe"
+[ -x "$VENV_PY" ] || VENV_PY="$API_HOME/.venv/bin/python"
+[ -x "$VENV_PY" ] || VENV_PY="$(command -v python || command -v python3 || true)"
+[ -n "$VENV_PY" ] || { echo "!! no Python interpreter found" >&2; exit 1; }
+
 # --- 2) mint a Keycloak token if none supplied but SSO creds are present -----
 if [ -z "${E2E_BEARER_TOKEN:-}" ] && [ -n "${E2E_SSO_USERNAME:-}" ]; then
   : "${E2E_KC_TOKEN_URL:?set E2E_KC_TOKEN_URL to mint a token}"
@@ -58,29 +67,24 @@ if [ -z "${E2E_BEARER_TOKEN:-}" ] && [ -n "${E2E_SSO_USERNAME:-}" ]; then
     --data-urlencode "password=${E2E_SSO_PASSWORD:-}" \
     --data-urlencode "scope=openid")
   E2E_BEARER_TOKEN=$(printf '%s' "$_tok_json" \
-    | python -c "import sys,json;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+    | "$VENV_PY" -c "import sys,json;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
   if [ -z "${E2E_BEARER_TOKEN}" ]; then
     echo "!! token mint failed:" >&2
     printf '%s' "$_tok_json" \
-      | python -c "import sys,json;d=json.load(sys.stdin);print(d.get('error'),'-',d.get('error_description'))" 2>/dev/null >&2 \
+      | "$VENV_PY" -c "import sys,json;d=json.load(sys.stdin);print(d.get('error'),'-',d.get('error_description'))" 2>/dev/null >&2 \
       || printf '%s\n' "$_tok_json" | head -c 300 >&2
     exit 1
   fi
   export E2E_BEARER_TOKEN
   # Derive the tenant from the token's tenant_id claim when not set explicitly.
   if [ -z "${E2E_TENANT_ID:-}" ]; then
-    E2E_TENANT_ID=$(printf '%s' "$E2E_BEARER_TOKEN" | python -c "
+    E2E_TENANT_ID=$(printf '%s' "$E2E_BEARER_TOKEN" | "$VENV_PY" -c '
 import sys,base64,json
 t=sys.stdin.read().strip().split('.')[1]; t+='='*(-len(t)%4)
-print(json.loads(base64.urlsafe_b64decode(t)).get('tenant_id',''))" 2>/dev/null || true)
+print(json.loads(base64.urlsafe_b64decode(t)).get("tenant_id", ""))' 2>/dev/null || true)
     export E2E_TENANT_ID
   fi
 fi
-
-# --- 3) resolve the venv python (built by ./run_unit_tests.sh) --------------
-VENV_PY="$API_HOME/.venv/Scripts/python.exe"          # Windows
-[ -x "$VENV_PY" ] || VENV_PY="$API_HOME/.venv/bin/python"   # Linux/macOS
-[ -x "$VENV_PY" ] || VENV_PY="$(command -v python || command -v python3)"
 
 echo ">> E2E_BASE_URL=${E2E_BASE_URL}  E2E_TENANT_ID=${E2E_TENANT_ID:-<unset>}  token=$([ -n "${E2E_BEARER_TOKEN:-}" ] && echo set || echo none)"
 

@@ -1,8 +1,9 @@
 
-# !/bin/bash
+#!/usr/bin/env bash
 
-# One script to run all unit tests for the Leo Customer360 project, including backend jobs and API tests.
+# One script to run all hermetic unit tests for the Leo Customer360 project.
 # This script is intended to be run from the root of the repository by developers and CI/CD pipelines.
+# Live deployment tests remain opt-in via customer360-api/tests/e2e/test.sh.
 
 set -euo pipefail
 
@@ -21,10 +22,10 @@ run_suite() {
   echo "Running: ${name}"
   echo "==================================================================="
 
-  if [ -x "$runner" ]; then
-    "$runner" "$@" || OVERALL_STATUS=$?
+  if [ -f "$runner" ]; then
+    bash "$runner" "$@" || OVERALL_STATUS=$?
   else
-    echo "Runner not found or not executable: ${runner}"
+    echo "Runner not found: ${runner}"
     OVERALL_STATUS=1
   fi
 
@@ -35,8 +36,11 @@ run_suite() {
 }
 
 run_suite "Customer 360 API" "${SCRIPT_DIR}/customer360-api/run_unit_tests.sh" "$@"
+run_suite "Data Tracking API" "${SCRIPT_DIR}/data-tracking-api/run_unit_tests.sh" "$@"
 run_suite "Identity Resolution" "${SCRIPT_DIR}/backend-system/identity_resolution/run_tests.sh" "$@"
 run_suite "Segmentation" "${SCRIPT_DIR}/backend-system/segmentation/run_tests.sh" "$@"
+run_suite "Campaign Activation" "${SCRIPT_DIR}/backend-system/campaign_activation/run_tests.sh" "$@"
+run_suite "Email Engine" "${SCRIPT_DIR}/backend-system/email_engine/run_tests.sh" "$@"
 run_suite "LEO Ad Server" "${SCRIPT_DIR}/ads-server/run_unit_tests.sh" "$@"
 
 echo ""

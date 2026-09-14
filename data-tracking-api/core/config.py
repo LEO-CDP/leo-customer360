@@ -151,6 +151,16 @@ class Settings(BaseSettings):
             "TRACKING_BOT_USER_AGENT_PATTERNS", "tracking_bot_user_agent_patterns"
         ),
     )
+    email_tracking_secret: str = Field(
+        default="leocdp-dev-tracking-secret",
+        validation_alias=AliasChoices("EMAIL_TRACKING_SECRET", "email_tracking_secret"),
+    )
+    email_webhook_signing_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "CRM_EMAIL_WEBHOOK_SIGNING_SECRET", "email_webhook_signing_secret"
+        ),
+    )
 
 
 settings = Settings()

@@ -19,12 +19,6 @@ pytestmark = pytest.mark.skipif(
     not os.environ.get("E2E_BASE_URL"), reason="E2E_BASE_URL not set (see tests/e2e/README.md)"
 )
 
-
-@pytest.fixture(autouse=True)
-def _require_email_feature(email_feature):
-    """Skip this module unless the target deploys the SCRUM-97 activation endpoints."""
-
-
 def _campaign_body(tenant_id, **over):
     return {"tenant_id": tenant_id, "name": f"E2E Activation {uuid.uuid4().hex[:8]}", **over}
 
@@ -54,7 +48,14 @@ def test_activate_draft_campaign_is_refused(client, p, tenant_id, track):
 
 # --- S97-04 Approved but missing template/segment -------------------------
 @pytest.mark.case("S97-04")
-def test_activate_approved_without_template_or_segment_is_refused(client, p, tenant_id, track):
+def test_activate_approved_without_template_or_segment_is_refused(
+    client, p, tenant_id, track, campaign_create_starts_in_draft_feature
+):
+    if campaign_create_starts_in_draft_feature:
+        pytest.skip(
+            "generic POST /campaigns no longer seeds Approved campaigns directly; "
+            "the missing template/segment activation guard is covered by unit tests"
+        )
     created = client.post(p("/campaigns/"), json=_campaign_body(tenant_id, approval_status="Approved"))
     assert created.status_code in (200, 201), created.text
     track.add("campaign", created.json()["campaign_id"])

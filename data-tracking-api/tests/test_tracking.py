@@ -16,7 +16,12 @@ from core.redis_cache import (
     TrackingRequestProtection,
     build_rate_limit_key,
 )
-from core.routers.tracking import get_protection, get_storage, get_tracking_service
+from core.routers.tracking import (
+    build_tracking_request,
+    get_protection,
+    get_storage,
+    get_tracking_service,
+)
 from core.service import IdentityValidationError, TrackingLogService, _collect_sessions
 from core.storage import StoredTrackingLog, build_tracking_object
 
@@ -88,6 +93,30 @@ def test_build_tracking_object_uses_utc_hour_folder_and_ndjson():
     assert key.startswith("2026-08-25-21/")
     assert key.endswith(".jsonl")
     assert json.loads(body.decode().strip())["event"] == event
+
+
+def test_build_tracking_request_normalizes_readme_example_identities():
+    request = build_tracking_request(
+        SOURCE_ID,
+        [
+            {
+                "event_name": "page_view",
+                "page_url": "https://example.test/",
+                "properties": {"experiment": {"variant": 2}},
+            }
+        ],
+        session_id=" session-123 ",
+        anonymous_id=" anon-123 ",
+        device_id="device-456",
+        device_fingerprint="fingerprint-789",
+        user_id="user-456",
+        metadata={"source": "web", "campaign": {"name": "spring"}},
+    )
+
+    assert request.session_id == "session-123"
+    assert request.anonymous_id == "anon-123"
+    assert request.metadata == {"source": "web", "campaign": {"name": "spring"}}
+    assert request.events[0]["event_name"] == "page_view"
 
 
 def test_ingest_tracking_logs_returns_object_location():
