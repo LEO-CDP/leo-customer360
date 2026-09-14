@@ -136,7 +136,7 @@ both the scheduled checks and the health monitor read it.
 | Secret | Used by | Purpose |
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | all three workflows | Bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | all three workflows | Destination chat/channel id |
+| `TELEGRAM_CHAT_ID` | all three workflows | Destination chat/channel id(s) — one, or many separated by comma / semicolon / whitespace / newline; the message is sent to each |
 | `KEYCLOAK_CLIENT_SECRET`, `KC_TEST_USER_PASSWORD` | scheduled checks | Enable the E2E leg (already provisioned for CI) |
 
 ### GitHub repo variables (optional)

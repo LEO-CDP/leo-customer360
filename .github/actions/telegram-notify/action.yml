@@ -6,7 +6,7 @@ inputs:
     description: Telegram bot token (secrets.TELEGRAM_BOT_TOKEN)
     required: true
   chat-id:
-    description: Target chat id (secrets.TELEGRAM_CHAT_ID)
+    description: "Target chat id(s) — one or many, separated by comma / semicolon / whitespace / newline (secrets.TELEGRAM_CHAT_ID)"
     required: true
   message:
     description: Message text (plain text; truncated to Telegram's 4096-char limit)
@@ -41,11 +41,20 @@ runs:
         esac
         # Telegram hard-limits messages to 4096 chars.
         TEXT="${icon} ${TEXT:0:3990}"
-        code=$(curl -sS -o /tmp/tg.out -w '%{http_code}' \
-          "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-          --data-urlencode "chat_id=${CHAT_ID}" \
-          --data-urlencode "text=${TEXT}" \
-          --data "disable_web_page_preview=true")
-        if [ "$code" != "200" ]; then
-          echo "::warning::Telegram sendMessage returned HTTP ${code}: $(cat /tmp/tg.out)"
-        fi
+        # Fan out to one or many chat ids (comma / semicolon / whitespace / newline separated).
+        sent=0; failed=0
+        for cid in $(printf '%s' "$CHAT_ID" | tr ',;' '  '); do
+          [ -z "$cid" ] && continue
+          code=$(curl -sS -o /tmp/tg.out -w '%{http_code}' \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${cid}" \
+            --data-urlencode "text=${TEXT}" \
+            --data "disable_web_page_preview=true")
+          if [ "$code" = "200" ]; then
+            sent=$((sent + 1))
+          else
+            failed=$((failed + 1))
+            echo "::warning::Telegram sendMessage to ${cid} returned HTTP ${code}: $(cat /tmp/tg.out)"
+          fi
+        done
+        echo "Telegram: sent=${sent} failed=${failed}"
