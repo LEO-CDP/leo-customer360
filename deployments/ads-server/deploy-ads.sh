@@ -126,7 +126,7 @@ $OTEL_LINES" | base64 | tr -d '\n')"
 DBPW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
 
 echo ">> Building, bootstrapping leo_ads schema, and (re)starting the container ..."
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ADS_PORT" "$ENVB64" "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DBPW_B64" "$DB_SCHEMA" "$SEED_SAMPLE" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ADS_PORT" "$ENVB64" "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DBPW_B64" "$DB_SCHEMA" "$SEED_SAMPLE" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" < <(declare -f docker_pull_retry; cat <<'REMOTE'
 set -euo pipefail
 PORT="$1"; ENVB64="$2"; DBHOST="$3"; DBPORT="$4"; DBNAME="$5"; DBUSER="$6"; DBPW="$(printf %s "$7" | base64 -d)"; SCHEMA="$8"; SEED="$9"
 DEPLOY_MODE="${10:-build}"; IMAGE="${11:-}"; GHCR_USER="${12:-token}"; GHCR_TOKEN="$(printf %s "${13:-}" | base64 -d 2>/dev/null || true)"
@@ -159,6 +159,7 @@ sleep 3
 curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && echo "   health OK (:$PORT/health)" || echo "   WARN: health not ready yet"
 sudo docker ps --filter name=customer360-ads --format '   running: {{.Names}} ({{.Status}})'
 REMOTE
+)
 echo ">> Done. Expose via the LB (add an 'ads' backend -> <box-ip>:$ADS_PORT) if it needs public access."
 
 # --- release ledger: record this deploy to the GitHub Deployments API (best-effort) ---

@@ -142,7 +142,7 @@ PARAMS_B64="$(printf '%s\n' \
   "DEPLOY_MODE=$DEPLOY_MODE" "IMAGE=$IMAGE" "GHCR_USER=$GHCR_USER" "GHCR_TOKEN_B64=$GHCR_TOKEN_B64" "CONTAINER=$CONTAINER" "OTEL_B64=$OTEL_B64" \
   "REPLICAS=$REPLICAS" "LB_IMAGE=$LB_IMAGE" "NETWORK=$NETWORK" "RL_REQUESTS=$RL_REQUESTS" "RL_WINDOW=$RL_WINDOW" \
   | base64 | tr -d '\n')"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PARAMS_B64" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PARAMS_B64" < <(declare -f docker_pull_retry; cat <<'REMOTE'
 set -euo pipefail
 tmp="$(mktemp)"; printf %s "$1" | base64 -d > "$tmp"; set -a; . "$tmp"; set +a; rm -f "$tmp"
 S3_SECRET_KEY="$(printf %s "$S3_SECRET_B64" | base64 -d)"
@@ -273,6 +273,7 @@ sudo docker ps --filter "name=${CONTAINER}-" --format '   {{.Names}} ({{.Status}
 echo "   --- load balancer (host :8010) ---"
 sudo docker ps --filter "name=${LB_NAME}" --format '   {{.Names}} ({{.Status}}) image={{.Image}}'
 REMOTE
+)
 
 echo ">> Done. $REPLICAS data-tracking-api replica(s) behind the local nginx LB on :8010 (health: /health)."
 echo "   Public (Caddy /data + LB): https://beta.leocdp.com/data/api/v1/tracking/logs"
