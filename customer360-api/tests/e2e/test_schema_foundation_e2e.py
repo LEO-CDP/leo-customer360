@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(
     not os.environ.get("E2E_BASE_URL"), reason="E2E_BASE_URL not set (see tests/e2e/README.md)"
 )
 
-APPROVAL_STATUSES = ("Draft", "InReview", "Approved", "Rejected")
+NON_DRAFT_APPROVAL_STATUSES = ("InReview", "Approved", "Rejected")
 
 
 def _campaign_body(tenant_id, **over):
@@ -44,14 +44,12 @@ def test_campaign_email_marketing_columns_round_trip(client, p, tenant_id, segme
     assert got.json()["approval_status"] == "Draft"
 
 
-# --- S93-03: every valid approval_status accepted -------------------------
+# --- S93-03: generic create must start in Draft ---------------------------
 @pytest.mark.case("S93-03")
-@pytest.mark.parametrize("status", APPROVAL_STATUSES)
-def test_campaign_accepts_each_approval_status(client, p, tenant_id, track, status):
+@pytest.mark.parametrize("status", NON_DRAFT_APPROVAL_STATUSES)
+def test_campaign_create_rejects_non_draft_approval_status(client, p, tenant_id, status):
     r = client.post(p("/campaigns/"), json=_campaign_body(tenant_id, approval_status=status))
-    assert r.status_code in (200, 201), r.text
-    track.add("campaign", r.json()["campaign_id"])
-    assert r.json()["approval_status"] == status
+    assert r.status_code == 422, r.text
 
 
 # --- S93-04: invalid approval_status rejected -----------------------------

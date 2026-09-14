@@ -14,6 +14,7 @@ from core.database import engine
 from core.init_core_data import init_core_data
 from core.routers.analytics_api import all_analytics_routers
 from core.routers.auth_api import all_auth_routers
+from core.routers.campaign_draft_api import all_campaign_draft_routers
 from core.routers.content_api import all_content_routers
 from core.routers.campaign_activation_api import all_campaign_activation_routers
 from core.routers.crm_api import all_crm_routers
@@ -86,6 +87,8 @@ def _include_api_routers(app: FastAPI) -> None:
     for r in all_crm_sync_routers:
         app.include_router(r, prefix=API_PREFIX)
     for r in all_campaign_activation_routers:
+        app.include_router(r, prefix=API_PREFIX)
+    for r in all_campaign_draft_routers:
         app.include_router(r, prefix=API_PREFIX)
     for r in all_email_tracking_routers:
         app.include_router(r, prefix=API_PREFIX)

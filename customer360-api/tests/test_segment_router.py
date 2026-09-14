@@ -107,7 +107,7 @@ def _build_test_app(*, create_hook=None, update_hook=None, db=None) -> FastAPI:
             create_validator=lambda db, payload: __import__("core.utils.domains", fromlist=["validate_domain_value"]).validate_domain_value(
                 db, payload.get("domain"), allow_all=True
             ),
-            update_validator=lambda db, payload: __import__("core.utils.domains", fromlist=["validate_domain_value"]).validate_domain_value(
+            update_validator=lambda db, obj, payload: __import__("core.utils.domains", fromlist=["validate_domain_value"]).validate_domain_value(
                 db, payload.get("domain"), allow_all=True
             ),
             create_transform=_transform_segment_create,

@@ -29,12 +29,13 @@ def build_crud_router(
     prefix: str,
     tags: list[str],
     create_validator: Optional[Callable[[Session, dict[str, Any]], None]] = None,
-    update_validator: Optional[Callable[[Session, dict[str, Any]], None]] = None,
+    update_validator: Optional[Callable[[Session, Any, dict[str, Any]], None]] = None,
     create_transform: Optional[Callable[[Session, dict[str, Any]], dict[str, Any]]] = None,
     update_transform: Optional[Callable[[Session, Any, dict[str, Any]], dict[str, Any]]] = None,
     integrity_error_detail: Optional[Callable[[IntegrityError], Optional[str]]] = None,
     create_hook: Optional[Callable[[Any], None]] = None,
     update_hook: Optional[Callable[[Any], None]] = None,
+    read_hook: Optional[Callable[[Session, Any], None]] = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=tags)  # type: ignore[arg-type]
     crud = CRUDBase(model)
@@ -73,6 +74,8 @@ def build_crud_router(
         obj = crud.get(db, item_id)
         if obj is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")
+        if read_hook is not None:
+            read_hook(db, obj)
         return obj
 
     @router.post("/", response_model=read_schema, status_code=201)
@@ -110,7 +113,7 @@ def build_crud_router(
             obj_in = update_transform(db, obj, obj_in)
         if update_validator is not None:
             try:
-                update_validator(db, obj_in)
+                update_validator(db, obj, obj_in)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from core.database import get_db
 from core.models.crm import Account, Campaign, CampaignMember, Contact, Industry, Lead, LeadSource, Opportunity
+from core.repositories.campaign_draft_repository import APPROVAL_STATUS_APPROVED, CampaignDraftRepository
 from core.repositories.campaign_repository import CampaignRepository
 from core.routers._generic import build_crud_router
 from core.schemas.crm import (
@@ -52,15 +53,57 @@ from core.schemas.crm import (
     TopCampaignItem,
 )
 
+def _attach_campaign_content_items(db: Session, campaign: Campaign) -> None:
+    """Enriches GET /campaigns/{id} with its content plan (specs/002-ai-campaign-draft-creation),
+    via a join against crm_campaign_content_items/cdp_content_items -- see
+    core.repositories.campaign_draft_repository.list_campaign_content_items."""
+    repo = CampaignDraftRepository(db)
+    campaign.content_items = repo.list_campaign_content_items(campaign.tenant_id, campaign.campaign_id)
+
+
+def _block_edit_of_approved_campaign(db: Session, campaign: Campaign, payload: dict) -> None:
+    """Refuses the generic PATCH /campaigns/{id} once a campaign is Approved
+    (specs/002-ai-campaign-draft-creation): editing name/dates/budget/etc.
+    here would silently bypass the re-review workflow -- no audit row, no
+    approval-status demotion, no optimistic-concurrency guard, unlike
+    CampaignDraftRepository.edit_draft(). approval_status itself is already
+    excluded from CampaignUpdate, so this only needs to catch edits to an
+    already-Approved row; edits before approval remain unrestricted here."""
+    if campaign.approval_status == APPROVAL_STATUS_APPROVED:
+        raise ValueError(
+            f"Campaign '{campaign.campaign_id}' is Approved; edit it via "
+            "PATCH /campaigns/{campaign_id}/draft (campaign_draft_api) instead, "
+            "which re-reviews the change and records it in the campaign's history"
+        )
+
+
+def _validate_create_campaign_starts_in_draft(db: Session, payload: dict) -> None:
+    """Refuses generic POST /campaigns writes that try to bypass the draft-review
+    workflow by setting approval metadata up front."""
+    if payload.get("approval_status") not in (None, "Draft"):
+        raise ValueError(
+            "Campaigns created via POST /campaigns must start in Draft; use the campaign draft "
+            "approval workflow to change approval_status"
+        )
+    if payload.get("approved_by") is not None or payload.get("approved_at") is not None:
+        raise ValueError(
+            "Campaign approval metadata may not be set via POST /campaigns; use the campaign "
+            "draft approval workflow instead"
+        )
+
+
 campaigns_router = build_crud_router(
     model=Campaign,
     pk_field="campaign_id",
     pk_type=uuid.UUID,
     create_schema=CampaignCreate,
+    create_validator=_validate_create_campaign_starts_in_draft,
     update_schema=CampaignUpdate,
     read_schema=CampaignRead,
     prefix="/campaigns",
     tags=["CRM - Campaigns"],
+    read_hook=_attach_campaign_content_items,
+    update_validator=_block_edit_of_approved_campaign,
 )
 
 campaign_members_router = build_crud_router(

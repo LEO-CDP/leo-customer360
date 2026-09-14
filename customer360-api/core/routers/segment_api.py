@@ -178,7 +178,7 @@ segments_router = build_crud_router(
     prefix="/segments",
     tags=["Segmentation"],
     create_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
-    update_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
+    update_validator=lambda db, obj, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
     create_transform=_transform_segment_create,
     update_transform=_transform_segment_update,
     integrity_error_detail=_segment_integrity_error_detail,

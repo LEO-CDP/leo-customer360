@@ -42,7 +42,9 @@ class Campaign(Base):
     end_date: Mapped[Optional[date]] = mapped_column(Date)
     budget_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
     currency: Mapped[Optional[str]] = mapped_column(String(3), server_default="VND")
-    # Email-marketing links + human-approval gate.
+    # Email-marketing links + human-approval gate (AI Campaign Strategy and
+    # Draft Creation, specs/002-ai-campaign-draft-creation): governance state
+    # machine, independent of the free-text `status` column above.
     segment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("cdp_segments.segment_id", ondelete="SET NULL")
     )
@@ -55,6 +57,28 @@ class Campaign(Base):
     strategy_summary: Mapped[Optional[str]] = mapped_column(Text)
     ai_plan: Mapped[Optional[dict]] = mapped_column(JSONB)
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    # Bumped on every campaign-draft write; used by CampaignDraftRepository's
+    # optimistic-concurrency guard (see database-schema.sql's crm_campaign
+    # updated_at column, added alongside crm_campaign_reviews).
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CampaignReview(Base):
+    __tablename__ = "crm_campaign_reviews"
+
+    review_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id", ondelete="CASCADE"), nullable=False
+    )
+    reviewer_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"), nullable=False
+    )
+    decision: Mapped[str] = mapped_column(String(10), nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 
 

@@ -9,6 +9,7 @@ from core.models.crm import (
     CampaignContentItem,
     CampaignDispatchLog,
     CampaignMember,
+    CampaignReview,
     Contact,
     EmailProviderConfig,
     EmailTemplate,
@@ -37,6 +38,7 @@ from core.models.identity import (
 from core.models.relations import CdpRelation, CustomerContact, RelationType, Transaction
 from core.models.segmentation import CdpSegment
 from core.models.system import (
+    SysAuditLog,
     SysDataSource,
     SysDomain,
     SysTenantDomain,
@@ -53,6 +55,7 @@ __all__ = [
     "CampaignContentItem",
     "CampaignDispatchLog",
     "CampaignMember",
+    "CampaignReview",
     "CdpContentItem",
     "Contact",
     "EmailProviderConfig",
@@ -81,6 +84,7 @@ __all__ = [
     "CustomerContact",
     "Transaction",
     "RelationType",
+    "SysAuditLog",
     "SysDataSource",
     "SysDomain",
     "SysTenantDomain",
