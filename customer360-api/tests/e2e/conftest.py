@@ -23,6 +23,8 @@ import pytest
 
 BASE_URL = os.environ.get("E2E_BASE_URL", "").rstrip("/")
 API_PREFIX = os.environ.get("E2E_API_PREFIX", "/api/v1")
+TRACKING_BASE_URL = os.environ.get("E2E_TRACKING_BASE_URL", "").rstrip("/")
+TRACKING_API_PREFIX = os.environ.get("E2E_TRACKING_API_PREFIX", "/api/v1")
 BEARER_TOKEN = os.environ.get("E2E_BEARER_TOKEN", "").strip()
 TENANT_ID = os.environ.get("E2E_TENANT_ID", "").strip()
 USER_ID = os.environ.get("E2E_USER_ID", "").strip()
@@ -198,6 +200,26 @@ def unauth_client():
 
 
 @pytest.fixture(scope="session")
+def email_client():
+    """Unauthenticated client for the public data-tracking email routes."""
+    if not TRACKING_BASE_URL:
+        pytest.skip("E2E_TRACKING_BASE_URL not set")
+    with httpx.Client(
+        base_url=TRACKING_BASE_URL,
+        timeout=TIMEOUT,
+        follow_redirects=True,
+        verify=VERIFY_TLS,
+    ) as c:
+        yield c
+
+
+@pytest.fixture(scope="session")
+def email_p():
+    """Prefix a public email-tracking route on data-tracking-api."""
+    return lambda path: f"{TRACKING_API_PREFIX}{path}"
+
+
+@pytest.fixture(scope="session")
 def tenant_id():
     if not TENANT_ID:
         pytest.skip("E2E_TENANT_ID not set (required to build request bodies)")
@@ -317,13 +339,11 @@ def campaign_create_starts_in_draft_feature(client, p, tenant_id):
 
 
 @pytest.fixture(scope="session")
-def email_feature(unauth_client, p):
-    """Skip SCRUM-97/98 tests when the target doesn't serve the email
-    execution/tracking endpoints yet (e.g. UAT still on a pre-subtask-05/06
-    build) -- the public open-pixel returns 200 only when they're deployed."""
-    r = unauth_client.get(p("/track/email/open"))
+def email_feature(email_client, email_p):
+    """Skip email-tracking tests when data-tracking-api is not deployed."""
+    r = email_client.get(email_p("/track/email/open"))
     if r.status_code != 200:
-        pytest.skip("email tracking/execution endpoints not deployed on target (SCRUM-97/98)")
+        pytest.skip("email tracking endpoints not deployed on E2E_TRACKING_BASE_URL")
 
 
 @pytest.fixture(scope="session")

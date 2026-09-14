@@ -18,10 +18,10 @@ column, so the ids here are the selectors.
 
 | | |
 |---|---|
-| Target | UAT — `https://beta.leocdp.com/c360api` (Caddy → API, `root_path=/c360api`) |
+| Target | Customer API — `https://beta.leocdp.com/c360api`; email tracking — `https://beta.leocdp.com/data` |
 | Auth | Keycloak (`/auth`, realm `customer360`, client `customer360-api`) password grant → Bearer JWT with `tenant_id`/`user_id`/roles. SSO-off targets: `X-Tenant-Id`/`X-User-Id` headers. |
 | Tenant | `11111111-1111-1111-1111-111111111111` (shared UAT test tenant) |
-| Runner | `./test.sh` (loads `tests/e2e/.env`, mints a fresh token, runs pytest) |
+| Runner | `./test.sh` (loads `tests/e2e/.env`, mints a fresh token, runs pytest; S98 uses `E2E_TRACKING_BASE_URL`) |
 | Config | `tests/e2e/.env` (git-ignored) — see `README.md` |
 
 ## 2. Test types covered
@@ -173,7 +173,7 @@ psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.dow
 
 ## 8. SCRUM-97 — Dagster Execution Modernization (campaign activation + email dispatch)
 
-> **Deploy gate:** these hit endpoints added on `feat/SCRUM-92/subtask-05-06`. They **skip** with "…not deployed on target (SCRUM-97/98)" when the target still runs a pre-05/06 build (the probe: public `GET /track/email/open` must return 200). They run for real once this branch is deployed — e.g. via the CI `e2e` stage after a UAT deploy. Run: `CASES=S97 ./test.sh`.
+> **Deploy gate:** S97 targets campaign activation on customer360-api. S98 targets data-tracking-api through `E2E_TRACKING_BASE_URL`. Run: `CASES=S97 ./test.sh` or `CASES=S98 ./test.sh`.
 
 | ID | AC | Scenario | Type | Method | Expected | Cleanup |
 |----|----|----------|------|--------|----------|---------|
@@ -190,7 +190,7 @@ psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.dow
 
 ## 9. SCRUM-98 — Tracking, Webhooks & Compliance (public endpoints)
 
-> Tokens are minted for **synthetic random** (tenant, campaign, profile) ids using `E2E_EMAIL_TRACKING_SECRET` (must match the deployment; UAT default), so these exercise the contract + security fixes with **zero data footprint** (a random profile has no `cdp_profile_links` row → events skipped, no suppression written). Run: `CASES=S98 ./test.sh`.
+> Tokens are minted for **synthetic random** (tenant, campaign, profile) ids using `E2E_EMAIL_TRACKING_SECRET` (must match data-tracking-api), so these exercise the contract + security fixes with **zero database footprint**. Run: `E2E_TRACKING_BASE_URL=https://<host>/data CASES=S98 ./test.sh`.
 
 | ID | AC | Scenario | Type | Method | Expected |
 |----|----|----------|------|--------|----------|

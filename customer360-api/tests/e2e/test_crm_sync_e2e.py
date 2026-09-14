@@ -25,6 +25,7 @@ VERIFY_TLS = os.environ.get("E2E_VERIFY_TLS", "true").strip().lower() not in ("f
 # Optional second tenant for real cross-tenant isolation checks.
 TENANT_B = os.environ.get("E2E_TENANT_ID_B", "").strip()
 TOKEN_B = os.environ.get("E2E_BEARER_TOKEN_B", "").strip()
+NON_ADMIN_TOKEN = os.environ.get("E2E_BEARER_TOKEN_NON_ADMIN", "").strip()
 
 
 def _assert_counts_consistent(counts: dict) -> None:
@@ -133,6 +134,30 @@ def test_sync_requires_authorization(unauth_client, p, segment_id):
     assert r.status_code in (400, 401, 403), r.text
 
 
+# --- S94-12 non-admin role -----------------------------------------------
+@pytest.mark.case("S94-12")
+@pytest.mark.skipif(
+    not NON_ADMIN_TOKEN,
+    reason="E2E_BEARER_TOKEN_NON_ADMIN not set",
+)
+def test_sync_rejects_non_admin_token(p, segment_id):
+    import httpx
+
+    headers = {
+        "Authorization": f"Bearer {NON_ADMIN_TOKEN}",
+        "X-Tenant-Id": os.environ.get("E2E_TENANT_ID", "").strip(),
+    }
+    with httpx.Client(
+        base_url=BASE_URL,
+        headers=headers,
+        timeout=TIMEOUT,
+        follow_redirects=True,
+        verify=VERIFY_TLS,
+    ) as non_admin:
+        response = non_admin.post(p(f"/admin/crm/sync-segment/{segment_id}"))
+    assert response.status_code == 403, response.text
+
+
 # --- S94-15 list limit bounds --------------------------------------------
 @pytest.mark.case("S94-15")
 def test_sync_runs_limit_is_bounded(client, p):
@@ -157,9 +182,11 @@ def test_sync_runs_filter_scopes_to_segment(client, p, make_segment):
 def test_cross_tenant_segment_and_run_are_404(client, p, segment_id):
     import httpx
     # Run a sync under tenant A to get a real run id.
-    run_id = client.post(p(f"/admin/crm/sync-segment/{segment_id}")).json()["sync_run_id"]
+    source_run = client.post(p(f"/admin/crm/sync-segment/{segment_id}"))
+    assert source_run.status_code == 200, source_run.text
+    run_id = source_run.json()["sync_run_id"]
     hb = {"Authorization": f"Bearer {TOKEN_B}", "X-Tenant-Id": TENANT_B}
-    with httpx.Client(base_url=C.BASE_URL, headers=hb, timeout=C.TIMEOUT,
-                      follow_redirects=True, verify=C.VERIFY_TLS) as cb:
+    with httpx.Client(base_url=BASE_URL, headers=hb, timeout=TIMEOUT,
+                      follow_redirects=True, verify=VERIFY_TLS) as cb:
         assert cb.post(p(f"/admin/crm/sync-segment/{segment_id}")).status_code == 404  # A's segment
         assert cb.get(p(f"/admin/crm/sync-runs/{run_id}")).status_code == 404          # A's run

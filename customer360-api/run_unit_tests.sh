@@ -59,4 +59,7 @@ echo -e "${GREEN}Installing requirements...${NC}"
 export SSO_LOGIN=true
 
 echo -e "${YELLOW}Running customer360-api unit tests...${NC}"
-"$VENV_PYTHON" -m pytest tests/ -v "$@"
+# E2E tests are live-deployment tests and must run through tests/e2e/test.sh.
+# Keeping them out of this runner prevents an exported E2E_BASE_URL from
+# turning a normal unit-test run into a UAT mutation.
+"$VENV_PYTHON" -m pytest tests/ --ignore=tests/e2e -v "$@"

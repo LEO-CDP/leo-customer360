@@ -19,12 +19,6 @@ pytestmark = pytest.mark.skipif(
     not os.environ.get("E2E_BASE_URL"), reason="E2E_BASE_URL not set (see tests/e2e/README.md)"
 )
 
-
-@pytest.fixture(autouse=True)
-def _require_email_feature(email_feature):
-    """Skip this module unless the target deploys the SCRUM-97 activation endpoints."""
-
-
 def _campaign_body(tenant_id, **over):
     return {"tenant_id": tenant_id, "name": f"E2E Activation {uuid.uuid4().hex[:8]}", **over}
 
