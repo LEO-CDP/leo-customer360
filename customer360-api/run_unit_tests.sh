@@ -51,9 +51,10 @@ echo -e "${GREEN}Installing requirements...${NC}"
 
 ###############################################################################
 # These are pure unit tests: no DB/Redis/Keycloak connection is required
-# (everything is faked in tests/conftest.py). SSO_LOGIN is forced true so
-# auth-required behavior is exercised the same way regardless of the local
-# .env (which typically has SSO_LOGIN=false for interactive dev use).
+# (everything is faked in tests/conftest.py). Standalone router tests inject
+# authenticated request state because they do not mount the production auth
+# middleware. Tests that exercise alternate SSO role behavior patch
+# core.auth.SSO_LOGIN explicitly.
 ###############################################################################
 export SSO_LOGIN=true
 

@@ -15,6 +15,7 @@ from core.routers.tracking import (
     router as tracking_router,
     shutdown_tracking_storage,
 )
+from core.routers.email_tracking import router as email_tracking_router
 from core.storage import S3ObjectStorage
 
 
@@ -55,6 +56,8 @@ async def allow_private_network_preflight(request, call_next):
 
 app.include_router(tracking_router, prefix="/api/v1")
 app.include_router(tracking_router, prefix="/data/api/v1")
+app.include_router(email_tracking_router, prefix="/api/v1")
+app.include_router(email_tracking_router, prefix="/data/api/v1")
 
 BASE_DIR = Path(__file__).resolve().parent
 static_dir = BASE_DIR / "static"

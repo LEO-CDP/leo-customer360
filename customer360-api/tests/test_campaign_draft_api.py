@@ -153,8 +153,8 @@ def _build_test_app() -> FastAPI:
     async def _inject_identity(request: Request, call_next):
         request.state.tenant_id = request.headers.get("X-Tenant-Id", str(DEMO_TENANT_ID))
         request.state.user_id = request.headers.get("X-User-Id", str(DEMO_USER_ID))
-        if roles := request.headers.get("X-Roles"):
-            request.state.user = {"roles": [role.strip() for role in roles.split(",") if role.strip()]}
+        roles = request.headers.get("X-Roles", "tenant_admin")
+        request.state.user = {"roles": [role.strip() for role in roles.split(",") if role.strip()]}
         return await call_next(request)
 
     app.dependency_overrides[get_db] = lambda: None
