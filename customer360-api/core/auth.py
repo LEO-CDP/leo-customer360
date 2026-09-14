@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Any, Optional
 
 from fastapi import HTTPException, Request, Security, status
@@ -443,6 +444,36 @@ def require_admin(request: Request) -> None:
 
     if "admin" not in {r.lower() for r in roles}:
         raise HTTPException(status_code=403, detail="This action requires the 'admin' role.")
+
+
+# Roles allowed to run tenant-admin actions (segment->CRM sync, campaign
+# activation, email config). Platform admins implicitly qualify.
+TENANT_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "tenant_admin", "admin"}
+
+
+def require_tenant(request: Request) -> str:
+    """Return the caller's tenant_id (set by auth_middleware), normalized +
+    validated as a UUID, or raise 400 -- a malformed value must not 500 a later
+    ``uuid.UUID()`` cast."""
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="No tenant context found (missing X-Tenant-Id)")
+    try:
+        return str(uuid.UUID(str(tenant_id)))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="X-Tenant-Id is not a valid UUID") from exc
+
+
+def require_tenant_admin(request: Request, action: str = "this action") -> None:
+    """Gate a tenant-admin action. Open in local dev (SSO off); otherwise the
+    caller must be authenticated and hold a tenant-admin role."""
+    if not SSO_LOGIN:
+        return
+    if not isinstance(getattr(request.state, "user", None), dict):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not {r.lower() for r in get_current_roles(request)} & TENANT_ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail=f"Tenant admin role required for {action}")
+
 
 # ---------------------------------------------------------
 # MCP & System Metrics Setup (Redis API Key Protected)

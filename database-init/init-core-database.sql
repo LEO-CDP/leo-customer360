@@ -192,7 +192,15 @@ INSERT INTO customer360.cdp_event_catalog (
     ('start-lesson',      'EDUCATION', 'education', 'User started a specific lesson or module.',      FALSE, NULL, 600),
     ('complete-lesson',   'EDUCATION', 'education', 'User completed a lesson.',                       FALSE, NULL, 610),
     ('submit-quiz',       'EDUCATION', 'education', 'User submitted a quiz or assignment.',           FALSE, 'score', 620),
-    ('download-material', 'EDUCATION', 'education', 'User downloaded course materials or syllabus.',  FALSE, NULL, 630)
+    ('download-material', 'EDUCATION', 'education', 'User downloaded course materials or syllabus.',  FALSE, NULL, 630),
+
+    -- EMAIL MARKETING ENGAGEMENT
+    ('email-delivered',    'GENERAL', 'all', 'Marketing email was accepted/delivered by the recipient MTA.', FALSE, NULL, 640),
+    ('email-bounced',      'GENERAL', 'all', 'Marketing email bounced (hard/soft).',                          FALSE, NULL, 650),
+    ('email-complained',   'GENERAL', 'all', 'Recipient marked the marketing email as spam/complaint.',       FALSE, NULL, 660),
+    ('email-opened',       'GENERAL', 'all', 'Recipient opened the marketing email (tracking pixel).',        FALSE, NULL, 670),
+    ('email-clicked',      'GENERAL', 'all', 'Recipient clicked a link in the marketing email.',              FALSE, NULL, 680),
+    ('email-unsubscribed', 'GENERAL', 'all', 'Recipient unsubscribed via the email footer link.',             FALSE, NULL, 690)
 ON CONFLICT (event_name) DO UPDATE SET
     event_category        = EXCLUDED.event_category,
     domain_scope          = EXCLUDED.domain_scope,

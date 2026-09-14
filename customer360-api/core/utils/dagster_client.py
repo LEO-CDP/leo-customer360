@@ -429,6 +429,27 @@ class EmailEngineDagsterService(DagsterService):
         return self.submit()
 
 
+class CampaignActivationDagsterService(DagsterService):
+    """backend-system/campaign_activation -- real campaign orchestration
+   : validates an Approved campaign, snapshots its segment, marks
+    it Running, then submits the email_engine run that dispatches it (see
+    backend-system/campaign_activation/dagster_defs.py)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            job_name=settings.dagster_campaign_activation_job_name,
+            location_name=settings.dagster_campaign_activation_location_name,
+            repository_name=settings.dagster_campaign_activation_repository_name,
+        )
+
+    def activate(self, campaign_id: str, tenant_id: str) -> str:
+        """Triggers a campaign_activation run for one Approved campaign."""
+        run_config = {
+            "ops": {"activate_campaign_op": {"config": {"campaign_id": campaign_id, "tenant_id": tenant_id}}}
+        }
+        return self.submit(run_config=run_config, tags={"campaign_id": campaign_id, "tenant_id": tenant_id})
+
+
 class NotificationEngineDagsterService(DagsterService):
     """backend-system/notification_engine -- outbound push/SMS/in-app
     notification dispatch (placeholder job today, see
@@ -466,6 +487,7 @@ class DagsterClient:
         self.segmentation = SegmentationDagsterService()
         self.data_synch = DataSynchDagsterService()
         self.email_engine = EmailEngineDagsterService()
+        self.campaign_activation = CampaignActivationDagsterService()
         self.notification_engine = NotificationEngineDagsterService()
 
 

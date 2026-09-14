@@ -145,6 +145,50 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
+  # E2E tests for customer360-api against the LIVE UAT deployment, AFTER the unit
+  # tests pass. Reuses the deploy pipeline's Keycloak secrets to mint a token.
+  # Default suite writes NO crm_* rows (impossible-predicate segment) and cleans
+  # up its own ephemeral fixtures. Set repo variable E2E_ALLOW_DATA_WRITES=1 to
+  # also run the opt-in routing (write) tests. See customer360-api/tests/e2e/.
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: E2E (customer360-api -> UAT)
+    needs: [changes, test]
+    if: ${{ contains(fromJSON(needs.changes.outputs.services), 'customer360-api') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install customer360-api dependencies
+        run: pip install -r customer360-api/requirements.txt
+
+      - name: Run E2E against UAT
+        env:
+          # Non-secret config (override with repo variables of the same name).
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL || 'https://beta.leocdp.com/c360api' }}
+          E2E_TENANT_ID: ${{ vars.E2E_TENANT_ID || '11111111-1111-1111-1111-111111111111' }}
+          E2E_KC_TOKEN_URL: ${{ vars.E2E_KC_TOKEN_URL || 'https://beta.leocdp.com/auth/realms/customer360/protocol/openid-connect/token' }}
+          E2E_KC_CLIENT_ID: ${{ vars.E2E_KC_CLIENT_ID || 'customer360-api' }}
+          E2E_SSO_USERNAME: ${{ vars.E2E_SSO_USERNAME || 'c360admin' }}
+          E2E_ALLOW_DATA_WRITES: ${{ vars.E2E_ALLOW_DATA_WRITES }}
+          # Secrets (reuse the ones the deploy pipeline already provisions).
+          E2E_KC_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+          E2E_SSO_PASSWORD: ${{ secrets.KC_TEST_USER_PASSWORD }}
+        run: |
+          if [ -z "$E2E_KC_CLIENT_SECRET" ] || [ -z "$E2E_SSO_PASSWORD" ]; then
+            echo "::warning::E2E Keycloak secrets not configured; skipping E2E."
+            exit 0
+          fi
+          bash customer360-api/tests/e2e/test.sh
+
+  # ---------------------------------------------------------------------------
   # Build one image per changed service (matrix). Push to GHCR only on `main`,
   # and only after that service's tests pass. PRs and branches build-only.
   # ---------------------------------------------------------------------------

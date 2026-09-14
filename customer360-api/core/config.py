@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     api_default_page_size: int = 100
     api_max_page_size: int = 1000
 
+    # Segment -> CRM sync engine: profiles are resolved
+    # and upserted into crm_* tables in batches this size so a large segment
+    # never loads its whole membership into memory at once.
+    crm_sync_batch_size: int = Field(
+        default=500,
+        validation_alias=AliasChoices("CRM_SYNC_BATCH_SIZE", "crm_sync_batch_size"),
+    )
+
     # Dagster webserver GraphQL endpoint (backend-system/, `dagster dev` /
     # dagster-webserver deployment) -- shared by every backend-system code
     # location. Used to submit job runs asynchronously instead of running
@@ -137,6 +145,25 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DAGSTER_EMAIL_ENGINE_REPOSITORY_NAME", "dagster_email_engine_repository_name"),
     )
 
+    dagster_campaign_activation_job_name: str = Field(
+        default="campaign_activation_job",
+        validation_alias=AliasChoices(
+            "DAGSTER_CAMPAIGN_ACTIVATION_JOB_NAME", "dagster_campaign_activation_job_name"
+        ),
+    )
+    dagster_campaign_activation_location_name: str = Field(
+        default="campaign_activation",
+        validation_alias=AliasChoices(
+            "DAGSTER_CAMPAIGN_ACTIVATION_LOCATION_NAME", "dagster_campaign_activation_location_name"
+        ),
+    )
+    dagster_campaign_activation_repository_name: str = Field(
+        default="__repository__",
+        validation_alias=AliasChoices(
+            "DAGSTER_CAMPAIGN_ACTIVATION_REPOSITORY_NAME", "dagster_campaign_activation_repository_name"
+        ),
+    )
+
     dagster_notification_engine_job_name: str = Field(
         default="notification_engine_job",
         validation_alias=AliasChoices(
@@ -154,6 +181,21 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "DAGSTER_NOTIFICATION_ENGINE_REPOSITORY_NAME", "dagster_notification_engine_repository_name"
         ),
+    )
+
+    # Email tracking: HMAC secret signing the open/click/
+    # unsubscribe tokens. MUST match backend-system email_engine's
+    # EMAIL_TRACKING_SECRET so tokens minted at send time verify here.
+    email_tracking_secret: str = Field(
+        default="leocdp-dev-tracking-secret",
+        validation_alias=AliasChoices("EMAIL_TRACKING_SECRET", "email_tracking_secret"),
+    )
+    # HMAC secret the provider signs delivery/bounce/complaint webhooks with
+    # (verified in core/routers/email_tracking_api.py). Empty -> the /webhook
+    # endpoint is disabled (503), so a misconfig can't accept forged callbacks.
+    email_webhook_signing_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("CRM_EMAIL_WEBHOOK_SIGNING_SECRET", "email_webhook_signing_secret"),
     )
 
     # Redis response cache (see core/cache.py). Disconnected/misconfigured
