@@ -69,13 +69,17 @@ class FakeCampaignCRUD:
 
 
 def _build_test_app() -> FastAPI:
+    from core.routers.crm_api import _block_edit_of_approved_campaign, _validate_create_campaign_starts_in_draft
+
     with patch("core.routers._generic.CRUDBase", FakeCampaignCRUD):
         router = build_crud_router(
             model=Campaign,
             pk_field="campaign_id",
             pk_type=uuid.UUID,
             create_schema=CampaignCreate,
+            create_validator=_validate_create_campaign_starts_in_draft,
             update_schema=CampaignUpdate,
+            update_validator=_block_edit_of_approved_campaign,
             read_schema=CampaignRead,
             prefix="/campaigns",
             tags=["CRM - Campaigns"],
@@ -157,6 +161,12 @@ class CampaignCrudTests(unittest.TestCase):
         body = response.json()
         self.assertIsNone(body.get("campaign_code"))
         self.assertIsNone(body.get("status"))
+
+    def test_create_campaign_rejects_non_draft_approval_status(self):
+        response = self.client.post("/campaigns/", json=_campaign_payload(approval_status="Approved"))
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("must start in Draft", response.json()["detail"])
 
     # ------------------------------------------------------------------
     # READ
