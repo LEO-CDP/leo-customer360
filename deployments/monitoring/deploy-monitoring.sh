@@ -295,6 +295,7 @@ fi
 if [ "${J_EN:-false}" = "true" ]; then
   echo "   deploying Jaeger (all-in-one, badger storage) ..."
   sudo docker pull "$J_IMG" >/dev/null || true
+  # v2 volume: fresh badger DB; old jaeger_data (grew to 3.5GB, OOM-loaded on the 300m box) left orphaned — remove manually.
   sudo docker volume create jaeger_data2 >/dev/null
   sudo docker rm -f c360-jaeger >/dev/null 2>&1 || true
   sudo docker run -d --name c360-jaeger --restart unless-stopped --user root --memory "${J_MEM:-300m}" -e COLLECTOR_OTLP_ENABLED=true -e QUERY_BASE_PATH=/jaeger -e SPAN_STORAGE_TYPE=badger -e BADGER_EPHEMERAL=false -e BADGER_SPAN_STORE_TTL="${J_TTL:-24h}" -e BADGER_DIRECTORY_VALUE=/badger/data -e BADGER_DIRECTORY_KEY=/badger/key -v jaeger_data2:/badger -p "${J_UI_BIND:-127.0.0.1}:${J_UI_PORT:-16686}:16686" -p "0.0.0.0:${J_OTLP_HTTP:-4318}:4318" "$J_IMG"   # gRPC 4317 NOT published: Netdata's otel-plugin owns host :4317; apps export OTLP/HTTP :4318
