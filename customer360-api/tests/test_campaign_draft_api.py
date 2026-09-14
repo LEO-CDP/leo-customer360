@@ -153,6 +153,8 @@ def _build_test_app() -> FastAPI:
     async def _inject_identity(request: Request, call_next):
         request.state.tenant_id = request.headers.get("X-Tenant-Id", str(DEMO_TENANT_ID))
         request.state.user_id = request.headers.get("X-User-Id", str(DEMO_USER_ID))
+        if roles := request.headers.get("X-Roles"):
+            request.state.user = {"roles": [role.strip() for role in roles.split(",") if role.strip()]}
         return await call_next(request)
 
     app.dependency_overrides[get_db] = lambda: None
@@ -283,6 +285,24 @@ class ReviewCampaignDraftTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["approval_status"], "Rejected")
+
+    def test_approve_requires_tenant_admin_role_in_sso_mode(self):
+        with patch("core.auth.SSO_LOGIN", True):
+            response = self.client.post(f"/campaigns/{self.campaign_id}/approve", headers={"X-Roles": "analyst"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"], "Tenant admin role required for campaign draft approval")
+
+    def test_reject_requires_tenant_admin_role_in_sso_mode(self):
+        with patch("core.auth.SSO_LOGIN", True):
+            response = self.client.post(
+                f"/campaigns/{self.campaign_id}/reject",
+                json={"reason": "Budget too aggressive"},
+                headers={"X-Roles": "analyst"},
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"], "Tenant admin role required for campaign draft approval")
 
     def test_editing_approved_campaign_reverts_to_in_review(self):
         self.client.post(f"/campaigns/{self.campaign_id}/approve")

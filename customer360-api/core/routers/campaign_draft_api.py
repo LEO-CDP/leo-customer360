@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from core.auth import require_tenant
+from core.auth import require_tenant, require_tenant_admin
 from core.database import get_db
 from core.repositories.campaign_draft_repository import (
     CampaignDraftApprovalBlockedError,
@@ -140,6 +140,7 @@ def edit_campaign_draft(
 @router.post("/{campaign_id}/approve", response_model=CampaignDraftResponse)
 def approve_campaign_draft(campaign_id: uuid.UUID, request: Request, db: Session = Depends(get_db)):
     tenant_id = uuid.UUID(require_tenant(request))
+    require_tenant_admin(request, "campaign draft approval")
     reviewer_id = _current_user_id(request)
     if reviewer_id is None:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -163,6 +164,7 @@ def reject_campaign_draft(
     db: Session = Depends(get_db),
 ):
     tenant_id = uuid.UUID(require_tenant(request))
+    require_tenant_admin(request, "campaign draft approval")
     reviewer_id = _current_user_id(request)
     if reviewer_id is None:
         raise HTTPException(status_code=401, detail="Authentication required")
