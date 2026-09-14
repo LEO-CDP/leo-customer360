@@ -37,7 +37,7 @@ class GeminiProvider(AIProvider):
         try:
             with urllib.request.urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
                 body = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             detail = getattr(exc, "reason", exc)
             raise AIProviderError(f"Gemini request failed: {detail}") from exc
 
