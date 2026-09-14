@@ -41,6 +41,9 @@ class OpenAIProvider(AIProvider):
             raise AIProviderError(f"OpenAI request failed: {detail}") from exc
 
         try:
-            return body["choices"][0]["message"]["content"]
+            content = body["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise AIProviderError("OpenAI response did not contain generated content") from exc
+        if not isinstance(content, str) or not content.strip():
+            raise AIProviderError("OpenAI response did not contain generated content")
+        return content
