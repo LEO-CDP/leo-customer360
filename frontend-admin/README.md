@@ -238,6 +238,10 @@ This is the basis for profiles, segments, datasources, scoring models, and syste
 
 ## Start / stop / restart
 
+The frontend-admin service targets Python 3.12. The Docker image uses
+`python:3.12-slim`; local development should use Python 3.12 or newer within the
+supported dependency ranges in `requirements.txt`.
+
 From this folder, the app is started via:
 
 ```bash

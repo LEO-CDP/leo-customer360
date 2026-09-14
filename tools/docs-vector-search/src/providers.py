@@ -345,6 +345,17 @@ def _generation_diagnostic(response: dict, finish_reason: str | None) -> str:
     return ", ".join(details)
 
 
+def _generation_needs_retry(answer: str, finish_reason: str | None) -> bool:
+    return not answer or str(finish_reason).lower() in {"length", "max_tokens"}
+
+
+def _retry_token_budget(current: int, *, context_limit: int | None = None) -> int:
+    retry_tokens = max(current * 2, 1024)
+    if context_limit is not None:
+        retry_tokens = min(retry_tokens, max(1, context_limit - 1))
+    return retry_tokens
+
+
 def _openai_generation(system: str, user: str, max_tokens: int) -> dict:
     payload = {
         "model": OPENAI_LLM_MODEL,
@@ -361,6 +372,29 @@ def _openai_generation(system: str, user: str, max_tokens: int) -> dict:
     return _openai_request("chat/completions", payload)
 
 
+def _gemini_generation(system: str, user: str, max_tokens: int) -> dict:
+    return _gemini_request(
+        f"models/{quote(GEMINI_LLM_MODEL, safe='')}:generateContent",
+        {
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user}]}],
+            "generationConfig": {
+                "maxOutputTokens": max_tokens,
+                "temperature": 0.2,
+            },
+        },
+    )
+
+
+def _gemini_answer(response: dict) -> tuple[str, str | None]:
+    try:
+        candidate = response["candidates"][0]
+        parts = candidate["content"]["parts"]
+        return _content_text(parts), candidate.get("finishReason")
+    except (KeyError, IndexError, TypeError, AttributeError) as exc:
+        raise RuntimeError("Gemini response did not contain an answer") from exc
+
+
 def generate(system: str, user: str) -> str:
     """Generate an answer through the configured OpenAI, Gemini, or local provider."""
     if LLM_PROVIDER == "openai":
@@ -369,10 +403,10 @@ def generate(system: str, user: str) -> str:
         max_tokens = max(DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS, 1024)
         response = _openai_generation(system, user, max_tokens)
         answer, finish_reason = _openai_answer(response)
-        if not answer:
-            retry_tokens = max(max_tokens * 2, 1024)
+        if _generation_needs_retry(answer, finish_reason):
+            retry_tokens = _retry_token_budget(max_tokens)
             _log.warning(
-                "OpenAI generation returned no visible text (%s); retrying with %d tokens",
+                "OpenAI generation was incomplete (%s); retrying with %d tokens",
                 _generation_diagnostic(response, finish_reason),
                 retry_tokens,
             )
@@ -385,24 +419,23 @@ def generate(system: str, user: str) -> str:
             )
         return answer
     if LLM_PROVIDER == "gemini":
-        response = _gemini_request(
-            f"models/{quote(GEMINI_LLM_MODEL, safe='')}:generateContent",
-            {
-                "systemInstruction": {"parts": [{"text": system}]},
-                "contents": [{"role": "user", "parts": [{"text": user}]}],
-                "generationConfig": {
-                    "maxOutputTokens": DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS,
-                    "temperature": 0.2,
-                },
-            },
-        )
-        try:
-            parts = response["candidates"][0]["content"]["parts"]
-            answer = _content_text(parts)
-        except (KeyError, IndexError, TypeError, AttributeError) as exc:
-            raise RuntimeError("Gemini response did not contain an answer") from exc
+        max_tokens = DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS
+        response = _gemini_generation(system, user, max_tokens)
+        answer, finish_reason = _gemini_answer(response)
+        if _generation_needs_retry(answer, finish_reason):
+            retry_tokens = _retry_token_budget(max_tokens)
+            _log.warning(
+                "Gemini generation was incomplete (%s); retrying with %d tokens",
+                _generation_diagnostic(response, finish_reason),
+                retry_tokens,
+            )
+            response = _gemini_generation(system, user, retry_tokens)
+            answer, finish_reason = _gemini_answer(response)
         if not answer:
-            raise RuntimeError("Gemini response contained no visible answer")
+            raise RuntimeError(
+                "Gemini response contained no visible answer "
+                f"({_generation_diagnostic(response, finish_reason)})"
+            )
         return answer
     if LLM_PROVIDER != "local":
         raise RuntimeError(f"Unsupported LLM_PROVIDER: {LLM_PROVIDER}")
@@ -415,7 +448,39 @@ def generate(system: str, user: str) -> str:
         max_tokens=DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS,
         temperature=0.2,
     )
-    answer = _content_text(resp["choices"][0]["message"].get("content"))
+    try:
+        choice = resp["choices"][0]
+        answer = _content_text(choice["message"].get("content"))
+        finish_reason = choice.get("finish_reason")
+    except (KeyError, IndexError, TypeError, AttributeError) as exc:
+        raise RuntimeError("Local model response did not contain a message") from exc
+    if _generation_needs_retry(answer, finish_reason):
+        retry_tokens = _retry_token_budget(
+            DOCS_LOCAL_LLM_MAX_OUTPUT_TOKENS,
+            context_limit=LOCAL_LLM_CONTEXT_TOKENS,
+        )
+        _log.warning(
+            "Local generation was incomplete (%s); retrying with %d tokens",
+            _generation_diagnostic(resp, finish_reason),
+            retry_tokens,
+        )
+        resp = _llm().create_chat_completion(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=retry_tokens,
+            temperature=0.2,
+        )
+        try:
+            choice = resp["choices"][0]
+            answer = _content_text(choice["message"].get("content"))
+            finish_reason = choice.get("finish_reason")
+        except (KeyError, IndexError, TypeError, AttributeError) as exc:
+            raise RuntimeError("Local model response did not contain a message") from exc
     if not answer:
-        raise RuntimeError("Local model response contained no visible answer")
+        raise RuntimeError(
+            "Local model response contained no visible answer "
+            f"({_generation_diagnostic(resp, finish_reason)})"
+        )
     return answer

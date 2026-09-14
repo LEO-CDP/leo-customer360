@@ -112,9 +112,9 @@ DOCS_PROXY_TIMEOUT_SECONDS=$DOCS_PROXY_TIMEOUT_SECONDS"
 [[ -n "$DOCS_SEARCH_URL" ]] && DOCS_LINES="DOCS_SEARCH_URL=$DOCS_SEARCH_URL
 $DOCS_LINES"
 # Shared secret the /ai proxy sends as X-Internal-Auth so the docs service exempts it from the
-# public rate limit. Must equal the docs deploy's DOCS_INTERNAL_AUTH_SECRET; empty (default) => the
-# proxy is rate-limited like any client (fail-closed). Emit only when set.
-DOCS_INTERNAL_AUTH_SECRET="${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-}}"
+# public rate limit. Must equal the docs deploy's DOCS_INTERNAL_AUTH_SECRET. The default is
+# leoragbot; override it with a deployment secret in production.
+DOCS_INTERNAL_AUTH_SECRET="${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-leoragbot}}"
 [[ -n "$DOCS_INTERNAL_AUTH_SECRET" ]] && DOCS_LINES="DOCS_INTERNAL_AUTH_SECRET=$DOCS_INTERNAL_AUTH_SECRET
 $DOCS_LINES"
 

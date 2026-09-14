@@ -11,6 +11,21 @@ try:  # optional in CI/containers
 except Exception:  # noqa: BLE001
     pass
 
+def _parse_allowed_hosts(value: str) -> set[str]:
+    return {
+        host.strip().lower().rstrip(".")
+        for host in value.split(",")
+        if host.strip()
+    }
+
+
+LEO_BOT_ALLOWED_HOSTS = _parse_allowed_hosts(
+    os.getenv(
+        "LEO_BOT_ALLOWED_HOSTS",
+        "localhost, admin.leocdp.com, beta.leocdp.com, c360.example.com",
+    )
+)
+
 # Local layout: src/config.py → src → docs-vector-search → tools → <repo root>.
 # In the container the code lives at /app/src, so parents[3] doesn't exist — fall back
 # safely (CORPUS_DIR/MODELS_DIR are set via env there, so this default is never used).
@@ -179,10 +194,10 @@ ASK_RATE_WINDOW_SEC = int(os.getenv("ASK_RATE_WINDOW_SEC", "60"))
 # not-via-the-proxy and falls back to the direct peer (fail closed).
 TRUSTED_PROXY_HOPS = max(1, int(os.getenv("TRUSTED_PROXY_HOPS", "1")))
 # Shared secret that identifies a trusted internal caller (the frontend-admin proxy),
-# presented as the X-Internal-Auth header. EMPTY (default) => no caller is ever exempt,
-# so admin traffic is rate-limited too. Set the SAME value here and as the proxy's
-# DOCS_INTERNAL_SECRET to exempt the admin console from the public rate limit.
-INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
+# presented as the X-Internal-Auth header. The default is leoragbot; override it for
+# production and use the SAME value in the frontend proxy to exempt admin traffic
+# from the public rate limit.
+INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "leoragbot")
 
 # Redis-backed request limiting. Local Docker runs a dedicated no-auth Redis service
 # (docs-rate-limit-redis) on the same network; server deployment defaults to localhost.
