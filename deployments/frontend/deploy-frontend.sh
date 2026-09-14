@@ -130,7 +130,7 @@ $DOCS_LINES
 $OTEL_LINES" | base64 | tr -d '\n')"
 
 echo ">> Building + (re)starting the container ..."
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PORT" "$ENV_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PORT" "$ENV_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" < <(declare -f docker_pull_retry; cat <<'REMOTE'
 set -euo pipefail
 PORT="$1"; ENV_B64="$2"
 DEPLOY_MODE="${3:-build}"; IMAGE="${4:-}"; GHCR_USER="${5:-token}"; GHCR_TOKEN="$(printf %s "${6:-}" | base64 -d 2>/dev/null || true)"
@@ -163,6 +163,7 @@ sleep 3
 curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && echo "   health OK (:$PORT/health)" || echo "   WARN: health not ready yet"
 sudo docker ps --filter name=customer360-frontend --format '   running: {{.Names}} ({{.Status}})'
 REMOTE
+)
 echo ">> Done. Expose it via the LB (add a 'frontend' backend -> <box-ip>:$PORT), then open http://<lb>:$PORT/"
 
 # --- release ledger: record this deploy to the GitHub Deployments API (best-effort) ---

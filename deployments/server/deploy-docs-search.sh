@@ -253,7 +253,7 @@ echo ">> Fetching the model, refreshing the index (enrich), and (re)starting the
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' \
   "$DOCS_PORT" "$ENVB64" "$DOCS_GGUF_URL" "$GGUF_NAME" "$DEPLOY_MODE" "$IMAGE" \
   "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$CONTAINER" \
-  "$REDIS_CONTAINER" "$REDIS_IMAGE" <<'REMOTE'
+  "$REDIS_CONTAINER" "$REDIS_IMAGE" < <(declare -f docker_pull_retry; cat <<'REMOTE'
 set -euo pipefail
 PORT="$1"; ENVB64="$2"; GGUF_URL="$3"; GGUF_NAME="$4"; DEPLOY_MODE="${5:-ghcr}"; IMAGE="${6:-}"
 GHCR_USER="${7:-token}"; GHCR_TOKEN="$(printf %s "${8:-}" | base64 -d 2>/dev/null || true)"; CONTAINER="${9:-customer360-docs-vector-search}"
@@ -348,6 +348,7 @@ sleep 5
 curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && echo "   health OK (:$PORT/health)" || echo "   WARN: health not ready yet (models load on first request)"
 sudo docker ps --filter name="$CONTAINER" --format '   running: {{.Names}} ({{.Status}})'
 REMOTE
+)
 echo ">> Done. Expose via the LB (add a 'docs' backend -> <box-ip>:$DOCS_PORT) if it needs public access."
 
 # --- release ledger: record this deploy to the GitHub Deployments API (best-effort) ---
