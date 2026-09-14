@@ -80,6 +80,27 @@ No cross-run state is needed — the ">5 min" is measured *inside* one run by th
 6-round window. During an ongoing outage each 15-min cycle re-alerts (keeps it
 visible); add a dedup marker later if that's too noisy.
 
+## Telegram message format
+
+Every message leads with a status icon — Telegram can't colour text, so the emoji
+*is* the colour cue. The icon is set by the composite action's `status` input:
+
+| Status | Icon | When |
+| --- | --- | --- |
+| `start` | 🔵 | a workflow started |
+| `success` | ✅ | a workflow passed / all checks green |
+| `failure` | ❌ | a workflow failed, or a check / service is down |
+| `warning` | ⚠️ | cancelled / skipped / other non-success |
+| `info` | ℹ️ | default (anything else) |
+
+Any state that is **not** `start` or `success` carries a **`Reason:`** line — and,
+for the scheduled checks and health monitor, the per-item ✅/❌ breakdown — so the
+message says *why*, not just *that* something is off:
+
+- **CI/CD notifier** — `Reason: concluded 'failure' (push on main) — open the run…`
+- **Scheduled checks** — `Reason: failed leg(s): unit health — see details below`, then per-suite/URL ✅/❌.
+- **Health monitor** — the ❌ list of URLs still failing after the >5-min window.
+
 ## Health-check URLs
 
 Default set (all public services fronted by Caddy on `beta.leocdp.com`, each
@@ -115,7 +136,7 @@ both the scheduled checks and the health monitor read it.
 | Secret | Used by | Purpose |
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | all three workflows | Bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | all three workflows | Destination chat/channel id |
+| `TELEGRAM_CHAT_ID` | all three workflows | Destination chat/channel id(s) — one, or many separated by comma / semicolon / whitespace / newline; the message is sent to each |
 | `KEYCLOAK_CLIENT_SECRET`, `KC_TEST_USER_PASSWORD` | scheduled checks | Enable the E2E leg (already provisioned for CI) |
 
 ### GitHub repo variables (optional)
