@@ -97,15 +97,19 @@ Idempotent / safe to re-run:
   ``||`` merge).
 """
 
+import gzip
 import hashlib
+import json
 import logging
 import math
 import os
 import random
 import sys
 import uuid
-from datetime import datetime, timedelta
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote_plus, urlparse
 
 import psycopg2
@@ -145,7 +149,55 @@ DEMO_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
 # master profiles still get the lightweight lifecycle+scoring enrichment.
 DETAIL_PROFILE_LIMIT = 60
 PERSONA_EMBEDDING_DIM = 768
-# Demo invariant: every resolved master profile must have >10 behavioral events.
+
+# Demo behavioral-event fixture. Objects use the same per-source S3 layout
+# consumed by customer360-api's event query repository.
+BEHAVIORAL_EVENT_COUNT = int(os.environ.get("DEMO_BEHAVIORAL_EVENT_COUNT", "20000"))
+BEHAVIORAL_EVENT_LOOKBACK_DAYS = int(
+    os.environ.get("DEMO_BEHAVIORAL_EVENT_LOOKBACK_DAYS", "120")
+)
+S3_ENDPOINT_URL = os.environ.get("ANALYTICS_S3_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT_URL")
+S3_REGION = os.environ.get("S3_REGION", "us-east-1")
+S3_ACCESS_KEY_ID = os.environ.get("S3_ACCESS_KEY_ID") or os.environ.get("AWS_ACCESS_KEY_ID")
+S3_SECRET_ACCESS_KEY = os.environ.get("S3_SECRET_ACCESS_KEY") or os.environ.get("AWS_SECRET_ACCESS_KEY")
+S3_SESSION_TOKEN = os.environ.get("S3_SESSION_TOKEN") or os.environ.get("AWS_SESSION_TOKEN")
+S3_FORCE_PATH_STYLE = os.environ.get("S3_FORCE_PATH_STYLE", "false").lower() == "true"
+S3_VERIFY_SSL = os.environ.get("S3_VERIFY_SSL", "true").lower() == "true"
+S3_AUTO_CREATE_BUCKETS = os.environ.get("S3_AUTO_CREATE_BUCKETS", "true").lower() == "true"
+
+BEHAVIORAL_SOURCE_SLUGS = {
+    "adjust": "adjust-mobile-attribution",
+    "onesignal": "c360-tracker",
+    "webtracking": "google-analytics-4",
+    "googleanalytics": "google-analytics-4",
+}
+
+BEHAVIORAL_EVENT_TEMPLATES = {
+    "retail": (
+        ("product-view", "GENERAL", "product", False, "web"),
+        ("add-to-cart", "COMMERCE", "product", False, "web"),
+        ("purchase", "COMMERCE", "product", True, "web"),
+        ("wishlist-add", "COMMERCE", "product", False, "mobile_app"),
+        ("app-open", "GENERAL", "app", False, "mobile_app"),
+    ),
+    "education": (
+        ("course-started", "EDUCATION", "course", False, "web"),
+        ("lesson-completed", "EDUCATION", "lesson", False, "web"),
+        ("assignment-submitted", "EDUCATION", "assignment", False, "web"),
+        ("course-enrolled", "EDUCATION", "course", True, "mobile_app"),
+        ("learning-session-started", "EDUCATION", "lesson", False, "mobile_app"),
+    ),
+    "real_estate": (
+        ("property-view", "REAL_ESTATE", "property", False, "web"),
+        ("property-inquiry", "REAL_ESTATE", "property", True, "web"),
+        ("virtual-tour-started", "REAL_ESTATE", "property", False, "mobile_app"),
+    ),
+    "travel": (
+        ("destination-view", "TRAVEL", "destination", False, "web"),
+        ("search-completed", "TRAVEL", "trip", False, "web"),
+        ("booking-completed", "TRAVEL", "booking", True, "mobile_app"),
+    ),
+}
 
 def canonical_demo_domain(domain: str | None) -> str:
     if not domain:
@@ -2016,6 +2068,285 @@ def fetch_master_profiles(cursor) -> list:
     return cursor.fetchall()
 
 
+def fetch_event_profiles(cursor) -> list:
+    """Return raw profiles together with their resolved master profiles."""
+    cursor.execute(
+        f"""
+        SELECT m.master_profile_id, m.domain, m.created_at,
+               r.raw_profile_id, r.source_system, r.channel,
+               r.external_customer_id, r.device_id, r.platform
+        FROM {_table('cdp_master_profiles')} m
+        JOIN {_table('cdp_profile_links')} l
+          ON l.tenant_id = m.tenant_id
+         AND l.master_profile_id = m.master_profile_id
+         AND l.status = 'ACTIVE'
+        JOIN {_table('cdp_raw_profiles_stage')} r
+          ON r.tenant_id = l.tenant_id
+         AND r.raw_profile_id = l.raw_profile_id
+        WHERE m.tenant_id = %s
+          AND m.status_code = 1
+        ORDER BY m.master_profile_id, r.raw_profile_id;
+        """,
+        (DEMO_TENANT_ID,),
+    )
+    return cursor.fetchall()
+
+
+def _build_demo_s3_client() -> Any:
+    import boto3
+    from botocore.client import Config
+
+    client_kwargs: dict[str, Any] = {
+        "region_name": S3_REGION,
+        "verify": S3_VERIFY_SSL,
+        "config": Config(
+            s3={"addressing_style": "path" if S3_FORCE_PATH_STYLE else "auto"}
+        ),
+    }
+    if S3_ENDPOINT_URL:
+        client_kwargs["endpoint_url"] = S3_ENDPOINT_URL
+    if S3_ACCESS_KEY_ID:
+        client_kwargs["aws_access_key_id"] = S3_ACCESS_KEY_ID
+    if S3_SECRET_ACCESS_KEY:
+        client_kwargs["aws_secret_access_key"] = S3_SECRET_ACCESS_KEY
+    if S3_SESSION_TOKEN:
+        client_kwargs["aws_session_token"] = S3_SESSION_TOKEN
+    return boto3.client("s3", **client_kwargs)
+
+
+def _ensure_demo_s3_bucket(client: Any, bucket: str) -> None:
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    try:
+        client.head_bucket(Bucket=bucket)
+        return
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code not in {"404", "NoSuchBucket", "NotFound"}:
+            raise RuntimeError(f"Could not access demo event bucket {bucket}") from exc
+        if not S3_AUTO_CREATE_BUCKETS:
+            raise RuntimeError(f"Demo event bucket does not exist: {bucket}") from exc
+    except BotoCoreError as exc:
+        raise RuntimeError(f"Could not access demo event bucket {bucket}") from exc
+
+    create_kwargs: dict[str, Any] = {"Bucket": bucket}
+    if S3_REGION != "us-east-1":
+        create_kwargs["CreateBucketConfiguration"] = {"LocationConstraint": S3_REGION}
+    try:
+        client.create_bucket(**create_kwargs)
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code not in {"BucketAlreadyExists", "BucketAlreadyOwnedByYou"}:
+            raise RuntimeError(f"Could not create demo event bucket {bucket}") from exc
+
+
+def _clear_demo_event_objects(client: Any, bucket: str) -> None:
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    try:
+        paginator = client.get_paginator("list_objects_v2")
+        keys = [
+            str(item["Key"])
+            for page in paginator.paginate(Bucket=bucket, Prefix="events/")
+            for item in page.get("Contents", [])
+            if str(item.get("Key", "")).startswith("events/")
+            and "-demo-behavioral-" in str(item.get("Key", ""))
+        ]
+        for start in range(0, len(keys), 1000):
+            client.delete_objects(
+                Bucket=bucket,
+                Delete={
+                    "Objects": [{"Key": key} for key in keys[start : start + 1000]],
+                    "Quiet": True,
+                },
+            )
+    except (BotoCoreError, ClientError) as exc:
+        raise RuntimeError(f"Could not clear prior demo event objects from {bucket}") from exc
+
+
+def _event_source_slug(source_system: str | None) -> str:
+    normalized = (source_system or "Adjust").strip().lower()
+    return BEHAVIORAL_SOURCE_SLUGS.get(normalized, "adjust-mobile-attribution")
+
+
+def _event_output_source(source_system: str | None) -> str:
+    return {
+        "adjust": "Adjust",
+        "onesignal": "OneSignal",
+        "webtracking": "GoogleAnalytics",
+    }.get((source_system or "Adjust").strip().lower(), source_system or "Adjust")
+
+
+def _build_behavioral_event(
+    profile: dict,
+    raw_profile: dict,
+    event_index: int,
+    event_time: datetime,
+) -> dict[str, Any]:
+    domain = canonical_demo_domain(profile.get("domain"))
+    templates = BEHAVIORAL_EVENT_TEMPLATES.get(domain, BEHAVIORAL_EVENT_TEMPLATES["retail"])
+    rng = stable_rng(f"behavioral-event:{DEMO_TENANT_ID}:{event_index}")
+    event_name, event_category, entity_type, is_conversion, channel = rng.choice(templates)
+    source_system = _event_output_source(raw_profile.get("source_system"))
+    event_id = str(uuid.uuid5(DEMO_NAMESPACE, f"behavioral-event:{DEMO_TENANT_ID}:{event_index}"))
+    session_id = f"demo-session-{event_index // 5:06d}"
+    entity_id = f"demo-{entity_type}-{rng.randint(1, 5000):05d}"
+    event_value = round(rng.uniform(150_000, 3_000_000), 2) if is_conversion else None
+    payload = {
+        "event_id": event_id,
+        "event_time": event_time.isoformat(),
+        "tenant_id": DEMO_TENANT_ID,
+        "domain": domain,
+        "master_profile_id": str(profile["master_profile_id"]),
+        "raw_profile_id": str(raw_profile["raw_profile_id"]),
+        "external_customer_id": raw_profile.get("external_customer_id"),
+        "device_id": raw_profile.get("device_id"),
+        "session_id": session_id,
+        "source_system": source_system,
+        "channel": channel or raw_profile.get("channel"),
+        "platform": raw_profile.get("platform"),
+        "event_category": event_category,
+        "event_name": event_name,
+        "is_conversion": is_conversion,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "event_value": event_value,
+        "currency": "VND",
+        "transaction_id": event_id if is_conversion else None,
+        "transaction_status": "completed" if is_conversion else None,
+        "location_name": rng.choice(("Ho Chi Minh City", "Hanoi", "Da Nang")),
+    }
+    return {
+        "schema_version": 1,
+        "ingestion_version": "demo-1.0",
+        "event_id": event_id,
+        "data_source_id": str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{_event_source_slug(raw_profile.get('source_system'))}")),
+        "tenant_id": DEMO_TENANT_ID,
+        "event_time": event_time.isoformat(),
+        "received_at": (event_time + timedelta(seconds=rng.randint(1, 90))).isoformat(),
+        "source_system": source_system,
+        "domain": domain,
+        "event_name": event_name,
+        "event_category": event_category,
+        "event_dedup_key": f"demo:{event_id}",
+        "identity": {
+            "user_id": str(raw_profile["raw_profile_id"]),
+            "session_id": session_id,
+            "device_id": raw_profile.get("device_id"),
+            "external_customer_id": raw_profile.get("external_customer_id"),
+        },
+        "master_profile_id": str(profile["master_profile_id"]),
+        "raw_profile_id": str(raw_profile["raw_profile_id"]),
+        "payload": payload,
+    }
+
+
+def seed_behavioral_events(
+    event_profiles: list,
+    *,
+    event_count: int = BEHAVIORAL_EVENT_COUNT,
+    s3_client: Any | None = None,
+) -> int:
+    """Generate and store tenant-scoped canonical event envelopes in S3."""
+    if not event_profiles:
+        raise RuntimeError("No raw/master profile links found for behavioral events")
+    if event_count < 1 or BEHAVIORAL_EVENT_LOOKBACK_DAYS < 1:
+        raise ValueError("Behavioral event count and lookback days must be positive")
+
+    profiles_by_master: dict[str, list[dict]] = defaultdict(list)
+    for row in event_profiles:
+        profiles_by_master[str(row["master_profile_id"])].append(row)
+    masters = sorted(profiles_by_master)
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=BEHAVIORAL_EVENT_LOOKBACK_DAYS)
+    rng = stable_rng(f"behavioral-events:{DEMO_TENANT_ID}:{event_count}:{BEHAVIORAL_EVENT_LOOKBACK_DAYS}")
+    span_seconds = max(1, int((now - start).total_seconds()))
+    batches: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+
+    for event_index in range(event_count):
+        master_id = masters[event_index % len(masters)]
+        linked_profiles = profiles_by_master[master_id]
+        raw_profile = linked_profiles[event_index % len(linked_profiles)]
+        event_time = start + timedelta(seconds=rng.randint(0, span_seconds))
+        envelope = _build_behavioral_event(
+            {"master_profile_id": master_id, "domain": raw_profile.get("domain")},
+            raw_profile,
+            event_index,
+            event_time,
+        )
+        source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{_event_source_slug(raw_profile.get('source_system'))}"))
+        batches[(source_id, event_time.date().isoformat())].append(envelope)
+
+    client = s3_client or _build_demo_s3_client()
+    source_ids = sorted(
+        {
+            str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
+            for source_slug in BEHAVIORAL_SOURCE_SLUGS.values()
+        }
+    )
+    for source_id in source_ids:
+        bucket = f"data-tracking-{source_id}"
+        _ensure_demo_s3_bucket(client, bucket)
+        _clear_demo_event_objects(client, bucket)
+
+    written_objects = 0
+    for (source_id, event_date), envelopes in sorted(batches.items()):
+        bucket = f"data-tracking-{source_id}"
+        object_key = f"events/{event_date}-demo-behavioral-{source_id}.jsonl.gz"
+        body = gzip.compress(
+            ("\n".join(
+                json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
+                for envelope in envelopes
+            ) + "\n").encode("utf-8"),
+            mtime=0,
+        )
+        _ensure_demo_s3_bucket(client, bucket)
+        checksum = hashlib.sha256(body).hexdigest()
+        client.put_object(
+            Bucket=bucket,
+            Key=object_key,
+            Body=body,
+            ContentType="application/x-ndjson",
+            ContentEncoding="gzip",
+            Metadata={
+                "data-source-id": source_id,
+                "event-count": str(len(envelopes)),
+                "schema-version": "1",
+                "ingestion-version": "demo-1.0",
+                "sha256": checksum,
+            },
+        )
+        object_id = uuid.uuid5(uuid.NAMESPACE_URL, f"s3://{bucket}/{object_key}")
+        client.put_object(
+            Bucket=bucket,
+            Key=f"_processed/{object_id}.json",
+            Body=json.dumps(
+                {
+                    "object_id": str(object_id),
+                    "bucket": bucket,
+                    "object_key": object_key,
+                    "data_source_id": source_id,
+                    "event_count": len(envelopes),
+                    "content_sha256": checksum,
+                    "status": "stored",
+                },
+                separators=(",", ":"),
+            ).encode("utf-8"),
+            ContentType="application/json",
+        )
+        written_objects += 1
+
+    logger.info(
+        "Seeded %d behavioral events across %d S3 object(s), %d master profile(s), and %d source bucket(s) (%d-day lookback).",
+        event_count,
+        written_objects,
+        len(masters),
+        len({source_id for source_id, _ in batches}),
+        BEHAVIORAL_EVENT_LOOKBACK_DAYS,
+    )
+    return event_count
+
+
 def main() -> None:
     conn = psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT)
     try:
@@ -2037,6 +2368,7 @@ def main() -> None:
             seed_data_sources(cursor)
             seed_scoring_models(cursor)
             reset_tenant_scoped_demo_tables(cursor)
+            event_profiles = fetch_event_profiles(cursor)
             seed_campaign_performance_daily(cursor, crm_ids["campaign"])
             seed_relations(cursor, detail_profiles)
             seed_customer_contacts(cursor, detail_profiles)
@@ -2049,6 +2381,7 @@ def main() -> None:
             seed_content_items(cursor, master_profiles)
             link_crm_contacts_to_master_profiles(cursor, crm_ids, master_profiles)
 
+        seed_behavioral_events(event_profiles)
         conn.commit()
         logger.info(
             "Full demo data seeded: %d master profiles enriched, %d ICP persona archetypes seeded "

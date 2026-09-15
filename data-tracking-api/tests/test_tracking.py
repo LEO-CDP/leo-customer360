@@ -110,6 +110,11 @@ def test_build_tracking_object_uses_utc_hour_folder_and_ndjson():
     assert record["payload"] == event
     assert record["schema_version"] == 1
     assert record["event_id"]
+    assert record["event_name"] == "page_view"
+    assert record["event_category"] == "GENERAL"
+    assert record["domain"] == "unknown"
+    assert record["source_system"] == "tracking"
+    assert record["event_time"] == received_at.isoformat()
 
 
 def test_metrics_exposes_queue_depth_age_and_configured_limits():

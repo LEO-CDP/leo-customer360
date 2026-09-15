@@ -195,6 +195,60 @@ def test_count_jsonl_records_supports_gzip_bronze_objects():
     assert aggregation.count_jsonl_records(body, "hour/events.jsonl.gz") == 2
 
 
+def test_normalize_event_record_matches_cdp_raw_events_contract():
+    normalized = aggregation.normalize_event_record(
+        {
+            "schema_version": 1,
+            "event_id": "11111111-1111-1111-1111-111111111111",
+            "event_time": "2026-09-15T14:22:11.123Z",
+            "event_category": "commerce",
+            "event_name": "purchase",
+            "identity": {"device_id": "device-1"},
+            "payload": {
+                "domain": "retail",
+                "source_system": "POS",
+                "event_value": 12.5,
+                "currency": "USD",
+                "items": [{"sku": "sku-1"}],
+            },
+        },
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+    )
+
+    assert normalized["tenant_id"] == "33333333-3333-3333-3333-333333333333"
+    assert normalized["source_system"] == "POS"
+    assert normalized["event_category"] == "COMMERCE"
+    assert normalized["event_name"] == "purchase"
+    assert normalized["device_id"] == "device-1"
+    assert normalized["payload"]["items"] == [{"sku": "sku-1"}]
+
+
+def test_upsert_raw_profile_uses_deterministic_identity_key():
+    cursor = FakeCursor([[]])
+    event = aggregation.normalize_event_record(
+        {
+            "event_id": "11111111-1111-1111-1111-111111111111",
+            "event_time": "2026-09-15T14:22:11Z",
+            "payload": {
+                "domain": "retail",
+                "source_system": "web",
+                "email": "customer@example.test",
+            },
+        },
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+    )
+
+    first_id = aggregation.upsert_raw_profile(cursor, event)
+    second_id = aggregation.upsert_raw_profile(cursor, event)
+
+    assert first_id == second_id == event["raw_profile_id"]
+    assert len(cursor.execute_calls) == 2
+    assert "cdp_raw_profiles_stage" in cursor.execute_calls[0][0]
+    assert "ON CONFLICT (raw_profile_id)" in cursor.execute_calls[0][0]
+
+
 def test_canonical_tracking_envelope_is_read_from_gzip_s3_object():
     records = (
         b'{"schema_version":1,"event_id":"event-1",'
@@ -287,7 +341,7 @@ def test_process_tracking_logs_counts_new_objects_and_skips_checkpointed_objects
         "events_added": 2,
         "sources_total": 1,
     }
-    assert len(s3.get_calls) == 1
+    assert len(s3.get_calls) == 2
     increment_call = next(call for call in redis_client.eval_calls if "HINCRBY" in call[0])
     assert increment_call[3] == "s3://data-tracking-source-1/events/2026-08-25-08/first.jsonl.gz"
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{2}", str(increment_call[4]))
@@ -303,12 +357,13 @@ def test_process_tracking_logs_counts_new_objects_and_skips_checkpointed_objects
     assert s3.paginate_calls == [
         {
             "Bucket": "data-tracking-source-1",
-            "Prefix": "events/2026-08-25-08/",
+            "Prefix": "events/",
+            "StartAfter": "events/2026-08-24-23/old.jsonl.gz",
         },
     ]
     assert redis_client.states["analytics:data-source-state:source-1"][
         "last_processed_hour"
-    ] == "2026-08-25-08"
+    ] == "2026-08-25-09"
     assert redis_client.states["analytics:data-source-state:source-1"][
         "status"
     ] == "completed"

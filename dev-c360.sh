@@ -588,7 +588,6 @@ seed_demo_if_empty() {
     "SELECT
        CASE WHEN
          (SELECT COUNT(*) FROM ${db_schema}.cdp_master_profiles) = 0
-         AND (SELECT COUNT(*) FROM ${db_schema}.cdp_raw_events) = 0
          AND (SELECT COUNT(*) FROM ${db_schema}.cdp_content_items) = 0
        THEN 'empty' ELSE 'not_empty' END" 2>/dev/null || true)"
 

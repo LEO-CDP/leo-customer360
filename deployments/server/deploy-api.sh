@@ -123,13 +123,29 @@ echo ">> Installing Docker (if needed), building, and (re)starting the container
 PW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
 REDIS_PW_B64="$(printf %s "${REDIS_PASS:-}" | base64 | tr -d '\n')"
 KC_SECRET_B64="$(printf %s "$KC_SECRET" | base64 | tr -d '\n')"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$OTEL_B64" < <(declare -f docker_pull_retry; cat <<'REMOTE'
+EVENT_QUERY_MAX_DAYS="${EVENT_QUERY_MAX_DAYS:-90}"
+EVENT_S3_BUCKET="${EVENT_S3_BUCKET:-}"
+EVENT_RAW_PREFIX="${EVENT_RAW_PREFIX:-events}"
+EVENT_S3_ENDPOINT_URL="${ANALYTICS_S3_ENDPOINT_URL:-${S3_ENDPOINT_URL:-}}"
+EVENT_S3_REGION="${S3_REGION:-us-east-1}"
+EVENT_S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-}"
+EVENT_S3_SECRET_B64="$(printf %s "${S3_SECRET_ACCESS_KEY:-}" | base64 | tr -d '\n')"
+EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-false}"
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" < <(declare -f docker_pull_retry; cat <<'REMOTE'
 set -euo pipefail
 DB_HOST="$1"; DB_PORT="$2"; DB_NAME="$3"; DB_USER="$4"; DB_PW="$(printf %s "$5" | base64 -d)"; DAG_HOST="$6"
 REDIS_HOST="$7"; REDIS_PORT="$8"; REDIS_PW="$(printf %s "${9:-}" | base64 -d 2>/dev/null || true)"
 SSO_LOGIN="${10:-false}"; SSO_URL="${11:-}"; KC_REALM="${12:-}"; KC_CLIENT="${13:-}"; KC_SECRET="$(printf %s "${14:-}" | base64 -d 2>/dev/null || true)"
 DEPLOY_MODE="${15:-build}"; IMAGE="${16:-}"; GHCR_USER="${17:-token}"; GHCR_TOKEN="$(printf %s "${18:-}" | base64 -d 2>/dev/null || true)"
 OTEL_B64="${19:-}"
+EVENT_QUERY_MAX_DAYS="${20:-90}"
+EVENT_S3_BUCKET="${21:-}"
+EVENT_RAW_PREFIX="${22:-events}"
+EVENT_S3_ENDPOINT_URL="${23:-}"
+EVENT_S3_REGION="${24:-us-east-1}"
+EVENT_S3_ACCESS_KEY_ID="${25:-}"
+EVENT_S3_SECRET_ACCESS_KEY="$(printf %s "${26:-}" | base64 -d 2>/dev/null || true)"
+EVENT_S3_FORCE_PATH_STYLE="${27:-false}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -165,6 +181,14 @@ DB_PASSWORD=$DB_PW
 DB_SCHEMA=$DB_NAME
 DAGSTER_GRAPHQL_HOST=$DAG_HOST
 DAGSTER_GRAPHQL_PORT=3000
+EVENT_QUERY_MAX_DAYS=$EVENT_QUERY_MAX_DAYS
+EVENT_S3_BUCKET=$EVENT_S3_BUCKET
+EVENT_RAW_PREFIX=$EVENT_RAW_PREFIX
+ANALYTICS_S3_ENDPOINT_URL=$EVENT_S3_ENDPOINT_URL
+S3_REGION=$EVENT_S3_REGION
+S3_ACCESS_KEY_ID=$EVENT_S3_ACCESS_KEY_ID
+S3_SECRET_ACCESS_KEY=$EVENT_S3_SECRET_ACCESS_KEY
+S3_FORCE_PATH_STYLE=$EVENT_S3_FORCE_PATH_STYLE
 ENVF
 if [[ -n "$REDIS_HOST" && -n "$REDIS_PW" ]]; then
   cat >> "$env_file" <<ENVR

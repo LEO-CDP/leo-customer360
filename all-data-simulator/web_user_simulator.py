@@ -10,6 +10,7 @@ mode so the data source can still be exercised in local environments.
 from __future__ import annotations
 
 import argparse
+import gzip
 import importlib
 import json
 import logging
@@ -18,9 +19,10 @@ import os
 import random
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -502,6 +504,40 @@ class AnalyticsApiClient:
 			)
 		return summary
 
+	def query_events(
+		self,
+		*,
+		event_time_from: datetime,
+		days: int = 90,
+		limit: int = 1000,
+	) -> list[dict[str, Any]]:
+		"""Read canonical event rows through the customer360 S3 query endpoint."""
+		self._login()
+		query = urllib.parse.urlencode(
+			{
+				"event_time_from": event_time_from.astimezone(timezone.utc).isoformat(),
+				"days": days,
+				"limit": limit,
+			}
+		)
+		headers = {
+			"Accept": "application/json",
+			"User-Agent": "leo-web-user-simulator/1.0",
+		}
+		if self.token:
+			headers["Authorization"] = f"Bearer {self.token}"
+		request = urllib.request.Request(
+			f"{self.base_url}/events/?{query}", headers=headers, method="GET"
+		)
+		try:
+			with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+				payload = json.loads(response.read().decode("utf-8"))
+		except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError) as exc:
+			raise AnalyticsApiError("Customer 360 event query failed") from exc
+		if not isinstance(payload, list):
+			raise AnalyticsApiError("Customer 360 event query returned a non-list response")
+		return payload
+
 
 def trigger_analytics_and_verify(
 	config: AgentConfig,
@@ -523,6 +559,13 @@ def trigger_analytics_and_verify(
 		config.analytics_timeout_seconds,
 	)
 	summary = client.verify_data_source_summary(config.data_source_id)
+	queried_events = client.query_events(
+		event_time_from=datetime.now(timezone.utc) - timedelta(days=90),
+		days=90,
+		limit=1000,
+	)
+	if not queried_events:
+		raise AnalyticsApiError("Customer 360 S3 event query returned no events")
 	LOGGER.info(
 		"Verified data source %s: total_tracked_event=%s avg_daily_event=%s "
 		"avg_events_per_profile=%s",
@@ -576,6 +619,8 @@ class MinioTrackingVerifier:
 			) from exc
 
 		records: list[dict[str, Any]] = []
+		if object_key.endswith(".gz"):
+			body = gzip.decompress(body)
 		for line_number, line in enumerate(body.decode("utf-8").splitlines(), start=1):
 			if not line.strip():
 				continue
@@ -622,7 +667,17 @@ class MinioTrackingVerifier:
 				expected_stored_event.setdefault("session_id", session_id)
 			if user_id:
 				expected_stored_event.setdefault("user_id", user_id)
-			if record.get("event") != expected_stored_event:
+			if record.get("schema_version") != 1:
+				raise TrackingVerificationError(
+					f"Record {index} has an unsupported schema_version in "
+					f"s3://{bucket}/{object_key}"
+				)
+			if not record.get("event_id") or not record.get("event_time"):
+				raise TrackingVerificationError(
+					f"Record {index} is missing event_id/event_time in "
+					f"s3://{bucket}/{object_key}"
+				)
+			if record.get("payload") != expected_stored_event:
 				raise TrackingVerificationError(
 					f"Record {index} does not match the event sent to "
 					f"s3://{bucket}/{object_key}"
@@ -994,7 +1049,7 @@ def run_simulation(config: AgentConfig, user_count: int, *, seed: int | None = N
 							"bucket": response["bucket"],
 							"object_key": response["object_key"],
 							"verified_event_count": len(stored_records),
-							"stored_events": [record["event"] for record in stored_records],
+							"stored_events": [record["payload"] for record in stored_records],
 						},
 						ensure_ascii=False,
 						indent=2,

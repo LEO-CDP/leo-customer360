@@ -415,3 +415,25 @@ Only then:
 - [ ] Run the full S3 tracking/analytics E2E test.
 
 **Principle:** S3 is the immutable event lake; PostgreSQL is the identity and operational database; aggregates and serving projections stay small, rebuildable, and intentional.
+
+## Current Five-Folder Event Flow
+
+The repository implementation now follows this contract:
+
+1. `data-tracking-api` validates external batches and writes canonical gzip
+  JSONL RAW objects plus `_processed/` state markers to S3/MinIO. It never
+  connects to PostgreSQL.
+2. `backend-system/analytics` scans all `events/` objects with resumable Redis
+  cursors, normalizes governed fields to the `cdp_raw_events` contract,
+  upserts `cdp_raw_profiles_stage`, and updates source statistics.
+3. `customer360-api` serves read-only `/api/v1/events/` compatibility queries
+  from S3/MinIO with Polars, using PostgreSQL only to resolve the caller's
+  active tenant-owned data sources.
+4. `backend-system/identity_resolution/scripts/init_sample_data.py` seeds raw
+  profile staging and identity-resolution inputs, not behavioral events.
+5. `all-data-simulator/test_web_user_simulator.py` verifies the gzip canonical
+  envelope in MinIO, analytics statistics, and the customer API S3 query.
+
+The relational `cdp_raw_events` table remains only as legacy read/archive/drop-
+gate history until Silver compaction, backfill, reconciliation, query parity,
+and rollback requirements in Phases 3 through 6 are complete.

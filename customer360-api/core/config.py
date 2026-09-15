@@ -34,6 +34,51 @@ class Settings(BaseSettings):
     api_default_page_size: int = 100
     api_max_page_size: int = 1000
 
+    event_query_max_days: int = Field(
+        default=90,
+        validation_alias=AliasChoices("EVENT_QUERY_MAX_DAYS", "event_query_max_days"),
+    )
+    event_s3_bucket: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("EVENT_S3_BUCKET", "event_s3_bucket"),
+    )
+    event_s3_prefix: str = Field(
+        default="events",
+        validation_alias=AliasChoices("EVENT_RAW_PREFIX", "event_s3_prefix"),
+    )
+    event_s3_endpoint_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "ANALYTICS_S3_ENDPOINT_URL", "S3_ENDPOINT_URL", "event_s3_endpoint_url"
+        ),
+    )
+    event_s3_region: str = Field(
+        default="us-east-1",
+        validation_alias=AliasChoices("S3_REGION", "event_s3_region"),
+    )
+    event_s3_access_key_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("S3_ACCESS_KEY_ID", "event_s3_access_key_id"),
+    )
+    event_s3_secret_access_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "S3_SECRET_ACCESS_KEY", "event_s3_secret_access_key"
+        ),
+    )
+    event_s3_session_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("S3_SESSION_TOKEN", "event_s3_session_token"),
+    )
+    event_s3_force_path_style: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("S3_FORCE_PATH_STYLE", "event_s3_force_path_style"),
+    )
+    event_s3_verify_ssl: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("S3_VERIFY_SSL", "event_s3_verify_ssl"),
+    )
+
     # Segment -> CRM sync engine: profiles are resolved
     # and upserted into crm_* tables in batches this size so a large segment
     # never loads its whole membership into memory at once.
