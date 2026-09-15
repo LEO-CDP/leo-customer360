@@ -47,7 +47,7 @@ flowchart LR
   end
   subgraph Feedback["Track & feed back"]
     S8 --> S9[Open / click / unsubscribe / webhook]
-    S9 --> S10[cdp_raw_events + suppression]
+    S9 --> S10[S3/MinIO event lake + suppression]
     S10 --> S11[Customer 360 + campaign metrics]
   end
   S11 -. re-segment .-> S1
@@ -171,7 +171,7 @@ sequenceDiagram
   AD-->>User: email delivered
   User->>TK: GET /track/email/open?u=token
   TK->>CR: record_engagement_event(...)
-  CR->>PG: advisory_xact_lock · dedup · INSERT cdp_raw_events
+  CR->>TK: Redis handoff -> immutable S3/MinIO event object
   User->>TK: GET /track/email/click?u&url&k
   TK->>TK: verify_click_url(url,k) — else 302 to /
   TK->>CR: record_engagement_event(...)
@@ -343,22 +343,21 @@ passes `run_id`) → `email_engine/send.py:255` `send_campaign`:
 `SUPPRESSION_EVENTS` (55). Webhook is **fail-closed**: `503` if `CRM_EMAIL_WEBHOOK_SIGNING_SECRET`
 unset, `401` on bad signature.
 
-**Write side** — `core/crud/email_tracking.py` (opens its **own** RLS session from the token, not `get_db`):
-- `record_engagement_event` (88): `pg_advisory_xact_lock(2, hashtext(dedup_key))` → existence check →
-  insert into `cdp_raw_events` (`source_system='EmailEngine'`, `channel='email'`). Returns
-  `inserted | duplicate | skipped_no_raw_profile`. (App-level dedup because `cdp_raw_events` is
-  partitioned by `event_time`.)
+**Write side** — email tracking normalizes engagement events through the
+`data-tracking-api` Redis/S3 contract. The public tracking service does not
+open a PostgreSQL connection or insert behavioral-event rows. Deduplication is
+represented by the canonical event ID/dedup key and immutable S3 state.
 - `resolve_recipient_email` (62): reads the address from `cdp_campaign_dispatch_logs` (falls back to
   profile email) — suppression is keyed on the **real mailed address**, never the untrusted payload.
 - `add_suppression` (141): `INSERT … cdp_email_suppression … ON CONFLICT (tenant_id, lower(email)) DO NOTHING`.
 
-> The separate `data-tracking-api/` service (`POST /tracking/logs`) is **generic web-behaviour**
-> ingestion (Redis Streams → S3/MinIO) and is *not* part of this email path.
+> The `data-tracking-api/` service owns both generic web behaviour and normalized
+> email engagement ingestion (Redis Streams → S3/MinIO).
 
 ### Stage 8 — Feedback into Customer 360 — 🟡 (SCRUM-99, capture only)
 
-**Landed:** email events are captured into `cdp_raw_events` and compliance suppression into
-`cdp_email_suppression` (Stage 7). A change-gated segmentation sensor exists
+**Landed:** email events are captured in the S3/MinIO event lake and compliance
+suppression remains in `cdp_email_suppression` (Stage 7). A change-gated segmentation sensor exists
 (`backend-system/segmentation/dagster_defs.py:136` `segmentation_poll_sensor`, watches
 `cdp_master_profiles` via `count_recently_changed_master_profiles`). Campaign performance is exposed
 read-only through `vw_campaign_performance_metrics` + `CampaignRepository`
@@ -366,7 +365,7 @@ read-only through `vw_campaign_performance_metrics` + `CampaignRepository`
 
 **Not built (the three headline SCRUM-99 behaviours):**
 1. Writing email touchpoints/engagement back to `cdp_master_profiles` — nothing propagates
-   `cdp_raw_events` → profile fields. The `scoring` Dagster location that would bridge this is still a
+  S3 Silver event projections → profile fields. The `scoring` Dagster location that would bridge this is still a
    sleep placeholder (`backend-system/scoring/dagster_defs.py`).
 2. Email-event-driven segment refresh — the sensor watches profiles, and email events don't touch
    profiles, so opens/clicks don't trip it.

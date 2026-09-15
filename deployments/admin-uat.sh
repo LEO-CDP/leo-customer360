@@ -90,7 +90,7 @@ SELECT relname AS table, n_live_tup AS est_rows
 FROM pg_stat_user_tables
 WHERE schemaname='customer360'
   AND relname IN ('cdp_master_profiles','cdp_content_items','cdp_persona_features',
-                  'cdp_raw_events_default','crm_campaign_performance_daily')
+                  'crm_campaign_performance_daily')
 ORDER BY relname;
 \echo -- schema totals --
 SELECT count(*) AS tables, COALESCE(sum(n_live_tup),0) AS est_total_rows

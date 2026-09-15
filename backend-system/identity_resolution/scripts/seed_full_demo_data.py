@@ -19,15 +19,10 @@ real ``master_profile_id`` values. It covers:
    including a couple of NOT-YET-identity-resolved rows with
    ``master_profile_id = NULL``, the same async-backfill pattern used by
    ``cdp_raw_events``).
-4. ``cdp_raw_events``: sample behavioral events spanning every
-   ``event_category`` seeded in ``cdp_event_catalog`` (GENERAL/FEEDBACK/
-    COMMERCE/EDUCATION/TRAVEL/REAL_ESTATE), including a few
-   travel/real_estate events with NO master profile yet (domains not
-   otherwise represented among the Adjust-only CIR demo profiles).
-5. ``graph_edges``: a handful of edges spanning several relation partitions
+4. ``graph_edges``: a handful of edges spanning several relation partitions
    (``belongs_to``, ``converted``, ``has``, ``belongs_to_industry``,
    ``is_connected_to``, ``is_from``).
-6. ``cdp_master_profiles`` enrichment: fills in every column NOT already set
+5. ``cdp_master_profiles`` enrichment: fills in every column NOT already set
    by ``CustomerIdentityResolver`` -- lifecycle/engagement tracking
    (customer_since/last_activity_at/preferred_channel/lifecycle_stage/
     persona_summary), the full ML scoring block (lead/churn/CLV/CX/data
@@ -37,7 +32,7 @@ real ``master_profile_id`` values. It covers:
    profiles, acquisition_source/acquisition_campaign (joined back from the
    raw profile that first created the master, via first_seen_raw_profile_id),
    segmentation_tags/attributes/gender/address/profile_picture_url.
-7a. ``cdp_persona_archetypes``: two curated "Ideal Customer Profile" (ICP)
+6a. ``cdp_persona_archetypes``: two curated "Ideal Customer Profile" (ICP)
    archetypes per ``sys_domain`` (a premium/champion target and an emerging/
    growth target), each tied to a concrete product and campaign time window,
    with a declared centroid component-score vector + ``persona_embedding``.
@@ -46,7 +41,7 @@ real ``master_profile_id`` values. It covers:
    (cosine similarity against the centroids) to the best-fit archetype in
    its domain, persisted as a versioned ``cdp_customer_personas`` row --
    see ``seed_persona_archetypes()`` / ``seed_customer_personas()``.
-7. **crm_contact <-> cdp_master_profiles linkage**: these two tables have NO
+6. **crm_contact <-> cdp_master_profiles linkage**: these two tables have NO
    shared key in database-schema.sql (crm_contact has no tenant_id/
    master_profile_id column, and cdp_master_profiles has nothing pointing
    back to crm_contact) -- they represent separate B2B-CRM vs B2C-identity-
@@ -87,8 +82,7 @@ Idempotent / safe to re-run:
   ``ON CONFLICT (pk) DO UPDATE``.
 - ``cdp_relation_types`` is upserted via ``ON CONFLICT (code) DO NOTHING``.
 - Every tenant-scoped table seeded here (cdp_relations, crm_customer_contacts,
-  crm_transactions, cdp_raw_events) is reset (``DELETE ... WHERE tenant_id =
-  DEMO_TENANT_ID``) before reinserting.
+  crm_transactions) is reset before reinserting.
 - ``graph_edges`` has no tenant_id either -- demo rows are tagged
   ``metadata->>'demo_tenant' = DEMO_TENANT_ID`` and reset via that filter.
 - ``cdp_master_profiles`` enrichment is a plain UPDATE keyed by
@@ -147,12 +141,11 @@ DEMO_TENANT_ID = "11111111-1111-1111-1111-111111111111"
 DEMO_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
 
 # How many resolved master profiles get the heavier per-row demo content
-# (customer contacts / transactions / raw events / persona_embedding). All
+# (customer contacts / transactions / persona_embedding). All
 # master profiles still get the lightweight lifecycle+scoring enrichment.
 DETAIL_PROFILE_LIMIT = 60
 PERSONA_EMBEDDING_DIM = 768
 # Demo invariant: every resolved master profile must have >10 behavioral events.
-MIN_EVENTS_PER_MASTER_PROFILE = 11
 
 def canonical_demo_domain(domain: str | None) -> str:
     if not domain:
@@ -1037,11 +1030,10 @@ def seed_scoring_models(cursor) -> None:
 
 
 def reset_tenant_scoped_demo_tables(cursor) -> None:
-    logger.info("Resetting previous demo rows in tenant-scoped tables (relations/contacts/transactions/events/content)...")
+    logger.info("Resetting previous demo rows in tenant-scoped tables (relations/contacts/transactions/content)...")
     cursor.execute(f"DELETE FROM {_table('cdp_relations')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('crm_customer_contacts')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('crm_transactions')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
-    cursor.execute(f"DELETE FROM {_table('cdp_raw_events')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('cdp_content_items')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('crm_campaign_performance_daily')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('graph_edges')} WHERE metadata->>'demo_tenant' = %s;", (DEMO_TENANT_ID,))
@@ -1183,214 +1175,6 @@ def seed_transactions(cursor, master_profiles: list) -> None:
                 "purchase", "completed", "product", rng.randint(50_000, 500_000), "VND", "pos",
                 datetime.now() - timedelta(hours=rng.randint(1, 48)),
             ),
-        )
-
-
-RETAIL_EVENTS = [
-    ("GENERAL", "page-view", None, None, False),
-    ("GENERAL", "search", None, None, False),
-    ("COMMERCE", "add-to-cart", (100_000, 500_000), "product", False),
-    ("COMMERCE", "purchase", (200_000, 2_000_000), "product", True),
-    ("FEEDBACK", "submit-csat-form", None, None, False),
-]
-EDUCATION_EVENTS = [
-    ("GENERAL", "user-login", None, None, False),
-    ("EDUCATION", "course-started", None, "course", False),
-    ("EDUCATION", "lesson-completed", None, "lesson", False),
-    ("EDUCATION", "assignment-submitted", None, "assignment", False),
-    ("EDUCATION", "exam-booked", (300_000, 3_000_000), "certificate", True),
-    ("FEEDBACK", "submit-csat-form", None, None, False),
-]
-MEDIA_EVENTS = [
-    ("GENERAL", "user-login", None, None, False),
-    ("GENERAL", "content-view", None, None, False),
-    ("GENERAL", "search", None, None, False),
-    ("FEEDBACK", "submit-csat-form", None, None, False),
-]
-REAL_ESTATE_EVENTS = [
-    ("GENERAL", "view-property", None, "property", False),
-    ("GENERAL", "search", None, None, False),
-    ("REAL_ESTATE", "request-property-tour", None, "property", False),
-    ("FEEDBACK", "submit-csat-form", None, None, False),
-]
-TRAVEL_EVENTS = [
-    ("GENERAL", "search-flight", None, None, False),
-    ("TRAVEL", "booking", (1_000_000, 8_000_000), "booking", True),
-    ("GENERAL", "itinerary-view", None, "booking", False),
-    ("FEEDBACK", "submit-csat-form", None, None, False),
-]
-
-DOMAIN_EVENT_CATALOG = {
-    "retail": RETAIL_EVENTS,
-    "education": EDUCATION_EVENTS,
-    "media": MEDIA_EVENTS,
-    "real_estate": REAL_ESTATE_EVENTS,
-    "travel": TRAVEL_EVENTS,
-}
-
-DOMAIN_EVENT_SOURCE_SYSTEM = {
-    "retail": "Adjust",
-    "education": "GoogleAnalytics",
-    "media": "C360Tracker",
-    "real_estate": "C360Tracker",
-    "travel": "C360Tracker",
-}
-
-DOMAIN_EVENT_CHANNEL = {
-    "retail": "mobile_app",
-    "education": "web",
-    "media": "web",
-    "real_estate": "web",
-    "travel": "mobile_app",
-}
-
-# Anonymous (no resolved profile yet) events for domains not otherwise
-# represented in a given CIR demo dataset.
-UNRESOLVED_EVENTS = [
-    ("travel", "TRAVEL", "search-flight", None, None, False),
-    ("travel", "TRAVEL", "booking", (1_000_000, 8_000_000), "booking", True),
-    ("real_estate", "REAL_ESTATE", "view-property", None, "property", False),
-    ("real_estate", "REAL_ESTATE", "request-property-tour", None, "property", False),
-    ("media", "GENERAL", "content-view", None, "content", False),
-    ("education", "EDUCATION", "course-started", None, "course", False),
-]
-
-
-def seed_raw_profiles_for_anonymous_events(cursor) -> dict:
-    """Creates raw profiles for anonymous/unresolved events.
-
-    Returns a dict mapping (domain, device_id) to raw_profile_id so events can reference them.
-    """
-    logger.info("Seeding raw profiles for anonymous events (travel/real_estate/media/education)...")
-    raw_profile_map = {}
-    rng = stable_rng("anonymous_raw_profiles")
-
-    # Create raw profiles per unique unresolved-event domain.
-    unresolved_domains = sorted({domain for domain, *_rest in UNRESOLVED_EVENTS})
-    for domain in unresolved_domains:
-        # Create a few raw profiles per domain for variety
-        for i in range(3):
-            device_id = f"demo-anon-device-{domain}-{i}-{rng.randint(1000, 9999)}"
-            raw_profile_id = str(uuid.uuid4())
-
-            cursor.execute(
-                f"""
-                INSERT INTO {_table('cdp_raw_profiles_stage')}
-                    (raw_profile_id, tenant_id, domain, source_system, channel, device_id,
-                     event_name, status_code)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
-                """,
-                (
-                    raw_profile_id, DEMO_TENANT_ID, domain, "C360Tracker", "web",
-                    device_id, "page-view", 1,
-                ),
-            )
-            raw_profile_map[(domain, device_id)] = raw_profile_id
-
-    return raw_profile_map
-
-
-def seed_raw_events(cursor, master_profiles: list, raw_profile_map: dict | None = None) -> None:
-    logger.info(
-        "Seeding cdp_raw_events for all master profiles (minimum %d events/profile)...",
-        MIN_EVENTS_PER_MASTER_PROFILE,
-    )
-    for m in master_profiles:
-        rng = stable_rng(f"events:{m['master_profile_id']}")
-        domain = canonical_demo_domain(m["domain"])
-        catalog = DOMAIN_EVENT_CATALOG.get(domain, RETAIL_EVENTS)
-        source_system = DOMAIN_EVENT_SOURCE_SYSTEM.get(domain, "C360Tracker")
-        event_channel = DOMAIN_EVENT_CHANNEL.get(domain, "web")
-        for category, event_name, value_range, entity_type, is_conversion in catalog:
-            cursor.execute(
-                f"""
-                INSERT INTO {_table('cdp_raw_events')}
-                    (tenant_id, domain, master_profile_id, raw_profile_id, source_system, channel, event_category,
-                     event_name, is_conversion, entity_type, event_value, currency, event_time)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-                """,
-                (
-                    DEMO_TENANT_ID, domain, m["master_profile_id"], m["first_seen_raw_profile_id"],
-                    source_system,
-                    event_channel, category, event_name, is_conversion, entity_type,
-                    rng.randint(*value_range) if value_range else None, "VND",
-                    datetime.now() - timedelta(days=realistic_event_days_ago(rng), hours=rng.randint(0, 23)),
-                ),
-            )
-
-        # Add deterministic extra events so every master profile has >10 rows.
-        extra_events_needed = max(0, MIN_EVENTS_PER_MASTER_PROFILE - len(catalog))
-        for _ in range(extra_events_needed):
-            category, event_name, value_range, entity_type, is_conversion = rng.choice(catalog)
-            cursor.execute(
-                f"""
-                INSERT INTO {_table('cdp_raw_events')}
-                    (tenant_id, domain, master_profile_id, raw_profile_id, source_system, channel, event_category,
-                     event_name, is_conversion, entity_type, event_value, currency, event_time)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-                """,
-                (
-                    DEMO_TENANT_ID, domain, m["master_profile_id"], m["first_seen_raw_profile_id"],
-                    source_system,
-                    event_channel, category, event_name, is_conversion, entity_type,
-                    rng.randint(*value_range) if value_range else None, "VND",
-                    datetime.now() - timedelta(days=realistic_event_days_ago(rng), hours=rng.randint(0, 23)),
-                ),
-            )
-
-    logger.info("Seeding anonymous cdp_raw_events for travel/real_estate/media/education domains (no resolved profile yet)...")
-    if raw_profile_map is None:
-        raw_profile_map = {}
-
-    rng = stable_rng("unresolved_events")
-    for domain, category, event_name, value_range, entity_type, is_conversion in UNRESOLVED_EVENTS:
-        # Use device_ids from our raw_profile_map to ensure FK constraint is satisfied
-        raw_profile_keys = [(d, dev_id) for (d, dev_id) in raw_profile_map.keys() if d == domain]
-        if raw_profile_keys:
-            domain_to_use, device_id = rng.choice(raw_profile_keys)
-            raw_profile_id = raw_profile_map[(domain_to_use, device_id)]
-        else:
-            # Fallback: should not happen if raw_profile_map was properly populated
-            continue
-
-        cursor.execute(
-            f"""
-            INSERT INTO {_table('cdp_raw_events')}
-                (tenant_id, domain, device_id, raw_profile_id, source_system, channel, event_category, event_name,
-                 is_conversion, entity_type, event_value, currency, event_time)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-            """,
-            (
-                DEMO_TENANT_ID, domain, device_id, raw_profile_id, "C360Tracker", "web",
-                category, event_name, is_conversion, entity_type,
-                rng.randint(*value_range) if value_range else None, "VND",
-                datetime.now() - timedelta(days=realistic_event_days_ago(rng, max_days=365)),
-            ),
-        )
-
-
-def validate_min_events_per_master_profile(cursor, min_events: int = MIN_EVENTS_PER_MASTER_PROFILE) -> None:
-    """Raises if any resolved demo master profile has fewer than ``min_events`` rows in cdp_raw_events."""
-    cursor.execute(
-        f"""
-        SELECT mp.master_profile_id, COUNT(e.event_id) AS event_count
-        FROM {_table('cdp_master_profiles')} mp
-        LEFT JOIN {_table('cdp_raw_events')} e
-          ON e.tenant_id = mp.tenant_id AND e.master_profile_id = mp.master_profile_id
-        WHERE mp.tenant_id = %s
-        GROUP BY mp.master_profile_id
-        HAVING COUNT(e.event_id) < %s
-        ORDER BY event_count ASC, mp.master_profile_id
-        LIMIT 10;
-        """,
-        (DEMO_TENANT_ID, min_events),
-    )
-    violations = cursor.fetchall()
-    if violations:
-        sample = ", ".join(f"{row['master_profile_id']}({row['event_count']})" for row in violations)
-        raise RuntimeError(
-            f"Demo invariant failed: each master profile must have >= {min_events} events in "
-            f"{_table('cdp_raw_events')}. Sample violations: {sample}"
         )
 
 
@@ -2257,9 +2041,6 @@ def main() -> None:
             seed_relations(cursor, detail_profiles)
             seed_customer_contacts(cursor, detail_profiles)
             seed_transactions(cursor, detail_profiles)
-            raw_profile_map = seed_raw_profiles_for_anonymous_events(cursor)
-            seed_raw_events(cursor, master_profiles, raw_profile_map)
-            validate_min_events_per_master_profile(cursor)
             seed_graph_edges(cursor, crm_ids, detail_profiles)
             enrich_master_profiles(cursor, master_profiles)
             master_profiles = fetch_master_profiles(cursor)
@@ -2271,13 +2052,13 @@ def main() -> None:
         conn.commit()
         logger.info(
             "Full demo data seeded: %d master profiles enriched, %d ICP persona archetypes seeded "
-            "across sys_domain, %d got detail rows (relations/contacts/transactions); all master "
-            "profiles got >= %d events; content items: %d/profile/type; %d customer personas "
+            "across sys_domain, %d got detail rows (relations/contacts/transactions); "
+            "content items: %d/profile/type; %d customer personas "
             "computed + lookalike-matched to an ICP archetype; CRM journey graph + "
             "graph_edges + cdp_relation_types seeded; crm_contact <-> cdp_master_profiles linked "
             "via graph_edges ('is_active_as') + cross-referenced attributes/metadata.",
             len(master_profiles), len(ICP_ARCHETYPES), len(detail_profiles),
-            MIN_EVENTS_PER_MASTER_PROFILE, CONTENT_ITEMS_PER_TYPE_PER_PROFILE, personas_computed,
+            CONTENT_ITEMS_PER_TYPE_PER_PROFILE, personas_computed,
         )
     except Exception:
         conn.rollback()

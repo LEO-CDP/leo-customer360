@@ -573,8 +573,6 @@ print_database_status() {
   docker exec -u postgres "$POSTGRES_CONTAINER" psql -U "${DB_USER:-postgres}" -d "$db_name" -P pager=off -c \
     "SELECT 'cdp_master_profiles' AS table_name, COUNT(*) AS row_count FROM ${db_schema}.cdp_master_profiles
      UNION ALL
-     SELECT 'cdp_raw_events', COUNT(*) FROM ${db_schema}.cdp_raw_events
-     UNION ALL
      SELECT 'cdp_content_items', COUNT(*) FROM ${db_schema}.cdp_content_items
      UNION ALL
      SELECT 'crm_transactions', COUNT(*) FROM ${db_schema}.crm_transactions;"

@@ -58,7 +58,7 @@ flowchart TB
 
     subgraph DATA["Data plane — PostgreSQL 16 (database-schema.sql)"]
         direction TB
-        RAW[(cdp_raw_profiles_stage\ncdp_raw_events)]
+        RAW[(cdp_raw_profiles_stage)]
         MASTER[(cdp_master_profiles\ncdp_profile_attributes)]
         CRM[(crm_* journey graph\nLead/Contact/Account/Opportunity)]
         GRAPH[(graph_edges / cdp_relations)]
@@ -82,9 +82,9 @@ flowchart TB
 
     AF --> RAW
     ME --> RAW
-    WT --> RAW
-    POS --> RAW
-    CB --> RAW
+    WT --> TRACK
+    POS --> TRACK
+    CB --> TRACK
 
     RAW -- "match / merge\n(metadata-driven rules)" --> CIR
     CIR --> MASTER

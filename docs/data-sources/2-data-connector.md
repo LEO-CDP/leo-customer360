@@ -19,17 +19,17 @@ flowchart LR
         REDIS["Redis Rate Limits & Cursors"]
     end
 
-    subgraph Staging["Database Staging"]
+    subgraph Staging["Profile Staging + Event Lake"]
         STAGE_PRF["cdp_raw_profiles_stage"]
-        STAGE_EVT["cdp_raw_events"]
+      STAGE_EVT["S3/MinIO RAW + Silver events"]
     end
 
     ORCH --> WORKER
     WORKER --> REDIS
     WORKER -->|"Pull batch with OAuth / Tokens"| External
     External -->|"JSON response records"| WORKER
-    WORKER -->|"Flatten & Upsert"| STAGE_PRF
-    WORKER -->|"Normalize Events"| STAGE_EVT
+    WORKER -->|"Flatten & Upsert profiles"| STAGE_PRF
+    WORKER -->|"Normalize & write events"| STAGE_EVT
 ```
 
 ---
@@ -82,7 +82,7 @@ Credentials, OAuth secrets, and target endpoints are stored encrypted in `sys_da
 ## 3. Ingestion & Transformation Pipeline
 
 1. **Cursor & Incremental Checkpoint**:
-   - Connector workers query the maximum `last_activity_at` or `stat_time_day` from `cdp_raw_events` for the specific `data_source_id`.
+  - Connector workers query their vendor-specific watermark and store it in Redis; event history is written to the S3/MinIO RAW lake.
    - Redis stores watermark checkpoints (`source_state:{data_source_id}`) preventing duplicate pulls.
 2. **Batch Pull with Backoff**:
    - Requests are throttled using token-bucket rate limiters in Redis to adhere to vendor API quotas.
@@ -90,7 +90,7 @@ Credentials, OAuth secrets, and target endpoints are stored encrypted in `sys_da
 3. **Normalization & Mapping**:
    - Vendor records are flattened and mapped to standard staging models:
      - Form responses $\rightarrow$ `cdp_raw_profiles_stage` (`field_email`, `field_phone`, `first_name`, `last_name`).
-     - Behavioral facts $\rightarrow$ `cdp_raw_events` (`event_name`, `event_time`, `event_data`).
+    - Behavioral facts $\rightarrow$ canonical S3/MinIO event envelopes (`event_name`, `event_time`, `payload`).
 
 ---
 

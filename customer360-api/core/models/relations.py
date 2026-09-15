@@ -84,8 +84,8 @@ class Transaction(Base):
 
     Mirrors ``crm_transactions``: a source-agnostic transaction landing table
     (POS, core banking, booking engines, ...). ``master_profile_id`` is
-    nullable/soft-referenced (no NOT NULL) -- same async-backfill pattern as
-    ``cdp_raw_events`` -- since a transaction can be ingested before Customer
+    nullable/soft-referenced (no NOT NULL) because a transaction can be
+    ingested before Customer
     Identity Resolution (CIR) has linked it to a resolved profile.
     """
 

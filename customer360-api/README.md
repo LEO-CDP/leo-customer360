@@ -285,10 +285,6 @@ To add a new tool:
 - /api/v1/transactions
 
 ### 9.10 Events
-- GET /api/v1/events/
-- GET /api/v1/events/{event_id}
-- POST /api/v1/events/
-- POST /api/v1/events/bulk
 
 ### 9.11 Content
 - GET /api/v1/content-items/
