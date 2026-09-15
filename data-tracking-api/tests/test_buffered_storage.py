@@ -68,7 +68,7 @@ def test_buffered_storage_flushes_after_interval():
         stored = buffered.store_tracking_logs(SOURCE_ID, [{"event": "page_view"}], received_at)
 
         assert stored.bucket == f"data-tracking-{SOURCE_ID}"
-        assert stored.object_key.startswith("2026-09-09-04/")
+        assert stored.object_key.startswith("events/2026-09-09-04/")
         assert len(fake_storage.calls) == 0
 
         assert _wait_until(lambda: len(fake_storage.calls) == 1)

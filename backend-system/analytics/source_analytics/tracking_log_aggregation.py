@@ -1,10 +1,12 @@
 """Aggregate data-tracking JSONL objects into hourly Redis and source totals."""
 
+import gzip
 import json
 import logging
 import os
 import re
 import sys
+from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
@@ -57,7 +59,9 @@ ANALYTICS_LOCK_TTL_SECONDS = int(
 )
 
 TRACKED_EVENT_FIELD = "tracked-event"
-HOURLY_FOLDER_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2}-\d{2})/(.+\.jsonl)$")
+HOURLY_FOLDER_PATTERN = re.compile(
+    r"^(?:events/)?(\d{4}-\d{2}-\d{2}-\d{2})/(.+\.jsonl(?:\.gz)?)$"
+)
 SOURCE_LOCK_PREFIX = "analytics:data-source-lock:"
 SOURCE_STATE_PREFIX = "analytics:data-source-state:"
 SOURCE_DAILY_PREFIX = "analytics:data-source-daily:"
@@ -207,7 +211,7 @@ def iter_hourly_objects(
     start_after: Optional[str] = None,
     prefix: Optional[str] = None,
 ) -> Any:
-    """List JSONL object keys and their UTC hour folder in a bucket."""
+    """List legacy or gzip-compressed JSONL object keys by UTC hour."""
     try:
         paginator = s3_client.get_paginator("list_objects_v2")
         paginate_kwargs: dict[str, str] = {"Bucket": bucket}
@@ -414,8 +418,7 @@ def _aggregate_source_results(
 def count_jsonl_records(body: Any, object_key: str) -> int:
     """Parse a JSONL body and return its number of non-empty JSON records."""
     count = 0
-    lines = body.iter_lines() if hasattr(body, "iter_lines") else body
-    for raw_line in lines:
+    for raw_line in _iter_jsonl_lines(body, object_key):
         if not raw_line or not raw_line.strip():
             continue
         try:
@@ -430,7 +433,7 @@ def count_jsonl_records(body: Any, object_key: str) -> int:
 
 def _extract_profile_signature(record: dict[str, Any]) -> Optional[str]:
     """Extract a stable profile signature from one NDJSON tracking record."""
-    event = record.get("event")
+    event = record.get("payload") or record.get("event")
     if not isinstance(event, dict):
         return None
 
@@ -478,8 +481,7 @@ def summarize_bucket_metrics(s3_client: Any, bucket: str) -> tuple[int, int, flo
         body = response["Body"]
         object_count = 0
         try:
-            lines = body.iter_lines() if hasattr(body, "iter_lines") else body
-            for raw_line in lines:
+            for raw_line in _iter_jsonl_lines(body, object_key):
                 if not raw_line or not raw_line.strip():
                     continue
                 try:
@@ -514,8 +516,7 @@ def count_records_and_signatures(body: Any, object_key: str) -> tuple[int, set[s
     """Parse one JSONL object and return event count plus profile signatures."""
     count = 0
     signatures: set[str] = set()
-    lines = body.iter_lines() if hasattr(body, "iter_lines") else body
-    for raw_line in lines:
+    for raw_line in _iter_jsonl_lines(body, object_key):
         if not raw_line or not raw_line.strip():
             continue
         try:
@@ -529,6 +530,19 @@ def count_records_and_signatures(body: Any, object_key: str) -> tuple[int, set[s
         if signature:
             signatures.add(signature)
     return count, signatures
+
+
+def _iter_jsonl_lines(body: Any, object_key: str) -> Any:
+    """Yield decoded JSONL lines from plain or gzip-compressed S3 bodies."""
+    if object_key.endswith(".gz"):
+        file_object = body if hasattr(body, "read") else BytesIO(body)
+        with gzip.GzipFile(fileobj=file_object, mode="rb") as compressed:
+            yield from compressed
+        return
+    if isinstance(body, (bytes, bytearray)):
+        yield from BytesIO(body)
+        return
+    yield from (body.iter_lines() if hasattr(body, "iter_lines") else body)
 
 
 def _source_lock_key(data_source_id: str) -> str:
@@ -761,13 +775,14 @@ def process_tracking_logs(
         bucket = f"data-tracking-{data_source_id}"
         try:
             start_after = get_source_cursor(cache, data_source_id)
-            if not start_after or not start_after.startswith(f"{current_hour}/"):
+            current_prefix = f"events/{current_hour}/"
+            if not start_after or not start_after.startswith(current_prefix):
                 start_after = None
             for hour, object_key in iter_hourly_objects(
                 storage,
                 bucket,
                 start_after=start_after,
-                prefix=f"{current_hour}/",
+                prefix=current_prefix,
             ):
                 if source_objects_processed >= OBJECT_BATCH_SIZE:
                     write_log(

@@ -1,5 +1,6 @@
 """Tests for tracking-log aggregation and its Dagster wrapper."""
 
+import gzip
 from io import BytesIO
 import re
 from unittest.mock import MagicMock
@@ -82,9 +83,9 @@ class FakeS3:
                     "Contents": [
                         {"Key": key}
                         for key in [
-                            "2026-08-25-08/first.jsonl",
+                            "events/2026-08-25-08/first.jsonl.gz",
                             "not-an-hour/readme.txt",
-                            "2026-08-25-09/second.jsonl",
+                            "events/2026-08-25-09/second.jsonl.gz",
                         ]
                     ]
                 }
@@ -188,6 +189,31 @@ def test_count_jsonl_records_ignores_blank_lines_and_requires_objects():
     assert aggregation.count_jsonl_records(body, "hour/events.jsonl") == 2
 
 
+def test_count_jsonl_records_supports_gzip_bronze_objects():
+    body = BytesIO(gzip.compress(b'{"event": "page_view"}\n{"event": "purchase"}\n'))
+
+    assert aggregation.count_jsonl_records(body, "hour/events.jsonl.gz") == 2
+
+
+def test_canonical_tracking_envelope_is_read_from_gzip_s3_object():
+    records = (
+        b'{"schema_version":1,"event_id":"event-1",'
+        b'"event_time":"2026-08-25T08:01:00Z",'
+        b'"payload":{"event_name":"page_view","user_id":"User-1"}}\n'
+        b'{"schema_version":1,"event_id":"event-2",'
+        b'"event_time":"2026-08-25T08:02:00Z",'
+        b'"payload":{"event_name":"click","session_id":"Session-1"}}\n'
+    )
+
+    count, signatures = aggregation.count_records_and_signatures(
+        BytesIO(gzip.compress(records)),
+        "events/2026-08-25-08/batch.jsonl.gz",
+    )
+
+    assert count == 2
+    assert signatures == {"user_id:user-1", "session_id:session-1"}
+
+
 def test_current_system_gmt_hour_uses_required_format():
     value = aggregation.current_system_gmt_hour()
 
@@ -229,13 +255,17 @@ def test_process_tracking_logs_counts_new_objects_and_skips_checkpointed_objects
     connection = FakeConnection(cursor)
     s3 = FakeS3(
         {
-            "2026-08-25-08/first.jsonl": BytesIO(b'{"event": "page_view"}\n{"event": "click"}\n'),
-            "2026-08-25-09/second.jsonl": BytesIO(b'{"event": "purchase"}\n'),
+            "events/2026-08-25-08/first.jsonl.gz": BytesIO(
+                gzip.compress(b'{"event": "page_view"}\n{"event": "click"}\n')
+            ),
+            "events/2026-08-25-09/second.jsonl.gz": BytesIO(
+                gzip.compress(b'{"event": "purchase"}\n')
+            ),
         }
     )
     redis_client = FakeRedis([1, 0])
     redis_client.states["analytics:data-source-state:source-1"] = {
-        "last_processed_object": "2026-08-24-23/old.jsonl",
+        "last_processed_object": "events/2026-08-24-23/old.jsonl.gz",
     }
     monkeypatch.setattr(
         aggregation,
@@ -259,7 +289,7 @@ def test_process_tracking_logs_counts_new_objects_and_skips_checkpointed_objects
     }
     assert len(s3.get_calls) == 1
     increment_call = next(call for call in redis_client.eval_calls if "HINCRBY" in call[0])
-    assert increment_call[3] == "s3://data-tracking-source-1/2026-08-25-08/first.jsonl"
+    assert increment_call[3] == "s3://data-tracking-source-1/events/2026-08-25-08/first.jsonl.gz"
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{2}", str(increment_call[4]))
     assert increment_call[5:8] == (
         "tracked-event",
@@ -273,7 +303,7 @@ def test_process_tracking_logs_counts_new_objects_and_skips_checkpointed_objects
     assert s3.paginate_calls == [
         {
             "Bucket": "data-tracking-source-1",
-            "Prefix": "2026-08-25-08/",
+            "Prefix": "events/2026-08-25-08/",
         },
     ]
     assert redis_client.states["analytics:data-source-state:source-1"][
@@ -333,8 +363,12 @@ def test_process_tracking_logs_stops_at_object_batch_limit(monkeypatch):
     connection = FakeConnection(cursor)
     s3 = FakeS3(
         {
-            "2026-08-25-08/first.jsonl": BytesIO(b'{"event": "page_view"}\n'),
-            "2026-08-25-09/second.jsonl": BytesIO(b'{"event": "purchase"}\n'),
+            "events/2026-08-25-08/first.jsonl.gz": BytesIO(
+                gzip.compress(b'{"event": "page_view"}\n')
+            ),
+            "events/2026-08-25-09/second.jsonl.gz": BytesIO(
+                gzip.compress(b'{"event": "purchase"}\n')
+            ),
         }
     )
     redis_client = FakeRedis([1])
@@ -367,12 +401,19 @@ def test_analytics_definitions_expose_three_minute_gmt_schedule():
 def test_summarize_bucket_metrics_counts_profiles_and_daily_average():
     s3 = FakeS3(
         {
-            "2026-08-25-08/first.jsonl": BytesIO(
-                b'{"event":{"external_customer_id":"cust-1"}}\n'
-                b'{"event":{"profile_identities":{"email":"u2@example.com"}}}\n'
+            "events/2026-08-25-08/first.jsonl.gz": BytesIO(
+                gzip.compress(
+                    b'{"schema_version":1,"event_id":"event-1",'
+                    b'"payload":{"external_customer_id":"cust-1"}}\n'
+                    b'{"schema_version":1,"event_id":"event-2",'
+                    b'"payload":{"profile_identities":{"email":"u2@example.com"}}}\n'
+                )
             ),
-            "2026-08-25-09/second.jsonl": BytesIO(
-                b'{"event":{"external_customer_id":"cust-1"}}\n'
+            "events/2026-08-25-09/second.jsonl.gz": BytesIO(
+                gzip.compress(
+                    b'{"schema_version":1,"event_id":"event-3",'
+                    b'"payload":{"external_customer_id":"cust-1"}}\n'
+                )
             ),
         }
     )

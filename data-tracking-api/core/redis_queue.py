@@ -1,5 +1,7 @@
 """Durable Redis Streams handoff for asynchronous tracking-log delivery."""
 
+import base64
+import hashlib
 import json
 import logging
 from datetime import datetime
@@ -11,17 +13,24 @@ import redis
 from redis.exceptions import ResponseError
 
 from core.buffered_storage import TrackingQueueError, TrackingQueueFullError
+from core.metrics import tracking_metrics
 from core.storage import S3ObjectStorage, StoredTrackingLog, build_tracking_object
 
 logger = logging.getLogger(__name__)
 
 _PUBLISH_STREAM_SCRIPT = """
+local existing_message_id = redis.call('GET', KEYS[2])
+if existing_message_id then
+    return existing_message_id
+end
 local stream_length = redis.call('XLEN', KEYS[1])
 local max_length = tonumber(ARGV[2])
 if max_length > 0 and stream_length >= max_length then
     return redis.error_reply('TRACKING_STREAM_FULL')
 end
-return redis.call('XADD', KEYS[1], '*', 'payload', ARGV[1])
+local message_id = redis.call('XADD', KEYS[1], '*', 'payload', ARGV[1])
+redis.call('SET', KEYS[2], message_id, 'EX', ARGV[3])
+return message_id
 """
 
 
@@ -47,6 +56,9 @@ class RedisStreamTrackingStorage:
         block_ms: int,
         claim_idle_ms: int,
         retry_seconds: float,
+        schema_version: int = 1,
+        ingestion_version: str = "1.0",
+        idempotency_ttl_seconds: int = 172800,
         consumer_name: str | None = None,
     ):
         self.storage = storage
@@ -58,6 +70,9 @@ class RedisStreamTrackingStorage:
         self.block_ms = max(1, int(block_ms))
         self.claim_idle_ms = max(1, int(claim_idle_ms))
         self.retry_seconds = max(0.1, float(retry_seconds))
+        self.schema_version = schema_version
+        self.ingestion_version = ingestion_version
+        self.idempotency_ttl_seconds = max(1, int(idempotency_ttl_seconds))
         self.consumer_name = consumer_name or f"tracking-worker-{id(self)}"
         self._stop_event = Event()
         self._closed = False
@@ -75,27 +90,37 @@ class RedisStreamTrackingStorage:
         received_at: datetime,
     ) -> StoredTrackingLog:
         """Build a batch and enqueue it without performing an S3 request."""
-        bucket, object_key, body = build_tracking_object(data_source_id, events, received_at)
+        bucket, object_key, body = build_tracking_object(
+            data_source_id,
+            events,
+            received_at,
+            schema_version=getattr(self, "schema_version", 1),
+            ingestion_version=getattr(self, "ingestion_version", "1.0"),
+        )
         payload = json.dumps(
             {
                 "data_source_id": str(data_source_id),
                 "bucket": bucket,
                 "object_key": object_key,
-                "body": body.decode("utf-8"),
+                "body": base64.b64encode(body).decode("ascii"),
+                "body_encoding": "base64",
                 "event_count": len(events),
                 "received_at": received_at.isoformat(),
             },
             ensure_ascii=False,
             separators=(",", ":"),
         )
+        idempotency_key = _idempotency_key(self.stream_name, bucket, object_key)
         try:
             message_id = str(
                 self.redis.eval(
                     _PUBLISH_STREAM_SCRIPT,
-                    1,
+                    2,
                     self.stream_name,
+                    idempotency_key,
                     payload,
                     str(self.max_stream_length),
+                    str(getattr(self, "idempotency_ttl_seconds", 172800)),
                 )
             )
         except ResponseError as exc:
@@ -142,6 +167,28 @@ class RedisStreamTrackingStorage:
             return int(self.redis.xlen(self.stream_name))
         except redis.RedisError:
             return 0
+
+    def queue_capacity(self) -> int:
+        """Return the configured Redis Stream capacity."""
+        return self.max_stream_length
+
+    def oldest_pending_age_seconds(self) -> float:
+        """Return Redis' idle age for the oldest pending message."""
+        try:
+            pending = self.redis.xpending_range(
+                self.stream_name,
+                self.consumer_group,
+                min="-",
+                max="+",
+                count=1,
+            )
+        except (AttributeError, redis.RedisError):
+            return 0.0
+        if not pending:
+            return 0.0
+        item = pending[0]
+        idle_ms = item.get("time_since_delivered", 0) if isinstance(item, dict) else 0
+        return max(0.0, float(idle_ms) / 1000)
 
     def _ensure_consumer_group(self) -> None:
         try:
@@ -233,7 +280,16 @@ def _decode_message(fields: dict[str, str]) -> dict[str, Any]:
         "data_source_id": UUID(decoded["data_source_id"]),
         "bucket": decoded["bucket"],
         "object_key": decoded["object_key"],
-        "body": decoded["body"].encode("utf-8"),
+        "body": (
+            base64.b64decode(decoded["body"])
+            if decoded.get("body_encoding") == "base64"
+            else decoded["body"].encode("utf-8")
+        ),
         "event_count": int(decoded["event_count"]),
         "received_at": datetime.fromisoformat(decoded["received_at"]),
     }
+
+
+def _idempotency_key(stream_name: str, bucket: str, object_key: str) -> str:
+    digest = hashlib.sha256(f"{bucket}/{object_key}".encode("utf-8")).hexdigest()
+    return f"{stream_name}:idempotency:{digest}"

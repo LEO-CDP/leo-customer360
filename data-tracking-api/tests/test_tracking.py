@@ -1,5 +1,6 @@
 """Focused tests for tracking ingestion and object-key partitioning."""
 
+import gzip
 import json
 from datetime import datetime, timezone
 from uuid import UUID
@@ -22,6 +23,8 @@ from core.routers.tracking import (
     get_storage,
     get_tracking_service,
 )
+from core.buffered_storage import BufferedTrackingStorage
+from core.metrics import tracking_metrics
 from core.service import IdentityValidationError, TrackingLogService, _collect_sessions
 from core.storage import StoredTrackingLog, build_tracking_object
 
@@ -79,6 +82,17 @@ class FakeProtection:
         return self.decision
 
 
+class FakeQueueStorage:
+    def pending_count(self):
+        return 3
+
+    def oldest_pending_age_seconds(self):
+        return 12.5
+
+    def queue_capacity(self):
+        return 100
+
+
 def test_build_tracking_object_uses_utc_hour_folder_and_ndjson():
     received_at = datetime(2026, 8, 25, 21, 5, tzinfo=timezone.utc)
     event = {
@@ -90,9 +104,54 @@ def test_build_tracking_object_uses_utc_hour_folder_and_ndjson():
     bucket, key, body = build_tracking_object(SOURCE_ID, [event], received_at)
 
     assert bucket == f"data-tracking-{SOURCE_ID}"
-    assert key.startswith("2026-08-25-21/")
-    assert key.endswith(".jsonl")
-    assert json.loads(body.decode().strip())["event"] == event
+    assert key.startswith("events/2026-08-25-21/")
+    assert key.endswith(".jsonl.gz")
+    record = json.loads(gzip.decompress(body).decode().strip())
+    assert record["payload"] == event
+    assert record["schema_version"] == 1
+    assert record["event_id"]
+
+
+def test_metrics_exposes_queue_depth_age_and_configured_limits():
+    app.dependency_overrides[get_tracking_service] = lambda: TrackingLogService(
+        FakeStorage(), FakeSessionCache()
+    )
+    from core.routers.tracking import get_tracking_storage
+
+    app.dependency_overrides[get_tracking_storage] = lambda: FakeQueueStorage()
+    try:
+        response = TestClient(app).get("/metrics")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "tracking_queue_depth 3" in response.text
+    assert "tracking_queue_oldest_pending_age_seconds 12.5" in response.text
+    assert "tracking_request_max_events" in response.text
+    assert "tracking_object_max_bytes" in response.text
+
+
+def test_metrics_counter_increments_for_accepted_ingestion():
+    before = tracking_metrics.snapshot().get("tracking_ingestion_batches_total", 0)
+    fake_storage = FakeStorage()
+    app.dependency_overrides[get_tracking_service] = lambda: TrackingLogService(
+        fake_storage, FakeSessionCache()
+    )
+    try:
+        response = TestClient(app).post(
+            "/api/v1/tracking/logs",
+            json={
+                "data_source_id": str(SOURCE_ID),
+                "session_id": "metrics-session",
+                "events": [{"event": "page_view"}],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 202
+    assert tracking_metrics.snapshot()["tracking_ingestion_batches_total"] == before + 1
 
 
 def test_build_tracking_request_normalizes_readme_example_identities():
@@ -179,6 +238,25 @@ def test_ingest_preserves_dynamic_payload_and_all_batch_identities():
     assert stored_event["user_id"] == "user-012"
     assert stored_event["metadata"]["campaign"]["name"] == "spring"
     assert stored_event["properties"]["items"][0]["price"] == 12.5
+
+
+def test_ingest_generates_stable_event_id_for_http_retries():
+    first_storage = FakeStorage()
+    second_storage = FakeStorage()
+    event = {"event_name": "page_view", "properties": {"path": "/home"}}
+
+    TrackingLogService(first_storage, FakeSessionCache()).ingest(
+        SOURCE_ID,
+        [event],
+        session_id="session-123",
+    )
+    TrackingLogService(second_storage, FakeSessionCache()).ingest(
+        SOURCE_ID,
+        [event],
+        session_id="session-123",
+    )
+
+    assert first_storage.calls[0][1][0]["event_id"] == second_storage.calls[0][1][0]["event_id"]
 
 
 def test_ingest_accepts_canonical_web_sdk_identity_field_names():

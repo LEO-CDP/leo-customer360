@@ -1,8 +1,10 @@
 """Business service for tracking-log ingestion."""
 
+import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any, Optional, Protocol
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from core.schemas import IDENTIFIER_FIELDS
 from core.storage import StoredTrackingLog
@@ -63,6 +65,7 @@ class TrackingLogService:
 
         events = _enrich_events(
             events,
+            data_source_id=data_source_id,
             session_id=session_id,
             anonymous_id=anonymous_id,
             device_id=device_id,
@@ -97,6 +100,7 @@ def _collect_sessions(
 def _enrich_events(
     events: list[dict[str, Any]],
     *,
+    data_source_id: UUID,
     session_id: Optional[str],
     anonymous_id: Optional[str],
     device_id: Optional[str],
@@ -116,15 +120,42 @@ def _enrich_events(
         return events
 
     enriched_events = []
-    for event in events:
+    for index, event in enumerate(events):
         enriched_event = dict(event)
         for field_name, value in identities.items():
             if value:
                 enriched_event.setdefault(field_name, value)
         if metadata:
             enriched_event.setdefault("metadata", dict(metadata))
+        if not _string_value(enriched_event.get("event_id")):
+            dedup_key = _event_dedup_key(enriched_event)
+            source = dedup_key or _fallback_event_hash(enriched_event, index)
+            enriched_event["event_id"] = str(
+                uuid5(NAMESPACE_URL, f"c360:event:{data_source_id}:{source}")
+            )
         enriched_events.append(enriched_event)
     return enriched_events
+
+
+def _event_dedup_key(event: dict[str, Any]) -> Optional[str]:
+    direct_value = _string_value(event.get("event_dedup_key"))
+    if direct_value:
+        return direct_value
+    properties = event.get("properties")
+    if isinstance(properties, dict):
+        return _string_value(properties.get("event_dedup_key"))
+    return None
+
+
+def _fallback_event_hash(event: dict[str, Any], index: int) -> str:
+    payload = json.dumps(
+        {"index": index, "event": event},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _has_identity(

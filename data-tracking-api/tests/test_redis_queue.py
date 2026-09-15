@@ -1,5 +1,7 @@
 """Tests for the durable Redis Stream tracking handoff."""
 
+import base64
+import gzip
 import json
 from datetime import datetime, timezone
 from uuid import UUID
@@ -29,7 +31,16 @@ class FakeRedisStream:
         self.added.append((stream_name, fields, kwargs))
         return "1710000000000-0"
 
-    def eval(self, _script, _key_count, stream_name, payload, _max_length):
+    def eval(
+        self,
+        _script,
+        _key_count,
+        stream_name,
+        _idempotency_key,
+        payload,
+        _max_length,
+        _ttl_seconds,
+    ):
         if self.error:
             raise self.error
         self.added.append((stream_name, {"payload": payload}, {}))
@@ -84,7 +95,8 @@ def test_redis_stream_publish_does_not_call_s3_and_preserves_nested_json():
     assert stored.queue_message_id == "1710000000000-0"
     assert not storage.calls
     payload = json.loads(broker.added[0][1]["payload"])
-    assert json.loads(payload["body"].strip())["event"]["properties"]["items"] == ["sku-1"]
+    body = gzip.decompress(base64.b64decode(payload["body"]))
+    assert json.loads(body.strip())["payload"]["properties"]["items"] == ["sku-1"]
 
 
 def test_redis_stream_worker_acknowledges_only_after_s3_write():

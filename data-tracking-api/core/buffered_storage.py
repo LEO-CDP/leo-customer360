@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID
 
 from core.storage import S3ObjectStorage, StoredTrackingLog, build_tracking_object
+from core.metrics import tracking_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +45,14 @@ class BufferedTrackingStorage:
         flush_interval_seconds: int,
         max_queue_size: int,
         flush_batch_size: int,
+        schema_version: int = 1,
+        ingestion_version: str = "1.0",
     ):
         self.storage = storage
         self.flush_interval_seconds = max(1, int(flush_interval_seconds))
         self.flush_batch_size = max(1, int(flush_batch_size))
+        self.schema_version = schema_version
+        self.ingestion_version = ingestion_version
         self._queue: Queue[QueuedTrackingObject] = Queue(maxsize=max(1, int(max_queue_size)))
         self._stop_event = Event()
         self._state_lock = Lock()
@@ -67,7 +72,13 @@ class BufferedTrackingStorage:
         A full queue is reported to the caller instead of falling back to a
         synchronous object-storage write on the request path.
         """
-        bucket, object_key, body = build_tracking_object(data_source_id, events, received_at)
+        bucket, object_key, body = build_tracking_object(
+            data_source_id,
+            events,
+            received_at,
+            schema_version=self.schema_version,
+            ingestion_version=self.ingestion_version,
+        )
         queued = QueuedTrackingObject(
             data_source_id=data_source_id,
             bucket=bucket,
@@ -110,6 +121,18 @@ class BufferedTrackingStorage:
     def pending_count(self) -> int:
         """Return queued + in-flight tracking object count."""
         return int(self._queue.qsize() + len(self._pending))
+
+    def queue_capacity(self) -> int:
+        """Return the configured maximum number of queued batches."""
+        return int(self._queue.maxsize)
+
+    def oldest_pending_age_seconds(self) -> float:
+        """Return the age of the oldest queued object, or zero when empty."""
+        queued = list(self._pending) + list(self._queue.queue)
+        if not queued:
+            return 0.0
+        oldest = min(item.received_at for item in queued)
+        return max(0.0, (datetime.now(oldest.tzinfo) - oldest).total_seconds())
 
     def _run(self) -> None:
         last_flush_at = time.monotonic()

@@ -32,6 +32,8 @@ You are an expert software engineer contributing to an enterprise-grade Customer
 - Never expose data across tenants.
 - Preserve historical customer identities.
 - Do not invent business rules.
+- Always enforce request body size limits for tracking endpoints.
+- TRACKING_ENDPOINTS (code in data-tracking-api) never connect directly to the database, it can write data to S3 or a message queue for asynchronous processing. Always ensure that the data is validated and sanitized before sending it to these storage mechanisms.
 
 ## AI Behavior
 

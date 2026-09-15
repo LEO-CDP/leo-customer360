@@ -9,12 +9,15 @@ from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
 from core.redis_cache import TrackingRequestProtection
+from core.request_limits import RequestBodyLimitMiddleware
 from core.routers.tracking import (
     get_protection,
     get_storage,
+    get_tracking_storage,
     router as tracking_router,
     shutdown_tracking_storage,
 )
+from core.metrics import render_prometheus_metrics
 from core.routers.email_tracking import router as email_tracking_router
 from core.storage import S3ObjectStorage
 
@@ -31,6 +34,11 @@ app = FastAPI(
     description="Ingests CDP tracking records into hourly S3-compatible objects.",
     version=settings.api_version,
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    RequestBodyLimitMiddleware,
+    max_body_bytes=settings.max_request_body_bytes,
 )
 
 app.add_middleware(
@@ -98,6 +106,17 @@ if static_dir.exists():
 @app.get("/", tags=["Health"])
 def root() -> dict[str, str]:
     return {"service": "data-tracking-api", "status": "ok", "docs": "/docs"}
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics(
+    tracking_storage=Depends(get_tracking_storage),
+) -> Response:
+    """Expose low-cardinality Prometheus metrics for the tracking worker."""
+    return Response(
+        content=render_prometheus_metrics(settings, tracking_storage),
+        media_type="text/plain; version=0.0.4",
+    )
 
 
 @app.get("/health", tags=["Health"])

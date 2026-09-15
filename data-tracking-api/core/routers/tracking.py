@@ -10,6 +10,7 @@ from core.buffered_storage import BufferedTrackingStorage, TrackingQueueError
 from core.config import settings
 from core.redis_cache import TrackingRequestProtection
 from core.redis_queue import RedisStreamTrackingStorage
+from core.metrics import tracking_metrics
 from core.schemas import TrackingLogRequest, TrackingLogResponse
 from core.service import IdentityValidationError, TrackingLogService
 from core.storage import ObjectStorageError, S3ObjectStorage, StoredTrackingLog, build_storage
@@ -51,6 +52,9 @@ def get_tracking_storage(
                 block_ms=settings.tracking_stream_block_ms,
                 claim_idle_ms=settings.tracking_stream_claim_idle_ms,
                 retry_seconds=settings.tracking_stream_retry_seconds,
+                schema_version=settings.event_schema_version,
+                ingestion_version=settings.event_ingestion_version,
+                idempotency_ttl_seconds=settings.tracking_idempotency_ttl_seconds,
             )
         else:
             _tracking_storage = BufferedTrackingStorage(
@@ -58,6 +62,8 @@ def get_tracking_storage(
                 flush_interval_seconds=settings.time_to_flush_log,
                 max_queue_size=settings.tracking_log_queue_max_size,
                 flush_batch_size=settings.tracking_log_flush_batch_size,
+                schema_version=settings.event_schema_version,
+                ingestion_version=settings.event_ingestion_version,
             )
     return _tracking_storage
 
@@ -75,6 +81,19 @@ def shutdown_tracking_storage() -> None:
     if _tracking_storage is not None:
         _tracking_storage.close()
         _tracking_storage = None
+
+
+@router.get("/queue-status")
+def tracking_queue_status(
+    tracking_storage: BufferedTrackingStorage | RedisStreamTrackingStorage = Depends(
+        get_tracking_storage
+    ),
+) -> dict[str, float | int]:
+    """Expose bounded queue depth and oldest-pending age for operations."""
+    return {
+        "queue_depth": tracking_storage.pending_count(),
+        "oldest_pending_age_seconds": tracking_storage.oldest_pending_age_seconds(),
+    }
 
 
 def ingest_tracking_request(
@@ -127,7 +146,9 @@ def ingest_tracking_logs(
     service: TrackingLogService = Depends(get_tracking_service),
 ) -> TrackingLogResponse:
     """Store a batch of source events in the current UTC hour partition."""
+    tracking_metrics.increment("tracking_ingestion_requests_total")
     if len(payload.events) > settings.max_events_per_request:
+        tracking_metrics.increment("tracking_ingestion_rejections_total")
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"A request may contain at most {settings.max_events_per_request} events",
@@ -135,6 +156,7 @@ def ingest_tracking_logs(
 
     user_agent = request.headers.get("user-agent")
     if protection.is_bot(user_agent):
+        tracking_metrics.increment("tracking_ingestion_filtered_total")
         return TrackingLogResponse(
             data_source_id=payload.data_source_id,
             accepted=False,
@@ -146,6 +168,7 @@ def ingest_tracking_logs(
 
     decision = protection.allow_request(request, payload.data_source_id)
     if not decision.allowed:
+        tracking_metrics.increment("tracking_ingestion_rate_limited_total")
         response.headers["Retry-After"] = str(decision.retry_after_seconds)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -155,6 +178,8 @@ def ingest_tracking_logs(
 
     try:
         stored, cached_session_count = ingest_tracking_request(payload, service)
+        tracking_metrics.increment("tracking_ingestion_batches_total")
+        tracking_metrics.increment("tracking_ingestion_events_total", len(payload.events))
         return TrackingLogResponse(
             data_source_id=stored.data_source_id,
             bucket=stored.bucket,
@@ -165,11 +190,13 @@ def ingest_tracking_logs(
             queue_message_id=stored.queue_message_id,
         )
     except IdentityValidationError as exc:
+        tracking_metrics.increment("tracking_ingestion_rejections_total")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
     except (ObjectStorageError, TrackingQueueError) as exc:
+        tracking_metrics.increment("tracking_ingestion_errors_total")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Tracking ingestion is temporarily unavailable; retry the request",

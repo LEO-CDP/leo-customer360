@@ -49,6 +49,40 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("S3_AUTO_CREATE_BUCKETS", "s3_auto_create_buckets"),
     )
+    event_schema_version: int = Field(
+        default=1,
+        validation_alias=AliasChoices("EVENT_SCHEMA_VERSION", "event_schema_version"),
+    )
+    event_ingestion_version: str = Field(
+        default="1.0",
+        validation_alias=AliasChoices(
+            "EVENT_INGESTION_VERSION", "event_ingestion_version"
+        ),
+    )
+    tracking_idempotency_ttl_seconds: int = Field(
+        default=172800,
+        validation_alias=AliasChoices(
+            "TRACKING_IDEMPOTENCY_TTL_SECONDS", "tracking_idempotency_ttl_seconds"
+        ),
+    )
+    tracking_processed_prefix: str = Field(
+        default="_processed",
+        validation_alias=AliasChoices(
+            "TRACKING_PROCESSED_PREFIX", "tracking_processed_prefix"
+        ),
+    )
+    event_max_object_size_bytes: int = Field(
+        default=16 * 1024 * 1024,
+        validation_alias=AliasChoices(
+            "EVENT_MAX_OBJECT_SIZE_BYTES", "event_max_object_size_bytes"
+        ),
+    )
+    max_request_body_bytes: int = Field(
+        default=4 * 1024 * 1024,
+        validation_alias=AliasChoices(
+            "TRACKING_MAX_REQUEST_BODY_BYTES", "max_request_body_bytes"
+        ),
+    )
     max_events_per_request: int = Field(
         default=1000,
         validation_alias=AliasChoices("TRACKING_MAX_EVENTS_PER_REQUEST", "tracking_max_events_per_request"),

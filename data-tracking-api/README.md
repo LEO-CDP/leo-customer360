@@ -2,15 +2,27 @@
 
 A small FastAPI ingestion service for CDP tracking events. Each accepted batch
 is acknowledged after it is durably enqueued in Redis Streams, then written by
-a background worker as newline-delimited JSON to an S3-compatible object:
+a background worker as gzip-compressed newline-delimited JSON to an
+S3-compatible Bronze object:
 
 ```text
-s3://data-tracking-[data_source_id]/yyyy-mm-dd-hh/[batch-uuid].jsonl
+s3://data-tracking-[data_source_id]/yyyy-mm-dd-hh/[deterministic-batch-uuid].jsonl.gz
 ```
 
-The folder uses the UTC time at which the API received the batch. Each line
-contains `data_source_id`, `received_at`, and the original event under `event`.
+The folder uses the UTC time at which the API received the batch. Each line is
+a versioned envelope containing `schema_version`, `ingestion_version`,
+`event_id`, `event_time`, `received_at`, `event_dedup_key`, identity fields,
+and the original event under `payload`. `event_id` is preserved when supplied,
+otherwise it is derived deterministically from the source event or a canonical
+fallback hash. The batch key is derived from the ordered event IDs, so a retry
+of the same HTTP request reuses the same logical object.
+
 Batches are immutable objects, which avoids concurrent append races in S3.
+Uploads include event count, schema version, ingestion version, and SHA-256
+metadata. Redis messages carry compressed bodies as base64 and remain pending
+until the raw S3 write and `_processed/<object-id>.json` state marker succeed.
+The state marker is the durable idempotency authority; Redis idempotency keys
+are a bounded duplicate-publication optimization and may expire safely.
 Redis Streams use consumer-group acknowledgements, so an object is acknowledged
 only after the S3/MinIO write succeeds. An unacknowledged message can be
 claimed by another tracking-api replica after a worker failure.
@@ -89,6 +101,30 @@ created. Legitimate clients are limited per source IP using an atomic Redis
 window and receive `429` plus `Retry-After` when the limit is exceeded.
 
 OpenAPI is available at `/docs`; liveness is available at `/health`.
+Operational queue status is available at `/api/v1/tracking/queue-status` and
+reports only the bounded queue depth and oldest pending age.
+Prometheus-compatible operational metrics are available at `/metrics` (and
+through the deployed `/data/metrics` path). Metrics include queue depth,
+oldest pending age, queue capacity, request/event/object limits, accepted and
+rejected ingestion totals, and S3 upload failures. Configure the wire-level
+request cap with `TRACKING_MAX_REQUEST_BODY_BYTES`.
+
+## Canonical envelope and MinIO state configuration
+
+The first cutover keeps the existing per-source bucket layout so current
+analytics consumers can migrate without a bucket-wide rewrite. The durable
+processed-state markers are written into the same source bucket. Configure the
+state prefix and Redis idempotency retention as needed:
+
+```text
+TRACKING_PROCESSED_PREFIX=_processed
+TRACKING_IDEMPOTENCY_TTL_SECONDS=172800
+EVENT_MAX_OBJECT_SIZE_BYTES=16777216
+```
+
+The public tracking service has no PostgreSQL driver, credentials, connection,
+or write path. Environment-level `tenant_id=.../source_id=...` keys and Silver
+compaction remain subsequent rollout phases.
 
 ## Email tracking
 
