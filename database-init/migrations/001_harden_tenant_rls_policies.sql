@@ -7,9 +7,11 @@ DECLARE
     tenant_tables TEXT[] := ARRAY[
         'sys_organization',
         'sys_user',
+        'sys_userinfo',
         'sys_role',
         'sys_audit_log',
         'crm_campaign',
+        'crm_campaign_performance_daily',
         'crm_campaign_member',
         'crm_lead',
         'crm_lead_source',
@@ -30,7 +32,8 @@ DECLARE
         'cdp_segments',
         'cdp_content_items',
         'cdp_customer_personas',
-        'cdp_persona_archetypes'
+        'cdp_persona_archetypes',
+        'sys_data_source'
     ];
 BEGIN
     FOREACH table_name IN ARRAY tenant_tables LOOP

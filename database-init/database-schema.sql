@@ -203,20 +203,6 @@ CREATE INDEX IF NOT EXISTS idx_user_org ON customer360.sys_user(organization_id)
 -- Added index for status, as admin dashboards frequently filter by active/inactive users
 CREATE INDEX IF NOT EXISTS idx_user_status ON customer360.sys_user(tenant_id, status);
 
--- ----------------------------------------------------------------------------
--- ROW LEVEL SECURITY (RBAC)
--- ----------------------------------------------------------------------------
-ALTER TABLE customer360.sys_user ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customer360.sys_user FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS tenant_policy ON customer360.sys_user;
-
-CREATE POLICY tenant_policy ON customer360.sys_user
-    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
-
-
-
 -- ==========================================================
 -- User Login & SSO Identity Management (sys_userinfo)
 -- ==========================================================
@@ -274,19 +260,6 @@ CREATE INDEX IF NOT EXISTS idx_sys_userinfo_user ON customer360.sys_userinfo(use
 -- Highly optimized lookup index for the authentication pipeline 
 -- (Used immediately upon login to find the user by their SSO token or local username)
 CREATE INDEX IF NOT EXISTS idx_sys_userinfo_provider_lookup ON customer360.sys_userinfo(tenant_id, auth_provider, provider_subject_id);
-
--- ----------------------------------------------------------------------------
--- ROW LEVEL SECURITY (RBAC / Multi-Tenant Isolation)
--- ----------------------------------------------------------------------------
--- Standard RLS implementation matching the rest of the customer360 schema
-ALTER TABLE customer360.sys_userinfo ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customer360.sys_userinfo FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS tenant_policy ON customer360.sys_userinfo;
-
-CREATE POLICY tenant_policy ON customer360.sys_userinfo
-    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
 
 -- ==========================================================
 -- RBAC Role & Permission Tables
@@ -412,6 +385,15 @@ CREATE TABLE IF NOT EXISTS customer360.crm_campaign (
     campaign_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
+
+    -- Agentic email campaign planning and approval
+    segment_id UUID,
+    template_id UUID,
+    approval_status VARCHAR(50) NOT NULL DEFAULT 'Draft',
+    approved_by UUID,
+    approved_at TIMESTAMP WITH TIME ZONE,
+    strategy_summary TEXT,
+    ai_plan JSONB,
     
     -- Dashboard Dimensions
     campaign_code VARCHAR(100),
@@ -435,6 +417,7 @@ CREATE TABLE IF NOT EXISTS customer360.crm_campaign (
     
     metadata JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
     
     CONSTRAINT uq_crm_campaign_code UNIQUE (tenant_id, campaign_code)
 );
@@ -535,19 +518,6 @@ CREATE INDEX IF NOT EXISTS idx_crm_campaign_perf_tenant_date
 CREATE INDEX IF NOT EXISTS idx_crm_campaign_perf_campaign 
     ON customer360.crm_campaign_performance_daily(campaign_id);
 
--- RLS policy for crm_campaign_performance_daily
--- Note: Make sure to also add 'crm_campaign_performance_daily' to the 
--- tenant_tables array in your DO $$ script at the bottom of the schema file.
-ALTER TABLE customer360.crm_campaign_performance_daily ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customer360.crm_campaign_performance_daily FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS tenant_policy ON customer360.crm_campaign_performance_daily;
-
-CREATE POLICY tenant_policy ON customer360.crm_campaign_performance_daily
-    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
-
-
 -- CampaignMember
 CREATE TABLE IF NOT EXISTS customer360.crm_campaign_member (
     campaign_member_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -571,6 +541,7 @@ CREATE TABLE IF NOT EXISTS customer360.crm_lead (
     lead_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     user_id UUID REFERENCES customer360.sys_user(user_id), -- data owner
+    lead_source_id UUID,
     first_name TEXT,
     last_name TEXT,
     email TEXT,
@@ -778,14 +749,10 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- MARKETING & ENGAGEMENT
     -- Attribution data and computed fields used for audience building.
     -- ------------------------------------------------------------------------
-    -- current_persona_id for tracking profile's persona because 1 person can change persona over time,
-    --  but we want to keep a history of all personas the person has been assigned to.
-    -- NOTE: NOT declared inline here -- cdp_customer_personas (below) itself
-    -- has a NOT NULL FK back to cdp_master_profiles.master_profile_id, so this
-    -- is a genuine circular table dependency. cdp_customer_personas does not
-    -- exist yet at this point in the script, so current_persona_id is added
-    -- via ALTER TABLE immediately after cdp_customer_personas is created
-    -- (see the "MASTER PROFILES & IDENTITY RESOLUTION" section below).
+    -- current_persona_id tracks the current assignment while preserving the
+    -- full assignment history in cdp_customer_personas. Its FK is declared
+    -- after cdp_customer_personas because both tables reference each other.
+    current_persona_id UUID,
     persona_name TEXT, -- keep to ADD a short label for the persona (e.g., "Gen Z Shopper", "High-Value Investor") for quick filtering and segmentation in dashboards and queries.
     -- Longer, human-readable narrative summary of the customer (behavior,
     -- preferences, notable traits) usually generated by an LLM or the
@@ -1540,6 +1507,27 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_customer_personas
 
 COMMENT ON TABLE customer360.cdp_customer_personas IS 'Versioned match/assignment of ONE master profile to ONE cdp_persona_archetypes row, computed by backend-system/identity_resolution''s PersonaResolutionEngine: this profile''s own behavior/engagement/financial/loyalty/relationship/risk component scores, an overall persona_score, customer_value_tier/risk_level/next_best_action, and match_score (lookalike fit vs the archetype centroid). Each recomputation inserts a new row (computed_version); only the latest row per master_profile_id has is_active = TRUE. Many rows (across many master profiles) can reference the same persona_archetype_id -- that many-to-many fan-in is the whole point of this table.';
 
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_cdp_master_profile_current_persona'
+          AND conrelid = 'customer360.cdp_master_profiles'::regclass
+    ) THEN
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE SET NULL',
+            'customer360',
+            'cdp_master_profiles',
+            'fk_cdp_master_profile_current_persona',
+            'current_persona_id',
+            'customer360',
+            'cdp_customer_personas',
+            'persona_id'
+        );
+    END IF;
+END $$;
+
 -- Maintains cdp_persona_archetypes.matched_profile_count as a true
 -- COUNT(DISTINCT master_profile_id) over ACTIVE matches, so the Persona
 -- Management admin UI never has to compute it ad hoc client-side.
@@ -1584,13 +1572,6 @@ CREATE TRIGGER trg_sync_persona_archetype_match_count
     AFTER INSERT OR UPDATE OF persona_archetype_id, is_active OR DELETE ON customer360.cdp_customer_personas
     FOR EACH ROW
     EXECUTE FUNCTION customer360.sync_persona_archetype_match_count();
-
--- current_persona_id has a circular FK relationship with cdp_customer_personas
--- (which itself has a NOT NULL FK back to cdp_master_profiles above), so it
--- cannot be declared inline on the cdp_master_profiles CREATE TABLE -- added
--- here via ALTER TABLE instead, now that cdp_customer_personas exists.
-ALTER TABLE customer360.cdp_master_profiles
-    ADD COLUMN IF NOT EXISTS current_persona_id UUID REFERENCES customer360.cdp_customer_personas(persona_id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_cdp_mp_current_persona ON customer360.cdp_master_profiles (current_persona_id)
 WHERE
@@ -1994,10 +1975,7 @@ COMMENT ON TABLE customer360.cdp_event_catalog IS 'Governed vocabulary of event_
 -- attribute_internal_code / is_identity_resolution / status / matching_rule /
 -- matching_threshold, so the extra metadata columns below are additive and
 -- safe for that consumer.
--- Uses CREATE TABLE IF NOT EXISTS + ADD COLUMN IF NOT EXISTS so it stays
--- additive/idempotent for databases where a narrower cdp_profile_attributes
--- table was already created at runtime (pre-existing behavior of
--- backend-system/identity_resolution/scripts/init_sample_data.py).
+-- Uses CREATE TABLE IF NOT EXISTS so the schema is defined in one place.
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2170,16 +2148,23 @@ COMMENT ON TABLE customer360.cdp_scoring_models IS 'Central registry for all ML 
 
 DO $$
 BEGIN
-    ALTER TABLE customer360.cdp_profile_attributes
-    ADD CONSTRAINT fk_cdp_pa_scoring_model 
-    FOREIGN KEY (scoring_model_name) 
-    REFERENCES customer360.cdp_scoring_models(scoring_model_name)
-    ON DELETE RESTRICT; 
-    -- ON DELETE RESTRICT prevents accidentally deleting a model 
-    -- if attributes are still mapped to it.
-EXCEPTION
-    WHEN duplicate_object THEN
-        RAISE NOTICE 'Foreign key fk_cdp_pa_scoring_model already exists.';
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_cdp_pa_scoring_model'
+          AND conrelid = 'customer360.cdp_profile_attributes'::regclass
+    ) THEN
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE RESTRICT',
+            'customer360',
+            'cdp_profile_attributes',
+            'fk_cdp_pa_scoring_model',
+            'scoring_model_name',
+            'customer360',
+            'cdp_scoring_models',
+            'scoring_model_name'
+        );
+    END IF;
 END $$;
 
 -- ----------------------------------------------------------------------------
@@ -2296,17 +2281,6 @@ CREATE INDEX IF NOT EXISTS idx_sys_data_source_tenant ON customer360.sys_data_so
 
 -- Optimized index for filtering active data sources in the UI
 CREATE INDEX IF NOT EXISTS idx_sys_data_source_status ON customer360.sys_data_source(tenant_id, status);
-
--- Enable RLS to maintain strict tenant isolation matching the existing schema pattern
-ALTER TABLE customer360.sys_data_source ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customer360.sys_data_source FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS tenant_policy ON customer360.sys_data_source;
-
--- Policy ensures queries only return rows matching the current connection's tenant_id
-CREATE POLICY tenant_policy ON customer360.sys_data_source
-    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
 
 -- ============================================================================
 -- cdp_profile_merge_history: audit trail of master-to-master profile merges
@@ -2939,8 +2913,8 @@ CREATE INDEX IF NOT EXISTS idx_graph_edges_belongs_to_industry_created_at ON cus
 -- approval -> dispatch). Placed after all referenced tables (sys_user,
 -- crm_campaign, crm_lead, crm_lead_source, cdp_segments, cdp_content_items)
 -- so foreign keys resolve. See docs/action-plans/AGENTIC-EMAIL-MARKETING-FLOW.md.
--- The ALTER/ADD CONSTRAINT statements are guarded so this section is safe to
--- re-run against an already-migrated database (run-sql.sh re-applies the schema).
+-- The deferred constraints are guarded so this section is safe to re-run
+-- against an already-migrated database (run-sql.sh re-applies the schema).
 
 -- Email template library authored by AI agents and gated by human review.
 CREATE TABLE IF NOT EXISTS customer360.crm_email_templates (
@@ -2969,55 +2943,48 @@ COMMENT ON TABLE customer360.crm_email_templates IS 'Email template library for 
 CREATE INDEX IF NOT EXISTS idx_crm_email_templates_tenant ON customer360.crm_email_templates (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_crm_email_templates_tenant_status ON customer360.crm_email_templates (tenant_id, status);
 
--- Extend crm_campaign with segment/template links, the AI planning fields, and
--- the human-approval gate that keeps AI-created campaigns out of execution.
-ALTER TABLE customer360.crm_campaign
-    ADD COLUMN IF NOT EXISTS segment_id UUID,
-    ADD COLUMN IF NOT EXISTS template_id UUID,
-    ADD COLUMN IF NOT EXISTS approval_status VARCHAR(50) DEFAULT 'Draft',
-    ADD COLUMN IF NOT EXISTS approved_by UUID,
-    ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE,
-    ADD COLUMN IF NOT EXISTS strategy_summary TEXT,
-    ADD COLUMN IF NOT EXISTS ai_plan JSONB;
-
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_segment' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
-        ALTER TABLE customer360.crm_campaign ADD CONSTRAINT fk_crm_campaign_segment
-            FOREIGN KEY (segment_id) REFERENCES customer360.cdp_segments(segment_id) ON DELETE SET NULL;
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE SET NULL',
+            'customer360', 'crm_campaign', 'fk_crm_campaign_segment',
+            'segment_id', 'customer360', 'cdp_segments', 'segment_id'
+        );
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_template' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
-        ALTER TABLE customer360.crm_campaign ADD CONSTRAINT fk_crm_campaign_template
-            FOREIGN KEY (template_id) REFERENCES customer360.crm_email_templates(template_id) ON DELETE SET NULL;
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE SET NULL',
+            'customer360', 'crm_campaign', 'fk_crm_campaign_template',
+            'template_id', 'customer360', 'crm_email_templates', 'template_id'
+        );
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_approved_by' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
-        ALTER TABLE customer360.crm_campaign ADD CONSTRAINT fk_crm_campaign_approved_by
-            FOREIGN KEY (approved_by) REFERENCES customer360.sys_user(user_id);
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I)',
+            'customer360', 'crm_campaign', 'fk_crm_campaign_approved_by',
+            'approved_by', 'customer360', 'sys_user', 'user_id'
+        );
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_crm_campaign_approval_status' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
-        ALTER TABLE customer360.crm_campaign ADD CONSTRAINT chk_crm_campaign_approval_status
-            CHECK (approval_status IN ('Draft', 'InReview', 'Approved', 'Rejected'));
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I CHECK (approval_status IN (''Draft'', ''InReview'', ''Approved'', ''Rejected''))',
+            'customer360', 'crm_campaign', 'chk_crm_campaign_approval_status'
+        );
     END IF;
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_crm_campaign_segment ON customer360.crm_campaign (segment_id);
 CREATE INDEX IF NOT EXISTS idx_crm_campaign_template ON customer360.crm_campaign (template_id);
 
--- Bumped by CampaignDraftRepository on every approve/reject/edit_draft write;
--- backs its optimistic-concurrency guard (re-reads this column immediately
--- before committing to detect a concurrent reviewer's write).
-ALTER TABLE customer360.crm_campaign
-    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT now();
-
--- Give crm_lead the lead_source_id relation the sync engine populates.
-ALTER TABLE customer360.crm_lead
-    ADD COLUMN IF NOT EXISTS lead_source_id UUID;
-
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_lead_lead_source' AND conrelid = 'customer360.crm_lead'::regclass) THEN
-        ALTER TABLE customer360.crm_lead ADD CONSTRAINT fk_crm_lead_lead_source
-            FOREIGN KEY (lead_source_id) REFERENCES customer360.crm_lead_source(lead_source_id) ON DELETE SET NULL;
+        EXECUTE format(
+            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE SET NULL',
+            'customer360', 'crm_lead', 'fk_crm_lead_lead_source',
+            'lead_source_id', 'customer360', 'crm_lead_source', 'lead_source_id'
+        );
     END IF;
 END $$;
 
@@ -3202,9 +3169,11 @@ DECLARE
     tenant_tables TEXT[] := ARRAY[
         'sys_organization',
         'sys_user',
+        'sys_userinfo',
         'sys_role',
         'sys_audit_log',
         'crm_campaign',
+        'crm_campaign_performance_daily',
         'crm_campaign_member',
         'crm_lead',
         'crm_lead_source',
@@ -3232,12 +3201,13 @@ DECLARE
         'crm_segment_sync_runs',
         'cdp_campaign_dispatch_logs',
         'crm_email_provider_config',
-        'cdp_email_suppression'
+        'cdp_email_suppression',
+        'sys_data_source'
     ];
 BEGIN
     FOREACH t IN ARRAY tenant_tables LOOP
-        EXECUTE format('ALTER TABLE customer360.%I ENABLE ROW LEVEL SECURITY;', t);
-        EXECUTE format('ALTER TABLE customer360.%I FORCE ROW LEVEL SECURITY;', t);
+        EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY;', 'customer360', t);
+        EXECUTE format('ALTER TABLE %I.%I FORCE ROW LEVEL SECURITY;', 'customer360', t);
         EXECUTE format('DROP POLICY IF EXISTS tenant_policy ON customer360.%I;', t);
         EXECUTE format(
             'CREATE POLICY tenant_policy ON customer360.%I
