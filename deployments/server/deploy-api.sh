@@ -152,7 +152,7 @@ echo ">> Installing Docker (if needed), building, and (re)starting the container
 PW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
 REDIS_PW_B64="$(printf %s "${REDIS_PASS:-}" | base64 | tr -d '\n')"
 KC_SECRET_B64="$(printf %s "$KC_SECRET" | base64 | tr -d '\n')"
-EVENT_QUERY_MAX_DAYS="${EVENT_QUERY_MAX_DAYS:-90}"
+EVENT_QUERY_MAX_DAYS="${EVENT_QUERY_MAX_DAYS:-180}"
 # Event-S3 read config from ../storage. EVENT_S3_BUCKET stays empty on purpose:
 # empty = per-source read mode (bucket data-tracking-<source_id>); endpoint/region/
 # creds are still needed to reach those buckets.
@@ -177,7 +177,7 @@ REDIS_HOST="${A[6]:-}"; REDIS_PORT="${A[7]:-}"; REDIS_PW="$(printf %s "${A[8]:-}
 SSO_LOGIN="${A[9]:-false}"; SSO_URL="${A[10]:-}"; KC_REALM="${A[11]:-}"; KC_CLIENT="${A[12]:-}"; KC_SECRET="$(printf %s "${A[13]:-}" | base64 -d 2>/dev/null || true)"
 DEPLOY_MODE="${A[14]:-build}"; IMAGE="${A[15]:-}"; GHCR_USER="${A[16]:-token}"; GHCR_TOKEN="$(printf %s "${A[17]:-}" | base64 -d 2>/dev/null || true)"
 OTEL_B64="${A[18]:-}"
-EVENT_QUERY_MAX_DAYS="${A[19]:-90}"
+EVENT_QUERY_MAX_DAYS="${A[19]:-180}"
 EVENT_S3_BUCKET="${A[20]:-}"
 EVENT_RAW_PREFIX="${A[21]:-events}"
 EVENT_S3_ENDPOINT_URL="${A[22]:-}"

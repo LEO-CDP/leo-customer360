@@ -11,6 +11,7 @@ import polars as pl
 from botocore.client import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from core.config import Settings
@@ -19,6 +20,10 @@ from core.models.system import SysDataSource
 
 class EventQueryError(RuntimeError):
     """Raised when the event lake cannot be queried."""
+
+
+class EventDataSourceError(EventQueryError):
+    """Raised when a requested data source is not valid for the tenant."""
 
 
 class EventQueryRepository:
@@ -41,6 +46,7 @@ class EventQueryRepository:
         channel: Optional[str] = None,
         event_category: Optional[str] = None,
         event_name: Optional[str] = None,
+        data_source_id: Optional[UUID] = None,
     ) -> list[dict[str, Any]]:
         now = datetime.now(timezone.utc)
         bounded_days = min(max(1, int(days)), max(1, int(self.settings.event_query_max_days)))
@@ -49,7 +55,7 @@ class EventQueryRepository:
             lower_bound = max(lower_bound, _as_utc(event_time_from))
         upper_bound = now
 
-        source_ids = self._tenant_source_ids(db, tenant_id)
+        source_ids = self._tenant_source_ids(db, tenant_id, data_source_id)
         rows: list[dict[str, Any]] = []
         for source_id in source_ids:
             for object_key in self._list_object_keys(source_id, tenant_id, lower_bound, upper_bound):
@@ -58,34 +64,37 @@ class EventQueryRepository:
         if not rows:
             return []
 
-        frame = pl.from_dicts(rows, infer_schema_length=None)
-        frame = frame.with_columns(
-            [
-                pl.col("event_time").str.to_datetime(time_zone="UTC", strict=False),
-                pl.col("created_at").str.to_datetime(time_zone="UTC", strict=False),
-            ]
-        ).filter(
-            pl.col("event_time").is_not_null()
-            & (pl.col("event_time") >= lower_bound)
-            & (pl.col("event_time") <= upper_bound)
-        )
+        try:
+            frame = pl.from_dicts(rows, infer_schema_length=None)
+            frame = frame.with_columns(
+                [
+                    pl.col("event_time").str.to_datetime(time_zone="UTC", strict=False),
+                    pl.col("created_at").str.to_datetime(time_zone="UTC", strict=False),
+                ]
+            ).filter(
+                pl.col("event_time").is_not_null()
+                & (pl.col("event_time") >= lower_bound)
+                & (pl.col("event_time") <= upper_bound)
+            )
 
-        filters = {
-            "master_profile_id": str(master_profile_id) if master_profile_id else None,
-            "domain": domain,
-            "channel": channel,
-            "event_category": event_category,
-            "event_name": event_name,
-        }
-        for column, value in filters.items():
-            if value is not None:
-                frame = frame.filter(pl.col(column) == value)
+            filters = {
+                "master_profile_id": str(master_profile_id) if master_profile_id else None,
+                "domain": domain,
+                "channel": channel,
+                "event_category": event_category,
+                "event_name": event_name,
+            }
+            for column, value in filters.items():
+                if value is not None:
+                    frame = frame.filter(pl.col(column) == value)
 
-        return (
-            frame.sort(["event_time", "event_id"], descending=[True, True])
-            .head(limit)
-            .to_dicts()
-        )
+            return (
+                frame.sort(["event_time", "event_id"], descending=[True, True])
+                .head(limit)
+                .to_dicts()
+            )
+        except pl.exceptions.PolarsError as exc:
+            raise EventQueryError("Could not process event records") from exc
 
     def _build_s3_client(self) -> Any:
         client_kwargs: dict[str, Any] = {
@@ -116,12 +125,36 @@ class EventQueryRepository:
             raise EventQueryError("Invalid S3 client configuration") from None
 
     @staticmethod
-    def _tenant_source_ids(db: Session, tenant_id: UUID) -> list[UUID]:
+    def _tenant_source_ids(
+        db: Session,
+        tenant_id: UUID,
+        requested_source_id: Optional[UUID] = None,
+    ) -> list[UUID]:
         statement = select(SysDataSource.data_source_id).where(
             SysDataSource.tenant_id == tenant_id,
             SysDataSource.status == 1,
         )
-        return [row[0] for row in db.execute(statement).all()]
+        if requested_source_id is not None:
+            statement = statement.where(SysDataSource.data_source_id == requested_source_id)
+        try:
+            rows = db.execute(statement).all()
+        except SQLAlchemyError as exc:
+            raise EventQueryError("Could not validate event data sources") from exc
+
+        if requested_source_id is not None and not rows:
+            raise EventDataSourceError(
+                "Data source is invalid, inactive, or not owned by the tenant"
+            )
+
+        source_ids: list[UUID] = []
+        for row in rows:
+            try:
+                source_id = row[0] if isinstance(row[0], UUID) else UUID(str(row[0]))
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise EventQueryError("Invalid data source ID stored in PostgreSQL") from exc
+            if source_id not in source_ids:
+                source_ids.append(source_id)
+        return source_ids
 
     def _list_object_keys(
         self,
@@ -151,9 +184,9 @@ class EventQueryRepository:
                             yield key
             except ClientError as exc:
                 error_code = str(exc.response.get("Error", {}).get("Code", ""))
-                if error_code in {"404", "NoSuchBucket", "NotFound"}:
-                    current_date += timedelta(days=1)
-                    continue
+                status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+                if error_code in {"404", "NoSuchBucket", "NotFound"} or status_code == 404:
+                    return
                 raise EventQueryError(
                     f"Could not list event objects for source {source_id}"
                 ) from exc
@@ -173,11 +206,20 @@ class EventQueryRepository:
         try:
             response = self.s3.get_object(Bucket=bucket, Key=object_key)
             body = response["Body"].read()
-        except (BotoCoreError, ClientError) as exc:
+        except ClientError as exc:
+            error_code = str(exc.response.get("Error", {}).get("Code", ""))
+            status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if error_code in {"404", "NoSuchBucket", "NotFound"} or status_code == 404:
+                return []
+            raise EventQueryError(f"Could not read event object {object_key}") from exc
+        except BotoCoreError as exc:
             raise EventQueryError(f"Could not read event object {object_key}") from exc
 
         if object_key.endswith(".gz"):
-            body = gzip.decompress(body)
+            try:
+                body = gzip.decompress(body)
+            except (EOFError, OSError) as exc:
+                raise EventQueryError(f"Malformed compressed event object {object_key}") from exc
         rows: list[dict[str, Any]] = []
         for line in body.splitlines():
             if not line.strip():

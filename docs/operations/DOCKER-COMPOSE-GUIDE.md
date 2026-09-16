@@ -312,7 +312,7 @@ tune per environment (dev/staging/prod). Highlights:
 | `REDIS_PASSWORD` | `change_me_redis_password` | **Change in every real environment.** Applied via `--requirepass`. |
 | `CACHE_ENABLED` | `true` | Kill switch for the whole Redis caching layer in customer360-api (fails open regardless). |
 | `CACHE_TTL_SECONDS` | `60` | Max staleness window for cached GET responses. Lower for tighter consistency, raise to cut DB load further. |
-| `CIR_POLL_INTERVAL_SECONDS` | `30` | How often the `cir` worker polls `cdp_raw_profiles_stage` for unresolved rows. |
+| `CIR_POLL_INTERVAL_SECONDS` | `90` | How often the `cir` worker polls `cdp_raw_profiles_stage` for unresolved rows. |
 | `CIR_BATCH_SIZE` | `5000` | Rows per resolution batch. |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `10` / `20` | customer360-api SQLAlchemy pool sizing — tune with expected concurrent request volume. |
 | `SSO_LOGIN` | `false` | Customer 360 API auth mode from `.env.example`; set `true` for Keycloak-protected deployments. The dev no-SSO Compose path is selected when this is `false`. |

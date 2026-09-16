@@ -7,9 +7,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
+from core.cache import cache_response
 from core.config import settings
 from core.database import get_db
-from core.repositories.event_query_repository import EventQueryError, EventQueryRepository
+from core.repositories.event_query_repository import (
+    EventDataSourceError,
+    EventQueryError,
+    EventQueryRepository,
+)
 from core.schemas.event_query import EventQueryRead
 
 router = APIRouter(prefix="/events", tags=["Behavioral Events"])
@@ -30,6 +35,7 @@ def _tenant_id_from_request(request: Request) -> uuid.UUID:
 
 
 @router.get("/", response_model=list[EventQueryRead])
+@cache_response("events/s3", ttl=settings.cache_ttl_seconds)
 def list_events_from_s3(
     request: Request,
     event_time_from: Optional[datetime] = None,
@@ -40,11 +46,12 @@ def list_events_from_s3(
     channel: Optional[str] = None,
     event_category: Optional[str] = None,
     event_name: Optional[str] = None,
+    data_source_id: Optional[uuid.UUID] = None,
+    tenant_id: uuid.UUID = Depends(_tenant_id_from_request),
     db: Session = Depends(get_db),
     repository: EventQueryRepository = Depends(get_event_query_repository),
 ) -> list[EventQueryRead]:
     """Query canonical event envelopes from the tenant's S3/MinIO source buckets."""
-    tenant_id = _tenant_id_from_request(request)
     if days > settings.event_query_max_days:
         raise HTTPException(
             status_code=422,
@@ -62,7 +69,10 @@ def list_events_from_s3(
             channel=channel,
             event_category=event_category,
             event_name=event_name,
+            data_source_id=data_source_id,
         )
+    except EventDataSourceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except EventQueryError as exc:
         raise HTTPException(status_code=503, detail="Event lake query failed") from exc
     return [EventQueryRead.model_validate(row) for row in rows]

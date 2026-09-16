@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     api_max_page_size: int = 1000
 
     event_query_max_days: int = Field(
-        default=90,
+        default=180,
         validation_alias=AliasChoices("EVENT_QUERY_MAX_DAYS", "event_query_max_days"),
     )
     # Leave empty for per-source mode: the reader then reads data-tracking-<source_id>

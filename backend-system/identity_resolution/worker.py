@@ -29,7 +29,7 @@ from dagster_defs import identity_resolution_job
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL_SECONDS = int(os.environ.get("CIR_POLL_INTERVAL_SECONDS", "30"))
+POLL_INTERVAL_SECONDS = int(os.environ.get("CIR_POLL_INTERVAL_SECONDS", "90"))
 
 
 def main() -> None:

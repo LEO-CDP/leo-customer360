@@ -814,9 +814,9 @@ DATA_SOURCES = [
         "journey_map_id": "journey-mobile-attribution",
         "touchpoint_hub_id": "touchpoint-mobile-ads",
         "security_code": "ADJ-DEMO-SECURE",
-        "total_tracked_event": 120000,
-        "avg_daily_event": 3200,
-        "avg_events_per_profile": 26.75,
+        "total_tracked_event": 0,
+        "avg_daily_event": 0,
+        "avg_events_per_profile": 0,
         "access_tokens": {"api_token": "adjust_demo_token"},
         "data_source_hosts": ["automate.adjust.com", "app.adjust.com"],
         "javascript_tags": [],
@@ -838,9 +838,9 @@ DATA_SOURCES = [
         "journey_map_id": "journey-web-analytics",
         "touchpoint_hub_id": "touchpoint-web",
         "security_code": "GA4-DEMO-SECURE",
-        "total_tracked_event": 98000,
-        "avg_daily_event": 2400,
-        "avg_events_per_profile": 18.90,
+        "total_tracked_event": 0,
+        "avg_daily_event": 0,
+        "avg_events_per_profile": 0,
         "access_tokens": {"measurement_id": "G-DEMO360"},
         "data_source_hosts": ["www.googletagmanager.com", "www.google-analytics.com", "analytics.google.com"],
         "javascript_tags": [
@@ -868,9 +868,9 @@ DATA_SOURCES = [
         "journey_map_id": "journey-c360-tracker",
         "touchpoint_hub_id": "touchpoint-c360-tracker",
         "security_code": "C360-DEMO-SECURE",
-        "total_tracked_event": 86000,
-        "avg_daily_event": 2100,
-        "avg_events_per_profile": 16.8,
+        "total_tracked_event": 0,
+        "avg_daily_event": 0,
+        "avg_events_per_profile": 0,
         "access_tokens": {"write_key": "c360_tracker_demo_key"},
         "data_source_hosts": configured_hosts(
             "C360_TRACKER_DATA_SOURCE_HOSTS",
@@ -1053,6 +1053,30 @@ def seed_data_sources(cursor) -> None:
                 data_source["data_source_hosts"],
                 data_source["javascript_tags"],
                 Json(data_source["qr_code_data"]),
+            ),
+        )
+
+
+def update_data_source_statistics(cursor, statistics_by_source: dict[str, dict[str, Any]]) -> None:
+    """Persist statistics calculated from the event objects written to S3."""
+    for source_id, statistics in statistics_by_source.items():
+        cursor.execute(
+            f"""
+            UPDATE {_table('sys_data_source')}
+            SET total_tracked_event = %s,
+                avg_daily_event = %s,
+                avg_events_per_profile = %s,
+                updated_at = now()
+            WHERE tenant_id = %s
+              AND data_source_id = %s
+              AND status = 1;
+            """,
+            (
+                statistics["total_tracked_event"],
+                statistics["avg_daily_event"],
+                statistics["avg_events_per_profile"],
+                DEMO_TENANT_ID,
+                source_id,
             ),
         )
 
@@ -2270,12 +2294,49 @@ def _build_behavioral_event(
     }
 
 
+def _calculate_event_statistics(
+    batches: dict[tuple[str, str], list[dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    """Calculate data-source metrics from the event envelopes queued for S3."""
+    source_totals: dict[str, int] = defaultdict(int)
+    source_dates: dict[str, set[str]] = defaultdict(set)
+    source_profiles: dict[str, set[str]] = defaultdict(set)
+
+    for (source_id, event_date), envelopes in batches.items():
+        source_totals[source_id] += len(envelopes)
+        source_dates[source_id].add(event_date)
+        source_profiles[source_id].update(
+            str(envelope["master_profile_id"])
+            for envelope in envelopes
+            if envelope.get("master_profile_id")
+        )
+
+    statistics_by_source: dict[str, dict[str, Any]] = {}
+    for source_slug in sorted(set(BEHAVIORAL_SOURCE_SLUGS.values())):
+        source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
+        total_events = source_totals[source_id]
+        statistics_by_source[source_id] = {
+            "total_tracked_event": total_events,
+            "avg_daily_event": round(
+                total_events / len(source_dates[source_id]), 2
+            )
+            if source_dates[source_id]
+            else 0,
+            "avg_events_per_profile": round(
+                total_events / len(source_profiles[source_id]), 2
+            )
+            if source_profiles[source_id]
+            else 0,
+        }
+    return statistics_by_source
+
+
 def seed_behavioral_events(
     event_profiles: list,
     *,
     event_count: int = BEHAVIORAL_EVENT_COUNT,
     s3_client: Any | None = None,
-) -> int:
+) -> dict[str, dict[str, Any]]:
     if not event_profiles:
         raise RuntimeError("No raw/master profile links found for behavioral events")
     profiles_by_master: dict[str, list[dict]] = defaultdict(list)
@@ -2330,8 +2391,9 @@ def seed_behavioral_events(
             Body=json.dumps({"object_id": str(object_id), "bucket": bucket, "object_key": object_key, "event_count": len(envelopes), "content_sha256": checksum, "status": "stored"}, separators=(",", ":")).encode("utf-8"),
             ContentType="application/json",
         )
+    statistics_by_source = _calculate_event_statistics(batches)
     logger.info("Seeded %d behavioral events across %d S3 object(s).", event_count, len(batches))
-    return event_count
+    return statistics_by_source
 
 
 def _new_data_s3_client() -> Any:
@@ -2478,7 +2540,9 @@ def main() -> None:
             seed_content_items(cursor, master_profiles)
             link_crm_contacts_to_master_profiles(cursor, crm_ids, master_profiles)
 
-        seed_behavioral_events(event_profiles)
+        statistics_by_source = seed_behavioral_events(event_profiles)
+        with conn.cursor() as cursor:
+            update_data_source_statistics(cursor, statistics_by_source)
         conn.commit()
         logger.info(
             "Full demo data seeded: %d master profiles enriched, %d ICP persona archetypes seeded "

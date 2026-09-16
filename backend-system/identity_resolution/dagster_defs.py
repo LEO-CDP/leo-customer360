@@ -54,7 +54,7 @@ from identity_resolution.daily_job import (  # noqa: E402
     run_daily_identity_resolution,
 )
 
-POLL_INTERVAL_SECONDS = int(os.environ.get("CIR_POLL_INTERVAL_SECONDS", "60"))
+POLL_INTERVAL_SECONDS = int(os.environ.get("CIR_POLL_INTERVAL_SECONDS", "90"))
 
 
 class IdentityResolutionConfig(Config):

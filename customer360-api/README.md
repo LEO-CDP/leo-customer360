@@ -49,7 +49,7 @@ PostgreSQL, reads immutable `events/*.jsonl.gz` objects from S3/MinIO,
 normalizes canonical envelopes with Polars, filters/sorts by `event_time`, and
 returns at most `limit` rows. It never writes event data to PostgreSQL.
 
-Configure the query connection with `EVENT_QUERY_MAX_DAYS`, optional
+Configure the query connection with `EVENT_QUERY_MAX_DAYS` (default: `180` days), optional
 `EVENT_S3_BUCKET`, `EVENT_RAW_PREFIX`, `S3_ENDPOINT_URL` or
 `ANALYTICS_S3_ENDPOINT_URL`, `S3_REGION`, S3 credentials, and
 `S3_FORCE_PATH_STYLE`.

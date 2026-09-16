@@ -32,6 +32,7 @@ import hashlib
 import json
 import logging
 import uuid
+from datetime import date, datetime
 from typing import Any, Callable, Optional
 
 import redis
@@ -48,7 +49,16 @@ _client_initialized = False
 # This is also what lets the decorator transparently skip the injected
 # SQLAlchemy `Session` (and any other non-primitive dependency) without the
 # caller having to name it explicitly.
-_CACHEABLE_PARAM_TYPES = (str, int, float, bool, uuid.UUID, type(None))
+_CACHEABLE_PARAM_TYPES = (
+    str,
+    int,
+    float,
+    bool,
+    uuid.UUID,
+    date,
+    datetime,
+    type(None),
+)
 
 
 def get_redis_client() -> Optional["redis.Redis"]:

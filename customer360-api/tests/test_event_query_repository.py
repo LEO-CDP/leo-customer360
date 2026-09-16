@@ -8,9 +8,10 @@ from types import SimpleNamespace
 from uuid import UUID
 
 from botocore.exceptions import ClientError
+import pytest
 
 from core.config import Settings
-from core.repositories.event_query_repository import EventQueryRepository
+from core.repositories.event_query_repository import EventDataSourceError, EventQueryError, EventQueryRepository
 
 
 TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -18,13 +19,19 @@ SOURCE_ID = UUID("22222222-2222-2222-2222-222222222222")
 
 
 class FakeResult:
+    def __init__(self, rows):
+        self.rows = rows
+
     def all(self):
-        return [(SOURCE_ID,)]
+        return self.rows
 
 
 class FakeDb:
+    def __init__(self, rows=None):
+        self.rows = rows if rows is not None else [(SOURCE_ID,)]
+
     def execute(self, _statement):
-        return FakeResult()
+        return FakeResult(self.rows)
 
 
 class FakePaginator:
@@ -146,3 +153,36 @@ def test_query_skips_active_sources_without_provisioned_buckets():
     )
 
     assert rows == []
+
+
+def test_query_rejects_requested_source_without_active_tenant_row_before_s3():
+    repository = EventQueryRepository(
+        Settings(event_s3_prefix="events"),
+        s3_client=MissingBucketS3(b"", "events/missing.jsonl.gz"),
+    )
+
+    with pytest.raises(EventDataSourceError, match="invalid, inactive"):
+        repository.query(
+            FakeDb(rows=[]),
+            TENANT_ID,
+            data_source_id=SOURCE_ID,
+            event_time_from=datetime.now(timezone.utc) - timedelta(days=1),
+            days=1,
+            limit=1000,
+        )
+
+
+def test_query_rejects_invalid_source_id_from_postgresql_before_s3():
+    repository = EventQueryRepository(
+        Settings(event_s3_prefix="events"),
+        s3_client=MissingBucketS3(b"", "events/missing.jsonl.gz"),
+    )
+
+    with pytest.raises(EventQueryError, match="Invalid data source ID"):
+        repository.query(
+            FakeDb(rows=[("not-a-uuid",)]),
+            TENANT_ID,
+            event_time_from=datetime.now(timezone.utc) - timedelta(days=1),
+            days=1,
+            limit=1000,
+        )
