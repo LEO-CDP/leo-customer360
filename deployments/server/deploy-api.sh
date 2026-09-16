@@ -153,33 +153,41 @@ PW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
 REDIS_PW_B64="$(printf %s "${REDIS_PASS:-}" | base64 | tr -d '\n')"
 KC_SECRET_B64="$(printf %s "$KC_SECRET" | base64 | tr -d '\n')"
 EVENT_QUERY_MAX_DAYS="${EVENT_QUERY_MAX_DAYS:-90}"
+# Event-S3 read config from ../storage. EVENT_S3_BUCKET stays empty on purpose:
+# empty = per-source read mode (bucket data-tracking-<source_id>); endpoint/region/
+# creds are still needed to reach those buckets.
+store="../storage"
+EVENT_S3_ENDPOINT_URL="${ANALYTICS_S3_ENDPOINT_URL:-${S3_ENDPOINT_URL:-$(tfval s3_endpoint "$store/overlays/$ENV.tfvars")}}"
+EVENT_S3_REGION="${S3_REGION:-$(tfval region "$store/overlays/$ENV.tfvars")}"; EVENT_S3_REGION="${EVENT_S3_REGION:-us-east-1}"
 EVENT_S3_BUCKET="${EVENT_S3_BUCKET:-}"
 EVENT_RAW_PREFIX="${EVENT_RAW_PREFIX:-events}"
-EVENT_S3_ENDPOINT_URL="${ANALYTICS_S3_ENDPOINT_URL:-${S3_ENDPOINT_URL:-}}"
-EVENT_S3_REGION="${S3_REGION:-us-east-1}"
-# A real region is a short lowercase token (e.g. us-east-1). Reject anything else: a
-# contaminated S3_REGION (once a base64 SMTP blob leaked in via the env) 500s every
-# /events query with boto3 InvalidRegionError AND bleeds a secret into api.env/logs.
-[[ "$EVENT_S3_REGION" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: S3_REGION='${EVENT_S3_REGION:0:24}...' is not a region (expected e.g. us-east-1) -- check your env / smtp.$ENV.local.env." >&2; exit 1; }
-EVENT_S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-}"
-EVENT_S3_SECRET_B64="$(printf %s "${S3_SECRET_ACCESS_KEY:-}" | base64 | tr -d '\n')"
-EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-false}"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" < <(declare -f docker_pull_retry; cat <<'REMOTE'
+EVENT_S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-${TF_VAR_access_key:-$(tfval access_key "$store/terraform.tfvars")}}"
+EVENT_S3_SECRET_B64="$(printf %s "${S3_SECRET_ACCESS_KEY:-${TF_VAR_secret_key:-$(tfval secret_key "$store/terraform.tfvars")}}" | base64 | tr -d '\n')"
+EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-true}"
+# Region must be a short lowercase token (boto3 rejects anything else).
+[[ "$EVENT_S3_REGION" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: S3_REGION='${EVENT_S3_REGION:0:24}...' is not a region (expected e.g. us-east-1)." >&2; exit 1; }
+# ssh flattens argv and silently drops empty args (shifting later fields); pass one
+# base64 newline-joined blob so empties survive, split remotely with mapfile.
+ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" | base64 | tr -d '\r\n')"
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ARGV_B64" < <(declare -f docker_pull_retry; cat <<'REMOTE'
 set -euo pipefail
-DB_HOST="$1"; DB_PORT="$2"; DB_NAME="$3"; DB_USER="$4"; DB_PW="$(printf %s "$5" | base64 -d)"; DAG_HOST="$6"
-REDIS_HOST="$7"; REDIS_PORT="$8"; REDIS_PW="$(printf %s "${9:-}" | base64 -d 2>/dev/null || true)"
-SSO_LOGIN="${10:-false}"; SSO_URL="${11:-}"; KC_REALM="${12:-}"; KC_CLIENT="${13:-}"; KC_SECRET="$(printf %s "${14:-}" | base64 -d 2>/dev/null || true)"
-DEPLOY_MODE="${15:-build}"; IMAGE="${16:-}"; GHCR_USER="${17:-token}"; GHCR_TOKEN="$(printf %s "${18:-}" | base64 -d 2>/dev/null || true)"
-OTEL_B64="${19:-}"
-EVENT_QUERY_MAX_DAYS="${20:-90}"
-EVENT_S3_BUCKET="${21:-}"
-EVENT_RAW_PREFIX="${22:-events}"
-EVENT_S3_ENDPOINT_URL="${23:-}"
-EVENT_S3_REGION="${24:-us-east-1}"
-EVENT_S3_ACCESS_KEY_ID="${25:-}"
-EVENT_S3_SECRET_ACCESS_KEY="$(printf %s "${26:-}" | base64 -d 2>/dev/null || true)"
-EVENT_S3_FORCE_PATH_STYLE="${27:-false}"
-SMTP_B64="${28:-}"
+mapfile -t A < <(printf %s "${1:-}" | base64 -d)   # fields in order, empties preserved
+DB_HOST="${A[0]}"; DB_PORT="${A[1]}"; DB_NAME="${A[2]}"; DB_USER="${A[3]}"; DB_PW="$(printf %s "${A[4]}" | base64 -d)"; DAG_HOST="${A[5]}"
+REDIS_HOST="${A[6]:-}"; REDIS_PORT="${A[7]:-}"; REDIS_PW="$(printf %s "${A[8]:-}" | base64 -d 2>/dev/null || true)"
+SSO_LOGIN="${A[9]:-false}"; SSO_URL="${A[10]:-}"; KC_REALM="${A[11]:-}"; KC_CLIENT="${A[12]:-}"; KC_SECRET="$(printf %s "${A[13]:-}" | base64 -d 2>/dev/null || true)"
+DEPLOY_MODE="${A[14]:-build}"; IMAGE="${A[15]:-}"; GHCR_USER="${A[16]:-token}"; GHCR_TOKEN="$(printf %s "${A[17]:-}" | base64 -d 2>/dev/null || true)"
+OTEL_B64="${A[18]:-}"
+EVENT_QUERY_MAX_DAYS="${A[19]:-90}"
+EVENT_S3_BUCKET="${A[20]:-}"
+EVENT_RAW_PREFIX="${A[21]:-events}"
+EVENT_S3_ENDPOINT_URL="${A[22]:-}"
+EVENT_S3_REGION="${A[23]:-us-east-1}"
+# Re-check post-transport: fail loud if a non-region value ever lands here.
+[[ "$EVENT_S3_REGION" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: received S3_REGION is not a region ('${EVENT_S3_REGION:0:16}...') -- deploy arg transport corrupted." >&2; exit 1; }
+EVENT_S3_ACCESS_KEY_ID="${A[24]:-}"
+EVENT_S3_SECRET_ACCESS_KEY="$(printf %s "${A[25]:-}" | base64 -d 2>/dev/null || true)"
+EVENT_S3_FORCE_PATH_STYLE="${A[26]:-false}"
+SMTP_B64="${A[27]:-}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
