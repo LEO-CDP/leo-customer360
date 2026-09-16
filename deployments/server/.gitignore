@@ -3,6 +3,7 @@ terraform.tfvars
 *.auto.tfvars
 *.tfvars.json
 .env
+smtp.*.local.env
 
 # State (may contain secrets in plaintext).
 # Per-env workspace state lives under terraform.tfstate.d/<env>/.

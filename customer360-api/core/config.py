@@ -190,6 +190,36 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DAGSTER_EMAIL_ENGINE_REPOSITORY_NAME", "dagster_email_engine_repository_name"),
     )
 
+    # --- Email dispatch (SMTP). Mirrors the env the backend-system/email_engine
+    #     sender reads; here it backs the GET /metadata/smtp health probe. This is
+    #     the SYSTEM/env config (email_engine's fallback), not a tenant's
+    #     crm_email_provider_config DB row. 'mock' -> the probe reports 'disabled'.
+    email_dispatch_adapter: str = Field(
+        default="mock",
+        validation_alias=AliasChoices("EMAIL_DISPATCH_ADAPTER", "email_dispatch_adapter"),
+    )
+    smtp_host: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("SMTP_HOST", "smtp_host")
+    )
+    smtp_port: int = Field(
+        default=587, validation_alias=AliasChoices("SMTP_PORT", "smtp_port")
+    )
+    smtp_username: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("SMTP_USERNAME", "smtp_username")
+    )
+    smtp_password: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("SMTP_PASSWORD", "smtp_password")
+    )
+    smtp_use_tls: bool = Field(
+        default=True, validation_alias=AliasChoices("SMTP_USE_TLS", "smtp_use_tls")
+    )
+    smtp_timeout_seconds: int = Field(
+        default=10, validation_alias=AliasChoices("SMTP_TIMEOUT_SECONDS", "smtp_timeout_seconds")
+    )
+    email_from_address: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("EMAIL_FROM_ADDRESS", "email_from_address")
+    )
+
     dagster_campaign_activation_job_name: str = Field(
         default="campaign_activation_job",
         validation_alias=AliasChoices(
