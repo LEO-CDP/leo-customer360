@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 # Deploy customer360-api (FastAPI) onto the "api" server VM for an env.
 #   ./deploy-api.sh <uat|prod>
@@ -156,6 +157,10 @@ EVENT_S3_BUCKET="${EVENT_S3_BUCKET:-}"
 EVENT_RAW_PREFIX="${EVENT_RAW_PREFIX:-events}"
 EVENT_S3_ENDPOINT_URL="${ANALYTICS_S3_ENDPOINT_URL:-${S3_ENDPOINT_URL:-}}"
 EVENT_S3_REGION="${S3_REGION:-us-east-1}"
+# A real region is a short lowercase token (e.g. us-east-1). Reject anything else: a
+# contaminated S3_REGION (once a base64 SMTP blob leaked in via the env) 500s every
+# /events query with boto3 InvalidRegionError AND bleeds a secret into api.env/logs.
+[[ "$EVENT_S3_REGION" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: S3_REGION='${EVENT_S3_REGION:0:24}...' is not a region (expected e.g. us-east-1) -- check your env / smtp.$ENV.local.env." >&2; exit 1; }
 EVENT_S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-}"
 EVENT_S3_SECRET_B64="$(printf %s "${S3_SECRET_ACCESS_KEY:-}" | base64 | tr -d '\n')"
 EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-false}"
