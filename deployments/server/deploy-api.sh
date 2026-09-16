@@ -267,6 +267,18 @@ sudo docker rm -f customer360-api >/dev/null 2>&1 || true
 sudo docker run -d --name customer360-api --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/api.env "$RUN_IMG"
 sleep 3
 sudo docker ps --filter name=customer360-api --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
+# Post-start SMTP health (non-fatal): runs the SAME check GET /metadata/smtp
+# serves, in-container -- no HTTP auth/token needed. 'reachable' => the Brevo
+# credential authenticates; 'disabled' => mock (fine); anything else prints a
+# GH ::warning:: but never fails the deploy (email is non-critical -- a relay
+# hiccup must not block a release; flip the '*' branch to `exit 1` for a hard gate).
+SMTP_STATUS="$(sudo docker exec customer360-api python -c 'import json;from core.repositories.metadata_repository import MetadataRepository as M;print(M().get_smtp_health().get("status",""))' 2>/dev/null || echo error)"
+echo "   SMTP health (/api/v1/metadata/smtp): status=${SMTP_STATUS:-error}"
+case "$SMTP_STATUS" in
+  reachable) echo "   -> SMTP relay reachable and credential authenticates." ;;
+  disabled)  echo "   -> email dispatch is mock (no SMTP configured for this env)." ;;
+  *) echo "::warning::customer360-api SMTP health: status=${SMTP_STATUS:-error} (email may not send -- check the env's smtp.<env>.env / BREVO_SMTP_PASSWORD secret)" ;;
+esac
 REMOTE
 )
 
