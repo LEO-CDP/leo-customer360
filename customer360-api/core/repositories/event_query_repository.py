@@ -89,6 +89,7 @@ class EventQueryRepository:
 
     def _build_s3_client(self) -> Any:
         client_kwargs: dict[str, Any] = {
+            # Must be a valid AWS region token; boto3 rejects any other value.
             "region_name": self.settings.event_s3_region,
             "verify": self.settings.event_s3_verify_ssl,
             "config": Config(
