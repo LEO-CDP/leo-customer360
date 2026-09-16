@@ -195,7 +195,7 @@ def test_count_jsonl_records_supports_gzip_bronze_objects():
     assert aggregation.count_jsonl_records(body, "hour/events.jsonl.gz") == 2
 
 
-def test_normalize_event_record_matches_cdp_raw_events_contract():
+def test_normalize_event_record_matches_governed_event_contract():
     normalized = aggregation.normalize_event_record(
         {
             "schema_version": 1,

@@ -379,7 +379,7 @@ def reset_demo_data(cursor) -> None:
 
     Also clears every OTHER table that FK-references cdp_master_profiles /
     cdp_raw_profiles_stage and gets populated by
-    scripts/seed_full_demo_data.py (cdp_raw_events, crm_transactions,
+    scripts/seed_full_demo_data.py (S3 event objects, crm_transactions,
     crm_customer_contacts, cdp_relations) -- those must be deleted BEFORE
     cdp_master_profiles/cdp_raw_profiles_stage or re-running this script
     after seed_full_demo_data.py has run raises a ForeignKeyViolation (the

@@ -118,9 +118,9 @@ flowchart TB
 
 ### 3.2 Data Flow: Ingest → Identity Resolution → Activation
 
-1. **Raw profile ingestion** (`cdp_raw_profiles_stage`, `cdp_raw_events`)
-   - External services (Google Analytics, POS, CRM,...) send events or profile snapshots.
-   - Land in staging tables with `source_system`, `domain` (`retail`/`banking`/`travel`/`real_estate`), and optional PII (email, phone, name).
+1. **Profile and event ingestion** (`cdp_raw_profiles_stage` plus S3/MinIO event objects)
+    - External services (Google Analytics, POS, CRM,...) send events or profile snapshots.
+    - Profile snapshots land in PostgreSQL staging with `source_system`, `domain` (`retail`/`banking`/`travel`/`real_estate`), and optional PII (email, phone, name); behavioral events remain immutable in S3/MinIO.
    - Status tracked via `status_code` / `cdp_id_resolution_status`.
 
 2. **Identity Resolution (CIR)** — [`backend-system/identity_resolution/`](../../backend-system/identity_resolution)
@@ -292,11 +292,13 @@ Records which raw profile was merged into which master profile, when, and by wha
 - `match_method`, `match_confidence`, matched attributes.
 - `matched_at` timestamp.
 
-#### `cdp_raw_events` — Behavioral event fact table (partitioned)
-Behavioral events from all sources, partitioned by `event_time` for scale.
-- `master_profile_id` (nullable until the owning raw profile is resolved).
-- `event_type`: `install`, `login`, `purchase`, `kyc_completed`, ...
-- `event_data JSONB`, plus geo context columns (PostGIS) for location-aware domains (real estate, retail, travel).
+#### S3/MinIO event lake — Canonical behavioral event history
+Behavioral events from all sources are stored as immutable versioned JSONL Bronze
+objects and compacted Silver Parquet partitions by `event_time` for scale.
+- The canonical envelope carries `tenant_id`, `data_source_id`, identity fields,
+    event taxonomy, timestamps, and the source-specific `payload`.
+- Profile timelines and analytics query S3 through the authorized event query
+    repository; PostgreSQL stores identity, CRM, and rebuildable projections only.
 
 ### 5.2 CRM Journey Graph
 

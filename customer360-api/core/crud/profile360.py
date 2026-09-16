@@ -1,23 +1,24 @@
-"""Aggregate queries that power the Customer 360 profile dashboard widgets
-(engagement summary, cross-channel activity, top interests, unified
-timeline) by combining ``cdp_raw_events``, ``crm_transactions`` and
-``crm_customer_contacts`` for a single resolved master profile. Kept
-separate from core/crud/identity.py (tenant-wide CIR reporting) since these
-are all scoped to one master_profile_id.
+"""Aggregate Customer 360 profile dashboard metrics from S3 events and PostgreSQL.
+
+Behavioral events are read from the tenant-scoped S3 event lake. PostgreSQL is
+used only for resolved profiles, CRM transactions, and customer contacts.
 """
 
+from collections import Counter
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from core.config import settings
+from core.models.identity import CdpMasterProfile
+from core.repositories.event_query_repository import EventQueryRepository
 
 _SCHEMA = settings.db_schema
 
-# Friendly display labels for cdp_raw_events.event_category values.
+# Friendly display labels for canonical S3 event categories.
 EVENT_CATEGORY_LABELS = {
     "GENERAL": "General Activity",
     "EDUCATION": "Education",
@@ -30,7 +31,7 @@ EVENT_CATEGORY_LABELS = {
     "SERVICE_INDUSTRY": "Service Industry",
 }
 
-# Friendly display titles for cdp_raw_events.event_name values.
+# Friendly display titles for canonical S3 event names.
 EVENT_NAME_TITLES = {
     "user-login": "Logged in",
     "page-view": "Viewed a page",
@@ -53,18 +54,55 @@ def _window_start(days: int) -> datetime:
     return datetime.now(timezone.utc) - timedelta(days=days)
 
 
+def _profile_event_rows(
+    db: Session,
+    master_profile_id: uuid.UUID,
+    *,
+    days: int,
+    limit: int | None,
+) -> list[dict]:
+    tenant_id = db.execute(
+        select(CdpMasterProfile.tenant_id).where(
+            CdpMasterProfile.master_profile_id == master_profile_id
+        )
+    ).scalar_one_or_none()
+    if tenant_id is None:
+        return []
+    return EventQueryRepository(settings).query(
+        db,
+        tenant_id,
+        days=days,
+        limit=limit,
+        master_profile_id=master_profile_id,
+    )
+
+
+def _as_datetime(value: object) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def get_engagement_summary(
     db: Session, master_profile_id: uuid.UUID, days: int = 90
 ) -> dict:
     since = _window_start(days)
-
-    logins = db.execute(
-        text(
-            f"SELECT COUNT(*) FROM {_SCHEMA}.cdp_raw_events "
-            f"WHERE master_profile_id = :mpid AND event_name = 'user-login' AND event_time >= :since"
-        ),
-        {"mpid": str(master_profile_id), "since": since},
-    ).scalar_one()
+    events = _profile_event_rows(db, master_profile_id, days=days, limit=None)
+    logins = sum(
+        1
+        for event in events
+        if event.get("event_name") == "user-login"
+        and (_as_datetime(event.get("event_time")) or datetime.min.replace(tzinfo=timezone.utc)) >= since
+    )
 
     txn_row = db.execute(
         text(
@@ -76,18 +114,34 @@ def get_engagement_summary(
         {"mpid": str(master_profile_id), "since": since},
     ).mappings().first()
 
-    last_interaction = db.execute(
+    event_times = [
+        event_time
+        for event in events
+        if (event_time := _as_datetime(event.get("event_time"))) is not None
+    ]
+    transaction_time = db.execute(
         text(
-            f"""
-            SELECT GREATEST(
-                (SELECT MAX(event_time) FROM {_SCHEMA}.cdp_raw_events WHERE master_profile_id = :mpid),
-                (SELECT MAX(transaction_time) FROM {_SCHEMA}.crm_transactions WHERE master_profile_id = :mpid),
-                (SELECT MAX(contact_date) FROM {_SCHEMA}.crm_customer_contacts WHERE master_profile_id = :mpid)
-            ) AS last_at
-            """
+            f"SELECT MAX(transaction_time) FROM {_SCHEMA}.crm_transactions "
+            "WHERE master_profile_id = :mpid"
         ),
         {"mpid": str(master_profile_id)},
     ).scalar_one()
+    contact_time = db.execute(
+        text(
+            f"SELECT MAX(contact_date) FROM {_SCHEMA}.crm_customer_contacts "
+            "WHERE master_profile_id = :mpid"
+        ),
+        {"mpid": str(master_profile_id)},
+    ).scalar_one()
+    interaction_times = [
+        *event_times,
+        *[
+            normalized
+            for value in (transaction_time, contact_time)
+            if (normalized := _as_datetime(value)) is not None
+        ],
+    ]
+    last_interaction = max(interaction_times, default=None)
 
     return {
         "period_days": days,
@@ -102,22 +156,14 @@ def get_engagement_summary(
 
 def get_channel_activity(db: Session, master_profile_id: uuid.UUID, days: int = 90) -> dict:
     since = _window_start(days)
-
-    app_sessions = db.execute(
-        text(
-            f"SELECT COUNT(*) FROM {_SCHEMA}.cdp_raw_events "
-            f"WHERE master_profile_id = :mpid AND channel = 'mobile_app' AND event_time >= :since"
-        ),
-        {"mpid": str(master_profile_id), "since": since},
-    ).scalar_one()
-
-    web_sessions = db.execute(
-        text(
-            f"SELECT COUNT(*) FROM {_SCHEMA}.cdp_raw_events "
-            f"WHERE master_profile_id = :mpid AND channel = 'web' AND event_time >= :since"
-        ),
-        {"mpid": str(master_profile_id), "since": since},
-    ).scalar_one()
+    events = _profile_event_rows(db, master_profile_id, days=days, limit=None)
+    recent_events = [
+        event
+        for event in events
+        if (_as_datetime(event.get("event_time")) or datetime.min.replace(tzinfo=timezone.utc)) >= since
+    ]
+    app_sessions = sum(1 for event in recent_events if event.get("channel") == "mobile_app")
+    web_sessions = sum(1 for event in recent_events if event.get("channel") == "web")
 
     customer_service_contacts = db.execute(
         text(
@@ -145,16 +191,19 @@ def get_channel_activity(db: Session, master_profile_id: uuid.UUID, days: int = 
 
 
 def get_top_interests(db: Session, master_profile_id: uuid.UUID, limit: int = 5) -> list[dict]:
-    rows = db.execute(
-        text(
-            f"SELECT event_category, COUNT(*) AS cnt FROM {_SCHEMA}.cdp_raw_events "
-            f"WHERE master_profile_id = :mpid GROUP BY event_category ORDER BY cnt DESC LIMIT :limit"
-        ),
-        {"mpid": str(master_profile_id), "limit": limit},
-    ).all()
+    counts = Counter(
+        event.get("event_category", "GENERAL")
+        for event in _profile_event_rows(
+            db,
+            master_profile_id,
+            days=settings.event_query_max_days,
+            limit=None,
+        )
+    )
+    rows = counts.most_common(limit)
     if not rows:
         return []
-    max_count = max(cnt for _, cnt in rows)
+    max_count = rows[0][1]
     return [
         {
             "category": category,
@@ -169,17 +218,12 @@ def get_top_interests(db: Session, master_profile_id: uuid.UUID, limit: int = 5)
 def get_timeline(db: Session, master_profile_id: uuid.UUID, limit: int = 20) -> list[dict]:
     mpid = str(master_profile_id)
 
-    events = db.execute(
-        text(
-            f"""
-            SELECT event_category, event_name, channel, event_value, currency, event_time
-            FROM {_SCHEMA}.cdp_raw_events
-            WHERE master_profile_id = :mpid
-            ORDER BY event_time DESC LIMIT :limit
-            """
-        ),
-        {"mpid": mpid, "limit": limit},
-    ).mappings().all()
+    events = _profile_event_rows(
+        db,
+        master_profile_id,
+        days=settings.event_query_max_days,
+        limit=limit,
+    )
 
     transactions = db.execute(
         text(
@@ -207,16 +251,18 @@ def get_timeline(db: Session, master_profile_id: uuid.UUID, limit: int = 20) -> 
 
     entries: list[dict] = []
     for row in events:
-        title = EVENT_NAME_TITLES.get(row["event_name"], row["event_name"].replace("-", " ").title())
+        event_name = row.get("event_name") or "event"
+        event_category = row.get("event_category") or "GENERAL"
+        title = EVENT_NAME_TITLES.get(event_name, event_name.replace("-", " ").title())
         entries.append(
             {
                 "kind": "event",
                 "title": title,
-                "subtitle": EVENT_CATEGORY_LABELS.get(row["event_category"], row["event_category"]),
-                "channel": row["channel"],
-                "amount": row["event_value"],
-                "currency": row["currency"],
-                "occurred_at": row["event_time"],
+                "subtitle": EVENT_CATEGORY_LABELS.get(event_category, event_category),
+                "channel": row.get("channel"),
+                "amount": row.get("event_value"),
+                "currency": row.get("currency"),
+                "occurred_at": _as_datetime(row.get("event_time")),
             }
         )
     for row in transactions:
@@ -245,7 +291,7 @@ def get_timeline(db: Session, master_profile_id: uuid.UUID, limit: int = 20) -> 
         )
 
     def _sort_key(entry: dict) -> datetime:
-        occurred_at = entry["occurred_at"]
+        occurred_at = _as_datetime(entry["occurred_at"])
         if occurred_at is None:
             return datetime.min.replace(tzinfo=timezone.utc)
         if occurred_at.tzinfo is None:

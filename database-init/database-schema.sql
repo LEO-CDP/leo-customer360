@@ -1775,153 +1775,6 @@ VALUES
     ('PERSONA_HISTORY_SCORE_DELTA_THRESHOLD', '5.0', 'NUMERIC', 'Minimum absolute score delta for history record', TRUE, 'system_seed')
 ON CONFLICT (config_key) DO NOTHING;
 
--- ============================================================================
--- cdp_raw_events: high-volume behavioral/transactional event fact table
--- ============================================================================
--- Range-partitioned by event_time (monthly) so a single tenant's event volume
--- can scale to billions of rows without one giant table/index: writes only
--- touch the current month's partition, old partitions can be compressed/
--- archived/dropped independently, and queries that filter on event_time get
--- automatic partition pruning.
---
--- event_category values mirror leotech.cdp.domain.schema.BehavioralEvent's
--- inner classes (General/Education/Commerce/Feedback/Finance/StockTrading/
--- Travel/RealEstate/ServiceIndustry -> upper-snake here) in core-leo-cdp, so
--- the same event vocabulary is used whether an event lands in ArangoDB
--- (cdp_trackingevent, via leo.observer.js) or here in the Postgres golden-
--- record/analytics store. See cdp_event_catalog below for the seeded core
--- event names per domain (banking, retail, real_estate, travel).
---
--- Identity columns (device_id/advertising_id/cookie_id/external_customer_id/
--- session_id) are carried directly on the event row -- NOT only reachable via
--- master_profile_id/raw_profile_id -- so high-throughput ingestion never
--- blocks waiting for Customer Identity Resolution (CIR) to link the event to
--- a resolved profile first. raw_profile_id is required at ingest time (event
--- must link to cdp_raw_profiles_stage), while master_profile_id is expected to
--- be backfilled asynchronously once CIR resolves the identity.
--- ============================================================================
-CREATE TABLE IF NOT EXISTS customer360.cdp_raw_events (
-    event_id UUID NOT NULL DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
-    -- Data owner: internal sys_user who created/manages this row (nullable -- almost
-    -- always NULL for high-throughput pipeline ingestion; the event's actual actor is
-    -- the resolved profile/customer, tracked separately via master_profile_id).
-    user_id UUID REFERENCES customer360.sys_user(user_id),
-    -- Business vertical this event belongs to (drives which cdp_event_catalog
-    -- rows/entity_type values are relevant). Validated against sys_domain at the
-    -- API layer, see cdp_master_profiles.domain above.
-    domain TEXT NOT NULL DEFAULT 'retail',
-
-    -- Lineage to resolved/staged profiles. raw_profile_id is required and points to
-    -- cdp_raw_profiles_stage; master_profile_id remains nullable/backfilled.
-    master_profile_id UUID REFERENCES customer360.cdp_master_profiles (master_profile_id),
-    raw_profile_id UUID NOT NULL REFERENCES customer360.cdp_raw_profiles_stage (raw_profile_id),
-
-    -- Direct identity carry, available at ingest time even before/without CIR.
-    external_customer_id TEXT,
-    device_id TEXT,
-    advertising_id TEXT,
-    cookie_id TEXT,
-    session_id TEXT,
-
-    -- Source & channel of the event.
-    source_system TEXT NOT NULL, -- 'Adjust' | 'OneSignal' | 'WebTracking' | 'CoreBanking' | 'POS' | 'PMS' | 'GDS' | ...
-    -- Optional idempotency key from ingestion caller; when present it is
-    -- unique per (tenant_id, source_system) to make repeated retries safe.
-    event_dedup_key TEXT,
-    channel TEXT, -- 'mobile_app' | 'web' | 'pos' | 'call_center' | 'branch' | 'agent' | 'ivr' | ...
-    platform TEXT, -- ios | android | web
-    ip_address INET,
-    user_agent TEXT,
-
-    -- Marketing attribution snapshot (Adjust/Web Tracking), carried directly
-    -- on the event row -- same rationale as the identity columns above -- so
-    -- campaign/revenue reporting never needs to join back to
-    -- cdp_raw_profiles_stage. Full attribution detail lives there.
-    media_source TEXT,
-    campaign TEXT,
-
-    -- Event taxonomy (see cdp_event_catalog for the governed event_name list per category).
-    event_category TEXT NOT NULL DEFAULT 'GENERAL' CHECK (
-        event_category IN (
-            'GENERAL',
-            'EDUCATION',
-            'COMMERCE',
-            'FEEDBACK',
-            'FINANCE',
-            'STOCK_TRADING',
-            'TRAVEL',
-            'REAL_ESTATE',
-            'SERVICE_INDUSTRY'
-        )
-    ),
-    event_name TEXT NOT NULL, -- e.g. page-view, purchase, apply-loan, booking, view-property
-    is_conversion BOOLEAN NOT NULL DEFAULT FALSE,
-
-    -- Generic entity reference (product/account/loan/property/booking/course/...).
-    -- Keeps this table free of dozens of per-domain columns while staying indexable.
-    entity_type TEXT, -- 'product' | 'account' | 'loan' | 'property' | 'booking' | 'course' | ...
-    entity_id TEXT,
-
-    -- Monetary value, generic across domains (purchase amount, loan amount,
-    -- booking value, transfer amount, trade amount, ...). See cdp_event_catalog.value_field.
-    event_value NUMERIC(15, 2),
-    currency TEXT DEFAULT 'USD',
-
-    -- Transaction linkage (purchase/booking/loan/trade confirmation, etc.)
-    transaction_id TEXT,
-    transaction_status TEXT,
-
-    -- Geo (optional). Useful for real-estate listing location, retail POS/store
-    -- location, travel destinations, and bank-branch visits.
-    geo_location GEOGRAPHY(POINT, 4326),
-    location_code TEXT,
-    location_name TEXT,
-
-    event_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),  -- when the event actually happened
-    event_payload JSONB,                -- full raw source payload / domain-specific attributes
-
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),           -- when the row was ingested (may lag event_time for batch/late data)
-
-    PRIMARY KEY (event_id, event_time)
-) PARTITION BY RANGE (event_time);
-
-COMMENT ON TABLE customer360.cdp_raw_events IS 'High-volume behavioral/transactional event fact table, range-partitioned monthly by event_time. Identity columns are carried directly on the row so ingestion never blocks on CIR; raw_profile_id is mandatory (linked to cdp_raw_profiles_stage) while master_profile_id is backfilled asynchronously. See cdp_event_catalog for the governed event_category/event_name vocabulary.';
-
--- Creates (idempotently) the monthly partition covering for_date, e.g.
--- customer360.cdp_raw_events_2026_07 for FOR VALUES FROM ('2026-07-01') TO ('2026-08-01').
--- Call this from a scheduled job (cron/Airflow) a month or two ahead of need;
--- the DEFAULT partition below acts as a safety net if that job falls behind.
-CREATE OR REPLACE FUNCTION customer360.ensure_cdp_raw_events_partition(for_date DATE)
-RETURNS void AS $$
-DECLARE
-    part_start DATE := date_trunc('month', for_date);
-    part_end DATE := part_start + INTERVAL '1 month';
-    part_name TEXT := 'cdp_raw_events_' || to_char(part_start, 'YYYY_MM');
-BEGIN
-    EXECUTE format(
-        'CREATE TABLE IF NOT EXISTS customer360.%I PARTITION OF customer360.cdp_raw_events FOR VALUES FROM (%L) TO (%L);',
-        part_name, part_start, part_end
-    );
-END;
-$$ LANGUAGE plpgsql;
-
--- Bootstrap a rolling window of monthly partitions (3 months back .. 12 months
--- forward from today) so ingestion works immediately after a fresh install.
-DO $$
-DECLARE
-    i INT;
-BEGIN
-    FOR i IN -3..12 LOOP
-        PERFORM customer360.ensure_cdp_raw_events_partition((CURRENT_DATE + (i || ' months')::INTERVAL)::DATE);
-    END LOOP;
-END;
-$$;
-
--- Catch-all so ingestion never fails for a month outside the bootstrapped
--- window while partition maintenance catches up.
-CREATE TABLE IF NOT EXISTS customer360.cdp_raw_events_default PARTITION OF customer360.cdp_raw_events DEFAULT;
-
 ---------------------------------------------------
 -- EVENT CATALOG (governed cross-domain event vocabulary)
 ---------------------------------------------------
@@ -1946,8 +1799,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_event_catalog (
     domain_scope TEXT NOT NULL DEFAULT 'all',
     description TEXT,
     is_conversion_default BOOLEAN NOT NULL DEFAULT FALSE,
-    -- Conceptual name of the event_payload key that should be mirrored into
-    -- cdp_raw_events.event_value for this event (documentation aid only).
+    -- Conceptual name of the payload key that should be promoted to the
+    -- canonical S3 event envelope's event_value (documentation aid only).
     value_field TEXT,
     display_order INT NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'ACTIVE',
@@ -1955,7 +1808,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_event_catalog (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-COMMENT ON TABLE customer360.cdp_event_catalog IS 'Governed vocabulary of event_category/event_name pairs (seeded below) across GENERAL/FEEDBACK/COMMERCE/FINANCE/STOCK_TRADING/TRAVEL/REAL_ESTATE. Not FK-enforced from cdp_raw_events so ingestion is never blocked by a missing catalog row; exists for discoverability/governance.';
+COMMENT ON TABLE customer360.cdp_event_catalog IS 'Governed vocabulary of event_category/event_name pairs (seeded below) across GENERAL/FEEDBACK/COMMERCE/FINANCE/STOCK_TRADING/TRAVEL/REAL_ESTATE. The catalog is not FK-enforced by the S3 event lake, so ingestion is never blocked by a missing catalog row; it exists for discoverability/governance.';
 
 ---------------------------------------------------
 -- PROFILE ATTRIBUTE METADATA REGISTRY
@@ -2368,7 +2221,8 @@ CREATE TABLE IF NOT EXISTS customer360.crm_transactions (
     -- always NULL for pipeline-imported transactions).
     user_id UUID REFERENCES customer360.sys_user (user_id),
 
-    -- Nullable + no hard NOT NULL, same async-backfill pattern as cdp_raw_events:
+    -- Nullable + no hard NOT NULL, matching the asynchronous identity-linking
+    -- pattern used by the S3 event lake:
     -- a transaction can be ingested from a source system before Customer Identity
     -- Resolution (CIR) has linked it to a resolved profile.
     master_profile_id UUID REFERENCES customer360.cdp_master_profiles(master_profile_id),
@@ -2409,7 +2263,7 @@ CREATE TABLE IF NOT EXISTS customer360.crm_transactions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-COMMENT ON TABLE customer360.crm_transactions IS 'Source-agnostic transaction fact (retail purchase, banking transfer, travel booking, ...). master_profile_id is nullable and backfilled asynchronously by CIR, the same pattern as cdp_raw_events, so ingestion is never blocked waiting for identity resolution.';
+COMMENT ON TABLE customer360.crm_transactions IS 'Source-agnostic transaction fact (retail purchase, banking transfer, travel booking, ...). master_profile_id is nullable and backfilled asynchronously by CIR, matching the S3 event lake pattern, so ingestion is never blocked waiting for identity resolution.';
 
 -- ============================================================================
 -- cdp_content_items: personalized content library (news/video/product/article)
@@ -2766,8 +2620,7 @@ WHERE
 CREATE INDEX IF NOT EXISTS idx_contacts_date ON customer360.crm_customer_contacts (contact_date);
 
 -- crm_transactions indexes: tenant timeline, resolved-profile timeline, generic
--- entity lookups, and idempotent re-ingestion protection (mirrors the
--- cdp_raw_events / cdp_profile_links index conventions above).
+-- entity lookups, and idempotent re-ingestion protection.
 CREATE INDEX IF NOT EXISTS idx_crm_transactions_tenant_time ON customer360.crm_transactions (
     tenant_id,
     transaction_time DESC
@@ -2804,104 +2657,6 @@ WHERE
 CREATE INDEX IF NOT EXISTS idx_cdp_pa_scoring_model ON customer360.cdp_profile_attributes (scoring_model_name)
 WHERE
     is_scoring_model = TRUE;
-
--- cdp_raw_events indexes: created on the partitioned parent, Postgres
--- propagates each of these automatically to every monthly partition (current
--- + future ones created via ensure_cdp_raw_events_partition()).
--- Optional idempotency key per source-system ingestion stream.
--- NOTE: event_time must be included because Postgres requires every unique
--- index on a partitioned table to include all partitioning columns
--- (cdp_raw_events is PARTITION BY RANGE (event_time)) -- so this dedups
--- (tenant_id, source_system, event_dedup_key) per event_time value rather
--- than globally across all time.
-CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_raw_events_tenant_source_dedup ON customer360.cdp_raw_events (
-    tenant_id,
-    source_system,
-    event_dedup_key,
-    event_time
-)
-WHERE
-    event_dedup_key IS NOT NULL;
--- Tenant timeline queries (most common access pattern for a Customer 360 view).
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_tenant_time ON customer360.cdp_raw_events (tenant_id, event_time DESC);
--- Event taxonomy / funnel analysis per tenant+domain.
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_taxonomy ON customer360.cdp_raw_events (
-    tenant_id,
-    domain,
-    event_category,
-    event_name,
-    event_time DESC
-);
--- Resolved-profile timeline (Customer 360 activity feed).
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_master_profile ON customer360.cdp_raw_events (
-    master_profile_id,
-    event_time DESC
-)
-WHERE
-    master_profile_id IS NOT NULL;
--- Backfill lookups from cdp_raw_profiles_stage.
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_raw_profile ON customer360.cdp_raw_events (raw_profile_id)
-WHERE
-    raw_profile_id IS NOT NULL;
--- Pre-resolution identity lookups (event arrives before/without CIR linking).
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_device_id ON customer360.cdp_raw_events (device_id)
-WHERE
-    device_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_advertising_id ON customer360.cdp_raw_events (advertising_id)
-WHERE
-    advertising_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_cookie_id ON customer360.cdp_raw_events (cookie_id)
-WHERE
-    cookie_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_external_customer_id ON customer360.cdp_raw_events (external_customer_id)
-WHERE
-    external_customer_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_session_id ON customer360.cdp_raw_events (session_id)
-WHERE
-    session_id IS NOT NULL;
--- Generic entity lookups (all events about a given product/property/booking/...).
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_entity ON customer360.cdp_raw_events (entity_type, entity_id)
-WHERE
-    entity_id IS NOT NULL;
--- Conversion funnel / revenue reporting.
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_conversion ON customer360.cdp_raw_events (tenant_id, event_time DESC)
-WHERE
-    is_conversion = TRUE;
--- Campaign performance reporting (events/conversions by media_source+campaign).
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_campaign ON customer360.cdp_raw_events (tenant_id, media_source, campaign)
-WHERE
-    campaign IS NOT NULL;
--- Point lookup by event_id alone (without needing event_time for partition pruning).
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_event_id ON customer360.cdp_raw_events (event_id);
--- Ad-hoc querying of the raw source payload.
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_payload ON customer360.cdp_raw_events USING GIN (event_payload);
--- Geo-proximity queries (property/store/destination location search).
-CREATE INDEX IF NOT EXISTS idx_cdp_raw_events_geo ON customer360.cdp_raw_events USING GIST (geo_location)
-WHERE
-    geo_location IS NOT NULL;
-
--- Event catalog: browsing by category/domain and fast active-event lookup.
-CREATE INDEX IF NOT EXISTS idx_cdp_event_catalog_category ON customer360.cdp_event_catalog (event_category);
-
-CREATE INDEX IF NOT EXISTS idx_cdp_event_catalog_domain_scope ON customer360.cdp_event_catalog (domain_scope)
-WHERE
-    status = 'ACTIVE';
-
--- Graph edges indexes
-CREATE INDEX IF NOT EXISTS idx_graph_edges_belongs_to_from_to ON customer360.graph_edges_belongs_to (from_id, to_id);
-
-CREATE INDEX IF NOT EXISTS idx_graph_edges_comes_from_from_id ON customer360.graph_edges_comes_from (from_id);
-
-CREATE INDEX IF NOT EXISTS idx_graph_edges_converted_from_id ON customer360.graph_edges_converted (from_id);
-
-CREATE INDEX IF NOT EXISTS idx_graph_edges_follows_embedding_ivfflat ON customer360.graph_edges_follows USING ivfflat (embedding vector_cosine_ops)
-WITH (lists = 100);
-
-CREATE INDEX IF NOT EXISTS idx_graph_edges_is_driven_by_created_at ON customer360.graph_edges_is_driven_by (created_at);
 
 CREATE INDEX IF NOT EXISTS idx_graph_edges_belongs_to_industry_created_at ON customer360.graph_edges_belongs_to_industry (created_at);
 
@@ -3188,7 +2943,6 @@ DECLARE
         'cdp_profile_links',
         'cdp_identity_index',
         'cdp_profile_merge_history',
-        'cdp_raw_events',
         'cdp_relations',
         'cdp_domain_profiles',
         'cdp_segments',

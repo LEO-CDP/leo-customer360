@@ -17,8 +17,8 @@ real ``master_profile_id`` values. It covers:
 3. ``crm_customer_contacts`` (CS/call-center/email interaction log) and
     ``crm_transactions`` (retail purchases, education enrollments/tuition payments --
    including a couple of NOT-YET-identity-resolved rows with
-   ``master_profile_id = NULL``, the same async-backfill pattern used by
-   ``cdp_raw_events``).
+   ``master_profile_id = NULL``, the same async-backfill pattern used by the
+   S3 event lake).
 4. ``graph_edges``: a handful of edges spanning several relation partitions
    (``belongs_to``, ``converted``, ``has``, ``belongs_to_industry``,
    ``is_connected_to``, ``is_from``).
@@ -232,10 +232,7 @@ def stable_rng(key: str) -> random.Random:
 
 
 def realistic_event_days_ago(rng: random.Random, max_days: int = 365) -> int:
-    """Evenly-spread day offset across ``max_days`` (defaults to 365 days / 1 year) so
-    seeded cdp_raw_events give the analytics dashboard's Event Activity Heatmap
-    real daily-tracking coverage across the full year, instead of clustering
-    almost entirely in the most recent week."""
+    """Spread S3 event day offsets across a year for realistic heatmap coverage."""
     quarter = max(1, max_days // 4)
     bucket = rng.random()
     if bucket < 0.30:
@@ -1241,7 +1238,8 @@ def seed_transactions(cursor, master_profiles: list) -> None:
             )
 
     # A couple of NOT-YET-resolved transactions (master_profile_id = NULL) --
-    # demonstrates the same async-backfill pattern as cdp_raw_events, and the
+    # demonstrates the same asynchronous identity-linking pattern as the S3
+    # event lake.
     # ux_crm_transactions_tenant_source dedup-safety unique index.
     rng = stable_rng("unresolved_transactions")
     for i in range(2):
@@ -2475,19 +2473,6 @@ def seed_new_data(cursor, *, event_count: int = NEW_DATA_EVENT_COUNT) -> int:
         source_id = source_ids[index % len(source_ids)]
         event_time = start + timedelta(seconds=rng.randrange(NEW_DATA_LOOKBACK_HOURS * 3600))
         payload, envelope = _new_data_event(profile, source_id, event_time, rng)
-        cursor.execute(
-            f"""
-            INSERT INTO {_table('cdp_raw_events')}
-                (event_id, tenant_id, domain, master_profile_id, raw_profile_id,
-                 external_customer_id, device_id, session_id, source_system, channel,
-                 platform, event_category, event_name, is_conversion, entity_type,
-                 entity_id, event_value, currency, transaction_id, transaction_status,
-                 event_dedup_key, event_time, event_payload)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s);
-            """,
-            (payload["event_id"], DEMO_TENANT_ID, payload["domain"], payload["master_profile_id"], payload["raw_profile_id"], payload["external_customer_id"], payload["device_id"], payload["session_id"], payload["source_system"], payload["channel"], payload["platform"], payload["event_category"], payload["event_name"], payload["is_conversion"], payload["entity_type"], payload["entity_id"], payload["event_value"], payload["currency"], payload["transaction_id"], payload["transaction_status"], payload["event_dedup_key"], event_time, Json(payload)),
-        )
         batches[(source_id, event_time.date().isoformat())].append(envelope)
 
     s3 = _new_data_s3_client()

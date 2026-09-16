@@ -613,13 +613,6 @@ WITH checks AS (
 	  AND created_at < current_timestamp - INTERVAL '24 hours'
 	UNION ALL
 	SELECT
-		'unresolved_events',
-		COUNT(*)::bigint
-	FROM customer360.cdp_raw_events
-	WHERE tenant_id = current_setting('app.tenant_id')::uuid
-	  AND master_profile_id IS NULL
-	UNION ALL
-	SELECT
 		'transactions_without_profile',
 		COUNT(*)::bigint
 	FROM customer360.crm_transactions
@@ -673,7 +666,7 @@ WHERE n.nspname = 'customer360'
   AND c.relname IN (
 	  'sys_user', 'sys_userinfo', 'sys_data_source',
 	  'cdp_raw_profiles_stage', 'cdp_master_profiles', 'cdp_domain_profiles',
-	  'cdp_profile_links', 'cdp_identity_index', 'cdp_raw_events',
+	  'cdp_profile_links', 'cdp_identity_index',
 	  'cdp_segments', 'cdp_persona_archetypes', 'cdp_customer_personas',
 	  'crm_campaign', 'crm_campaign_member', 'crm_lead', 'crm_contact',
 	  'crm_account', 'crm_opportunity', 'crm_customer_contacts', 'crm_transactions'

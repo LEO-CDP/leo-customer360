@@ -555,7 +555,7 @@ def normalize_event_record(
     data_source_id: str,
     tenant_id: str,
 ) -> dict[str, Any]:
-    """Normalize canonical or legacy JSONL into the cdp_raw_events contract.
+    """Normalize canonical or legacy JSONL into the governed event contract.
 
     ``payload`` remains the complete source-specific document. Governed fields
     are derived from the envelope first and payload second; tenant ownership is

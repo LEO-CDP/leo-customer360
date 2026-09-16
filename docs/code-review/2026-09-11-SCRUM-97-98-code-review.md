@@ -19,7 +19,7 @@
 - **SCRUM-97** replaces the two placeholder Dagster jobs with real pipelines:
   - `campaign_activation` (`backend-system/campaign_activation/`): loads the campaign tenant-scoped, **hard-gates on `approval_status == 'Approved'`**, validates the template is Approved, marks the campaign `Running`, and submits an out-of-process `email_engine_job` run via Dagster GraphQL.
   - `email_engine` (`backend-system/email_engine/`): resolves segment members by `segment_tag`, filters suppressed/ineligible, renders per recipient, dispatches via a pluggable adapter (`mock` default / `smtp`), and writes an idempotent `cdp_campaign_dispatch_logs` ledger (UNIQUE `(campaign_id, master_profile_id)`, terminal rows never re-sent). Per-tenant SMTP config in `crm_email_provider_config` (DB source-of-truth, Redis-cached).
-- **SCRUM-98** adds public tracking + compliance in `customer360-api`: open-pixel, click-redirect, unsubscribe, and a provider webhook; HMAC-signed tracking tokens; events normalize into `cdp_raw_events`; hard bounce/complaint/unsubscribe add to `cdp_email_suppression`, which the send path consults.
+- **SCRUM-98** adds public tracking + compliance in `customer360-api`: open-pixel, click-redirect, unsubscribe, and a provider webhook; HMAC-signed tracking tokens; events normalize into the S3 event envelope; hard bounce/complaint/unsubscribe add to `cdp_email_suppression`, which the send path consults.
 
 **What's genuinely good (verified):** ledger idempotency (UNIQUE + `WHERE status NOT IN ('Sent','Suppressed')` never downgrades a terminal row); RLS `ENABLE`+`FORCE`+`tenant_policy` on all four new tables; public writes set `app.tenant_id` **from the signed token** (not a header) so RLS holds; constant-time HMAC compare on decode; soft bounces excluded from suppression; the approval gate is re-checked in `email_engine` (defense in depth); migrations are idempotent with rollbacks; naming matches the epic gate (`sync_segment_crm`, `email_*`, `campaign_*`, `crm_*`/`cdp_*`).
 
@@ -75,15 +75,15 @@ The `Sent` row is written *after* `adapter.send()` and committed per batch (`con
 **Fix:** tolerate only `UndefinedTable`/`relation does not exist`; on any other error, fail the batch/recipient rather than send.
 
 ### M2 — MEDIUM · Dedup is a TOCTOU check-then-insert (and the unique index can't back it)
-`customer360-api/core/crud/email_tracking.py:98-129` (+ `database-schema.sql` `ux_cdp_raw_events_tenant_source_dedup`) · **CONFIRMED**
+`customer360-api/core/crud/email_tracking.py:98-129` (+ the former PostgreSQL event dedup index) · **CONFIRMED**
 `_dedup_exists` SELECT then INSERT are not atomic; the only unique index includes `event_time`, while the insert uses `event_time = now()`, so two concurrent identical callbacks get different timestamps, both pass the check, and both satisfy the index. The webhook dedup key `f"{provider}:{dedup_id}"` also uses the attacker-controllable `provider` param + `message_id`.
-**Failure:** a provider's two simultaneous delivery retries → 2 `cdp_raw_events` rows for one event → inflated metrics (violates SCRUM-98's dedup AC).
+**Failure:** a provider's two simultaneous delivery retries → 2 event records for one event → inflated metrics (violates SCRUM-98's dedup AC).
 **Fix:** atomic dedup — a dedicated dedup table (or an index excluding `event_time`) written `ON CONFLICT DO NOTHING`, or a per-key advisory lock.
 
 ### M3 — MEDIUM · Engagement events silently dropped when no ACTIVE `cdp_profile_links` row
 `customer360-api/core/crud/email_tracking.py:102-106` · **CONFIRMED**
-`cdp_raw_events.raw_profile_id` is NOT NULL; if the master profile has no ACTIVE raw link, `record_engagement_event` returns `skipped_no_raw_profile` and writes nothing (suppression still applied). Sync-created leads/contacts often have no raw-profile link.
-**Failure:** opens/clicks for such recipients never land in the event catalog → under-counted metrics with no audit trail.
+The former event-table path required a raw profile link; if the master profile had no ACTIVE raw link, `record_engagement_event` returned `skipped_no_raw_profile` and wrote nothing (suppression still applied). Sync-created leads/contacts often had no raw-profile link.
+**Failure:** opens/clicks for such recipients never land in the event lake → under-counted metrics with no audit trail.
 **Fix:** fall back to a synthetic/placeholder raw_profile_id (or relax the constraint for engagement rows) and at minimum count the drop.
 
 ### M4 — MEDIUM · Dev seeder has no production guard
@@ -164,7 +164,7 @@ Template existence + Approved status is enforced; the segment is only checked fo
 | **H2** | ✅ `send_campaign` takes a per-campaign `pg_try_advisory_lock` (classid 1); a concurrent/retried run that can't acquire it skips instead of double-sending. | `email_engine/send.py` |
 | **M1** | ✅ Suppression lookup now tolerates only `UndefinedTable`; any other error **fails closed** (raises) rather than sending a batch with unknown suppression state. | `email_engine/send.py` |
 | **M2** | ✅ Dedup made atomic via `pg_advisory_xact_lock` (classid 2) on the dedup key around the check-then-insert. | `crud/email_tracking.py` |
-| **M3** | ✅ Raw-profile lookup broadened (prefer ACTIVE, fall back to any link) and the drop elevated to a WARNING flagged as a metric under-count. (Full fix — nullable engagement `raw_profile_id` — deferred: needs a migration on the partitioned `cdp_raw_events`.) | `crud/email_tracking.py` |
+| **M3** | ✅ Raw-profile lookup broadened (prefer ACTIVE, fall back to any link) and the drop elevated to a WARNING flagged as a metric under-count. Event history is now S3-owned; any future engagement projection must use the canonical S3 envelope. | `crud/email_tracking.py` |
 | **M4** | ✅ Seeder refuses unless `SEED_ALLOW=1`. | `scripts/seed_email_campaign.py` |
 | **M5** | ✅ Activation validates the segment row/`segment_tag` (mirrors the template check) — a dangling `segment_id` now fails at activation. | `campaign_activation/activation.py` |
 | **L1** | ✅ Merge vars HTML-escaped into the HTML body (subject/text stay plain). | `email_engine/send.py` |

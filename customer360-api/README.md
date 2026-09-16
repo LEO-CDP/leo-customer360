@@ -36,8 +36,8 @@ In proxied environments, APIs are typically served under /c360api as well.
 
 ### Behavioral event reads
 
-`GET /api/v1/events/` is a read-only compatibility endpoint backed by the
-S3/MinIO event lake, not PostgreSQL `cdp_raw_events`. It requires the normal
+`GET /api/v1/events/` is a read-only endpoint backed by the
+S3/MinIO event lake. It requires the normal
 authenticated tenant context and supports bounded filters:
 
 ```text

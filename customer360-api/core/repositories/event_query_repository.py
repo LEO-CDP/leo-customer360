@@ -40,7 +40,7 @@ class EventQueryRepository:
         *,
         event_time_from: Optional[datetime] = None,
         days: int,
-        limit: int,
+        limit: int | None,
         master_profile_id: Optional[UUID] = None,
         domain: Optional[str] = None,
         channel: Optional[str] = None,
@@ -88,11 +88,10 @@ class EventQueryRepository:
                 if value is not None:
                     frame = frame.filter(pl.col(column) == value)
 
-            return (
-                frame.sort(["event_time", "event_id"], descending=[True, True])
-                .head(limit)
-                .to_dicts()
-            )
+            result = frame.sort(["event_time", "event_id"], descending=[True, True])
+            if limit is not None:
+                result = result.head(limit)
+            return result.to_dicts()
         except pl.exceptions.PolarsError as exc:
             raise EventQueryError("Could not process event records") from exc
 

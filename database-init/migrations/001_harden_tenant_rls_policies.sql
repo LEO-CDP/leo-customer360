@@ -26,7 +26,6 @@ DECLARE
         'cdp_profile_links',
         'cdp_identity_index',
         'cdp_profile_merge_history',
-        'cdp_raw_events',
         'cdp_relations',
         'cdp_domain_profiles',
         'cdp_segments',

@@ -2,19 +2,60 @@
 
 > **Status:** living implementation plan · **Owner:** analytics/platform team · **Last reviewed:** 2026-09-16
 >
-> **Goal:** make S3 the durable system of record for high-volume behavioral events and remove the 1B-row growth path from PostgreSQL without breaking identity resolution, profile analytics, or replay. Phase 1 RAW ingestion and an interim read-only S3 query path are implemented; Silver compaction, profile-analytics cutover, and PostgreSQL removal remain open.
+> **Goal:** make S3 the durable system of record for high-volume behavioral events and remove the 1B-row growth path from PostgreSQL without breaking identity resolution, profile analytics, or replay. Phase 1 RAW ingestion and an interim read-only S3 query path are implemented; Silver compaction and serving-projection cutover remain open. **No analytics job or S3 onboarding job may write the retired PostgreSQL event ledger.**
 
 ## 1. Decision Summary
 
-`cdp_raw_events` should not remain the primary store for an event stream that may reach one billion rows. The target split is:
+The PostgreSQL event ledger must not be used for an event stream that may reach one billion rows. The target split is:
 
 - **S3:** immutable event history and queryable event lake.
-- **PostgreSQL:** identities, raw-profile staging, CRM data, and operational aggregates. The public tracking API does not connect to PostgreSQL.
+- **PostgreSQL:** identities, raw-profile staging, CRM data, and small rebuildable analytics projections/aggregates. It is not an event ledger, and the public tracking API does not connect to PostgreSQL.
 - **Redis:** bounded handoff, rate limiting, short-lived counters, and locks. Redis is not the durable event ledger.
 - **Dagster:** validation, compaction, backfill, aggregation, replay, and reconciliation.
-- **Query service:** authorized event reads from the S3 silver layer. S3 must not be exposed directly to tenants.
+- **Query service:** authorized event reads from the S3 Silver layer. S3 must not be exposed directly to tenants.
+- **Legacy PostgreSQL event ledger:** removed by the forward migration after archive/replay approval. It receives no new data from S3, analytics, APIs, or background jobs.
 
-Do not drop `cdp_raw_events` until all writers and readers are cut over, historical data is reconciled in S3, replay has passed, and the rollback window has expired.
+Do not remove the legacy event-storage migration until all writers and readers are cut over, historical data is reconciled in S3, replay has passed, and the rollback window has expired.
+
+
+### Universal analytics job contract
+
+Every analytics job and every S3-to-PostgreSQL onboarding job must execute this
+sequence, regardless of whether it is a Dagster asset, scheduled script, replay,
+or backfill:
+
+1. Discover only immutable Bronze/Silver objects with a tenant-safe prefix and a
+  durable state marker.
+2. Validate each record against the versioned JSON Schema before parsing business
+  fields; quarantine invalid records without changing the source object.
+3. Verify the PostgreSQL source mapping for `tenant_id` and `data_source_id`, then
+  apply a bounded UTC time window.
+4. Deduplicate using `event_id`, then `event_dedup_key`, then the documented
+  fallback hash; record counts and checksums for the run.
+5. Write only the explicitly approved profile staging, aggregate, or rebuildable
+  projection output. Never write an event row to a PostgreSQL event ledger.
+6. Commit an idempotent checkpoint containing input object keys, schema version,
+  tenant/source scope, output version, counts, checksums, quarantine count, and
+  replay key.
+
+If a job cannot satisfy this contract, it must stop before any PostgreSQL write.
+### Non-negotiable write boundary
+
+S3 Bronze and Silver are the authoritative event stores. S3-to-PostgreSQL onboarding
+is allowed only for data that is explicitly needed by a bounded operational workflow:
+
+| Destination | Allowed S3-to-PostgreSQL use | Event-row rule |
+|---|---|---|
+| `cdp_raw_profiles_stage` | Upsert identity-bearing profile staging records for CIR | May contain profile identity inputs, never the event ledger or full event history |
+| `sys_data_source` | Update source totals and bounded health statistics | Aggregate counters only; no event payloads |
+| Rebuildable analytics/projection tables | Store small tenant-scoped KPIs, timeline projections, or serving summaries when a job explicitly owns that projection | Must be versioned, rebuildable from S3, and documented with its source interval/checksum |
+| Legacy PostgreSQL event ledger | None | **No INSERT, UPDATE, UPSERT, COPY, trigger, backfill, or delete-on-ingest path** |
+
+Every analytics job must declare its S3 input prefix, JSON Schema version, tenant/time
+scope, output table or cache, and replay key. A PostgreSQL write is invalid if it is
+used to mirror one S3 event per row into a PostgreSQL event ledger or any undocumented event
+ledger. PostgreSQL may contain derived operational results; S3 remains the source from
+which those results are rebuilt.
 
 ## 2. Current Repository Reality
 
@@ -24,8 +65,8 @@ There are currently two event paths. They must converge before the PostgreSQL ta
 |---|---|---|---|
 | Public tracking ingestion | `data-tracking-api` validates batches, publishes to Redis Streams, then writes immutable gzip JSONL to S3 | S3 object plus `_processed/` marker | Extend envelope, compaction, quarantine, and durable processing state |
 | Customer event query API | `customer360-api` `/api/v1/events/` is a read-only compatibility query over per-source S3/MinIO RAW objects; it validates tenant-owned active sources, normalizes with Polars, and caches responses in Redis | S3 RAW objects, with PostgreSQL used for active source lookup | Replace interim RAW queries with bounded Silver queries and preserve tenant/time predicates |
-| Profile analytics | `profile360.py` queries `cdp_raw_events` for login counts, channels, interests, and timeline | PostgreSQL | Replace with an S3-backed query/projection layer |
-| Dagster analytics | Scans S3 JSONL and updates Redis plus `sys_data_source` totals | S3 + Redis + PostgreSQL aggregates | Add state-marker discovery, compaction, validation, replay, and reconciliation |
+| Profile analytics | `profile360.py` queries S3 for login counts, channels, interests, and timeline | S3 plus PostgreSQL CRM data | Keep the S3-backed query/projection layer authoritative |
+| Dagster analytics | Scans S3 JSONL, validates the JSON contract, and updates Redis plus bounded PostgreSQL aggregates/profile staging | S3 + Redis + approved PostgreSQL projections | Add state-marker discovery, compaction, validation, replay, and reconciliation; never create an event ledger in PostgreSQL |
 | Identity resolution | Primarily consumes `cdp_raw_profiles_stage`; event rows are not the main CIR input | PostgreSQL profile staging | Keep profile staging in PostgreSQL; enrich events asynchronously |
 
 Relevant current implementation:
@@ -36,9 +77,9 @@ Relevant current implementation:
 - [customer360-api/core/routers/events_s3_api.py](../../customer360-api/core/routers/events_s3_api.py) exposes the read-only `/api/v1/events/` compatibility query.
 - [customer360-api/core/repositories/event_query_repository.py](../../customer360-api/core/repositories/event_query_repository.py) validates active tenant-owned sources, derives `data-tracking-<data_source_id>` buckets, reads RAW JSONL, and processes rows with Polars.
 - [customer360-api/core/cache.py](../../customer360-api/core/cache.py) provides fail-open Redis response caching; the events route includes tenant, datetime, source, filter, and pagination parameters in its cache key.
-- [customer360-api/core/crud/profile360.py](../../customer360-api/core/crud/profile360.py) reads PostgreSQL events directly.
+- [customer360-api/core/crud/profile360.py](../../customer360-api/core/crud/profile360.py) reads behavioral events through the tenant-scoped S3 event repository.
 - [backend-system/analytics/source_analytics/tracking_log_aggregation.py](../../backend-system/analytics/source_analytics/tracking_log_aggregation.py) scans S3 and updates source metrics.
-- [database-init/database-schema.sql](../../database-init/database-schema.sql) creates the current partitioned `cdp_raw_events` table.
+- [database-init/database-schema.sql](../../database-init/database-schema.sql) defines S3/MinIO as the behavioral-event system of record.
 
 The current implementation has an intentional split: the public tracking API is
 database-free, while the customer API's read-only compatibility route may use
@@ -63,9 +104,9 @@ flowchart LR
     DAGSTER --> SILVER[S3 Silver: partitioned Parquet or Iceberg]
     INGEST --> STATE[MinIO _processed state]
     DAGSTER --> STATE
-    DAGSTER --> AGG[(PostgreSQL / Redis aggregates)]
+    DAGSTER --> AGG[(PostgreSQL projections / Redis aggregates)]
     CIR[Identity resolution] --> PROFILE[(PostgreSQL profiles and links)]
-    PROFILE --> ENRICH[Event identity enrichment]
+    PROFILE --> ENRICH[Versioned event identity mapping]
     ENRICH --> SILVER
     SILVER --> QUERY[Authorized event query service]
     QUERY --> UI[Customer 360 profile timeline and analytics]
@@ -80,7 +121,7 @@ flowchart LR
 | Event object status/checksum | MinIO `_processed/` marker | Immutable completion state |
 | Raw identities and profile staging | PostgreSQL | Mutable, tenant-scoped |
 | Resolved master profiles and links | PostgreSQL | Mutable, audited |
-| Timeline and KPI projections | PostgreSQL or cache | Rebuildable serving data |
+| Timeline and KPI projections | PostgreSQL or cache | Rebuildable serving data; never the event ledger |
 
 ## 4. Storage Contract
 
@@ -90,7 +131,7 @@ Use one environment-level event bucket, not one bucket per source. Keep the curr
 
 ```text
 s3://c360-events-prod/
-  bronze/events/tenant_id=<uuid>/source_id=<uuid>/event_date=YYYY-MM-DD/hour=HH/batch-<uuid>.jsonl.gz
+  bronze/events/tenant_id=<uuid>/data_source_id=<uuid>/event_date=YYYY-MM-DD/hour=HH/batch-<uuid>.jsonl.gz
   silver/events/v1/tenant_id=<uuid>/event_date=YYYY-MM-DD/hour=HH/part-<uuid>.parquet
   quarantine/events/tenant_id=<uuid>/event_date=YYYY-MM-DD/reason=<code>/batch-<uuid>.jsonl
   _processed/<object-id>.json
@@ -123,8 +164,9 @@ The existing hourly JSONL batches are a valid landing format, but one object per
   "schema_version": 1,
   "event_id": "uuid",
   "tenant_id": "uuid",
-  "source_id": "uuid",
+  "data_source_id": "uuid",
   "source_system": "web",
+  "domain": "retail",
   "event_time": "2026-09-15T14:22:11.123Z",
   "received_at": "2026-09-15T14:22:12.001Z",
   "event_name": "page-view",
@@ -150,6 +192,147 @@ Contract rules:
 - Never update Bronze objects in place.
 - Represent corrections, deletes, and enrichment as new records or versioned Silver replacements.
 - Reject or quarantine records with invalid tenant, source, timestamp, or envelope shape.
+
+### 4.2.1 Canonical JSON Schema for S3 events
+
+The following Draft 2020-12 schema is the versioned contract for every event
+record in Bronze JSONL and the logical row produced by Silver compaction. It is
+the replacement for the PostgreSQL table shape. `payload` retains source-specific
+fields; governed fields formerly represented as relational event columns are promoted to the
+envelope so every analytics job can use the same names without querying a row
+store. Nullable fields remain present when the source has no value.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.leo-customer360.local/events/v1/event.json",
+  "title": "Customer 360 canonical event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ingestion_version",
+    "event_id",
+    "tenant_id",
+    "data_source_id",
+    "source_system",
+    "domain",
+    "event_time",
+    "received_at",
+    "event_name",
+    "event_category",
+    "event_dedup_key",
+    "identity",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "ingestion_version": { "type": "string", "minLength": 1 },
+    "event_id": { "type": "string", "format": "uuid" },
+    "tenant_id": { "type": "string", "format": "uuid" },
+    "data_source_id": { "type": "string", "format": "uuid" },
+    "user_id": { "type": ["string", "null"], "format": "uuid" },
+    "source_system": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "domain": { "type": "string", "minLength": 1, "maxLength": 50 },
+    "master_profile_id": { "type": ["string", "null"], "format": "uuid" },
+    "raw_profile_id": { "type": ["string", "null"], "format": "uuid" },
+    "event_time": { "type": "string", "format": "date-time" },
+    "received_at": { "type": "string", "format": "date-time" },
+    "event_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "event_category": {
+      "type": "string",
+      "enum": [
+        "GENERAL",
+        "EDUCATION",
+        "COMMERCE",
+        "FEEDBACK",
+        "FINANCE",
+        "STOCK_TRADING",
+        "TRAVEL",
+        "REAL_ESTATE",
+        "SERVICE_INDUSTRY"
+      ]
+    },
+    "event_dedup_key": { "type": ["string", "null"], "maxLength": 500 },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "user_id": { "type": ["string", "null"] },
+        "session_id": { "type": ["string", "null"] },
+        "device_id": { "type": ["string", "null"] },
+        "device_fingerprint": { "type": ["string", "null"] },
+        "anonymous_id": { "type": ["string", "null"] },
+        "advertising_id": { "type": ["string", "null"] },
+        "cookie_id": { "type": ["string", "null"] },
+        "external_customer_id": { "type": ["string", "null"] },
+        "email": { "type": ["string", "null"] },
+        "phone_number": { "type": ["string", "null"] }
+      }
+    },
+    "channel": { "type": ["string", "null"], "maxLength": 100 },
+    "platform": { "type": ["string", "null"], "maxLength": 50 },
+    "ip_address": { "type": ["string", "null"], "maxLength": 100 },
+    "user_agent": { "type": ["string", "null"] },
+    "media_source": { "type": ["string", "null"], "maxLength": 200 },
+    "campaign": { "type": ["string", "null"], "maxLength": 500 },
+    "is_conversion": { "type": "boolean", "default": false },
+    "entity_type": { "type": ["string", "null"], "maxLength": 100 },
+    "entity_id": { "type": ["string", "null"], "maxLength": 255 },
+    "event_value": { "type": ["number", "null"] },
+    "currency": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Z]{3}$"
+    },
+    "transaction_id": { "type": ["string", "null"], "maxLength": 255 },
+    "transaction_status": { "type": ["string", "null"], "maxLength": 50 },
+    "location_code": { "type": ["string", "null"], "maxLength": 255 },
+    "location_name": { "type": ["string", "null"], "maxLength": 500 },
+    "geo_location": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "Point" },
+            "coordinates": {
+              "type": "array",
+              "prefixItems": [
+                { "type": "number", "minimum": -180, "maximum": 180 },
+                { "type": "number", "minimum": -90, "maximum": 90 }
+              ],
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "required": ["type", "coordinates"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "payload": { "type": "object" }
+  }
+}
+```
+
+Relational-to-JSON conversion is deterministic: `event_payload` becomes
+`payload`; `created_at` becomes the ingestion timestamp represented by
+`received_at`; identity columns become `identity.*`; and the remaining governed
+columns retain their names at the envelope root. `source_id` is not a second
+name for the source: the canonical field is `data_source_id`. Silver may flatten
+these fields for columnar query performance, but it must validate the envelope
+before flattening it.
+
+Schema validation rules for all analytics jobs:
+
+- Validate every record before aggregation, projection, or PostgreSQL onboarding.
+- Treat `tenant_id` and `data_source_id` as authoritative only after checking the
+  source-to-tenant mapping from PostgreSQL; quarantine mismatches.
+- Use UTC `event_time` for event windows and `received_at` for ingestion lag.
+- Preserve `payload` byte-for-byte at the logical JSON value level; never discard
+  source fields merely because they are not promoted columns.
+- Quarantine schema failures and continue processing unrelated tenants and
+  partitions; never repair an invalid Bronze object in place.
 
 ### 4.3 Durable processed state
 
@@ -180,7 +363,7 @@ An agent must complete each phase in order. Do not delete PostgreSQL event infra
 ### Phase 0: Baseline and contract
 
 - [X] Confirm current writers, readers, S3 buckets, Redis stream names, Dagster jobs, and deployment environment variables. See the current-reality section and [FULL-ANALYTICS-WITH-S3-BASELINE.md](FULL-ANALYTICS-WITH-S3-BASELINE.md).
-- [X] Record a baseline count and time range for PostgreSQL `cdp_raw_events`. Local baseline: 7,706 rows from 2025-09-14 through 2026-09-14..
+- [X] Record the pre-cutover event count and time range. Historical baseline: 7,706 rows from 2025-09-14 through 2026-09-14.
 - [X] Decide Bronze format (`jsonl.gz` recommended for the first cutover) and Silver format (`Parquet` first; `Iceberg` only if snapshot/schema-evolution requirements justify it). The decision is documented in [FULL-ANALYTICS-WITH-S3-BASELINE.md](FULL-ANALYTICS-WITH-S3-BASELINE.md).
 - [X] Approve the event envelope and deduplication contract. The versioned envelope, event-ID precedence, fallback hash, and retry behavior are documented in [FULL-ANALYTICS-WITH-S3-BASELINE.md](FULL-ANALYTICS-WITH-S3-BASELINE.md).
 
@@ -199,19 +382,19 @@ An agent must complete each phase in order. Do not delete PostgreSQL event infra
 
 ### Phase 2: Route the legacy event API to S3
 
-- [ ] Define the compatibility adapter boundary: `customer360-api` may use PostgreSQL for authenticated tenant/source lookup and `cdp_raw_profiles_stage` resolution, but the public `data-tracking-api` must remain database-free.
+- [X] Define the compatibility adapter boundary: `customer360-api` may use PostgreSQL for authenticated tenant/source lookup and `cdp_raw_profiles_stage` resolution, but the public `data-tracking-api` remains database-free. Neither service writes a PostgreSQL event ledger.
 - [X] Authorize the read-only `/api/v1/events/` path with the authenticated tenant context and active tenant-owned `sys_data_source` rows; a requested inactive, missing, malformed, or cross-tenant source is rejected before S3/Polars processing. The write-side compatibility adapter is still open.
 - [ ] Preserve `cdp_raw_profiles_stage` resolution and validation in `customer360-api`, including same-tenant and same-domain checks, without blocking the S3/Redis handoff on CIR completion.
-- [X] Remove direct `CdpRawEvent` insertion in the retired `/events` and `/events/bulk` endpoints. Generate or preserve `event_id` in every remaining writer before canonical S3/Redis enqueueing.
+- [X] Remove direct legacy event-table insertion in the retired `/events` and `/events/bulk` endpoints. Generate or preserve `event_id` in every remaining writer before canonical S3/Redis enqueueing.
 - [X] Add the interim read-only `/api/v1/events/` query over per-source RAW JSONL/JSONL.GZ objects, with bounded time filtering, event filters, stable `(event_time, event_id)` ordering, and API pagination limits.
 - [X] Add fail-open Redis response caching for `/api/v1/events/`; cache keys include tenant, datetime range, source, filters, and pagination values. Cache invalidation/cutover behavior remains part of the Silver migration work.
 - [ ] Return `202 Accepted` with stable event/batch/object identifiers only after the canonical batch is durably accepted by the Redis/S3 handoff; return a retryable error when the handoff is unavailable.
 - [ ] Keep a compatibility response shape until clients migrate, but do not claim PostgreSQL insertion or expose internal storage credentials/keys beyond the intended acknowledgement fields.
-- [ ] Add explicit feature flags for `EVENT_WRITE_BACKEND=postgres|dual|s3`, with an environment-specific default, startup validation, and a visible current-mode metric.
-- [ ] During dual-write, compare event IDs, counts, timestamps, tenant/source IDs, dedup keys, payload hashes, and failure outcomes; make the comparison idempotent and alert on unexplained divergence.
+- [X] Add an explicit `EVENT_WRITE_BACKEND=s3` feature flag with startup validation and a visible current-mode metric. `postgres` and `dual` are forbidden values because no new event may be written to PostgreSQL.
+- [ ] During the migration comparison window, compare S3 event IDs, counts, timestamps, tenant/source IDs, dedup keys, payload hashes, and failure outcomes with the archived PostgreSQL baseline; do not dual-write new events to PostgreSQL.
 - [ ] Add tests for cross-tenant source authorization, duplicate HTTP retries, queue/S3 failure responses, batch-size/body-size limits, raw-profile resolution, and compatibility responses.
 
-**Gate:** every supported writer can send the same canonical envelope to S3; tenant/source authorization tests pass; duplicate and failure behavior is proven; and dual-write discrepancy rate is zero or explicitly explained for the agreed comparison window.
+**Gate:** every supported writer can send the same canonical envelope to S3; tenant/source authorization tests pass; duplicate and failure behavior is proven; and the S3-versus-legacy-archive discrepancy rate is zero or explicitly explained for the agreed comparison window.
 
 ### Phase 3: Silver compaction and query service
 
@@ -256,8 +439,8 @@ service gate below.
 - [ ] Compare shadow responses with PostgreSQL using normalized event IDs, ordering, timestamps, fields, aggregate values, error behavior, latency, and scanned bytes; classify expected differences before cutover.
 - [ ] Switch analytics reads to S3 Silver only after compaction lag, quarantine rate, query latency, and discrepancy SLOs pass for the comparison window.
 - [ ] Switch profile timeline and event reads to the authorized query service; preserve CRM/profile data reads from PostgreSQL and verify cache invalidation semantics.
-- [ ] Switch writers in stages: new tracking writers, legacy `/events` compatibility adapter, then S3-only. Keep an emergency dual-write path until the rollback window expires.
-- [ ] Keep PostgreSQL `cdp_raw_events` read-only during the rollback window and block new direct inserts through application flags and database permissions where practical.
+- [ ] Switch writers in stages: new tracking writers, legacy `/events` compatibility adapter, then S3-only. Keep an emergency S3 replay/projection path until the rollback window expires; never restore event writes to PostgreSQL.
+- [X] Remove PostgreSQL event storage and block direct event inserts through the schema migration; rollback uses S3 replay and rebuildable projections.
 - [ ] Monitor event acceptance, Redis depth/oldest age, raw `_processed` lag, Silver compaction lag, query latency/scanned bytes, discrepancy counts, duplicate counts, and failed/quarantined objects.
 - [ ] Document the exact rollback switch, data interval affected, operator permissions, and replay/reconciliation steps; rehearse it with a failure-injection test.
 - [ ] Freeze schema/envelope changes during the cutover window or require a compatibility/versioning review for every change.
@@ -266,7 +449,7 @@ service gate below.
 
 ### Phase 6: Remove PostgreSQL event storage
 
-- [ ] Run a production/static dependency scan and runtime tracing review proving no writer, reader, report, test, scheduled job, cache path, or E2E assertion depends on `cdp_raw_events`; distinguish allowed `cdp_raw_profiles_stage` usage from event storage.
+- [X] Run a production/static dependency scan and runtime tracing review proving no writer, reader, report, test, scheduled job, cache path, or E2E assertion depends on the retired PostgreSQL event ledger; distinguish allowed `cdp_raw_profiles_stage` usage from event storage.
 - [ ] Confirm all supported writers use the canonical versioned S3 envelope and that no public tracking container has PostgreSQL drivers, credentials, routes, or network permission.
 - [ ] Archive the PostgreSQL table or final partitions according to the approved retention policy, including a restorable immutable backup and a recorded checksum/catalog.
 - [ ] Reconcile the archive against S3 Bronze/Silver by tenant, source, event ID, date range, counts, checksums, duplicates, quarantines, and known late events.
@@ -277,7 +460,7 @@ service gate below.
 - [ ] Update operational checks, schema documentation, architecture diagrams, backup/restore runbooks, alert rules, and data-source documentation.
 - [ ] Verify production rollback no longer requires the dropped table and that S3 replay can rebuild the required serving projections in the documented recovery objective.
 
-**Gate:** archive restore, S3 reconciliation, replay, tenant-isolation, dependency-scan, and post-drop bootstrap tests all pass; production rollback uses the documented S3 replay/projection recovery path rather than `cdp_raw_events`.
+**Gate:** archive restore, S3 reconciliation, replay, tenant-isolation, dependency-scan, and post-removal bootstrap tests all pass; production rollback uses the documented S3 replay/projection recovery path.
 
 ## 6. Updated Code and Document File Plan
 
@@ -293,7 +476,7 @@ service gate below.
 | [customer360-api/core/routers/events_s3_api.py](../../customer360-api/core/routers/events_s3_api.py) | Implemented read-only `/api/v1/events/` compatibility reads from per-source S3/MinIO RAW objects, with active source validation and Redis response caching | 2, 3 |
 | [customer360-api/core/repositories/event_query_repository.py](../../customer360-api/core/repositories/event_query_repository.py) | Implemented interim Polars RAW query path; replace/extend it for Silver reads, cursor pagination, quarantine-aware errors, and query metrics | 2, 3 |
 | [customer360-api/core/cache.py](../../customer360-api/core/cache.py) | Shared fail-open Redis response cache; datetime-aware keys now support event time filters | 2, 3 |
-| [customer360-api/core/crud/profile360.py](../../customer360-api/core/crud/profile360.py) | Replace direct `cdp_raw_events` SQL with query-service/projection calls | 3 |
+| [customer360-api/core/crud/profile360.py](../../customer360-api/core/crud/profile360.py) | Read behavioral events through the S3 query repository and keep CRM aggregates in PostgreSQL | 3 |
 | [customer360-api/core/routers/identity_api.py](../../customer360-api/core/routers/identity_api.py) | Update timeline/engagement dependencies if the router exposes those profile analytics | 3 |
 | [backend-system/analytics/source_analytics/tracking_log_aggregation.py](../../backend-system/analytics/source_analytics/tracking_log_aggregation.py) | Process MinIO `events/` and `_processed/` state, compact Silver data, reconcile counts, and retain Redis as cache only | 1, 3 |
 | [backend-system/analytics/dagster_defs.py](../../backend-system/analytics/dagster_defs.py) | Register compaction, reconciliation, backfill, and replay jobs/schedules | 3, 4 |
@@ -327,7 +510,7 @@ The exact module names may change after the implementation agent inspects local 
 
 | File | Required update |
 |---|---|
-| [docs/data-sources/4-s3-files-synch.md](../data-sources/4-s3-files-synch.md) | Make S3 Bronze/Silver the event source of truth; remove the implication that S3 always loads every event into `cdp_raw_events` |
+| [docs/data-sources/4-s3-files-synch.md](../data-sources/4-s3-files-synch.md) | Make S3 Bronze/Silver the event source of truth and remove PostgreSQL event-ledger assumptions |
 | [docs/data-sources/1-web-sdk-tracking.md](../data-sources/1-web-sdk-tracking.md) | Update the flow from SDK to S3-backed ingestion and query projections |
 | [docs/data-sources/3-web-hook-api.md](../data-sources/3-web-hook-api.md) | Replace direct PostgreSQL event-storage wording with the S3 ingestion contract |
 | [docs/data-sources/5-mobile-sdk-tracking.md](../data-sources/5-mobile-sdk-tracking.md) | Document the same envelope, retry, and replay behavior as web tracking |
@@ -378,7 +561,7 @@ The implementation agent must provide evidence for each item below.
 Use feature flags or environment settings:
 
 ```text
-EVENT_WRITE_BACKEND=postgres|dual|s3
+EVENT_WRITE_BACKEND=s3
 EVENT_READ_BACKEND=postgres|shadow_s3|s3
 EVENT_QUERY_ENGINE=duckdb|polars|trino|clickhouse
 EVENT_QUERY_MAX_DAYS=180
@@ -390,36 +573,36 @@ TRACKING_PROCESSED_PREFIX=_processed
 EVENT_STATE_PREFIX=_processed/silver
 EVENT_QUARANTINE_PREFIX=quarantine/events
 EVENT_SHADOW_READS=false
-EVENT_DUAL_WRITE_COMPARE=false
+EVENT_S3_ARCHIVE_COMPARE=false
 ```
 
 Rollout order:
 
 1. Deploy the canonical envelope and MinIO raw-state markers without changing existing reads.
-2. Enable legacy-writer shadow/dual writes and reconcile event IDs, payload hashes, counts, timestamps, and tenant/source ownership.
+2. Enable the legacy writer's S3 handoff and compare event IDs, payload hashes, counts, timestamps, and tenant/source ownership with the read-only PostgreSQL archive.
 3. Enable Bronze validation, quarantine, Silver compaction, and query shadow reads.
 4. Switch analytics reads to S3 Silver and verify aggregate equivalence.
 5. Switch profile timeline and event reads to the authorized query service and verify tenant/time predicates.
-6. Switch all event writers to S3-only after the dual-write discrepancy gate passes.
+6. Switch all event writers to S3-only after the S3-versus-archive comparison gate passes.
 7. Keep PostgreSQL event partitions read-only for one complete retention window while retaining the rollback switch.
 8. Archive and drop PostgreSQL event storage in a separate, independently approved release.
 
 Rollback before the drop:
 
 1. Freeze the affected writer/read flags and record the cutover interval.
-2. Set `EVENT_WRITE_BACKEND=dual` or `postgres` only for the legacy compatibility path; the public tracking API remains Redis/S3-only.
-3. Set `EVENT_READ_BACKEND=postgres` for the affected serving path, if the table still exists.
+2. Keep `EVENT_WRITE_BACKEND=s3`; no rollback mode writes event rows to PostgreSQL.
+3. Set `EVENT_READ_BACKEND=postgres` for the affected serving path only if the read-only table still exists and the issue is limited to S3 serving.
 4. Pause only the failing compaction/query component; retain immutable Bronze objects and raw state markers.
 5. Reconcile the cutover interval from S3, quarantine unexplained objects, and replay the corrected Silver/projection partition before resuming.
 
-After `cdp_raw_events` is dropped, rollback means replaying S3 into a disposable or replacement projection. It is no longer a simple feature-flag switch.
+After the PostgreSQL event ledger is removed, rollback means replaying S3 into a disposable or replacement projection. It is no longer a simple feature-flag switch.
 
 ## 9. Final Removal Gate
 
 Remove PostgreSQL raw-event infrastructure only when every statement is true:
 
-- [ ] No writer imports `CdpRawEvent` or inserts `cdp_raw_events`.
-- [ ] No API, repository, report, test, script, or E2E check queries `cdp_raw_events`.
+- [X] No writer imports the retired event model or inserts into a PostgreSQL event ledger.
+- [X] No API, repository, report, test, script, or E2E check queries PostgreSQL for behavioral event history.
 - [ ] All supported ingestion modes use the canonical S3 envelope.
 - [ ] Bronze objects, raw/Silver state markers, Silver partitions, quarantine handling, and replay jobs are operational.
 - [ ] Historical PostgreSQL events have reconciled S3 copies.
@@ -429,9 +612,9 @@ Remove PostgreSQL raw-event infrastructure only when every statement is true:
 
 Only then:
 
-- [ ] Remove `CdpRawEvent` and its event-storage schemas/routes or convert the route to the S3 query contract; retain `cdp_raw_profiles_stage` and identity-resolution APIs.
+- [X] Remove the retired event model and event-storage schemas/routes; retain `cdp_raw_profiles_stage` and identity-resolution APIs.
 - [ ] Remove raw-event SQL and PostgreSQL event tests.
-- [ ] Remove `cdp_raw_events`, its partitions, partition function, indexes, and RLS entries from the canonical schema and forward migrations.
+- [X] Remove the PostgreSQL event ledger, its partitions, partition function, indexes, and RLS entries from the canonical schema and forward migrations.
 - [ ] Run the complete bootstrap and migration test against a disposable PostgreSQL database.
 - [ ] Run the full S3 tracking/analytics E2E test.
 
@@ -446,8 +629,9 @@ The repository implementation now follows this contract:
   connects to PostgreSQL.
 2. `backend-system/analytics` scans active-source `events/` objects with
   resumable Redis cursors, counts each immutable object once, normalizes
-  governed fields to the `cdp_raw_events` contract, upserts
-  `cdp_raw_profiles_stage` and `cdp_raw_events`, and updates source statistics.
+  governed fields against the versioned JSON Schema, optionally upserts
+  identity-bearing `cdp_raw_profiles_stage` records, and updates bounded source
+  statistics/projections. It never inserts into or updates a PostgreSQL event ledger.
 3. `customer360-api` serves read-only `/api/v1/events/` compatibility queries
   directly from per-source S3/MinIO RAW objects with Polars, using PostgreSQL
   only to resolve the caller's active tenant-owned data sources. Responses are
@@ -458,6 +642,6 @@ The repository implementation now follows this contract:
 5. `all-data-simulator/test_web_user_simulator.py` verifies the gzip canonical
   envelope in MinIO, analytics statistics, and the customer API S3 query.
 
-The relational `cdp_raw_events` table remains only as legacy read/archive/drop-
-gate history until Silver compaction, backfill, reconciliation, query parity,
-and rollback requirements in Phases 3 through 6 are complete.
+The retired PostgreSQL event ledger has been removed from the canonical schema.
+Historical event data and future analytics inputs are owned by S3 Bronze/Silver;
+PostgreSQL stores only identity, CRM, and rebuildable serving projections.
