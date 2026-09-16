@@ -5,7 +5,9 @@ stay focused on request parsing and HTTP response mapping.
 """
 
 import logging
+import smtplib
 import socket
+import ssl
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -112,6 +114,44 @@ class MetadataRepository:
 			result["status"] = "unreachable"
 			result["error"] = str(exc)
 		return result
+
+	def _check_smtp(self) -> dict[str, Any]:
+		"""Probe the system SMTP relay (the env config the email_engine falls back
+		to when a tenant has no crm_email_provider_config row).
+
+		'disabled' when dispatch is mock or no host is set (no real email is sent).
+		Otherwise it opens a connection, optionally STARTTLS + login, and NOOPs to
+		verify the credential actually authenticates -- so this validates the
+		Brevo/SMTP key, not just TCP reachability. Deliberately NOT part of
+		_service_status(): it does a real login and must never run on the
+		unauthenticated login-screen /metadata call."""
+		result = {"service": "smtp", "status": "unknown", "provider": settings.email_dispatch_adapter}
+		if (settings.email_dispatch_adapter or "mock").strip().lower() != "smtp" or not settings.smtp_host:
+			result["status"] = "disabled"
+			result["note"] = "Email dispatch is 'mock' or no SMTP host is configured (no real email is sent)"
+			return result
+		result["host"] = settings.smtp_host
+		result["port"] = settings.smtp_port
+		result["from_address"] = settings.email_from_address
+		result["login"] = bool(settings.smtp_username and settings.smtp_password)
+		try:
+			with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=settings.smtp_timeout_seconds) as server:
+				if settings.smtp_use_tls:
+					# Verified TLS (cert + hostname) -- matches the email_engine sender.
+					server.starttls(context=ssl.create_default_context())
+				if settings.smtp_username and settings.smtp_password:
+					server.login(settings.smtp_username, settings.smtp_password)
+				server.noop()
+			result["status"] = "reachable"
+		except Exception as exc:  # noqa: BLE001
+			logger.warning("SMTP health check failed", exc_info=True)
+			result["status"] = "unreachable"
+			result["error"] = str(exc)
+		return result
+
+	def get_smtp_health(self) -> dict[str, Any]:
+		"""On-demand SMTP dispatch health for GET /metadata/smtp."""
+		return self._check_smtp()
 
 	def _service_status(self) -> dict[str, Any]:
 		return {

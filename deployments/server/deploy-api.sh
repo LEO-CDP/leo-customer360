@@ -118,6 +118,35 @@ if [[ "$ENV" == "prod" ]]; then MON_IP="$(srv_ip "${MON_SERVER_KEY:-api}" fixed_
 OTEL_ENABLED="${OTEL_ENABLED:-$(tfval otel_enabled "overlays/$ENV.tfvars")}"
 OTEL_B64="$(otel_env_lines customer360-api "$ENV" "$JAEGER_HOST" | base64 | tr -d '\n')"
 
+# --- Email dispatch (SMTP). Per-env creds from the git-ignored smtp.<env>.env
+#     (see smtp.env.example). Absent -> adapter=mock (prod stays mock). Feeds the
+#     GET /metadata/smtp health probe. Sent as ONE base64 blob (last positional
+#     arg) so the SMTP key survives ssh transport and never sits in argv cleartext.
+SMTP_LINES="EMAIL_DISPATCH_ADAPTER=mock"
+if [[ -f "smtp.$ENV.env" ]]; then
+  set -a; source "smtp.$ENV.env"
+  [[ -f "smtp.$ENV.local.env" ]] && source "smtp.$ENV.local.env"
+  set +a
+  # Password precedence: BREVO_SMTP_PASSWORD (GH secret / env) > local override > committed file.
+  SMTP_PASSWORD="${BREVO_SMTP_PASSWORD:-${SMTP_PASSWORD:-}}"
+  SMTP_LINES="$(cat <<SMTPBODY
+EMAIL_DISPATCH_ADAPTER=${EMAIL_DISPATCH_ADAPTER:-smtp}
+SMTP_HOST=${SMTP_HOST:-}
+SMTP_PORT=${SMTP_PORT:-587}
+SMTP_USERNAME=${SMTP_USERNAME:-}
+SMTP_PASSWORD=${SMTP_PASSWORD:-}
+SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-}
+EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-LEO CDP}
+SMTPBODY
+)"
+  echo ">> Email: SMTP dispatch ENABLED (host=${SMTP_HOST:-}, from=${EMAIL_FROM_ADDRESS:-}) -- /metadata/smtp will probe it"
+else
+  echo ">> Email: dispatch = mock (no smtp.$ENV.env for '$ENV') -- /metadata/smtp reports disabled"
+fi
+SMTP_B64="$(printf '%s' "$SMTP_LINES" | base64 | tr -d '
+')"
+
 # --- build + run on the VM (values passed as positional args; password base64'd) ---
 echo ">> Installing Docker (if needed), building, and (re)starting the container ..."
 PW_B64="$(printf %s "$DB_PASS" | base64 | tr -d '\n')"
@@ -131,7 +160,7 @@ EVENT_S3_REGION="${S3_REGION:-us-east-1}"
 EVENT_S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-}"
 EVENT_S3_SECRET_B64="$(printf %s "${S3_SECRET_ACCESS_KEY:-}" | base64 | tr -d '\n')"
 EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-false}"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" < <(declare -f docker_pull_retry; cat <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" < <(declare -f docker_pull_retry; cat <<'REMOTE'
 set -euo pipefail
 DB_HOST="$1"; DB_PORT="$2"; DB_NAME="$3"; DB_USER="$4"; DB_PW="$(printf %s "$5" | base64 -d)"; DAG_HOST="$6"
 REDIS_HOST="$7"; REDIS_PORT="$8"; REDIS_PW="$(printf %s "${9:-}" | base64 -d 2>/dev/null || true)"
@@ -146,6 +175,7 @@ EVENT_S3_REGION="${24:-us-east-1}"
 EVENT_S3_ACCESS_KEY_ID="${25:-}"
 EVENT_S3_SECRET_ACCESS_KEY="$(printf %s "${26:-}" | base64 -d 2>/dev/null || true)"
 EVENT_S3_FORCE_PATH_STYLE="${27:-false}"
+SMTP_B64="${28:-}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -214,6 +244,9 @@ else
   echo "SSO_LOGIN=false" >> "$env_file"
 fi
 if [ -n "$OTEL_B64" ]; then printf '%s' "$OTEL_B64" | base64 -d >> "$env_file"; fi
+if [ -n "$SMTP_B64" ]; then printf '
+' >> "$env_file"; printf '%s' "$SMTP_B64" | base64 -d >> "$env_file"; printf '
+' >> "$env_file"; fi
 sudo mv "$env_file" /opt/c360/api.env
 sudo chmod 600 /opt/c360/api.env
 if [ "$DEPLOY_MODE" = "ghcr" ]; then

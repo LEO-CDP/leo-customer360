@@ -114,6 +114,30 @@ REDIS_PORT=$REDIS_PORT
 REDIS_DB=0
 ENVBODY
 )"
+
+# --- Email dispatch (SMTP) for email_engine. Per-env creds from the git-ignored
+#     smtp.<env>.env (see smtp.env.example). Absent -> adapter stays 'mock' (no real
+#     email), which is why prod stays mock until a smtp.prod.env exists. The whole
+#     blob is base64'd below, so the SMTP key survives ssh transport intact.
+if [[ -f "smtp.$ENV.env" ]]; then
+  set -a; source "smtp.$ENV.env"
+  [[ -f "smtp.$ENV.local.env" ]] && source "smtp.$ENV.local.env"
+  set +a
+  # Password precedence: BREVO_SMTP_PASSWORD (GH secret / env) > local override > committed file.
+  SMTP_PASSWORD="${BREVO_SMTP_PASSWORD:-${SMTP_PASSWORD:-}}"
+  ENV_CONTENT="$ENV_CONTENT
+EMAIL_DISPATCH_ADAPTER=${EMAIL_DISPATCH_ADAPTER:-smtp}
+SMTP_HOST=${SMTP_HOST:-}
+SMTP_PORT=${SMTP_PORT:-587}
+SMTP_USERNAME=${SMTP_USERNAME:-}
+SMTP_PASSWORD=${SMTP_PASSWORD:-}
+SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-}
+EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-LEO CDP}"
+  echo ">> Email: SMTP dispatch ENABLED for email_engine (host=${SMTP_HOST:-}, from=${EMAIL_FROM_ADDRESS:-})"
+else
+  echo ">> Email: dispatch = mock (no smtp.$ENV.env for '$ENV') -- email_engine will not send real email"
+fi
 ENV_B64="$(printf %s "$ENV_CONTENT" | base64 | tr -d '\n')"
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ENV_B64" "$DEPLOY_MODE" "$GHCR_USER" "$IMAGE" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" < <(declare -f docker_pull_retry; cat <<'REMOTE'
 set -euo pipefail

@@ -58,6 +58,21 @@ def get_dagster_metadata(
     return repository.get_dagster_metadata()
 
 
+@metadata_router.get("/smtp")
+def get_smtp_health(
+    repository: MetadataRepository = Depends(get_metadata_repository),
+) -> dict[str, Any]:
+    """SMTP dispatch health check. Reports 'disabled' when email runs in mock
+    mode; otherwise actively connects (STARTTLS + login + NOOP) to the configured
+    SMTP relay to confirm it is reachable and the credential authenticates.
+
+    Reflects the SYSTEM/env SMTP config (the email_engine send-time fallback),
+    not a tenant's per-tenant crm_email_provider_config row. Authenticated like
+    /metadata/dagster (only bare GET /metadata is login-screen exempt), and kept
+    out of GET /metadata so a real SMTP login never runs on page load."""
+    return repository.get_smtp_health()
+
+
 @metadata_router.get("/domains")
 def get_metadata_domains(
     tenant_id: uuid.UUID = DEFAULT_TENANT_ID,
