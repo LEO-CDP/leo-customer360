@@ -219,9 +219,6 @@ class Settings(BaseSettings):
     email_from_address: Optional[str] = Field(
         default=None, validation_alias=AliasChoices("EMAIL_FROM_ADDRESS", "email_from_address")
     )
-    email_from_name: Optional[str] = Field(
-        default=None, validation_alias=AliasChoices("EMAIL_FROM_NAME", "email_from_name")
-    )
 
     dagster_campaign_activation_job_name: str = Field(
         default="campaign_activation_job",

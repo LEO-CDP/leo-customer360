@@ -121,7 +121,7 @@ OTEL_B64="$(otel_env_lines customer360-api "$ENV" "$JAEGER_HOST" | base64 | tr -
 # --- Email dispatch (SMTP). Per-env creds from the git-ignored smtp.<env>.env
 #     (see smtp.env.example). Absent -> adapter=mock (prod stays mock). Feeds the
 #     GET /metadata/smtp health probe. Sent as ONE base64 blob (last positional
-#     arg) so the SMTP key survives ssh transport and never sits in argv cleartext.
+#     arg) so the SMTP key survives ssh transport base64'd, not plain in argv.
 SMTP_LINES="EMAIL_DISPATCH_ADAPTER=mock"
 if [[ -f "smtp.$ENV.env" ]]; then
   set -a; source "smtp.$ENV.env"
@@ -144,8 +144,7 @@ SMTPBODY
 else
   echo ">> Email: dispatch = mock (no smtp.$ENV.env for '$ENV') -- /metadata/smtp reports disabled"
 fi
-SMTP_B64="$(printf '%s' "$SMTP_LINES" | base64 | tr -d '
-')"
+SMTP_B64="$(printf '%s' "$SMTP_LINES" | base64 | tr -d '\n')"
 
 # --- build + run on the VM (values passed as positional args; password base64'd) ---
 echo ">> Installing Docker (if needed), building, and (re)starting the container ..."
@@ -244,9 +243,7 @@ else
   echo "SSO_LOGIN=false" >> "$env_file"
 fi
 if [ -n "$OTEL_B64" ]; then printf '%s' "$OTEL_B64" | base64 -d >> "$env_file"; fi
-if [ -n "$SMTP_B64" ]; then printf '
-' >> "$env_file"; printf '%s' "$SMTP_B64" | base64 -d >> "$env_file"; printf '
-' >> "$env_file"; fi
+if [ -n "$SMTP_B64" ]; then printf '\n' >> "$env_file"; printf '%s' "$SMTP_B64" | base64 -d >> "$env_file"; printf '\n' >> "$env_file"; fi
 sudo mv "$env_file" /opt/c360/api.env
 sudo chmod 600 /opt/c360/api.env
 if [ "$DEPLOY_MODE" = "ghcr" ]; then
@@ -272,7 +269,7 @@ sudo docker ps --filter name=customer360-api --format '   running: {{.Names}} ({
 # credential authenticates; 'disabled' => mock (fine); anything else prints a
 # GH ::warning:: but never fails the deploy (email is non-critical -- a relay
 # hiccup must not block a release; flip the '*' branch to `exit 1` for a hard gate).
-SMTP_STATUS="$(sudo docker exec customer360-api python -c 'import json;from core.repositories.metadata_repository import MetadataRepository as M;print(M().get_smtp_health().get("status",""))' 2>/dev/null || echo error)"
+SMTP_STATUS="$(sudo docker exec customer360-api python -c 'from core.repositories.metadata_repository import MetadataRepository as M;print(M().get_smtp_health().get("status",""))' 2>/dev/null || echo error)"
 echo "   SMTP health (/api/v1/metadata/smtp): status=${SMTP_STATUS:-error}"
 case "$SMTP_STATUS" in
   reachable) echo "   -> SMTP relay reachable and credential authenticates." ;;
