@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import core.repositories.metadata_repository as mr
 from core.database import get_db
 from core.models.identity import CdpScoringModel
 from core.models.system import SysDataSource
@@ -423,6 +424,81 @@ class SysMetadataAuthExemptionTests(unittest.TestCase):
         self.assertNotIn("/api/v1/metadata/dagster", EXEMPT_PATHS)
         self.assertNotIn("/api/v1/metadata/domains", EXEMPT_PATHS)
         self.assertNotIn("/api/v1/metadata/data-sources", EXEMPT_PATHS)
+        # The SMTP probe does a real login -- it must NOT be login-screen exempt.
+        self.assertNotIn("/api/v1/metadata/smtp", EXEMPT_PATHS)
+
+
+class SmtpHealthTests(unittest.TestCase):
+    """GET /metadata/smtp: 'disabled' in mock mode, else an active SMTP
+    connect + login probe. All SMTP I/O is mocked so the test is hermetic."""
+
+    def setUp(self):
+        self.app = FastAPI()
+        self.app.include_router(all_metadata_routers[0])
+        self.app.dependency_overrides[get_db] = lambda: None
+
+    def test_smtp_disabled_in_mock_mode(self):
+        with patch.object(mr.settings, "email_dispatch_adapter", "mock"):
+            response = TestClient(self.app).get("/metadata/smtp")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["service"], "smtp")
+        self.assertEqual(body["status"], "disabled")
+
+    def test_smtp_reachable_when_login_succeeds(self):
+        server = MagicMock()
+        server.__enter__ = MagicMock(return_value=server)
+        server.__exit__ = MagicMock(return_value=False)
+        with (
+            patch.object(mr.settings, "email_dispatch_adapter", "smtp"),
+            patch.object(mr.settings, "smtp_host", "smtp-relay.brevo.com"),
+            patch.object(mr.settings, "smtp_username", "user"),
+            patch.object(mr.settings, "smtp_password", "key"),
+            patch("core.repositories.metadata_repository.smtplib.SMTP", return_value=server),
+        ):
+            response = TestClient(self.app).get("/metadata/smtp")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "reachable")
+        server.login.assert_called_once_with("user", "key")
+        server.noop.assert_called_once()
+
+    def test_smtp_no_credentials_not_reported_reachable(self):
+        # SMTP enabled + host reachable but no username/password: login is never
+        # attempted, so the probe must NOT claim the credential authenticates.
+        server = MagicMock()
+        server.__enter__ = MagicMock(return_value=server)
+        server.__exit__ = MagicMock(return_value=False)
+        with (
+            patch.object(mr.settings, "email_dispatch_adapter", "smtp"),
+            patch.object(mr.settings, "smtp_host", "smtp-relay.brevo.com"),
+            patch.object(mr.settings, "smtp_username", None),
+            patch.object(mr.settings, "smtp_password", None),
+            patch("core.repositories.metadata_repository.smtplib.SMTP", return_value=server),
+        ):
+            response = TestClient(self.app).get("/metadata/smtp")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "no_credentials")
+        server.login.assert_not_called()
+
+    def test_smtp_unreachable_surfaces_error(self):
+        with (
+            patch.object(mr.settings, "email_dispatch_adapter", "smtp"),
+            patch.object(mr.settings, "smtp_host", "smtp-relay.brevo.com"),
+            patch("core.repositories.metadata_repository.smtplib.SMTP", side_effect=OSError("refused")),
+        ):
+            response = TestClient(self.app).get("/metadata/smtp")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "unreachable")
+        # A fixed category, not the raw exception text (no stack/internal leak).
+        self.assertEqual(body["error"], "connection_error")
+        self.assertNotIn("refused", str(body))
 
 
 if __name__ == "__main__":

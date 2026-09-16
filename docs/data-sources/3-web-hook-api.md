@@ -8,18 +8,15 @@ Data Source Type 3 provides real-time, event-driven HTTP push ingestion. Externa
 sequenceDiagram
     autonumber
     participant Source as External Webhook Producer (e.g. Stripe, OneSignal, Shopify)
-    participant Gateway as customer360-api Ingestion Router
+    participant Gateway as data-tracking-api Ingestion Router
     participant Auth as Multi-Tenant & Signature Validator
-    participant DB as PostgreSQL 16 (cdp_raw_events & cdp_raw_profiles_stage)
-    participant CIR as Identity Resolution Queue
+    participant Lake as S3/MinIO RAW event lake
 
-    Source->>Gateway: POST /api/v1/events (with HMAC header)
+    Source->>Gateway: POST /api/v1/tracking/logs (with HMAC header)
     Gateway->>Auth: Validate Tenant, Data Source ID & Signature
     Auth-->>Gateway: OK
-    Gateway->>DB: Synchronous write to cdp_raw_events
-    Gateway->>DB: Upsert profile identities to cdp_raw_profiles_stage
-    Gateway-->>Source: 201 Created (event_id, master_profile_hint)
-    Gateway->>CIR: Queue Profile for CIR Resolution
+    Gateway->>Lake: Redis handoff -> immutable RAW object
+    Gateway-->>Source: 202 Accepted (batch/object acknowledgement)
 ```
 
 ---
@@ -27,8 +24,7 @@ sequenceDiagram
 ## 2. HTTP Ingestion Contract
 
 ### Endpoints
-- **Single Event**: `POST /api/v1/events`
-- **Bulk Batch**: `POST /api/v1/events/bulk`
+- **Event batch**: `POST /api/v1/tracking/logs`
 
 ### Mandatory Headers
 
@@ -44,7 +40,7 @@ sequenceDiagram
 
 ## 3. Payload Schema Specification
 
-### Single Event Request Body (`POST /api/v1/events`)
+### Event Batch Request Body (`POST /api/v1/tracking/logs`)
 ```json
 {
   "event_name": "order_completed",
@@ -77,7 +73,7 @@ sequenceDiagram
 }
 ```
 
-### Bulk Batch Ingestion (`POST /api/v1/events/bulk`)
+### Batch Ingestion (`POST /api/v1/tracking/logs`)
 Accepts an array of up to 500 event objects in a single transactional request:
 ```json
 [

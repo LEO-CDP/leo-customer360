@@ -25,8 +25,8 @@ flowchart TD
         LOADER["Staging Loader (COPY / Bulk Upsert)"]
     end
 
-    subgraph CDPDatabase["PostgreSQL 16 Database"]
-        RAW_EVT["cdp_raw_events"]
+    subgraph CDPDatabase["Customer 360 Serving Data"]
+        RAW_EVT["S3/MinIO RAW + Silver events"]
         RAW_PRF["cdp_raw_profiles_stage"]
     end
 

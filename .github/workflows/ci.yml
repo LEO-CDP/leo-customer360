@@ -8,7 +8,7 @@ on:
       - 'ui-wireframes/**'
       - 'docs/**'
   pull_request:
-    branches: [main, master]
+    branches: [main, master, dev-uat]   # dev-uat is an active integration branch -> gate its PRs (CI + CodeQL) too
     paths-ignore:
       - 'ui-wireframes/**'
       - 'docs/**'

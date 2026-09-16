@@ -327,8 +327,8 @@ def get_master_profile_engagement_summary(
     master_profile_id: uuid.UUID, days: int = Query(default=90, ge=1, le=365), db: Session = Depends(get_db)
 ):
     """Login/transaction counts, spend, and last-interaction timestamp for the
-    last ``days`` days, aggregated from cdp_raw_events + crm_transactions +
-    crm_customer_contacts."""
+    last ``days`` days. Behavioral event metrics are being migrated to the S3
+    Silver query path; CRM transactions and contacts remain PostgreSQL-backed."""
     if _master_crud.get(db, master_profile_id) is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
     return profile360_crud.get_engagement_summary(db, master_profile_id, days=days)
@@ -351,8 +351,9 @@ def get_master_profile_channel_activity(
 def get_master_profile_top_interests(
     master_profile_id: uuid.UUID, limit: int = Query(default=5, ge=1, le=20), db: Session = Depends(get_db)
 ):
-    """Top behavioral-event categories for this profile (cdp_raw_events.event_category),
-    ranked by count and normalized to a percentage of the top category."""
+    """Top behavioral-event categories for this profile from the event
+    projection. The projection is being migrated from PostgreSQL raw-event
+    storage to the S3 Silver query path."""
     if _master_crud.get(db, master_profile_id) is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
     return profile360_crud.get_top_interests(db, master_profile_id, limit=limit)

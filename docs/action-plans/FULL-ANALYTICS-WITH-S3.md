@@ -23,7 +23,7 @@ There are currently two event paths. They must converge before the PostgreSQL ta
 | Path | Current behavior | Source of truth today | Migration impact |
 |---|---|---|---|
 | Public tracking ingestion | `data-tracking-api` validates batches, publishes to Redis Streams, then writes immutable gzip JSONL to S3 | S3 object plus `_processed/` marker | Extend envelope, compaction, quarantine, and durable processing state |
-| Direct event API | `customer360-api` `/events` and `/events/bulk` write `CdpRawEvent` rows | PostgreSQL `cdp_raw_events` | Route writes through the S3 ingestion contract; preserve raw-profile resolution |
+| Legacy event API | `customer360-api` `/events` and `/events/bulk` write routes removed | No active customer360-api event writer | Keep raw-profile/CIR ownership separate; route remaining writers through the S3 ingestion contract |
 | Profile analytics | `profile360.py` queries `cdp_raw_events` for login counts, channels, interests, and timeline | PostgreSQL | Replace with an S3-backed query/projection layer |
 | Dagster analytics | Scans S3 JSONL and updates Redis plus `sys_data_source` totals | S3 + Redis + PostgreSQL aggregates | Add state-marker discovery, compaction, validation, replay, and reconciliation |
 | Identity resolution | Primarily consumes `cdp_raw_profiles_stage`; event rows are not the main CIR input | PostgreSQL profile staging | Keep profile staging in PostgreSQL; enrich events asynchronously |
@@ -191,7 +191,7 @@ An agent must complete each phase in order. Do not delete PostgreSQL event infra
 - [ ] Define the compatibility adapter boundary: `customer360-api` may use PostgreSQL for authenticated tenant/source lookup and `cdp_raw_profiles_stage` resolution, but the public `data-tracking-api` must remain database-free.
 - [ ] Authorize `tenant_id` and `data_source_id` from the authenticated caller and server-side source configuration; never trust a client-supplied tenant to choose an S3 prefix.
 - [ ] Preserve `cdp_raw_profiles_stage` resolution and validation in `customer360-api`, including same-tenant and same-domain checks, without blocking the S3/Redis handoff on CIR completion.
-- [ ] Replace direct `CdpRawEvent` insertion in `/events` and `/events/bulk` with the canonical S3 envelope and Redis handoff. Generate or preserve `event_id` before enqueueing, rather than relying on a PostgreSQL default.
+- [X] Remove direct `CdpRawEvent` insertion in the retired `/events` and `/events/bulk` endpoints. Generate or preserve `event_id` in every remaining writer before canonical S3/Redis enqueueing.
 - [ ] Return `202 Accepted` with stable event/batch/object identifiers only after the canonical batch is durably accepted by the Redis/S3 handoff; return a retryable error when the handoff is unavailable.
 - [ ] Keep a compatibility response shape until clients migrate, but do not claim PostgreSQL insertion or expose internal storage credentials/keys beyond the intended acknowledgement fields.
 - [ ] Add explicit feature flags for `EVENT_WRITE_BACKEND=postgres|dual|s3`, with an environment-specific default, startup validation, and a visible current-mode metric.
@@ -271,9 +271,7 @@ An agent must complete each phase in order. Do not delete PostgreSQL event infra
 | [data-tracking-api/core/redis_queue.py](../../data-tracking-api/core/redis_queue.py) | Preserve at-least-once behavior; carry envelope/version/checksum metadata; expose retry metrics | 1 |
 | [data-tracking-api/core/buffered_storage.py](../../data-tracking-api/core/buffered_storage.py) | Align local buffered mode with the same durable envelope and retry semantics | 1 |
 | [data-tracking-api/core/routers/tracking.py](../../data-tracking-api/core/routers/tracking.py) | Return durable batch/object identifiers and expose bounded queue status | 1 |
-| [customer360-api/core/routers/events_api.py](../../customer360-api/core/routers/events_api.py) | Replace direct PostgreSQL event writes with the S3 compatibility adapter; retain profile staging | 2 |
-| [customer360-api/core/models/events.py](../../customer360-api/core/models/events.py) | Temporary dual-write compatibility only; remove in Phase 6 | 2, 6 |
-| [customer360-api/core/schemas/events.py](../../customer360-api/core/schemas/events.py) | Add event/batch acknowledgement fields and preserve client compatibility | 2 |
+| `customer360-api` legacy event router/model/schemas | Removed the dev-only PostgreSQL event-write API; remaining profile analytics await the S3 Silver query phase | 2, 3 |
 | [customer360-api/core/crud/profile360.py](../../customer360-api/core/crud/profile360.py) | Replace direct `cdp_raw_events` SQL with query-service/projection calls | 3 |
 | [customer360-api/core/routers/identity_api.py](../../customer360-api/core/routers/identity_api.py) | Update timeline/engagement dependencies if the router exposes those profile analytics | 3 |
 | [backend-system/analytics/source_analytics/tracking_log_aggregation.py](../../backend-system/analytics/source_analytics/tracking_log_aggregation.py) | Process MinIO `events/` and `_processed/` state, compact Silver data, reconcile counts, and retain Redis as cache only | 1, 3 |
@@ -417,3 +415,25 @@ Only then:
 - [ ] Run the full S3 tracking/analytics E2E test.
 
 **Principle:** S3 is the immutable event lake; PostgreSQL is the identity and operational database; aggregates and serving projections stay small, rebuildable, and intentional.
+
+## Current Five-Folder Event Flow
+
+The repository implementation now follows this contract:
+
+1. `data-tracking-api` validates external batches and writes canonical gzip
+  JSONL RAW objects plus `_processed/` state markers to S3/MinIO. It never
+  connects to PostgreSQL.
+2. `backend-system/analytics` scans all `events/` objects with resumable Redis
+  cursors, normalizes governed fields to the `cdp_raw_events` contract,
+  upserts `cdp_raw_profiles_stage`, and updates source statistics.
+3. `customer360-api` serves read-only `/api/v1/events/` compatibility queries
+  from S3/MinIO with Polars, using PostgreSQL only to resolve the caller's
+  active tenant-owned data sources.
+4. `backend-system/identity_resolution/scripts/init_sample_data.py` seeds raw
+  profile staging and identity-resolution inputs, not behavioral events.
+5. `all-data-simulator/test_web_user_simulator.py` verifies the gzip canonical
+  envelope in MinIO, analytics statistics, and the customer API S3 query.
+
+The relational `cdp_raw_events` table remains only as legacy read/archive/drop-
+gate history until Silver compaction, backfill, reconciliation, query parity,
+and rollback requirements in Phases 3 through 6 are complete.

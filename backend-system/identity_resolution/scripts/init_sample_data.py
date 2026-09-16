@@ -387,9 +387,6 @@ def reset_demo_data(cursor) -> None:
     """
     logger.info("Resetting previous demo data for tenant_id=%s...", DEMO_TENANT_ID)
     cursor.execute(
-        f"DELETE FROM {_table('cdp_raw_events')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,)
-    )
-    cursor.execute(
         f"DELETE FROM {_table('crm_transactions')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,)
     )
     cursor.execute(

@@ -1,5 +1,6 @@
 import json
 import random
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from web_user_simulator import (
@@ -132,6 +133,33 @@ def test_analytics_client_rejects_non_positive_summary(monkeypatch):
         assert "metrics were not updated" in str(exc)
     else:
         raise AssertionError("Expected AnalyticsApiError")
+
+
+def test_analytics_client_queries_s3_backed_events(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'[{"event_id":"event-1"}]'
+
+    def fake_urlopen(request, timeout):
+        assert request.get_method() == "GET"
+        assert "/events/?" in request.full_url
+        assert "event_time_from=" in request.full_url
+        assert "days=90" in request.full_url
+        assert "limit=1000" in request.full_url
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    client = AnalyticsApiClient("http://customer360.test/api/v1", token="token")
+
+    assert client.query_events(
+        event_time_from=datetime.now(timezone.utc) - timedelta(days=90)
+    ) == [{"event_id": "event-1"}]
 
 
 def test_offline_agent_emits_complete_purchase_journey():
@@ -366,20 +394,25 @@ def test_minio_verifier_matches_stored_ndjson(monkeypatch):
         "read_records",
         lambda _bucket, _object_key: [
             {
+                "schema_version": 1,
+                "event_id": "11111111-1111-1111-1111-111111111111",
                 "data_source_id": DEFAULT_DATA_SOURCE_ID,
+                "event_time": "2026-09-08T00:00:00+00:00",
                 "received_at": "2026-09-08T00:00:00+00:00",
-                "event": stored_event,
+                "event_name": "purchase",
+                "event_category": "COMMERCE",
+                "payload": stored_event,
             }
         ],
     )
 
     records = verifier.verify_batch(
         bucket=f"data-tracking-{DEFAULT_DATA_SOURCE_ID}",
-        object_key="2026-09-08-00/batch.jsonl",
+        object_key="events/2026-09-08-00/batch.jsonl.gz",
         data_source_id=UUID(DEFAULT_DATA_SOURCE_ID),
         session_id="web-session-test",
         user_id="web-user-test",
         expected_events=[expected_event],
     )
 
-    assert records[0]["event"] == stored_event
+    assert records[0]["payload"] == stored_event

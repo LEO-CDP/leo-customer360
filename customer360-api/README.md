@@ -34,6 +34,26 @@ Primary capabilities:
 
 In proxied environments, APIs are typically served under /c360api as well.
 
+### Behavioral event reads
+
+`GET /api/v1/events/` is a read-only compatibility endpoint backed by the
+S3/MinIO event lake, not PostgreSQL `cdp_raw_events`. It requires the normal
+authenticated tenant context and supports bounded filters:
+
+```text
+/api/v1/events/?event_time_from=2026-06-17T17:49:58.434Z&days=90&limit=1000
+```
+
+The API resolves active data sources for the authenticated tenant from
+PostgreSQL, reads immutable `events/*.jsonl.gz` objects from S3/MinIO,
+normalizes canonical envelopes with Polars, filters/sorts by `event_time`, and
+returns at most `limit` rows. It never writes event data to PostgreSQL.
+
+Configure the query connection with `EVENT_QUERY_MAX_DAYS`, optional
+`EVENT_S3_BUCKET`, `EVENT_RAW_PREFIX`, `S3_ENDPOINT_URL` or
+`ANALYTICS_S3_ENDPOINT_URL`, `S3_REGION`, S3 credentials, and
+`S3_FORCE_PATH_STYLE`.
+
 ## 3. Architecture and Ownership
 
 - Main API app factory: core/apps/http_api_app.py
@@ -285,10 +305,6 @@ To add a new tool:
 - /api/v1/transactions
 
 ### 9.10 Events
-- GET /api/v1/events/
-- GET /api/v1/events/{event_id}
-- POST /api/v1/events/
-- POST /api/v1/events/bulk
 
 ### 9.11 Content
 - GET /api/v1/content-items/

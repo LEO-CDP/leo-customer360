@@ -34,6 +34,51 @@ class Settings(BaseSettings):
     api_default_page_size: int = 100
     api_max_page_size: int = 1000
 
+    event_query_max_days: int = Field(
+        default=90,
+        validation_alias=AliasChoices("EVENT_QUERY_MAX_DAYS", "event_query_max_days"),
+    )
+    event_s3_bucket: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("EVENT_S3_BUCKET", "event_s3_bucket"),
+    )
+    event_s3_prefix: str = Field(
+        default="events",
+        validation_alias=AliasChoices("EVENT_RAW_PREFIX", "event_s3_prefix"),
+    )
+    event_s3_endpoint_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "ANALYTICS_S3_ENDPOINT_URL", "S3_ENDPOINT_URL", "event_s3_endpoint_url"
+        ),
+    )
+    event_s3_region: str = Field(
+        default="us-east-1",
+        validation_alias=AliasChoices("S3_REGION", "event_s3_region"),
+    )
+    event_s3_access_key_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("S3_ACCESS_KEY_ID", "event_s3_access_key_id"),
+    )
+    event_s3_secret_access_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "S3_SECRET_ACCESS_KEY", "event_s3_secret_access_key"
+        ),
+    )
+    event_s3_session_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("S3_SESSION_TOKEN", "event_s3_session_token"),
+    )
+    event_s3_force_path_style: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("S3_FORCE_PATH_STYLE", "event_s3_force_path_style"),
+    )
+    event_s3_verify_ssl: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("S3_VERIFY_SSL", "event_s3_verify_ssl"),
+    )
+
     # Segment -> CRM sync engine: profiles are resolved
     # and upserted into crm_* tables in batches this size so a large segment
     # never loads its whole membership into memory at once.
@@ -143,6 +188,36 @@ class Settings(BaseSettings):
     dagster_email_engine_repository_name: str = Field(
         default="__repository__",
         validation_alias=AliasChoices("DAGSTER_EMAIL_ENGINE_REPOSITORY_NAME", "dagster_email_engine_repository_name"),
+    )
+
+    # --- Email dispatch (SMTP). Mirrors the env the backend-system/email_engine
+    #     sender reads; here it backs the GET /metadata/smtp health probe. This is
+    #     the SYSTEM/env config (email_engine's fallback), not a tenant's
+    #     crm_email_provider_config DB row. 'mock' -> the probe reports 'disabled'.
+    email_dispatch_adapter: str = Field(
+        default="mock",
+        validation_alias=AliasChoices("EMAIL_DISPATCH_ADAPTER", "email_dispatch_adapter"),
+    )
+    smtp_host: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("SMTP_HOST", "smtp_host")
+    )
+    smtp_port: int = Field(
+        default=587, validation_alias=AliasChoices("SMTP_PORT", "smtp_port")
+    )
+    smtp_username: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("SMTP_USERNAME", "smtp_username")
+    )
+    smtp_password: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("SMTP_PASSWORD", "smtp_password")
+    )
+    smtp_use_tls: bool = Field(
+        default=True, validation_alias=AliasChoices("SMTP_USE_TLS", "smtp_use_tls")
+    )
+    smtp_timeout_seconds: int = Field(
+        default=10, validation_alias=AliasChoices("SMTP_TIMEOUT_SECONDS", "smtp_timeout_seconds")
+    )
+    email_from_address: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("EMAIL_FROM_ADDRESS", "email_from_address")
     )
 
     dagster_campaign_activation_job_name: str = Field(

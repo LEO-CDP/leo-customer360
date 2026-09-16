@@ -103,10 +103,6 @@ FROM (
 	FROM customer360.cdp_identity_index
 	WHERE tenant_id = current_setting('app.tenant_id')::uuid
 	UNION ALL
-	SELECT 'cdp_raw_events', COUNT(*)::bigint
-	FROM customer360.cdp_raw_events
-	WHERE tenant_id = current_setting('app.tenant_id')::uuid
-	UNION ALL
 	SELECT 'cdp_segments', COUNT(*)::bigint
 	FROM customer360.cdp_segments
 	WHERE tenant_id = current_setting('app.tenant_id')::uuid
@@ -364,52 +360,10 @@ WHERE l.tenant_id = current_setting('app.tenant_id')::uuid
 	   OR r.tenant_id <> l.tenant_id OR m.tenant_id <> l.tenant_id)
 ORDER BY l.link_id;
 
-SELECT
-	event_category,
-	domain,
-	COUNT(*)::bigint AS event_count,
-	COUNT(*) FILTER (WHERE is_conversion)::bigint AS conversion_count,
-	COUNT(*) FILTER (WHERE master_profile_id IS NULL)::bigint AS unresolved_count
-FROM customer360.cdp_raw_events
-WHERE tenant_id = current_setting('app.tenant_id')::uuid
-GROUP BY event_category, domain
-ORDER BY domain, event_category;
-
-SELECT
-	COUNT(*)::bigint AS total_events,
-	COUNT(*) FILTER (WHERE master_profile_id IS NULL)::bigint AS unresolved_events,
-	COUNT(*) FILTER (WHERE event_time > current_timestamp)::bigint AS future_events,
-	MIN(event_time) AS oldest_event_time,
-	MAX(event_time) AS newest_event_time
-FROM customer360.cdp_raw_events
-WHERE tenant_id = current_setting('app.tenant_id')::uuid;
-
--- Events should use the governed catalog when a matching catalog row exists.
-SELECT
-	e.event_category,
-	e.domain,
-	e.event_name,
-	COUNT(*)::bigint AS uncatalogued_event_count
-FROM customer360.cdp_raw_events AS e
-LEFT JOIN customer360.cdp_event_catalog AS c
-	ON c.event_name = e.event_name
-   AND (c.domain_scope = 'all' OR c.domain_scope = e.domain)
-WHERE e.tenant_id = current_setting('app.tenant_id')::uuid
-  AND c.id IS NULL
-GROUP BY e.event_category, e.domain, e.event_name
-ORDER BY uncatalogued_event_count DESC, e.event_name;
-
--- Duplicate non-null source deduplication keys indicate retry/idempotency issues.
-SELECT
-	source_system,
-	event_dedup_key,
-	COUNT(*)::bigint AS duplicate_count
-FROM customer360.cdp_raw_events
-WHERE tenant_id = current_setting('app.tenant_id')::uuid
-  AND event_dedup_key IS NOT NULL
-GROUP BY source_system, event_dedup_key
-HAVING COUNT(*) > 1
-ORDER BY duplicate_count DESC, source_system, event_dedup_key;
+-- Behavioral event health is checked outside PostgreSQL. Inspect S3/MinIO
+-- RAW/Silver object counts, `_processed/` state lag, quarantine counts,
+-- checksums, duplicate event IDs, and Redis queue depth with the analytics
+-- reconciliation checks.
 
 -- ---------------------------------------------------------------------------
 -- 6. Transactions and customer contacts

@@ -45,6 +45,10 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("S3_FORCE_PATH_STYLE", "s3_force_path_style"),
     )
+    s3_verify_ssl: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("S3_VERIFY_SSL", "s3_verify_ssl"),
+    )
     s3_auto_create_buckets: bool = Field(
         default=True,
         validation_alias=AliasChoices("S3_AUTO_CREATE_BUCKETS", "s3_auto_create_buckets"),

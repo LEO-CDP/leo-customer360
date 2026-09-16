@@ -21,6 +21,19 @@ class ObjectStorageError(RuntimeError):
     """Raised when a tracking object cannot be written."""
 
 
+EVENT_CATEGORIES = {
+    "GENERAL",
+    "EDUCATION",
+    "COMMERCE",
+    "FEEDBACK",
+    "FINANCE",
+    "STOCK_TRADING",
+    "TRAVEL",
+    "REAL_ESTATE",
+    "SERVICE_INDUSTRY",
+}
+
+
 @dataclass(frozen=True)
 class StoredTrackingLog:
     data_source_id: UUID
@@ -59,10 +72,13 @@ def build_tracking_object(
                 "ingestion_version": ingestion_version,
                 "event_id": _event_id(event, data_source_id, index),
                 "data_source_id": str(data_source_id),
+                "tenant_id": _string_value(event.get("tenant_id")),
                 "event_time": _event_time(event, received_at),
                 "received_at": received_at.isoformat(),
-                "event_name": event.get("event_name"),
-                "event_category": event.get("event_category", "GENERAL"),
+                "source_system": _source_system(event),
+                "domain": _string_value(event.get("domain")) or "unknown",
+                "event_name": _event_name(event),
+                "event_category": _event_category(event),
                 "event_dedup_key": _event_dedup_key(event),
                 "identity": _identity(event),
                 "master_profile_id": event.get("master_profile_id"),
@@ -86,6 +102,7 @@ class S3ObjectStorage:
         )
         client_kwargs: dict[str, Any] = {
             "region_name": settings.s3_region,
+            "verify": settings.s3_verify_ssl,
             "config": client_config,
         }
         if settings.s3_endpoint_url:
@@ -347,7 +364,31 @@ def _identity(event: dict[str, Any]) -> dict[str, str | None]:
         "session_id": _string_value(event.get("session_id")),
         "device_id": _string_value(event.get("device_id")),
         "anonymous_id": _string_value(event.get("anonymous_id")),
+        "external_customer_id": _string_value(event.get("external_customer_id")),
+        "advertising_id": _string_value(event.get("advertising_id")),
+        "cookie_id": _string_value(event.get("cookie_id")),
+        "email": _string_value(event.get("email")),
+        "phone_number": _string_value(event.get("phone_number")),
     }
+
+
+def _source_system(event: dict[str, Any]) -> str:
+    return _string_value(event.get("source_system")) or "tracking"
+
+
+def _event_name(event: dict[str, Any]) -> str:
+    value = (
+        _string_value(event.get("event_name"))
+        or _string_value(event.get("eventType"))
+        or _string_value(event.get("event"))
+    )
+    return value or "unknown"
+
+
+def _event_category(event: dict[str, Any]) -> str:
+    value = _string_value(event.get("event_category"))
+    normalized = value.upper() if value else "GENERAL"
+    return normalized if normalized in EVENT_CATEGORIES else "GENERAL"
 
 
 def _event_time(event: dict[str, Any], received_at: datetime) -> str:

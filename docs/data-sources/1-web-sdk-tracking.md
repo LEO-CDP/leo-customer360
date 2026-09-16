@@ -13,16 +13,16 @@ sequenceDiagram
     participant Iframe as /cdp-sdk/html/cdp-event-proxy.html
     participant Observer as leo.observer.js
     participant Log as LEO Log Domain
-    participant API as customer360-api /events
-    participant Staging as cdp_raw_profiles_stage / cdp_raw_events
+    participant API as data-tracking-api
+    participant Staging as S3/MinIO RAW event lake
 
     User->>Host: Load Page
     Host->>Proxy: Execute Embedded Snippet
     Proxy->>Iframe: Create Hidden Cross-Origin Iframe
     Iframe->>Observer: Load Observer & FingerprintJS2
     Observer->>Log: Send Event Batch (/etv, /eta, /etc, /efb)
-    Log->>API: Bridge Event Hit
-    API->>Staging: Upsert Raw Event & Attribution Record
+    Log->>API: POST validated event batch
+    API->>Staging: Redis handoff -> immutable RAW object
 ```
 
 ---

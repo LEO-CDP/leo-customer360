@@ -10,7 +10,7 @@ from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
-from uuid import uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from dotenv import load_dotenv
 
@@ -52,6 +52,7 @@ S3_ACCESS_KEY_ID = os.environ.get("S3_ACCESS_KEY_ID")
 S3_SECRET_ACCESS_KEY = os.environ.get("S3_SECRET_ACCESS_KEY")
 S3_SESSION_TOKEN = os.environ.get("S3_SESSION_TOKEN")
 S3_FORCE_PATH_STYLE = os.environ.get("S3_FORCE_PATH_STYLE", "false").lower() == "true"
+S3_VERIFY_SSL = os.environ.get("S3_VERIFY_SSL", "true").lower() == "true"
 S3_MAX_POOL_CONNECTIONS = int(os.environ.get("ANALYTICS_S3_MAX_POOL_CONNECTIONS", "64"))
 ANALYTICS_LOCK_KEY = "analytics:tracking-log-run-lock"
 ANALYTICS_LOCK_TTL_SECONDS = int(
@@ -59,6 +60,18 @@ ANALYTICS_LOCK_TTL_SECONDS = int(
 )
 
 TRACKED_EVENT_FIELD = "tracked-event"
+EVENT_CATEGORIES = {
+    "GENERAL",
+    "EDUCATION",
+    "COMMERCE",
+    "FEEDBACK",
+    "FINANCE",
+    "STOCK_TRADING",
+    "TRAVEL",
+    "REAL_ESTATE",
+    "SERVICE_INDUSTRY",
+}
+EVENT_RAW_PREFIX = os.environ.get("ANALYTICS_EVENT_RAW_PREFIX", "events").strip("/")
 HOURLY_FOLDER_PATTERN = re.compile(
     r"^(?:events/)?(\d{4}-\d{2}-\d{2}-\d{2})/(.+\.jsonl(?:\.gz)?)$"
 )
@@ -126,6 +139,7 @@ def build_s3_client() -> Any:
 
     client_kwargs: dict[str, Any] = {
         "region_name": S3_REGION,
+        "verify": S3_VERIFY_SSL,
         "config": Config(
             s3={"addressing_style": "path" if S3_FORCE_PATH_STYLE else "auto"},
             max_pool_connections=max(8, S3_MAX_POOL_CONNECTIONS),
@@ -532,6 +546,201 @@ def count_records_and_signatures(body: Any, object_key: str) -> tuple[int, set[s
     return count, signatures
 
 
+class EventEnvelopeError(ValueError):
+    """Raised when an S3 record cannot satisfy the governed event contract."""
+
+
+def normalize_event_record(
+    record: dict[str, Any],
+    data_source_id: str,
+    tenant_id: str,
+) -> dict[str, Any]:
+    """Normalize canonical or legacy JSONL into the cdp_raw_events contract.
+
+    ``payload`` remains the complete source-specific document. Governed fields
+    are derived from the envelope first and payload second; tenant ownership is
+    always supplied by the active PostgreSQL data-source mapping, never trusted
+    from the object body.
+    """
+    schema_version = record.get("schema_version")
+    if schema_version not in (None, 1):
+        raise EventEnvelopeError(f"unsupported schema_version: {schema_version}")
+    payload = record.get("payload") or record.get("event")
+    if not isinstance(payload, dict):
+        if "event" in record and payload is not None:
+            payload = {"event": payload}
+        else:
+            raise EventEnvelopeError("event payload must be an object")
+
+    event_id = record.get("event_id") or payload.get("event_id")
+    if not event_id:
+        event_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"c360:legacy-event:{tenant_id}:{data_source_id}:"
+                f"{json.dumps(record, ensure_ascii=False, sort_keys=True, default=str)}",
+            )
+        )
+    try:
+        event_id = str(UUID(str(event_id)))
+    except (ValueError, TypeError) as exc:
+        raise EventEnvelopeError("event_id must be a UUID") from exc
+
+    event_time = _parse_event_datetime(record.get("event_time") or payload.get("event_time"))
+    if event_time is None:
+        event_time = _parse_event_datetime(record.get("received_at"))
+    if event_time is None:
+        raise EventEnvelopeError("event_time must be a valid UTC timestamp")
+
+    event_name = _text_value(
+        record.get("event_name") or payload.get("event_name") or payload.get("eventType")
+    ) or _text_value(payload.get("event")) or "unknown"
+    event_category = (_text_value(record.get("event_category") or payload.get("event_category")) or "GENERAL").upper()
+    if event_category not in EVENT_CATEGORIES:
+        event_category = "GENERAL"
+    identity = record.get("identity")
+    if not isinstance(identity, dict):
+        identity = {}
+
+    return {
+        "event_id": event_id,
+        "tenant_id": tenant_id,
+        "data_source_id": data_source_id,
+        "domain": _text_value(payload.get("domain")) or "unknown",
+        "source_system": _text_value(record.get("source_system") or payload.get("source_system")) or "tracking",
+        "master_profile_id": _text_value(record.get("master_profile_id") or payload.get("master_profile_id")),
+        "raw_profile_id": _text_value(payload.get("raw_profile_id")),
+        "external_customer_id": _identity_value(identity, payload, "external_customer_id"),
+        "email": _identity_value(identity, payload, "email"),
+        "phone_number": _identity_value(identity, payload, "phone_number"),
+        "device_id": _identity_value(identity, payload, "device_id"),
+        "advertising_id": _identity_value(identity, payload, "advertising_id"),
+        "cookie_id": _identity_value(identity, payload, "cookie_id"),
+        "session_id": _identity_value(identity, payload, "session_id"),
+        "channel": _text_value(payload.get("channel")),
+        "platform": _text_value(payload.get("platform")),
+        "event_category": event_category,
+        "event_name": event_name,
+        "event_dedup_key": _text_value(
+            record.get("event_dedup_key") or payload.get("event_dedup_key")
+        ),
+        "event_value": payload.get("event_value"),
+        "currency": _text_value(payload.get("currency")),
+        "entity_type": _text_value(payload.get("entity_type")),
+        "entity_id": _text_value(payload.get("entity_id")),
+        "transaction_id": _text_value(payload.get("transaction_id")),
+        "transaction_status": _text_value(payload.get("transaction_status")),
+        "location_name": _text_value(payload.get("location_name")),
+        "is_conversion": bool(payload.get("is_conversion", False)),
+        "event_time": event_time.isoformat(),
+        "received_at": record.get("received_at") or event_time.isoformat(),
+        "payload": payload,
+    }
+
+
+def upsert_raw_profile(cursor: Any, event: dict[str, Any]) -> str:
+    """Upsert one deterministic raw profile from a normalized event."""
+    identity_pairs = (
+        ("external_customer_id", event.get("external_customer_id")),
+        ("email", event.get("email")),
+        ("phone_number", event.get("phone_number")),
+        ("device_id", event.get("device_id")),
+        ("advertising_id", event.get("advertising_id")),
+        ("cookie_id", event.get("cookie_id")),
+        ("session_id", event.get("session_id")),
+    )
+    identity_type, identity_value = next(
+        ((key, value) for key, value in identity_pairs if value),
+        ("event_id", event["event_id"]),
+    )
+    raw_profile_id = str(
+        uuid5(
+            NAMESPACE_URL,
+            f"c360:raw-profile:{event['tenant_id']}:{event['data_source_id']}:{identity_type}:{identity_value}",
+        )
+    )
+    event["raw_profile_id"] = raw_profile_id
+    try:
+        from psycopg2.extras import Json
+
+        json_payload: Any = Json(event["payload"])
+    except ImportError:
+        json_payload = json.dumps(event["payload"], ensure_ascii=False)
+    cursor.execute(
+        f"""
+        INSERT INTO {DB_SCHEMA}.cdp_raw_profiles_stage (
+            raw_profile_id, tenant_id, domain, source_system, channel,
+            external_customer_id, email, phone_number, device_id,
+            advertising_id, cookie_id, session_id, event_name, event_time,
+            event_payload, status_code, processed_at
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, 1, NULL
+        )
+        ON CONFLICT (raw_profile_id) DO UPDATE SET
+            domain = EXCLUDED.domain,
+            source_system = EXCLUDED.source_system,
+            channel = EXCLUDED.channel,
+            external_customer_id = EXCLUDED.external_customer_id,
+            email = EXCLUDED.email,
+            phone_number = EXCLUDED.phone_number,
+            device_id = EXCLUDED.device_id,
+            advertising_id = EXCLUDED.advertising_id,
+            cookie_id = EXCLUDED.cookie_id,
+            session_id = EXCLUDED.session_id,
+            event_name = EXCLUDED.event_name,
+            event_time = EXCLUDED.event_time,
+            event_payload = EXCLUDED.event_payload,
+            status_code = 1,
+            processed_at = NULL
+        """,
+        (
+            raw_profile_id,
+            event["tenant_id"],
+            event["domain"],
+            event["source_system"],
+            event.get("channel"),
+            event.get("external_customer_id"),
+            event.get("email"),
+            event.get("phone_number"),
+            event.get("device_id"),
+            event.get("advertising_id"),
+            event.get("cookie_id"),
+            event.get("session_id"),
+            event["event_name"],
+            event["event_time"],
+            json_payload,
+        ),
+    )
+    return raw_profile_id
+
+
+def _parse_event_datetime(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _text_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _identity_value(identity: dict[str, Any], payload: dict[str, Any], key: str) -> Optional[str]:
+    return _text_value(identity.get(key) or payload.get(key))
+
+
 def _iter_jsonl_lines(body: Any, object_key: str) -> Any:
     """Yield decoded JSONL lines from plain or gzip-compressed S3 bodies."""
     if object_key.endswith(".gz"):
@@ -543,6 +752,34 @@ def _iter_jsonl_lines(body: Any, object_key: str) -> Any:
         yield from BytesIO(body)
         return
     yield from (body.iter_lines() if hasattr(body, "iter_lines") else body)
+
+
+def read_normalized_event_records(
+    body: Any,
+    object_key: str,
+    data_source_id: str,
+    tenant_id: str,
+) -> list[dict[str, Any]]:
+    """Read and validate one RAW object against the governed event contract."""
+    records: list[dict[str, Any]] = []
+    for raw_line in _iter_jsonl_lines(body, object_key):
+        if not raw_line or not raw_line.strip():
+            continue
+        try:
+            record = json.loads(raw_line)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise EventEnvelopeError(f"Invalid JSONL in object {object_key}") from exc
+        if not isinstance(record, dict):
+            raise EventEnvelopeError(f"JSONL record in object {object_key} must be an object")
+        if not record.get("event_time") and not (record.get("payload") or {}).get("event_time"):
+            hour_match = re.search(r"(\d{4}-\d{2}-\d{2}-\d{2})", object_key)
+            if hour_match:
+                record = dict(record)
+                record["event_time"] = datetime.strptime(
+                    hour_match.group(1), "%Y-%m-%d-%H"
+                ).replace(tzinfo=timezone.utc).isoformat()
+        records.append(normalize_event_record(record, data_source_id, tenant_id))
+    return records
 
 
 def _source_lock_key(data_source_id: str) -> str:
@@ -750,7 +987,6 @@ def process_tracking_logs(
         finally:
             global_lease.release()
 
-    current_hour = current_system_gmt_hour()
     source_items: list[tuple[str, str]] = []
     source_results: list[dict[str, Any]] = []
 
@@ -773,9 +1009,16 @@ def process_tracking_logs(
         source_objects_processed = 0
         saw_checkpointed_object = False
         bucket = f"data-tracking-{data_source_id}"
+        source_connection = db_connection
+        owns_source_connection = False
         try:
+            if source_connection is None:
+                source_connection = connect_database()
+                owns_source_connection = True
+            with source_connection.cursor() as context_cursor:
+                set_tenant_context(context_cursor, tenant_id)
             start_after = get_source_cursor(cache, data_source_id)
-            current_prefix = f"events/{current_hour}/"
+            current_prefix = f"{EVENT_RAW_PREFIX}/"
             if not start_after or not start_after.startswith(current_prefix):
                 start_after = None
             for hour, object_key in iter_hourly_objects(
@@ -797,11 +1040,22 @@ def process_tracking_logs(
                 response = storage.get_object(Bucket=bucket, Key=object_key)
                 body = response["Body"]
                 try:
-                    event_count, signatures = count_records_and_signatures(body, object_key)
+                    normalized_events = read_normalized_event_records(
+                        body, object_key, data_source_id, tenant_id
+                    )
+                    event_count = len(normalized_events)
+                    signatures = {
+                        signature
+                        for event in normalized_events
+                        if (signature := _extract_profile_signature({"payload": event["payload"]}))
+                    }
                 finally:
                     close = getattr(body, "close", None)
                     if close:
                         close()
+
+                for normalized_event in normalized_events:
+                    upsert_raw_profile(source_connection.cursor(), normalized_event)
 
                 if increment_hourly_count(
                     cache,
@@ -854,29 +1108,15 @@ def process_tracking_logs(
 
             # One DB connection per worker keeps writes thread-safe under psycopg2.
             # In single-thread test mode, reuse the injected connection.
-            if db_connection is not None:
+            if source_connection is not None:
                 update_data_source_summary(
-                    db_connection,
+                    source_connection,
                     tenant_id,
                     data_source_id,
                     total_tracked_event,
                     avg_daily_event,
                     avg_events_per_profile,
                 )
-            else:
-                worker_connection = connect_database()
-                try:
-                    update_data_source_summary(
-                        worker_connection,
-                        tenant_id,
-                        data_source_id,
-                        total_tracked_event,
-                        avg_daily_event,
-                        avg_events_per_profile,
-                    )
-                finally:
-                    worker_connection.close()
-
             _set_source_state(
                 cache,
                 data_source_id,
@@ -904,6 +1144,8 @@ def process_tracking_logs(
             raise
         finally:
             release_source_lock(cache, data_source_id, lock_token)
+            if owns_source_connection and source_connection is not None:
+                source_connection.close()
 
     if db_connection is not None:
         source_items = fetch_data_sources(db_connection, data_source_limit)

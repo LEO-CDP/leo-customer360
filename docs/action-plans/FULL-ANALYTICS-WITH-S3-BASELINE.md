@@ -32,8 +32,9 @@ MinIO/S3 endpoint with credentials that can list only the event buckets.
   batch IDs and carry compressed bytes safely through Redis.
 - Analytics currently discovers per-source hourly objects and updates Redis
   counters plus `sys_data_source` totals.
-- `customer360-api` and profile analytics still own the PostgreSQL raw-event
-  compatibility path. This Phase 1 change does not remove or redirect it.
+- The legacy `customer360-api` `/events` write API has been removed. Profile
+  analytics still has a PostgreSQL raw-event read dependency that must move to
+  the S3 Silver query path before the table can be dropped.
 
 ## Approved Phase 1 Contract
 

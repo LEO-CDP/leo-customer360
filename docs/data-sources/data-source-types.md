@@ -16,12 +16,12 @@ flowchart TD
 
     subgraph IngestionTier["2. Ingestion & Storage Tier"]
         LOG["Log Ingest Domain & Tracker Proxy"]
-        API["customer360-api /events & data-tracking-api"]
+        API["data-tracking-api /tracking/logs"]
         S3["S3 / MinIO Event Storage Partition"]
     end
 
     subgraph Staging["3. Database Staging (PostgreSQL 16)"]
-        RAW_EVT["customer360.cdp_raw_events"]
+        RAW_EVT["S3/MinIO RAW + Silver event lake"]
         RAW_PRF["customer360.cdp_raw_profiles_stage"]
     end
 

@@ -75,9 +75,6 @@ cat <<EOF
 ✅ Demo complete. Inspect the results yourself in psql, e.g.:
 
   docker exec -it -u postgres ${PG_CONTAINER} psql -d ${DB_NAME} -c \\
-    "SET app.tenant_id = '${DEMO_TENANT_ID}'; SELECT master_profile_id, domain, full_name, email, phone_number, source_systems FROM ${DB_SCHEMA}.cdp_master_profiles WHERE tenant_id = '${DEMO_TENANT_ID}' ORDER BY domain;"
-
-  docker exec -it -u postgres ${PG_CONTAINER} psql -d ${DB_NAME} -c \\
     "SET app.tenant_id = '${DEMO_TENANT_ID}'; SELECT raw_profile_id, source_system, domain, status_code FROM ${DB_SCHEMA}.cdp_raw_profiles_stage WHERE tenant_id = '${DEMO_TENANT_ID}' ORDER BY source_system;"
 
   docker exec -it -u postgres ${PG_CONTAINER} psql -d ${DB_NAME} -c \\

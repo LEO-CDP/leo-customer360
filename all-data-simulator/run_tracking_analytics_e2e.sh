@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reusable local E2E template:
-#   create events -> tracking API -> MinIO JSONL -> Dagster analytics -> PostgreSQL
+#   create events -> tracking API -> MinIO RAW JSONL.GZ -> Dagster analytics -> S3 stats/profile stage
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -116,7 +116,7 @@ docker exec "$MINIO_CONTAINER" mc alias set local http://127.0.0.1:9000 \
 	"$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 || \
 	fail "could not configure the MinIO mc alias"
 for attempt in 1 2 3; do
-	if STORED_NDJSON="$(docker exec "$MINIO_CONTAINER" mc cat "$MINIO_OBJECT" 2>/dev/null)"; then
+	if STORED_NDJSON="$(docker exec "$MINIO_CONTAINER" mc cat "$MINIO_OBJECT" 2>/dev/null | gzip -dc)"; then
 		break
 	fi
 	if [[ "$attempt" == 3 ]]; then
@@ -131,7 +131,11 @@ STORED_COUNT="$(jq 'length' <<<"$STORED_JSON")"
 	fail "MinIO stored $STORED_COUNT events; expected $EXPECTED_COUNT"
 for ((index = 0; index < EXPECTED_COUNT; index++)); do
 	expected_event="$(jq -c ".[$index] + {session_id: \"$SESSION_ID\", user_id: \"$USER_ID\"}" <<<"$EVENTS_JSON")"
-	stored_event="$(jq -c ".[$index].event" <<<"$STORED_JSON")"
+	stored_event="$(jq -c ".[$index].payload" <<<"$STORED_JSON")"
+	schema_version="$(jq -r ".[$index].schema_version // empty" <<<"$STORED_JSON")"
+	event_id="$(jq -r ".[$index].event_id // empty" <<<"$STORED_JSON")"
+	event_time="$(jq -r ".[$index].event_time // empty" <<<"$STORED_JSON")"
+	[[ "$schema_version" == "1" && -n "$event_id" && -n "$event_time" ]] || fail "MinIO record $((index + 1)) has invalid canonical envelope"
 	stored_source="$(jq -r ".[$index].data_source_id // empty" <<<"$STORED_JSON")"
 	[[ "$stored_source" == "$DATA_SOURCE_ID" ]] || \
 		fail "MinIO record $((index + 1)) has data_source_id=$stored_source"
