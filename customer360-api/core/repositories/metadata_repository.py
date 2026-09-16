@@ -142,7 +142,11 @@ class MetadataRepository:
 				if settings.smtp_username and settings.smtp_password:
 					server.login(settings.smtp_username, settings.smtp_password)
 				server.noop()
-			result["status"] = "reachable"
+			# Connected (and STARTTLS'd) OK. Only claim 'reachable' if we
+			# actually logged in -- with no credentials we never tested auth, so
+			# report 'no_credentials' instead of implying the relay accepts us
+			# (the deploy probe treats anything but reachable/disabled as a warning).
+			result["status"] = "reachable" if result["login"] else "no_credentials"
 		except Exception as exc:  # noqa: BLE001
 			logger.warning("SMTP health check failed", exc_info=True)
 			result["status"] = "unreachable"

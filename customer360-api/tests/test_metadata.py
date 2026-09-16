@@ -465,6 +465,26 @@ class SmtpHealthTests(unittest.TestCase):
         server.login.assert_called_once_with("user", "key")
         server.noop.assert_called_once()
 
+    def test_smtp_no_credentials_not_reported_reachable(self):
+        # SMTP enabled + host reachable but no username/password: login is never
+        # attempted, so the probe must NOT claim the credential authenticates.
+        server = MagicMock()
+        server.__enter__ = MagicMock(return_value=server)
+        server.__exit__ = MagicMock(return_value=False)
+        with (
+            patch.object(mr.settings, "email_dispatch_adapter", "smtp"),
+            patch.object(mr.settings, "smtp_host", "smtp-relay.brevo.com"),
+            patch.object(mr.settings, "smtp_username", None),
+            patch.object(mr.settings, "smtp_password", None),
+            patch("core.repositories.metadata_repository.smtplib.SMTP", return_value=server),
+        ):
+            response = TestClient(self.app).get("/metadata/smtp")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "no_credentials")
+        server.login.assert_not_called()
+
     def test_smtp_unreachable_surfaces_error(self):
         with (
             patch.object(mr.settings, "email_dispatch_adapter", "smtp"),
