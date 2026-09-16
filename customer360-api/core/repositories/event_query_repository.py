@@ -89,6 +89,7 @@ class EventQueryRepository:
 
     def _build_s3_client(self) -> Any:
         client_kwargs: dict[str, Any] = {
+            # Must be a valid AWS region token; boto3 rejects any other value.
             "region_name": self.settings.event_s3_region,
             "verify": self.settings.event_s3_verify_ssl,
             "config": Config(
@@ -107,7 +108,12 @@ class EventQueryRepository:
             client_kwargs["aws_secret_access_key"] = self.settings.event_s3_secret_access_key
         if self.settings.event_s3_session_token:
             client_kwargs["aws_session_token"] = self.settings.event_s3_session_token
-        return boto3.client("s3", **client_kwargs)
+        try:
+            return boto3.client("s3", **client_kwargs)
+        except (BotoCoreError, ClientError):
+            # Raise a clean error; the botocore message echoes region/keys and would
+            # leak them into the 500 traceback, so drop the cause chain (from None).
+            raise EventQueryError("Invalid S3 client configuration") from None
 
     @staticmethod
     def _tenant_source_ids(db: Session, tenant_id: UUID) -> list[UUID]:
