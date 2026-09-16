@@ -146,7 +146,21 @@ class MetadataRepository:
 		except Exception as exc:  # noqa: BLE001
 			logger.warning("SMTP health check failed", exc_info=True)
 			result["status"] = "unreachable"
-			result["error"] = str(exc)
+			# Return a FIXED category, never the raw exception text -- that would
+			# leak server internals / stack detail to the caller (CodeQL
+			# py/stack-trace-exposure). Full detail is in the server log above.
+			if isinstance(exc, smtplib.SMTPAuthenticationError):
+				result["error"] = "authentication_failed"
+			elif isinstance(exc, ssl.SSLError):
+				result["error"] = "tls_error"
+			elif isinstance(exc, TimeoutError):
+				result["error"] = "timeout"
+			elif isinstance(exc, smtplib.SMTPException):
+				result["error"] = "smtp_error"
+			elif isinstance(exc, OSError):
+				result["error"] = "connection_error"
+			else:
+				result["error"] = "error"
 		return result
 
 	def get_smtp_health(self) -> dict[str, Any]:

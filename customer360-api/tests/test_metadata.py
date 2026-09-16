@@ -476,7 +476,9 @@ class SmtpHealthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["status"], "unreachable")
-        self.assertEqual(body["error"], "refused")
+        # A fixed category, not the raw exception text (no stack/internal leak).
+        self.assertEqual(body["error"], "connection_error")
+        self.assertNotIn("refused", str(body))
 
 
 if __name__ == "__main__":
