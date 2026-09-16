@@ -59,6 +59,7 @@ cd "$SCRIPT_DIR"
 COMPOSE_FILE=""
 ENV_FILE=".env"
 ENV_EXAMPLE_FILE=".env.example"
+DEMO_TENANT_ID="${DEMO_TENANT_ID:-11111111-1111-1111-1111-111111111111}"
 CIR_DIR="backend-system/identity_resolution"
 BACKEND_SYSTEM_DIR="backend-system"
 CUSTOMER360_API_DIR="customer360-api"
@@ -580,6 +581,27 @@ print_database_status() {
      SELECT 'cdp_content_items', COUNT(*) FROM ${db_schema}.cdp_content_items
      UNION ALL
      SELECT 'crm_transactions', COUNT(*) FROM ${db_schema}.crm_transactions;"
+  echo "📈 Data source statistics:"
+  docker exec -u postgres "$POSTGRES_CONTAINER" psql -U "${DB_USER:-postgres}" -d "$db_name" -P pager=off \
+    -c "SELECT
+          data_source_id,
+          name,
+          slug,
+          CASE status WHEN 1 THEN 'active' ELSE 'inactive' END AS status,
+          CASE source_type
+            WHEN 1 THEN 'web/sdk'
+            WHEN 2 THEN 'connector'
+            WHEN 3 THEN 'webhook'
+            WHEN 4 THEN 's3'
+            WHEN 5 THEN 'mobile/sdk'
+            ELSE 'type-' || source_type::text
+          END AS source_type,
+          total_tracked_event,
+          avg_daily_event,
+          avg_events_per_profile
+        FROM ${db_schema}.sys_data_source
+        WHERE tenant_id = '${DEMO_TENANT_ID}'
+        ORDER BY status DESC, name;"
 }
 
 seed_demo_if_empty() {

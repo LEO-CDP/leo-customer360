@@ -119,8 +119,6 @@ window.C360 = window.C360 || {};
     rowSelectorClass: "datasource-row",
     rowClickable: true,
     onRowClick: function (id) { viewDataSource(id); },
-    onEdit: function (id) { viewDataSource(id); },
-    editLabel: "View",
     resourceLabel: "data source",
     clientSide: true,
     clientSideLimit: 500,

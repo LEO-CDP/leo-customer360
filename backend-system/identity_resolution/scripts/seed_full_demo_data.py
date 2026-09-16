@@ -106,6 +106,7 @@ import os
 import random
 import sys
 import uuid
+import warnings
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -164,6 +165,10 @@ S3_SESSION_TOKEN = os.environ.get("S3_SESSION_TOKEN") or os.environ.get("AWS_SES
 S3_FORCE_PATH_STYLE = os.environ.get("S3_FORCE_PATH_STYLE", "false").lower() == "true"
 S3_VERIFY_SSL = os.environ.get("S3_VERIFY_SSL", "true").lower() == "true"
 S3_AUTO_CREATE_BUCKETS = os.environ.get("S3_AUTO_CREATE_BUCKETS", "true").lower() == "true"
+if not S3_VERIFY_SSL:
+    from urllib3.exceptions import InsecureRequestWarning
+
+    warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 BEHAVIORAL_SOURCE_SLUGS = {
     "adjust": "adjust-mobile-attribution",
@@ -2339,9 +2344,12 @@ def _ensure_new_data_bucket(s3: Any, bucket: str) -> None:
 
 def _new_data_event(profile: dict, source_id: str, event_time: datetime, rng: random.Random) -> tuple[dict, dict]:
     domain = canonical_demo_domain(profile.get("domain"))
-    category, event_name, value_range, entity_type, is_conversion = rng.choice(DOMAIN_EVENT_CATALOG.get(domain, RETAIL_EVENTS))
+    event_name, category, entity_type, is_conversion, channel = rng.choice(
+        BEHAVIORAL_EVENT_TEMPLATES.get(domain, BEHAVIORAL_EVENT_TEMPLATES["retail"])
+    )
     event_id = str(uuid.uuid4())
     session_id = f"new-seed-session-{uuid.uuid4().hex[:16]}"
+    event_value = round(rng.uniform(150_000, 3_000_000), 2) if is_conversion else None
     payload = {
         "event_id": event_id,
         "event_time": event_time.isoformat(),
@@ -2353,7 +2361,7 @@ def _new_data_event(profile: dict, source_id: str, event_time: datetime, rng: ra
         "device_id": profile.get("device_id"),
         "session_id": session_id,
         "source_system": profile.get("source_system") or "C360Tracker",
-        "channel": DOMAIN_EVENT_CHANNEL.get(domain, profile.get("channel") or "web"),
+        "channel": channel or profile.get("channel") or "web",
         "platform": profile.get("platform"),
         "event_category": category,
         "event_name": event_name,
@@ -2361,7 +2369,7 @@ def _new_data_event(profile: dict, source_id: str, event_time: datetime, rng: ra
         "is_conversion": is_conversion,
         "entity_type": entity_type,
         "entity_id": f"new-{entity_type or 'event'}-{rng.randint(10000, 99999)}" if entity_type else None,
-        "event_value": rng.randint(*value_range) if value_range else None,
+        "event_value": event_value,
         "currency": "VND",
         "transaction_id": event_id if is_conversion else None,
         "transaction_status": "completed" if is_conversion else None,
@@ -2388,13 +2396,14 @@ def _new_data_event(profile: dict, source_id: str, event_time: datetime, rng: ra
 
 
 def seed_new_data(cursor, *, event_count: int = NEW_DATA_EVENT_COUNT) -> int:
-    """Append fresh events from now through the preceding 48 hours."""
+    """Append fresh events without deleting existing database or S3 data."""
     profiles = fetch_new_data_profiles(cursor)
     source_ids = fetch_active_source_ids(cursor)
     if not profiles:
         raise RuntimeError("No linked raw/master profiles found; run the default demo seed first")
     if not source_ids:
         raise RuntimeError("No active data sources found for the demo tenant")
+    logger.info("Loaded %d active data source IDs from the local database.", len(source_ids))
     now = datetime.now(timezone.utc)
     start = now - timedelta(hours=NEW_DATA_LOOKBACK_HOURS)
     rng = random.Random()
