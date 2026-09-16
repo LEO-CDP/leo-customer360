@@ -199,6 +199,10 @@ BEHAVIORAL_EVENT_TEMPLATES = {
     ),
 }
 
+MIN_EVENTS_PER_MASTER_PROFILE = 11
+NEW_DATA_EVENT_COUNT = int(os.environ.get("NEW_DATA_EVENT_COUNT", "20000"))
+NEW_DATA_LOOKBACK_HOURS = 48
+
 def canonical_demo_domain(domain: str | None) -> str:
     if not domain:
         return "retail"
@@ -2069,12 +2073,13 @@ def fetch_master_profiles(cursor) -> list:
 
 
 def fetch_event_profiles(cursor) -> list:
-    """Return raw profiles together with their resolved master profiles."""
+    """Return active raw-profile links with their resolved master profiles."""
     cursor.execute(
         f"""
         SELECT m.master_profile_id, m.domain, m.created_at,
                r.raw_profile_id, r.source_system, r.channel,
-               r.external_customer_id, r.device_id, r.platform
+               r.external_customer_id, r.device_id, r.advertising_id,
+               r.cookie_id, r.platform
         FROM {_table('cdp_master_profiles')} m
         JOIN {_table('cdp_profile_links')} l
           ON l.tenant_id = m.tenant_id
@@ -2090,6 +2095,24 @@ def fetch_event_profiles(cursor) -> list:
         (DEMO_TENANT_ID,),
     )
     return cursor.fetchall()
+
+
+def fetch_new_data_profiles(cursor) -> list:
+    """Return linked profiles for the append-only 48-hour seed mode."""
+    return fetch_event_profiles(cursor)
+
+
+def fetch_active_source_ids(cursor) -> list[str]:
+    cursor.execute(
+        f"""
+        SELECT data_source_id
+        FROM {_table('sys_data_source')}
+        WHERE tenant_id = %s AND status = 1
+        ORDER BY data_source_id;
+        """,
+        (DEMO_TENANT_ID,),
+    )
+    return [str(row["data_source_id"]) for row in cursor.fetchall()]
 
 
 def _build_demo_s3_client() -> Any:
@@ -2149,8 +2172,7 @@ def _clear_demo_event_objects(client: Any, bucket: str) -> None:
             str(item["Key"])
             for page in paginator.paginate(Bucket=bucket, Prefix="events/")
             for item in page.get("Contents", [])
-            if str(item.get("Key", "")).startswith("events/")
-            and "-demo-behavioral-" in str(item.get("Key", ""))
+            if "-demo-behavioral-" in str(item.get("Key", ""))
         ]
         for start in range(0, len(keys), 1000):
             client.delete_objects(
@@ -2165,8 +2187,10 @@ def _clear_demo_event_objects(client: Any, bucket: str) -> None:
 
 
 def _event_source_slug(source_system: str | None) -> str:
-    normalized = (source_system or "Adjust").strip().lower()
-    return BEHAVIORAL_SOURCE_SLUGS.get(normalized, "adjust-mobile-attribution")
+    return BEHAVIORAL_SOURCE_SLUGS.get(
+        (source_system or "Adjust").strip().lower(),
+        "adjust-mobile-attribution",
+    )
 
 
 def _event_output_source(source_system: str | None) -> str:
@@ -2247,12 +2271,8 @@ def seed_behavioral_events(
     event_count: int = BEHAVIORAL_EVENT_COUNT,
     s3_client: Any | None = None,
 ) -> int:
-    """Generate and store tenant-scoped canonical event envelopes in S3."""
     if not event_profiles:
         raise RuntimeError("No raw/master profile links found for behavioral events")
-    if event_count < 1 or BEHAVIORAL_EVENT_LOOKBACK_DAYS < 1:
-        raise ValueError("Behavioral event count and lookback days must be positive")
-
     profiles_by_master: dict[str, list[dict]] = defaultdict(list)
     for row in event_profiles:
         profiles_by_master[str(row["master_profile_id"])].append(row)
@@ -2262,11 +2282,9 @@ def seed_behavioral_events(
     rng = stable_rng(f"behavioral-events:{DEMO_TENANT_ID}:{event_count}:{BEHAVIORAL_EVENT_LOOKBACK_DAYS}")
     span_seconds = max(1, int((now - start).total_seconds()))
     batches: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
-
     for event_index in range(event_count):
         master_id = masters[event_index % len(masters)]
-        linked_profiles = profiles_by_master[master_id]
-        raw_profile = linked_profiles[event_index % len(linked_profiles)]
+        raw_profile = profiles_by_master[master_id][event_index % len(profiles_by_master[master_id])]
         event_time = start + timedelta(seconds=rng.randint(0, span_seconds))
         envelope = _build_behavioral_event(
             {"master_profile_id": master_id, "domain": raw_profile.get("domain")},
@@ -2278,29 +2296,19 @@ def seed_behavioral_events(
         batches[(source_id, event_time.date().isoformat())].append(envelope)
 
     client = s3_client or _build_demo_s3_client()
-    source_ids = sorted(
-        {
-            str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
-            for source_slug in BEHAVIORAL_SOURCE_SLUGS.values()
-        }
-    )
-    for source_id in source_ids:
+    for source_slug in sorted(set(BEHAVIORAL_SOURCE_SLUGS.values())):
+        source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
         bucket = f"data-tracking-{source_id}"
         _ensure_demo_s3_bucket(client, bucket)
         _clear_demo_event_objects(client, bucket)
 
-    written_objects = 0
     for (source_id, event_date), envelopes in sorted(batches.items()):
         bucket = f"data-tracking-{source_id}"
         object_key = f"events/{event_date}-demo-behavioral-{source_id}.jsonl.gz"
         body = gzip.compress(
-            ("\n".join(
-                json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
-                for envelope in envelopes
-            ) + "\n").encode("utf-8"),
+            ("\n".join(json.dumps(item, ensure_ascii=False, separators=(",", ":")) for item in envelopes) + "\n").encode("utf-8"),
             mtime=0,
         )
-        _ensure_demo_s3_bucket(client, bucket)
         checksum = hashlib.sha256(body).hexdigest()
         client.put_object(
             Bucket=bucket,
@@ -2308,50 +2316,130 @@ def seed_behavioral_events(
             Body=body,
             ContentType="application/x-ndjson",
             ContentEncoding="gzip",
-            Metadata={
-                "data-source-id": source_id,
-                "event-count": str(len(envelopes)),
-                "schema-version": "1",
-                "ingestion-version": "demo-1.0",
-                "sha256": checksum,
-            },
+            Metadata={"data-source-id": source_id, "event-count": str(len(envelopes)), "sha256": checksum},
         )
         object_id = uuid.uuid5(uuid.NAMESPACE_URL, f"s3://{bucket}/{object_key}")
         client.put_object(
             Bucket=bucket,
             Key=f"_processed/{object_id}.json",
-            Body=json.dumps(
-                {
-                    "object_id": str(object_id),
-                    "bucket": bucket,
-                    "object_key": object_key,
-                    "data_source_id": source_id,
-                    "event_count": len(envelopes),
-                    "content_sha256": checksum,
-                    "status": "stored",
-                },
-                separators=(",", ":"),
-            ).encode("utf-8"),
+            Body=json.dumps({"object_id": str(object_id), "bucket": bucket, "object_key": object_key, "event_count": len(envelopes), "content_sha256": checksum, "status": "stored"}, separators=(",", ":")).encode("utf-8"),
             ContentType="application/json",
         )
-        written_objects += 1
+    logger.info("Seeded %d behavioral events across %d S3 object(s).", event_count, len(batches))
+    return event_count
 
-    logger.info(
-        "Seeded %d behavioral events across %d S3 object(s), %d master profile(s), and %d source bucket(s) (%d-day lookback).",
-        event_count,
-        written_objects,
-        len(masters),
-        len({source_id for source_id, _ in batches}),
-        BEHAVIORAL_EVENT_LOOKBACK_DAYS,
-    )
+
+def _new_data_s3_client() -> Any:
+    return _build_demo_s3_client()
+
+
+def _ensure_new_data_bucket(s3: Any, bucket: str) -> None:
+    _ensure_demo_s3_bucket(s3, bucket)
+
+
+def _new_data_event(profile: dict, source_id: str, event_time: datetime, rng: random.Random) -> tuple[dict, dict]:
+    domain = canonical_demo_domain(profile.get("domain"))
+    category, event_name, value_range, entity_type, is_conversion = rng.choice(DOMAIN_EVENT_CATALOG.get(domain, RETAIL_EVENTS))
+    event_id = str(uuid.uuid4())
+    session_id = f"new-seed-session-{uuid.uuid4().hex[:16]}"
+    payload = {
+        "event_id": event_id,
+        "event_time": event_time.isoformat(),
+        "tenant_id": DEMO_TENANT_ID,
+        "domain": domain,
+        "master_profile_id": str(profile["master_profile_id"]),
+        "raw_profile_id": str(profile["raw_profile_id"]),
+        "external_customer_id": profile.get("external_customer_id"),
+        "device_id": profile.get("device_id"),
+        "session_id": session_id,
+        "source_system": profile.get("source_system") or "C360Tracker",
+        "channel": DOMAIN_EVENT_CHANNEL.get(domain, profile.get("channel") or "web"),
+        "platform": profile.get("platform"),
+        "event_category": category,
+        "event_name": event_name,
+        "event_dedup_key": f"new-seed:{event_id}",
+        "is_conversion": is_conversion,
+        "entity_type": entity_type,
+        "entity_id": f"new-{entity_type or 'event'}-{rng.randint(10000, 99999)}" if entity_type else None,
+        "event_value": rng.randint(*value_range) if value_range else None,
+        "currency": "VND",
+        "transaction_id": event_id if is_conversion else None,
+        "transaction_status": "completed" if is_conversion else None,
+        "location_name": rng.choice(("Ho Chi Minh City", "Hanoi", "Da Nang", "Can Tho")),
+    }
+    return payload, {
+        "schema_version": 1,
+        "ingestion_version": "demo-new-data-1.0",
+        "event_id": event_id,
+        "data_source_id": source_id,
+        "tenant_id": DEMO_TENANT_ID,
+        "event_time": event_time.isoformat(),
+        "received_at": datetime.now(timezone.utc).isoformat(),
+        "source_system": payload["source_system"],
+        "domain": domain,
+        "event_name": event_name,
+        "event_category": category,
+        "event_dedup_key": f"new-seed:{event_id}",
+        "identity": {"user_id": str(profile["raw_profile_id"]), "session_id": session_id, "device_id": profile.get("device_id"), "external_customer_id": profile.get("external_customer_id")},
+        "master_profile_id": str(profile["master_profile_id"]),
+        "raw_profile_id": str(profile["raw_profile_id"]),
+        "payload": payload,
+    }
+
+
+def seed_new_data(cursor, *, event_count: int = NEW_DATA_EVENT_COUNT) -> int:
+    """Append fresh events from now through the preceding 48 hours."""
+    profiles = fetch_new_data_profiles(cursor)
+    source_ids = fetch_active_source_ids(cursor)
+    if not profiles:
+        raise RuntimeError("No linked raw/master profiles found; run the default demo seed first")
+    if not source_ids:
+        raise RuntimeError("No active data sources found for the demo tenant")
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=NEW_DATA_LOOKBACK_HOURS)
+    rng = random.Random()
+    batches: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for index in range(event_count):
+        profile = profiles[index % len(profiles)]
+        source_id = source_ids[index % len(source_ids)]
+        event_time = start + timedelta(seconds=rng.randrange(NEW_DATA_LOOKBACK_HOURS * 3600))
+        payload, envelope = _new_data_event(profile, source_id, event_time, rng)
+        cursor.execute(
+            f"""
+            INSERT INTO {_table('cdp_raw_events')}
+                (event_id, tenant_id, domain, master_profile_id, raw_profile_id,
+                 external_customer_id, device_id, session_id, source_system, channel,
+                 platform, event_category, event_name, is_conversion, entity_type,
+                 entity_id, event_value, currency, transaction_id, transaction_status,
+                 event_dedup_key, event_time, event_payload)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            """,
+            (payload["event_id"], DEMO_TENANT_ID, payload["domain"], payload["master_profile_id"], payload["raw_profile_id"], payload["external_customer_id"], payload["device_id"], payload["session_id"], payload["source_system"], payload["channel"], payload["platform"], payload["event_category"], payload["event_name"], payload["is_conversion"], payload["entity_type"], payload["entity_id"], payload["event_value"], payload["currency"], payload["transaction_id"], payload["transaction_status"], payload["event_dedup_key"], event_time, Json(payload)),
+        )
+        batches[(source_id, event_time.date().isoformat())].append(envelope)
+
+    s3 = _new_data_s3_client()
+    for (source_id, event_date), envelopes in batches.items():
+        bucket = f"data-tracking-{source_id}"
+        _ensure_new_data_bucket(s3, bucket)
+        object_key = f"events/{event_date}-new-data-{uuid.uuid4()}.jsonl.gz"
+        body = gzip.compress(("\n".join(json.dumps(item, ensure_ascii=False, separators=(",", ":")) for item in envelopes) + "\n").encode("utf-8"), mtime=0)
+        s3.put_object(Bucket=bucket, Key=object_key, Body=body, ContentType="application/x-ndjson", ContentEncoding="gzip", Metadata={"data-source-id": source_id, "event-count": str(len(envelopes)), "seed-mode": "new-data-48h"})
+    logger.info("New data seed complete: %d fresh events across %d master/raw profile links, %d S3 object(s), current time through the previous %d hours.", event_count, len(profiles), len(batches), NEW_DATA_LOOKBACK_HOURS)
     return event_count
 
 
 def main() -> None:
+    new_data_mode = len(sys.argv) > 1 and sys.argv[1] == "--new-data"
     conn = psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT)
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             set_tenant_context(cursor, DEMO_TENANT_ID)
+            if new_data_mode:
+                seed_new_data(cursor)
+                conn.commit()
+                return
             master_profiles = fetch_master_profiles(cursor)
             if not master_profiles:
                 logger.error(

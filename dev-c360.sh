@@ -33,6 +33,9 @@
 #                                    seed-demo only when DB is empty; otherwise
 #                                    print DB status counts.
 #   ./dev-c360.sh no-seed           Same, but skip the CIR demo data seed step.
+#   ./dev-c360.sh seed-new-data     Start the dev stack and append fresh
+#                                    current/previous-48-hour event data only;
+#                                    never reset or rerun the default demo seed.
 #   ./dev-c360.sh upgrade           Local DEV upgrade: refresh images/containers
 #                                    with current repo code and restart core
 #                                    host services (non-destructive).
@@ -80,6 +83,7 @@ for arg in "$@"; do
     upgrade) ACTION="upgrade" ;;
     restart) ACTION="restart" ;;
     reset) ACTION="reset" ;;
+    seed-new-data) ACTION="seed-new-data" ;;
     stop-all) ACTION="stop-all" ;;
     -y|--yes) SKIP_CONFIRM="true" ;;
     no-seed) SKIP_SEED="true" ;;
@@ -610,7 +614,30 @@ seed_demo_if_empty() {
   fi
 }
 
-if [ "$SKIP_SEED" = "true" ]; then
+seed_new_data() {
+  local venv_dir="${SCRIPT_DIR}/${CIR_DIR}/.venv"
+  local venv_python="${venv_dir}/bin/python"
+
+  if [ ! -x "$venv_python" ] || ! "$venv_python" --version >/dev/null 2>&1; then
+    echo "📦 Creating identity-resolution virtualenv for seed-new-data..."
+    python3 -m venv --clear "$venv_dir"
+  fi
+  if [ ! -x "$venv_python" ] || ! "$venv_python" --version >/dev/null 2>&1; then
+    echo "❌ Identity-resolution Python virtualenv could not be created at '$venv_dir'." >&2
+    echo "   Install Python 3 with the venv package, then retry './dev-c360.sh seed-new-data'." >&2
+    return 1
+  fi
+  echo "📥 Ensuring identity-resolution dependencies are installed..."
+  echo "   Python: $venv_python ($($venv_python --version 2>&1))"
+  "$venv_python" -m pip install -q -r "${CIR_DIR}/requirements.txt"
+  echo "🌱 Appending fresh demo data from now through the previous 48 hours..."
+  (cd "$CIR_DIR" && "$venv_python" scripts/seed_full_demo_data.py --new-data)
+  print_database_status
+}
+
+if [ "$ACTION" = "seed-new-data" ]; then
+  seed_new_data
+elif [ "$SKIP_SEED" = "true" ]; then
   if [ "$ACTION" = "upgrade" ]; then
     echo "⏭️  Upgrade mode -- skipping CIR demo data seed step."
   else
