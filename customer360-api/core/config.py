@@ -38,6 +38,8 @@ class Settings(BaseSettings):
         default=90,
         validation_alias=AliasChoices("EVENT_QUERY_MAX_DAYS", "event_query_max_days"),
     )
+    # Dedicated per-env events bucket (e.g. leo-customer360-<env>-events), wired and
+    # auto-created by deploy-api.sh; kept separate from the shared storage bucket.
     event_s3_bucket: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("EVENT_S3_BUCKET", "event_s3_bucket"),
