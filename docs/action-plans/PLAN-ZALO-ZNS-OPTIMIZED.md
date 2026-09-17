@@ -43,6 +43,7 @@ flowchart TB
         ACT["campaign_activation<br/>validate + mark Running"]
         ENG["notification_engine<br/>ZNS dispatch adapter"]
         AN["analytics_job<br/>reads S3 → rollup"]
+        PROJ["opt-out projection<br/>reads S3 → consent"]
     end
 
     subgraph EXT["External"]
@@ -79,8 +80,9 @@ flowchart TB
     ENG -- "ZNS send (embeds token)" --> ZALOAPI
     ENG --> LOG
     ZALOAPI -- delivered / seen / click / opt-out --> WH
-    WH -- via TrackingLogService --> S3
-    WH -- opt-out --> SUP
+    WH -- all events via TrackingLogService --> S3
+    S3 -. zalo-opt-out .-> PROJ
+    PROJ -. set zalo_opt_in=false .-> SUP
     S3 --> AN
     LOG -. send counts .-> AN
     SUP -. blocks ineligible .-> SYNC
@@ -88,7 +90,7 @@ flowchart TB
     classDef new fill:#d4f7d4,stroke:#2e7d32,color:#1b5e20;
     classDef reuse fill:#eef2f7,stroke:#607d8b,color:#263238;
     classDef ext fill:#fff3cd,stroke:#b8860b,color:#5c4400;
-    class OACFG,TPLSYNC,TR,ENG,WH new;
+    class OACFG,TPLSYNC,TR,ENG,WH,PROJ new;
     class SYNC,DRAFT,APPR,ACT,AN,SEG,DS,TPLT,CAMP,LOG,SUP reuse;
     class ZALOAPI ext;
 ```
@@ -160,19 +162,21 @@ flowchart LR
     WH["zalo_tracking webhook<br/>verify sig · decode token · dedup"]
 
     OA --> WH
+    WH -->|"ALL events → TrackingLogService"| S3
     ENG -->|writes ledger row| LOG
-    WH -->|"_record_event → TrackingLogService"| S3
-    WH -->|opt-out / perm-failure| SUP
 
-    subgraph SINK1["Sink 1 — S3 event lake · durable source of truth"]
-        S3[("Bronze NDJSON → Silver Parquet<br/>zalo-delivered / seen / clicked / …")]
-        AN["analytics_job reads S3<br/>→ campaign rollup"]
+    subgraph SINK1["Sink 1 — S3 event lake · raw events land here FIRST"]
+        S3[("Bronze NDJSON → Silver Parquet<br/>zalo-delivered / seen / clicked / opt-out")]
+        AN["analytics_job<br/>→ campaign rollup"]
         S3 --> AN
     end
 
-    subgraph SINK2["Sink 2 — PostgreSQL · operational state only"]
+    S3 -->|"zalo-opt-out event"| PROJ
+    PROJ -->|"set zalo_opt_in=false"| SUP
+
+    subgraph SINK2["Sink 2 — PostgreSQL · derived operational state"]
         LOG["cdp_campaign_dispatch_logs<br/>send ledger"]
-        SUP["cdp_master_profiles<br/>communication_preferences: zalo_opt_in=false"]
+        SUP["cdp_master_profiles<br/>communication_preferences (consent projection)"]
     end
 
     SUP -.->|blocks ineligible| ENG
@@ -180,7 +184,7 @@ flowchart LR
     classDef new fill:#d4f7d4,stroke:#2e7d32,color:#1b5e20;
     classDef reuse fill:#eef2f7,stroke:#607d8b,color:#263238;
     classDef ext fill:#fff3cd,stroke:#b8860b,color:#5c4400;
-    class WH,ENG new;
+    class WH,ENG,PROJ new;
     class S3,AN,LOG,SUP reuse;
     class OA ext;
 ```
@@ -188,9 +192,10 @@ flowchart LR
 <sub>🟩 green = new Zalo-specific · ⬜ grey = reused infra · 🟨 yellow = external. **Sink 1** = durable event history in S3 (what analytics reads); **Sink 2** = operational state in Postgres.</sub>
 
 - **Sink 1 — S3 event lake (durable source of truth).** The webhook normalizes each callback and writes it through the **shared `TrackingLogService`** (`build_tracking_request` → `ingest_tracking_request`), exactly like email opens/clicks and the web SDK. Events land as immutable hourly Bronze NDJSON (per-`data_source_id` bucket `data-tracking-{id}`), compacted to Silver Parquet by `event_time`; the `analytics_job` reads S3 — **not** Postgres — for campaign rollups. Envelope mirrors email's: `properties = { tracking_channel: "zalo", tenant_id, campaign_id, master_profile_id, event_dedup_key, ... }`, `event = { event_name: "zalo-delivered|zalo-seen|zalo-clicked|zalo-failed|zalo-opt-out", properties }`.
-- **Sink 2 — Postgres (operational state only).** The **send ledger** (`cdp_campaign_dispatch_logs`) plus **opt-out state** written straight into `cdp_master_profiles.communication_preferences` (`zalo_opt_in=false`) — the *same* consent field the engine's eligibility query already reads, so **no suppression table is needed** (zero new tables). Postgres holds identity, CRM, consent, and rebuildable projections — never the raw event history.
+- **Sink 2 — Postgres (derived operational state).** The **send ledger** (`cdp_campaign_dispatch_logs`, written by the engine at send time) and the **consent projection** in `cdp_master_profiles.communication_preferences` (`zalo_opt_in`). **S3-first principle:** the webhook never writes consent directly — every raw event (incl. `zalo-opt-out`) lands in S3 (Sink 1) first; a **downstream domain action** (a Dagster projection op reading S3, mirroring how email suppression is materialized from S3) then sets `zalo_opt_in=false`. That flag is a **rebuildable projection** of the S3 opt-out stream — the same field the engine's eligibility query reads — so no suppression table is needed. Postgres holds identity, CRM, and rebuildable projections — never the raw event history.
 - **Correlation token.** Mail clients/webhooks can't authenticate, so email embeds a **signed tracking token** the provider echoes back (`decode_tracking_token` → tenant/campaign/master_profile). ZNS is the same shape: the dispatch adapter (§3.3) must embed a `tracking_id`/token at send time that the webhook decodes to recover `(tenant_id, campaign_id, master_profile_id)`.
-- **Router (shared handler, max reuse).** Refactor the email webhook into a reusable `make_webhook_router(prefix, secret_attr, event_map, suppress_reasons, channel, suppress_writer)` factory; `email_tracking.py` and a new `zalo_tracking.py` each become a few lines that call it with their own event-map + opt-out writer. Zalo: `POST /api/v1/track/zalo/webhook`, signature-verified with `CRM_ZALO_WEBHOOK_SIGNING_SECRET`, map event → dedup → `_record_event` (→ S3) → on opt-out/permanent-failure set the profile's `communication_preferences.zalo_opt_in=false`. `data_source_id` follows email's `_source_id(tenant_id)`. ⚠️ Confirm Zalo's signature scheme (HMAC vs `mac`/appsecret) before wiring `verify_webhook_signature` (§8).
+- **Router (shared handler, max reuse).** Refactor the email webhook into a reusable `make_webhook_router(prefix, secret_attr, event_map, suppress_reasons, channel)` factory; `email_tracking.py` and a new `zalo_tracking.py` each become a few lines that call it with their own event-map. Zalo: `POST /api/v1/track/zalo/webhook`, signature-verified with `CRM_ZALO_WEBHOOK_SIGNING_SECRET`, map event → dedup → `_record_event` writes **every** event (incl. opt-out, with `suppression_reason` in the payload) **only to S3** — no DB write in the request path. `data_source_id` follows email's `_source_id(tenant_id)`. ⚠️ Confirm Zalo's signature scheme (HMAC vs `mac`/appsecret) before wiring `verify_webhook_signature` (§8).
+- **Opt-out projection (domain action).** A downstream Dagster op reads new `zalo-opt-out`/`zalo-failed` events from S3 and sets `cdp_master_profiles.communication_preferences->>'zalo_opt_in'=false` — the only place consent is written. Rebuildable by replaying the S3 opt-out stream.
 
 ### 3.5 AI param-fill (extend, don't add)
 
@@ -281,7 +286,8 @@ Concrete, file-level task list mapped to the phases in §5. `[new]` = create, `[
 *Exit: an approved `zalo_zns` campaign sends real ZNS to an eligible audience, idempotently.*
 
 ### Phase 3 — Close the loop (webhook + feedback)
-- `[edit] data-tracking-api/core/routers/` — extract a shared `make_webhook_router(prefix, secret_attr, event_map, suppress_reasons, channel, suppress_writer)` factory and refactor `email_tracking.py` onto it (email regression-tested); then `[new] zalo_tracking.py` = a few-line call with the `zalo-*` event-map + opt-out writer. `POST /api/v1/track/zalo/webhook`; `_record_event` → **`TrackingLogService` → S3** (same envelope as email, `tracking_channel="zalo"`, `data_source_id=_source_id(tenant_id)`); opt-out/permanent-failure sets `cdp_master_profiles.communication_preferences->>'zalo_opt_in'=false`. ⚠️ Confirm Zalo's signature scheme (HMAC vs `mac`/appsecret) before wiring `verify_webhook_signature` (§8).
+- `[edit] data-tracking-api/core/routers/` — extract a shared `make_webhook_router(prefix, secret_attr, event_map, suppress_reasons, channel)` factory and refactor `email_tracking.py` onto it (email regression-tested); then `[new] zalo_tracking.py` = a few-line call with the `zalo-*` event-map. The webhook records **every** event (incl. opt-out, `suppression_reason` in the payload) to **S3 via `TrackingLogService`** (`tracking_channel="zalo"`, `data_source_id=_source_id(tenant_id)`) — **no DB write in the request path**. ⚠️ Confirm Zalo's signature scheme (HMAC vs `mac`/appsecret) before wiring `verify_webhook_signature` (§8).
+- `[new] backend-system/notification_engine/…` **opt-out projection op** — reads new `zalo-opt-out`/`zalo-failed` events from S3 and sets `cdp_master_profiles.communication_preferences->>'zalo_opt_in'=false` (the *only* place consent is written; rebuildable by replay; mirrors how email suppression is materialized from S3). Schedule it or fold into `analytics_job`.
 - `[edit] data-tracking-api/core/app.py` — mount the router (twice, under `/api/v1` and `/data/api/v1`, like email).
 - `[edit] data-tracking-api/core/config.py` + `.env.example` — `CRM_ZALO_WEBHOOK_SIGNING_SECRET` (empty disables the webhook, like email).
 - `[reuse]` `TrackingLogService` / `storage.py` (S3 writer) / `redis_queue.py` / `analytics_job` — **no change**; Zalo events ride the exact same ingest→Redis-Stream→S3(NDJSON/Parquet)→analytics path as web + email tracking. This is the sink the user flagged: Zalo tracking persists to S3, not Postgres.
@@ -505,14 +511,14 @@ class NotificationEngineDagsterService(DagsterService):
         return self.submit(run_config=run_config, tags={"campaign_id": campaign_id, "tenant_id": tenant_id})
 ```
 
-### Phase 3 · webhook → S3 + opt-out — shared `make_webhook_router` (max reuse)
+### Phase 3 · webhook → S3 (all events) + downstream opt-out projection
 
 ```python
-# Refactor email's webhook into a shared factory; zalo_tracking.py is then a few lines.
-# Engagement events → S3 via TrackingLogService; opt-out flips the profile consent field.
-# data-tracking-api/core/routers/channel_webhook.py  (email_tracking.py is refactored onto this)
-def make_webhook_router(*, prefix, secret_attr, event_map, suppress_reasons, channel,
-                        sig_alias, suppress_writer):
+# S3-FIRST: the webhook writes ONLY to the S3 event lake (every event, incl. opt-out,
+# carries suppression_reason in the payload). A separate downstream op projects opt-out
+# onto the profile consent field. No DB write in the request path.
+# data-tracking-api/core/routers/channel_webhook.py  (email_tracking.py refactored onto this)
+def make_webhook_router(*, prefix, secret_attr, event_map, suppress_reasons, channel, sig_alias):
     router = APIRouter(prefix=prefix)
     @router.post("/webhook")
     async def hook(request: Request, service = Depends(get_tracking_service),
@@ -527,24 +533,25 @@ def make_webhook_router(*, prefix, secret_attr, event_map, suppress_reasons, cha
         decoded = decode_tracking_token(evt.get("tracking_id") or evt.get("token"))
         if not (name and decoded):     return {"status": "ignored"}
         _record_event(decoded, name, service, dedup_key=f'{channel}:{evt.get("msg_id")}:{name}',
-                      payload={"tracking_channel": channel, "provider_message_id": evt.get("msg_id")})
-        if (reason := suppress_reasons.get(name)):
-            suppress_writer(decoded, evt, reason)                    # per-channel opt-out
+                      payload={"tracking_channel": channel, "provider_message_id": evt.get("msg_id"),
+                               "suppression_reason": suppress_reasons.get(name)})   # → S3 ONLY
         return {"status": "ok", "event": name}
     return router
 
-# data-tracking-api/core/routers/zalo_tracking.py — the whole module:
-def _zalo_optout(decoded, evt, reason):                             # opt-out = flip profile consent (no table)
-    with db_conn() as conn:
-        suppress_profile(conn, decoded["tenant_id"], decoded["master_profile_id"], reason)
-
+# data-tracking-api/core/routers/zalo_tracking.py — the whole module (no DB writer):
 ZNS_EVENTS = {"delivered": "zalo-delivered", "user_received_message": "zalo-delivered",
               "user_seen_message": "zalo-seen", "user_click": "zalo-clicked",
               "failed": "zalo-failed", "user_unfollow": "zalo-opt-out"}
 router = make_webhook_router(prefix="/track/zalo", secret_attr="zalo_webhook_signing_secret",
-                             event_map=ZNS_EVENTS,
-                             suppress_reasons={"zalo-opt-out": "opt_out", "zalo-failed": "permanent_failure"},
-                             channel="zalo", sig_alias="X-ZEvent-Signature", suppress_writer=_zalo_optout)
+                             event_map=ZNS_EVENTS, channel="zalo", sig_alias="X-ZEvent-Signature",
+                             suppress_reasons={"zalo-opt-out": "opt_out", "zalo-failed": "permanent_failure"})
+
+# ── downstream DOMAIN ACTION (Dagster op, reads S3) — the ONLY place consent is written:
+def project_zalo_optouts(conn, s3_events):       # new zalo-opt-out / zalo-failed events from S3
+    for e in s3_events:
+        p = e["properties"]
+        if not p.get("suppression_reason"):      continue
+        suppress_profile(conn, p["tenant_id"], p["master_profile_id"], p["suppression_reason"])
 ```
 
 ### Phase 4 · AI param-fill — `customer360-api/core/ai_providers/campaign_planner.py`
