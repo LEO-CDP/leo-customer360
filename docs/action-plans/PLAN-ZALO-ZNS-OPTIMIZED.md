@@ -7,12 +7,12 @@
 
 The repo already ships a complete agentic outbound pipeline for **email**: segment sync → AI campaign draft → human approval → orchestrated activation → engine dispatch → signed webhook → suppression → analytics rollup. `crm_campaign` already carries `channel`, `segment_id`, `template_id`, `approval_status`, `ai_plan`, etc.
 
-So Zalo needs **only the channel-specific pieces**, not the 7 new tables + 8 P0 subtasks in v1:
+So Zalo needs **only channel-specific code** and **zero new tables** — it reuses `sys_data_source`, `crm_email_templates`, `cdp_campaign_dispatch_logs`, and the profile consent field. vs v1's 7 new tables + 8 P0 subtasks:
 
-1. **OAuth + OA credential lifecycle** (the one thing email doesn't have — email uses static SMTP creds; Zalo needs an access/refresh token that rotates).
-2. **ZNS template *sync*** (read-only pull of pre-approved templates from Zalo) — **not AI free-text authoring**.
+1. **OAuth + OA credential lifecycle** (the one thing email doesn't have — an access/refresh token that rotates), stored in the existing **`sys_data_source.access_tokens`** JSONB (no new table).
+2. **ZNS template *sync*** (read-only pull of pre-approved templates from Zalo into **`crm_email_templates`**) — **not AI free-text authoring**.
 3. **A Zalo dispatch adapter** (fill the `notification_engine` placeholder, reusing the `email_engine` package shape).
-4. **A Zalo webhook router** (clone `email_tracking.py`) + a phone-keyed suppression table.
+4. **A Zalo webhook router** (clone `email_tracking.py`); opt-out sets the profile consent field — **no suppression table**.
 5. **AI *param-fill*** on the existing campaign-draft path (channel=`zalo_zns` selects an Approved template and fills typed params).
 
 Everything else is reuse.
@@ -57,30 +57,30 @@ flowchart TB
         S3[("Bronze NDJSON → Silver Parquet<br/>immutable engagement events")]
     end
 
-    subgraph PG["PostgreSQL · RLS"]
+    subgraph PG["PostgreSQL · RLS — all reused, no new tables"]
         direction LR
         SEG["cdp_segments"]
-        OACFGT["crm_zalo_oa_config"]
-        TPLT["crm_zalo_templates"]
+        DS["sys_data_source<br/>access_tokens = OA token"]
+        TPLT["crm_email_templates<br/>metadata.channel = zalo_zns"]
         CAMP["crm_campaign<br/>channel = zalo_zns"]
         LOG["cdp_campaign_dispatch_logs<br/>send ledger"]
-        SUP["cdp_zalo_suppression"]
+        SUP["cdp_master_profiles<br/>communication_preferences (opt-out)"]
     end
 
     SEG --> SYNC --> DRAFT --> APPR
-    OACFG -. writes .-> OACFGT
-    TR -. refreshes .-> OACFGT
+    OACFG -. writes .-> DS
+    TR -. refreshes .-> DS
     TPLSYNC -. writes .-> TPLT
     TPLT -. select approved template .-> DRAFT
     APPR -- Approved --> ACT
     ACT -. updates .-> CAMP
     ACT --> ENG
-    OACFGT -. OA token .-> ENG
+    DS -. OA token .-> ENG
     ENG -- "ZNS send (embeds token)" --> ZALOAPI
     ENG --> LOG
     ZALOAPI -- delivered / seen / click / opt-out --> WH
     WH -- via TrackingLogService --> S3
-    WH --> SUP
+    WH -- opt-out --> SUP
     S3 --> AN
     LOG -. send counts .-> AN
     SUP -. blocks ineligible .-> SYNC
@@ -88,8 +88,8 @@ flowchart TB
     classDef new fill:#d4f7d4,stroke:#2e7d32,color:#1b5e20;
     classDef reuse fill:#eef2f7,stroke:#607d8b,color:#263238;
     classDef ext fill:#fff3cd,stroke:#b8860b,color:#5c4400;
-    class OACFG,TPLSYNC,TR,ENG,WH,OACFGT,TPLT,SUP new;
-    class SYNC,DRAFT,APPR,ACT,AN,SEG,CAMP,LOG,S3 reuse;
+    class OACFG,TPLSYNC,TR,ENG,WH new;
+    class SYNC,DRAFT,APPR,ACT,AN,SEG,DS,TPLT,CAMP,LOG,SUP reuse;
     class ZALOAPI ext;
 ```
 
@@ -97,67 +97,55 @@ flowchart TB
 
 ## 3. What's genuinely NEW (the whole scope)
 
-### 3.1 Zalo OA credential + OAuth lifecycle  — *the only structurally new part*
+### 3.1 Zalo OA credential + OAuth lifecycle — *reuses `sys_data_source`, no new table*
 
-Schema (EER) — the new credential table and how it anchors templates and dispatch:
+Schema (EER) — OA credentials reuse `sys_data_source` (the connector table `data_synch`'s Zalo OA connector already fills); ZNS templates reuse `crm_email_templates`. **Zero new tables, zero DDL.**
 
 ```mermaid
 erDiagram
-    sys_tenant ||--o{ crm_zalo_oa_config : "owns (tenant_id, RLS)"
-    crm_zalo_oa_config ||--o{ crm_zalo_templates : "oa_id"
-    crm_zalo_oa_config ||--o{ cdp_campaign_dispatch_logs : "token authorizes send"
+    sys_tenant ||--o{ sys_data_source : "tenant_id (RLS)"
+    sys_tenant ||--o{ crm_email_templates : "tenant_id (RLS)"
+    crm_email_templates ||--o{ crm_campaign : "template_id (existing FK)"
 
-    sys_tenant {
-        uuid tenant_id PK "existing"
+    sys_data_source {
+        uuid data_source_id PK "EXISTING table (reused)"
+        uuid tenant_id FK "ref sys_tenant"
+        varchar slug "= 'zalo-oa', 1 per tenant"
+        jsonb access_tokens "oa_id, app_id, access_token, refresh_token, token_expires_at"
+        text security_code "app_secret"
+        text data_source_url "OA API base"
     }
-    crm_zalo_oa_config {
-        uuid config_id PK "NEW table"
-        uuid tenant_id FK "ref sys_tenant, NOT NULL"
-        text name "default 'default'"
-        varchar oa_id "Zalo OA id"
-        varchar app_id "Zalo app id"
-        text app_secret "secret, RLS-scoped"
-        text access_token "short-lived"
-        text refresh_token "rotates on refresh"
-        timestamptz token_expires_at "drives refresh schedule"
-        boolean is_active "partial UNIQUE WHERE is_active"
-        jsonb metadata
-        timestamptz created_at
-        timestamptz updated_at
-    }
-    crm_zalo_templates {
-        uuid template_id PK "NEW table, Zalo id"
+    crm_email_templates {
+        uuid template_id PK "EXISTING table (reused)"
         uuid tenant_id FK
-        varchar oa_id FK "ref crm_zalo_oa_config"
+        varchar status "Draft to Approved lifecycle"
+        jsonb variables "typed ZNS params"
+        jsonb metadata "channel=zalo_zns, zalo_template_id, oa_id"
     }
-    cdp_campaign_dispatch_logs {
-        uuid dispatch_id PK "existing (reused)"
-        uuid campaign_id FK
-        uuid master_profile_id FK
-        varchar provider_message_id "ZNS msg id"
+    crm_campaign {
+        uuid campaign_id PK "EXISTING table"
+        varchar channel "= 'zalo_zns'"
+        uuid template_id FK "already refs crm_email_templates"
     }
 ```
 
-<sub>**Legend** (Mermaid ER can't portably color entities, so new/existing is tagged in each table's `PK` comment): 🟩 *NEW* = `crm_zalo_oa_config`, `crm_zalo_templates` · ⬜ *existing (reused)* = `sys_tenant`, `cdp_campaign_dispatch_logs`. The two neighbours are abbreviated (full detail in §3.2 / reused as-is). The OA config is the credential anchor: templates belong to an `oa_id`, and its token authorizes every ZNS send landing in the dispatch ledger.</sub>
+<sub>**Every table is existing/reused — zero DDL.** Per-tenant separation is automatic (`tenant_id` + RLS on all three). OA config = one `sys_data_source` row per tenant (`slug='zalo-oa'`, tokens in `access_tokens` JSONB); ZNS templates live in `crm_email_templates`, which `crm_campaign.template_id` already FKs — so a `channel='zalo_zns'` campaign links a template with no schema change. Full field mapping in Appendix A.2.</sub>
 
-- **Table** `crm_zalo_oa_config` (mirror of `crm_email_provider_config`, one active row per tenant):
-  `config_id, tenant_id, name, oa_id, app_id, app_secret, access_token, refresh_token, token_expires_at, is_active, metadata, created_at, updated_at`. Add partial unique index `WHERE is_active` and RLS, exactly like the email config table.
-- **OAuth grant endpoint** in customer360-api `auth_api.py`: a `/auth/zalo-redirect` callback that exchanges the `oa_code` for access+refresh tokens and upserts `crm_zalo_oa_config`. (Teko hosts this at `uns.teko.vn/auth/zalo-redirect`; self-hosted LEO owns it.)
-- **Token-refresh job**: a small Dagster op on an interval **schedule** that refreshes tokens before expiry and persists the rotated refresh_token. This is the piece email never needed — and note **no Dagster schedules exist in the repo today**, so this is the first one (wire a `ScheduleDefinition` in `notification_engine/dagster_defs.py`).
-- **Credential-store decision:** `backend-system/data_synch` already defines a **Zalo OA v3.0 inbound pull connector** that stores tokens in `sys_data_source.access_tokens` (JSONB). Decide up front: either (a) a dedicated `crm_zalo_oa_config` (cleaner mirror of the email config, recommended for outbound), or (b) reuse `sys_data_source.access_tokens` so inbound-pull and outbound-ZNS share one OA credential. Don't end up with two token copies drifting apart.
+- **OA config → `sys_data_source`** (no new table): one row per tenant, `slug='zalo-oa'` (unique per tenant via `uq_sys_data_source_slug`). Store `oa_id/app_id/access_token/refresh_token/token_expires_at` in `access_tokens` JSONB, `app_secret` in `security_code`, OA API base in `data_source_url`, `source_type=2`. Reuse the same row `data_synch`'s Zalo connector fills, so inbound-pull + outbound-ZNS share one token (no drift).
+- **OAuth grant endpoint** in customer360-api `auth_api.py`: a `/auth/zalo-redirect` callback that exchanges the `oa_code` for access+refresh tokens and **upserts the tenant's `sys_data_source` row** (`access_tokens` JSONB). (Teko hosts this at `uns.teko.vn/auth/zalo-redirect`; self-hosted LEO owns it.)
+- **Token-refresh job**: a small Dagster op on an interval **schedule** that refreshes tokens before expiry and writes the rotated token back into `access_tokens` JSONB (parse `token_expires_at` in code — JSONB is untyped). Note **no Dagster schedules exist in the repo today**, so this is the first one (wire a `ScheduleDefinition` in `notification_engine/dagster_defs.py`).
 - ⚠️ **Verify before coding**: exact Zalo OAuth v4 token endpoint, access-token TTL, and whether the refresh token is single-use/rotating. Do not hardcode TTLs from memory — read the current Zalo OA Open API docs.
 
-### 3.2 ZNS template sync (read-only)
+### 3.2 ZNS template sync (read-only) → reuse `crm_email_templates`
 
-- **Table** `crm_zalo_templates` (a *synced cache*, not an authoring surface):
-  `template_id (Zalo's id), tenant_id, oa_id, name, status, params JSONB (typed param schema from Zalo), synced_at, metadata`. Distinct from `crm_email_templates` because content lives in Zalo, not here. (Add `quality/category/preview` only when the template UI actually needs them — don't sync fields nothing reads yet.)
-- **Sync endpoint** `POST /api/v1/admin/zalo/templates/sync` → calls Zalo `template/all`, upserts by `template_id`. Requires `require_tenant_admin` + OA-admin authorization (per the guide, the caller must be OA admin).
-- **List/detail endpoints** for the UI (name, created time, quality, status, id + "view content").
+- **No new table** — ZNS templates live in `crm_email_templates` (per-tenant; already has the Draft→InReview→Approved→Rejected lifecycle + `variables`/`metadata` JSONB + approver columns, and `crm_campaign.template_id` already FKs it). Store Zalo's `zalo_template_id`/`oa_id`/`category`/`quality` and `channel:"zalo_zns"` in `metadata`, the typed ZNS param schema in `variables`; leave `subject`/`html_body`/`text_body` NULL. Filter with `metadata->>'channel' = 'zalo_zns'`.
+- **Sync endpoint** `POST /api/v1/admin/zalo/templates/sync` → calls Zalo `template/all`, upserts rows into `crm_email_templates` (match on `metadata->>'zalo_template_id'`). Requires `require_tenant_admin` + OA-admin authorization (per the guide, the caller must be OA admin).
+- **List/detail endpoints** for the UI, filtered to `channel=zalo_zns` (name, created time, quality, status, id + "view content").
 
 ### 3.3 Zalo dispatch adapter (fill `notification_engine`)
 
-- Implement the `notification_engine` job by cloning the `email_engine` package layout: reuse `db.py`, `rls.py`, `send.py` loop, and the eligibility query; swap `adapters.py` for a **ZNS send adapter** and `rendering.py` for **typed-param binding** against `crm_zalo_templates.params`.
-- Resolve OA token via a `zalo` `provider_config.py` analog (DB source of truth, Redis-cached, same as email).
+- Implement the `notification_engine` job by cloning the `email_engine` package layout: reuse `db.py`, `rls.py`, `send.py` loop, and the eligibility query; swap `adapters.py` for a **ZNS send adapter** and `rendering.py` for **typed-param binding** against `crm_email_templates.variables` (rows where `metadata->>'channel'='zalo_zns'`).
+- Resolve the OA token from the tenant's `sys_data_source` row (`slug='zalo-oa'`, `access_tokens` JSONB; Redis-cached, refresh on expiry) — no dedicated provider-config table.
 - Write one row per recipient to the **existing** `cdp_campaign_dispatch_logs` (`provider_message_id` = ZNS message id). Idempotent re-runs come free from the existing UNIQUE constraint.
 - Respect ZNS priority category (OTP > transaction > promotion) and per-OA rate limits/quota; use the existing retry/backoff env pattern.
 
@@ -184,7 +172,7 @@ flowchart LR
 
     subgraph SINK2["Sink 2 — PostgreSQL · operational state only"]
         LOG["cdp_campaign_dispatch_logs<br/>send ledger"]
-        SUP["cdp_zalo_suppression<br/>never message again"]
+        SUP["cdp_master_profiles<br/>communication_preferences: zalo_opt_in=false"]
     end
 
     SUP -.->|blocks ineligible| ENG
@@ -192,39 +180,28 @@ flowchart LR
     classDef new fill:#d4f7d4,stroke:#2e7d32,color:#1b5e20;
     classDef reuse fill:#eef2f7,stroke:#607d8b,color:#263238;
     classDef ext fill:#fff3cd,stroke:#b8860b,color:#5c4400;
-    class WH,SUP,ENG new;
-    class S3,AN,LOG reuse;
+    class WH,ENG new;
+    class S3,AN,LOG,SUP reuse;
     class OA ext;
 ```
 
 <sub>🟩 green = new Zalo-specific · ⬜ grey = reused infra · 🟨 yellow = external. **Sink 1** = durable event history in S3 (what analytics reads); **Sink 2** = operational state in Postgres.</sub>
 
 - **Sink 1 — S3 event lake (durable source of truth).** The webhook normalizes each callback and writes it through the **shared `TrackingLogService`** (`build_tracking_request` → `ingest_tracking_request`), exactly like email opens/clicks and the web SDK. Events land as immutable hourly Bronze NDJSON (per-`data_source_id` bucket `data-tracking-{id}`), compacted to Silver Parquet by `event_time`; the `analytics_job` reads S3 — **not** Postgres — for campaign rollups. Envelope mirrors email's: `properties = { tracking_channel: "zalo", tenant_id, campaign_id, master_profile_id, event_dedup_key, ... }`, `event = { event_name: "zalo-delivered|zalo-seen|zalo-clicked|zalo-failed|zalo-opt-out", properties }`.
-- **Sink 2 — Postgres (operational state only).** The **send ledger** (`cdp_campaign_dispatch_logs`) and the **suppression list** `cdp_zalo_suppression` (mirror `cdp_email_suppression`, keyed by phone / `zalo_user_id`; suppressed recipients are never messaged again, enforced by the engine eligibility query). Postgres holds identity, CRM, suppression, and rebuildable projections — never the raw event history.
+- **Sink 2 — Postgres (operational state only).** The **send ledger** (`cdp_campaign_dispatch_logs`) plus **opt-out state** written straight into `cdp_master_profiles.communication_preferences` (`zalo_opt_in=false`) — the *same* consent field the engine's eligibility query already reads, so **no suppression table is needed** (zero new tables). Postgres holds identity, CRM, consent, and rebuildable projections — never the raw event history.
 - **Correlation token.** Mail clients/webhooks can't authenticate, so email embeds a **signed tracking token** the provider echoes back (`decode_tracking_token` → tenant/campaign/master_profile). ZNS is the same shape: the dispatch adapter (§3.3) must embed a `tracking_id`/token at send time that the webhook decodes to recover `(tenant_id, campaign_id, master_profile_id)`.
-- **Router.** `data-tracking-api/core/routers/zalo_tracking.py`, cloned from `email_tracking.py`: `POST /api/v1/track/zalo/webhook`, signature-verified with `CRM_ZALO_WEBHOOK_SIGNING_SECRET`, map event → dedup → `_record_event` (→ S3) → suppress on opt-out/permanent-failure. `data_source_id` follows email's `_source_id(tenant_id)` (tenant UUID as the S3 partition). ⚠️ Confirm Zalo's signature scheme (HMAC vs `mac`/appsecret) before reusing `verify_webhook_signature` (§8).
+- **Router (shared handler, max reuse).** Refactor the email webhook into a reusable `make_webhook_router(prefix, secret_attr, event_map, suppress_reasons, channel, suppress_writer)` factory; `email_tracking.py` and a new `zalo_tracking.py` each become a few lines that call it with their own event-map + opt-out writer. Zalo: `POST /api/v1/track/zalo/webhook`, signature-verified with `CRM_ZALO_WEBHOOK_SIGNING_SECRET`, map event → dedup → `_record_event` (→ S3) → on opt-out/permanent-failure set the profile's `communication_preferences.zalo_opt_in=false`. `data_source_id` follows email's `_source_id(tenant_id)`. ⚠️ Confirm Zalo's signature scheme (HMAC vs `mac`/appsecret) before wiring `verify_webhook_signature` (§8).
 
 ### 3.5 AI param-fill (extend, don't add)
 
-- On the existing `campaign_draft_api` path, for `channel=zalo_zns` the AI: (a) **selects** an Approved `crm_zalo_templates` row that fits the objective, (b) **fills its typed params** from segment/profile context, (c) drafts strategy + schedule. Output stays `Draft` behind the existing human-approval gate. No new endpoint, no free-text authoring.
+- On the existing `campaign_draft_api` path, for `channel=zalo_zns` the AI: (a) **selects** an Approved `crm_email_templates` row (`metadata.channel=zalo_zns`) that fits the objective, (b) **fills its typed params** (`variables`) from segment/profile context, (c) drafts strategy + schedule. Output stays `Draft` behind the existing human-approval gate. No new endpoint, no free-text authoring.
 
-## 4. Cut from the v1 plan (explicit deletions)
+## 4. Phased delivery (lean)
 
-- ❌ `crm_zalo_oa_accounts` — folded into `crm_zalo_oa_config` (§3.1).
-- ❌ `crm_zalo_dispatch_logs` — reuse generic `cdp_campaign_dispatch_logs`.
-- ❌ `crm_zalo_sync_runs` — reuse generic `crm_segment_sync_runs`.
-- ❌ `crm_campaign_content_items` "if not present" — it's present.
-- ❌ ALTER `crm_campaign` (segment_id/template_id/approval/ai_plan) — already present.
-- ❌ "Convert `campaign_activation` from placeholder" — already real.
-- ❌ AI free-text Zalo template authoring — replaced by template *sync* + param-fill.
-- **Net schema delta: 3 new tables** (`crm_zalo_oa_config`, `crm_zalo_templates`, `cdp_zalo_suppression`) vs. v1's 7 + a `crm_campaign` migration.
-
-## 5. Phased delivery (lean)
-
-- **Phase 0 — Connect (1 track):** `crm_zalo_oa_config` + `/auth/zalo-redirect` OAuth exchange + token-refresh job. *Exit:* a tenant can authorize an OA and we hold a live, auto-refreshing token. **(This is the real long pole — do it first and verify against Zalo docs.)**
-- **Phase 1 — Templates:** `crm_zalo_templates` + sync/list/detail endpoints. *Exit:* approved ZNS templates visible in CDP.
-- **Phase 2 — Dispatch:** `notification_engine` ZNS adapter + eligibility filter (phone + consent + `cdp_zalo_suppression`) + write to `cdp_campaign_dispatch_logs`; wire `campaign_activation` to route `zalo_zns` campaigns here. *Exit:* an approved zalo campaign sends real ZNS to an eligible audience.
-- **Phase 3 — Close the loop:** `zalo_tracking.py` webhook + suppression + analytics rollup (reuse). *Exit:* delivery/seen/opt-out update profiles, suppression, and campaign metrics.
+- **Phase 0 — Connect (1 track):** reuse `sys_data_source` (`slug='zalo-oa'`) for OA config + `/auth/zalo-redirect` OAuth exchange + token-refresh job. *Exit:* a tenant can authorize an OA and we hold a live, auto-refreshing token. **(This is the real long pole — do it first and verify against Zalo docs.)**
+- **Phase 1 — Templates:** ZNS template sync into `crm_email_templates` (`metadata.channel=zalo_zns`) + list/detail endpoints. *Exit:* approved ZNS templates visible in CDP.
+- **Phase 2 — Dispatch:** `notification_engine` ZNS adapter + eligibility filter (valid phone + `zalo_opt_in` consent) + write to `cdp_campaign_dispatch_logs`; wire `campaign_activation` to route `zalo_zns` campaigns here. *Exit:* an approved zalo campaign sends real ZNS to an eligible audience.
+- **Phase 3 — Close the loop:** `zalo_tracking.py` webhook + opt-out into profile consent + analytics rollup (reuse). *Exit:* delivery/seen/opt-out update profiles, consent, and campaign metrics.
 - **Phase 4 — AI param-fill:** extend `campaign_draft_api` for `zalo_zns`. *Exit:* AI proposes a template+params+schedule draft behind the existing approval gate.
 
 ## 6. Config (env)
@@ -241,7 +218,7 @@ CRM_ZALO_BATCH_SIZE=                 # mirror EMAIL_ENGINE_BATCH_SIZE
 CRM_ZALO_RATE_LIMIT_PER_SEC=        # Zalo-specific OA send quota
 ```
 
-Retries are handled by the Dagster `RetryPolicy(max_retries=2, delay=15)` on the op, exactly like `email_engine` — no per-channel retry/backoff env knobs. Tokens (access/refresh) live in `crm_zalo_oa_config` (DB + RLS), **not** in env.
+Retries are handled by the Dagster `RetryPolicy(max_retries=2, delay=15)` on the op, exactly like `email_engine` — no per-channel retry/backoff env knobs. Tokens (access/refresh) live in the tenant's `sys_data_source.access_tokens` JSONB (DB + RLS), **not** in env.
 
 ## 7. Testing (reuse the harness)
 
@@ -264,15 +241,13 @@ Concrete, file-level task list mapped to the phases in §5. `[new]` = create, `[
 ### Phase 0 — Connect (OA OAuth + token lifecycle)
 
 **Schema** (`database-init/`)
-- `[edit] database-schema.sql` — add table `crm_zalo_oa_config` (cols per §3.1) with partial unique index `WHERE is_active` + tenant FK; **add `'crm_zalo_oa_config'` to the RLS policy `DO $$` loop array** (the one that `ENABLE`+`FORCE`s RLS) — a new tenant table silently loses isolation if omitted.
-- `[new] migrations/003_zalo_oa_config.sql` — same table + append the name to the migration's RLS array (mirrors `001_harden_tenant_rls_policies.sql`), with forward + rollback.
+- `[none]` **no DDL, no migration, no RLS-array change** — OA config reuses the existing `sys_data_source` table (already RLS-registered). One row per tenant: `slug='zalo-oa'`, `source_type=2`, tokens in `access_tokens` JSONB, `app_secret` in `security_code`.
 
 **customer360-api** (`customer360-api/core/`)
-- `[new] routers/zalo_api.py` — `all_zalo_routers`; endpoints `GET/PUT /admin/zalo/oa-config`, `GET /admin/zalo/oauth-url` (build consent URL). Guard every route with `require_tenant` + `require_tenant_admin`.
-- `[edit] routers/auth_api.py` — add `GET /auth/zalo-redirect` callback: exchange `oa_code` → access+refresh tokens, upsert `crm_zalo_oa_config`.
+- `[new] routers/zalo_api.py` — `all_zalo_routers`; endpoints `GET/PUT /admin/zalo/oa-config` (read/write the tenant's `sys_data_source` `zalo-oa` row), `GET /admin/zalo/oauth-url` (build consent URL). Guard every route with `require_tenant` + `require_tenant_admin`.
+- `[edit] routers/auth_api.py` — add `GET /auth/zalo-redirect` callback: exchange `oa_code` → access+refresh tokens, upsert the tenant's `sys_data_source.access_tokens`.
 - `[edit] apps/http_api_app.py` — import `all_zalo_routers`, append one `include_router` loop in `_include_api_routers()`.
-- `[edit] schemas/crm.py` — `ZaloOaConfigUpsert/Read` (token fields write-only, mirror `EmailProviderConfigUpsert/Read`).
-- `[edit] models/crm.py` — ORM `ZaloOaConfig` (table `crm_zalo_oa_config`).
+- `[reuse] models/crm.py` + `schemas/crm.py` — reuse the existing `sys_data_source` model/schema (no new ORM); optionally add a thin `ZaloOaConfig` Pydantic view over its `access_tokens` JSONB.
 - `[edit] config.py` — add `crm_zalo_oa_app_id/secret`, `crm_zalo_oa_api_base_url`, `crm_zalo_oauth_redirect_uri` (reuse existing `dagster_notification_engine_*`).
 
 **backend-system** (`backend-system/notification_engine/`)
@@ -284,21 +259,21 @@ Concrete, file-level task list mapped to the phases in §5. `[new]` = create, `[
 *Exit: a tenant authorizes an OA and we hold a live, auto-refreshing token.* ⚠️ Verify token endpoint/TTL/rotation first (§8).
 
 ### Phase 1 — Templates (read-only ZNS sync)
-- `[edit] database-schema.sql` + `[new] migrations/004_zalo_templates.sql` — table `crm_zalo_templates` (§3.2) + RLS-array registration.
-- `[edit] models/crm.py` + `schemas/crm.py` — `ZaloTemplate` ORM + `ZaloTemplateRead`.
-- `[edit] routers/zalo_api.py` — `POST /admin/zalo/templates/sync` (calls Zalo `template/all`, upsert by `template_id`), `GET /admin/zalo/templates`, `GET /admin/zalo/templates/{id}`.
+- `[none]` **no DDL** — ZNS templates reuse the existing `crm_email_templates` table (`metadata->>'channel'='zalo_zns'`).
+- `[reuse] models/crm.py` + `schemas/crm.py` — reuse the existing `EmailTemplate` ORM / `EmailTemplateRead`; add a ZNS read view only if the UI needs distinct fields.
+- `[edit] routers/zalo_api.py` — `POST /admin/zalo/templates/sync` (calls Zalo `template/all`, upsert into `crm_email_templates` matching `metadata->>'zalo_template_id'`), `GET /admin/zalo/templates`, `GET /admin/zalo/templates/{id}` (filtered to `channel=zalo_zns`).
 
 *Exit: approved ZNS templates visible in the CDP.*
 
 ### Phase 2 — Dispatch (fill notification_engine)
 - Clone the `email_engine` package shape into `backend-system/notification_engine/notification_engine/`:
   - `[new] adapters.py` — `ZNSDispatchAdapter(DispatchAdapter)` + `MockZNSAdapter` + `build_adapter()`; returns `DispatchResult(ok, provider_message_id, error)`.
-  - `[new] provider_config.py` — resolve OA token from `crm_zalo_oa_config` (DB source of truth, Redis-cached, refresh on expiry).
-  - `[new] rendering.py` — bind typed params against `crm_zalo_templates.params` (assert all required params satisfied before send).
-  - `[new] send.py` — batch send loop (reuse email's structure): eligibility query (valid phone + consent + not in `cdp_zalo_suppression`), rate-limit/retry from env, **embed a signed tracking token/`tracking_id` in the ZNS request** (so the Phase-3 webhook can decode `tenant/campaign/master_profile`), write one row per recipient to the existing `cdp_campaign_dispatch_logs`.
+  - `[new] provider_config.py` — resolve OA token from the tenant's `sys_data_source` row (`slug='zalo-oa'`, `access_tokens` JSONB; Redis-cached, refresh on expiry).
+  - `[new] rendering.py` — bind typed params against `crm_email_templates.variables` for the `zalo_zns` template (assert all required params satisfied before send).
+  - `[new] send.py` — batch send loop (reuse email's structure): eligibility query (valid phone + `communication_preferences->>'zalo_opt_in'` = true), rate-limit/retry from env, **embed a signed tracking token/`tracking_id` in the ZNS request** (so the Phase-3 webhook can decode `tenant/campaign/master_profile`), write one row per recipient to the existing `cdp_campaign_dispatch_logs`.
   - `[new] db.py`, `[new] rls.py` — copied from email_engine (set `app.tenant_id` per connection).
   - `[edit] dagster_defs.py` — add `send_zalo_campaign` job (Config: `campaign_id`+`tenant_id`).
-- `[edit] database-schema.sql` + `[new] migrations/005_zalo_suppression.sql` — table `cdp_zalo_suppression` (phone/`zalo_user_id`-keyed, mirror `cdp_email_suppression`) + RLS-array registration.
+- `[none]` **no suppression table** — opt-out sets `cdp_master_profiles.communication_preferences->>'zalo_opt_in'=false`, which the eligibility query already reads.
 - `[edit] campaign_activation/.../triggers.py` — branch on `crm_campaign.channel`: `zalo_zns` → submit `notification_engine` run instead of `email_engine`.
 - `[edit] customer360-api/core/utils/dagster_client.py` — give `NotificationEngineDagsterService.dispatch(campaign_id, tenant_id)` a real `run_config` (mirror `CampaignActivationDagsterService.activate()`).
 - `[edit] config.py` + `.env.example` — `CRM_ZALO_BATCH_SIZE` (mirror `EMAIL_ENGINE_BATCH_SIZE`) + `CRM_ZALO_RATE_LIMIT_PER_SEC` (OA quota). Retries via Dagster `RetryPolicy` like email — no retry env knobs.
@@ -306,15 +281,15 @@ Concrete, file-level task list mapped to the phases in §5. `[new]` = create, `[
 *Exit: an approved `zalo_zns` campaign sends real ZNS to an eligible audience, idempotently.*
 
 ### Phase 3 — Close the loop (webhook + feedback)
-- `[new] data-tracking-api/core/routers/zalo_tracking.py` — clone `email_tracking.py`; `POST /api/v1/track/zalo/webhook`; `decode_tracking_token` → map delivered/seen/click/opt-out → canonical `zalo-*` events + suppression reasons; dedup; `_record_event` → **`TrackingLogService` → S3 event lake** (same envelope as email, `tracking_channel="zalo"`, `data_source_id = _source_id(tenant_id)`); suppress on opt-out/permanent-failure. ⚠️ Confirm Zalo's signature scheme (HMAC vs `mac`/appsecret) before reusing `verify_webhook_signature` verbatim (§8).
+- `[edit] data-tracking-api/core/routers/` — extract a shared `make_webhook_router(prefix, secret_attr, event_map, suppress_reasons, channel, suppress_writer)` factory and refactor `email_tracking.py` onto it (email regression-tested); then `[new] zalo_tracking.py` = a few-line call with the `zalo-*` event-map + opt-out writer. `POST /api/v1/track/zalo/webhook`; `_record_event` → **`TrackingLogService` → S3** (same envelope as email, `tracking_channel="zalo"`, `data_source_id=_source_id(tenant_id)`); opt-out/permanent-failure sets `cdp_master_profiles.communication_preferences->>'zalo_opt_in'=false`. ⚠️ Confirm Zalo's signature scheme (HMAC vs `mac`/appsecret) before wiring `verify_webhook_signature` (§8).
 - `[edit] data-tracking-api/core/app.py` — mount the router (twice, under `/api/v1` and `/data/api/v1`, like email).
 - `[edit] data-tracking-api/core/config.py` + `.env.example` — `CRM_ZALO_WEBHOOK_SIGNING_SECRET` (empty disables the webhook, like email).
 - `[reuse]` `TrackingLogService` / `storage.py` (S3 writer) / `redis_queue.py` / `analytics_job` — **no change**; Zalo events ride the exact same ingest→Redis-Stream→S3(NDJSON/Parquet)→analytics path as web + email tracking. This is the sink the user flagged: Zalo tracking persists to S3, not Postgres.
 
-*Exit: delivery/seen/opt-out update profiles, suppression, and campaign metrics.*
+*Exit: delivery/seen/opt-out update profiles, consent, and campaign metrics.*
 
 ### Phase 4 — AI param-fill
-- `[edit] customer360-api/core/ai_providers/campaign_planner.py` — add a `zalo_zns` output contract: select an Approved `crm_zalo_templates` row from a closed candidate list + fill typed params (reuse the existing provider abstraction + JSON-contract prompt; no new provider code). Output stays `Draft` behind the existing approval gate.
+- `[edit] customer360-api/core/ai_providers/campaign_planner.py` — add a `zalo_zns` output contract: select an Approved `crm_email_templates` row (`channel=zalo_zns`) from a closed candidate list + fill typed params (reuse the existing provider abstraction + JSON-contract prompt; no new provider code). Output stays `Draft` behind the existing approval gate.
 - `[edit] schemas/crm.py` — extend `CampaignDraftRequest/Response` for the ZNS template+params shape.
 
 *Exit: AI proposes a template+params+schedule draft behind the existing human-approval gate.*
@@ -336,41 +311,31 @@ Phase 0 is the long pole (external OAuth, first schedule, verify-against-docs) �
 
 Grounded in the existing email-channel patterns (`email_engine`, `email_tracking.py`, `crm_email_provider_config`, dagster defs). Zalo Open API endpoints/payloads are marked ⚠️ — confirm against current Zalo OA docs (plan §8) before shipping.
 
-### Phase 0 · schema — `crm_zalo_oa_config` + RLS registration
+### Phase 0 · OA config store — reuse `sys_data_source` (no DDL)
 
-```sql
--- database-init/database-schema.sql  (+ migrations/003_zalo_oa_config.sql)
-CREATE TABLE IF NOT EXISTS customer360.crm_zalo_oa_config (
-    config_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id         UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
-    name              TEXT NOT NULL DEFAULT 'default',
-    oa_id             VARCHAR(64),                 -- Zalo Official Account id
-    app_id            VARCHAR(64),
-    app_secret        TEXT,                        -- secret; RLS-scoped, never in env
-    access_token      TEXT,                        -- short-lived OAuth token
-    refresh_token     TEXT,                        -- rotates on each refresh
-    token_expires_at  TIMESTAMPTZ,                 -- drives the refresh schedule
-    is_active         BOOLEAN NOT NULL DEFAULT TRUE,
-    metadata          JSONB,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT uq_crm_zalo_oa_config_name UNIQUE (tenant_id, name)
-);
-CREATE INDEX IF NOT EXISTS idx_crm_zalo_oa_config_tenant ON customer360.crm_zalo_oa_config (tenant_id);
--- at most one active OA config per tenant (mirrors crm_email_provider_config)
-CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_zalo_oa_config_active
-    ON customer360.crm_zalo_oa_config (tenant_id) WHERE is_active;
-
--- CRITICAL: add the table name to the RLS policy DO$$ loop array at the end of
--- database-schema.sql (and migration 001-style array) or it silently loses
--- tenant isolation:
---   FOR t IN SELECT unnest(ARRAY[ ..., 'crm_zalo_oa_config' ]) LOOP ...
+```python
+# No CREATE TABLE. OA config = one sys_data_source row per tenant (slug='zalo-oa');
+# the rotating OAuth token lives in the access_tokens JSONB, app_secret in security_code.
+# sys_data_source is already RLS-registered — nothing to add to the policy array.
+def upsert_oa_config(conn, tenant_id, oa_id, *, access_token, refresh_token, expires_in):
+    set_tenant_context(conn, tenant_id)                      # RLS: SET app.tenant_id
+    tokens = {"oa_id": oa_id, "app_id": settings.crm_zalo_oa_app_id,
+              "access_token": access_token, "refresh_token": refresh_token,
+              "token_expires_at": _iso(now_utc() + timedelta(seconds=expires_in))}
+    conn.execute("""
+        INSERT INTO customer360.sys_data_source
+               (tenant_id, name, slug, source_type, status, data_source_url, access_tokens, security_code)
+        VALUES (%s, 'Zalo OA', 'zalo-oa', 2, 1, %s, %s::jsonb, %s)
+        ON CONFLICT (tenant_id, slug) DO UPDATE          -- uq_sys_data_source_slug
+           SET access_tokens = customer360.sys_data_source.access_tokens || EXCLUDED.access_tokens,
+               updated_at = now()""",
+        (tenant_id, settings.crm_zalo_oa_api_base_url, json.dumps(tokens), settings.crm_zalo_oa_app_secret))
 ```
 
 ### Phase 0 · OAuth callback — `customer360-api/core/routers/auth_api.py`
 
 ```python
-# GET /auth/zalo-redirect  — exchange oa_code for tokens, upsert config.
+# GET /auth/zalo-redirect  — exchange oa_code for tokens, upsert into sys_data_source.
 import time, json, urllib.request, urllib.parse
 from fastapi import Request
 from core.config import settings
@@ -385,9 +350,10 @@ async def zalo_redirect(request: Request, oa_id: str, code: str, state: str):
                                  headers={"secret_key": settings.crm_zalo_oa_app_secret,
                                           "Content-Type": "application/x-www-form-urlencoded"})
     tok = json.loads(urllib.request.urlopen(req, timeout=15).read())
-    _upsert_oa_config(tenant_id, oa_id,
-                      access_token=tok["access_token"], refresh_token=tok["refresh_token"],
-                      expires_in=int(tok["expires_in"]))   # sets token_expires_at = now + expires_in
+    with db_conn() as conn:                                # store into sys_data_source.access_tokens
+        upsert_oa_config(conn, tenant_id, oa_id,
+                         access_token=tok["access_token"], refresh_token=tok["refresh_token"],
+                         expires_in=int(tok["expires_in"]))
     return {"status": "connected", "oa_id": oa_id}
 ```
 
@@ -396,16 +362,20 @@ async def zalo_redirect(request: Request, oa_id: str, code: str, state: str):
 ```python
 # token_refresh.py
 def refresh_due_tokens(conn, skew_seconds=300) -> int:
+    # OA config lives in sys_data_source; token fields are inside access_tokens JSONB.
     with conn.cursor() as cur:
-        cur.execute("""SELECT tenant_id, config_id, app_id, app_secret, refresh_token
-                         FROM customer360.crm_zalo_oa_config
-                        WHERE is_active AND token_expires_at < now() + (%s || ' seconds')::interval""",
+        cur.execute("""SELECT tenant_id, data_source_id, access_tokens
+                         FROM customer360.sys_data_source
+                        WHERE slug='zalo-oa' AND status=1
+                          AND (access_tokens->>'token_expires_at')::timestamptz
+                              < now() + (%s || ' seconds')::interval""",
                     (skew_seconds,))
         rows = cur.fetchall()
-    for tenant_id, config_id, app_id, secret, refresh in rows:
+    for tenant_id, ds_id, tokens in rows:
         set_tenant_context(conn, tenant_id)                # RLS: SET app.tenant_id
-        tok = _zalo_refresh(app_id, secret, refresh)       # ⚠️ POST v4/oa/access_token grant=refresh_token
-        _persist_rotated(conn, config_id, tok)             # store new access+refresh, bump token_expires_at
+        tok = _zalo_refresh(settings.crm_zalo_oa_app_id, settings.crm_zalo_oa_app_secret,
+                            tokens["refresh_token"])       # ⚠️ POST v4/oa/access_token grant=refresh_token
+        _persist_rotated_jsonb(conn, ds_id, tok)           # merge new token fields into access_tokens
     return len(rows)
 
 # dagster_defs.py  — replaces the log+sleep placeholder; repo's FIRST schedule
@@ -432,9 +402,10 @@ defs = Definitions(
 async def sync_zns_templates(request: Request):
     tenant_id = require_tenant(request)
     require_tenant_admin(request, "zalo template sync")             # OA-admin action
-    cfg = get_active_oa_config(tenant_id)                           # access_token (auto-refreshed)
-    templates = zalo_list_templates(cfg.access_token)              # ⚠️ GET business.openapi/template/all
-    upserted = upsert_templates(tenant_id, cfg.oa_id, templates)   # ON CONFLICT (template_id) DO UPDATE
+    cfg = get_oa_config(tenant_id)                                 # sys_data_source 'zalo-oa' row (auto-refreshed)
+    templates = zalo_list_templates(cfg["access_token"])          # ⚠️ GET business.openapi/template/all
+    # upsert into crm_email_templates: metadata.channel='zalo_zns', match on metadata->>'zalo_template_id'
+    upserted = upsert_zns_templates(tenant_id, cfg["oa_id"], templates)
     return {"synced": upserted}
 ```
 
@@ -481,9 +452,8 @@ ELIGIBLE_SQL = """
     FROM customer360.cdp_master_profiles p
    WHERE p.tenant_id = %(tenant)s
      AND p.phone_number IS NOT NULL
-     AND COALESCE((p.communication_preferences->>'zalo_opt_in')::bool, false)   -- consent
-     AND NOT EXISTS (SELECT 1 FROM customer360.cdp_zalo_suppression s
-                      WHERE s.tenant_id = p.tenant_id AND s.phone = p.phone_number)
+     -- consent AND opt-out in one field: opt-out flips zalo_opt_in=false (no suppression table)
+     AND COALESCE((p.communication_preferences->>'zalo_opt_in')::bool, false)
      AND p.master_profile_id = ANY(%(audience)s)"""
 
 def run_send(conn, campaign, cfg):
@@ -491,7 +461,7 @@ def run_send(conn, campaign, cfg):
     set_tenant_context(conn, campaign.tenant_id)                    # RLS
     for pid, phone in eligible_recipients(conn, campaign):
         token = sign_tracking_token(campaign.tenant_id, campaign.campaign_id, pid)  # webhook correlation
-        r = adapter.send(phone=phone, template_id=campaign.zalo_template_id,
+        r = adapter.send(phone=phone, template_id=campaign.zns_template_id,   # crm_email_templates.metadata.zalo_template_id
                          template_data=render_params(campaign, pid), tracking_id=token)
         # write to the EXISTING generic ledger; UNIQUE(campaign_id, master_profile_id) → idempotent
         conn.execute("""INSERT INTO customer360.cdp_campaign_dispatch_logs
@@ -503,20 +473,21 @@ def run_send(conn, campaign, cfg):
                       'Sent' if r.ok else 'Failed'))
 ```
 
-### Phase 2 · suppression table + activation branch + dagster_client
+### Phase 2 · opt-out (no table) + activation branch + dagster_client
 
-```sql
-CREATE TABLE IF NOT EXISTS customer360.cdp_zalo_suppression (           -- mirrors cdp_email_suppression
-    suppression_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
-    phone TEXT NOT NULL,                                                -- or zalo_user_id
-    reason VARCHAR(50) NOT NULL,
-    campaign_id UUID REFERENCES customer360.crm_campaign(campaign_id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT chk_cdp_zalo_suppression_reason CHECK (reason IN ('opt_out','permanent_failure','manual'))
-);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_cdp_zalo_suppression_phone
-    ON customer360.cdp_zalo_suppression (tenant_id, phone);            -- + add to RLS array
+```python
+# No suppression table. Opt-out / permanent-failure flips the profile consent field
+# the eligibility query already reads — a suppressed profile is simply not eligible.
+def suppress_profile(conn, tenant_id, master_profile_id, reason):
+    set_tenant_context(conn, tenant_id)                                # RLS
+    conn.execute("""UPDATE customer360.cdp_master_profiles
+                       SET communication_preferences =
+                             COALESCE(communication_preferences, '{}'::jsonb)
+                             || jsonb_build_object('zalo_opt_in', false,
+                                                   'zalo_opt_out_reason', %s),
+                           updated_at = now()
+                     WHERE tenant_id=%s AND master_profile_id=%s""",
+                 (reason, tenant_id, master_profile_id))
 ```
 
 ```python
@@ -534,36 +505,46 @@ class NotificationEngineDagsterService(DagsterService):
         return self.submit(run_config=run_config, tags={"campaign_id": campaign_id, "tenant_id": tenant_id})
 ```
 
-### Phase 3 · webhook → S3 + suppression — `data-tracking-api/core/routers/zalo_tracking.py`
+### Phase 3 · webhook → S3 + opt-out — shared `make_webhook_router` (max reuse)
 
 ```python
-# Clone of email_tracking.py. Engagement events go to the S3 event lake via
-# TrackingLogService; suppression state goes to Postgres.
-from core.routers.tracking import build_tracking_request, get_tracking_service, ingest_tracking_request
+# Refactor email's webhook into a shared factory; zalo_tracking.py is then a few lines.
+# Engagement events → S3 via TrackingLogService; opt-out flips the profile consent field.
+# data-tracking-api/core/routers/channel_webhook.py  (email_tracking.py is refactored onto this)
+def make_webhook_router(*, prefix, secret_attr, event_map, suppress_reasons, channel,
+                        sig_alias, suppress_writer):
+    router = APIRouter(prefix=prefix)
+    @router.post("/webhook")
+    async def hook(request: Request, service = Depends(get_tracking_service),
+                   sig: str | None = Header(None, alias=sig_alias)):
+        secret = getattr(settings, secret_attr)
+        if not secret:                 return JSONResponse({"status": "disabled"}, 503)
+        raw = await request.body()
+        if not verify_webhook_signature(raw, sig, secret):           # ⚠️ HMAC vs Zalo 'mac' — confirm
+            return JSONResponse({"status": "rejected"}, 401)
+        evt = json.loads(raw)
+        name = event_map.get(evt.get("event_name"))
+        decoded = decode_tracking_token(evt.get("tracking_id") or evt.get("token"))
+        if not (name and decoded):     return {"status": "ignored"}
+        _record_event(decoded, name, service, dedup_key=f'{channel}:{evt.get("msg_id")}:{name}',
+                      payload={"tracking_channel": channel, "provider_message_id": evt.get("msg_id")})
+        if (reason := suppress_reasons.get(name)):
+            suppress_writer(decoded, evt, reason)                    # per-channel opt-out
+        return {"status": "ok", "event": name}
+    return router
 
-WEBHOOK_EVENT_TO_NAME = {"delivered": "zalo-delivered", "user_received_message": "zalo-delivered",
-                         "user_seen_message": "zalo-seen", "user_click": "zalo-clicked",
-                         "failed": "zalo-failed", "user_unfollow": "zalo-opt-out"}
-SUPPRESSION_EVENTS = {"zalo-opt-out": "opt_out", "zalo-failed": "permanent_failure"}
+# data-tracking-api/core/routers/zalo_tracking.py — the whole module:
+def _zalo_optout(decoded, evt, reason):                             # opt-out = flip profile consent (no table)
+    with db_conn() as conn:
+        suppress_profile(conn, decoded["tenant_id"], decoded["master_profile_id"], reason)
 
-@router.post("/webhook")
-async def zalo_webhook(request: Request, service = Depends(get_tracking_service),
-                       x_zevent_signature: str | None = Header(None)):
-    if not settings.zalo_webhook_signing_secret:
-        return JSONResponse({"status": "disabled"}, status_code=503)
-    raw = await request.body()
-    if not verify_webhook_signature(raw, x_zevent_signature):        # ⚠️ HMAC vs Zalo 'mac' scheme — confirm
-        return JSONResponse({"status": "rejected"}, status_code=401)
-    evt = json.loads(raw)
-    name = WEBHOOK_EVENT_TO_NAME.get(evt.get("event_name"))
-    decoded = decode_tracking_token(evt.get("tracking_id"))          # → tenant/campaign/master_profile
-    if not (name and decoded):
-        return {"status": "ignored"}
-    _record_event(decoded, name, service, dedup_key=f'zalo:{evt.get("msg_id")}:{name}',
-                  payload={"tracking_channel": "zalo", "provider_message_id": evt.get("msg_id")})
-    if (reason := SUPPRESSION_EVENTS.get(name)):
-        suppress_phone(decoded["tenant_id"], evt.get("user_id"), reason, decoded["campaign_id"])
-    return {"status": "ok", "event": name}
+ZNS_EVENTS = {"delivered": "zalo-delivered", "user_received_message": "zalo-delivered",
+              "user_seen_message": "zalo-seen", "user_click": "zalo-clicked",
+              "failed": "zalo-failed", "user_unfollow": "zalo-opt-out"}
+router = make_webhook_router(prefix="/track/zalo", secret_attr="zalo_webhook_signing_secret",
+                             event_map=ZNS_EVENTS,
+                             suppress_reasons={"zalo-opt-out": "opt_out", "zalo-failed": "permanent_failure"},
+                             channel="zalo", sig_alias="X-ZEvent-Signature", suppress_writer=_zalo_optout)
 ```
 
 ### Phase 4 · AI param-fill — `customer360-api/core/ai_providers/campaign_planner.py`
@@ -588,7 +569,7 @@ def generate_zalo_campaign_plan(segment_ctx, candidate_templates, objective):
 
 ## Appendix A.2 — Reuse spectrum: minimum vs maximum reuse
 
-A.1 above is written at the **recommended middle**. Each build area can be dialled to either end:
+The zero-new-table decisions (OA config, ZNS templates, opt-out) and the shared webhook / AI-planner reuse are settled in the main plan (§3–§4, Appendix A/A.1). The one build choice still worth calling out is the **dispatch engine** — clone vs shared core:
 
 - **MAX reuse** = least new code; extend/generalize the existing email code so both channels share it. Downside: touches working email paths (bigger blast radius, regression risk).
 - **MIN reuse** = self-contained clone; new code only, email untouched. Matches the repo's convention that each Dagster code location is self-contained (`email_engine` and `campaign_activation` each carry their own `db.py`/`rls.py`). Downside: more files, parallel maintenance.
@@ -596,11 +577,6 @@ A.1 above is written at the **recommended middle**. Each build area can be diall
 | Area | MAX reuse | MIN reuse | Recommended |
 |---|---|---|---|
 | Dispatch engine (db/rls/send loop) | Extract channel-agnostic core to `backend-system/shared/`, inject adapter+renderer | Clone `email_engine` package, swap `adapters.py`+`rendering.py` | **MIN** — matches repo convention, no email regression |
-| OA credential store | Reuse `sys_data_source.access_tokens` (JSONB) that `data_synch` already fills | New typed `crm_zalo_oa_config` table | **MIN** — typed + RLS isolation for a rotating secret |
-| Suppression | One generic `cdp_channel_suppression(channel, identifier, …)`; migrate email onto it | Parallel `cdp_zalo_suppression` (mirror email) | **MIN** — avoids migrating a working compliance table |
-| Webhook handler | Parametrize one handler by (event-map, suppression-writer) | Clone `email_tracking.py` → `zalo_tracking.py` | **MAX** — the handler body is identical; only the maps differ |
-| Template store | Generalize `crm_email_templates` to `channel` + `params` | Separate `crm_zalo_templates` cache | **MIN** — ZNS content lives in Zalo; different shape |
-| AI planner | Extend `campaign_planner` with a `channel` branch | Separate `zalo_planner.py` | **MAX** — already one provider abstraction + JSON contract |
 
 ### Dispatch engine
 
@@ -623,62 +599,4 @@ def run_send(conn, campaign, cfg):                         # cloned from email_e
         upsert_dispatch_log(conn, campaign, pid, r)        # own copy of the writer
 ```
 
-### OA credential store
-
-```python
-# ── MAX reuse ── no new table; reuse the row data_synch already keeps.
-def get_oa_token(conn, tenant_id):
-    row = query1(conn, """SELECT access_tokens FROM customer360.sys_data_source
-                           WHERE tenant_id=%s AND source_type='zalo_oa' AND is_active""", tenant_id)
-    return row["access_tokens"]["access_token"]            # JSONB blob, shared with inbound pull
-
-# ── MIN reuse ── dedicated typed table (see §3.1 EER); one active row per tenant.
-def get_oa_token(conn, tenant_id):
-    row = query1(conn, """SELECT access_token FROM customer360.crm_zalo_oa_config
-                           WHERE tenant_id=%s AND is_active""", tenant_id)
-    return row["access_token"]
-```
-
-### Suppression
-
-```sql
--- ── MAX reuse ── one table for every channel; email migrates onto it.
-CREATE TABLE customer360.cdp_channel_suppression (
-    suppression_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
-    channel    VARCHAR(20) NOT NULL,             -- 'email' | 'zalo_zns'
-    identifier TEXT NOT NULL,                    -- email OR phone/zalo_user_id
-    reason VARCHAR(50) NOT NULL,
-    UNIQUE (tenant_id, channel, lower(identifier))
-);  -- requires backfilling cdp_email_suppression + editing email_engine's eligibility query
-
--- ── MIN reuse ── parallel table, email's cdp_email_suppression untouched (see A.1).
-CREATE TABLE customer360.cdp_zalo_suppression ( ... phone TEXT ... );
-```
-
-### Webhook handler (MAX recommended — body is identical)
-
-```python
-# ── MAX reuse ── data-tracking-api/core/routers/channel_webhook.py
-def make_webhook_router(*, prefix, secret_attr, event_map, suppress_reasons, channel):
-    router = APIRouter(prefix=prefix)
-    @router.post("/webhook")
-    async def hook(request: Request, sig: str | None = Header(None),
-                   service = Depends(get_tracking_service)):
-        secret = getattr(settings, secret_attr)
-        if not secret: return JSONResponse({"status":"disabled"}, 503)
-        raw = await request.body()
-        if not verify(raw, sig, secret): return JSONResponse({"status":"rejected"}, 401)
-        evt = json.loads(raw); name = event_map.get(evt.get("event"))
-        decoded = decode_tracking_token(evt.get("token") or evt.get("tracking_id"))
-        if not (name and decoded): return {"status":"ignored"}
-        _record_event(decoded, name, service, payload={"tracking_channel": channel, ...})
-        if (reason := suppress_reasons.get(name)): suppress(decoded, evt, reason, channel)
-        return {"status":"ok"}
-    return router
-# email_tracking.py and zalo_tracking.py each become ~4 lines: call make_webhook_router(...).
-
-# ── MIN reuse ── clone email_tracking.py → zalo_tracking.py verbatim, edit the two maps (A.1 §Phase 3).
-```
-
-**Bottom line:** default to the A.1 (MIN-reuse) build for the engine, credential store, suppression, and templates — it matches the repo grain and keeps email regression-free — and take the MAX-reuse path only for the webhook and AI planner, where the shared code is genuinely identical and the refactor is cheap.
+**Bottom line (adopted):** **zero new tables** — OA config → `sys_data_source`, templates → `crm_email_templates`, opt-out → profile consent — plus shared `make_webhook_router` / `campaign_planner` reuse. The only genuinely new *code* is the ZNS dispatch adapter, the OAuth callback, the token-refresh schedule, and a thin zalo webhook module over the shared `make_webhook_router`; the dispatch engine is a self-contained `notification_engine` package clone (matching the repo's Dagster-code-location convention). If untyped JSONB or the shared template table ever chafes, dedicated `crm_zalo_*` tables (per §3.1) are the drop-in upgrade.
