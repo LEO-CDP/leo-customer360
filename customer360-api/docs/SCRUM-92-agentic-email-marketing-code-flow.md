@@ -254,11 +254,11 @@ flowchart TD
 
 ### Stage 2 — AI email template draft — 📐 (SCRUM-95, design only)
 
-**Exists:** `crm_email_templates` table + `EmailTemplate` model (`core/models/crm.py:250`) and
-`EmailTemplate{Base,Create,Update,Read}` schemas (`core/schemas/crm.py:321`), `status` default `Draft`.
+**Exists:** `crm_message_templates` table + `MessageTemplate` model (`core/models/crm.py`) and
+`MessageTemplate{Base,Create,Update,Read}` schemas (`core/schemas/crm.py`), `status` default `Draft`.
 
 **Not built:** no generation endpoint, **no template CRUD/review router** (the generic router factory in
-`crm_api.py` deliberately does *not* build one for `EmailTemplate`), no Gemini/OpenAI integration, no
+`crm_api.py` deliberately does *not* build one for `MessageTemplate`), no Gemini/OpenAI integration, no
 prompt code. `core/config.py` has no LLM settings. Intended contract:
 `docs/action-plans/AGENTIC-EMAIL-MARKETING-FLOW.md:172-212`.
 
@@ -297,7 +297,7 @@ Dagster run via `core/utils/dagster_client.py:445` `CampaignActivationDagsterSer
 `campaign_activation/activation.py:71` `activate_campaign`:
 1. `set_tenant_context` (RLS) → `_load_campaign` (`crm_campaign`).
 2. Gate: `approval_status == 'Approved'` + template/segment present (else `CampaignActivationError`).
-3. `_template_status` must be `Approved` (`crm_email_templates`).
+3. `_template_status` must be `Approved` (`crm_message_templates`).
 4. Validate `cdp_segments` row + `segment_tag`; `_segment_snapshot_count` (freeze audience size).
 5. `UPDATE crm_campaign SET status='Running'` + commit.
 6. `triggers.trigger_email_engine_job(...)` → GraphQL `submit_job_execution("email_engine_job", location="email_engine", …)` (`triggers.py:29`).
@@ -399,8 +399,8 @@ Fresh-cluster DDL: `database-init/database-schema.sql:2914-3218`. Incremental mi
 
 | Table | Migration (fwd / down) | Change | Idempotency / key constraint | RLS |
 |-------|------------------------|--------|------------------------------|-----|
-| `crm_email_templates` | `002` | **new** | `chk_…_status ∈ {Draft,InReview,Approved,Rejected}` | ✔ |
-| `crm_campaign` (+cols) | `002` | **alter**: `segment_id`, `template_id`, `approval_status`, `approved_by/at`, `strategy_summary`, `ai_plan` | FKs → `cdp_segments`, `crm_email_templates` | (base) |
+| `crm_message_templates` | `003` | **renamed/generalized** | message type, persona, context, variables, and approval status | ✔ |
+| `crm_campaign` (+cols) | `002` | **alter**: `segment_id`, `template_id`, `approval_status`, `approved_by/at`, `strategy_summary`, `ai_plan` | FKs → `cdp_segments`, `crm_message_templates` | (base) |
 | `crm_campaign_content_items` | `002` | **new** | `UNIQUE(campaign_id, content_item_id)` | ✔ |
 | `crm_segment_sync_runs` | `002` | **new** (audit) | status check; `segment_id` FK CASCADE | ✔ |
 | `crm_lead.lead_source_id` | `002` | **alter**: FK col | FK → `crm_lead_source` ON DELETE SET NULL | (base) |
@@ -409,14 +409,14 @@ Fresh-cluster DDL: `database-init/database-schema.sql:2914-3218`. Incremental mi
 | `cdp_email_suppression` | `004` | **new** | **`UNIQUE(tenant_id, lower(email))`** | ✔ |
 | `cdp_event_catalog` (seed) | `004` | **data**: `email-delivered/…/-unsubscribed` | `ON CONFLICT (event_name) DO NOTHING` | n/a |
 
-SQLAlchemy models: `customer360-api/core/models/crm.py` (`Campaign:23`, `EmailTemplate:250`,
+SQLAlchemy models: `customer360-api/core/models/crm.py` (`Campaign:23`, `MessageTemplate`,
 `CampaignContentItem:271`, `SegmentSyncRun:290`, `CampaignDispatchLog:315`, `EmailProviderConfig:349`).
 Pydantic schemas: `customer360-api/core/schemas/crm.py` (`APPROVAL_STATUS_PATTERN:18`).
 
 ```mermaid
 erDiagram
   cdp_segments ||--o{ crm_campaign : "segment_id"
-  crm_email_templates ||--o{ crm_campaign : "template_id"
+  crm_message_templates ||--o{ crm_campaign : "template_id"
   crm_campaign ||--o{ crm_campaign_content_items : "campaign_id"
   cdp_content_items ||--o{ crm_campaign_content_items : "content_item_id"
   crm_campaign ||--o{ cdp_campaign_dispatch_logs : "campaign_id"

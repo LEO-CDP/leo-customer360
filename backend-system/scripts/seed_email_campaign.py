@@ -3,7 +3,7 @@
 be exercised without the AI template/campaign generators.
 
 email_engine / campaign_activation only ever read Approved rows, so this script
-inserts an Approved ``crm_email_templates`` row and an Approved ``crm_campaign``
+inserts an Approved ``crm_message_templates`` row and an Approved ``crm_campaign``
 linked to a segment + that template. Optionally it also tags a few sample
 profiles with the segment's tag (and gives them an email) so the send has
 recipients.
@@ -68,20 +68,21 @@ def _resolve_segment(cur, tenant_id, segment_id):
 def _upsert_template(cur, tenant_id):
     cur.execute(
         f"""
-        INSERT INTO {DB_SCHEMA}.crm_email_templates
-            (tenant_id, name, subject, html_body, text_body, variables, status, approved_at)
-        VALUES (%s, %s, %s, %s, %s, %s, 'Approved', now())
+        INSERT INTO {DB_SCHEMA}.crm_message_templates
+            (tenant_id, name, message_type, message_body, subject, html_body, text_body,
+             context, variables, status, approved_at)
+        VALUES (%s, %s, 'EMAIL', %s, %s, %s, %s, %s, %s, 'Approved', now())
         ON CONFLICT DO NOTHING
         RETURNING template_id
         """,
-        (tenant_id, TEMPLATE_NAME, "A little something for you, {{ first_name }}",
-         HTML_BODY, TEXT_BODY, '{"first_name": "string", "unsubscribe_url": "string"}'),
+        (tenant_id, TEMPLATE_NAME, TEXT_BODY, "A little something for you, {{ first_name }}",
+         HTML_BODY, TEXT_BODY, '{}', '{"first_name": "string", "unsubscribe_url": "string"}'),
     )
     row = cur.fetchone()
     if row:
         return row["template_id"]
     cur.execute(
-        f"SELECT template_id FROM {DB_SCHEMA}.crm_email_templates "
+        f"SELECT template_id FROM {DB_SCHEMA}.crm_message_templates "
         f"WHERE tenant_id = %s AND name = %s",
         (tenant_id, TEMPLATE_NAME),
     )

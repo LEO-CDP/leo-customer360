@@ -21,7 +21,7 @@ from core.ai_providers.base import AIProviderError
 from core.cache import invalidate_prefix
 from core.ai_providers.campaign_planner import CampaignPlanBrief, GeneratedCampaignPlan, generate_campaign_plan
 from core.models.content import CdpContentItem
-from core.models.crm import Campaign, CampaignContentItem, CampaignReview, EmailTemplate
+from core.models.crm import Campaign, CampaignContentItem, CampaignReview, MessageTemplate
 from core.models.system import SysAuditLog
 from core.repositories.segment_respository import SegmentRepository
 
@@ -77,10 +77,10 @@ class CampaignDraftRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def _get_template(self, tenant_id: uuid.UUID, template_id: uuid.UUID) -> Optional[EmailTemplate]:
+    def _get_template(self, tenant_id: uuid.UUID, template_id: uuid.UUID) -> Optional[MessageTemplate]:
         return (
-            self.session.query(EmailTemplate)
-            .filter(EmailTemplate.template_id == template_id, EmailTemplate.tenant_id == tenant_id)
+            self.session.query(MessageTemplate)
+            .filter(MessageTemplate.template_id == template_id, MessageTemplate.tenant_id == tenant_id)
             .one_or_none()
         )
 

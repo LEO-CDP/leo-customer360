@@ -49,7 +49,7 @@ class Campaign(Base):
         PG_UUID(as_uuid=True), ForeignKey("cdp_segments.segment_id", ondelete="SET NULL")
     )
     template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("crm_email_templates.template_id", ondelete="SET NULL")
+        PG_UUID(as_uuid=True), ForeignKey("crm_message_templates.template_id", ondelete="SET NULL")
     )
     approval_status: Mapped[Optional[str]] = mapped_column(String(50), server_default="Draft")
     approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
@@ -266,23 +266,29 @@ class Industry(Base):
 
 
 # ---------------------------------------------------------------------------
-# Agentic Email Marketing entities.
-# Mirror the "Agentic Email Marketing Schema" section of database-schema.sql.
+# Agentic CRM messaging entities.
+# Mirror the "Agentic CRM Messaging Schema" section of database-schema.sql.
 # ---------------------------------------------------------------------------
 
 
-class EmailTemplate(Base):
-    __tablename__ = "crm_email_templates"
+class MessageTemplate(Base):
+    __tablename__ = "crm_message_templates"
 
     template_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    message_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="EMAIL")
+    persona_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_persona_archetypes.persona_archetype_id", ondelete="SET NULL")
+    )
+    context: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    message_body: Mapped[Optional[str]] = mapped_column(Text)
     subject: Mapped[Optional[str]] = mapped_column(Text)
     html_body: Mapped[Optional[str]] = mapped_column(Text)
     text_body: Mapped[Optional[str]] = mapped_column(Text)
-    variables: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    variables: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Draft")
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
     approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
@@ -290,7 +296,6 @@ class EmailTemplate(Base):
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
-
 
 class CampaignContentItem(Base):
     __tablename__ = "crm_campaign_content_items"
@@ -354,7 +359,7 @@ class CampaignDispatchLog(Base):
         PG_UUID(as_uuid=True), ForeignKey("cdp_master_profiles.master_profile_id", ondelete="CASCADE"), nullable=False
     )
     template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("crm_email_templates.template_id", ondelete="SET NULL")
+        PG_UUID(as_uuid=True), ForeignKey("crm_message_templates.template_id", ondelete="SET NULL")
     )
     recipient_email: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Pending")

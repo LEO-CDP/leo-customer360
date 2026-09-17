@@ -2359,7 +2359,7 @@ CREATE INDEX IF NOT EXISTS idx_cdp_segments_json_rules ON customer360.cdp_segmen
 -- Records reviewer approve/reject decisions on a campaign draft. The
 -- crm_campaign segment/template/approval_status columns and the
 -- crm_campaign_content_items relation table are defined later in this file
--- (Agentic Email Marketing Schema section), after crm_email_templates exists.
+-- (Agentic CRM Messaging Schema section), after crm_message_templates exists.
 CREATE TABLE IF NOT EXISTS customer360.crm_campaign_reviews (
     review_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
@@ -2663,21 +2663,33 @@ CREATE INDEX IF NOT EXISTS idx_graph_edges_belongs_to_industry_created_at ON cus
 -- ==========================================================
 -- Agentic Email Marketing Schema
 -- ==========================================================
--- Relational structure behind the outbound email marketing flow
--- (segment -> CRM sync -> AI template draft -> AI campaign draft -> human
+-- Relational structure behind the outbound CRM messaging flow
+-- (segment -> CRM sync -> AI message template draft -> AI campaign draft -> human
 -- approval -> dispatch). Placed after all referenced tables (sys_user,
 -- crm_campaign, crm_lead, crm_lead_source, cdp_segments, cdp_content_items)
 -- so foreign keys resolve. See docs/action-plans/AGENTIC-EMAIL-MARKETING-FLOW.md.
 -- The deferred constraints are guarded so this section is safe to re-run
 -- against an already-migrated database (run-sql.sh re-applies the schema).
 
--- Email template library authored by AI agents and gated by human review.
-CREATE TABLE IF NOT EXISTS customer360.crm_email_templates (
+-- Reusable message template library for email, SMS, and WhatsApp, authored by
+-- people or AI agents and gated by human review.
+CREATE TABLE IF NOT EXISTS customer360.crm_message_templates (
     template_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     name TEXT NOT NULL,
+    -- Platform key, intentionally open-ended for future messaging channels
+    -- (e.g. email, web_chat, zalo_oa, whatsapp, telegram).
+    message_type TEXT NOT NULL DEFAULT 'EMAIL',
+    -- Shared persona archetype used by an AI agent when generating or revising
+    -- this template. Hand-authored templates may leave it unset.
+    persona_id UUID REFERENCES customer360.cdp_persona_archetypes(persona_archetype_id) ON DELETE SET NULL,
+    -- Structured generation context, such as product, offer, tone, or locale.
+    context JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- Channel-neutral body used by SMS/WhatsApp and as the plain-text email body.
+    message_body TEXT,
     subject TEXT,
     html_body TEXT,
+    -- Retained for compatibility with existing email rendering integrations.
     text_body TEXT,
     -- Declared placeholders/merge variables (e.g. unsubscribe_url, first_name).
     variables JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -2689,14 +2701,23 @@ CREATE TABLE IF NOT EXISTS customer360.crm_email_templates (
     metadata JSONB,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-    CONSTRAINT chk_crm_email_templates_status
+    CONSTRAINT chk_crm_message_templates_message_type_not_blank
+        CHECK (btrim(message_type) <> ''),
+    CONSTRAINT chk_crm_message_templates_context_object
+        CHECK (jsonb_typeof(context) = 'object'),
+    CONSTRAINT chk_crm_message_templates_variables_object
+        CHECK (jsonb_typeof(variables) = 'object'),
+    CONSTRAINT chk_crm_message_templates_status
         CHECK (status IN ('Draft', 'InReview', 'Approved', 'Rejected'))
 );
 
-COMMENT ON TABLE customer360.crm_email_templates IS 'Email template library for the agentic outbound flow: subject/html/text body plus declared merge variables, authored (often by an AI agent) as Draft and moved through InReview -> Approved/Rejected before a campaign can use it.';
+COMMENT ON TABLE customer360.crm_message_templates IS 'Reusable CRM message templates for EMAIL, SMS, and WHATSAPP. Stores an optional AI persona reference, structured generation context, merge variables, channel-neutral content, and email-specific subject/HTML content through the Draft -> InReview -> Approved/Rejected lifecycle.';
 
-CREATE INDEX IF NOT EXISTS idx_crm_email_templates_tenant ON customer360.crm_email_templates (tenant_id);
-CREATE INDEX IF NOT EXISTS idx_crm_email_templates_tenant_status ON customer360.crm_email_templates (tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_crm_message_templates_tenant ON customer360.crm_message_templates (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_message_templates_tenant_status ON customer360.crm_message_templates (tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_crm_message_templates_tenant_type ON customer360.crm_message_templates (tenant_id, message_type);
+CREATE INDEX IF NOT EXISTS idx_crm_message_templates_persona ON customer360.crm_message_templates (persona_id)
+    WHERE persona_id IS NOT NULL;
 
 DO $$
 BEGIN
@@ -2711,7 +2732,7 @@ BEGIN
         EXECUTE format(
             'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE SET NULL',
             'customer360', 'crm_campaign', 'fk_crm_campaign_template',
-            'template_id', 'customer360', 'crm_email_templates', 'template_id'
+            'template_id', 'customer360', 'crm_message_templates', 'template_id'
         );
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_approved_by' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
@@ -2803,7 +2824,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_campaign_dispatch_logs (
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
     master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles(master_profile_id) ON DELETE CASCADE,
-    template_id UUID REFERENCES customer360.crm_email_templates(template_id) ON DELETE SET NULL,
+    template_id UUID REFERENCES customer360.crm_message_templates(template_id) ON DELETE SET NULL,
     recipient_email TEXT,
     status VARCHAR(50) NOT NULL DEFAULT 'Pending',
     provider VARCHAR(100),
@@ -2949,7 +2970,7 @@ DECLARE
         'cdp_content_items',
         'cdp_customer_personas',
         'cdp_persona_archetypes',
-        'crm_email_templates',
+        'crm_message_templates',
         'crm_campaign_content_items',
         'crm_campaign_reviews',
         'crm_segment_sync_runs',

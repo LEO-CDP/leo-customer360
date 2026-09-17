@@ -74,7 +74,7 @@ tables; (d) SQLAlchemy models + Pydantic schemas updated.
 | S93-10 | a | Forward migration `002_*.sql` applies (idempotent, re-runnable) | Positive | DB smoke | tables/columns/FK/index/RLS present; second run no-op | scratch DB dropped |
 | S93-11 | a | Rollback `002_*.down.sql` reverses cleanly | Positive | DB smoke | all objects dropped in dependency-safe order | scratch DB dropped |
 | S93-12 | c | RLS `ENABLE`+`FORCE`+`tenant_policy` on the 3 new tables | Integrity | DB smoke | `pg_policies` shows `tenant_policy`; blank `app.tenant_id` → 0 rows | scratch DB dropped |
-| S93-13 | d | Models importable & mapped (`EmailTemplate`, `CampaignContentItem`, `SegmentSyncRun`) | Positive | Unit | import + metadata assert | n/a |
+| S93-13 | d | Models importable & mapped (`MessageTemplate`, `CampaignContentItem`, `SegmentSyncRun`) | Positive | Unit | import + metadata assert | n/a |
 | S93-14 | b | `crm_campaign_content_items` unique `(campaign_id, content_item_id)` | Integrity | DB smoke / Unit | duplicate link rejected | scratch DB |
 
 > **Not E2E-automatable:** S93-10/11/12/14 have **no HTTP surface** (migrations run via

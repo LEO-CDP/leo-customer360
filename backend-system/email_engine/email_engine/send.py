@@ -83,8 +83,9 @@ def load_campaign(cur, tenant_id: str, campaign_id: str) -> Optional[dict]:
 def load_template(cur, tenant_id: str, template_id: str) -> Optional[dict]:
     cur.execute(
         f"""
-        SELECT template_id, subject, html_body, text_body, status
-        FROM {DB_SCHEMA}.crm_email_templates
+         SELECT template_id, subject, html_body,
+             COALESCE(message_body, text_body) AS text_body, status
+         FROM {DB_SCHEMA}.crm_message_templates
         WHERE template_id = %(template_id)s AND tenant_id = %(tenant_id)s
         """,
         {"template_id": template_id, "tenant_id": tenant_id},
