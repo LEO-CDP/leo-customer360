@@ -90,7 +90,7 @@ Contract status used below:
 
 **Required API:** **Available** `GET /campaigns`, `GET /campaigns/{campaign_id}`, `GET /campaigns/analytics`, `/summary`, `/spend-trend`, and `/top`. **Required** campaign detail projection `GET /api/v1/campaigns/{campaign_id}/workspace` and `GET /api/v1/campaigns/approvals?status=InReview`.
 
-**Data model:** `crm_campaign`, `crm_campaign_content_items`, `cdp_segments`, `crm_email_templates`, `crm_campaign_member`, `crm_campaign_performance_daily`, and `sys_audit_log`; channel tables join when present.
+**Data model:** `crm_campaign`, `crm_campaign_content_items`, `cdp_segments`, `crm_message_templates`, `crm_campaign_member`, `crm_campaign_performance_daily`, and `sys_audit_log`; channel tables join when present.
 
 **Data attributes:** `campaign_id`, `campaign_code`, `name`, `description`, `status`, `approval_status`, `channel`, `platform`, `objective`, `segment_id`, `template_id`, `start_date`, `end_date`, `budget_amount`, `currency`, `user_id`, `approved_by`, `approved_at`, `strategy_summary`, `ai_plan`, and `created_at`.
 
@@ -122,7 +122,7 @@ Contract status used below:
 
 **Required API:** **Required** `POST /api/v1/{asset_type}/{asset_id}/submit-review`, `/approve`, `/reject`; `POST /api/v1/campaigns/{campaign_id}/submit-review`, `/approve`, `/reject`; and `GET /api/v1/audit-log?entity_type={type}&entity_id={id}`. Responses must return allowed transitions and current revision to prevent stale approvals.
 
-**Data model:** `crm_campaign`, `crm_email_templates`, future `crm_zalo_templates`, future `crm_ad_creatives`, `sys_user`, `sys_user_role`, and `sys_audit_log`.
+**Data model:** `crm_campaign`, `crm_message_templates`, future channel-specific creative tables, `sys_user`, `sys_user_role`, and `sys_audit_log`.
 
 **Data attributes:** `status`, `approval_status`, `revision`, `submitted_by`, `submitted_at`, `approved_by`, `approved_at`, `rejected_by`, `rejected_at`, `review_comment`, `action`, `before_data`, `after_data`, `request_id`, and `success`.
 
@@ -156,7 +156,7 @@ Contract status used below:
 
 **Required API:** **Required** `GET/POST/PATCH /api/v1/email/templates`, `POST /api/v1/email/templates:generate`, template review endpoints, `POST /api/v1/admin/crm/sync-segment/{segment_id}`, `POST /api/v1/email/templates/{template_id}/preview`, `POST /api/v1/email/templates/{template_id}/test-send`, campaign planning/activation APIs, and email delivery analytics/suppression summaries.
 
-**Data model:** `crm_email_templates`, `crm_campaign`, `crm_campaign_content_items`, `crm_segment_sync_runs`, `cdp_master_profiles`, `cdp_content_items`, dispatch logs defined by the email backend, and `crm_campaign_performance_daily`.
+**Data model:** `crm_message_templates`, `crm_campaign`, `crm_campaign_content_items`, `crm_segment_sync_runs`, `cdp_master_profiles`, `cdp_content_items`, dispatch logs defined by the email backend, and `crm_campaign_performance_daily`.
 
 **Data attributes:** `template_id`, `name`, `subject`, `html_body`, `text_body`, `variables`, `status`, `created_by`, `approved_by`, `approved_at`, `segment_id`, `communication_preferences.email_opt_in`, masked `email`, `provider_message_id`, delivery `status`, `sent_at`, `delivered_at`, `opened_at`, `clicked_at`, `bounce_type`, and `complaint_at`.
 

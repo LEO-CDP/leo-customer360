@@ -315,6 +315,7 @@ class TrackingLogClient:
 		session_id: str,
 		user_id: str,
 		events: list[dict[str, Any]],
+		user_agent: str | None = None,
 	) -> dict[str, Any]:
 		"""Send one user's ordered event batch to the tracking API."""
 		payload = {
@@ -329,7 +330,7 @@ class TrackingLogClient:
 			headers={
 				"Accept": "application/json",
 				"Content-Type": "application/json",
-				"User-Agent": "leo-web-user-simulator/1.0",
+				"User-Agent": user_agent or "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
 			},
 			method="POST",
 		)

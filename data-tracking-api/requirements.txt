@@ -6,6 +6,7 @@ redis>=5.0,<6
 pydantic>=2.6,<3
 pydantic-settings>=2.2,<3
 python-dotenv>=1.0,<2
+ua-parser[regex]>=1.0.2,<2
 
 # OpenTelemetry zero-code request tracing (OTLP -> Jaeger), mirrors customer360-api.
 # The Dockerfile runs `opentelemetry-bootstrap -a install` to add the matching

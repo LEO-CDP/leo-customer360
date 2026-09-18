@@ -245,6 +245,35 @@ def test_ingest_preserves_dynamic_payload_and_all_batch_identities():
     assert stored_event["properties"]["items"][0]["price"] == 12.5
 
 
+def test_ingest_derives_device_type_from_user_agent():
+    fake_storage = FakeStorage()
+    fake_cache = FakeSessionCache()
+    app.dependency_overrides[get_tracking_service] = lambda: TrackingLogService(
+        fake_storage, fake_cache
+    )
+    try:
+        response = TestClient(app).post(
+            "/api/v1/tracking/logs",
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                    "Version/17.0 Mobile/15E148 Safari/604.1"
+                )
+            },
+            json={
+                "data_source_id": str(SOURCE_ID),
+                "session_id": "device-session",
+                "events": [{"event_name": "page_view"}],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 202
+    assert fake_storage.calls[0][1][0]["device_type"] == "mobile"
+
+
 def test_ingest_generates_stable_event_id_for_http_retries():
     first_storage = FakeStorage()
     second_storage = FakeStorage()
@@ -397,6 +426,39 @@ def test_rate_limiter_rejects_after_limit_and_supports_fail_open():
         client=FakeRedis(error=RedisError("redis down")),
     ).allow_request(request, SOURCE_ID)
     assert fail_open.allowed
+
+
+def test_rate_limiter_whitelists_configured_ip_without_consuming_redis_token():
+    client = FakeRedis(count=9999)
+    protection = TrackingRequestProtection(
+        Settings(tracking_rate_limit_whitelist="127.0.0.1, 172.16.0.0/12"),
+        client=client,
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "client": type("Client", (), {"host": "172.20.0.1"})(),
+            "headers": {"origin": "https://c360.example.com"},
+        },
+    )()
+
+    decision = protection.allow_request(request, SOURCE_ID)
+
+    assert decision == RateLimitDecision(allowed=True)
+    assert client.eval_calls == []
+
+
+def test_rate_limiter_rejects_invalid_whitelist_entry():
+    try:
+        TrackingRequestProtection(
+            Settings(tracking_rate_limit_whitelist="not-an-ip"),
+            client=FakeRedis(),
+        )
+    except ValueError as exc:
+        assert "TRACKING_RATE_LIMIT_WHITELIST" in str(exc)
+    else:
+        raise AssertionError("Expected invalid whitelist entry to be rejected")
 
 
 def test_rate_limit_key_contains_ip_data_source_and_origin():

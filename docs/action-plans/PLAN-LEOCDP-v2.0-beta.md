@@ -25,7 +25,7 @@ It is updated to be realistic and code-accurate against the current repository s
 
 - Target flow: `segment_id` selection -> lifecycle-based CRM routing -> AI template draft -> AI campaign draft -> human approval -> dispatch -> tracking -> feedback loop.
 - Data model direction:
-  - `crm_email_templates`
+  - `crm_message_templates`
   - campaign linkage (`segment_id`, `template_id`)
   - run/audit tables for deterministic sync and dispatch tracking.
 - Orchestration direction:
@@ -91,7 +91,7 @@ It is updated to be realistic and code-accurate against the current repository s
 
 ### 2.3 Accuracy Corrections Applied In This Consolidation
 
-- Uses `crm_email_templates` naming (not `cdp_email_templates`).
+- Uses `crm_message_templates` naming (not `cdp_email_templates`).
 - Treats channel-specific features as planned blockers, not implemented facts.
 - Distinguishes real `ads-server` runtime capabilities from missing Customer360-to-AdTech orchestration.
 - Keeps current truth that only identity resolution, segmentation, and analytics are fully active Dagster pipelines.
@@ -117,7 +117,7 @@ The following sequence is realistic for current code state and aligns all three 
 ### SUBTASK-01: Shared Schema Foundation
 
 - Add missing channel tables and campaign linkage FKs:
-  - Email: `crm_email_templates`
+  - Email and other channels: `crm_message_templates`
   - Ad Tech: `crm_ad_creatives`, `crm_ad_campaign_platform_map`, `crm_segment_audience_exports`
   - Zalo: `crm_zalo_templates`, `crm_zalo_oa_accounts`, `crm_zalo_dispatch_logs`, `crm_zalo_suppression`
 - Add shared mapping/audit tables where needed:
@@ -195,7 +195,7 @@ The following sequence is realistic for current code state and aligns all three 
 
 ### B. PostgreSQL Tables Checklist
 
-- [ ] Email tables are created (`crm_email_templates`, suppression, dispatch/audit where applicable).
+- [ ] Message tables are created (`crm_message_templates`, suppression, dispatch/audit where applicable).
 - [ ] Ad-tech tables are created (`crm_ad_creatives`, platform map, audience export, sync runs).
 - [ ] Zalo tables are created (`crm_zalo_templates`, accounts, dispatch logs, suppression, sync runs).
 - [ ] `crm_campaign` is extended with channel linkage and approval metadata.

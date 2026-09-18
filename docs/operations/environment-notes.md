@@ -124,6 +124,7 @@ independent and uses `ads-server/.env` from `ads-server/.env.example`.
 - `TRACKING_SESSION_TTL_SECONDS`: Session metadata TTL. Default: `86400`
 - `TRACKING_RATE_LIMIT_REQUESTS` / `TRACKING_RATE_LIMIT_WINDOW_SECONDS`: Per-IP request window. Defaults: `1000` / `360`
 - `TRACKING_RATE_LIMIT_FAIL_OPEN`: Allow ingestion when Redis rate limiting is unavailable. Default: `true`; use `false` for strict enforcement.
+- `TRACKING_RATE_LIMIT_WHITELIST`: Comma-separated client IPs/CIDRs exempt from the Redis limiter. Keep empty in production; local Compose may use `127.0.0.1,::1,172.16.0.0/12`.
 - `TRACKING_BOT_FILTER_ENABLED`: Enable configured user-agent filtering. Default: `true`
 - `TRACKING_BOT_USER_AGENT_PATTERNS`: Comma-separated case-insensitive user-agent substrings to discard.
 

@@ -34,7 +34,7 @@ if [[ -z "${BASTION:-}" ]]; then
   [[ -n "$FIP" ]] || { echo "ERROR: no floating IP for server key '$BACKEND_SERVER_KEY' (set BACKEND_SERVER_KEY)."; exit 1; }
   BASTION="${BASTION_USER:-leocdp360}@$FIP"
 fi
-SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=30 -o ServerAliveCountMax=10)  # keepalive: a long/idle docker pull must not get its SSH connection reaped
 echo ">> Target: $BASTION"
 
 # --- Redis: a LOCAL cache co-located on the jobs box, shared by all Dagster tasks (analytics

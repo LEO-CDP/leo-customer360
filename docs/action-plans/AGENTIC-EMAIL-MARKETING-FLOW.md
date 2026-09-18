@@ -95,11 +95,11 @@ Add missing relational structure so your target workflow can be implemented with
 
 Scope of Work
 
-- Create `crm_email_templates` with at least:
+- Create `crm_message_templates` with at least:
   - `template_id`, `tenant_id`, `name`, `subject`, `html_body`, `text_body`, `variables`, `status`, `created_by`, `approved_by`, `approved_at`, `metadata`.
 - Extend `crm_campaign` with:
   - `segment_id` FK -> `cdp_segments.segment_id`
-  - `template_id` FK -> `crm_email_templates.template_id`
+  - `template_id` FK -> `crm_message_templates.template_id`
   - `approval_status` (`Draft`, `InReview`, `Approved`, `Rejected`)
   - `approved_by`, `approved_at`
   - `strategy_summary` (text) and optional `ai_plan` (jsonb)
@@ -196,7 +196,7 @@ Scope of Work
   - html body
   - text body
   - required placeholders (`unsubscribe_url`, name fields)
-- Save templates in `crm_email_templates` with initial `Draft` status.
+- Save templates in `crm_message_templates` with initial `Draft` status.
 - Add review API:
   - approve/reject/edit template before campaign use.
 - Add basic prompt and output safety checks (length, forbidden claims, HTML safety).
@@ -439,7 +439,7 @@ Use this checklist as the implementation tracker for all technical tasks in this
 
 ### B. PostgreSQL Data Tables Checklist
 
-- [ ] Create `crm_email_templates` table with subject, html/text body, variables, status, approvals, metadata, and `tenant_id`.
+- [ ] Create `crm_message_templates` table with message type, persona, context, subject, html/text body, variables, status, approvals, metadata, and `tenant_id`.
 - [ ] Alter `crm_campaign` to add `segment_id`, `template_id`, `approval_status`, `approved_by`, `approved_at`, and AI planning fields.
 - [ ] Alter `crm_lead` to add `lead_source_id` FK to `crm_lead_source`.
 - [ ] Create `crm_campaign_content_items` relation table to map campaign-to-content (`cdp_content_items`).

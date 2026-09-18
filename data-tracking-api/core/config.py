@@ -179,6 +179,12 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("TRACKING_RATE_LIMIT_FAIL_OPEN", "tracking_rate_limit_fail_open"),
     )
+    tracking_rate_limit_whitelist: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "TRACKING_RATE_LIMIT_WHITELIST", "tracking_rate_limit_whitelist"
+        ),
+    )
     tracking_bot_filter_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("TRACKING_BOT_FILTER_ENABLED", "tracking_bot_filter_enabled"),

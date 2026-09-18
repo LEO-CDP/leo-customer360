@@ -330,6 +330,7 @@ tune per environment (dev/staging/prod). Highlights:
 | `TRACKING_SESSION_TTL_SECONDS` | `86400` | TTL for non-payload session metadata in Redis. |
 | `TRACKING_RATE_LIMIT_REQUESTS` / `TRACKING_RATE_LIMIT_WINDOW_SECONDS` | `120` / `60` | Per-source-IP Redis request window for tracking ingestion. |
 | `TRACKING_RATE_LIMIT_FAIL_OPEN` | `true` | Allows ingestion when Redis is unavailable; set `false` for strict production enforcement. |
+| `TRACKING_RATE_LIMIT_WHITELIST` | empty | Comma-separated trusted client IPs/CIDRs exempt from rate limiting; keep empty in production. |
 | `TRACKING_BOT_FILTER_ENABLED` | `true` | Discards configured crawler user agents before storage and rate-limit accounting. |
 | `TRACKING_BOT_USER_AGENT_PATTERNS` | `googlebot,...` | Comma-separated, case-insensitive user-agent substrings to filter. |
 | `LEO_GOOGLE_GENAI_API_KEY` | placeholder | Leave as `YOUR_...` to keep CIR persona-name generation offline (see `identity_resolution/persona.py`). |

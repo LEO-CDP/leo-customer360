@@ -12,7 +12,9 @@ s3://data-tracking-[data_source_id]/yyyy-mm-dd-hh/[deterministic-batch-uuid].jso
 The folder uses the UTC time at which the API received the batch. Each line is
 a versioned envelope containing `schema_version`, `ingestion_version`,
 `event_id`, `event_time`, `received_at`, `event_dedup_key`, identity fields,
-and the original event under `payload`. `event_id` is preserved when supplied,
+`device_type` (`mobile`, `tablet`, `desktop`, or `unknown`), and the original
+event under `payload`. `device_type` is derived from the HTTP `User-Agent` with
+`ua_parser`; the raw User-Agent is not persisted. `event_id` is preserved when supplied,
 otherwise it is derived deterministically from the source event or a canonical
 fallback hash. The batch key is derived from the ordered event IDs, so a retry
 of the same HTTP request reuses the same logical object.
@@ -98,7 +100,10 @@ Requests whose `User-Agent` contains one of the configured bot patterns
 (`googlebot`, `bingbot`, `ahrefsbot`, and similar) return `202` with
 `accepted=false` and `filtered=true`; no S3 object or Redis rate-limit token is
 created. Legitimate clients are limited per source IP using an atomic Redis
-window and receive `429` plus `Retry-After` when the limit is exceeded.
+window and receive `429` plus `Retry-After` when the limit is exceeded. An
+explicit comma-separated `TRACKING_RATE_LIMIT_WHITELIST` of IP addresses or
+CIDRs may exempt trusted local/dev clients from consuming rate-limit tokens;
+the direct client IP is used and forwarded headers are not trusted.
 
 OpenAPI is available at `/docs`; liveness is available at `/health`.
 Operational queue status is available at `/api/v1/tracking/queue-status` and

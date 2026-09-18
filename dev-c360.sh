@@ -33,9 +33,9 @@
 #                                    seed-demo only when DB is empty; otherwise
 #                                    print DB status counts.
 #   ./dev-c360.sh no-seed           Same, but skip the CIR demo data seed step.
-#   ./dev-c360.sh seed-new-data     Start the dev stack and append fresh
-#                                    current/previous-48-hour event data only;
-#                                    never reset or rerun the default demo seed.
+#   ./dev-c360.sh seed-new-data     Generate fresh synthetic traffic locally and
+#                                    POST it only to the running data-tracking-api;
+#                                    never starts Docker or touches DB/S3 directly.
 #   ./dev-c360.sh upgrade           Local DEV upgrade: refresh images/containers
 #                                    with current repo code and restart core
 #                                    host services (non-destructive).
@@ -102,6 +102,40 @@ done
 if [ "$ACTION" = "stop-all" ]; then
   bash "$SCRIPT_DIR/dev-stop-and-delete-all.sh"
   exit 0
+fi
+
+# API-only traffic seeding intentionally runs before any environment bootstrap,
+# Docker Compose command, database status query, or host-service restart.
+if [ "$ACTION" = "seed-new-data" ]; then
+  SIMULATOR_DIR="$SCRIPT_DIR/all-data-simulator"
+  SIMULATOR_VENV="$SIMULATOR_DIR/.venv"
+  SIMULATOR_PYTHON="$SIMULATOR_VENV/bin/python"
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "❌ Error: python3 is required for API-only seed-new-data." >&2
+    exit 1
+  fi
+  if [ ! -x "$SIMULATOR_PYTHON" ] || ! "$SIMULATOR_PYTHON" --version >/dev/null 2>&1; then
+    echo "📦 Creating all-data-simulator virtualenv for API-only seed-new-data..."
+    python3 -m venv "$SIMULATOR_VENV"
+  fi
+  if [ ! -x "$SIMULATOR_PYTHON" ] || ! "$SIMULATOR_PYTHON" --version >/dev/null 2>&1; then
+    echo "❌ Could not create '$SIMULATOR_PYTHON'." >&2
+    exit 1
+  fi
+
+  echo "📥 Ensuring all-data-simulator dependencies are installed..."
+  "$SIMULATOR_PYTHON" -m pip install -q -r "$SIMULATOR_DIR/requirements-api-seed.txt"
+  seed_tracking_url="${SEED_TRACKING_API_URL:-http://127.0.0.1:${C360_TRACKING_API_PORT:-8010}/api/v1/tracking/logs}"
+  seed_data_source_id="${SEED_TRACKING_DATA_SOURCE_ID:-${TRACKING_DATA_SOURCE_ID:-15dc39d4-ae42-5c60-9c77-66f05dcae448}}"
+  echo "🌐 Sending simulated traffic through data-tracking-api only..."
+  echo "   Endpoint: $seed_tracking_url"
+  echo "   Data source: $seed_data_source_id"
+  (cd "$SIMULATOR_DIR" && "$SIMULATOR_PYTHON" seed_api_data.py \
+    --tracking-url "$seed_tracking_url" \
+    --data-source-id "$seed_data_source_id" \
+    --verbose)
+  exit $?
 fi
 
 # 'upgrade' refreshes all dev containers/images and restarts host services
@@ -636,30 +670,7 @@ seed_demo_if_empty() {
   fi
 }
 
-seed_new_data() {
-  local venv_dir="${SCRIPT_DIR}/${CIR_DIR}/.venv"
-  local venv_python="${venv_dir}/bin/python"
-
-  if [ ! -x "$venv_python" ] || ! "$venv_python" --version >/dev/null 2>&1; then
-    echo "📦 Creating identity-resolution virtualenv for seed-new-data..."
-    python3 -m venv --clear "$venv_dir"
-  fi
-  if [ ! -x "$venv_python" ] || ! "$venv_python" --version >/dev/null 2>&1; then
-    echo "❌ Identity-resolution Python virtualenv could not be created at '$venv_dir'." >&2
-    echo "   Install Python 3 with the venv package, then retry './dev-c360.sh seed-new-data'." >&2
-    return 1
-  fi
-  echo "📥 Ensuring identity-resolution dependencies are installed..."
-  echo "   Python: $venv_python ($($venv_python --version 2>&1))"
-  "$venv_python" -m pip install -q -r "${CIR_DIR}/requirements.txt"
-  echo "🌱 Appending fresh demo data from now through the previous 48 hours..."
-  (cd "$CIR_DIR" && "$venv_python" scripts/seed_full_demo_data.py --new-data)
-  print_database_status
-}
-
-if [ "$ACTION" = "seed-new-data" ]; then
-  seed_new_data
-elif [ "$SKIP_SEED" = "true" ]; then
+if [ "$SKIP_SEED" = "true" ]; then
   if [ "$ACTION" = "upgrade" ]; then
     echo "⏭️  Upgrade mode -- skipping CIR demo data seed step."
   else

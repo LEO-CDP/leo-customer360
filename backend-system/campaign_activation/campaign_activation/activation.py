@@ -44,7 +44,7 @@ def _load_campaign(cur, tenant_id: str, campaign_id: str) -> Optional[dict]:
 
 def _template_status(cur, tenant_id: str, template_id: str) -> Optional[str]:
     cur.execute(
-        f"SELECT status FROM {DB_SCHEMA}.crm_email_templates "
+        f"SELECT status FROM {DB_SCHEMA}.crm_message_templates "
         f"WHERE template_id = %(template_id)s AND tenant_id = %(tenant_id)s",
         {"template_id": template_id, "tenant_id": tenant_id},
     )

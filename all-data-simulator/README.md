@@ -8,6 +8,7 @@ UAT environments. This folder covers three separate workflows:
 | Adjust batch fixture | `adjust_faker.py` | CSV and optionally MinIO/S3 |
 | GA4-style sample events | `google_analytics_faker.py` | JSON printed to stdout |
 | Web tracking and analytics E2E | `web_user_simulator.py` or `run_tracking_analytics_e2e.sh` | Tracking API, MinIO/S3, Dagster, PostgreSQL |
+| API-only fresh traffic seed | `seed_api_data.py` or `./dev-c360.sh seed-new-data` | `data-tracking-api` HTTP endpoint only |
 
 The web simulator does not publish to Kafka. It sends one ordered event batch
 per synthetic user to the tracking API; the tracking service writes NDJSON to
@@ -146,6 +147,47 @@ OPENAI_REASONING_EFFORT=none
 
 The `OPENAI_REASONING_EFFORT=none` setting is required by the documented
 `gpt-5.6-luna` tool-calling setup. Use `--model` to override the model.
+
+## API-Only Fresh Data Seed
+
+[seed_api_data.py](seed_api_data.py) generates synthetic user sessions and
+submits them through `POST /api/v1/tracking/logs`. The tracking API remains the
+only writer: this workflow does not connect to PostgreSQL, create or write S3/
+MinIO objects, trigger analytics, inspect MinIO, or start/restart Docker.
+The launcher installs only [requirements-api-seed.txt](requirements-api-seed.txt)
+for this workflow.
+
+With the local tracking API already running:
+
+```bash
+./dev-c360.sh seed-new-data
+```
+
+Run the simulator directly for a smaller smoke test:
+
+```bash
+cd all-data-simulator
+.venv/bin/python seed_api_data.py --events 100 --events-per-session 10 --seed 7 --verbose
+```
+
+Configuration is read from the simulator or repository `.env` files:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SEED_TRACKING_API_URL` | API endpoint receiving seed traffic | `http://localhost:8010/api/v1/tracking/logs` |
+| `SEED_TRACKING_DATA_SOURCE_ID` | Registered data-source UUID | `15dc39d4-ae42-5c60-9c77-66f05dcae448` |
+| `NEW_DATA_EVENT_COUNT` | Number of events to generate | `20000` |
+| `NEW_DATA_LOOKBACK_HOURS` | Event-time window behind now | `48` |
+| `SEED_EVENTS_PER_SESSION` | Events per HTTP request/session | `20` |
+| `SEED_API_CONCURRENCY` | Concurrent HTTP requests | `4` |
+| `SEED_PROFILE_COUNT` | Synthetic users rotated through sessions | `1000` |
+| `TRACKING_REQUEST_TIMEOUT_SECONDS` | Per-request timeout | `10` |
+| `SEED_QUEUE_DRAIN_TIMEOUT_SECONDS` | Maximum wait for the API queue to flush | `180` |
+| `SEED_QUEUE_POLL_INTERVAL_SECONDS` | Queue-status polling interval | `2` |
+
+The former `seed_full_demo_data.py --new-data` mode has been removed. The full
+demo seed still owns database enrichment and direct demo-fixture setup; fresh
+traffic seeding belongs here and must go through the tracking API.
 
 ## Tracking and Analytics E2E
 

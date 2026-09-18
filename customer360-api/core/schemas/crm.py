@@ -12,7 +12,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 APPROVAL_STATUS_PATTERN = "^(Draft|InReview|Approved|Rejected)$"
@@ -389,15 +389,20 @@ class IndustryRead(IndustryBase):
 
 
 # ---------------------------------------------------------------------------
-# Agentic Email Marketing Schemas
+# Agentic CRM Messaging Schemas
 # ---------------------------------------------------------------------------
 
 SYNC_RUN_STATUS_PATTERN = "^(Pending|Running|Completed|Failed)$"
 
 
-class EmailTemplateBase(BaseModel):
+class MessageTemplateBase(BaseModel):
     tenant_id: uuid.UUID
     name: str
+    # Open-ended platform key so new messaging channels do not require an API change.
+    message_type: str = "EMAIL"
+    persona_id: Optional[uuid.UUID] = None
+    context: dict = Field(default_factory=dict)
+    message_body: Optional[str] = None
     subject: Optional[str] = None
     html_body: Optional[str] = None
     text_body: Optional[str] = None
@@ -410,13 +415,25 @@ class EmailTemplateBase(BaseModel):
     approved_at: Optional[datetime] = None
     metadata_: Optional[dict] = None
 
+    @field_validator("message_type")
+    @classmethod
+    def _validate_message_type(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("message_type must not be empty")
+        return value
 
-class EmailTemplateCreate(EmailTemplateBase):
+
+class MessageTemplateCreate(MessageTemplateBase):
     pass
 
 
-class EmailTemplateUpdate(BaseModel):
+class MessageTemplateUpdate(BaseModel):
     name: Optional[str] = None
+    message_type: Optional[str] = None
+    persona_id: Optional[uuid.UUID] = None
+    context: Optional[dict] = None
+    message_body: Optional[str] = None
     subject: Optional[str] = None
     html_body: Optional[str] = None
     text_body: Optional[str] = None
@@ -427,8 +444,18 @@ class EmailTemplateUpdate(BaseModel):
     approved_at: Optional[datetime] = None
     metadata_: Optional[dict] = None
 
+    @field_validator("message_type")
+    @classmethod
+    def _validate_message_type(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("message_type must not be empty")
+        return value
 
-class EmailTemplateRead(EmailTemplateBase):
+
+class MessageTemplateRead(MessageTemplateBase):
     model_config = ConfigDict(from_attributes=True)
     template_id: uuid.UUID
     created_at: Optional[datetime] = None

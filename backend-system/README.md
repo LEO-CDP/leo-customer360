@@ -1269,7 +1269,7 @@ intentionally not identical:
 | Services | Declared dependency profile |
 | --- | --- |
 | `identity_resolution` | PostgreSQL driver, test tooling, dotenv, Gemini SDK, Pydantic, and Dagster |
-| `analytics`, `segmentation`, `personalization` | PostgreSQL, S3/MinIO, Redis, dotenv, test tooling, Pandas, Polars, and Dagster |
+| `analytics`, `segmentation`, `personalization` | PostgreSQL, S3/MinIO, Redis, dotenv, test tooling, Polars, and Dagster |
 | `scoring` | Dagster and `pymc-marketing` |
 | `data_synch`, `email_engine`, `notification_engine`, `campaign_activation` | Dagster only |
 
@@ -1282,7 +1282,6 @@ boto3>=1.34,<2
 redis>=5.0,<6
 python-dotenv>=1.0,<2
 pytest>=7.4,<9
-pandas>=2.2,<3
 polars>=1.0,<2
 ```
 
@@ -1292,16 +1291,15 @@ polars>=1.0,<2
 | ------------- | ----------------------------------------------------- |
 | Dagster       | Orchestration and scheduling                          |
 | Polars        | High-performance analytical transformation            |
-| Pandas        | Compatibility and smaller/ad-hoc analytical workloads |
 | Boto3         | S3/MinIO integration                                  |
 | Psycopg2      | PostgreSQL connectivity                               |
 | Redis         | Cache, leases, cursors and low-latency state          |
 | Python-dotenv | Local environment configuration                       |
 | Pytest        | Automated testing                                     |
 
-Polars and Pandas serve different purposes and can coexist. Polars should be
-preferred for future large-scale production transformations, especially
-JSONL/Parquet processing.
+Polars is the sole dataframe engine for analytical transformations. Prefer
+lazy Polars scans for large JSONL/Parquet workloads and collect only the
+projected, filtered result needed by the downstream step.
 
 ---
 

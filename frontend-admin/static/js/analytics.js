@@ -1,9 +1,9 @@
 /* Customer 360 Admin -- Analytics dashboard.
  *
- * Shows Chart.js time-series of event activity and a CSS heatmap matrix of
- * raw profile distribution (source system × domain). Data is fetched live
- * from customer360-api: /events for the time-series and /reporting/summary
- * for the profile heatmap.
+ * Shows Chart.js time-series of daily event totals and a CSS heatmap matrix
+ * of raw profile distribution (source system × domain). Data is fetched live
+ * from customer360-api: /events for daily volume, /events/device-types for
+ * device-type totals, and /reporting/summary for the profile heatmap.
  */
 window.C360 = window.C360 || {};
 
@@ -36,53 +36,9 @@ window.C360 = window.C360 || {};
     }
   }
 
-  function utcDateString(date) {
-    return date.toISOString().split("T")[0];
-  }
-
-  function eventTimeFrom(days) {
-    var cutoff = new Date(Date.now() - days * 86400000);
-    return cutoff.toISOString();
-  }
-
   function periodParams() {
     var days = C360.config.getDataPeriodDays("#analytics-period-select");
     return { days: days };
-  }
-
-  function aggregateEvents(events, days) {
-    var now = new Date();
-    var today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    var labels = [];
-    for (var i = days - 1; i >= 0; i--) {
-      var d = new Date(today);
-      d.setUTCDate(today.getUTCDate() - i);
-      labels.push(utcDateString(d));
-    }
-
-    var countsByDay = {};
-    var channels = {};
-    var conversions = 0;
-    var activeProfiles = {};
-
-    events.forEach(function (e) {
-      var day = e.event_time ? e.event_time.substring(0, 10) : "";
-      countsByDay[day] = (countsByDay[day] || 0) + 1;
-
-      var channel = e.channel || "unknown";
-      channels[channel] = (channels[channel] || 0) + 1;
-
-      if (e.is_conversion) conversions += 1;
-      if (e.master_profile_id) activeProfiles[e.master_profile_id] = true;
-    });
-
-    return {
-      labels: labels,
-      counts: labels.map(function (d) { return countsByDay[d] || 0; }),
-      channels: channels,
-      conversions: conversions,
-      activeProfileCount: Object.keys(activeProfiles).length
-    };
   }
 
   function renderTimeSeries(labels, counts) {
@@ -115,11 +71,12 @@ window.C360 = window.C360 || {};
     });
   }
 
-  function renderChannelChart(channels) {
-    var labels = Object.keys(channels);
-    var data = labels.map(function (k) { return channels[k]; });
+  function renderDeviceTypeChart(deviceTypeTotals) {
+    var rows = deviceTypeTotals || [];
+    var labels = rows.map(function (row) { return row.device_type || "unknown"; });
+    var data = rows.map(function (row) { return Number(row.total) || 0; });
 
-    renderChart("chart-events-channel", {
+    renderChart("chart-events-device-type", {
       type: "bar",
       data: {
         labels: labels.map(function (k) { return fmt.titleCase(k); }),
@@ -211,14 +168,14 @@ window.C360 = window.C360 || {};
     $container.append($grid);
   }
 
-  function buildEventHeatmapSeries(events, days) {
+  function buildEventHeatmapSeries(points, days) {
     var countsByDate = {};
     var heatmapDays = Math.max(1, Number(days) || 365);
 
-    (events || []).forEach(function (event) {
-      var eventDate = event && event.event_time ? event.event_time.substring(0, 10) : "";
+    (points || []).forEach(function (event) {
+      var eventDate = event && event.day ? event.day : "";
       if (!eventDate) return;
-      countsByDate[eventDate] = (countsByDate[eventDate] || 0) + 1;
+      countsByDate[eventDate] = (countsByDate[eventDate] || 0) + (Number(event.total) || 0);
     });
 
     var endDate = new Date();
@@ -319,10 +276,13 @@ window.C360 = window.C360 || {};
     });
   }
 
-  function updateKpis(events, summary, agg) {
-    $("#kpi-total-events").text(fmt.int(events.length));
-    $("#kpi-active-profiles").text(fmt.int(agg.activeProfileCount));
-    $("#kpi-conversions").text(fmt.int(agg.conversions));
+  function updateKpis(summary, dailyTotals) {
+    var totalEvents = dailyTotals.reduce(function (sum, point) {
+      return sum + (Number(point.total) || 0);
+    }, 0);
+    $("#kpi-total-events").text(fmt.int(totalEvents));
+    $("#kpi-active-profiles").text(fmt.int(summary.total_master_profiles || 0));
+    $("#kpi-conversions").text("—");
     $("#kpi-master-profiles").text(fmt.int(summary.total_master_profiles || 0));
   }
 
@@ -340,15 +300,19 @@ window.C360 = window.C360 || {};
     destroyCharts();
 
     $.when(
-      api("/events/", $.extend({ event_time_from: eventTimeFrom(days), limit: 1000 }, period)),
+      api("/events/", period),
+      api("/events/device-types", period),
       api("/reporting/summary", period)
-    ).done(function (eventsRes, summaryRes) {
-      var events = eventsRes[0] || [];
+    ).done(function (volumeRes, deviceTypesRes, summaryRes) {
+      var dailyTotals = volumeRes[0] || [];
+      var deviceTypeTotals = deviceTypesRes[0] || [];
       var summary = summaryRes[0] || {};
 
       $("#analytics-loading").addClass("hidden");
 
-      var hasEvents = events.length > 0;
+      var hasEvents = dailyTotals.some(function (point) {
+        return Number(point.total) > 0;
+      });
       var hasHeatmap = summary.raw_profiles_by_source_system && summary.raw_profiles_by_source_system.length > 0;
 
       if (!hasEvents && !hasHeatmap) {
@@ -358,20 +322,20 @@ window.C360 = window.C360 || {};
 
       $("#analytics-dashboard").removeClass("hidden");
 
-      var agg = aggregateEvents(events, days);
-      updateKpis(events, summary, agg);
+      updateKpis(summary, dailyTotals);
 
       if (hasEvents) {
-        renderTimeSeries(agg.labels, agg.counts);
-        renderChannelChart(agg.channels);
-        $("#events-time-series-note").toggleClass("hidden", events.length < 1000);
+        renderTimeSeries(
+          dailyTotals.map(function (point) { return point.day; }),
+          dailyTotals.map(function (point) { return Number(point.total) || 0; })
+        );
       } else {
         renderTimeSeries([], []);
-        renderChannelChart({});
       }
+      renderDeviceTypeChart(deviceTypeTotals);
 
       buildProfileHeatmap(summary.raw_profiles_by_source_system || []);
-      renderEventHeatmap(events, days);
+      renderEventHeatmap(dailyTotals, days);
     }).fail(function (xhr) {
       $("#analytics-loading").addClass("hidden");
       showApiError("loading analytics data", xhr);
