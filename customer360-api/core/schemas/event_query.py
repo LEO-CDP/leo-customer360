@@ -20,6 +20,7 @@ class EventQueryRead(BaseModel):
     session_id: Optional[str] = None
     source_system: Optional[str] = None
     channel: Optional[str] = None
+    device_type: str = "unknown"
     platform: Optional[str] = None
     event_category: str = "GENERAL"
     event_name: Optional[str] = None
@@ -42,8 +43,8 @@ class EventVolumeRead(BaseModel):
     total: int = Field(ge=0)
 
 
-class EventChannelVolumeRead(BaseModel):
-    """Number of events grouped by channel."""
+class EventDeviceTypeVolumeRead(BaseModel):
+    """Number of events grouped by normalized device type."""
 
-    channel: str
+    device_type: str
     total: int = Field(ge=0)

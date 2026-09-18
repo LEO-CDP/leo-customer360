@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from core.buffered_storage import BufferedTrackingStorage, TrackingQueueError
 from core.config import settings
+from core.device import parse_device_type
 from core.redis_cache import TrackingRequestProtection
 from core.redis_queue import RedisStreamTrackingStorage
 from core.metrics import tracking_metrics
@@ -99,6 +100,7 @@ def tracking_queue_status(
 def ingest_tracking_request(
     payload: TrackingLogRequest,
     service: TrackingLogService,
+    device_type: Optional[str] = None,
 ) -> tuple[StoredTrackingLog, int]:
     """Persist one validated tracking request through the S3-backed service."""
     return service.ingest(
@@ -109,6 +111,7 @@ def ingest_tracking_request(
         device_id=payload.device_id,
         device_fingerprint=payload.device_fingerprint,
         user_id=payload.user_id,
+        device_type=device_type,
         metadata=payload.metadata,
     )
 
@@ -177,7 +180,11 @@ def ingest_tracking_logs(
         )
 
     try:
-        stored, cached_session_count = ingest_tracking_request(payload, service)
+        stored, cached_session_count = ingest_tracking_request(
+            payload,
+            service,
+            device_type=parse_device_type(user_agent),
+        )
         tracking_metrics.increment("tracking_ingestion_batches_total")
         tracking_metrics.increment("tracking_ingestion_events_total", len(payload.events))
         return TrackingLogResponse(

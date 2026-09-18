@@ -177,7 +177,7 @@ def test_query_daily_totals_groups_hourly_events_by_utc_day():
     assert totals[0]["day"].isoformat() == now.strftime("%Y-%m-%d")
 
 
-def test_query_channel_totals_groups_complete_event_window():
+def test_query_device_type_totals_groups_complete_event_window():
     now = datetime.now(timezone.utc).replace(microsecond=0)
     object_key = f"events/{now.strftime('%Y-%m-%d-%H')}/batch.jsonl.gz"
     body = _gzip_envelopes(
@@ -185,19 +185,19 @@ def test_query_channel_totals_groups_complete_event_window():
             "schema_version": 1,
             "event_id": "event-channel-1",
             "event_time": (now - timedelta(minutes=5)).isoformat(),
-            "payload": {"event_name": "page_view", "channel": "web"},
+            "payload": {"event_name": "page_view", "device_type": "desktop"},
         },
         {
             "schema_version": 1,
             "event_id": "event-channel-2",
             "event_time": (now - timedelta(minutes=10)).isoformat(),
-            "payload": {"event_name": "app_open", "channel": "mobile_app"},
+            "payload": {"event_name": "app_open", "device_type": "mobile"},
         },
         {
             "schema_version": 1,
             "event_id": "event-channel-3",
             "event_time": (now - timedelta(minutes=15)).isoformat(),
-            "payload": {"event_name": "purchase", "channel": "web"},
+            "payload": {"event_name": "purchase", "device_type": "desktop"},
         },
     )
     repository = EventQueryRepository(
@@ -205,7 +205,7 @@ def test_query_channel_totals_groups_complete_event_window():
         s3_client=FakeS3(body, object_key),
     )
 
-    totals = repository.query_channel_totals(
+    totals = repository.query_device_type_totals(
         FakeDb(),
         TENANT_ID,
         event_time_from=now - timedelta(hours=1),
@@ -213,8 +213,8 @@ def test_query_channel_totals_groups_complete_event_window():
     )
 
     assert totals == [
-        {"channel": "web", "total": 2},
-        {"channel": "mobile_app", "total": 1},
+        {"device_type": "desktop", "total": 2},
+        {"device_type": "mobile", "total": 1},
     ]
     s3 = repository.s3
     assert len(s3.list_calls) == 1

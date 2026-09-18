@@ -15,7 +15,7 @@ from core.repositories.event_query_repository import (
     EventQueryError,
     EventQueryRepository,
 )
-from core.schemas.event_query import EventChannelVolumeRead, EventVolumeRead
+from core.schemas.event_query import EventDeviceTypeVolumeRead, EventVolumeRead
 
 router = APIRouter(prefix="/events", tags=["Behavioral Events"])
 
@@ -110,9 +110,9 @@ def list_event_volume_from_s3(
     return [EventVolumeRead.model_validate(row) for row in rows]
 
 
-@router.get("/channels", response_model=list[EventChannelVolumeRead])
-@cache_response("events/s3/channels", ttl=settings.cache_ttl_seconds)
-def list_event_channel_volume_from_s3(
+@router.get("/device-types", response_model=list[EventDeviceTypeVolumeRead])
+@cache_response("events/s3/device-types", ttl=settings.cache_ttl_seconds)
+def list_event_device_type_volume_from_s3(
     request: Request,
     days: int = Query(default=settings.event_query_max_days, ge=1),
     event_time_from: Optional[datetime] = None,
@@ -120,11 +120,11 @@ def list_event_channel_volume_from_s3(
     tenant_id: uuid.UUID = Depends(_tenant_id_from_request),
     db: Session = Depends(get_db),
     repository: EventQueryRepository = Depends(get_event_query_repository),
-) -> list[EventChannelVolumeRead]:
-    """Return complete event totals grouped by channel."""
+) -> list[EventDeviceTypeVolumeRead]:
+    """Return complete event totals grouped by normalized device type."""
     _validate_days(days)
     try:
-        rows = repository.query_channel_totals(
+        rows = repository.query_device_type_totals(
             db,
             tenant_id,
             event_time_from=event_time_from,
@@ -135,7 +135,7 @@ def list_event_channel_volume_from_s3(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except EventQueryError as exc:
         raise HTTPException(status_code=503, detail="Event lake query failed") from exc
-    return [EventChannelVolumeRead.model_validate(row) for row in rows]
+    return [EventDeviceTypeVolumeRead.model_validate(row) for row in rows]
 
 
 all_events_routers = [router]

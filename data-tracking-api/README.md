@@ -12,7 +12,9 @@ s3://data-tracking-[data_source_id]/yyyy-mm-dd-hh/[deterministic-batch-uuid].jso
 The folder uses the UTC time at which the API received the batch. Each line is
 a versioned envelope containing `schema_version`, `ingestion_version`,
 `event_id`, `event_time`, `received_at`, `event_dedup_key`, identity fields,
-and the original event under `payload`. `event_id` is preserved when supplied,
+`device_type` (`mobile`, `tablet`, `desktop`, or `unknown`), and the original
+event under `payload`. `device_type` is derived from the HTTP `User-Agent` with
+`ua_parser`; the raw User-Agent is not persisted. `event_id` is preserved when supplied,
 otherwise it is derived deterministically from the source event or a canonical
 fallback hash. The batch key is derived from the ordered event IDs, so a retry
 of the same HTTP request reuses the same logical object.

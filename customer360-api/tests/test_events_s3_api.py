@@ -45,11 +45,11 @@ class FakeRepository:
             }
         ]
 
-    def query_channel_totals(self, db, tenant_id, **kwargs):
+    def query_device_type_totals(self, db, tenant_id, **kwargs):
         self.calls.append((db, tenant_id, kwargs))
         return [
-            {"channel": "web", "total": 12},
-            {"channel": "mobile_app", "total": 5},
+            {"device_type": "desktop", "total": 12},
+            {"device_type": "mobile", "total": 5},
         ]
 
 
@@ -104,7 +104,7 @@ def test_events_route_does_not_expose_raw_event_rows(monkeypatch):
     assert fake_repository.calls == []
 
 
-def test_events_channels_route_returns_aggregated_totals(monkeypatch):
+def test_events_device_types_route_returns_aggregated_totals(monkeypatch):
     app = FastAPI()
     app.include_router(router)
     fake_repository = FakeRepository()
@@ -118,14 +118,14 @@ def test_events_channels_route_returns_aggregated_totals(monkeypatch):
         return await call_next(request)
 
     try:
-        response = TestClient(app).get("/events/channels", params={"days": 30})
+        response = TestClient(app).get("/events/device-types", params={"days": 30})
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
     assert response.json() == [
-        {"channel": "web", "total": 12},
-        {"channel": "mobile_app", "total": 5},
+        {"device_type": "desktop", "total": 12},
+        {"device_type": "mobile", "total": 5},
     ]
     assert fake_repository.calls[0][1] == TENANT_ID
     assert fake_repository.calls[0][2]["days"] == 30

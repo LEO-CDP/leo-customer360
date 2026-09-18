@@ -48,6 +48,7 @@ class TrackingLogService:
         device_id: Optional[str] = None,
         device_fingerprint: Optional[str] = None,
         user_id: Optional[str] = None,
+        device_type: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
     ) -> tuple[StoredTrackingLog, int]:
         received_at = datetime.now(timezone.utc)
@@ -71,6 +72,7 @@ class TrackingLogService:
             device_id=device_id,
             device_fingerprint=device_fingerprint,
             user_id=user_id,
+            device_type=device_type,
             metadata=metadata,
         )
         stored = self.storage.store_tracking_logs(data_source_id, events, received_at)
@@ -106,6 +108,7 @@ def _enrich_events(
     device_id: Optional[str],
     device_fingerprint: Optional[str],
     user_id: Optional[str],
+    device_type: Optional[str],
     metadata: Optional[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Preserve batch-level identity metadata in each durable event record."""
@@ -116,7 +119,7 @@ def _enrich_events(
         "device_fingerprint": device_fingerprint,
         "user_id": user_id,
     }
-    if not any(identities.values()) and not metadata:
+    if not any(identities.values()) and not device_type and not metadata:
         return events
 
     enriched_events = []
@@ -125,6 +128,8 @@ def _enrich_events(
         for field_name, value in identities.items():
             if value:
                 enriched_event.setdefault(field_name, value)
+        if device_type:
+            enriched_event["device_type"] = device_type
         if metadata:
             enriched_event.setdefault("metadata", dict(metadata))
         if not _string_value(enriched_event.get("event_id")):

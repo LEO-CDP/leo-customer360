@@ -71,3 +71,20 @@ def test_processed_marker_prevents_rewriting_raw_object_on_retry():
     assert len(client.put_calls) == 2
     assert client.put_calls[0]["Key"].startswith("events/")
     assert client.put_calls[1]["Key"].startswith("_processed/")
+
+
+def test_tracking_object_persists_device_type_in_s3_envelope():
+    from core.storage import build_tracking_object
+    import gzip
+    import json
+
+    _bucket, _key, body = build_tracking_object(
+        SOURCE_ID,
+        [{"event_name": "page_view", "device_type": "mobile"}],
+        datetime(2026, 9, 18, 7, 0, tzinfo=timezone.utc),
+    )
+
+    envelope = json.loads(gzip.decompress(body).decode("utf-8"))
+
+    assert envelope["device_type"] == "mobile"
+    assert envelope["payload"]["device_type"] == "mobile"

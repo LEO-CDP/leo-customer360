@@ -166,7 +166,7 @@ class EventQueryRepository:
             for offset in range((final_day - current_day).days + 1)
         ]
 
-    def query_channel_totals(
+    def query_device_type_totals(
         self,
         db: Session,
         tenant_id: UUID,
@@ -175,18 +175,18 @@ class EventQueryRepository:
         days: int,
         data_source_id: Optional[UUID] = None,
     ) -> list[dict[str, Any]]:
-        """Return complete channel totals for the requested event window."""
+        """Return complete device-type totals for the requested event window."""
         counts = self._aggregate_event_counts(
             db,
             tenant_id,
             event_time_from=event_time_from,
             days=days,
-            group_key=lambda row, _event_time: row.get("channel") or "unknown",
+            group_key=lambda row, _event_time: row.get("device_type") or "unknown",
             data_source_id=data_source_id,
         )
         return [
-            {"channel": channel, "total": total}
-            for channel, total in sorted(
+            {"device_type": device_type, "total": total}
+            for device_type, total in sorted(
                 counts.items(), key=lambda item: (-item[1], item[0])
             )
         ]
@@ -466,6 +466,7 @@ def _flatten_envelope(envelope: dict[str, Any], tenant_id: UUID) -> dict[str, An
         "session_id": _string_or_none(identity.get("session_id") or payload.get("session_id")),
         "source_system": _string_or_none(payload.get("source_system")) or "tracking",
         "channel": _string_or_none(payload.get("channel")),
+        "device_type": _string_or_none(first_value("device_type")) or "unknown",
         "platform": _string_or_none(payload.get("platform")),
         "event_category": str(envelope.get("event_category") or payload.get("event_category") or "GENERAL"),
         "event_name": _string_or_none(envelope.get("event_name") or payload.get("event_name")),

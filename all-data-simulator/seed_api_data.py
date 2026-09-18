@@ -47,6 +47,22 @@ EVENT_TEMPLATES = (
     ("app_open", "GENERAL", "mobile_app", "app"),
 )
 DOMAINS = ("retail", "education", "real_estate", "travel")
+DEVICE_PROFILES = (
+    (
+        "desktop",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+    ),
+    (
+        "mobile",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    ),
+    (
+        "tablet",
+        "Mozilla/5.0 (iPad; CPU OS 13_2 like Mac OS X) AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) Version/13.0 Mobile/15E148 Safari/604.1",
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -142,6 +158,7 @@ class ApiTrafficGenerator:
             profile_index = session_index % self.config.profile_count
             user_id = f"api-seed-user-{profile_index:06d}"
             session_id = self._identifier("session", session_index)
+            device_type, user_agent = self.rng.choice(DEVICE_PROFILES)
             events = [
                 self._event(
                     session_index=session_index,
@@ -151,12 +168,15 @@ class ApiTrafficGenerator:
                     event_time=self.clock - timedelta(
                         seconds=self.rng.randint(0, int(lookback.total_seconds()))
                     ),
+                    device_type=device_type,
                 )
                 for index in range(event_count)
             ]
             yield {
                 "session_id": session_id,
                 "user_id": user_id,
+                "device_type": device_type,
+                "user_agent": user_agent,
                 "events": events,
             }
             remaining -= event_count
@@ -174,6 +194,7 @@ class ApiTrafficGenerator:
         user_id: str,
         session_id: str,
         event_time: datetime,
+        device_type: str,
     ) -> dict[str, Any]:
         event_name, event_category, platform, entity_type = self.rng.choice(EVENT_TEMPLATES)
         event_id = self._identifier(
@@ -194,6 +215,7 @@ class ApiTrafficGenerator:
             "session_id": session_id,
             "device_id": f"api-seed-device-{user_id}",
             "external_customer_id": user_id,
+            "device_type": device_type,
             "platform": platform,
             "entity_type": entity_type,
             "entity_id": f"{entity_type}-{self.rng.randint(1, 50_000):05d}",
@@ -225,6 +247,7 @@ def _send_session(
         session_id=session["session_id"],
         user_id=session["user_id"],
         events=session["events"],
+        user_agent=session["user_agent"],
     )
     return {"event_count": len(session["events"]), "response": response}
 

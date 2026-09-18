@@ -2218,6 +2218,7 @@ def _build_behavioral_event(
     templates = BEHAVIORAL_EVENT_TEMPLATES.get(domain, BEHAVIORAL_EVENT_TEMPLATES["retail"])
     rng = stable_rng(f"behavioral-event:{DEMO_TENANT_ID}:{event_index}")
     event_name, event_category, entity_type, is_conversion, channel = rng.choice(templates)
+    device_type = "mobile" if channel == "mobile_app" else "desktop"
     source_system = _event_output_source(raw_profile.get("source_system"))
     event_id = str(uuid.uuid5(DEMO_NAMESPACE, f"behavioral-event:{DEMO_TENANT_ID}:{event_index}"))
     session_id = f"demo-session-{event_index // 5:06d}"
@@ -2235,6 +2236,7 @@ def _build_behavioral_event(
         "session_id": session_id,
         "source_system": source_system,
         "channel": channel or raw_profile.get("channel"),
+        "device_type": device_type,
         "platform": raw_profile.get("platform"),
         "event_category": event_category,
         "event_name": event_name,
@@ -2259,6 +2261,7 @@ def _build_behavioral_event(
         "domain": domain,
         "event_name": event_name,
         "event_category": event_category,
+        "device_type": device_type,
         "event_dedup_key": f"demo:{event_id}",
         "identity": {
             "user_id": str(raw_profile["raw_profile_id"]),

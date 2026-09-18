@@ -2,8 +2,8 @@
  *
  * Shows Chart.js time-series of daily event totals and a CSS heatmap matrix
  * of raw profile distribution (source system × domain). Data is fetched live
- * from customer360-api: /events for daily volume, /events/channels for
- * channel totals, and /reporting/summary for the profile heatmap.
+ * from customer360-api: /events for daily volume, /events/device-types for
+ * device-type totals, and /reporting/summary for the profile heatmap.
  */
 window.C360 = window.C360 || {};
 
@@ -71,12 +71,12 @@ window.C360 = window.C360 || {};
     });
   }
 
-  function renderChannelChart(channelTotals) {
-    var rows = channelTotals || [];
-    var labels = rows.map(function (row) { return row.channel || "unknown"; });
+  function renderDeviceTypeChart(deviceTypeTotals) {
+    var rows = deviceTypeTotals || [];
+    var labels = rows.map(function (row) { return row.device_type || "unknown"; });
     var data = rows.map(function (row) { return Number(row.total) || 0; });
 
-    renderChart("chart-events-channel", {
+    renderChart("chart-events-device-type", {
       type: "bar",
       data: {
         labels: labels.map(function (k) { return fmt.titleCase(k); }),
@@ -301,11 +301,11 @@ window.C360 = window.C360 || {};
 
     $.when(
       api("/events/", period),
-      api("/events/channels", period),
+      api("/events/device-types", period),
       api("/reporting/summary", period)
-    ).done(function (volumeRes, channelsRes, summaryRes) {
+    ).done(function (volumeRes, deviceTypesRes, summaryRes) {
       var dailyTotals = volumeRes[0] || [];
-      var channelTotals = channelsRes[0] || [];
+      var deviceTypeTotals = deviceTypesRes[0] || [];
       var summary = summaryRes[0] || {};
 
       $("#analytics-loading").addClass("hidden");
@@ -332,7 +332,7 @@ window.C360 = window.C360 || {};
       } else {
         renderTimeSeries([], []);
       }
-      renderChannelChart(channelTotals);
+      renderDeviceTypeChart(deviceTypeTotals);
 
       buildProfileHeatmap(summary.raw_profiles_by_source_system || []);
       renderEventHeatmap(dailyTotals, days);
