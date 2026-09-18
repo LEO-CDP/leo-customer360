@@ -254,7 +254,23 @@ if [ "$P_EN" = "true" ]; then
   sudo docker run "${run_args[@]}" "$P_IMG" "${cmd_args[@]}"
   ok=0; for _ in $(seq 1 20); do curl -fsSk "https://127.0.0.1:$P_PORT/api/status" >/dev/null 2>&1 && { ok=1; break; }; sleep 2; done
   sudo docker ps --filter name=c360-portainer --format '   running: {{.Names}} ({{.Status}})'
-  [ "$ok" = "1" ] && echo "   Portainer OK" || echo "   WARN: Portainer not ready yet"
+  if [ "$ok" = "1" ]; then
+    echo "   Portainer OK"
+    API_CONTAINER_ID="$(sudo docker ps -q --filter name='^customer360-api$' 2>/dev/null || true)"
+    if [ -n "$API_CONTAINER_ID" ]; then
+      API_LOG_DRIVER="$(sudo docker inspect -f '{{.HostConfig.LogConfig.Type}}' "$API_CONTAINER_ID" 2>/dev/null || true)"
+      API_LOG_PATH="$(sudo docker inspect -f '{{.LogPath}}' "$API_CONTAINER_ID" 2>/dev/null || true)"
+      if [ "$API_LOG_DRIVER" = "json-file" ] && [ -n "$API_LOG_PATH" ]; then
+        echo "   Portainer log tracking: customer360-api visible (driver=${API_LOG_DRIVER})"
+      else
+        echo "   WARN: customer360-api is present but its Docker log path could not be verified"
+      fi
+    else
+      echo "   WARN: customer360-api is not running on this Portainer host yet"
+    fi
+  else
+    echo "   WARN: Portainer not ready yet"
+  fi
 fi
 
 # ---------- Netdata (real-time metrics UI) ----------

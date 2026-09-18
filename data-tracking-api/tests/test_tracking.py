@@ -399,6 +399,39 @@ def test_rate_limiter_rejects_after_limit_and_supports_fail_open():
     assert fail_open.allowed
 
 
+def test_rate_limiter_whitelists_configured_ip_without_consuming_redis_token():
+    client = FakeRedis(count=9999)
+    protection = TrackingRequestProtection(
+        Settings(tracking_rate_limit_whitelist="127.0.0.1, 172.16.0.0/12"),
+        client=client,
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "client": type("Client", (), {"host": "172.20.0.1"})(),
+            "headers": {"origin": "https://c360.example.com"},
+        },
+    )()
+
+    decision = protection.allow_request(request, SOURCE_ID)
+
+    assert decision == RateLimitDecision(allowed=True)
+    assert client.eval_calls == []
+
+
+def test_rate_limiter_rejects_invalid_whitelist_entry():
+    try:
+        TrackingRequestProtection(
+            Settings(tracking_rate_limit_whitelist="not-an-ip"),
+            client=FakeRedis(),
+        )
+    except ValueError as exc:
+        assert "TRACKING_RATE_LIMIT_WHITELIST" in str(exc)
+    else:
+        raise AssertionError("Expected invalid whitelist entry to be rejected")
+
+
 def test_rate_limit_key_contains_ip_data_source_and_origin():
     key = build_rate_limit_key(
         "data-tracking-api",

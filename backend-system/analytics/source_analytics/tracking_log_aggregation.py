@@ -1,20 +1,11 @@
-"""Aggregate data-tracking JSONL objects into hourly Redis and source totals."""
+"""Public compatibility facade for tracking-log analytics."""
 
-import gzip
-import json
 import logging
 import os
-import re
 import sys
-from io import BytesIO
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
-from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
-
-from dotenv import load_dotenv
-
-load_dotenv()
 
 _BACKEND_SYSTEM_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,201 +13,91 @@ _BACKEND_SYSTEM_ROOT = os.path.dirname(
 if _BACKEND_SYSTEM_ROOT not in sys.path:
     sys.path.insert(0, _BACKEND_SYSTEM_ROOT)
 
-from shared.redis_lock import acquire_redis_lease  # noqa: E402
+from .clients import AnalyticsClientFactory  # noqa: E402
+from .config import AnalyticsSettings  # noqa: E402
+from .event_records import (  # noqa: E402
+    EVENT_CATEGORIES,
+    EventEnvelopeError,
+    EventRecordService,
+)
+from .metrics import AnalyticsMetrics  # noqa: E402
+from .object_store import HOURLY_FOLDER_PATTERN, S3EventStore  # noqa: E402
+from .repositories import AnalyticsRepository  # noqa: E402
+from .source_state import (  # noqa: E402
+    INCREMENT_IF_NEW_SCRIPT,
+    REFRESH_LOCK_SCRIPT,
+    RELEASE_LOCK_SCRIPT,
+    SourceStateStore,
+)
+from .tracking_log_service import TrackingLogAggregationService  # noqa: E402
 
 logger = logging.getLogger(__name__)
+SETTINGS = AnalyticsSettings.from_environment()
 
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_NAME = os.environ.get("DB_NAME", "customer360")
-DB_USER = os.environ.get("DB_USER", "postgres")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
-DB_PORT = os.environ.get("DB_PORT", "5432")
-DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
-# Non-positive means "no cap": process all active sources across all tenants.
-DATA_SOURCE_LIMIT = int(os.environ.get("ANALYTICS_DATA_SOURCE_LIMIT", "0"))
-MAX_WORKERS = max(1, int(os.environ.get("ANALYTICS_MAX_WORKERS", "2")))
-SOURCE_BATCH_SIZE = max(1, int(os.environ.get("ANALYTICS_SOURCE_BATCH_SIZE", "16")))
-OBJECT_BATCH_SIZE = max(
-    1, int(os.environ.get("ANALYTICS_OBJECT_BATCH_SIZE", "500"))
-)
-DATAFRAME_ENGINE = os.environ.get("ANALYTICS_DATAFRAME_ENGINE", "auto").strip().lower()
-REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", "6580"))
-REDIS_DB = int(os.environ.get("REDIS_DB", "0"))
-REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
-# Host-run local Dagster uses the published MinIO port, while containerized
-# deployments can continue to use the shared S3_ENDPOINT_URL directly.
-S3_ENDPOINT_URL = os.environ.get("ANALYTICS_S3_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT_URL")
-S3_REGION = os.environ.get("S3_REGION", "us-east-1")
-S3_ACCESS_KEY_ID = os.environ.get("S3_ACCESS_KEY_ID")
-S3_SECRET_ACCESS_KEY = os.environ.get("S3_SECRET_ACCESS_KEY")
-S3_SESSION_TOKEN = os.environ.get("S3_SESSION_TOKEN")
-S3_FORCE_PATH_STYLE = os.environ.get("S3_FORCE_PATH_STYLE", "false").lower() == "true"
-S3_VERIFY_SSL = os.environ.get("S3_VERIFY_SSL", "true").lower() == "true"
-S3_MAX_POOL_CONNECTIONS = int(os.environ.get("ANALYTICS_S3_MAX_POOL_CONNECTIONS", "64"))
-ANALYTICS_LOCK_KEY = "analytics:tracking-log-run-lock"
-ANALYTICS_LOCK_TTL_SECONDS = int(
-    os.environ.get("ANALYTICS_RUN_LOCK_TTL_SECONDS", "3600")
-)
-
+DB_HOST = SETTINGS.db_host
+DB_NAME = SETTINGS.db_name
+DB_USER = SETTINGS.db_user
+DB_PASSWORD = SETTINGS.db_password
+DB_PORT = SETTINGS.db_port
+DB_SCHEMA = SETTINGS.db_schema
+DATA_SOURCE_LIMIT = SETTINGS.data_source_limit
+MAX_WORKERS = SETTINGS.max_workers
+SOURCE_BATCH_SIZE = SETTINGS.source_batch_size
+OBJECT_BATCH_SIZE = SETTINGS.object_batch_size
+REDIS_HOST = SETTINGS.redis_host
+REDIS_PORT = SETTINGS.redis_port
+REDIS_DB = SETTINGS.redis_db
+REDIS_PASSWORD = SETTINGS.redis_password
+S3_ENDPOINT_URL = SETTINGS.s3_endpoint_url
+S3_REGION = SETTINGS.s3_region
+S3_ACCESS_KEY_ID = SETTINGS.s3_access_key_id
+S3_SECRET_ACCESS_KEY = SETTINGS.s3_secret_access_key
+S3_SESSION_TOKEN = SETTINGS.s3_session_token
+S3_FORCE_PATH_STYLE = SETTINGS.s3_force_path_style
+S3_VERIFY_SSL = SETTINGS.s3_verify_ssl
+S3_MAX_POOL_CONNECTIONS = SETTINGS.s3_max_pool_connections
+ANALYTICS_LOCK_KEY = SETTINGS.analytics_lock_key
+ANALYTICS_LOCK_TTL_SECONDS = SETTINGS.analytics_lock_ttl_seconds
+EVENT_RAW_PREFIX = SETTINGS.event_raw_prefix
+SOURCE_LOCK_PREFIX = SETTINGS.source_lock_prefix
+SOURCE_STATE_PREFIX = SETTINGS.source_state_prefix
+SOURCE_DAILY_PREFIX = SETTINGS.source_daily_prefix
+SOURCE_PROFILE_HLL_PREFIX = SETTINGS.source_profile_hll_prefix
+LOCK_TTL_SECONDS = SETTINGS.lock_ttl_seconds
+PROCESSED_OBJECT_TTL_SECONDS = SETTINGS.processed_object_ttl_seconds
 TRACKED_EVENT_FIELD = "tracked-event"
-EVENT_CATEGORIES = {
-    "GENERAL",
-    "EDUCATION",
-    "COMMERCE",
-    "FEEDBACK",
-    "FINANCE",
-    "STOCK_TRADING",
-    "TRAVEL",
-    "REAL_ESTATE",
-    "SERVICE_INDUSTRY",
-}
-EVENT_RAW_PREFIX = os.environ.get("ANALYTICS_EVENT_RAW_PREFIX", "events").strip("/")
-HOURLY_FOLDER_PATTERN = re.compile(
-    r"^(?:events/)?(\d{4}-\d{2}-\d{2}-\d{2})/(.+\.jsonl(?:\.gz)?)$"
-)
-SOURCE_LOCK_PREFIX = "analytics:data-source-lock:"
-SOURCE_STATE_PREFIX = "analytics:data-source-state:"
-SOURCE_DAILY_PREFIX = "analytics:data-source-daily:"
-SOURCE_PROFILE_HLL_PREFIX = "analytics:data-source-profiles-hll:"
-LOCK_TTL_SECONDS = int(os.environ.get("ANALYTICS_LOCK_TTL_SECONDS", "3600"))
-PROCESSED_OBJECT_TTL_SECONDS = int(
-    os.environ.get("ANALYTICS_PROCESSED_OBJECT_TTL_SECONDS", str(48 * 60 * 60))
-)
-_INCREMENT_IF_NEW_SCRIPT = """
-if redis.call('SET', KEYS[2], ARGV[1], 'NX', 'EX', ARGV[4]) then
-    redis.call('HINCRBY', KEYS[1], ARGV[2], ARGV[3])
-    return 1
-end
-return 0
-"""
-_RELEASE_LOCK_SCRIPT = """
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-    return redis.call('DEL', KEYS[1])
-end
-return 0
-"""
-_REFRESH_LOCK_SCRIPT = """
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-    return redis.call('EXPIRE', KEYS[1], ARGV[2])
-end
-return 0
-"""
-
-
-def _load_pandas() -> Any:
-    """Load pandas lazily so import cost only occurs during aggregation."""
-    import pandas as pd
-
-    return pd
+_INCREMENT_IF_NEW_SCRIPT = INCREMENT_IF_NEW_SCRIPT
+_RELEASE_LOCK_SCRIPT = RELEASE_LOCK_SCRIPT
+_REFRESH_LOCK_SCRIPT = REFRESH_LOCK_SCRIPT
 
 
 def _load_polars() -> Any:
-    """Load polars lazily so import cost only occurs during aggregation."""
     import polars as pl
 
     return pl
 
 
-def _resolve_dataframe_engine(engine: Optional[str] = None) -> str:
-    """Resolve dataframe engine from argument or environment."""
-    selected = (engine or DATAFRAME_ENGINE or "auto").strip().lower()
-    if selected not in {"auto", "pandas", "polars"}:
-        return "auto"
-    return selected
-
-
 def set_tenant_context(cursor: Any, tenant_id: Optional[str]) -> None:
-    """Set the transaction's RLS tenant context before tenant-scoped SQL."""
-    value = str(tenant_id).strip() if tenant_id is not None else ""
-    cursor.execute("SET app.tenant_id = %s", (value,))
+    AnalyticsRepository.set_tenant_context(cursor, tenant_id)
 
 
 def build_s3_client() -> Any:
-    """Build an S3 or MinIO client from the shared environment settings."""
-    import boto3
-    from botocore.client import Config
-
-    client_kwargs: dict[str, Any] = {
-        "region_name": S3_REGION,
-        "verify": S3_VERIFY_SSL,
-        "config": Config(
-            s3={"addressing_style": "path" if S3_FORCE_PATH_STYLE else "auto"},
-            max_pool_connections=max(8, S3_MAX_POOL_CONNECTIONS),
-        ),
-    }
-    if S3_ENDPOINT_URL:
-        client_kwargs["endpoint_url"] = S3_ENDPOINT_URL
-    if S3_ACCESS_KEY_ID:
-        client_kwargs["aws_access_key_id"] = S3_ACCESS_KEY_ID
-    if S3_SECRET_ACCESS_KEY:
-        client_kwargs["aws_secret_access_key"] = S3_SECRET_ACCESS_KEY
-    if S3_SESSION_TOKEN:
-        client_kwargs["aws_session_token"] = S3_SESSION_TOKEN
-    return boto3.client("s3", **client_kwargs)
+    return AnalyticsClientFactory(SETTINGS).build_s3_client()
 
 
 def build_redis_client() -> Any:
-    """Build the Redis client used by the aggregation job."""
-    import redis
-
-    return redis.Redis(
-        host=REDIS_HOST,
-        port=REDIS_PORT,
-        db=REDIS_DB,
-        password=REDIS_PASSWORD,
-        decode_responses=True,
-    )
+    return AnalyticsClientFactory(SETTINGS).build_redis_client()
 
 
 def connect_database() -> Any:
-    """Open a PostgreSQL connection to the Customer 360 database."""
-    import psycopg2
-
-    return psycopg2.connect(
-        host=DB_HOST,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        port=DB_PORT,
-    )
+    return AnalyticsClientFactory(SETTINGS).connect_database()
 
 
-def fetch_data_sources(connection: Any, limit: int = DATA_SOURCE_LIMIT) -> list[tuple[str, str]]:
-    """Return active source IDs and tenant IDs across all tenants.
-
-    When ``limit`` is positive, the final list is globally capped to that size.
-    A non-positive ``limit`` means no global cap.
-    """
-
-    sources: list[tuple[str, str]] = []
-    unlimited = limit <= 0
-    with connection.cursor() as cursor:
-        cursor.execute(f"SELECT tenant_id FROM {DB_SCHEMA}.sys_tenant ORDER BY tenant_id")
-        tenant_ids = [str(row[0]) for row in cursor.fetchall()]
-        for tenant_id in tenant_ids:
-            set_tenant_context(cursor, tenant_id)
-            query = f"""
-                SELECT data_source_id, tenant_id
-                FROM {DB_SCHEMA}.sys_data_source
-                WHERE tenant_id = %s AND status = 1
-                ORDER BY data_source_id
-            """
-            params: tuple[Any, ...] = (tenant_id,)
-            if not unlimited:
-                query += " LIMIT %s"
-                params = (tenant_id, limit)
-            cursor.execute(
-                query,
-                params,
-            )
-            sources.extend((str(row[0]), str(row[1])) for row in cursor.fetchall())
-
-    # Preserve deterministic ordering across tenants regardless of worker count.
-    sources.sort(key=lambda source: source[0])
-    if unlimited:
-        return sources
-    return sources[:limit]
+def fetch_data_sources(
+    connection: Any,
+    limit: int = DATA_SOURCE_LIMIT,
+) -> list[tuple[str, str]]:
+    return AnalyticsRepository(DB_SCHEMA).fetch_data_sources(connection, limit)
 
 
 def iter_hourly_objects(
@@ -225,25 +106,8 @@ def iter_hourly_objects(
     start_after: Optional[str] = None,
     prefix: Optional[str] = None,
 ) -> Any:
-    """List legacy or gzip-compressed JSONL object keys by UTC hour."""
-    try:
-        paginator = s3_client.get_paginator("list_objects_v2")
-        paginate_kwargs: dict[str, str] = {"Bucket": bucket}
-        if prefix:
-            paginate_kwargs["Prefix"] = prefix
-        if start_after:
-            paginate_kwargs["StartAfter"] = start_after
-        for page in paginator.paginate(**paginate_kwargs):
-            for item in page.get("Contents", []):
-                key = str(item.get("Key", ""))
-                match = HOURLY_FOLDER_PATTERN.match(key)
-                if match:
-                    yield match.group(1), key
-    except Exception as exc:
-        error_code = str(getattr(exc, "response", {}).get("Error", {}).get("Code", ""))
-        if error_code in {"404", "NoSuchBucket", "NotFound"}:
-            return
-        raise
+    store = S3EventStore(s3_client, SETTINGS)
+    yield from store.iter_hourly_objects(bucket, start_after, prefix)
 
 
 def _source_daily_key(data_source_id: str) -> str:
@@ -255,41 +119,40 @@ def _source_profile_hll_key(data_source_id: str) -> str:
 
 
 def current_system_gmt_hour() -> str:
-    """Return current system datetime in GMT with format yyyy-mm-dd-HH."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d-%H")
 
 
 def s3_json_cache_key(bucket: str, object_key: str) -> str:
-    """Build the Redis cache key from the S3 JSON object path."""
     return f"s3://{bucket}/{object_key}"
 
 
-def _get_source_state_int(redis_client: Any, data_source_id: str, field: str) -> Optional[int]:
-    raw = redis_client.hgetall(_source_state_key(data_source_id)).get(field)
-    if raw is None or str(raw).strip() == "":
-        return None
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
+def _state_store(redis_client: Any) -> SourceStateStore:
+    return SourceStateStore(redis_client, SETTINGS, current_system_gmt_hour)
 
 
-def _increment_source_cached_total(redis_client: Any, data_source_id: str, increment: int) -> None:
-    if increment <= 0:
-        return
-    state_key = _source_state_key(data_source_id)
-    state = redis_client.hgetall(state_key)
-    current = int(state.get("total_tracked_event_cache", "0") or "0")
-    redis_client.hset(state_key, mapping={"total_tracked_event_cache": str(current + increment)})
+def _get_source_state_int(
+    redis_client: Any,
+    data_source_id: str,
+    field: str,
+) -> Optional[int]:
+    return _state_store(redis_client).get_state_int(data_source_id, field)
 
 
-def _increment_source_daily_total(redis_client: Any, data_source_id: str, day: str, increment: int) -> None:
-    if increment <= 0:
-        return
-    daily_key = _source_daily_key(data_source_id)
-    daily = redis_client.hgetall(daily_key)
-    current = int(daily.get(day, "0") or "0")
-    redis_client.hset(daily_key, mapping={day: str(current + increment)})
+def _increment_source_cached_total(
+    redis_client: Any,
+    data_source_id: str,
+    increment: int,
+) -> None:
+    _state_store(redis_client).increment_cached_total(data_source_id, increment)
+
+
+def _increment_source_daily_total(
+    redis_client: Any,
+    data_source_id: str,
+    day: str,
+    increment: int,
+) -> None:
+    _state_store(redis_client).increment_daily_total(data_source_id, day, increment)
 
 
 def _add_source_profile_signatures(
@@ -297,257 +160,41 @@ def _add_source_profile_signatures(
     data_source_id: str,
     signatures: set[str],
 ) -> None:
-    if not signatures:
-        return
-    redis_client.pfadd(_source_profile_hll_key(data_source_id), *sorted(signatures))
+    _state_store(redis_client).add_profile_signatures(data_source_id, signatures)
 
 
-def _get_daily_stats(
-    redis_client: Any,
-    data_source_id: str,
-    engine: Optional[str] = None,
-) -> tuple[int, int]:
-    daily = redis_client.hgetall(_source_daily_key(data_source_id))
-    if not daily:
-        return 0, 0
-
-    selected_engine = _resolve_dataframe_engine(engine)
-
-    if selected_engine in {"auto", "polars"}:
-        try:
-            pl = _load_polars()
-            frame = pl.DataFrame(
-                {
-                    "day": list(daily.keys()),
-                    "events": [str(value) for value in daily.values()],
-                }
-            ).with_columns(
-                pl.col("events").cast(pl.Int64, strict=False).fill_null(0)
-            )
-
-            # Hybrid pipeline pattern:
-            # 1) Use Polars for fast normalization/casting on larger inputs.
-            # 2) Convert to Pandas for downstream/library-friendly calculations.
-            pd = _load_pandas()
-            pandas_frame = pd.DataFrame(frame.to_dicts())
-            return int(pandas_frame["day"].nunique()), int(pandas_frame["events"].sum())
-        except Exception:
-            if selected_engine == "polars":
-                raise
-
-    if selected_engine in {"auto", "pandas"}:
-        try:
-            pd = _load_pandas()
-            frame = pd.DataFrame(
-                {
-                    "day": list(daily.keys()),
-                    "events": pd.to_numeric(list(daily.values()), errors="coerce"),
-                }
-            )
-            frame["events"] = frame["events"].fillna(0).astype("int64")
-            return int(frame["day"].nunique()), int(frame["events"].sum())
-        except Exception:
-            if selected_engine == "pandas":
-                raise
-
-    total = 0
-    for value in daily.values():
-        try:
-            total += int(value)
-        except (TypeError, ValueError):
-            continue
-    return len(daily), total
+def _get_daily_stats(redis_client: Any, data_source_id: str) -> tuple[int, int]:
+    return _state_store(redis_client).get_daily_stats(data_source_id)
 
 
-def _aggregate_source_results(
-    results: list[dict[str, Any]],
-    engine: Optional[str] = None,
-) -> dict[str, int]:
-    """Aggregate per-source worker results with pandas for large source counts."""
-    if not results:
-        return {
-            "sources_processed": 0,
-            "sources_skipped_running": 0,
-            "objects_processed": 0,
-            "events_added": 0,
-            "sources_total": 0,
-        }
+def _aggregate_source_results(results: list[dict[str, Any]]) -> dict[str, int]:
+    return AnalyticsMetrics.aggregate_source_results(results)
 
-    selected_engine = _resolve_dataframe_engine(engine)
 
-    if selected_engine in {"auto", "polars"}:
-        try:
-            pl = _load_polars()
-            frame = pl.DataFrame(results).with_columns(
-                [
-                    pl.col("skipped_running").cast(pl.Boolean, strict=False).fill_null(False),
-                    pl.col("objects_processed").cast(pl.Int64, strict=False).fill_null(0),
-                    pl.col("events_added").cast(pl.Int64, strict=False).fill_null(0),
-                ]
-            )
-
-            # Hybrid pipeline pattern:
-            # Polars handles schema coercion efficiently; Pandas handles final
-            # aggregation in a format expected by downstream Python tooling.
-            pd = _load_pandas()
-            pandas_frame = pd.DataFrame(frame.to_dicts())
-            skipped = pandas_frame["skipped_running"].astype(bool)
-            return {
-                "sources_processed": int((~skipped).sum()),
-                "sources_skipped_running": int(skipped.sum()),
-                "objects_processed": int(pandas_frame["objects_processed"].fillna(0).sum()),
-                "events_added": int(pandas_frame["events_added"].fillna(0).sum()),
-                "sources_total": int(len(pandas_frame.index)),
-            }
-        except Exception:
-            if selected_engine == "polars":
-                raise
-
-    if selected_engine in {"auto", "pandas"}:
-        try:
-            pd = _load_pandas()
-            frame = pd.DataFrame(results)
-            skipped = frame["skipped_running"].astype(bool)
-            return {
-                "sources_processed": int((~skipped).sum()),
-                "sources_skipped_running": int(skipped.sum()),
-                "objects_processed": int(frame["objects_processed"].fillna(0).sum()),
-                "events_added": int(frame["events_added"].fillna(0).sum()),
-                "sources_total": int(len(frame.index)),
-            }
-        except Exception:
-            if selected_engine == "pandas":
-                raise
-
-    sources_skipped_running = sum(1 for item in results if item.get("skipped_running"))
-    return {
-        "sources_processed": len(results) - sources_skipped_running,
-        "sources_skipped_running": sources_skipped_running,
-        "objects_processed": sum(int(item.get("objects_processed", 0)) for item in results),
-        "events_added": sum(int(item.get("events_added", 0)) for item in results),
-        "sources_total": len(results),
-    }
+_parse_event_datetime = EventRecordService.parse_event_datetime
+_text_value = EventRecordService.text_value
+_identity_value = EventRecordService.identity_value
+_iter_jsonl_lines = EventRecordService.iter_jsonl_lines
+_extract_profile_signature = EventRecordService.extract_profile_signature
 
 
 def count_jsonl_records(body: Any, object_key: str) -> int:
-    """Parse a JSONL body and return its number of non-empty JSON records."""
-    count = 0
-    for raw_line in _iter_jsonl_lines(body, object_key):
-        if not raw_line or not raw_line.strip():
-            continue
-        try:
-            record = json.loads(raw_line)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"Invalid JSONL in object {object_key}") from exc
-        if not isinstance(record, dict):
-            raise ValueError(f"JSONL record in object {object_key} must be an object")
-        count += 1
-    return count
-
-
-def _extract_profile_signature(record: dict[str, Any]) -> Optional[str]:
-    """Extract a stable profile signature from one NDJSON tracking record."""
-    event = record.get("payload") or record.get("event")
-    if not isinstance(event, dict):
-        return None
-
-    def normalize(value: Any) -> Optional[str]:
-        if value is None:
-            return None
-        text = str(value).strip()
-        if not text:
-            return None
-        return text.lower()
-
-    direct_keys = [
-        "external_customer_id",
-        "user_id",
-        "email",
-        "phone_number",
-        "device_id",
-        "advertising_id",
-        "cookie_id",
-        "session_id",
-    ]
-    for key in direct_keys:
-        normalized = normalize(event.get(key))
-        if normalized:
-            return f"{key}:{normalized}"
-
-    identities = event.get("profile_identities")
-    if isinstance(identities, dict):
-        for key in direct_keys:
-            normalized = normalize(identities.get(key))
-            if normalized:
-                return f"{key}:{normalized}"
-
-    return None
+    return EventRecordService(DB_SCHEMA).count_jsonl_records(body, object_key)
 
 
 def summarize_bucket_metrics(s3_client: Any, bucket: str) -> tuple[int, int, float]:
-    """Recompute source totals and averages by scanning all hourly JSONL logs."""
-    total_tracked_event = 0
-    days_with_events: set[str] = set()
-    profile_signatures: set[str] = set()
-
-    for hour, object_key in iter_hourly_objects(s3_client, bucket):
-        response = s3_client.get_object(Bucket=bucket, Key=object_key)
-        body = response["Body"]
-        object_count = 0
-        try:
-            for raw_line in _iter_jsonl_lines(body, object_key):
-                if not raw_line or not raw_line.strip():
-                    continue
-                try:
-                    record = json.loads(raw_line)
-                except (TypeError, json.JSONDecodeError) as exc:
-                    raise ValueError(f"Invalid JSONL in object {object_key}") from exc
-                if not isinstance(record, dict):
-                    raise ValueError(f"JSONL record in object {object_key} must be an object")
-                object_count += 1
-                signature = _extract_profile_signature(record)
-                if signature:
-                    profile_signatures.add(signature)
-        finally:
-            close = getattr(body, "close", None)
-            if close:
-                close()
-
-        if object_count > 0:
-            days_with_events.add(hour[:10])
-            total_tracked_event += object_count
-
-    avg_daily_event = round(total_tracked_event / len(days_with_events)) if days_with_events else 0
-    avg_events_per_profile = (
-        round(total_tracked_event / len(profile_signatures), 2)
-        if profile_signatures
-        else 0.0
+    return EventRecordService(DB_SCHEMA).summarize_bucket_metrics(
+        s3_client,
+        bucket,
+        iter_hourly_objects,
     )
-    return total_tracked_event, avg_daily_event, avg_events_per_profile
 
 
-def count_records_and_signatures(body: Any, object_key: str) -> tuple[int, set[str]]:
-    """Parse one JSONL object and return event count plus profile signatures."""
-    count = 0
-    signatures: set[str] = set()
-    for raw_line in _iter_jsonl_lines(body, object_key):
-        if not raw_line or not raw_line.strip():
-            continue
-        try:
-            record = json.loads(raw_line)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"Invalid JSONL in object {object_key}") from exc
-        if not isinstance(record, dict):
-            raise ValueError(f"JSONL record in object {object_key} must be an object")
-        count += 1
-        signature = _extract_profile_signature(record)
-        if signature:
-            signatures.add(signature)
-    return count, signatures
-
-
-class EventEnvelopeError(ValueError):
-    """Raised when an S3 record cannot satisfy the governed event contract."""
+def count_records_and_signatures(
+    body: Any,
+    object_key: str,
+) -> tuple[int, set[str]]:
+    return EventRecordService(DB_SCHEMA).count_records_and_signatures(body, object_key)
 
 
 def normalize_event_record(
@@ -555,203 +202,11 @@ def normalize_event_record(
     data_source_id: str,
     tenant_id: str,
 ) -> dict[str, Any]:
-    """Normalize canonical or legacy JSONL into the governed event contract.
-
-    ``payload`` remains the complete source-specific document. Governed fields
-    are derived from the envelope first and payload second; tenant ownership is
-    always supplied by the active PostgreSQL data-source mapping, never trusted
-    from the object body.
-    """
-    schema_version = record.get("schema_version")
-    if schema_version not in (None, 1):
-        raise EventEnvelopeError(f"unsupported schema_version: {schema_version}")
-    payload = record.get("payload") or record.get("event")
-    if not isinstance(payload, dict):
-        if "event" in record and payload is not None:
-            payload = {"event": payload}
-        else:
-            raise EventEnvelopeError("event payload must be an object")
-
-    event_id = record.get("event_id") or payload.get("event_id")
-    if not event_id:
-        event_id = str(
-            uuid5(
-                NAMESPACE_URL,
-                f"c360:legacy-event:{tenant_id}:{data_source_id}:"
-                f"{json.dumps(record, ensure_ascii=False, sort_keys=True, default=str)}",
-            )
-        )
-    try:
-        event_id = str(UUID(str(event_id)))
-    except (ValueError, TypeError) as exc:
-        raise EventEnvelopeError("event_id must be a UUID") from exc
-
-    event_time = _parse_event_datetime(record.get("event_time") or payload.get("event_time"))
-    if event_time is None:
-        event_time = _parse_event_datetime(record.get("received_at"))
-    if event_time is None:
-        raise EventEnvelopeError("event_time must be a valid UTC timestamp")
-
-    event_name = _text_value(
-        record.get("event_name") or payload.get("event_name") or payload.get("eventType")
-    ) or _text_value(payload.get("event")) or "unknown"
-    event_category = (_text_value(record.get("event_category") or payload.get("event_category")) or "GENERAL").upper()
-    if event_category not in EVENT_CATEGORIES:
-        event_category = "GENERAL"
-    identity = record.get("identity")
-    if not isinstance(identity, dict):
-        identity = {}
-
-    return {
-        "event_id": event_id,
-        "tenant_id": tenant_id,
-        "data_source_id": data_source_id,
-        "domain": _text_value(payload.get("domain")) or "unknown",
-        "source_system": _text_value(record.get("source_system") or payload.get("source_system")) or "tracking",
-        "master_profile_id": _text_value(record.get("master_profile_id") or payload.get("master_profile_id")),
-        "raw_profile_id": _text_value(payload.get("raw_profile_id")),
-        "external_customer_id": _identity_value(identity, payload, "external_customer_id"),
-        "email": _identity_value(identity, payload, "email"),
-        "phone_number": _identity_value(identity, payload, "phone_number"),
-        "device_id": _identity_value(identity, payload, "device_id"),
-        "advertising_id": _identity_value(identity, payload, "advertising_id"),
-        "cookie_id": _identity_value(identity, payload, "cookie_id"),
-        "session_id": _identity_value(identity, payload, "session_id"),
-        "channel": _text_value(payload.get("channel")),
-        "platform": _text_value(payload.get("platform")),
-        "event_category": event_category,
-        "event_name": event_name,
-        "event_dedup_key": _text_value(
-            record.get("event_dedup_key") or payload.get("event_dedup_key")
-        ),
-        "event_value": payload.get("event_value"),
-        "currency": _text_value(payload.get("currency")),
-        "entity_type": _text_value(payload.get("entity_type")),
-        "entity_id": _text_value(payload.get("entity_id")),
-        "transaction_id": _text_value(payload.get("transaction_id")),
-        "transaction_status": _text_value(payload.get("transaction_status")),
-        "location_name": _text_value(payload.get("location_name")),
-        "is_conversion": bool(payload.get("is_conversion", False)),
-        "event_time": event_time.isoformat(),
-        "received_at": record.get("received_at") or event_time.isoformat(),
-        "payload": payload,
-    }
-
-
-def upsert_raw_profile(cursor: Any, event: dict[str, Any]) -> str:
-    """Upsert one deterministic raw profile from a normalized event."""
-    identity_pairs = (
-        ("external_customer_id", event.get("external_customer_id")),
-        ("email", event.get("email")),
-        ("phone_number", event.get("phone_number")),
-        ("device_id", event.get("device_id")),
-        ("advertising_id", event.get("advertising_id")),
-        ("cookie_id", event.get("cookie_id")),
-        ("session_id", event.get("session_id")),
+    return EventRecordService(DB_SCHEMA).normalize_event_record(
+        record,
+        data_source_id,
+        tenant_id,
     )
-    identity_type, identity_value = next(
-        ((key, value) for key, value in identity_pairs if value),
-        ("event_id", event["event_id"]),
-    )
-    raw_profile_id = str(
-        uuid5(
-            NAMESPACE_URL,
-            f"c360:raw-profile:{event['tenant_id']}:{event['data_source_id']}:{identity_type}:{identity_value}",
-        )
-    )
-    event["raw_profile_id"] = raw_profile_id
-    try:
-        from psycopg2.extras import Json
-
-        json_payload: Any = Json(event["payload"])
-    except ImportError:
-        json_payload = json.dumps(event["payload"], ensure_ascii=False)
-    cursor.execute(
-        f"""
-        INSERT INTO {DB_SCHEMA}.cdp_raw_profiles_stage (
-            raw_profile_id, tenant_id, domain, source_system, channel,
-            external_customer_id, email, phone_number, device_id,
-            advertising_id, cookie_id, session_id, event_name, event_time,
-            event_payload, status_code, processed_at
-        ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, 1, NULL
-        )
-        ON CONFLICT (raw_profile_id) DO UPDATE SET
-            domain = EXCLUDED.domain,
-            source_system = EXCLUDED.source_system,
-            channel = EXCLUDED.channel,
-            external_customer_id = EXCLUDED.external_customer_id,
-            email = EXCLUDED.email,
-            phone_number = EXCLUDED.phone_number,
-            device_id = EXCLUDED.device_id,
-            advertising_id = EXCLUDED.advertising_id,
-            cookie_id = EXCLUDED.cookie_id,
-            session_id = EXCLUDED.session_id,
-            event_name = EXCLUDED.event_name,
-            event_time = EXCLUDED.event_time,
-            event_payload = EXCLUDED.event_payload,
-            status_code = 1,
-            processed_at = NULL
-        """,
-        (
-            raw_profile_id,
-            event["tenant_id"],
-            event["domain"],
-            event["source_system"],
-            event.get("channel"),
-            event.get("external_customer_id"),
-            event.get("email"),
-            event.get("phone_number"),
-            event.get("device_id"),
-            event.get("advertising_id"),
-            event.get("cookie_id"),
-            event.get("session_id"),
-            event["event_name"],
-            event["event_time"],
-            json_payload,
-        ),
-    )
-    return raw_profile_id
-
-
-def _parse_event_datetime(value: Any) -> Optional[datetime]:
-    if isinstance(value, datetime):
-        parsed = value
-    elif isinstance(value, str) and value.strip():
-        try:
-            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    else:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _text_value(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _identity_value(identity: dict[str, Any], payload: dict[str, Any], key: str) -> Optional[str]:
-    return _text_value(identity.get(key) or payload.get(key))
-
-
-def _iter_jsonl_lines(body: Any, object_key: str) -> Any:
-    """Yield decoded JSONL lines from plain or gzip-compressed S3 bodies."""
-    if object_key.endswith(".gz"):
-        file_object = body if hasattr(body, "read") else BytesIO(body)
-        with gzip.GzipFile(fileobj=file_object, mode="rb") as compressed:
-            yield from compressed
-        return
-    if isinstance(body, (bytes, bytearray)):
-        yield from BytesIO(body)
-        return
-    yield from (body.iter_lines() if hasattr(body, "iter_lines") else body)
 
 
 def read_normalized_event_records(
@@ -760,26 +215,16 @@ def read_normalized_event_records(
     data_source_id: str,
     tenant_id: str,
 ) -> list[dict[str, Any]]:
-    """Read and validate one RAW object against the governed event contract."""
-    records: list[dict[str, Any]] = []
-    for raw_line in _iter_jsonl_lines(body, object_key):
-        if not raw_line or not raw_line.strip():
-            continue
-        try:
-            record = json.loads(raw_line)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise EventEnvelopeError(f"Invalid JSONL in object {object_key}") from exc
-        if not isinstance(record, dict):
-            raise EventEnvelopeError(f"JSONL record in object {object_key} must be an object")
-        if not record.get("event_time") and not (record.get("payload") or {}).get("event_time"):
-            hour_match = re.search(r"(\d{4}-\d{2}-\d{2}-\d{2})", object_key)
-            if hour_match:
-                record = dict(record)
-                record["event_time"] = datetime.strptime(
-                    hour_match.group(1), "%Y-%m-%d-%H"
-                ).replace(tzinfo=timezone.utc).isoformat()
-        records.append(normalize_event_record(record, data_source_id, tenant_id))
-    return records
+    return EventRecordService(DB_SCHEMA).read_normalized_event_records(
+        body,
+        object_key,
+        data_source_id,
+        tenant_id,
+    )
+
+
+def upsert_raw_profile(cursor: Any, event: dict[str, Any]) -> str:
+    return EventRecordService(DB_SCHEMA).upsert_raw_profile(cursor, event)
 
 
 def _source_lock_key(data_source_id: str) -> str:
@@ -791,79 +236,40 @@ def _source_state_key(data_source_id: str) -> str:
 
 
 def _set_source_state(redis_client: Any, data_source_id: str, **values: Any) -> None:
-    values["updated_at"] = datetime.now(timezone.utc).isoformat()
-    redis_client.hset(
-        _source_state_key(data_source_id),
-        mapping={key: str(value) for key, value in values.items() if value is not None},
-    )
+    _state_store(redis_client).set_state(data_source_id, **values)
 
 
-def acquire_source_lock(redis_client: Any, data_source_id: str, run_id: str) -> Optional[str]:
-    """Acquire one source lease, returning its ownership token if available."""
-    token = str(uuid4())
-    acquired = redis_client.set(
-        _source_lock_key(data_source_id), token, nx=True, ex=LOCK_TTL_SECONDS
-    )
-    if not acquired:
-        return None
-    _set_source_state(
-        redis_client,
-        data_source_id,
-        status="running",
-        run_id=run_id,
-        started_at=datetime.now(timezone.utc).isoformat(),
-        last_error="",
-    )
-    return token
+def acquire_source_lock(
+    redis_client: Any,
+    data_source_id: str,
+    run_id: str,
+) -> Optional[str]:
+    return _state_store(redis_client).acquire_source_lock(data_source_id, run_id)
 
 
 def refresh_source_lock(redis_client: Any, data_source_id: str, token: str) -> None:
-    """Extend a source lease and fail if another worker owns it."""
-    refreshed = redis_client.eval(
-        _REFRESH_LOCK_SCRIPT,
-        1,
-        _source_lock_key(data_source_id),
-        token,
-        str(LOCK_TTL_SECONDS),
-    )
-    if int(refreshed) != 1:
-        raise RuntimeError(f"Analytics lock was lost for data source {data_source_id}")
+    _state_store(redis_client).refresh_source_lock(data_source_id, token)
 
 
 def release_source_lock(redis_client: Any, data_source_id: str, token: str) -> None:
-    """Release a source lease only when this run still owns it."""
-    redis_client.eval(_RELEASE_LOCK_SCRIPT, 1, _source_lock_key(data_source_id), token)
+    _state_store(redis_client).release_source_lock(data_source_id, token)
 
 
 def get_source_cursor(redis_client: Any, data_source_id: str) -> Optional[str]:
-    """Return the last processed S3 object key for one source."""
-    state = redis_client.hgetall(_source_state_key(data_source_id))
-    return state.get("last_processed_object") or None
+    return _state_store(redis_client).get_source_cursor(data_source_id)
 
 
-def save_source_cursor(redis_client: Any, data_source_id: str, hour: str, object_key: str) -> None:
-    """Persist the hourly folder and object used as the next S3 StartAfter."""
-    _set_source_state(
-        redis_client,
-        data_source_id,
-        last_processed_hour=hour,
-        last_processed_object=object_key,
-    )
+def save_source_cursor(
+    redis_client: Any,
+    data_source_id: str,
+    hour: str,
+    object_key: str,
+) -> None:
+    _state_store(redis_client).save_source_cursor(data_source_id, hour, object_key)
 
 
 def get_source_statuses(redis_client: Any) -> list[dict[str, str]]:
-    """Return persisted source states, marking active leases as running."""
-    statuses: list[dict[str, str]] = []
-    for state_key in redis_client.scan_iter(match=f"{SOURCE_STATE_PREFIX}*"):
-        data_source_id = str(state_key)[len(SOURCE_STATE_PREFIX):]
-        state = {str(key): str(value) for key, value in redis_client.hgetall(state_key).items()}
-        if redis_client.exists(_source_lock_key(data_source_id)):
-            state["status"] = "running"
-        elif state.get("status") == "running":
-            state["status"] = "stale"
-        state["data_source_id"] = data_source_id
-        statuses.append(state)
-    return sorted(statuses, key=lambda status: status["data_source_id"])
+    return _state_store(redis_client).get_source_statuses()
 
 
 def increment_hourly_count(
@@ -874,28 +280,13 @@ def increment_hourly_count(
     object_key: str,
     event_count: int,
 ) -> bool:
-    """Atomically checkpoint an object and increment its hourly event hash.
-
-    The checkpoint prevents retries from counting the same immutable S3 object
-    twice. The Lua script performs ``HINCRBY`` only when the object is new.
-    """
-    if event_count < 0:
-        raise ValueError("event count cannot be negative")
-
-    hourly_key = f"{data_source_id}-{hour}"
-    checkpoint_key = s3_json_cache_key(bucket, object_key)
-    processed_at = current_system_gmt_hour()
-    result = redis_client.eval(
-        _INCREMENT_IF_NEW_SCRIPT,
-        2,
-        hourly_key,
-        checkpoint_key,
-        processed_at,
-        TRACKED_EVENT_FIELD,
-        str(event_count),
-        str(PROCESSED_OBJECT_TTL_SECONDS),
+    return _state_store(redis_client).increment_hourly_count(
+        data_source_id,
+        hour,
+        bucket,
+        object_key,
+        event_count,
     )
-    return int(result) == 1
 
 
 def update_data_source_summary(
@@ -906,34 +297,14 @@ def update_data_source_summary(
     avg_daily_event: int,
     avg_events_per_profile: float,
 ) -> None:
-    """Persist core summary metrics for one active data source."""
-    if total_tracked_event < 0:
-        raise ValueError("total tracked event cannot be negative")
-
-    with connection.cursor() as cursor:
-        set_tenant_context(cursor, tenant_id)
-        cursor.execute(
-            f"""
-            UPDATE {DB_SCHEMA}.sys_data_source
-            SET total_tracked_event = %s,
-                avg_daily_event = %s,
-                avg_events_per_profile = %s,
-                updated_at = NOW()
-            WHERE data_source_id = %s AND tenant_id = %s AND status = 1
-            """,
-            (
-                total_tracked_event,
-                avg_daily_event,
-                avg_events_per_profile,
-                data_source_id,
-                tenant_id,
-            ),
-        )
-        if cursor.rowcount != 1:
-            raise RuntimeError(
-                f"Active data source {data_source_id} was not found or is not accessible"
-            )
-    connection.commit()
+    AnalyticsRepository(DB_SCHEMA).update_data_source_summary(
+        connection,
+        tenant_id,
+        data_source_id,
+        total_tracked_event,
+        avg_daily_event,
+        avg_events_per_profile,
+    )
 
 
 def process_tracking_logs(
@@ -947,235 +318,29 @@ def process_tracking_logs(
     _lock_acquired: bool = False,
     _global_lease: Optional[Any] = None,
 ) -> dict[str, int]:
-    """Process hourly JSONL logs for the catalog's first data sources.
-
-    Each non-empty JSONL record represents one tracked event because the
-    tracking API writes one record per event. Missing source buckets are empty
-    sources, while malformed objects or dependency errors fail the run.
-    """
-    storage = s3_client if s3_client is not None else build_s3_client()
-    cache = redis_client if redis_client is not None else build_redis_client()
-    write_log = log or logger.info
-    run_id = run_id or str(uuid4())
-
-    if not _lock_acquired:
-        global_lease = acquire_redis_lease(
-            cache,
-            ANALYTICS_LOCK_KEY,
-            ANALYTICS_LOCK_TTL_SECONDS,
-        )
-        if global_lease is None:
-            write_log("Skipping analytics run because another run owns the global lock")
-            return {
-                "sources_processed": 0,
-                "sources_skipped_running": 0,
-                "objects_processed": 0,
-                "events_added": 0,
-                "sources_total": 0,
-            }
-        try:
-            return process_tracking_logs(
-                s3_client=storage,
-                redis_client=cache,
-                db_connection=db_connection,
-                data_source_limit=data_source_limit,
-                run_id=run_id,
-                log=write_log,
-                _lock_acquired=True,
-                _global_lease=global_lease,
-            )
-        finally:
-            global_lease.release()
-
-    source_items: list[tuple[str, str]] = []
-    source_results: list[dict[str, Any]] = []
-
-    def _process_one_source(data_source_id: str, tenant_id: str) -> dict[str, Any]:
-        lock_token = acquire_source_lock(cache, data_source_id, run_id)
-        if lock_token is None:
-            write_log(
-                "Skipping data source %s because another analytics run owns its lock",
-                data_source_id,
-            )
-            return {
-                "data_source_id": data_source_id,
-                "tenant_id": tenant_id,
-                "skipped_running": True,
-                "objects_processed": 0,
-                "events_added": 0,
-            }
-
-        source_increment = 0
-        source_objects_processed = 0
-        saw_checkpointed_object = False
-        bucket = f"data-tracking-{data_source_id}"
-        source_connection = db_connection
-        owns_source_connection = False
-        try:
-            if source_connection is None:
-                source_connection = connect_database()
-                owns_source_connection = True
-            with source_connection.cursor() as context_cursor:
-                set_tenant_context(context_cursor, tenant_id)
-            start_after = get_source_cursor(cache, data_source_id)
-            current_prefix = f"{EVENT_RAW_PREFIX}/"
-            if not start_after or not start_after.startswith(current_prefix):
-                start_after = None
-            for hour, object_key in iter_hourly_objects(
-                storage,
-                bucket,
-                start_after=start_after,
-                prefix=current_prefix,
-            ):
-                if source_objects_processed >= OBJECT_BATCH_SIZE:
-                    write_log(
-                        "Pausing source %s after %d objects; next run resumes from the saved cursor",
-                        data_source_id,
-                        OBJECT_BATCH_SIZE,
-                    )
-                    break
-                if _global_lease is not None:
-                    _global_lease.refresh()
-                refresh_source_lock(cache, data_source_id, lock_token)
-                response = storage.get_object(Bucket=bucket, Key=object_key)
-                body = response["Body"]
-                try:
-                    normalized_events = read_normalized_event_records(
-                        body, object_key, data_source_id, tenant_id
-                    )
-                    event_count = len(normalized_events)
-                    signatures = {
-                        signature
-                        for event in normalized_events
-                        if (signature := _extract_profile_signature({"payload": event["payload"]}))
-                    }
-                finally:
-                    close = getattr(body, "close", None)
-                    if close:
-                        close()
-
-                for normalized_event in normalized_events:
-                    upsert_raw_profile(source_connection.cursor(), normalized_event)
-
-                if increment_hourly_count(
-                    cache,
-                    data_source_id,
-                    hour,
-                    bucket,
-                    object_key,
-                    event_count,
-                ):
-                    source_objects_processed += 1
-                    source_increment += event_count
-                    _increment_source_cached_total(cache, data_source_id, event_count)
-                    _increment_source_daily_total(cache, data_source_id, hour[:10], event_count)
-                    _add_source_profile_signatures(cache, data_source_id, signatures)
-                    write_log(
-                        "Processed %s records from %s/%s",
-                        event_count,
-                        bucket,
-                        object_key,
-                    )
-                else:
-                    saw_checkpointed_object = True
-                save_source_cursor(cache, data_source_id, hour, object_key)
-
-            total_tracked_event = _get_source_state_int(
-                cache, data_source_id, "total_tracked_event_cache"
-            )
-            if total_tracked_event is None and saw_checkpointed_object:
-                # Recovery path: state was lost but checkpoints existed, so rebuild once.
-                (
-                    total_tracked_event,
-                    _recovered_avg_daily,
-                    _recovered_avg_events_per_profile,
-                ) = summarize_bucket_metrics(storage, bucket)
-                cache.hset(
-                    _source_state_key(data_source_id),
-                    mapping={"total_tracked_event_cache": str(total_tracked_event)},
-                )
-            elif total_tracked_event is None:
-                total_tracked_event = 0
-
-            active_days, daily_total = _get_daily_stats(cache, data_source_id)
-            profile_count = int(cache.pfcount(_source_profile_hll_key(data_source_id)))
-            avg_daily_event = round(daily_total / active_days) if active_days > 0 else 0
-            avg_events_per_profile = (
-                round(total_tracked_event / profile_count, 2)
-                if profile_count > 0
-                else 0.0
-            )
-
-            # One DB connection per worker keeps writes thread-safe under psycopg2.
-            # In single-thread test mode, reuse the injected connection.
-            if source_connection is not None:
-                update_data_source_summary(
-                    source_connection,
-                    tenant_id,
-                    data_source_id,
-                    total_tracked_event,
-                    avg_daily_event,
-                    avg_events_per_profile,
-                )
-            _set_source_state(
-                cache,
-                data_source_id,
-                status="completed",
-                completed_at=datetime.now(timezone.utc).isoformat(),
-                objects_processed=source_objects_processed,
-                events_added=source_increment,
-                last_error="",
-            )
-            return {
-                "data_source_id": data_source_id,
-                "tenant_id": tenant_id,
-                "skipped_running": False,
-                "objects_processed": source_objects_processed,
-                "events_added": source_increment,
-            }
-        except Exception as exc:
-            _set_source_state(
-                cache,
-                data_source_id,
-                status="failed",
-                completed_at=datetime.now(timezone.utc).isoformat(),
-                last_error=str(exc),
-            )
-            raise
-        finally:
-            release_source_lock(cache, data_source_id, lock_token)
-            if owns_source_connection and source_connection is not None:
-                source_connection.close()
-
-    if db_connection is not None:
-        source_items = fetch_data_sources(db_connection, data_source_limit)
-        for data_source_id, tenant_id in source_items:
-            result = _process_one_source(data_source_id, tenant_id)
-            source_results.append(result)
-    else:
-        seed_connection = connect_database()
-        try:
-            source_items = fetch_data_sources(seed_connection, data_source_limit)
-        finally:
-            seed_connection.close()
-
-        for source_batch_start in range(0, len(source_items), SOURCE_BATCH_SIZE):
-            source_batch = source_items[
-                source_batch_start : source_batch_start + SOURCE_BATCH_SIZE
-            ]
-            worker_count = max(1, min(MAX_WORKERS, len(source_batch)))
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                futures = {
-                    executor.submit(_process_one_source, data_source_id, tenant_id): (
-                        data_source_id,
-                        tenant_id,
-                    )
-                    for data_source_id, tenant_id in source_batch
-                }
-                for future in as_completed(futures):
-                    result = future.result()
-                    source_results.append(result)
-            if _global_lease is not None:
-                _global_lease.refresh()
-
-    return _aggregate_source_results(source_results)
+    """Process hourly JSONL logs through the injected analytics service."""
+    runtime_settings = replace(
+        SETTINGS,
+        max_workers=MAX_WORKERS,
+        source_batch_size=SOURCE_BATCH_SIZE,
+        object_batch_size=OBJECT_BATCH_SIZE,
+    )
+    client_factory = AnalyticsClientFactory(runtime_settings)
+    storage = s3_client if s3_client is not None else client_factory.build_s3_client()
+    cache = redis_client if redis_client is not None else client_factory.build_redis_client()
+    service = TrackingLogAggregationService(
+        settings=runtime_settings,
+        s3_client=storage,
+        redis_client=cache,
+        db_connection=db_connection,
+        source_loader=fetch_data_sources,
+        database_connector=client_factory.connect_database,
+        run_id=run_id,
+        log=log or logger.info,
+        clock=current_system_gmt_hour,
+    )
+    return service.run(
+        data_source_limit=data_source_limit,
+        lock_acquired=_lock_acquired,
+        global_lease=_global_lease,
+    )

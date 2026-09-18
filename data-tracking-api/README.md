@@ -98,7 +98,10 @@ Requests whose `User-Agent` contains one of the configured bot patterns
 (`googlebot`, `bingbot`, `ahrefsbot`, and similar) return `202` with
 `accepted=false` and `filtered=true`; no S3 object or Redis rate-limit token is
 created. Legitimate clients are limited per source IP using an atomic Redis
-window and receive `429` plus `Retry-After` when the limit is exceeded.
+window and receive `429` plus `Retry-After` when the limit is exceeded. An
+explicit comma-separated `TRACKING_RATE_LIMIT_WHITELIST` of IP addresses or
+CIDRs may exempt trusted local/dev clients from consuming rate-limit tokens;
+the direct client IP is used and forwarded headers are not trusted.
 
 OpenAPI is available at `/docs`; liveness is available at `/health`.
 Operational queue status is available at `/api/v1/tracking/queue-status` and

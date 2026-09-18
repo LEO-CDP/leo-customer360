@@ -273,10 +273,19 @@ else
   RUN_IMG="customer360-api"
 fi
 sudo docker rm -f customer360-api >/dev/null 2>&1 || true
-# --log-opt: cap the json-file log (unbounded by default) so it can't fill the VM disk.
-sudo docker run -d --name customer360-api --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/api.env "$RUN_IMG"
+# Keep logs visible to Portainer through the shared Docker socket while bounding disk usage.
+sudo docker run -d --name customer360-api --restart unless-stopped \
+  --log-driver=json-file --log-opt max-size=10m --log-opt max-file=3 \
+  --network host --env-file /opt/c360/api.env "$RUN_IMG"
 sleep 3
 sudo docker ps --filter name=customer360-api --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
+LOG_DRIVER="$(sudo docker inspect -f '{{.HostConfig.LogConfig.Type}}' customer360-api 2>/dev/null || true)"
+LOG_PATH="$(sudo docker inspect -f '{{.LogPath}}' customer360-api 2>/dev/null || true)"
+if [[ "$LOG_DRIVER" == "json-file" && -n "$LOG_PATH" ]]; then
+  echo "   Portainer logs: enabled (driver=${LOG_DRIVER}, rotated 10m x 3)"
+else
+  echo "::warning::Portainer logs could not be verified for customer360-api (driver=${LOG_DRIVER:-unknown})"
+fi
 # Post-start SMTP health (non-fatal): runs the SAME check GET /metadata/smtp
 # serves, in-container -- no HTTP auth/token needed. 'reachable' => the Brevo
 # credential authenticates; 'disabled' => mock (fine); anything else prints a

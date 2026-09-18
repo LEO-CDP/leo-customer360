@@ -41,6 +41,9 @@ class FakePaginator:
 
     def paginate(self, **kwargs):
         self.calls.append(kwargs)
+        prefix = kwargs.get("Prefix")
+        if prefix and not self.key.startswith(prefix):
+            return [{"Contents": []}]
         return [{"Contents": [{"Key": self.key}]}]
 
 
@@ -81,7 +84,7 @@ def _gzip_envelopes(*envelopes):
 
 def test_query_reads_current_tracking_envelope_with_polars_and_tenant_source_scope():
     now = datetime.now(timezone.utc).replace(microsecond=0)
-    object_key = "events/2026-09-15-14/batch.jsonl.gz"
+    object_key = f"events/{now.strftime('%Y-%m-%d-%H')}/batch.jsonl.gz"
     body = _gzip_envelopes(
         {
             "schema_version": 1,
@@ -136,6 +139,86 @@ def test_query_reads_current_tracking_envelope_with_polars_and_tenant_source_sco
     assert s3.get_calls == [
         {"Bucket": f"data-tracking-{SOURCE_ID}", "Key": object_key}
     ]
+
+
+def test_query_daily_totals_groups_hourly_events_by_utc_day():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    object_key = f"events/{now.strftime('%Y-%m-%d-%H')}/batch.jsonl.gz"
+    body = _gzip_envelopes(
+        {
+            "schema_version": 1,
+            "event_id": "event-hour-1",
+            "event_time": (now - timedelta(minutes=5)).isoformat(),
+            "event_name": "page_view",
+            "payload": {"event_name": "page_view"},
+        },
+        {
+            "schema_version": 1,
+            "event_id": "event-hour-2",
+            "event_time": (now - timedelta(minutes=15)).isoformat(),
+            "event_name": "purchase",
+            "payload": {"event_name": "purchase"},
+        },
+    )
+    repository = EventQueryRepository(
+        Settings(event_s3_prefix="events", event_query_max_days=90),
+        s3_client=FakeS3(body, object_key),
+    )
+
+    totals = repository.query_daily_totals(
+        FakeDb(),
+        TENANT_ID,
+        event_time_from=now - timedelta(hours=1),
+        days=90,
+    )
+
+    assert len(totals) == 1
+    assert totals[0]["total"] == 2
+    assert totals[0]["day"].isoformat() == now.strftime("%Y-%m-%d")
+
+
+def test_query_channel_totals_groups_complete_event_window():
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    object_key = f"events/{now.strftime('%Y-%m-%d-%H')}/batch.jsonl.gz"
+    body = _gzip_envelopes(
+        {
+            "schema_version": 1,
+            "event_id": "event-channel-1",
+            "event_time": (now - timedelta(minutes=5)).isoformat(),
+            "payload": {"event_name": "page_view", "channel": "web"},
+        },
+        {
+            "schema_version": 1,
+            "event_id": "event-channel-2",
+            "event_time": (now - timedelta(minutes=10)).isoformat(),
+            "payload": {"event_name": "app_open", "channel": "mobile_app"},
+        },
+        {
+            "schema_version": 1,
+            "event_id": "event-channel-3",
+            "event_time": (now - timedelta(minutes=15)).isoformat(),
+            "payload": {"event_name": "purchase", "channel": "web"},
+        },
+    )
+    repository = EventQueryRepository(
+        Settings(event_s3_prefix="events", event_query_max_days=90),
+        s3_client=FakeS3(body, object_key),
+    )
+
+    totals = repository.query_channel_totals(
+        FakeDb(),
+        TENANT_ID,
+        event_time_from=now - timedelta(hours=1),
+        days=30,
+    )
+
+    assert totals == [
+        {"channel": "web", "total": 2},
+        {"channel": "mobile_app", "total": 1},
+    ]
+    s3 = repository.s3
+    assert len(s3.list_calls) == 1
+    assert s3.list_calls[0]["Prefix"] == f"events/{now.date().isoformat()}-"
 
 
 def test_query_skips_active_sources_without_provisioned_buckets():

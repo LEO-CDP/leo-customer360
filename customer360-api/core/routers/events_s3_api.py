@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TypedDict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
@@ -15,9 +15,18 @@ from core.repositories.event_query_repository import (
     EventQueryError,
     EventQueryRepository,
 )
-from core.schemas.event_query import EventQueryRead
+from core.schemas.event_query import EventChannelVolumeRead, EventVolumeRead
 
 router = APIRouter(prefix="/events", tags=["Behavioral Events"])
+
+
+class EventQueryFilters(TypedDict):
+    master_profile_id: Optional[uuid.UUID]
+    domain: Optional[str]
+    channel: Optional[str]
+    event_category: Optional[str]
+    event_name: Optional[str]
+    data_source_id: Optional[uuid.UUID]
 
 
 def get_event_query_repository() -> EventQueryRepository:
@@ -34,13 +43,39 @@ def _tenant_id_from_request(request: Request) -> uuid.UUID:
         raise HTTPException(status_code=401, detail="Invalid tenant context") from exc
 
 
-@router.get("/", response_model=list[EventQueryRead])
-@cache_response("events/s3", ttl=settings.cache_ttl_seconds)
-def list_events_from_s3(
+def _validate_days(days: int) -> None:
+    if days > settings.event_query_max_days:
+        raise HTTPException(
+            status_code=422,
+            detail=f"days may not exceed {settings.event_query_max_days}",
+        )
+
+
+def _query_filters(
+    *,
+    master_profile_id: Optional[uuid.UUID],
+    domain: Optional[str],
+    channel: Optional[str],
+    event_category: Optional[str],
+    event_name: Optional[str],
+    data_source_id: Optional[uuid.UUID],
+) -> EventQueryFilters:
+    return {
+        "master_profile_id": master_profile_id,
+        "domain": domain,
+        "channel": channel,
+        "event_category": event_category,
+        "event_name": event_name,
+        "data_source_id": data_source_id,
+    }
+
+
+@router.get("/", response_model=list[EventVolumeRead])
+@cache_response("events/s3/daily", ttl=settings.cache_ttl_seconds)
+def list_event_volume_from_s3(
     request: Request,
     event_time_from: Optional[datetime] = None,
     days: int = Query(default=settings.event_query_max_days, ge=1),
-    limit: int = Query(default=settings.api_default_page_size, ge=1, le=settings.api_max_page_size),
     master_profile_id: Optional[uuid.UUID] = None,
     domain: Optional[str] = None,
     channel: Optional[str] = None,
@@ -50,32 +85,57 @@ def list_events_from_s3(
     tenant_id: uuid.UUID = Depends(_tenant_id_from_request),
     db: Session = Depends(get_db),
     repository: EventQueryRepository = Depends(get_event_query_repository),
-) -> list[EventQueryRead]:
-    """Query canonical event envelopes from the tenant's S3/MinIO source buckets."""
-    if days > settings.event_query_max_days:
-        raise HTTPException(
-            status_code=422,
-            detail=f"days may not exceed {settings.event_query_max_days}",
-        )
+) -> list[EventVolumeRead]:
+    """Return complete UTC-day totals for the event-volume chart."""
+    _validate_days(days)
     try:
-        rows = repository.query(
+        rows = repository.query_daily_totals(
             db,
             tenant_id,
             event_time_from=event_time_from,
             days=days,
-            limit=limit,
-            master_profile_id=master_profile_id,
-            domain=domain,
-            channel=channel,
-            event_category=event_category,
-            event_name=event_name,
+            **_query_filters(
+                master_profile_id=master_profile_id,
+                domain=domain,
+                channel=channel,
+                event_category=event_category,
+                event_name=event_name,
+                data_source_id=data_source_id,
+            ),
+        )
+    except EventDataSourceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EventQueryError as exc:
+        raise HTTPException(status_code=503, detail="Event lake query failed") from exc
+    return [EventVolumeRead.model_validate(row) for row in rows]
+
+
+@router.get("/channels", response_model=list[EventChannelVolumeRead])
+@cache_response("events/s3/channels", ttl=settings.cache_ttl_seconds)
+def list_event_channel_volume_from_s3(
+    request: Request,
+    days: int = Query(default=settings.event_query_max_days, ge=1),
+    event_time_from: Optional[datetime] = None,
+    data_source_id: Optional[uuid.UUID] = None,
+    tenant_id: uuid.UUID = Depends(_tenant_id_from_request),
+    db: Session = Depends(get_db),
+    repository: EventQueryRepository = Depends(get_event_query_repository),
+) -> list[EventChannelVolumeRead]:
+    """Return complete event totals grouped by channel."""
+    _validate_days(days)
+    try:
+        rows = repository.query_channel_totals(
+            db,
+            tenant_id,
+            event_time_from=event_time_from,
+            days=days,
             data_source_id=data_source_id,
         )
     except EventDataSourceError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except EventQueryError as exc:
         raise HTTPException(status_code=503, detail="Event lake query failed") from exc
-    return [EventQueryRead.model_validate(row) for row in rows]
+    return [EventChannelVolumeRead.model_validate(row) for row in rows]
 
 
 all_events_routers = [router]

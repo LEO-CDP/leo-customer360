@@ -3,6 +3,7 @@
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from typing import Any, Optional
 from uuid import UUID
 
@@ -83,7 +84,7 @@ class RedisSessionCache:
 
 
 class TrackingRequestProtection:
-    """Applies configurable bot filtering and an atomic Redis rate limit."""
+    """Applies bot filtering and an atomic Redis rate limit."""
 
     def __init__(self, settings: Settings, client: Optional[Any] = None):
         self.settings = settings
@@ -98,6 +99,37 @@ class TrackingRequestProtection:
             for pattern in settings.tracking_bot_user_agent_patterns.split(",")
             if pattern.strip()
         )
+        self.rate_limit_whitelist = self._parse_rate_limit_whitelist(
+            settings.tracking_rate_limit_whitelist
+        )
+
+    @staticmethod
+    def _parse_rate_limit_whitelist(
+        value: str,
+    ) -> tuple[IPv4Network | IPv6Network, ...]:
+        networks: list[IPv4Network | IPv6Network] = []
+        for entry in value.split(","):
+            normalized = entry.strip()
+            if not normalized:
+                continue
+            try:
+                networks.append(ip_network(normalized, strict=False))
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid TRACKING_RATE_LIMIT_WHITELIST entry: {normalized}"
+                ) from exc
+        return tuple(networks)
+
+    def is_rate_limit_whitelisted(self, request: Request) -> bool:
+        """Return whether the direct client IP is exempt from Redis limiting."""
+        if not self.rate_limit_whitelist:
+            return False
+        client_ip = request.client.host if request.client else ""
+        try:
+            address = ip_address(client_ip)
+        except ValueError:
+            return False
+        return any(address in network for network in self.rate_limit_whitelist)
 
     def ping(self) -> bool:
         """Report Redis reachability for /health.
@@ -124,6 +156,9 @@ class TrackingRequestProtection:
         data_source_id: UUID,
     ) -> RateLimitDecision:
         """Consume one scoped token, or apply the configured Redis fallback."""
+        if self.is_rate_limit_whitelisted(request):
+            return RateLimitDecision(allowed=True)
+
         client_ip = request.client.host if request.client else "unknown"
         key = build_rate_limit_key(
             self.settings.tracking_redis_key_prefix,

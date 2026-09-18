@@ -1,6 +1,6 @@
 """Read models for tenant-scoped event queries backed by S3 Silver/RAW data."""
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
 from uuid import UUID
@@ -33,3 +33,17 @@ class EventQueryRead(BaseModel):
     location_name: Optional[str] = None
     event_payload: dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[datetime] = None
+
+
+class EventVolumeRead(BaseModel):
+    """Number of events received during one UTC day."""
+
+    day: date
+    total: int = Field(ge=0)
+
+
+class EventChannelVolumeRead(BaseModel):
+    """Number of events grouped by channel."""
+
+    channel: str
+    total: int = Field(ge=0)

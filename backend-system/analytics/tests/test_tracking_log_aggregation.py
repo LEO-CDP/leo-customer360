@@ -533,7 +533,7 @@ def test_aggregate_source_results_rolls_up_worker_metrics():
     }
 
 
-def test_aggregate_source_results_with_pandas_engine():
+def test_aggregate_source_results_with_polars():
     summary = aggregation._aggregate_source_results(
         [
             {
@@ -551,7 +551,6 @@ def test_aggregate_source_results_with_pandas_engine():
                 "events_added": 0,
             },
         ],
-        engine="pandas",
     )
 
     assert summary == {
@@ -563,37 +562,7 @@ def test_aggregate_source_results_with_pandas_engine():
     }
 
 
-def test_aggregate_source_results_with_polars_engine():
-    summary = aggregation._aggregate_source_results(
-        [
-            {
-                "data_source_id": "s1",
-                "tenant_id": "t1",
-                "skipped_running": False,
-                "objects_processed": 3,
-                "events_added": 30,
-            },
-            {
-                "data_source_id": "s2",
-                "tenant_id": "t1",
-                "skipped_running": False,
-                "objects_processed": 4,
-                "events_added": 50,
-            },
-        ],
-        engine="polars",
-    )
-
-    assert summary == {
-        "sources_processed": 2,
-        "sources_skipped_running": 0,
-        "objects_processed": 7,
-        "events_added": 80,
-        "sources_total": 2,
-    }
-
-
-def test_get_daily_stats_with_pandas_and_polars_engines():
+def test_get_daily_stats_with_polars():
     redis_client = FakeRedis([])
     redis_client.hset(
         "analytics:data-source-daily:source-1",
@@ -603,12 +572,6 @@ def test_get_daily_stats_with_pandas_and_polars_engines():
         },
     )
 
-    pandas_days, pandas_total = aggregation._get_daily_stats(
-        redis_client, "source-1", engine="pandas"
-    )
-    polars_days, polars_total = aggregation._get_daily_stats(
-        redis_client, "source-1", engine="polars"
-    )
+    polars_days, polars_total = aggregation._get_daily_stats(redis_client, "source-1")
 
-    assert (pandas_days, pandas_total) == (2, 250)
     assert (polars_days, polars_total) == (2, 250)

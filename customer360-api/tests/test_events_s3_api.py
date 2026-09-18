@@ -36,6 +36,22 @@ class FakeRepository:
             }
         ]
 
+    def query_daily_totals(self, db, tenant_id, **kwargs):
+        self.calls.append((db, tenant_id, kwargs))
+        return [
+            {
+                "day": "2026-09-15",
+                "total": 42,
+            }
+        ]
+
+    def query_channel_totals(self, db, tenant_id, **kwargs):
+        self.calls.append((db, tenant_id, kwargs))
+        return [
+            {"channel": "web", "total": 12},
+            {"channel": "mobile_app", "total": 5},
+        ]
+
 
 def test_events_route_queries_s3_with_authenticated_tenant_and_bounds(monkeypatch):
     app = FastAPI()
@@ -54,7 +70,6 @@ def test_events_route_queries_s3_with_authenticated_tenant_and_bounds(monkeypatc
             "/events/",
             params={
                 "event_time_from": "2026-06-17T17:49:58.434Z",
-                "limit": 1000,
                 "days": 90,
             },
         )
@@ -62,10 +77,58 @@ def test_events_route_queries_s3_with_authenticated_tenant_and_bounds(monkeypatc
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json()[0]["event_name"] == "purchase"
+    assert response.json() == [{"day": "2026-09-15", "total": 42}]
     assert fake_repository.calls[0][1] == TENANT_ID
-    assert fake_repository.calls[0][2]["limit"] == 1000
     assert fake_repository.calls[0][2]["days"] == 90
+
+
+def test_events_route_does_not_expose_raw_event_rows(monkeypatch):
+    app = FastAPI()
+    app.include_router(router)
+    fake_repository = FakeRepository()
+    monkeypatch.setattr(cache_module, "get_redis_client", lambda: None)
+    app.dependency_overrides[get_db] = lambda: FakeDb()
+    app.dependency_overrides[get_event_query_repository] = lambda: fake_repository
+
+    @app.middleware("http")
+    async def tenant_middleware(request, call_next):
+        request.state.tenant_id = str(TENANT_ID)
+        return await call_next(request)
+
+    try:
+        response = TestClient(app).get("/events/raw", params={"limit": 1000})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert fake_repository.calls == []
+
+
+def test_events_channels_route_returns_aggregated_totals(monkeypatch):
+    app = FastAPI()
+    app.include_router(router)
+    fake_repository = FakeRepository()
+    monkeypatch.setattr(cache_module, "get_redis_client", lambda: None)
+    app.dependency_overrides[get_db] = lambda: FakeDb()
+    app.dependency_overrides[get_event_query_repository] = lambda: fake_repository
+
+    @app.middleware("http")
+    async def tenant_middleware(request, call_next):
+        request.state.tenant_id = str(TENANT_ID)
+        return await call_next(request)
+
+    try:
+        response = TestClient(app).get("/events/channels", params={"days": 30})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"channel": "web", "total": 12},
+        {"channel": "mobile_app", "total": 5},
+    ]
+    assert fake_repository.calls[0][1] == TENANT_ID
+    assert fake_repository.calls[0][2]["days"] == 30
 
 
 def test_events_route_rejects_days_above_configured_bound():
@@ -96,12 +159,19 @@ def test_events_route_returns_not_found_for_invalid_or_inactive_source():
         return await call_next(request)
 
     class InvalidSourceRepository(FakeRepository):
-        def query(self, db, tenant_id, **kwargs):
+        @staticmethod
+        def _raise_invalid_source():
             from core.repositories.event_query_repository import EventDataSourceError
 
             raise EventDataSourceError(
                 "Data source is invalid, inactive, or not owned by the tenant"
             )
+
+        def query(self, db, tenant_id, **kwargs):
+            self._raise_invalid_source()
+
+        def query_daily_totals(self, db, tenant_id, **kwargs):
+            self._raise_invalid_source()
 
     invalid_repository = InvalidSourceRepository()
     app.dependency_overrides[get_event_query_repository] = lambda: invalid_repository
