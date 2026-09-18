@@ -19,6 +19,7 @@ from core.routers.tracking import (
 )
 from core.metrics import render_prometheus_metrics
 from core.routers.email_tracking import router as email_tracking_router
+from core.routers.zalo_tracking import router as zalo_tracking_router
 from core.storage import S3ObjectStorage
 
 
@@ -66,6 +67,8 @@ app.include_router(tracking_router, prefix="/api/v1")
 app.include_router(tracking_router, prefix="/data/api/v1")
 app.include_router(email_tracking_router, prefix="/api/v1")
 app.include_router(email_tracking_router, prefix="/data/api/v1")
+app.include_router(zalo_tracking_router, prefix="/api/v1")
+app.include_router(zalo_tracking_router, prefix="/data/api/v1")
 
 BASE_DIR = Path(__file__).resolve().parent
 static_dir = BASE_DIR / "static"
