@@ -6,7 +6,7 @@ Recomputes ``cdp_segments`` membership (``member_count`` +
 segment, either across all tenants (scheduled) or scoped to one tenant
 (on-demand) -- the scheduled/batch counterpart to customer360-api's
 on-demand ``POST /api/v1/segments/{id}/recompute``
-(``customer360-api/core/crud/segmentation.py``). See
+(``leo_customer360_dao/crud/segmentation.py``). See
 ``docs/api-plans/PLAN-SEGMENTS-API-IMPROVEMENT.md`` Phase 3.
 
     - ``recompute_segments_op`` / ``segmentation_job`` -- one pass over every

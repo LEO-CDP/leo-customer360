@@ -17,7 +17,10 @@ RUN apt-get update \
 RUN pip install --no-cache-dir \
       dagster dagster-webserver dagster-graphql dagster-postgres dagster-aws psycopg2-binary
 
-COPY . /app
+COPY customer360-dao /opt/customer360-dao
+RUN pip install --no-cache-dir /opt/customer360-dao
+
+COPY backend-system /app
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Install each code location's own requirements if present.

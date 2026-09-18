@@ -17,11 +17,11 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from core.cache import get_redis_client
-from core.config import settings
-from core.crud.base import CRUDBase
+from leo_customer360_dao.config import settings
+from leo_customer360_dao.crud.base import CRUDBase
 from core.database import engine
-from core.models.identity import CdpScoringModel
-from core.models.system import SysDataSource, SysDomain, SysTenantDomain
+from leo_customer360_dao.models.identity import CdpScoringModel
+from leo_customer360_dao.models.system import SysDataSource, SysDomain, SysTenantDomain
 from core.utils.dagster_client import DagsterClient
 
 logger = logging.getLogger(__name__)

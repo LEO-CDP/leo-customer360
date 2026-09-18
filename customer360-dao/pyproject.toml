@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leo-customer360-dao"
+version = "0.1.0"
+description = "Common SQLAlchemy models and data access objects for LEO Customer 360"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Proprietary"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Typing :: Typed",
+]
+dependencies = [
+    "SQLAlchemy>=2.0,<3",
+    "boto3>=1.34,<2",
+    "pgvector>=0.3,<1",
+    "polars>=1.0,<2",
+    "pydantic[email]>=2.6,<3",
+    "pydantic-settings>=2.2,<3",
+    "psycopg2-binary>=2.9,<3",
+    "PyJWT>=2.3,<3",
+    "redis>=5.0,<6",
+]
+
+[project.urls]
+Repository = "https://github.com/LEO-CDP/leo-customer360/tree/main/customer360-dao"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4,<9",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["leo_customer360_dao*"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/tests"]
+addopts = "-ra"

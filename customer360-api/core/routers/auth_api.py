@@ -19,11 +19,11 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import text
 
-from core.config import settings
+from leo_customer360_dao.config import settings
 from core.database import SessionLocal
 from core.repositories.metadata_repository import DEFAULT_TENANT_ID
-from core.repositories.user_repository import UserRepository
-from core.schemas.auth import (
+from leo_customer360_dao.repositories.user_repository import UserRepository
+from leo_customer360_dao.schemas.auth import (
     LoginRequest,
     LoginResponse,
     LogoutRequest,
@@ -32,7 +32,7 @@ from core.schemas.auth import (
     SsoTokenResponse,
 )
 from core.utils.rate_limiter import RedisRateLimiter
-from core.utils.security import create_dev_access_token, verify_password
+from leo_customer360_dao.utils.security import create_dev_access_token, verify_password
 
 logger = logging.getLogger(__name__)
 

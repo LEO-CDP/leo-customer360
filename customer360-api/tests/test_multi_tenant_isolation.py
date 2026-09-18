@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from core.auth import auth_middleware
 from core.database import _set_transaction_context, get_db
-from tests.conftest import FakeDBSession, FakeRedis
+from conftest import FakeDBSession, FakeRedis
 
 
 def _fake_request(tenant_id=None, user_id=None) -> Request:
@@ -158,7 +158,7 @@ class MultiTenantEndToEndIsolationTests(unittest.TestCase):
         return app
 
     def test_sequential_requests_from_different_tenants_stay_isolated(self):
-        from core.utils.security import create_dev_access_token
+        from leo_customer360_dao.utils.security import create_dev_access_token
 
         client = TestClient(self._build_app())
         token_a, _ = create_dev_access_token(tenant_id="tenant-A", user_id="user-A", username="a", roles=["user"])

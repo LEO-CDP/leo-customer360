@@ -12,10 +12,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
-from core.config import settings
-from core.crud.base import CRUDBase
+from leo_customer360_dao.config import settings
+from leo_customer360_dao.crud.base import CRUDBase
 from core.database import get_db
-from core.models.base import Base
+from leo_customer360_dao.models.base import Base
 
 
 def build_crud_router(

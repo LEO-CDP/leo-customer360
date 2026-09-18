@@ -32,7 +32,7 @@ DEMO_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 
 class FakePersonaRepository:
-    """Stands in for core.repositories.persona_repository.PersonaRepository:
+    """Stands in for leo_customer360_dao.repositories.persona_repository.PersonaRepository:
     an in-memory dict-backed store instead of a real database, so the
     persona routers' HTTP-level wiring (status codes, request/response
     schemas, filters) can be tested without SQLAlchemy/PostgreSQL."""

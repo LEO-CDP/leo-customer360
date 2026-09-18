@@ -45,7 +45,7 @@ The suite runs against a **shared** UAT tenant, so every case cleans up after it
 4. **Routing tests** (`test_routing_e2e.py`) that *do* write to `crm_lead`/`crm_contact`/
    `crm_customer_contacts`/`crm_transactions`/`crm_lead_source` are **opt-in**
    (`E2E_ALLOW_DATA_WRITES=1`) and self-clean by computing the sync's **deterministic
-   `uuid5` PKs** (imported from `core.crud.crm_sync`) and `DELETE`-ing exactly those
+   `uuid5` PKs** (imported from `leo_customer360_dao.crud.crm_sync`) and `DELETE`-ing exactly those
    ids — but only rows **absent before** the test ran (pre-existing rows for a real
    profile are left untouched).
 5. **Sweeper** `cleanup.py` (`CLEANUP=1 ./test.sh` or `python cleanup.py`) removes any

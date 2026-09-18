@@ -17,19 +17,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
-from core.config import settings
-from core.crud.base import CRUDBase
-from core.crud.segmentation import DOMAIN_ATTRIBUTES_JOIN_SQL
+from leo_customer360_dao.config import settings
+from leo_customer360_dao.crud.base import CRUDBase
+from leo_customer360_dao.crud.segmentation import DOMAIN_ATTRIBUTES_JOIN_SQL
 from core.database import get_db
 from core.init_core_data import list_tenant_ids, seed_default_segments_with_breakdown
-from core.models.segmentation import CdpSegment
-from core.repositories.segment_respository import SegmentRepository
+from leo_customer360_dao.models.segmentation import CdpSegment
+from leo_customer360_dao.repositories.segment_respository import SegmentRepository
 from core.routers._generic import build_crud_router, insert_before_item_routes
-from core.schemas.identity import MasterProfileRead
-from core.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
+from leo_customer360_dao.schemas.identity import MasterProfileRead
+from leo_customer360_dao.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
 from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 from core.utils.domains import validate_domain_value
-from core.utils.sql_safety import validate_sql_where_fragment
+from leo_customer360_dao.utils.sql_safety import validate_sql_where_fragment
 
 logger = logging.getLogger(__name__)
 

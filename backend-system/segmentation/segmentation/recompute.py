@@ -1,7 +1,7 @@
 """Segmentation membership recompute logic.
 
 Standalone reimplementation of customer360-api's
-``core.crud.segmentation.recompute_segment_membership``, duplicated here
+``leo_customer360_dao.crud.segmentation.recompute_segment_membership``, duplicated here
 (rather than imported) because this is a separately deployed service with
 its own ``requirements.txt``/venv -- see ``backend-system/README.md``'s
 "Independent code locations" section and
@@ -77,7 +77,7 @@ _QUERY_KEYWORDS_PATTERN = re.compile(r"\b(select|from|join|union|into|with)\b", 
 # bare-column sql_rules fragments keep resolving unambiguously against
 # cdp_master_profiles. New domain-scoped rules reference it explicitly, e.g.
 # dp.domain_attributes->>'risk_segment'. Mirrors customer360-api's
-# core/crud/segmentation.py::DOMAIN_ATTRIBUTES_JOIN_SQL -- keep both in sync.
+# leo_customer360_dao/crud/segmentation.py::DOMAIN_ATTRIBUTES_JOIN_SQL -- keep both in sync.
 _DOMAIN_ATTRIBUTES_JOIN_SQL = """
     LEFT JOIN LATERAL (
         SELECT dom.domain_attributes

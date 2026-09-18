@@ -4,3 +4,4 @@
 # running the combined Dagster UI on a dev machine -- see start.sh/README.md.
 dagster-webserver>=1.9,<2
 pytest>=7.4,<9
+leo-customer360-dao

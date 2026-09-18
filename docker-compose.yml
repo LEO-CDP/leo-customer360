@@ -218,8 +218,8 @@ services:
   # ---------------------------------------------------------------------------
   dagster:
     build:
-      context: ./backend-system
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend-system/Dockerfile
     image: customer360-dagster:local
     container_name: customer360-dagster
     restart: unless-stopped
@@ -277,8 +277,8 @@ services:
   # run monitoring, and the run queue; it must not expose the webserver port.
   dagster-daemon:
     build:
-      context: ./backend-system
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend-system/Dockerfile
     image: customer360-dagster:local
     container_name: customer360-dagster-daemon
     restart: unless-stopped
@@ -324,8 +324,8 @@ services:
   # ---------------------------------------------------------------------------
   api:
     build:
-      context: ./customer360-api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: customer360-api/Dockerfile
     image: customer360-api:local
     container_name: customer360-api
     restart: unless-stopped
@@ -436,8 +436,8 @@ services:
   cir-demo-seed:
     profiles: ["dev"]
     build:
-      context: ./backend-system
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend-system/Dockerfile
     image: customer360-dagster:local
     container_name: customer360-cir-demo-seed
     restart: "no"

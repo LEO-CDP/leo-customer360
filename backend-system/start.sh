@@ -70,6 +70,9 @@ fi
 
 VENV_PYTHON="$VENV_DIR/bin/python"
 
+log "Installing local leo-customer360-dao checkout..."
+"$VENV_PYTHON" -m pip install -q --no-deps --upgrade ../customer360-dao
+
 log "Installing requirements for: ${SERVICES[*]} (+ requirements-dev.txt for the local Dagster UI)..."
 for svc in "${SERVICES[@]}"; do
     "$VENV_PYTHON" -m pip install -q -r "${PROJECT_HOME}/${svc}/requirements.txt"

@@ -22,12 +22,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.config import settings
+from leo_customer360_dao.config import settings
 from core.database import SessionLocal
-from core.models.segmentation import CdpSegment
-from core.models.system import SysUser, SysUserInfo
+from leo_customer360_dao.models.segmentation import CdpSegment
+from leo_customer360_dao.models.system import SysUser, SysUserInfo
 from core.repositories.metadata_repository import DEFAULT_TENANT_ID
-from core.utils.security import hash_password
+from leo_customer360_dao.utils.security import hash_password
 
 logger = logging.getLogger(__name__)
 

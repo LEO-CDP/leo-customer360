@@ -24,7 +24,7 @@ from core.repositories.campaign_draft_repository import (
     CampaignSegmentNotFoundError,
     CampaignTemplateNotFoundError,
 )
-from core.schemas.crm import (
+from leo_customer360_dao.schemas.crm import (
     CampaignDraftContentItemRead,
     CampaignDraftRequest,
     CampaignDraftResponse,

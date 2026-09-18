@@ -38,7 +38,7 @@ from typing import Any, Callable, Optional
 import redis
 from fastapi.encoders import jsonable_encoder
 
-from core.config import settings
+from leo_customer360_dao.config import settings
 
 logger = logging.getLogger(__name__)
 

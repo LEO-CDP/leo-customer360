@@ -206,7 +206,7 @@ flowchart TD
   O --> P[("cdp_campaign_dispatch_logs<br/>ON CONFLICT(campaign_id, master_profile_id)<br/>WHERE status NOT IN (Sent, Suppressed)")]
 ```
 
-**Sync-engine internals** (`customer360-api/core/crud/crm_sync.py`) — the routing + idempotent upsert
+**Sync-engine internals** (`customer360-dao/src/leo_customer360_dao/crud/crm_sync.py`) — the routing + idempotent upsert
 graph for Stage 1 (SCRUM-94):
 
 ```mermaid
@@ -241,9 +241,9 @@ flowchart TD
 `customer360-api/core/routers/crm_sync_api.py:42` `sync_segment_crm` (tenant-admin gated;
 `GET /admin/crm/sync-runs[/{id}]` for audit).
 
-**Engine:** `customer360-api/core/crud/crm_sync.py` `sync_segment_to_crm`:
-1. Validate `sql_rules` (`core/utils/sql_safety.validate_sql_where_fragment`).
-2. `recompute_segment_membership(db, segment)` (reused from `core/crud/segmentation.py`) — unless `dry_run`.
+**Engine:** `customer360-dao/src/leo_customer360_dao/crud/crm_sync.py` `sync_segment_to_crm`:
+1. Validate `sql_rules` (`leo_customer360_dao.utils.sql_safety.validate_sql_where_fragment`).
+2. `recompute_segment_membership(db, segment)` (reused from `leo_customer360_dao/crud/segmentation.py`) — unless `dry_run`.
 3. `_iter_segment_members(...)` — keyset-paginated read of `cdp_master_profiles` (tenant-scoped, `status_code=1`).
 4. `classify_route(lifecycle_stage)` → route + upsert, each member inside a `SAVEPOINT`:
    - **customer** → `_upsert_customer_contact` (`crm_customer_contacts`) + `_upsert_transactions` (`crm_transactions`, facts never fabricated).
@@ -275,7 +275,7 @@ prompt code. `core/config.py` has no LLM settings. Intended contract:
 - Campaign CRUD via `build_crud_router` and analytics sub-router — `core/routers/crm_api.py`.
 
 **Not built:** the AI planning endpoint (`…campaigns:plan`) and a real state-machine. Today
-`approval_status` is only **regex-validated** (`APPROVAL_STATUS_PATTERN`, `core/schemas/crm.py:18`);
+`approval_status` is only **regex-validated** (`APPROVAL_STATUS_PATTERN`, `leo_customer360_dao/schemas/crm.py`);
 the single enforced transition is the **activation gate** in Stage 5. Spec:
 `AGENTIC-EMAIL-MARKETING-FLOW.md:214-255`, `AGENTIC-MARKETING.md`.
 
@@ -489,15 +489,15 @@ Keycloak token), `README.md`, `TEST_PLAN.md` (AC → case traceability). Simulat
 
 **customer360-api**
 - `core/routers/crm_sync_api.py` — segment→CRM sync + audit endpoints
-- `core/crud/crm_sync.py` — the sync engine (routing, deterministic upserts, audit)
+- `customer360-dao/src/leo_customer360_dao/crud/crm_sync.py` — the sync engine (routing, deterministic upserts, audit)
 - `core/routers/campaign_activation_api.py` — approval gate + activation + dispatch-logs + provider-config
-- `core/crud/email_provider.py` — provider-config write side + Redis invalidation
+- `customer360-dao/src/leo_customer360_dao/crud/email_provider.py` — provider-config write side + Redis invalidation
 - `core/routers/email_tracking_api.py` — public open/click/unsubscribe/webhook
 - `core/crud/email_tracking.py` — event capture (dedup) + suppression
 - `core/utils/email_tracking.py` — token sign/verify, webhook verify, event maps
 - `core/utils/dagster_client.py` — GraphQL clients for the Dagster jobs
 - `core/routers/crm_api.py` / `core/repositories/campaign_repository.py` — campaign CRUD + analytics
-- `core/models/crm.py`, `core/schemas/crm.py` — ORM + Pydantic
+- `customer360-dao/src/leo_customer360_dao/models/crm.py`, `customer360-dao/src/leo_customer360_dao/schemas/crm.py` — ORM + Pydantic
 - `core/apps/http_api_app.py` — `PUBLIC_PATHS` allowlist
 - `tests/e2e/*` — E2E suite + plan
 

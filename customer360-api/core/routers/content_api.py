@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
 from core.database import get_db
-from core.repositories.content_repository import ContentRepository
-from core.schemas.content import (
+from leo_customer360_dao.repositories.content_repository import ContentRepository
+from leo_customer360_dao.schemas.content import (
     ContentItemCreate,
     ContentItemRead,
     ContentItemUpdate,

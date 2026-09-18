@@ -2,7 +2,7 @@
 # Deploy backend-system (the Dagster orchestrator) onto the server VM for an env.
 #   ./deploy-backend.sh <uat|prod>
 #
-# Ships the repo's backend-system/ to the box over SSH (tar-over-ssh — no git creds
+# Ships the repo's backend-system/ and customer360-dao/ to the box over SSH (tar-over-ssh — no git creds
 # needed on the VM), installs Docker if missing, builds the image, and (re)runs it as a
 # container on port 3000 with --network host so it reaches the PRIVATE customer360 DB
 # (same subnet as the VM). Re-runnable: it rebuilds and replaces the container.
@@ -77,8 +77,8 @@ GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
 if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
   DEPLOY_MODE="build"; IMAGE=""
   echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
-  echo ">> Shipping backend-system/ ..."
-  tar -C "$REPO_ROOT" -czf - backend-system \
+  echo ">> Shipping backend-system/ and customer360-dao/ ..."
+  tar -C "$REPO_ROOT" -czf - backend-system customer360-dao \
     | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
 else
   DEPLOY_MODE="ghcr"
@@ -191,7 +191,7 @@ if [ "$DEPLOY_MODE" = "ghcr" ]; then
   RUN_IMG="$IMAGE"
 else
   echo "   building image (this can take a few minutes on a small box)..."
-  sudo docker build -t customer360-dagster /opt/c360/backend-system
+  sudo docker build -t customer360-dagster -f /opt/c360/backend-system/Dockerfile /opt/c360
   RUN_IMG="customer360-dagster"
 fi
 # Preserve the OLD instance's Dagster storage before replacing the container. The

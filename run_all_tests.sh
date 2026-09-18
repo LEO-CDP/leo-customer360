@@ -35,6 +35,7 @@ run_suite() {
   echo "-------------------------------------------------------------------"
 }
 
+run_suite "Customer 360 DAO" "${SCRIPT_DIR}/customer360-dao/run_tests.sh" "$@"
 run_suite "Customer 360 API" "${SCRIPT_DIR}/customer360-api/run_unit_tests.sh" "$@"
 run_suite "Data Tracking API" "${SCRIPT_DIR}/data-tracking-api/run_unit_tests.sh" "$@"
 run_suite "Identity Resolution" "${SCRIPT_DIR}/backend-system/identity_resolution/run_tests.sh" "$@"

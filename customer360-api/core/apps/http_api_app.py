@@ -9,7 +9,7 @@ from fastapi.openapi.utils import get_openapi
 from sqlalchemy import text
 
 from core.auth import auth_middleware
-from core.config import settings
+from leo_customer360_dao.config import settings
 from core.database import engine
 from core.init_core_data import init_core_data
 from core.routers.analytics_api import all_analytics_routers

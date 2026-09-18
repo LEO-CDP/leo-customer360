@@ -8,12 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-COPY requirements.txt .
+COPY customer360-dao /opt/customer360-dao
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    pip install /opt/customer360-dao
+
+COPY customer360-api/requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     pip install -r requirements.txt
 RUN opentelemetry-bootstrap -a install
 
-COPY . .
+COPY customer360-api/ .
 
 EXPOSE 8008
 

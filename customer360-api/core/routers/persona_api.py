@@ -19,18 +19,18 @@ from sqlalchemy.orm import Session
 
 from core.auth import require_admin
 from core.cache import cache_response, invalidate_prefix
-from core.config import settings
-from core.crud.base import CRUDBase
+from leo_customer360_dao.config import settings
+from leo_customer360_dao.crud.base import CRUDBase
 from core.database import get_db
-from core.models.identity import (
+from leo_customer360_dao.models.identity import (
     CdpCustomerPersona,
     CdpPersonaArchetype,
     CdpPersonaFeature,
     CdpPersonaHistory,
     CdpPersonaScoreDetail,
 )
-from core.repositories.persona_repository import PersonaRepository
-from core.schemas.identity import (
+from leo_customer360_dao.repositories.persona_repository import PersonaRepository
+from leo_customer360_dao.schemas.identity import (
     CustomerPersonaCreate,
     CustomerPersonaRead,
     CustomerPersonaUpdate,

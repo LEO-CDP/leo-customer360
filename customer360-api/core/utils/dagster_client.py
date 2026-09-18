@@ -34,7 +34,7 @@ Layout:
   - ``DagsterClient`` -- facade exposing one attribute per service
     (``dagster_client.segmentation``, ``dagster_client.analytics``, ...).
     The module-level ``dagster_client`` singleton is the intended entry
-    point for the rest of the codebase (mirrors the ``core.config.settings``
+    point for the rest of the codebase (mirrors the ``leo_customer360_dao.config.settings``
     singleton pattern).
 
 ``scoring``/``data_synch``/``email_engine``/``notification_engine`` currently
@@ -49,7 +49,7 @@ from typing import Any, Callable, Optional
 
 from dagster_graphql import DagsterGraphQLClient, DagsterGraphQLClientError
 
-from core.config import settings
+from leo_customer360_dao.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -333,7 +333,7 @@ class SegmentationDagsterService(DagsterService):
     ``refresh``/``create``/``update`` all submit the SAME underlying
     ``segmentation_job`` -- there is no separate Dagster op per action,
     since a segment row's create/update itself is a synchronous DB write
-    (see ``core/crud/segmentation.py``); what these need Dagster for is the
+    (see ``leo_customer360_dao/crud/segmentation.py``); what these need Dagster for is the
     potentially-expensive membership recompute that should follow. What
     differs per method is the ``trigger_reason`` tag attached to the run
     (useful for filtering run history in the Dagster UI) and the docstring

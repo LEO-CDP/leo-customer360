@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 
 from core.ai_providers.base import AIProvider, AIProviderError
-from core.config import settings
+from leo_customer360_dao.config import settings
 
 _OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 _REQUEST_TIMEOUT_SECONDS = 30

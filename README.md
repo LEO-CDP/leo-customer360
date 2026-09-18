@@ -8,6 +8,7 @@ Customer 360 is the identity-resolution and golden-record layer for the LEO CDP 
 The code in this repo is not an abstract demo. It reflects a real platform layout with:
 
 - a PostgreSQL 16 schema for master profiles, raw profiles, links, CRM entities, personas, and segmentation metadata
+- a reusable `leo-customer360-dao` Python package containing shared models, schemas, CRUD, repositories, and database utilities
 - a FastAPI API in `customer360-api/` for CRUD, reporting, auth, and tenant-scoped access
 - a Dagster workspace in `backend-system/` that runs identity resolution, segmentation, and analytics jobs
 - a FastAPI ad-serving service in `ads-server/`
@@ -38,6 +39,7 @@ The current repo contains four application services, three active Dagster jobs, 
 | [`database-init/`](database-init) | Schema source: `database-schema.sql`, seed/init scripts, and SQL views |
 | [`backend-system/`](backend-system) | Dagster workspace with nine code locations: identity resolution, segmentation, analytics, and six placeholder services |
 | [`customer360-api/`](customer360-api) | FastAPI service with routers, auth, SQLAlchemy models, and business logic |
+| [`customer360-dao/`](customer360-dao) | Installable shared Python DAO package and package-owned unit tests |
 | [`data-tracking-api/`](data-tracking-api) | FastAPI ingestion service that queues dynamic events in Redis Streams and writes hourly tracking-log objects to S3/MinIO |
 | [`ads-server/`](ads-server) | Standalone FastAPI ad-serving service with its own database, cache, and widget code |
 | [`frontend-admin/`](frontend-admin) | Thin admin UI served by FastAPI and loaded from static templates |

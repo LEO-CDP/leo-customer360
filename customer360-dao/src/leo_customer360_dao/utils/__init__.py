@@ -1,0 +1,1 @@
+"""Small persistence utilities shared by DAO modules."""

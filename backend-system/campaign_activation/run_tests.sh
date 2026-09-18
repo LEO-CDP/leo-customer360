@@ -54,6 +54,9 @@ fi
 
 VENV_PYTHON="$VENV_DIR/bin/python"
 
+echo "📦 Installing local leo-customer360-dao checkout..."
+"$VENV_PYTHON" -m pip install -q --no-deps --upgrade ../../customer360-dao
+
 echo "📥 Installing requirements..."
 "$VENV_PYTHON" -m pip install -q -r requirements.txt
 

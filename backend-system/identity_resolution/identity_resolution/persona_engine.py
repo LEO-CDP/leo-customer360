@@ -1028,7 +1028,7 @@ class PersonaResolutionEngine:
         ``cdp_customer_personas`` row below, so it's still the correct
         pre-match weight here). This is the ONLY place centroid_*_score is
         ever written -- the admin API's PersonaArchetypeCreate/Update never
-        accept it as input (see customer360-api/core/schemas/identity.py)."""
+        accept it as input (see leo_customer360_dao/schemas/identity.py)."""
         query = f"""
             INSERT INTO {self._table('cdp_persona_archetypes')}
                 (tenant_id, domain, persona_code, persona_name, persona_category,

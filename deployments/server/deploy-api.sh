@@ -3,7 +3,7 @@
 # Deploy customer360-api (FastAPI) onto the "api" server VM for an env.
 #   ./deploy-api.sh <uat|prod>
 #
-# Ships the repo's customer360-api/ to the box over SSH (tar-over-ssh), installs Docker if
+# Ships the repo's customer360-api/ and customer360-dao/ to the box over SSH (tar-over-ssh), installs Docker if
 # missing, builds the image, and (re)runs it as a container with --network host on :8008,
 # wired to the PRIVATE customer360 DB and to the backend box's Dagster GraphQL (:3000).
 # Re-runnable. Target box = servers["$API_SERVER_KEY"] (default "api"); the Dagster host is
@@ -99,8 +99,8 @@ GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
 if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
   DEPLOY_MODE="build"; IMAGE=""
   echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
-  echo ">> Shipping customer360-api/ ..."
-  tar -C "$REPO_ROOT" -czf - customer360-api \
+  echo ">> Shipping customer360-api/ and customer360-dao/ ..."
+  tar -C "$REPO_ROOT" -czf - customer360-api customer360-dao \
     | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
 else
   DEPLOY_MODE="ghcr"
@@ -269,7 +269,7 @@ else
   # The Dockerfile uses `RUN --mount=type=cache` (BuildKit-only) but docker.io ships no
   # buildx, so strip the mount (it's only a pip-cache optimization) and use the classic builder.
   sed -i 's/ --mount=[^ ]*//g' /opt/c360/customer360-api/Dockerfile
-  sudo docker build -t customer360-api /opt/c360/customer360-api
+  sudo docker build -t customer360-api -f /opt/c360/customer360-api/Dockerfile /opt/c360
   RUN_IMG="customer360-api"
 fi
 sudo docker rm -f customer360-api >/dev/null 2>&1 || true

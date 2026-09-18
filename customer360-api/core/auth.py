@@ -22,10 +22,10 @@ from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 
 from core.cache import get_redis_client
-from core.config import settings
-from core.repositories.auth_repository import AuthRepository
+from leo_customer360_dao.config import settings
+from leo_customer360_dao.repositories.auth_repository import AuthRepository
 from core.utils.rate_limiter import RedisRateLimiter
-from core.utils.security import decode_dev_access_token
+from leo_customer360_dao.utils.security import decode_dev_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +339,7 @@ async def auth_middleware(request: Request, call_next):
       - SSO_LOGIN=true: token must be a real Keycloak access token (verified
         via introspection).
       - SSO_LOGIN=false: token must be a locally-signed dev JWT obtained from
-        POST /auth/login (see core.utils.security) -- same
+        POST /auth/login (see leo_customer360_dao.utils.security) -- same
         Authorization: Bearer contract used in production, just HS256-signed
         locally instead of by Keycloak.
     """
