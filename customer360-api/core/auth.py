@@ -43,6 +43,7 @@ EXEMPT_PATHS = {
     "/api/v1/auth/login",
     "/api/v1/auth/callback",
     "/api/v1/auth/logout",
+    "/api/v1/auth/zalo-redirect",
 }
 SSO_LOGIN=settings.sso_login
 # TTL for the resolved (tenant_id, user_id) identity cache, independent of

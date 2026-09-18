@@ -28,6 +28,7 @@ from core.routers.relations_api import all_relations_routers
 from core.routers.reporting_api import router as reporting_router
 from core.routers.segment_api import all_segment_routers
 from core.routers.user_api import all_user_routers
+from core.routers.zalo_api import all_zalo_routers
 
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ PUBLIC_PATHS = {
     "/api/v1/auth/login",
     "/api/v1/auth/callback",
     "/api/v1/auth/logout",
+    "/api/v1/auth/zalo-redirect",
     "/mcp",
     "/mcp/",
     "/mcp/health",
@@ -82,6 +84,8 @@ def _include_api_routers(app: FastAPI) -> None:
     for r in all_campaign_activation_routers:
         app.include_router(r, prefix=API_PREFIX)
     for r in all_campaign_draft_routers:
+        app.include_router(r, prefix=API_PREFIX)
+    for r in all_zalo_routers:
         app.include_router(r, prefix=API_PREFIX)
     for r in all_segment_routers:
         app.include_router(r, prefix=API_PREFIX)

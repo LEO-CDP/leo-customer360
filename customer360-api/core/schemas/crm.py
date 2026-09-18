@@ -124,6 +124,16 @@ class CampaignDraftRequest(BaseModel):
     budget_time_constraints: Optional[str] = None
 
 
+class ZnsCampaignDraftRequest(BaseModel):
+    """AI Zalo ZNS draft: the caller supplies a segment + objective; the AI
+    SELECTS one Approved ZNS template (crm_email_templates, channel=zalo_zns) and
+    fills its typed params -- no ``template_id`` is supplied by the caller."""
+
+    segment_id: uuid.UUID
+    objective: str
+    budget_time_constraints: Optional[str] = None
+
+
 class CampaignDraftResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -635,6 +645,30 @@ class EmailProviderConfigRead(BaseModel):
     metadata_: Optional[dict] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+# --- Zalo OA (ZNS) --------------------------------------------------------
+# OA config is stored in sys_data_source (slug='zalo-oa'); these are read-only
+# views over that row. Tokens/secret are never returned — only status flags.
+class ZaloOaConfigRead(BaseModel):
+    """Connection status of the tenant's Zalo OA (no tokens/secret returned)."""
+
+    connected: bool = False
+    oa_id: Optional[str] = None
+    app_id: Optional[str] = None
+    token_expires_at: Optional[str] = None
+    has_refresh_token: bool = False
+
+
+class ZaloOauthUrlResponse(BaseModel):
+    """Zalo OA consent URL the admin visits to authorize the OA."""
+
+    authorize_url: str
+
+
+class ZaloConnectResult(BaseModel):
+    status: str
+    oa_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

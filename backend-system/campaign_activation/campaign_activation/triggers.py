@@ -20,10 +20,16 @@ DAGSTER_GRAPHQL_HOST = os.environ.get("DAGSTER_GRAPHQL_HOST", "localhost")
 DAGSTER_GRAPHQL_PORT = int(os.environ.get("DAGSTER_GRAPHQL_PORT", "3000"))
 EMAIL_ENGINE_JOB_NAME = os.environ.get("DAGSTER_EMAIL_ENGINE_JOB_NAME", "email_engine_job")
 EMAIL_ENGINE_LOCATION_NAME = os.environ.get("DAGSTER_EMAIL_ENGINE_LOCATION_NAME", "email_engine")
+NOTIFICATION_ENGINE_JOB_NAME = os.environ.get("DAGSTER_NOTIFICATION_ENGINE_JOB_NAME", "notification_engine_job")
+NOTIFICATION_ENGINE_LOCATION_NAME = os.environ.get("DAGSTER_NOTIFICATION_ENGINE_LOCATION_NAME", "notification_engine")
 
 
 class EmailEngineTriggerError(Exception):
     """Raised when the email_engine_job run could not be submitted."""
+
+
+class NotificationEngineTriggerError(Exception):
+    """Raised when the notification_engine_job (Zalo ZNS) run could not be submitted."""
 
 
 def trigger_email_engine_job(campaign_id: str, tenant_id: str, log: Callable[[str], None] = print) -> str:
@@ -44,4 +50,25 @@ def trigger_email_engine_job(campaign_id: str, tenant_id: str, log: Callable[[st
             f"{DAGSTER_GRAPHQL_HOST}:{DAGSTER_GRAPHQL_PORT}: {exc}"
         ) from exc
     log(f"campaign_activation: submitted {EMAIL_ENGINE_JOB_NAME} run {run_id} for campaign {campaign_id}")
+    return run_id
+
+
+def trigger_notification_engine_job(campaign_id: str, tenant_id: str, log: Callable[[str], None] = print) -> str:
+    """Submit a ``notification_engine_job`` (Zalo ZNS) run for one campaign; return its run_id."""
+    run_config = {
+        "ops": {"send_zalo_campaign_op": {"config": {"campaign_id": campaign_id, "tenant_id": tenant_id}}}
+    }
+    try:
+        client = DagsterGraphQLClient(DAGSTER_GRAPHQL_HOST, port_number=DAGSTER_GRAPHQL_PORT)
+        run_id = client.submit_job_execution(
+            NOTIFICATION_ENGINE_JOB_NAME,
+            repository_location_name=NOTIFICATION_ENGINE_LOCATION_NAME,
+            run_config=run_config,
+        )
+    except Exception as exc:  # noqa: BLE001 - webserver unreachable / job not registered / submit rejected.
+        raise NotificationEngineTriggerError(
+            f"could not submit {NOTIFICATION_ENGINE_JOB_NAME} at "
+            f"{DAGSTER_GRAPHQL_HOST}:{DAGSTER_GRAPHQL_PORT}: {exc}"
+        ) from exc
+    log(f"campaign_activation: submitted {NOTIFICATION_ENGINE_JOB_NAME} run {run_id} for campaign {campaign_id}")
     return run_id

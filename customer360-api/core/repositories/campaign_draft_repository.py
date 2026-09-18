@@ -19,7 +19,13 @@ from sqlalchemy.orm import Session
 
 from core.ai_providers.base import AIProviderError
 from core.cache import invalidate_prefix
-from core.ai_providers.campaign_planner import CampaignPlanBrief, GeneratedCampaignPlan, generate_campaign_plan
+from core.ai_providers.campaign_planner import (
+    CampaignPlanBrief,
+    GeneratedCampaignPlan,
+    ZnsCampaignPlanBrief,
+    generate_campaign_plan,
+    generate_zalo_campaign_plan,
+)
 from core.models.content import CdpContentItem
 from core.models.crm import Campaign, CampaignContentItem, CampaignReview, MessageTemplate
 from core.models.system import SysAuditLog
@@ -265,6 +271,121 @@ class CampaignDraftRepository:
                     "start_date": generated.start_date.isoformat(),
                     "end_date": generated.end_date.isoformat(),
                     "content_item_ids": selected_ids,
+                },
+            )
+        )
+        self.session.commit()
+        invalidate_prefix("crm_campaign")
+        self.session.refresh(campaign)
+        return campaign
+
+    def create_zns_draft(
+        self,
+        tenant_id: uuid.UUID,
+        created_by: Optional[uuid.UUID],
+        segment_id: uuid.UUID,
+        objective: str,
+        budget_time_constraints: Optional[str] = None,
+    ) -> Campaign:
+        """AI-drafted Zalo ZNS campaign. Unlike ``create_draft``, the caller does
+        NOT supply a template: the AI SELECTS one Approved ZNS template
+        (crm_email_templates, channel=zalo_zns) from a closed candidate list and
+        fills its typed params. Persists a ``channel='zalo_zns'`` crm_campaign
+        draft (InReview) with the chosen ``template_id`` + ``ai_plan.template_data``
+        (which the notification_engine reads at send time). Same
+        read-commit-then-AI-then-write shape as ``create_draft``."""
+        segment = SegmentRepository(self.session).get_segment(segment_id)
+        if segment is None:
+            raise CampaignSegmentNotFoundError(f"Segment '{segment_id}' not found")
+        if not segment.is_active or segment.status_code != 1:
+            raise CampaignDraftValidationError(
+                f"Segment '{segment_id}' is not resolvable (inactive or no computed snapshot)"
+            )
+
+        approved = self.session.execute(
+            select(EmailTemplate).where(
+                EmailTemplate.tenant_id == tenant_id, EmailTemplate.status == "Approved"
+            )
+        ).scalars().all()
+        candidates = [t for t in approved if (t.metadata_ or {}).get("channel") == "zalo_zns"]
+        if not candidates:
+            raise CampaignDraftValidationError(
+                "No Approved ZNS templates found; sync + approve a ZNS template first"
+            )
+        candidate_payload = [
+            {"template_id": str(t.template_id), "name": t.name, "params": (t.variables or {}).get("params", [])}
+            for t in candidates
+        ]
+        valid_template_ids = {str(t.template_id): t.template_id for t in candidates}
+        segment_name = segment.segment_name
+
+        # End the read-only transaction (nothing pending) before the AI call.
+        self.session.commit()
+
+        brief = ZnsCampaignPlanBrief(
+            segment_context={"segment_id": str(segment_id), "segment_name": segment_name},
+            objective=objective,
+            budget_time_constraints=budget_time_constraints,
+        )
+        try:
+            generated = generate_zalo_campaign_plan(brief, candidate_payload)
+        except AIProviderError as exc:
+            raise CampaignDraftValidationError(str(exc)) from exc
+
+        if generated.start_date is None or generated.end_date is None or generated.end_date < generated.start_date:
+            raise CampaignDraftValidationError("AI-generated schedule window is invalid (end_date before start_date)")
+        if generated.end_date < date.today():
+            raise CampaignDraftValidationError("AI-generated schedule window is entirely in the past")
+
+        chosen_template_id = valid_template_ids.get(generated.template_id)
+        if chosen_template_id is None:  # defense-in-depth (planner already guards this)
+            raise CampaignDraftValidationError(
+                f"AI selected template '{generated.template_id}' not in the candidate list"
+            )
+
+        campaign = Campaign(
+            tenant_id=tenant_id,
+            user_id=created_by,
+            name=generated.name,
+            status=APPROVAL_STATUS_DRAFT,
+            channel="zalo_zns",
+            objective=objective,
+            segment_id=segment_id,
+            template_id=chosen_template_id,
+            approval_status=APPROVAL_STATUS_IN_REVIEW,
+            strategy_summary=generated.strategy_summary,
+            ai_plan={
+                "name": generated.name,
+                "objective": generated.objective,
+                "strategy_summary": generated.strategy_summary,
+                "action_plan": generated.action_plan,
+                "start_date": generated.start_date.isoformat(),
+                "end_date": generated.end_date.isoformat(),
+                "template_id": generated.template_id,
+                "template_data": generated.template_data,
+            },
+            start_date=generated.start_date,
+            end_date=generated.end_date,
+        )
+        self.session.add(campaign)
+        self.session.flush()
+
+        self.session.add(
+            SysAuditLog(
+                tenant_id=tenant_id,
+                user_id=created_by,
+                action="CREATE",
+                resource_type="crm_campaign",
+                resource_id=str(campaign.campaign_id),
+                created_at=_utc_now_naive(),
+                after_data={
+                    "channel": "zalo_zns",
+                    "name": generated.name,
+                    "objective": objective,
+                    "template_id": str(chosen_template_id),
+                    "template_data": generated.template_data,
+                    "start_date": generated.start_date.isoformat(),
+                    "end_date": generated.end_date.isoformat(),
                 },
             )
         )

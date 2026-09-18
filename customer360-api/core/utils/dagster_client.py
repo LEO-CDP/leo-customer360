@@ -451,9 +451,8 @@ class CampaignActivationDagsterService(DagsterService):
 
 
 class NotificationEngineDagsterService(DagsterService):
-    """backend-system/notification_engine -- outbound push/SMS/in-app
-    notification dispatch (placeholder job today, see
-    backend-system/notification_engine/dagster_defs.py)."""
+    """backend-system/notification_engine -- outbound Zalo ZNS dispatch
+    (send_zalo_campaign_op), see backend-system/notification_engine/dagster_defs.py."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -462,9 +461,12 @@ class NotificationEngineDagsterService(DagsterService):
             repository_name=settings.dagster_notification_engine_repository_name,
         )
 
-    def dispatch(self) -> str:
-        """Triggers a notification dispatch run."""
-        return self.submit()
+    def dispatch(self, campaign_id: str, tenant_id: str) -> str:
+        """Triggers a notification_engine (Zalo ZNS) dispatch run for one campaign."""
+        run_config = {
+            "ops": {"send_zalo_campaign_op": {"config": {"campaign_id": campaign_id, "tenant_id": tenant_id}}}
+        }
+        return self.submit(run_config=run_config, tags={"campaign_id": campaign_id, "tenant_id": tenant_id})
 
 
 class DagsterClient:
