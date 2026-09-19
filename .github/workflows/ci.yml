@@ -102,7 +102,7 @@ jobs:
             customer360-api)   runners="customer360-api/run_unit_tests.sh" ;;
             customer360-dao)   runners="customer360-dao/run_tests.sh" ;;
             data-tracking-api) runners="data-tracking-api/run_unit_tests.sh" ;;
-            backend-system)    runners="backend-system/identity_resolution/run_tests.sh backend-system/segmentation/run_tests.sh" ;;
+            backend-system)    runners="backend-system/identity_resolution/run_tests.sh backend-system/segmentation/run_tests.sh backend-system/campaign_activation/run_tests.sh backend-system/email_engine/run_tests.sh backend-system/notification_engine/run_tests.sh" ;;
             docs-vector-search) runners="tools/docs-vector-search/run_unit_tests.sh" ;;
             *)                 runners="" ;;
           esac

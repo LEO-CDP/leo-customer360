@@ -16,12 +16,14 @@ import urllib.request
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import text
 
 from leo_customer360_dao.config import settings
+from leo_customer360_dao.crud import zalo_oa
 from core.database import SessionLocal
 from core.repositories.metadata_repository import DEFAULT_TENANT_ID
+from leo_customer360_dao.schemas.crm import ZaloConnectResult
 from leo_customer360_dao.repositories.user_repository import UserRepository
 from leo_customer360_dao.schemas.auth import (
     LoginRequest,
@@ -247,6 +249,41 @@ async def logout(payload: LogoutRequest) -> Any:
 
     logout_url = f"{_end_session_endpoint()}?{urllib.parse.urlencode(params)}"
     return LogoutResponse(sso_login=True, logout_url=logout_url)
+
+
+@router.get("/zalo-redirect", response_model=ZaloConnectResult)
+async def zalo_redirect(
+    request: Request,
+    oa_id: str = Query(..., description="Zalo Official Account id"),
+    code: str = Query(..., description="OA authorization code returned by Zalo"),
+    state: str = Query(..., description="Signed, tenant-bound state echoed by Zalo"),
+) -> Any:
+    """Public Zalo OA OAuth callback: verify the tenant-bound ``state``, exchange
+    the code for access+refresh tokens, and upsert the tenant's ``sys_data_source``
+    ``zalo-oa`` row. Exempt from bearer auth (the browser redirect carries no
+    token) -- the signed ``state`` is what binds the call to a tenant."""
+    try:
+        tenant_id = zalo_oa.verify_state(state)
+        tokens = zalo_oa.exchange_oa_code(code)
+    except zalo_oa.ZaloOAError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+    db = SessionLocal()
+    try:
+        # RLS: bind this connection to the resolved tenant before writing.
+        db.info["tenant_id"] = tenant_id
+        db.execute(text("SELECT set_config('app.tenant_id', :t, true)"), {"t": tenant_id})
+        zalo_oa.upsert_oa_tokens(
+            db,
+            UUID(tenant_id),
+            oa_id=oa_id,
+            access_token=tokens["access_token"],
+            refresh_token=tokens.get("refresh_token", ""),
+            expires_in=int(tokens.get("expires_in", 3600)),
+        )
+    finally:
+        db.close()
+    return ZaloConnectResult(status="connected", oa_id=oa_id)
 
 
 all_auth_routers = [router]

@@ -38,12 +38,10 @@ from typing import Any, Callable, Optional
 import redis
 from fastapi.encoders import jsonable_encoder
 
+from leo_customer360_dao.cache import get_redis_client
 from leo_customer360_dao.config import settings
 
 logger = logging.getLogger(__name__)
-
-_client: Optional["redis.Redis"] = None
-_client_initialized = False
 
 # Only these simple, JSON-friendly kwarg types are folded into the cache key.
 # This is also what lets the decorator transparently skip the injected
@@ -59,30 +57,6 @@ _CACHEABLE_PARAM_TYPES = (
     datetime,
     type(None),
 )
-
-
-def get_redis_client() -> Optional["redis.Redis"]:
-    """Lazily creates a singleton Redis client, or None if caching is disabled
-    or the client failed to initialize."""
-    global _client, _client_initialized
-    if not settings.cache_enabled:
-        return None
-    if not _client_initialized:
-        _client_initialized = True
-        try:
-            _client = redis.Redis(
-                host=settings.redis_host,
-                port=settings.redis_port,
-                db=settings.redis_db,
-                password=settings.redis_password or None,
-                decode_responses=True,
-                socket_connect_timeout=2,
-                socket_timeout=2,
-            )
-        except Exception:
-            logger.warning("Failed to initialize Redis client; caching disabled.", exc_info=True)
-            _client = None
-    return _client
 
 
 def _build_cache_key(prefix: str, params: dict[str, Any]) -> str:

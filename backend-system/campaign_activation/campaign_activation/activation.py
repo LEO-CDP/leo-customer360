@@ -20,7 +20,7 @@ from psycopg2.extras import RealDictCursor
 
 from .db import DB_SCHEMA, connect
 from .rls import set_tenant_context
-from .triggers import trigger_email_engine_job
+from .triggers import trigger_email_engine_job, trigger_notification_engine_job
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class CampaignActivationError(Exception):
 def _load_campaign(cur, tenant_id: str, campaign_id: str) -> Optional[dict]:
     cur.execute(
         f"""
-        SELECT campaign_id, name, approval_status, status, segment_id, template_id
+        SELECT campaign_id, name, approval_status, status, channel, segment_id, template_id
         FROM {DB_SCHEMA}.crm_campaign
         WHERE campaign_id = %(campaign_id)s AND tenant_id = %(tenant_id)s
         """,
@@ -125,14 +125,24 @@ def activate_campaign(
         log(f"campaign_activation: campaign {campaign_id} Approved, segment size={segment_size} "
             f"(pre-eligibility; email_engine filters no-email / opt-out / suppressed)")
 
+        channel = (campaign.get("channel") or "").strip()
         summary = {
             "campaign_id": campaign_id,
             "tenant_id": tenant_id,
             "snapshot_count": segment_size,
+            "channel": channel or "email",
             "email_engine_run_id": None,
+            "dispatch_run_id": None,
         }
+        # Route to the channel's dispatch engine: zalo_zns -> notification_engine,
+        # everything else -> email_engine (existing behavior unchanged).
         if trigger_email:
-            summary["email_engine_run_id"] = trigger_email_engine_job(campaign_id, tenant_id, log=log)
+            if channel == "zalo_zns":
+                run_id = trigger_notification_engine_job(campaign_id, tenant_id, log=log)
+            else:
+                run_id = trigger_email_engine_job(campaign_id, tenant_id, log=log)
+                summary["email_engine_run_id"] = run_id
+            summary["dispatch_run_id"] = run_id
         return summary
     finally:
         conn.close()

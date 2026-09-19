@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from pydantic import BaseModel, Field
 
 from core.config import settings
+from core.webhook_security import verify_hmac_signature
 from core.routers.tracking import (
     build_tracking_request,
     get_tracking_service,
@@ -105,12 +106,7 @@ def verify_click_url(url: Optional[str], signature: Optional[str]) -> bool:
 
 
 def verify_webhook_signature(raw_body: bytes, signature: Optional[str]) -> bool:
-    secret = settings.email_webhook_signing_secret
-    if not secret or not signature:
-        return False
-    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-    provided = signature.split("=", 1)[1] if signature.startswith("sha256=") else signature
-    return hmac.compare_digest(provided.strip(), expected)
+    return verify_hmac_signature(raw_body, signature, settings.email_webhook_signing_secret)
 
 
 def _source_id(tenant_id: str) -> uuid.UUID:
