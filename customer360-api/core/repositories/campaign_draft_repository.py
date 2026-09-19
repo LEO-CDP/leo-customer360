@@ -289,7 +289,7 @@ class CampaignDraftRepository:
     ) -> Campaign:
         """AI-drafted Zalo ZNS campaign. Unlike ``create_draft``, the caller does
         NOT supply a template: the AI SELECTS one Approved ZNS template
-        (crm_email_templates, channel=zalo_zns) from a closed candidate list and
+        (crm_message_templates, channel=zalo_zns) from a closed candidate list and
         fills its typed params. Persists a ``channel='zalo_zns'`` crm_campaign
         draft (InReview) with the chosen ``template_id`` + ``ai_plan.template_data``
         (which the notification_engine reads at send time). Same
@@ -303,8 +303,8 @@ class CampaignDraftRepository:
             )
 
         approved = self.session.execute(
-            select(EmailTemplate).where(
-                EmailTemplate.tenant_id == tenant_id, EmailTemplate.status == "Approved"
+            select(MessageTemplate).where(
+                MessageTemplate.tenant_id == tenant_id, MessageTemplate.status == "Approved"
             )
         ).scalars().all()
         candidates = [t for t in approved if (t.metadata_ or {}).get("channel") == "zalo_zns"]

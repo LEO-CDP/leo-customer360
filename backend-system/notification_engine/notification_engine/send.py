@@ -2,7 +2,7 @@
 
 ``send_zalo_campaign`` is the real body behind the notification_engine send job.
 Given one Approved, ``channel='zalo_zns'`` campaign pointing at an Approved ZNS
-template (a ``crm_email_templates`` row with metadata.channel='zalo_zns') + a
+template (a ``crm_message_templates`` row with metadata.channel='zalo_zns') + a
 segment, it:
 
   1. validates approval/channel/template/segment (defense-in-depth),
@@ -22,7 +22,7 @@ from typing import Callable, Iterator, Optional
 from psycopg2.extras import RealDictCursor
 
 from .adapters import DispatchAdapter, build_zns_adapter
-from .config import BATCH_SIZE
+from .config import BATCH_SIZE, DISPATCH_ADAPTER
 from .db import DB_SCHEMA, connect
 from .provider_config import load_oa_token
 from .rendering import render_params
@@ -70,7 +70,7 @@ def load_campaign(cur, tenant_id: str, campaign_id: str) -> Optional[dict]:
 def load_zns_template(cur, tenant_id: str, template_id: str) -> Optional[dict]:
     cur.execute(
         f"""SELECT template_id, name, status, variables, metadata
-              FROM {DB_SCHEMA}.crm_email_templates
+              FROM {DB_SCHEMA}.crm_message_templates
              WHERE template_id = %(template_id)s AND tenant_id = %(tenant_id)s""",
         {"template_id": template_id, "tenant_id": tenant_id},
     )
@@ -225,9 +225,29 @@ def send_zalo_campaign(
 
         if adapter is None:
             token = load_oa_token(conn, tenant_id)
-            adapter = build_zns_adapter(token.get("access_token"))
+            access_token = token.get("access_token")
+            # Fail loudly rather than silently falling back to the mock adapter when
+            # real ZNS delivery is configured but the OA is not connected -- otherwise
+            # a whole segment gets ledgered 'Sent' with mock ids and nothing delivered.
+            if DISPATCH_ADAPTER.strip().lower() == "zns" and not access_token:
+                raise NotificationEngineError(
+                    f"campaign {campaign_id}: CRM_ZALO_DISPATCH_ADAPTER=zns but tenant "
+                    f"{tenant_id} has no Zalo OA access token (OA not connected) -- refusing to send")
+            adapter = build_zns_adapter(access_token)
 
         base_data = _base_template_data(campaign)
+        # Guard: a zalo_zns campaign created outside the AI-draft flow (generic CRUD)
+        # can reach here with no bound params -> Zalo rejects every recipient. Require
+        # every param the template declares to be present in template_data first.
+        required_params = [
+            p if isinstance(p, str) else str((p or {}).get("name") or (p or {}).get("key") or "")
+            for p in ((template.get("variables") or {}).get("params") or [])
+        ]
+        missing_params = [p for p in required_params if p and p not in base_data]
+        if missing_params:
+            raise NotificationEngineError(
+                f"campaign {campaign_id}: template_data is missing required ZNS params "
+                f"{missing_params} (campaign has no AI plan / bound params?)")
         crm_template_id = str(campaign["template_id"])
         summary = {"campaign_id": campaign_id, "tenant_id": tenant_id, "provider": adapter.provider_name,
                    "total": 0, "sent": 0, "failed": 0, "skipped": 0, "already_sent": 0}
@@ -262,47 +282,76 @@ def send_zalo_campaign(
 
 def _process_batch(conn, adapter, tenant_id, campaign_id, crm_template_id, zns_template_id,
                    base_data, batch, run_id, summary) -> None:
-    """Render + dispatch + ledger one batch. Each recipient is SAVEPOINT-isolated."""
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        set_tenant_context(cur, tenant_id)
-        for profile in batch:
-            summary["total"] += 1
-            master_profile_id = str(profile["master_profile_id"])
-            phone = _clean(profile.get("phone_number"))
-            cur.execute("SAVEPOINT recipient")
-            try:
-                existing = _current_status(cur, campaign_id, master_profile_id)
-                if existing in TERMINAL_STATUSES:
-                    summary["already_sent" if existing == "Sent" else "skipped"] += 1
-                    cur.execute("RELEASE SAVEPOINT recipient")
-                    continue
+    """Render + dispatch + ledger one batch, one COMMITTED transaction per recipient.
 
-                common = dict(tenant_id=tenant_id, campaign_id=campaign_id,
-                              master_profile_id=master_profile_id, template_id=crm_template_id,
-                              recipient=phone, run_id=run_id)
-                if not phone or _is_opted_out(profile):
-                    reason = "no phone number" if not phone else "zalo_opt_in is false"
+    Intent ('Sending') is committed BEFORE the external ZNS send, so a committed
+    'Sent' can never be rolled back by a later error, and a crash between send and
+    result leaves a durable 'Sending' row. On replay a 'Sending' row is NOT re-sent
+    (at-most-once -- the safe default for a paid channel: never double-bill); it is
+    surfaced for operator / delivery-webhook reconciliation instead.
+    ponytail: per-recipient commit over per-batch -- throughput ceiling accepted for
+    correctness on money; the path to safe retry is a provider-side idempotency key.
+    """
+    for profile in batch:
+        summary["total"] += 1
+        master_profile_id = str(profile["master_profile_id"])
+        phone = _clean(profile.get("phone_number"))
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                set_tenant_context(cur, tenant_id)
+                existing = _current_status(cur, campaign_id, master_profile_id)
+            conn.rollback()  # close the read-only tx before branching
+            if existing in TERMINAL_STATUSES:
+                summary["already_sent" if existing == "Sent" else "skipped"] += 1
+                continue
+            if existing == "Sending":
+                # a prior run recorded intent but never confirmed -> do NOT resend
+                # (avoid double-billing); leave it for reconciliation.
+                summary["skipped"] += 1
+                logger.warning("notification_engine: recipient %s left 'Sending' by a prior "
+                               "run; not resent (reconcile via delivery callback)", master_profile_id)
+                continue
+
+            common = dict(tenant_id=tenant_id, campaign_id=campaign_id,
+                          master_profile_id=master_profile_id, template_id=crm_template_id,
+                          recipient=phone, run_id=run_id)
+            if not phone or _is_opted_out(profile):
+                reason = "no phone number" if not phone else "zalo_opt_in is false"
+                with conn.cursor() as cur:
+                    set_tenant_context(cur, tenant_id)
                     _upsert_dispatch(cur, status="Skipped", error_message=reason, **common)
-                    summary["skipped"] += 1
-                else:
-                    context = {
-                        "first_name": _clean(profile.get("first_name")) or "",
-                        "last_name": _clean(profile.get("last_name")) or "",
-                        "name": _display_name(profile),
-                        "phone": phone,
-                    }
-                    template_data = render_params(base_data, context)
-                    token = encode_tracking_token(tenant_id, campaign_id, master_profile_id)
-                    result = adapter.send(phone=phone, template_id=zns_template_id,
-                                          template_data=template_data, tracking_id=token)
-                    _upsert_dispatch(cur, status="Sent" if result.ok else "Failed",
-                                     provider=adapter.provider_name,
-                                     provider_message_id=result.provider_message_id,
-                                     error_message=result.error, **common)
-                    summary["sent" if result.ok else "failed"] += 1
-                cur.execute("RELEASE SAVEPOINT recipient")
-            except Exception as exc:  # noqa: BLE001 - isolate a bad recipient, keep the batch going
-                cur.execute("ROLLBACK TO SAVEPOINT recipient")
-                summary["failed"] += 1
-                logger.warning("notification_engine: recipient %s failed: %s", master_profile_id, exc)
-    conn.commit()
+                conn.commit()
+                summary["skipped"] += 1
+                continue
+
+            # 1) record intent + commit BEFORE the external send
+            with conn.cursor() as cur:
+                set_tenant_context(cur, tenant_id)
+                _upsert_dispatch(cur, status="Sending", **common)
+            conn.commit()
+
+            # 2) external, non-transactional ZNS send
+            context = {
+                "first_name": _clean(profile.get("first_name")) or "",
+                "last_name": _clean(profile.get("last_name")) or "",
+                "name": _display_name(profile),
+                "phone": phone,
+            }
+            template_data = render_params(base_data, context)
+            token = encode_tracking_token(tenant_id, campaign_id, master_profile_id)
+            result = adapter.send(phone=phone, template_id=zns_template_id,
+                                  template_data=template_data, tracking_id=token)
+
+            # 3) record terminal result + commit
+            with conn.cursor() as cur:
+                set_tenant_context(cur, tenant_id)
+                _upsert_dispatch(cur, status="Sent" if result.ok else "Failed",
+                                 provider=adapter.provider_name,
+                                 provider_message_id=result.provider_message_id,
+                                 error_message=result.error, **common)
+            conn.commit()
+            summary["sent" if result.ok else "failed"] += 1
+        except Exception as exc:  # noqa: BLE001 - isolate a bad recipient, keep the batch going
+            conn.rollback()
+            summary["failed"] += 1
+            logger.warning("notification_engine: recipient %s failed: %s", master_profile_id, exc)

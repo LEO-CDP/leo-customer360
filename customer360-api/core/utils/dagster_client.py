@@ -462,7 +462,9 @@ class NotificationEngineDagsterService(DagsterService):
         )
 
     def dispatch(self, campaign_id: str, tenant_id: str) -> str:
-        """Triggers a notification_engine (Zalo ZNS) dispatch run for one campaign."""
+        """Triggers a notification_engine (Zalo ZNS) dispatch run for one campaign.
+        API-side trigger contract (mirrors EmailEngineDagsterService.send_campaign);
+        the live activation path also submits this job from campaign_activation."""
         run_config = {
             "ops": {"send_zalo_campaign_op": {"config": {"campaign_id": campaign_id, "tenant_id": tenant_id}}}
         }

@@ -40,6 +40,9 @@ def refresh_due_tokens(conn, skew_seconds: int = 300, log=print) -> dict:
     Returns ``{'checked', 'refreshed', 'errors'}``.
     """
     with conn.cursor() as cur:
+        # No tenant context here: this cross-tenant query relies on the backend DB
+        # role holding BYPASSRLS. Without it, RLS fails closed -> 0 rows -> tokens
+        # silently never refresh (checked=0 in the summary is the tell).
         cur.execute(
             f"""SELECT tenant_id, data_source_id, access_tokens
                   FROM {DB_SCHEMA}.sys_data_source
@@ -67,7 +70,10 @@ def refresh_due_tokens(conn, skew_seconds: int = 300, log=print) -> dict:
             new["access_token"] = data["access_token"]
             if data.get("refresh_token"):  # Zalo rotates the refresh token
                 new["refresh_token"] = data["refresh_token"]
-            expires_in = int(data.get("expires_in", 3600))
+            try:
+                expires_in = int(data.get("expires_in") or 3600)
+            except (TypeError, ValueError):
+                expires_in = 3600
             new["token_expires_at"] = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
 
             with conn.cursor() as cur:

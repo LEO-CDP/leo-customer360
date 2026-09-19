@@ -262,8 +262,11 @@ async def zalo_redirect(
     the code for access+refresh tokens, and upsert the tenant's ``sys_data_source``
     ``zalo-oa`` row. Exempt from bearer auth (the browser redirect carries no
     token) -- the signed ``state`` is what binds the call to a tenant."""
-    tenant_id = zalo_oa.verify_state(state)
-    tokens = zalo_oa.exchange_oa_code(code)
+    try:
+        tenant_id = zalo_oa.verify_state(state)
+        tokens = zalo_oa.exchange_oa_code(code)
+    except zalo_oa.ZaloOAError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
     db = SessionLocal()
     try:

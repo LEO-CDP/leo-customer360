@@ -17,6 +17,7 @@ from io import BytesIO
 from typing import Iterable
 
 from .config import (
+    EVENT_RAW_PREFIX,
     OPTOUT_LOOKBACK_HOURS,
     S3_ACCESS_KEY_ID,
     S3_ENDPOINT_URL,
@@ -83,16 +84,20 @@ def extract_optout_events(records: Iterable[dict]) -> list[dict]:
     return events
 
 
-def _read_bucket(s3_client, bucket: str, start_after: str | None) -> list[dict]:
+def _read_bucket(s3_client, bucket: str, start_after: str | None, prefix: str | None = None) -> list[dict]:
     events: list[dict] = []
     try:
         paginator = s3_client.get_paginator("list_objects_v2")
         kwargs = {"Bucket": bucket}
+        if prefix:
+            kwargs["Prefix"] = prefix
         if start_after:
             kwargs["StartAfter"] = start_after
         for page in paginator.paginate(**kwargs):
             for item in page.get("Contents", []):
                 key = str(item.get("Key", ""))
+                if not (key.endswith(".jsonl") or key.endswith(".jsonl.gz")):
+                    continue
                 obj = s3_client.get_object(Bucket=bucket, Key=key)
                 records = []
                 for line in _iter_lines(obj["Body"], key):
@@ -114,8 +119,12 @@ def _read_bucket(s3_client, bucket: str, start_after: str | None) -> list[dict]:
 def read_optout_events_for_tenants(tenant_ids: Iterable[str], s3_client=None) -> list[dict]:
     """Read recent zalo opt-out events across the given tenants' buckets."""
     s3_client = s3_client or build_s3_client()
-    start_after = (datetime.now(timezone.utc) - timedelta(hours=OPTOUT_LOOKBACK_HOURS)).strftime("%Y-%m-%d-%H")
+    prefix = f"{EVENT_RAW_PREFIX}/"
+    window_start = (datetime.now(timezone.utc) - timedelta(hours=OPTOUT_LOOKBACK_HOURS)).strftime("%Y-%m-%d-%H")
+    # Prefix-scoped listing + prefix-qualified StartAfter so we page only the recent
+    # hourly partitions ("<prefix>/YYYY-MM-DD-HH/...") instead of the whole bucket.
+    start_after = f"{prefix}{window_start}"
     events: list[dict] = []
     for tenant_id in tenant_ids:
-        events.extend(_read_bucket(s3_client, f"data-tracking-{tenant_id}", start_after))
+        events.extend(_read_bucket(s3_client, f"data-tracking-{tenant_id}", start_after, prefix))
     return events

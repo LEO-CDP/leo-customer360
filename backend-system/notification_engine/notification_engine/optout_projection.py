@@ -71,6 +71,9 @@ def read_optout_events(conn) -> list[dict]:
     from .s3_reader import read_optout_events_for_tenants  # lazy: boto3 only at run time
 
     with conn.cursor() as cur:
+        # Cross-tenant driver query (no tenant context) -- relies on the backend DB
+        # role holding BYPASSRLS; without it RLS fails closed to 0 rows and the
+        # opt-out projection silently no-ops.
         cur.execute(f"SELECT DISTINCT tenant_id FROM {DB_SCHEMA}.sys_data_source WHERE slug = 'zalo-oa'")
         tenant_ids = [str(row[0]) for row in cur.fetchall()]
     if not tenant_ids:

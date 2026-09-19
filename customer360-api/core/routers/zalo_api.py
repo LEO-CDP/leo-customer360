@@ -54,7 +54,7 @@ def get_zalo_oauth_url(request: Request) -> ZaloOauthUrlResponse:
 @zalo_router.post("/templates/sync")
 def sync_zns_templates(request: Request, db: Session = Depends(get_db)) -> dict:
     """Pull the connected OA's approved ZNS templates from Zalo and upsert them
-    into ``crm_email_templates`` (channel='zalo_zns'). Requires OA-admin."""
+    into ``crm_message_templates`` (channel='zalo_zns'). Requires OA-admin."""
     tenant_id = require_tenant(request)
     require_tenant_admin(request, "zalo template sync")
 

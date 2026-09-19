@@ -51,3 +51,6 @@ S3_SESSION_TOKEN = os.environ.get("S3_SESSION_TOKEN") or None
 S3_FORCE_PATH_STYLE = _flag("S3_FORCE_PATH_STYLE", "true")
 S3_VERIFY_SSL = _flag("S3_VERIFY_SSL", "true")
 OPTOUT_LOOKBACK_HOURS = int(os.environ.get("CRM_ZALO_OPTOUT_LOOKBACK_HOURS", "6"))
+# Bronze event-lake prefix -- MUST match the writer (analytics ANALYTICS_EVENT_RAW_PREFIX);
+# keys are "<prefix>/YYYY-MM-DD-HH/*.jsonl[.gz]", so listing must be prefix-scoped.
+EVENT_RAW_PREFIX = os.environ.get("ANALYTICS_EVENT_RAW_PREFIX", "events").strip().strip("/")

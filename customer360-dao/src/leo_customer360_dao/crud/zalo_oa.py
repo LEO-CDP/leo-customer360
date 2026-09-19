@@ -18,7 +18,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import jwt
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -26,6 +25,17 @@ from leo_customer360_dao.config import settings
 from leo_customer360_dao.models.system import SysDataSource
 
 logger = logging.getLogger(__name__)
+
+
+class ZaloOAError(Exception):
+    """Domain error from the Zalo OA flow. Carries a suggested HTTP ``status`` as a
+    plain int hint so the API layer can map it without the DAO importing a web
+    framework (keeps this package framework-neutral)."""
+
+    def __init__(self, message: str, *, status: int = 502) -> None:
+        super().__init__(message)
+        self.status = status
+
 
 ZALO_OA_SLUG = "zalo-oa"
 _STATE_ALG = "HS256"
@@ -107,9 +117,9 @@ def verify_state(state: str) -> str:
     try:
         claims = jwt.decode(state, settings.dev_jwt_secret, algorithms=[_STATE_ALG])
     except jwt.PyJWTError as exc:
-        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state") from exc
+        raise ZaloOAError("Invalid or expired OAuth state", status=400) from exc
     if claims.get("typ") != _STATE_TYP or not claims.get("t"):
-        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+        raise ZaloOAError("Invalid OAuth state", status=400)
     return str(claims["t"])
 
 
@@ -151,12 +161,12 @@ def exchange_oa_code(oa_code: str) -> dict[str, Any]:
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
         logger.warning("Zalo OA token exchange failed HTTP %s: %s", exc.code, detail)
-        raise HTTPException(status_code=502, detail="Zalo OA token exchange failed") from exc
+        raise ZaloOAError("Zalo OA token exchange failed", status=502) from exc
     except Exception as exc:
         logger.warning("Zalo OA token endpoint unreachable", exc_info=True)
-        raise HTTPException(status_code=502, detail="Zalo OA token endpoint unreachable") from exc
+        raise ZaloOAError("Zalo OA token endpoint unreachable", status=502) from exc
 
     if not data.get("access_token"):
         # Zalo returns {"error":...,"message":...} on failure.
-        raise HTTPException(status_code=502, detail=f"Zalo OA token exchange returned no access_token: {data}")
+        raise ZaloOAError(f"Zalo OA token exchange returned no access_token: {data}", status=502)
     return data

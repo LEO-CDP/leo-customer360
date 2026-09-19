@@ -11,8 +11,6 @@ S3-first: opt-out is NOT written to Postgres here; it rides the S3 event as a
 Reuses ``decode_tracking_token`` (verifies the shared EMAIL_TRACKING_SECRET token).
 """
 
-import hashlib
-import hmac
 import json
 import logging
 import uuid
@@ -22,6 +20,7 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 
 from core.config import settings
+from core.webhook_security import verify_hmac_signature
 from core.routers.email_tracking import decode_tracking_token
 from core.routers.tracking import build_tracking_request, get_tracking_service, ingest_tracking_request
 from core.service import TrackingLogService
@@ -37,16 +36,9 @@ def _source_id(tenant_id: str) -> uuid.UUID:
         return uuid.uuid5(uuid.NAMESPACE_URL, f"channel-tracking:{tenant_id}")
 
 
-def _verify_signature(raw_body: bytes, signature: Optional[str], secret: str) -> bool:
-    if not secret or not signature:
-        return False
-    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-    provided = signature.split("=", 1)[1] if signature.startswith("sha256=") else signature
-    return hmac.compare_digest(provided.strip(), expected)
-
-
-def record_channel_event(decoded, event_name, service, *, channel, dedup_key, payload=None) -> None:
-    """Record one engagement event to the S3 event lake via TrackingLogService."""
+def record_channel_event(decoded, event_name, service, *, channel, dedup_key, payload=None) -> bool:
+    """Record one engagement event to the S3 event lake via TrackingLogService.
+    Returns True on success, False if persistence failed (caller decides retry)."""
     try:
         properties = {
             "tracking_channel": channel,
@@ -63,8 +55,10 @@ def record_channel_event(decoded, event_name, service, *, channel, dedup_key, pa
             events=[{"event_name": event_name, "properties": properties}],
         )
         ingest_tracking_request(request, service)
+        return True
     except Exception:  # webhook responses must stay provider-safe
         logger.warning("failed to persist %s tracking event %s", channel, event_name, exc_info=True)
+        return False
 
 
 def make_webhook_router(*, prefix, secret_attr, event_map, suppress_reasons, channel,
@@ -84,7 +78,7 @@ def make_webhook_router(*, prefix, secret_attr, event_map, suppress_reasons, cha
                 {"status": "disabled", "reason": "webhook signing secret not configured"}, status_code=503
             )
         raw = await request.body()
-        if not _verify_signature(raw, signature, secret):
+        if not verify_hmac_signature(raw, signature, secret):
             return JSONResponse({"status": "rejected", "reason": "invalid signature"}, status_code=401)
         try:
             evt = json.loads(raw)
@@ -101,11 +95,18 @@ def make_webhook_router(*, prefix, secret_attr, event_map, suppress_reasons, cha
         reason = suppress_reasons.get(name)
         # S3-first: opt-out carries suppression_reason on the S3 event; a
         # downstream projection op applies it to profile consent (no DB write here).
-        record_channel_event(
+        ok = record_channel_event(
             decoded, name, service, channel=channel,
             dedup_key=f"{channel}:{msg_id}:{name}",
             payload={"provider_message_id": msg_id, "suppression_reason": reason},
         )
+        # A dropped suppression event = consent lost (user messaged after opt-out),
+        # so ask the provider to retry with a 503; non-suppression events stay best-effort.
+        if reason and not ok:
+            return JSONResponse(
+                {"status": "retry", "reason": "failed to persist suppression event"},
+                status_code=503,
+            )
         return {"status": "ok", "event": name, "suppression_reason": reason}
 
     return router

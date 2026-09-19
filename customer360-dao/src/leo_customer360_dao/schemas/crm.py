@@ -126,7 +126,7 @@ class CampaignDraftRequest(BaseModel):
 
 class ZnsCampaignDraftRequest(BaseModel):
     """AI Zalo ZNS draft: the caller supplies a segment + objective; the AI
-    SELECTS one Approved ZNS template (crm_email_templates, channel=zalo_zns) and
+    SELECTS one Approved ZNS template (crm_message_templates, channel=zalo_zns) and
     fills its typed params -- no ``template_id`` is supplied by the caller."""
 
     segment_id: uuid.UUID

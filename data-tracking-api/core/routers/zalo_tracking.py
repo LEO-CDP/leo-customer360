@@ -32,5 +32,3 @@ router = make_webhook_router(
     sig_header="X-ZEvent-Signature",
     id_field="msg_id",
 )
-
-all_zalo_tracking_routers = [router]

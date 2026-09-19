@@ -45,7 +45,8 @@ def test_happy_path_marks_running_and_triggers(monkeypatch):
     out = activate_campaign("c1", "t1", log=lambda *_: None)
 
     assert out == {"campaign_id": "c1", "tenant_id": "t1",
-                   "snapshot_count": 5, "email_engine_run_id": "email-run-1"}
+                   "snapshot_count": 5, "channel": "email",
+                   "email_engine_run_id": "email-run-1", "dispatch_run_id": "email-run-1"}
     assert trigger.call_args.args == ("c1", "t1")
     conn.commit.assert_called_once()
     conn.close.assert_called_once()

@@ -22,8 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 class DispatchAdapter:
-    provider_name = "base"
-
     def send(self, *, phone: str, template_id: str, template_data: dict, tracking_id: str) -> DispatchResult:
         raise NotImplementedError
 
@@ -35,7 +33,8 @@ class MockZNSAdapter(DispatchAdapter):
 
     def send(self, *, phone: str, template_id: str, template_data: dict, tracking_id: str) -> DispatchResult:
         message_id = f"mock-zns-{uuid.uuid4()}"
-        logger.info("MockZNSAdapter: phone=%s template=%s msg_id=%s", phone, template_id, message_id)
+        # Log the non-PII tracking handle, never the recipient phone number.
+        logger.info("MockZNSAdapter: template=%s tracking=%s msg_id=%s", template_id, tracking_id, message_id)
         return DispatchResult(ok=True, provider_message_id=message_id)
 
 
@@ -66,7 +65,8 @@ class ZNSDispatchAdapter(DispatchAdapter):
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.load(resp)
         except Exception as exc:  # noqa: BLE001 - surface any send failure as a Failed dispatch
-            logger.warning("ZNSDispatchAdapter: send to %s failed: %s", phone, exc)
+            # Log the non-PII tracking handle, never the recipient phone number.
+            logger.warning("ZNSDispatchAdapter: send failed (tracking=%s): %s", tracking_id, exc)
             return DispatchResult(ok=False, error=str(exc))
         if data.get("error") == 0:
             return DispatchResult(ok=True, provider_message_id=str((data.get("data") or {}).get("msg_id", "")))
