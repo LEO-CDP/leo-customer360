@@ -2,7 +2,8 @@
 
 Zalo posts delivery/seen/click/failure/opt-out callbacks; each is recorded to the
 S3 event lake (opt-out carries a suppression_reason for the downstream consent
-projection). Signature verified with CRM_ZALO_WEBHOOK_SIGNING_SECRET.
+projection). Signature verification is supplied by the deployment's webhook
+security provider; this tracking process does not read tenant configuration.
 
 ⚠️ Confirm Zalo's signature scheme + event_name values against current Zalo OA docs.
 """
@@ -25,7 +26,7 @@ ZNS_SUPPRESSION_EVENTS = {
 
 router = make_webhook_router(
     prefix="/track/zalo",
-    secret_attr="zalo_webhook_signing_secret",
+    secret_attr="email_webhook_signing_secret",
     event_map=ZNS_EVENT_TO_NAME,
     suppress_reasons=ZNS_SUPPRESSION_EVENTS,
     channel="zalo",

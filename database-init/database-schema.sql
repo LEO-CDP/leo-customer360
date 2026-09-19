@@ -17,6 +17,7 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 -- and fuzzy_dmetaphone (dmetaphone()) CIR matching_rule query builders.
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 -- =========================================================
 -- Schema
@@ -304,11 +305,12 @@ CREATE TABLE IF NOT EXISTS customer360.sys_role_permission (
 COMMENT ON TABLE customer360.sys_role_permission IS 'Join table granting permissions (sys_permission) to roles (sys_role) -- many-to-many.';
 
 CREATE TABLE IF NOT EXISTS customer360.sys_user_role (
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant (tenant_id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES customer360.sys_user (user_id) ON DELETE CASCADE,
     role_id UUID NOT NULL REFERENCES customer360.sys_role (role_id) ON DELETE CASCADE,
     assigned_at TIMESTAMP DEFAULT now(),
     assigned_by UUID,
-    PRIMARY KEY (user_id, role_id)
+    PRIMARY KEY (tenant_id, user_id, role_id)
 );
 
 COMMENT ON TABLE customer360.sys_user_role IS 'Join table assigning roles (sys_role) to users (sys_user) -- many-to-many.';
@@ -646,8 +648,6 @@ COMMENT ON TABLE customer360.crm_industry IS 'Dictionary of industry classificat
 -- tenant_id indexes for the CRM entity tables above, used both for lookup
 -- performance and by the tenant_id RLS policies (see ROW LEVEL SECURITY
 -- section at the end of this file).
-CREATE INDEX IF NOT EXISTS idx_crm_campaign_tenant ON customer360.crm_campaign (tenant_id);
-
 CREATE INDEX IF NOT EXISTS idx_crm_campaign_member_tenant ON customer360.crm_campaign_member (tenant_id);
 
 CREATE INDEX IF NOT EXISTS idx_crm_lead_tenant ON customer360.crm_lead (tenant_id);
@@ -706,7 +706,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- this table -- since hashed PII can no longer be used as a human-readable label for
     -- browsing/semantic search. current_persona_id is computed by application code (see
     -- backend-system/identity_resolution/identity_resolution/persona.py), never by the DB.
-    is_hashed BOOLEAN DEFAULT FALSE,
+    is_hashed BOOLEAN NOT NULL DEFAULT FALSE,
 
     -- Primary contact info (used for primary identity stitching and marketing)
     email TEXT,
@@ -799,7 +799,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     customer_since DATE,
     -- Timestamp of the profile's most recent activity across any channel.
     -- Updated continuously by the streaming/event pipeline (not batch).
-    last_activity_at TIMESTAMP,
+    last_activity_at TIMESTAMP WITH TIME ZONE,
     -- Channel the customer engages with most, used to drive recommendation/
     -- next-best-action logic (e.g. 'Mobile App', 'Website', 'Internet Banking App').
     preferred_channel TEXT,
@@ -874,7 +874,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- Format: {"churn_model": "v2.1", "clv_model": "v1.4"}
     model_versions JSONB DEFAULT '{}'::JSONB,
     -- Tracks the last time the batch or streaming pipelines updated these scores.
-    scores_updated_at TIMESTAMP,
+    scores_updated_at TIMESTAMP WITH TIME ZONE,
 
     -- =========================================================================
     -- SYSTEM METADATA
@@ -885,7 +885,17 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
 
     -- Business rule: a profile with hashed PII is not human-readable/searchable without a
     -- persona_name stand-in. Enforced at the DB layer in addition to application code.
-    CONSTRAINT chk_cdp_mp_hashed_requires_persona_name CHECK (is_hashed = FALSE OR persona_name IS NOT NULL)
+    CONSTRAINT chk_cdp_mp_hashed_requires_persona_name CHECK (is_hashed = FALSE OR persona_name IS NOT NULL),
+    CONSTRAINT chk_cdp_mp_probability_ranges CHECK (
+        (lead_conversion_probability IS NULL OR lead_conversion_probability BETWEEN 0 AND 1)
+        AND (churn_probability IS NULL OR churn_probability BETWEEN 0 AND 1)
+        AND (identity_confidence_score IS NULL OR identity_confidence_score BETWEEN 0 AND 1)
+    ),
+    CONSTRAINT chk_cdp_mp_score_ranges CHECK (
+        (engagement_score IS NULL OR engagement_score BETWEEN 0 AND 100)
+        AND (overall_sentiment_score IS NULL OR overall_sentiment_score BETWEEN -1 AND 1)
+        AND (profile_completeness_score IS NULL OR profile_completeness_score BETWEEN 0 AND 100)
+    )
 );
 
 COMMENT ON TABLE customer360.cdp_master_profiles IS 'The golden/resolved customer profile (identity-resolution output): consolidated demographics, cross-channel identity graph, retail/banking/real-estate/travel/media/education domain attributes, marketing/persona fields, lineage, lifecycle tracking, and the full ML scoring block (lead, churn, CLV, CX, data quality). One row per real person per tenant+domain, built by CustomerIdentityResolver from cdp_raw_profiles_stage.';
@@ -1048,9 +1058,9 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_domain_profiles (
     -- ACTIVITY
     -- ========================================================================
 
-    first_activity_at TIMESTAMP,
+    first_activity_at TIMESTAMP WITH TIME ZONE,
 
-    last_activity_at TIMESTAMP,
+    last_activity_at TIMESTAMP WITH TIME ZONE,
 
     -- ========================================================================
     -- AUDIT
@@ -1070,7 +1080,10 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_domain_profiles (
         CHECK (jsonb_typeof(domain_attributes) = 'object'),
 
     CONSTRAINT chk_cdp_domain_profiles_analytics_object
-        CHECK (analytics IS NULL OR jsonb_typeof(analytics) = 'object')
+        CHECK (analytics IS NULL OR jsonb_typeof(analytics) = 'object'),
+
+    CONSTRAINT chk_cdp_domain_profiles_engagement_range
+        CHECK (engagement_score IS NULL OR engagement_score BETWEEN 0 AND 100)
 
 );
 
@@ -2381,6 +2394,7 @@ CREATE INDEX IF NOT EXISTS idx_crm_campaign_reviews_campaign ON customer360.crm_
 -- Parent
 CREATE TABLE IF NOT EXISTS customer360.graph_edges (
     edge_id UUID NOT NULL DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     from_id UUID NOT NULL,
     to_id UUID NOT NULL,
     from_type TEXT NOT NULL,
@@ -2668,116 +2682,9 @@ CREATE INDEX IF NOT EXISTS idx_graph_edges_belongs_to_industry_created_at ON cus
 -- approval -> dispatch). Placed after all referenced tables (sys_user,
 -- crm_campaign, crm_lead, crm_lead_source, cdp_segments, cdp_content_items)
 -- so foreign keys resolve. See docs/action-plans/AGENTIC-EMAIL-MARKETING-FLOW.md.
--- The deferred constraints are guarded so this section is safe to re-run
--- against an already-migrated database (run-sql.sh re-applies the schema).
 
 -- Reusable message template library for email, SMS, and WhatsApp, authored by
 -- people or AI agents and gated by human review.
--- === Upgrade path (folded from former migration 003, deleted upstream): an env
--- created before the email->message rename still has crm_email_templates. Rename
--- it in place + add the new columns HERE, before the CREATE below, so existing
--- rows and template_id FKs survive and the CREATE becomes a no-op. run-sql.sh
--- applies database-schema.sql BEFORE migrations/, so the rename must live here to
--- win (a rename in migrations/ would be pre-empted by the CREATE and skip). ===
--- Generalize the email-only template table into a reusable CRM message
--- template table while preserving template_id references from campaigns and
--- dispatch logs.
-DO $$
-BEGIN
-    IF to_regclass('customer360.crm_email_templates') IS NOT NULL
-       AND to_regclass('customer360.crm_message_templates') IS NULL THEN
-        ALTER TABLE customer360.crm_email_templates
-            RENAME TO crm_message_templates;
-    END IF;
-END $$;
-
-ALTER TABLE IF EXISTS customer360.crm_message_templates
-    ADD COLUMN IF NOT EXISTS message_type TEXT NOT NULL DEFAULT 'EMAIL',
-    ADD COLUMN IF NOT EXISTS persona_id UUID,
-    ADD COLUMN IF NOT EXISTS context JSONB NOT NULL DEFAULT '{}'::jsonb,
-    ADD COLUMN IF NOT EXISTS message_body TEXT;
-
-ALTER TABLE IF EXISTS customer360.crm_message_templates
-    ALTER COLUMN message_type TYPE TEXT;
-
-DO $$
-BEGIN
-    IF to_regclass('customer360.crm_message_templates') IS NOT NULL THEN
-        UPDATE customer360.crm_message_templates
-        SET message_type = 'EMAIL'
-        WHERE message_type IS NULL OR btrim(message_type) = '';
-
-        UPDATE customer360.crm_message_templates
-        SET message_body = COALESCE(message_body, text_body, html_body)
-        WHERE message_body IS NULL;
-
-        ALTER TABLE customer360.crm_message_templates
-            ALTER COLUMN message_type SET NOT NULL;
-    END IF;
-END $$;
-
-DO $$
-BEGIN
-    IF to_regclass('customer360.crm_message_templates') IS NULL THEN
-        RETURN;
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'fk_crm_message_templates_persona'
-          AND conrelid = 'customer360.crm_message_templates'::regclass
-    ) THEN
-        ALTER TABLE customer360.crm_message_templates
-            ADD CONSTRAINT fk_crm_message_templates_persona
-            FOREIGN KEY (persona_id)
-            REFERENCES customer360.cdp_persona_archetypes(persona_archetype_id)
-            ON DELETE SET NULL;
-    END IF;
-
-    ALTER TABLE customer360.crm_message_templates
-        DROP CONSTRAINT IF EXISTS chk_crm_message_templates_type;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'chk_crm_message_templates_message_type_not_blank'
-          AND conrelid = 'customer360.crm_message_templates'::regclass
-    ) THEN
-        ALTER TABLE customer360.crm_message_templates
-            ADD CONSTRAINT chk_crm_message_templates_message_type_not_blank
-            CHECK (btrim(message_type) <> '');
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'chk_crm_message_templates_context_object'
-          AND conrelid = 'customer360.crm_message_templates'::regclass
-    ) THEN
-        ALTER TABLE customer360.crm_message_templates
-            ADD CONSTRAINT chk_crm_message_templates_context_object
-            CHECK (jsonb_typeof(context) = 'object');
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'chk_crm_message_templates_variables_object'
-          AND conrelid = 'customer360.crm_message_templates'::regclass
-    ) THEN
-        ALTER TABLE customer360.crm_message_templates
-            ADD CONSTRAINT chk_crm_message_templates_variables_object
-            CHECK (jsonb_typeof(variables) = 'object');
-    END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_crm_message_templates_tenant
-    ON customer360.crm_message_templates (tenant_id);
-CREATE INDEX IF NOT EXISTS idx_crm_message_templates_tenant_status
-    ON customer360.crm_message_templates (tenant_id, status);
-CREATE INDEX IF NOT EXISTS idx_crm_message_templates_tenant_type
-    ON customer360.crm_message_templates (tenant_id, message_type);
-CREATE INDEX IF NOT EXISTS idx_crm_message_templates_persona
-    ON customer360.crm_message_templates (persona_id)
-    WHERE persona_id IS NOT NULL;
-
 CREATE TABLE IF NOT EXISTS customer360.crm_message_templates (
     template_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
@@ -2994,6 +2901,8 @@ CREATE TABLE IF NOT EXISTS customer360.crm_connector_config (
 );
 
 COMMENT ON TABLE customer360.crm_connector_config IS 'Outbound CRM connector configuration for activation and communication channels such as email, SMS, push, chat, ads and webhooks. Inbound data collection remains modeled by sys_data_source.';
+COMMENT ON COLUMN customer360.crm_connector_config.credentials IS 'Secret connector material. For CHAT/ZALO this contains app_id, app_secret, oa_id, access_token, refresh_token, token_expires_at, and webhook_signing_secret.';
+COMMENT ON COLUMN customer360.crm_connector_config.config IS 'Non-secret connector settings. For CHAT/ZALO this contains oa_api_base_url, oauth_authorize_url, oa_token_url, oauth_redirect_uri, token_refresh_cron, dispatch_adapter, zns_api_base_url, batch_size, optout_projection_cron, and optout_lookback_hours.';
 
 CREATE INDEX IF NOT EXISTS idx_crm_connector_tenant ON customer360.crm_connector_config (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_crm_connector_channel ON customer360.crm_connector_config (tenant_id, connector_type);
@@ -3067,12 +2976,211 @@ CREATE INDEX IF NOT EXISTS idx_crm_suppression_lookup
 CREATE INDEX IF NOT EXISTS idx_crm_suppression_profile
     ON customer360.crm_suppression_list (tenant_id, master_profile_id)
     WHERE master_profile_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_suppression_global
-    ON customer360.crm_suppression_list (tenant_id, channel, identifier_type, identifier)
-    WHERE status = 'ACTIVE' AND scope = 'GLOBAL';
-CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_suppression_campaign
-    ON customer360.crm_suppression_list (tenant_id, channel, identifier_type, identifier, campaign_id)
-    WHERE status = 'ACTIVE' AND scope = 'CAMPAIGN';
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class r ON r.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+        WHERE n.nspname = 'customer360'
+          AND r.relname = 'crm_suppression_list'
+          AND c.conname = 'ex_crm_suppression_global_window'
+    ) THEN
+        ALTER TABLE customer360.crm_suppression_list
+            ADD CONSTRAINT ex_crm_suppression_global_window
+            EXCLUDE USING gist (
+                tenant_id WITH =,
+                channel WITH =,
+                identifier_type WITH =,
+                identifier WITH =,
+                tstzrange(
+                    created_at,
+                    COALESCE(expires_at, 'infinity'::timestamptz),
+                    '[)'
+                ) WITH &&
+            )
+            WHERE (status = 'ACTIVE' AND scope = 'GLOBAL');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class r ON r.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+        WHERE n.nspname = 'customer360'
+          AND r.relname = 'crm_suppression_list'
+          AND c.conname = 'ex_crm_suppression_campaign_window'
+    ) THEN
+        ALTER TABLE customer360.crm_suppression_list
+            ADD CONSTRAINT ex_crm_suppression_campaign_window
+            EXCLUDE USING gist (
+                tenant_id WITH =,
+                channel WITH =,
+                identifier_type WITH =,
+                identifier WITH =,
+                campaign_id WITH =,
+                tstzrange(
+                    created_at,
+                    COALESCE(expires_at, 'infinity'::timestamptz),
+                    '[)'
+                ) WITH &&
+            )
+            WHERE (status = 'ACTIVE' AND scope = 'CAMPAIGN');
+    END IF;
+END;
+$$;
+
+-- ==========================================================
+-- Tenant-consistent foreign keys
+-- ==========================================================
+-- Every relationship between tenant-owned tables must carry the child tenant
+-- alongside the referenced ID. The single-column FKs above remain for
+-- compatibility with existing clients; these composite FKs are the boundary
+-- that prevents a row from tenant A referencing an object owned by tenant B.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sys_organization_tenant_id
+    ON customer360.sys_organization (tenant_id, organization_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sys_user_tenant_id
+    ON customer360.sys_user (tenant_id, user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sys_role_tenant_id
+    ON customer360.sys_role (tenant_id, role_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_campaign_tenant_id
+    ON customer360.crm_campaign (tenant_id, campaign_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_lead_source_tenant_id
+    ON customer360.crm_lead_source (tenant_id, lead_source_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_contact_tenant_id
+    ON customer360.crm_contact (tenant_id, contact_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_account_tenant_id
+    ON customer360.crm_account (tenant_id, account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_industry_tenant_id
+    ON customer360.crm_industry (tenant_id, industry_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_master_profiles_tenant_id
+    ON customer360.cdp_master_profiles (tenant_id, master_profile_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_raw_profiles_stage_tenant_id
+    ON customer360.cdp_raw_profiles_stage (tenant_id, raw_profile_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_persona_archetypes_tenant_id
+    ON customer360.cdp_persona_archetypes (tenant_id, persona_archetype_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_customer_personas_tenant_id
+    ON customer360.cdp_customer_personas (tenant_id, persona_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_segments_tenant_id
+    ON customer360.cdp_segments (tenant_id, segment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_content_items_tenant_id
+    ON customer360.cdp_content_items (tenant_id, content_item_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_message_templates_tenant_id
+    ON customer360.crm_message_templates (tenant_id, template_id);
+
+DO $$
+DECLARE
+    fk RECORD;
+BEGIN
+    FOR fk IN
+        SELECT *
+        FROM jsonb_to_recordset($tenant_fk$
+        [
+            {"child_table":"sys_user","constraint_name":"fk_sys_user_tenant_organization","child_columns":"tenant_id, organization_id","parent_table":"sys_organization","parent_columns":"tenant_id, organization_id","on_delete":"SET NULL (organization_id)"},
+            {"child_table":"sys_userinfo","constraint_name":"fk_sys_userinfo_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"CASCADE"},
+            {"child_table":"sys_user_role","constraint_name":"fk_sys_user_role_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"CASCADE"},
+            {"child_table":"sys_user_role","constraint_name":"fk_sys_user_role_tenant_role","child_columns":"tenant_id, role_id","parent_table":"sys_role","parent_columns":"tenant_id, role_id","on_delete":"CASCADE"},
+            {"child_table":"sys_audit_log","constraint_name":"fk_sys_audit_log_tenant_organization","child_columns":"tenant_id, organization_id","parent_table":"sys_organization","parent_columns":"tenant_id, organization_id","on_delete":"SET NULL (organization_id)"},
+            {"child_table":"sys_audit_log","constraint_name":"fk_sys_audit_log_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_campaign_performance_daily","constraint_name":"fk_crm_campaign_perf_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_member","constraint_name":"fk_crm_campaign_member_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_member","constraint_name":"fk_crm_campaign_member_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_campaign_member","constraint_name":"fk_crm_campaign_member_tenant_contact","child_columns":"tenant_id, contact_id","parent_table":"crm_contact","parent_columns":"tenant_id, contact_id","on_delete":"SET NULL (contact_id)"},
+            {"child_table":"crm_lead","constraint_name":"fk_crm_lead_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_lead","constraint_name":"fk_crm_lead_tenant_source","child_columns":"tenant_id, lead_source_id","parent_table":"crm_lead_source","parent_columns":"tenant_id, lead_source_id","on_delete":"SET NULL (lead_source_id)"},
+            {"child_table":"crm_contact","constraint_name":"fk_crm_contact_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_contact","constraint_name":"fk_crm_contact_tenant_account","child_columns":"tenant_id, account_id","parent_table":"crm_account","parent_columns":"tenant_id, account_id","on_delete":"SET NULL (account_id)"},
+            {"child_table":"crm_account","constraint_name":"fk_crm_account_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_account","constraint_name":"fk_crm_account_tenant_industry","child_columns":"tenant_id, industry_id","parent_table":"crm_industry","parent_columns":"tenant_id, industry_id","on_delete":"SET NULL (industry_id)"},
+            {"child_table":"crm_opportunity","constraint_name":"fk_crm_opportunity_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_opportunity","constraint_name":"fk_crm_opportunity_tenant_account","child_columns":"tenant_id, account_id","parent_table":"crm_account","parent_columns":"tenant_id, account_id","on_delete":"SET NULL (account_id)"},
+            {"child_table":"crm_industry","constraint_name":"fk_crm_industry_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"cdp_master_profiles","constraint_name":"fk_cdp_master_profiles_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"cdp_master_profiles","constraint_name":"fk_cdp_master_profiles_tenant_persona","child_columns":"tenant_id, current_persona_id","parent_table":"cdp_customer_personas","parent_columns":"tenant_id, persona_id","on_delete":"SET NULL (current_persona_id)"},
+            {"child_table":"cdp_domain_profiles","constraint_name":"fk_cdp_domain_profiles_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_raw_profiles_stage","constraint_name":"fk_cdp_raw_profiles_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"cdp_profile_links","constraint_name":"fk_cdp_profile_links_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"cdp_profile_links","constraint_name":"fk_cdp_profile_links_tenant_raw","child_columns":"tenant_id, raw_profile_id","parent_table":"cdp_raw_profiles_stage","parent_columns":"tenant_id, raw_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_profile_links","constraint_name":"fk_cdp_profile_links_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_profile_links","constraint_name":"fk_cdp_profile_links_tenant_unlinked_by","child_columns":"tenant_id, unlinked_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (unlinked_by)"},
+            {"child_table":"cdp_identity_index","constraint_name":"fk_cdp_identity_index_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_profile_merge_history","constraint_name":"fk_cdp_merge_history_tenant_target","child_columns":"tenant_id, target_master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"RESTRICT"},
+            {"child_table":"cdp_profile_merge_history","constraint_name":"fk_cdp_merge_history_tenant_user","child_columns":"tenant_id, merged_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (merged_by)"},
+            {"child_table":"cdp_relations","constraint_name":"fk_cdp_relations_tenant_source","child_columns":"tenant_id, source_master_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_relations","constraint_name":"fk_cdp_relations_tenant_target","child_columns":"tenant_id, target_master_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_relations","constraint_name":"fk_cdp_relations_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_customer_contacts","constraint_name":"fk_crm_customer_contacts_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"crm_customer_contacts","constraint_name":"fk_crm_customer_contacts_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_transactions","constraint_name":"fk_crm_transactions_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"SET NULL (master_profile_id)"},
+            {"child_table":"crm_transactions","constraint_name":"fk_crm_transactions_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"cdp_segments","constraint_name":"fk_cdp_segments_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_approved_by","child_columns":"tenant_id, approved_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (approved_by)"},
+            {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_segment","child_columns":"tenant_id, segment_id","parent_table":"cdp_segments","parent_columns":"tenant_id, segment_id","on_delete":"SET NULL (segment_id)"},
+            {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_template","child_columns":"tenant_id, template_id","parent_table":"crm_message_templates","parent_columns":"tenant_id, template_id","on_delete":"SET NULL (template_id)"},
+            {"child_table":"crm_campaign_reviews","constraint_name":"fk_crm_campaign_reviews_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_reviews","constraint_name":"fk_crm_campaign_reviews_tenant_user","child_columns":"tenant_id, reviewer_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"RESTRICT"},
+            {"child_table":"crm_campaign_content_items","constraint_name":"fk_crm_campaign_content_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_content_items","constraint_name":"fk_crm_campaign_content_tenant_item","child_columns":"tenant_id, content_item_id","parent_table":"cdp_content_items","parent_columns":"tenant_id, content_item_id","on_delete":"CASCADE"},
+            {"child_table":"crm_segment_sync_runs","constraint_name":"fk_crm_segment_sync_tenant_segment","child_columns":"tenant_id, segment_id","parent_table":"cdp_segments","parent_columns":"tenant_id, segment_id","on_delete":"CASCADE"},
+            {"child_table":"crm_segment_sync_runs","constraint_name":"fk_crm_segment_sync_tenant_user","child_columns":"tenant_id, triggered_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (triggered_by)"},
+            {"child_table":"cdp_campaign_dispatch_logs","constraint_name":"fk_cdp_dispatch_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_campaign_dispatch_logs","constraint_name":"fk_cdp_dispatch_tenant_profile","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_campaign_dispatch_logs","constraint_name":"fk_cdp_dispatch_tenant_template","child_columns":"tenant_id, template_id","parent_table":"crm_message_templates","parent_columns":"tenant_id, template_id","on_delete":"SET NULL (template_id)"},
+            {"child_table":"crm_message_templates","constraint_name":"fk_crm_message_templates_tenant_user","child_columns":"tenant_id, created_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (created_by)"},
+            {"child_table":"crm_message_templates","constraint_name":"fk_crm_message_templates_tenant_approved_by","child_columns":"tenant_id, approved_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (approved_by)"},
+            {"child_table":"crm_message_templates","constraint_name":"fk_crm_message_templates_tenant_persona","child_columns":"tenant_id, persona_id","parent_table":"cdp_persona_archetypes","parent_columns":"tenant_id, persona_archetype_id","on_delete":"SET NULL (persona_id)"},
+            {"child_table":"crm_connector_config","constraint_name":"fk_crm_connector_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
+            {"child_table":"crm_suppression_list","constraint_name":"fk_crm_suppression_tenant_profile","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"SET NULL (master_profile_id)"},
+            {"child_table":"crm_suppression_list","constraint_name":"fk_crm_suppression_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_suppression_list","constraint_name":"fk_crm_suppression_tenant_user","child_columns":"tenant_id, removed_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (removed_by)"},
+            {"child_table":"cdp_customer_personas","constraint_name":"fk_cdp_personas_tenant_master","child_columns":"tenant_id, master_profile_id","parent_table":"cdp_master_profiles","parent_columns":"tenant_id, master_profile_id","on_delete":"CASCADE"},
+            {"child_table":"cdp_customer_personas","constraint_name":"fk_cdp_personas_tenant_archetype","child_columns":"tenant_id, persona_archetype_id","parent_table":"cdp_persona_archetypes","parent_columns":"tenant_id, persona_archetype_id","on_delete":"CASCADE"}
+        ]$tenant_fk$::jsonb) AS item(
+            child_table TEXT,
+            constraint_name TEXT,
+            child_columns TEXT,
+            parent_table TEXT,
+            parent_columns TEXT,
+            on_delete TEXT
+        )
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_attribute a
+            JOIN pg_class r ON r.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'customer360'
+              AND r.relname = fk.child_table
+              AND a.attname = 'tenant_id'
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+        ) THEN
+            CONTINUE;
+        END IF;
+
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint c
+            JOIN pg_class r ON r.oid = c.conrelid
+            JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE c.conname = fk.constraint_name
+              AND n.nspname = 'customer360'
+        ) THEN
+            EXECUTE format(
+                'ALTER TABLE customer360.%I ADD CONSTRAINT %I FOREIGN KEY (%s) REFERENCES customer360.%I (%s) ON DELETE %s',
+                fk.child_table,
+                fk.constraint_name,
+                fk.child_columns,
+                fk.parent_table,
+                fk.parent_columns,
+                fk.on_delete
+            );
+        END IF;
+    END LOOP;
+END;
+$$;
 
 ---------------------------------------------------
 -- ROW LEVEL SECURITY (RBAC / Multi-Tenant Isolation)
@@ -3122,6 +3230,7 @@ DECLARE
     t TEXT;
     tenant_tables TEXT[] := ARRAY[
         'sys_organization',
+        'sys_tenant_domain',
         'sys_user',
         'sys_userinfo',
         'sys_role',
@@ -3155,10 +3264,26 @@ DECLARE
         'cdp_campaign_dispatch_logs',
         'crm_connector_config',
         'crm_suppression_list',
-        'sys_data_source'
+        'sys_data_source',
+        'sys_user_role',
+        'graph_edges'
     ];
 BEGIN
     FOREACH t IN ARRAY tenant_tables LOOP
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_attribute a
+            JOIN pg_class r ON r.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = r.relnamespace
+            WHERE n.nspname = 'customer360'
+              AND r.relname = t
+              AND a.attname = 'tenant_id'
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+        ) THEN
+            CONTINUE;
+        END IF;
+
         EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY;', 'customer360', t);
         EXECUTE format('ALTER TABLE %I.%I FORCE ROW LEVEL SECURITY;', 'customer360', t);
         EXECUTE format('DROP POLICY IF EXISTS tenant_policy ON customer360.%I;', t);

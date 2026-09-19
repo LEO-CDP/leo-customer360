@@ -259,20 +259,18 @@ async def zalo_redirect(
     state: str = Query(..., description="Signed, tenant-bound state echoed by Zalo"),
 ) -> Any:
     """Public Zalo OA OAuth callback: verify the tenant-bound ``state``, exchange
-    the code for access+refresh tokens, and upsert the tenant's ``sys_data_source``
-    ``zalo-oa`` row. Exempt from bearer auth (the browser redirect carries no
+    the code for access+refresh tokens, and upsert the tenant's Zalo
+    ``crm_connector_config`` row. Exempt from bearer auth (the browser redirect carries no
     token) -- the signed ``state`` is what binds the call to a tenant."""
-    try:
-        tenant_id = zalo_oa.verify_state(state)
-        tokens = zalo_oa.exchange_oa_code(code)
-    except zalo_oa.ZaloOAError as exc:
-        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
-
     db = SessionLocal()
     try:
-        # RLS: bind this connection to the resolved tenant before writing.
+        tenant_id = zalo_oa.verify_state(state)
         db.info["tenant_id"] = tenant_id
         db.execute(text("SELECT set_config('app.tenant_id', :t, true)"), {"t": tenant_id})
+        connector = zalo_oa.get_oa_config(db, UUID(tenant_id))
+        if connector is None:
+            raise zalo_oa.ZaloOAError("Zalo connector configuration is not active", status=503)
+        tokens = zalo_oa.exchange_oa_code(code, connector)
         zalo_oa.upsert_oa_tokens(
             db,
             UUID(tenant_id),
@@ -281,6 +279,8 @@ async def zalo_redirect(
             refresh_token=tokens.get("refresh_token", ""),
             expires_in=int(tokens.get("expires_in", 3600)),
         )
+    except zalo_oa.ZaloOAError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
     finally:
         db.close()
     return ZaloConnectResult(status="connected", oa_id=oa_id)

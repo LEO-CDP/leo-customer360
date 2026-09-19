@@ -2,6 +2,8 @@
 -- suppression registry. Existing email suppressions are migrated as global or
 -- campaign-scoped EMAIL rows.
 
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
 CREATE TABLE IF NOT EXISTS customer360.crm_suppression_list (
     suppression_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
@@ -62,12 +64,63 @@ CREATE INDEX IF NOT EXISTS idx_crm_suppression_lookup
 CREATE INDEX IF NOT EXISTS idx_crm_suppression_profile
     ON customer360.crm_suppression_list (tenant_id, master_profile_id)
     WHERE master_profile_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_suppression_global
-    ON customer360.crm_suppression_list (tenant_id, channel, identifier_type, identifier)
-    WHERE status = 'ACTIVE' AND scope = 'GLOBAL';
-CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_suppression_campaign
-    ON customer360.crm_suppression_list (tenant_id, channel, identifier_type, identifier, campaign_id)
-    WHERE status = 'ACTIVE' AND scope = 'CAMPAIGN';
+DROP INDEX IF EXISTS customer360.uq_crm_suppression_global;
+DROP INDEX IF EXISTS customer360.uq_crm_suppression_campaign;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class r ON r.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+        WHERE n.nspname = 'customer360'
+          AND r.relname = 'crm_suppression_list'
+          AND c.conname = 'ex_crm_suppression_global_window'
+    ) THEN
+        ALTER TABLE customer360.crm_suppression_list
+            ADD CONSTRAINT ex_crm_suppression_global_window
+            EXCLUDE USING gist (
+                tenant_id WITH =,
+                channel WITH =,
+                identifier_type WITH =,
+                identifier WITH =,
+                tstzrange(
+                    created_at,
+                    COALESCE(expires_at, 'infinity'::timestamptz),
+                    '[)'
+                ) WITH &&
+            )
+            WHERE (status = 'ACTIVE' AND scope = 'GLOBAL');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class r ON r.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = r.relnamespace
+        WHERE n.nspname = 'customer360'
+          AND r.relname = 'crm_suppression_list'
+          AND c.conname = 'ex_crm_suppression_campaign_window'
+    ) THEN
+        ALTER TABLE customer360.crm_suppression_list
+            ADD CONSTRAINT ex_crm_suppression_campaign_window
+            EXCLUDE USING gist (
+                tenant_id WITH =,
+                channel WITH =,
+                identifier_type WITH =,
+                identifier WITH =,
+                campaign_id WITH =,
+                tstzrange(
+                    created_at,
+                    COALESCE(expires_at, 'infinity'::timestamptz),
+                    '[)'
+                ) WITH &&
+            )
+            WHERE (status = 'ACTIVE' AND scope = 'CAMPAIGN');
+    END IF;
+END;
+$$;
 
 DO $$
 BEGIN

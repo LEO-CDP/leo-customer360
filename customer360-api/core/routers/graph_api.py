@@ -11,6 +11,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from core.auth import require_tenant
 from leo_customer360_dao.config import settings
 from core.database import get_db
 from leo_customer360_dao.repositories.graph_repository import GraphRepository
@@ -26,6 +27,7 @@ def list_edges(
     to_id: str | None = None,
     skip: int = 0,
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
+    tenant_id: str = Depends(require_tenant),
     db: Session = Depends(get_db),
 ):
     repo = GraphRepository(db)
@@ -33,13 +35,13 @@ def list_edges(
 
 
 @router.get("/count")
-def count_edges(db: Session = Depends(get_db)):
+def count_edges(tenant_id: str = Depends(require_tenant), db: Session = Depends(get_db)):
     repo = GraphRepository(db)
     return {"count": repo.count_edges()}
 
 
 @router.get("/{edge_id}", response_model=GraphEdgeRead)
-def get_edge(edge_id: uuid.UUID, db: Session = Depends(get_db)):
+def get_edge(edge_id: uuid.UUID, tenant_id: str = Depends(require_tenant), db: Session = Depends(get_db)):
     repo = GraphRepository(db)
     obj = repo.get_edge(edge_id)
     if obj is None:
@@ -48,13 +50,17 @@ def get_edge(edge_id: uuid.UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=GraphEdgeRead, status_code=201)
-def create_edge(payload: GraphEdgeCreate, db: Session = Depends(get_db)):
+def create_edge(
+    payload: GraphEdgeCreate,
+    tenant_id: str = Depends(require_tenant),
+    db: Session = Depends(get_db),
+):
     repo = GraphRepository(db)
     return repo.create_edge(payload.model_dump())
 
 
 @router.delete("/{edge_id}", status_code=204)
-def delete_edge(edge_id: uuid.UUID, db: Session = Depends(get_db)):
+def delete_edge(edge_id: uuid.UUID, tenant_id: str = Depends(require_tenant), db: Session = Depends(get_db)):
     repo = GraphRepository(db)
     try:
         repo.delete_edge(edge_id)

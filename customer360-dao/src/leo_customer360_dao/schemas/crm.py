@@ -649,9 +649,55 @@ class EmailProviderConfigRead(BaseModel):
     updated_at: Optional[datetime] = None
 
 
+class ZaloConnectorConfigUpsert(BaseModel):
+    """Writable tenant-scoped Zalo connector settings.
+
+    Secrets are accepted for writes but never returned by the read schema.
+    """
+
+    app_id: Optional[str] = None
+    app_secret: Optional[str] = None
+    oa_api_base_url: str = "https://openapi.zalo.me"
+    oauth_authorize_url: str = "https://oauth.zaloapp.com/v4/oa/permission"
+    oa_token_url: str = "https://oauth.zaloapp.com/v4/oa/access_token"
+    oauth_redirect_uri: str = ""
+    token_refresh_cron: str = "*/30 * * * *"
+    dispatch_adapter: str = Field(default="mock", pattern="^(mock|zns)$")
+    zns_api_base_url: str = "https://business.openapi.zalo.me"
+    batch_size: int = Field(default=500, ge=1, le=10000)
+    webhook_signing_secret: Optional[str] = None
+    optout_projection_cron: str = "*/15 * * * *"
+    optout_lookback_hours: int = Field(default=6, ge=1, le=168)
+    is_active: bool = True
+
+
+class ZaloConnectorConfigRead(BaseModel):
+    """Tenant Zalo connector settings without credential material."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    connector_id: uuid.UUID
+    tenant_id: uuid.UUID
+    app_id: Optional[str] = None
+    app_secret_set: bool = False
+    webhook_signing_secret_set: bool = False
+    access_token_set: bool = False
+    oa_api_base_url: str
+    oauth_authorize_url: str
+    oa_token_url: str
+    oauth_redirect_uri: str
+    token_refresh_cron: str
+    dispatch_adapter: str
+    zns_api_base_url: str
+    batch_size: int
+    optout_projection_cron: str
+    optout_lookback_hours: int
+    is_active: bool
+
+
 # --- Zalo OA (ZNS) --------------------------------------------------------
-# OA config is stored in sys_data_source (slug='zalo-oa'); these are read-only
-# views over that row. Tokens/secret are never returned — only status flags.
+# OA config is stored in crm_connector_config (connector_type='CHAT', provider='ZALO');
+# these are read-only views over that row. Tokens/secret are never returned — only status flags.
 class ZaloOaConfigRead(BaseModel):
     """Connection status of the tenant's Zalo OA (no tokens/secret returned)."""
 

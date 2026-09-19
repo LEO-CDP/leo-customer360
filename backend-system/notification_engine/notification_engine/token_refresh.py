@@ -1,10 +1,7 @@
-"""Zalo OA access-token refresh.
+"""Zalo OA access-token refresh from the generic connector registry.
 
-OA config/tokens live per-tenant in ``sys_data_source`` (slug='zalo-oa'); the
-rotating token is inside the ``access_tokens`` JSONB. This refreshes tokens that
-are at/near expiry and writes the rotated token back (Zalo rotates the refresh
-token too). Processes all tenants on one connection (like identity_resolution) --
-the backend-system DB role bypasses RLS; per-row tenant context is still set.
+The rotating token is stored in ``crm_connector_config.credentials`` and the
+tenant-specific OAuth endpoint/app credentials are stored alongside it.
 
 ⚠️ Zalo OAuth v4 refresh endpoint/params/header -- confirm against current docs.
 """
@@ -14,19 +11,18 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-from notification_engine.config import ZALO_APP_ID, ZALO_APP_SECRET, ZALO_TOKEN_URL
 from notification_engine.db import DB_SCHEMA, connect
 from notification_engine.rls import set_tenant_context
 
 
-def _refresh(refresh_token: str) -> dict:
+def _refresh(refresh_token: str, app_id: str, app_secret: str, token_url: str) -> dict:
     body = urllib.parse.urlencode(
-        {"refresh_token": refresh_token, "app_id": ZALO_APP_ID, "grant_type": "refresh_token"}
+        {"refresh_token": refresh_token, "app_id": app_id, "grant_type": "refresh_token"}
     ).encode("utf-8")
     req = urllib.request.Request(
-        ZALO_TOKEN_URL,
+        token_url,
         data=body,
-        headers={"secret_key": ZALO_APP_SECRET, "Content-Type": "application/x-www-form-urlencoded"},
+        headers={"secret_key": app_secret, "Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -34,7 +30,7 @@ def _refresh(refresh_token: str) -> dict:
 
 
 def refresh_due_tokens(conn, skew_seconds: int = 300, log=print) -> dict:
-    """Refresh every ``zalo-oa`` row whose token expires within ``skew_seconds``.
+    """Refresh every active Zalo connector whose token expires within ``skew_seconds``.
 
     One bad OA (network/refused) is logged and skipped, never blocking the rest.
     Returns ``{'checked', 'refreshed', 'errors'}``.
@@ -43,14 +39,16 @@ def refresh_due_tokens(conn, skew_seconds: int = 300, log=print) -> dict:
         # No tenant context here: this cross-tenant query relies on the backend DB
         # role holding BYPASSRLS. Without it, RLS fails closed -> 0 rows -> tokens
         # silently never refresh (checked=0 in the summary is the tell).
-        cur.execute(
-            f"""SELECT tenant_id, data_source_id, access_tokens
-                  FROM {DB_SCHEMA}.sys_data_source
-                 WHERE slug = 'zalo-oa' AND status = 1
-                   AND COALESCE(access_tokens->>'refresh_token', '') <> ''
+                cur.execute(
+                        f"""SELECT tenant_id, connector_id, credentials, config
+                                    FROM {DB_SCHEMA}.crm_connector_config
+                                 WHERE connector_type = 'CHAT' AND provider = 'ZALO'
+                                     AND direction IN ('OUTBOUND', 'BIDIRECTIONAL')
+                                     AND status = 'ACTIVE' AND is_active = TRUE
+                                     AND COALESCE(credentials->>'refresh_token', '') <> ''
                    AND (
-                        access_tokens->>'token_expires_at' IS NULL
-                        OR (access_tokens->>'token_expires_at')::timestamptz
+                                                credentials->>'token_expires_at' IS NULL
+                                                OR (credentials->>'token_expires_at')::timestamptz
                            < now() + make_interval(secs => %s)
                    )""",
             (skew_seconds,),
@@ -58,15 +56,21 @@ def refresh_due_tokens(conn, skew_seconds: int = 300, log=print) -> dict:
         rows = cur.fetchall()
 
     checked, refreshed, errors = len(rows), 0, 0
-    for tenant_id, data_source_id, tokens in rows:
-        tokens = tokens or {}
+    for tenant_id, connector_id, credentials, config in rows:
+        credentials = credentials or {}
+        config = config or {}
         try:
-            data = _refresh(tokens["refresh_token"])
+            data = _refresh(
+                credentials["refresh_token"],
+                credentials.get("app_id", ""),
+                credentials.get("app_secret", ""),
+                config.get("oa_token_url", "https://oauth.zaloapp.com/v4/oa/access_token"),
+            )
             if not data.get("access_token"):
                 errors += 1
-                log(f"zalo token refresh: no access_token for data_source={data_source_id}: {data}")
+                log(f"zalo token refresh: no access_token for connector={connector_id}: {data}")
                 continue
-            new = dict(tokens)
+            new = dict(credentials)
             new["access_token"] = data["access_token"]
             if data.get("refresh_token"):  # Zalo rotates the refresh token
                 new["refresh_token"] = data["refresh_token"]
@@ -79,16 +83,16 @@ def refresh_due_tokens(conn, skew_seconds: int = 300, log=print) -> dict:
             with conn.cursor() as cur:
                 set_tenant_context(cur, str(tenant_id))
                 cur.execute(
-                    f"UPDATE {DB_SCHEMA}.sys_data_source "
-                    f"SET access_tokens = %s::jsonb, updated_at = now() WHERE data_source_id = %s",
-                    (json.dumps(new), data_source_id),
+                    f"UPDATE {DB_SCHEMA}.crm_connector_config "
+                    f"SET credentials = %s::jsonb, updated_at = now() WHERE connector_id = %s",
+                    (json.dumps(new), connector_id),
                 )
             conn.commit()
             refreshed += 1
         except Exception as exc:  # noqa: BLE001 - resilience: one OA must not block others
             conn.rollback()
             errors += 1
-            log(f"zalo token refresh failed for data_source={data_source_id}: {exc}")
+            log(f"zalo token refresh failed for connector={connector_id}: {exc}")
 
     return {"checked": checked, "refreshed": refreshed, "errors": errors}
 

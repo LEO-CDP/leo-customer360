@@ -56,7 +56,7 @@ class CdpMasterProfile(Base):
     # hashed. Whenever TRUE,
     # persona_name must be populated (enforced by a DB CHECK constraint + identity-resolution-
     # service's persona.py, which auto-generates persona_name for hashed profiles).
-    is_hashed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    is_hashed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     email: Mapped[Optional[str]] = mapped_column(Text)
     phone_number: Mapped[Optional[str]] = mapped_column(Text)
     secondary_emails: Mapped[Optional[list]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
@@ -95,7 +95,7 @@ class CdpMasterProfile(Base):
     # ------------------------------------------------------------------
     customer_since: Mapped[Optional[date]] = mapped_column(Date)
     # Updated continuously by the streaming/event pipeline (not batch).
-    last_activity_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=False))
+    last_activity_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
     preferred_channel: Mapped[Optional[str]] = mapped_column(Text)
     # 'prospect' | 'lead' | 'customer' | 'vip' | 'dormant' | 'churn_risk'
     lifecycle_stage: Mapped[Optional[str]] = mapped_column(Text)
@@ -124,7 +124,7 @@ class CdpMasterProfile(Base):
     identity_confidence_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))
 
     model_versions: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
-    scores_updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=False))
+    scores_updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
 
     created_at: Mapped[Optional[datetime]] = mapped_column(server_default=text("now()"))
     updated_at: Mapped[Optional[datetime]] = mapped_column(server_default=text("now()"))
@@ -224,8 +224,8 @@ class CdpDomainProfile(Base):
     domain_attributes: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     analytics: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
 
-    first_activity_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=False))
-    last_activity_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=False))
+    first_activity_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    last_activity_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
     status_code: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), nullable=False, server_default=text("now()"))
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), nullable=False, server_default=text("now()"))

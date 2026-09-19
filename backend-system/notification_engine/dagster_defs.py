@@ -1,9 +1,9 @@
 """Dagster definitions for the Notification Engine service
 (backend-system/notification_engine).
 
-Hosts the Zalo OA token-refresh job + the repo's FIRST ``ScheduleDefinition``,
-which keeps each tenant's ``zalo-oa`` OAuth token fresh in
-``sys_data_source.access_tokens``. The Zalo ZNS campaign-send job
+Hosts the Zalo OA token-refresh job + the repo's ``ScheduleDefinition``,
+which keeps each tenant's OAuth token fresh in
+``crm_connector_config.credentials``. The Zalo ZNS campaign-send job
 (``send_zalo_campaign``) is added to this code location in Phase 2.
 
 Run from `backend-system/`: `dagster dev -w workspace.yaml`.
@@ -27,7 +27,6 @@ from dagster import (  # noqa: E402
     op,
 )
 
-from notification_engine.config import OPTOUT_PROJECTION_CRON, TOKEN_REFRESH_CRON  # noqa: E402
 from notification_engine.db import connect  # noqa: E402
 from notification_engine.optout_projection import project_optout_events, read_optout_events  # noqa: E402
 from notification_engine.send import send_zalo_campaign  # noqa: E402
@@ -54,7 +53,7 @@ def zalo_token_refresh_job() -> None:
 zalo_token_refresh_schedule = ScheduleDefinition(
     name="zalo_token_refresh_schedule",
     job=zalo_token_refresh_job,
-    cron_schedule=TOKEN_REFRESH_CRON,
+    cron_schedule="*/5 * * * *",
 )
 
 
@@ -110,7 +109,7 @@ def zalo_optout_projection_job() -> None:
 zalo_optout_projection_schedule = ScheduleDefinition(
     name="zalo_optout_projection_schedule",
     job=zalo_optout_projection_job,
-    cron_schedule=OPTOUT_PROJECTION_CRON,
+    cron_schedule="*/5 * * * *",
 )
 
 

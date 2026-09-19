@@ -205,12 +205,5 @@ class Settings(BaseSettings):
             "CRM_EMAIL_WEBHOOK_SIGNING_SECRET", "email_webhook_signing_secret"
         ),
     )
-    zalo_webhook_signing_secret: str = Field(
-        default="",
-        validation_alias=AliasChoices(
-            "CRM_ZALO_WEBHOOK_SIGNING_SECRET", "zalo_webhook_signing_secret"
-        ),
-    )
-
 
 settings = Settings()

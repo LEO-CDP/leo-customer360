@@ -22,9 +22,8 @@ from typing import Callable, Iterator, Optional
 from psycopg2.extras import RealDictCursor
 
 from .adapters import DispatchAdapter, build_zns_adapter
-from .config import BATCH_SIZE, DISPATCH_ADAPTER
 from .db import DB_SCHEMA, connect
-from .provider_config import load_oa_token
+from .provider_config import load_oa_token, load_zalo_config
 from .rendering import render_params
 from .rls import set_tenant_context
 from .tracking import encode_tracking_token
@@ -174,7 +173,7 @@ def send_zalo_campaign(
     *,
     run_id: Optional[str] = None,
     adapter: Optional[DispatchAdapter] = None,
-    batch_size: int = BATCH_SIZE,
+    batch_size: Optional[int] = None,
     log: Callable[[str], None] = logger.info,
 ) -> dict:
     """Execute one Approved zalo_zns campaign's send. See module docstring."""
@@ -223,17 +222,29 @@ def send_zalo_campaign(
             if not segment_tag:
                 raise NotificationEngineError(f"segment {campaign['segment_id']} not found or has no segment_tag")
 
+        zalo_config = load_zalo_config(conn, tenant_id)
+        if zalo_config is None:
+            raise NotificationEngineError(
+                f"campaign {campaign_id}: no active CHAT/ZALO connector for tenant {tenant_id}"
+            )
         if adapter is None:
             token = load_oa_token(conn, tenant_id)
             access_token = token.get("access_token")
             # Fail loudly rather than silently falling back to the mock adapter when
             # real ZNS delivery is configured but the OA is not connected -- otherwise
             # a whole segment gets ledgered 'Sent' with mock ids and nothing delivered.
-            if DISPATCH_ADAPTER.strip().lower() == "zns" and not access_token:
+            dispatch_adapter = str(zalo_config.get("dispatch_adapter") or "mock").strip().lower()
+            if dispatch_adapter == "zns" and not access_token:
                 raise NotificationEngineError(
-                    f"campaign {campaign_id}: CRM_ZALO_DISPATCH_ADAPTER=zns but tenant "
+                    f"campaign {campaign_id}: Zalo dispatch adapter is zns but tenant "
                     f"{tenant_id} has no Zalo OA access token (OA not connected) -- refusing to send")
-            adapter = build_zns_adapter(access_token)
+            adapter = build_zns_adapter(
+                access_token,
+                dispatch_adapter,
+                str(zalo_config.get("zns_api_base_url") or "").strip() or None,
+            )
+
+        effective_batch_size = batch_size or int(zalo_config.get("batch_size") or 500)
 
         base_data = _base_template_data(campaign)
         # Guard: a zalo_zns campaign created outside the AI-draft flow (generic CRUD)
@@ -255,9 +266,9 @@ def send_zalo_campaign(
             f"zns_template={zns_template_id}, provider={adapter.provider_name})")
 
         batch: list = []
-        for profile in iter_recipients(conn, tenant_id, segment_tag, batch_size):
+        for profile in iter_recipients(conn, tenant_id, segment_tag, effective_batch_size):
             batch.append(profile)
-            if len(batch) >= batch_size:
+            if len(batch) >= effective_batch_size:
                 _process_batch(conn, adapter, tenant_id, campaign_id, crm_template_id,
                                zns_template_id, base_data, batch, run_id, summary)
                 batch = []

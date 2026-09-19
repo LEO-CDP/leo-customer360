@@ -41,12 +41,13 @@ real ``master_profile_id`` values. It covers:
    (cosine similarity against the centroids) to the best-fit archetype in
    its domain, persisted as a versioned ``cdp_customer_personas`` row --
    see ``seed_persona_archetypes()`` / ``seed_customer_personas()``.
-6. **crm_contact <-> cdp_master_profiles linkage**: these two tables have NO
-   shared key in database-schema.sql (crm_contact has no tenant_id/
-   master_profile_id column, and cdp_master_profiles has nothing pointing
-   back to crm_contact) -- they represent separate B2B-CRM vs B2C-identity-
-   resolution domains. ``link_crm_contacts_to_master_profiles()`` bridges a
-   handful of them via the generic ``graph_edges`` table
+6. **crm_contact <-> cdp_master_profiles linkage**: these two tables have no
+    direct master-profile foreign key in database-schema.sql (crm_contact is
+    tenant-scoped but has no master_profile_id column, and cdp_master_profiles
+    has nothing pointing back to crm_contact) -- they represent separate
+    B2B-CRM vs B2C-identity-resolution domains. The
+    ``link_crm_contacts_to_master_profiles()`` function bridges a handful of
+    them via the generic ``graph_edges`` table
    (``relation = 'is_active_as'``, ``cdp_master_profiles -> crm_contact``),
    PLUS a denormalized cross-reference id on each side
    (``cdp_master_profiles.attributes->>'linked_crm_contact_id'`` and
@@ -76,15 +77,16 @@ pipeline, and the schema itself defines those columns as plain TEXT with no
 hashing expectation. Names used are obviously-synthetic demo placeholders.
 
 Idempotent / safe to re-run:
-- CRM entities (crm_industry/crm_account/.../crm_opportunity) have NO
-  tenant_id column in database-schema.sql, so they're keyed by deterministic
-  uuid5 ids (derived from a fixed demo string) and upserted via
-  ``ON CONFLICT (pk) DO UPDATE``.
+- CRM entities (crm_industry/crm_account/.../crm_opportunity) are
+    tenant-scoped in database-schema.sql and use deterministic uuid5 ids (derived
+    from a fixed demo string) for idempotent upserts via ``ON CONFLICT (pk) DO
+    UPDATE``.
 - ``cdp_relation_types`` is upserted via ``ON CONFLICT (code) DO NOTHING``.
 - Every tenant-scoped table seeded here (cdp_relations, crm_customer_contacts,
   crm_transactions) is reset before reinserting.
-- ``graph_edges`` has no tenant_id either -- demo rows are tagged
-  ``metadata->>'demo_tenant' = DEMO_TENANT_ID`` and reset via that filter.
+- ``graph_edges`` is tenant-scoped -- demo rows carry
+    ``tenant_id = DEMO_TENANT_ID`` and are tagged
+    ``metadata->>'demo_tenant' = DEMO_TENANT_ID`` for reset filtering.
 - ``cdp_master_profiles`` enrichment is a plain UPDATE keyed by
   ``master_profile_id`` -- naturally idempotent (re-running just recomputes
   the same deterministic values, since every generator below is seeded from
@@ -1353,23 +1355,31 @@ def seed_graph_edges(cursor, crm_ids: dict, master_profiles: list) -> None:
         cursor.execute(
             f"""
             INSERT INTO {_table('graph_edges')}
-                (from_id, to_id, from_type, to_type, relation, description, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s);
+                (tenant_id, from_id, to_id, from_type, to_type, relation, description, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
             """,
-            (from_id, to_id, from_type, to_type, relation, f"Demo edge: {from_type} -{relation}-> {to_type}.", metadata),
+            (
+                DEMO_TENANT_ID,
+                from_id,
+                to_id,
+                from_type,
+                to_type,
+                relation,
+                f"Demo edge: {from_type} -{relation}-> {to_type}.",
+                metadata,
+            ),
         )
 
 
 # crm_contact <-> cdp_master_profiles are two SEPARATE domains in
-# database-schema.sql -- crm_contact has no tenant_id/master_profile_id
-# column at all, and cdp_master_profiles has nothing pointing back to
-# crm_contact. There is NO natural FK/shared key between them (see the
-# discussion in the session this was added). The only schema-supported way to
-# express "this resolved consumer profile is ALSO this B2B contact/decision-
-# maker" is the generic graph_edges table -- which is exactly the join key
-# this function seeds, in both directions (a graph_edges row, plus a
-# denormalized cross-reference id on each side for quick lookups without a
-# graph_edges join).
+# database-schema.sql -- crm_contact is tenant-scoped but has no
+# master_profile_id column, and cdp_master_profiles has nothing pointing back
+# to crm_contact. There is NO natural FK/shared key between them. The only
+# schema-supported way to express "this resolved consumer profile is ALSO this
+# B2B contact/decision-maker" is the generic graph_edges table -- which is
+# exactly the join key this function seeds, in both directions (a graph_edges
+# row, plus a denormalized cross-reference id on each side for quick lookups
+# without a graph_edges join).
 CONTACT_MASTER_LINK_ACCOUNTS = (
     # (account_name, contact_defs index, domain, master_profiles index within that domain)
     ("education_account_1", 0, "education", 0),
@@ -1423,11 +1433,16 @@ def link_crm_contacts_to_master_profiles(cursor, crm_ids: dict, master_profiles:
         cursor.execute(
             f"""
             INSERT INTO {_table('graph_edges')}
-                (from_id, to_id, from_type, to_type, relation, description, metadata)
-            VALUES (%s, %s, 'cdp_master_profiles', 'crm_contact', 'is_active_as', %s, %s);
+                (tenant_id, from_id, to_id, from_type, to_type, relation, description, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
             """,
             (
-                master_id, contact_id,
+                DEMO_TENANT_ID,
+                master_id,
+                contact_id,
+                "cdp_master_profiles",
+                "crm_contact",
+                "is_active_as",
                 f"This resolved consumer profile is also the B2B contact/decision-maker at {account_name}.",
                 metadata,
             ),

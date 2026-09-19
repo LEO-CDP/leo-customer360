@@ -377,32 +377,6 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GEMINI_MODEL", "gemini_model"),
     )
 
-    # --- Zalo OA (ZNS) outbound channel ---------------------------------
-    # OA config/tokens are stored per-tenant in sys_data_source (slug='zalo-oa');
-    # only the app-level credentials + endpoints live here. Endpoints are
-    # verify-against-current-Zalo-OA-docs defaults.
-    crm_zalo_oa_app_id: str = Field(
-        default="", validation_alias=AliasChoices("CRM_ZALO_OA_APP_ID", "crm_zalo_oa_app_id")
-    )
-    crm_zalo_oa_app_secret: str = Field(
-        default="", validation_alias=AliasChoices("CRM_ZALO_OA_APP_SECRET", "crm_zalo_oa_app_secret")
-    )
-    crm_zalo_oa_api_base_url: str = Field(
-        default="https://openapi.zalo.me",
-        validation_alias=AliasChoices("CRM_ZALO_OA_API_BASE_URL", "crm_zalo_oa_api_base_url"),
-    )
-    crm_zalo_oauth_authorize_url: str = Field(
-        default="https://oauth.zaloapp.com/v4/oa/permission",
-        validation_alias=AliasChoices("CRM_ZALO_OAUTH_AUTHORIZE_URL", "crm_zalo_oauth_authorize_url"),
-    )
-    crm_zalo_oa_token_url: str = Field(
-        default="https://oauth.zaloapp.com/v4/oa/access_token",
-        validation_alias=AliasChoices("CRM_ZALO_OA_TOKEN_URL", "crm_zalo_oa_token_url"),
-    )
-    crm_zalo_oauth_redirect_uri: str = Field(
-        default="", validation_alias=AliasChoices("CRM_ZALO_OAUTH_REDIRECT_URI", "crm_zalo_oauth_redirect_uri")
-    )
-
     @property
     def database_url(self) -> str:
         return (
