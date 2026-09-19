@@ -161,7 +161,7 @@ def test_events_route_returns_not_found_for_invalid_or_inactive_source():
     class InvalidSourceRepository(FakeRepository):
         @staticmethod
         def _raise_invalid_source():
-            from core.repositories.event_query_repository import EventDataSourceError
+            from leo_customer360_dao.repositories.event_query_repository import EventDataSourceError
 
             raise EventDataSourceError(
                 "Data source is invalid, inactive, or not owned by the tenant"

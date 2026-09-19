@@ -16,11 +16,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from core.database import get_db
-from core.models.crm import Account, Campaign, CampaignMember, Contact, Industry, Lead, LeadSource, Opportunity
+from leo_customer360_dao.models.crm import Account, Campaign, CampaignMember, Contact, Industry, Lead, LeadSource, Opportunity
 from core.repositories.campaign_draft_repository import APPROVAL_STATUS_APPROVED, CampaignDraftRepository
-from core.repositories.campaign_repository import CampaignRepository
+from leo_customer360_dao.repositories.campaign_repository import CampaignRepository
 from core.routers._generic import build_crud_router
-from core.schemas.crm import (
+from leo_customer360_dao.schemas.crm import (
     AccountCreate,
     AccountRead,
     AccountUpdate,

@@ -15,8 +15,8 @@ from fastapi.testclient import TestClient
 
 import core.repositories.metadata_repository as mr
 from core.database import get_db
-from core.models.identity import CdpScoringModel
-from core.models.system import SysDataSource
+from leo_customer360_dao.models.identity import CdpScoringModel
+from leo_customer360_dao.models.system import SysDataSource
 from core.routers.metadata_api import all_metadata_routers
 
 

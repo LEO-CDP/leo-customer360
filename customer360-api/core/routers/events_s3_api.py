@@ -8,14 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response
-from core.config import settings
+from leo_customer360_dao.config import settings
 from core.database import get_db
-from core.repositories.event_query_repository import (
+from leo_customer360_dao.repositories.event_query_repository import (
     EventDataSourceError,
     EventQueryError,
     EventQueryRepository,
 )
-from core.schemas.event_query import EventDeviceTypeVolumeRead, EventVolumeRead
+from leo_customer360_dao.schemas.event_query import EventDeviceTypeVolumeRead, EventVolumeRead
 
 router = APIRouter(prefix="/events", tags=["Behavioral Events"])
 

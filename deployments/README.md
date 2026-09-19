@@ -120,6 +120,25 @@ each environment **pull that same immutable image by tag** — instead of rebuil
 > automatically after CI succeeds (`main` commit whose title contains `--deploy-uat` → uat;
 > a `vX.Y.Z` tag → prod).
 
+### Customer 360 DAO image dependency
+
+The API and Dagster images install the checked-out `customer360-dao` source
+before installing their service requirements. Their CI and Compose builds use
+the repository root as the Docker build context, while the Dockerfile remains
+under the service directory. The `BUILD_LOCAL=1` fallback follows the same rule:
+
+- `server/deploy-api.sh` ships `customer360-api/` and `customer360-dao/`, then
+  builds with `customer360-api/Dockerfile` from `/opt/c360`.
+- `server/deploy-backend.sh` ships `backend-system/` and `customer360-dao/`,
+  then builds with `backend-system/Dockerfile` from `/opt/c360`.
+
+This avoids requiring an unpublished package on the VM or in CI. Once a DAO
+release is published to the configured Python package index, the bare
+`leo-customer360-dao` requirement remains satisfied by the pre-installed local
+distribution. Do not change these builds back to service-only contexts unless
+the Dockerfiles are also changed to obtain the package from a trusted package
+index.
+
 ### 1 · What CI publishes to GHCR
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) tests each changed service, builds its

@@ -3,7 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from core.models.system import SysDomain
+from leo_customer360_dao.models.system import SysDomain
 
 
 def get_active_domain_codes(db: Session) -> set[str]:

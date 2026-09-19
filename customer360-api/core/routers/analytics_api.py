@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from redis.exceptions import RedisError
 
 from core.cache import get_redis_client
-from core.config import settings
+from leo_customer360_dao.config import settings
 from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 
 logger = logging.getLogger(__name__)

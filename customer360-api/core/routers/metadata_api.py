@@ -11,10 +11,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from core.config import settings
+from leo_customer360_dao.config import settings
 from core.database import get_db
-from core.models.identity import CdpScoringModel
-from core.models.system import SysDataSource
+from leo_customer360_dao.models.identity import CdpScoringModel
+from leo_customer360_dao.models.system import SysDataSource
 from core.repositories.metadata_repository import (
     DEFAULT_TENANT_ID,
     MetadataConflictError,
@@ -22,7 +22,7 @@ from core.repositories.metadata_repository import (
     MetadataRepository,
     MetadataRepositoryError,
 )
-from core.schemas.system import (
+from leo_customer360_dao.schemas.system import (
     DataSourceCreate,
     DataSourceRead,
     DataSourceUpdate,

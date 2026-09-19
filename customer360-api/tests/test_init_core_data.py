@@ -17,7 +17,7 @@ from core.init_core_data import (
     seed_default_segments,
     seed_default_segments_with_breakdown,
 )
-from tests.conftest import FakeDBSession
+from conftest import FakeDBSession
 
 
 class _AllResult:

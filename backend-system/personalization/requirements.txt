@@ -6,3 +6,4 @@ python-dotenv>=1.0,<2
 pytest>=7.4,<9
 polars>=1.0,<2
 dagster-polars
+leo-customer360-dao

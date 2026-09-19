@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 
 from core.auth import auth_middleware
-from tests.conftest import FakeDBSession, FakeQueryResult, FakeRedis
+from conftest import FakeDBSession, FakeQueryResult, FakeRedis
 
 
 def _build_app():
@@ -254,7 +254,7 @@ class AuthMiddlewareTests(unittest.TestCase):
         self.assertEqual(response.json()["detail"], "Invalid or expired dev token")
 
     def test_dev_mode_accepts_valid_dev_token(self):
-        from core.utils.security import create_dev_access_token
+        from leo_customer360_dao.utils.security import create_dev_access_token
 
         client = TestClient(_build_app())
         token, _ = create_dev_access_token(

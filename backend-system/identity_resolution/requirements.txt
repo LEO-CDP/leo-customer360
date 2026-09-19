@@ -7,3 +7,4 @@ redis>=5.0,<6
 google-genai>=2.14.0
 pydantic>=2,<3
 dagster>=1.9,<2
+leo-customer360-dao

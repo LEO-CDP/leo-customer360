@@ -11,10 +11,10 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from core.config import settings
+from leo_customer360_dao.config import settings
 from core.database import get_db
-from core.repositories.graph_repository import GraphRepository
-from core.schemas.graph import GraphEdgeCreate, GraphEdgeRead
+from leo_customer360_dao.repositories.graph_repository import GraphRepository
+from leo_customer360_dao.schemas.graph import GraphEdgeCreate, GraphEdgeRead
 
 router = APIRouter(prefix="/graph-edges", tags=["Graph"])
 

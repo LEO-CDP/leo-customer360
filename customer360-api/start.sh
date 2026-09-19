@@ -84,6 +84,9 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 # Install requirements
 ###############################################################################
 
+log "${GREEN}[DEPS] Installing local leo-customer360-dao checkout${NC}"
+"$VENV_PYTHON" -m pip install -q --no-deps --upgrade ../customer360-dao
+
 log "[DEPS] Installing requirements..."
 "$VENV_PYTHON" -m pip install -q -r requirements.txt
 log "${GREEN}[DEPS] Requirements ready${NC}"

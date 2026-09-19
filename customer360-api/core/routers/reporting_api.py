@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 
 from core.cache import cache_response
 from core.database import get_db
-from core.repositories.reporting_respository import ReportingRepository
-from core.schemas.reporting import CirSummary, DuplicateMasterProfile, IdentityGraphCoverage
+from leo_customer360_dao.repositories.reporting_respository import ReportingRepository
+from leo_customer360_dao.schemas.reporting import CirSummary, DuplicateMasterProfile, IdentityGraphCoverage
 
 router = APIRouter(prefix="/reporting", tags=["Identity Resolution - Reporting"])
 

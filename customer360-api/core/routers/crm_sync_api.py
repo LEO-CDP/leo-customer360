@@ -2,7 +2,7 @@
 
 Exposes ``POST /api/v1/admin/crm/sync-segment/{segment_id}`` -- recompute one
 segment and route its members into the ``crm_*`` tables by lifecycle stage (see
-``core.crud.crm_sync``) -- plus read-only audit endpoints over
+``leo_customer360_dao.crud.crm_sync``) -- plus read-only audit endpoints over
 ``crm_segment_sync_runs`` for the "audit evidence" the flow requires.
 
 Every route is tenant-scoped: the segment (and every write) is bound to the
@@ -19,11 +19,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.auth import require_tenant, require_tenant_admin
-from core.crud.crm_sync import sync_segment_to_crm
+from leo_customer360_dao.crud.crm_sync import sync_segment_to_crm
 from core.database import get_db
-from core.models.crm import SegmentSyncRun
-from core.repositories.segment_respository import SegmentRepository
-from core.schemas.crm import SegmentCrmSyncResponse, SegmentSyncRunRead
+from leo_customer360_dao.models.crm import SegmentSyncRun
+from leo_customer360_dao.repositories.segment_respository import SegmentRepository
+from leo_customer360_dao.schemas.crm import SegmentCrmSyncResponse, SegmentSyncRunRead
 
 logger = logging.getLogger(__name__)
 

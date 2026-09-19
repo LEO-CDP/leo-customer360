@@ -11,12 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
-from core.config import settings
-from core.crud import identity as identity_crud
-from core.crud import profile360 as profile360_crud
-from core.crud.base import CRUDBase
+from leo_customer360_dao.config import settings
+from leo_customer360_dao.crud import identity as identity_crud
+from leo_customer360_dao.crud import profile360 as profile360_crud
+from leo_customer360_dao.crud.base import CRUDBase
 from core.database import get_db
-from core.models.identity import (
+from leo_customer360_dao.models.identity import (
     CdpCustomerPersona,
     CdpDomainProfile,
     CdpIdentityIndex,
@@ -28,9 +28,9 @@ from core.models.identity import (
     CdpProfileMergeHistory,
     CdpRawProfileStage,
 )
-from core.models.system import SysDomain
+from leo_customer360_dao.models.system import SysDomain
 from core.routers._generic import build_crud_router
-from core.schemas.identity import (
+from leo_customer360_dao.schemas.identity import (
     DomainAttributeUpsert,
     DomainProfileCreate,
     DomainProfileRead,
@@ -58,7 +58,7 @@ from core.schemas.identity import (
     RawProfileRead,
     RawProfileUpdate,
 )
-from core.schemas.profile360 import ChannelActivity, EngagementSummary, TimelineEntry, TopInterest
+from leo_customer360_dao.schemas.profile360 import ChannelActivity, EngagementSummary, TimelineEntry, TopInterest
 from core.utils.domains import validate_domain_value
 
 # --- Master Profiles ---------------------------------------------------------

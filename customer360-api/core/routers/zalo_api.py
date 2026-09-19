@@ -15,9 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from core.auth import require_tenant, require_tenant_admin
-from core.crud import zalo_oa, zalo_templates
+from leo_customer360_dao.crud import zalo_oa, zalo_templates
 from core.database import get_db
-from core.schemas.crm import EmailTemplateRead, ZaloOaConfigRead, ZaloOauthUrlResponse
+from leo_customer360_dao.schemas.crm import MessageTemplateRead, ZaloOaConfigRead, ZaloOauthUrlResponse
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ def sync_zns_templates(request: Request, db: Session = Depends(get_db)) -> dict:
     )
 
 
-@zalo_router.get("/templates", response_model=list[EmailTemplateRead])
+@zalo_router.get("/templates", response_model=list[MessageTemplateRead])
 def list_zns_templates(request: Request, db: Session = Depends(get_db)):
     """The tenant's synced ZNS templates (name, status, quality, id, params)."""
     tenant_id = require_tenant(request)
@@ -75,7 +75,7 @@ def list_zns_templates(request: Request, db: Session = Depends(get_db)):
     return zalo_templates.list_templates(db, uuid.UUID(tenant_id))
 
 
-@zalo_router.get("/templates/{template_id}", response_model=EmailTemplateRead)
+@zalo_router.get("/templates/{template_id}", response_model=MessageTemplateRead)
 def get_zns_template(template_id: uuid.UUID, request: Request, db: Session = Depends(get_db)):
     """One ZNS template's full content (params/preview) for the "view content" UI."""
     tenant_id = require_tenant(request)

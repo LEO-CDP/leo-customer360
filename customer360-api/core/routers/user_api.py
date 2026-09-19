@@ -16,9 +16,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 
 from core.database import SessionLocal
-from core.models.system import SysUser
-from core.repositories.user_repository import UserRepository
-from core.schemas.user import UserCreate, UserUpdate, UserResponse, UserListResponse
+from leo_customer360_dao.models.system import SysUser
+from leo_customer360_dao.repositories.user_repository import UserRepository
+from leo_customer360_dao.schemas.user import UserCreate, UserUpdate, UserResponse, UserListResponse
 
 
 router = APIRouter(prefix="/users", tags=["Users"])

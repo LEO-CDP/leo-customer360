@@ -26,10 +26,10 @@ from core.ai_providers.campaign_planner import (
     generate_campaign_plan,
     generate_zalo_campaign_plan,
 )
-from core.models.content import CdpContentItem
-from core.models.crm import Campaign, CampaignContentItem, CampaignReview, MessageTemplate
-from core.models.system import SysAuditLog
-from core.repositories.segment_respository import SegmentRepository
+from leo_customer360_dao.models.content import CdpContentItem
+from leo_customer360_dao.models.crm import Campaign, CampaignContentItem, CampaignReview, MessageTemplate
+from leo_customer360_dao.models.system import SysAuditLog
+from leo_customer360_dao.repositories.segment_respository import SegmentRepository
 
 APPROVAL_STATUS_DRAFT = "Draft"
 APPROVAL_STATUS_IN_REVIEW = "InReview"

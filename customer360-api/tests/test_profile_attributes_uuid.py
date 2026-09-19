@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.database import get_db
-from core.schemas.identity import ProfileAttributeRead
+from leo_customer360_dao.schemas.identity import ProfileAttributeRead
 
 
 class FakeProfileAttributeCRUD:

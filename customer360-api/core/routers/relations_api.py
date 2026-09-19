@@ -10,10 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from core.cache import cache_response, invalidate_prefix
-from core.config import settings
+from leo_customer360_dao.config import settings
 from core.database import get_db
-from core.repositories.relations_repository import RelationsRepository
-from core.schemas.relations import (
+from leo_customer360_dao.repositories.relations_repository import RelationsRepository
+from leo_customer360_dao.schemas.relations import (
     CdpRelationCreate,
     CdpRelationRead,
     CdpRelationUpdate,

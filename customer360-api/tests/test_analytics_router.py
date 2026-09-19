@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.config import settings
+from leo_customer360_dao.config import settings
 from core.routers.analytics_api import analytics_router
 from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 

@@ -9,7 +9,7 @@ import urllib.request
 from urllib.parse import quote, urlencode
 
 from core.ai_providers.base import AIProvider, AIProviderError
-from core.config import settings
+from leo_customer360_dao.config import settings
 
 _GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 _REQUEST_TIMEOUT_SECONDS = 30

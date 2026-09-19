@@ -17,7 +17,7 @@ import pytest
 
 # Reuse the engine's own deterministic-key + routing helpers so the test computes
 # the exact PKs the sync writes (and thus can delete precisely).
-from core.crud.crm_sync import (
+from leo_customer360_dao.crud.crm_sync import (
     DEFAULT_LEAD_SOURCE_NAME,
     _clean,
     _deterministic_id,

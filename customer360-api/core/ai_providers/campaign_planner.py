@@ -16,7 +16,7 @@ from typing import Any, Optional
 from core.ai_providers.base import AIProvider, AIProviderError, parse_json_object
 from core.ai_providers.gemini_provider import GeminiProvider
 from core.ai_providers.openai_provider import OpenAIProvider
-from core.config import settings
+from leo_customer360_dao.config import settings
 
 _PROVIDERS: dict[str, type[AIProvider]] = {
     "gemini": GeminiProvider,

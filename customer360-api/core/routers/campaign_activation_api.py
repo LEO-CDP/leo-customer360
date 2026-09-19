@@ -19,10 +19,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.auth import require_tenant, require_tenant_admin
-from core.crud.email_provider import get_active_config, upsert_config
+from leo_customer360_dao.crud.email_provider import get_active_config, upsert_config
 from core.database import get_db
-from core.models.crm import Campaign, CampaignDispatchLog, EmailProviderConfig
-from core.schemas.crm import (
+from leo_customer360_dao.models.crm import Campaign, CampaignDispatchLog, EmailProviderConfig
+from leo_customer360_dao.schemas.crm import (
     CampaignActivationResponse,
     CampaignDispatchLogRead,
     EmailProviderConfigRead,
