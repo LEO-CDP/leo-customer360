@@ -1,4 +1,4 @@
-"""Event-envelope parsing and profile staging operations."""
+"""Event-envelope parsing and raw-profile extraction."""
 
 import gzip
 import json
@@ -165,6 +165,13 @@ class EventRecordService:
         identity = record.get("identity")
         if not isinstance(identity, dict):
             identity = {}
+        address = payload.get("address")
+        if not isinstance(address, dict):
+            address = {}
+        anonymous_id = self.identity_value(identity, payload, "anonymous_id")
+        session_id = self.identity_value(identity, payload, "session_id") or self.text_value(
+            payload.get("sessionKey")
+        )
 
         return {
             "event_id": event_id,
@@ -181,15 +188,52 @@ class EventRecordService:
             "raw_profile_id": self.text_value(payload.get("raw_profile_id")),
             "external_customer_id": self.identity_value(
                 identity, payload, "external_customer_id"
+            )
+            or anonymous_id,
+            "anonymous_id": anonymous_id,
+            "device_fingerprint": self.identity_value(
+                identity, payload, "device_fingerprint"
             ),
+            "full_name": self.identity_value(identity, payload, "full_name"),
+            "first_name": self.identity_value(identity, payload, "first_name"),
+            "last_name": self.identity_value(identity, payload, "last_name"),
             "email": self.identity_value(identity, payload, "email"),
             "phone_number": self.identity_value(identity, payload, "phone_number"),
+            "national_id": self.identity_value(identity, payload, "national_id"),
+            "date_of_birth": self.identity_value(identity, payload, "date_of_birth"),
+            "address_line1": self.text_value(
+                address.get("address_line1") or address.get("line1") or payload.get("address_line1")
+            ),
+            "address_line2": self.text_value(
+                address.get("address_line2") or address.get("line2") or payload.get("address_line2")
+            ),
+            "city": self.text_value(address.get("city") or payload.get("city")),
+            "state_province": self.text_value(
+                address.get("state_province")
+                or address.get("state")
+                or payload.get("state_province")
+            ),
+            "postal_code": self.text_value(
+                address.get("postal_code") or address.get("zip") or payload.get("postal_code")
+            ),
+            "country": self.text_value(address.get("country") or payload.get("country")),
+            "company_name": self.identity_value(identity, payload, "company_name"),
             "device_id": self.identity_value(identity, payload, "device_id"),
             "advertising_id": self.identity_value(identity, payload, "advertising_id"),
             "cookie_id": self.identity_value(identity, payload, "cookie_id"),
-            "session_id": self.identity_value(identity, payload, "session_id"),
-            "channel": self.text_value(payload.get("channel")),
+            "session_id": session_id,
             "platform": self.text_value(payload.get("platform")),
+            "app_version": self.text_value(payload.get("app_version")),
+            "push_token": self.text_value(payload.get("push_token")),
+            "ga_client_id": self.text_value(payload.get("ga_client_id")),
+            "ip_address": self.text_value(payload.get("ip_address")),
+            "user_agent": self.text_value(payload.get("user_agent")),
+            "media_source": self.text_value(payload.get("media_source")),
+            "campaign": self.text_value(payload.get("campaign")),
+            "utm_source": self.text_value(payload.get("utm_source")),
+            "utm_medium": self.text_value(payload.get("utm_medium")),
+            "utm_campaign": self.text_value(payload.get("utm_campaign")),
+            "channel": self.text_value(payload.get("channel")),
             "event_category": event_category,
             "event_name": event_name,
             "event_dedup_key": self.text_value(
@@ -339,8 +383,8 @@ class EventRecordService:
         )
         return total_tracked_event, avg_daily_event, avg_events_per_profile
 
-    def upsert_raw_profile(self, cursor: Any, event: dict[str, Any]) -> str:
-        """Upsert one deterministic raw profile from a normalized event."""
+    def extract_raw_profile(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Extract the DAO raw-stage contract from one normalized event."""
         identity_pairs = (
             ("external_customer_id", event.get("external_customer_id")),
             ("email", event.get("email")),
@@ -361,56 +405,44 @@ class EventRecordService:
             )
         )
         event["raw_profile_id"] = raw_profile_id
-        try:
-            from psycopg2.extras import Json
-
-            json_payload: Any = Json(event["payload"])
-        except ImportError:
-            json_payload = json.dumps(event["payload"], ensure_ascii=False)
-        cursor.execute(
-            f"""
-            INSERT INTO {self.db_schema}.cdp_raw_profiles_stage (
-                raw_profile_id, tenant_id, domain, source_system, channel,
-                external_customer_id, email, phone_number, device_id,
-                advertising_id, cookie_id, session_id, event_name, event_time,
-                event_payload, status_code, processed_at
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, 1, NULL
-            )
-            ON CONFLICT (raw_profile_id) DO UPDATE SET
-                domain = EXCLUDED.domain,
-                source_system = EXCLUDED.source_system,
-                channel = EXCLUDED.channel,
-                external_customer_id = EXCLUDED.external_customer_id,
-                email = EXCLUDED.email,
-                phone_number = EXCLUDED.phone_number,
-                device_id = EXCLUDED.device_id,
-                advertising_id = EXCLUDED.advertising_id,
-                cookie_id = EXCLUDED.cookie_id,
-                session_id = EXCLUDED.session_id,
-                event_name = EXCLUDED.event_name,
-                event_time = EXCLUDED.event_time,
-                event_payload = EXCLUDED.event_payload,
-                status_code = 1,
-                processed_at = NULL
-            """,
-            (
-                raw_profile_id,
-                event["tenant_id"],
-                event["domain"],
-                event["source_system"],
-                event.get("channel"),
-                event.get("external_customer_id"),
-                event.get("email"),
-                event.get("phone_number"),
-                event.get("device_id"),
-                event.get("advertising_id"),
-                event.get("cookie_id"),
-                event.get("session_id"),
-                event["event_name"],
-                event["event_time"],
-                json_payload,
-            ),
-        )
-        return raw_profile_id
+        return {
+            "raw_profile_id": raw_profile_id,
+            "tenant_id": event["tenant_id"],
+            "data_source_id": event["data_source_id"],
+            "domain": event["domain"],
+            "source_system": event["source_system"],
+            "channel": event.get("channel"),
+            "external_customer_id": event.get("external_customer_id"),
+            "full_name": event.get("full_name"),
+            "first_name": event.get("first_name"),
+            "last_name": event.get("last_name"),
+            "email": event.get("email"),
+            "phone_number": event.get("phone_number"),
+            "national_id": event.get("national_id"),
+            "date_of_birth": event.get("date_of_birth"),
+            "address_line1": event.get("address_line1"),
+            "address_line2": event.get("address_line2"),
+            "city": event.get("city"),
+            "state_province": event.get("state_province"),
+            "postal_code": event.get("postal_code"),
+            "country": event.get("country"),
+            "company_name": event.get("company_name"),
+            "device_id": event.get("device_id"),
+            "advertising_id": event.get("advertising_id"),
+            "platform": event.get("platform"),
+            "app_version": event.get("app_version"),
+            "push_token": event.get("push_token"),
+            "cookie_id": event.get("cookie_id"),
+            "ga_client_id": event.get("ga_client_id"),
+            "session_id": event.get("session_id"),
+            "ip_address": event.get("ip_address"),
+            "user_agent": event.get("user_agent"),
+            "media_source": event.get("media_source"),
+            "campaign": event.get("campaign"),
+            "utm_source": event.get("utm_source"),
+            "utm_medium": event.get("utm_medium"),
+            "utm_campaign": event.get("utm_campaign"),
+            "event_name": event["event_name"],
+            "event_time": event["event_time"],
+            "event_payload": event["payload"],
+        }

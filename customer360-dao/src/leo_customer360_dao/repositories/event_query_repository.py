@@ -2,6 +2,7 @@
 
 import gzip
 import json
+import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Iterator, Optional
@@ -16,7 +17,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from leo_customer360_dao.config import Settings
+from leo_customer360_dao.cache import get_redis_client
 from leo_customer360_dao.models.system import SysDataSource
+
+logger = logging.getLogger(__name__)
+_PROFILE_EVENT_COUNT_READY_FIELD = "__ready__"
 
 
 class EventQueryError(RuntimeError):
@@ -190,6 +195,108 @@ class EventQueryRepository:
                 counts.items(), key=lambda item: (-item[1], item[0])
             )
         ]
+
+    def query_profile_event_counts(
+        self,
+        db: Session,
+        tenant_id: UUID,
+        profile_ids: Iterable[UUID],
+        *,
+        data_source_id: Optional[UUID] = None,
+        days: Optional[int] = None,
+    ) -> dict[UUID, int]:
+        """Count tracked events for a page of master profiles in one scan."""
+        requested_ids = {str(profile_id) for profile_id in profile_ids}
+        if not requested_ids:
+            return {}
+        requested_id_list = list(requested_ids)
+
+        bounded_days = min(
+            max(1, int(days if days is not None else self.settings.event_query_max_days)),
+            max(1, int(self.settings.event_query_max_days)),
+        )
+        cache_key = self._profile_event_count_cache_key(
+            tenant_id,
+            data_source_id,
+            bounded_days,
+        )
+        cached_counts = self._read_profile_event_count_cache(cache_key, requested_id_list)
+        if cached_counts is not None:
+            return cached_counts
+
+        lower_bound, upper_bound = self._query_bounds(
+            None,
+            bounded_days,
+        )
+        counts: Counter[str] = Counter()
+        for row, _event_time in self._iter_filtered_rows(
+            db,
+            tenant_id,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            master_profile_id=None,
+            domain=None,
+            channel=None,
+            event_category=None,
+            event_name=None,
+            data_source_id=data_source_id,
+        ):
+            master_profile_id = row.get("master_profile_id")
+            if master_profile_id is not None and str(master_profile_id) in requested_ids:
+                counts[str(master_profile_id)] += 1
+
+        self._write_profile_event_count_cache(cache_key, counts)
+        return {
+            UUID(profile_id): counts.get(profile_id, 0)
+            for profile_id in requested_id_list
+        }
+
+    @staticmethod
+    def _profile_event_count_cache_key(
+        tenant_id: UUID,
+        data_source_id: Optional[UUID],
+        days: int,
+    ) -> str:
+        source_key = str(data_source_id) if data_source_id is not None else "all"
+        return f"c360:event-profile-counts:{tenant_id}:{source_key}:{days}"
+
+    @staticmethod
+    def _read_profile_event_count_cache(
+        cache_key: str,
+        profile_ids: list[str],
+    ) -> Optional[dict[UUID, int]]:
+        client = get_redis_client()
+        if client is None:
+            return None
+        try:
+            if not client.hget(cache_key, _PROFILE_EVENT_COUNT_READY_FIELD):
+                return None
+            values = client.hmget(cache_key, profile_ids)
+            return {
+                UUID(profile_id): int(value or 0)
+                for profile_id, value in zip(profile_ids, values)
+            }
+        except Exception:  # noqa: BLE001 - cache failures must not break reads
+            logger.debug("Could not read profile event-count cache", exc_info=True)
+            return None
+
+    def _write_profile_event_count_cache(
+        self,
+        cache_key: str,
+        counts: Counter[str],
+    ) -> None:
+        client = get_redis_client()
+        if client is None:
+            return
+        try:
+            mapping = {
+                _PROFILE_EVENT_COUNT_READY_FIELD: "1",
+                **{profile_id: str(count) for profile_id, count in counts.items()},
+            }
+            client.hset(cache_key, mapping=mapping)
+            client.expire(cache_key, self.settings.cache_ttl_seconds)
+        except Exception:  # noqa: BLE001 - cache failures must not break reads
+            logger.debug("Could not write profile event-count cache", exc_info=True)
 
     def _aggregate_event_counts(
         self,

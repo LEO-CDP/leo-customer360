@@ -133,6 +133,7 @@ class MasterProfileRead(MasterProfileBase):
     model_config = ConfigDict(from_attributes=True)
     master_profile_id: uuid.UUID
     linked_raw_profile_count: int = 0
+    total_tracked_events: int = 0
     status_code: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -154,6 +155,7 @@ class MasterProfileListResponse(BaseModel):
 
 class RawProfileBase(BaseModel):
     tenant_id: uuid.UUID
+    data_source_id: Optional[uuid.UUID] = None
     user_id: Optional[uuid.UUID] = None
     domain: str = Field(default="retail")
     source_system: str

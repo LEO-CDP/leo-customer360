@@ -223,8 +223,15 @@ def read_normalized_event_records(
     )
 
 
-def upsert_raw_profile(cursor: Any, event: dict[str, Any]) -> str:
-    return EventRecordService(DB_SCHEMA).upsert_raw_profile(cursor, event)
+def extract_raw_profile(event: dict[str, Any]) -> dict[str, Any]:
+    return EventRecordService(DB_SCHEMA).extract_raw_profile(event)
+
+
+def upsert_raw_profile(raw_profile_repository: Any, event: dict[str, Any]) -> str:
+    """Persist one normalized event through the shared DAO repository."""
+    raw_profile = extract_raw_profile(event)
+    raw_profile_repository.upsert_raw_profile(raw_profile)
+    return raw_profile["raw_profile_id"]
 
 
 def _source_lock_key(data_source_id: str) -> str:
@@ -312,6 +319,8 @@ def process_tracking_logs(
     s3_client: Optional[Any] = None,
     redis_client: Optional[Any] = None,
     db_connection: Optional[Any] = None,
+    dao_session_factory: Optional[Callable[[str], Any]] = None,
+    raw_profile_repository_factory: Optional[Callable[[Any], Any]] = None,
     data_source_limit: int = DATA_SOURCE_LIMIT,
     run_id: Optional[str] = None,
     log: Optional[Callable[..., None]] = None,
@@ -335,6 +344,8 @@ def process_tracking_logs(
         db_connection=db_connection,
         source_loader=fetch_data_sources,
         database_connector=client_factory.connect_database,
+        dao_session_factory=dao_session_factory,
+        raw_profile_repository_factory=raw_profile_repository_factory,
         run_id=run_id,
         log=log or logger.info,
         clock=current_system_gmt_hour,

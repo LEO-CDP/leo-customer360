@@ -6,7 +6,7 @@ metadata / throttle-status tables consumed by backend-system/identity_resolution
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -59,6 +59,10 @@ from leo_customer360_dao.schemas.identity import (
     RawProfileUpdate,
 )
 from leo_customer360_dao.schemas.profile360 import ChannelActivity, EngagementSummary, TimelineEntry, TopInterest
+from leo_customer360_dao.repositories.event_query_repository import (
+    EventDataSourceError,
+    EventQueryError,
+)
 from core.utils.domains import validate_domain_value
 
 # --- Master Profiles ---------------------------------------------------------
@@ -71,6 +75,7 @@ _master_crud = CRUDBase(CdpMasterProfile)
 @cache_response("master_profiles/list", ttl=settings.cache_ttl_seconds)
 def list_master_profiles(
     tenant_id: Optional[uuid.UUID] = None,
+    data_source_id: Optional[uuid.UUID] = Query(default=None),
     domain: Optional[str] = Query(default=None),
     lifecycle_stage: Optional[str] = Query(
         default=None, pattern="^(prospect|lead|customer|vip|dormant|churn_risk)$"
@@ -100,6 +105,7 @@ def list_master_profiles(
     return identity_crud.list_master_profiles_page(
         db,
         tenant_id=tenant_id,
+        data_source_id=data_source_id,
         domain=domain,
         lifecycle_stage=lifecycle_stage,
         domain_attribute_key=domain_attribute_key,
@@ -362,13 +368,29 @@ def get_master_profile_top_interests(
 @master_profiles_router.get("/{master_profile_id}/timeline", response_model=list[TimelineEntry])
 @cache_response("master_profiles/timeline", ttl=settings.cache_ttl_seconds)
 def get_master_profile_timeline(
-    master_profile_id: uuid.UUID, limit: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db)
+    request: Request,
+    master_profile_id: uuid.UUID,
+    limit: int = Query(default=20, ge=1, le=100),
+    data_source_id: Optional[uuid.UUID] = Query(default=None),
+    db: Session = Depends(get_db),
 ):
     """Unified, most-recent-first activity feed merging behavioral events,
-    transactions, and logged customer service contacts."""
+    transactions, and logged customer service contacts. When ``data_source_id``
+    is supplied, the feed contains only behavioral events from that active,
+    tenant-owned source."""
     if _master_crud.get(db, master_profile_id) is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    return profile360_crud.get_timeline(db, master_profile_id, limit=limit)
+    try:
+        return profile360_crud.get_timeline(
+            db,
+            master_profile_id,
+            limit=limit,
+            data_source_id=data_source_id,
+        )
+    except EventDataSourceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EventQueryError as exc:
+        raise HTTPException(status_code=503, detail="Event lake query failed") from exc
 
 
 @master_profiles_router.post("/", response_model=MasterProfileRead, status_code=201)

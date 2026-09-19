@@ -2,6 +2,7 @@
 
 import gzip
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from types import SimpleNamespace
@@ -72,6 +73,30 @@ class MissingBucketS3(FakeS3):
                 )
 
         return MissingPaginator()
+
+
+class FakeProfileCountCache:
+    def __init__(self):
+        self.hashes = {}
+        self.expiry = {}
+
+    def hget(self, key, field):
+        return self.hashes.get(key, {}).get(field)
+
+    def hmget(self, key, fields):
+        values = self.hashes.get(key, {})
+        return [values.get(field) for field in fields]
+
+    def hset(self, key, mapping):
+        self.hashes.setdefault(key, {}).update(mapping)
+
+    def expire(self, key, seconds):
+        self.expiry[key] = seconds
+
+
+class BrokenProfileCountCache:
+    def hget(self, _key, _field):
+        raise RuntimeError("redis unavailable")
 
 
 def _gzip_envelopes(*envelopes):
@@ -269,3 +294,84 @@ def test_query_rejects_invalid_source_id_from_postgresql_before_s3():
             days=1,
             limit=1000,
         )
+
+
+def test_query_profile_event_counts_groups_events_by_master_profile(monkeypatch):
+    repository = EventQueryRepository(Settings(event_s3_prefix="events"), s3_client=FakeS3(b"", "events/missing.jsonl.gz"))
+    first_profile = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    second_profile = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+    monkeypatch.setattr(
+        repository,
+        "_iter_filtered_rows",
+        lambda *_args, **_kwargs: iter(
+            [
+                ({"master_profile_id": str(first_profile)}, datetime.now(timezone.utc)),
+                ({"master_profile_id": str(first_profile)}, datetime.now(timezone.utc)),
+                ({"master_profile_id": str(second_profile)}, datetime.now(timezone.utc)),
+                ({"master_profile_id": str(uuid.uuid4())}, datetime.now(timezone.utc)),
+            ]
+        ),
+    )
+
+    result = repository.query_profile_event_counts(
+        FakeDb(),
+        TENANT_ID,
+        [first_profile, second_profile],
+        data_source_id=SOURCE_ID,
+    )
+
+    assert result == {first_profile: 2, second_profile: 1}
+
+
+def test_query_profile_event_counts_reuses_cached_aggregate(monkeypatch):
+    settings = Settings(event_s3_prefix="events", event_query_max_days=90)
+    repository = EventQueryRepository(settings, s3_client=FakeS3(b"", "events/missing.jsonl.gz"))
+    profile_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    cache = FakeProfileCountCache()
+    scan_count = 0
+
+    def rows(*_args, **_kwargs):
+        nonlocal scan_count
+        scan_count += 1
+        return iter(
+            [
+                ({"master_profile_id": str(profile_id)}, datetime.now(timezone.utc)),
+            ]
+        )
+
+    monkeypatch.setattr(
+        "leo_customer360_dao.repositories.event_query_repository.get_redis_client",
+        lambda: cache,
+    )
+    monkeypatch.setattr(repository, "_iter_filtered_rows", rows)
+
+    assert repository.query_profile_event_counts(FakeDb(), TENANT_ID, [profile_id]) == {
+        profile_id: 1
+    }
+    assert repository.query_profile_event_counts(FakeDb(), TENANT_ID, [profile_id]) == {
+        profile_id: 1
+    }
+    assert scan_count == 1
+    assert cache.expiry
+
+
+def test_query_profile_event_counts_falls_back_when_redis_fails(monkeypatch):
+    settings = Settings(event_s3_prefix="events", event_query_max_days=90)
+    repository = EventQueryRepository(settings, s3_client=FakeS3(b"", "events/missing.jsonl.gz"))
+    profile_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    monkeypatch.setattr(
+        "leo_customer360_dao.repositories.event_query_repository.get_redis_client",
+        lambda: BrokenProfileCountCache(),
+    )
+    monkeypatch.setattr(
+        repository,
+        "_iter_filtered_rows",
+        lambda *_args, **_kwargs: iter(
+            [({"master_profile_id": str(profile_id)}, datetime.now(timezone.utc))]
+        ),
+    )
+
+    assert repository.query_profile_event_counts(FakeDb(), TENANT_ID, [profile_id]) == {
+        profile_id: 1
+    }

@@ -60,6 +60,7 @@ def _profile_event_rows(
     *,
     days: int,
     limit: int | None,
+    data_source_id: Optional[uuid.UUID] = None,
 ) -> list[dict]:
     tenant_id = db.execute(
         select(CdpMasterProfile.tenant_id).where(
@@ -74,6 +75,7 @@ def _profile_event_rows(
         days=days,
         limit=limit,
         master_profile_id=master_profile_id,
+        data_source_id=data_source_id,
     )
 
 
@@ -215,7 +217,12 @@ def get_top_interests(db: Session, master_profile_id: uuid.UUID, limit: int = 5)
     ]
 
 
-def get_timeline(db: Session, master_profile_id: uuid.UUID, limit: int = 20) -> list[dict]:
+def get_timeline(
+    db: Session,
+    master_profile_id: uuid.UUID,
+    limit: int = 20,
+    data_source_id: Optional[uuid.UUID] = None,
+) -> list[dict]:
     mpid = str(master_profile_id)
 
     events = _profile_event_rows(
@@ -223,31 +230,35 @@ def get_timeline(db: Session, master_profile_id: uuid.UUID, limit: int = 20) -> 
         master_profile_id,
         days=settings.event_query_max_days,
         limit=limit,
+        data_source_id=data_source_id,
     )
 
-    transactions = db.execute(
-        text(
-            f"""
-            SELECT transaction_type, entity_name, amount, currency, channel, transaction_time
-            FROM {_SCHEMA}.crm_transactions
-            WHERE master_profile_id = :mpid
-            ORDER BY transaction_time DESC LIMIT :limit
-            """
-        ),
-        {"mpid": mpid, "limit": limit},
-    ).mappings().all()
+    transactions = []
+    contacts = []
+    if data_source_id is None:
+        transactions = db.execute(
+            text(
+                f"""
+                SELECT transaction_type, entity_name, amount, currency, channel, transaction_time
+                FROM {_SCHEMA}.crm_transactions
+                WHERE master_profile_id = :mpid
+                ORDER BY transaction_time DESC LIMIT :limit
+                """
+            ),
+            {"mpid": mpid, "limit": limit},
+        ).mappings().all()
 
-    contacts = db.execute(
-        text(
-            f"""
-            SELECT contact_type, contact_channel, contact_content, contact_date
-            FROM {_SCHEMA}.crm_customer_contacts
-            WHERE master_profile_id = :mpid
-            ORDER BY contact_date DESC LIMIT :limit
-            """
-        ),
-        {"mpid": mpid, "limit": limit},
-    ).mappings().all()
+        contacts = db.execute(
+            text(
+                f"""
+                SELECT contact_type, contact_channel, contact_content, contact_date
+                FROM {_SCHEMA}.crm_customer_contacts
+                WHERE master_profile_id = :mpid
+                ORDER BY contact_date DESC LIMIT :limit
+                """
+            ),
+            {"mpid": mpid, "limit": limit},
+        ).mappings().all()
 
     entries: list[dict] = []
     for row in events:

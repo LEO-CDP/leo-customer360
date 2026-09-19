@@ -24,7 +24,11 @@ from source_analytics.tracking_log_aggregation import process_tracking_logs  # n
 
 @op(retry_policy=RetryPolicy(max_retries=2, delay=30))
 def aggregate_tracking_logs_op(context: OpExecutionContext) -> dict[str, int]:
-    """Count hourly S3 JSONL logs and update Redis and source totals."""
+    """Stage normalized S3 profiles through the DAO and update source totals.
+
+    The identity-resolution Dagster location consumes the staged rows and
+    creates the tenant/domain-scoped master profile 360 records.
+    """
     context.log.info("analytics job: tracking-log aggregation started")
     summary = process_tracking_logs(run_id=context.run_id, log=context.log.info)
     context.log.info(

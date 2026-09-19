@@ -550,6 +550,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
         }}) as mock_list:
             response = self.client.get(
                 "/master-profiles/?tenant_id=11111111-1111-1111-1111-111111111111"
+                "&data_source_id=22222222-2222-2222-2222-222222222222"
                 "&domain=healthcare&lifecycle_stage=customer&membership_tier=Gold"
                 "&churn_risk_tier=high&linked_raw_profile_count_min=2"
                 "&q=nguyen&page=3&page_size=15&days=30"
@@ -559,6 +560,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
         mock_list.assert_called_once_with(
             self.session,
             tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            data_source_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
             domain="healthcare",
             lifecycle_stage="customer",
             domain_attribute_key=None,
@@ -577,6 +579,29 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
         response = self.client.get("/master-profiles/?domain=finance")
 
         self.assertEqual(response.status_code, 422)
+
+    def test_timeline_forwards_data_source_filter(self):
+        master_profile_id = uuid.uuid4()
+        data_source_id = uuid.uuid4()
+        with (
+            patch.object(identity_router._master_crud, "get", return_value=object()),
+            patch(
+                "core.routers.identity_api.profile360_crud.get_timeline",
+                return_value=[],
+            ) as mock_timeline,
+        ):
+            response = self.client.get(
+                f"/master-profiles/{master_profile_id}/timeline"
+                f"?data_source_id={data_source_id}&limit=8"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_timeline.assert_called_once_with(
+            self.session,
+            master_profile_id,
+            limit=8,
+            data_source_id=data_source_id,
+        )
 
 
 class _ScalarsAllResult:

@@ -10,6 +10,7 @@ section of core-customer360/identity-resolution.md.
 import uuid
 from math import ceil
 from typing import Optional
+from leo_customer360_dao.config import settings
 from leo_customer360_dao.utils.datetime import cutoff_for_days
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
@@ -21,6 +22,10 @@ from leo_customer360_dao.models.identity import (
     CdpPersonaArchetype,
     CdpProfileLink,
     CdpRawProfileStage,
+)
+from leo_customer360_dao.repositories.event_query_repository import (
+    EventQueryError,
+    EventQueryRepository,
 )
 
 STATUS_CODE_LABELS = {
@@ -36,6 +41,7 @@ def list_master_profiles_page(
     db: Session,
     *,
     tenant_id: Optional[uuid.UUID] = None,
+    data_source_id: Optional[uuid.UUID] = None,
     domain: Optional[str] = None,
     lifecycle_stage: Optional[str] = None,
     domain_attribute_key: Optional[str] = None,
@@ -58,6 +64,24 @@ def list_master_profiles_page(
 
     if tenant_id is not None:
         where_clauses.append(CdpMasterProfile.tenant_id == tenant_id)
+    if data_source_id is not None:
+        where_clauses.append(
+            exists(
+                select(1)
+                .select_from(CdpProfileLink)
+                .join(
+                    CdpRawProfileStage,
+                    CdpRawProfileStage.raw_profile_id == CdpProfileLink.raw_profile_id,
+                )
+                .where(
+                    CdpProfileLink.master_profile_id == CdpMasterProfile.master_profile_id,
+                    CdpProfileLink.tenant_id == CdpMasterProfile.tenant_id,
+                    CdpProfileLink.status == "ACTIVE",
+                    CdpRawProfileStage.tenant_id == CdpMasterProfile.tenant_id,
+                    CdpRawProfileStage.data_source_id == data_source_id,
+                )
+            )
+        )
     if domain is not None:
         where_clauses.append(CdpMasterProfile.domain == domain)
     if lifecycle_stage is not None:
@@ -143,8 +167,25 @@ def list_master_profiles_page(
 
     rows = db.execute(list_stmt).all()
     items = []
+    profile_ids = [profile.master_profile_id for profile, _linked_count in rows]
+    event_counts = {}
+    session_tenant_id = tenant_id or getattr(db, "info", {}).get("tenant_id")
+    if profile_ids and session_tenant_id:
+        try:
+            event_counts = EventQueryRepository(settings).query_profile_event_counts(
+                db,
+                uuid.UUID(str(session_tenant_id)),
+                profile_ids,
+                data_source_id=data_source_id,
+                days=settings.event_query_max_days,
+            )
+        except (EventQueryError, ValueError):
+            # Profile browsing remains available when the optional event lake
+            # is unavailable; the response reports zero tracked events.
+            event_counts = {}
     for profile, linked_raw_profile_count in rows:
         profile.linked_raw_profile_count = int(linked_raw_profile_count or 0)
+        profile.total_tracked_events = event_counts.get(profile.master_profile_id, 0)
         items.append(profile)
     total = db.execute(count_stmt).scalar_one()
     total_pages = ceil(total / page_size) if total > 0 else 1

@@ -77,6 +77,7 @@ JSONB_KEYED_IDENTITY_FIELDS = {
 RAW_PROFILE_COLUMNS = (
     "raw_profile_id",
     "tenant_id",
+    "data_source_id",
     "domain",
     "source_system",
     "created_at",

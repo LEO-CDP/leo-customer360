@@ -11,6 +11,10 @@ window.C360 = window.C360 || {};
   var currentProfileId = null;
   var currentContentType = "";
   var timelineLimit = 8;
+  var timelineDataSourceId = "";
+  var timelineDataSourcesLoadedForTenant = null;
+  var timelineDataSourcesLoading = false;
+  var timelineRequestLoading = false;
 
   // Mirrors the sys_domain / validate_domain_value fixed dictionary
   // (customer360-api/core/utils/domains.py) -- used to populate the "Add
@@ -59,6 +63,63 @@ window.C360 = window.C360 || {};
   // shared header one) -- always uses the fixed 90-day default.
   function periodDays() {
     return 90;
+  }
+
+  function timelineRequestParams() {
+    var params = { limit: timelineLimit };
+    if (timelineDataSourceId) params.data_source_id = timelineDataSourceId;
+    return params;
+  }
+
+  function updateTimelineLoadingState() {
+    var requestLoading = timelineRequestLoading;
+    var controlsLoading = timelineDataSourcesLoading || requestLoading;
+    $("#profile-timeline-loading").toggleClass("hidden", !requestLoading);
+    $("#timeline-data-source-filter").prop("disabled", controlsLoading);
+    $("#btn-timeline-more")
+      .prop("disabled", requestLoading)
+      .toggleClass("opacity-50 cursor-not-allowed", requestLoading);
+  }
+
+  function loadTimelineDataSources() {
+    var $select = $("#timeline-data-source-filter");
+    var tenantId = C360.config.current && C360.config.current.tenantId;
+    if (
+      !$select.length ||
+      !tenantId ||
+      (timelineDataSourcesLoadedForTenant === tenantId && $select.find("option").length > 1)
+    ) {
+      return $.Deferred().resolve().promise();
+    }
+
+    timelineDataSourcesLoading = true;
+    updateTimelineLoadingState();
+    return api("/metadata/data-sources", {
+      tenant_id: tenantId,
+      status: 1,
+      skip: 0,
+      limit: 1000,
+    }).done(function (sources) {
+      var items = Array.isArray(sources) ? sources.slice() : [];
+      items.sort(function (left, right) {
+        return String(left.name || left.slug || "").localeCompare(String(right.name || right.slug || ""));
+      });
+      $select.find("option:not(:first)").remove();
+      items.forEach(function (source) {
+        var label = source.name || source.slug || source.data_source_id;
+        if (source.slug && source.name && source.slug !== source.name) {
+          label += " (" + source.slug + ")";
+        }
+        $select.append($("<option></option>").attr("value", source.data_source_id).text(label));
+      });
+      $select.val(timelineDataSourceId || "");
+      timelineDataSourcesLoadedForTenant = tenantId;
+    }).fail(function (xhr) {
+      showApiError("loading timeline data sources", xhr);
+    }).always(function () {
+      timelineDataSourcesLoading = false;
+      updateTimelineLoadingState();
+    });
   }
 
   function timelineEntryVm(t) {
@@ -883,12 +944,29 @@ window.C360 = window.C360 || {};
   }
 
   function loadMoreTimeline() {
+    if (timelineRequestLoading) return;
     timelineLimit += 8;
-    api("/master-profiles/" + currentProfileId + "/timeline", {
-      limit: timelineLimit,
-    }).done(function (timeline) {
-      var vms = (timeline || []).map(timelineEntryVm);
-      var html = vms
+    requestTimeline();
+  }
+
+  function requestTimeline() {
+    if (!currentProfileId || timelineRequestLoading) return;
+    timelineRequestLoading = true;
+    updateTimelineLoadingState();
+    api("/master-profiles/" + currentProfileId + "/timeline", timelineRequestParams())
+      .done(renderTimeline)
+      .fail(function (xhr) {
+        showApiError("loading profile timeline", xhr);
+      })
+      .always(function () {
+        timelineRequestLoading = false;
+        updateTimelineLoadingState();
+      });
+  }
+
+  function renderTimeline(timeline) {
+    var vms = (timeline || []).map(timelineEntryVm);
+    var html = vms
         .map(function (t) {
           return (
             '<li class="flex gap-3"><div class="w-2 h-2 mt-1.5 rounded-full bg-indigo-500 flex-shrink-0"></div>' +
@@ -911,8 +989,15 @@ window.C360 = window.C360 || {};
           );
         })
         .join("");
-      $("#detail-content").find("ol").first().html(html);
-    });
+      $("#profile-timeline-list").html(html);
+    $("#btn-timeline-more").toggleClass("hidden", vms.length === 0);
+      $("#profile-timeline-list").toggleClass("hidden", vms.length === 0);
+      $("#profile-timeline-empty").toggleClass("hidden", vms.length > 0);
+  }
+
+  function reloadTimeline() {
+    timelineLimit = 8;
+    requestTimeline();
   }
 
   function load(masterProfileId) {
@@ -920,6 +1005,7 @@ window.C360 = window.C360 || {};
     currentProfileId = masterProfileId;
     currentContentType = "";
     timelineLimit = 8;
+    timelineDataSourceId = "";
     $(".content-tab-btn")
       .removeClass("bg-indigo-600 text-white")
       .addClass("bg-slate-100");
@@ -977,6 +1063,7 @@ window.C360 = window.C360 || {};
             C360.templates.render("profile-details", vm),
           );
           populateDomainAttributeDomainSelect(profileRes[0].domain);
+          loadTimelineDataSources();
           loadContentItems(masterProfileId, "");
         },
       )
@@ -1002,6 +1089,12 @@ window.C360 = window.C360 || {};
     });
 
     $(document).on("click", "#btn-timeline-more", loadMoreTimeline);
+
+    $(document).off("change.profileTimeline", "#timeline-data-source-filter");
+    $(document).on("change.profileTimeline", "#timeline-data-source-filter", function () {
+      timelineDataSourceId = String($(this).val() || "");
+      if (currentProfileId) reloadTimeline();
+    });
 
     $(document).on("submit", "#domain-attribute-form", function (e) {
       e.preventDefault();

@@ -143,6 +143,9 @@ class CdpRawProfileStage(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False
     )
+    data_source_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_data_source.data_source_id")
+    )
     # Data owner: internal sys_user who created/manages this row (nullable -- rows are
     # normally landed by ingestion pipelines, not an interactive admin user).
     user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))

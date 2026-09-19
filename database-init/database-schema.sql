@@ -1210,6 +1210,9 @@ CREATE TRIGGER trg_sync_domain_attribute_catalog
 CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     raw_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    -- Concrete inbound connector lineage. This remains separate from
+    -- source_system because several connectors can emit the same protocol.
+    data_source_id UUID,
     -- Data owner: internal sys_user who created/manages this row (nullable -- rows are
     -- normally landed by ingestion pipelines, not an interactive admin user).
     user_id UUID REFERENCES customer360.sys_user(user_id),

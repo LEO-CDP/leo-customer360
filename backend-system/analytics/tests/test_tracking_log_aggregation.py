@@ -144,6 +144,15 @@ class FakeRedis:
         return next(self.results)
 
 
+def fake_dao_dependencies():
+    session = MagicMock()
+    repository = MagicMock()
+    return {
+        "dao_session_factory": lambda _tenant_id: session,
+        "raw_profile_repository_factory": lambda _session: repository,
+    }
+
+
 def test_fetch_data_sources_honors_tenant_rls_and_global_limit():
     cursor = FakeCursor(
         [
@@ -224,8 +233,50 @@ def test_normalize_event_record_matches_governed_event_contract():
     assert normalized["payload"]["items"] == [{"sku": "sku-1"}]
 
 
+def test_web_sdk_anonymous_events_share_one_raw_profile():
+    page_view = aggregation.normalize_event_record(
+        {
+            "event_id": "11111111-1111-1111-1111-111111111111",
+            "event_time": "2026-09-15T14:22:11.123Z",
+            "payload": {
+                "eventType": "page_view",
+                "anonymous_id": "web-anonymous-1",
+                "sessionKey": "web-session-1",
+                "device_fingerprint": "web-fingerprint-1",
+                "page_url": "https://example.test/",
+            },
+        },
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+    )
+    click = aggregation.normalize_event_record(
+        {
+            "event_id": "44444444-4444-4444-4444-444444444444",
+            "event_time": "2026-09-15T14:22:15.123Z",
+            "payload": {
+                "eventType": "click",
+                "anonymous_id": "web-anonymous-1",
+                "sessionKey": "web-session-1",
+                "device_fingerprint": "web-fingerprint-1",
+                "target": "buy-now",
+            },
+        },
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+    )
+
+    page_profile = aggregation.extract_raw_profile(page_view)
+    click_profile = aggregation.extract_raw_profile(click)
+
+    assert page_view["external_customer_id"] == "web-anonymous-1"
+    assert page_view["session_id"] == "web-session-1"
+    assert page_view["device_fingerprint"] == "web-fingerprint-1"
+    assert page_profile["raw_profile_id"] == click_profile["raw_profile_id"]
+    assert click_profile["event_payload"]["eventType"] == "click"
+
+
 def test_upsert_raw_profile_uses_deterministic_identity_key():
-    cursor = FakeCursor([[]])
+    repository = MagicMock()
     event = aggregation.normalize_event_record(
         {
             "event_id": "11111111-1111-1111-1111-111111111111",
@@ -240,13 +291,14 @@ def test_upsert_raw_profile_uses_deterministic_identity_key():
         "33333333-3333-3333-3333-333333333333",
     )
 
-    first_id = aggregation.upsert_raw_profile(cursor, event)
-    second_id = aggregation.upsert_raw_profile(cursor, event)
+    first_id = aggregation.upsert_raw_profile(repository, event)
+    second_id = aggregation.upsert_raw_profile(repository, event)
 
     assert first_id == second_id == event["raw_profile_id"]
-    assert len(cursor.execute_calls) == 2
-    assert "cdp_raw_profiles_stage" in cursor.execute_calls[0][0]
-    assert "ON CONFLICT (raw_profile_id)" in cursor.execute_calls[0][0]
+    assert repository.upsert_raw_profile.call_count == 2
+    first_profile = repository.upsert_raw_profile.call_args_list[0].args[0]
+    assert first_profile["raw_profile_id"] == event["raw_profile_id"]
+    assert first_profile["event_payload"] == event["payload"]
 
 
 def test_canonical_tracking_envelope_is_read_from_gzip_s3_object():
@@ -332,6 +384,7 @@ def test_process_tracking_logs_counts_new_objects_and_skips_checkpointed_objects
         s3_client=s3,
         redis_client=redis_client,
         db_connection=connection,
+        **fake_dao_dependencies(),
     )
 
     assert summary == {
@@ -439,6 +492,7 @@ def test_process_tracking_logs_stops_at_object_batch_limit(monkeypatch):
         s3_client=s3,
         redis_client=redis_client,
         db_connection=connection,
+        **fake_dao_dependencies(),
     )
 
     assert summary["objects_processed"] == 1
