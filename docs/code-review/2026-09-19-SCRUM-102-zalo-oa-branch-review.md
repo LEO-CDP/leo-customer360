@@ -8,6 +8,14 @@
 
 **Verification legend:** ✅ verified directly against the code during review · ◦ code read / reviewer-verified, not independently re-run.
 
+## Revision history
+
+- **r1 (2026-09-19)** — Initial review: 14 findings across correctness/security (`/code-review max`) and over-engineering (ponytail).
+- **r2 (2026-09-19)** — #1 **suppressed** (team decision). #5 **reframed**: the real root cause is `run-sql.sh` applying `database-schema.sql` before `migrations/` with no ledger, so "restore migration 003" wouldn't work — the rename must live in the schema itself.
+- **r3 (2026-09-19)** — All active findings fixed and committed; resolution table + per-finding ✅ FIXED markers added.
+- **r4 (2026-09-19)** — #13 **reclassified** after reviewer feedback: `dispatch()`, `all_zalo_tracking_routers`, and base `provider_name` are interface/convention members whose siblings are kept even when uncalled → all **restored**. Net from #13: nothing removed.
+- **r5 (2026-09-19)** — `origin/main` merged again, bringing the **connector-config refactor** (`crm_email_provider_config` → `crm_connector_config`). Adaptation verified — see *Post-review: main merges* below. No code changes required; CI green on the merged commit (`28256b8`).
+
 ---
 
 ## Summary
@@ -53,6 +61,21 @@ All active findings fixed on branch `feat/SCRUM-102-...`; **#1 suppressed** (tea
 **Follow-ups noted, not blocking:** dedicated tests for the new send/ledger logic and the #3/#7 guards; a provider-side idempotency key would let #4 move from at-most-once to safe-retry; consider a migration ledger so `run-sql.sh` stops re-running every file.
 
 **Deferred (not counted):** the `⚠️`-marked Zalo API contract guesses (endpoints, `secret_key` header, webhook signature scheme) are flagged in-code as unverified and must be corrected before real callbacks work.
+
+## Post-review: main merges & adaptation
+
+**Merge of `origin/main` — connector-config refactor (`290bf9e`).** Main replaced `crm_email_provider_config` with a generic `crm_connector_config` (multi-channel EMAIL/SMS/PUSH), refactored the DAO models/CRUD/schemas, enhanced the suppression list for omnichannel, and re-added migrations `002_crm_connector_config.sql` / `003_crm_suppression_list.sql`.
+
+**Impact on this branch: none — no code changes required.** The refactor is backward-compatible and the merge integrated coherently:
+
+- Model alias kept: `EmailProviderConfig = ConnectorConfig`; CRUD names unchanged (`get_active_config` / `upsert_config`) — our imports still resolve.
+- The only `crm_email_provider_config` references are inside main's own migration `002` (the data-transition script), not our code.
+- `database-schema.sql` holds **both** the folded `crm_message_templates` rename (finding #5) **and** main's new `crm_connector_config` table — no conflict, no leftover conflict markers.
+- The co-modified `campaign_activation_api.py` adopted main's connector model (`ConnectorConfig`, generic `config`/`credentials` JSONB); our branch had no Zalo logic there (ZNS routing lives backend-side in `campaign_activation/activation.py`), so nothing was lost.
+
+**Verification.** All co-modified files compile; local suites pass — `campaign_activation` 12, `notification_engine` 7, `email_engine` 18, and `campaign_activation_router` + `dagster_client` + `zalo_planner` 30. CI on the merged commit (`28256b8`): 26 checks pass, 1 skip (`deploy`).
+
+> Note: the merge means the branch is no longer a single commit (a merge commit sits on top of the squashed fix commit). This is the normal result of merging `main`; can be re-squashed on request.
 
 ---
 
