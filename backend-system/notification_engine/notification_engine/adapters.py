@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 class DispatchAdapter:
+    provider_name = "base"
+
     def send(self, *, phone: str, template_id: str, template_data: dict, tracking_id: str) -> DispatchResult:
         raise NotImplementedError
 

@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from core.auth import require_tenant, require_tenant_admin
 from leo_customer360_dao.crud.email_provider import get_active_config, upsert_config
 from core.database import get_db
-from leo_customer360_dao.models.crm import Campaign, CampaignDispatchLog, EmailProviderConfig
+from leo_customer360_dao.models.crm import Campaign, CampaignDispatchLog, ConnectorConfig
 from leo_customer360_dao.schemas.crm import (
     CampaignActivationResponse,
     CampaignDispatchLogRead,
@@ -35,9 +35,31 @@ logger = logging.getLogger(__name__)
 campaign_activation_router = APIRouter(prefix="/admin", tags=["Campaign - Activation & Email"])
 
 
-def _to_provider_read(config: EmailProviderConfig) -> EmailProviderConfigRead:
-    read = EmailProviderConfigRead.model_validate(config)
-    read.smtp_password_set = bool(config.smtp_password)
+def _to_provider_read(config: ConnectorConfig) -> EmailProviderConfigRead:
+    values = config.config if hasattr(config, "config") else {}
+    credentials = config.credentials if hasattr(config, "credentials") else {}
+    config_id = getattr(config, "connector_id", None) or getattr(config, "config_id")
+    read = EmailProviderConfigRead(
+        config_id=config_id,
+        tenant_id=config.tenant_id,
+        name=config.name,
+        provider=str(config.provider).lower(),
+        smtp_host=values.get("smtp_host", getattr(config, "smtp_host", None)),
+        smtp_port=values.get("smtp_port", getattr(config, "smtp_port", None)),
+        smtp_username=values.get("smtp_username", getattr(config, "smtp_username", None)),
+        credentials_ref=getattr(config, "credentials_ref", None),
+        smtp_use_tls=values.get("smtp_use_tls", getattr(config, "smtp_use_tls", True)),
+        from_address=values.get("from_address", getattr(config, "from_address", None)),
+        from_name=values.get("from_name", getattr(config, "from_name", None)),
+        is_active=config.is_active,
+        metadata_=getattr(config, "metadata_", None),
+        created_at=getattr(config, "created_at", None),
+        updated_at=getattr(config, "updated_at", None),
+    )
+    read.smtp_password_set = bool(
+        credentials.get("password", getattr(config, "smtp_password", None))
+        or getattr(config, "credentials_ref", None)
+    )
     return read
 
 

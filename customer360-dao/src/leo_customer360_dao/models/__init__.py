@@ -11,6 +11,7 @@ from leo_customer360_dao.models.crm import (
     CampaignMember,
     CampaignReview,
     Contact,
+    ConnectorConfig,
     EmailProviderConfig,
     Industry,
     Lead,
@@ -18,6 +19,7 @@ from leo_customer360_dao.models.crm import (
     MessageTemplate,
     Opportunity,
     SegmentSyncRun,
+    SuppressionList,
 )
 from leo_customer360_dao.models.graph import GraphEdge
 from leo_customer360_dao.models.identity import (
@@ -58,6 +60,7 @@ __all__ = [
     "CampaignReview",
     "CdpContentItem",
     "Contact",
+    "ConnectorConfig",
     "EmailProviderConfig",
     "Industry",
     "Lead",
@@ -65,6 +68,7 @@ __all__ = [
     "MessageTemplate",
     "Opportunity",
     "SegmentSyncRun",
+    "SuppressionList",
     "GraphEdge",
     "CdpCustomerPersona",
     "CdpDomainProfile",

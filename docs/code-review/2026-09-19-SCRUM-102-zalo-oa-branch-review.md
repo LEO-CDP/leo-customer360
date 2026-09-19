@@ -25,7 +25,7 @@
 | 10 | 🟡 Low | "Framework-neutral" DAO imports `fastapi`, raises HTTP, undeclared dep | `crud/zalo_oa.py` |
 | 11 | 🟡 Low | Webhook factory duplicates email HMAC/token code (email never ported) | `channel_webhook.py` |
 | 12 | 🟡 Low | `core/cache.py` `get_redis_client` duplicates DAO copy byte-for-byte | `core/cache.py` |
-| 13 | 🟡 Low | Dead code: `all_zalo_tracking_routers`, `provider_name="base"` (the `dispatch()` method is NOT dead — see below) | multiple |
+| 13 | 🟡 Low | "Dead code" — on review, all three items are interface/convention members; none removed | multiple |
 | 14 | 🟡 Low | CI backend runner skips new `notification_engine` / `campaign_activation` tests | `.github/workflows/ci.yml` |
 
 ## Resolution status (2026-09-19)
@@ -47,7 +47,7 @@ All active findings fixed on branch `feat/SCRUM-102-...`; **#1 suppressed** (tea
 | 10 | Fixed — DAO raises domain `ZaloOAError`; no `fastapi` import | `88aaf18` |
 | 11 | Fixed (partial) — HMAC verify shared via `core/webhook_security.py`; full email→factory port deliberately skipped (GET routes don't fit) | `609dfc7` |
 | 12 | Fixed — `core/cache.py` imports the DAO's `get_redis_client` | `0d816e1` |
-| 13 | Fixed — dead export + base `provider_name` removed; `dispatch()` initially removed then **restored** (it's the API-side trigger contract, symmetric with `email_engine.send_campaign`) | squashed |
+| 13 | Reviewed — all 3 items (`dispatch()`, `all_zalo_tracking_routers`, base `provider_name`) are interface/convention members whose siblings are kept even when uncalled; **none removed** | squashed |
 | 14 | Fixed — CI runs all backend suites; new `notification_engine/run_tests.sh` | `0d816e1` |
 
 **Follow-ups noted, not blocking:** dedicated tests for the new send/ledger logic and the #3/#7 guards; a provider-side idempotency key would let #4 move from at-most-once to safe-retry; consider a migration ledger so `run-sql.sh` stops re-running every file.
@@ -199,11 +199,11 @@ The "framework-neutral" DAO (per `database.py` docstring) imports `fastapi.HTTPE
 
 **Fix:** `from leo_customer360_dao.cache import get_redis_client`; drop the local copy + its `_client`/`_client_initialized` globals. ~-25 lines.
 
-### 13. ◦ Dead code (partial — one item reclassified)
+### 13. ◦ "Dead code" — reviewed, nothing removed
 
-> ✅ **FIXED** — commit `0d816e1` (export + `provider_name`); `dispatch()` **restored** after review.
-- `data-tracking-api/core/routers/zalo_tracking.py:36` — `all_zalo_tracking_routers` export unused (`app.py` imports `router` directly). **Removed.**
-- `backend-system/notification_engine/notification_engine/adapters.py:25` — `DispatchAdapter.provider_name = "base"` never read. **Removed.**
+> ↩️ **REVIEWED — nothing removed.** All three were initially cut, then restored: each is an interface/convention member whose siblings are deliberately kept even though uncalled today. Deleting the odd one broke symmetry.
+- `data-tracking-api/core/routers/zalo_tracking.py` — `all_zalo_tracking_routers` export: initially removed as unused, then **restored**. The sibling `email_tracking.py` keeps `all_email_tracking_routers` (also unused by `app.py`, which imports `router` directly) — it's a per-module export convention, so removing only zalo's broke symmetry. **Kept.**
+- `backend-system/notification_engine/notification_engine/adapters.py` — `DispatchAdapter.provider_name = "base"`: initially removed as never-read, then **restored**. It declares the interface attribute every adapter carries (`send.py` reads `adapter.provider_name`); the base default documents the contract. **Kept.**
 - `customer360-api/core/utils/dagster_client.py` — `NotificationEngineDagsterService.dispatch()` was initially removed as "no caller", then **restored**. It is the API-side trigger contract for `notification_engine_job`, symmetric with `EmailEngineDagsterService.send_campaign()` (also uncalled from the API today but deliberately kept). The live activation path submits the same job from `campaign_activation/triggers.py`; the API-side method is the intended entry point if an endpoint wires it up. Not dead code — keeping it preserves the facade convention. **Kept.**
 
 ### 14. ◦ CI skips the new suites

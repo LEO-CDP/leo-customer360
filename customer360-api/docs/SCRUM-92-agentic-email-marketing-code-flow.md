@@ -120,8 +120,8 @@ Key facts:
 - **Cross-service hand-off is not one job graph.** `campaign_activation` submits a *separate*
   `email_engine_job` run via the Dagster webserver GraphQL API
   (`backend-system/campaign_activation/campaign_activation/triggers.py:29`).
-- **Provider config** resolves Redis cache → DB (`crm_email_provider_config`) → `SMTP_*` env → mock,
-  with write-through cache invalidation from the API. Both services must share one Redis.
+- **Connector config** resolves DB (`crm_connector_config`, `connector_type='EMAIL'`) → `SMTP_*` env
+  → mock. The outbound activation connector model is separate from inbound `sys_data_source`.
 
 ---
 
@@ -139,7 +139,7 @@ sequenceDiagram
   participant CA as "campaign_activation/activation.py"
   participant TR as "campaign_activation/triggers.py"
   participant EE as "email_engine/send.py"
-  participant PC as "email_engine/provider_config.py"
+  participant PC as "email_engine/connector_config.py"
   participant AD as "email_engine/adapters.py"
   participant PG as "PostgreSQL (RLS)"
   actor User as "Recipient"
@@ -156,13 +156,13 @@ sequenceDiagram
   TR-->>EE: GraphQL submit email_engine_job
   EE->>PG: pg_try_advisory_lock(1, hashtext(campaign_id))
   EE->>PC: load_email_config(tenant_id)
-  PC->>PG: active crm_email_provider_config (on Redis miss)
+  PC->>PG: active crm_connector_config EMAIL row
   EE->>AD: build_adapter(config) → smtp | mock
   EE->>PG: re-validate campaign/template/segment (defense in depth)
   EE->>PG: iter_recipients(...) keyset batches
   loop per recipient (SAVEPOINT)
     EE->>PG: _current_status → skip if Sent/Suppressed
-    EE->>PG: _suppressed_emails
+    EE->>PG: _suppressed_recipients (email + profile suppression)
     EE->>EE: _render_for_recipient (encode_tracking_token · sign click links · pixel)
     EE->>AD: adapter.send(...)
     EE->>PG: _upsert_dispatch → cdp_campaign_dispatch_logs (ON CONFLICT terminal-guard)
@@ -176,8 +176,8 @@ sequenceDiagram
   TK->>TK: verify_click_url(url,k) — else 302 to /
   TK->>CR: record_engagement_event(...)
   Note over TK: POST /track/email/webhook — 503 if secret unset, 401 if bad HMAC
-  TK->>CR: resolve_recipient_email → add_suppression (hard bounce / complaint)
-  CR->>PG: INSERT cdp_email_suppression (ON CONFLICT DO NOTHING)
+  TK->>CR: record provider event + suppression reason in S3/MinIO
+  CR-->>PG: Activation reads crm_suppression_list before dispatch
 ```
 
 **Send-engine internals** (`backend-system/email_engine/email_engine/send.py`) — the per-recipient
@@ -186,13 +186,13 @@ call graph and where each branch lands in the ledger:
 ```mermaid
 flowchart TD
   A["send_campaign() · send.py:255"] --> B["pg_try_advisory_lock(1, campaign)"]
-  A --> C["load_email_config() · provider_config.py:97"]
+  A --> C["load_email_config() · connector_config.py"]
   C --> D["build_adapter() · adapters.py:115"]
   A --> E["load_campaign / load_template / load_segment_tag — re-validate"]
   A --> F["iter_recipients() · send.py:107 — keyset batches"]
   F --> G["_process_batch() · send.py:347"]
   G --> H["_current_status() — terminal guard"]
-  G --> I["_suppressed_emails()"]
+  G --> I["_suppressed_recipients()"]
   G --> J{"eligible?"}
   J -->|"suppressed"| K["status = Suppressed"]
   J -->|"no email / opted-out"| L["status = Skipped"]
@@ -335,7 +335,7 @@ passes `run_id`) → `email_engine/send.py:255` `send_campaign`:
 |---|---|---|
 | `GET /track/email/open` | `track_open` (58) | records `email-opened`; always returns 1×1 GIF even on bad token |
 | `GET /track/email/click` | `track_click` (69) | 302 **only** if `verify_click_url(url,k)` passes & http/https (anti open-redirect), else 302→`/` |
-| `GET /track/email/unsubscribe` | `unsubscribe` (87) | records `email-unsubscribed` + `add_suppression("unsubscribe")` |
+| `GET /track/email/unsubscribe` | `unsubscribe` (87) | records `email-unsubscribed` with suppression reason `unsubscribe` |
 | `POST /track/email/webhook` | `email_webhook` (107) | HMAC-verified provider callback; dedup; suppress on hard bounce/complaint |
 
 **Token & auth** — `core/utils/email_tracking.py`: `decode_tracking_token` (87, constant-time compare),
@@ -347,9 +347,9 @@ unset, `401` on bad signature.
 `data-tracking-api` Redis/S3 contract. The public tracking service does not
 open a PostgreSQL connection or insert behavioral-event rows. Deduplication is
 represented by the canonical event ID/dedup key and immutable S3 state.
-- `resolve_recipient_email` (62): reads the address from `cdp_campaign_dispatch_logs` (falls back to
-  profile email) — suppression is keyed on the **real mailed address**, never the untrusted payload.
-- `add_suppression` (141): `INSERT … cdp_email_suppression … ON CONFLICT (tenant_id, lower(email)) DO NOTHING`.
+- Email tracking carries the provider event and suppression reason into the S3/MinIO event envelope.
+- Activation reads the canonical mailed address from the profile and checks `crm_suppression_list`
+  by tenant, `channel='EMAIL'`, `identifier_type='EMAIL'`, active status, expiry, and campaign scope.
 
 > The `data-tracking-api/` service owns both generic web behaviour and normalized
 > email engagement ingestion (Redis Streams → S3/MinIO).
@@ -357,7 +357,7 @@ represented by the canonical event ID/dedup key and immutable S3 state.
 ### Stage 8 — Feedback into Customer 360 — 🟡 (SCRUM-99, capture only)
 
 **Landed:** email events are captured in the S3/MinIO event lake and compliance
-suppression remains in `cdp_email_suppression` (Stage 7). A change-gated segmentation sensor exists
+suppression is modeled in `crm_suppression_list` (Stage 7). A change-gated segmentation sensor exists
 (`backend-system/segmentation/dagster_defs.py:136` `segmentation_poll_sensor`, watches
 `cdp_master_profiles` via `count_recently_changed_master_profiles`). Campaign performance is exposed
 read-only through `vw_campaign_performance_metrics` + `CampaignRepository`
@@ -374,20 +374,18 @@ read-only through `vw_campaign_performance_metrics` + `CampaignRepository`
 
 ---
 
-## 4. Provider config & dispatch adapter — ✅ (SCRUM-97)
+## 4. Connector config & dispatch adapter — ✅ (SCRUM-97)
 
-- **Resolution order** — `backend-system/email_engine/email_engine/provider_config.py:97`
-  `load_email_config`: Redis (`email_provider_config:{tenant}`, TTL 300s) → active
-  `crm_email_provider_config` row → `SMTP_*` env → mock default. All Redis ops fail-open.
-- **Write side + cache invalidation** — `customer360-api/core/crud/email_provider.py`:
-  `get_active_config`, `upsert_config` (keeps one active row per tenant), `invalidate_config_cache`
-  (deletes the same Redis key on every write). Exposed at
+- **Resolution order** — `backend-system/email_engine/email_engine/connector_config.py`
+  `load_email_config`: active outbound `crm_connector_config` EMAIL row → `SMTP_*` env → mock default.
+- **Write side** — `customer360-api/core/crud/email_provider.py`:
+  `get_active_config`, `upsert_config` (keeps one active EMAIL connector per tenant). Exposed at
   `GET/PUT /api/v1/admin/email-provider-config` (`campaign_activation_api.py`); `smtp_password` is
   write-only (never returned).
 - **Adapter selection** — `email_engine/adapters.py:115` `build_adapter`: `provider=='smtp'` →
   `SMTPDispatchAdapter` (real `smtplib`); anything else → `MockDispatchAdapter` (unknown provider logs
-  a warning and falls back to mock — a typo never triggers a real send). **SES is not implemented**
-  (documented future stub; DB CHECK allows only `('mock','smtp')`).
+  a warning and falls back to mock — a typo never triggers a real send). Additional connector providers
+  are represented in the generic table and can be implemented by adding adapters.
 
 ---
 
@@ -405,12 +403,12 @@ Fresh-cluster DDL: `database-init/database-schema.sql:2914-3218`. Incremental mi
 | `crm_segment_sync_runs` | `002` | **new** (audit) | status check; `segment_id` FK CASCADE | ✔ |
 | `crm_lead.lead_source_id` | `002` | **alter**: FK col | FK → `crm_lead_source` ON DELETE SET NULL | (base) |
 | `cdp_campaign_dispatch_logs` | `003` | **new** (send ledger) | **`UNIQUE(campaign_id, master_profile_id)`** | ✔ |
-| `crm_email_provider_config` | `003` | **new** | `UNIQUE(tenant_id,name)` + partial-unique one-active-per-tenant | ✔ |
-| `cdp_email_suppression` | `004` | **new** | **`UNIQUE(tenant_id, lower(email))`** | ✔ |
+| `crm_connector_config` | `002_crm_connector_config` | **new/migrated** | `UNIQUE(tenant_id,name)` + partial-unique default-per-channel | ✔ |
+| `crm_suppression_list` | `003_crm_suppression_list` | **new/migrated** | Active global/campaign uniqueness by channel and identifier | ✔ |
 | `cdp_event_catalog` (seed) | `004` | **data**: `email-delivered/…/-unsubscribed` | `ON CONFLICT (event_name) DO NOTHING` | n/a |
 
-SQLAlchemy models: `customer360-api/core/models/crm.py` (`Campaign:23`, `MessageTemplate`,
-`CampaignContentItem:271`, `SegmentSyncRun:290`, `CampaignDispatchLog:315`, `EmailProviderConfig:349`).
+SQLAlchemy models: `customer360-dao/src/leo_customer360_dao/models/crm.py` (`Campaign`,
+`MessageTemplate`, `CampaignContentItem`, `SegmentSyncRun`, `CampaignDispatchLog`, `ConnectorConfig`).
 Pydantic schemas: `customer360-api/core/schemas/crm.py` (`APPROVAL_STATUS_PATTERN:18`).
 
 ```mermaid
@@ -423,7 +421,7 @@ erDiagram
   cdp_master_profiles ||--o{ cdp_campaign_dispatch_logs : "master_profile_id"
   crm_lead_source ||--o{ crm_lead : "lead_source_id"
   cdp_segments ||--o{ crm_segment_sync_runs : "segment_id"
-  crm_campaign ||--o{ cdp_email_suppression : "campaign_id"
+  crm_campaign ||--o{ crm_suppression_list : "campaign_id"
 ```
 
 ---
@@ -503,7 +501,7 @@ Keycloak token), `README.md`, `TEST_PLAN.md` (AC → case traceability). Simulat
 
 **backend-system**
 - `campaign_activation/dagster_defs.py`, `campaign_activation/{activation,triggers,rls,db}.py`
-- `email_engine/dagster_defs.py`, `email_engine/{send,adapters,rendering,provider_config,tracking,rls,db}.py`
+- `email_engine/dagster_defs.py`, `email_engine/{send,adapters,rendering,connector_config,provider_config,tracking,rls,db}.py`
 - `segmentation/dagster_defs.py` + `segmentation/recompute.py` — recompute + poll sensor
 - `scoring/dagster_defs.py` — placeholder (engagement writeback gap)
 - `workspace.yaml` — Dagster code-location registration

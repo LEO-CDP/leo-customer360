@@ -375,31 +375,81 @@ class CampaignDispatchLog(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 
 
-class EmailProviderConfig(Base):
-    """Per-tenant, dynamically-managed email dispatch configuration.
+class ConnectorConfig(Base):
+    """Per-tenant outbound CRM activation connector configuration."""
 
-    The email_engine resolves the active row at send time (Redis-cached, DB as
-    source of truth) instead of reading static SMTP env vars, so a tenant's
-    provider/credentials can change without a redeploy. ``smtp_password`` is a
-    secret -- protect it at rest (pgcrypto / a secret manager) in any non-dev
-    deployment; it is never returned by the read API."""
+    __tablename__ = "crm_connector_config"
 
-    __tablename__ = "crm_email_provider_config"
-
-    config_id: Mapped[uuid.UUID] = mapped_column(
+    connector_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id", ondelete="SET NULL")
+    )
     name: Mapped[str] = mapped_column(Text, nullable=False, server_default="default")
-    provider: Mapped[str] = mapped_column(String(50), nullable=False, server_default="mock")
-    smtp_host: Mapped[Optional[str]] = mapped_column(Text)
-    smtp_port: Mapped[Optional[int]] = mapped_column(Integer)
-    smtp_username: Mapped[Optional[str]] = mapped_column(Text)
-    smtp_password: Mapped[Optional[str]] = mapped_column(Text)
-    smtp_use_tls: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
-    from_address: Mapped[Optional[str]] = mapped_column(Text)
-    from_name: Mapped[Optional[str]] = mapped_column(Text)
+    connector_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    direction: Mapped[str] = mapped_column(String(20), nullable=False, server_default="OUTBOUND")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="ACTIVE")
+    endpoint_url: Mapped[Optional[str]] = mapped_column(Text)
+    region: Mapped[Optional[str]] = mapped_column(String(100))
+    auth_type: Mapped[Optional[str]] = mapped_column(String(50))
+    credentials_ref: Mapped[Optional[str]] = mapped_column(Text)
+    credentials: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    capabilities: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    last_tested_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    last_test_status: Mapped[Optional[str]] = mapped_column(String(20))
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+# Compatibility alias for callers that still import the old email-specific name.
+EmailProviderConfig = ConnectorConfig
+
+
+class SuppressionList(Base):
+    """Tenant-scoped omnichannel activation suppression record."""
+
+    __tablename__ = "crm_suppression_list"
+
+    suppression_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id", ondelete="CASCADE"), nullable=False
+    )
+    master_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_master_profiles.master_profile_id", ondelete="SET NULL")
+    )
+    channel: Mapped[str] = mapped_column(String(30), nullable=False)
+    identifier_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    identifier: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(String(50), nullable=False)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False, server_default="GLOBAL")
+    campaign_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id", ondelete="SET NULL")
+    )
+    source: Mapped[Optional[str]] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="ACTIVE")
+    expires_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    removed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    removed_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id", ondelete="SET NULL")
+    )
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )

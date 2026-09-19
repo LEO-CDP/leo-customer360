@@ -67,7 +67,7 @@ def get_smtp_health(
     SMTP relay to confirm it is reachable and the credential authenticates.
 
     Reflects the SYSTEM/env SMTP config (the email_engine send-time fallback),
-    not a tenant's per-tenant crm_email_provider_config row. Authenticated like
+    not a tenant's per-tenant crm_connector_config EMAIL row. Authenticated like
     /metadata/dagster (only bare GET /metadata is login-screen exempt), and kept
     out of GET /metadata so a real SMTP login never runs on page load."""
     return repository.get_smtp_health()

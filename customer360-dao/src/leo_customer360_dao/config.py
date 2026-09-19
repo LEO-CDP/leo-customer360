@@ -196,7 +196,7 @@ class Settings(BaseSettings):
     # --- Email dispatch (SMTP). Mirrors the env the backend-system/email_engine
     #     sender reads; here it backs the GET /metadata/smtp health probe. This is
     #     the SYSTEM/env config (email_engine's fallback), not a tenant's
-    #     crm_email_provider_config DB row. 'mock' -> the probe reports 'disabled'.
+    #     crm_connector_config EMAIL row. 'mock' -> the probe reports 'disabled'.
     email_dispatch_adapter: str = Field(
         default="mock",
         validation_alias=AliasChoices("EMAIL_DISPATCH_ADAPTER", "email_dispatch_adapter"),

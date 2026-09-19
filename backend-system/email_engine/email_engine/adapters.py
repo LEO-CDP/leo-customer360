@@ -61,7 +61,7 @@ class MockDispatchAdapter(DispatchAdapter):
 
 class SMTPDispatchAdapter(DispatchAdapter):
     """Real SMTP send. Settings come from a resolved config dict
-    (``provider_config.load_email_config``) when provided, else from static
+    (``connector_config.load_email_config``) when provided, else from static
     SMTP_* env vars. One connection per ``send`` (fine at this beta's batch sizes)."""
 
     provider_name = "smtp"
@@ -116,7 +116,7 @@ class SMTPDispatchAdapter(DispatchAdapter):
 
 def build_adapter(config: Optional[dict] = None) -> DispatchAdapter:
     """Return the dispatch adapter for a resolved provider config dict (from
-    ``provider_config.load_email_config``). With no config, falls back to
+    ``connector_config.load_email_config``). With no config, falls back to
     ``EMAIL_DISPATCH_ADAPTER`` env (default ``mock``). An unknown provider falls
     back to mock with a warning, so a typo never silently starts real sends."""
     if config is not None:
