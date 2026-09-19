@@ -158,7 +158,7 @@ resolution.
 
 - `Account`, `Contact`, `Lead`, `LeadSource`, `Opportunity`, `Industry`
 - `Campaign`, `CampaignMember`, `CampaignContentItem`, `CampaignReview`
-- `CampaignDispatchLog`, `MessageTemplate`, `EmailProviderConfig`
+- `CampaignDispatchLog`, `MessageTemplate`, `ConnectorConfig`, `SuppressionList`
 - `SegmentSyncRun`
 
 ### Other domain models

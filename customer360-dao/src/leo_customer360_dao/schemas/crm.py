@@ -560,7 +560,7 @@ class SegmentCrmSyncResponse(BaseModel):
 
 
 DISPATCH_STATUS_PATTERN = "^(Pending|Sent|Failed|Skipped|Suppressed)$"
-EMAIL_PROVIDER_PATTERN = "^(mock|smtp)$"
+EMAIL_PROVIDER_PATTERN = "^(mock|smtp|ses|sendgrid|mailgun|resend)$"
 
 
 class CampaignDispatchLogRead(BaseModel):
@@ -607,6 +607,7 @@ class EmailProviderConfigUpsert(BaseModel):
     smtp_port: Optional[int] = None
     smtp_username: Optional[str] = None
     smtp_password: Optional[str] = None
+    credentials_ref: Optional[str] = None
     smtp_use_tls: bool = True
     from_address: Optional[str] = None
     from_name: Optional[str] = None
@@ -627,6 +628,7 @@ class EmailProviderConfigRead(BaseModel):
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = None
     smtp_username: Optional[str] = None
+    credentials_ref: Optional[str] = None
     smtp_use_tls: bool = True
     from_address: Optional[str] = None
     from_name: Optional[str] = None

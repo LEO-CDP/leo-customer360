@@ -14,6 +14,8 @@ from fastapi.testclient import TestClient
 
 from core.database import get_db
 from core.routers.campaign_activation_api import campaign_activation_router
+from leo_customer360_dao.crud.email_provider import upsert_config
+from leo_customer360_dao.schemas.crm import EmailProviderConfigUpsert
 
 
 class CampaignActivationRouterTests(unittest.TestCase):
@@ -104,6 +106,23 @@ class CampaignActivationRouterTests(unittest.TestCase):
         body = resp.json()
         self.assertNotIn("smtp_password", body)
         self.assertTrue(body["smtp_password_set"])
+
+    def test_partial_provider_update_preserves_existing_state(self):
+        existing = SimpleNamespace(
+            tenant_id=uuid.UUID(self.tenant_id), name="existing", provider="SENDGRID",
+            is_active=False, config={"from_address": "old@example.com"}, credentials={},
+        )
+        db = SimpleNamespace(
+            execute=lambda statement: SimpleNamespace(scalar_one_or_none=lambda: existing),
+            commit=lambda: None,
+            refresh=lambda row: None,
+        )
+
+        result = upsert_config(db, uuid.UUID(self.tenant_id), EmailProviderConfigUpsert(name="existing"))
+
+        self.assertIs(result, existing)
+        self.assertEqual(existing.provider, "SENDGRID")
+        self.assertFalse(existing.is_active)
 
 
 if __name__ == "__main__":

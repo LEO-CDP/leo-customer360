@@ -29,7 +29,7 @@ def _summary():
 def test_process_batch_routes_each_recipient_by_eligibility(mock_conn, mock_cursor):
     # Suppression list contains supp@x.io; per-recipient current-status:
     #   r1 -> new, r2 -> new, r3 -> new, r4 -> already 'Sent'.
-    mock_cursor.fetchall.return_value = [{"email": "supp@x.io"}]
+    mock_cursor.fetchall.return_value = [{"identifier_type": "EMAIL", "identifier": "supp@x.io"}]
     mock_cursor.fetchone.side_effect = [None, None, None, {"status": "Sent"}]
 
     adapter = MagicMock()
@@ -68,4 +68,21 @@ def test_opted_out_recipient_is_skipped_not_sent(mock_conn, mock_cursor):
                    run_id="r", summary=summary)
 
     assert summary["skipped"] == 1
+    assert adapter.send.call_count == 0
+
+
+def test_profile_level_suppression_is_not_sent(mock_conn, mock_cursor):
+    mock_cursor.fetchall.return_value = [{"identifier_type": "PROFILE_ID", "identifier": "p1"}]
+    mock_cursor.fetchone.side_effect = [None]
+    adapter = MagicMock()
+    adapter.provider_name = "mock"
+
+    batch = [{"master_profile_id": "p1", "email": "x@x.io", "first_name": "X",
+              "communication_preferences": {}}]
+    summary = _summary()
+
+    _process_batch(mock_conn, adapter, "t1", "c1", "tpl1", template={"subject": "s"}, batch=batch,
+                   run_id="r", summary=summary)
+
+    assert summary["suppressed"] == 1
     assert adapter.send.call_count == 0

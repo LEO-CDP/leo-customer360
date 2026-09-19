@@ -117,7 +117,7 @@ class MetadataRepository:
 
 	def _check_smtp(self) -> dict[str, Any]:
 		"""Probe the system SMTP relay (the env config the email_engine falls back
-		to when a tenant has no crm_email_provider_config row).
+		to when a tenant has no active crm_connector_config EMAIL row).
 
 		'disabled' when dispatch is mock or no host is set (no real email is sent).
 		Otherwise it opens a connection, optionally STARTTLS + login, and NOOPs to

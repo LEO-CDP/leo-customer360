@@ -27,7 +27,7 @@ from psycopg2.extras import RealDictCursor
 
 from .adapters import DispatchAdapter, build_adapter
 from .db import DB_SCHEMA, connect
-from .provider_config import load_email_config
+from .connector_config import load_email_config
 from .rendering import inject_tracking_pixel, render_string, rewrite_links_for_click_tracking
 from .rls import set_tenant_context
 from .tracking import encode_tracking_token
@@ -135,31 +135,64 @@ def iter_recipients(conn, tenant_id: str, segment_tag: str, batch_size: int) -> 
             return
 
 
-def _suppressed_emails(cur, tenant_id: str, emails: list) -> set:
-    """Lower-cased emails on the compliance suppression list.
+def _suppressed_recipients(cur, tenant_id: str, campaign_id: str, batch: list[dict]) -> tuple[set, set]:
+    """Return actively suppressed email addresses and profile IDs for a batch.
 
     Degrades gracefully to an empty set if the suppression table does not exist
     yet, so this pipeline runs before the suppression table exists."""
-    wanted = [e.lower() for e in emails if e]
-    if not wanted:
-        return set()
+    wanted_emails = [str(p.get("email")).strip().lower() for p in batch if p.get("email")]
+    wanted_profiles = [str(p["master_profile_id"]) for p in batch if p.get("master_profile_id")]
+    if not wanted_emails and not wanted_profiles:
+        return set(), set()
     # Run inside a savepoint so a failure (e.g. suppression table absent)
     # can be rolled back without poisoning the surrounding batch transaction.
     cur.execute("SAVEPOINT suppression_lookup")
     try:
         cur.execute(
-            f"SELECT lower(email) AS email FROM {DB_SCHEMA}.cdp_email_suppression "
-            f"WHERE tenant_id = %(tenant_id)s AND lower(email) = ANY(%(emails)s)",
-            {"tenant_id": tenant_id, "emails": wanted},
+            f"""
+            SELECT identifier_type, lower(identifier) AS identifier
+            FROM {DB_SCHEMA}.crm_suppression_list
+            WHERE tenant_id = %(tenant_id)s
+              AND status = 'ACTIVE'
+              AND (expires_at IS NULL OR expires_at > now())
+              AND (
+                    scope = 'GLOBAL'
+                    OR (scope = 'CAMPAIGN' AND campaign_id = %(campaign_id)s)
+              )
+              AND (
+                    (
+                        channel = 'EMAIL'
+                        AND identifier_type = 'EMAIL'
+                        AND lower(identifier) = ANY(%(emails)s)
+                    )
+                    OR (
+                        channel = 'GLOBAL'
+                        AND identifier_type = 'PROFILE_ID'
+                        AND lower(identifier) = ANY(%(profile_ids)s)
+                    )
+              )
+            """,
+            {
+                "tenant_id": tenant_id,
+                "campaign_id": campaign_id,
+                "emails": wanted_emails,
+                "profile_ids": wanted_profiles,
+            },
         )
-        result = {row["email"] for row in cur.fetchall()}
+        rows = cur.fetchall()
+        suppressed_emails = {
+            row["identifier"] for row in rows if row["identifier_type"] == "EMAIL"
+        }
+        suppressed_profiles = {
+            row["identifier"] for row in rows if row["identifier_type"] == "PROFILE_ID"
+        }
         cur.execute("RELEASE SAVEPOINT suppression_lookup")
-        return result
+        return suppressed_emails, suppressed_profiles
     except errors.UndefinedTable as exc:
         # Suppression table not deployed yet -> tolerate (nothing to suppress).
         cur.execute("ROLLBACK TO SAVEPOINT suppression_lookup")
         logger.warning("suppression table absent; treating none as suppressed: %s", exc)
-        return set()
+        return set(), set()
     except Exception:
         # Any other error (transient/timeout/deadlock): FAIL CLOSED -- do not send
         # a batch whose suppression state is unknown (compliance).
@@ -351,7 +384,9 @@ def _process_batch(conn, adapter, tenant_id, campaign_id, template_id, template,
     Each recipient is wrapped in a SAVEPOINT so a single failure is isolated."""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         set_tenant_context(cur, tenant_id)
-        suppressed = _suppressed_emails(cur, tenant_id, [p.get("email") for p in batch])
+        suppressed_emails, suppressed_profiles = _suppressed_recipients(
+            cur, tenant_id, campaign_id, batch
+        )
 
         for profile in batch:
             summary["total"] += 1
@@ -369,7 +404,10 @@ def _process_batch(conn, adapter, tenant_id, campaign_id, template_id, template,
                     tenant_id=tenant_id, campaign_id=campaign_id, master_profile_id=master_profile_id,
                     template_id=template_id, recipient_email=email, run_id=run_id,
                 )
-                if email and email.lower() in suppressed:
+                if (
+                    master_profile_id in suppressed_profiles
+                    or (email and email.lower() in suppressed_emails)
+                ):
                     _upsert_dispatch(cur, status="Suppressed", error_message="on suppression list", **common)
                     summary["suppressed"] += 1
                 elif not email or _is_opted_out(profile):

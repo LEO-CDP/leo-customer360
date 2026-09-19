@@ -2849,52 +2849,125 @@ CREATE INDEX IF NOT EXISTS idx_cdp_campaign_dispatch_campaign ON customer360.cdp
 CREATE INDEX IF NOT EXISTS idx_cdp_campaign_dispatch_campaign_status ON customer360.cdp_campaign_dispatch_logs (campaign_id, status);
 CREATE INDEX IF NOT EXISTS idx_cdp_campaign_dispatch_profile ON customer360.cdp_campaign_dispatch_logs (master_profile_id);
 
--- --- Per-tenant dynamic email dispatch config -----------------
-CREATE TABLE IF NOT EXISTS customer360.crm_email_provider_config (
-    config_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+-- --- Generic outbound activation connector config -----------------
+CREATE TABLE IF NOT EXISTS customer360.crm_connector_config (
+    connector_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    user_id UUID REFERENCES customer360.sys_user(user_id) ON DELETE SET NULL,
     name TEXT NOT NULL DEFAULT 'default',
-    provider VARCHAR(50) NOT NULL DEFAULT 'mock',
-    smtp_host TEXT,
-    smtp_port INTEGER,
-    smtp_username TEXT,
-    smtp_password TEXT,
-    smtp_use_tls BOOLEAN NOT NULL DEFAULT TRUE,
-    from_address TEXT,
-    from_name TEXT,
+    connector_type VARCHAR(50) NOT NULL,
+    provider VARCHAR(100) NOT NULL,
+    direction VARCHAR(20) NOT NULL DEFAULT 'OUTBOUND',
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    endpoint_url TEXT,
+    region VARCHAR(100),
+    auth_type VARCHAR(50),
+    credentials_ref TEXT,
+    credentials JSONB NOT NULL DEFAULT '{}'::jsonb,
+    config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    capabilities JSONB DEFAULT '{}'::jsonb,
+    last_tested_at TIMESTAMP WITH TIME ZONE,
+    last_test_status VARCHAR(20),
+    last_error TEXT,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    metadata JSONB,
+    metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-    CONSTRAINT chk_crm_email_provider_config_provider CHECK (provider IN ('mock', 'smtp')),
-    CONSTRAINT uq_crm_email_provider_config_name UNIQUE (tenant_id, name)
+    CONSTRAINT uq_crm_connector_name UNIQUE (tenant_id, name),
+    CONSTRAINT chk_crm_connector_type CHECK (connector_type IN ('EMAIL', 'SMS', 'PUSH', 'CHAT', 'ADS', 'WEBHOOK')),
+    CONSTRAINT chk_crm_connector_direction CHECK (direction IN ('INBOUND', 'OUTBOUND', 'BIDIRECTIONAL')),
+    CONSTRAINT chk_crm_connector_status CHECK (status IN ('ACTIVE', 'INACTIVE', 'ERROR', 'TESTING')),
+    CONSTRAINT chk_crm_connector_last_test_status CHECK (
+        last_test_status IS NULL OR last_test_status IN ('SUCCESS', 'FAILED')
+    ),
+    CONSTRAINT chk_crm_connector_credentials_object CHECK (jsonb_typeof(credentials) = 'object'),
+    CONSTRAINT chk_crm_connector_config_object CHECK (jsonb_typeof(config) = 'object'),
+    CONSTRAINT chk_crm_connector_capabilities_object CHECK (
+        capabilities IS NULL OR jsonb_typeof(capabilities) = 'object'
+    )
 );
 
-COMMENT ON TABLE customer360.crm_email_provider_config IS 'Per-tenant email dispatch configuration: provider + SMTP connection/envelope settings resolved by the email_engine at send time (DB is source of truth, Redis-cached). At most one active row per tenant (uq_crm_email_provider_config_active).';
+COMMENT ON TABLE customer360.crm_connector_config IS 'Outbound CRM connector configuration for activation and communication channels such as email, SMS, push, chat, ads and webhooks. Inbound data collection remains modeled by sys_data_source.';
 
-CREATE INDEX IF NOT EXISTS idx_crm_email_provider_config_tenant ON customer360.crm_email_provider_config (tenant_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_email_provider_config_active
-    ON customer360.crm_email_provider_config (tenant_id) WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_crm_connector_tenant ON customer360.crm_connector_config (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_crm_connector_channel ON customer360.crm_connector_config (tenant_id, connector_type);
+CREATE INDEX IF NOT EXISTS idx_crm_connector_status ON customer360.crm_connector_config (tenant_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_connector_default
+    ON customer360.crm_connector_config (tenant_id, connector_type)
+    WHERE is_default = TRUE AND is_active = TRUE;
 
--- --- Email compliance suppression list ------------------------
-CREATE TABLE IF NOT EXISTS customer360.cdp_email_suppression (
+-- --- Omnichannel CRM suppression list --------------------------
+CREATE TABLE IF NOT EXISTS customer360.crm_suppression_list (
     suppression_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
-    email TEXT NOT NULL,
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    master_profile_id UUID REFERENCES customer360.cdp_master_profiles(master_profile_id) ON DELETE SET NULL,
+    channel VARCHAR(30) NOT NULL,
+    identifier_type VARCHAR(30) NOT NULL,
+    identifier TEXT NOT NULL,
     reason VARCHAR(50) NOT NULL,
-    campaign_id UUID REFERENCES customer360.crm_campaign(campaign_id) ON DELETE SET NULL,
+    scope VARCHAR(20) NOT NULL DEFAULT 'GLOBAL',
+    campaign_id UUID REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
     source VARCHAR(100),
-    metadata JSONB,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    expires_at TIMESTAMP WITH TIME ZONE,
+    removed_at TIMESTAMP WITH TIME ZONE,
+    removed_by UUID REFERENCES customer360.sys_user(user_id) ON DELETE SET NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-    CONSTRAINT chk_cdp_email_suppression_reason
-        CHECK (reason IN ('hard_bounce', 'complaint', 'unsubscribe', 'manual'))
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT chk_crm_suppression_list_channel CHECK (
+        channel IN ('EMAIL', 'SMS', 'PUSH', 'WHATSAPP', 'ZALO', 'VOICE', 'GLOBAL')
+    ),
+    CONSTRAINT chk_crm_suppression_list_identifier_type CHECK (
+        identifier_type IN ('EMAIL', 'PHONE', 'PUSH_TOKEN', 'DEVICE_ID', 'PROFILE_ID')
+    ),
+    CONSTRAINT chk_crm_suppression_list_reason CHECK (
+        reason IN (
+            'HARD_BOUNCE', 'SOFT_BOUNCE', 'COMPLAINT', 'UNSUBSCRIBE', 'MANUAL',
+            'INVALID_DESTINATION', 'POLICY', 'LEGAL'
+        )
+    ),
+    CONSTRAINT chk_crm_suppression_list_scope CHECK (scope IN ('GLOBAL', 'CAMPAIGN')),
+    CONSTRAINT chk_crm_suppression_list_status CHECK (status IN ('ACTIVE', 'REMOVED')),
+    CONSTRAINT chk_crm_suppression_list_campaign_scope CHECK (
+        (scope = 'GLOBAL' AND campaign_id IS NULL)
+        OR (scope = 'CAMPAIGN' AND campaign_id IS NOT NULL)
+    ),
+    CONSTRAINT chk_crm_suppression_list_removed CHECK (
+        (status = 'ACTIVE' AND removed_at IS NULL)
+        OR (status = 'REMOVED' AND removed_at IS NOT NULL)
+    ),
+    CONSTRAINT chk_crm_suppression_list_identifier_not_blank CHECK (btrim(identifier) <> ''),
+    CONSTRAINT chk_crm_suppression_list_email_lower CHECK (
+        identifier_type <> 'EMAIL' OR identifier = lower(identifier)
+    ),
+    CONSTRAINT chk_crm_suppression_list_profile_identifier CHECK (
+        (identifier_type = 'PROFILE_ID' AND channel = 'GLOBAL')
+        OR (identifier_type <> 'PROFILE_ID' AND channel <> 'GLOBAL')
+    ),
+    CONSTRAINT chk_crm_suppression_list_metadata CHECK (jsonb_typeof(metadata) = 'object')
 );
 
-COMMENT ON TABLE customer360.cdp_email_suppression IS 'Compliance suppression list: an email here is never sent again for the tenant. Populated on hard bounce / spam complaint / unsubscribe; enforced by the email_engine eligibility query. Unique per (tenant, lower(email)).';
+COMMENT ON TABLE customer360.crm_suppression_list IS 'Omnichannel CRM suppression registry used by activation services before message dispatch. Supports global and campaign-scoped suppression across Email, SMS, Push, WhatsApp, Zalo, Voice and profile-level suppression.';
+COMMENT ON COLUMN customer360.crm_suppression_list.identifier IS 'Canonical normalized destination identifier. Email must be lowercase; phone numbers should use E.164; provider/device identifiers must use the canonical representation defined by the connector.';
+COMMENT ON COLUMN customer360.crm_suppression_list.scope IS 'GLOBAL blocks activation across campaigns; CAMPAIGN blocks activation only for campaign_id.';
 
-CREATE INDEX IF NOT EXISTS idx_cdp_email_suppression_tenant ON customer360.cdp_email_suppression (tenant_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_cdp_email_suppression_email
-    ON customer360.cdp_email_suppression (tenant_id, lower(email));
+CREATE INDEX IF NOT EXISTS idx_crm_suppression_tenant_status
+    ON customer360.crm_suppression_list (tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_crm_suppression_lookup
+    ON customer360.crm_suppression_list (
+        tenant_id, channel, identifier_type, identifier, status, expires_at
+    );
+CREATE INDEX IF NOT EXISTS idx_crm_suppression_profile
+    ON customer360.crm_suppression_list (tenant_id, master_profile_id)
+    WHERE master_profile_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_suppression_global
+    ON customer360.crm_suppression_list (tenant_id, channel, identifier_type, identifier)
+    WHERE status = 'ACTIVE' AND scope = 'GLOBAL';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_suppression_campaign
+    ON customer360.crm_suppression_list (tenant_id, channel, identifier_type, identifier, campaign_id)
+    WHERE status = 'ACTIVE' AND scope = 'CAMPAIGN';
 
 ---------------------------------------------------
 -- ROW LEVEL SECURITY (RBAC / Multi-Tenant Isolation)
@@ -2975,8 +3048,8 @@ DECLARE
         'crm_campaign_reviews',
         'crm_segment_sync_runs',
         'cdp_campaign_dispatch_logs',
-        'crm_email_provider_config',
-        'cdp_email_suppression',
+        'crm_connector_config',
+        'crm_suppression_list',
         'sys_data_source'
     ];
 BEGIN
