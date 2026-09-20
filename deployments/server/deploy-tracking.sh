@@ -22,7 +22,8 @@
 #   TRACKING_NETWORK  (private docker bridge name; default c360-tracking)
 #   BUILD_LOCAL (default 0 — data-tracking-api is now built + published to GHCR by CI, so it
 #               pulls the image; set BUILD_LOCAL=1 to build on the VM from source instead)
-#   S3_AUTO_CREATE_BUCKETS (default true — per-source buckets; see ../storage/README.md caveat)
+#   S3_AUTO_CREATE_BUCKETS (default true — per-source and master-profile buckets)
+#   MASTER_PROFILE_S3_BUCKET (default c360-master-profiles)
 set -euo pipefail
 cd "$(dirname "$0")"                 # deployments/server
 REPO_ROOT="$(cd ../.. && pwd)"       # repo root (contains data-tracking-api/)
@@ -85,6 +86,7 @@ S3_REGION="$(tfval region "$store/overlays/$ENV.tfvars")"; S3_REGION="${S3_REGIO
 S3_ACCESS_KEY="${TF_VAR_access_key:-$(tfval access_key "$store/terraform.tfvars")}"
 S3_SECRET_KEY="${TF_VAR_secret_key:-$(tfval secret_key "$store/terraform.tfvars")}"
 S3_AUTO_CREATE="${S3_AUTO_CREATE_BUCKETS:-true}"
+MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
 : "${S3_ENDPOINT:?could not read s3_endpoint from $store/overlays/$ENV.tfvars}"
 : "${S3_ACCESS_KEY:?missing vStorage access_key (set TF_VAR_access_key or $store/terraform.tfvars)}"
 : "${S3_SECRET_KEY:?missing vStorage secret_key (set TF_VAR_secret_key or $store/terraform.tfvars)}"
@@ -105,6 +107,7 @@ fi
 # --- CD image source: pull the CI-built image from GHCR by default (data-tracking-api is now
 #     published by CI, like the other services); set BUILD_LOCAL=1 to build on the VM instead. ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/s3.sh"
 SERVICE="data-tracking-api"          # source dir + GHCR image name (ghcr.io/leo-cdp/leo-customer360/data-tracking-api)
 CONTAINER="customer360-tracking-api" # runtime container name (matches dev-docker-compose.yml)
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
@@ -137,12 +140,12 @@ S3_SECRET_B64="$(printf %s "$S3_SECRET_KEY" | base64 | tr -d '\n')"
 REDIS_PW_B64="$(printf %s "${REDIS_PASS:-}" | base64 | tr -d '\n')"
 GHCR_TOKEN_B64="$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')"
 PARAMS_B64="$(printf '%s\n' \
-  "S3_ENDPOINT=$S3_ENDPOINT" "S3_REGION=$S3_REGION" "S3_ACCESS_KEY=$S3_ACCESS_KEY" "S3_SECRET_B64=$S3_SECRET_B64" "S3_AUTO_CREATE=$S3_AUTO_CREATE" \
+  "S3_ENDPOINT=$S3_ENDPOINT" "S3_REGION=$S3_REGION" "S3_ACCESS_KEY=$S3_ACCESS_KEY" "S3_SECRET_B64=$S3_SECRET_B64" "S3_AUTO_CREATE=$S3_AUTO_CREATE" "MASTER_PROFILE_S3_BUCKET=$MASTER_PROFILE_S3_BUCKET" \
   "REDIS_HOST=${REDIS_HOST:-}" "REDIS_PORT=${REDIS_PORT:-}" "REDIS_PW_B64=$REDIS_PW_B64" \
   "DEPLOY_MODE=$DEPLOY_MODE" "IMAGE=$IMAGE" "GHCR_USER=$GHCR_USER" "GHCR_TOKEN_B64=$GHCR_TOKEN_B64" "CONTAINER=$CONTAINER" "OTEL_B64=$OTEL_B64" \
   "REPLICAS=$REPLICAS" "LB_IMAGE=$LB_IMAGE" "NETWORK=$NETWORK" "RL_REQUESTS=$RL_REQUESTS" "RL_WINDOW=$RL_WINDOW" \
   | base64 | tr -d '\n')"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PARAMS_B64" < <(declare -f docker_pull_retry; cat <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$PARAMS_B64" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 tmp="$(mktemp)"; printf %s "$1" | base64 -d > "$tmp"; set -a; . "$tmp"; set +a; rm -f "$tmp"
 S3_SECRET_KEY="$(printf %s "$S3_SECRET_B64" | base64 -d)"
@@ -180,6 +183,7 @@ S3_ACCESS_KEY_ID=$S3_ACCESS_KEY
 S3_SECRET_ACCESS_KEY=$S3_SECRET_KEY
 S3_FORCE_PATH_STYLE=true
 S3_AUTO_CREATE_BUCKETS=$S3_AUTO_CREATE
+MASTER_PROFILE_S3_BUCKET=$MASTER_PROFILE_S3_BUCKET
 ENVF
 if [ -n "${REDIS_HOST:-}" ]; then
   cat >> "$env_file" <<ENVR
@@ -209,6 +213,7 @@ else
   sudo docker build -t data-tracking-api /opt/c360/data-tracking-api
   RUN_IMG="data-tracking-api"
 fi
+ensure_s3_bucket "$RUN_IMG" /opt/c360/tracking.env "$MASTER_PROFILE_S3_BUCKET" "$S3_AUTO_CREATE"
 echo "   pulling LB image $LB_IMAGE ..."
 sudo docker pull "$LB_IMAGE" >/dev/null
 

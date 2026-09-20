@@ -62,8 +62,16 @@ S3_REGION="$(tfval region "$store/overlays/$ENV.tfvars")"; S3_REGION="${S3_REGIO
 S3_BUCKET="$(tfval bucket_names "$store/overlays/$ENV.tfvars")"   # first quoted bucket name
 S3_ACCESS_KEY="${TF_VAR_access_key:-$(tfval access_key "$store/terraform.tfvars")}"
 S3_SECRET_KEY="${TF_VAR_secret_key:-$(tfval secret_key "$store/terraform.tfvars")}"
+if [[ -n "${S3_AUTO_CREATE_BUCKETS:-}" ]]; then
+  S3_AUTO_CREATE="$S3_AUTO_CREATE_BUCKETS"
+elif [[ -n "$S3_ENDPOINT" && -n "$S3_ACCESS_KEY" && -n "$S3_SECRET_KEY" ]]; then
+  S3_AUTO_CREATE="true"
+else
+  S3_AUTO_CREATE="false"
+fi
+MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
 if [[ -n "$S3_ENDPOINT" && -n "$S3_BUCKET" && -n "$S3_ACCESS_KEY" && -n "$S3_SECRET_KEY" ]]; then
-  echo ">> S3: $S3_ENDPOINT bucket=$S3_BUCKET (region $S3_REGION, path-style) — compute logs -> vStorage"
+  echo ">> S3: $S3_ENDPOINT bucket=$S3_BUCKET (region $S3_REGION, path-style, auto_create=$S3_AUTO_CREATE) — compute logs -> vStorage"
 else
   echo ">> S3: not fully configured — compute logs will use the local default"
 fi
@@ -71,6 +79,7 @@ fi
 # --- CD image source: pull the CI-built image from GHCR by default; set
 #     BUILD_LOCAL=1 to fall back to shipping source + building on the VM. ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/s3.sh"
 SERVICE="customer360-dagster"
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
 GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
@@ -109,6 +118,8 @@ AWS_ACCESS_KEY_ID=$S3_ACCESS_KEY
 AWS_SECRET_ACCESS_KEY=$S3_SECRET_KEY
 S3_ACCESS_KEY_ID=$S3_ACCESS_KEY
 S3_SECRET_ACCESS_KEY=$S3_SECRET_KEY
+S3_AUTO_CREATE_BUCKETS=$S3_AUTO_CREATE
+MASTER_PROFILE_S3_BUCKET=$MASTER_PROFILE_S3_BUCKET
 REDIS_HOST=$REDIS_HOST
 REDIS_PORT=$REDIS_PORT
 REDIS_DB=0
@@ -139,9 +150,10 @@ else
   echo ">> Email: dispatch = mock (no smtp.$ENV.env for '$ENV') -- email_engine will not send real email"
 fi
 ENV_B64="$(printf %s "$ENV_CONTENT" | base64 | tr -d '\n')"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ENV_B64" "$DEPLOY_MODE" "$GHCR_USER" "$IMAGE" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" < <(declare -f docker_pull_retry; cat <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ENV_B64" "$DEPLOY_MODE" "$GHCR_USER" "$IMAGE" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 ENV_B64="$1"; DEPLOY_MODE="$2"; GHCR_USER="${3:-token}"; IMAGE="${4:-}"; GHCR_TOKEN="$(printf %s "${5:-}" | base64 -d 2>/dev/null || true)"
+S3_AUTO_CREATE_BUCKETS="${6:-false}"; MASTER_PROFILE_S3_BUCKET="${7:-c360-master-profiles}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -194,6 +206,7 @@ else
   sudo docker build -t customer360-dagster -f /opt/c360/backend-system/Dockerfile /opt/c360
   RUN_IMG="customer360-dagster"
 fi
+ensure_s3_bucket "$RUN_IMG" /opt/c360/backend.env "$MASTER_PROFILE_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
 # Preserve the OLD instance's Dagster storage before replacing the container. The
 # old container ran with an EPHEMERAL DAGSTER_HOME (no -v mount), so its SQLite
 # run/event/schedule history lives ONLY inside the container layer — copy it out

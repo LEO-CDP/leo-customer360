@@ -99,6 +99,15 @@ bring-up before DNS is live:
 running `api` early is safe — re-run it after `sso-realm` to switch SSO on. Secrets/creds
 live in each module's own `.env` / `terraform.tfvars` (see each module's README).
 
+### Shared master-profile S3 bucket
+
+The API and identity-resolution projection use `MASTER_PROFILE_S3_BUCKET`,
+which defaults to `c360-master-profiles`. Set `S3_AUTO_CREATE_BUCKETS=true`
+in `deployments/server/.env` to have the API, Dagster backend, and tracking
+deployment scripts idempotently create/check that bucket before their
+containers start. The bootstrap runs inside each deployed image using its
+configured vStorage credentials, so it works for both UAT and production.
+
 ## Continuous Delivery (CD)
 
 `deploy-all.sh` above is the **manual / one-shot** path. The **target CD model** builds each

@@ -164,12 +164,15 @@ EVENT_RAW_PREFIX="${EVENT_RAW_PREFIX:-events}"
 EVENT_S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-${TF_VAR_access_key:-$(tfval access_key "$store/terraform.tfvars")}}"
 EVENT_S3_SECRET_B64="$(printf %s "${S3_SECRET_ACCESS_KEY:-${TF_VAR_secret_key:-$(tfval secret_key "$store/terraform.tfvars")}}" | base64 | tr -d '\n')"
 EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-true}"
+S3_AUTO_CREATE="${S3_AUTO_CREATE_BUCKETS:-true}"
+MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
 # Region must be a short lowercase token (boto3 rejects anything else).
 [[ "$EVENT_S3_REGION" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: S3_REGION='${EVENT_S3_REGION:0:24}...' is not a region (expected e.g. us-east-1)." >&2; exit 1; }
+echo ">> Master profile S3: bucket=$MASTER_PROFILE_S3_BUCKET (auto_create=$S3_AUTO_CREATE)"
 # ssh flattens argv and silently drops empty args (shifting later fields); pass one
 # base64 newline-joined blob so empties survive, split remotely with mapfile.
-ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" | base64 | tr -d '\r\n')"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ARGV_B64" < <(declare -f docker_pull_retry; cat <<'REMOTE'
+ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" | base64 | tr -d '\r\n')"
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ARGV_B64" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 mapfile -t A < <(printf %s "${1:-}" | base64 -d)   # fields in order, empties preserved
 DB_HOST="${A[0]}"; DB_PORT="${A[1]}"; DB_NAME="${A[2]}"; DB_USER="${A[3]}"; DB_PW="$(printf %s "${A[4]}" | base64 -d)"; DAG_HOST="${A[5]}"
@@ -188,6 +191,8 @@ EVENT_S3_ACCESS_KEY_ID="${A[24]:-}"
 EVENT_S3_SECRET_ACCESS_KEY="$(printf %s "${A[25]:-}" | base64 -d 2>/dev/null || true)"
 EVENT_S3_FORCE_PATH_STYLE="${A[26]:-false}"
 SMTP_B64="${A[27]:-}"
+S3_AUTO_CREATE_BUCKETS="${A[28]:-true}"
+MASTER_PROFILE_S3_BUCKET="${A[29]:-c360-master-profiles}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -231,6 +236,8 @@ S3_REGION=$EVENT_S3_REGION
 S3_ACCESS_KEY_ID=$EVENT_S3_ACCESS_KEY_ID
 S3_SECRET_ACCESS_KEY=$EVENT_S3_SECRET_ACCESS_KEY
 S3_FORCE_PATH_STYLE=$EVENT_S3_FORCE_PATH_STYLE
+S3_AUTO_CREATE_BUCKETS=$S3_AUTO_CREATE_BUCKETS
+MASTER_PROFILE_S3_BUCKET=$MASTER_PROFILE_S3_BUCKET
 ENVF
 if [[ -n "$REDIS_HOST" && -n "$REDIS_PW" ]]; then
   cat >> "$env_file" <<ENVR
@@ -272,6 +279,7 @@ else
   sudo docker build -t customer360-api -f /opt/c360/customer360-api/Dockerfile /opt/c360
   RUN_IMG="customer360-api"
 fi
+ensure_s3_bucket "$RUN_IMG" /opt/c360/api.env "$MASTER_PROFILE_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
 sudo docker rm -f customer360-api >/dev/null 2>&1 || true
 # Keep logs visible to Portainer through the shared Docker socket while bounding disk usage.
 sudo docker run -d --name customer360-api --restart unless-stopped \

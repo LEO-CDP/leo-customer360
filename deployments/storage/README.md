@@ -104,6 +104,13 @@ the workspace and pass the overlay yourself:
 
 - **Bucket names are globally unique** within the vStorage tenant, so UAT and
   PROD must use different names (the overlays already do).
+- The shared master-profile projection bucket is `c360-master-profiles`. It is
+  intentionally not listed in both environment overlays because UAT and PROD
+  use separate Terraform workspaces while the bucket name is globally unique.
+  When `S3_AUTO_CREATE_BUCKETS=true`, `server/deploy-api.sh`,
+  `server/deploy-backend.sh`, and `server/deploy-tracking.sh` perform an
+  idempotent `head_bucket`/`create_bucket` bootstrap before starting their
+  containers.
 - **Endpoint:** `s3_endpoint` defaults to **HCM04** (this account's object-storage
   regions are `hcm04` / `han02`, not `hcm03`). Override it in the overlay if your
   project lives elsewhere. `region` is a SigV4 signing label only and must stay
