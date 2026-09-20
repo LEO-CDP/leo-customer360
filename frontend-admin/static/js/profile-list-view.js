@@ -25,7 +25,12 @@ window.C360 = window.C360 || {};
       displayName: displayName,
       initials: fmt.initials(displayName),
       shortId: fmt.shortId(p.master_profile_id),
-      tierLabel: p.membership_tier || p.clv_segment || "—",
+      domainLabel: fmt.domainLabel(p.domain),
+      domainIcon: fmt.domainIcon(p.domain),
+      domainIconBg: fmt.domainIconBg(p.domain),
+      tierLabel: fmt.titleCase(p.membership_tier || p.clv_segment) || "—",
+      tierIcon: "🏷️",
+      lastActivityIcon: "🕒",
       lifecycleLabel: fmt.titleCase(p.lifecycle_stage) || "—",
       lifecycleBadgeClass: fmt.lifecycleBadgeClass(p.lifecycle_stage),
       churnBadgeClass: fmt.churnBadgeClass(p.churn_risk_tier),
@@ -35,7 +40,7 @@ window.C360 = window.C360 || {};
         : fmt.int(p.total_tracked_events),
       clvLabel: (p.predictive_clv !== null && p.predictive_clv !== undefined) ? fmt.money(p.predictive_clv, "") : "—",
       engagementLabel: (p.engagement_score !== null && p.engagement_score !== undefined) ? fmt.score(p.engagement_score) : "—",
-      lastActivityLabel: p.last_activity_at ? fmt.date(p.last_activity_at) : "—"
+      lastActivityLabel: p.last_activity_at ? fmt.dateTime(p.last_activity_at) : "—"
     });
   }
 
@@ -43,13 +48,13 @@ window.C360 = window.C360 || {};
   // as-is by segments-view.js for the segment-detail "Matched Profiles" table.
   var COLUMNS = [
     { label: "Profile", type: "identity", nameField: "displayName", subField: "shortId", avatarField: "initials" },
-    { label: "Domain", field: "domain", capitalize: true },
-    { label: "Tier", field: "tierLabel" },
+    { label: "Domain", type: "identity", nameField: "domainLabel", avatarField: "domainIcon", avatarBgField: "domainIconBg", avatarColor: "text-slate-600", compact: true },
+    { label: "Tier", type: "identity", nameField: "tierLabel", avatarField: "tierIcon", avatarBg: "bg-amber-100", avatarColor: "text-amber-700", compact: true },
     { label: "Lifecycle", type: "badge", field: "lifecycleLabel", classField: "lifecycleBadgeClass" },
     { label: "Churn Risk", type: "badge", field: "churn_risk_tier", classField: "churnBadgeClass" },
     { label: "Linked Profiles", field: "linkedRawProfileCountLabel" },
-    { label: "Total Tracked Events", field: "trackedEventsLabel" },
-    { label: "Last Activity", field: "lastActivityLabel", muted: true }
+    { label: "Total Events", field: "trackedEventsLabel" },
+    { label: "Last Activity", type: "identity", nameField: "lastActivityLabel", avatarField: "lastActivityIcon", avatarBg: "bg-slate-100", avatarColor: "text-slate-500", compact: true }
   ];
 
   function buildListParams(params) {

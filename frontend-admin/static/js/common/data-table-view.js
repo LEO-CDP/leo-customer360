@@ -36,6 +36,7 @@ window.C360 = window.C360 || {};
       class: [col.cellClass || "", col.muted ? "text-slate-500" : "", col.capitalize ? "capitalize" : ""].join(" ").trim(),
       isBadge: col.type === "badge",
       isIdentity: col.type === "identity",
+      isCompactIdentity: col.type === "identity" && col.compact,
       isMetrics: col.type === "metrics",
       isLink: col.type === "link"
     };

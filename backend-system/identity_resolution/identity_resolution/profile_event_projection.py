@@ -88,13 +88,15 @@ class MasterProfileEventProjector:
 
         for data_source_id, source_matchers in by_source.items():
             identifier_index: dict[str, set[_RawMatcher]] = defaultdict(set)
+            raw_profile_index: dict[str, set[_RawMatcher]] = defaultdict(set)
             for matcher in source_matchers:
+                raw_profile_index[matcher.raw_profile_id].add(matcher)
                 for identifier in matcher.identifiers:
                     identifier_index[identifier].add(matcher)
 
             for object_key in self._iter_source_objects(data_source_id):
                 for envelope in self._iter_object(data_source_id, object_key):
-                    matched = self._match_event(envelope, identifier_index, source_matchers)
+                    matched = self._match_event(envelope, identifier_index, raw_profile_index)
                     for matcher in matched:
                         event_id = str(envelope.get("event_id") or object_key)
                         if event_id in seen_by_master[matcher.master_profile_id]:
@@ -198,27 +200,35 @@ class MasterProfileEventProjector:
 
     def _iter_object(self, data_source_id: str, object_key: str) -> Iterator[dict[str, Any]]:
         bucket = f"data-tracking-{data_source_id}"
+        body = None
+        reader = None
         try:
-            body = self.store.s3.get_object(Bucket=bucket, Key=object_key)["Body"].read()
+            body = self.store.s3.get_object(Bucket=bucket, Key=object_key)["Body"]
+            reader = gzip.GzipFile(fileobj=body) if object_key.endswith(".gz") else body
+            for line in reader:
+                if not line.strip():
+                    continue
+                envelope = json.loads(line)
+                if isinstance(envelope, dict):
+                    yield envelope
         except ClientError as exc:
             code = str(exc.response.get("Error", {}).get("Code", ""))
             if code in {"404", "NoSuchBucket", "NotFound"}:
                 return
             raise
-        if object_key.endswith(".gz"):
-            body = gzip.decompress(body)
-        for line in body.splitlines():
-            if not line.strip():
-                continue
-            envelope = json.loads(line)
-            if isinstance(envelope, dict):
-                yield envelope
+        except BotoCoreError:
+            raise
+        finally:
+            if reader is not None and reader is not body:
+                reader.close()
+            if body is not None:
+                body.close()
 
     @staticmethod
     def _match_event(
         envelope: dict[str, Any],
         identifier_index: dict[str, set[_RawMatcher]],
-        source_matchers: list[_RawMatcher],
+        raw_profile_index: dict[str, set[_RawMatcher]],
     ) -> set[_RawMatcher]:
         payload = envelope.get("payload") or envelope.get("event")
         payload = payload if isinstance(payload, dict) else {}
@@ -232,11 +242,7 @@ class MasterProfileEventProjector:
         }
         direct_raw_profile_id = payload.get("raw_profile_id") or envelope.get("raw_profile_id")
         if direct_raw_profile_id:
-            direct = {
-                matcher
-                for matcher in source_matchers
-                if matcher.raw_profile_id == str(direct_raw_profile_id)
-            }
+            direct = raw_profile_index.get(str(direct_raw_profile_id), set())
             if direct:
                 return direct
         matched: set[_RawMatcher] = set()

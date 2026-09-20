@@ -3,9 +3,7 @@
  * customer360-api/core/routers/reporting_api.py) and renders KPI cards plus
  * Chart.js visualizations: processing funnel, profile counts by domain,
  * raw profiles by source system, and identity graph channel coverage.
- * The "Top Duplicate Master Profiles" table previously rendered here has
- * moved to the Profiles list view's "Duplicate Profiles" tab -- see
- * profile-duplicates-view.js. */
+ * Duplicate-profile counts remain available as reporting metrics. */
 window.C360 = window.C360 || {};
 
 (function (C360) {

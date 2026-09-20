@@ -4,6 +4,12 @@
   {{#each cells}}
   <td class="px-6 py-4 {{class}}">
     {{#if isIdentity}}
+    {{#if isCompactIdentity}}
+    <div class="inline-flex items-center gap-1.5 max-w-[180px]">
+      <span class="w-5 h-5 shrink-0 rounded-md text-[10px] flex items-center justify-center {{avatarBg}} {{avatarColor}}" aria-hidden="true">{{avatarContent}}</span>
+      <span class="text-xs font-medium text-slate-700 truncate">{{name}}</span>
+    </div>
+    {{else}}
     <div class="flex items-center gap-3 max-w-[250px]">
       <!-- Avatar with shadow and white ring -->
       <div class="w-10 h-10 shrink-0 rounded-full font-bold text-sm shadow-sm ring-2 ring-white flex items-center justify-center {{avatarBg}} {{avatarColor}} {{avatarTextClass}}">{{avatarContent}}</div>
@@ -20,6 +26,7 @@
         {{/if}}
       </div>
     </div>
+    {{/if}}
     {{else if isBadge}}
     {{#if value}}
       <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold shadow-sm {{badgeClass}}">{{value}}</span>
