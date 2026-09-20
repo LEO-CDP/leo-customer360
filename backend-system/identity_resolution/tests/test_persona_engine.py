@@ -236,6 +236,21 @@ class TestPersonaScoreAggregation:
 
 
 class TestComputePersona:
+    def test_unknown_tracking_profile_gets_web_visitor_persona(self, monkeypatch):
+        monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
+        computation = compute_persona(
+            _profile(
+                domain="unknown",
+                source_systems=["tracking"],
+                master_profile_id="11111111-1111-1111-1111-111111111111",
+            )
+        )
+
+        assert computation.persona_name == "Web Visitor"
+        assert computation.persona_category == "Web Visitor"
+        assert computation.persona_code == "web_visitor"
+        assert "Anonymous web visitor" in computation.persona_summary
+
     def test_returns_populated_computation(self, monkeypatch):
         monkeypatch.setattr(persona, "LEO_GOOGLE_GENAI_API_KEY", None)
         computation = compute_persona(_profile())

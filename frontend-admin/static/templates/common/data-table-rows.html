@@ -4,10 +4,10 @@
   {{#each cells}}
   <td class="px-6 py-4 {{class}}">
     {{#if isIdentity}}
-    <div class="flex items-center gap-3">
+    <div class="flex items-center gap-3 max-w-[250px]">
       <!-- Avatar with shadow and white ring -->
       <div class="w-10 h-10 shrink-0 rounded-full font-bold text-sm shadow-sm ring-2 ring-white flex items-center justify-center {{avatarBg}} {{avatarColor}} {{avatarTextClass}}">{{avatarContent}}</div>
-      <div class="min-w-0">
+      <div class="min-w-0 flex-1">
         <div class="font-semibold text-slate-900 truncate group-hover:text-indigo-600 transition-colors">{{name}}</div>
         {{#if sub}}
         {{#if isTagSub}}

@@ -54,6 +54,14 @@ class SourceStateStore:
     def source_profile_hll_key(self, data_source_id: str) -> str:
         return f"{self.settings.source_profile_hll_prefix}{data_source_id}"
 
+    def source_profile_analytics_key(
+        self, data_source_id: str, raw_profile_id: str
+    ) -> str:
+        return f"{self.settings.source_profile_analytics_prefix}{data_source_id}:{raw_profile_id}"
+
+    def source_profile_event_key(self, data_source_id: str, event_id: str) -> str:
+        return f"{self.settings.source_profile_event_prefix}{data_source_id}:{event_id}"
+
     def set_state(self, data_source_id: str, **values: Any) -> None:
         values["updated_at"] = datetime.now(timezone.utc).isoformat()
         self.redis_client.hset(
@@ -108,6 +116,43 @@ class SourceStateStore:
 
     def profile_count(self, data_source_id: str) -> int:
         return int(self.redis_client.pfcount(self.source_profile_hll_key(data_source_id)))
+
+    def record_profile_event_analytics(
+        self,
+        data_source_id: str,
+        raw_profile_id: str,
+        event_id: str,
+        *,
+        page_view: bool,
+        click: bool,
+    ) -> dict[str, float | int]:
+        """Accumulate one deduplicated event and return its profile snapshot."""
+        accepted = self.redis_client.set(
+            self.source_profile_event_key(data_source_id, event_id),
+            "1",
+            nx=True,
+            ex=self.settings.processed_object_ttl_seconds,
+        )
+        profile_key = self.source_profile_analytics_key(data_source_id, raw_profile_id)
+        if accepted:
+            increments = {"total_tracked_events": 1}
+            if page_view:
+                increments["page_views"] = 1
+            if click:
+                increments["clicks"] = 1
+            for field, increment in increments.items():
+                self.redis_client.hincrby(profile_key, field, increment)
+
+        values = self.redis_client.hgetall(profile_key)
+        total = int(values.get("total_tracked_events", 0) or 0)
+        page_views = int(values.get("page_views", 0) or 0)
+        clicks = int(values.get("clicks", 0) or 0)
+        return {
+            "page_views": page_views,
+            "clicks": clicks,
+            "total_tracked_events": total,
+            "click_through_rate": round(clicks / page_views, 6) if page_views else 0.0,
+        }
 
     def get_daily_stats(self, data_source_id: str) -> tuple[int, int]:
         daily = self.redis_client.hgetall(self.source_daily_key(data_source_id))

@@ -36,6 +36,7 @@ _RAW_PROFILE_COLUMNS = (
     "raw_profile_id",
     "tenant_id",
     "data_source_id",
+    "data_source_analytics",
     "domain",
     "source_system",
     "channel",

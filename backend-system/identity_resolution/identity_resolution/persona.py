@@ -77,7 +77,9 @@ _ROLE_BY_DOMAIN = {
     "travel": ("Traveler", "Frequent Flyer", "Hotel Guest", "Explorer"),
     "media": ("Content Consumer", "Subscriber", "Viewer", "Listener"),
     "education": ("Learner", "Student", "Course Taker", "Lifelong Learner"),
+    "unknown": ("Web Visitor",),
 }
+_WEB_VISITOR_SOURCE_SYSTEMS = {"tracking", "web", "webtracking", "web_tracking"}
 
 LEO_GOOGLE_GENAI_API_KEY = os.getenv("LEO_GOOGLE_GENAI_API_KEY", None)
 LEO_GOOGLE_GENAI_MODEL = os.getenv("LEO_GOOGLE_GENAI_MODEL", "gemini-3.5-flash")
@@ -145,6 +147,21 @@ def profile_looks_hashed(profile: Dict[str, Any], fields=PII_SCALAR_FIELDS) -> b
     return any(is_hashed_value(profile.get(field)) for field in fields)
 
 
+def is_web_visitor_profile(profile: Dict[str, Any]) -> bool:
+    """Identify anonymous Web SDK profiles without inventing a domain."""
+    domain = str(profile.get("domain") or "").strip().lower()
+    if domain not in {"", "unknown"}:
+        return False
+    source_system = str(profile.get("source_system") or "").strip().lower()
+    if source_system in _WEB_VISITOR_SOURCE_SYSTEMS:
+        return True
+    source_systems = profile.get("source_systems") or []
+    return any(
+        str(value).strip().lower() in _WEB_VISITOR_SOURCE_SYSTEMS
+        for value in source_systems
+    )
+
+
 def _stable_seed(profile: Dict[str, Any]) -> str:
     """Returns a stable string to deterministically derive a persona_name
     from, preferring non-PII identity anchors. Falls back to the (already
@@ -179,6 +196,9 @@ def generate_persona_name(profile: Dict[str, Any]) -> str:
     stable identity anchor, so the same underlying person always gets a
     stable, traceable, non-reversible suffix.
     """
+    if is_web_visitor_profile(profile):
+        return "Web Visitor"
+
     seed = _stable_seed(profile)
     digest = hashlib.sha256((seed or "unknown").encode("utf-8")).hexdigest()
     suffix = digest[:6]

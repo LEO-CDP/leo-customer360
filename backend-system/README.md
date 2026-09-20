@@ -1241,7 +1241,7 @@ The local Dagster setup currently uses the following variables.
 | `DAGSTER_UI_HOST`                    | `127.0.0.1`                    | Bind address for the Dagster webserver              |
 | `DAGSTER_UI_PORT`                    | `3000`                         | Host port for the Dagster UI                        |
 | `DAGSTER_HOME`                       | `backend-system/.dagster_home` | Persistent run/event storage for local development  |
-| `CIR_POLL_INTERVAL_SECONDS`          | `90`                           | Polling interval for the identity-resolution sensor |
+| `CIR_POLL_INTERVAL_SECONDS`          | `600`                          | Polling interval for the identity-resolution sensor (10 minutes) |
 | `SEGMENTATION_POLL_INTERVAL_SECONDS` | `10`                           | Polling interval for the segmentation sensor        |
 
 Placeholder jobs also accept service-specific sleep settings, each defaulting

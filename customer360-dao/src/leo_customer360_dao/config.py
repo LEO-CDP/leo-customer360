@@ -81,6 +81,12 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("S3_VERIFY_SSL", "event_s3_verify_ssl"),
     )
+    master_profile_s3_bucket: str = Field(
+        default="c360-master-profiles",
+        validation_alias=AliasChoices(
+            "MASTER_PROFILE_S3_BUCKET", "master_profile_s3_bucket"
+        ),
+    )
 
     # Segment -> CRM sync engine: profiles are resolved
     # and upserted into crm_* tables in batches this size so a large segment

@@ -31,7 +31,12 @@ from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from . import persona
-from .persona import generate_persona_name, generate_persona_summary, primary_role_label
+from .persona import (
+    generate_persona_name,
+    generate_persona_summary,
+    is_web_visitor_profile,
+    primary_role_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -830,6 +835,7 @@ def compute_persona(master_profile: Dict[str, Any]) -> PersonaComputation:
     generate_persona_name/generate_persona_summary. Fully unit-testable
     without a database."""
     domain = (master_profile.get("domain") or "retail").lower()
+    is_web_visitor = is_web_visitor_profile(master_profile)
     lifecycle_stage = master_profile.get("lifecycle_stage")
 
     scores = {
@@ -846,8 +852,8 @@ def compute_persona(master_profile: Dict[str, Any]) -> PersonaComputation:
     next_best_action = compute_next_best_action(
         lifecycle_stage=lifecycle_stage, value_tier=value_tier, risk_level=risk_level
     )
-    persona_category = compute_persona_category(domain, value_tier)
-    persona_code = compute_persona_code(domain, value_tier, lifecycle_stage)
+    persona_category = "Web Visitor" if is_web_visitor else compute_persona_category(domain, value_tier)
+    persona_code = "web_visitor" if is_web_visitor else compute_persona_code(domain, value_tier, lifecycle_stage)
 
     confidence_score = master_profile.get("identity_confidence_score")
     if confidence_score is not None:
@@ -889,7 +895,11 @@ def compute_persona(master_profile: Dict[str, Any]) -> PersonaComputation:
         "relationship_score": scores["relationship"],
         "risk_score": scores["risk"],
     }
-    persona_summary = generate_persona_summary(summary_stats)
+    persona_summary = (
+        "Anonymous web visitor with page-view and click activity."
+        if is_web_visitor
+        else generate_persona_summary(summary_stats)
+    )
 
     return PersonaComputation(
         persona_code=persona_code,

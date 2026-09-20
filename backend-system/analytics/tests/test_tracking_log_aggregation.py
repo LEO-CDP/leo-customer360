@@ -111,7 +111,10 @@ class FakeRedis:
 
     def set(self, key, _value, nx=False, ex=None):
         assert nx is True
-        assert ex == aggregation.LOCK_TTL_SECONDS
+        assert ex in {
+            aggregation.LOCK_TTL_SECONDS,
+            aggregation.PROCESSED_OBJECT_TTL_SECONDS,
+        }
         if self.locked or key in self.locked_keys:
             return False
         self.locked_keys.add(key)
@@ -119,6 +122,10 @@ class FakeRedis:
 
     def hset(self, key, mapping):
         self.states.setdefault(key, {}).update(mapping)
+
+    def hincrby(self, key, field, increment):
+        state = self.states.setdefault(key, {})
+        state[field] = str(int(state.get(field, 0)) + increment)
 
     def hgetall(self, key):
         return self.states.get(key, {})

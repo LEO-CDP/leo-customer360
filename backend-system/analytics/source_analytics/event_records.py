@@ -108,6 +108,15 @@ class EventRecordService:
                     return f"{key}:{normalized.lower()}"
         return None
 
+    @staticmethod
+    def analytics_event_flags(event: dict[str, Any]) -> tuple[bool, bool]:
+        """Return page-view and click classifications for source analytics."""
+        event_name = str(event.get("event_name") or "").strip().lower().replace("-", "_")
+        return (
+            event_name in {"page_view", "pageview", "view"},
+            event_name in {"click", "link_click", "button_click", "email_clicked"},
+        )
+
     def normalize_event_record(
         self,
         record: dict[str, Any],

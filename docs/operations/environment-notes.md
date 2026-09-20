@@ -61,7 +61,7 @@ independent and uses `ads-server/.env` from `ads-server/.env.example`.
 ## Identity resolution and background jobs
 
 - `CIR_BATCH_SIZE`: Batch size for identity resolution processing. Default: `5000`
-- `CIR_POLL_INTERVAL_SECONDS`: Interval between identity resolution worker polls. Default: `90`
+- `CIR_POLL_INTERVAL_SECONDS`: Interval between identity resolution worker polls. Default: `600` (10 minutes)
 - `ANALYTICS_DATA_SOURCE_LIMIT`: Data sources processed per analytics run. Default: `10`
 - `ANALYTICS_LOCK_TTL_SECONDS`: Analytics Redis lock lifetime. Default: `3600`
 - `DAGSTER_UI_HOST`: Host interface for the Dagster UI. Default: `127.0.0.1`

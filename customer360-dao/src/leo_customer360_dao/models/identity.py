@@ -87,6 +87,7 @@ class CdpMasterProfile(Base):
     segmentation_tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
     communication_preferences: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     attributes: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    data_source_analytics: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     source_systems: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
     first_seen_raw_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
 
@@ -146,6 +147,7 @@ class CdpRawProfileStage(Base):
     data_source_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("sys_data_source.data_source_id")
     )
+    data_source_analytics: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     # Data owner: internal sys_user who created/manages this row (nullable -- rows are
     # normally landed by ingestion pipelines, not an interactive admin user).
     user_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))

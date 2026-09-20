@@ -10,7 +10,6 @@ section of core-customer360/identity-resolution.md.
 import uuid
 from math import ceil
 from typing import Optional
-from leo_customer360_dao.config import settings
 from leo_customer360_dao.utils.datetime import cutoff_for_days
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
@@ -22,10 +21,6 @@ from leo_customer360_dao.models.identity import (
     CdpPersonaArchetype,
     CdpProfileLink,
     CdpRawProfileStage,
-)
-from leo_customer360_dao.repositories.event_query_repository import (
-    EventQueryError,
-    EventQueryRepository,
 )
 
 STATUS_CODE_LABELS = {
@@ -167,25 +162,12 @@ def list_master_profiles_page(
 
     rows = db.execute(list_stmt).all()
     items = []
-    profile_ids = [profile.master_profile_id for profile, _linked_count in rows]
-    event_counts = {}
-    session_tenant_id = tenant_id or getattr(db, "info", {}).get("tenant_id")
-    if profile_ids and session_tenant_id:
-        try:
-            event_counts = EventQueryRepository(settings).query_profile_event_counts(
-                db,
-                uuid.UUID(str(session_tenant_id)),
-                profile_ids,
-                data_source_id=data_source_id,
-                days=settings.event_query_max_days,
-            )
-        except (EventQueryError, ValueError):
-            # Profile browsing remains available when the optional event lake
-            # is unavailable; the response reports zero tracked events.
-            event_counts = {}
     for profile, linked_raw_profile_count in rows:
         profile.linked_raw_profile_count = int(linked_raw_profile_count or 0)
-        profile.total_tracked_events = event_counts.get(profile.master_profile_id, 0)
+        profile.total_tracked_events = _total_tracked_events(
+            getattr(profile, "data_source_analytics", None),
+            data_source_id,
+        )
         items.append(profile)
     total = db.execute(count_stmt).scalar_one()
     total_pages = ceil(total / page_size) if total > 0 else 1
@@ -201,6 +183,25 @@ def list_master_profiles_page(
             "has_next": page < total_pages,
         },
     }
+
+
+def _total_tracked_events(
+    analytics: Optional[dict],
+    data_source_id: Optional[uuid.UUID] = None,
+) -> int:
+    """Read the profile event total from persisted source analytics JSON."""
+    if not isinstance(analytics, dict):
+        return 0
+    source_items = (
+        {str(data_source_id): analytics.get(str(data_source_id))}
+        if data_source_id is not None
+        else analytics
+    )
+    return sum(
+        int(metrics.get("total_tracked_events", 0) or 0)
+        for metrics in source_items.values()
+        if isinstance(metrics, dict)
+    )
 
 
 def list_master_profiles_by_persona_category_page(

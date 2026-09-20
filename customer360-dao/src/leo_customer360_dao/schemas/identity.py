@@ -42,6 +42,7 @@ class MasterProfileBase(BaseModel):
     segmentation_tags: Optional[list[str]] = None
     communication_preferences: Optional[dict] = None
     attributes: Optional[dict] = None
+    data_source_analytics: Optional[dict[str, dict[str, Any]]] = None
     source_systems: Optional[list[str]] = None
     first_seen_raw_profile_id: Optional[uuid.UUID] = None
 
@@ -103,6 +104,7 @@ class MasterProfileUpdate(BaseModel):
     segmentation_tags: Optional[list[str]] = None
     communication_preferences: Optional[dict] = None
     attributes: Optional[dict] = None
+    data_source_analytics: Optional[dict[str, dict[str, Any]]] = None
     source_systems: Optional[list[str]] = None
     customer_since: Optional[date] = None
     last_activity_at: Optional[datetime] = None
@@ -156,6 +158,7 @@ class MasterProfileListResponse(BaseModel):
 class RawProfileBase(BaseModel):
     tenant_id: uuid.UUID
     data_source_id: Optional[uuid.UUID] = None
+    data_source_analytics: Optional[dict[str, dict[str, Any]]] = None
     user_id: Optional[uuid.UUID] = None
     domain: str = Field(default="retail")
     source_system: str
@@ -206,6 +209,7 @@ class RawProfileCreate(RawProfileBase):
 
 
 class RawProfileUpdate(BaseModel):
+    data_source_analytics: Optional[dict[str, dict[str, Any]]] = None
     user_id: Optional[uuid.UUID] = None
     channel: Optional[str] = None
     external_customer_id: Optional[str] = None

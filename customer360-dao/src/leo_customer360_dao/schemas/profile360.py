@@ -4,7 +4,8 @@ routes in core/routers/identity_api.py)."""
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -42,3 +43,15 @@ class TimelineEntry(BaseModel):
     amount: Optional[Decimal] = None
     currency: Optional[str] = None
     occurred_at: Optional[datetime] = None
+    event_id: Optional[str] = None
+    data_source_id: Optional[UUID] = None
+    raw_profile_id: Optional[UUID] = None
+    source_system: Optional[str] = None
+    domain: Optional[str] = None
+    device_type: Optional[str] = None
+    event_category: Optional[str] = None
+    event_name: Optional[str] = None
+    page_url: Optional[str] = None
+    page_title: Optional[str] = None
+    referrer_url: Optional[str] = None
+    event_data: Optional[dict[str, Any]] = None

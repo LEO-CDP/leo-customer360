@@ -70,6 +70,14 @@ def test_identity_repository_upserts_raw_profile_with_tenant_scope():
             "tenant_id": tenant_id,
             "domain": "retail",
             "source_system": "web",
+            "data_source_analytics": {
+                str(uuid.uuid4()): {
+                    "page_views": 1,
+                    "clicks": 1,
+                    "click_through_rate": 1.0,
+                    "total_tracked_events": 1,
+                }
+            },
             "email": "customer@example.test",
             "event_name": "page_view",
             "event_time": "2026-09-18T12:00:00Z",
@@ -82,6 +90,7 @@ def test_identity_repository_upserts_raw_profile_with_tenant_scope():
     assert "cdp_raw_profiles_stage" in rendered_statement
     assert "ON CONFLICT" in rendered_statement
     assert "status_code" in rendered_statement
+    assert "data_source_analytics" in rendered_statement
 
 
 def test_identity_repository_rejects_a_cross_tenant_raw_profile():
@@ -101,3 +110,16 @@ def test_identity_repository_rejects_a_cross_tenant_raw_profile():
         assert str(exc) == "Raw profile tenant does not match the session tenant"
     else:  # pragma: no cover - assertion guard
         raise AssertionError("cross-tenant raw profile was accepted")
+
+
+def test_total_tracked_events_reads_persisted_source_analytics():
+    from leo_customer360_dao.crud.identity import _total_tracked_events
+
+    source_id = uuid.uuid4()
+    analytics = {
+        str(source_id): {"total_tracked_events": 7},
+        str(uuid.uuid4()): {"total_tracked_events": 3},
+    }
+
+    assert _total_tracked_events(analytics) == 10
+    assert _total_tracked_events(analytics, source_id) == 7

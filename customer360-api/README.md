@@ -54,6 +54,28 @@ Configure the query connection with `EVENT_QUERY_MAX_DAYS` (default: `180` days)
 `ANALYTICS_S3_ENDPOINT_URL`, `S3_REGION`, S3 credentials, and
 `S3_FORCE_PATH_STYLE`.
 
+### Master profile timeline projections
+
+`GET /api/v1/master-profiles/{master_profile_id}/timeline` reads the resolved
+profile's JSON projection from the `MASTER_PROFILE_S3_BUCKET` bucket (default:
+`c360-master-profiles`) using the object key `{master_profile_id}.json`. CIR
+rebuilds that object after resolving the profile's active raw-profile links;
+the JSON contains the complete merged raw envelopes from every source, ordered
+newest first. The API filters the projection without scanning source buckets:
+
+```text
+/api/v1/master-profiles/{id}/timeline?from_event_time=2026-09-20T05:29:18.766000+00:00&to_event_time=2026-09-13T05:29:18.766000+00:00
+```
+
+The two endpoints are order-independent and default to the most recent seven
+days. `data_source_id` optionally restricts the returned events to one active,
+tenant-owned source. Timeline entries include source lineage, event category/name,
+device/domain metadata, page title/URL/referrer, and a bounded scalar-only
+`event_data` object for safe display. The API does not return the complete raw
+event payload or identity object. Use
+`identity_resolution/scripts/rebuild_master_profile_event_projections.py` once
+after enabling this projection for existing profiles.
+
 ## 3. Architecture and Ownership
 
 - Main API app factory: core/apps/http_api_app.py

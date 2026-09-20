@@ -260,6 +260,7 @@ routers and Dagster definitions.
 | `repositories.content_repository` | Tenant/domain content CRUD and recommended-content queries. |
 | `repositories.crm_repository` | CRM entity repositories for accounts, contacts, leads, opportunities, and campaigns. |
 | `repositories.event_query_repository` | Tenant-scoped S3/MinIO event discovery, decompression, Polars parsing, filtering, and volume summaries. |
+| `repositories.master_profile_event_repository` | JSON event projections for resolved master profiles, including seven-day/range/source filtering. |
 | `repositories.graph_repository` | Customer graph-edge queries. |
 | `repositories.identity_repository` | Identity profile CRUD and identity-specific operations. |
 | `repositories.persona_repository` | Persona archetype, feature, score, history, and customer-persona queries. |

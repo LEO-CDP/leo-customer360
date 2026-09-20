@@ -314,6 +314,16 @@ class TrackingLogAggregationService:
                 if signature:
                     signatures.add(signature)
                 raw_profile = self.events.extract_raw_profile(normalized_event)
+                page_view, click = self.events.analytics_event_flags(normalized_event)
+                raw_profile["data_source_analytics"] = {
+                    str(data_source_id): self.state.record_profile_event_analytics(
+                        data_source_id,
+                        raw_profile["raw_profile_id"],
+                        normalized_event["event_id"],
+                        page_view=page_view,
+                        click=click,
+                    )
+                }
                 raw_profile_repository.upsert_raw_profile(raw_profile)
         finally:
             close = getattr(body, "close", None)

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Reusable local E2E template:
-#   create events -> tracking API -> MinIO RAW JSONL.GZ -> Dagster analytics -> S3 stats/profile stage
+# Reusable local E2E integration test:
+#   production-shaped events -> tracking API -> MinIO RAW JSONL.GZ ->
+#   Dagster analytics -> raw analytics -> CIR -> master analytics/persona/API
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,7 +22,7 @@ require_command() {
 	}
 }
 
-for command_name in curl jq docker; do
+for command_name in curl jq docker python3; do
 	require_command "$command_name"
 done
 
@@ -36,9 +37,14 @@ MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}"
 DB_USER="${DB_USER:-postgres}"
 DB_NAME="${DB_NAME:-customer360}"
 DB_SCHEMA="${DB_SCHEMA:-customer360}"
+MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
 S3_WAIT_SECONDS="${E2E_S3_WAIT_SECONDS:-5}"
 ANALYTICS_POLL_SECONDS="${E2E_ANALYTICS_POLL_SECONDS:-5}"
 ANALYTICS_TIMEOUT_SECONDS="${E2E_ANALYTICS_TIMEOUT_SECONDS:-300}"
+CIR_DIR="$ROOT_DIR/backend-system/identity_resolution"
+CIR_PYTHON="${CIR_PYTHON:-$CIR_DIR/.venv/bin/python}"
+CIR_POLL_INTERVAL_SECONDS="${CIR_POLL_INTERVAL_SECONDS:-600}"
+E2E_APPLY_LOCAL_MIGRATIONS="${E2E_APPLY_LOCAL_MIGRATIONS:-true}"
 CUSTOMER360_API_TOKEN="${CUSTOMER360_API_TOKEN:-${LEO_API_TOKEN:-}}"
 CUSTOMER360_USERNAME="${CUSTOMER360_USERNAME:-${DEFAULT_ROOT_USERNAME:-}}"
 CUSTOMER360_PASSWORD="${CUSTOMER360_PASSWORD:-${DEFAULT_ROOT_PASSWORD:-}}"
@@ -58,9 +64,17 @@ if ! [[ "$ANALYTICS_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
 	exit 1
 fi
 
-SESSION_ID="${E2E_SESSION_ID:-e2e-session-$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}}"
-USER_ID="${E2E_USER_ID:-e2e-user-${RANDOM}}"
-ORDER_ID="${E2E_ORDER_ID:-e2e-order-${RANDOM}}"
+new_uuid() {
+	python3 -c 'import uuid; print(uuid.uuid4())'
+}
+
+SESSION_ID="${E2E_SESSION_ID:-$(new_uuid)}"
+ANONYMOUS_ID="${E2E_ANONYMOUS_ID:-$(new_uuid | tr -d '-')}"
+DEVICE_FINGERPRINT="${E2E_DEVICE_FINGERPRINT:-$(new_uuid | tr -d '-')}"
+PAGE_EVENT_ID="${E2E_PAGE_EVENT_ID:-$(new_uuid)}"
+CLICK_EVENT_ID="${E2E_CLICK_EVENT_ID:-$(new_uuid)}"
+EVENT_TIME="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+CLICK_TIME="$(date -u -d '+1 second' +%Y-%m-%dT%H:%M:%S.%3NZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
 
 log() {
 	printf '[e2e] %s\n' "$*"
@@ -70,6 +84,25 @@ fail() {
 	printf '[e2e] ERROR: %s\n' "$*" >&2
 	exit 1
 }
+
+if [[ "$E2E_APPLY_LOCAL_MIGRATIONS" == "true" ]]; then
+	MIGRATION_FILE="$ROOT_DIR/database-init/migrations/009_data_source_analytics.sql"
+	[[ -f "$MIGRATION_FILE" ]] || fail "missing analytics migration: $MIGRATION_FILE"
+	log "Applying idempotent local analytics schema migration"
+	docker exec -i "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" \
+		-v ON_ERROR_STOP=1 < "$MIGRATION_FILE" >/dev/null || \
+		fail "could not apply $MIGRATION_FILE"
+fi
+
+[[ -x "$CIR_PYTHON" ]] || fail "identity-resolution virtualenv is missing: $CIR_PYTHON"
+CIR_SENSOR_INTERVAL="$(
+	cd "$CIR_DIR"
+	CIR_POLL_INTERVAL_SECONDS="$CIR_POLL_INTERVAL_SECONDS" "$CIR_PYTHON" -c \
+		'import dagster_defs; print(dagster_defs.POLL_INTERVAL_SECONDS)'
+)" || fail "could not load identity-resolution Dagster definition"
+[[ "$CIR_SENSOR_INTERVAL" == "$CIR_POLL_INTERVAL_SECONDS" ]] || \
+	fail "identity-resolution sensor interval is $CIR_SENSOR_INTERVAL; expected $CIR_POLL_INTERVAL_SECONDS"
+log "Identity-resolution sensor interval verified: ${CIR_SENSOR_INTERVAL}s"
 
 post_json() {
 	local url="$1"
@@ -82,22 +115,27 @@ post_json() {
 		--data "$body"
 }
 
-log "Creating deterministic ecommerce events for user $USER_ID"
+log "Creating production-shaped anonymous Web SDK events"
 EVENTS_JSON="$(jq -cn \
-	--arg order_id "$ORDER_ID" \
+	--arg page_event_id "$PAGE_EVENT_ID" \
+	--arg click_event_id "$CLICK_EVENT_ID" \
+	--arg event_time "$EVENT_TIME" \
+	--arg click_time "$CLICK_TIME" \
+	--arg anonymous_id "$ANONYMOUS_ID" \
+	--arg session_id "$SESSION_ID" \
+	--arg device_fingerprint "$DEVICE_FINGERPRINT" \
 	'[
-		{"event_name":"ad_impression","page_url":"https://shop.example.test/ads/ad-001","source":"local-e2e-template","ad_id":"ad-001","campaign":"summer_audio_sale","product_id":"product-001"},
-		{"event_name":"product_view","page_url":"https://shop.example.test/products/product-001","source":"local-e2e-template","product_id":"product-001"},
-		{"event_name":"price_request","page_url":"https://shop.example.test/products/product-001","source":"local-e2e-template","product_id":"product-001","answer_price_vnd":1490000},
-		{"event_name":"purchase","page_url":"https://shop.example.test/checkout/complete","source":"local-e2e-template","product_id":"product-001","quantity":1,"total_price_vnd":1490000,"currency":"VND","order_id":$order_id}
+		{"event_id":$page_event_id,"event_name":"page-view","event_time":$event_time,"page_url":"https%3A%2F%2Fwww.bigdatavietnam.org%2F2012%2F12%2Fdata-science-starter-kit.html","page_title":"Big%20Data%20Vietnam%3A%20Data%20Science","referrer_url":"https://www.bigdatavietnam.org/2012/12/about-mc2ads-project.html","anonymous_id":$anonymous_id,"session_id":$session_id,"device_fingerprint":$device_fingerprint,"event_data":{},"device_type":"desktop"},
+		{"event_id":$click_event_id,"event_name":"click","event_time":$click_time,"page_url":"https%3A%2F%2Fwww.bigdatavietnam.org%2F2012%2F12%2Fdata-science-starter-kit.html","page_title":"Big%20Data%20Vietnam%3A%20Data%20Science","referrer_url":"https://www.bigdatavietnam.org/2012/12/about-mc2ads-project.html","anonymous_id":$anonymous_id,"session_id":$session_id,"device_fingerprint":$device_fingerprint,"event_data":{"target":"article-link","label":"starter-kit"},"device_type":"desktop"}
 	]')"
 
 REQUEST_BODY="$(jq -cn \
 	--arg data_source_id "$DATA_SOURCE_ID" \
 	--arg session_id "$SESSION_ID" \
-	--arg user_id "$USER_ID" \
+	--arg anonymous_id "$ANONYMOUS_ID" \
+	--arg device_fingerprint "$DEVICE_FINGERPRINT" \
 	--argjson events "$EVENTS_JSON" \
-	'{data_source_id:$data_source_id,session_id:$session_id,user_id:$user_id,events:$events}')"
+	'{data_source_id:$data_source_id,session_id:$session_id,anonymous_id:$anonymous_id,device_fingerprint:$device_fingerprint,events:$events}')"
 
 log "POST $TRACKING_API_URL"
 TRACKING_RESPONSE="$(post_json "$TRACKING_API_URL" "$REQUEST_BODY")" || fail "tracking API rejected the event batch"
@@ -130,7 +168,6 @@ STORED_COUNT="$(jq 'length' <<<"$STORED_JSON")"
 [[ "$STORED_COUNT" == "$EXPECTED_COUNT" ]] || \
 	fail "MinIO stored $STORED_COUNT events; expected $EXPECTED_COUNT"
 for ((index = 0; index < EXPECTED_COUNT; index++)); do
-	expected_event="$(jq -c ".[$index] + {session_id: \"$SESSION_ID\", user_id: \"$USER_ID\"}" <<<"$EVENTS_JSON")"
 	stored_event="$(jq -c ".[$index].payload" <<<"$STORED_JSON")"
 	schema_version="$(jq -r ".[$index].schema_version // empty" <<<"$STORED_JSON")"
 	event_id="$(jq -r ".[$index].event_id // empty" <<<"$STORED_JSON")"
@@ -139,8 +176,15 @@ for ((index = 0; index < EXPECTED_COUNT; index++)); do
 	stored_source="$(jq -r ".[$index].data_source_id // empty" <<<"$STORED_JSON")"
 	[[ "$stored_source" == "$DATA_SOURCE_ID" ]] || \
 		fail "MinIO record $((index + 1)) has data_source_id=$stored_source"
-	[[ "$stored_event" == "$expected_event" ]] || \
-		fail "MinIO record $((index + 1)) does not match the submitted event"
+	stored_event_name="$(jq -r ".[$index].payload.event_name // empty" <<<"$STORED_JSON")"
+	stored_anonymous_id="$(jq -r ".[$index].payload.anonymous_id // empty" <<<"$STORED_JSON")"
+	stored_fingerprint="$(jq -r ".[$index].payload.device_fingerprint // empty" <<<"$STORED_JSON")"
+	[[ "$stored_event_name" == "page-view" || "$stored_event_name" == "click" ]] || \
+		fail "MinIO record $((index + 1)) has unexpected event_name=$stored_event_name"
+	[[ "$stored_anonymous_id" == "$ANONYMOUS_ID" ]] || \
+		fail "MinIO record $((index + 1)) lost anonymous_id"
+	[[ "$stored_fingerprint" == "$DEVICE_FINGERPRINT" ]] || \
+		fail "MinIO record $((index + 1)) lost device_fingerprint"
 	done
 log "MinIO verification passed for $EXPECTED_COUNT stored events"
 printf '%s\n' "$STORED_JSON" | jq .
@@ -170,7 +214,25 @@ if [[ "$TRIGGER_STATUS" == "409" ]]; then
 		fail "analytics trigger returned 409 and status lookup failed"
 	RUN_ID="$(jq -er '.active_submission.run_id // empty' <<<"$ACTIVE_STATUS")" || true
 	[[ -n "$RUN_ID" ]] || fail "analytics trigger returned 409 with no active run_id: $(cat "$TRIGGER_BODY")"
-	log "Analytics run already active; reusing run_id: $RUN_ID"
+	ACTIVE_RUN_STATUS_RESPONSE="$(curl --fail-with-body --silent --show-error --max-time 30 \
+		-H 'Accept: application/json' -H "$AUTH_HEADER" \
+		"$CUSTOMER360_API_URL/analytics/source-analytics/status/$RUN_ID")" || \
+		fail "could not inspect active analytics run $RUN_ID"
+	ACTIVE_RUN_STATUS="$(jq -r '.status // empty' <<<"$ACTIVE_RUN_STATUS_RESPONSE")"
+	if [[ "$ACTIVE_RUN_STATUS" == "success" || "$ACTIVE_RUN_STATUS" == "failure" ]]; then
+		log "Analytics submission was stale ($ACTIVE_RUN_STATUS); lease cleared, submitting a fresh run"
+		TRIGGER_STATUS="$(curl --silent --show-error --max-time 30 \
+			-H 'Accept: application/json' -H "$AUTH_HEADER" \
+			-o "$TRIGGER_BODY" -w '%{http_code}' \
+			-X POST "$CUSTOMER360_API_URL/analytics/source-analytics/process")" || \
+			fail "fresh analytics trigger request failed"
+		[[ "$TRIGGER_STATUS" =~ ^2[0-9][0-9]$ ]] || \
+			fail "fresh analytics trigger returned HTTP $TRIGGER_STATUS: $(cat "$TRIGGER_BODY")"
+		TRIGGER_RESPONSE="$(cat "$TRIGGER_BODY")"
+		RUN_ID="$(jq -er '.run_id' <<<"$TRIGGER_RESPONSE")" || fail "fresh analytics trigger returned no run_id"
+	else
+		log "Analytics run already active; reusing run_id: $RUN_ID"
+	fi
 elif [[ "$TRIGGER_STATUS" =~ ^2[0-9][0-9]$ ]]; then
 	TRIGGER_RESPONSE="$(cat "$TRIGGER_BODY")"
 	RUN_ID="$(jq -er '.run_id' <<<"$TRIGGER_RESPONSE")" || fail "analytics trigger returned no run_id"
@@ -195,6 +257,59 @@ while true; do
 	sleep "$ANALYTICS_POLL_SECONDS"
 done
 log "Analytics run completed successfully"
+
+RAW_SQL="SELECT json_build_object('raw_profile_id',raw_profile_id,'status_code',status_code,'external_customer_id',external_customer_id,'data_source_analytics',data_source_analytics)::text FROM ${DB_SCHEMA}.cdp_raw_profiles_stage WHERE tenant_id='${TENANT_ID}' AND data_source_id='${DATA_SOURCE_ID}' AND external_customer_id='${ANONYMOUS_ID}' ORDER BY created_at DESC LIMIT 1;"
+RAW_PROFILE_JSON="$(docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -tA -v ON_ERROR_STOP=1 -c "$RAW_SQL")" || fail "could not query raw profile analytics"
+[[ -n "$RAW_PROFILE_JSON" ]] || fail "analytics did not stage the anonymous raw profile"
+jq -e --arg data_source_id "$DATA_SOURCE_ID" \
+	'.external_customer_id != null and .data_source_analytics[$data_source_id].total_tracked_events >= 2 and .data_source_analytics[$data_source_id].page_views >= 1 and .data_source_analytics[$data_source_id].clicks >= 1' \
+	<<<"$RAW_PROFILE_JSON" >/dev/null || fail "raw profile data_source_analytics was not computed correctly"
+log "Raw profile analytics verification passed"
+printf '%s\n' "$RAW_PROFILE_JSON" | jq .
+
+log "Running backend-system/identity_resolution daily drain (sensor interval=${CIR_POLL_INTERVAL_SECONDS}s)"
+CIR_RESULT="$(
+	cd "$CIR_DIR"
+	CIR_POLL_INTERVAL_SECONDS="$CIR_POLL_INTERVAL_SECONDS" "$CIR_PYTHON" -c \
+		'from identity_resolution.daily_job import run_daily_identity_resolution; print(run_daily_identity_resolution())'
+)" || fail "identity resolution daily drain failed"
+log "Identity resolution processed $(tail -n 1 <<<"$CIR_RESULT") raw profile batch result"
+
+MASTER_SQL="SELECT json_build_object('master_profile_id',mp.master_profile_id,'domain',mp.domain,'persona_name',mp.persona_name,'data_source_analytics',mp.data_source_analytics,'linked_raw_profile_count',mp.linked_raw_profile_count)::text FROM ${DB_SCHEMA}.cdp_master_profiles mp JOIN ${DB_SCHEMA}.cdp_profile_links link ON link.tenant_id=mp.tenant_id AND link.master_profile_id=mp.master_profile_id AND link.status='ACTIVE' JOIN ${DB_SCHEMA}.cdp_raw_profiles_stage raw ON raw.tenant_id=link.tenant_id AND raw.raw_profile_id=link.raw_profile_id WHERE mp.tenant_id='${TENANT_ID}' AND raw.data_source_id='${DATA_SOURCE_ID}' AND raw.external_customer_id='${ANONYMOUS_ID}' ORDER BY mp.updated_at DESC LIMIT 1;"
+MASTER_PROFILE_JSON="$(docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -tA -v ON_ERROR_STOP=1 -c "$MASTER_SQL")" || fail "could not query resolved master profile"
+[[ -n "$MASTER_PROFILE_JSON" ]] || fail "identity resolution did not create/link a master profile"
+jq -e --arg data_source_id "$DATA_SOURCE_ID" \
+	'.persona_name == "Web Visitor" and .data_source_analytics[$data_source_id].total_tracked_events >= 2 and .data_source_analytics[$data_source_id].page_views >= 1 and .data_source_analytics[$data_source_id].clicks >= 1' \
+	<<<"$MASTER_PROFILE_JSON" >/dev/null || fail "master profile persona or merged data_source_analytics is incorrect"
+MASTER_PROFILE_ID="$(jq -er '.master_profile_id' <<<"$MASTER_PROFILE_JSON")"
+log "Master profile Web Visitor and analytics merge verification passed: $MASTER_PROFILE_ID"
+printf '%s\n' "$MASTER_PROFILE_JSON" | jq .
+
+MASTER_OBJECT="local/${MASTER_PROFILE_S3_BUCKET}/${MASTER_PROFILE_ID}.json"
+MASTER_EVENT_JSON="$(docker exec "$MINIO_CONTAINER" mc cat "$MASTER_OBJECT" 2>/dev/null)" || \
+	fail "could not read master profile event projection $MASTER_OBJECT"
+jq -e --arg master_profile_id "$MASTER_PROFILE_ID" \
+	'length >= 2 and .[0].event_time >= .[1].event_time and all(.[]; .master_profile_id == $master_profile_id or .master_profile_id == null)' \
+	<<<"$MASTER_EVENT_JSON" >/dev/null || fail "master profile event projection is incomplete or not newest-first"
+log "Master profile S3 JSON projection verification passed"
+
+FROM_EVENT_TIME="$(jq -rn --arg value "$CLICK_TIME" '$value|@uri')"
+TO_EVENT_TIME="$(jq -rn --arg value "$EVENT_TIME" '$value|@uri')"
+TIMELINE_RESPONSE="$(curl --fail-with-body --silent --show-error --max-time 30 \
+	-H 'Accept: application/json' -H "$AUTH_HEADER" \
+	"$CUSTOMER360_API_URL/master-profiles/$MASTER_PROFILE_ID/timeline?limit=8&from_event_time=$FROM_EVENT_TIME&to_event_time=$TO_EVENT_TIME")" || \
+	fail "master profile timeline API lookup failed"
+jq -e 'length >= 2' <<<"$TIMELINE_RESPONSE" >/dev/null || \
+	fail "master profile timeline API returned fewer than two projected events"
+log "Master profile timeline API date-range verification passed"
+
+PROFILE_RESPONSE="$(curl --fail-with-body --silent --show-error --max-time 30 \
+	-H 'Accept: application/json' -H "$AUTH_HEADER" \
+	"$CUSTOMER360_API_URL/master-profiles/$MASTER_PROFILE_ID")" || fail "master profile API lookup failed"
+jq -e --arg data_source_id "$DATA_SOURCE_ID" \
+	'.persona_name == "Web Visitor" and .data_source_analytics[$data_source_id].total_tracked_events >= 2' \
+	<<<"$PROFILE_RESPONSE" >/dev/null || fail "Customer 360 API did not expose merged profile analytics"
+log "Customer 360 API master profile verification passed"
 
 SUMMARY_RESPONSE="$(curl --fail-with-body --silent --show-error --max-time 30 -H 'Accept: application/json' -H "$AUTH_HEADER" "$CUSTOMER360_API_URL/metadata/data-sources/$DATA_SOURCE_ID")" || fail "data-source API lookup failed"
 SQL="SELECT json_build_object('data_source_id',data_source_id,'total_tracked_event',total_tracked_event,'avg_daily_event',avg_daily_event,'avg_events_per_profile',avg_events_per_profile)::text FROM ${DB_SCHEMA}.sys_data_source WHERE tenant_id='${TENANT_ID}' AND data_source_id='${DATA_SOURCE_ID}' AND status=1;"

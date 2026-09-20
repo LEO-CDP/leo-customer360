@@ -192,10 +192,12 @@ traffic seeding belongs here and must go through the tracking API.
 ## Tracking and Analytics E2E
 
 [run_tracking_analytics_e2e.sh](run_tracking_analytics_e2e.sh) is a local
-integration check for one deterministic event batch. It verifies the tracking
-API response, exact MinIO NDJSON contents, successful `analytics_hourly_schedule`
-completion, the Customer 360 data-source summary, and the matching PostgreSQL
-row.
+integration check for production-shaped anonymous Web SDK events. It verifies
+the tracking API response, exact MinIO NDJSON contents, successful
+`analytics_hourly_schedule` completion, persisted raw-profile
+`data_source_analytics`, the 15-minute CIR sensor configuration, the resolved
+master-profile analytics merge, the `Web Visitor` persona, and the Customer
+360 API response.
 
 Start the local services first, then run from this directory:
 

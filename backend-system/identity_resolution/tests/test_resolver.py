@@ -313,6 +313,27 @@ class TestLinkAndUpdate:
         assert upsert_params[2] == "banking"
         assert upsert_params[3].adapted == {"national_id": "079123456789"}
 
+    def test_refreshes_master_source_analytics_from_linked_raw_profiles(self, mock_cursor, mock_conn):
+        resolver = make_resolver(mock_conn)
+        source_id = "source-1"
+        mock_cursor.fetchall.return_value = [
+            {"data_source_analytics": {source_id: {"page_views": 2, "total_tracked_events": 3}}},
+            {"data_source_analytics": {source_id: {"clicks": 1, "total_tracked_events": 2}}},
+        ]
+
+        resolver._refresh_master_data_source_analytics(mock_cursor, "tenant-1", "master-1")
+
+        update_query, params = mock_cursor.execute.call_args_list[-1][0]
+        assert "data_source_analytics = %s::JSONB" in update_query
+        assert params[0].adapted == {
+            source_id: {
+                "page_views": 2,
+                "clicks": 1,
+                "total_tracked_events": 5,
+                "click_through_rate": 0.5,
+            }
+        }
+
     def test_skips_identity_graph_merges_without_source_system(self, mock_cursor, mock_conn):
         resolver = make_resolver(mock_conn)
         raw_profile = {
@@ -388,11 +409,12 @@ class TestCreateMasterAndLink:
         assert insert_params[7] == ["adv-2"]  # advertising_ids
         assert insert_params[8] == ["cookie-2"]  # cookie_ids
         assert insert_params[9].adapted == {"OneSignal": "push-2"}  # push_tokens
-        assert insert_params[10] == ["OneSignal"]  # source_systems
-        assert insert_params[11] == "r2"  # first_seen_raw_profile_id
+        assert insert_params[10].adapted == {}  # data_source_analytics
+        assert insert_params[11] == ["OneSignal"]  # source_systems
+        assert insert_params[12] == "r2"  # first_seen_raw_profile_id
         # Plaintext full_name here (not a SHA-256 hex digest) -> not flagged hashed, no persona_name.
-        assert insert_params[12] is False  # is_hashed
-        assert insert_params[13] is None  # persona_name
+        assert insert_params[13] is False  # is_hashed
+        assert insert_params[14] is None  # persona_name
 
         link_query, link_params = mock_cursor.execute.call_args_list[2][0]
         assert "INSERT INTO customer360.cdp_profile_links" in link_query
@@ -417,8 +439,8 @@ class TestCreateMasterAndLink:
         resolver._create_master_and_link(mock_cursor, raw_profile)
 
         _, insert_params = mock_cursor.execute.call_args_list[1][0]
-        assert insert_params[12] is True  # is_hashed
-        assert insert_params[13] == generate_persona_name(raw_profile)  # persona_name
+        assert insert_params[13] is True  # is_hashed
+        assert insert_params[14] == generate_persona_name(raw_profile)  # persona_name
 
     def test_creates_master_with_national_id_upserts_domain_profile(self, mock_cursor, mock_conn):
         mock_cursor.fetchone.side_effect = [None, {"master_profile_id": "new-master-3"}]

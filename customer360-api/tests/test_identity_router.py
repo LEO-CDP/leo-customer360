@@ -593,6 +593,8 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             response = self.client.get(
                 f"/master-profiles/{master_profile_id}/timeline"
                 f"?data_source_id={data_source_id}&limit=8"
+                "&from_event_time=2026-09-20T05:29:18.766000%2B00:00"
+                "&to_event_time=2026-09-13T05:29:18.766000%2B00:00"
             )
 
         self.assertEqual(response.status_code, 200)
@@ -601,6 +603,8 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             master_profile_id,
             limit=8,
             data_source_id=data_source_id,
+            from_event_time=datetime(2026, 9, 20, 5, 29, 18, 766000, tzinfo=timezone.utc),
+            to_event_time=datetime(2026, 9, 13, 5, 29, 18, 766000, tzinfo=timezone.utc),
         )
 
 

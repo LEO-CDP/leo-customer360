@@ -773,6 +773,10 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- Format: {"email_opt_in": true, "sms_opt_in": false, "push_opt_in": true}
     communication_preferences JSONB DEFAULT '{}'::JSONB,
 
+    -- Analytics-related data sources and metrics.
+    -- Example format: {"Data Source ID": {"page_views": 123, "click_through_rate": 0.05}}
+    data_source_analytics JSONB DEFAULT '{}'::JSONB,
+
     -- ------------------------------------------------------------------------
     -- LINEAGE & AUDIT
     -- ------------------------------------------------------------------------
@@ -1213,6 +1217,11 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     -- Concrete inbound connector lineage. This remains separate from
     -- source_system because several connectors can emit the same protocol.
     data_source_id UUID,
+    
+    -- Analytics-related data sources and metrics.
+    -- Example format: {"Data Source ID": {"page_views": 123, "click_through_rate": 0.05}}
+    data_source_analytics JSONB DEFAULT '{}'::JSONB,
+
     -- Data owner: internal sys_user who created/manages this row (nullable -- rows are
     -- normally landed by ingestion pipelines, not an interactive admin user).
     user_id UUID REFERENCES customer360.sys_user(user_id),
