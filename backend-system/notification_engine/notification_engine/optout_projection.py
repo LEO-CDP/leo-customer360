@@ -67,18 +67,25 @@ def project_optout_events(conn, events: Iterable[dict]) -> dict:
 
 def read_optout_events(conn) -> list[dict]:
     """Read new ``zalo-opt-out`` / ``zalo-failed`` events from the S3 event lake
-    for every tenant with a connected OA, ready to feed ``project_optout_events``."""
+    for every tenant with an active Zalo connector, ready to feed ``project_optout_events``."""
     from .s3_reader import read_optout_events_for_tenants  # lazy: boto3 only at run time
 
     with conn.cursor() as cur:
         # Cross-tenant driver query (no tenant context) -- relies on the backend DB
         # role holding BYPASSRLS; without it RLS fails closed to 0 rows and the
         # opt-out projection silently no-ops.
-        cur.execute(f"SELECT DISTINCT tenant_id FROM {DB_SCHEMA}.sys_data_source WHERE slug = 'zalo-oa'")
-        tenant_ids = [str(row[0]) for row in cur.fetchall()]
+        cur.execute(
+            f"""SELECT DISTINCT tenant_id, COALESCE((config->>'optout_lookback_hours')::integer, 6)
+                   FROM {DB_SCHEMA}.crm_connector_config
+                  WHERE connector_type = 'CHAT' AND provider = 'ZALO'
+                    AND status = 'ACTIVE' AND is_active = TRUE"""
+        )
+        rows = cur.fetchall()
+        tenant_ids = [str(row[0]) for row in rows]
+        lookback_hours = max((int(row[1]) for row in rows), default=6)
     if not tenant_ids:
         return []
-    return read_optout_events_for_tenants(tenant_ids)
+    return read_optout_events_for_tenants(tenant_ids, lookback_hours=lookback_hours)
 
 
 def _demo() -> None:

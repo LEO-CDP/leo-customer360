@@ -175,7 +175,7 @@ Resolver có code cho `fuzzy_trgm` và `fuzzy_dmetaphone`, đồng thời Postgr
 
 - `backend-system/Dockerfile` chạy Dagster webserver/daemon và load CIR từ
   `backend-system/workspace.yaml`.
-- Sensor phát `RunRequest()` mỗi `CIR_POLL_INTERVAL_SECONDS` (mặc định 90 giây).
+- Sensor phát `RunRequest()` mỗi `CIR_POLL_INTERVAL_SECONDS` (mặc định 600 giây / 10 phút).
   Mỗi op gọi daily drain, xử lý các batch tối đa `CIR_BATCH_SIZE` (mặc định
   5.000) cho đến khi staging hết dữ liệu.
 - Dagster retry ở cấp op; resolver rollback transaction khi lỗi.
@@ -422,7 +422,7 @@ database trigger gọi tự động.
 | `DB_PORT` | `5432` | Kết nối PostgreSQL |
 | `DB_SCHEMA` | `customer360` | Schema CIR |
 | `CIR_BATCH_SIZE` | `5000` trong daily job/scripts | Số raw profile mỗi batch |
-| `CIR_POLL_INTERVAL_SECONDS` | `90` | Dagster sensor và `worker.py` |
+| `CIR_POLL_INTERVAL_SECONDS` | `600` | Dagster sensor và `worker.py` (10 phút) |
 | `DAGSTER_HOME` | `/dagster_home` trong image | Run history; compose mount volume |
 | `LEO_GOOGLE_GENAI_API_KEY` | unset | Optional persona label generation |
 | `LEO_GOOGLE_GENAI_MODEL` | `gemini-3.5-flash` | Optional Gemini model |

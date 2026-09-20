@@ -174,7 +174,7 @@ Contract status used below:
 
 **Required API:** **Required** `GET /api/v1/zalo/oa-accounts`, `GET/POST/PATCH /api/v1/zalo/templates`, `POST /api/v1/zalo/templates:generate`, template review endpoints, `POST /api/v1/admin/zalo/sync-segment/{segment_id}?dry_run=true|false`, Zalo campaign planning/activation APIs, `GET /api/v1/zalo/dispatches`, and suppression/performance summary APIs.
 
-**Data model:** **Required schema** `crm_zalo_templates`, `crm_zalo_oa_accounts`, `crm_zalo_dispatch_logs`, `crm_zalo_suppression`, and `crm_zalo_sync_runs`; shared `crm_campaign`, `crm_campaign_content_items`, `cdp_segments`, `cdp_master_profiles`, and `cdp_content_items`.
+**Data model:** Reuse `crm_connector_config`, `crm_message_templates`, `cdp_campaign_dispatch_logs`, `crm_campaign`, `crm_campaign_content_items`, `cdp_segments`, `cdp_master_profiles`, and `cdp_content_items`; Zalo opt-out is projected into profile consent.
 
 **Data attributes:** `oa_account_id`, `oa_name`, `oa_id`, account `status`, `template_id`, `message_text`, `variables`, CTA/short-link variants, template `status`, `phone_hash`, `communication_preferences`, `suppression_reason`, `provider_message_id`, dispatch `status`, `sent_at`, `delivered_at`, `read_at`, `error_code`, and aggregate click/opt-out counts.
 

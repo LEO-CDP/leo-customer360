@@ -13,6 +13,22 @@ from .repositories import AnalyticsRepository
 from .source_state import SourceStateStore
 
 
+def _default_dao_session_factory(tenant_id: str) -> Any:
+    """Create a DAO session carrying the tenant context for one source worker."""
+    from leo_customer360_dao.database import SessionLocal
+
+    session = SessionLocal()
+    session.info["tenant_id"] = tenant_id
+    return session
+
+
+def _default_raw_profile_repository_factory(session: Any) -> Any:
+    """Build the shared identity repository without importing DAO at module load."""
+    from leo_customer360_dao.repositories.identity_repository import IdentityRepository
+
+    return IdentityRepository(session)
+
+
 class TrackingLogAggregationService:
     """Coordinate source discovery, event processing, and summary writes."""
 
@@ -25,6 +41,8 @@ class TrackingLogAggregationService:
         db_connection: Optional[Any],
         source_loader: Callable[[Any, int], list[tuple[str, str]]],
         database_connector: Callable[[], Any],
+        dao_session_factory: Optional[Callable[[str], Any]] = None,
+        raw_profile_repository_factory: Optional[Callable[[Any], Any]] = None,
         run_id: Optional[str] = None,
         log: Optional[Callable[..., None]] = None,
         clock: Optional[Callable[[], str]] = None,
@@ -41,6 +59,10 @@ class TrackingLogAggregationService:
         self.db_connection = db_connection
         self.source_loader = source_loader
         self.database_connector = database_connector
+        self.dao_session_factory = dao_session_factory or _default_dao_session_factory
+        self.raw_profile_repository_factory = (
+            raw_profile_repository_factory or _default_raw_profile_repository_factory
+        )
         self.run_id = run_id or str(uuid4())
         self.log = log or (lambda *_args, **_kwargs: None)
 
@@ -136,6 +158,7 @@ class TrackingLogAggregationService:
             }
 
         source_connection = self.db_connection
+        dao_session = None
         owns_source_connection = False
         source_increment = 0
         source_objects_processed = 0
@@ -145,6 +168,8 @@ class TrackingLogAggregationService:
             if source_connection is None:
                 source_connection = self.database_connector()
                 owns_source_connection = True
+            dao_session = self.dao_session_factory(tenant_id)
+            raw_profile_repository = self.raw_profile_repository_factory(dao_session)
             with source_connection.cursor() as context_cursor:
                 self.database.set_tenant_context(context_cursor, tenant_id)
 
@@ -167,12 +192,13 @@ class TrackingLogAggregationService:
                     global_lease.refresh()
                 self.state.refresh_source_lock(data_source_id, lock_token)
                 event_count, signatures = self._process_object(
-                    source_connection,
+                    raw_profile_repository,
                     bucket,
                     object_key,
                     data_source_id,
                     tenant_id,
                 )
+                dao_session.commit()
                 if self.state.increment_hourly_count(
                     data_source_id,
                     hour,
@@ -246,6 +272,8 @@ class TrackingLogAggregationService:
                 "events_added": source_increment,
             }
         except Exception as exc:
+            if dao_session is not None:
+                dao_session.rollback()
             self.state.set_state(
                 data_source_id,
                 status="failed",
@@ -257,10 +285,12 @@ class TrackingLogAggregationService:
             self.state.release_source_lock(data_source_id, lock_token)
             if owns_source_connection and source_connection is not None:
                 source_connection.close()
+            if dao_session is not None:
+                dao_session.close()
 
     def _process_object(
         self,
-        source_connection: Any,
+        raw_profile_repository: Any,
         bucket: str,
         object_key: str,
         data_source_id: str,
@@ -271,20 +301,30 @@ class TrackingLogAggregationService:
         event_count = 0
         signatures: set[str] = set()
         try:
-            with source_connection.cursor() as profile_cursor:
-                for normalized_event in self.events.iter_normalized_event_records(
-                    body,
-                    object_key,
-                    data_source_id,
-                    tenant_id,
-                ):
-                    event_count += 1
-                    signature = self.events.extract_profile_signature(
-                        {"payload": normalized_event["payload"]}
+            for normalized_event in self.events.iter_normalized_event_records(
+                body,
+                object_key,
+                data_source_id,
+                tenant_id,
+            ):
+                event_count += 1
+                signature = self.events.extract_profile_signature(
+                    {"payload": normalized_event["payload"]}
+                )
+                if signature:
+                    signatures.add(signature)
+                raw_profile = self.events.extract_raw_profile(normalized_event)
+                page_view, click = self.events.analytics_event_flags(normalized_event)
+                raw_profile["data_source_analytics"] = {
+                    str(data_source_id): self.state.record_profile_event_analytics(
+                        data_source_id,
+                        raw_profile["raw_profile_id"],
+                        normalized_event["event_id"],
+                        page_view=page_view,
+                        click=click,
                     )
-                    if signature:
-                        signatures.add(signature)
-                    self.events.upsert_raw_profile(profile_cursor, normalized_event)
+                }
+                raw_profile_repository.upsert_raw_profile(raw_profile)
         finally:
             close = getattr(body, "close", None)
             if close:

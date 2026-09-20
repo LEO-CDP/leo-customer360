@@ -3,8 +3,8 @@
 Lists recent gzip/plain JSONL objects in each tenant's ``data-tracking-{tenant_id}``
 bucket (Zalo events partition by tenant UUID via the webhook's ``_source_id``) and
 yields the ``zalo-opt-out`` / ``zalo-failed`` records the webhook wrote. Downstream
-``apply_optout`` is idempotent, so this re-scans a bounded recent window
-(``CRM_ZALO_OPTOUT_LOOKBACK_HOURS``) each run rather than tracking a checkpoint.
+``apply_optout`` is idempotent, so this re-scans a bounded recent window from
+the tenant connector configuration each run rather than tracking a checkpoint.
 
 Self-contained (boto3 only; mirrors the analytics code location's S3 client/env).
 ``extract_optout_events`` is the pure, testable filter.
@@ -18,7 +18,6 @@ from typing import Iterable
 
 from .config import (
     EVENT_RAW_PREFIX,
-    OPTOUT_LOOKBACK_HOURS,
     S3_ACCESS_KEY_ID,
     S3_ENDPOINT_URL,
     S3_FORCE_PATH_STYLE,
@@ -116,11 +115,13 @@ def _read_bucket(s3_client, bucket: str, start_after: str | None, prefix: str | 
     return events
 
 
-def read_optout_events_for_tenants(tenant_ids: Iterable[str], s3_client=None) -> list[dict]:
+def read_optout_events_for_tenants(
+    tenant_ids: Iterable[str], s3_client=None, lookback_hours: int = 6
+) -> list[dict]:
     """Read recent zalo opt-out events across the given tenants' buckets."""
     s3_client = s3_client or build_s3_client()
     prefix = f"{EVENT_RAW_PREFIX}/"
-    window_start = (datetime.now(timezone.utc) - timedelta(hours=OPTOUT_LOOKBACK_HOURS)).strftime("%Y-%m-%d-%H")
+    window_start = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).strftime("%Y-%m-%d-%H")
     # Prefix-scoped listing + prefix-qualified StartAfter so we page only the recent
     # hourly partitions ("<prefix>/YYYY-MM-DD-HH/...") instead of the whole bucket.
     start_after = f"{prefix}{window_start}"

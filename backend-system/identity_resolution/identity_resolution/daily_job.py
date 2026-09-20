@@ -14,6 +14,7 @@ import psycopg2
 from dotenv import load_dotenv
 
 from identity_resolution.resolver import CustomerIdentityResolver
+from identity_resolution.profile_event_projection import MasterProfileEventProjector
 from identity_resolution.rls import set_tenant_context
 
 _BACKEND_SYSTEM_ROOT = os.path.dirname(
@@ -83,11 +84,14 @@ def run_daily_identity_resolution() -> int:
             schema=DB_SCHEMA,
             batch_size=BATCH_SIZE,
         )
+        projector = MasterProfileEventProjector(conn, schema=DB_SCHEMA)
         logger.info("[%s] Starting daily identity resolution run.", datetime.now(timezone.utc))
 
         for batch_number in range(1, MAX_BATCHES_PER_RUN + 1):
             processed = resolver.run_resolution_batch()
             total_processed += processed
+            for tenant_id, master_profile_ids in resolver.last_resolved_profiles_by_tenant.items():
+                projector.project_profiles(tenant_id, master_profile_ids)
             if processed < BATCH_SIZE:
                 break
             lease.refresh()

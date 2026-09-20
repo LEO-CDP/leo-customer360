@@ -8,6 +8,7 @@ UAT environments. This folder covers three separate workflows:
 | Adjust batch fixture | `adjust_faker.py` | CSV and optionally MinIO/S3 |
 | GA4-style sample events | `google_analytics_faker.py` | JSON printed to stdout |
 | Web tracking and analytics E2E | `web_user_simulator.py` or `run_tracking_analytics_e2e.sh` | Tracking API, MinIO/S3, Dagster, PostgreSQL |
+| UAT web traffic | `uat_tracking_traffic_simulator.py` or `run_uat_tracking_traffic.sh` | UAT tracking API only |
 | API-only fresh traffic seed | `seed_api_data.py` or `./dev-c360.sh seed-new-data` | `data-tracking-api` HTTP endpoint only |
 
 The web simulator does not publish to Kafka. It sends one ordered event batch
@@ -189,13 +190,44 @@ The former `seed_full_demo_data.py --new-data` mode has been removed. The full
 demo seed still owns database enrichment and direct demo-fixture setup; fresh
 traffic seeding belongs here and must go through the tracking API.
 
+## UAT Web Tracking Traffic
+
+[uat_tracking_traffic_simulator.py](uat_tracking_traffic_simulator.py) sends
+anonymous browser journeys to the UAT tracking endpoint. Each simulated session
+gets a new anonymous ID, session ID, device fingerprint, and event IDs. The IDs
+are reused only by events in that session; `user_id` remains `null`, matching
+anonymous web traffic.
+
+Run the default UAT traffic profile:
+
+```bash
+./run_uat_tracking_traffic.sh
+```
+
+The default profile sends 25 sessions with 3 to 7 ordered page-view, click,
+scroll, and search events per session to
+`https://beta.leocdp.com/data/api/v1/tracking/logs` using data source
+`4512a4ab-9fe8-4a1a-9915-521fdaf9925a`. Preview one generated payload without
+making a request:
+
+```bash
+UAT_DRY_RUN=true ./run_uat_tracking_traffic.sh
+```
+
+Useful overrides include `UAT_SESSIONS`, `UAT_MIN_EVENTS`, `UAT_MAX_EVENTS`,
+`UAT_CONCURRENCY`, `UAT_LOOKBACK_HOURS`, `UAT_RANDOM_SEED`, and
+`UAT_TRACKING_API_URL`. The Python script also accepts the corresponding
+command-line options.
+
 ## Tracking and Analytics E2E
 
 [run_tracking_analytics_e2e.sh](run_tracking_analytics_e2e.sh) is a local
-integration check for one deterministic event batch. It verifies the tracking
-API response, exact MinIO NDJSON contents, successful `analytics_hourly_schedule`
-completion, the Customer 360 data-source summary, and the matching PostgreSQL
-row.
+integration check for production-shaped anonymous Web SDK events. It verifies
+the tracking API response, exact MinIO NDJSON contents, successful
+`analytics_hourly_schedule` completion, persisted raw-profile
+`data_source_analytics`, the 15-minute CIR sensor configuration, the resolved
+master-profile analytics merge, the `Web Visitor` persona, and the Customer
+360 API response.
 
 Start the local services first, then run from this directory:
 

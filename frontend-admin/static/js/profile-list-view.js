@@ -30,6 +30,9 @@ window.C360 = window.C360 || {};
       lifecycleBadgeClass: fmt.lifecycleBadgeClass(p.lifecycle_stage),
       churnBadgeClass: fmt.churnBadgeClass(p.churn_risk_tier),
       linkedRawProfileCountLabel: fmt.int(p.linked_raw_profile_count || 0),
+      trackedEventsLabel: p.total_tracked_events === null || p.total_tracked_events === undefined
+        ? "—"
+        : fmt.int(p.total_tracked_events),
       clvLabel: (p.predictive_clv !== null && p.predictive_clv !== undefined) ? fmt.money(p.predictive_clv, "") : "—",
       engagementLabel: (p.engagement_score !== null && p.engagement_score !== undefined) ? fmt.score(p.engagement_score) : "—",
       lastActivityLabel: p.last_activity_at ? fmt.date(p.last_activity_at) : "—"
@@ -45,12 +48,55 @@ window.C360 = window.C360 || {};
     { label: "Lifecycle", type: "badge", field: "lifecycleLabel", classField: "lifecycleBadgeClass" },
     { label: "Churn Risk", type: "badge", field: "churn_risk_tier", classField: "churnBadgeClass" },
     { label: "Linked Profiles", field: "linkedRawProfileCountLabel" },
+    { label: "Total Tracked Events", field: "trackedEventsLabel" },
     { label: "Last Activity", field: "lastActivityLabel", muted: true }
   ];
 
   function buildListParams(params) {
     var query = params || {};
     return query;
+  }
+
+  var dataSourcesLoadedForTenant = null;
+
+  function loadDataSources() {
+    var $select = $("#data-source-filter");
+    var tenantId = C360.config.current && C360.config.current.tenantId;
+    if (!$select.length || !tenantId || dataSourcesLoadedForTenant === tenantId) {
+      return $.Deferred().resolve().promise();
+    }
+
+    $select.prop("disabled", true);
+    return api("/metadata/data-sources", {
+      tenant_id: tenantId,
+      status: 1,
+      skip: 0,
+      limit: 1000
+    }).done(function (sources) {
+      var current = $select.val();
+      var items = Array.isArray(sources) ? sources.slice() : [];
+      items.sort(function (left, right) {
+        return String(left.name || left.slug || "").localeCompare(String(right.name || right.slug || ""));
+      });
+      $select.find("option:not(:first)").remove();
+      items.forEach(function (source) {
+        var label = source.name || source.slug || source.data_source_id;
+        if (source.slug && source.name && source.slug !== source.name) {
+          label += " (" + source.slug + ")";
+        }
+        $select.append($("<option></option>").attr("value", source.data_source_id).text(label));
+      });
+      if (current && $select.find("option[value='" + current + "']").length) {
+        $select.val(current);
+      } else {
+        $select.val("");
+      }
+      dataSourcesLoadedForTenant = tenantId;
+    }).fail(function (xhr) {
+      showApiError("loading data sources", xhr);
+    }).always(function () {
+      $select.prop("disabled", false);
+    });
   }
 
   var dtv = C360.DataTableView.create({
@@ -82,6 +128,7 @@ window.C360 = window.C360 || {};
     dtv.bindRowClick();
     dtv.bindSearch("#search-input", "q", 350);
     dtv.bindSelect("#domain-filter", "domain");
+    dtv.bindSelect("#data-source-filter", "data_source_id");
     dtv.bindSelect("#lifecycle-filter", "lifecycle_stage");
     dtv.bindSelect("#tier-filter", "clv_segment");
     dtv.bindSelect("#churn-risk-filter", "churn_risk_tier");
@@ -103,8 +150,17 @@ window.C360 = window.C360 || {};
   C360.router.define("/profiles", {
     section: "view-list",
     tab: "profiles",
-    mount: function () { load(false); }
+    mount: function () {
+      loadDataSources();
+      load(false);
+    }
   });
 
-  C360.profileListView = { load: load, bindEvents: bindEvents, rowVm: rowVm, columns: COLUMNS };
+  C360.profileListView = {
+    load: load,
+    loadDataSources: loadDataSources,
+    bindEvents: bindEvents,
+    rowVm: rowVm,
+    columns: COLUMNS
+  };
 })(window.C360);

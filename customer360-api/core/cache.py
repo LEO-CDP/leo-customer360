@@ -29,6 +29,7 @@ than a source of truth.
 
 import functools
 import hashlib
+import inspect
 import json
 import logging
 import uuid
@@ -37,6 +38,7 @@ from typing import Any, Callable, Optional
 
 import redis
 from fastapi.encoders import jsonable_encoder
+from starlette.requests import Request
 
 from leo_customer360_dao.cache import get_redis_client
 from leo_customer360_dao.config import settings
@@ -74,7 +76,13 @@ def cache_get(key: str) -> Optional[Any]:
     except redis.RedisError:
         logger.warning("Redis GET failed for key=%s; falling back to DB.", key, exc_info=True)
         return None
-    return json.loads(raw) if raw is not None else None
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        logger.warning("Redis cache entry was invalid JSON for key=%s; ignoring it.", key)
+        return None
 
 
 def cache_set(key: str, value: Any, ttl: Optional[int] = None) -> None:
@@ -83,7 +91,7 @@ def cache_set(key: str, value: Any, ttl: Optional[int] = None) -> None:
         return
     try:
         client.set(key, json.dumps(value, default=str), ex=ttl or settings.cache_ttl_seconds)
-    except redis.RedisError:
+    except (redis.RedisError, TypeError, ValueError):
         logger.warning("Redis SET failed for key=%s.", key, exc_info=True)
 
 
@@ -121,7 +129,19 @@ def cache_response(prefix: str, ttl: Optional[int] = None) -> Callable:
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            cache_params = {k: v for k, v in kwargs.items() if isinstance(v, _CACHEABLE_PARAM_TYPES)}
+            bound = inspect.signature(func).bind_partial(*args, **kwargs)
+            cache_params = {
+                name: value
+                for name, value in bound.arguments.items()
+                if isinstance(value, _CACHEABLE_PARAM_TYPES)
+            }
+            request = next(
+                (value for value in (*args, *kwargs.values()) if isinstance(value, Request)),
+                None,
+            )
+            request_tenant_id = getattr(getattr(request, "state", None), "tenant_id", None)
+            if request_tenant_id:
+                cache_params["_tenant_id"] = str(request_tenant_id)
             key = _build_cache_key(prefix, cache_params)
 
             cached_value = cache_get(key)

@@ -7,9 +7,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from core.buffered_storage import BufferedTrackingStorage, TrackingQueueError
-from core.config import settings
+from core.config import Settings, settings
 from core.device import parse_device_type
-from core.redis_cache import TrackingRequestProtection
+from core.redis_cache import TrackingRequestProtection, build_redis_client
 from core.redis_queue import RedisStreamTrackingStorage
 from core.metrics import tracking_metrics
 from core.schemas import TrackingLogRequest, TrackingLogResponse
@@ -20,6 +20,10 @@ router = APIRouter(prefix="/tracking", tags=["Tracking Logs"])
 _storage: S3ObjectStorage | None = None
 _protection: TrackingRequestProtection | None = None
 _tracking_storage: BufferedTrackingStorage | RedisStreamTrackingStorage | None = None
+
+
+def _stream_socket_timeout_seconds(config: Settings) -> float:
+    return max(1.0, config.tracking_stream_block_ms / 1000 + 1.0)
 
 
 def get_storage() -> S3ObjectStorage:
@@ -43,9 +47,14 @@ def get_tracking_storage(
     global _tracking_storage
     if _tracking_storage is None:
         if settings.tracking_queue_backend == "redis_stream":
+            # XREADGROUP BLOCK may wait for the full block interval. Keep the
+            # request cache's short timeout separate from the stream worker.
             _tracking_storage = RedisStreamTrackingStorage(
                 storage=storage,
-                redis_client=protection.client,
+                redis_client=build_redis_client(
+                    settings,
+                    socket_timeout=_stream_socket_timeout_seconds(settings),
+                ),
                 stream_name=settings.tracking_stream_name,
                 consumer_group=settings.tracking_stream_group,
                 max_stream_length=settings.tracking_stream_max_length,

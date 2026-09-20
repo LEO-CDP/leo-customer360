@@ -11,6 +11,9 @@ region      = "us-east-1"                          # keep us-east-1 (no Location
 
 bucket_names = ["leo-customer360-uat"]
 
+master_profile_s3_bucket = "c360-master-profiles"
+s3_auto_create_buckets   = true
+
 enable_versioning = false
 
 # --- Cost estimate (VND / month) — tune to the env's expected usage ---

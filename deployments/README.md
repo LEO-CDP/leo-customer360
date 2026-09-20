@@ -99,6 +99,20 @@ bring-up before DNS is live:
 running `api` early is safe — re-run it after `sso-realm` to switch SSO on. Secrets/creds
 live in each module's own `.env` / `terraform.tfvars` (see each module's README).
 
+### Shared master-profile S3 bucket
+
+The API and identity-resolution projection use `MASTER_PROFILE_S3_BUCKET`,
+which is set to `c360-master-profiles` in each
+`storage/overlays/<env>.tfvars`. Those overlays also set
+`s3_auto_create_buckets = true`; the API, Dagster backend, and tracking
+deployment scripts read those values and idempotently create/check the bucket
+before their containers start. The bootstrap runs inside each deployed image
+using its configured vStorage credentials, so it works for both UAT and
+production. The backend deployment also runs
+`identity_resolution/scripts/rebuild_master_profile_event_projections.py`
+once when this bucket is empty, so existing master profiles are backfilled
+instead of waiting for a new CIR staging event.
+
 ## Continuous Delivery (CD)
 
 `deploy-all.sh` above is the **manual / one-shot** path. The **target CD model** builds each

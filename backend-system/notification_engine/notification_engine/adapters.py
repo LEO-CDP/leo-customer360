@@ -1,6 +1,6 @@
 """Pluggable Zalo ZNS dispatch adapters (mirrors email_engine/adapters.py).
 
-Chosen at runtime by ``CRM_ZALO_DISPATCH_ADAPTER`` (default ``mock``):
+The adapter and API base are selected from the tenant's connector row:
 
   * ``mock`` -- MockZNSAdapter: logs + returns a synthetic message id, so the
     pipeline runs end-to-end with no Zalo credentials (E2E / tests).
@@ -15,7 +15,6 @@ import urllib.request
 import uuid
 from typing import Optional
 
-from .config import DISPATCH_ADAPTER, ZNS_API_BASE
 from .models import DispatchResult
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,7 @@ class ZNSDispatchAdapter(DispatchAdapter):
 
     provider_name = "zalo_zns"
 
-    def __init__(self, access_token: str, api_base: str = ZNS_API_BASE) -> None:
+    def __init__(self, access_token: str, api_base: str = "https://business.openapi.zalo.me") -> None:
         self.token = access_token
         self.api_base = api_base.rstrip("/")
 
@@ -75,12 +74,15 @@ class ZNSDispatchAdapter(DispatchAdapter):
         return DispatchResult(ok=False, error=f"{data.get('error')}:{data.get('message')}")
 
 
-def build_zns_adapter(access_token: Optional[str] = None, provider: Optional[str] = None) -> DispatchAdapter:
-    """Return the ZNS adapter. Falls back to ``mock`` when no token/CRM_ZALO_
-    DISPATCH_ADAPTER=mock, so a missing credential never silently starts real sends."""
-    provider = (provider or DISPATCH_ADAPTER).strip().lower()
+def build_zns_adapter(
+    access_token: Optional[str] = None,
+    provider: Optional[str] = None,
+    api_base: Optional[str] = None,
+) -> DispatchAdapter:
+    """Return the configured adapter, defaulting to mock without credentials."""
+    provider = (provider or "mock").strip().lower()
     if provider == "zns" and access_token:
-        return ZNSDispatchAdapter(access_token)
+        return ZNSDispatchAdapter(access_token, api_base or "https://business.openapi.zalo.me")
     if provider not in ("zns", "mock"):
         logger.warning("Unknown Zalo dispatch adapter %r; falling back to mock", provider)
     return MockZNSAdapter()

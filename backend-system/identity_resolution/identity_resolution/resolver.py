@@ -77,6 +77,8 @@ JSONB_KEYED_IDENTITY_FIELDS = {
 RAW_PROFILE_COLUMNS = (
     "raw_profile_id",
     "tenant_id",
+    "data_source_id",
+    "data_source_analytics",
     "domain",
     "source_system",
     "created_at",
@@ -127,6 +129,7 @@ class CustomerIdentityResolver:
         self.schema = schema
         self.batch_size = batch_size
         self.persona_engine = PersonaResolutionEngine(schema=schema) if enable_persona_resolution else None
+        self.last_resolved_profiles_by_tenant: Dict[str, set[str]] = {}
 
     def _table(self, name: str) -> str:
         return f"{self.schema}.{name}" if self.schema else name
@@ -887,6 +890,12 @@ class CustomerIdentityResolver:
             WHERE master_profile_id = %s AND tenant_id = %s;
         """
         cursor.execute(update_query, tuple(params))
+        if raw_profile.get("data_source_analytics"):
+            self._refresh_master_data_source_analytics(
+                cursor,
+                str(raw_profile["tenant_id"]),
+                str(master_id),
+            )
 
         incoming_domain_values: Dict[str, Any] = {}
         for field in DOMAIN_ATTRIBUTE_FIELDS:
@@ -945,6 +954,12 @@ class CustomerIdentityResolver:
         )
         existing_link = cursor.fetchone()
         if existing_link:
+            if raw_profile.get("data_source_analytics"):
+                self._refresh_master_data_source_analytics(
+                    cursor,
+                    str(raw_profile["tenant_id"]),
+                    str(existing_link["master_profile_id"]),
+                )
             return existing_link["master_profile_id"]
 
         source_system = raw_profile.get("source_system")
@@ -970,8 +985,9 @@ class CustomerIdentityResolver:
             INSERT INTO {self._table('cdp_master_profiles')}
                 (tenant_id, domain, full_name, email, phone_number,
                  external_ids, device_ids, advertising_ids, cookie_ids, push_tokens,
-                 source_systems, first_seen_raw_profile_id, is_hashed, persona_name)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 data_source_analytics, source_systems, first_seen_raw_profile_id,
+                 is_hashed, persona_name)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING master_profile_id;
         """
         cursor.execute(
@@ -989,6 +1005,7 @@ class CustomerIdentityResolver:
                 advertising_ids,
                 cookie_ids,
                 Json(push_tokens),
+                Json(raw_profile.get("data_source_analytics") or {}),
                 source_systems,
                 raw_profile["raw_profile_id"],
                 looks_hashed,
@@ -1018,6 +1035,54 @@ class CustomerIdentityResolver:
         )
         return new_master_id
 
+    def _refresh_master_data_source_analytics(
+        self,
+        cursor,
+        tenant_id: str,
+        master_id: str,
+    ) -> None:
+        """Rebuild master analytics from its active raw-profile snapshots."""
+        cursor.execute(
+            f"""
+            SELECT raw.data_source_analytics
+            FROM {self._table('cdp_profile_links')} AS link
+            JOIN {self._table('cdp_raw_profiles_stage')} AS raw
+              ON raw.tenant_id = link.tenant_id
+             AND raw.raw_profile_id = link.raw_profile_id
+            WHERE link.tenant_id = %s
+              AND link.master_profile_id = %s
+              AND link.status = 'ACTIVE'
+            """,
+            (tenant_id, master_id),
+        )
+        merged: Dict[str, Dict[str, Any]] = {}
+        for row in cursor.fetchall():
+            snapshot = row.get("data_source_analytics") or {}
+            if not isinstance(snapshot, dict):
+                continue
+            for source_id, metrics in snapshot.items():
+                if not isinstance(metrics, dict):
+                    continue
+                target = merged.setdefault(str(source_id), {})
+                for field, value in metrics.items():
+                    if field == "click_through_rate":
+                        continue
+                    if isinstance(value, (int, float)):
+                        target[field] = target.get(field, 0) + value
+                page_views = target.get("page_views", 0)
+                clicks = target.get("clicks", 0)
+                target["click_through_rate"] = round(clicks / page_views, 6) if page_views else 0.0
+
+        cursor.execute(
+            f"""
+            UPDATE {self._table('cdp_master_profiles')}
+            SET data_source_analytics = %s::JSONB,
+                updated_at = NOW()
+            WHERE tenant_id = %s AND master_profile_id = %s
+            """,
+            (Json(merged), tenant_id, master_id),
+        )
+
     def _mark_as_processed(self, cursor, tenant_id: str, raw_profile_id: str) -> None:
         """Marks a raw profile as processed (status_code = 3) and stamps processed_at."""
         query = f"""
@@ -1037,6 +1102,7 @@ class CustomerIdentityResolver:
             The number of raw profiles processed in this batch.
         """
         try:
+            self.last_resolved_profiles_by_tenant = {}
             with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 set_tenant_context(cursor, None)
                 rules = self._get_active_rules(cursor)
@@ -1068,6 +1134,10 @@ class CustomerIdentityResolver:
                             matched_id = matched["master_profile_id"]
                         else:
                             matched_id = self._create_master_and_link(cursor, profile)
+
+                        self.last_resolved_profiles_by_tenant.setdefault(
+                            str(tenant_id), set()
+                        ).add(str(matched_id))
 
                         # Identity *understanding*: recompute the resolved master
                         # profile's persona without changing the active RLS tenant.

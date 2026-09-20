@@ -1,24 +1,45 @@
-"""Resolve a tenant's Zalo OA token for dispatch.
-
-OA config/tokens live in ``sys_data_source`` (slug='zalo-oa'); the send pipeline
-reads the current access token from there at run time (DB is source of truth;
-the token-refresh schedule keeps it fresh). No SMTP-style provider table.
-"""
+"""Resolve tenant-scoped Zalo settings from ``crm_connector_config``."""
 
 from .db import DB_SCHEMA
 from .rls import set_tenant_context
 
+DEFAULT_ZALO_CONFIG = {
+    "token_refresh_cron": "*/30 * * * *",
+    "dispatch_adapter": "mock",
+    "zns_api_base_url": "https://business.openapi.zalo.me",
+    "batch_size": 500,
+    "optout_projection_cron": "*/15 * * * *",
+    "optout_lookback_hours": 6,
+}
 
-def load_oa_token(conn, tenant_id: str) -> dict:
-    """Return ``{'access_token', 'oa_id'}`` for the tenant's connected OA (values
-    may be None if the OA is not connected)."""
+
+def load_zalo_config(conn, tenant_id: str) -> dict | None:
+    """Return the active tenant Zalo connector with credentials merged in."""
     with conn.cursor() as cur:
         set_tenant_context(cur, tenant_id)
         cur.execute(
-            f"SELECT access_tokens FROM {DB_SCHEMA}.sys_data_source "
-            f"WHERE tenant_id = %s AND slug = 'zalo-oa' AND status = 1",
+            f"""SELECT credentials, config
+                   FROM {DB_SCHEMA}.crm_connector_config
+                  WHERE tenant_id = %s
+                    AND connector_type = 'CHAT'
+                    AND provider = 'ZALO'
+                    AND direction IN ('OUTBOUND', 'BIDIRECTIONAL')
+                    AND status = 'ACTIVE' AND is_active = TRUE
+                  ORDER BY is_default DESC, updated_at DESC
+                  LIMIT 1""",
             (tenant_id,),
         )
         row = cur.fetchone()
-    tokens = (row[0] if row else None) or {}
-    return {"access_token": tokens.get("access_token"), "oa_id": tokens.get("oa_id")}
+    if not row:
+        return None
+    credentials, config = row
+    values = dict(DEFAULT_ZALO_CONFIG)
+    values.update(config or {})
+    values.update(credentials or {})
+    return values
+
+
+def load_oa_token(conn, tenant_id: str) -> dict:
+    """Return the tenant's current Zalo access token and OA id."""
+    values = load_zalo_config(conn, tenant_id) or {}
+    return {"access_token": values.get("access_token"), "oa_id": values.get("oa_id")}

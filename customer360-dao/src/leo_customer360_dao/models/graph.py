@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Text, text
+from sqlalchemy import ForeignKey, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,6 +27,9 @@ class GraphEdge(Base):
     # parent), so it's convenient to look up/filter on edge_id alone too.
     edge_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False
     )
     relation: Mapped[str] = mapped_column(Text, primary_key=True)
 

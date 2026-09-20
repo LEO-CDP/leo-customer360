@@ -49,7 +49,7 @@ def test_opt_out_event_recorded_to_s3_with_suppression_reason():
         "tracking_id": _token("t1", "c1", "p1"),
         "msg_id": "zmsg-1",
     }).encode()
-    with patch.object(settings, "zalo_webhook_signing_secret", WEBHOOK_SECRET):
+    with patch.object(settings, "email_webhook_signing_secret", WEBHOOK_SECRET):
         resp = client.post(f"{ZALO_PREFIX}/webhook", content=body,
                            headers={"X-ZEvent-Signature": _sign(body, WEBHOOK_SECRET)})
     app.dependency_overrides.clear()
@@ -73,7 +73,7 @@ def test_delivered_event_has_no_suppression_reason():
     fake = FakeTrackingService()
     client = _client(fake)
     body = json.dumps({"event_name": "delivered", "tracking_id": _token("t1", "c1", "p2"), "msg_id": "m2"}).encode()
-    with patch.object(settings, "zalo_webhook_signing_secret", WEBHOOK_SECRET):
+    with patch.object(settings, "email_webhook_signing_secret", WEBHOOK_SECRET):
         resp = client.post(f"{ZALO_PREFIX}/webhook", content=body,
                            headers={"X-ZEvent-Signature": _sign(body, WEBHOOK_SECRET)})
     app.dependency_overrides.clear()
@@ -86,7 +86,7 @@ def test_webhook_rejects_bad_signature():
     fake = FakeTrackingService()
     client = _client(fake)
     body = json.dumps({"event_name": "user_unfollow", "tracking_id": _token("t1", "c1", "p1")}).encode()
-    with patch.object(settings, "zalo_webhook_signing_secret", WEBHOOK_SECRET):
+    with patch.object(settings, "email_webhook_signing_secret", WEBHOOK_SECRET):
         resp = client.post(f"{ZALO_PREFIX}/webhook", content=body, headers={"X-ZEvent-Signature": "sha256=deadbeef"})
     app.dependency_overrides.clear()
     assert resp.status_code == 401
@@ -97,7 +97,7 @@ def test_webhook_disabled_when_secret_unset():
     fake = FakeTrackingService()
     client = _client(fake)
     body = json.dumps({"event_name": "user_unfollow", "tracking_id": _token("t1", "c1", "p1")}).encode()
-    with patch.object(settings, "zalo_webhook_signing_secret", ""):
+    with patch.object(settings, "email_webhook_signing_secret", ""):
         resp = client.post(f"{ZALO_PREFIX}/webhook", content=body, headers={"X-ZEvent-Signature": "x"})
     app.dependency_overrides.clear()
     assert resp.status_code == 503
@@ -107,7 +107,7 @@ def test_unknown_event_or_bad_token_ignored():
     fake = FakeTrackingService()
     client = _client(fake)
     body = json.dumps({"event_name": "some_unmapped_event", "tracking_id": _token("t1", "c1", "p1")}).encode()
-    with patch.object(settings, "zalo_webhook_signing_secret", WEBHOOK_SECRET):
+    with patch.object(settings, "email_webhook_signing_secret", WEBHOOK_SECRET):
         resp = client.post(f"{ZALO_PREFIX}/webhook", content=body,
                            headers={"X-ZEvent-Signature": _sign(body, WEBHOOK_SECRET)})
     app.dependency_overrides.clear()

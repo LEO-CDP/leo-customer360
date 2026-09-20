@@ -185,8 +185,11 @@ def get_source_analytics_run_status(request: Request, run_id: str) -> dict[str, 
             redis_client = get_redis_client()
             if redis_client is not None:
                 try:
-                    if redis_client.hget(SUBMISSION_STATE_KEY, "run_id") == run_id:
-                        _release_submission(redis_client)
+                    # A terminal run owns no future submission lease. Clear it
+                    # even when the stored state run_id is stale after an API
+                    # restart or a Dagster retry, otherwise new runs can be
+                    # blocked by an orphaned Redis lock.
+                    _release_submission(redis_client)
                 except RedisError:
                     logger.warning("Could not clear analytics submission lease", exc_info=True)
         return result

@@ -22,7 +22,13 @@ esac
 
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
-tfval() { grep -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/' | head -1; }
+tfval() {
+  local line; line="$(grep -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null | head -1)"
+  case "$line" in
+    *\"*\"*) line="${line#*\"}"; printf '%s' "${line%%\"*}" ;;
+    *) line="${line#*=}"; line="${line%%#*}"; printf '%s' "$(printf '%s' "$line" | tr -d '[:space:]')" ;;
+  esac
+}
 
 # --- SSH target: the BACKEND server's floating IP (selected by map key) ---
 BACKEND_SERVER_KEY="${BACKEND_SERVER_KEY:-backend}"
@@ -62,8 +68,17 @@ S3_REGION="$(tfval region "$store/overlays/$ENV.tfvars")"; S3_REGION="${S3_REGIO
 S3_BUCKET="$(tfval bucket_names "$store/overlays/$ENV.tfvars")"   # first quoted bucket name
 S3_ACCESS_KEY="${TF_VAR_access_key:-$(tfval access_key "$store/terraform.tfvars")}"
 S3_SECRET_KEY="${TF_VAR_secret_key:-$(tfval secret_key "$store/terraform.tfvars")}"
+S3_AUTO_CREATE="${S3_AUTO_CREATE_BUCKETS:-$(tfval s3_auto_create_buckets "$store/overlays/$ENV.tfvars")}"
+if [[ -z "$S3_AUTO_CREATE" ]]; then
+  if [[ -n "$S3_ENDPOINT" && -n "$S3_ACCESS_KEY" && -n "$S3_SECRET_KEY" ]]; then
+    S3_AUTO_CREATE="true"
+  else
+    S3_AUTO_CREATE="false"
+  fi
+fi
+MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-$(tfval master_profile_s3_bucket "$store/overlays/$ENV.tfvars")}"; MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
 if [[ -n "$S3_ENDPOINT" && -n "$S3_BUCKET" && -n "$S3_ACCESS_KEY" && -n "$S3_SECRET_KEY" ]]; then
-  echo ">> S3: $S3_ENDPOINT bucket=$S3_BUCKET (region $S3_REGION, path-style) — compute logs -> vStorage"
+  echo ">> S3: $S3_ENDPOINT bucket=$S3_BUCKET (region $S3_REGION, path-style, auto_create=$S3_AUTO_CREATE) — compute logs -> vStorage"
 else
   echo ">> S3: not fully configured — compute logs will use the local default"
 fi
@@ -71,6 +86,7 @@ fi
 # --- CD image source: pull the CI-built image from GHCR by default; set
 #     BUILD_LOCAL=1 to fall back to shipping source + building on the VM. ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/s3.sh"
 SERVICE="customer360-dagster"
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
 GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
@@ -109,6 +125,8 @@ AWS_ACCESS_KEY_ID=$S3_ACCESS_KEY
 AWS_SECRET_ACCESS_KEY=$S3_SECRET_KEY
 S3_ACCESS_KEY_ID=$S3_ACCESS_KEY
 S3_SECRET_ACCESS_KEY=$S3_SECRET_KEY
+S3_AUTO_CREATE_BUCKETS=$S3_AUTO_CREATE
+MASTER_PROFILE_S3_BUCKET=$MASTER_PROFILE_S3_BUCKET
 REDIS_HOST=$REDIS_HOST
 REDIS_PORT=$REDIS_PORT
 REDIS_DB=0
@@ -139,9 +157,10 @@ else
   echo ">> Email: dispatch = mock (no smtp.$ENV.env for '$ENV') -- email_engine will not send real email"
 fi
 ENV_B64="$(printf %s "$ENV_CONTENT" | base64 | tr -d '\n')"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ENV_B64" "$DEPLOY_MODE" "$GHCR_USER" "$IMAGE" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" < <(declare -f docker_pull_retry; cat <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ENV_B64" "$DEPLOY_MODE" "$GHCR_USER" "$IMAGE" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 ENV_B64="$1"; DEPLOY_MODE="$2"; GHCR_USER="${3:-token}"; IMAGE="${4:-}"; GHCR_TOKEN="$(printf %s "${5:-}" | base64 -d 2>/dev/null || true)"
+S3_AUTO_CREATE_BUCKETS="${6:-false}"; MASTER_PROFILE_S3_BUCKET="${7:-c360-master-profiles}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -194,6 +213,7 @@ else
   sudo docker build -t customer360-dagster -f /opt/c360/backend-system/Dockerfile /opt/c360
   RUN_IMG="customer360-dagster"
 fi
+ensure_s3_bucket "$RUN_IMG" /opt/c360/backend.env "$MASTER_PROFILE_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
 # Preserve the OLD instance's Dagster storage before replacing the container. The
 # old container ran with an EPHEMERAL DAGSTER_HOME (no -v mount), so its SQLite
 # run/event/schedule history lives ONLY inside the container layer — copy it out
@@ -225,6 +245,51 @@ sudo docker run -d --name backend-system --restart unless-stopped --log-opt max-
 sudo docker run -d --name backend-system-daemon --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/backend.env --entrypoint /app/entrypoint.sh "$RUN_IMG" dagster-daemon run -w workspace.yaml
 sleep 3
 sudo docker ps --filter name=backend-system --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
+
+# Existing master profiles predate the incremental CIR projection hook. When
+# the shared projection bucket is empty, rebuild all active profiles once from
+# the source event buckets; later deployments skip this scan after the first
+# projection object exists. The command runs inside the deployed image so it
+# uses the exact DB and S3 environment already validated above.
+if [[ "${S3_AUTO_CREATE_BUCKETS,,}" =~ ^(true|1|yes)$ ]]; then
+  set +e
+  sudo docker run --rm --network host --env-file /opt/c360/backend.env --entrypoint python "$RUN_IMG" - "$MASTER_PROFILE_S3_BUCKET" <<'PY'
+import os
+import sys
+
+import boto3
+from botocore.client import Config
+
+bucket = sys.argv[1]
+endpoint = os.environ.get("S3_ENDPOINT_URL") or os.environ.get("ANALYTICS_S3_ENDPOINT_URL")
+region = os.environ.get("S3_REGION") or "us-east-1"
+client = boto3.client(
+    "s3",
+    endpoint_url=endpoint,
+    region_name=region,
+    aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("S3_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY") or os.environ.get("S3_SECRET_ACCESS_KEY"),
+    config=Config(s3={"addressing_style": "path"}),
+)
+try:
+    page = client.list_objects_v2(Bucket=bucket, MaxKeys=1)
+except Exception as exc:
+    print(f"master-profile bucket probe failed: {exc}", file=sys.stderr)
+    raise SystemExit(2) from exc
+raise SystemExit(10 if page.get("KeyCount", 0) else 0)
+PY
+  probe_status=$?
+  set -e
+  if [[ "$probe_status" -eq 0 ]]; then
+    echo "   master-profile projection bucket is empty; rebuilding active profiles ..."
+    sudo docker exec backend-system python /app/identity_resolution/scripts/rebuild_master_profile_event_projections.py
+  elif [[ "$probe_status" -eq 10 ]]; then
+    echo "   master-profile projection bucket already contains objects; skipping rebuild"
+  else
+    echo "ERROR: could not determine whether master-profile projection bucket is empty (status=$probe_status)." >&2
+    exit "$probe_status"
+  fi
+fi
 REMOTE
 )
 

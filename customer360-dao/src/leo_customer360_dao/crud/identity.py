@@ -36,6 +36,7 @@ def list_master_profiles_page(
     db: Session,
     *,
     tenant_id: Optional[uuid.UUID] = None,
+    data_source_id: Optional[uuid.UUID] = None,
     domain: Optional[str] = None,
     lifecycle_stage: Optional[str] = None,
     domain_attribute_key: Optional[str] = None,
@@ -58,6 +59,24 @@ def list_master_profiles_page(
 
     if tenant_id is not None:
         where_clauses.append(CdpMasterProfile.tenant_id == tenant_id)
+    if data_source_id is not None:
+        where_clauses.append(
+            exists(
+                select(1)
+                .select_from(CdpProfileLink)
+                .join(
+                    CdpRawProfileStage,
+                    CdpRawProfileStage.raw_profile_id == CdpProfileLink.raw_profile_id,
+                )
+                .where(
+                    CdpProfileLink.master_profile_id == CdpMasterProfile.master_profile_id,
+                    CdpProfileLink.tenant_id == CdpMasterProfile.tenant_id,
+                    CdpProfileLink.status == "ACTIVE",
+                    CdpRawProfileStage.tenant_id == CdpMasterProfile.tenant_id,
+                    CdpRawProfileStage.data_source_id == data_source_id,
+                )
+            )
+        )
     if domain is not None:
         where_clauses.append(CdpMasterProfile.domain == domain)
     if lifecycle_stage is not None:
@@ -145,6 +164,10 @@ def list_master_profiles_page(
     items = []
     for profile, linked_raw_profile_count in rows:
         profile.linked_raw_profile_count = int(linked_raw_profile_count or 0)
+        profile.total_tracked_events = _total_tracked_events(
+            getattr(profile, "data_source_analytics", None),
+            data_source_id,
+        )
         items.append(profile)
     total = db.execute(count_stmt).scalar_one()
     total_pages = ceil(total / page_size) if total > 0 else 1
@@ -160,6 +183,25 @@ def list_master_profiles_page(
             "has_next": page < total_pages,
         },
     }
+
+
+def _total_tracked_events(
+    analytics: Optional[dict],
+    data_source_id: Optional[uuid.UUID] = None,
+) -> int:
+    """Read the profile event total from persisted source analytics JSON."""
+    if not isinstance(analytics, dict):
+        return 0
+    source_items = (
+        {str(data_source_id): analytics.get(str(data_source_id))}
+        if data_source_id is not None
+        else analytics
+    )
+    return sum(
+        int(metrics.get("total_tracked_events", 0) or 0)
+        for metrics in source_items.values()
+        if isinstance(metrics, dict)
+    )
 
 
 def list_master_profiles_by_persona_category_page(

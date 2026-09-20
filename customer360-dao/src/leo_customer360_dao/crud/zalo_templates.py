@@ -20,7 +20,6 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from leo_customer360_dao.config import settings
 from leo_customer360_dao.models.crm import MessageTemplate
 
 logger = logging.getLogger(__name__)
@@ -28,10 +27,10 @@ logger = logging.getLogger(__name__)
 ZALO_ZNS_CHANNEL = "zalo_zns"
 
 
-def _fetch_zns_templates(access_token: str, offset: int = 0, limit: int = 100) -> list[dict]:
+def _fetch_zns_templates(access_token: str, api_base_url: str, offset: int = 0, limit: int = 100) -> list[dict]:
     """GET the OA's ZNS template list. ⚠️ endpoint/shape per current Zalo docs."""
     url = (
-        f"{settings.crm_zalo_oa_api_base_url.rstrip('/')}/template/all"
+        f"{api_base_url.rstrip('/')}/template/all"
         f"?{urllib.parse.urlencode({'offset': offset, 'limit': limit})}"
     )
     req = urllib.request.Request(url, headers={"access_token": access_token}, method="GET")
@@ -48,13 +47,19 @@ def _map_status(remote: dict) -> str:
     return "Approved" if raw in ("enable", "approved", "1", "true") else "Draft"
 
 
-def sync_templates(db: Session, tenant_id: uuid.UUID, oa_id: Optional[str], access_token: str) -> dict:
+def sync_templates(
+    db: Session,
+    tenant_id: uuid.UUID,
+    oa_id: Optional[str],
+    access_token: str,
+    api_base_url: str,
+) -> dict:
     """Pull the OA's ZNS templates and upsert them (matched on the Zalo template id).
 
     Returns ``{'synced': n}``. Small template counts, so we load the tenant's
     existing ZNS rows once and match in Python (avoids a JSONB index dependency).
     """
-    remote = _fetch_zns_templates(access_token)
+    remote = _fetch_zns_templates(access_token, api_base_url)
     existing_rows = db.execute(
         select(MessageTemplate).where(MessageTemplate.tenant_id == tenant_id)
     ).scalars().all()

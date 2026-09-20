@@ -97,7 +97,7 @@ All active findings fixed on branch `feat/SCRUM-102-...`; **#1 suppressed** (tea
 > ✅ **FIXED** — commit `fcdd8e3`
 **`backend-system/notification_engine/notification_engine/adapters.py:80`** (`build_zns_adapter`), **`send.py:226-228`**.
 
-`build_zns_adapter` returns `MockZNSAdapter` whenever `access_token` is falsy — even with `CRM_ZALO_DISPATCH_ADAPTER=zns` — and `send_zalo_campaign` has no "OA connected" precondition.
+`build_zns_adapter` returns `MockZNSAdapter` whenever `access_token` is falsy — even with the connector's dispatch adapter set to `zns` — and `send_zalo_campaign` has no "OA connected" precondition.
 
 **Failure scenario:** prod `adapter=zns`, tenant never completed OAuth → `load_oa_token` returns `{'access_token': None}` → `if provider == 'zns' and access_token:` is False → `MockZNSAdapter()`. Every recipient gets `status='Sent'`, `provider='zalo_zns_mock'`, zero real delivery, and those terminal `Sent` rows permanently block re-send after the OA is later connected. Unlike `email_engine` (selects SMTP by provider name, fails loudly), ZNS silently reports success.
 

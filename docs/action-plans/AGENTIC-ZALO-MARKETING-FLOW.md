@@ -31,8 +31,8 @@ Segment -> CRM sync routing -> Phone eligibility filter -> AI Zalo template draf
 
 Schema gaps that must be addressed in this story:
 
-- No dedicated `crm_zalo_templates` table exists.
-- No dedicated `crm_zalo_oa_accounts` table exists.
+- Zalo templates reuse `crm_message_templates`.
+- OA settings reuse the tenant's `crm_connector_config` row.
 - No dedicated Zalo dispatch log table exists.
 - No dedicated Zalo opt-out/suppression table exists.
 - No explicit campaign linkage for Zalo template/account/channel config exists on `crm_campaign`.
@@ -100,23 +100,23 @@ Add missing relational structure for Zalo template lifecycle, account linkage, a
 
 Scope of Work
 
-- Create `crm_zalo_templates` table with at least:
+- Reuse `crm_message_templates` with at least:
 	- `template_id`, `tenant_id`, `name`, `message_text`, `variables`, `status`, `created_by`, `approved_by`, `approved_at`, `metadata`.
-- Create `crm_zalo_oa_accounts` table with:
+- Reuse `crm_connector_config` with:
 	- `oa_account_id`, `tenant_id`, `oa_name`, `oa_id`, `status`, `config`, `metadata`.
-- Create `crm_zalo_dispatch_logs` table with:
+- Reuse `cdp_campaign_dispatch_logs` with:
 	- `dispatch_id`, `tenant_id`, `campaign_id`, `master_profile_id`, `phone_hash`, `provider_message_id`, `status`, `sent_at`, `delivered_at`, `read_at`, `error_code`, `metadata`.
-- Create `crm_zalo_suppression` table with:
+- Project opt-out into `cdp_master_profiles.communication_preferences` rather than a dedicated suppression table:
 	- `suppression_id`, `tenant_id`, `phone_hash`, `reason`, `source`, `created_at`, `metadata`.
 - Extend `crm_campaign` with:
 	- `segment_id` FK -> `cdp_segments.segment_id`
-	- `zalo_template_id` FK -> `crm_zalo_templates.template_id`
-	- `oa_account_id` FK -> `crm_zalo_oa_accounts.oa_account_id`
+	- `template_id` FK -> `crm_message_templates.template_id`
+	- connector settings -> `crm_connector_config.connector_id`
 	- `approval_status` (`Draft`, `InReview`, `Approved`, `Rejected`)
 	- `approved_by`, `approved_at`
 	- `strategy_summary` and optional `ai_plan`.
 - Add campaign-content relation table `crm_campaign_content_items` if not present.
-- Add sync-run audit table `crm_zalo_sync_runs` with per-route and eligibility counts.
+- Reuse `crm_segment_sync_runs` for per-route and eligibility counts.
 - Add/extend indexes and RLS policies for all new tenant-scoped tables.
 
 Acceptance Criteria
@@ -155,8 +155,8 @@ Scope of Work
 - Apply Zalo eligibility filters:
 	- valid normalized phone
 	- consent/opt-in enabled
-	- not in `crm_zalo_suppression`
-- Persist run record in `crm_zalo_sync_runs`.
+	- not opted out in `cdp_master_profiles.communication_preferences`
+- Persist run record in `crm_segment_sync_runs`.
 - Guarantee idempotent rerun behavior.
 
 Acceptance Criteria
@@ -195,7 +195,7 @@ Scope of Work
 	- message text variants
 	- CTA text variants
 	- required variables and short links placeholders
-- Save drafts in `crm_zalo_templates` with `Draft` status.
+- Save drafts in `crm_message_templates` with `Draft` status.
 - Add review API: approve/reject/edit template before campaign use.
 - Add safety checks: policy keywords, forbidden claims, length limits.
 
@@ -273,7 +273,7 @@ Scope of Work
 - Replace `notification_engine_job` placeholder with real send pipeline:
 	- render final message payload
 	- dispatch through Zalo OA adapter
-	- persist send attempts to `crm_zalo_dispatch_logs`
+	- persist send attempts to `cdp_campaign_dispatch_logs`
 - Integrate with existing real services:
 	- use `segmentation_job` outputs for selected segment freshness
 	- preserve compatibility with `analytics_job` downstream verification
@@ -429,17 +429,17 @@ Use this checklist as the implementation tracker for all technical tasks in this
 	- CRM module tables use `crm_*`.
 	- CDP module tables use `cdp_*`.
 	- System tables use `sys_*`.
-- [ ] New environment variables for this epic use `CRM_ZALO_*` plus provider-specific standard names.
+- [ ] Tenant-scoped Zalo settings are stored in `crm_connector_config` (`connector_type='CHAT'`, `provider='ZALO'`).
 
 ### B. PostgreSQL Data Tables Checklist
 
-- [ ] Create `crm_zalo_templates` table with message payload, variables, approvals, metadata, and `tenant_id`.
-- [ ] Create `crm_zalo_oa_accounts` table for account-level dispatch configuration.
-- [ ] Create `crm_zalo_dispatch_logs` table for message-level delivery lifecycle.
-- [ ] Create `crm_zalo_suppression` table for opt-out/failure-based suppression state.
+- [ ] Configure `crm_message_templates` with message payload, variables, approvals, metadata, and `tenant_id`.
+- [ ] Configure `crm_connector_config` for account-level dispatch settings.
+- [ ] Use `cdp_campaign_dispatch_logs` for message-level delivery lifecycle.
+- [ ] Project opt-out/failure state into profile communication preferences.
 - [ ] Alter `crm_campaign` to add `segment_id`, `zalo_template_id`, `oa_account_id`, approval fields, and AI planning fields.
 - [ ] Create `crm_campaign_content_items` relation table if not already available.
-- [ ] Create `crm_zalo_sync_runs` audit table.
+- [ ] Use `crm_segment_sync_runs` for sync-run audit data.
 - [ ] Add FK constraints for all cross-table relationships.
 - [ ] Add unique constraints for idempotency-sensitive entities.
 - [ ] Add tenant-aware indexes for query hot paths.
@@ -466,33 +466,11 @@ Use this checklist as the implementation tracker for all technical tasks in this
 - [ ] Implement suppression updates and performance rollup updates.
 - [ ] Add E2E automation that follows simulator pattern.
 
-### D. Required Environment Config Checklist
+### D. Database Connector Config Checklist
 
-- [ ] Define AI provider selector:
-	- `CRM_ZALO_AI_PROVIDER` (`openai` or `gemini`)
-- [ ] Define OpenAI credentials/config when provider is OpenAI:
-	- `OPENAI_API_KEY`
-	- `OPENAI_MODEL`
-- [ ] Define Gemini credentials/config when provider is Gemini:
-	- `GEMINI_API_KEY`
-	- `GEMINI_MODEL`
-- [ ] Define Zalo OA credentials/config:
-	- `CRM_ZALO_OA_APP_ID`
-	- `CRM_ZALO_OA_APP_SECRET`
-	- `CRM_ZALO_OA_ACCESS_TOKEN`
-	- `CRM_ZALO_OA_REFRESH_TOKEN`
-	- `CRM_ZALO_OA_API_BASE_URL`
-- [ ] Define sender and compliance defaults:
-	- `CRM_ZALO_BRAND_NAME`
-	- `CRM_ZALO_TRACKING_BASE_URL`
-	- `CRM_ZALO_UNSUBSCRIBE_BASE_URL`
-- [ ] Define runtime controls:
-	- `CRM_ZALO_BATCH_SIZE`
-	- `CRM_ZALO_RATE_LIMIT_PER_SEC`
-	- `CRM_ZALO_MAX_RETRIES`
-	- `CRM_ZALO_RETRY_BACKOFF_MS`
-- [ ] Define webhook security values:
-	- `CRM_ZALO_WEBHOOK_SIGNING_SECRET`
+- [ ] Store app credentials, rotating OAuth tokens, and webhook credentials in `crm_connector_config.credentials`.
+- [ ] Store API endpoints, redirect URI, adapter, schedules, and batch/lookback controls in `crm_connector_config.config`.
+- [ ] Configure the row through `PUT /api/v1/admin/zalo/connector-config`; do not add tenant Zalo settings to `.env`.
 - [ ] Ensure values exist in `.env.example` and active environment files used by services.
 
 ### E. Definition of Ready and Done Checklist

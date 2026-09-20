@@ -74,6 +74,7 @@ class MissingBucketS3(FakeS3):
         return MissingPaginator()
 
 
+
 def _gzip_envelopes(*envelopes):
     raw = b"\n".join(
         json.dumps(envelope, separators=(",", ":")).encode("utf-8")
@@ -254,7 +255,6 @@ def test_query_rejects_requested_source_without_active_tenant_row_before_s3():
             limit=1000,
         )
 
-
 def test_query_rejects_invalid_source_id_from_postgresql_before_s3():
     repository = EventQueryRepository(
         Settings(event_s3_prefix="events"),
@@ -269,3 +269,9 @@ def test_query_rejects_invalid_source_id_from_postgresql_before_s3():
             days=1,
             limit=1000,
         )
+
+
+if __name__ == "__main__":
+    raise SystemExit("Run this module with pytest")
+
+TEST_FILE_COMPLETE = True

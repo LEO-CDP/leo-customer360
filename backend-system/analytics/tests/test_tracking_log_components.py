@@ -31,6 +31,10 @@ class StateRedis:
     def hset(self, key, mapping):
         self.states.setdefault(key, {}).update(mapping)
 
+    def hincrby(self, key, field, increment):
+        state = self.states.setdefault(key, {})
+        state[field] = str(int(state.get(field, 0)) + increment)
+
     def hgetall(self, key):
         return self.states.get(key, {})
 
@@ -150,6 +154,43 @@ def test_source_state_store_tracks_lock_cursor_and_profiles():
 
     state.release_source_lock("source-1", token)
     assert state.get_source_statuses()[0]["status"] == "stale"
+
+
+def test_source_state_accumulates_deduplicated_profile_analytics():
+    redis_client = StateRedis()
+    settings = AnalyticsSettings.from_environment()
+    state = SourceStateStore(redis_client, settings, lambda: "2026-09-18-12")
+
+    first = state.record_profile_event_analytics(
+        "source-1",
+        "raw-1",
+        "event-1",
+        page_view=True,
+        click=False,
+    )
+    duplicate = state.record_profile_event_analytics(
+        "source-1",
+        "raw-1",
+        "event-1",
+        page_view=True,
+        click=False,
+    )
+    second = state.record_profile_event_analytics(
+        "source-1",
+        "raw-1",
+        "event-2",
+        page_view=False,
+        click=True,
+    )
+
+    assert first["total_tracked_events"] == 1
+    assert duplicate == first
+    assert second == {
+        "page_views": 1,
+        "clicks": 1,
+        "total_tracked_events": 2,
+        "click_through_rate": 1.0,
+    }
 
 
 def test_tracking_service_uses_injected_source_loader():

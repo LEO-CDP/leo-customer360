@@ -55,6 +55,20 @@ class TestProfileLooksHashed:
 
 
 class TestGeneratePersonaName:
+    def test_anonymous_unknown_tracking_profile_is_web_visitor(self):
+        profile = {
+            "domain": "unknown",
+            "source_system": "tracking",
+            "anonymous_id": "13e54921f3aa4b9ab4ac3e65d33fa120",
+        }
+
+        assert generate_persona_name(profile) == "Web Visitor"
+
+    def test_web_visitor_detects_tracking_when_not_first_source_system(self):
+        assert generate_persona_name(
+            {"domain": "unknown", "source_systems": ["Adjust", "tracking"]}
+        ) == "Web Visitor"
+
     def test_deterministic_for_same_profile(self):
         profile = {"domain": "retail", "device_id": "dev-1", "media_source": "TikTok Ads"}
         assert generate_persona_name(profile) == generate_persona_name(profile)

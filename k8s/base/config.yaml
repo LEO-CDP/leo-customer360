@@ -49,3 +49,4 @@ data:
   KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
   S3_ENDPOINT: "http://minio:9000"
   MINIO_BUCKET: "customer360-events-dev"
+  MASTER_PROFILE_S3_BUCKET: "c360-master-profiles"

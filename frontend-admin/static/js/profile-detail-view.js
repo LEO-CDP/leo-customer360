@@ -10,7 +10,14 @@ window.C360 = window.C360 || {};
 
   var currentProfileId = null;
   var currentContentType = "";
-  var timelineLimit = 8;
+  var timelineLimit = 100;
+  var timelineDataSourceId = "";
+  var timelineDataSourcesLoadedForTenant = null;
+  var timelineDataSourcesLoading = false;
+  var timelineRequestLoading = false;
+  var timelineRangePreset = "7d";
+  var timelineFromEventTime = "";
+  var timelineToEventTime = "";
 
   // Mirrors the sys_domain / validate_domain_value fixed dictionary
   // (customer360-api/core/utils/domains.py) -- used to populate the "Add
@@ -61,19 +68,232 @@ window.C360 = window.C360 || {};
     return 90;
   }
 
+  function timelineRequestParams() {
+    var params = { limit: timelineLimit };
+    if (timelineDataSourceId) params.data_source_id = timelineDataSourceId;
+    if (timelineFromEventTime) params.from_event_time = timelineFromEventTime;
+    if (timelineToEventTime) params.to_event_time = timelineToEventTime;
+    return params;
+  }
+
+  function decodeTimelineValue(value) {
+    if (!value) return "";
+    try { return decodeURIComponent(String(value)); } catch (e) { return String(value); }
+  }
+
+  function safeTimelineUrl(value) {
+    var decoded = decodeTimelineValue(value);
+    return /^https?:\/\//i.test(decoded) ? decoded : "";
+  }
+
+  function compactTimelineUrl(value) {
+    if (!value) return "";
+    return value.length > 96 ? value.slice(0, 93) + "..." : value;
+  }
+
+  function timelineJsonLabel(value) {
+    if (!value || typeof value !== "object") return "";
+    try {
+      var json = JSON.stringify(value);
+      return json.length > 320 ? json.slice(0, 317) + "..." : json;
+    } catch (e) { return ""; }
+  }
+
+  function escapeTimelineText(value) {
+    return $("<div>").text(value === null || value === undefined ? "" : String(value)).html();
+  }
+
+  function timelineBadgeHtml(label, classes) {
+    return label
+      ? '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ' +
+        classes +
+        '">' +
+        escapeTimelineText(label) +
+        "</span>"
+      : "";
+  }
+
+  function timelineLocalInputValue(date) {
+    function pad(value) { return String(value).padStart(2, "0"); }
+    return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) +
+      "T" + pad(date.getHours()) + ":" + pad(date.getMinutes());
+  }
+
+  var TIMELINE_RANGE_LABELS = {
+    "24h": "Last 24 hours",
+    "7d": "Last 7 days",
+    "30d": "Last 30 days",
+    custom: "Custom range",
+  };
+
+  function timelineRangeStart(preset, end) {
+    var hours = preset === "24h" ? 24 : preset === "30d" ? 30 * 24 : 7 * 24;
+    return new Date(end.getTime() - hours * 60 * 60 * 1000);
+  }
+
+  function updateTimelineRangeUi(showGenericCustomLabel) {
+    $(".timeline-range-preset").each(function () {
+      var active = $(this).data("range") === timelineRangePreset;
+      $(this)
+        .toggleClass("bg-white text-indigo-700 shadow-sm", active)
+        .toggleClass("text-slate-500 hover:bg-white/70", !active)
+        .attr("aria-pressed", active ? "true" : "false");
+    });
+    $("#timeline-custom-range").toggleClass(
+      "hidden",
+      timelineRangePreset !== "custom",
+    );
+
+    var summary = TIMELINE_RANGE_LABELS[timelineRangePreset] || "Custom range";
+    if (
+      timelineRangePreset === "custom" &&
+      timelineFromEventTime &&
+      timelineToEventTime &&
+      !showGenericCustomLabel
+    ) {
+      summary =
+        fmt.dateTime(timelineFromEventTime) +
+        " - " +
+        fmt.dateTime(timelineToEventTime);
+    }
+    $("#timeline-range-summary").text(summary);
+  }
+
+  function initializeTimelineRange(forceReset) {
+    if (forceReset || !timelineFromEventTime || !timelineToEventTime) {
+      var now = new Date();
+      timelineRangePreset = "7d";
+      var start = timelineRangeStart(timelineRangePreset, now);
+      timelineFromEventTime = start.toISOString();
+      timelineToEventTime = now.toISOString();
+    }
+    $("#timeline-from-event-time").val(
+      timelineLocalInputValue(new Date(timelineFromEventTime)),
+    );
+    $("#timeline-to-event-time").val(
+      timelineLocalInputValue(new Date(timelineToEventTime)),
+    );
+    updateTimelineRangeUi();
+  }
+
+  function readTimelineRange() {
+    var fromValue = $("#timeline-from-event-time").val();
+    var toValue = $("#timeline-to-event-time").val();
+    var fromDate = fromValue ? new Date(fromValue) : null;
+    var toDate = toValue ? new Date(toValue) : null;
+    var error = "";
+    if (!fromDate || isNaN(fromDate.getTime()) || !toDate || isNaN(toDate.getTime())) {
+      error = "Choose both a start and end time.";
+    } else if (fromDate > toDate) {
+      error = "The start time must be before the end time.";
+    }
+    $("#timeline-range-error").text(error).toggleClass("hidden", !error);
+    if (error) return false;
+
+    timelineRangePreset = "custom";
+    timelineFromEventTime = fromDate.toISOString();
+    timelineToEventTime = toDate.toISOString();
+    updateTimelineRangeUi();
+    return true;
+  }
+
+  function setTimelineRangePreset(preset) {
+    if (!TIMELINE_RANGE_LABELS[preset]) return;
+    timelineRangePreset = preset;
+    $("#timeline-range-error").addClass("hidden").text("");
+    if (preset !== "custom") {
+      var end = new Date();
+      timelineFromEventTime = timelineRangeStart(preset, end).toISOString();
+      timelineToEventTime = end.toISOString();
+      $("#timeline-from-event-time").val(
+        timelineLocalInputValue(new Date(timelineFromEventTime)),
+      );
+      $("#timeline-to-event-time").val(
+        timelineLocalInputValue(new Date(timelineToEventTime)),
+      );
+    }
+    updateTimelineRangeUi(preset === "custom");
+    if (preset !== "custom" && currentProfileId) reloadTimeline();
+  }
+
+  function updateTimelineLoadingState() {
+    var requestLoading = timelineRequestLoading;
+    var controlsLoading = timelineDataSourcesLoading || requestLoading;
+    $("#profile-timeline-loading").toggleClass("hidden", !requestLoading);
+    $("#timeline-data-source-filter").prop("disabled", controlsLoading);
+    $(".timeline-range-control").prop("disabled", controlsLoading);
+  }
+
+  function loadTimelineDataSources() {
+    var $select = $("#timeline-data-source-filter");
+    var tenantId = C360.config.current && C360.config.current.tenantId;
+    if (
+      !$select.length ||
+      !tenantId ||
+      (timelineDataSourcesLoadedForTenant === tenantId && $select.find("option").length > 1)
+    ) {
+      return $.Deferred().resolve().promise();
+    }
+
+    timelineDataSourcesLoading = true;
+    updateTimelineLoadingState();
+    return api("/metadata/data-sources", {
+      tenant_id: tenantId,
+      status: 1,
+      skip: 0,
+      limit: 1000,
+    }).done(function (sources) {
+      var items = Array.isArray(sources) ? sources.slice() : [];
+      items.sort(function (left, right) {
+        return String(left.name || left.slug || "").localeCompare(String(right.name || right.slug || ""));
+      });
+      $select.find("option:not(:first)").remove();
+      items.forEach(function (source) {
+        var label = source.name || source.slug || source.data_source_id;
+        if (source.slug && source.name && source.slug !== source.name) {
+          label += " (" + source.slug + ")";
+        }
+        $select.append($("<option></option>").attr("value", source.data_source_id).text(label));
+      });
+      $select.val(timelineDataSourceId || "");
+      timelineDataSourcesLoadedForTenant = tenantId;
+    }).fail(function (xhr) {
+      showApiError("loading timeline data sources", xhr);
+    }).always(function () {
+      timelineDataSourcesLoading = false;
+      updateTimelineLoadingState();
+    });
+  }
+
   function timelineEntryVm(t) {
     var icon =
       t.kind === "transaction"
         ? "💳"
         : t.kind === "contact"
           ? "💬"
-          : fmt.CATEGORY_ICONS[(t.subtitle || "").toUpperCase()] || "🔔";
+          : fmt.CATEGORY_ICONS[(t.event_category || t.subtitle || "").toUpperCase()] || "🔔";
     return {
       icon: icon,
-      title: t.title,
+      title: t.title || "Activity",
       channelLabel: fmt.titleCase(t.channel) || "—",
       timeLabel: fmt.dateTime(t.occurred_at),
-      amountLabel: t.amount ? fmt.money(t.amount, t.currency) : null,
+      amountLabel:
+        t.amount !== null && t.amount !== undefined && t.amount !== ""
+          ? fmt.money(t.amount, t.currency)
+          : null,
+      sourceLabel: fmt.titleCase(t.source_system) || "",
+      dataSourceIdLabel: t.data_source_id ? fmt.shortId(t.data_source_id) : "",
+      domainLabel: t.domain ? fmt.domainLabel(t.domain) : "",
+      deviceTypeLabel: fmt.titleCase(t.device_type) || "",
+      categoryLabel: fmt.titleCase(t.event_category) || "",
+      eventNameLabel: fmt.titleCase(t.event_name) || "",
+      pageTitle: decodeTimelineValue(t.page_title),
+      pageUrl: compactTimelineUrl(decodeTimelineValue(t.page_url)),
+      pageUrlHref: safeTimelineUrl(t.page_url),
+      referrerLabel: compactTimelineUrl(decodeTimelineValue(t.referrer_url)),
+      eventIdLabel: t.event_id ? fmt.shortId(t.event_id) : "",
+      rawProfileIdLabel: t.raw_profile_id ? fmt.shortId(t.raw_profile_id) : "",
+      eventDataLabel: timelineJsonLabel(t.event_data),
     };
   }
 
@@ -882,44 +1102,123 @@ window.C360 = window.C360 || {};
       });
   }
 
-  function loadMoreTimeline() {
-    timelineLimit += 8;
-    api("/master-profiles/" + currentProfileId + "/timeline", {
-      limit: timelineLimit,
-    }).done(function (timeline) {
-      var vms = (timeline || []).map(timelineEntryVm);
-      var html = vms
+  function requestTimeline() {
+    if (!currentProfileId || timelineRequestLoading) return;
+    timelineRequestLoading = true;
+    updateTimelineLoadingState();
+    api("/master-profiles/" + currentProfileId + "/timeline", timelineRequestParams())
+      .done(renderTimeline)
+      .fail(function (xhr) {
+        showApiError("loading profile timeline", xhr);
+      })
+      .always(function () {
+        timelineRequestLoading = false;
+        updateTimelineLoadingState();
+      });
+  }
+
+  function renderTimeline(timeline) {
+    var vms = (timeline || []).map(timelineEntryVm);
+    var html = vms
         .map(function (t) {
+          var badges =
+            timelineBadgeHtml(t.sourceLabel, "bg-indigo-50 text-indigo-700") +
+            timelineBadgeHtml(t.domainLabel, "bg-slate-100 text-slate-600") +
+            timelineBadgeHtml(t.categoryLabel, "bg-amber-50 text-amber-700") +
+            timelineBadgeHtml(t.eventNameLabel, "bg-emerald-50 text-emerald-700") +
+            timelineBadgeHtml(t.deviceTypeLabel, "bg-sky-50 text-sky-700");
+          var pageDetails = "";
+          if (t.pageTitle || t.pageUrl) {
+            pageDetails +=
+              '<div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">' +
+              '<span class="font-semibold text-slate-500">Page</span>' +
+              (t.pageTitle
+                ? '<span class="font-medium">' + escapeTimelineText(t.pageTitle) + "</span>"
+                : "") +
+              (t.pageUrlHref
+                ? '<a class="max-w-full truncate text-indigo-600 hover:text-indigo-800 hover:underline" href="' +
+                  escapeTimelineText(t.pageUrlHref) +
+                  '" target="_blank" rel="noopener noreferrer" title="Open page">' +
+                  escapeTimelineText(t.pageUrl) +
+                  "</a>"
+                : t.pageUrl
+                  ? '<span class="max-w-full truncate text-slate-500" title="Page URL">' +
+                    escapeTimelineText(t.pageUrl) +
+                    "</span>"
+                  : "") +
+              "</div>";
+          }
+          if (t.referrerLabel) {
+            pageDetails +=
+              '<div class="mt-1 max-w-full truncate text-xs text-slate-400" title="Referrer">From ' +
+              escapeTimelineText(t.referrerLabel) +
+              "</div>";
+          }
+          var lineage = [];
+          if (t.eventIdLabel) lineage.push("Event " + t.eventIdLabel);
+          if (t.rawProfileIdLabel) lineage.push("Raw profile " + t.rawProfileIdLabel);
+          if (t.dataSourceIdLabel) lineage.push("Source " + t.dataSourceIdLabel);
+          var lineageHtml = lineage.length
+            ? '<div class="mt-2 text-[11px] text-slate-400">' +
+              lineage.map(escapeTimelineText).join(" &middot; ") +
+              "</div>"
+            : "";
+          var eventDataHtml = t.eventDataLabel
+            ? '<details class="mt-2 rounded-lg border border-slate-200 bg-white/70 px-2.5 py-1.5 text-xs text-slate-600">' +
+              '<summary class="cursor-pointer select-none font-medium text-slate-500">Event data</summary>' +
+              '<code class="mt-1 block max-w-full overflow-x-auto whitespace-pre-wrap break-words text-[11px] text-slate-600">' +
+              escapeTimelineText(t.eventDataLabel) +
+              "</code></details>"
+            : "";
           return (
-            '<li class="flex gap-3"><div class="w-2 h-2 mt-1.5 rounded-full bg-indigo-500 flex-shrink-0"></div>' +
-            '<div class="flex-1 flex items-start justify-between gap-3"><div><div class="text-sm font-medium">' +
-            t.icon +
-            " " +
-            $("<div>").text(t.title).html() +
+            '<li class="relative flex items-start group">' +
+            '<div class="absolute -left-6 mt-1.5 w-3.5 h-3.5 rounded-full bg-white border-2 border-indigo-500 ring-4 ring-white group-hover:scale-125 group-hover:border-indigo-600 transition-all"></div>' +
+            '<article class="w-full flex items-start justify-between gap-3 p-3.5 bg-slate-50/50 hover:bg-slate-50 rounded-xl border border-slate-100/80 transition-all">' +
+            '<div class="min-w-0 flex-1">' +
+            '<div class="text-sm font-semibold text-slate-800 flex items-center gap-2">' +
+            '<span class="text-base">' +
+            escapeTimelineText(t.icon) +
+            '</span><span>' +
+            escapeTimelineText(t.title) +
+            "</span></div>" +
+            '<div class="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-1.5"><span>' +
+            escapeTimelineText(t.timeLabel) +
+            '</span><span class="text-slate-300">&bull;</span><span class="font-medium text-slate-500">' +
+            escapeTimelineText(t.channelLabel) +
+            "</span></div>" +
+            (badges ? '<div class="mt-2 flex flex-wrap gap-1.5">' + badges + "</div>" : "") +
+            pageDetails +
+            eventDataHtml +
+            lineageHtml +
             "</div>" +
-            '<div class="text-xs text-slate-400">' +
-            t.timeLabel +
-            " &middot; " +
-            $("<div>").text(t.channelLabel).html() +
-            "</div></div>" +
             (t.amountLabel
-              ? '<span class="text-xs bg-slate-100 rounded-full px-2 py-1 whitespace-nowrap">' +
-                $("<div>").text(t.amountLabel).html() +
+              ? '<span class="text-xs font-semibold bg-white border border-slate-200/80 text-slate-700 rounded-lg px-2.5 py-1 whitespace-nowrap shadow-sm">' +
+                escapeTimelineText(t.amountLabel) +
                 "</span>"
               : "") +
-            "</div></li>"
+            "</article></li>"
           );
         })
         .join("");
-      $("#detail-content").find("ol").first().html(html);
-    });
+    $("#profile-timeline-list").html(html);
+    $("#profile-timeline-list").toggleClass("hidden", vms.length === 0);
+    $("#profile-timeline-empty").toggleClass("hidden", vms.length > 0);
+  }
+
+  function reloadTimeline() {
+    requestTimeline();
   }
 
   function load(masterProfileId) {
     closeLinkedRawModal();
     currentProfileId = masterProfileId;
     currentContentType = "";
-    timelineLimit = 8;
+    timelineLimit = 100;
+    timelineDataSourceId = "";
+    timelineRangePreset = "7d";
+    timelineFromEventTime = "";
+    timelineToEventTime = "";
+    initializeTimelineRange(true);
     $(".content-tab-btn")
       .removeClass("bg-indigo-600 text-white")
       .addClass("bg-slate-100");
@@ -941,9 +1240,7 @@ window.C360 = window.C360 || {};
       api("/master-profiles/" + masterProfileId + "/top-interests", {
         limit: 5,
       }),
-      api("/master-profiles/" + masterProfileId + "/timeline", {
-        limit: timelineLimit,
-      }),
+      api("/master-profiles/" + masterProfileId + "/timeline", timelineRequestParams()),
       loadProfileLinks(masterProfileId),
       loadPersona(masterProfileId),
       loadPersonaHistory(masterProfileId),
@@ -976,7 +1273,9 @@ window.C360 = window.C360 || {};
           $("#detail-content").html(
             C360.templates.render("profile-details", vm),
           );
+          initializeTimelineRange(false);
           populateDomainAttributeDomainSelect(profileRes[0].domain);
+          loadTimelineDataSources();
           loadContentItems(masterProfileId, "");
         },
       )
@@ -1001,7 +1300,33 @@ window.C360 = window.C360 || {};
       }, 1200);
     });
 
-    $(document).on("click", "#btn-timeline-more", loadMoreTimeline);
+    $(document).off("change.profileTimeline", "#timeline-data-source-filter");
+    $(document).on("change.profileTimeline", "#timeline-data-source-filter", function () {
+      timelineDataSourceId = String($(this).val() || "");
+      if (currentProfileId) reloadTimeline();
+    });
+
+    $(document).off("click.profileTimeline", "#btn-timeline-apply");
+    $(document).on("click.profileTimeline", "#btn-timeline-apply", function () {
+      if (readTimelineRange() && currentProfileId) reloadTimeline();
+    });
+
+    $(document).off("click.profileTimeline", "#btn-timeline-reset");
+    $(document).on("click.profileTimeline", "#btn-timeline-reset", function () {
+      setTimelineRangePreset("7d");
+    });
+
+    $(document).off("click.profileTimeline", ".timeline-range-preset");
+    $(document).on("click.profileTimeline", ".timeline-range-preset", function () {
+      setTimelineRangePreset(String($(this).data("range") || ""));
+    });
+
+    $(document).off("input.profileTimeline", "#timeline-from-event-time, #timeline-to-event-time");
+    $(document).on("input.profileTimeline", "#timeline-from-event-time, #timeline-to-event-time", function () {
+      timelineRangePreset = "custom";
+      $("#timeline-range-error").addClass("hidden").text("");
+      updateTimelineRangeUi(true);
+    });
 
     $(document).on("submit", "#domain-attribute-form", function (e) {
       e.preventDefault();
