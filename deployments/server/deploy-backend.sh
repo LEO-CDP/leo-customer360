@@ -22,7 +22,13 @@ esac
 
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
-tfval() { grep -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/' | head -1; }
+tfval() {
+  local line; line="$(grep -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null | head -1)"
+  case "$line" in
+    *\"*\"*) line="${line#*\"}"; printf '%s' "${line%%\"*}" ;;
+    *) line="${line#*=}"; line="${line%%#*}"; printf '%s' "$(printf '%s' "$line" | tr -d '[:space:]')" ;;
+  esac
+}
 
 # --- SSH target: the BACKEND server's floating IP (selected by map key) ---
 BACKEND_SERVER_KEY="${BACKEND_SERVER_KEY:-backend}"
@@ -62,14 +68,15 @@ S3_REGION="$(tfval region "$store/overlays/$ENV.tfvars")"; S3_REGION="${S3_REGIO
 S3_BUCKET="$(tfval bucket_names "$store/overlays/$ENV.tfvars")"   # first quoted bucket name
 S3_ACCESS_KEY="${TF_VAR_access_key:-$(tfval access_key "$store/terraform.tfvars")}"
 S3_SECRET_KEY="${TF_VAR_secret_key:-$(tfval secret_key "$store/terraform.tfvars")}"
-if [[ -n "${S3_AUTO_CREATE_BUCKETS:-}" ]]; then
-  S3_AUTO_CREATE="$S3_AUTO_CREATE_BUCKETS"
-elif [[ -n "$S3_ENDPOINT" && -n "$S3_ACCESS_KEY" && -n "$S3_SECRET_KEY" ]]; then
-  S3_AUTO_CREATE="true"
-else
-  S3_AUTO_CREATE="false"
+S3_AUTO_CREATE="${S3_AUTO_CREATE_BUCKETS:-$(tfval s3_auto_create_buckets "$store/overlays/$ENV.tfvars")}"
+if [[ -z "$S3_AUTO_CREATE" ]]; then
+  if [[ -n "$S3_ENDPOINT" && -n "$S3_ACCESS_KEY" && -n "$S3_SECRET_KEY" ]]; then
+    S3_AUTO_CREATE="true"
+  else
+    S3_AUTO_CREATE="false"
+  fi
 fi
-MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
+MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-$(tfval master_profile_s3_bucket "$store/overlays/$ENV.tfvars")}"; MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
 if [[ -n "$S3_ENDPOINT" && -n "$S3_BUCKET" && -n "$S3_ACCESS_KEY" && -n "$S3_SECRET_KEY" ]]; then
   echo ">> S3: $S3_ENDPOINT bucket=$S3_BUCKET (region $S3_REGION, path-style, auto_create=$S3_AUTO_CREATE) — compute logs -> vStorage"
 else

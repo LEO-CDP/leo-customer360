@@ -104,10 +104,12 @@ the workspace and pass the overlay yourself:
 
 - **Bucket names are globally unique** within the vStorage tenant, so UAT and
   PROD must use different names (the overlays already do).
-- The shared master-profile projection bucket is `c360-master-profiles`. It is
-  intentionally not listed in both environment overlays because UAT and PROD
-  use separate Terraform workspaces while the bucket name is globally unique.
-  When `S3_AUTO_CREATE_BUCKETS=true`, `server/deploy-api.sh`,
+- The shared master-profile projection bucket is configured as
+  `master_profile_s3_bucket = "c360-master-profiles"` in both environment
+  overlays. It is intentionally not included in either overlay's
+  environment-specific `bucket_names` list because UAT and PROD use separate
+  Terraform workspaces while the bucket name is globally unique.
+  When `s3_auto_create_buckets = true`, `server/deploy-api.sh`,
   `server/deploy-backend.sh`, and `server/deploy-tracking.sh` perform an
   idempotent `head_bucket`/`create_bucket` bootstrap before starting their
   containers.

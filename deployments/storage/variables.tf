@@ -57,6 +57,23 @@ variable "bucket_names" {
   }
 }
 
+variable "master_profile_s3_bucket" {
+  type        = string
+  default     = "c360-master-profiles"
+  description = "Shared bucket for resolved master-profile event projections. Application deploy scripts bootstrap it when s3_auto_create_buckets is true."
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.master_profile_s3_bucket))
+    error_message = "master_profile_s3_bucket must be lowercase, 3-63 chars, and start/end with a letter or digit."
+  }
+}
+
+variable "s3_auto_create_buckets" {
+  type        = bool
+  default     = true
+  description = "Allow the API, backend, and tracking deployment scripts to create missing S3 buckets."
+}
+
 variable "enable_versioning" {
   type        = bool
   default     = false

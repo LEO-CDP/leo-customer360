@@ -164,8 +164,8 @@ EVENT_RAW_PREFIX="${EVENT_RAW_PREFIX:-events}"
 EVENT_S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-${TF_VAR_access_key:-$(tfval access_key "$store/terraform.tfvars")}}"
 EVENT_S3_SECRET_B64="$(printf %s "${S3_SECRET_ACCESS_KEY:-${TF_VAR_secret_key:-$(tfval secret_key "$store/terraform.tfvars")}}" | base64 | tr -d '\n')"
 EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-true}"
-S3_AUTO_CREATE="${S3_AUTO_CREATE_BUCKETS:-true}"
-MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
+S3_AUTO_CREATE="${S3_AUTO_CREATE_BUCKETS:-$(tfval s3_auto_create_buckets "$store/overlays/$ENV.tfvars")}"; S3_AUTO_CREATE="${S3_AUTO_CREATE:-true}"
+MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-$(tfval master_profile_s3_bucket "$store/overlays/$ENV.tfvars")}"; MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
 # Region must be a short lowercase token (boto3 rejects anything else).
 [[ "$EVENT_S3_REGION" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: S3_REGION='${EVENT_S3_REGION:0:24}...' is not a region (expected e.g. us-east-1)." >&2; exit 1; }
 echo ">> Master profile S3: bucket=$MASTER_PROFILE_S3_BUCKET (auto_create=$S3_AUTO_CREATE)"

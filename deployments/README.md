@@ -102,11 +102,13 @@ live in each module's own `.env` / `terraform.tfvars` (see each module's README)
 ### Shared master-profile S3 bucket
 
 The API and identity-resolution projection use `MASTER_PROFILE_S3_BUCKET`,
-which defaults to `c360-master-profiles`. Set `S3_AUTO_CREATE_BUCKETS=true`
-in `deployments/server/.env` to have the API, Dagster backend, and tracking
-deployment scripts idempotently create/check that bucket before their
-containers start. The bootstrap runs inside each deployed image using its
-configured vStorage credentials, so it works for both UAT and production.
+which is set to `c360-master-profiles` in each
+`storage/overlays/<env>.tfvars`. Those overlays also set
+`s3_auto_create_buckets = true`; the API, Dagster backend, and tracking
+deployment scripts read those values and idempotently create/check the bucket
+before their containers start. The bootstrap runs inside each deployed image
+using its configured vStorage credentials, so it works for both UAT and
+production.
 
 ## Continuous Delivery (CD)
 
