@@ -66,7 +66,20 @@ class MasterProfileEventProjector:
     ) -> None:
         if not master_profile_ids:
             return
+        bucket = getattr(self.store, "bucket", "<configured-store>")
+        logger.info(
+            "Projecting %d master profiles for tenant %s into bucket %s",
+            len(master_profile_ids),
+            tenant_id,
+            bucket,
+        )
         matchers = self._load_matchers(tenant_id, master_profile_ids)
+        if not matchers:
+            logger.warning(
+                "No active raw-profile matchers found for tenant %s; "
+                "master-profile projections will contain no events",
+                tenant_id,
+            )
         events_by_master: dict[str, list[dict[str, Any]]] = defaultdict(list)
         seen_by_master: dict[str, set[str]] = defaultdict(set)
         by_source: dict[str, list[_RawMatcher]] = defaultdict(list)
@@ -104,6 +117,13 @@ class MasterProfileEventProjector:
                 UUID(tenant_id),
                 UUID(master_profile_id),
                 events,
+            )
+            logger.info(
+                "Wrote master profile projection tenant=%s master_profile_id=%s events=%d bucket=%s",
+                tenant_id,
+                master_profile_id,
+                len(events),
+                bucket,
             )
 
     def _load_matchers(

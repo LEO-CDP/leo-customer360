@@ -112,7 +112,8 @@ the workspace and pass the overlay yourself:
   When `s3_auto_create_buckets = true`, `server/deploy-api.sh`,
   `server/deploy-backend.sh`, and `server/deploy-tracking.sh` perform an
   idempotent `head_bucket`/`create_bucket` bootstrap before starting their
-  containers.
+  containers. The backend deploy also backfills existing master-profile
+  projection objects when the shared bucket is empty.
 - **Endpoint:** `s3_endpoint` defaults to **HCM04** (this account's object-storage
   regions are `hcm04` / `han02`, not `hcm03`). Override it in the overlay if your
   project lives elsewhere. `region` is a SigV4 signing label only and must stay

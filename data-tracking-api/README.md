@@ -219,6 +219,10 @@ new batches instead of trimming unacknowledged entries. Successfully processed
 entries are deleted after acknowledgement. `TRACKING_STREAM_CLAIM_IDLE_MS`
 controls when another worker may reclaim a stalled message.
 `TRACKING_STREAM_RETRY_SECONDS` controls worker retry delay after an S3 failure.
+The stream worker uses a dedicated Redis client whose socket timeout is longer
+than `TRACKING_STREAM_BLOCK_MS`; the request-side rate-limit/session client
+keeps its short timeout. This prevents an idle `XREADGROUP BLOCK` from being
+treated as a Redis outage.
 
 `TRACKING_QUEUE_BACKEND=memory` is available for isolated local tests only. It
 is process-local and rejects new batches when full; it must not be used when

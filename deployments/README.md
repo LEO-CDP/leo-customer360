@@ -108,7 +108,10 @@ which is set to `c360-master-profiles` in each
 deployment scripts read those values and idempotently create/check the bucket
 before their containers start. The bootstrap runs inside each deployed image
 using its configured vStorage credentials, so it works for both UAT and
-production.
+production. The backend deployment also runs
+`identity_resolution/scripts/rebuild_master_profile_event_projections.py`
+once when this bucket is empty, so existing master profiles are backfilled
+instead of waiting for a new CIR staging event.
 
 ## Continuous Delivery (CD)
 

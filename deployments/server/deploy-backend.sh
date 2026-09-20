@@ -245,6 +245,51 @@ sudo docker run -d --name backend-system --restart unless-stopped --log-opt max-
 sudo docker run -d --name backend-system-daemon --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/backend.env --entrypoint /app/entrypoint.sh "$RUN_IMG" dagster-daemon run -w workspace.yaml
 sleep 3
 sudo docker ps --filter name=backend-system --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
+
+# Existing master profiles predate the incremental CIR projection hook. When
+# the shared projection bucket is empty, rebuild all active profiles once from
+# the source event buckets; later deployments skip this scan after the first
+# projection object exists. The command runs inside the deployed image so it
+# uses the exact DB and S3 environment already validated above.
+if [[ "${S3_AUTO_CREATE_BUCKETS,,}" =~ ^(true|1|yes)$ ]]; then
+  set +e
+  sudo docker run --rm --network host --env-file /opt/c360/backend.env --entrypoint python "$RUN_IMG" - "$MASTER_PROFILE_S3_BUCKET" <<'PY'
+import os
+import sys
+
+import boto3
+from botocore.client import Config
+
+bucket = sys.argv[1]
+endpoint = os.environ.get("S3_ENDPOINT_URL") or os.environ.get("ANALYTICS_S3_ENDPOINT_URL")
+region = os.environ.get("S3_REGION") or "us-east-1"
+client = boto3.client(
+    "s3",
+    endpoint_url=endpoint,
+    region_name=region,
+    aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("S3_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY") or os.environ.get("S3_SECRET_ACCESS_KEY"),
+    config=Config(s3={"addressing_style": "path"}),
+)
+try:
+    page = client.list_objects_v2(Bucket=bucket, MaxKeys=1)
+except Exception as exc:
+    print(f"master-profile bucket probe failed: {exc}", file=sys.stderr)
+    raise SystemExit(2) from exc
+raise SystemExit(10 if page.get("KeyCount", 0) else 0)
+PY
+  probe_status=$?
+  set -e
+  if [[ "$probe_status" -eq 0 ]]; then
+    echo "   master-profile projection bucket is empty; rebuilding active profiles ..."
+    sudo docker exec backend-system python /app/identity_resolution/scripts/rebuild_master_profile_event_projections.py
+  elif [[ "$probe_status" -eq 10 ]]; then
+    echo "   master-profile projection bucket already contains objects; skipping rebuild"
+  else
+    echo "ERROR: could not determine whether master-profile projection bucket is empty (status=$probe_status)." >&2
+    exit "$probe_status"
+  fi
+fi
 REMOTE
 )
 

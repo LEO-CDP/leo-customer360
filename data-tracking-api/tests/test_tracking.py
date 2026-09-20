@@ -15,9 +15,11 @@ from core.config import Settings
 from core.redis_cache import (
     RateLimitDecision,
     TrackingRequestProtection,
+    build_redis_client,
     build_rate_limit_key,
 )
 from core.routers.tracking import (
+    _stream_socket_timeout_seconds,
     build_tracking_request,
     get_protection,
     get_storage,
@@ -30,6 +32,21 @@ from core.storage import StoredTrackingLog, build_tracking_object
 
 
 SOURCE_ID = UUID("11111111-1111-1111-1111-111111111111")
+
+
+def test_stream_redis_timeout_exceeds_block_interval(monkeypatch):
+    captured = {}
+
+    class FakeRedisClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("core.redis_cache.redis.Redis", FakeRedisClient)
+    settings = Settings(tracking_stream_block_ms=5000)
+
+    build_redis_client(settings, socket_timeout=_stream_socket_timeout_seconds(settings))
+
+    assert captured["socket_timeout"] == 6.0
 
 
 class FakeStorage:

@@ -193,8 +193,17 @@ class TrackingRequestProtection:
         )
 
 
-def build_redis_client(settings: Settings) -> Any:
-    """Build a short-timeout Redis client; connections are opened on demand."""
+def build_redis_client(
+    settings: Settings,
+    *,
+    socket_timeout: float = 0.5,
+) -> Any:
+    """Build a Redis client; connections are opened on demand.
+
+    Request-side cache operations use the short default timeout. Stream
+    consumers pass a longer timeout because XREADGROUP may block while waiting
+    for the next message.
+    """
     return redis.Redis(
         host=settings.redis_host,
         port=settings.redis_port,
@@ -202,6 +211,6 @@ def build_redis_client(settings: Settings) -> Any:
         password=settings.redis_password,
         decode_responses=True,
         socket_connect_timeout=0.5,
-        socket_timeout=0.5,
+        socket_timeout=max(0.1, float(socket_timeout)),
         health_check_interval=30,
     )

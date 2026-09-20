@@ -39,18 +39,18 @@ def refresh_due_tokens(conn, skew_seconds: int = 300, log=print) -> dict:
         # No tenant context here: this cross-tenant query relies on the backend DB
         # role holding BYPASSRLS. Without it, RLS fails closed -> 0 rows -> tokens
         # silently never refresh (checked=0 in the summary is the tell).
-                cur.execute(
-                        f"""SELECT tenant_id, connector_id, credentials, config
-                                    FROM {DB_SCHEMA}.crm_connector_config
-                                 WHERE connector_type = 'CHAT' AND provider = 'ZALO'
-                                     AND direction IN ('OUTBOUND', 'BIDIRECTIONAL')
-                                     AND status = 'ACTIVE' AND is_active = TRUE
-                                     AND COALESCE(credentials->>'refresh_token', '') <> ''
-                   AND (
-                                                credentials->>'token_expires_at' IS NULL
-                                                OR (credentials->>'token_expires_at')::timestamptz
-                           < now() + make_interval(secs => %s)
-                   )""",
+        cur.execute(
+            f"""SELECT tenant_id, connector_id, credentials, config
+                        FROM {DB_SCHEMA}.crm_connector_config
+                     WHERE connector_type = 'CHAT' AND provider = 'ZALO'
+                         AND direction IN ('OUTBOUND', 'BIDIRECTIONAL')
+                         AND status = 'ACTIVE' AND is_active = TRUE
+                         AND COALESCE(credentials->>'refresh_token', '') <> ''
+                       AND (
+                            credentials->>'token_expires_at' IS NULL
+                            OR (credentials->>'token_expires_at')::timestamptz
+                               < now() + make_interval(secs => %s)
+                       )""",
             (skew_seconds,),
         )
         rows = cur.fetchall()
