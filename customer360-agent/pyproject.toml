@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leo-customer360-agent"
+version = "0.1.0"
+description = "HTTP client for the LEO Customer 360 AI Agent service (campaign planning)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Proprietary"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Typing :: Typed",
+]
+# The client only needs stdlib (urllib/json/dataclasses) + the shared config in the DAO
+# (agent_service_url / agent_api_token). The AGENT SERVER's runtime deps (fastapi, litellm,
+# ...) live in requirements.txt and are NOT installed for consumers of this client.
+dependencies = [
+    "leo-customer360-dao",
+]
+
+[project.urls]
+Repository = "https://github.com/LEO-CDP/leo-customer360/tree/main/customer360-agent"
+
+# Package ONLY the client library. The agent server modules (ai_providers, campaign_planner,
+# prompts, models, app, config) are flat under src/ and run via `uvicorn app:app --app-dir src`
+# -- they are intentionally excluded so installing this package doesn't drag the server in.
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["leo_customer360_agent*"]

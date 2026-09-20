@@ -1,0 +1,106 @@
+"""Unit tests for ai_providers: parse_json_object() plus the generic State-pattern
+provider (ProviderState / LLMProvider / build_state) over a mocked LiteLLM SDK."""
+
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+
+# The provider tests patch litellm.completion, so the SDK must be importable.
+pytest.importorskip("litellm")
+
+from ai_providers.base import AIProviderError, parse_json_object
+from ai_providers.provider import LLMProvider, ProviderState, build_state
+
+
+def _fake_completion(text: str):
+    """Mimic the OpenAI-shaped object LiteLLM returns."""
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))])
+
+
+class ParseJsonObjectTests(unittest.TestCase):
+    def test_parses_plain_json(self):
+        self.assertEqual(parse_json_object('{"name": "Q4 Win-Back"}'), {"name": "Q4 Win-Back"})
+
+    def test_strips_json_labeled_code_fence(self):
+        self.assertEqual(parse_json_object('```json\n{"name": "Q4 Win-Back"}\n```'), {"name": "Q4 Win-Back"})
+
+    def test_raises_ai_provider_error_on_invalid_json(self):
+        with self.assertRaises(AIProviderError):
+            parse_json_object("not json")
+
+    def test_raises_ai_provider_error_on_non_object_json(self):
+        with self.assertRaises(AIProviderError):
+            parse_json_object("[1, 2, 3]")
+
+    def test_lone_fence_raises_ai_provider_error_not_index_error(self):
+        with self.assertRaises(AIProviderError):
+            parse_json_object("```")
+
+
+class ProviderStateTests(unittest.TestCase):
+    def test_validate_ok_with_api_key(self):
+        ProviderState("gemini/gemini-2.5-flash", api_key="k").validate()
+
+    def test_validate_ok_with_local_base_url_no_key(self):
+        ProviderState("openai/llama3.1", api_key="", api_base="http://localhost:11434/v1").validate()
+
+    def test_validate_raises_without_key_or_base(self):
+        with self.assertRaises(AIProviderError):
+            ProviderState("gemini/gemini-2.5-flash", api_key="", api_base="").validate()
+
+
+class LLMProviderTests(unittest.TestCase):
+    def test_complete_passes_model_base_and_merged_extra(self):
+        state = ProviderState(
+            "openai/llama3.1", api_key="", api_base="http://localhost:11434/v1",
+            extra_config={"max_tokens": 512},
+        )
+        with patch("litellm.completion", return_value=_fake_completion("ok")) as mock_completion:
+            result = LLMProvider(state).complete("prompt")
+        self.assertEqual(result, "ok")
+        kwargs = mock_completion.call_args.kwargs
+        self.assertEqual(kwargs["model"], "openai/llama3.1")
+        self.assertEqual(kwargs["api_base"], "http://localhost:11434/v1")
+        self.assertEqual(kwargs["max_tokens"], 512)  # extra_config forwarded
+
+    def test_set_state_switches_model(self):
+        provider = LLMProvider(ProviderState("gemini/g", api_key="k"))
+        with patch("litellm.completion", return_value=_fake_completion("x")) as mock_completion:
+            provider.complete("p")
+            self.assertEqual(mock_completion.call_args.kwargs["model"], "gemini/g")
+            provider.set_state(ProviderState("anthropic/c", api_key="k"))
+            provider.complete("p")
+            self.assertEqual(mock_completion.call_args.kwargs["model"], "anthropic/c")
+
+    def test_unconfigured_raises_before_sdk(self):
+        with patch("litellm.completion") as mock_completion:
+            with self.assertRaises(AIProviderError):
+                LLMProvider(ProviderState("gemini/g", api_key="", api_base="")).complete("p")
+            mock_completion.assert_not_called()
+
+
+class BuildStateTests(unittest.TestCase):
+    def test_reads_settings_and_overrides_model(self):
+        with patch("ai_providers.provider.settings") as s:
+            s.llm_model = "gemini/gemini-2.5-flash"
+            s.llm_api_key = "gk"
+            s.llm_base_url = ""
+            s.llm_extra_config = {}
+            state = build_state(model="anthropic/claude-3-5-sonnet-latest")
+        self.assertEqual(state.model, "anthropic/claude-3-5-sonnet-latest")  # per-call override wins
+        self.assertEqual(state.api_key, "gk")
+
+    def test_extra_config_merges_settings_then_per_call(self):
+        with patch("ai_providers.provider.settings") as s:
+            s.llm_model = "gemini/g"
+            s.llm_api_key = "gk"
+            s.llm_base_url = ""
+            s.llm_extra_config = {"timeout": 30, "max_tokens": 100}
+            state = build_state(extra_config={"max_tokens": 999})
+        self.assertEqual(state.extra_config, {"timeout": 30, "max_tokens": 999})
+
+
+if __name__ == "__main__":
+    unittest.main()

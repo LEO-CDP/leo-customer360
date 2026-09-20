@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from core.ai_providers import campaign_planner as cp
-from core.ai_providers.base import AIProviderError
+import campaign_planner as cp
+from ai_providers.base import AIProviderError
 
 
 class _FakeProvider:
@@ -17,7 +17,10 @@ class _FakeProvider:
 
 
 def _patch_provider(monkeypatch, response: dict):
-    monkeypatch.setattr(cp, "_resolve_provider", lambda _ai: _FakeProvider(response))
+    # zalo.generate_* calls base._resolve_provider / base._instructions -> patch there.
+    monkeypatch.setattr(cp.base, "_resolve_provider", lambda *a, **k: _FakeProvider(response))
+    # Prompt bodies live in the DB; stub the store lookup so tests need no DB.
+    monkeypatch.setattr(cp.base, "_instructions", lambda _k: "ZNS instructions")
 
 
 _CANDIDATES = [

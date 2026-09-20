@@ -101,6 +101,7 @@ jobs:
                         https://beta.leocdp.com/data/health \
                         https://beta.leocdp.com/ads/health \
                         https://beta.leocdp.com/ai/health \
+                        https://beta.leocdp.com/agent/health \
                         https://beta.leocdp.com/auth/realms/customer360"
           urls="${URLS:-$default_urls}"
           fail=0

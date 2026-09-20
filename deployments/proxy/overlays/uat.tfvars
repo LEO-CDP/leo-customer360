@@ -34,5 +34,10 @@ data_upstream = "10.100.1.8:8010"
 # `cd ../server && terraform output servers`.
 docs_upstream = "10.100.1.7:8001"
 
+# customer360-agent — ONLY /agent/health is routed (see Caddyfile); /plan/* stays internal.
+# Its own box (server key "agent"); VERIFY the private IP with `terraform output servers`
+# after ../server apply. Caddy runs on the api box, which already reaches the agent on :8009.
+agent_upstream = "10.100.1.9:8009" # <-- set the real agent-box private ip
+
 # Parent origin allowed to embed the hidden c360 web SDK iframe.
 sdk_frame_ancestor = "https://beta.leocdp.com"

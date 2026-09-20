@@ -40,6 +40,17 @@
 		reverse_proxy {$ADS_UPSTREAM}
 	}
 
+	# --- customer360-agent HEALTH ONLY under /agent/health. The agent is an INTERNAL
+	#     service (customer360-api calls it privately on :8009); we expose ONLY /health
+	#     publicly so scheduled-checks can probe it. /plan/* is NOT routed here and stays
+	#     internal (an LLM planning endpoint must not be public). Rewrites /agent/health
+	#     -> /health on the agent box. ---
+	@agent_health path /agent/health
+	handle @agent_health {
+		rewrite * /health
+		reverse_proxy {$AGENT_UPSTREAM}
+	}
+
 	# The web SDK iframe must reach data-tracking-api, not the frontend catch-all.
 	# SAMEORIGIN cannot allow an iframe embedded by a different origin.
 	@cdp_sdk path /cdp-sdk/*

@@ -37,6 +37,15 @@ servers = {
     root_disk_size = 50
     name           = "docs" # -> c360-api-prod-docs
   }
+  "agent" = {
+    # customer360-agent (AI Agent service, FastAPI :8009 -> LiteLLM). Dedicated box.
+    # Requested 1 vCPU / 2 GB, but prod is the gen-2 (s2-general) family whose SMALLEST
+    # tier is 2x4 — there is no 1x2 in gen-2 (same constraint as docs/tracking). Deployed
+    # by deployments/agent/deploy-agent.sh.
+    flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB (smallest gen-2 tier)
+    root_disk_size = 50
+    name           = "agent" # -> c360-api-prod-agent
+  }
   # Uncomment to give data-tracking-api its own prod box (see deployments/server/deploy-tracking.sh).
   # PROD is the gen-2 (s2-general) family, whose smallest tier is 2x4 (no 1x2) — bump if beacon
   # traffic needs it. After apply: set proxy/overlays/prod.tfvars data_upstream to this box's
@@ -86,4 +95,10 @@ security_group = ["secg-7c1e85ec-8028-460a-8592-99463f198831"] # "Default"
 # to docs-vector-search on the docs box. Keep this in sync with docs_upstream.
 extra_ingress = [
   { port = 8001, cidr = "10.101.1.12/32" }, # docs-vector-search <- frontend/caddy box private IP
+  # customer360-agent wiring. VERIFY the box private IPs with `terraform output servers`
+  # after apply, then uncomment with the real /32s (api box = customer360-api "4x8";
+  # mon box = mon_server_key in ../monitoring/overlays/prod.tfvars, default "4x8"):
+  # { port = 8009, cidr = "10.101.1.X/32" }, # agent :8009  <- api box (customer360-api -> agent /plan/*)
+  # { port = 9001, cidr = "10.101.1.Y/32" }, # agent :9001  <- mon box (Portainer manages the agent box)
+  # { port = 4318, cidr = "10.101.1.Z/32" }, # mon-box Jaeger OTLP <- agent box (request traces)  [source = agent box IP]
 ]

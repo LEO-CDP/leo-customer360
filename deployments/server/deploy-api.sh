@@ -232,6 +232,12 @@ S3_ACCESS_KEY_ID=$EVENT_S3_ACCESS_KEY_ID
 S3_SECRET_ACCESS_KEY=$EVENT_S3_SECRET_ACCESS_KEY
 S3_FORCE_PATH_STYLE=$EVENT_S3_FORCE_PATH_STYLE
 ENVF
+# --- customer360-agent: point the API at the agent box + share the bearer token.
+#     AGENT_IP empty (box not provisioned yet) => keep the DAO default (localhost); the
+#     token is sent only when set (must match the agent's AGENT_API_TOKEN). ---
+AGENT_IP="$(srv_ip agent fixed_ip)"
+[[ -n "$AGENT_IP" ]] && echo "AGENT_SERVICE_URL=http://$AGENT_IP:${AGENT_PORT:-8009}" >> "$env_file"
+[[ -n "${AGENT_API_TOKEN:-}" ]] && echo "AGENT_API_TOKEN=$AGENT_API_TOKEN" >> "$env_file"
 if [[ -n "$REDIS_HOST" && -n "$REDIS_PW" ]]; then
   cat >> "$env_file" <<ENVR
 REDIS_HOST=$REDIS_HOST

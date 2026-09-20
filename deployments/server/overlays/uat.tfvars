@@ -42,6 +42,15 @@ servers = {
     root_disk_size = 20
     name           = "docs" # -> c360-api-uat-docs
   }
+  "agent" = {
+    # customer360-agent (AI Agent service, FastAPI :8009 -> LiteLLM). Its OWN box so
+    # LLM calls / prompt planning can't starve the shared api box. Deployed by
+    # deployments/agent/deploy-agent.sh (GHCR image, reaches the private vDB for the
+    # prompt store). 1x2 is enough — it holds no model, just proxies to the LLM API.
+    flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB
+    root_disk_size = 20
+    name           = "agent" # -> c360-api-uat-agent
+  }
 }
 
 # All resolved from discover-catalog.py for THIS account's live AZ (HCM03-1C):
@@ -104,6 +113,11 @@ extra_ingress = [
   { port = 6580, cidr = "10.100.1.8/32" }, # api-box Redis      <- tracking box (rate-limit + session cache)
   { port = 4318, cidr = "10.100.1.8/32" }, # api-box Jaeger OTLP <- tracking box (request traces)
   { port = 4318, cidr = "10.100.1.7/32" }, # api-box Jaeger OTLP <- docs box (docs-vector-search request traces)
+  { port = 8009, cidr = "10.100.1.5/32" }, # customer360-agent  <- api box (customer360-api -> agent /plan/*). Only the agent box listens on 8009.
+  # api-box Jaeger OTLP <- customer360-agent box (request traces). VERIFY the agent box
+  # private IP with `terraform output servers` after apply, then uncomment with the /32:
+  # { port = 4318, cidr = "10.100.1.X/32" }, # api-box Jaeger OTLP <- customer360-agent box
+  # (Portainer agent :9001 on the agent box is already covered by the 10.100.1.5 rule above.)
 ]
 
 # LOGIN via cloud-init user_data. The VNG Ubuntu 24.04 image's ssh-keygen.service FAILS at

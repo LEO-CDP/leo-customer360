@@ -319,6 +319,50 @@ services:
           memory: 1g
 
   # ---------------------------------------------------------------------------
+  # 6b) Customer 360 AI Agent (FastAPI) - provider-agnostic AI campaign
+  #     planning (Gemini / OpenAI / any OpenAI-compatible local LLM via config).
+  #     Called over HTTP by the API via the client lib leo_customer360_agent.client.
+  # ---------------------------------------------------------------------------
+  agent:
+    build:
+      context: ./customer360-agent
+      dockerfile: Dockerfile
+    image: customer360-agent:local
+    container_name: customer360-agent
+    restart: unless-stopped
+    init: true
+    <<: *default-hardening
+    env_file:
+      - .env
+    environment:
+      # Postgres-backed prompt store: schema + defaults are created/seeded on startup.
+      AGENT_DATABASE_URL: postgresql+psycopg2://${DB_USER:-postgres}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-customer360}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${C360_AGENT_HOST:-127.0.0.1}:${C360_AGENT_PORT:-8009}:8009"
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8009/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
   # 7) Customer 360 API (FastAPI) - CRUD + reporting over the customer360
   #    schema, Redis-cached reads (see customer360-api/core/cache.py).
   # ---------------------------------------------------------------------------
@@ -348,6 +392,7 @@ services:
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
       DAGSTER_GRAPHQL_HOST: dagster
       SSO_LOGIN_URL: http://keycloak:8080
+      AGENT_SERVICE_URL: http://agent:8009
     depends_on:
       postgres:
         condition: service_healthy
@@ -356,6 +401,8 @@ services:
       keycloak:
         condition: service_healthy
       dagster:
+        condition: service_healthy
+      agent:
         condition: service_healthy
     ports:
       - "${C360_API_HOST:-127.0.0.1}:${C360_API_PORT:-8008}:8008"

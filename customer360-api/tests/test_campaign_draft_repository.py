@@ -11,8 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from core.ai_providers.base import AIProviderError
-from core.ai_providers.campaign_planner import GeneratedCampaignPlan
+from leo_customer360_agent.client import AIProviderError, GeneratedCampaignPlan
 from core.repositories.campaign_draft_repository import (
     APPROVAL_STATUS_APPROVED,
     APPROVAL_STATUS_IN_REVIEW,

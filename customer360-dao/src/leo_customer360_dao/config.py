@@ -376,6 +376,18 @@ class Settings(BaseSettings):
         default="gemini-2.5-flash",
         validation_alias=AliasChoices("GEMINI_MODEL", "gemini_model"),
     )
+    # AI campaign planning now runs in the standalone customer360-agent service;
+    # the API calls it over HTTP (see customer360-api/core/ai_client.py).
+    agent_service_url: str = Field(
+        default="http://localhost:8009",
+        validation_alias=AliasChoices("AGENT_SERVICE_URL", "agent_service_url"),
+    )
+    # Shared bearer token sent to the agent's /plan/* (must match the agent's
+    # AGENT_API_TOKEN). Blank = no auth header (local dev / agent auth disabled).
+    agent_api_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("AGENT_API_TOKEN", "agent_api_token"),
+    )
 
     # --- Zalo OA (ZNS) outbound channel ---------------------------------
     # OA config/tokens are stored per-tenant in sys_data_source (slug='zalo-oa');
