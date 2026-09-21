@@ -118,13 +118,16 @@ JAEGER_HOST="$(srv_ip "$MON_SERVER_KEY" fixed_ip)"; [[ -n "$JAEGER_HOST" ]] || J
 OTEL_LINES="$(otel_env_lines customer360-agent "$ENV" "$JAEGER_HOST")"
 
 # env file built locally, shipped base64 (dodges ssh arg-flattening).
+# Emit LLM_EXTRA_CONFIG only when set — pydantic-settings JSON-parses this dict field at
+# the source level, so an empty value crashes startup (SettingsError, not a validator).
+EXTRA_LINE=""; [[ -n "$LLM_EXTRA_CONFIG" ]] && EXTRA_LINE="LLM_EXTRA_CONFIG=$LLM_EXTRA_CONFIG"
 ENVB64="$(printf '%s' "AGENT_DATABASE_URL=$AGENT_DATABASE_URL
 AGENT_DB_SCHEMA=$AGENT_DB_SCHEMA
 AGENT_API_TOKEN=$AGENT_API_TOKEN
 LLM_MODEL=$LLM_MODEL
 LLM_API_KEY=$LLM_API_KEY
 LLM_BASE_URL=$LLM_BASE_URL
-LLM_EXTRA_CONFIG=$LLM_EXTRA_CONFIG
+$EXTRA_LINE
 $OTEL_LINES" | base64 | tr -d '\n')"
 
 echo ">> Deploying the container ..."
