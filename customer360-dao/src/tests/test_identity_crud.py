@@ -41,6 +41,18 @@ def test_master_profiles_page_supports_days_filter():
     assert result["pagination"]["total_pages"] == 1
 
 
+def test_master_profiles_page_defaults_to_last_activity_then_updated_time():
+    session = _Session()
+
+    list_master_profiles_page(session, page=1, page_size=25)
+
+    rendered_sql = str(session.statements[0])
+    assert "last_activity_at DESC NULLS LAST" in rendered_sql
+    assert "updated_at DESC NULLS LAST" in rendered_sql
+    assert "created_at DESC" in rendered_sql
+    assert "master_profile_id ASC" in rendered_sql
+
+
 def test_master_profiles_page_supports_data_source_filter():
     session = _Session()
     data_source_id = uuid.uuid4()

@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 
@@ -33,6 +33,65 @@ class BrowserProfile:
 class Page:
 	url: str
 	title: str
+	content_type: str = "blog"
+	topic: str = "big-data"
+	content_id: str | None = None
+
+
+@dataclass(frozen=True)
+class Course:
+	course_id: str
+	title: str
+	topic: str
+	price_vnd: int
+	level: str
+
+
+@dataclass(frozen=True)
+class TrafficSource:
+	utm_source: str
+	utm_medium: str
+	utm_campaign: str
+	utm_content: str
+	utm_term: str
+	utm_id: str
+	traffic_type: str
+	referrer_url: str
+
+	def __post_init__(self) -> None:
+		if self.traffic_type not in {"organic", "paid", "direct", "offline"}:
+			raise ValueError(f"unsupported traffic_type: {self.traffic_type}")
+
+	def utm_parameters(self) -> dict[str, str]:
+		return {
+			"utm_source": self.utm_source,
+			"utm_medium": self.utm_medium,
+			"utm_campaign": self.utm_campaign,
+			"utm_content": self.utm_content,
+			"utm_term": self.utm_term,
+			"utm_id": self.utm_id,
+		}
+
+	@property
+	def is_paid(self) -> bool:
+		return self.traffic_type == "paid"
+
+
+@dataclass(frozen=True)
+class VisitorProfile:
+	user_id: str
+	full_name: str
+	email: str
+	gender: str
+
+	def as_dict(self) -> dict[str, str]:
+		return {
+			"user_id": self.user_id,
+			"name": self.full_name,
+			"full_name": self.full_name,
+			"email": self.email,
+			"gender": self.gender,
+		}
 
 
 BROWSER_PROFILES = (
@@ -54,20 +113,291 @@ BROWSER_PROFILES = (
 	),
 )
 
-PAGES = (
+BLOG_PAGES = (
 	Page("https://www.bigdatavietnam.org/", "Big Data Vietnam"),
 	Page(
 		"https://www.bigdatavietnam.org/2012/12/data-science-starter-kit.html",
 		"Big Data Vietnam: Data Science Starter Kit",
+		topic="data-analytics",
 	),
 	Page(
 		"https://www.bigdatavietnam.org/2012/12/about-mc2ads-project.html",
 		"About the Big Data Vietnam Project",
+		topic="big-data",
 	),
 	Page(
 		"https://www.bigdatavietnam.org/2013/01/big-data-analytics.html",
 		"Big Data Analytics",
+		topic="big-data",
 	),
+	Page(
+		"https://www.bigdatavietnam.org/blog/generative-ai-for-business.html",
+		"Generative AI for Business Teams",
+		topic="gen-ai",
+	),
+	Page(
+		"https://www.bigdatavietnam.org/blog/agentic-ai-workflows.html",
+		"Agentic AI Workflows: From Prompt to Action",
+		topic="agentic-ai",
+	),
+	Page(
+		"https://www.bigdatavietnam.org/blog/martech-customer-data-platform.html",
+		"Martech and the Customer Data Platform",
+		topic="martech",
+	),
+)
+
+COURSES = (
+	Course(
+		"course-big-data-engineering",
+		"Big Data Engineering with Spark and Lakehouse",
+		"big-data",
+		2_490_000,
+		"intermediate",
+	),
+	Course(
+		"course-generative-ai",
+		"Generative AI Product Engineering",
+		"gen-ai",
+		2_990_000,
+		"intermediate",
+	),
+	Course(
+		"course-agentic-ai",
+		"Agentic AI Systems and Tool-Using Workflows",
+		"agentic-ai",
+		3_490_000,
+		"advanced",
+	),
+	Course(
+		"course-martech",
+		"Martech Analytics and Customer 360",
+		"martech",
+		2_190_000,
+		"intermediate",
+	),
+	Course(
+		"course-data-analytics",
+		"Practical Data Analytics for Growth Teams",
+		"data-analytics",
+		1_890_000,
+		"beginner",
+	),
+)
+
+COURSE_PAGES = tuple(
+	Page(
+		f"https://www.bigdatavietnam.org/courses/{course.course_id}",
+		course.title,
+		content_type="course",
+		topic=course.topic,
+		content_id=course.course_id,
+	)
+	for course in COURSES
+)
+
+PAGES = BLOG_PAGES + COURSE_PAGES
+
+TRAFFIC_SOURCES = (
+	TrafficSource(
+		"google",
+		"organic",
+		"education-content-discovery",
+		"blog-search",
+		"big data course",
+		"edu-google-organic-2026",
+		"organic",
+		"https://www.google.com/search?q=big+data+vietnam",
+	),
+	TrafficSource(
+		"google",
+		"cpc",
+		"genai-course-launch",
+		"search-ad-01",
+		"generative ai course",
+		"edu-google-cpc-2026",
+		"paid",
+		"https://www.google.com/search?q=generative+ai+course",
+	),
+	TrafficSource(
+		"linkedin",
+		"social",
+		"b2b-ai-leadership",
+		"thought-leadership",
+		"agentic ai",
+		"edu-linkedin-social-2026",
+		"organic",
+		"https://www.linkedin.com/",
+	),
+	TrafficSource(
+		"newsletter",
+		"email",
+		"monthly-learning-path",
+		"recommended-courses",
+		"martech",
+		"edu-newsletter-email-2026",
+		"organic",
+		"https://mail.example.test/campaigns/monthly-learning-path",
+	),
+	TrafficSource(
+		"facebook",
+		"paid_social",
+		"upskill-ai-2026",
+		"carousel-course-card",
+		"data analytics",
+		"edu-facebook-paid-2026",
+		"paid",
+		"https://www.facebook.com/",
+	),
+	TrafficSource(
+		"direct",
+		"none",
+		"direct-education",
+		"bookmark",
+		"",
+		"edu-direct-2026",
+		"direct",
+		"",
+	),
+	TrafficSource(
+		"google",
+		"organic",
+		"big-data-ai-learning",
+		"search-result-blog",
+		"big data vietnam",
+		"edu-google-organic-blog-2026",
+		"organic",
+		"https://www.google.com/search?q=big+data+vietnam+course",
+	),
+	TrafficSource(
+		"google",
+		"cpc",
+		"agentic-ai-course-search",
+		"text-ad-course",
+		"agentic ai course",
+		"edu-google-paid-agentic-2026",
+		"paid",
+		"https://www.google.com/search?q=agentic+ai+course",
+	),
+	TrafficSource(
+		"facebook",
+		"social",
+		"community-learning",
+		"organic-page-post",
+		"gen ai",
+		"edu-facebook-organic-2026",
+		"organic",
+		"https://www.facebook.com/",
+	),
+	TrafficSource(
+		"linkedin",
+		"paid_social",
+		"martech-lead-generation",
+		"sponsored-document",
+		"martech course",
+		"edu-linkedin-paid-2026",
+		"paid",
+		"https://www.linkedin.com/",
+	),
+	TrafficSource(
+		"tiktok",
+		"social",
+		"ai-career-tips",
+		"creator-organic-video",
+		"ai career",
+		"edu-tiktok-organic-2026",
+		"organic",
+		"https://www.tiktok.com/",
+	),
+	TrafficSource(
+		"tiktok",
+		"paid_social",
+		"upskill-with-ai",
+		"in-feed-video-ad",
+		"generative ai",
+		"edu-tiktok-paid-2026",
+		"paid",
+		"https://www.tiktok.com/",
+	),
+	TrafficSource(
+		"instagram",
+		"social",
+		"learning-carousel",
+		"organic-carousel",
+		"data career",
+		"edu-instagram-organic-2026",
+		"organic",
+		"https://www.instagram.com/",
+	),
+	TrafficSource(
+		"instagram",
+		"paid_social",
+		"course-enrollment-ads",
+		"story-ad-course",
+		"online course",
+		"edu-instagram-paid-2026",
+		"paid",
+		"https://www.instagram.com/",
+	),
+	TrafficSource(
+		"workshop_qr",
+		"qr_code",
+		"workshop-ai-2026",
+		"name-badge-qr",
+		"agentic ai workshop",
+		"edu-workshop-qr-2026",
+		"offline",
+		"",
+	),
+	TrafficSource(
+		"youtube",
+		"video",
+		"ai-explained-series",
+		"organic-channel-video",
+		"big data tutorial",
+		"edu-youtube-organic-2026",
+		"organic",
+		"https://www.youtube.com/",
+	),
+	TrafficSource(
+		"youtube",
+		"paid_video",
+		"genai-course-video",
+		"pre-roll-course-ad",
+		"gen ai course",
+		"edu-youtube-paid-2026",
+		"paid",
+		"https://www.youtube.com/",
+	),
+)
+
+SEARCH_QUERIES = (
+	"big data architecture",
+	"spark lakehouse course",
+	"generative ai for product teams",
+	"agentic ai tools",
+	"martech customer data platform",
+	"data analytics certification",
+)
+
+FIRST_NAMES = (
+	("An", "male"),
+	("Bao", "male"),
+	("Chi", "female"),
+	("Duy", "male"),
+	("Ha", "female"),
+	("Linh", "female"),
+	("Minh", "male"),
+	("Trang", "female"),
+)
+
+LAST_NAMES = ("Nguyen", "Tran", "Le", "Pham", "Vo", "Hoang")
+
+SEARCH_PAGE = Page(
+	"https://www.bigdatavietnam.org/search",
+	"Search results",
+	content_type="search",
+	topic="education",
 )
 
 REFERRERS = (
@@ -87,8 +417,8 @@ class UatTrafficConfig:
 	tracking_api_url: str = DEFAULT_TRACKING_API_URL
 	data_source_id: UUID = UUID(DEFAULT_DATA_SOURCE_ID)
 	sessions: int = 25
-	min_events: int = 3
-	max_events: int = 7
+	min_events: int = 6
+	max_events: int = 12
 	lookback_hours: int = 24
 	concurrency: int = 2
 	request_timeout_seconds: float = 15.0
@@ -153,6 +483,12 @@ class WebTrafficGenerator:
 		anonymous_id = self._uuid("anonymous", session_index).hex
 		device_fingerprint = self._uuid("device", session_index).hex
 		event_count = self.rng.randint(self.config.min_events, self.config.max_events)
+		traffic_source = self.rng.choice(TRAFFIC_SOURCES)
+		course = self.rng.choice(COURSES)
+		visitor = self._visitor_profile(session_index)
+		is_buyer = event_count >= 8 and self.rng.random() < 0.45
+		logs_in = is_buyer or self.rng.random() < 0.55
+		actions = self._journey_plan(event_count, is_buyer=is_buyer, logs_in=logs_in)
 		max_age = int(self.config.lookback_hours * 3600)
 		minimum_age = (event_count - 1) * 45 + 30
 		session_start = self.clock - timedelta(
@@ -160,32 +496,59 @@ class WebTrafficGenerator:
 		)
 
 		events: list[dict[str, Any]] = []
-		current_page = self.rng.choice(PAGES)
-		referrer = self.rng.choice(REFERRERS)
+		current_page = self._landing_page(course)
+		referrer = traffic_source.referrer_url
 		elapsed_seconds = 0
-		for event_index in range(event_count):
-			if event_index == 0:
-				event_name = "page-view"
-				event_data: dict[str, Any] = {}
-			else:
-				event_name, current_page, event_data = self._next_action(current_page)
+		authenticated = False
+		for event_index, action in enumerate(actions):
+			current_page = self._page_for_action(
+				action,
+				current_page=current_page,
+				course=course,
+				event_index=event_index,
+			)
 			if event_index > 0:
 				elapsed_seconds += self.rng.randint(2, 45)
+			event_name, event_type, event_category, event_data, metrics, event_fields = (
+				self._event_details(
+					action,
+					page=current_page,
+					course=course,
+					visitor=visitor,
+					session_id=session_id,
+				)
+			)
+			event_user_id = visitor.user_id if authenticated or action == "user-login" else None
+			profile_data = visitor.as_dict() if action == "user-login" else None
 			events.append(
 				self._event(
 					event_name=event_name,
+					event_type=event_type,
+					event_category=event_category,
 					event_time=session_start + timedelta(seconds=elapsed_seconds),
 					page=current_page,
+					page_url=(
+						_append_query(current_page.url, traffic_source.utm_parameters())
+						if event_index == 0
+						else current_page.url
+					),
 					referrer=referrer,
 					anonymous_id=anonymous_id,
 					session_id=session_id,
 					device_fingerprint=device_fingerprint,
 					device_type=profile.device_type,
 					event_data=event_data,
+					metrics=metrics,
+					event_fields=event_fields,
+					profile_data=profile_data,
+					user_id=event_user_id,
+					traffic_source=traffic_source,
 					session_index=session_index,
 					event_index=event_index,
 				)
 			)
+			if action == "user-login":
+				authenticated = True
 			referrer = current_page.url
 
 		return SimulatedSession(
@@ -196,54 +559,353 @@ class WebTrafficGenerator:
 				"data_source_id": str(self.config.data_source_id),
 				"session_id": session_id,
 				"user_id": None,
+				"metadata": {
+					"domain": "education",
+					"source_system": "web",
+					"utm": traffic_source.utm_parameters(),
+					"traffic_type": traffic_source.traffic_type,
+					"is_paid": traffic_source.is_paid,
+				},
 				"events": events,
 			},
 		)
 
-	def _next_action(self, current_page: Page) -> tuple[str, Page, dict[str, Any]]:
-		roll = self.rng.random()
-		if roll < 0.42:
-			return "page-view", self.rng.choice(PAGES), {}
-		if roll < 0.72:
-			return "click", current_page, {
-				"target": self.rng.choice(("article-link", "navigation", "read-more")),
-				"label": self.rng.choice(("Read more", "Explore", "View article")),
+	def _visitor_profile(self, session_index: int) -> VisitorProfile:
+		first_name, gender = self.rng.choice(FIRST_NAMES)
+		last_name = self.rng.choice(LAST_NAMES)
+		slug = f"{first_name}.{last_name}".lower()
+		return VisitorProfile(
+			user_id=str(self._uuid("user", session_index)),
+			full_name=f"{first_name} {last_name}",
+			email=f"{slug}.{session_index + 1}@example.test",
+			gender=gender,
+		)
+
+	def _journey_plan(
+		self,
+		event_count: int,
+		*,
+		is_buyer: bool,
+		logs_in: bool,
+	) -> list[str]:
+		if is_buyer:
+			prefix = [
+				"page-view",
+				"scroll",
+				"search",
+				"page-view",
+				"user-login",
+				"add-to-cart",
+				"checkout-started",
+			]
+			if event_count == 8:
+				prefix = [
+					"page-view",
+					"search",
+					"page-view",
+					"user-login",
+					"add-to-cart",
+					"checkout-started",
+				]
+			filler_count = event_count - len(prefix) - 1
+			fillers = [
+				self.rng.choice(("scroll", "click", "course-view"))
+				for _ in range(max(0, filler_count))
+			]
+			return prefix[:3] + fillers + prefix[3:] + ["purchase"]
+
+		actions = ["page-view", "scroll", "search", "click", "page-view"]
+		if logs_in:
+			actions.append("user-login")
+		while len(actions) < event_count:
+			actions.append(
+				self.rng.choice(("scroll", "click", "course-view", "page-view"))
+			)
+		return actions[:event_count]
+
+	def _landing_page(self, course: Course) -> Page:
+		related_blogs = tuple(page for page in BLOG_PAGES if page.topic == course.topic)
+		if self.rng.random() < 0.75:
+			return self.rng.choice(related_blogs or BLOG_PAGES)
+		return self._course_page(course)
+
+	@staticmethod
+	def _course_page(course: Course) -> Page:
+		return next(page for page in COURSE_PAGES if page.content_id == course.course_id)
+
+	def _page_for_action(
+		self,
+		action: str,
+		*,
+		current_page: Page,
+		course: Course,
+		event_index: int,
+	) -> Page:
+		if action in {"course-view", "add-to-cart", "checkout-started", "purchase"}:
+			return self._course_page(course)
+		if action == "search":
+			query = self.rng.choice(SEARCH_QUERIES)
+			topic = self._topic_for_query(query)
+			return Page(
+				f"{SEARCH_PAGE.url}?{urlencode({'q': query})}",
+				f"Search results for {query}",
+				content_type="search",
+				topic=topic,
+			)
+		if action == "click" and current_page.content_type == "blog":
+			if self.rng.random() < 0.4:
+				return self._course_page(course)
+			return self.rng.choice(BLOG_PAGES)
+		if action == "page-view" and event_index > 0:
+			if self.rng.random() < 0.65:
+				return self._course_page(course)
+			return self.rng.choice(BLOG_PAGES)
+		return current_page
+
+	@staticmethod
+	def _topic_for_query(query: str) -> str:
+		query_lower = query.lower()
+		for topic in ("big-data", "gen-ai", "agentic-ai", "martech", "data-analytics"):
+			if topic.replace("-", " ") in query_lower:
+				return topic
+		if "spark" in query_lower or "lakehouse" in query_lower:
+			return "big-data"
+		if "analytics" in query_lower:
+			return "data-analytics"
+		return "education"
+
+	def _event_details(
+		self,
+		action: str,
+		*,
+		page: Page,
+		course: Course,
+		visitor: VisitorProfile,
+		session_id: str,
+	) -> tuple[str, str, str, dict[str, Any], dict[str, Any], dict[str, Any]]:
+		event_name = {
+			"course-view": "course_view",
+			"add-to-cart": "add_to_cart",
+			"checkout-started": "checkout_started",
+		}.get(action, action)
+		event_type = {
+			"page-view": "page_view",
+			"scroll": "engagement",
+			"click": "engagement",
+			"search": "search",
+			"course-view": "page_view",
+			"user-login": "identity",
+			"add-to-cart": "commerce",
+			"checkout-started": "commerce",
+			"purchase": "conversion",
+		}[action]
+		event_category = "COMMERCE" if action in {
+			"add-to-cart",
+			"checkout-started",
+			"purchase",
+		} else "EDUCATION"
+		event_data: dict[str, Any] = {
+			"content_type": page.content_type,
+			"topic": page.topic,
+			"content_title": page.title,
+		}
+		metrics: dict[str, Any] = {
+			"engagement_score": round(self.rng.uniform(0.35, 0.98), 2),
+		}
+		event_fields: dict[str, Any] = {}
+		if page.content_id:
+			event_data["content_id"] = page.content_id
+		if page.content_type == "course":
+			event_data.update(
+				{
+					"course_id": course.course_id,
+					"course_name": course.title,
+					"course_level": course.level,
+					"price_vnd": course.price_vnd,
+				}
+			)
+			event_fields.update(
+				{
+					"course_id": course.course_id,
+					"product_id": course.course_id,
+					"course_name": course.title,
+				}
+			)
+
+		if action in {"page-view", "course-view"}:
+			metrics.update(
+				{
+					"time_on_page_seconds": self.rng.randint(18, 240),
+					"scroll_depth_percent": self.rng.choice((25, 50, 75, 90, 100)),
+					"content_progress_percent": self.rng.choice((10, 25, 50, 75)),
+				}
+			)
+		elif action == "scroll":
+			depth_percent = self.rng.choice((25, 50, 75, 90, 100))
+			event_data["depth_percent"] = depth_percent
+			metrics.update(
+				{
+					"scroll_depth_percent": depth_percent,
+					"time_on_page_seconds": self.rng.randint(10, 120),
+				}
+			)
+		elif action == "click":
+			event_data.update(
+				{
+					"target": self.rng.choice(("article-link", "course-card", "navigation", "read-more")),
+					"label": self.rng.choice(("Read more", "Explore course", "View article")),
+				}
+			)
+			metrics.update(
+				{
+					"click_position": self.rng.randint(1, 12),
+					"time_since_page_load_ms": self.rng.randint(800, 9000),
+				}
+			)
+		elif action == "search":
+			query = page.title.removeprefix("Search results for ")
+			event_data.update(
+				{
+					"query": query,
+					"search_type": "site_search",
+					"results_count": self.rng.randint(4, 48),
+				}
+			)
+			metrics.update(
+				{
+					"query_length": len(query),
+					"search_result_position": self.rng.randint(1, 8),
+					"search_latency_ms": self.rng.randint(80, 900),
+				}
+			)
+		elif action == "user-login":
+			event_data["profile"] = visitor.as_dict()
+			metrics.update(
+				{
+					"form_completion_seconds": self.rng.randint(4, 28),
+					"login_attempt": 1,
+				}
+			)
+			event_fields.update(visitor.as_dict())
+		elif action in {"add-to-cart", "checkout-started"}:
+			cart_item = {
+				"item_id": course.course_id,
+				"item_name": course.title,
+				"item_category": course.topic,
+				"quantity": 1,
+				"price_vnd": course.price_vnd,
 			}
-		if roll < 0.88:
-			return "scroll", current_page, {
-				"depth_percent": self.rng.choice((25, 50, 75, 100)),
+			event_data["cart"] = {"items": [cart_item], "value_vnd": course.price_vnd}
+			metrics.update(
+				{
+					"cart_item_count": 1,
+					"cart_value_vnd": course.price_vnd,
+					"checkout_step": 1 if action == "add-to-cart" else 2,
+				}
+			)
+			event_fields.update(
+				{
+					"shopping_cart_items": [cart_item],
+					"cart_value_vnd": course.price_vnd,
+				}
+			)
+		elif action == "purchase":
+			transaction_id = f"order-{session_id[:12]}"
+			item = {
+				"item_id": course.course_id,
+				"item_name": course.title,
+				"item_category": course.topic,
+				"quantity": 1,
+				"price_vnd": course.price_vnd,
 			}
-		query = self.rng.choice(("data science", "analytics", "machine learning"))
-		return "search", current_page, {"query": query}
+			event_data.update(
+				{
+					"transaction_id": transaction_id,
+					"payment_method": self.rng.choice(("card", "bank_transfer", "ewallet")),
+					"items": [item],
+				}
+			)
+			metrics.update(
+				{
+					"items_count": 1,
+					"revenue_vnd": course.price_vnd,
+					"discount_vnd": self.rng.choice((0, 0, 100_000, 200_000)),
+				}
+			)
+			event_fields.update(
+				{
+					"transaction_id": transaction_id,
+					"transaction_value": course.price_vnd,
+					"event_value": course.price_vnd,
+					"currency_code": "VND",
+					"currency": "VND",
+					"is_conversion": True,
+					"shopping_cart_items": [item],
+				}
+			)
+		return event_name, event_type, event_category, event_data, metrics, event_fields
 
 	def _event(
 		self,
 		*,
 		event_name: str,
+		event_type: str,
+		event_category: str,
 		event_time: datetime,
 		page: Page,
+		page_url: str,
 		referrer: str,
 		anonymous_id: str,
 		session_id: str,
 		device_fingerprint: str,
 		device_type: str,
 		event_data: dict[str, Any],
+		metrics: dict[str, Any],
+		event_fields: dict[str, Any],
+		profile_data: dict[str, str] | None,
+		user_id: str | None,
+		traffic_source: TrafficSource,
 		session_index: int,
 		event_index: int,
 	) -> dict[str, Any]:
-		return {
+		serialized_event_data = dict(event_data)
+		serialized_event_data["utm"] = traffic_source.utm_parameters()
+		serialized_event_data["traffic_type"] = traffic_source.traffic_type
+		serialized_event_data["is_paid"] = traffic_source.is_paid
+		event = {
 			"event_name": event_name,
+			"event_type": event_type,
+			"event_category": event_category,
+			"domain": "education",
+			"source_system": "web",
+			"traffic_source": traffic_source.utm_source,
+			"traffic_type": traffic_source.traffic_type,
+			"is_paid": traffic_source.is_paid,
+			"channel": traffic_source.utm_medium,
 			"event_time": _format_event_time(event_time),
-			"page_url": quote(page.url, safe=""),
+			"page_url": quote(page_url, safe=""),
 			"page_title": quote(page.title, safe=""),
 			"referrer_url": quote(referrer, safe="") if referrer else "",
 			"anonymous_id": anonymous_id,
 			"session_id": session_id,
 			"device_fingerprint": device_fingerprint,
-			"event_data": event_data,
+			"event_data": serialized_event_data,
+			"metrics": metrics,
 			"event_id": str(self._uuid("event", session_index, event_index)),
 			"device_type": device_type,
 		}
+		event.update(traffic_source.utm_parameters())
+		if user_id:
+			event["user_id"] = user_id
+		if profile_data:
+			event["profile_data"] = profile_data
+		event.update(event_fields)
+		return event
+
+
+def _append_query(url: str, parameters: dict[str, str]) -> str:
+	separator = "&" if "?" in url else "?"
+	return f"{url}{separator}{urlencode(parameters)}"
 
 
 def _format_event_time(value: datetime) -> str:
@@ -376,8 +1038,8 @@ def _parse_args() -> argparse.Namespace:
 		default=UUID(os.getenv("UAT_TRACKING_DATA_SOURCE_ID", DEFAULT_DATA_SOURCE_ID)),
 	)
 	parser.add_argument("--sessions", type=int, default=_env_int("UAT_SESSIONS", 25))
-	parser.add_argument("--min-events", type=int, default=_env_int("UAT_MIN_EVENTS", 3))
-	parser.add_argument("--max-events", type=int, default=_env_int("UAT_MAX_EVENTS", 7))
+	parser.add_argument("--min-events", type=int, default=_env_int("UAT_MIN_EVENTS", 6))
+	parser.add_argument("--max-events", type=int, default=_env_int("UAT_MAX_EVENTS", 12))
 	parser.add_argument(
 		"--lookback-hours",
 		type=int,

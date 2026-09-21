@@ -204,11 +204,16 @@ Run the default UAT traffic profile:
 ./run_uat_tracking_traffic.sh
 ```
 
-The default profile sends 25 sessions with 3 to 7 ordered page-view, click,
-scroll, and search events per session to
+The default profile sends 25 sessions with 6 to 12 ordered blog, search, login,
+course-view, cart, checkout, and purchase events per session to
 `https://beta.leocdp.com/data/api/v1/tracking/logs` using data source
-`4512a4ab-9fe8-4a1a-9915-521fdaf9925a`. Preview one generated payload without
-making a request:
+`4512a4ab-9fe8-4a1a-9915-521fdaf9925a`. Journeys include synthetic UTM
+attribution from Google, Facebook, LinkedIn, TikTok, Instagram, YouTube,
+workshop QR codes, email, and direct traffic. Both organic and paid variants
+are generated, plus fake learner profiles with name, email, and gender on login
+events. A subset of longer journeys purchases a Big Data, Gen AI, Agentic AI,
+Martech, or analytics course.
+Preview one generated payload without making a request:
 
 ```bash
 UAT_DRY_RUN=true ./run_uat_tracking_traffic.sh
@@ -217,7 +222,8 @@ UAT_DRY_RUN=true ./run_uat_tracking_traffic.sh
 Useful overrides include `UAT_SESSIONS`, `UAT_MIN_EVENTS`, `UAT_MAX_EVENTS`,
 `UAT_CONCURRENCY`, `UAT_LOOKBACK_HOURS`, `UAT_RANDOM_SEED`, and
 `UAT_TRACKING_API_URL`. The Python script also accepts the corresponding
-command-line options.
+command-line options. See [uat_tracking_traffic_flow.md](uat_tracking_traffic_flow.md)
+for the detailed generation, attribution, payload, and API handoff flow.
 
 ## Tracking and Analytics E2E
 

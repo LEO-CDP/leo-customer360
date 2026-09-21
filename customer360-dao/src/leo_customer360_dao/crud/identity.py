@@ -145,7 +145,12 @@ def list_master_profiles_page(
             & (link_count_subq.c.tenant_id == CdpMasterProfile.tenant_id),
         )
         .where(*where_clauses)
-        .order_by(CdpMasterProfile.last_activity_at.desc().nullslast(), CdpMasterProfile.created_at.desc())
+        .order_by(
+            CdpMasterProfile.last_activity_at.desc().nullslast(),
+            CdpMasterProfile.updated_at.desc().nullslast(),
+            CdpMasterProfile.created_at.desc(),
+            CdpMasterProfile.master_profile_id.asc(),
+        )
         .offset(offset)
         .limit(page_size)
     )
