@@ -1,0 +1,25 @@
+# Web framework and ASGI server
+fastapi>=0.111,<1
+uvicorn[standard]>=0.30,<1
+
+# Settings from env / .env
+pydantic>=2.6,<3
+pydantic-settings>=2.2,<3
+python-dotenv>=1.0,<2
+
+# Multi-provider LLM SDK (OpenAI / Gemini / Anthropic Claude / local OpenAI-compatible)
+litellm>=1.51,<2
+
+# Postgres-backed prompt store (optional -- only used when AGENT_DATABASE_URL is set)
+SQLAlchemy>=2.0,<3
+psycopg2-binary>=2.9,<3
+
+# OpenTelemetry zero-code request tracing (OTLP -> Jaeger). The Dockerfile runs
+# `opentelemetry-bootstrap -a install` to pull the FastAPI/SQLAlchemy/... instrumentors.
+# No-op at runtime unless OTEL_SDK_DISABLED=false (wired by deployments/agent -> lib/otel.sh).
+opentelemetry-distro>=0.48b0,<1
+opentelemetry-exporter-otlp>=1.27,<2
+
+# Test-only (see run_unit_tests.sh)
+pytest>=7.4,<9
+httpx>=0.27,<1

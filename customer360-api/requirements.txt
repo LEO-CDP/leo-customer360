@@ -44,3 +44,6 @@ httpx>=0.27,<1
 opentelemetry-distro>=0.48b0,<1
 opentelemetry-exporter-otlp>=1.27,<2
 leo-customer360-dao
+# HTTP client to the customer360-agent service (installed from /opt in the Dockerfile,
+# like the DAO). Owns the agent request/response contract the campaign_draft repo uses.
+leo-customer360-agent

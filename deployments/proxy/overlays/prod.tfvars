@@ -30,5 +30,10 @@ data_upstream = "10.101.1.15:8010" # <-- set the real tracking-box private ip
 # server overlay's extra_ingress.
 docs_upstream = "10.101.1.16:8001" # <-- set the real docs-box private ip
 
+# customer360-agent — ONLY /agent/health is routed (see Caddyfile); /plan/* stays internal.
+# Its own box (server key "agent"); VERIFY the private IP from ../server (prod) outputs, and
+# open agent:8009 <- the caddy/frontend box in ../server/overlays/prod.tfvars.
+agent_upstream = "10.101.1.17:8009" # <-- set the real agent-box private ip
+
 # Parent origin allowed to embed the hidden c360 web SDK iframe.
 sdk_frame_ancestor = "https://c360.leocdp.com"

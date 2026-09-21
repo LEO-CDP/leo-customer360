@@ -1,0 +1,453 @@
+<style>
+  :root {
+    --bg: #f5f7f9; --surface: #ffffff; --surface-2: #eef2f5;
+    --ink: #0f1720; --ink-soft: #4a5866; --ink-faint: #7c8a97;
+    --line: #dde4ea; --accent: #0e8fa3; --accent-soft: #d6eef2;
+    --pass: #1a8a4f; --pass-bg: #e4f4ea; --pass-line: #b7e0c6;
+    --warn: #9a6a00; --warn-bg: #fbf1da; --warn-line: #ecd39a;
+    --fix: #7a3ea8; --fix-bg: #f2e9fa; --fix-line: #d8bff0;
+    --code-bg: #f0f3f6;
+    --mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c1117; --surface: #12181f; --surface-2: #171f28;
+      --ink: #e6edf3; --ink-soft: #a9b6c2; --ink-faint: #6b7883;
+      --line: #232c37; --accent: #34c0d4; --accent-soft: #103038;
+      --pass: #46c98a; --pass-bg: #10261a; --pass-line: #1e4a30;
+      --warn: #e0a94a; --warn-bg: #2a2110; --warn-line: #5a4520;
+      --fix: #c39be8; --fix-bg: #201530; --fix-line: #3d2a55; --code-bg: #161d26;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f5f7f9; --surface: #ffffff; --surface-2: #eef2f5;
+    --ink: #0f1720; --ink-soft: #4a5866; --ink-faint: #7c8a97;
+    --line: #dde4ea; --accent: #0e8fa3; --accent-soft: #d6eef2;
+    --pass: #1a8a4f; --pass-bg: #e4f4ea; --pass-line: #b7e0c6;
+    --warn: #9a6a00; --warn-bg: #fbf1da; --warn-line: #ecd39a;
+    --fix: #7a3ea8; --fix-bg: #f2e9fa; --fix-line: #d8bff0; --code-bg: #f0f3f6;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0c1117; --surface: #12181f; --surface-2: #171f28;
+    --ink: #e6edf3; --ink-soft: #a9b6c2; --ink-faint: #6b7883;
+    --line: #232c37; --accent: #34c0d4; --accent-soft: #103038;
+    --pass: #46c98a; --pass-bg: #10261a; --pass-line: #1e4a30;
+    --warn: #e0a94a; --warn-bg: #2a2110; --warn-line: #5a4520;
+    --fix: #c39be8; --fix-bg: #201530; --fix-line: #3d2a55; --code-bg: #161d26;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans);
+         line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: clamp(1.5rem, 4vw, 3.5rem) clamp(1rem, 4vw, 2.5rem); }
+
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .18em; text-transform: uppercase;
+             color: var(--accent); margin: 0 0 .6rem; }
+  .eyebrow .live { background: var(--pass); color: #fff; border-radius: 4px; padding: .1rem .4rem; margin-left: .5rem;
+                   letter-spacing: .1em; }
+  h1 { font-size: clamp(1.7rem, 4vw, 2.5rem); line-height: 1.1; margin: 0 0 .5rem; text-wrap: balance;
+       letter-spacing: -.02em; font-weight: 680; }
+  .lede { color: var(--ink-soft); margin: 0; max-width: 66ch; font-size: 1.02rem; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.4rem 0 0; font-family: var(--mono); font-size: .78rem; }
+  .chip { background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: .32rem .6rem; color: var(--ink-soft); }
+  .chip b { color: var(--ink); font-weight: 600; }
+
+  .totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .8rem; margin: 1.8rem 0 .4rem; }
+  .tcard { background: var(--surface); border: 1px solid var(--line); border-radius: 13px; padding: 1.1rem 1.2rem; }
+  .tcard .n { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 600; color: var(--ink); line-height: 1; }
+  .tcard .n small { font-size: .9rem; color: var(--ink-faint); font-weight: 500; }
+  .tcard .l { font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); margin-top: .5rem; }
+  .tcard.good { border-color: var(--pass-line); background: var(--pass-bg); }
+  .tcard.good .n { color: var(--pass); }
+
+  h2 { font-size: 1.05rem; letter-spacing: -.01em; margin: 2.4rem 0 1rem; padding-bottom: .5rem; border-bottom: 1px solid var(--line); font-weight: 640; }
+
+  .channel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-bottom: 1.4rem; }
+  .ch-head { display: flex; align-items: center; gap: .8rem; padding: .9rem 1.2rem; background: var(--surface-2); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .ch-tag { font-family: var(--mono); font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; padding: .2rem .5rem; border-radius: 5px; border: 1px solid; font-weight: 600; }
+  .ch-tag.email { color: var(--accent); border-color: var(--accent); }
+  .ch-tag.zalo  { color: var(--warn); border-color: var(--warn-line); }
+  .ch-head .route { font-family: var(--mono); font-size: .9rem; color: var(--ink); font-weight: 600; }
+  .ch-head .verdict { margin-left: auto; font-family: var(--mono); font-size: .8rem; color: var(--pass); font-weight: 600; }
+  .ch-head .verdict::before { content: "\2714  "; }
+
+  .req { padding: 1.1rem 1.2rem; border-bottom: 1px solid var(--line); }
+  .req h3, .pane h3 { font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 .7rem; font-weight: 600; display: flex; gap: .6rem; align-items: center; }
+  .req h3 .send { color: var(--accent); text-transform: none; letter-spacing: 0; font-family: var(--mono); font-size: .82rem; }
+  pre.prompt { font-family: var(--mono); font-size: .74rem; line-height: 1.6; background: var(--code-bg); border: 1px solid var(--line);
+               border-radius: 9px; padding: .85rem .95rem; overflow-x: auto; color: var(--ink); margin: 0; white-space: pre-wrap; word-break: break-word;
+               max-height: 300px; overflow-y: auto; }
+  pre.prompt .sys { color: var(--ink-soft); } pre.prompt .lbl { color: var(--accent); font-weight: 600; }
+
+  .ch-body { display: grid; grid-template-columns: 1.15fr .85fr; gap: 0; }
+  @media (max-width: 680px) { .ch-body { grid-template-columns: 1fr; } }
+  .pane { padding: 1.1rem 1.2rem; }
+  .pane + .pane { border-left: 1px solid var(--line); }
+  @media (max-width: 680px) { .pane + .pane { border-left: none; border-top: 1px solid var(--line); } }
+
+  pre.json { font-family: var(--mono); font-size: .74rem; line-height: 1.6; background: var(--code-bg); border: 1px solid var(--line);
+             border-radius: 9px; padding: .8rem .9rem; overflow-x: auto; color: var(--ink); margin: 0; white-space: pre-wrap; word-break: break-word; }
+  pre.json .k { color: var(--accent); } pre.json .s { color: var(--pass); }
+
+  .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: .6rem; }
+  .m { background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: .6rem .7rem; }
+  .m .mv { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.05rem; font-weight: 600; color: var(--ink); }
+  .m .ml { font-size: .62rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); margin-top: .2rem; }
+  .m.wide { grid-column: 1 / -1; }
+  .bar { height: 8px; border-radius: 5px; overflow: hidden; display: flex; margin: .55rem 0 .3rem; background: var(--surface); border: 1px solid var(--line); }
+  .bar .p { background: var(--accent); } .bar .c { background: var(--pass); }
+  .barkey { display: flex; gap: 1rem; font-family: var(--mono); font-size: .68rem; color: var(--ink-soft); }
+  .barkey i { font-style: normal; } .barkey .dp::before { content: "\25A0 "; color: var(--accent); } .barkey .dc::before { content: "\25A0 "; color: var(--pass); }
+
+  .checks { list-style: none; padding: 0; margin: .9rem 0 0; display: grid; gap: .35rem; }
+  .checks li { font-family: var(--mono); font-size: .74rem; color: var(--ink-soft); padding-left: 1.4rem; position: relative; }
+  .checks li::before { content: "\2714"; position: absolute; left: 0; color: var(--pass); font-weight: 700; }
+
+  .finding { border-radius: 10px; padding: 1rem 1.2rem; margin-top: 1rem; border: 1px solid; border-left-width: 3px; }
+  .finding.fix { background: var(--fix-bg); border-color: var(--fix-line); border-left-color: var(--fix); }
+  .finding.warn { background: var(--warn-bg); border-color: var(--warn-line); border-left-color: var(--warn); }
+  .finding .ft { font-weight: 700; color: var(--ink); margin: 0 0 .3rem; display: flex; align-items: center; gap: .5rem; }
+  .finding .ft .sev { font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; color: #fff; padding: .1rem .45rem; border-radius: 4px; }
+  .finding.fix .ft .sev { background: var(--fix); } .finding.warn .ft .sev { background: var(--warn); }
+  .finding p { margin: .3rem 0 0; color: var(--ink-soft); font-size: .92rem; }
+  .finding code { font-family: var(--mono); font-size: .84em; background: var(--code-bg); padding: .05rem .3rem; border-radius: 4px; color: var(--ink); }
+
+  .cmp { width: 100%; border-collapse: collapse; margin-top: .4rem; font-size: .86rem; }
+  .cmp th, .cmp td { text-align: left; padding: .55rem .7rem; border-bottom: 1px solid var(--line); }
+  .cmp thead th { font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); }
+  .cmp td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+  .cmpwrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+
+  .note { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: .9rem 1.1rem; color: var(--ink-soft); font-size: .9rem; margin-top: 1rem; }
+  .note b { color: var(--ink); }
+  .mono { font-family: var(--mono); }
+  footer { margin-top: 2.6rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: .78rem; font-family: var(--mono); }
+
+  .stages { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; font-family: var(--mono); font-size: .74rem; margin: 0 0 1.3rem; }
+  .stages .st { background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: .35rem .6rem; color: var(--ink); }
+  .stages .st b { color: var(--accent); margin-right: .25rem; }
+  .stages .ar { color: var(--ink-faint); }
+  .stagelabel { font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); margin: 1.5rem 0 .55rem; font-weight: 600; }
+  .stagelabel b { color: var(--accent); }
+  .emailcard { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .emailcard .hdr { padding: .8rem 1.1rem; border-bottom: 1px solid var(--line); background: var(--surface-2); font-family: var(--mono); font-size: .78rem; display: grid; gap: .18rem; color: var(--ink-soft); }
+  .emailcard .hdr span b { color: var(--ink-faint); font-weight: 600; margin-right: .4rem; }
+  .emailcard .hdr .subj { font-family: var(--sans); font-weight: 700; color: var(--ink); font-size: 1rem; margin-top: .35rem; }
+  .emailbody { background: #ffffff; color: #1a1a1a; padding: 1.15rem 1.3rem; font-family: var(--sans); font-size: .92rem; line-height: 1.55; }
+  .emailbody p { margin: 0 0 .7rem; } .emailbody a { color: #0e6ba8; }
+  .emailbody .tracked { text-decoration: underline dotted; }
+  .pixel-note { font-family: var(--mono); font-size: .68rem; color: var(--ink-faint); padding: .5rem 1.3rem; background: var(--surface-2); border-top: 1px dashed var(--line); }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">customer360-agent &middot; live LLM evaluation <span class="live">LIVE RUN</span></p>
+  <h1>AI Agent — Request, Response, Cost &amp; Full Lifecycle</h1>
+  <p class="lede">The real agent planner was called against the <b>configured production model</b> (<span class="mono">gpt-5.6-luna</span>, from the CI variable <span class="mono">LEO_OPENAI_MODEL_NAME</span>) for both channels. For each case below: the exact request sent to the model, the response returned, tokens consumed, dollar cost, and a scored evaluation — then the whole path from plan → saved DB draft → send-time render → the final email in the inbox.</p>
+
+  <div class="chips">
+    <span class="chip">mode <b>live</b></span>
+    <span class="chip">model <b>openai/gpt-5.6-luna</b></span>
+    <span class="chip">source <b>vars.LEO_OPENAI_MODEL_NAME</b></span>
+    <span class="chip">run <b>Actions #35564830156</b></span>
+    <span class="chip">commit <b>da67a16</b></span>
+    <span class="chip">date <b>2026-09-21</b></span>
+  </div>
+
+  <div class="totals">
+    <div class="tcard good"><div class="n">2 / 2</div><div class="l">Channels usable</div></div>
+    <div class="tcard good"><div class="n">14 / 14</div><div class="l">Eval checks passed</div></div>
+    <div class="tcard"><div class="n">1,668</div><div class="l">Total tokens</div></div>
+    <div class="tcard"><div class="n"><small>$</small>0.00126</div><div class="l">Total cost (USD)</div></div>
+  </div>
+  <div class="finding fix">
+    <p class="ft"><span class="sev">Caught &amp; fixed</span> The live eval found a production-breaking bug</p>
+    <p>On the first run with <code>gpt-5.6-luna</code>, <b>every plan failed</b>: <code>UnsupportedParamsError — gpt-5.6-luna doesn't support temperature=0.4 while reasoning is active</code>. The agent hard-coded <code>temperature=0.4</code>, which reasoning models reject. Fixed in <code>ai_providers/base.py</code> by enabling <code>litellm.drop_params = True</code> (drops any param a given model doesn't support instead of erroring). Both channels pass after the fix. <b>Without this eval, the deployed agent would have 502'd on every request with the configured model.</b></p>
+  </div>
+
+  <h2>Automated test suites — 69 passing across 3 services</h2>
+  <p class="lede" style="font-size:.95rem">Every service in the campaign pipeline has a green suite covering the agent's planning, the persisted draft, and both send-time renders. Run 2026-09-21 on Python 3.12.</p>
+  <div class="totals">
+    <div class="tcard good"><div class="n">42</div><div class="l">customer360-agent</div></div>
+    <div class="tcard good"><div class="n">19</div><div class="l">email_engine</div></div>
+    <div class="tcard good"><div class="n">8</div><div class="l">notification_engine (ZNS)</div></div>
+    <div class="tcard good"><div class="n">69 / 69</div><div class="l">Total · 0 failed</div></div>
+  </div>
+  <div class="cmpwrap" style="margin-top:1rem">
+    <table class="cmp">
+      <thead><tr><th>Suite</th><th>Test file</th><th>What it covers</th><th>Tests</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">agent</td><td class="mono">test_e2e.py</td><td>Full HTTP stack both channels + persisted crm_campaign draft (LLM mocked)</td><td class="num">9</td></tr>
+        <tr><td class="mono">agent</td><td class="mono">test_ai_providers.py</td><td>LiteLLM provider, JSON parse, State pattern</td><td class="num">13</td></tr>
+        <tr><td class="mono">agent</td><td class="mono">test_prompt_store.py</td><td>Prompt render, validate rail, Pg snapshot read</td><td class="num">10</td></tr>
+        <tr><td class="mono">agent</td><td class="mono">test_app.py</td><td>HTTP layer: serialization, 502 mapping, auth gate</td><td class="num">6</td></tr>
+        <tr><td class="mono">agent</td><td class="mono">test_zalo_planner.py</td><td>ZNS guardrails: off-list template, missing params</td><td class="num">4</td></tr>
+        <tr><td class="mono">email</td><td class="mono">test_rendering_adapters.py</td><td>Render fns + <b>full send-time email render</b> + adapters</td><td class="num">13</td></tr>
+        <tr><td class="mono">email</td><td class="mono">test_send.py</td><td>Batch send, opt-out, display-name logic</td><td class="num">5</td></tr>
+        <tr><td class="mono">email</td><td class="mono">test_dagster_defs.py</td><td>Dagster job/sensor wiring</td><td class="num">1</td></tr>
+        <tr><td class="mono">zns</td><td class="mono">test_notification_engine.py</td><td>Param binding + <b>full send-time ZNS render</b>, adapter, opt-out projection</td><td class="num">8</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="color:var(--ink-soft);font-size:.86rem;margin:.5rem 0 0">The two render tests added this round — <span class="mono">test_render_for_recipient_produces_final_email</span> (email) and <span class="mono">test_full_zns_render_produces_sent_template_data</span> (ZNS) — assert the exact final message shown in the lifecycle sections below.</p>
+
+  <!-- EMAIL -->
+  <h2>Email / content campaign</h2>
+  <div class="channel">
+    <div class="ch-head">
+      <span class="ch-tag email">email</span>
+      <span class="route">POST /plan/email</span>
+      <span class="verdict">usable &middot; eval 7/7 &middot; 4.94s</span>
+    </div>
+    <div class="req">
+      <h3>Request sent to the model <span class="send">&rarr; openai/gpt-5.6-luna &middot; temperature 0.4</span></h3>
+      <pre class="prompt"><span class="sys">You are a marketing campaign strategist. Given a target segment, a marketer's objective, optional budget/time constraints, and a CLOSED list of candidate content items, propose a campaign plan. You MUST select recommended content only from the supplied candidate list -- you MUST NOT invent new content_item_id values or reference any item not in that list. If no candidate items are suitable, return an empty content_item_ids array rather than fabricating one. Respond with ONLY a JSON object with exactly these keys: "name", "objective", "strategy_summary", "action_plan", "start_date" (YYYY-MM-DD), "end_date" (YYYY-MM-DD), "content_item_ids" (array, each one of the candidate ids, priority-ordered).</span>
+<span class="lbl">Segment:</span> {'segment': 'dormant-90d', 'size': 1200, 'avg_order_value': 42.5, 'top_category': 'skincare', 'locale': 'vi-VN'}
+<span class="lbl">Objective:</span> reactivate customers who haven't purchased in 90 days, target a 5% return rate
+<span class="lbl">Budget/time constraints:</span> 2-week window in October, email only, max 2 touches
+<span class="lbl">Candidate content items:</span> [{'content_item_id': 'c1', 'title': 'We miss you — 15% off your favourites', 'type': 'promo'}, {'content_item_id': 'c2', 'title': 'New skincare arrivals for autumn', 'type': 'editorial'}, {'content_item_id': 'c3', 'title': 'Free shipping this weekend only', 'type': 'promo'}, {'content_item_id': 'c4', 'title': 'Your loyalty points are expiring', 'type': 'transactional'}]</pre>
+    </div>
+    <div class="ch-body">
+      <div class="pane">
+        <h3>Response returned</h3>
+        <pre class="json">{
+  <span class="k">"name"</span>: <span class="s">"Dormant 90-Day Skincare Reactivation"</span>,
+  <span class="k">"objective"</span>: <span class="s">"Reactivate customers who have not
+     purchased in 90 days and achieve a 5% return
+     rate, ~60 returning customers."</span>,
+  <span class="k">"strategy_summary"</span>: <span class="s">"Two-email reactivation for
+     Vietnamese customers: personalized 15% skincare
+     offer, then a time-limited free-shipping nudge."</span>,
+  <span class="k">"action_plan"</span>: [
+    <span class="s">"Email 1 on 2026-10-05: 15% off favourites…"</span>,
+    <span class="s">"Email 2 on 2026-10-10: free shipping, weekend"</span>,
+    <span class="s">"Track returns vs 5% target through 2026-10-18"</span>
+  ],
+  <span class="k">"start_date"</span>: <span class="s">"2026-10-05"</span>,
+  <span class="k">"end_date"</span>: <span class="s">"2026-10-18"</span>,
+  <span class="k">"content_item_ids"</span>: [<span class="s">"c1"</span>, <span class="s">"c3"</span>]
+}</pre>
+        <ul class="checks">
+          <li>content_ids from candidates (c1, c3)</li>
+          <li>dates correct &amp; ordered (Oct 2026)</li>
+          <li>objective + strategy + action_plan present</li>
+        </ul>
+      </div>
+      <div class="pane">
+        <h3>Tokens &amp; cost</h3>
+        <div class="metrics">
+          <div class="m"><div class="mv">389</div><div class="ml">Prompt tokens</div></div>
+          <div class="m"><div class="mv">308</div><div class="ml">Completion tokens</div></div>
+          <div class="m"><div class="mv">697</div><div class="ml">Total tokens</div></div>
+          <div class="m"><div class="mv">$0.00045</div><div class="ml">Cost (USD)</div></div>
+          <div class="m wide">
+            <div class="bar"><div class="p" style="width:55.8%"></div><div class="c" style="width:44.2%"></div></div>
+            <div class="barkey"><i class="dp">prompt 56%</i><i class="dc">completion 44%</i></div>
+          </div>
+          <div class="m wide"><div class="mv">4.936 s</div><div class="ml">Latency (round trip)</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ZALO -->
+  <h2>Zalo ZNS campaign</h2>
+  <div class="channel">
+    <div class="ch-head">
+      <span class="ch-tag zalo">zalo zns</span>
+      <span class="route">POST /plan/zalo</span>
+      <span class="verdict">usable &middot; eval 7/7 &middot; 6.29s</span>
+    </div>
+    <div class="req">
+      <h3>Request sent to the model <span class="send">&rarr; openai/gpt-5.6-luna &middot; temperature 0.4</span></h3>
+      <pre class="prompt"><span class="sys">You are a Zalo ZNS campaign strategist. Given a target segment, a marketer's objective, and a CLOSED list of APPROVED ZNS templates (each with a template_id and its required parameter names), choose exactly ONE template and fill EVERY one of its required parameters with concrete values suitable for the segment. You MUST pick a template_id from the candidate list -- never invent one -- and you MUST NOT author free message text (ZNS content is fixed by the approved template). Respond with ONLY a JSON object with keys: "template_id", "template_data", "name", "objective", "strategy_summary", "action_plan", "start_date", "end_date".</span>
+<span class="lbl">Segment:</span> {'segment': 'cart-abandoners-48h', 'size': 300, 'avg_cart_value': 68.0, 'locale': 'vi-VN'}
+<span class="lbl">Objective:</span> recover abandoned carts within 48 hours with a time-limited incentive
+<span class="lbl">Budget/time constraints:</span> single ZNS touch, this week
+<span class="lbl">Candidate approved ZNS templates:</span> [{'template_id': 'tpl-otp', 'name': 'OTP verify', 'params': ['otp', 'name']}, {'template_id': 'tpl-promo', 'name': 'Promo nudge', 'params': ['offer', 'expiry']}, {'template_id': 'tpl-cart', 'name': 'Cart reminder', 'params': ['customer_name', 'item_count', 'discount']}]</pre>
+    </div>
+    <div class="ch-body">
+      <div class="pane">
+        <h3>Response returned <span style="color:var(--warn);font-weight:600;text-transform:none;letter-spacing:0">(localized to vi-VN)</span></h3>
+        <pre class="json">{
+  <span class="k">"template_id"</span>: <span class="s">"tpl-promo"</span>,
+  <span class="k">"template_data"</span>: {
+    <span class="k">"offer"</span>: <span class="s">"Giảm 10% cho sản phẩm trong giỏ hàng"</span>,
+    <span class="k">"expiry"</span>: <span class="s">"Trong 48 giờ, đến 2026-09-23"</span>
+  },
+  <span class="k">"name"</span>: <span class="s">"Promo nudge"</span>,
+  <span class="k">"objective"</span>: <span class="s">"Khôi phục giỏ hàng bị bỏ trong
+     vòng 48 giờ bằng ưu đãi có thời hạn"</span>,
+  <span class="k">"strategy_summary"</span>: <span class="s">"Gửi một ZNS duy nhất đến 300
+     khách đã bỏ giỏ, kèm ưu đãi giảm 10%…"</span>,
+  <span class="k">"action_plan"</span>: [<span class="s">"Gửi ZNS 2026-09-21…"</span>, <span class="s">"…"</span>],
+  <span class="k">"start_date"</span>: <span class="s">"2026-09-21"</span>,
+  <span class="k">"end_date"</span>: <span class="s">"2026-09-23"</span>
+}</pre>
+        <ul class="checks">
+          <li>template_id from candidates (tpl-promo)</li>
+          <li>both required params (offer, expiry) filled</li>
+          <li>no free message text authored</li>
+          <li>respected locale vi-VN (Vietnamese)</li>
+        </ul>
+      </div>
+      <div class="pane">
+        <h3>Tokens &amp; cost</h3>
+        <div class="metrics">
+          <div class="m"><div class="mv">352</div><div class="ml">Prompt tokens</div></div>
+          <div class="m"><div class="mv">619</div><div class="ml">Completion tokens</div></div>
+          <div class="m"><div class="mv">971</div><div class="ml">Total tokens</div></div>
+          <div class="m"><div class="mv">$0.00081</div><div class="ml">Cost (USD)</div></div>
+          <div class="m wide">
+            <div class="bar"><div class="p" style="width:36.3%"></div><div class="c" style="width:63.7%"></div></div>
+            <div class="barkey"><i class="dp">prompt 36%</i><i class="dc">completion 64%</i></div>
+          </div>
+          <div class="m wide"><div class="mv">6.294 s</div><div class="ml">Latency (round trip)</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Evaluation &amp; findings</h2>
+  <p class="lede" style="font-size:.95rem">Both channels scored 7/7: well-formed JSON, on-spec keys, and closed-list guardrails respected (content IDs and the ZNS template came from the supplied candidates; all required ZNS params filled). Quality was notably strong — correct 2026 campaign dates and full Vietnamese localization matching <span class="mono">locale: vi-VN</span>.</p>
+
+  <div class="finding warn">
+    <p class="ft"><span class="sev">Tradeoff</span> Reasoning model: higher quality, ~4&times; the cost &amp; ~2&times; the latency</p>
+    <p>vs the earlier <code>gpt-4o-mini</code> baseline, <code>gpt-5.6-luna</code> spends far more completion tokens (reasoning) and runs slower — but gets the year right (4o-mini dated campaigns in 2023) and localizes fully. Choose per use case: <code>gpt-4o-mini</code> for cheap/fast drafts, <code>gpt-5.6-luna</code> when correctness matters.</p>
+  </div>
+
+  <div class="cmpwrap" style="margin-top:1rem">
+    <table class="cmp">
+      <thead><tr><th>Model</th><th>Email tokens / cost / latency</th><th>Zalo tokens / cost / latency</th><th>Quality note</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">gpt-4o-mini</td><td class="num">542 · $0.00015 · 3.5s</td><td class="num">531 · $0.00016 · 1.6s</td><td>dated 2023 (wrong)</td></tr>
+        <tr><td class="mono">gpt-5.6-luna</td><td class="num">697 · $0.00045 · 4.9s</td><td class="num">971 · $0.00081 · 6.3s</td><td>dates + vi-VN correct</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note"><b>What "usable" means here.</b> A real model call end-to-end: prompt assembled from the production bodies → sent to OpenAI → parsed → guardrail-checked → serialized — the same path <span class="mono">customer360-api</span> drives in production. HTTP + auth are covered separately by the 8/8 E2E suite.</div>
+
+  <h2>Email lifecycle — from plan to inbox</h2>
+  <p class="lede" style="font-size:.95rem">The agent only <b>plans</b> — it selects content and a schedule, it does not write email copy. Here's the whole path from that plan to a rendered email in one recipient's inbox, each step grounded in the real code.</p>
+
+  <div class="stages">
+    <span class="st"><b>1</b> agent /plan/email</span><span class="ar">&rarr;</span>
+    <span class="st"><b>2</b> crm_campaign draft · InReview</span><span class="ar">&rarr;</span>
+    <span class="st"><b>3</b> human approve</span><span class="ar">&rarr;</span>
+    <span class="st"><b>4</b> render per recipient</span><span class="ar">&rarr;</span>
+    <span class="st"><b>5</b> send</span>
+  </div>
+
+  <div class="stagelabel"><b>Step 2</b> · saved to DB — crm_campaign draft (built from the plan)</div>
+  <pre class="json">{
+  <span class="k">"crm_campaign"</span>: {
+    <span class="k">"name"</span>: <span class="s">"Dormant 90-Day Skincare Reactivation"</span>,
+    <span class="k">"status"</span>: <span class="s">"Draft"</span>, <span class="k">"approval_status"</span>: <span class="s">"InReview"</span>,
+    <span class="k">"objective"</span>: <span class="s">"reactivate lapsed customers"</span>,
+    <span class="k">"segment_id"</span>: <span class="s">"&lt;segment-uuid&gt;"</span>,
+    <span class="k">"template_id"</span>: <span class="s">"&lt;approved-email-template-uuid&gt;"</span>,
+    <span class="k">"strategy_summary"</span>: <span class="s">"two-touch reactivation email"</span>,
+    <span class="k">"start_date"</span>: <span class="s">"2026-10-05"</span>, <span class="k">"end_date"</span>: <span class="s">"2026-10-18"</span>,
+    <span class="k">"ai_plan"</span>: { <span class="s">…full generated plan (action_plan, dates, content_item_ids)…</span> }
+  },
+  <span class="k">"crm_campaign_content_items"</span>: [
+    {<span class="k">"content_item_id"</span>: <span class="s">"c1"</span>, <span class="k">"position"</span>: 1},
+    {<span class="k">"content_item_id"</span>: <span class="s">"c3"</span>, <span class="k">"position"</span>: 2}
+  ]
+}</pre>
+  <p style="color:var(--ink-soft);font-size:.86rem;margin:.5rem 0 0">Asserted by the E2E test <span class="mono">test_email_plan_persists_as_campaign_draft</span>. The draft is gated <span class="mono">InReview</span> — nothing sends until a human approves.</p>
+
+  <div class="stagelabel"><b>Step 3</b> · the Approved template it links (crm_message_templates)</div>
+  <p style="color:var(--ink-soft);font-size:.86rem;margin:0 0 .55rem">Copy is <b>not</b> AI-authored — the draft references an existing Approved template. Placeholders are <span class="mono">{{ name }}</span>-style.</p>
+  <pre class="prompt"><span class="lbl">subject:</span>   We miss you, {{ first_name }} — 15% off your favourites
+<span class="lbl">html_body:</span> &lt;p&gt;Hi {{ name }},&lt;/p&gt;&lt;p&gt;Here's &lt;strong&gt;15% off&lt;/strong&gt; your favourite skincare.&lt;/p&gt;
+           &lt;p&gt;&lt;a href="https://shop.example.com/winback"&gt;Shop now&lt;/a&gt;&lt;/p&gt;
+           &lt;p&gt;&lt;a href="{{ unsubscribe_url }}"&gt;Unsubscribe&lt;/a&gt;&lt;/p&gt;
+<span class="lbl">text_body:</span> Hi {{ name }}, … Shop now: https://shop.example.com/winback</pre>
+
+  <div class="stagelabel"><b>Step 4</b> · send-time render (backend-system/email_engine/rendering.py)</div>
+  <div class="finding fix" style="margin-top:0">
+    <p class="ft"><span class="sev">Design</span> Plain <span class="mono">{{ }}</span> substitution — deliberately NOT Jinja</p>
+    <p>Rendering is a fixed regex substitution over a known context, not a template engine — so an AI/marketer-authored template can <b>never execute code</b>. Per-recipient context: <code>{first_name, last_name, name, email, unsubscribe_url}</code>. HTML-body values are HTML-escaped (a profile field can't inject markup); unknown placeholders render empty (no leaked <code>{{ raw }}</code>); then links are rewritten for click-tracking and a 1×1 open pixel is injected.</p>
+  </div>
+  <pre class="prompt"><span class="lbl">context (recipient "An Nguyễn"):</span>
+{'first_name': 'An', 'last_name': 'Nguyễn', 'name': 'An Nguyễn',
+ 'email': 'an.nguyen@example.com', 'unsubscribe_url': 'https://track…/u/unsub?u=TOK'}</pre>
+
+  <div class="stagelabel"><b>Step 5</b> · final email in the inbox (actual output of the real render code)</div>
+  <div class="emailcard">
+    <div class="hdr">
+      <span><b>From</b> Skincare Co &lt;hello@shop.example.com&gt;</span>
+      <span><b>To</b> An Nguyễn &lt;an.nguyen@example.com&gt;</span>
+      <div class="subj">We miss you, An — 15% off your favourites</div>
+    </div>
+    <div class="emailbody">
+      <p>Hi An Nguyễn,</p>
+      <p>It's been a while. Here's <strong>15% off</strong> your favourite skincare.</p>
+      <p><a class="tracked" href="#">Shop now</a> <span style="color:#888;font-size:.8em">(href rewritten → track.example.com/c/click?u=…&amp;url=…&amp;k=&lt;signed&gt;)</span></p>
+      <p><a class="tracked" href="#">Unsubscribe</a></p>
+    </div>
+    <div class="pixel-note">+ 1×1 open-tracking pixel injected before &lt;/body&gt; · links signed (k=) so the click endpoint rejects a swapped URL</div>
+  </div>
+  <p style="color:var(--ink-soft);font-size:.86rem;margin:.5rem 0 0"><b>subject</b> and <b>text_body</b> render the same context unescaped; only the HTML body is escaped + tracking-wrapped. This is the exact output of <span class="mono">email_engine.rendering</span> run against the template + recipient above.</p>
+
+  <h2>Zalo ZNS lifecycle — template-locked, no free text</h2>
+  <p class="lede" style="font-size:.95rem">ZNS is different from email: content is <b>fixed by the OA-approved template</b>. The agent picks one <span class="mono">template_id</span> and fills its typed params — it never authors message text, and there's no HTML, no link-rewrite, no open pixel. The Zalo OA renders its approved layout from the params.</p>
+
+  <div class="stages">
+    <span class="st"><b>1</b> agent /plan/zalo</span><span class="ar">&rarr;</span>
+    <span class="st"><b>2</b> crm_campaign draft · zalo_zns · InReview</span><span class="ar">&rarr;</span>
+    <span class="st"><b>3</b> human approve</span><span class="ar">&rarr;</span>
+    <span class="st"><b>4</b> bind params per recipient</span><span class="ar">&rarr;</span>
+    <span class="st"><b>5</b> send to Zalo OA</span>
+  </div>
+
+  <div class="stagelabel"><b>Step 2</b> · saved draft — crm_campaign linked to a zalo_zns template</div>
+  <pre class="json">{
+  <span class="k">"crm_campaign"</span>: {
+    <span class="k">"name"</span>: <span class="s">"Promo nudge"</span>, <span class="k">"status"</span>: <span class="s">"Draft"</span>, <span class="k">"approval_status"</span>: <span class="s">"InReview"</span>,
+    <span class="k">"objective"</span>: <span class="s">"recover abandoned carts within 48 hours…"</span>,
+    <span class="k">"template_id"</span>: <span class="s">"&lt;approved zalo_zns template uuid&gt;"</span>,
+    <span class="k">"ai_plan"</span>: {
+      <span class="k">"template_id"</span>: <span class="s">"tpl-promo"</span>,
+      <span class="k">"template_data"</span>: { <span class="k">"offer"</span>: <span class="s">"Giảm 10%…"</span>, <span class="k">"expiry"</span>: <span class="s">"Trong 48 giờ…"</span> },
+      <span class="k">"start_date"</span>: <span class="s">"2026-09-21"</span>, <span class="k">"end_date"</span>: <span class="s">"2026-09-23"</span>
+    }
+  }
+}</pre>
+
+  <div class="stagelabel"><b>Step 3</b> · the Approved ZNS template (crm_message_templates · message_type ZALO_ZNS)</div>
+  <p style="color:var(--ink-soft);font-size:.86rem;margin:0 0 .55rem">The template's layout/wording is <b>locked by Zalo OA approval</b> — only its declared params are fillable. <span class="mono">metadata.zalo_template_id</span> holds the OA template id the message is sent against.</p>
+  <pre class="prompt"><span class="lbl">variables (fillable params):</span> ["offer", "expiry", "customer_name"]
+<span class="lbl">metadata.zalo_template_id:</span> &lt;OA-approved template id&gt;
+<span class="lbl">status:</span> Approved   <span class="lbl">message_type:</span> ZALO_ZNS
+<span class="sys">(no subject / html_body / text_body — ZNS content is not authored here)</span></pre>
+
+  <div class="stagelabel"><b>Step 4</b> · send-time param binding (notification_engine/rendering.py::render_params)</div>
+  <div class="finding fix" style="margin-top:0">
+    <p class="ft"><span class="sev">Design</span> Only typed params are filled — no message body is ever authored</p>
+    <p>Each param value may carry <span class="mono">{{merge}}</span> tokens (<code>first_name, last_name, name, phone</code>) bound per recipient; non-string values pass through untouched. Recipients with no phone or <code>zalo_opt_in=false</code> are skipped. There is no HTML escaping / link rewriting / pixel — those are email-only.</p>
+  </div>
+  <pre class="prompt"><span class="lbl">context (recipient):</span> {'first_name': 'An', 'name': 'An Nguyễn', 'phone': '+84901234567'}
+<span class="lbl">template_data (before):</span> {'customer_name': '{{ first_name }}', 'offer': 'Giảm 10%…', 'expiry': 'Trong 48 giờ…'}</pre>
+
+  <div class="stagelabel"><b>Step 5</b> · final ZNS message sent to the OA (actual render_params output)</div>
+  <div class="emailcard">
+    <div class="hdr">
+      <span><b>To</b> +84901234567 (Zalo)</span>
+      <span><b>ZNS template</b> &lt;OA-approved id&gt; · Approved</span>
+      <div class="subj" style="font-family:var(--mono);font-size:.85rem">template_data → Zalo OA</div>
+    </div>
+    <div class="emailbody">
+      <p style="margin:0 0 .4rem"><code>customer_name</code> = <b>An</b> <span style="color:#888;font-size:.85em">← {{ first_name }} bound</span></p>
+      <p style="margin:0 0 .4rem"><code>offer</code> = Giảm 10% cho sản phẩm trong giỏ hàng</p>
+      <p style="margin:0"><code>expiry</code> = Trong 48 giờ, đến 2026-09-23</p>
+    </div>
+    <div class="pixel-note">Zalo OA renders its fixed, approved layout with these params · no free text, no tracking pixel (ZNS ≠ HTML email)</div>
+  </div>
+  <p style="color:var(--ink-soft);font-size:.86rem;margin:.5rem 0 0">Exact output of <span class="mono">notification_engine.rendering.render_params</span> for this recipient. Both channels verified: email full-render in <span class="mono">email_engine/tests/test_rendering_adapters.py</span>, the agent plans in the 9/9 <span class="mono">customer360-agent</span> E2E suite.</p>
+
+  <footer>customer360-agent/tools/live_eval.py · Actions run 35564830156 · gpt-5.6-luna · 1,668 tokens · $0.001261 · 2026-09-21</footer>
+</div>

@@ -12,6 +12,12 @@ COPY customer360-dao /opt/customer360-dao
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     pip install /opt/customer360-dao
 
+# The agent's HTTP client library (leo_customer360_agent.client). Depends on the DAO
+# above; src-layout packages ONLY the client, not the agent server.
+COPY customer360-agent /opt/customer360-agent
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    pip install /opt/customer360-agent
+
 COPY customer360-api/requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     pip install -r requirements.txt

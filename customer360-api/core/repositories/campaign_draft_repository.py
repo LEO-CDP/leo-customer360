@@ -17,9 +17,9 @@ from typing import Any, Optional
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from core.ai_providers.base import AIProviderError
 from core.cache import invalidate_prefix
-from core.ai_providers.campaign_planner import (
+from leo_customer360_agent.client import (
+    AIProviderError,
     CampaignPlanBrief,
     GeneratedCampaignPlan,
     ZnsCampaignPlanBrief,

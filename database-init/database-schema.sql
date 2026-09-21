@@ -3317,3 +3317,36 @@ $$;
 --     tenant_id =
 --     NULLIF(btrim(current_setting('app.tenant_id')), '')::uuid
 -- );
+
+-- ============================================================================
+-- Prompt store (customer360-agent) -- LLM prompt bodies as addressable,
+-- versioned data. Global config (NOT tenant-scoped, no RLS): a prompt key like
+-- 'campaign.plan.instructions' is the same for every tenant. The agent seeds the
+-- in-code defaults as version 1 on startup and can publish new versions;
+-- current_version = 0 means "use the agent's in-code default" (no row here).
+-- Owned by customer360-agent/src/prompts (PgPromptStore); see its README.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS customer360.prompt_template (
+    key             TEXT PRIMARY KEY,
+    engine          TEXT NOT NULL DEFAULT 'none',
+    current_version INTEGER NOT NULL DEFAULT 1,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE customer360.prompt_template IS
+    'Prompt-store pointer: current published version per prompt key (customer360-agent). Global, not tenant-scoped.';
+
+-- Append-only version history; the pointer above selects the live one. No FK to
+-- prompt_template so a version can be written before its pointer row (seed path).
+CREATE TABLE IF NOT EXISTS customer360.prompt_version (
+    key           TEXT NOT NULL,
+    version       INTEGER NOT NULL,
+    body          TEXT NOT NULL,
+    required_vars TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    created_by    TEXT NOT NULL DEFAULT 'system',
+    note          TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (key, version)
+);
+COMMENT ON TABLE customer360.prompt_version IS
+    'Prompt-store append-only version log (customer360-agent). created_by=''seed'' marks a copy of an in-code default.';
