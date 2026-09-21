@@ -84,3 +84,26 @@ def test_project_optout_events_counts_applied_vs_skipped():
         {"properties": {"tenant_id": "t", "master_profile_id": "p3"}},        # missing reason
     ]
     assert project_optout_events(_Conn(), events) == {"applied": 1, "skipped": 2}
+
+
+def test_full_zns_render_produces_sent_template_data():
+    """The 'final ZNS message' sent to the OA: the campaign's template_data (from
+    the agent's plan, template tpl-promo) bound against a resolved recipient.
+    ZNS is template-locked — only typed params are filled, no message text is
+    authored, so the output IS the template_data dict handed to the OA."""
+    campaign_template_data = {                       # from crm_campaign.ai_plan.template_data
+        "customer_name": "{{first_name}}",           # personalization token
+        "offer": "Giảm 10% cho sản phẩm trong giỏ hàng",
+        "expiry": "Trong 48 giờ, đến 2026-09-23",
+    }
+    context = {"first_name": "An", "last_name": "Nguyễn", "name": "An Nguyễn", "phone": "+84901234567"}
+
+    sent = render_params(campaign_template_data, context)
+
+    assert sent == {
+        "customer_name": "An",                       # {{first_name}} bound
+        "offer": "Giảm 10% cho sản phẩm trong giỏ hàng",
+        "expiry": "Trong 48 giờ, đến 2026-09-23",
+    }
+    # No key added or dropped — ZNS never authors free text beyond the fixed params.
+    assert set(sent) == set(campaign_template_data)
