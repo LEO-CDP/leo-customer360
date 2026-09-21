@@ -125,12 +125,14 @@ class UsageRecorder:
     def __init__(self, live: bool):
         self.live = live
         self.last = None
+        self._real = None
+        if live:
+            import litellm
+            self._real = litellm.completion  # capture BEFORE patch to avoid self-recursion
 
     def __call__(self, *args, **kwargs):
-        import litellm
-
         if self.live:
-            resp = litellm.completion(*args, **kwargs)
+            resp = self._real(*args, **kwargs)
         else:
             # Stub: realistic OpenAI-shaped response with a usage block. Approximate token
             # counts so mock output is plausible; cost stays 0 (no real spend).
