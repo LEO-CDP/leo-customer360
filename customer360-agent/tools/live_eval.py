@@ -125,12 +125,19 @@ class UsageRecorder:
     def __init__(self, live: bool):
         self.live = live
         self.last = None
+        self.last_request = None
         self._real = None
         if live:
             import litellm
             self._real = litellm.completion  # capture BEFORE patch to avoid self-recursion
 
     def __call__(self, *args, **kwargs):
+        self.last_request = {
+            "model": kwargs.get("model"),
+            "messages": kwargs.get("messages"),
+            "params": {k: v for k, v in kwargs.items()
+                       if k not in ("messages", "api_key", "api_base", "model")},
+        }
         if self.live:
             resp = self._real(*args, **kwargs)
         else:
@@ -235,6 +242,7 @@ def run_channel(kind: str, recorder: UsageRecorder) -> dict:
     result["latency_s"] = round(time.perf_counter() - t0, 3)
 
     result["usage"] = _usage_of(recorder.last) if recorder.last else {}
+    result["request"] = recorder.last_request
     result["cost_usd"] = _cost_of(recorder.last, recorder.live)
     if plan is not None:
         result["response"] = {k: (v.isoformat() if hasattr(v, "isoformat") else v)

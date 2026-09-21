@@ -26,6 +26,10 @@ def complete_with_litellm(
 ) -> str:
     import litellm  # deferred: heavy import, and only needed at completion time
 
+    # Reasoning models (e.g. gpt-5.x) reject temperature != 1; drop_params makes LiteLLM
+    # silently drop any param a given model doesn't support instead of raising.
+    litellm.drop_params = True
+
     params: dict[str, Any] = {"temperature": 0.4}
     params.update(extra or {})
     try:
