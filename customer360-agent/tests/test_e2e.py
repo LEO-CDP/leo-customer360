@@ -99,6 +99,67 @@ def test_email_plan_end_to_end():
     assert "c1" in prompt
 
 
+def _campaign_draft_record(plan: dict, *, segment_id: str, template_id: str, objective: str) -> dict:
+    """Map the agent's /plan/email response to the crm_campaign draft row that
+    customer360-api actually persists. Mirrors core/repositories/
+    campaign_draft_repository.py::create_draft — the ai_plan JSONB blob, the
+    row's status/approval_status/strategy_summary/dates, and the ordered
+    content-item links. This is the 'final email campaign saved to the DB'."""
+    return {
+        "crm_campaign": {
+            "name": plan["name"],
+            "status": "Draft",
+            "approval_status": "InReview",           # a fresh AI draft lands in review
+            "objective": objective,
+            "segment_id": segment_id,
+            "template_id": template_id,               # the Approved email template it will send with
+            "strategy_summary": plan["strategy_summary"],
+            "start_date": plan["start_date"],
+            "end_date": plan["end_date"],
+            "ai_plan": {                              # JSONB column — the full generated plan
+                "name": plan["name"],
+                "objective": plan["objective"],
+                "strategy_summary": plan["strategy_summary"],
+                "action_plan": plan["action_plan"],
+                "start_date": plan["start_date"],
+                "end_date": plan["end_date"],
+                "content_item_ids": plan["content_item_ids"],
+            },
+        },
+        # crm_campaign_content_items — one ordered row per selected content item.
+        "crm_campaign_content_items": [
+            {"content_item_id": cid, "position": i}
+            for i, cid in enumerate(plan["content_item_ids"], start=1)
+        ],
+    }
+
+
+def test_email_plan_persists_as_campaign_draft():
+    """The 'final result': the plan the agent returns, assembled into the exact
+    crm_campaign draft record customer360-api writes to the DB."""
+    seg = "11111111-1111-1111-1111-111111111111"
+    tpl = "22222222-2222-2222-2222-222222222222"
+    fenced = "```json\n" + json.dumps(_EMAIL_LLM_JSON) + "\n```"
+    with patch("litellm.completion", return_value=_fake_completion(fenced)):
+        resp = client.post("/plan/email", json=_EMAIL_REQUEST)
+    assert resp.status_code == 200, resp.text
+
+    record = _campaign_draft_record(resp.json(), segment_id=seg, template_id=tpl,
+                                    objective=_EMAIL_REQUEST["objective"])
+    row = record["crm_campaign"]
+    # The saved draft carries the plan verbatim, is gated for review, and links
+    # only the AI-selected content items — in order.
+    assert row["name"] == "Q4 Win-Back"
+    assert row["status"] == "Draft" and row["approval_status"] == "InReview"
+    assert row["template_id"] == tpl
+    assert row["ai_plan"]["content_item_ids"] == ["c1", "c2"]
+    assert row["start_date"] == "2999-10-01" and row["end_date"] == "2999-10-31"
+    assert record["crm_campaign_content_items"] == [
+        {"content_item_id": "c1", "position": 1},
+        {"content_item_id": "c2", "position": 2},
+    ]
+
+
 def test_email_bad_llm_json_maps_to_502():
     with patch("litellm.completion", return_value=_fake_completion("sorry, I can't")):
         resp = client.post("/plan/email", json=_EMAIL_REQUEST)
