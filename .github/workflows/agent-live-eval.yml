@@ -35,7 +35,9 @@ jobs:
       - name: Run live eval (real LLM via CD key)
         env:
           OPENAI_API_KEY: ${{ secrets.LEO_OPENAI_API_KEY }}   # CD secret; the script reads OPENAI_API_KEY
-          LLM_MODEL: openai/gpt-4o-mini
+          # Model from the CICD variable (LEO_OPENAI_MODEL_NAME, a bare name) + the
+          # openai/ provider prefix LiteLLM needs. Paired with the OpenAI base URL.
+          LLM_MODEL: openai/${{ vars.LEO_OPENAI_MODEL_NAME }}
           PYTHONUTF8: '1'
         run: |
           python customer360-agent/tools/live_eval.py --json eval-live.json
