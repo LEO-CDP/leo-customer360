@@ -1,7 +1,7 @@
 """Seeds sample test data for a Customer Identity Resolution (CIR) demo run.
 
 Connects to the PostgreSQL database configured via environment variables /
-``.env`` (see ``daily_job.py``) and:
+``.env`` (see ``cir_tasks.py``) and:
 
 1. Ensures the ``pg_trgm`` / ``fuzzystrmatch`` extensions are enabled (needed
    for the ``fuzzy_dmetaphone`` matching rule used by other attributes).

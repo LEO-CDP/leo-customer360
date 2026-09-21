@@ -267,11 +267,11 @@ jq -e --arg data_source_id "$DATA_SOURCE_ID" \
 log "Raw profile analytics verification passed"
 printf '%s\n' "$RAW_PROFILE_JSON" | jq .
 
-log "Running backend-system/identity_resolution daily drain (sensor interval=${CIR_POLL_INTERVAL_SECONDS}s)"
+log "Running backend-system/identity_resolution drain (sensor interval=${CIR_POLL_INTERVAL_SECONDS}s)"
 CIR_RESULT="$(
 	cd "$CIR_DIR"
 	CIR_POLL_INTERVAL_SECONDS="$CIR_POLL_INTERVAL_SECONDS" "$CIR_PYTHON" -c \
-		'from identity_resolution.daily_job import run_daily_identity_resolution; print(run_daily_identity_resolution())'
+		'from identity_resolution.cir_tasks import run_identity_resolution_tasks; print(run_identity_resolution_tasks())'
 )" || fail "identity resolution daily drain failed"
 log "Identity resolution processed $(tail -n 1 <<<"$CIR_RESULT") raw profile batch result"
 

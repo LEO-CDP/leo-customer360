@@ -1,7 +1,7 @@
 """Dagster job/sensor definitions for the Customer Identity Resolution (CIR)
 service.
 
-Wraps the existing ``identity_resolution.daily_job.run_daily_identity_resolution``
+Wraps the existing ``identity_resolution.cir_tasks.run_identity_resolution_tasks``
 batch-drain logic in a Dagster op/job so every run is tracked, retried, and
 observable (Dagit/webserver run history, per-step logs, alerts) instead of a
 bare ``while True`` polling loop:
@@ -49,9 +49,9 @@ from dagster import (  # noqa: E402
     sensor,
 )
 
-from identity_resolution.daily_job import (  # noqa: E402
+from identity_resolution.cir_tasks import (  # noqa: E402
     recompute_persona_archetype_match_count,
-    run_daily_identity_resolution,
+    run_identity_resolution_tasks,
 )
 
 # Poll the staging queue every 10 minutes by default. Operators can override
@@ -85,7 +85,7 @@ def resolve_identities_op(context: OpExecutionContext, config: IdentityResolutio
         return matched_profile_count
 
     context.log.info("CIR identity resolution job: started")
-    processed = run_daily_identity_resolution()
+    processed = run_identity_resolution_tasks()
     context.log.info(f"CIR identity resolution job: done (processed={processed})")
     return processed
 
