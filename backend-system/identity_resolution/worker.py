@@ -4,7 +4,7 @@
 Repeatedly executes the Dagster ``identity_resolution_job`` (see
 ``dagster_defs.py``) in-process, sleeping ``CIR_POLL_INTERVAL_SECONDS``
 between cycles, instead of calling
-``identity_resolution.daily_job.run_daily_identity_resolution()`` directly.
+``identity_resolution.cir_tasks.run_identity_resolution_tasks()`` directly.
 Every cycle therefore runs through Dagster's execution engine -- tracked as
 a Dagster run with per-step logs, timing, and (via the op's retry policy)
 automatic retries -- so it's ready to be monitored with a Dagster

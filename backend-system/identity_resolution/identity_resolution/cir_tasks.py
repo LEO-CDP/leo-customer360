@@ -1,10 +1,10 @@
-"""Daily scheduled entry point for Customer Identity Resolution.
+"""Scheduled tasks for Customer Identity Resolution (CIR).
 
-Runs standalone (cron, Airflow PythonOperator/@task, Dagster asset, etc.) and
-fully drains the ``cdp_raw_profiles_stage`` staging table in successive
-batches by repeatedly calling ``CustomerIdentityResolver.run_resolution_batch()``.
+The module provides the bounded staging-table drain used by Dagster, cron,
+Airflow, and local maintenance commands, plus targeted persona-count refreshes.
 """
 
+from collections.abc import Mapping
 import logging
 import os
 import sys
@@ -45,6 +45,8 @@ REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
 CIR_LOCK_KEY = "identity-resolution:staging-drain-lock"
 CIR_LOCK_TTL_SECONDS = int(os.environ.get("CIR_LOCK_TTL_SECONDS", "3600"))
 
+ResolvedProfilesByTenant = dict[str, set[str]]
+
 
 def build_redis_client():
     """Build the Redis client used to serialize CIR drain runs."""
@@ -61,8 +63,47 @@ def build_redis_client():
     )
 
 
-def run_daily_identity_resolution() -> int:
-    """Connects to Postgres and drains the staging table until empty.
+def _merge_resolved_profiles(
+    resolved_profiles_by_tenant: ResolvedProfilesByTenant,
+    batch_profiles: Mapping[str, set[str]],
+) -> None:
+    """Accumulate the master profiles resolved by one CIR batch."""
+    for tenant_id, master_profile_ids in batch_profiles.items():
+        resolved_profiles_by_tenant.setdefault(tenant_id, set()).update(master_profile_ids)
+
+
+def _drain_resolution_batches(resolver, lease) -> tuple[int, ResolvedProfilesByTenant]:
+    """Process up to the configured number of batches and return its results."""
+    total_processed = 0
+    resolved_profiles_by_tenant: ResolvedProfilesByTenant = {}
+
+    for _ in range(MAX_BATCHES_PER_RUN):
+        processed = resolver.run_resolution_batch()
+        total_processed += processed
+        batch_profiles = resolver.last_resolved_profiles_by_tenant
+        if isinstance(batch_profiles, Mapping):
+            _merge_resolved_profiles(resolved_profiles_by_tenant, batch_profiles)
+        if processed < BATCH_SIZE:
+            break
+        lease.refresh()
+    else:
+        logger.info(
+            "CIR run reached its batch budget (%d batches x %d profiles); next run will continue",
+            MAX_BATCHES_PER_RUN,
+            BATCH_SIZE,
+        )
+
+    return total_processed, resolved_profiles_by_tenant
+
+
+def _project_resolved_profiles(projector, resolved_profiles_by_tenant: ResolvedProfilesByTenant) -> None:
+    """Project each tenant once after all batches in the run are committed."""
+    for tenant_id in sorted(resolved_profiles_by_tenant):
+        projector.project_profiles(tenant_id, resolved_profiles_by_tenant[tenant_id])
+
+
+def run_identity_resolution_tasks() -> int:
+    """Acquire the CIR lease, drain staging, and project resolved profiles.
 
     Returns:
         The total number of raw profiles processed across all batches.
@@ -74,7 +115,6 @@ def run_daily_identity_resolution() -> int:
         return 0
 
     conn = None
-    total_processed = 0
     try:
         conn = psycopg2.connect(
             host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
@@ -85,25 +125,12 @@ def run_daily_identity_resolution() -> int:
             batch_size=BATCH_SIZE,
         )
         projector = MasterProfileEventProjector(conn, schema=DB_SCHEMA)
-        logger.info("[%s] Starting daily identity resolution run.", datetime.now(timezone.utc))
-
-        for batch_number in range(1, MAX_BATCHES_PER_RUN + 1):
-            processed = resolver.run_resolution_batch()
-            total_processed += processed
-            for tenant_id, master_profile_ids in resolver.last_resolved_profiles_by_tenant.items():
-                projector.project_profiles(tenant_id, master_profile_ids)
-            if processed < BATCH_SIZE:
-                break
-            lease.refresh()
-        else:
-            logger.info(
-                "CIR run reached its batch budget (%d batches x %d profiles); next run will continue",
-                MAX_BATCHES_PER_RUN,
-                BATCH_SIZE,
-            )
+        logger.info("[%s] Starting identity resolution run.", datetime.now(timezone.utc))
+        total_processed, resolved_profiles_by_tenant = _drain_resolution_batches(resolver, lease)
+        _project_resolved_profiles(projector, resolved_profiles_by_tenant)
 
         logger.info(
-            "[%s] Daily run complete. Total profiles processed: %d",
+            "[%s] Identity resolution run complete. Total profiles processed: %d",
             datetime.now(timezone.utc),
             total_processed,
         )
@@ -164,4 +191,4 @@ def recompute_persona_archetype_match_count(tenant_id: str, persona_archetype_id
 
 
 if __name__ == "__main__":
-    run_daily_identity_resolution()
+    run_identity_resolution_tasks()

@@ -2,7 +2,7 @@
 
 This service is a background worker with no HTTP surface, so the most
 meaningful liveness signal is "can it still reach PostgreSQL" -- the same
-connection every worker cycle (see daily_job.py) depends on.
+connection every worker cycle (see cir_tasks.py) depends on.
 """
 
 import os

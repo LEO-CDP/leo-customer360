@@ -470,7 +470,7 @@ identity_resolution_job
 The job is backed by:
 
 ```text
-run_daily_identity_resolution()
+run_identity_resolution_tasks()
 ```
 
 from the service's business logic package.
