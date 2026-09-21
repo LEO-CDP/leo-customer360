@@ -40,14 +40,12 @@
 		reverse_proxy {$ADS_UPSTREAM}
 	}
 
-	# --- customer360-agent HEALTH ONLY under /agent/health. The agent is an INTERNAL
-	#     service (customer360-api calls it privately on :8009); we expose ONLY /health
-	#     publicly so scheduled-checks can probe it. /plan/* is NOT routed here and stays
-	#     internal (an LLM planning endpoint must not be public). Rewrites /agent/health
-	#     -> /health on the agent box. ---
-	@agent_health path /agent/health
-	handle @agent_health {
-		rewrite * /health
+	# --- customer360-agent under /agent/* -> the agent box (:8009), prefix STRIPPED
+	#     (handle_path): /agent/health -> /health, /agent/plan/zalo -> /plan/zalo.
+	#     /health stays open; /plan/* is gated by the Bearer AGENT_API_TOKEN (constant-time
+	#     check in the agent's require_token) — that token is the ONLY thing making the LLM
+	#     planning endpoint safe to expose, so it MUST stay set on the agent box in uat/prod. ---
+	handle_path /agent/* {
 		reverse_proxy {$AGENT_UPSTREAM}
 	}
 

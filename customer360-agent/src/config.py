@@ -60,5 +60,13 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("LLM_EXTRA_CONFIG", "llm_extra_config"),
     )
 
+    # ASGI root_path when served behind a path-stripping proxy (Caddy handle_path
+    # /agent/*). Set to "/agent" so Swagger + /openapi.json resolve under the public
+    # prefix; blank when reached directly on :8009.
+    root_path: str = Field(
+        default="",
+        validation_alias=AliasChoices("AGENT_ROOT_PATH", "ROOT_PATH", "root_path"),
+    )
+
 
 settings = Settings()

@@ -24,7 +24,8 @@ from models import (
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="Customer 360 - AI Agent", version=settings.api_version)
+app = FastAPI(title="Customer 360 - AI Agent", version=settings.api_version,
+              root_path=settings.root_path)
 
 
 def require_token(authorization: str = Header(default="")) -> None:
