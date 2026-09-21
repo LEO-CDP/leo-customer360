@@ -12,6 +12,7 @@ from email_engine.rendering import (
     render_string,
     rewrite_links_for_click_tracking,
 )
+from email_engine.send import _render_for_recipient
 from email_engine.tracking import encode_tracking_token
 
 
@@ -87,3 +88,38 @@ def test_build_adapter_unknown_provider_falls_back_to_mock():
 
 def test_build_adapter_mock_config():
     assert isinstance(build_adapter({"provider": "mock"}), MockDispatchAdapter)
+
+
+# --- full send-time render (the real _render_for_recipient) ----------------
+
+def test_render_for_recipient_produces_final_email():
+    """The 'final email' a recipient receives: subject/html/text personalized
+    from an Approved template + a resolved profile, with click-tracking and the
+    open pixel applied. Exercises the real send.py::_render_for_recipient."""
+    template = {
+        "subject": "We miss you, {{ first_name }} — 15% off your favourites",
+        "html_body": (
+            "<html><body><p>Hi {{ name }},</p>"
+            '<p><a href="https://shop.example.com/winback">Shop now</a></p>'
+            '<p><a href="{{ unsubscribe_url }}">Unsubscribe</a></p></body></html>'
+        ),
+        "text_body": "Hi {{ name }}, shop: https://shop.example.com/winback",
+    }
+    profile = {"first_name": "An", "last_name": "Nguyễn", "email": "an.nguyen@example.com"}
+    urls = {
+        "unsubscribe": "https://track/u?u=TOK", "click_base": "https://track/c",
+        "token": "TOK", "pixel": "https://track/o.gif?u=TOK",
+    }
+
+    out = _render_for_recipient(template, profile, urls)
+
+    # {{ first_name }} / {{ name }} substituted from the profile.
+    assert out["subject"] == "We miss you, An — 15% off your favourites"
+    assert "Hi An Nguyễn," in out["html_body"]
+    # In-body links routed through the signed click-tracking redirect.
+    assert "https://track/c?u=TOK&url=https%3A%2F%2Fshop.example.com%2Fwinback&k=" in out["html_body"]
+    # 1x1 open pixel injected before </body>.
+    assert out["html_body"].index("<img") < out["html_body"].index("</body>")
+    assert 'src="https://track/o.gif?u=TOK"' in out["html_body"]
+    # text_body personalized but NOT link-rewritten (plain text stays clean).
+    assert out["text_body"] == "Hi An Nguyễn, shop: https://shop.example.com/winback"
