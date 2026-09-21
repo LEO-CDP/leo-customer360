@@ -244,6 +244,300 @@ ON CONFLICT (scoring_model_name) DO UPDATE SET
 
 
 -- ============================================================================
+-- Seed customer360.cdp_ai_agents
+-- ============================================================================
+
+INSERT INTO customer360.cdp_ai_agents (
+    agent_code,
+    display_name,
+    description,
+    model_type,
+    model_name,
+    status,
+    schedule_definition,
+    input_features,
+    hyperparameters,
+    system_instructions,
+    required_variables,
+    instruction_version,
+    instruction_updated_by,
+    instruction_note
+) VALUES
+
+    -- ------------------------------------------------------------------------
+    -- Scoring / ML agents
+    -- ------------------------------------------------------------------------
+
+    (
+        'lead_scoring',
+        'Lead Conversion Scoring Agent',
+        'Predicts lead_conversion_probability and lead_grade for prospect-to-customer conversion.',
+        'classification',
+        'lead-scoring-model',
+        'ACTIVE',
+        '0 1 * * *',
+        ARRAY[
+            'last_activity_at',
+            'source_systems',
+            'segmentation_tags'
+        ],
+        '{}'::jsonb,
+        NULL,
+        ARRAY[]::TEXT[],
+        1,
+        'seed',
+        'initial seed'
+    ),
+
+    (
+        'churn_scoring',
+        'Churn Risk Scoring Agent',
+        'Predicts churn_probability and churn_risk_tier from engagement drop-offs.',
+        'classification',
+        'churn-scoring-model',
+        'ACTIVE',
+        '0 2 * * *',
+        ARRAY[
+            'last_activity_at',
+            'historical_clv'
+        ],
+        '{}'::jsonb,
+        NULL,
+        ARRAY[]::TEXT[],
+        1,
+        'seed',
+        'initial seed'
+    ),
+
+    (
+        'clv_scoring',
+        'Customer Lifetime Value Agent',
+        'Predicts predictive_clv and clv_segment.',
+        'regression',
+        'clv-scoring-model',
+        'ACTIVE',
+        '0 3 * * 0',
+        ARRAY[
+            'historical_clv'
+        ],
+        '{}'::jsonb,
+        NULL,
+        ARRAY[]::TEXT[],
+        1,
+        'seed',
+        'initial seed'
+    ),
+
+    (
+        'cx_scoring',
+        'Customer Experience Scoring Agent',
+        'Computes engagement_score, latest_nps_score, average_csat and overall_sentiment_score.',
+        'regression',
+        'cx-scoring-model',
+        'ACTIVE',
+        '0 * * * *',
+        ARRAY[
+            'latest_nps_score',
+            'average_csat'
+        ],
+        '{}'::jsonb,
+        NULL,
+        ARRAY[]::TEXT[],
+        1,
+        'seed',
+        'initial seed'
+    ),
+
+    (
+        'data_quality',
+        'Profile Data Quality Agent',
+        'Computes profile_completeness_score for data-quality monitoring.',
+        'rules_engine',
+        'data-quality-rules-v1',
+        'ACTIVE',
+        '0 1 * * *',
+        ARRAY[
+            'email',
+            'phone_number',
+            'device_ids'
+        ],
+        '{}'::jsonb,
+        NULL,
+        ARRAY[]::TEXT[],
+        1,
+        'seed',
+        'initial seed'
+    ),
+
+    (
+        'lifecycle_stage',
+        'Lifecycle Stage Agent',
+        'Derives lifecycle_stage such as prospect, lead, customer, vip, dormant and churn_risk.',
+        'rules_engine',
+        'lifecycle-stage-rules-v1',
+        'ACTIVE',
+        '0 1 * * *',
+        ARRAY[
+            'customer_since',
+            'last_activity_at',
+            'churn_risk_tier'
+        ],
+        '{}'::jsonb,
+        NULL,
+        ARRAY[]::TEXT[],
+        1,
+        'seed',
+        'initial seed'
+    ),
+
+    (
+        'persona_summary_generator',
+        'Persona Summary Generator',
+        'Generates an LLM-based narrative persona_summary for each profile.',
+        'generative_llm',
+        'gpt-5.6',
+        'ACTIVE',
+        NULL,
+        ARRAY[
+            'attributes',
+            'segmentation_tags'
+        ],
+        '{
+            "temperature": 0.2,
+            "max_output_tokens": 500
+        }'::jsonb,
+        NULL,
+        ARRAY[]::TEXT[],
+        1,
+        'seed',
+        'initial seed'
+    ),
+
+    (
+        'persona_risk_score',
+        'Persona Risk Score Agent',
+        'Derives banking risk-persona input from kyc_status and risk_segment.',
+        'classification',
+        'persona-risk-model-v1',
+        'ACTIVE',
+        '0 4 * * *',
+        ARRAY[
+            'kyc_status',
+            'risk_segment'
+        ],
+        '{}'::jsonb,
+        NULL,
+        ARRAY[]::TEXT[],
+        1,
+        'seed',
+        'initial seed'
+    ),
+
+    (
+        'persona_loyalty_score',
+        'Persona Loyalty Score Agent',
+        'Derives retail loyalty-persona input from membership_tier.',
+        'classification',
+        'persona-loyalty-model-v1',
+        'ACTIVE',
+        NULL,
+        ARRAY[
+            'membership_tier'
+        ],
+        '{}'::jsonb,
+        NULL,
+        ARRAY[]::TEXT[],
+        1,
+        'seed',
+        'initial seed'
+    ),
+
+    -- ------------------------------------------------------------------------
+    -- Task-oriented AI agents
+    -- ------------------------------------------------------------------------
+
+    (
+        'campaign_planner',
+        'Campaign Planning Agent',
+        'Creates a marketing campaign plan from a target segment, marketer objective, optional constraints, and a closed candidate content set.',
+        'generative_llm',
+        'gpt-5.6',
+        'ACTIVE',
+        NULL,
+        ARRAY[
+            'target_segment',
+            'objective',
+            'budget',
+            'time_constraints',
+            'candidate_content_items'
+        ],
+        '{
+            "temperature": 0.2,
+            "max_output_tokens": 1200
+        }'::jsonb,
+
+        'You are a marketing campaign strategist. Given a target segment, a marketer''s objective, optional budget/time constraints, and a CLOSED list of candidate content items, propose a campaign plan. You MUST select recommended content only from the supplied candidate list -- you MUST NOT invent new content_item_id values or reference any item not in that list. If no candidate items are suitable, return an empty content_item_ids array rather than fabricating one. Respond with ONLY a JSON object with exactly these keys: "name" (string), "objective" (string), "strategy_summary" (string), "action_plan" (array of short strings), "start_date" (string, YYYY-MM-DD), "end_date" (string, YYYY-MM-DD), "content_item_ids" (array of strings, each exactly one of the candidate content_item_id values, ordered by recommended priority).',
+
+        ARRAY[
+            'target_segment',
+            'objective',
+            'budget',
+            'time_constraints',
+            'candidate_content_items'
+        ],
+
+        1,
+        'seed',
+        'initial seed'
+    ),
+
+    (
+        'zns_campaign_planner',
+        'Zalo ZNS Campaign Planning Agent',
+        'Selects one approved ZNS template and populates all required parameters for a target segment and campaign objective.',
+        'generative_llm',
+        'gpt-5.6',
+        'ACTIVE',
+        NULL,
+        ARRAY[
+            'target_segment',
+            'objective',
+            'approved_zns_templates'
+        ],
+        '{
+            "temperature": 0.2,
+            "max_output_tokens": 1000
+        }'::jsonb,
+
+        'You are a Zalo ZNS campaign strategist. Given a target segment, a marketer''s objective, and a CLOSED list of APPROVED ZNS templates (each with a template_id and its required parameter names), choose exactly ONE template and fill EVERY one of its required parameters with concrete values suitable for the segment. You MUST pick a template_id from the candidate list -- never invent one -- and you MUST NOT author free message text (ZNS content is fixed by the approved template). Respond with ONLY a JSON object with exactly these keys: "template_id" (string, one of the candidates), "template_data" (object mapping every required param name to a string value), "name" (string), "objective" (string), "strategy_summary" (string), "action_plan" (array of short strings), "start_date" (YYYY-MM-DD), "end_date" (YYYY-MM-DD).',
+
+        ARRAY[
+            'target_segment',
+            'objective',
+            'approved_zns_templates'
+        ],
+
+        1,
+        'seed',
+        'initial seed'
+    )
+
+ON CONFLICT (agent_code) DO UPDATE SET
+
+    display_name          = EXCLUDED.display_name,
+    description           = EXCLUDED.description,
+    model_type            = EXCLUDED.model_type,
+    model_name            = EXCLUDED.model_name,
+    status                = EXCLUDED.status,
+    schedule_definition   = EXCLUDED.schedule_definition,
+    input_features        = EXCLUDED.input_features,
+    hyperparameters       = EXCLUDED.hyperparameters,
+
+    -- Do not overwrite current instructions on deployment re-seed.
+    -- This protects any instruction changed through an admin/runtime flow.
+    updated_at            = now();
+
+-- ============================================================================
 -- FULL ATTRIBUTE CATALOG SEED
 -- ============================================================================
 -- Catalog of cdp_master_profiles columns and cdp_raw_profiles_stage matching

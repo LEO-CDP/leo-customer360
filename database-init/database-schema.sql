@@ -1835,6 +1835,132 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_event_catalog (
 
 COMMENT ON TABLE customer360.cdp_event_catalog IS 'Governed vocabulary of event_category/event_name pairs (seeded below) across GENERAL/FEEDBACK/COMMERCE/FINANCE/STOCK_TRADING/TRAVEL/REAL_ESTATE. The catalog is not FK-enforced by the S3 event lake, so ingestion is never blocked by a missing catalog row; it exists for discoverability/governance.';
 
+
+-- ============================================================================
+-- AI Agent Registry
+-- ============================================================================
+-- Unified registry for ML models, rule engines, and task-oriented AI agents.
+--
+-- agent_code:
+--   Stable identifier used by application/agent runtime.
+--
+-- model_name:
+--   Actual AI/ML model name, e.g. gpt-5.6, qwen3-14b,
+--   xgboost-lead-v3, lightgbm-churn-v2, etc.
+--
+-- system_instructions / required_variables:
+--   Current runtime instructions and input contract for task-oriented agents.
+--
+-- Historical prompt versions are intentionally NOT stored in PostgreSQL.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
+    -- Stable application-level agent identifier.
+    -- Examples:
+    --   lead_scoring
+    --   campaign_planner
+    --   zns_campaign_planner
+    agent_code VARCHAR(100) PRIMARY KEY,
+
+    -- Human-readable metadata
+    display_name VARCHAR(255) NOT NULL,
+    description TEXT,
+
+    -- AI / ML / rules execution type
+    model_type VARCHAR(50) NOT NULL CHECK (
+        model_type IN (
+            'classification',
+            'regression',
+            'clustering',
+            'rules_engine',
+            'generative_llm'
+        )
+    ),
+
+    -- Actual AI model / ML model name.
+    -- Examples:
+    --   gpt-5.6
+    --   qwen3-14b
+    --   xgboost-lead-v3
+    --   lightgbm-churn-v2
+    model_name VARCHAR(255),
+
+    -- Runtime lifecycle
+    status VARCHAR(20) DEFAULT 'ACTIVE' CHECK (
+        status IN (
+            'ACTIVE',
+            'INACTIVE',
+            'TRAINING',
+            'DEPRECATED',
+            'FAILED'
+        )
+    ),
+
+    -- Scheduler definition for batch/scoring agents.
+    -- Example: '0 1 * * *'
+    schedule_definition VARCHAR(100),
+
+    -- Features / runtime context consumed by the model or agent.
+    input_features TEXT[] DEFAULT ARRAY[]::TEXT[],
+
+    -- Model/runtime configuration.
+    -- Examples:
+    --   temperature
+    --   max_output_tokens
+    --   thresholds
+    --   provider-specific parameters
+    hyperparameters JSONB DEFAULT '{}'::JSONB,
+
+    -- ------------------------------------------------------------------------
+    -- Agent instruction fields
+    -- ------------------------------------------------------------------------
+
+    -- Current system instruction for task-oriented AI agents.
+    system_instructions TEXT,
+
+    -- Runtime context variables expected by the agent.
+    required_variables TEXT[] DEFAULT ARRAY[]::TEXT[],
+
+    -- Current instruction revision.
+    instruction_version INTEGER NOT NULL DEFAULT 1
+        CHECK (instruction_version > 0),
+
+    -- Provenance for current instruction.
+    instruction_updated_by VARCHAR(255) NOT NULL DEFAULT 'system',
+
+    -- Human-readable change note.
+    instruction_note TEXT NOT NULL DEFAULT '',
+
+    -- Audit fields
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+COMMENT ON TABLE customer360.cdp_ai_agents IS
+    'Unified registry for AI/ML models and task-oriented AI agents. Stores model configuration and current agent instructions.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.agent_code IS
+    'Stable application/runtime identifier for the AI agent or model configuration.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.model_name IS
+    'Actual AI model or ML model name used by this agent, such as gpt-5.6, qwen3-14b, xgboost-lead-v3, or lightgbm-churn-v2.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.system_instructions IS
+    'Current system-level instructions for a task-oriented AI agent. Historical versions are managed outside this table.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.required_variables IS
+    'Runtime context variables required to execute the agent instructions.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.instruction_version IS
+    'Current instruction revision. Replaces prompt_template.current_version.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_status
+    ON customer360.cdp_ai_agents (status);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_model_name
+    ON customer360.cdp_ai_agents (model_name)
+    WHERE model_name IS NOT NULL;
+
 ---------------------------------------------------
 -- PROFILE ATTRIBUTE METADATA REGISTRY
 ---------------------------------------------------
@@ -1943,7 +2069,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     -- Regex patterns blocked from being promoted to external identifiers.
     blocked_patterns TEXT[] NOT NULL DEFAULT ARRAY['^[0-]*$'],
 
-    -- segmentation metadata: whether this attribute can be used for audience segmentation, and its data type (TEXT, NUMERIC, DATE, TIMESTAMP, BOOLEAN, JSONB).
+    -- segmentation metadata: whether this attribute can be used for audience segmentation, and its data type TEXT, NUMERIC, DATE, TIMESTAMP, BOOLEAN, JSONB.
     is_segmentable BOOLEAN NOT NULL DEFAULT TRUE,
     data_type VARCHAR(50) NOT NULL DEFAULT 'TEXT',
 
@@ -1960,8 +2086,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     )),
     value_min NUMERIC,
     value_max NUMERIC,
-    -- How often this attribute/score gets (re)computed: 'realtime' | 'hourly' |
-    -- 'daily' | 'weekly' | 'batch' | 'event_driven'.
+    -- Update schedule: 'realtime' | 'hourly' | 'daily' | 'weekly' | 'batch' | 'event_driven'
     refresh_frequency VARCHAR(50),
 
     display_order INT NOT NULL DEFAULT 0,
@@ -1969,7 +2094,9 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-COMMENT ON TABLE customer360.cdp_profile_attributes IS 'Metadata-driven attribute catalog for cdp_master_profiles schema columns used by identity-resolution engine (CIR). One row per master-profile column (email, phone_number, device_id, etc.) with consolidation rules, matching strategies, and schema hints. Domain-specific attributes (national_id, kyc_status, loyalty_id, etc.) must be included; they live as JSONB keys in cdp_domain_profiles.domain_attributes.';
+-- Defines rules for both standard columns and JSONB domain attributes
+-- Defines rules for both standard columns and JSONB domain attributes
+COMMENT ON TABLE customer360.cdp_profile_attributes IS 'CIR attribute catalog defining consolidation and matching rules for cdp_master_profiles columns and cdp_domain_profiles JSONB keys.';
 
 -- ==========================================================
 -- Scoring Models Registry
