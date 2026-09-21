@@ -23,21 +23,31 @@ REPO_ROOT="$(cd ../.. && pwd)" # repo root (contains customer360-agent/)
 ENV="${1:-}"; ACTION="${2:-deploy}"
 case "$ENV" in uat | prod) ;; *) echo "Usage: ./deploy-agent.sh <uat|prod> [deploy|destroy]"; exit 1 ;; esac
 
-# Keep the CI-injected LLM secret authoritative over an optional local server/.env.
+# Keep CI-injected LLM config (secret key + model name) authoritative over an optional local server/.env.
 _LEO_OPENAI_API_KEY_FROM_ENV="${LEO_OPENAI_API_KEY:-}"
+_LEO_OPENAI_MODEL_NAME_FROM_ENV="${LEO_OPENAI_MODEL_NAME:-}"
 _LLM_API_KEY_FROM_ENV="${LLM_API_KEY:-}"
 _AGENT_API_TOKEN_FROM_ENV="${AGENT_API_TOKEN:-}"
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
 [[ -n "$_LEO_OPENAI_API_KEY_FROM_ENV" ]] && LEO_OPENAI_API_KEY="$_LEO_OPENAI_API_KEY_FROM_ENV"
+[[ -n "$_LEO_OPENAI_MODEL_NAME_FROM_ENV" ]] && LEO_OPENAI_MODEL_NAME="$_LEO_OPENAI_MODEL_NAME_FROM_ENV"
 [[ -n "$_LLM_API_KEY_FROM_ENV" ]] && LLM_API_KEY="$_LLM_API_KEY_FROM_ENV"
 [[ -n "$_AGENT_API_TOKEN_FROM_ENV" ]] && AGENT_API_TOKEN="$_AGENT_API_TOKEN_FROM_ENV"
-unset _LEO_OPENAI_API_KEY_FROM_ENV _LLM_API_KEY_FROM_ENV _AGENT_API_TOKEN_FROM_ENV
+unset _LEO_OPENAI_API_KEY_FROM_ENV _LEO_OPENAI_MODEL_NAME_FROM_ENV _LLM_API_KEY_FROM_ENV _AGENT_API_TOKEN_FROM_ENV
 
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 AGENT_SERVER_KEY="${AGENT_SERVER_KEY:-agent}"
 AGENT_PORT="${AGENT_PORT:-8009}"
 AGENT_DB_SCHEMA="${AGENT_DB_SCHEMA:-customer360}"
-LLM_MODEL="${LLM_MODEL:-openai/gpt-4o-mini}"              # OpenAI via LiteLLM (model prefix carries the provider)
+# Model: explicit LLM_MODEL wins; else the CD var LEO_OPENAI_MODEL_NAME (a bare name -> add the
+# openai/ provider prefix LiteLLM needs, unless it already carries a provider/); else the default.
+if [[ -z "${LLM_MODEL:-}" ]]; then
+  if [[ -n "${LEO_OPENAI_MODEL_NAME:-}" ]]; then
+    case "$LEO_OPENAI_MODEL_NAME" in */*) LLM_MODEL="$LEO_OPENAI_MODEL_NAME" ;; *) LLM_MODEL="openai/$LEO_OPENAI_MODEL_NAME" ;; esac
+  else
+    LLM_MODEL="openai/gpt-4o-mini"
+  fi
+fi
 LLM_BASE_URL="${LLM_BASE_URL:-https://api.openai.com/v1}" # OpenAI endpoint
 LLM_EXTRA_CONFIG="${LLM_EXTRA_CONFIG:-}"
 # Secret key (never committed): explicit LLM_API_KEY wins, else LEO_OPENAI_API_KEY (CD secret).

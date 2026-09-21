@@ -28,6 +28,7 @@ name: CD
 #   BREVO_SMTP_PASSWORD -> Brevo SMTP password for uat (email_engine real send + /metadata/smtp); absent => uat email stays mock. prod has no smtp.prod.env so stays mock regardless.
 #   DOCS_OPENAI_API_KEY -> docs-vector-search OpenAI embeddings and LLM
 #   LEO_OPENAI_API_KEY  -> customer360-agent LLM_API_KEY (OpenAI via LiteLLM)
+#   (var) LEO_OPENAI_MODEL_NAME -> customer360-agent LLM_MODEL (bare name; deploy-agent.sh adds openai/)
 #   AGENT_API_TOKEN     -> shared bearer token gating the agent's /plan/* (agent + api both get it)
 #   DOCS_INTERNAL_AUTH_SECRET -> shared secret for the frontend-admin /ai proxy (optional)
 #   VSTORAGE_ACCESS_KEY / VSTORAGE_SECRET_KEY -> S3/vStorage remote-state creds AND
@@ -220,6 +221,7 @@ jobs:
           TF_VAR_secret_key: ${{ secrets.VSTORAGE_SECRET_KEY }}
           DOCS_OPENAI_API_KEY: ${{ secrets.DOCS_OPENAI_API_KEY }}
           LEO_OPENAI_API_KEY: ${{ secrets.LEO_OPENAI_API_KEY }}   # customer360-agent -> LLM_API_KEY (OpenAI)
+          LEO_OPENAI_MODEL_NAME: ${{ vars.LEO_OPENAI_MODEL_NAME }}   # customer360-agent -> LLM_MODEL (deploy-agent.sh adds the openai/ prefix)
           AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}   # shared bearer token: agent /plan/* auth == customer360-api sender
           DOCS_INTERNAL_AUTH_SECRET: ${{ secrets.DOCS_INTERNAL_AUTH_SECRET }}
           PORTAINER_ADMIN_PASSWORD: ${{ secrets.PORTAINER_ADMIN_PASSWORD }}   # monitoring step: auto-registers Portainer agent envs
