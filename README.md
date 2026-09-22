@@ -1,174 +1,250 @@
+# Customer 360 Platform
 
-# Customer 360
+Customer 360 is a multi-tenant customer data, intelligence, activation, and experience platform. It turns raw profile and behavioral data into governed customer context, segments, recommendations, promotions, and AI-assisted workflows.
 
-Customer 360 is the identity-resolution and golden-record layer for the LEO CDP platform. The repository combines a PostgreSQL-backed customer graph, a FastAPI read/write API, a Dagster orchestration workspace, and a thin admin frontend that consumes the API.
+The repository is organized around eight top-level `customer360-*` components. They are connected parts of one platform, but they have different ownership boundaries: SQL defines persistence, the DAO owns reusable database access, backend jobs transform and resolve data, APIs expose contracts, and the frontend and agent consume those contracts.
 
-> 📖 **Documentation site:** **https://leo-cdp.github.io/leo-customer360/** — every `*.md` in this repo, rendered and searchable with diagrams, images, and PDFs. Auto-built from `main` by [`.github/workflows/deploy-docs.yml`](.github/workflows/deploy-docs.yml).
+## Roadmap Vision: Agentic Customer 360 Platform
 
-The code in this repo is not an abstract demo. It reflects a real platform layout with:
+The platform is moving from a customer data platform into a governed agentic decision system: every interaction becomes trusted customer context, every decision is explainable, and every activation produces measurable feedback. AI should help teams understand audiences, recommend the next best action, create campaign drafts, and operate through approved tools without bypassing tenant, consent, security, or human-governance boundaries.
 
-- a PostgreSQL 16 schema for master profiles, raw profiles, links, CRM entities, personas, and segmentation metadata
-- a reusable `leo-customer360-dao` Python package containing shared models, schemas, CRUD, repositories, and database utilities
-- a FastAPI API in `customer360-api/` for CRUD, reporting, auth, and tenant-scoped access
-- a Dagster workspace in `customer360-backend/` that runs identity resolution, segmentation, and analytics jobs
-- a FastAPI ad-serving service in `customer360-promotions/`
-- a browser-based admin UI in `customer360-frontend/` that calls the API over HTTP
-- local Docker-based startup and demo seeding scripts in the repo root
+### Agentic operating loop
 
-![](./docs/architecture/images/composable-cdp-architecture.png)
+```mermaid
+flowchart LR
+    Observe[Observe events and customer context] --> Understand[Resolve identity and understand intent]
+    Understand --> Recommend[Recommend content, products, audiences, and next actions]
+    Recommend --> Create[Create an explainable draft through REST or MCP]
+    Create --> Govern[Validate, approve, and audit]
+    Govern --> Activate[Activate through promotions and campaign channels]
+    Activate --> Learn[Measure outcomes and update customer context]
+    Learn --> Observe
+```
 
-## What is implemented today
+### Delivery horizons
 
-The current repo contains four application services, three active Dagster jobs, and six placeholder Dagster jobs.
+1. **Trust foundation** — Complete tenant-safe identity resolution, consent and suppression handling, durable event ingestion, RLS enforcement, auditable schemas, and stable REST/MCP contracts. The event API remains database-free on the request path; PostgreSQL remains the governed system of record for mastered customer context.
+2. **Intelligence layer** — Add production scoring, embeddings, semantic search, lookalike audiences, graph-aware segmentation, and real-time recommendations for web, mobile, promotions, and AI agents. Recommendations must include freshness, confidence, source context, and tenant scope.
+3. **Governed activation** — Let `customer360-agent` generate campaign, content, promotion, email, Zalo, and ad-tech drafts. Human approval remains mandatory before scheduling, publishing, sending, or spending. `customer360-promotions` delivers standard digital banners, affiliate links, sponsored native content, and recommendation candidates through explicit service contracts.
+4. **Closed-loop optimization** — Correlate impressions, clicks, conversions, spend, delivery outcomes, and customer responses back into Customer 360. Add experiment support, model/version traceability, drift and data-quality monitoring, retry-safe activation, and policy-aware next-best-action optimization.
 
-| Area | Status | Notes |
+### Non-negotiable technical guardrails
+
+- Every read, write, recommendation, agent tool, export, and activation is tenant-scoped and permission-checked.
+- Agents can observe, explain, recommend, and draft; only authorized humans can approve or activate billable or customer-facing actions.
+- Event ingestion validates and sanitizes payloads before durable Redis/S3 handling and never performs direct PostgreSQL writes in the request path.
+- Activation is idempotent, consent-aware, suppression-aware, auditable, retry-safe, and protected by preflight checks.
+- Prompts, models, providers, recommendation evidence, approvals, revisions, and outcomes are versioned for reproducibility.
+- Operational behavior is observable across API requests, event queues, Dagster jobs, agent calls, recommendation decisions, and activation runs.
+
+## Platform Flow
+
+```mermaid
+flowchart LR
+    Web[Web and mobile clients] --> Frontend[customer360-frontend]
+    Web --> Events[customer360-event-api]
+    External[Connectors and webhooks] --> Events
+
+    Frontend --> API[customer360-api\nREST + MCP]
+    Agent[customer360-agent\nAI campaign planning] --> API
+    Agent --> MCP[MCP tools\n/api/mcp]
+    MCP --> API
+
+    Events --> Stream[Redis Streams]
+    Stream --> Lake[S3 or MinIO\nimmutable event objects]
+    Lake --> Backend[customer360-backend\nDagster + Polars]
+    Backend --> API
+    Backend --> DAO[customer360-dao]
+    API --> DAO
+    DAO --> DB[customer360-database\nPostgreSQL 16]
+    Backend --> DB
+
+    Backend --> Segments[Profiles, personas, segments, analytics]
+    Segments --> Promotions[customer360-promotions]
+    Promotions --> API
+    API --> Frontend
+    API --> Agent
+```
+
+### Core data lifecycle
+
+1. A browser, mobile client, connector, or webhook submits activity to `customer360-event-api`.
+2. The event API validates and sanitizes the payload, acknowledges only after durable Redis Stream enqueue, and writes immutable hourly NDJSON objects to S3 or MinIO. The request path does not write directly to PostgreSQL.
+3. `customer360-backend` Dagster code locations consume raw data, resolve identities, recompute segments, and aggregate analytics. The active jobs are identity resolution, segmentation, and analytics; additional locations are runnable scaffolds for activation and personalization work.
+4. `customer360-dao` provides tenant-aware models, repositories, CRUD, RLS context, SQL safety, and event-lake query helpers. It is installed as a package rather than imported through a source-path workaround.
+5. `customer360-api` exposes authenticated REST resources for profiles, CRM, personas, segments, reporting, metadata, and event-related reads. Its MCP sub-application exposes approved tenant-scoped tools for AI clients.
+6. `customer360-promotions` evaluates promotion data such as placements, campaigns, creatives, standard digital banners, affiliate links, sponsored native content, and recommendation candidates. Its PostgreSQL objects live in the `leo_ads` schema.
+7. `customer360-frontend` renders the browser experience and calls the API. It does not connect directly to PostgreSQL or own customer business logic.
+8. `customer360-agent` calls the API and campaign-planning service over HTTP; it uses provider-neutral LiteLLM configuration and a versioned PostgreSQL prompt store.
+
+## The Eight Components
+
+| Component | Responsibility | Primary contract | Runtime shape |
+|---|---|---|---|
+| [`customer360-database/`](customer360-database) | Canonical schema, seeds, views, and forward migrations | PostgreSQL 16 `customer360` schema, tenant tables, RLS, graph, CRM, profile, event, and prompt data | SQL files applied by PostgreSQL bootstrap and [`deployments/postgres/run-sql.sh`](deployments/postgres/run-sql.sh) |
+| [`customer360-dao/`](customer360-dao) | Reusable persistence boundary | SQLAlchemy models, Pydantic schemas, tenant-scoped repositories, CRUD, RLS context, SQL safety, and event-lake queries | Installable Python package; no HTTP server |
+| [`customer360-backend/`](customer360-backend) | Data processing and orchestration | Dagster jobs, sensors, schedules, Polars transformations, identity resolution, segmentation, analytics, and activation scaffolds | Dagster workspace with nine code locations |
+| [`customer360-api/`](customer360-api) | Authenticated application API | REST/MCP JSON and tool contracts for profiles, CRM, personas, segments, reporting, metadata, and integrations | FastAPI on port `8008`; REST plus MCP mounted under `/mcp` |
+| [`customer360-event-api/`](customer360-event-api) | Durable behavioral-event ingestion | `POST /api/v1/tracking/logs`; Redis Streams enqueue; immutable S3/MinIO event objects | FastAPI on port `8010`; database-free request path |
+| [`customer360-promotions/`](customer360-promotions) | Promotion delivery and recommendations | Tenant-scoped placements, campaigns, creatives, banners, affiliate tracking, sponsored content, and recommendation responses | FastAPI on port `9009`; `leo_ads` schema and Redis cache |
+| [`customer360-frontend/`](customer360-frontend) | Admin and operator browser experience | Static SPA shell, templates, auth/session state, dashboards, and API calls | FastAPI shell on port `8890`; no direct database access |
+| [`customer360-agent/`](customer360-agent) | AI campaign-planning service and client | `/plan/campaign`, `/plan/zalo`, bearer-token service calls, LiteLLM provider abstraction, versioned prompts | FastAPI on port `8009`; client package consumed by `customer360-api` |
+
+### What belongs where
+
+- **Database rules** belong in `customer360-database` and its migrations.
+- **Reusable persistence logic** belongs in `customer360-dao`, not in API routers or frontend code.
+- **Long-running transformations and scheduled processing** belong in `customer360-backend` Dagster code locations.
+- **HTTP authentication, tenant context, request validation, and API contracts** belong in `customer360-api` or the specialized event/promotions services.
+- **Event ingestion** must validate, sanitize, and enqueue to Redis Streams or object storage. `customer360-event-api` must not connect directly to the database on the request path.
+- **Browser presentation** belongs in `customer360-frontend`; it consumes API responses and never bypasses tenant-aware API boundaries.
+- **AI provider calls and prompt lifecycle** belong in `customer360-agent`; the core API uses its client contract rather than importing planner internals.
+
+## Runtime Contracts
+
+### Tenant and identity safety
+
+Every customer-facing read or write must respect `tenant_id`. Authentication resolves the caller and tenant context; repositories and database policies provide defense in depth. Identity resolution preserves historical identifiers while consolidating activity into a master profile. Do not infer tenant scope from arbitrary request-body values or bypass the DAO/API boundary.
+
+### Storage boundaries
+
+| Data | System of record | Notes |
 |---|---|---|
-| `customer360-backend/identity_resolution/` | Implemented | Dagster identity-resolution job; resolves raw profile matches into master profiles |
-| `customer360-backend/segmentation/` | Implemented | Recomputes active segments and syncs member/tag data back to master profiles |
-| `customer360-backend/analytics/` | Implemented | Hourly Dagster job that aggregates tracking logs and updates source totals |
-| `customer360-api/` | Implemented | Main REST API for identity, CRM, persona, reporting, and metadata |
-| `customer360-event-api/` | Implemented | Durably queues dynamic tracking events in Redis Streams and writes immutable hourly per-source S3/MinIO objects |
-| `customer360-promotions/` | Implemented | Multi-tenant FastAPI ad-serving API with placements, campaigns, creatives, and a browser loader |
-| `customer360-frontend/` | Implemented | FastAPI shell for the UI, backed by client-side JS and API requests |
-| `customer360-backend/scoring/`, `data_synch/`, `email_engine/`, `notification_engine/`, `campaign_activation/`, `personalization/` | Placeholder | Runnable Dagster scaffolds ready for their service logic |
+| Master profiles, CRM, personas, segments, metadata, graph, prompt store | PostgreSQL `customer360` | Canonical schema in `customer360-database`; RLS and foreign keys apply |
+| Raw behavioral events | S3 or MinIO event lake | Immutable hourly NDJSON objects; Redis Stream messages carry the durable handoff |
+| Event queue, rate limits, session metadata, API-key mappings, caches | Redis | Redis Streams are required for durable event acknowledgement; optional caches fail open where configured |
+| Promotion placements, campaigns, creatives, tracking endpoints | PostgreSQL `leo_ads` | Owned by `customer360-promotions`; public route prefix is `/ads` |
+| Versioned agent prompts | PostgreSQL `customer360.prompt_template` and `prompt_version` | Seeded by `customer360-database/init-prompt-store-seed.sql` |
 
-## Repository structure
+### API and experience boundaries
 
-| Path | Purpose |
-|---|---|
-| [`customer360-database/`](customer360-database) | Schema source: `database-schema.sql`, seed/init scripts, and SQL views |
-| [`customer360-backend/`](customer360-backend) | Dagster workspace with nine code locations: identity resolution, segmentation, analytics, and six placeholder services |
-| [`customer360-api/`](customer360-api) | FastAPI service with routers, auth, SQLAlchemy models, and business logic |
-| [`customer360-dao/`](customer360-dao) | Installable shared Python DAO package and package-owned unit tests |
-| [`customer360-event-api/`](customer360-event-api) | FastAPI ingestion service that queues dynamic events in Redis Streams and writes hourly tracking-log objects to S3/MinIO |
-| [`customer360-promotions/`](customer360-promotions) | Standalone FastAPI ad-serving service with its own database, cache, and widget code |
-| [`customer360-frontend/`](customer360-frontend) | Thin admin UI served by FastAPI and loaded from static templates |
-| [`all-data-simulator/`](all-data-simulator) | Synthetic raw data and optional S3/MinIO upload helpers |
-| [`deployments/`](deployments) | Deployment scripts, infrastructure component configuration, and deployment diagrams |
-| [`k8s/`](k8s) | Kubernetes deployment documentation and manifests |
-| [`postgres/`](postgres), [`redis/`](redis) | Custom Docker image setup for PostgreSQL/PostGIS/pgvector and Redis |
-| [`docs/`](docs) | Architecture, operations, and planning material |
-| [`ui-wireframes/`](ui-wireframes) | UI design references |
-| `docker-compose.yml`, `dev-docker-compose.yml`, `dev-no-sso-docker-compose.yml` | Production-style, local-development, and no-SSO Compose stacks |
-| `dev-c360.sh`, `dev-stop-and-delete-all.sh`, `manage-c360.sh`, `run_all_tests.sh` | Local startup, cleanup, stack management, and consolidated test scripts |
+- Browser and external clients use `customer360-api` and `customer360-event-api`; they do not connect to PostgreSQL directly.
+- AI clients use the authenticated MCP surface under `customer360-api/mcp`.
+- `customer360-agent` is an internal HTTP service called by the API and is protected by `AGENT_API_TOKEN` for planning routes.
+- `customer360-promotions` provides the promotion decision and content surface; the core API and frontend integrate with it through service contracts.
+- The frontend is configured for browser-reachable API URLs. Docker network hostnames are not automatically valid browser URLs.
 
-## Runtime architecture
+## Deployment Topology
 
-The repo runs with the following high-level flow:
+### Local development
 
-1. Postgres stores the canonical `customer360` schema and all operational metadata.
-2. `customer360-api` exposes the public API and enforces tenant-aware auth via middleware.
-3. The Dagster backend loads nine code locations; identity resolution, segmentation, and analytics are active, while six additional service locations are runnable placeholders.
-4. The data-tracking API stores immutable hourly NDJSON batches in per-source S3 buckets; dev uses the in-network MinIO service.
-5. The admin frontend calls the API directly, without direct database access.
-6. The standalone ads server serves tenant-scoped ad placements and creatives through its API and browser loader.
-7. Local dev and production scripts bootstrap dockerized infrastructure and run the platform as a coherent stack.
+The local development stack uses Docker for infrastructure and selected APIs:
 
-## Local development quick start
+- `dev-docker-compose.yml` runs PostgreSQL, Redis, Keycloak, MinIO, and the event API; host processes run the main API and Dagster jobs.
+- `dev-no-sso-docker-compose.yml` provides the same core workflow without the Keycloak dependency.
+- `docker-compose.yml` is the production-shaped all-in-one stack with PostgreSQL, Redis, Keycloak, Dagster, `customer360-api`, the agent, the event API, and the optional demo-seed profile.
+- `deployments/` contains VM deployment scripts, Terraform overlays, proxy configuration, monitoring, storage, and deployment diagrams.
+- `k8s/` contains the Kubernetes-oriented Dagster and platform deployment material.
 
-### 1) Prepare environment
+### Production-facing paths
+
+The deployment proxy normally exposes:
+
+| Public path | Component | Default port |
+|---|---|---:|
+| `/` | `customer360-frontend` | `8890` |
+| `/c360api` | `customer360-api` | `8008` |
+| `/ads` | `customer360-promotions` | `9009` |
+| `/data` | `customer360-event-api` | `8010` |
+| `/mcp` | MCP surface mounted by `customer360-api` | `8008` |
+| `/ai` | Docs-vector-search proxy through the frontend | `8001` |
+
+Infrastructure is provisioned separately from application code. Terraform manages the environment modules and remote state; deployment scripts ship the appropriate `customer360-*` directory and locally install `customer360-dao` where a service requirements file refers to the package.
+
+## Local Development
+
+### Start the development workflow
 
 ```bash
 cp .env.example .env
-```
-
-Then edit the values in `.env` for your local Postgres, Redis, Keycloak, and host ports. The repo includes a full env template and operational notes in the docs.
-
-### 2) Start the dev stack
-
-```bash
 ./dev-c360.sh
 ```
 
-This script starts the infra stack and the MinIO-backed data-tracking API in Docker, then automatically seeds demo data if the database is empty. It is meant for the workflow where Postgres and Redis run in Docker while the main API and backend workers run directly on the host.
+`dev-c360.sh` starts the infrastructure stack, waits for health checks, builds the docs search service, and seeds demo data when the database is empty. It is the preferred entrypoint for a host-run API and Dagster development workflow.
 
-### 3) Run host services
-
-In a separate terminal, start the API and backend workers:
+Useful variants:
 
 ```bash
-cd customer360-api
-./start.sh
-
-cd ../customer360-backend/identity_resolution
-./run-demo.sh
+./dev-c360.sh no-seed       # skip the identity-resolution demo seed
+./dev-c360.sh seed-new-data # send synthetic traffic through customer360-event-api
+./dev-c360.sh restart      # restart docs search and host-run services
+./dev-c360.sh upgrade      # rebuild current local services without deleting volumes
+./dev-c360.sh reset -y      # destructive: remove Docker volumes and recreate the stack
 ```
 
-The admin frontend can also be started separately:
+Run host services in separate terminals when using the dev Compose workflow:
 
 ```bash
-cd ../customer360-frontend
-./start.sh
+cd customer360-api && ./start.sh
+cd customer360-backend/identity_resolution && ./run-demo.sh
+cd customer360-frontend && ./start.sh
 ```
 
-## Production-style stack
-
-For the packaged stack using Docker Compose, run:
+For the packaged Docker workflow:
 
 ```bash
 ./manage-c360.sh start
 ./manage-c360.sh status
+./manage-c360.sh logs customer360-api
 ```
 
-This covers the main production service stack in `docker-compose.yml`, including Postgres, Redis, Keycloak, Dagster, the Customer 360 API, and the data-tracking API. The dev stack in `dev-docker-compose.yml` additionally runs MinIO and its initializer. The standalone `customer360-promotions/` service has its own startup scripts.
+### Shared DAO installation
 
-## Service entrypoints
-
-The repo uses these primary entrypoints:
-
-- `customer360-api/app.py` — FastAPI API entrypoint
-- `customer360-event-api/app.py` — CDP tracking-log FastAPI entrypoint (port 8010)
-- `customer360-promotions/app.py` — ad-serving FastAPI entrypoint (port 9009 by default)
-- `customer360-backend/workspace.yaml` — Dagster workspace containing all nine backend code locations
-- `customer360-backend/identity_resolution/worker.py` — legacy local polling helper; production runs the Dagster job
-- `customer360-frontend/app.py` — admin frontend shell
-- `manage-c360.sh` — production-style Docker stack manager
-- `dev-c360.sh` — local dev infrastructure bootstrap
-
-## Authentication and tenant context
-
-The API is auth-protected on nearly every route. The current implementation requires a valid bearer token on all non-exempt endpoints, and it resolves tenant/user context from the token or Keycloak-backed auth flow. The code now intentionally rejects header-only login shortcuts, so the runtime behavior matches the current API docs in `customer360-api/README.md`.
-
-The usual local flow is:
+Register the checked-out DAO before installing service requirements that contain the package name:
 
 ```bash
-curl -s -X POST http://localhost:8008/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"<password from .env>"}'
+./customer360-dao/install-local.sh
+./customer360-dao/install-local.sh --requirements
 ```
 
-Then pass the returned `access_token` as a bearer token in subsequent requests.
+Targeted setup is useful when working on one service:
+
+```bash
+./customer360-dao/install-local.sh --service customer360-api --requirements
+./customer360-dao/install-local.sh --service customer360-backend/segmentation --requirements
+./customer360-agent/install-local.sh --service customer360-api --requirements
+```
 
 ## Testing
 
-The repo includes a consolidated test runner:
+Run the repository-level suites with:
 
 ```bash
 ./run_all_tests.sh
 ```
 
-This is the current project-level test entrypoint for the Customer 360 API, identity resolution, segmentation, and c360 promotions suites. The data-tracking API also has its own `customer360-event-api/run_unit_tests.sh` runner.
+Focused runners include:
 
-## Key documentation
+```bash
+./customer360-api/run_unit_tests.sh
+./customer360-event-api/run_unit_tests.sh
+./customer360-promotions/run_unit_tests.sh
+./customer360-agent/run_unit_tests.sh
+bash customer360-dao/run_tests.sh
+cd customer360-backend/identity_resolution && ./run_tests.sh
+```
 
-Start here for deeper context:
+Some integration suites require PostgreSQL, Redis, MinIO/S3, Keycloak, or a running service. Unit runners report when those dependencies are unavailable; do not interpret skipped integration tests as full end-to-end coverage.
 
-- [`docs/architecture/TECHNICAL-DOCUMENTATION.md`](docs/architecture/TECHNICAL-DOCUMENTATION.md)
-- [`docs/operations/DOCKER-COMPOSE-GUIDE.md`](docs/operations/DOCKER-COMPOSE-GUIDE.md)
-- [`customer360-api/README.md`](customer360-api/README.md)
-- [`customer360-event-api/README.md`](customer360-event-api/README.md)
-- [`customer360-promotions/README.md`](customer360-promotions/README.md)
-- [`customer360-backend/README.md`](customer360-backend/README.md)
-- [`customer360-frontend/README.md`](customer360-frontend/README.md)
-- [`deployments/README.md`](deployments/README.md)
-- [`k8s/README.md`](k8s/README.md)
+## Documentation Map
+
+- [`customer360-api/README.md`](customer360-api/README.md) - REST/MCP surfaces, authentication, tenant context, and MCP tool safety.
+- [`customer360-backend/README.md`](customer360-backend/README.md) - Dagster code locations, bounded workloads, data processing, and operational controls.
+- [`customer360-dao/README.md`](customer360-dao/README.md) - package layout, installation, repositories, RLS context, and tests.
+- [`customer360-database/README.md`](customer360-database/README.md) - schema requirements, initialization order, seeds, views, and migrations.
+- [`customer360-event-api/README.md`](customer360-event-api/README.md) - event envelope, Redis Streams, S3/MinIO storage, identity fields, and API contract.
+- [`customer360-promotions/README.md`](customer360-promotions/README.md) - banners, affiliate links, sponsored content, recommendations, and the `c360_PROMOTION_*` environment contract.
+- [`customer360-frontend/README.md`](customer360-frontend/README.md) - browser shell, auth/session flow, templates, and API integration.
+- [`customer360-agent/README.md`](customer360-agent/README.md) - LiteLLM providers, prompt store, planning endpoints, and bearer-token security.
+- [`deployments/README.md`](deployments/README.md) - VM topology, Terraform, proxy routes, remote state, and production operations.
+- [`k8s/README.md`](k8s/README.md) - Kubernetes platform and Dagster deployment material.
 
 ## References
 
-- [LEOCDP.com](https://leocdp.com)
-- [Dagster](https://dagster.io)
+- [Documentation site](https://leo-cdp.github.io/leo-customer360/)
+- [Dagster](https://dagster.io/)
 - [FastAPI](https://fastapi.tiangolo.com/)
+- [Model Context Protocol](https://modelcontextprotocol.io/)
 - [PostgreSQL](https://www.postgresql.org/)
 - [pgvector](https://github.com/pgvector/pgvector)
 - [PostGIS](https://postgis.net/)
-
