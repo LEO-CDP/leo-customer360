@@ -179,24 +179,23 @@ if command -v docker >/dev/null 2>&1; then
   sudo docker builder prune -a -f >/dev/null 2>&1 || true
   echo "   reclaiming disk (df after):  $(df -h --output=avail / | tail -1 | tr -d ' ') free"
 fi
-# 10G swap for the Dagster box: identity/segmentation run workers (Polars/pandas)
-# spike RAM; a swapfile absorbs the peak so the gRPC code server doesn't miss its
-# heartbeat and get OOM-killed mid-step (the failure that left runs hung). Size-aware
-# + idempotent: (re)creates /swapfile only when it is missing or smaller than 10G
-# (a pre-existing 2G swapfile must not shadow the 10G we want).
-if [ "$(sudo stat -c%s /swapfile 2>/dev/null || echo 0)" -lt 10737418240 ]; then
-  sudo swapoff /swapfile 2>/dev/null || true
-  sudo rm -f /swapfile
-  sudo fallocate -l 10G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=10240 status=none
-  sudo chmod 600 /swapfile
-  sudo mkswap /swapfile >/dev/null
-  sudo swapon /swapfile || true
-  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
-  echo "   swap: 10G /swapfile (re)created"
-else
-  sudo swapon /swapfile 2>/dev/null || true
-  echo "   swap: /swapfile already >=10G"
-fi
+ensure_swap() {
+  # Identity/segmentation workers (Polars/pandas) can spike RAM; create swap before
+  # local builds, but after GHCR pulls so it does not consume layer-extraction space.
+  if [ "$(sudo stat -c%s /swapfile 2>/dev/null || echo 0)" -lt 10737418240 ]; then
+    sudo swapoff /swapfile 2>/dev/null || true
+    sudo rm -f /swapfile
+    sudo fallocate -l 10G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=10240 status=none
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile >/dev/null
+    sudo swapon /swapfile || true
+    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+    echo "   swap: 10G /swapfile (re)created"
+  else
+    sudo swapon /swapfile 2>/dev/null || true
+    echo "   swap: /swapfile already >=10G"
+  fi
+}
 umask 077
 env_file="$(mktemp)"
 printf %s "$ENV_B64" | base64 -d > "$env_file"
@@ -207,9 +206,11 @@ if [ "$DEPLOY_MODE" = "ghcr" ]; then
   echo "   pulling $IMAGE ..."
   [ -n "$GHCR_TOKEN" ] && printf %s "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
   docker_pull_retry "$IMAGE"
+  ensure_swap
   RUN_IMG="$IMAGE"
 else
   echo "   building image (this can take a few minutes on a small box)..."
+  ensure_swap
   sudo docker build -t customer360-dagster -f /opt/c360/customer360-backend/Dockerfile /opt/c360
   RUN_IMG="customer360-dagster"
 fi
