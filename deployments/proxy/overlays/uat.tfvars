@@ -15,7 +15,7 @@ caddy_image      = "caddy:2-alpine"
 api_upstream       = "127.0.0.1:8008"  # customer360-api (root_path /c360api; Caddy strips /c360api)
 keycloak_upstream  = "127.0.0.1:8080"  # Keycloak (serve under /auth -> set KC_HTTP_RELATIVE_PATH=/auth)
 frontend_upstream  = "127.0.0.1:8890"  # customer360-frontend (catch-all "/")
-ads_upstream       = "127.0.0.1:9009"  # ads-server (/ads)
+ads_upstream       = "127.0.0.1:9009"  # customer360-promotions (/ads)
 dagster_upstream   = "10.100.1.4:3000" # backend box (only if you enable the /dagster block)
 netdata_upstream   = "127.0.0.1:4199"  # oauth2-proxy -> Netdata (only if you enable /netdata)
 portainer_upstream = "127.0.0.1:9443"  # Portainer HTTPS (only if you enable /portainer)

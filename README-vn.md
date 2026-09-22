@@ -8,7 +8,7 @@ Code trong repository này không phải là một abstract demo. Đây là layo
 - schema PostgreSQL 16 cho master profiles, raw profiles, links, CRM entities, personas và segmentation metadata
 - FastAPI API trong `customer360-api/` cho CRUD, reporting, auth và tenant-scoped access
 - Dagster workspace trong `customer360-backend/` chạy các job identity resolution, segmentation và analytics
-- FastAPI ad-serving service trong `ads-server/`
+- FastAPI ad-serving service trong `customer360-promotions/`
 - browser-based admin UI trong `customer360-frontend/` gọi API qua HTTP
 - các script khởi động bằng Docker và seed demo ở thư mục gốc của repository
 
@@ -25,7 +25,7 @@ Repository hiện có bốn application service, ba Dagster job đang hoạt đ�
 | `customer360-backend/analytics/` | Đã triển khai | Dagster job chạy mỗi giờ để aggregate tracking logs và cập nhật source totals |
 | `customer360-api/` | Đã triển khai | REST API chính cho identity, CRM, persona, reporting và metadata |
 | `customer360-event-api/` | Đã triển khai | Đưa dynamic tracking event vào Redis Streams và ghi object S3/MinIO bất biến theo từng source và từng giờ |
-| `ads-server/` | Đã triển khai | FastAPI ad-serving API đa tenant với placement, campaign, creative và browser loader |
+| `customer360-promotions/` | Đã triển khai | FastAPI ad-serving API đa tenant với placement, campaign, creative và browser loader |
 | `customer360-frontend/` | Đã triển khai | FastAPI shell cho UI, sử dụng client-side JS và API request |
 | `customer360-backend/scoring/`, `data_synch/`, `email_engine/`, `notification_engine/`, `campaign_activation/`, `personalization/` | Placeholder | Các Dagster scaffold có thể chạy, sẵn sàng bổ sung service logic |
 
@@ -37,7 +37,7 @@ Repository hiện có bốn application service, ba Dagster job đang hoạt đ�
 | [`customer360-backend/`](customer360-backend) | Dagster workspace với chín code location: identity resolution, segmentation, analytics và sáu placeholder service |
 | [`customer360-api/`](customer360-api) | FastAPI service với router, auth, SQLAlchemy model và business logic |
 | [`customer360-event-api/`](customer360-event-api) | FastAPI ingestion service đưa event vào Redis Streams rồi ghi tracking-log object theo giờ vào S3/MinIO |
-| [`ads-server/`](ads-server) | FastAPI ad-serving service độc lập với database, cache và widget code riêng |
+| [`customer360-promotions/`](customer360-promotions) | FastAPI ad-serving service độc lập với database, cache và widget code riêng |
 | [`customer360-frontend/`](customer360-frontend) | Admin UI gọn, được FastAPI phục vụ và load từ static template |
 | [`all-data-simulator/`](all-data-simulator) | Công cụ tạo raw data tổng hợp và hỗ trợ upload lên S3/MinIO |
 | [`deployments/`](deployments) | Deployment script, cấu hình infrastructure component và deployment diagram |
@@ -106,7 +106,7 @@ For the packaged stack using Docker Compose, run:
 ./manage-c360.sh status
 ```
 
-Stack này bao gồm production service stack chính trong `docker-compose.yml`, gồm Postgres, Redis, Keycloak, Dagster, Customer 360 API và data-tracking API. Dev stack trong `dev-docker-compose.yml` chạy thêm MinIO và initializer của MinIO. Service độc lập `ads-server/` có các startup script riêng.
+Stack này bao gồm production service stack chính trong `docker-compose.yml`, gồm Postgres, Redis, Keycloak, Dagster, Customer 360 API và data-tracking API. Dev stack trong `dev-docker-compose.yml` chạy thêm MinIO và initializer của MinIO. Service độc lập `customer360-promotions/` có các startup script riêng.
 
 ## Service entrypoints
 
@@ -114,7 +114,7 @@ Repository sử dụng các entrypoint chính sau:
 
 - `customer360-api/app.py` — FastAPI API entrypoint
 - `customer360-event-api/app.py` — CDP tracking-log FastAPI entrypoint (port 8010)
-- `ads-server/app.py` — ad-serving FastAPI entrypoint (port 9009 theo mặc định)
+- `customer360-promotions/app.py` — ad-serving FastAPI entrypoint (port 9009 theo mặc định)
 - `customer360-backend/workspace.yaml` — Dagster workspace chứa toàn bộ chín backend code location
 - `customer360-backend/identity_resolution/worker.py` — local polling helper legacy; production chạy Dagster job
 - `customer360-frontend/app.py` — admin frontend shell
@@ -143,7 +143,7 @@ Repository có consolidated test runner:
 ./run_all_tests.sh
 ```
 
-Đây là test entrypoint cấp project hiện tại cho các test suite của Customer 360 API, identity resolution, segmentation và LEO ad server. Data-tracking API cũng có runner riêng tại `customer360-event-api/run_unit_tests.sh`.
+Đây là test entrypoint cấp project hiện tại cho các test suite của Customer 360 API, identity resolution, segmentation và c360 promotions. Data-tracking API cũng có runner riêng tại `customer360-event-api/run_unit_tests.sh`.
 
 ## Tài liệu chính
 
@@ -153,7 +153,7 @@ Repository có consolidated test runner:
 - [`docs/operations/DOCKER-COMPOSE-GUIDE.md`](docs/operations/DOCKER-COMPOSE-GUIDE.md)
 - [`customer360-api/customer360-api.md`](customer360-api/customer360-api.md)
 - [`customer360-event-api/README.md`](customer360-event-api/README.md)
-- [`ads-server/README.md`](ads-server/README.md)
+- [`customer360-promotions/README.md`](customer360-promotions/README.md)
 - [`customer360-backend/README.md`](customer360-backend/README.md)
 - [`customer360-frontend/README.md`](customer360-frontend/README.md)
 - [`deployments/README.md`](deployments/README.md)

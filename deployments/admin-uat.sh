@@ -63,7 +63,7 @@ case "$ACTION" in
   # --- lightweight container restarts (no image pull) -----------------------
   restart-apps)
     echo ">> Restarting api/ads/frontend on the api box ..."
-    run_on "$(srv_ip api)" 'sudo docker restart customer360-api customer360-ads customer360-frontend >/dev/null && sudo docker ps --filter name=customer360- --format "   {{.Names}} {{.Status}}"'
+    run_on "$(srv_ip api)" 'sudo docker restart customer360-api customer360-promotions customer360-frontend >/dev/null && sudo docker ps --filter name=customer360- --format "   {{.Names}} {{.Status}}"'
     ;;
   restart-backend)
     echo ">> Restarting customer360-backend (Dagster) on the backend box ..."

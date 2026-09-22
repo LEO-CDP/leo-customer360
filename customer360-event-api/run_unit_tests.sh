@@ -7,7 +7,7 @@
 # the tests stub the boto3 / redis clients.
 #
 # Creates/reuses a local .venv, installs requirements (test deps included:
-# pytest, httpx), then runs pytest. Mirrors ads-server/run_unit_tests.sh.
+# pytest, httpx), then runs pytest. Mirrors customer360-promotions/run_unit_tests.sh.
 #
 # Usage:
 #   ./run_unit_tests.sh                       # run the whole suite

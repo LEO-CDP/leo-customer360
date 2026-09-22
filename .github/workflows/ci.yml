@@ -44,7 +44,7 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            ads-server: 'ads-server/**'
+            customer360-promotions: 'customer360-promotions/**'
             customer360-backend: 'customer360-backend/**'
             customer360-dao: 'customer360-dao/**'
             customer360-api: 'customer360-api/**'
@@ -62,7 +62,7 @@ jobs:
         id: select
         run: |
           if [[ "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo 'services=["ads-server","customer360-backend","customer360-dao","customer360-api","customer360-agent","customer360-event-api","customer360-frontend","docs-vector-search","postgres","redis"]' >> "$GITHUB_OUTPUT"
+            echo 'services=["customer360-promotions","customer360-backend","customer360-dao","customer360-api","customer360-agent","customer360-event-api","customer360-frontend","docs-vector-search","postgres","redis"]' >> "$GITHUB_OUTPUT"
           else
             printf 'services=%s\n' '${{ steps.filter.outputs.changes }}' >> "$GITHUB_OUTPUT"
           fi
@@ -99,7 +99,7 @@ jobs:
           mkdir -p logs
           # Map each service to its test runner script(s).
           case "$svc" in
-            ads-server)        runners="ads-server/run_unit_tests.sh" ;;
+            customer360-promotions)        runners="customer360-promotions/run_unit_tests.sh" ;;
             customer360-api)   runners="customer360-api/run_unit_tests.sh" ;;
             customer360-agent) runners="customer360-agent/run_unit_tests.sh" ;;
             customer360-dao)   runners="customer360-dao/run_tests.sh" ;;

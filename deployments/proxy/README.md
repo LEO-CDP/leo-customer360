@@ -13,7 +13,7 @@ Client ──HTTPS──▶ LB :443 ─(TCP passthrough)─▶ Caddy :443 (api b
                                                   ├─ /            → customer360-frontend :8890
                                                   ├─ /c360api/*    → customer360-api :8008   (prefix stripped)
                                                   ├─ /auth/*       → keycloak :8080          (KC serves under /auth)
-                                                  ├─ /ads/*        → ads-server :9009        (prefix stripped)
+                                                  ├─ /ads/*        → customer360-promotions :9009        (prefix stripped)
                                                   └─ /cdp-sdk/*    → customer360-event-api :8010 (iframe + assets)
 ```
 
@@ -181,7 +181,7 @@ LB no longer points at it.
 - **customer360-api** has `root_path=/c360api`, so Caddy uses `handle_path` to **strip**
   `/c360api` and the app sees its own `/api/v1/...` routes; `root_path` keeps its
   generated URLs (docs) correct.
-- **ads-server** is proxied under `/ads` with the prefix stripped — fine for its JSON
+- **customer360-promotions** is proxied under `/ads` with the prefix stripped — fine for its JSON
   API; if it serves UI assets it'd need its own base-path config.
 - **Web SDK iframe** is proxied under `/cdp-sdk` without stripping the prefix because
   `customer360-event-api` mounts the SDK at that path. Its response allows only the origin

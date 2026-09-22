@@ -25,7 +25,7 @@ Runs on **`push`** to any branch and on **`pull_request`** targeting
 
 `dorny/paths-filter`](https://github.com/dorny/paths-filter) compares the diff
 against a filter per service and emits a **JSON array of the changed services**
-(e.g. `["ads-server","customer360-frontend"]`). Branch and PR matrices use that
+(e.g. `["customer360-promotions","customer360-frontend"]`). Branch and PR matrices use that
 array; `main` and release tags expand it to all publishable services.
 
 ### 3. `test` — one job per selected service
@@ -58,7 +58,7 @@ renders **one aggregated table** into the run summary, and sends the Brevo email
 
 | Service          | Build context       | Port | Test runner(s)                                          | Image on GHCR                                      |
 | ---------------- | ------------------- | ---- | ------------------------------------------------------- | -------------------------------------------------- |
-| `ads-server`     | `./ads-server`      | 9009 | `run_unit_tests.sh`                                     | `ghcr.io/leo-cdp/leo-customer360/ads-server`       |
+| `customer360-promotions`     | `./customer360-promotions`      | 9009 | `run_unit_tests.sh`                                     | `ghcr.io/leo-cdp/leo-customer360/customer360-promotions`       |
 | `customer360-backend` | `./customer360-backend`  | 3000 | `identity_resolution/run_tests.sh` + `segmentation/run_tests.sh` | `ghcr.io/leo-cdp/leo-customer360/customer360-dagster` |
 | `customer360-api`| `./customer360-api` | 8008 | `run_unit_tests.sh`                                     | `ghcr.io/leo-cdp/leo-customer360/customer360-api`  |
 | `customer360-frontend` | `./customer360-frontend`  | 8890 | *(none — reported as skip)*                             | `ghcr.io/leo-cdp/leo-customer360/customer360-frontend`   |

@@ -14,7 +14,7 @@ the public `/c360/ai/ask` URL:
 
 - `customer360-api`: `root_path=/c360api`
 - Keycloak: `KC_HTTP_RELATIVE_PATH=/auth`
-- `ads-server`: `LEO_AD_ROOT_PATH=/ads`
+- `customer360-promotions`: `c360_PROMOTION_ROOT_PATH=/ads`
 - `customer360-frontend`: `FRONTEND_ROOT_PATH=/c360`, `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`, and `DOCS_SEARCH_URL=http://127.0.0.1:8001`
 - `docs-vector-search`: start locally on `127.0.0.1:8001`; `dev-c360.sh` builds the image, refreshes the index, and starts it
 - `customer360-event-api`: no root path; nginx strips `/data`
@@ -62,7 +62,7 @@ With this configuration, the public endpoints are:
 | customer360-frontend AI proxy | `https://c360.example.com/c360/ai/ask` | `127.0.0.1:8890` -> `127.0.0.1:8001/ask` |
 | customer360-api | `https://c360.example.com/c360api/api/v1` | `127.0.0.1:8008` |
 | Keycloak | `https://c360.example.com/auth` | `127.0.0.1:8080` |
-| ads-server and docs | `https://c360.example.com/ads` and `/ads/docs` | `127.0.0.1:9009` |
+| customer360-promotions and docs | `https://c360.example.com/ads` and `/ads/docs` | `127.0.0.1:9009` |
 | customer360-event-api | POST `https://c360.example.com/data/api/v1/tracking/logs`; health `https://c360.example.com/data/health` | `127.0.0.1:8010` |
 | Dagster UI | `https://c360.example.com/dagster` | `127.0.0.1:3000` |
 | MinIO S3 API | `https://s3dev.example.com` | `127.0.0.1:9000` |
@@ -105,7 +105,7 @@ upstream c360_keycloak {
   server 127.0.0.1:8080;
 }
 
-# ads-server
+# customer360-promotions
 upstream c360_ads {
   server 127.0.0.1:9009;
 }
@@ -197,7 +197,7 @@ server {
     proxy_read_timeout 600s;
   }
 
-  # ads-server: preserve /ads for LEO_AD_ROOT_PATH=/ads.
+  # customer360-promotions: preserve /ads for c360_PROMOTION_ROOT_PATH=/ads.
   location = /ads {
     proxy_pass http://c360_ads;
     proxy_set_header Host $host;

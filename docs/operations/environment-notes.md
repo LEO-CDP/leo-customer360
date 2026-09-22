@@ -1,8 +1,8 @@
 # Environment configuration notes
 
 The root `.env` file is the shared configuration for the Customer 360
-services. Use `.env.example` as its template. The `ads-server` service is
-independent and uses `ads-server/.env` from `ads-server/.env.example`.
+services. Use `.env.example` as its template. The `customer360-promotions` service is
+independent and uses `customer360-promotions/.env` from `customer360-promotions/.env.example`.
 
 ## General guidance
 
@@ -136,29 +136,29 @@ independent and uses `ads-server/.env` from `ads-server/.env.example`.
 - `LEO_OPENAI_MODEL_NAME`: OpenAI model. Default: `gpt-5.6-luna`
 - `LEO_OPENAI_BASE_URL`: OpenAI-compatible API URL. Default: `YOUR_OPENAI_BASE_URL`
 
-## Independent ads-server settings
+## Independent customer360-promotions settings
 
-These keys belong only to `ads-server/.env`. They are not part of the root
+These keys belong only to `customer360-promotions/.env`. They are not part of the root
 global `.env` file.
 
 ### Ad server API
 
-- `LEO_AD_API_HOST`: API listen address. Default: `localhost`
-- `LEO_AD_API_PORT`: API listen port. Default: `9009`
-- `LEO_AD_TRACKING_BASE_URL`: Customer 360 tracking API URL. Default: `http://localhost:8010`
+- `c360_PROMOTION_API_HOST`: API listen address. Default: `localhost`
+- `c360_PROMOTION_API_PORT`: API listen port. Default: `9009`
+- `c360_PROMOTION_TRACKING_BASE_URL`: Customer 360 tracking API URL. Default: `http://localhost:8010`
 
 ### Ad server PostgreSQL
 
-- `LEO_AD_DB_HOST`: PostgreSQL host. Default: `localhost`
-- `LEO_AD_DB_PORT`: PostgreSQL port. Default: `5432`
-- `LEO_AD_DB_USER`: PostgreSQL user. Default: `postgres`
-- `LEO_AD_DB_PASSWORD`: PostgreSQL password. Set a private value.
-- `LEO_AD_DB_NAME`: Database name. Default: `customer360`
-- `LEO_AD_DB_SCHEMA`: Ads schema. Default: `leo_ads`
+- `c360_PROMOTION_DB_HOST`: PostgreSQL host. Default: `localhost`
+- `c360_PROMOTION_DB_PORT`: PostgreSQL port. Default: `5432`
+- `c360_PROMOTION_DB_USER`: PostgreSQL user. Default: `postgres`
+- `c360_PROMOTION_DB_PASSWORD`: PostgreSQL password. Set a private value.
+- `c360_PROMOTION_DB_NAME`: Database name. Default: `customer360`
+- `c360_PROMOTION_DB_SCHEMA`: Ads schema. Default: `leo_ads`
 
 ### Ad server Redis
 
-- `LEO_AD_REDIS_HOST`: Redis host. Default: `localhost`
-- `LEO_AD_REDIS_PORT`: Redis port. Default: `6580`
-- `LEO_AD_REDIS_DB`: Redis database number. Default: `0`
-- `LEO_AD_REDIS_PASSWORD`: Redis password. Set a private value.
+- `c360_PROMOTION_REDIS_HOST`: Redis host. Default: `localhost`
+- `c360_PROMOTION_REDIS_PORT`: Redis port. Default: `6580`
+- `c360_PROMOTION_REDIS_DB`: Redis database number. Default: `0`
+- `c360_PROMOTION_REDIS_PASSWORD`: Redis password. Set a private value.

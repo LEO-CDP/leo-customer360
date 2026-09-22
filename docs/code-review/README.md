@@ -52,7 +52,7 @@ Fix in this order — the first five are exploitable cross-tenant data breaches 
 | 4 | Remove the hardcoded dev-JWT secret; refuse to boot with a default secret; make `SSO_LOGIN=false` fail-closed for authz. | [C4](#c4), [H2](#h2), [H3](#h3) |
 | 5 | In the CIR worker, use transaction-local `SET LOCAL` / `set_config(...,true)`; run the app as a **non-superuser** DB role and rely on `FORCE RLS`. | [C6](#c6), [M7](#medium-findings) |
 | 6 | Rework identity matching: gate merges on an identifier-strength confidence score, normalize email/phone, add transitive-merge + deterministic tie-breaks. | [C5](#c5), [H1](#h1), [H10](#h10), [H11](#h11), [M13](#medium-findings) |
-| 7 | Make ingestion + analytics idempotent and bounded; add auth to `customer360-event-api` and `ads-server`. | [H5](#h5), [H6](#h6), [H7](#h7), [H8](#h8), [M21](#medium-findings) |
+| 7 | Make ingestion + analytics idempotent and bounded; add auth to `customer360-event-api` and `customer360-promotions`. | [H5](#h5), [H6](#h6), [H7](#h7), [H8](#h8), [M21](#medium-findings) |
 
 ---
 
@@ -240,7 +240,7 @@ exists rather than send an empty string; bot-filtered requests are discarded bef
 validation path.
 
 <a id="h7"></a>
-**H7 — ads-server read endpoints have no auth and no tenant scope.** `ads-server`: `GET /ads/{ad_id}`
+**H7 — customer360-promotions read endpoints have no auth and no tenant scope.** `customer360-promotions`: `GET /ads/{ad_id}`
 → `ad_repository.py:92` filters only `ad_id` + `status`; `GET /placements/{placement_key}` →
 `placement_repository.get_active_by_key` defaults `tenant_id=None` (no filter). No auth exists on
 the service. Any client enumerates sequential `ad_id`s to read every tenant's ad config
@@ -299,8 +299,8 @@ engages. Parse a trusted `X-Forwarded-For`.
 
 | ID | Location | Issue | Impact |
 |---|---|---|---|
-| M1 | `ads-server/repository/ad_repository.py:258` | Serving query checks only `a.status='active'`; no campaign/creative status, flight window (`starts_at`/`ends_at`), or budget | Serves paused/expired/out-of-flight ads |
-| M2 | `ads-server/repository/ad_repository.py:267` | No-ad fallback selects tenant's top ads across **all** placements, ignoring `placement_id` | Wrong-placement creative served into the slot |
+| M1 | `customer360-promotions/repository/ad_repository.py:258` | Serving query checks only `a.status='active'`; no campaign/creative status, flight window (`starts_at`/`ends_at`), or budget | Serves paused/expired/out-of-flight ads |
+| M2 | `customer360-promotions/repository/ad_repository.py:267` | No-ad fallback selects tenant's top ads across **all** placements, ignoring `placement_id` | Wrong-placement creative served into the slot |
 | M3 | `customer360-api/core/routers/auth_api.py:143` | Root-admin password compared with `==` (not `hmac.compare_digest`) | Timing side-channel on the highest-value account |
 | M4 | `customer360-api/core/routers/metadata_api.py:63` | `GET /metadata/domains` filters by caller `tenant_id`; `sys_tenant_domain` has no RLS | Cross-tenant enumeration of enabled domains |
 | M5 | `customer360-api/core/routers/user_api.py:232` | `create/update/delete_user` require only an ACTIVE user, no admin role | Intra-tenant privilege escalation / hard-delete of other users |
@@ -323,7 +323,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 | M22 | `customer360-backend/personalization/dagster_defs.py:33` | Copy-paste: job defined as `@job(name="scoring_job")` | No `personalization_job` exists; submissions fail; two identical `scoring_job`s in Dagit |
 | M23 | `customer360-frontend/app.py:135` | `tenant_id = TENANT_ID or cookie or header`, but `TENANT_ID` always defaults to a hardcoded UUID | Per-request cookie/header tenant switching silently never works |
 | M24 | `customer360-backend/scripts/migrate_dagster_sqlite_to_postgres.py:99` | Drops the `id` column, `fetchall()`s whole tables, one transaction, no per-table try/except | Re-numbered event-log ids break sensor cursors; OOM / all-or-nothing abort on large history |
-| M25 | `ads-server/repository/ad_repository.py:397` | Tracking rows collapsed into `{f"{event_type}Url": ...}` | Multiple endpoints per event type → all but the last silently dropped (missing pixels) |
+| M25 | `customer360-promotions/repository/ad_repository.py:397` | Tracking rows collapsed into `{f"{event_type}Url": ...}` | Multiple endpoints per event type → all but the last silently dropped (missing pixels) |
 
 <a id="low-findings"></a>
 ### ⚪ Low findings
@@ -334,13 +334,13 @@ engages. Parse a trusted `X-Forwarded-For`.
 | L2 | `customer360-api/core/utils/sql_safety.py:96` | `validate_sql_where_fragment` is a denylist; permits expensive built-ins (e.g. `repeat(md5(...))`) → CPU-bound DoS per scanned row |
 | L3 | `customer360-api/core/utils/rate_limiter.py:50` | `INCR` then separate `EXPIRE` (only when count==1); a crash between them leaves a no-TTL key → permanent lockout (fails closed) |
 | L4 | `customer360-api/core/auth.py:113` | Introspection cache TTL floored at 60s and never re-checks `exp`/`active` → token honored up to ~60s past expiry / revocation |
-| L5 | `ads-server/repository/ad_repository.py:65` | `_session()` builds a new `sessionmaker` (and re-imports it) on every call → per-request overhead on the serving path |
-| L6 | `ads-server/repository/ad_repository.py:322` | `_placement_dimensions`: `max_width_px or 300` treats a legitimate 0 as missing; fixed branch omits the `responsive` key |
-| L7 | `ads-server/core/application.py:291` | `get_ad`/`get_placement` return `None` on miss → HTTP 200 `null` instead of 404 |
-| L8 | `ads-server/core/application.py:176` | CORS `allow_origins=["*"]` (amplifies the un-scoped read endpoints H7) |
-| L9 | `ads-server/repository/ad_repository.py:228` | Placement resolution `... LIMIT 1` with no `ORDER BY` → non-deterministic which placement wins |
-| L10 | `ads-server/repository/ad_repository.py:227` | Serving joins tenant on `tenant_key` only; no `tenant.status` check → suspended tenants keep serving |
-| L11 | `ads-server/repository/ad_cache_utils.py:1` | File is only TODO comments — the documented Redis caching/TTLs don't exist; config TTLs unused and mismatched (60 vs 300/3600) |
+| L5 | `customer360-promotions/repository/ad_repository.py:65` | `_session()` builds a new `sessionmaker` (and re-imports it) on every call → per-request overhead on the serving path |
+| L6 | `customer360-promotions/repository/ad_repository.py:322` | `_placement_dimensions`: `max_width_px or 300` treats a legitimate 0 as missing; fixed branch omits the `responsive` key |
+| L7 | `customer360-promotions/core/application.py:291` | `get_ad`/`get_placement` return `None` on miss → HTTP 200 `null` instead of 404 |
+| L8 | `customer360-promotions/core/application.py:176` | CORS `allow_origins=["*"]` (amplifies the un-scoped read endpoints H7) |
+| L9 | `customer360-promotions/repository/ad_repository.py:228` | Placement resolution `... LIMIT 1` with no `ORDER BY` → non-deterministic which placement wins |
+| L10 | `customer360-promotions/repository/ad_repository.py:227` | Serving joins tenant on `tenant_key` only; no `tenant.status` check → suspended tenants keep serving |
+| L11 | `customer360-promotions/repository/ad_cache_utils.py:1` | File is only TODO comments — the documented Redis caching/TTLs don't exist; config TTLs unused and mismatched (60 vs 300/3600) |
 | L12 | `customer360-event-api/core/routers/tracking.py:20` | `get_storage`/`get_protection` lazily assign module singletons with no lock → cold-start race leaks a client |
 | L13 | `customer360-event-api/app.py:47` | `cdp-event-proxy.html` route registered unconditionally (unlike guarded static mounts) → 500 if the file is absent |
 | L14 | `all-data-simulator/google_analytics_faker.py:20` | `event_time` from naive `datetime.now()` emitted tz-less → mis-bucketed by host offset downstream |
@@ -357,7 +357,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 |---|---:|---:|---|
 | `customer360-api` | 91 | ~9,700* | C1–C4 · H2,H3,H13 · M3–M6,M16,M17 · L1–L4 |
 | `customer360-backend/identity_resolution` | — | 8,411 | C5,C6 · H1,H10,H11,H12 · M11–M15 · L18 |
-| `ads-server` | 22 | 3,809 | H7 · M1,M2,M25 · L5–L11 |
+| `customer360-promotions` | 22 | 3,809 | H7 · M1,M2,M25 · L5–L11 |
 | `customer360-event-api` | 12 | 1,334 | H4,H5,H6 · M18–M21 · L12,L13 |
 | `customer360-backend/analytics` | — | 732 | H8 · M7–M9 |
 | `customer360-backend/segmentation` | — | 627 | H9 · M10 |
@@ -371,7 +371,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 
 ## 7. Methodology & scope
 
-- **Scope:** every `*.py` under `ads-server/`, `all-data-simulator/`, `customer360-backend/`,
+- **Scope:** every `*.py` under `customer360-promotions/`, `all-data-simulator/`, `customer360-backend/`,
   `customer360-api/` (excluding `.venv`), `customer360-event-api/`, `deployments/`, `customer360-frontend/`.
   Tests were read for context but are not the review target.
 - **Approach:** the code was partitioned across six parallel reviewers, each applying ten

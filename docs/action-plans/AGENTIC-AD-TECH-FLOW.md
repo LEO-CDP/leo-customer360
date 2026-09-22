@@ -37,11 +37,11 @@ Schema gaps that must be addressed in this story:
 - No dedicated segment audience snapshot/export table exists for deterministic ad activation runs.
 - No dedicated ad webhook normalization table exists in the CRM/CDP schema.
 
-### Ad Server reality (`ads-server/*`)
+### Ad Server reality (`customer360-promotions/*`)
 
-- `ads-server` is a real service with its own `leo_ads` schema, SQLAlchemy models, and repository/API tests.
+- `customer360-promotions` is a real service with its own `leo_ads` schema, SQLAlchemy models, and repository/API tests.
 - Domain models exist for campaign, creative, ad, placement, targeting, and tenant.
-- Admin API and schema docs are present under `ads-server/static/admin` and `ads-server/sql-scripts`.
+- Admin API and schema docs are present under `customer360-promotions/static/admin` and `customer360-promotions/sql-scripts`.
 - Current gap for this epic: no proven orchestrated bridge from Customer 360 segment workflows into `leo_ads` activation and closed-loop attribution.
 
 ### Dagster service reality (`customer360-backend/*/dagster_defs.py`)
@@ -75,7 +75,7 @@ Implication: this story must convert `campaign_activation` and `data_synch` into
 5. AI agent creates ad creative drafts (headline/body/CTA/media spec hints) using Gemini or OpenAI.
 6. AI agent creates campaign draft in `crm_campaign` with objective, budget, `start_date`, `end_date`, and linked creative/content plan.
 7. Human review/approval gate moves campaign from `Draft` to executable states.
-8. Dispatch publishes to ad tech path (internal `ads-server` and/or configured platform connectors), then tracking and analytics feed Customer 360.
+8. Dispatch publishes to ad tech path (internal `customer360-promotions` and/or configured platform connectors), then tracking and analytics feed Customer 360.
 
 ## Story-level Acceptance Criteria
 
@@ -95,7 +95,7 @@ Implication: this story must convert `campaign_activation` and `data_synch` into
 
 ### SUBTASK-01: Schema and Migration Foundation for Ad Tech
 
-Component: `customer360-database/migrations` + `ads-server/sql-scripts`
+Component: `customer360-database/migrations` + `customer360-promotions/sql-scripts`
 Priority: P0 Blocker  
 Depends on: none  
 Blocks: SUBTASK-02..08  
@@ -177,7 +177,7 @@ Marketer can select one segment and produce deterministic CRM sync plus ad audie
 
 ### SUBTASK-03: AI Ad Creative Authoring (Gemini/OpenAI)
 
-Component: `customer360-api/core` + `ads-server`  
+Component: `customer360-api/core` + `customer360-promotions`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01, SUBTASK-02  
 Blocks: SUBTASK-04, SUBTASK-05, SUBTASK-08  
@@ -263,7 +263,7 @@ AI can prepare complete ad campaign drafts while human approval remains a hard g
 
 ### SUBTASK-05: Activation Pipeline Modernization (Campaign + Data Sync)
 
-Component: `customer360-backend/campaign_activation` + `customer360-backend/data_synch` + `ads-server`
+Component: `customer360-backend/campaign_activation` + `customer360-backend/data_synch` + `customer360-promotions`
 Priority: P0 Blocker  
 Depends on: SUBTASK-02, SUBTASK-03, SUBTASK-04  
 Blocks: SUBTASK-06, SUBTASK-08  
@@ -281,7 +281,7 @@ Scope of Work
 	- publish activation request
 - Replace `data_synch_job` placeholder with real sync workflow:
 	- write/update audience payload and targeting contracts for ad channels
-	- bridge to `ads-server` or provider connectors
+	- bridge to `customer360-promotions` or provider connectors
 	- persist `crm_ad_campaign_platform_map` states
 - Keep integration points with existing real services:
 	- use `segmentation_job` outputs for segment freshness
@@ -362,7 +362,7 @@ Ad engagement becomes actionable inside Customer 360 profile and campaign analyt
 
 ### SUBTASK-08: End-to-End Automated Test Suite (Learn from Simulator)
 
-Component: cross-cutting (`all-data-simulator`, `customer360-backend`, `customer360-api`, `ads-server`)
+Component: cross-cutting (`all-data-simulator`, `customer360-backend`, `customer360-api`, `customer360-promotions`)
 Priority: P0 Blocker (Beta Gate)  
 Depends on: SUBTASK-01..07  
 Estimate: 8 pts
@@ -443,7 +443,7 @@ Use this checklist as the implementation tracker for all technical tasks in this
 	- CDP module tables use `cdp_*`.
 	- System tables use `sys_*`.
 	- Ad server schema tables remain under `leo_ads.*`.
-- [ ] New environment variables for this epic use `CRM_ADTECH_*` plus existing `LEO_AD_*` conventions.
+- [ ] New environment variables for this epic use `CRM_ADTECH_*` plus existing `c360_PROMOTION_*` conventions.
 
 ### B. PostgreSQL Data Tables Checklist
 
@@ -499,14 +499,14 @@ Use this checklist as the implementation tracker for all technical tasks in this
 	- `CRM_ADTECH_RETRY_BACKOFF_MS`
 - [ ] Define callback/webhook security values:
 	- `CRM_ADTECH_WEBHOOK_SIGNING_SECRET`
-- [ ] Define ads-server connectivity values:
-	- `LEO_AD_API_HOST`
-	- `LEO_AD_API_PORT`
-	- `LEO_AD_DB_HOST`
-	- `LEO_AD_DB_PORT`
-	- `LEO_AD_DB_NAME`
-	- `LEO_AD_DB_USER`
-	- `LEO_AD_DB_PASSWORD`
+- [ ] Define customer360-promotions connectivity values:
+	- `c360_PROMOTION_API_HOST`
+	- `c360_PROMOTION_API_PORT`
+	- `c360_PROMOTION_DB_HOST`
+	- `c360_PROMOTION_DB_PORT`
+	- `c360_PROMOTION_DB_NAME`
+	- `c360_PROMOTION_DB_USER`
+	- `c360_PROMOTION_DB_PASSWORD`
 - [ ] Ensure values exist in `.env.example` and active environment files used by services.
 
 ### E. Definition of Ready and Done Checklist

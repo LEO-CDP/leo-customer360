@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # otel.sh — shared OpenTelemetry (OTLP -> Jaeger) env wiring for the deploy scripts.
 #
-# The three FastAPI images (customer360-api, ads-server, customer360-frontend) are
+# The three FastAPI images (customer360-api, customer360-promotions, customer360-frontend) are
 # instrumented with OpenTelemetry ZERO-CODE auto-instrumentation (see each
 # service Dockerfile: `opentelemetry-bootstrap -a install` +
 # `opentelemetry-instrument uvicorn ...`). This helper emits the OTEL_* lines

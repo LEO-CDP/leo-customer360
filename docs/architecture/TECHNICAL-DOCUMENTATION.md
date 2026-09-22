@@ -69,7 +69,7 @@ flowchart TB
         ANALYTICS["customer360-backend/analytics/\nDagster tracking-log aggregation"]
         API["customer360-api/\nFastAPI REST + reporting"]
         TRACK["customer360-event-api/\nFastAPI event ingestion"]
-        ADS["ads-server/\nFastAPI ad serving"]
+        ADS["customer360-promotions/\nFastAPI ad serving"]
         UI["customer360-frontend/\nFastAPI-served static SPA"]
     end
 
@@ -113,7 +113,7 @@ flowchart TB
 - **One API contract** ([`customer360-api/`](../../customer360-api)) governs all reads/writes to the schema, backed by Redis for latency and Keycloak for SSO/authorization.
 - **Backend pipelines are Dagster-orchestrated** ([`customer360-backend/`](../../customer360-backend)) — `customer360-api` submits Dagster job runs asynchronously through the Dagster GraphQL API (`core/utils/dagster_client.py`) instead of running long batch work inline inside an HTTP request.
 - **Tracking ingestion and analytics are separate services** — `customer360-event-api` validates dynamic event JSON and customer identifiers, publishes batches to a Redis Streams consumer group, and uses background workers to write immutable hourly NDJSON objects to S3/MinIO. The `analytics` Dagster job aggregates those objects into source totals and Redis-backed metrics.
-- **Ad serving is a separate API** ([`ads-server/`](../../ads-server)) — it serves tenant-scoped placements and creatives and is deployed independently from the core Customer 360 Compose stack.
+- **Ad serving is a separate API** ([`customer360-promotions/`](../../customer360-promotions)) — it serves tenant-scoped placements and creatives and is deployed independently from the core Customer 360 Compose stack.
 - **The admin UI is a static single-page app** served by a thin FastAPI process — no server-side rendering of data, no direct database access from the UI tier.
 
 ### 3.2 Data Flow: Ingest → Identity Resolution → Activation
@@ -142,7 +142,7 @@ flowchart TB
    - `POST /api/v1/segments/{id}/recompute` (on-demand, synchronous) or the scheduled `segmentation_job` (Dagster, polls for changes every `SEGMENTATION_POLL_INTERVAL_SECONDS`) recompute `cdp_segments` membership.
    - Marketing composes segments via CRM graph joins or `cdp_master_profiles` filters and activates against the resulting list.
 
-6. **Ad delivery** — [`ads-server/`](../../ads-server)
+6. **Ad delivery** — [`customer360-promotions/`](../../customer360-promotions)
     - The standalone ad-serving API reads tenant-scoped campaigns, creatives, and placements and exposes the browser loader for client-side delivery.
 
 ### 3.3 Orchestration Architecture (Dagster)
@@ -206,7 +206,7 @@ Each placeholder service exists so `customer360-api/core/utils/dagster_client.py
 | | `dagster-graphql` | Client library used to submit Dagster job runs from the API without embedding the Dagster core package. |
 | | `redis` (Python client) | Used by `core/cache.py` for the response cache and by `customer360-event-api` for the Redis Streams broker, rate limiting, and session metadata. |
 | **Tracking API** | FastAPI + Uvicorn + Redis Streams | `customer360-event-api/` — accepts dynamic event batches, durably queues them in Redis, and writes immutable hourly per-source NDJSON objects to S3; MinIO is used in dev. |
-| **Ad Server** | FastAPI + Uvicorn | `ads-server/` — standalone multi-tenant ad-serving API on port `9009`, with Redis-ready caching and a browser loader. |
+| **Ad Server** | FastAPI + Uvicorn | `customer360-promotions/` — standalone multi-tenant ad-serving API on port `9009`, with Redis-ready caching and a browser loader. |
 | **Authentication** | Keycloak (`keycloak/keycloak:26.7`) | Real SSO service in the compose stack. `core/auth.py` calls its token-introspection endpoint directly via `urllib.request` — no Keycloak client library dependency. |
 | **Frontend** | FastAPI + Uvicorn (`customer360-frontend/app.py`) | **Not Flask.** A thin FastAPI process serves a static single-page admin UI (`index.html` + `static/`) and renders one Jinja2 template (`base-templates/index.html`) to inject `FRONTEND_API_HOSTNAME`/`FRONTEND_TENANT_ID` into `static/js/config.js` at request time. No database access in this service — all customer data is fetched client-side, live, from `customer360-api`. |
 | | Tailwind CSS, jQuery 3, Handlebars | All loaded via CDN in `index.html`; no frontend build step/bundler. |
@@ -360,7 +360,7 @@ cd ../customer360-frontend && ./start.sh
 | Redis | `6580` | **not** the Redis default 6379; password required (`REDIS_PASSWORD`). |
 | customer360-api | `8008` | health check: `GET /health`. |
 | customer360-event-api | `8010` | tracking-log ingestion API; queues batches in Redis Streams and writes them asynchronously to S3 in production or MinIO in dev. |
-| ads-server | `9009` | standalone ad-serving API; not part of the core Compose service list. |
+| customer360-promotions | `9009` | standalone ad-serving API; not part of the core Compose service list. |
 | customer360-frontend | `8890` | health check: `GET /health`. |
 | Keycloak | `8080` | health endpoint served on management port `9000`, not `8080`. |
 | Dagster webserver | `3000` | run history, job/sensor status (local dev only, via `customer360-backend/start.sh`). |
@@ -388,7 +388,7 @@ The variants intentionally share project names, container names, and volumes whe
 **Application and infrastructure images:**
 - `customer360-api/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8008`.
 - `customer360-event-api/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8010`.
-- `ads-server/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 9009`.
+- `customer360-promotions/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 9009`.
 - `customer360-frontend/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8890`.
 - `customer360-backend/Dockerfile` → unified Dagster webserver and daemon loading all nine
     customer360-backend code locations on port `3000`; identity resolution runs as a
@@ -423,7 +423,7 @@ FRONTEND_API_HOSTNAME, FRONTEND_TENANT_ID   # customer360-frontend only
 ### 6.3 Monitoring & Health Checks
 
 Container and Compose health monitoring covers:
-- `customer360-api`, `customer360-event-api`, `ads-server`, `customer360-frontend`: HTTP GET to `/health` when deployed.
+- `customer360-api`, `customer360-event-api`, `customer360-promotions`, `customer360-frontend`: HTTP GET to `/health` when deployed.
 - `postgres`: `pg_isready`.
 - `redis`: `redis-cli ping` with the configured password.
 - `keycloak`: raw TCP probe of `GET /health/ready` on management port `9000`.

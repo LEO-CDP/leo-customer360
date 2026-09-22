@@ -207,4 +207,4 @@ Contract status used below:
 3. `FE-CAM-02`, `FE-CAM-03`, and `FE-CAM-04` for the governed shared workflow.
 4. `FE-EMAIL-01`, because its core schema is already present.
 5. `FE-ZALO-01` after Zalo schema/API blockers are complete.
-6. `FE-AD-01` after Ad Tech schema/API and the Customer 360-to-`ads-server` bridge are complete.
+6. `FE-AD-01` after Ad Tech schema/API and the Customer 360-to-`customer360-promotions` bridge are complete.

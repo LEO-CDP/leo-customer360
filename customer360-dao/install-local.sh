@@ -20,7 +20,7 @@ INSTALL_REQUIREMENTS=0
 SERVICE_DIRS=(
     "customer360-api"
     "customer360-event-api"
-    "ads-server"
+    "customer360-promotions"
     "customer360-backend"
 )
 while IFS= read -r service_dir; do

@@ -73,7 +73,7 @@ title_of() { case "$1" in
   sso-realm)     echo "Keycloak realm + confidential client (bootstrap-realm.py)";;
   api)           echo "customer360-api (FastAPI)";;
   frontend)      echo "customer360-frontend (admin UI)";;
-  ads)           echo "ads-server (LEO Ad Server, schema leo_ads)";;
+  ads)           echo "customer360-promotions (c360 Promotions, schema leo_ads)";;
   agent)         echo "customer360-agent (AI Agent service, LiteLLM, :8009)";;
   tracking)      echo "customer360-event-api (event ingestion -> S3, /data)";;
   docs-search)   echo "docs-vector-search (local-model RAG, pgvector on the vDB)";;
@@ -189,7 +189,7 @@ run_one() {  # <id> <action>
     sso)           ssh_step sso            deploy-sso.sh deploy "$2" ;;
     proxy)         ssh_step proxy          deploy-caddy.sh deploy "$2" ;;
     frontend)      ssh_step frontend       deploy-frontend.sh deploy "$2" ;;
-    ads)           ssh_step ads-server     deploy-ads.sh deploy "$2" ;;
+    ads)           ssh_step customer360-promotions     deploy-ads.sh deploy "$2" ;;
     agent)         ssh_step_env_only server deploy-agent.sh "$2" ;;
     tracking)      ssh_step_env_only server deploy-tracking.sh "$2" ;;
     docs-search)   ssh_step_env_only server deploy-docs-search.sh "$2" ;;

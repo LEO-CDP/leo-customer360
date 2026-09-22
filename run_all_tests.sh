@@ -42,7 +42,7 @@ run_suite "Identity Resolution" "${SCRIPT_DIR}/customer360-backend/identity_reso
 run_suite "Segmentation" "${SCRIPT_DIR}/customer360-backend/segmentation/run_tests.sh" "$@"
 run_suite "Campaign Activation" "${SCRIPT_DIR}/customer360-backend/campaign_activation/run_tests.sh" "$@"
 run_suite "Email Engine" "${SCRIPT_DIR}/customer360-backend/email_engine/run_tests.sh" "$@"
-run_suite "LEO Ad Server" "${SCRIPT_DIR}/ads-server/run_unit_tests.sh" "$@"
+run_suite "c360 Promotions" "${SCRIPT_DIR}/customer360-promotions/run_unit_tests.sh" "$@"
 
 echo ""
 echo "==================================================================="

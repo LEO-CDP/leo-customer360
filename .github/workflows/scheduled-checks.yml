@@ -41,7 +41,7 @@ jobs:
         id: unit
         run: |
           set +e
-          runners="ads-server/run_unit_tests.sh \
+          runners="customer360-promotions/run_unit_tests.sh \
                    customer360-api/run_unit_tests.sh \
                    customer360-event-api/run_unit_tests.sh \
                    customer360-backend/identity_resolution/run_tests.sh \

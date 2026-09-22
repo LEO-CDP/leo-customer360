@@ -11,7 +11,7 @@ The code in this repo is not an abstract demo. It reflects a real platform layou
 - a reusable `leo-customer360-dao` Python package containing shared models, schemas, CRUD, repositories, and database utilities
 - a FastAPI API in `customer360-api/` for CRUD, reporting, auth, and tenant-scoped access
 - a Dagster workspace in `customer360-backend/` that runs identity resolution, segmentation, and analytics jobs
-- a FastAPI ad-serving service in `ads-server/`
+- a FastAPI ad-serving service in `customer360-promotions/`
 - a browser-based admin UI in `customer360-frontend/` that calls the API over HTTP
 - local Docker-based startup and demo seeding scripts in the repo root
 
@@ -28,7 +28,7 @@ The current repo contains four application services, three active Dagster jobs, 
 | `customer360-backend/analytics/` | Implemented | Hourly Dagster job that aggregates tracking logs and updates source totals |
 | `customer360-api/` | Implemented | Main REST API for identity, CRM, persona, reporting, and metadata |
 | `customer360-event-api/` | Implemented | Durably queues dynamic tracking events in Redis Streams and writes immutable hourly per-source S3/MinIO objects |
-| `ads-server/` | Implemented | Multi-tenant FastAPI ad-serving API with placements, campaigns, creatives, and a browser loader |
+| `customer360-promotions/` | Implemented | Multi-tenant FastAPI ad-serving API with placements, campaigns, creatives, and a browser loader |
 | `customer360-frontend/` | Implemented | FastAPI shell for the UI, backed by client-side JS and API requests |
 | `customer360-backend/scoring/`, `data_synch/`, `email_engine/`, `notification_engine/`, `campaign_activation/`, `personalization/` | Placeholder | Runnable Dagster scaffolds ready for their service logic |
 
@@ -41,7 +41,7 @@ The current repo contains four application services, three active Dagster jobs, 
 | [`customer360-api/`](customer360-api) | FastAPI service with routers, auth, SQLAlchemy models, and business logic |
 | [`customer360-dao/`](customer360-dao) | Installable shared Python DAO package and package-owned unit tests |
 | [`customer360-event-api/`](customer360-event-api) | FastAPI ingestion service that queues dynamic events in Redis Streams and writes hourly tracking-log objects to S3/MinIO |
-| [`ads-server/`](ads-server) | Standalone FastAPI ad-serving service with its own database, cache, and widget code |
+| [`customer360-promotions/`](customer360-promotions) | Standalone FastAPI ad-serving service with its own database, cache, and widget code |
 | [`customer360-frontend/`](customer360-frontend) | Thin admin UI served by FastAPI and loaded from static templates |
 | [`all-data-simulator/`](all-data-simulator) | Synthetic raw data and optional S3/MinIO upload helpers |
 | [`deployments/`](deployments) | Deployment scripts, infrastructure component configuration, and deployment diagrams |
@@ -110,7 +110,7 @@ For the packaged stack using Docker Compose, run:
 ./manage-c360.sh status
 ```
 
-This covers the main production service stack in `docker-compose.yml`, including Postgres, Redis, Keycloak, Dagster, the Customer 360 API, and the data-tracking API. The dev stack in `dev-docker-compose.yml` additionally runs MinIO and its initializer. The standalone `ads-server/` service has its own startup scripts.
+This covers the main production service stack in `docker-compose.yml`, including Postgres, Redis, Keycloak, Dagster, the Customer 360 API, and the data-tracking API. The dev stack in `dev-docker-compose.yml` additionally runs MinIO and its initializer. The standalone `customer360-promotions/` service has its own startup scripts.
 
 ## Service entrypoints
 
@@ -118,7 +118,7 @@ The repo uses these primary entrypoints:
 
 - `customer360-api/app.py` — FastAPI API entrypoint
 - `customer360-event-api/app.py` — CDP tracking-log FastAPI entrypoint (port 8010)
-- `ads-server/app.py` — ad-serving FastAPI entrypoint (port 9009 by default)
+- `customer360-promotions/app.py` — ad-serving FastAPI entrypoint (port 9009 by default)
 - `customer360-backend/workspace.yaml` — Dagster workspace containing all nine backend code locations
 - `customer360-backend/identity_resolution/worker.py` — legacy local polling helper; production runs the Dagster job
 - `customer360-frontend/app.py` — admin frontend shell
@@ -147,7 +147,7 @@ The repo includes a consolidated test runner:
 ./run_all_tests.sh
 ```
 
-This is the current project-level test entrypoint for the Customer 360 API, identity resolution, segmentation, and LEO ad server suites. The data-tracking API also has its own `customer360-event-api/run_unit_tests.sh` runner.
+This is the current project-level test entrypoint for the Customer 360 API, identity resolution, segmentation, and c360 promotions suites. The data-tracking API also has its own `customer360-event-api/run_unit_tests.sh` runner.
 
 ## Key documentation
 
@@ -157,7 +157,7 @@ Start here for deeper context:
 - [`docs/operations/DOCKER-COMPOSE-GUIDE.md`](docs/operations/DOCKER-COMPOSE-GUIDE.md)
 - [`customer360-api/README.md`](customer360-api/README.md)
 - [`customer360-event-api/README.md`](customer360-event-api/README.md)
-- [`ads-server/README.md`](ads-server/README.md)
+- [`customer360-promotions/README.md`](customer360-promotions/README.md)
 - [`customer360-backend/README.md`](customer360-backend/README.md)
 - [`customer360-frontend/README.md`](customer360-frontend/README.md)
 - [`deployments/README.md`](deployments/README.md)

@@ -110,7 +110,7 @@ ssh -i ~/.ssh/c360-api_ed25519 \
 ## Jaeger — API request tracing (OpenTelemetry → OTLP)
 
 Lightweight, Jaeger-style request profiling for the three FastAPI services
-(`customer360-api`, `ads-server`, `customer360-frontend`) via **OpenTelemetry zero-code
+(`customer360-api`, `customer360-promotions`, `customer360-frontend`) via **OpenTelemetry zero-code
 auto-instrumentation** exporting over **OTLP**.
 
 **How it works.** Each service image runs `opentelemetry-bootstrap -a install` (installs
@@ -143,7 +143,7 @@ sed -i 's/^jaeger_enabled *=.*/jaeger_enabled = true/' overlays/uat.tfvars
 ./deploy-monitoring.sh uat            # starts c360-jaeger (badger, mem-capped)
 
 # 2) turn tracing on for the target service and redeploy
-(cd ../server && OTEL_ENABLED=true ./deploy-api.sh uat)     # or ../ads-server, ../frontend
+(cd ../server && OTEL_ENABLED=true ./deploy-api.sh uat)     # or ../customer360-promotions, ../frontend
 #    fast path (no full redeploy): flip the env-file on the box then RE-CREATE the container.
 #    NOTE: `docker restart` does NOT re-read --env-file (it's applied only at `docker run`), so a
 #    restart alone leaves tracing OFF — you must rm + run (reusing the same image):

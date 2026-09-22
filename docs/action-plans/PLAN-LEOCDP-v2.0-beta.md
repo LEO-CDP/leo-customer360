@@ -42,7 +42,7 @@ It is updated to be realistic and code-accurate against the current repository s
   - `crm_segment_audience_exports`
   - ad sync run/audit tables.
 - Integration direction:
-  - bridge Customer 360 workflows into `ads-server` (`leo_ads` schema) with traceable external IDs.
+  - bridge Customer 360 workflows into `customer360-promotions` (`leo_ads` schema) with traceable external IDs.
 - Governance direction:
   - AI-created campaign stays `Draft`; human approval required for activation.
 
@@ -70,7 +70,7 @@ It is updated to be realistic and code-accurate against the current repository s
 | Generic event ingestion with dedup and identity resolution hints | DONE | `customer360-api/core/routers/events_api.py` (`/events`, `/events/bulk`) |
 | Core CRM/CDP schema (campaign, lead, lead source, contact, transactions, content items) | DONE | `customer360-database/database-schema.sql` |
 | Active Dagster jobs for identity, segmentation, analytics | DONE | `customer360-backend/identity_resolution/dagster_defs.py`, `customer360-backend/segmentation/dagster_defs.py`, `customer360-backend/analytics/dagster_defs.py` |
-| Ad server runtime and data models (`leo_ads`) | DONE | `ads-server/core/application.py`, `ads-server/model/*.py`, `ads-server/tests/test_api.py` |
+| Ad server runtime and data models (`leo_ads`) | DONE | `customer360-promotions/core/application.py`, `customer360-promotions/model/*.py`, `customer360-promotions/tests/test_api.py` |
 | Tracking analytics E2E smoke script | DONE | `all-data-simulator/run_tracking_analytics_e2e.sh` (recent run succeeded) |
 
 ### 2.2 Critical Gaps (Not Implemented Yet)
@@ -92,7 +92,7 @@ It is updated to be realistic and code-accurate against the current repository s
 
 - Uses `crm_message_templates` naming (not `cdp_email_templates`).
 - Treats channel-specific features as planned blockers, not implemented facts.
-- Distinguishes real `ads-server` runtime capabilities from missing Customer360-to-AdTech orchestration.
+- Distinguishes real `customer360-promotions` runtime capabilities from missing Customer360-to-AdTech orchestration.
 - Keeps current truth that only identity resolution, segmentation, and analytics are fully active Dagster pipelines.
 
 ## 3) Consolidated Readiness Matrix (By Channel)
@@ -227,7 +227,7 @@ The following sequence is realistic for current code state and aligns all three 
   - `CRM_ADTECH_AI_PROVIDER`
   - `CRM_ADTECH_DEFAULT_PLATFORM`, `CRM_ADTECH_DEFAULT_OBJECTIVE`
   - `CRM_ADTECH_TRACKING_BASE_URL`, `CRM_ADTECH_WEBHOOK_SIGNING_SECRET`
-  - Existing ad server envs remain authoritative in `ads-server/.env.example` (`LEO_AD_*`).
+  - Existing ad server envs remain authoritative in `customer360-promotions/.env.example` (`c360_PROMOTION_*`).
 - [ ] Zalo execution settings are stored in the tenant's `crm_connector_config` row (`CHAT/ZALO`), split between `credentials` and `config` JSONB.
 - [ ] Tenant Zalo settings are managed through the admin connector-config API, not runtime env files.
 

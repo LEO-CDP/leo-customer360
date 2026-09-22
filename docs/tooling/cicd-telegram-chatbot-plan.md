@@ -55,7 +55,7 @@ they post their own messages, so adding them would double-message.
 
 Single job, so the whole run collapses to one Telegram summary:
 
-1. **Unit tests** — runs the same runner set CI gates on (`ads-server`,
+1. **Unit tests** — runs the same runner set CI gates on (`customer360-promotions`,
    `customer360-api`, `customer360-event-api`, `identity_resolution`, `segmentation`,
    `docs-vector-search`). Each runner self-provisions its venv.
 2. **E2E → UAT** — mirrors CI's E2E leg against `https://beta.leocdp.com/c360api`;
@@ -111,7 +111,7 @@ verified `200`):
 | customer360-frontend (UI) | `https://beta.leocdp.com/health` |
 | customer360-api | `https://beta.leocdp.com/c360api/health` |
 | customer360-event-api | `https://beta.leocdp.com/data/health` |
-| ads-server | `https://beta.leocdp.com/ads/health` |
+| customer360-promotions | `https://beta.leocdp.com/ads/health` |
 | docs-vector-search (via frontend `/ai` proxy) | `https://beta.leocdp.com/ai/health` |
 | Keycloak (SSO realm) | `https://beta.leocdp.com/auth/realms/customer360` |
 

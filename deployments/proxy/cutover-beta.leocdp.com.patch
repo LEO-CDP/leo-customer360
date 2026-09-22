@@ -65,10 +65,10 @@ index 900126a..98925f7 100644
 -    health_path = "/health" # customer360-frontend serves /health on 8890
 -  }
 -  "ads" = {
--    member_ip   = "10.100.1.5" # c360-api-uat-api (ads-server co-located, see deployments/ads-server)
+-    member_ip   = "10.100.1.5" # c360-api-uat-api (customer360-promotions co-located, see deployments/customer360-promotions)
 -    member_port = 9009
 -    listen_port = 9009      # LB public :9009 -> ads:9009
--    health_path = "/health" # ads-server serves /health on 9009
+-    health_path = "/health" # customer360-promotions serves /health on 9009
 +    listen_port = 3000
 +    health_path = null
    }
