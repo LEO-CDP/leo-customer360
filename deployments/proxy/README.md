@@ -10,7 +10,7 @@ a box you already pay for (the shared api box in uat).
 Client ──HTTPS──▶ LB :443 ─(TCP passthrough)─▶ Caddy :443 (api box)
                   LB :80  ─(ACME + redirect)─▶ Caddy :80
                                                   │  terminates TLS, routes by path:
-                                                  ├─ /            → frontend-admin :8890
+                                                  ├─ /            → customer360-frontend :8890
                                                   ├─ /c360api/*    → customer360-api :8008   (prefix stripped)
                                                   ├─ /auth/*       → keycloak :8080          (KC serves under /auth)
                                                   ├─ /ads/*        → ads-server :9009        (prefix stripped)

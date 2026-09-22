@@ -91,7 +91,7 @@
 		reverse_proxy {$DOCS_UPSTREAM}
 	}
 
-	# --- everything else -> the admin UI (frontend-admin). Keep this block LAST. ---
+	# --- everything else -> the admin UI (customer360-frontend). Keep this block LAST. ---
 	handle {
 		reverse_proxy {$FRONTEND_UPSTREAM}
 	}

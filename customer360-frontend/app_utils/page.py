@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 
 from .config import FrontendSettings
 
-_log = logging.getLogger("frontend-admin")
+_log = logging.getLogger("customer360-frontend")
 
 
 class AdminPageRenderer:

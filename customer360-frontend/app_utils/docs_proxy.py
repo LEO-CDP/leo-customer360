@@ -8,7 +8,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 
 from .config import FrontendSettings
 
-_log = logging.getLogger("frontend-admin.docs")
+_log = logging.getLogger("customer360-frontend.docs")
 
 
 class DocsProxy:

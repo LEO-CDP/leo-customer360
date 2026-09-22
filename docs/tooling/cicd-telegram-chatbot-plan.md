@@ -108,7 +108,7 @@ verified `200`):
 
 | Service | URL |
 | --- | --- |
-| frontend-admin (UI) | `https://beta.leocdp.com/health` |
+| customer360-frontend (UI) | `https://beta.leocdp.com/health` |
 | customer360-api | `https://beta.leocdp.com/c360api/health` |
 | customer360-event-api | `https://beta.leocdp.com/data/health` |
 | ads-server | `https://beta.leocdp.com/ads/health` |
@@ -119,7 +119,7 @@ Override with the repo variable `HEALTH_CHECK_URLS` (space/newline-separated) �
 both the scheduled checks and the health monitor read it.
 
 > **docs-vector-search** has no public route of its own (private `docs` box,
-> reached via SSH/tunnel). The frontend-admin proxies it at `/ai/*`, so
+> reached via SSH/tunnel). The customer360-frontend proxies it at `/ai/*`, so
 > `…/ai/health` forwards to the service's `/health` — returns `200` when it's up
 > and `502` when it's unreachable, which is exactly what a health probe wants.
 

@@ -321,7 +321,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 | M20 | `customer360-event-api/core/storage.py:106` | `_ensure_bucket` does a `head_bucket` every request; any non-404 (e.g. 403) is fatal | Doubles S3 latency; spurious 503 → whole batch dropped when PutObject would succeed |
 | M21 | `customer360-event-api/core/storage.py:38` | Object key is `uuid4()`; no idempotency key | Client retry after a 503 writes a duplicate object → double-counted events |
 | M22 | `backend-system/personalization/dagster_defs.py:33` | Copy-paste: job defined as `@job(name="scoring_job")` | No `personalization_job` exists; submissions fail; two identical `scoring_job`s in Dagit |
-| M23 | `frontend-admin/app.py:135` | `tenant_id = TENANT_ID or cookie or header`, but `TENANT_ID` always defaults to a hardcoded UUID | Per-request cookie/header tenant switching silently never works |
+| M23 | `customer360-frontend/app.py:135` | `tenant_id = TENANT_ID or cookie or header`, but `TENANT_ID` always defaults to a hardcoded UUID | Per-request cookie/header tenant switching silently never works |
 | M24 | `backend-system/scripts/migrate_dagster_sqlite_to_postgres.py:99` | Drops the `id` column, `fetchall()`s whole tables, one transaction, no per-table try/except | Re-numbered event-log ids break sensor cursors; OOM / all-or-nothing abort on large history |
 | M25 | `ads-server/repository/ad_repository.py:397` | Tracking rows collapsed into `{f"{event_type}Url": ...}` | Multiple endpoints per event type → all but the last silently dropped (missing pixels) |
 
@@ -363,7 +363,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 | `backend-system/segmentation` | — | 627 | H9 · M10 |
 | `backend-system` (other Dagster + scripts) | — | ~475 | M22,M24 · L16 |
 | `all-data-simulator` | 5 | 1,376 | L14,L15 |
-| `deployments` + `frontend-admin` | 4 | 653 | M23 · L17 |
+| `deployments` + `customer360-frontend` | 4 | 653 | M23 · L17 |
 
 \* excludes the vendored `.venv`.
 
@@ -372,7 +372,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 ## 7. Methodology & scope
 
 - **Scope:** every `*.py` under `ads-server/`, `all-data-simulator/`, `backend-system/`,
-  `customer360-api/` (excluding `.venv`), `customer360-event-api/`, `deployments/`, `frontend-admin/`.
+  `customer360-api/` (excluding `.venv`), `customer360-event-api/`, `deployments/`, `customer360-frontend/`.
   Tests were read for context but are not the review target.
 - **Approach:** the code was partitioned across six parallel reviewers, each applying ten
   finder angles (line-by-line, removed-behavior, cross-file caller/callee, language pitfalls,

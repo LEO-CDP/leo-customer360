@@ -10,7 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import FrontendSettings
 
-_log = logging.getLogger("frontend-admin")
+_log = logging.getLogger("customer360-frontend")
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

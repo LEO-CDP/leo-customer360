@@ -15,7 +15,7 @@ The defaults below come from [.env.example](../../../.env.example). Copy that fi
 | MinIO Console | `127.0.0.1:9001` | 9001 | Web UI for the dev MinIO bucket |
 | Dagster UI | `127.0.0.1:3000` | 3000 | Only when running backend-system directly on the host |
 | C360 API | `127.0.0.1:8008` | 8008 | FastAPI app; all endpoints except `/health` require a bearer token |
-| C360 Frontend | `0.0.0.0:8890` | 8890 | Static admin UI served by frontend-admin |
+| C360 Frontend | `0.0.0.0:8890` | 8890 | Static admin UI served by customer360-frontend |
 
 > The published ports are configurable through `.env` using `*_HOST_PORT` and `*_HOST_BIND` variables. The defaults in [.env.example](../../../.env.example) are loopback-only for safety.
 

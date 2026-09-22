@@ -12,7 +12,7 @@ The code in this repo is not an abstract demo. It reflects a real platform layou
 - a FastAPI API in `customer360-api/` for CRUD, reporting, auth, and tenant-scoped access
 - a Dagster workspace in `backend-system/` that runs identity resolution, segmentation, and analytics jobs
 - a FastAPI ad-serving service in `ads-server/`
-- a browser-based admin UI in `frontend-admin/` that calls the API over HTTP
+- a browser-based admin UI in `customer360-frontend/` that calls the API over HTTP
 - local Docker-based startup and demo seeding scripts in the repo root
 
 ![](./docs/architecture/images/composable-cdp-architecture.png)
@@ -29,7 +29,7 @@ The current repo contains four application services, three active Dagster jobs, 
 | `customer360-api/` | Implemented | Main REST API for identity, CRM, persona, reporting, and metadata |
 | `customer360-event-api/` | Implemented | Durably queues dynamic tracking events in Redis Streams and writes immutable hourly per-source S3/MinIO objects |
 | `ads-server/` | Implemented | Multi-tenant FastAPI ad-serving API with placements, campaigns, creatives, and a browser loader |
-| `frontend-admin/` | Implemented | FastAPI shell for the UI, backed by client-side JS and API requests |
+| `customer360-frontend/` | Implemented | FastAPI shell for the UI, backed by client-side JS and API requests |
 | `backend-system/scoring/`, `data_synch/`, `email_engine/`, `notification_engine/`, `campaign_activation/`, `personalization/` | Placeholder | Runnable Dagster scaffolds ready for their service logic |
 
 ## Repository structure
@@ -42,7 +42,7 @@ The current repo contains four application services, three active Dagster jobs, 
 | [`customer360-dao/`](customer360-dao) | Installable shared Python DAO package and package-owned unit tests |
 | [`customer360-event-api/`](customer360-event-api) | FastAPI ingestion service that queues dynamic events in Redis Streams and writes hourly tracking-log objects to S3/MinIO |
 | [`ads-server/`](ads-server) | Standalone FastAPI ad-serving service with its own database, cache, and widget code |
-| [`frontend-admin/`](frontend-admin) | Thin admin UI served by FastAPI and loaded from static templates |
+| [`customer360-frontend/`](customer360-frontend) | Thin admin UI served by FastAPI and loaded from static templates |
 | [`all-data-simulator/`](all-data-simulator) | Synthetic raw data and optional S3/MinIO upload helpers |
 | [`deployments/`](deployments) | Deployment scripts, infrastructure component configuration, and deployment diagrams |
 | [`k8s/`](k8s) | Kubernetes deployment documentation and manifests |
@@ -97,7 +97,7 @@ cd ../backend-system/identity_resolution
 The admin frontend can also be started separately:
 
 ```bash
-cd ../frontend-admin
+cd ../customer360-frontend
 ./start.sh
 ```
 
@@ -121,7 +121,7 @@ The repo uses these primary entrypoints:
 - `ads-server/app.py` — ad-serving FastAPI entrypoint (port 9009 by default)
 - `backend-system/workspace.yaml` — Dagster workspace containing all nine backend code locations
 - `backend-system/identity_resolution/worker.py` — legacy local polling helper; production runs the Dagster job
-- `frontend-admin/app.py` — admin frontend shell
+- `customer360-frontend/app.py` — admin frontend shell
 - `manage-c360.sh` — production-style Docker stack manager
 - `dev-c360.sh` — local dev infrastructure bootstrap
 
@@ -159,7 +159,7 @@ Start here for deeper context:
 - [`customer360-event-api/README.md`](customer360-event-api/README.md)
 - [`ads-server/README.md`](ads-server/README.md)
 - [`backend-system/README.md`](backend-system/README.md)
-- [`frontend-admin/README.md`](frontend-admin/README.md)
+- [`customer360-frontend/README.md`](customer360-frontend/README.md)
 - [`deployments/README.md`](deployments/README.md)
 - [`k8s/README.md`](k8s/README.md)
 

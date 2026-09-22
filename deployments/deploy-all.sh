@@ -72,7 +72,7 @@ title_of() { case "$1" in
   proxy)         echo "Caddy reverse proxy (TLS + path routing) — cutover";;
   sso-realm)     echo "Keycloak realm + confidential client (bootstrap-realm.py)";;
   api)           echo "customer360-api (FastAPI)";;
-  frontend)      echo "frontend-admin (admin UI)";;
+  frontend)      echo "customer360-frontend (admin UI)";;
   ads)           echo "ads-server (LEO Ad Server, schema leo_ads)";;
   agent)         echo "customer360-agent (AI Agent service, LiteLLM, :8009)";;
   tracking)      echo "customer360-event-api (event ingestion -> S3, /data)";;

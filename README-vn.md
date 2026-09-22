@@ -9,7 +9,7 @@ Code trong repository này không phải là một abstract demo. Đây là layo
 - FastAPI API trong `customer360-api/` cho CRUD, reporting, auth và tenant-scoped access
 - Dagster workspace trong `backend-system/` chạy các job identity resolution, segmentation và analytics
 - FastAPI ad-serving service trong `ads-server/`
-- browser-based admin UI trong `frontend-admin/` gọi API qua HTTP
+- browser-based admin UI trong `customer360-frontend/` gọi API qua HTTP
 - các script khởi động bằng Docker và seed demo ở thư mục gốc của repository
 
 ![](./docs/architecture/images/composable-cdp-architecture.png)
@@ -26,7 +26,7 @@ Repository hiện có bốn application service, ba Dagster job đang hoạt đ�
 | `customer360-api/` | Đã triển khai | REST API chính cho identity, CRM, persona, reporting và metadata |
 | `customer360-event-api/` | Đã triển khai | Đưa dynamic tracking event vào Redis Streams và ghi object S3/MinIO bất biến theo từng source và từng giờ |
 | `ads-server/` | Đã triển khai | FastAPI ad-serving API đa tenant với placement, campaign, creative và browser loader |
-| `frontend-admin/` | Đã triển khai | FastAPI shell cho UI, sử dụng client-side JS và API request |
+| `customer360-frontend/` | Đã triển khai | FastAPI shell cho UI, sử dụng client-side JS và API request |
 | `backend-system/scoring/`, `data_synch/`, `email_engine/`, `notification_engine/`, `campaign_activation/`, `personalization/` | Placeholder | Các Dagster scaffold có thể chạy, sẵn sàng bổ sung service logic |
 
 ## Cấu trúc repository
@@ -38,7 +38,7 @@ Repository hiện có bốn application service, ba Dagster job đang hoạt đ�
 | [`customer360-api/`](customer360-api) | FastAPI service với router, auth, SQLAlchemy model và business logic |
 | [`customer360-event-api/`](customer360-event-api) | FastAPI ingestion service đưa event vào Redis Streams rồi ghi tracking-log object theo giờ vào S3/MinIO |
 | [`ads-server/`](ads-server) | FastAPI ad-serving service độc lập với database, cache và widget code riêng |
-| [`frontend-admin/`](frontend-admin) | Admin UI gọn, được FastAPI phục vụ và load từ static template |
+| [`customer360-frontend/`](customer360-frontend) | Admin UI gọn, được FastAPI phục vụ và load từ static template |
 | [`all-data-simulator/`](all-data-simulator) | Công cụ tạo raw data tổng hợp và hỗ trợ upload lên S3/MinIO |
 | [`deployments/`](deployments) | Deployment script, cấu hình infrastructure component và deployment diagram |
 | [`k8s/`](k8s) | Tài liệu và manifest triển khai Kubernetes |
@@ -93,7 +93,7 @@ cd ../backend-system/identity_resolution
 Admin frontend cũng có thể được khởi động riêng:
 
 ```bash
-cd ../frontend-admin
+cd ../customer360-frontend
 ./start.sh
 ```
 
@@ -117,7 +117,7 @@ Repository sử dụng các entrypoint chính sau:
 - `ads-server/app.py` — ad-serving FastAPI entrypoint (port 9009 theo mặc định)
 - `backend-system/workspace.yaml` — Dagster workspace chứa toàn bộ chín backend code location
 - `backend-system/identity_resolution/worker.py` — local polling helper legacy; production chạy Dagster job
-- `frontend-admin/app.py` — admin frontend shell
+- `customer360-frontend/app.py` — admin frontend shell
 - `manage-c360.sh` — production-style Docker stack manager
 - `dev-c360.sh` — local dev infrastructure bootstrap
 
@@ -155,7 +155,7 @@ Repository có consolidated test runner:
 - [`customer360-event-api/README.md`](customer360-event-api/README.md)
 - [`ads-server/README.md`](ads-server/README.md)
 - [`backend-system/README.md`](backend-system/README.md)
-- [`frontend-admin/README.md`](frontend-admin/README.md)
+- [`customer360-frontend/README.md`](customer360-frontend/README.md)
 - [`deployments/README.md`](deployments/README.md)
 - [`k8s/README.md`](k8s/README.md)
 

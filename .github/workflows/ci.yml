@@ -50,7 +50,7 @@ jobs:
             customer360-api: 'customer360-api/**'
             customer360-agent: 'customer360-agent/**'
             customer360-event-api: 'customer360-event-api/**'
-            frontend-admin: 'frontend-admin/**'
+            customer360-frontend: 'customer360-frontend/**'
             docs-vector-search: 'tools/docs-vector-search/**'
             postgres: 'postgres/**'
             redis: 'redis/**'
@@ -62,7 +62,7 @@ jobs:
         id: select
         run: |
           if [[ "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo 'services=["ads-server","backend-system","customer360-dao","customer360-api","customer360-agent","customer360-event-api","frontend-admin","docs-vector-search","postgres","redis"]' >> "$GITHUB_OUTPUT"
+            echo 'services=["ads-server","backend-system","customer360-dao","customer360-api","customer360-agent","customer360-event-api","customer360-frontend","docs-vector-search","postgres","redis"]' >> "$GITHUB_OUTPUT"
           else
             printf 'services=%s\n' '${{ steps.filter.outputs.changes }}' >> "$GITHUB_OUTPUT"
           fi

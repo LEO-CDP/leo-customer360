@@ -1,4 +1,4 @@
-"""Static asset mounting for frontend-admin."""
+"""Static asset mounting for customer360-frontend."""
 from __future__ import annotations
 
 from fastapi import FastAPI

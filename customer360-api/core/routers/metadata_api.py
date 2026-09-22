@@ -86,7 +86,7 @@ def get_metadata_domains(
         SELECT * FROM customer360.sys_tenant_domain WHERE tenant_id = ?
 
     filtered to active rows on both sides, and returned as a simple
-    ``{domain_code: domain_name}`` map so the frontend-admin UI can render
+    ``{domain_code: domain_name}`` map so the customer360-frontend UI can render
     domain labels without hard-coding them.
     """
     try:

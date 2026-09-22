@@ -45,7 +45,7 @@ async def index(request: Request):
 @app.get("/health", tags=["Health"])
 async def health():
     return {
-        "service": "frontend-admin",
+        "service": "customer360-frontend",
         "status": "ok",
         "api_base": settings.api_base,
         "environment": "development" if settings.is_dev else "production",

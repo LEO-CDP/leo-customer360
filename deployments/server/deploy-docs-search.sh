@@ -100,7 +100,7 @@ DOCS_CORS_ORIGINS="${DOCS_CORS_ORIGINS:-https://leo-cdp.github.io}"
 # Per-IP /ask rate limit for public callers (via Caddy/XFF). Tune per env; 0 disables.
 DOCS_ASK_RATE_MAX="${DOCS_ASK_RATE_MAX:-10}"
 DOCS_ASK_RATE_WINDOW_SEC="${DOCS_ASK_RATE_WINDOW_SEC:-60}"
-# Shared secret that lets the docs service treat the frontend-admin /ai proxy as an internal
+# Shared secret that lets the docs service treat the customer360-frontend /ai proxy as an internal
 # caller (exempt from the public rate limit). The default is leoragbot; override it for production:
 # admin AI traffic is rate-limited like any client. Set the SAME value as the frontend deploy's
 # DOCS_INTERNAL_AUTH_SECRET — export it once before deploying, put it in both

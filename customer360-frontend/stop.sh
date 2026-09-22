@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Customer 360 Admin frontend (frontend-admin)
+# Customer 360 Admin frontend (customer360-frontend)
 # Stops the uvicorn process started by start.sh.
 ###############################################################################
 set -Eeuo pipefail
@@ -29,12 +29,12 @@ if [ -z "$PID" ] || ! kill -0 "$PID" 2>/dev/null; then
 fi
 
 if [ -z "$PID" ]; then
-    echo -e "${YELLOW}No running frontend-admin process found.${NC}"
+    echo -e "${YELLOW}No running customer360-frontend process found.${NC}"
     rm -f "$PID_FILE"
     exit 0
 fi
 
-echo "Stopping frontend-admin (PID $PID)..."
+echo "Stopping customer360-frontend (PID $PID)..."
 kill "$PID" 2>/dev/null || true
 
 for _ in 1 2 3 4 5; do

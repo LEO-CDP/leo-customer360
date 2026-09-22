@@ -3,7 +3,7 @@
 .env*
 
 # Large directories not needed by the postgres image build context.
-frontend-admin/
+customer360-frontend/
 docs/
 ui-wireframes/
 logs/

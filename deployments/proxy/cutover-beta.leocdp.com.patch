@@ -59,10 +59,10 @@ index 900126a..98925f7 100644
 -    health_path = null # TCP health check: Keycloak's /health is on the mgmt port 9000, not 8080
 -  }
 -  "frontend" = {
--    member_ip   = "10.100.1.5" # c360-api-uat-api (frontend-admin co-located, see deployments/frontend)
+-    member_ip   = "10.100.1.5" # c360-api-uat-api (customer360-frontend co-located, see deployments/frontend)
 -    member_port = 8890
 -    listen_port = 8890      # LB public :8890 -> frontend:8890
--    health_path = "/health" # frontend-admin serves /health on 8890
+-    health_path = "/health" # customer360-frontend serves /health on 8890
 -  }
 -  "ads" = {
 -    member_ip   = "10.100.1.5" # c360-api-uat-api (ads-server co-located, see deployments/ads-server)

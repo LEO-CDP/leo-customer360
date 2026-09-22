@@ -2421,7 +2421,7 @@ COMMENT ON TABLE customer360.crm_transactions IS 'Source-agnostic transaction fa
 -- cdp_content_items: personalized content library (news/video/product/article)
 -- ============================================================================
 -- Backs the Customer 360 profile dashboard's "Personalized Items" panel
--- (core-customer360/frontend-admin). Items are ranked per master profile by
+-- (core-customer360/customer360-frontend). Items are ranked per master profile by
 -- segment_tags overlap with cdp_master_profiles.segmentation_tags -- see
 -- customer360-api's GET /api/v1/content-items/recommended.
 CREATE TABLE IF NOT EXISTS customer360.cdp_content_items (

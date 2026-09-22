@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-06
 **Author:** Implementation planning pass
-**Scope:** Add a documentation chat-bot ("Ask the Docs") agent to **`docs-site`** (public Quartz site) and **`frontend-admin`** (Customer 360 admin SPA), both consuming the RAG API served by **`tools/docs-vector-search`**.
+**Scope:** Add a documentation chat-bot ("Ask the Docs") agent to **`docs-site`** (public Quartz site) and **`customer360-frontend`** (Customer 360 admin SPA), both consuming the RAG API served by **`tools/docs-vector-search`**.
 **Status:** Plan / design — no code written yet.
 
 > Historical note (2026-09-12): this plan contains pre-standardization examples that use
@@ -22,7 +22,7 @@ Give end users a conversational way to query the LEO Customer 360 documentation 
 two places:
 
 1. **`docs-site`** — a floating "Ask the Docs" widget on every documentation page (public, GitHub Pages).
-2. **`frontend-admin`** — an in-app "Docs Assistant" available across all admin tabs.
+2. **`customer360-frontend`** — an in-app "Docs Assistant" available across all admin tabs.
 
 Both widgets talk to the **already-built** local-RAG service in `tools/docs-vector-search` (semantic
 search + grounded question answering, fully local models, pgvector on the vDB). No new model or
@@ -72,7 +72,7 @@ pulls the CI image from GHCR, runs `enrich` on the box, serves `:8000`. **It is 
 by default** — the deploy script ends with: *"Expose via the LB (add a 'docs' backend) if it needs
 public access."* Public routing is done in Caddy (`deployments/proxy/Caddyfile`).
 
-### 2.2 `frontend-admin` — Customer 360 admin SPA
+### 2.2 `customer360-frontend` — Customer 360 admin SPA
 
 - **Server:** FastAPI (`app.py`) that serves a **static single-page app** (`base-templates/index.html`
   + `static/`). Tailwind, jQuery, Handlebars via CDN. Server injects runtime config into the page via
@@ -115,7 +115,7 @@ flowchart LR
   end
   subgraph API_BOX[api VM]
     Caddy[Caddy :443<br/>path router]
-    FE[frontend-admin :8890]
+    FE[customer360-frontend :8890]
     C360API[customer360-api :8008]
   end
   subgraph DOCS_BOX[docs VM]
@@ -136,7 +136,7 @@ flowchart LR
 Two integration paths that share a common widget behaviour spec (§6.5) but differ in how they reach
 the API:
 
-- **`frontend-admin` → server-side proxy** (recommended for this app). The admin FastAPI app gains a
+- **`customer360-frontend` → server-side proxy** (recommended for this app). The admin FastAPI app gains a
   thin `/ai/*` proxy that forwards to the docs service over the private network. The browser calls
   **same-origin** `/ai/ask` — no CORS, and the docs box never needs a public route. Optionally gate on
   the existing session.
@@ -150,7 +150,7 @@ flowchart LR
   end
   subgraph API_BOX[api VM]
     Caddy[Caddy :443]
-    FE[frontend-admin :8890<br/>+ /ai proxy]
+    FE[customer360-frontend :8890<br/>+ /ai proxy]
     FEW[admin widget]
   end
   subgraph DOCS_BOX[docs VM]
@@ -163,7 +163,7 @@ flowchart LR
   Caddy -->|/docs-ai/* -> docs-box:8000| RAG
 ```
 
-**Why two paths?** `frontend-admin` is a server we control end-to-end, so proxying is strictly better
+**Why two paths?** `customer360-frontend` is a server we control end-to-end, so proxying is strictly better
 (no CORS surface, no public exposure of the LLM box, reuse of session/rate-limit). `docs-site` is
 static with no backend, so it must call a public endpoint — which forces CORS + rate limiting on the
 service. The service changes in §5 support *both* (CORS is harmless for the proxied path).
@@ -235,7 +235,7 @@ app.add_middleware(
 )
 ```
 
-> The frontend-admin proxy path (§6.1) is same-origin and does **not** need CORS; this is purely for
+> The customer360-frontend proxy path (§6.1) is same-origin and does **not** need CORS; this is purely for
 > the static docs-site. Keep `allow_origins` an explicit list — never `["*"]` on a public,
 > unauthenticated, CPU-heavy endpoint.
 
@@ -286,7 +286,7 @@ CORS must allow the SSE request and Caddy must not buffer it (`flush_interval -1
 
 ---
 
-## 6. `frontend-admin` implementation
+## 6. `customer360-frontend` implementation
 
 **Integration style:** server-side proxy + a **floating widget** (available on every tab), not a routed
 nav tab. A floating launcher is less intrusive and keeps the docs assistant one click away everywhere.
@@ -479,7 +479,7 @@ This makes the wait feel productive and gives value even if generation is slow o
 - **Persistence:** keep the in-session transcript in memory (optionally `sessionStorage`); no PII is
   involved but keep it client-side only.
 
-### 6.6 Wiring into `frontend-admin` (file checklist)
+### 6.6 Wiring into `customer360-frontend` (file checklist)
 
 | File | Change |
 |------|--------|
@@ -625,10 +625,10 @@ live, else every call fails a preflight / is unreachable.
 | `CORS_ORIGINS` | docs-vector-search (`config.py`) | Allowed browser origins | `https://leo-cdp.github.io` |
 | `DOCS_CORS_ORIGINS` | `deploy-docs-search.sh` | Ships `CORS_ORIGINS` to the box | same |
 | `docs_upstream` | `overlays/*.tfvars` + `deploy-caddy.sh` | Docs box private ip:8000 | — |
-| `DOCS_SEARCH_URL` | frontend-admin (`app.py`) | Where the proxy forwards locally | `http://127.0.0.1:8001` |
-| `DOCS_SEARCH_TIMEOUT` | frontend-admin | Proxy timeout (s) | `60` |
-| `DOCS_SITE_BASE` | frontend-admin | For out-links to docs-site | `https://leo-cdp.github.io/leo-customer360` |
-| `docs_ai_base` (derived) | frontend-admin index | Widget → same-origin proxy base | `${FRONTEND_ROOT_PATH}/ai` |
+| `DOCS_SEARCH_URL` | customer360-frontend (`app.py`) | Where the proxy forwards locally | `http://127.0.0.1:8001` |
+| `DOCS_SEARCH_TIMEOUT` | customer360-frontend | Proxy timeout (s) | `60` |
+| `DOCS_SITE_BASE` | customer360-frontend | For out-links to docs-site | `https://leo-cdp.github.io/leo-customer360` |
+| `docs_ai_base` (derived) | customer360-frontend index | Widget → same-origin proxy base | `${FRONTEND_ROOT_PATH}/ai` |
 | `DOCS_AI_PUBLIC_URL` | docs-site CI (optional) | Public API base baked into the static widget | `https://<caddy_domain>/docs-ai` |
 
 ---
@@ -640,7 +640,7 @@ live, else every call fails a preflight / is unreachable.
   `Access-Control-Allow-Origin`; a disallowed origin is rejected. `/health` unchanged.
 - Manual: `curl -s <box>:8000/ask -H 'content-type: application/json' -d '{"question":"What is CIR?"}'`.
 
-**frontend-admin:**
+**customer360-frontend:**
 - Unit (pytest + httpx mock): `/ai/ask` forwards body, trims/validates `question`, maps upstream 5xx →
   502, empty question → 422.
 - Manual: run `uvicorn app:app`; open the app; ask a question; verify same-origin `POST /ai/ask` in the
@@ -662,7 +662,7 @@ live, else every call fails a preflight / is unreachable.
 
 1. **Service:** add CORS (§5.1) + rate limiting (§5.3); redeploy docs-vector-search
    (`deploy-docs-search.sh uat`). Verify `/health` + a manual `/ask`.
-2. **frontend-admin:** ship the proxy + widget (§6). This path needs **no** public docs exposure — it
+2. **customer360-frontend:** ship the proxy + widget (§6). This path needs **no** public docs exposure — it
    can go out first and independently. Deploy, smoke-test in UAT.
 3. **Public route:** add the Caddy `/docs-ai/*` block (§5.2) + `docs_upstream`; redeploy Caddy. Confirm
    the public URL + preflight from `leo-cdp.github.io`.
@@ -712,7 +712,7 @@ Steps 2 and 3–4 are independent; do 1 first (both depend on it).
 |------------|------|
 | Service: CORS + rate limit + deploy wiring | 0.5 day |
 | Caddy public route + overlays | 0.5 day |
-| frontend-admin: proxy + config + widget + template + CSS | 1.5–2 days |
+| customer360-frontend: proxy + config + widget + template + CSS | 1.5–2 days |
 | docs-site: component + inline script + scss + CI + README | 1.5–2 days |
 | Testing (unit + cross-origin + manual) & polish | 1 day |
 | **Total** | **~5–6 days** |

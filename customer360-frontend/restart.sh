@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Customer 360 Admin frontend (frontend-admin)
+# Customer 360 Admin frontend (customer360-frontend)
 # Restarts the app: stop.sh followed by start.sh.
 ###############################################################################
 set -Eeuo pipefail
@@ -48,6 +48,6 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 log "API hostname for the browser: ${FRONTEND_API_HOSTNAME:-http://localhost:8008}"
-log "${GREEN}Restarting frontend-admin...${NC}"
+log "${GREEN}Restarting customer360-frontend...${NC}"
 "$PROJECT_HOME/stop.sh"
 "$PROJECT_HOME/start.sh"

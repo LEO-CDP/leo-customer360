@@ -70,7 +70,7 @@ flowchart TB
         API["customer360-api/\nFastAPI REST + reporting"]
         TRACK["customer360-event-api/\nFastAPI event ingestion"]
         ADS["ads-server/\nFastAPI ad serving"]
-        UI["frontend-admin/\nFastAPI-served static SPA"]
+        UI["customer360-frontend/\nFastAPI-served static SPA"]
     end
 
     subgraph PLATFORM["Platform / cross-cutting"]
@@ -208,7 +208,7 @@ Each placeholder service exists so `customer360-api/core/utils/dagster_client.py
 | **Tracking API** | FastAPI + Uvicorn + Redis Streams | `customer360-event-api/` — accepts dynamic event batches, durably queues them in Redis, and writes immutable hourly per-source NDJSON objects to S3; MinIO is used in dev. |
 | **Ad Server** | FastAPI + Uvicorn | `ads-server/` — standalone multi-tenant ad-serving API on port `9009`, with Redis-ready caching and a browser loader. |
 | **Authentication** | Keycloak (`keycloak/keycloak:26.7`) | Real SSO service in the compose stack. `core/auth.py` calls its token-introspection endpoint directly via `urllib.request` — no Keycloak client library dependency. |
-| **Frontend** | FastAPI + Uvicorn (`frontend-admin/app.py`) | **Not Flask.** A thin FastAPI process serves a static single-page admin UI (`index.html` + `static/`) and renders one Jinja2 template (`base-templates/index.html`) to inject `FRONTEND_API_HOSTNAME`/`FRONTEND_TENANT_ID` into `static/js/config.js` at request time. No database access in this service — all customer data is fetched client-side, live, from `customer360-api`. |
+| **Frontend** | FastAPI + Uvicorn (`customer360-frontend/app.py`) | **Not Flask.** A thin FastAPI process serves a static single-page admin UI (`index.html` + `static/`) and renders one Jinja2 template (`base-templates/index.html`) to inject `FRONTEND_API_HOSTNAME`/`FRONTEND_TENANT_ID` into `static/js/config.js` at request time. No database access in this service — all customer data is fetched client-side, live, from `customer360-api`. |
 | | Tailwind CSS, jQuery 3, Handlebars | All loaded via CDN in `index.html`; no frontend build step/bundler. |
 | | Hand-rolled hash router (`static/js/router.js`) | Small React-Router-style client-side router (path patterns, params, redirects) — not a frontend framework. |
 | **Object storage (dev only)** | MinIO | S3-compatible storage in `dev-docker-compose.yml` only, for testing file-based event ingestion locally; production uses a real S3 bucket instead and MinIO is intentionally absent from `docker-compose.yml`. |
@@ -349,7 +349,7 @@ frontend separately after the infrastructure is healthy:
 ```bash
 cd customer360-api && ./start.sh
 cd ../backend-system && ./start.sh
-cd ../frontend-admin && ./start.sh
+cd ../customer360-frontend && ./start.sh
 ```
 
 **Real service ports** (verified from the Compose files; do not assume common defaults):
@@ -361,7 +361,7 @@ cd ../frontend-admin && ./start.sh
 | customer360-api | `8008` | health check: `GET /health`. |
 | customer360-event-api | `8010` | tracking-log ingestion API; queues batches in Redis Streams and writes them asynchronously to S3 in production or MinIO in dev. |
 | ads-server | `9009` | standalone ad-serving API; not part of the core Compose service list. |
-| frontend-admin | `8890` | health check: `GET /health`. |
+| customer360-frontend | `8890` | health check: `GET /health`. |
 | Keycloak | `8080` | health endpoint served on management port `9000`, not `8080`. |
 | Dagster webserver | `3000` | run history, job/sensor status (local dev only, via `backend-system/start.sh`). |
 | MinIO (dev only) | `9000` (S3 API) / `9001` (console) | only in `dev-docker-compose.yml`, not in production `docker-compose.yml`. |
@@ -389,7 +389,7 @@ The variants intentionally share project names, container names, and volumes whe
 - `customer360-api/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8008`.
 - `customer360-event-api/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8010`.
 - `ads-server/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 9009`.
-- `frontend-admin/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8890`.
+- `customer360-frontend/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8890`.
 - `backend-system/Dockerfile` → unified Dagster webserver and daemon loading all nine
     backend-system code locations on port `3000`; identity resolution runs as a
     Dagster job and sensor in this image.
@@ -410,7 +410,7 @@ REDIS_HOST, REDIS_PORT (6580), REDIS_PASSWORD
 SSO_LOGIN, SSO_LOGIN_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET
 DAGSTER_GRAPHQL_HOST, DAGSTER_GRAPHQL_PORT
 LEO_GOOGLE_GENAI_API_KEY   # optional; enables LLM-generated persona names in identity_resolution
-FRONTEND_API_HOSTNAME, FRONTEND_TENANT_ID   # frontend-admin only
+FRONTEND_API_HOSTNAME, FRONTEND_TENANT_ID   # customer360-frontend only
 ```
 
 **Note on CORS:** `customer360-api/app.py` currently hardcodes `allow_origins=["*"]`, `allow_credentials=False` in `CORSMiddleware` — there is no environment-variable override for this today. Any production hardening of CORS requires an actual code change to `app.py`.
@@ -423,7 +423,7 @@ FRONTEND_API_HOSTNAME, FRONTEND_TENANT_ID   # frontend-admin only
 ### 6.3 Monitoring & Health Checks
 
 Container and Compose health monitoring covers:
-- `customer360-api`, `customer360-event-api`, `ads-server`, `frontend-admin`: HTTP GET to `/health` when deployed.
+- `customer360-api`, `customer360-event-api`, `ads-server`, `customer360-frontend`: HTTP GET to `/health` when deployed.
 - `postgres`: `pg_isready`.
 - `redis`: `redis-cli ping` with the configured password.
 - `keycloak`: raw TCP probe of `GET /health/ready` on management port `9000`.

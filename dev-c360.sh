@@ -40,7 +40,7 @@
 #                                    with current repo code and restart core
 #                                    host services (non-destructive).
 #   ./dev-c360.sh restart           Restart docs-vector-search,
-#                                    customer360-api, backend-system, and frontend-admin.
+#                                    customer360-api, backend-system, and customer360-frontend.
 #   ./dev-c360.sh reset             DESTRUCTIVE: `docker compose down -v`
 #                                    (drops the postgres/redis/minio volumes
 #                                    -- this also wipes Keycloak's
@@ -63,7 +63,7 @@ DEMO_TENANT_ID="${DEMO_TENANT_ID:-11111111-1111-1111-1111-111111111111}"
 CIR_DIR="backend-system/identity_resolution"
 BACKEND_SYSTEM_DIR="backend-system"
 CUSTOMER360_API_DIR="customer360-api"
-FRONTEND_ADMIN_DIR="frontend-admin"
+FRONTEND_ADMIN_DIR="customer360-frontend"
 DOCS_SEARCH_DIR="tools/docs-vector-search"
 DOCS_SEARCH_COMPOSE_FILE="$DOCS_SEARCH_DIR/docker-compose.yml"
 DOCS_SEARCH_ENV_FILE="$DOCS_SEARCH_DIR/.env"
@@ -389,7 +389,7 @@ restart_host_services() {
   echo "   - customer360-api: ./${CUSTOMER360_API_DIR}/restart.sh"
   (cd "$CUSTOMER360_API_DIR" && bash restart.sh)
 
-  echo "   - frontend-admin: ./${FRONTEND_ADMIN_DIR}/restart.sh"
+  echo "   - customer360-frontend: ./${FRONTEND_ADMIN_DIR}/restart.sh"
   (cd "$FRONTEND_ADMIN_DIR" && bash restart.sh)
 }
 

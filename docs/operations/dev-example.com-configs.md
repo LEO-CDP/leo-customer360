@@ -8,14 +8,14 @@
 ```
 
 The applications must be configured for the public prefixes before starting
-the services. For the `/c360/ai/ask` flow, the browser calls the frontend-admin
+the services. For the `/c360/ai/ask` flow, the browser calls the customer360-frontend
 proxy; `DOCS_SEARCH_URL` is the private local upstream and must not be set to
 the public `/c360/ai/ask` URL:
 
 - `customer360-api`: `root_path=/c360api`
 - Keycloak: `KC_HTTP_RELATIVE_PATH=/auth`
 - `ads-server`: `LEO_AD_ROOT_PATH=/ads`
-- `frontend-admin`: `FRONTEND_ROOT_PATH=/c360`, `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`, and `DOCS_SEARCH_URL=http://127.0.0.1:8001`
+- `customer360-frontend`: `FRONTEND_ROOT_PATH=/c360`, `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`, and `DOCS_SEARCH_URL=http://127.0.0.1:8001`
 - `docs-vector-search`: start locally on `127.0.0.1:8001`; `dev-c360.sh` builds the image, refreshes the index, and starts it
 - `customer360-event-api`: no root path; nginx strips `/data`
 - Dagster: start the UI with `--path-prefix /dagster`
@@ -51,15 +51,15 @@ The browser-facing AI endpoint is then:
 https://c360.example.com/c360/ai/ask
 ```
 
-Nginx routes that request to `frontend-admin`; `frontend-admin` forwards the
+Nginx routes that request to `customer360-frontend`; `customer360-frontend` forwards the
 request to `http://127.0.0.1:8001/ask`.
 
 With this configuration, the public endpoints are:
 
 | Service | Public URL | Local upstream |
 | --- | --- | --- |
-| frontend-admin (UI) | `https://c360.example.com/c360/` | `127.0.0.1:8890` |
-| frontend-admin AI proxy | `https://c360.example.com/c360/ai/ask` | `127.0.0.1:8890` -> `127.0.0.1:8001/ask` |
+| customer360-frontend (UI) | `https://c360.example.com/c360/` | `127.0.0.1:8890` |
+| customer360-frontend AI proxy | `https://c360.example.com/c360/ai/ask` | `127.0.0.1:8890` -> `127.0.0.1:8001/ask` |
 | customer360-api | `https://c360.example.com/c360api/api/v1` | `127.0.0.1:8008` |
 | Keycloak | `https://c360.example.com/auth` | `127.0.0.1:8080` |
 | ads-server and docs | `https://c360.example.com/ads` and `/ads/docs` | `127.0.0.1:9009` |
@@ -133,7 +133,7 @@ upstream c360_minio_console {
 server {
   server_name c360.example.com;
 
-  # frontend-admin uses /c360 as its public root path. Keep the AI routes
+  # customer360-frontend uses /c360 as its public root path. Keep the AI routes
   # prefixed because FastAPI registers /c360/ai/* when FRONTEND_ROOT_PATH=/c360.
   location = /c360 {
     return 308 /c360/;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Customer 360 Admin frontend (frontend-admin)
+# Customer 360 Admin frontend (customer360-frontend)
 # Starts the FastAPI static-site app (app.py) with uvicorn in the background.
 ###############################################################################
 set -Eeuo pipefail
@@ -90,6 +90,6 @@ fi
 ###############################################################################
 # Start uvicorn in the background
 ###############################################################################
-log "Starting frontend-admin on http://${HOST}:${PORT} ..."
+log "Starting customer360-frontend on http://${HOST}:${PORT} ..."
 nohup uvicorn app:app --host "$HOST" --port "$PORT" $RELOAD_FLAG >>"$LOG_FILE" 2>&1 &
 echo $! >"$PID_FILE"

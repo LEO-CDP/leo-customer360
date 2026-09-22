@@ -1,5 +1,5 @@
 
-// Utility functions for the frontend-admin app
+// Utility functions for the customer360-frontend app
 
 // Show a toast notification using iziToast library
 function showToast(message, kind) {

@@ -1,4 +1,4 @@
-"""Environment loading and typed frontend-admin settings."""
+"""Environment loading and typed customer360-frontend settings."""
 from __future__ import annotations
 
 import os

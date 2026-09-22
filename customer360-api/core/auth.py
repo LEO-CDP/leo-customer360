@@ -34,7 +34,7 @@ EXEMPT_PATHS = {
     # GET /metadata is part of the login flow itself: the login screen calls
     # it (unauthenticated) to learn sso_login/sso_config and decide whether
     # to render the Keycloak button or the dev credential form (see
-    # frontend-admin/static/js/auth-view.js). Every OTHER /metadata/* route
+    # customer360-frontend/static/js/auth-view.js). Every OTHER /metadata/* route
     # (dagster/domains/data-sources) is real protected API data with no
     # pre-login need and must NOT be exempt.
     "/api/v1/metadata",
@@ -407,7 +407,7 @@ def get_current_roles(request: Request) -> list[str]:
     ``authenticate_request`` above): the dev-JWT ``roles`` claim, or a real
     Keycloak token's ``realm_access.roles`` / ``resource_access.*.roles`` --
     same two shapes the frontend already decodes (see
-    frontend-admin/static/js/common/config.js::currentUserFromConfig).
+    customer360-frontend/static/js/common/config.js::currentUserFromConfig).
     """
     payload = getattr(request.state, "user", None)
     if not isinstance(payload, dict):

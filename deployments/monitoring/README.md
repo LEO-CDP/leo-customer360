@@ -110,7 +110,7 @@ ssh -i ~/.ssh/c360-api_ed25519 \
 ## Jaeger — API request tracing (OpenTelemetry → OTLP)
 
 Lightweight, Jaeger-style request profiling for the three FastAPI services
-(`customer360-api`, `ads-server`, `frontend-admin`) via **OpenTelemetry zero-code
+(`customer360-api`, `ads-server`, `customer360-frontend`) via **OpenTelemetry zero-code
 auto-instrumentation** exporting over **OTLP**.
 
 **How it works.** Each service image runs `opentelemetry-bootstrap -a install` (installs

@@ -5,7 +5,7 @@ you only have two public DNS domains available:
 
 | Domain | Purpose |
 |---|---|
-| `cdp.example.com` | Both the **Customer 360 API** and the **frontend-admin** UI |
+| `cdp.example.com` | Both the **Customer 360 API** and the **customer360-frontend** UI |
 | `id.example.com` | **Keycloak** identity provider / SSO |
 
 It builds on the existing [DOCKER-COMPOSE-GUIDE.md](DOCKER-COMPOSE-GUIDE.md) and
@@ -41,7 +41,7 @@ you may restrict it later if desired.
 
 ## 2. What must change vs. the default compose stack
 
-1. **Add `frontend-admin` to `docker-compose.yml`** — it is not part of the
+1. **Add `customer360-frontend` to `docker-compose.yml`** — it is not part of the
    default production stack.
 2. **Bind all host-published ports to `127.0.0.1`** and put Nginx in front.
 3. **Set `FRONTEND_API_HOSTNAME` to a relative path** (`/api/v1`) so the
@@ -90,7 +90,7 @@ This will place certificates under:
 
 ---
 
-## 4. Add `frontend-admin` to `docker-compose.yml`
+## 4. Add `customer360-frontend` to `docker-compose.yml`
 
 Append the service below to the existing
 [`docker-compose.yml`](../../docker-compose.yml). It reuses the same patterns as
@@ -104,7 +104,7 @@ Append the service below to the existing
   # ---------------------------------------------------------------------------
   frontend:
     build:
-      context: ./frontend-admin
+      context: ./customer360-frontend
       dockerfile: Dockerfile
     image: customer360-frontend:local
     container_name: customer360-frontend
@@ -171,7 +171,7 @@ C360_API_PORT=8008
 C360_API_HOST=127.0.0.1
 C360_API_PORT=8008
 
-# ----- frontend-admin / uvicorn ---------------------------------------------
+# ----- customer360-frontend / uvicorn ---------------------------------------------
 FRONTEND_HOST_BIND=0.0.0.0
 FRONTEND_HOST_PORT=8890
 
@@ -203,7 +203,7 @@ REDIS_HOST_BIND=127.0.0.1
 
 ### Important notes
 
-- `FRONTEND_API_HOSTNAME=` (empty) makes `frontend-admin/app.py` render
+- `FRONTEND_API_HOSTNAME=` (empty) makes `customer360-frontend/app.py` render
   `apiBase: "/api/v1"`. The browser will call
   `https://cdp.example.com/api/v1/...`, which Nginx proxies to the API.
 - `KEYCLOAK_COMMAND=start` switches Keycloak from `start-dev` to production

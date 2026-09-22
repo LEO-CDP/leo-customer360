@@ -37,7 +37,7 @@ Full inventory in the module READMEs and `*/overlays/{uat,prod}.tfvars`. Condens
 ### 2.1 UAT — everything on tiny VMs
 | Box | Flavor | vCPU/RAM | Runs |
 |---|---|---|---|
-| `c360-api-uat-api` (10.100.1.5) | `s-general-1x2` | 1 / 2 GB | customer360-api, redis, keycloak, frontend-admin, ads-server, **Caddy**, **whole monitoring stack** (Portainer, Netdata, Jaeger, pgAdmin, oauth2-proxy) |
+| `c360-api-uat-api` (10.100.1.5) | `s-general-1x2` | 1 / 2 GB | customer360-api, redis, keycloak, customer360-frontend, ads-server, **Caddy**, **whole monitoring stack** (Portainer, Netdata, Jaeger, pgAdmin, oauth2-proxy) |
 | `c360-api-uat-backend` (10.100.1.4) | `s-general-1x2` | 1 / 2 GB | Dagster (backend-system), Portainer agent |
 | `c360-api-uat-tracking` (10.100.1.8) | `s-general-1x2` | 1 / 2 GB | customer360-event-api, Portainer agent |
 
@@ -49,7 +49,7 @@ The api box is explicitly oversubscribed (1 vCPU/2 GB running ~11 containers; a 
 |---|---|---|---|---|
 | `c360-api-prod-4x8` (…1.10) | `s2-general-4x8` | 4 / 8 | customer360-api (+ monitoring) | provisioned |
 | `c360-api-prod-sso` (…1.11) | `s2-general-2x4` | 2 / 4 | Keycloak | provisioned |
-| `c360-api-prod-frontend` (…1.12) | `s2-general-2x4` | 2 / 4 | frontend-admin + Caddy | provisioned |
+| `c360-api-prod-frontend` (…1.12) | `s2-general-2x4` | 2 / 4 | customer360-frontend + Caddy | provisioned |
 | `c360-api-prod-ads` (…1.13) | `s2-general-4x8` | 4 / 8 | ads-server | provisioned |
 | `c360-api-prod-tracking` (…1.15) | `s2-general-2x4` | 2 / 4 | customer360-event-api | **commented-out** |
 | backend/Dagster (…1.14) | — | — | Dagster | **designed, no server key** |
@@ -81,7 +81,7 @@ Internet
 VNG NLB/ALB  (ONE load balancer, provisioned by the Ingress)
   ▼
 Ingress controller (NGINX + cert-manager/Let's Encrypt)   ← replaces Caddy
-  ├── /            → frontend-admin  (Deployment + Service)
+  ├── /            → customer360-frontend  (Deployment + Service)
   ├── /c360api     → customer360-api (Deployment + Service + HPA)
   ├── /auth        → keycloak        (Deployment/StatefulSet + Service)
   ├── /ads         → ads-server      (Deployment + Service + HPA)
@@ -116,7 +116,7 @@ Outside the cluster, same VPC (unchanged):
 |---|---|---|
 | customer360-api container (`--network host`, :8008) | `Deployment` + `Service` (ClusterIP) + **HPA** | env-file → `Secret`/`ConfigMap`; `root_path=/c360api` preserved via ingress path |
 | ads-server (:9009, high-QPS) | `Deployment` + `Service` + **HPA** | biggest autoscale beneficiary |
-| frontend-admin (:8890) | `Deployment` + `Service` | static-ish; browser calls API/Keycloak via ingress |
+| customer360-frontend (:8890) | `Deployment` + `Service` | static-ish; browser calls API/Keycloak via ingress |
 | keycloak (:8080, mgmt :9000) | `Deployment` (or `StatefulSet`) + `Service` | external DB `db_keycloak`; set `KC_HTTP_RELATIVE_PATH=/auth`; liveness on :9000 |
 | dagster / backend-system (:3000) | `Deployment` + `Service` | needs PG; if it needs run storage, add a PVC |
 | customer360-event-api (:8010) | `Deployment` + `Service` + **HPA** | ✅ **now built + published to GHCR by CI** (`ci.yml`); `deploy-tracking.sh` pulls it by default (`BUILD_LOCAL=0`). Redis Streams broker plus S3 creds and OTLP endpoint must be provided via `Secret`/env |

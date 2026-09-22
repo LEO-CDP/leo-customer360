@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy frontend-admin (FastAPI admin UI) onto a server VM over SSH.
+# Deploy customer360-frontend (FastAPI admin UI) onto a server VM over SSH.
 #
 #   uat  -> container on the api box (shared; server key "api") — the browser-facing
 #           "web tier" that already runs the API + Keycloak; the backend box is full.
@@ -13,7 +13,7 @@
 #   ./deploy-frontend.sh <uat|prod> destroy    # remove the container
 set -euo pipefail
 cd "$(dirname "$0")"
-REPO_ROOT="$(cd ../.. && pwd)" # repo root (contains frontend-admin/)
+REPO_ROOT="$(cd ../.. && pwd)" # repo root (contains customer360-frontend/)
 
 ENV="${1:-}"; ACTION="${2:-deploy}"
 case "$ENV" in uat | prod) ;; *) echo "Usage: ./deploy-frontend.sh <uat|prod> [deploy|destroy]"; exit 1 ;; esac
@@ -69,14 +69,14 @@ echo "   API=$API_HOSTNAME  SSO_LOGIN=$SSO_LOGIN  tenant=$TENANT  root_path='${R
 # --- CD image source: pull the CI-built image from GHCR by default; set
 #     BUILD_LOCAL=1 to fall back to shipping source + building on the VM. ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
-SERVICE="frontend-admin"
+SERVICE="customer360-frontend"
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
 GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
 if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
   DEPLOY_MODE="build"; IMAGE=""
   echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
-  echo ">> Shipping frontend-admin/ ..."
-  tar -C "$REPO_ROOT" -czf - frontend-admin \
+  echo ">> Shipping customer360-frontend/ ..."
+  tar -C "$REPO_ROOT" -czf - customer360-frontend \
     | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
 else
   DEPLOY_MODE="ghcr"
@@ -92,7 +92,7 @@ if [[ "$ENV" == "prod" ]]; then MON_IP="$(printf '%s' "$SERVERS_JSON" | python3 
 # Persist the tracing choice in config: otel_enabled in overlays/<env>.tfvars sets the default
 # (an explicit OTEL_ENABLED env var still overrides); empty -> otel.sh's per-env default.
 OTEL_ENABLED="${OTEL_ENABLED:-$(tfval otel_enabled "overlays/$ENV.tfvars")}"
-OTEL_LINES="$(otel_env_lines frontend-admin "$ENV" "$JAEGER_HOST")"
+OTEL_LINES="$(otel_env_lines customer360-frontend "$ENV" "$JAEGER_HOST")"
 
 # --- Docs Assistant target: resolve the "docs" box PRIVATE ip (fixed_ip):port unless the
 #     overlay pinned docs_search_url. Same servers-output idiom as FIP/MON_IP above. The
@@ -152,9 +152,9 @@ if [ "$DEPLOY_MODE" = "ghcr" ]; then
   RUN_IMG="$IMAGE"
 else
   # docker.io has no buildx -> strip the BuildKit `RUN --mount` (pip-cache only).
-  sed -i 's/ --mount=[^ ]*//g' /opt/c360/frontend-admin/Dockerfile
+  sed -i 's/ --mount=[^ ]*//g' /opt/c360/customer360-frontend/Dockerfile
   BUILD_VERSION="$(date -u +%Y-%m-%d-%H-%M)"
-  sudo docker build --build-arg BUILD_VERSION="$BUILD_VERSION" -t customer360-frontend /opt/c360/frontend-admin
+  sudo docker build --build-arg BUILD_VERSION="$BUILD_VERSION" -t customer360-frontend /opt/c360/customer360-frontend
   RUN_IMG="customer360-frontend"
 fi
 sudo docker rm -f customer360-frontend >/dev/null 2>&1 || true

@@ -19,7 +19,7 @@ servers = {
     name           = "sso" # -> c360-api-prod-sso
   }
   "frontend" = {
-    flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB — dedicated admin UI (frontend-admin); see deployments/frontend
+    flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB — dedicated admin UI (customer360-frontend); see deployments/frontend
     root_disk_size = 50
     name           = "frontend" # -> c360-api-prod-frontend
   }

@@ -176,7 +176,7 @@ RRF_RANK_CONSTANT = int(os.getenv("RRF_RANK_CONSTANT", "60"))
 
 # --- HTTP / browser access -------------------------------------------------------
 # CORS allow-list for browsers calling this API directly (the static docs site on
-# GitHub Pages). Server-side callers (the frontend-admin /ai proxy) are same-origin
+# GitHub Pages). Server-side callers (the customer360-frontend /ai proxy) are same-origin
 # and don't need this. Comma-separated exact origins; never "*" on an unauthenticated,
 # CPU-heavy endpoint. Default: the public docs site.
 CORS_ORIGINS = [
@@ -193,7 +193,7 @@ ASK_RATE_WINDOW_SEC = int(os.getenv("ASK_RATE_WINDOW_SEC", "60"))
 # real client is the Nth entry from the right. A chain shorter than this is treated as
 # not-via-the-proxy and falls back to the direct peer (fail closed).
 TRUSTED_PROXY_HOPS = max(1, int(os.getenv("TRUSTED_PROXY_HOPS", "1")))
-# Shared secret that identifies a trusted internal caller (the frontend-admin proxy),
+# Shared secret that identifies a trusted internal caller (the customer360-frontend proxy),
 # presented as the X-Internal-Auth header. The default is leoragbot; override it for
 # production and use the SAME value in the frontend proxy to exempt admin traffic
 # from the public rate limit.
@@ -215,7 +215,7 @@ DOCS_REDIS_SOCKET_TIMEOUT_SECONDS = float(
 # Request-parameter caps (defence against CPU amplification via huge/negative values).
 TOP_N_MAX = int(os.getenv("TOP_N_MAX", "50"))
 TOP_K_MAX = int(os.getenv("TOP_K_MAX", "20"))
-# Max accepted question/query length (chars). Mirrors the frontend-admin proxy's cap.
+# Max accepted question/query length (chars). Mirrors the customer360-frontend proxy's cap.
 QUESTION_MAX_LEN = int(os.getenv("QUESTION_MAX_LEN", "2000"))
 
 # Vector store — pgvector on the VNGCloud vDB (PostgreSQL 15)

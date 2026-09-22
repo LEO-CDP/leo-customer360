@@ -65,7 +65,7 @@ OVERVIEW
 ## Current folder structure
 
 ```text
-frontend-admin/
+customer360-frontend/
 ├── app.py                         # FastAPI entrypoint and config injection
 ├── Dockerfile
 ├── README.md
@@ -120,7 +120,7 @@ frontend-admin/
 
 ## Runtime setup and config
 
-The FastAPI app in `app.py` loads environment values from `frontend-admin/.env` when present, and falls back to defaults if none is set.
+The FastAPI app in `app.py` loads environment values from `customer360-frontend/.env` when present, and falls back to defaults if none is set.
 
 Relevant settings:
 
@@ -138,7 +138,7 @@ Build the image with an explicit version:
 docker build \
         --build-arg BUILD_VERSION="$(date -u +%Y-%m-%d-%H-%M)" \
         -t customer360-frontend:local \
-        frontend-admin
+        customer360-frontend
 ```
 
 The displayed build version is read once when the application starts from the
@@ -238,7 +238,7 @@ This is the basis for profiles, segments, datasources, scoring models, and syste
 
 ## Start / stop / restart
 
-The frontend-admin service targets Python 3.12. The Docker image uses
+The customer360-frontend service targets Python 3.12. The Docker image uses
 `python:3.12-slim`; local development should use Python 3.12 or newer within the
 supported dependency ranges in `requirements.txt`.
 
