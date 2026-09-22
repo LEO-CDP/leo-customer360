@@ -166,12 +166,31 @@ if ! command -v docker >/dev/null 2>&1; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
   sudo systemctl enable --now docker
 fi
+# Preserve the OLD instance's Dagster storage before removing its container and
+# image layers. The old container ran with an EPHEMERAL DAGSTER_HOME (no -v
+# mount), so its SQLite run/event/schedule history lives ONLY inside the
+# container layer. Import later with
+# customer360-backend/scripts/migrate_dagster_sqlite_to_postgres.py.
+if sudo docker ps -a --format '{{.Names}}' | grep -qx customer360-backend; then
+  ts="$(date -u +%Y%m%d-%H%M%S)"; bak="/opt/c360/dagster-home-backup-$ts.tar"
+  echo "   backing up old DAGSTER_HOME -> $bak"
+  if sudo docker cp customer360-backend:/dagster_home - > "$bak" 2>/dev/null; then
+    echo "   backup saved ($(du -h "$bak" | cut -f1))"
+  else
+    rm -f "$bak"; echo "   (nothing to back up, or copy failed — continuing)"
+  fi
+fi
+# Remove the old containers before pruning: image prune preserves images still
+# referenced by running/stopped containers, which can leave too little space
+# for the replacement image's layer extraction.
+for n in customer360-backend customer360-backend-daemon customer360-backend-redis; do
+  sudo docker rm -f "$n" >/dev/null 2>&1 || true
+done
 # Reclaim disk before we write/pull anything. Each deploy pulls a new SHA-pinned image
 # and the old ones pile up until a small VM fills its disk ("No space left on device"
-# on the very first env-file write). This runs before any disk write (the heredoc streams
-# over stdin) so it recovers even from an already-full disk. The currently-running
-# customer360-backend still holds its image here, so `image prune -a` keeps it and drops only
-# the stale ones. Best-effort: never fail the deploy on cleanup.
+# on the very first env-file write). This runs before the env-file write (the heredoc
+# streams over stdin) so it recovers even from an already-full disk. Best-effort:
+# never fail the deploy on cleanup.
 if command -v docker >/dev/null 2>&1; then
   echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
   sudo docker container prune -f  >/dev/null 2>&1 || true
@@ -215,20 +234,6 @@ else
   RUN_IMG="customer360-dagster"
 fi
 ensure_s3_bucket "$RUN_IMG" /opt/c360/backend.env "$MASTER_PROFILE_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
-# Preserve the OLD instance's Dagster storage before replacing the container. The
-# old container ran with an EPHEMERAL DAGSTER_HOME (no -v mount), so its SQLite
-# run/event/schedule history lives ONLY inside the container layer — copy it out
-# now or `docker rm` destroys it. Import later with
-# customer360-backend/scripts/migrate_dagster_sqlite_to_postgres.py (see deployment.md).
-if sudo docker ps -a --format '{{.Names}}' | grep -qx customer360-backend; then
-  ts="$(date -u +%Y%m%d-%H%M%S)"; bak="/opt/c360/dagster-home-backup-$ts.tar"
-  echo "   backing up old DAGSTER_HOME -> $bak"
-  if sudo docker cp customer360-backend:/dagster_home - > "$bak" 2>/dev/null; then
-    echo "   backup saved ($(du -h "$bak" | cut -f1))"
-  else
-    rm -f "$bak"; echo "   (nothing to back up, or copy failed — continuing)"
-  fi
-fi
 # NOTE: the container's entrypoint (render_dagster_instance.py) ensures the
 # dedicated `dagster` database exists and picks storage adaptively — shared
 # PostgreSQL if reachable, else local SQLite — so the deploy does NOT hard-depend
@@ -237,7 +242,6 @@ fi
 # and the daemon (schedules, sensors, run queue, run monitoring). `dagster-webserver`
 # alone runs NO daemon, so the run queue would never drain — the daemon is required.
 # Both use --network host + the same env-file; the daemon binds no port, so no conflict.
-for n in customer360-backend customer360-backend-daemon customer360-backend-redis; do sudo docker rm -f "$n" >/dev/null 2>&1 || true; done
 # Local Redis cache for all Dagster tasks (analytics dedup "already-processed" state + counters).
 # 127.0.0.1:6580; appendonly so the processed-state survives a restart (else logs would re-process).
 sudo docker run -d --name customer360-backend-redis --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host -v c360-dagster-redis:/data redis:7-alpine redis-server --port 6580 --appendonly yes
