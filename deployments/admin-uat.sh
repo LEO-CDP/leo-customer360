@@ -16,7 +16,7 @@
 #   seed-demo        Seed CIR/demo data — idempotent          (seed_demo_if_empty)
 #   bootstrap-realm  Re-run idempotent Keycloak realm/roles/client bootstrap
 #   restart-apps     Restart api + ads + frontend containers  (restart_host_services)
-#   restart-backend  Restart backend-system (Dagster)
+#   restart-backend  Restart customer360-backend (Dagster)
 #   redeploy-apps    Pull latest images + recreate api/ads/frontend/backend
 #   flush-cache      FLUSHDB the Redis cache (needs CONFIRM=flush-cache)
 #
@@ -66,8 +66,8 @@ case "$ACTION" in
     run_on "$(srv_ip api)" 'sudo docker restart customer360-api customer360-ads customer360-frontend >/dev/null && sudo docker ps --filter name=customer360- --format "   {{.Names}} {{.Status}}"'
     ;;
   restart-backend)
-    echo ">> Restarting backend-system (Dagster) on the backend box ..."
-    run_on "$(srv_ip backend)" 'sudo docker restart backend-system >/dev/null && sudo docker ps --filter name=backend-system --format "   {{.Names}} {{.Status}}"'
+    echo ">> Restarting customer360-backend (Dagster) on the backend box ..."
+    run_on "$(srv_ip backend)" 'sudo docker restart customer360-backend >/dev/null && sudo docker ps --filter name=customer360-backend --format "   {{.Names}} {{.Status}}"'
     ;;
 
   # --- read-only DB status (catalog live-row estimates: RLS-immune) ----------

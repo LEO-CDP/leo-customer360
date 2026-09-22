@@ -36,7 +36,7 @@ style: |
 # Customer Identity Resolution (CIR)
 ## Trong nền tảng Customer 360
 
-Tài liệu kỹ thuật tập trung vào `backend-system/identity_resolution`<br>
+Tài liệu kỹ thuật tập trung vào `customer360-backend/identity_resolution`<br>
 Cập nhật: 2026-08-28
 
 ---
@@ -173,8 +173,8 @@ Resolver có code cho `fuzzy_trgm` và `fuzzy_dmetaphone`, đồng thời Postgr
 
 ### Điểm quan trọng
 
-- `backend-system/Dockerfile` chạy Dagster webserver/daemon và load CIR từ
-  `backend-system/workspace.yaml`.
+- `customer360-backend/Dockerfile` chạy Dagster webserver/daemon và load CIR từ
+  `customer360-backend/workspace.yaml`.
 - Sensor phát `RunRequest()` mỗi `CIR_POLL_INTERVAL_SECONDS` (mặc định 600 giây / 10 phút).
   Mỗi op gọi daily drain, xử lý các batch tối đa `CIR_BATCH_SIZE` (mặc định
   5.000) cho đến khi staging hết dữ liệu.
@@ -186,7 +186,7 @@ Resolver có code cho `fuzzy_trgm` và `fuzzy_dmetaphone`, đồng thời Postgr
 
 | Entry point | Trạng thái |
 |---|---|
-| `dagster_defs.py` → sensor → job/op | Đường chạy chính của image `backend-system` |
+| `dagster_defs.py` → sensor → job/op | Đường chạy chính của image `customer360-backend` |
 | `daily_job.py` | Có thể gọi độc lập từ cron, Airflow hoặc CLI; được Dagster gọi trong runtime hiện tại |
 | `worker.py` | Loop in-process thay thế, gọi trực tiếp `execute_in_process()`; không phải command trong Dockerfile hiện tại |
 | `IdentityResolutionTrigger.attempt_trigger()` | Helper throttle bằng row lock; hiện không có production caller trong repository |
@@ -489,20 +489,20 @@ metadata seed và trạng thái database.
 
 | Nội dung | File |
 |---|---|
-| Dagster job, sensor, retry | `backend-system/identity_resolution/dagster_defs.py` |
-| Container entrypoint và image | `backend-system/Dockerfile` |
-| Batch drain / DB connection | `backend-system/identity_resolution/identity_resolution/daily_job.py` |
-| Matching, link, merge, transaction | `backend-system/identity_resolution/identity_resolution/resolver.py` |
-| Tenant context | `backend-system/identity_resolution/identity_resolution/rls.py` |
-| Optional throttle helper | `backend-system/identity_resolution/identity_resolution/trigger_controller.py` |
-| Persona computation/persistence | `backend-system/identity_resolution/identity_resolution/persona_engine.py` |
-| PII-safe label | `backend-system/identity_resolution/identity_resolution/persona.py` |
+| Dagster job, sensor, retry | `customer360-backend/identity_resolution/dagster_defs.py` |
+| Container entrypoint và image | `customer360-backend/Dockerfile` |
+| Batch drain / DB connection | `customer360-backend/identity_resolution/identity_resolution/daily_job.py` |
+| Matching, link, merge, transaction | `customer360-backend/identity_resolution/identity_resolution/resolver.py` |
+| Tenant context | `customer360-backend/identity_resolution/identity_resolution/rls.py` |
+| Optional throttle helper | `customer360-backend/identity_resolution/identity_resolution/trigger_controller.py` |
+| Persona computation/persistence | `customer360-backend/identity_resolution/identity_resolution/persona_engine.py` |
+| PII-safe label | `customer360-backend/identity_resolution/identity_resolution/persona.py` |
 | Schema, indexes, constraints, persona tables | `customer360-database/database-schema.sql` |
 | Attribute catalog và CIR seed | `customer360-database/init-core-database.sql` |
 | FORCE RLS migration | `customer360-database/migrations/001_harden_tenant_rls_policies.sql` |
-| Demo seed và hash PII | `backend-system/identity_resolution/scripts/init_sample_data.py` |
-| Demo resolution | `backend-system/identity_resolution/scripts/run_demo_resolution.py` |
-| Workspace code locations | `backend-system/workspace.yaml` |
+| Demo seed và hash PII | `customer360-backend/identity_resolution/scripts/init_sample_data.py` |
+| Demo resolution | `customer360-backend/identity_resolution/scripts/run_demo_resolution.py` |
+| Workspace code locations | `customer360-backend/workspace.yaml` |
 
 ---
 

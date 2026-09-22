@@ -1,9 +1,9 @@
 # Customer 360 — Applying the Dagster Scale-Out on UAT (vServer)
 
-> **Status:** applied baseline + forward plan · **Date:** 2026-09-09 · **Scope:** `backend-system/` (Dagster) on **vServer (VM + Docker + SSH)**, **UAT only**
+> **Status:** applied baseline + forward plan · **Date:** 2026-09-09 · **Scope:** `customer360-backend/` (Dagster) on **vServer (VM + Docker + SSH)**, **UAT only**
 > **Platform:** GreenNode / VNG Cloud vServer — HCM03-1C, `s-general-*` flavor family (not the `s2-general-*` AZ used in the cost tables)
 > **Parent analysis:** [`dagster-scaling-analysis.md`](./dagster-scaling-analysis.md) (the full VKS target + PROD topology)
-> **Source of truth for today's shape:** [`../server/deploy-backend.sh`](../server/deploy-backend.sh) · [`../../backend-system/deployment.md`](../../backend-system/deployment.md) · [`../../backend-system/scripts/render_dagster_instance.py`](../../backend-system/scripts/render_dagster_instance.py) · [`../server/overlays/uat.tfvars`](../server/overlays/uat.tfvars)
+> **Source of truth for today's shape:** [`../server/deploy-backend.sh`](../server/deploy-backend.sh) · [`../../customer360-backend/deployment.md`](../../customer360-backend/deployment.md) · [`../../customer360-backend/scripts/render_dagster_instance.py`](../../customer360-backend/scripts/render_dagster_instance.py) · [`../server/overlays/uat.tfvars`](../server/overlays/uat.tfvars)
 
 This is the **UAT, vServer-native** application of the parent scaling analysis. The parent
 targets **VKS** (Kubernetes node pools, HPA, ephemeral run pods, PROD `5 / 10 / 5`). UAT does
@@ -28,11 +28,11 @@ workers:
 ## 1. TL;DR
 
 - **UAT already runs the split control plane on vServer.** [`deploy-backend.sh uat`](../server/deploy-backend.sh)
-  launches **two containers** from one image — `backend-system` (the `dagster-webserver` on `:3000`)
-  and `backend-system-daemon` (the singleton `dagster-daemon`) — both with `--network host` and the
+  launches **two containers** from one image — `customer360-backend` (the `dagster-webserver` on `:3000`)
+  and `customer360-backend-daemon` (the singleton `dagster-daemon`) — both with `--network host` and the
   same env-file. This is the parent's **Phase 1** (split `dagster dev` → webserver + daemon), done.
 - **Storage is already shared and adaptive (Phase 0).** The container entrypoint renders
-  `$DAGSTER_HOME/dagster.yaml` at start via [`render_dagster_instance.py`](../../backend-system/scripts/render_dagster_instance.py):
+  `$DAGSTER_HOME/dagster.yaml` at start via [`render_dagster_instance.py`](../../customer360-backend/scripts/render_dagster_instance.py):
   **PostgreSQL** run/event/schedule storage (dedicated `dagster` DB, best-effort created) and
   **S3 / vStorage** compute logs, each probed and used only if reachable.
 - **The run queue is already bounded (part of §6.3).** The renderer always writes a
@@ -68,7 +68,7 @@ mechanisms are simply unavailable and the pool model collapses to fixed containe
 
 > [!IMPORTANT] The daemon box carries the run compute on UAT
 > With the `DefaultRunLauncher`, every launched run executes as a subprocess **on the
-> `backend-system-daemon` container's VM**. There is no isolation and no per-op scaling — this is
+> `customer360-backend-daemon` container's VM**. There is no isolation and no per-op scaling — this is
 > the parent's §2 baseline behavior. It is why the UAT box was resized `1x2 → 2x4`, and why the
 > bounded `max_concurrent_runs` matters: 2 concurrent identity/segmentation/analytics runs on a
 > 4 GB box is already near the memory edge. Measure before raising it.
@@ -77,13 +77,13 @@ mechanisms are simply unavailable and the pool model collapses to fixed containe
 
 ## 3. Current UAT baseline (what is actually deployed today)
 
-Grounded in [`deploy-backend.sh`](../server/deploy-backend.sh), [`render_dagster_instance.py`](../../backend-system/scripts/render_dagster_instance.py),
+Grounded in [`deploy-backend.sh`](../server/deploy-backend.sh), [`render_dagster_instance.py`](../../customer360-backend/scripts/render_dagster_instance.py),
 and [`uat.tfvars`](../server/overlays/uat.tfvars):
 
 | Aspect | UAT today |
 |---|---|
 | Host | **one** `s-general-2x4` VM (2 vCPU / 4 GB, 20 GB SSD), HCM03-1C, floating IP for SSH |
-| Process model | **two containers, one image** (`customer360-dagster`): `backend-system` = webserver `:3000`; `backend-system-daemon` = singleton daemon |
+| Process model | **two containers, one image** (`customer360-dagster`): `customer360-backend` = webserver `:3000`; `customer360-backend-daemon` = singleton daemon |
 | Networking | `--network host` (reaches the **private** customer360 vDB in the same subnet) |
 | Run/event/schedule storage | **PostgreSQL** (dedicated `dagster` DB on the managed vDB), adaptive — falls back to local SQLite only if the DB is unreachable |
 | Compute logs | **S3 / vStorage** (`S3ComputeLogManager`, path-style, `dagster-compute-logs/` prefix), adaptive — local logs if the bucket doesn't answer |
@@ -107,7 +107,7 @@ and [`uat.tfvars`](../server/overlays/uat.tfvars):
 | Phase 4 — scale the `ingestion / ai / compute` pools | ⬜ Not started (single box carries everything) |
 
 > [!WARNING] UAT box is under the documented UAT requirement
-> [`deployment.md`](../../backend-system/deployment.md) **Mode 1 (UAT, ~1,000 virtual users)** calls
+> [`deployment.md`](../../customer360-backend/deployment.md) **Mode 1 (UAT, ~1,000 virtual users)** calls
 > for **4 vCPU / 8 GB**. The live box is **2 vCPU / 4 GB** (`s-general-2x4`) — the pragmatic resize
 > that stopped the OOM/swap, not the full documented target. Treat closing that gap (Stage 1) as the
 > next step **before** any worker-VM fan-out. Confirm the flavor is enabled in HCM03-1C before relying
@@ -158,7 +158,7 @@ lives on **one VM**, the "which vServer" question is just: what single flavor ho
 |---|---|---|---|
 | `s-general-1x2` | 1 / 2 GB | ❌ too small | The original box — run workers OOM/swapped; already abandoned |
 | `s-general-2x4` | 2 / 4 GB | ⚠️ minimum, **live today** | Works, but under target; ~2 concurrent runs on 4 GB is at the memory edge |
-| **`s-general-4x8`** | **4 / 8 GB** | ✅ **recommended fit** | Matches [`deployment.md`](../../backend-system/deployment.md) **Mode 1** (UAT, ~1,000 VUs); headroom for `max_concurrent_runs` + Polars/identity materialization |
+| **`s-general-4x8`** | **4 / 8 GB** | ✅ **recommended fit** | Matches [`deployment.md`](../../customer360-backend/deployment.md) **Mode 1** (UAT, ~1,000 VUs); headroom for `max_concurrent_runs` + Polars/identity materialization |
 | `s-general-8x16`+ | 8 / 16 GB+ | ❌ overkill | PROD/Mode 2 territory; UAT has 6 of 9 locations as placeholders and no scale-to-zero |
 
 > [!TIP] The fit for UAT is **`s-general-4x8`** (4 vCPU / 8 GB) + a **50 GB** root disk
@@ -268,7 +268,7 @@ directly and Stage 2's fixed worker VMs retire. Track that under
 
 ## 6. Config knobs (where UAT actually tunes this)
 
-All rendered by [`render_dagster_instance.py`](../../backend-system/scripts/render_dagster_instance.py)
+All rendered by [`render_dagster_instance.py`](../../customer360-backend/scripts/render_dagster_instance.py)
 at container start from the env-file `deploy-backend.sh` writes to `/opt/c360/backend.env`:
 
 | Knob (env var) | Default | Effect |
@@ -294,16 +294,16 @@ ssh -i ~/.ssh/c360-api_ed25519 -L 3000:localhost:3000 leocdp360@<uat-backend-fip
 # then open http://localhost:3000
 
 # On the box:
-sudo docker ps --filter name=backend-system          # expect BOTH backend-system + backend-system-daemon
-sudo docker logs --tail=100 backend-system-daemon | grep render-instance
+sudo docker ps --filter name=customer360-backend          # expect BOTH customer360-backend + customer360-backend-daemon
+sudo docker logs --tail=100 customer360-backend-daemon | grep render-instance
 curl -fsS http://127.0.0.1:3000/server_info
-sudo docker exec backend-system sh -c 'cat /dagster_home/dagster.yaml'
+sudo docker exec customer360-backend sh -c 'cat /dagster_home/dagster.yaml'
 free -h && df -h /                                    # memory headroom + disk (keep ≥30% free)
 ```
 
 Check immediately after a redeploy:
 
-- **Exactly one** `backend-system-daemon` container is running (two daemons ⇒ duplicate ticks).
+- **Exactly one** `customer360-backend-daemon` container is running (two daemons ⇒ duplicate ticks).
 - `render-instance` logged `storage: PostgreSQL (shared)` — **not** a SQLite fallback.
 - `render-instance` logged `run coordinator: QueuedRunCoordinator (max_concurrent_runs=…)`.
 - All 9 code locations load in the UI; the `identity_resolution` and `segmentation` sensors are
@@ -336,6 +336,6 @@ Check immediately after a redeploy:
 | Emergency build-on-VM | `BUILD_LOCAL=1 bash deployments/server/deploy-backend.sh uat` |
 | Resize the box | edit `deployments/server/overlays/uat.tfvars` → `cd deployments/server && ./deploy.sh uat apply` |
 | Tunnel to the UI | `ssh -i ~/.ssh/c360-api_ed25519 -L 3000:localhost:3000 leocdp360@<fip>` |
-| Inspect rendered instance | `sudo docker exec backend-system cat /dagster_home/dagster.yaml` |
+| Inspect rendered instance | `sudo docker exec customer360-backend cat /dagster_home/dagster.yaml` |
 | Webserver command (image CMD) | `dagster-webserver -w workspace.yaml -h 0.0.0.0 -p 3000` |
 | Daemon command (singleton) | `dagster-daemon run -w workspace.yaml` |

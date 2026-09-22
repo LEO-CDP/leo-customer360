@@ -235,7 +235,7 @@ credentials (pgAdmin only stores them if you tick "Save").
 
 Portainer runs on the api box (`mon_server_key`) and by default sees only that box's Docker
 socket. The platform spans more than one vServer (the **backend** box, server key `1x2` /
-`10.100.1.4`, runs `backend-system`/Dagster) — so rather than stand up a **second** Portainer,
+`10.100.1.4`, runs `customer360-backend`/Dagster) — so rather than stand up a **second** Portainer,
 run a lightweight **`portainer/agent`** on the other box and register it in the existing Portainer
 as another *Environment*. One login, one UI, every box in the list.
 

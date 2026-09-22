@@ -6,9 +6,9 @@
 # Starts the development stack in dev-docker-compose.yml (postgres + redis +
 # keycloak + minio + tracking-api) and the local docs-vector-search service so
 # customer360-api and
-# backend-system/identity_resolution (CIR) can be run directly on the host
+# customer360-backend/identity_resolution (CIR) can be run directly on the host
 # against dockerized Postgres/Redis -- see
-# customer360-api/start.sh and backend-system/identity_resolution/run-demo.sh, and
+# customer360-api/start.sh and customer360-backend/identity_resolution/run-demo.sh, and
 # "non-Docker local dev workflow" in DOCKER-COMPOSE-GUIDE.md section 10.
 #
 # What it does, in order:
@@ -25,7 +25,7 @@
 #      automated realm/client seed script in this repo, so it prints manual
 #      setup instructions (DOCKER-COMPOSE-GUIDE.md section 9) when missing.
 #   6. Checks whether core demo tables are empty; if empty, runs the
-#      seed-demo workflow via backend-system/identity_resolution/run-demo.sh.
+#      seed-demo workflow via customer360-backend/identity_resolution/run-demo.sh.
 #      If not empty, prints current DB row-count status for key tables.
 #
 # Usage:
@@ -40,7 +40,7 @@
 #                                    with current repo code and restart core
 #                                    host services (non-destructive).
 #   ./dev-c360.sh restart           Restart docs-vector-search,
-#                                    customer360-api, backend-system, and customer360-frontend.
+#                                    customer360-api, customer360-backend, and customer360-frontend.
 #   ./dev-c360.sh reset             DESTRUCTIVE: `docker compose down -v`
 #                                    (drops the postgres/redis/minio volumes
 #                                    -- this also wipes Keycloak's
@@ -60,8 +60,8 @@ COMPOSE_FILE=""
 ENV_FILE=".env"
 ENV_EXAMPLE_FILE=".env.example"
 DEMO_TENANT_ID="${DEMO_TENANT_ID:-11111111-1111-1111-1111-111111111111}"
-CIR_DIR="backend-system/identity_resolution"
-BACKEND_SYSTEM_DIR="backend-system"
+CIR_DIR="customer360-backend/identity_resolution"
+BACKEND_SYSTEM_DIR="customer360-backend"
 CUSTOMER360_API_DIR="customer360-api"
 FRONTEND_ADMIN_DIR="customer360-frontend"
 DOCS_SEARCH_DIR="tools/docs-vector-search"
@@ -383,7 +383,7 @@ validate_docs_provider_credentials() {
 
 restart_host_services() {
   echo "🔁 Restarting host services..."
-  echo "   - backend-system: ./${BACKEND_SYSTEM_DIR}/restart.sh"
+  echo "   - customer360-backend: ./${BACKEND_SYSTEM_DIR}/restart.sh"
   (cd "$BACKEND_SYSTEM_DIR" && bash restart.sh)
 
   echo "   - customer360-api: ./${CUSTOMER360_API_DIR}/restart.sh"
@@ -459,7 +459,7 @@ if [ "$ACTION" = "restart" ]; then
 fi
 
 # DB_PORT/REDIS_PORT are what host-run apps (customer360-api/start.sh,
-# backend-system/identity_resolution/run-demo.sh) connect through; *_HOST_PORT is
+# customer360-backend/identity_resolution/run-demo.sh) connect through; *_HOST_PORT is
 # what docker-compose publishes. They must match when running against the
 # dockerized services from the host.
 if [ "${DB_PORT:-5432}" != "${POSTGRES_HOST_PORT:-5432}" ]; then

@@ -1,5 +1,5 @@
 """Unit tests for core.utils.dagster_client -- the OOP wrapper around
-dagster_graphql.DagsterGraphQLClient used to trigger backend-system Dagster
+dagster_graphql.DagsterGraphQLClient used to trigger customer360-backend Dagster
 jobs. All tests inject a fake client_factory (no real DagsterGraphQLClient/
 HTTP connection), so they run without a Dagster webserver.
 """
@@ -312,7 +312,7 @@ class IdentityResolutionRecomputePersonasTests(unittest.TestCase):
 
 
 class DagsterClientFacadeTests(unittest.TestCase):
-    def test_facade_exposes_one_service_per_backend_system_location(self):
+    def test_facade_exposes_one_service_per_customer360_backend_location(self):
         self.assertIsInstance(dagster_client.analytics, AnalyticsDagsterService)
         self.assertIsInstance(dagster_client.identity_resolution, IdentityResolutionDagsterService)
         self.assertIsInstance(dagster_client.scoring, ScoringDagsterService)
@@ -321,7 +321,7 @@ class DagsterClientFacadeTests(unittest.TestCase):
         self.assertIsInstance(dagster_client.email_engine, EmailEngineDagsterService)
         self.assertIsInstance(dagster_client.notification_engine, NotificationEngineDagsterService)
 
-    def test_service_job_and_location_names_match_backend_system_dagster_defs(self):
+    def test_service_job_and_location_names_match_customer360_backend_dagster_defs(self):
         self.assertEqual(dagster_client.analytics.job_name, "analytics_job")
         self.assertEqual(dagster_client.analytics.location_name, "analytics")
         self.assertEqual(dagster_client.identity_resolution.job_name, "identity_resolution_job")

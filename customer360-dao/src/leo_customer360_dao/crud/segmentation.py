@@ -3,7 +3,7 @@ core/models/segmentation.py and docs/api-plans/PLAN-SEGMENTS-API-IMPROVEMENT.md)
 
 ``recompute_segment_membership`` is the shared implementation used by both
 the on-demand ``POST /segments/{id}/recompute`` endpoint (core/routers/
-segment.py) and the scheduled Dagster job (backend-system/segmentation --
+segment.py) and the scheduled Dagster job (customer360-backend/segmentation --
 which duplicates this SQL rather than importing this module, since it is a
 separately deployed service; keep both in sync if this logic changes).
 """
@@ -26,7 +26,7 @@ from leo_customer360_dao.utils.sql_safety import validate_sql_where_fragment
 # keep resolving unambiguously against cdp_master_profiles. New domain-scoped
 # rules reference it explicitly, e.g. dp.domain_attributes->>'risk_segment'
 # (see GET /segments/segmentable-profile-attributes in core/routers/segment_api.py).
-# Duplicated in backend-system/segmentation/segmentation/recompute.py (separately
+# Duplicated in customer360-backend/segmentation/segmentation/recompute.py (separately
 # deployed service) -- keep both in sync if this SQL changes.
 DOMAIN_ATTRIBUTES_JOIN_SQL = """
     LEFT JOIN LATERAL (

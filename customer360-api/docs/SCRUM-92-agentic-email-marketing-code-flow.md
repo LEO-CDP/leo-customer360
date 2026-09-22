@@ -84,7 +84,7 @@ flowchart TB
     R4["crm_api.py<br/>campaign CRUD + analytics"]
     DCL["utils/dagster_client.py<br/>GraphQL client"]
   end
-  subgraph BE["backend-system · Dagster"]
+  subgraph BE["customer360-backend · Dagster"]
     J1["campaign_activation_job"]
     J2["email_engine_job"]
     J3["segmentation_job + poll sensor"]
@@ -119,7 +119,7 @@ Key facts:
   token**, not a header.
 - **Cross-service hand-off is not one job graph.** `campaign_activation` submits a *separate*
   `email_engine_job` run via the Dagster webserver GraphQL API
-  (`backend-system/campaign_activation/campaign_activation/triggers.py:29`).
+  (`customer360-backend/campaign_activation/campaign_activation/triggers.py:29`).
 - **Connector config** resolves DB (`crm_connector_config`, `connector_type='EMAIL'`) → `SMTP_*` env
   → mock. The outbound activation connector model is separate from inbound `sys_data_source`.
 
@@ -180,7 +180,7 @@ sequenceDiagram
   CR-->>PG: Activation reads crm_suppression_list before dispatch
 ```
 
-**Send-engine internals** (`backend-system/email_engine/email_engine/send.py`) — the per-recipient
+**Send-engine internals** (`customer360-backend/email_engine/email_engine/send.py`) — the per-recipient
 call graph and where each branch lands in the ledger:
 
 ```mermaid
@@ -264,7 +264,7 @@ prompt code. `core/config.py` has no LLM settings. Intended contract:
 
 **Reference provider-switch code to model the build on** (not wired to this feature):
 `all-data-simulator/adjust_faker.py`, `all-data-simulator/web_user_simulator.py`,
-`backend-system/identity_resolution/identity_resolution/persona_engine.py:874-911`.
+`customer360-backend/identity_resolution/identity_resolution/persona_engine.py:874-911`.
 
 ### Stage 3 — AI campaign draft — 🟡 (SCRUM-96)
 
@@ -293,7 +293,7 @@ Dagster run via `core/utils/dagster_client.py:445` `CampaignActivationDagsterSer
 (`503` if Dagster unreachable). Returns `run_id`.
 
 **Job:** `campaign_activation_job` → `activate_campaign_op`
-(`backend-system/campaign_activation/dagster_defs.py:52`, `RetryPolicy(max_retries=2, delay=10)`) →
+(`customer360-backend/campaign_activation/dagster_defs.py:52`, `RetryPolicy(max_retries=2, delay=10)`) →
 `campaign_activation/activation.py:71` `activate_campaign`:
 1. `set_tenant_context` (RLS) → `_load_campaign` (`crm_campaign`).
 2. Gate: `approval_status == 'Approved'` + template/segment present (else `CampaignActivationError`).
@@ -305,7 +305,7 @@ Dagster run via `core/utils/dagster_client.py:445` `CampaignActivationDagsterSer
 ### Stage 6 — Dagster: render & dispatch — ✅ (SCRUM-97)
 
 **Job:** `email_engine_job` → `send_campaign_op`
-(`backend-system/email_engine/dagster_defs.py:53`, `RetryPolicy(max_retries=2, delay=15)`,
+(`customer360-backend/email_engine/dagster_defs.py:53`, `RetryPolicy(max_retries=2, delay=15)`,
 passes `run_id`) → `email_engine/send.py:255` `send_campaign`:
 1. **Per-campaign advisory lock** `pg_try_advisory_lock(1, hashtext(campaign_id))` — a concurrent/retry
    run that can't acquire it exits `skipped_locked` (no double-send). Released in `finally`.
@@ -358,7 +358,7 @@ represented by the canonical event ID/dedup key and immutable S3 state.
 
 **Landed:** email events are captured in the S3/MinIO event lake and compliance
 suppression is modeled in `crm_suppression_list` (Stage 7). A change-gated segmentation sensor exists
-(`backend-system/segmentation/dagster_defs.py:136` `segmentation_poll_sensor`, watches
+(`customer360-backend/segmentation/dagster_defs.py:136` `segmentation_poll_sensor`, watches
 `cdp_master_profiles` via `count_recently_changed_master_profiles`). Campaign performance is exposed
 read-only through `vw_campaign_performance_metrics` + `CampaignRepository`
 (`core/repositories/campaign_repository.py`).
@@ -366,7 +366,7 @@ read-only through `vw_campaign_performance_metrics` + `CampaignRepository`
 **Not built (the three headline SCRUM-99 behaviours):**
 1. Writing email touchpoints/engagement back to `cdp_master_profiles` — nothing propagates
   S3 Silver event projections → profile fields. The `scoring` Dagster location that would bridge this is still a
-   sleep placeholder (`backend-system/scoring/dagster_defs.py`).
+   sleep placeholder (`customer360-backend/scoring/dagster_defs.py`).
 2. Email-event-driven segment refresh — the sensor watches profiles, and email events don't touch
    profiles, so opens/clicks don't trip it.
 3. Email-metric rollup into campaign performance — `crm_campaign_performance_daily` has **ad-metric
@@ -376,7 +376,7 @@ read-only through `vw_campaign_performance_metrics` + `CampaignRepository`
 
 ## 4. Connector config & dispatch adapter — ✅ (SCRUM-97)
 
-- **Resolution order** — `backend-system/email_engine/email_engine/connector_config.py`
+- **Resolution order** — `customer360-backend/email_engine/email_engine/connector_config.py`
   `load_email_config`: active outbound `crm_connector_config` EMAIL row → `SMTP_*` env → mock default.
 - **Write side** — `customer360-api/core/crud/email_provider.py`:
   `get_active_config`, `upsert_config` (keeps one active EMAIL connector per tenant). Exposed at
@@ -479,7 +479,7 @@ Keycloak token), `README.md`, `TEST_PLAN.md` (AC → case traceability). Simulat
 | SCRUM-95 | AI template generation (Gemini/OpenAI) + template CRUD + approve/reject/edit APIs | `customer360-api/core` (new `ai/` + template router); model on the reference provider-switch code |
 | SCRUM-96 | AI campaign planning endpoint + real Draft→InReview→Approved/Rejected→Scheduled/Running state machine | `customer360-api/core` (planning service + transition validator) |
 | SCRUM-97 | (optional) SES adapter | `email_engine/adapters.py` (one subclass + branch); DB CHECK allows `mock/smtp` only today |
-| SCRUM-99 | profile touchpoint/engagement writeback; email-driven segment refresh; email-metric rollup into `crm_campaign_performance_daily` | `backend-system/scoring` (currently placeholder) + new perf columns/aggregation |
+| SCRUM-99 | profile touchpoint/engagement writeback; email-driven segment refresh; email-metric rollup into `crm_campaign_performance_daily` | `customer360-backend/scoring` (currently placeholder) + new perf columns/aggregation |
 
 ---
 
@@ -499,7 +499,7 @@ Keycloak token), `README.md`, `TEST_PLAN.md` (AC → case traceability). Simulat
 - `core/apps/http_api_app.py` — `PUBLIC_PATHS` allowlist
 - `tests/e2e/*` — E2E suite + plan
 
-**backend-system**
+**customer360-backend**
 - `campaign_activation/dagster_defs.py`, `campaign_activation/{activation,triggers,rls,db}.py`
 - `email_engine/dagster_defs.py`, `email_engine/{send,adapters,rendering,connector_config,provider_config,tracking,rls,db}.py`
 - `segmentation/dagster_defs.py` + `segmentation/recompute.py` — recompute + poll sensor

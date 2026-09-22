@@ -1,6 +1,6 @@
 """Pydantic schemas for the Customer Identity Resolution (CIR) core models:
 master profiles, raw profile staging, profile links, and the matching-rule
-metadata / throttle-status tables consumed by backend-system/identity_resolution.
+metadata / throttle-status tables consumed by customer360-backend/identity_resolution.
 """
 
 import uuid
@@ -513,7 +513,7 @@ class PersonaArchetypeRead(PersonaArchetypeBase):
     # as input (see PersonaArchetypeBase/Create/Update above) -- both are
     # computed/maintained entirely server-side: matched_profile_count by the
     # DB trigger (trg_sync_persona_archetype_match_count) and targeted Dagster
-    # refreshes, and the centroid_* scores by backend-system/identity_resolution's PersonaResolutionEngine
+    # refreshes, and the centroid_* scores by customer360-backend/identity_resolution's PersonaResolutionEngine
     # (_upsert_archetype), which folds each newly (re)resolved master
     # profile's component scores into a running mean every time the
     # identity_resolution_job processes it.

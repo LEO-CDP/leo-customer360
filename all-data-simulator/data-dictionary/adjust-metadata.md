@@ -97,8 +97,8 @@ Luu y chat luong du lieu:
 
 - all-data-simulator/data-dictionary/adjust-dictionary.csv
 - all-data-simulator/adjust_faker.py
-- backend-system/identity_resolution/identity_resolution/resolver.py
-- backend-system/identity_resolution/scripts/init_sample_data.py
+- customer360-backend/identity_resolution/identity_resolution/resolver.py
+- customer360-backend/identity_resolution/scripts/init_sample_data.py
 
 ## 7. Ket luan
 

@@ -170,7 +170,7 @@ session and is never in the key, so Tenant B replays Tenant A's cached PII.
 
 <a id="c5"></a>
 #### C5 — Identity resolution over-merges distinct people
-- **Where:** `backend-system/identity_resolution/identity_resolution/resolver.py:688` (OR of all
+- **Where:** `customer360-backend/identity_resolution/identity_resolution/resolver.py:688` (OR of all
   conditions) and `:1042-1050` (link + merge on any match, no threshold).
 - **What:** `_find_master_profile` ORs every identifier the raw profile happens to carry
   (email, phone, **and weak signals like `device_id`/`advertising_id`/`cookie_id`**, all seeded
@@ -184,10 +184,10 @@ session and is never in the key, so Tenant B replays Tenant A's cached PII.
 
 <a id="c6"></a>
 #### C6 — CIR worker sets RLS tenant with session `SET`, leaking across pooled connections
-- **Where:** `backend-system/identity_resolution/identity_resolution/rls.py:9`
+- **Where:** `customer360-backend/identity_resolution/identity_resolution/rls.py:9`
   (`cursor.execute("SET app.tenant_id = %s", (value,))`); same pattern in
-  `backend-system/analytics/source_analytics/tracking_log_aggregation.py:65` and
-  `backend-system/segmentation/segmentation/rls.py:9`.
+  `customer360-backend/analytics/source_analytics/tracking_log_aggregation.py:65` and
+  `customer360-backend/segmentation/segmentation/rls.py:9`.
 - **What:** `SET` is **session-scoped**, not transaction-local. The schema explicitly prescribes
   tx-local `set_config('app.tenant_id', t, true)` (`database-schema.sql:2925`), which
   `customer360-api` correctly uses. `run_resolution_batch` commits leaving `app.tenant_id`
@@ -305,11 +305,11 @@ engages. Parse a trusted `X-Forwarded-For`.
 | M4 | `customer360-api/core/routers/metadata_api.py:63` | `GET /metadata/domains` filters by caller `tenant_id`; `sys_tenant_domain` has no RLS | Cross-tenant enumeration of enabled domains |
 | M5 | `customer360-api/core/routers/user_api.py:232` | `create/update/delete_user` require only an ACTIVE user, no admin role | Intra-tenant privilege escalation / hard-delete of other users |
 | M6 | `customer360-api/core/routers/events_api.py:39` | Create routes take `tenant_id` from body, no check vs token | Cross-tenant writes if DB role bypasses RLS (default `postgres` superuser) |
-| M7 | `backend-system/analytics/.../tracking_log_aggregation.py:128` | `fetch_data_sources` has no explicit `tenant_id` predicate, relies solely on RLS | One misconfigured GRANT → cross-tenant enumeration / duplicate processing |
+| M7 | `customer360-backend/analytics/.../tracking_log_aggregation.py:128` | `fetch_data_sources` has no explicit `tenant_id` predicate, relies solely on RLS | One misconfigured GRANT → cross-tenant enumeration / duplicate processing |
 | M8 | `.../tracking_log_aggregation.py:139` | Single global `LIMIT` across all tenants (default 10) | Only the 10 lexicographically-smallest sources are ever aggregated; tenants starved |
 | M9 | `.../tracking_log_aggregation.py:286` | Per-object checkpoint keys created with SETNX, **no TTL** | Unbounded Redis growth; eviction re-enables double-counting |
-| M10 | `backend-system/segmentation/dagster_defs.py:133` | Recompute bumps `updated_at`; the sensor triggers on `updated_at` changes | Self-retriggering → runaway back-to-back full recomputes (esp. time-relative rules) |
-| M11 | `backend-system/identity_resolution/.../persona_engine.py:1045` | Centroid running-mean assumes +1 member per upsert, but masters are re-resolved every batch | Centroids drift toward frequently-active profiles |
+| M10 | `customer360-backend/segmentation/dagster_defs.py:133` | Recompute bumps `updated_at`; the sensor triggers on `updated_at` changes | Self-retriggering → runaway back-to-back full recomputes (esp. time-relative rules) |
+| M11 | `customer360-backend/identity_resolution/.../persona_engine.py:1045` | Centroid running-mean assumes +1 member per upsert, but masters are re-resolved every batch | Centroids drift toward frequently-active profiles |
 | M12 | `.../persona_engine.py:555` | `compute_financial_score(clv_reference=GLOBAL_DEFAULT)` binds the global as a default arg at import | Runtime `cdp_persona_config` override of CLV reference silently no-ops |
 | M13 | `.../resolver.py:590` | Email/phone matched with no normalization (case/whitespace/`+country`) | Duplicate masters for the same person; later re-bridged by weak signals |
 | M14 | `.../trigger_controller.py:105` | Zero-profile run returns before `commit()`, leaving the throttle UPDATE + `FOR UPDATE` lock open | Every other worker's `FOR UPDATE NOWAIT` fails → throttle starvation |
@@ -320,9 +320,9 @@ engages. Parse a trusted `X-Forwarded-For`.
 | M19 | `customer360-event-api/core/service.py` | **Resolved:** session-cache aggregation now prefers event-level identity, matching the identity persisted to S3 | Prevents session counters from diverging from durable event data |
 | M20 | `customer360-event-api/core/storage.py:106` | `_ensure_bucket` does a `head_bucket` every request; any non-404 (e.g. 403) is fatal | Doubles S3 latency; spurious 503 → whole batch dropped when PutObject would succeed |
 | M21 | `customer360-event-api/core/storage.py:38` | Object key is `uuid4()`; no idempotency key | Client retry after a 503 writes a duplicate object → double-counted events |
-| M22 | `backend-system/personalization/dagster_defs.py:33` | Copy-paste: job defined as `@job(name="scoring_job")` | No `personalization_job` exists; submissions fail; two identical `scoring_job`s in Dagit |
+| M22 | `customer360-backend/personalization/dagster_defs.py:33` | Copy-paste: job defined as `@job(name="scoring_job")` | No `personalization_job` exists; submissions fail; two identical `scoring_job`s in Dagit |
 | M23 | `customer360-frontend/app.py:135` | `tenant_id = TENANT_ID or cookie or header`, but `TENANT_ID` always defaults to a hardcoded UUID | Per-request cookie/header tenant switching silently never works |
-| M24 | `backend-system/scripts/migrate_dagster_sqlite_to_postgres.py:99` | Drops the `id` column, `fetchall()`s whole tables, one transaction, no per-table try/except | Re-numbered event-log ids break sensor cursors; OOM / all-or-nothing abort on large history |
+| M24 | `customer360-backend/scripts/migrate_dagster_sqlite_to_postgres.py:99` | Drops the `id` column, `fetchall()`s whole tables, one transaction, no per-table try/except | Re-numbered event-log ids break sensor cursors; OOM / all-or-nothing abort on large history |
 | M25 | `ads-server/repository/ad_repository.py:397` | Tracking rows collapsed into `{f"{event_type}Url": ...}` | Multiple endpoints per event type → all but the last silently dropped (missing pixels) |
 
 <a id="low-findings"></a>
@@ -345,7 +345,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 | L13 | `customer360-event-api/app.py:47` | `cdp-event-proxy.html` route registered unconditionally (unlike guarded static mounts) → 500 if the file is absent |
 | L14 | `all-data-simulator/google_analytics_faker.py:20` | `event_time` from naive `datetime.now()` emitted tz-less → mis-bucketed by host offset downstream |
 | L15 | `all-data-simulator/adjust_faker.py:401` | `MEDIA_SOURCE_CONFIG[campaign.media_source]` bare subscript on LLM output → `KeyError` crashes the run (also `:365`, `:459`) |
-| L16 | `backend-system/scripts/render_dagster_instance.py:68` | `s3_ready()` probes with `MINIO_ROOT_*`, but the rendered `S3ComputeLogManager` relies on `AWS_*` → probe passes, runtime upload fails |
+| L16 | `customer360-backend/scripts/render_dagster_instance.py:68` | `s3_ready()` probes with `MINIO_ROOT_*`, but the rendered `S3ComputeLogManager` relies on `AWS_*` → probe passes, runtime upload fails |
 | L17 | `deployments/sso/bootstrap-realm.py:67` | One admin token fetched once, reused across 20+ calls whose statuses are unchecked → silent partial realm provisioning on token expiry |
 | L18 | `.../persona_engine.py:194` | `apply_persona_config` mutates ~40 module-level globals shared across instances → not thread-safe if resolutions run concurrently in-process |
 
@@ -356,12 +356,12 @@ engages. Parse a trusted `X-Forwarded-For`.
 | Service | Files | ~LOC | Findings (C/H/M/L) |
 |---|---:|---:|---|
 | `customer360-api` | 91 | ~9,700* | C1–C4 · H2,H3,H13 · M3–M6,M16,M17 · L1–L4 |
-| `backend-system/identity_resolution` | — | 8,411 | C5,C6 · H1,H10,H11,H12 · M11–M15 · L18 |
+| `customer360-backend/identity_resolution` | — | 8,411 | C5,C6 · H1,H10,H11,H12 · M11–M15 · L18 |
 | `ads-server` | 22 | 3,809 | H7 · M1,M2,M25 · L5–L11 |
 | `customer360-event-api` | 12 | 1,334 | H4,H5,H6 · M18–M21 · L12,L13 |
-| `backend-system/analytics` | — | 732 | H8 · M7–M9 |
-| `backend-system/segmentation` | — | 627 | H9 · M10 |
-| `backend-system` (other Dagster + scripts) | — | ~475 | M22,M24 · L16 |
+| `customer360-backend/analytics` | — | 732 | H8 · M7–M9 |
+| `customer360-backend/segmentation` | — | 627 | H9 · M10 |
+| `customer360-backend` (other Dagster + scripts) | — | ~475 | M22,M24 · L16 |
 | `all-data-simulator` | 5 | 1,376 | L14,L15 |
 | `deployments` + `customer360-frontend` | 4 | 653 | M23 · L17 |
 
@@ -371,7 +371,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 
 ## 7. Methodology & scope
 
-- **Scope:** every `*.py` under `ads-server/`, `all-data-simulator/`, `backend-system/`,
+- **Scope:** every `*.py` under `ads-server/`, `all-data-simulator/`, `customer360-backend/`,
   `customer360-api/` (excluding `.venv`), `customer360-event-api/`, `deployments/`, `customer360-frontend/`.
   Tests were read for context but are not the review target.
 - **Approach:** the code was partitioned across six parallel reviewers, each applying ten

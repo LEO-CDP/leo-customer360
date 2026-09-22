@@ -45,7 +45,7 @@ jobs:
         with:
           filters: |
             ads-server: 'ads-server/**'
-            backend-system: 'backend-system/**'
+            customer360-backend: 'customer360-backend/**'
             customer360-dao: 'customer360-dao/**'
             customer360-api: 'customer360-api/**'
             customer360-agent: 'customer360-agent/**'
@@ -62,7 +62,7 @@ jobs:
         id: select
         run: |
           if [[ "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo 'services=["ads-server","backend-system","customer360-dao","customer360-api","customer360-agent","customer360-event-api","customer360-frontend","docs-vector-search","postgres","redis"]' >> "$GITHUB_OUTPUT"
+            echo 'services=["ads-server","customer360-backend","customer360-dao","customer360-api","customer360-agent","customer360-event-api","customer360-frontend","docs-vector-search","postgres","redis"]' >> "$GITHUB_OUTPUT"
           else
             printf 'services=%s\n' '${{ steps.filter.outputs.changes }}' >> "$GITHUB_OUTPUT"
           fi
@@ -104,7 +104,7 @@ jobs:
             customer360-agent) runners="customer360-agent/run_unit_tests.sh" ;;
             customer360-dao)   runners="customer360-dao/run_tests.sh" ;;
             customer360-event-api) runners="customer360-event-api/run_unit_tests.sh" ;;
-            backend-system)    runners="backend-system/identity_resolution/run_tests.sh backend-system/segmentation/run_tests.sh backend-system/campaign_activation/run_tests.sh backend-system/email_engine/run_tests.sh backend-system/notification_engine/run_tests.sh" ;;
+            customer360-backend)    runners="customer360-backend/identity_resolution/run_tests.sh customer360-backend/segmentation/run_tests.sh customer360-backend/campaign_activation/run_tests.sh customer360-backend/email_engine/run_tests.sh customer360-backend/notification_engine/run_tests.sh" ;;
             docs-vector-search) runners="tools/docs-vector-search/run_unit_tests.sh" ;;
             *)                 runners="" ;;
           esac
@@ -186,10 +186,10 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          # backend-system is the source directory and matrix key; the
+          # customer360-backend is the source directory and matrix key; the
           # published Dagster image uses its runtime name.
-          images: ghcr.io/${{ github.repository }}/${{ matrix.service == 'backend-system' && 'customer360-dagster' || matrix.service }}
-          # The matrix key remains backend-system because it is the source
+          images: ghcr.io/${{ github.repository }}/${{ matrix.service == 'customer360-backend' && 'customer360-dagster' || matrix.service }}
+          # The matrix key remains customer360-backend because it is the source
           # directory and test scope; its published image has the Dagster name.
           flavor: |
             latest=auto
@@ -207,7 +207,7 @@ jobs:
         if: ${{ matrix.service != 'customer360-dao' }}
         uses: docker/build-push-action@v6
         with:
-          context: ${{ (matrix.service == 'postgres' || matrix.service == 'backend-system' || matrix.service == 'customer360-api') && '.' || (matrix.service == 'docs-vector-search' && './tools/docs-vector-search') || format('./{0}', matrix.service) }}
+          context: ${{ (matrix.service == 'postgres' || matrix.service == 'customer360-backend' || matrix.service == 'customer360-api') && '.' || (matrix.service == 'docs-vector-search' && './tools/docs-vector-search') || format('./{0}', matrix.service) }}
           file: ${{ matrix.service == 'docs-vector-search' && './tools/docs-vector-search/Dockerfile' || format('./{0}/Dockerfile', matrix.service) }}
           target: ${{ matrix.service == 'docs-vector-search' && 'hosted' || '' }}
           # Push on the default branch and on release tags; build-only elsewhere.

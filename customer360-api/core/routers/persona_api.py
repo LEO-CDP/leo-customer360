@@ -1,7 +1,7 @@
 
 """Routers for customer personas, features, scores, and history.
 
-Customer personas are "identity understanding" computed by the backend-system/
+Customer personas are "identity understanding" computed by the customer360-backend/
 identity_resolution PersonaResolutionEngine, representing resolved understanding
 of who a customer is based on their aggregated raw and domain profiles.
 

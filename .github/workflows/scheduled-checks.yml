@@ -44,8 +44,8 @@ jobs:
           runners="ads-server/run_unit_tests.sh \
                    customer360-api/run_unit_tests.sh \
                    customer360-event-api/run_unit_tests.sh \
-                   backend-system/identity_resolution/run_tests.sh \
-                   backend-system/segmentation/run_tests.sh \
+                   customer360-backend/identity_resolution/run_tests.sh \
+                   customer360-backend/segmentation/run_tests.sh \
                    tools/docs-vector-search/run_unit_tests.sh"
           mkdir -p logs
           fail=0

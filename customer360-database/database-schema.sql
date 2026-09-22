@@ -705,7 +705,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- current_persona_id (below) MUST be populated -- see the CHECK constraint at the end of
     -- this table -- since hashed PII can no longer be used as a human-readable label for
     -- browsing/semantic search. current_persona_id is computed by application code (see
-    -- backend-system/identity_resolution/identity_resolution/persona.py), never by the DB.
+    -- customer360-backend/identity_resolution/identity_resolution/persona.py), never by the DB.
     is_hashed BOOLEAN NOT NULL DEFAULT FALSE,
 
     -- Primary contact info (used for primary identity stitching and marketing)
@@ -1530,7 +1530,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_customer_personas
            computed_version)
 );
 
-COMMENT ON TABLE customer360.cdp_customer_personas IS 'Versioned match/assignment of ONE master profile to ONE cdp_persona_archetypes row, computed by backend-system/identity_resolution''s PersonaResolutionEngine: this profile''s own behavior/engagement/financial/loyalty/relationship/risk component scores, an overall persona_score, customer_value_tier/risk_level/next_best_action, and match_score (lookalike fit vs the archetype centroid). Each recomputation inserts a new row (computed_version); only the latest row per master_profile_id has is_active = TRUE. Many rows (across many master profiles) can reference the same persona_archetype_id -- that many-to-many fan-in is the whole point of this table.';
+COMMENT ON TABLE customer360.cdp_customer_personas IS 'Versioned match/assignment of ONE master profile to ONE cdp_persona_archetypes row, computed by customer360-backend/identity_resolution''s PersonaResolutionEngine: this profile''s own behavior/engagement/financial/loyalty/relationship/risk component scores, an overall persona_score, customer_value_tier/risk_level/next_best_action, and match_score (lookalike fit vs the archetype centroid). Each recomputation inserts a new row (computed_version); only the latest row per master_profile_id has is_active = TRUE. Many rows (across many master profiles) can reference the same persona_archetype_id -- that many-to-many fan-in is the whole point of this table.';
 
 DO $$
 BEGIN
@@ -1974,7 +1974,7 @@ CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_model_name
 -- Quality / Identity Resolution confidence). Also carries the
 -- cdp_raw_profiles_stage matching keys (device_id, advertising_id, cookie_id,
 -- external_customer_id) consumed dynamically by the Customer Identity
--- Resolution (CIR) engine (core-customer360/backend-system/identity_resolution ->
+-- Resolution (CIR) engine (core-customer360/customer360-backend/identity_resolution ->
 -- identity_resolution.resolver.CustomerIdentityResolver), which only reads
 -- attribute_internal_code / is_identity_resolution / status / matching_rule /
 -- matching_threshold, so the extra metadata columns below are additive and
@@ -3352,7 +3352,7 @@ $$;
 --   CREATE ROLE customer360_app LOGIN PASSWORD '...';
 --   GRANT USAGE ON SCHEMA customer360 TO customer360_app;
 --   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA customer360 TO customer360_app;
--- backend-system/identity_resolution (CIR) intentionally processes many tenants per
+-- customer360-backend/identity_resolution (CIR) intentionally processes many tenants per
 -- batch/connection (see run_resolution_batch in resolver.py), so it either
 -- needs its own BYPASSRLS role, OR -- the approach taken here -- it re-issues
 -- set_config('app.tenant_id', ...) per row before each row's queries, which

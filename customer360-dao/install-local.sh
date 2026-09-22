@@ -5,7 +5,7 @@
 #   ./customer360-dao/install-local.sh
 #   ./customer360-dao/install-local.sh --requirements
 #   ./customer360-dao/install-local.sh --service customer360-api
-#   ./customer360-dao/install-local.sh --service backend-system/segmentation --requirements
+#   ./customer360-dao/install-local.sh --service customer360-backend/segmentation --requirements
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,18 +14,18 @@ DAO_DIR="$SCRIPT_DIR"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 INSTALL_REQUIREMENTS=0
 
-# These are the repository's Python microservice roots. backend-system child
+# These are the repository's Python microservice roots. customer360-backend child
 # locations get their own environment because their test/start scripts support
 # both shared and per-location virtualenvs.
 SERVICE_DIRS=(
     "customer360-api"
     "customer360-event-api"
     "ads-server"
-    "backend-system"
+    "customer360-backend"
 )
 while IFS= read -r service_dir; do
     SERVICE_DIRS+=("${service_dir#"$REPO_ROOT/"}")
-done < <(find "$REPO_ROOT/backend-system" -mindepth 2 -maxdepth 2 -type f -name 'requirements.txt' -printf '%h\n' | sort -u)
+done < <(find "$REPO_ROOT/customer360-backend" -mindepth 2 -maxdepth 2 -type f -name 'requirements.txt' -printf '%h\n' | sort -u)
 
 usage() {
         cat >&2 <<'USAGE'
@@ -35,7 +35,7 @@ Usage:
     ./customer360-dao/install-local.sh
     ./customer360-dao/install-local.sh --requirements
     ./customer360-dao/install-local.sh --service customer360-api
-    ./customer360-dao/install-local.sh --service backend-system/segmentation --requirements
+    ./customer360-dao/install-local.sh --service customer360-backend/segmentation --requirements
 USAGE
 }
 
@@ -101,7 +101,7 @@ install_service() {
     "$python" -m pip install --quiet --upgrade --no-deps --editable "$DAO_DIR"
 
     if [[ "$INSTALL_REQUIREMENTS" -eq 1 ]]; then
-        if [[ "$relative_dir" == "backend-system" ]]; then
+        if [[ "$relative_dir" == "customer360-backend" ]]; then
             mapfile -t requirements_files < <(
                 find "$service_dir" -maxdepth 2 -type f -name 'requirements*.txt' -print | sort
             )

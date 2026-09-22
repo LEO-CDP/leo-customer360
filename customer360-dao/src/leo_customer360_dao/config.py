@@ -96,8 +96,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CRM_SYNC_BATCH_SIZE", "crm_sync_batch_size"),
     )
 
-    # Dagster webserver GraphQL endpoint (backend-system/, `dagster dev` /
-    # dagster-webserver deployment) -- shared by every backend-system code
+    # Dagster webserver GraphQL endpoint (customer360-backend/, `dagster dev` /
+    # dagster-webserver deployment) -- shared by every customer360-backend code
     # location. Used to submit job runs asynchronously instead of running
     # long batch work inline inside an HTTP request (see
     # core/utils/dagster_client.py).
@@ -111,8 +111,8 @@ class Settings(BaseSettings):
     )
 
     # Per-service job/location/repository names, one triplet per
-    # `backend-system/<service>/dagster_defs.py` code location registered in
-    # `backend-system/workspace.yaml`. `repository_name` defaults to
+    # `customer360-backend/<service>/dagster_defs.py` code location registered in
+    # `customer360-backend/workspace.yaml`. `repository_name` defaults to
     # `__repository__`, Dagster's auto-generated name for a module-level
     # `Definitions(...)` object (every service here uses that pattern).
     dagster_analytics_job_name: str = Field(
@@ -199,7 +199,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DAGSTER_EMAIL_ENGINE_REPOSITORY_NAME", "dagster_email_engine_repository_name"),
     )
 
-    # --- Email dispatch (SMTP). Mirrors the env the backend-system/email_engine
+    # --- Email dispatch (SMTP). Mirrors the env the customer360-backend/email_engine
     #     sender reads; here it backs the GET /metadata/smtp health probe. This is
     #     the SYSTEM/env config (email_engine's fallback), not a tenant's
     #     crm_connector_config EMAIL row. 'mock' -> the probe reports 'disabled'.

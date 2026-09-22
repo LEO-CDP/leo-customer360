@@ -18,8 +18,8 @@ Customer Persona Resolution (CPR) transforms Master Profiles into AI-native Pers
 This document is grounded in components that already exist in the repository:
 
 - PostgreSQL schema and Persona tables in `customer360-database/database-schema.sql`
-- Persona engine module in `backend-system/identity_resolution/identity_resolution/persona_engine.py`
-- Persona computation logic in `backend-system/identity_resolution/identity_resolution/persona.py`
+- Persona engine module in `customer360-backend/identity_resolution/identity_resolution/persona_engine.py`
+- Persona computation logic in `customer360-backend/identity_resolution/identity_resolution/persona.py`
 - `PersonaResolutionEngine` and `PersonaVersioningManager` in `resolver.py`
 - Vector support through `pgvector` on PostgreSQL 16
 
@@ -585,4 +585,4 @@ In short, the current implementation is technically robust and ready to support 
 
 ---
 
-**References:** [persona_engine.py](../../backend-system/identity_resolution/identity_resolution/persona_engine.py) | [database-schema.sql](../../customer360-database/database-schema.sql)
+**References:** [persona_engine.py](../../customer360-backend/identity_resolution/identity_resolution/persona_engine.py) | [database-schema.sql](../../customer360-database/database-schema.sql)

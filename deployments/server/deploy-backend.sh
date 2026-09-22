@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Deploy backend-system (the Dagster orchestrator) onto the server VM for an env.
+# Deploy customer360-backend (the Dagster orchestrator) onto the server VM for an env.
 #   ./deploy-backend.sh <uat|prod>
 #
-# Ships the repo's backend-system/ and customer360-dao/ to the box over SSH (tar-over-ssh — no git creds
+# Ships the repo's customer360-backend/ and customer360-dao/ to the box over SSH (tar-over-ssh — no git creds
 # needed on the VM), installs Docker if missing, builds the image, and (re)runs it as a
 # container on port 3000 with --network host so it reaches the PRIVATE customer360 DB
 # (same subnet as the VM). Re-runnable: it rebuilds and replaces the container.
@@ -12,7 +12,7 @@
 # DB connection is read from the sibling ../postgres deployment.
 set -euo pipefail
 cd "$(dirname "$0")"                 # deployments/server
-REPO_ROOT="$(cd ../.. && pwd)"       # repo root (contains backend-system/)
+REPO_ROOT="$(cd ../.. && pwd)"       # repo root (contains customer360-backend/)
 
 ENV="${1:-}"
 case "$ENV" in
@@ -93,8 +93,8 @@ GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
 if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
   DEPLOY_MODE="build"; IMAGE=""
   echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
-  echo ">> Shipping backend-system/ and customer360-dao/ ..."
-  tar -C "$REPO_ROOT" -czf - backend-system customer360-dao \
+  echo ">> Shipping customer360-backend/ and customer360-dao/ ..."
+  tar -C "$REPO_ROOT" -czf - customer360-backend customer360-dao \
     | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
 else
   DEPLOY_MODE="ghcr"
@@ -170,7 +170,7 @@ fi
 # and the old ones pile up until a small VM fills its disk ("No space left on device"
 # on the very first env-file write). This runs before any disk write (the heredoc streams
 # over stdin) so it recovers even from an already-full disk. The currently-running
-# backend-system still holds its image here, so `image prune -a` keeps it and drops only
+# customer360-backend still holds its image here, so `image prune -a` keeps it and drops only
 # the stale ones. Best-effort: never fail the deploy on cleanup.
 if command -v docker >/dev/null 2>&1; then
   echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
@@ -210,7 +210,7 @@ if [ "$DEPLOY_MODE" = "ghcr" ]; then
   RUN_IMG="$IMAGE"
 else
   echo "   building image (this can take a few minutes on a small box)..."
-  sudo docker build -t customer360-dagster -f /opt/c360/backend-system/Dockerfile /opt/c360
+  sudo docker build -t customer360-dagster -f /opt/c360/customer360-backend/Dockerfile /opt/c360
   RUN_IMG="customer360-dagster"
 fi
 ensure_s3_bucket "$RUN_IMG" /opt/c360/backend.env "$MASTER_PROFILE_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
@@ -218,11 +218,11 @@ ensure_s3_bucket "$RUN_IMG" /opt/c360/backend.env "$MASTER_PROFILE_S3_BUCKET" "$
 # old container ran with an EPHEMERAL DAGSTER_HOME (no -v mount), so its SQLite
 # run/event/schedule history lives ONLY inside the container layer — copy it out
 # now or `docker rm` destroys it. Import later with
-# backend-system/scripts/migrate_dagster_sqlite_to_postgres.py (see deployment.md).
-if sudo docker ps -a --format '{{.Names}}' | grep -qx backend-system; then
+# customer360-backend/scripts/migrate_dagster_sqlite_to_postgres.py (see deployment.md).
+if sudo docker ps -a --format '{{.Names}}' | grep -qx customer360-backend; then
   ts="$(date -u +%Y%m%d-%H%M%S)"; bak="/opt/c360/dagster-home-backup-$ts.tar"
   echo "   backing up old DAGSTER_HOME -> $bak"
-  if sudo docker cp backend-system:/dagster_home - > "$bak" 2>/dev/null; then
+  if sudo docker cp customer360-backend:/dagster_home - > "$bak" 2>/dev/null; then
     echo "   backup saved ($(du -h "$bak" | cut -f1))"
   else
     rm -f "$bak"; echo "   (nothing to back up, or copy failed — continuing)"
@@ -236,15 +236,15 @@ fi
 # and the daemon (schedules, sensors, run queue, run monitoring). `dagster-webserver`
 # alone runs NO daemon, so the run queue would never drain — the daemon is required.
 # Both use --network host + the same env-file; the daemon binds no port, so no conflict.
-for n in backend-system backend-system-daemon backend-system-redis; do sudo docker rm -f "$n" >/dev/null 2>&1 || true; done
+for n in customer360-backend customer360-backend-daemon customer360-backend-redis; do sudo docker rm -f "$n" >/dev/null 2>&1 || true; done
 # Local Redis cache for all Dagster tasks (analytics dedup "already-processed" state + counters).
 # 127.0.0.1:6580; appendonly so the processed-state survives a restart (else logs would re-process).
-sudo docker run -d --name backend-system-redis --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host -v c360-dagster-redis:/data redis:7-alpine redis-server --port 6580 --appendonly yes
+sudo docker run -d --name customer360-backend-redis --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host -v c360-dagster-redis:/data redis:7-alpine redis-server --port 6580 --appendonly yes
 # --log-opt: cap the json-file log (unbounded by default) so it can't fill the VM disk.
-sudo docker run -d --name backend-system --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/backend.env "$RUN_IMG"
-sudo docker run -d --name backend-system-daemon --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/backend.env --entrypoint /app/entrypoint.sh "$RUN_IMG" dagster-daemon run -w workspace.yaml
+sudo docker run -d --name customer360-backend --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/backend.env "$RUN_IMG"
+sudo docker run -d --name customer360-backend-daemon --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/backend.env --entrypoint /app/entrypoint.sh "$RUN_IMG" dagster-daemon run -w workspace.yaml
 sleep 3
-sudo docker ps --filter name=backend-system --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
+sudo docker ps --filter name=customer360-backend --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
 
 # Existing master profiles predate the incremental CIR projection hook. When
 # the shared projection bucket is empty, rebuild all active profiles once from
@@ -282,7 +282,7 @@ PY
   set -e
   if [[ "$probe_status" -eq 0 ]]; then
     echo "   master-profile projection bucket is empty; rebuilding active profiles ..."
-    sudo docker exec backend-system python /app/identity_resolution/scripts/rebuild_master_profile_event_projections.py
+    sudo docker exec customer360-backend python /app/identity_resolution/scripts/rebuild_master_profile_event_projections.py
   elif [[ "$probe_status" -eq 10 ]]; then
     echo "   master-profile projection bucket already contains objects; skipping rebuild"
   else

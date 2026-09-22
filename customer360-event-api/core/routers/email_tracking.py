@@ -76,7 +76,7 @@ def _sign(value: str, secret: str) -> str:
 
 
 def decode_tracking_token(token: Optional[str]) -> Optional[dict[str, str]]:
-    """Decode and verify the token minted by backend-system email_engine."""
+    """Decode and verify the token minted by customer360-backend email_engine."""
     if not token or not settings.email_tracking_secret:
         return None
     try:

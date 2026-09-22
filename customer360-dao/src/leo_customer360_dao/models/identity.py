@@ -10,11 +10,11 @@ zone) and ``cdp_profile_links`` (raw -> master links).
 cross-channel graph / marketing / lineage columns plus Lead / Churn / CLV /
 CX / Data Quality scoring-model metadata) and also carries the CIR
 matching-rule and
-consolidation metadata consumed by backend-system/identity_resolution's
+consolidation metadata consumed by customer360-backend/identity_resolution's
 ``CustomerIdentityResolver``.
 ``CdpIdResolutionStatus`` (real-time throttle state) remains a CIR
 *runtime-only* table, created idempotently by
-backend-system/identity_resolution/scripts/init_sample_data.py
+customer360-backend/identity_resolution/scripts/init_sample_data.py
 (``CREATE TABLE IF NOT EXISTS``).
 """
 
@@ -77,7 +77,7 @@ class CdpMasterProfile(Base):
     # Points at the latest (is_active=TRUE) cdp_customer_personas MATCH row for
     # this profile (which itself points at a SHARED cdp_persona_archetypes
     # row). Nullable + ON DELETE SET NULL: computed asynchronously by
-    # backend-system/identity_resolution's PersonaResolutionEngine
+    # customer360-backend/identity_resolution's PersonaResolutionEngine
     # (persona_engine.py), never required at profile-creation time.
     current_persona_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("cdp_customer_personas.persona_id", ondelete="SET NULL")
@@ -448,7 +448,7 @@ class CdpPersonaArchetype(Base):
 
 class CdpCustomerPersona(Base):
     """Versioned MATCH/assignment of one master profile to one shared
-    ``CdpPersonaArchetype``, computed by backend-system/identity_resolution's
+    ``CdpPersonaArchetype``, computed by customer360-backend/identity_resolution's
     PersonaResolutionEngine -- identity *understanding*, built on top of the
     identity *matching* output above. Each recomputation inserts a new row
     (computed_version increments per tenant/master_profile/

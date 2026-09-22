@@ -20,7 +20,7 @@ containerized deployment.
 | `redis` | `customer360-redis:local` (redis:8-alpine) | Response cache **and Keycloak token cache** for customer360-api (see [`core/cache.py`](../../customer360-api/core/cache.py) / [`core/auth.py`](../../customer360-api/core/auth.py)) | `${REDIS_HOST_PORT:-6580}` → 6580 |
 | `keycloak-db-init` | reuses `customer360-postgres:local` | **One-shot** job that creates the dedicated `db_keycloak` database on the shared `postgres` instance, then exits | none |
 | `keycloak` | `keycloak/keycloak:26.7` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
-| `dagster` | `customer360-dagster:local` (Python 3.11-slim) | Dagster webserver and daemon for all nine backend-system code locations, including identity resolution | `${DAGSTER_UI_PORT:-3000}` → 3000 |
+| `dagster` | `customer360-dagster:local` (Python 3.11-slim) | Dagster webserver and daemon for all nine customer360-backend code locations, including identity resolution | `${DAGSTER_UI_PORT:-3000}` → 3000 |
 | `api` | `customer360-api:local` (Python 3.11-slim) | Customer 360 / CIR REST API (FastAPI), Keycloak-secured | `${C360_API_PORT:-8008}` → 8008 |
 | `tracking-api` | `customer360-tracking-api:local` (Python 3.11-slim) | CDP tracking-log ingestion; AWS S3 in production, MinIO in dev | `${C360_TRACKING_API_PORT:-8010}` → 8010 |
 | `cir-demo-seed` | reuses `customer360-dagster:local` | **Dev only** one-shot job that seeds demo data, then exits | none |
@@ -93,7 +93,7 @@ credentials. `.env.example` is the committed template.
 >    Postgres/Redis image bootstrap variables (`POSTGRES_USER`, `--requirepass`, etc.).
 > 2. Application services (`api`, Dagster, demo seed, and `tracking-api`) get
 >    the whole file injected via `env_file:`, exactly like
->    `customer360-api`/`backend-system` read it for non-Docker local dev
+>    `customer360-api`/`customer360-backend` read it for non-Docker local dev
 >    (`pydantic-settings` / `python-dotenv`). Infrastructure containers receive
 >    only the explicit variables they need.
 > 3. **`DB_HOST` / `REDIS_HOST` in `.env` are overridden by `docker-compose.yml`**
@@ -101,7 +101,7 @@ credentials. `.env.example` is the committed template.
 >    `api`/`dagster`/`cir-demo-seed`/`tracking-api` containers, regardless of
 >    what's in the file.
 >    The `localhost` defaults in `.env.example` are only correct when you run
->    `customer360-api`/`backend-system` directly on the host
+>    `customer360-api`/`customer360-backend` directly on the host
 >    (`./start.sh`, `./run-demo.sh`) against the dockerized Postgres/Redis via
 >    their published host ports.
 
@@ -443,7 +443,7 @@ non-Docker dev scripts:
 
 - [`dev-start-pgsql.sh`](../../dev-c360.sh) → container `pgsql16_vector`
 - `customer360-api/start.sh` / `stop.sh` → runs uvicorn directly on the host
-- `backend-system/identity_resolution/run-demo.sh` → runs the CIR scripts directly on the host
+- `customer360-backend/identity_resolution/run-demo.sh` → runs the CIR scripts directly on the host
 
 They use different container names and (by default) the same host ports, so
 only run one Postgres/Redis path at a time on a given port — or remap ports

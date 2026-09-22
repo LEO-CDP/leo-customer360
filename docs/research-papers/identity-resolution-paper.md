@@ -36,7 +36,7 @@ Here `H` can be the same SHA-256 digest in both rows. The resolver does not reve
 
 Customer Identity Resolution (CIR) converts heterogeneous source observations into a tenant-scoped Customer 360 master profile. The current implementation uses a PostgreSQL staging queue, a Python resolver, metadata-driven matching rules, explicit row-level tenant context, and a link table that records every raw-to-master decision. Matching is intentionally separate from downstream persona resolution: the resolver first answers whether a raw observation belongs to an existing identity, then computes an explainable, versioned persona for the resulting master profile.
 
-This paper describes the implementation present in `customer360-database/database-schema.sql`, `customer360-database/init-core-database.sql`, and `backend-system/identity_resolution/identity_resolution/`. It also identifies schema capabilities that are present but not yet part of the active resolver path, so the design description does not overstate current behavior.
+This paper describes the implementation present in `customer360-database/database-schema.sql`, `customer360-database/init-core-database.sql`, and `customer360-backend/identity_resolution/identity_resolution/`. It also identifies schema capabilities that are present but not yet part of the active resolver path, so the design description does not overstate current behavior.
 
 ## 1. Problem and Design Answer
 
@@ -225,7 +225,7 @@ The schema reserves `persona_embedding VECTOR(768)` on the shared archetype and 
 3. If the last execution is less than `throttle_seconds` ago, it rolls back and defers the work.
 4. Otherwise, it updates `last_executed_at` and runs one resolver batch.
 
-The default throttle interval is five seconds. The controller catches errors so an ingestion request is not blocked by a resolution failure. The status table is a runtime support table initialized defensively by `backend-system/identity_resolution/scripts/init_sample_data.py` and represented in the API model.
+The default throttle interval is five seconds. The controller catches errors so an ingestion request is not blocked by a resolution failure. The status table is a runtime support table initialized defensively by `customer360-backend/identity_resolution/scripts/init_sample_data.py` and represented in the API model.
 
 ### 5.2 Scheduled draining
 

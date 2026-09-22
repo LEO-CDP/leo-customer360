@@ -67,7 +67,7 @@ title_of() { case "$1" in
   db-schema)     echo "SQL bootstrap: extensions, keycloak db, app schema";;
   cache)         echo "Redis (uat: container on api box; prod: MemStore)";;
   sso)           echo "Keycloak (SSO / OIDC) container";;
-  backend)       echo "backend-system (Dagster orchestrator)";;
+  backend)       echo "customer360-backend (Dagster orchestrator)";;
   load-balancer) echo "L4 NLB fronting Caddy / dagster / dashboards";;
   proxy)         echo "Caddy reverse proxy (TLS + path routing) — cutover";;
   sso-realm)     echo "Keycloak realm + confidential client (bootstrap-realm.py)";;

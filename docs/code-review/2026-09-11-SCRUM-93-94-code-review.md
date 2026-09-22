@@ -232,7 +232,7 @@ Reviewed the branch against the **parent story** SCRUM-92 *"Agentic Outbound Ema
 
 ### Ponytail lens
 - **P4 vindicated:** the unused `EmailTemplate` / `CampaignContentItem` Create/Update schemas are epic-mandated foundation consumed by SUBTASK-03/04 — not speculation.
-- **`backend-system/data_synch` Dagster job deliberately not built** (N3): the synchronous API engine satisfies SCRUM-94's AC; the async/Dagster path is the documented PF1 ceiling, to add only when scale demands. Building it now would be duplicate work.
+- **`customer360-backend/data_synch` Dagster job deliberately not built** (N3): the synchronous API engine satisfies SCRUM-94's AC; the async/Dagster path is the documented PF1 ceiling, to add only when scale demands. Building it now would be duplicate work.
 - **Zero scope creep into 03–08** — no AI/SMTP/webhook/dispatch code. `Lean. Ship.`
 
 ### Code-review lens (SCRUM-92 NFR beta gates)

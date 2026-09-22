@@ -29,7 +29,7 @@ build customer360-postgres:local .                              postgres/Dockerf
 build customer360-redis:local    redis
 build customer360-api:local      customer360-api
 build customer360-frontend:local customer360-frontend "" "$(date -u +%Y-%m-%d-%H-%M)"
-build customer360-dagster:local  backend-system
+build customer360-dagster:local  customer360-backend
 
 # Preload third-party images (everything referenced by the overlay that we do
 # NOT build locally) onto the kind node, so pods don't pull them from the

@@ -1,6 +1,6 @@
 """Routers for the Customer Identity Resolution (CIR) core models: master
 profiles, raw profile staging, profile links, and the matching-rule
-metadata / throttle-status tables consumed by backend-system/identity_resolution.
+metadata / throttle-status tables consumed by customer360-backend/identity_resolution.
 """
 
 import uuid
@@ -293,7 +293,7 @@ def get_master_profile_linked_raw_profile_detail(
 @cache_response("master_profiles/persona", ttl=settings.cache_ttl_seconds)
 def get_master_profile_current_persona(master_profile_id: uuid.UUID, db: Session = Depends(get_db)):
     """The profile's CURRENT persona (identity *understanding*, computed from
-    the resolved identity by backend-system/identity_resolution's
+    the resolved identity by customer360-backend/identity_resolution's
     PersonaResolutionEngine), resolved via current_persona_id. 404 if the
     profile has no persona computed yet."""
     profile = _master_crud.get(db, master_profile_id)
@@ -506,7 +506,7 @@ def get_raw_profile(raw_profile_id: uuid.UUID, db: Session = Depends(get_db)):
 @raw_profiles_router.post("/", response_model=RawProfileRead, status_code=201)
 def create_raw_profile(payload: RawProfileCreate, db: Session = Depends(get_db)):
     """Ingests a raw profile event (status_code defaults to 1 = new/unprocessed,
-    ready to be picked up by backend-system/identity_resolution)."""
+    ready to be picked up by customer360-backend/identity_resolution)."""
     obj = _raw_crud.create(db, payload.model_dump())
     invalidate_prefix("raw_profiles")
     return obj
@@ -686,7 +686,7 @@ def get_resolution_status(db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=404,
             detail="cdp_id_resolution_status has not been initialized yet "
-            "(run backend-system/identity_resolution/scripts/init_sample_data.py).",
+            "(run customer360-backend/identity_resolution/scripts/init_sample_data.py).",
         )
     return obj
 

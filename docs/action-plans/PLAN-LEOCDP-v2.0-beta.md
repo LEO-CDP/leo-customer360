@@ -69,7 +69,7 @@ It is updated to be realistic and code-accurate against the current repository s
 | Segment matched profiles and recompute trigger | DONE | `customer360-api/core/routers/segment_api.py` (`/{segment_id}/matched-profiles`, `/{segment_id}/recompute`) |
 | Generic event ingestion with dedup and identity resolution hints | DONE | `customer360-api/core/routers/events_api.py` (`/events`, `/events/bulk`) |
 | Core CRM/CDP schema (campaign, lead, lead source, contact, transactions, content items) | DONE | `customer360-database/database-schema.sql` |
-| Active Dagster jobs for identity, segmentation, analytics | DONE | `backend-system/identity_resolution/dagster_defs.py`, `backend-system/segmentation/dagster_defs.py`, `backend-system/analytics/dagster_defs.py` |
+| Active Dagster jobs for identity, segmentation, analytics | DONE | `customer360-backend/identity_resolution/dagster_defs.py`, `customer360-backend/segmentation/dagster_defs.py`, `customer360-backend/analytics/dagster_defs.py` |
 | Ad server runtime and data models (`leo_ads`) | DONE | `ads-server/core/application.py`, `ads-server/model/*.py`, `ads-server/tests/test_api.py` |
 | Tracking analytics E2E smoke script | DONE | `all-data-simulator/run_tracking_analytics_e2e.sh` (recent run succeeded) |
 
@@ -82,10 +82,10 @@ It is updated to be realistic and code-accurate against the current repository s
 | Zalo connector/template/dispatch storage | READY | Reuses `crm_connector_config`, `crm_message_templates`, and `cdp_campaign_dispatch_logs` |
 | Channel-specific sync endpoints (`/admin/crm/sync-segment/*`, `/admin/adtech/*`, `/admin/zalo/*`) | BLOCKER | Not present in `customer360-api/core/routers` |
 | Channel-specific webhooks (ESP callbacks, ad callbacks, Zalo OA callbacks) | BLOCKER | Not present in `customer360-api/core/routers` |
-| Campaign activation real orchestration | PARTIAL | `backend-system/campaign_activation/dagster_defs.py` is placeholder sleep job |
-| Email execution pipeline | PARTIAL | `backend-system/email_engine/dagster_defs.py` is placeholder sleep job |
-| Notification/Zalo execution pipeline | PARTIAL | `backend-system/notification_engine/dagster_defs.py` is placeholder sleep job |
-| Data sync execution pipeline | PARTIAL | `backend-system/data_synch/dagster_defs.py` is placeholder sleep job |
+| Campaign activation real orchestration | PARTIAL | `customer360-backend/campaign_activation/dagster_defs.py` is placeholder sleep job |
+| Email execution pipeline | PARTIAL | `customer360-backend/email_engine/dagster_defs.py` is placeholder sleep job |
+| Notification/Zalo execution pipeline | PARTIAL | `customer360-backend/notification_engine/dagster_defs.py` is placeholder sleep job |
+| Data sync execution pipeline | PARTIAL | `customer360-backend/data_synch/dagster_defs.py` is placeholder sleep job |
 | End-to-end channel suites (email, ad-tech, zalo) | BLOCKER | No channel-specific E2E suites yet in repo |
 
 ### 2.3 Accuracy Corrections Applied In This Consolidation

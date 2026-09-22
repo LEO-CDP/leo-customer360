@@ -143,8 +143,8 @@ under the service directory. The `BUILD_LOCAL=1` fallback follows the same rule:
 
 - `server/deploy-api.sh` ships `customer360-api/` and `customer360-dao/`, then
   builds with `customer360-api/Dockerfile` from `/opt/c360`.
-- `server/deploy-backend.sh` ships `backend-system/` and `customer360-dao/`,
-  then builds with `backend-system/Dockerfile` from `/opt/c360`.
+- `server/deploy-backend.sh` ships `customer360-backend/` and `customer360-dao/`,
+  then builds with `customer360-backend/Dockerfile` from `/opt/c360`.
 
 This avoids requiring an unpublished package on the VM or in CI. Once a DAO
 release is published to the configured Python package index, the bare
@@ -162,7 +162,7 @@ image, and pushes it to:
 ghcr.io/leo-cdp/leo-customer360/<service>
 ```
 
-for `<service>` ∈ `customer360-api` · `backend-system` · `ads-server` · `customer360-frontend`
+for `<service>` ∈ `customer360-api` · `customer360-backend` · `ads-server` · `customer360-frontend`
 · `customer360-event-api` · `docs-vector-search` · `postgres` · `redis` (each has its own `Dockerfile`; a change
 under that folder builds it — `docs-vector-search`'s source lives under [`tools/docs-vector-search`](../tools/docs-vector-search),
 so its build `context`/`file` are overridden in `ci.yml`).
@@ -341,7 +341,7 @@ flowchart TB
       ads["ads-server (LEO Ad Server)<br/>:9009 · leo_ads"]
     end
     subgraph bebox["vServer c360-api-uat-backend · 10.100.1.4"]
-      dagster["backend-system<br/>Dagster :3000"]
+      dagster["customer360-backend<br/>Dagster :3000"]
     end
     subgraph docsbox["vServer c360-api-uat-docs · 10.100.1.7 (s-general-1x2)"]
       docs["docs-vector-search (local-model RAG)<br/>:8001 · MiniLM embed + bge rerank + Qwen 0.5B<br/>(internal — SSH/tunnel, no public route yet)"]
@@ -395,7 +395,7 @@ flowchart TB
 | Netdata | api box `10.100.1.5` | 19999 | real-time host + per-container metrics; no native auth → oauth2-proxy SSO |
 | Jaeger | api box `10.100.1.5` | 16686 (UI) · 4318/4317 (OTLP) | OpenTelemetry request-trace UI (`c360-jaeger`); **always-on** (SSO+TLS); badger storage, mem-capped; UI loopback (base path /jaeger) → **oauth2-proxy :4686 → Caddy /jaeger on :443 (Keycloak SSO, TLS)** |
 | pgAdmin | api box `10.100.1.5` | 5050 | Postgres admin/monitoring UI (`c360-pgadmin`); its own login, exposed **directly** on the LB (`LB :5050 → pgAdmin :5050`); plain HTTP (cleartext login — see the LB note); `pgadmin_data` volume, mem-capped |
-| Dagster | backend box `10.100.1.4` | 3000 | backend-system worker |
+| Dagster | backend box `10.100.1.4` | 3000 | customer360-backend worker |
 | Portainer agent | backend `10.100.1.4` + tracking `10.100.1.8` | 9001 | `c360-portainer-agent`; lets the api-box Portainer manage these boxes too (private VPC, reached from `10.100.1.5`); registered as Portainer environments |
 | customer360-event-api | tracking box `10.100.1.8` | 8010 | FastAPI event ingestion on its own dedicated `s-general-1x2` box, run as **N auto-load-balanced replicas** (uat 3 / prod 5, `TRACKING_REPLICAS`) on a private docker bridge behind a local **nginx** LB that owns `:8010` (least_conn round-robin); publishes dynamic batches to the shared Redis Streams consumer group and writes NDJSON asynchronously to vStorage/S3; rate-limit + session state remains fail-open, but Redis is required for durable enqueue; OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
 | docs-vector-search | docs box `10.100.1.7` | 8001 | AI docs Q&A — **local-model RAG**: `paraphrase-multilingual-MiniLM-L12-v2` embed (384-dim, VN+EN) + `bge-reranker-base` rerank + `Qwen2.5-0.5B` GGUF generate; vectors in **pgvector** on the vDB (schema `rag`, table `doc_chunks`); its OWN `s-general-2x4` box; **not behind the LB directly** (reached via SSH/tunnel), but **customer360-frontend proxies it at `/ai/*`** — so `https://beta.leocdp.com/ai/health` (→ docs-search `/health`) is its public health check, alongside `/ai/ask` + `/ai/search`; deploy `server/deploy-docs-search.sh` (pull GHCR image → start dedicated no-auth Redis for rate limiting on the same host network → `enrich` on box → serve) |

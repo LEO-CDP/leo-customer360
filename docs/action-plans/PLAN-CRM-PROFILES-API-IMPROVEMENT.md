@@ -162,7 +162,7 @@ different file names than assumed above:
    ```
 
 4. **Add polling endpoint** (optional, only meaningful once the job actually
-   runs asynchronously -- e.g. offloaded to a `backend-system/*` Dagster job
+   runs asynchronously -- e.g. offloaded to a `customer360-backend/*` Dagster job
    like the other pipelines, rather than run inline in the request):
    ```python
    @router.get("/crm/sync-profiles/{job_id}")

@@ -41,7 +41,7 @@ MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
 S3_WAIT_SECONDS="${E2E_S3_WAIT_SECONDS:-5}"
 ANALYTICS_POLL_SECONDS="${E2E_ANALYTICS_POLL_SECONDS:-5}"
 ANALYTICS_TIMEOUT_SECONDS="${E2E_ANALYTICS_TIMEOUT_SECONDS:-300}"
-CIR_DIR="$ROOT_DIR/backend-system/identity_resolution"
+CIR_DIR="$ROOT_DIR/customer360-backend/identity_resolution"
 CIR_PYTHON="${CIR_PYTHON:-$CIR_DIR/.venv/bin/python}"
 CIR_POLL_INTERVAL_SECONDS="${CIR_POLL_INTERVAL_SECONDS:-600}"
 E2E_APPLY_LOCAL_MIGRATIONS="${E2E_APPLY_LOCAL_MIGRATIONS:-true}"
@@ -267,7 +267,7 @@ jq -e --arg data_source_id "$DATA_SOURCE_ID" \
 log "Raw profile analytics verification passed"
 printf '%s\n' "$RAW_PROFILE_JSON" | jq .
 
-log "Running backend-system/identity_resolution drain (sensor interval=${CIR_POLL_INTERVAL_SECONDS}s)"
+log "Running customer360-backend/identity_resolution drain (sensor interval=${CIR_POLL_INTERVAL_SECONDS}s)"
 CIR_RESULT="$(
 	cd "$CIR_DIR"
 	CIR_POLL_INTERVAL_SECONDS="$CIR_POLL_INTERVAL_SECONDS" "$CIR_PYTHON" -c \

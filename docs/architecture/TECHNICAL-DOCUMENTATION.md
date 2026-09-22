@@ -35,7 +35,7 @@ From any `master_profile_id`, calls `GET /api/v1/master-profiles/{id}/links` to 
 A data operations team adds a new identity attribute (e.g. `zalo_id` from a new source) via `POST /api/v1/profile-attributes` with `is_identity_resolution=true`, `matching_rule='exact'` — the CIR engine **automatically** applies the new rule on its next batch/real-time run, with no change to `resolver.py`.
 
 ### UC8 (infrastructure ready, scoring logic not yet implemented) — Customer scoring
-The schema already has the necessary columns (`churn_probability`, `predictive_clv`, `lead_conversion_probability`, `engagement_score`, ...) and metadata (`is_scoring_model`, `scoring_model_name/version`, `refresh_frequency`) so an external ML pipeline (planned: a Dagster job in `backend-system/scoring/`, currently a placeholder) can write results via `PATCH /api/v1/master-profiles/{id}` — ready for churn prevention, next-best-offer, and lead-grading use cases once a model is deployed.
+The schema already has the necessary columns (`churn_probability`, `predictive_clv`, `lead_conversion_probability`, `engagement_score`, ...) and metadata (`is_scoring_model`, `scoring_model_name/version`, `refresh_frequency`) so an external ML pipeline (planned: a Dagster job in `customer360-backend/scoring/`, currently a placeholder) can write results via `PATCH /api/v1/master-profiles/{id}` — ready for churn prevention, next-best-offer, and lead-grading use cases once a model is deployed.
 
 ### UC9 — Semantic search / lookalike audiences (pgvector)
 Using `persona_embedding` (master profile) or `embedding` (CRM/graph_edges), similarity queries via `ORDER BY embedding <-> :query_embedding LIMIT N` find "customers similar to" a target group described in natural language (e.g. *"software company B2B customers with >3 opportunities"*) — the infrastructure is ready; generating the embeddings (via an LLM) is outside the scope of this module.
@@ -65,8 +65,8 @@ flowchart TB
     end
 
     subgraph SERVICES["Application services"]
-        CIR["backend-system/identity_resolution/\nDagster identity-resolution job"]
-        ANALYTICS["backend-system/analytics/\nDagster tracking-log aggregation"]
+        CIR["customer360-backend/identity_resolution/\nDagster identity-resolution job"]
+        ANALYTICS["customer360-backend/analytics/\nDagster tracking-log aggregation"]
         API["customer360-api/\nFastAPI REST + reporting"]
         TRACK["customer360-event-api/\nFastAPI event ingestion"]
         ADS["ads-server/\nFastAPI ad serving"]
@@ -76,7 +76,7 @@ flowchart TB
     subgraph PLATFORM["Platform / cross-cutting"]
         REDIS[(Redis 8\ntracking stream + rate/session state)]
         KC[Keycloak\nSSO / token introspection]
-        DAGSTER["Dagster webserver\n(backend-system/)"]
+        DAGSTER["Dagster webserver\n(customer360-backend/)"]
         OBJECTS[(S3 / MinIO\nhourly tracking logs)]
     end
 
@@ -109,9 +109,9 @@ flowchart TB
 
 **How to read this diagram:**
 - **One golden record, many sources** — Google Analytics/Web/POS/Core Banking all land in a single staging table; nothing is siloed per channel.
-- **Identity resolution is a separate, swappable worker** ([`backend-system/identity_resolution/`](../../backend-system/identity_resolution)), not baked into the API — it writes to Postgres directly via `psycopg2`, independent of `customer360-api`.
+- **Identity resolution is a separate, swappable worker** ([`customer360-backend/identity_resolution/`](../../customer360-backend/identity_resolution)), not baked into the API — it writes to Postgres directly via `psycopg2`, independent of `customer360-api`.
 - **One API contract** ([`customer360-api/`](../../customer360-api)) governs all reads/writes to the schema, backed by Redis for latency and Keycloak for SSO/authorization.
-- **Backend pipelines are Dagster-orchestrated** ([`backend-system/`](../../backend-system)) — `customer360-api` submits Dagster job runs asynchronously through the Dagster GraphQL API (`core/utils/dagster_client.py`) instead of running long batch work inline inside an HTTP request.
+- **Backend pipelines are Dagster-orchestrated** ([`customer360-backend/`](../../customer360-backend)) — `customer360-api` submits Dagster job runs asynchronously through the Dagster GraphQL API (`core/utils/dagster_client.py`) instead of running long batch work inline inside an HTTP request.
 - **Tracking ingestion and analytics are separate services** — `customer360-event-api` validates dynamic event JSON and customer identifiers, publishes batches to a Redis Streams consumer group, and uses background workers to write immutable hourly NDJSON objects to S3/MinIO. The `analytics` Dagster job aggregates those objects into source totals and Redis-backed metrics.
 - **Ad serving is a separate API** ([`ads-server/`](../../ads-server)) — it serves tenant-scoped placements and creatives and is deployed independently from the core Customer 360 Compose stack.
 - **The admin UI is a static single-page app** served by a thin FastAPI process — no server-side rendering of data, no direct database access from the UI tier.
@@ -123,7 +123,7 @@ flowchart TB
     - Profile snapshots land in PostgreSQL staging with `source_system`, `domain` (`retail`/`banking`/`travel`/`real_estate`), and optional PII (email, phone, name); behavioral events remain immutable in S3/MinIO.
    - Status tracked via `status_code` / `cdp_id_resolution_status`.
 
-2. **Identity Resolution (CIR)** — [`backend-system/identity_resolution/`](../../backend-system/identity_resolution)
+2. **Identity Resolution (CIR)** — [`customer360-backend/identity_resolution/`](../../customer360-backend/identity_resolution)
    - **Trigger:** the long-running `worker.py` polling loop, which drives `identity_resolution_job` in-process via Dagster's `execute_in_process()`, plus a `daily_job.py` batch entrypoint (cron/Airflow compatible) for scheduled full runs.
    - **Matching engine** (`identity_resolution/resolver.py`): loads active matching rules at runtime from `cdp_profile_attributes` (rows with `is_identity_resolution=true`).
      - **Exact match**: `national_id`, `email`, `phone_number` (SHA-256 hashed), plus `external_customer_id`/`device_id`/`advertising_id`/`cookie_id` (identity-graph fields).
@@ -147,10 +147,10 @@ flowchart TB
 
 ### 3.3 Orchestration Architecture (Dagster)
 
-`backend-system/` is a single Dagster workspace ([`backend-system/workspace.yaml`](../../backend-system/workspace.yaml)). Every subfolder is an independent, separately-deployable Python codebase (own `requirements.txt`) that registers one `dagster_defs.py` code location:
+`customer360-backend/` is a single Dagster workspace ([`customer360-backend/workspace.yaml`](../../customer360-backend/workspace.yaml)). Every subfolder is an independent, separately-deployable Python codebase (own `requirements.txt`) that registers one `dagster_defs.py` code location:
 
 ```
-backend-system/
+customer360-backend/
 ├── workspace.yaml            # lists all 9 code locations below
 ├── requirements-dev.txt      # dagster-webserver, only needed for ./start.sh (local UI)
 ├── start.sh / stop.sh / restart.sh   # local dev: dagster dev -w workspace.yaml
@@ -195,10 +195,10 @@ Each placeholder service exists so `customer360-api/core/utils/dagster_client.py
 | **Database** | PostgreSQL 16 | Built from `postgis/postgis:16-3.5` base image + `postgresql-16-pgvector` (apt package) — not a stock `postgres:16` image. |
 | | Extensions | `uuid-ossp`, `pgcrypto`, `vector` (pgvector), `postgis`; `pg_trgm`/`fuzzystrmatch` referenced for fuzzy identity matching. |
 | **Cache** | Redis 8 (`redis:8-alpine`) | Custom port **6580** (not the Redis default 6379), configured via `redis/redis.conf`. Password supplied at container start via `--requirepass` (never baked into the image). |
-| **Identity Resolution** | Python 3.11, `psycopg2-binary` | Direct DB access, no ORM — `backend-system/identity_resolution/requirements.txt` has no SQLAlchemy dependency. |
+| **Identity Resolution** | Python 3.11, `psycopg2-binary` | Direct DB access, no ORM — `customer360-backend/identity_resolution/requirements.txt` has no SQLAlchemy dependency. |
 | | `google-genai` | Google Gemini SDK, used by `persona.py` for optional LLM-generated persona names (with an offline fallback). |
 | | Dagster ≥1.9 | Orchestration: jobs, sensors, run monitoring. |
-| **Segmentation** | Python 3.11, `psycopg2` | Standalone recompute logic in `backend-system/segmentation/`, mirroring (not importing) the equivalent CRUD code in `customer360-api`. |
+| **Segmentation** | Python 3.11, `psycopg2` | Standalone recompute logic in `customer360-backend/segmentation/`, mirroring (not importing) the equivalent CRUD code in `customer360-api`. |
 | **Analytics** | Python 3.11, S3-compatible client, Redis | Hourly `analytics_job` reads tracking-log objects from S3/MinIO and updates source totals and analytics state. |
 | **API Service** | FastAPI (`>=0.111,<1`) + Uvicorn | `customer360-api/` — synchronous SQLAlchemy 2 ORM (`Session`, not `AsyncSession`). |
 | | SQLAlchemy 2, `psycopg2-binary`, `pgvector` (Python binding) | ORM layer + vector column support. |
@@ -212,7 +212,7 @@ Each placeholder service exists so `customer360-api/core/utils/dagster_client.py
 | | Tailwind CSS, jQuery 3, Handlebars | All loaded via CDN in `index.html`; no frontend build step/bundler. |
 | | Hand-rolled hash router (`static/js/router.js`) | Small React-Router-style client-side router (path patterns, params, redirects) — not a frontend framework. |
 | **Object storage (dev only)** | MinIO | S3-compatible storage in `dev-docker-compose.yml` only, for testing file-based event ingestion locally; production uses a real S3 bucket instead and MinIO is intentionally absent from `docker-compose.yml`. |
-| **Testing** | pytest (`>=7.4,<9`), `pytest-cov` | Unit/integration tests in `customer360-api/tests/`, `backend-system/identity_resolution/tests/`, `backend-system/segmentation/tests/`. |
+| **Testing** | pytest (`>=7.4,<9`), `pytest-cov` | Unit/integration tests in `customer360-api/tests/`, `customer360-backend/identity_resolution/tests/`, `customer360-backend/segmentation/tests/`. |
 | **Observability** | OpenTelemetry | API, tracking API, ad server, and frontend images launch under `opentelemetry-instrument`; exporters are enabled through deployment environment configuration. |
 | **Containerization** | Docker + Docker Compose v2 | `docker-compose.yml` (postgres, redis, keycloak, Dagster, API, tracking API, and optional demo seed) and `dev-docker-compose.yml` / `dev-no-sso-docker-compose.yml` (host-run development infrastructure with MinIO). |
 
@@ -234,7 +234,7 @@ Each placeholder service exists so `customer360-api/core/utils/dagster_client.py
 
 **Scoring & ML integration** — `cdp_master_profiles` has placeholder columns for external ML outputs:
 - `churn_probability`, `predictive_clv`, `lead_conversion_probability`, `engagement_score`.
-- A future Dagster job in `backend-system/scoring/` (currently a placeholder) would compute these and write them back via `PATCH /api/v1/master-profiles/{id}`.
+- A future Dagster job in `customer360-backend/scoring/` (currently a placeholder) would compute these and write them back via `PATCH /api/v1/master-profiles/{id}`.
 
 ## 5. Data Model (`customer360-database/database-schema.sql`)
 
@@ -348,7 +348,7 @@ frontend separately after the infrastructure is healthy:
 
 ```bash
 cd customer360-api && ./start.sh
-cd ../backend-system && ./start.sh
+cd ../customer360-backend && ./start.sh
 cd ../customer360-frontend && ./start.sh
 ```
 
@@ -363,7 +363,7 @@ cd ../customer360-frontend && ./start.sh
 | ads-server | `9009` | standalone ad-serving API; not part of the core Compose service list. |
 | customer360-frontend | `8890` | health check: `GET /health`. |
 | Keycloak | `8080` | health endpoint served on management port `9000`, not `8080`. |
-| Dagster webserver | `3000` | run history, job/sensor status (local dev only, via `backend-system/start.sh`). |
+| Dagster webserver | `3000` | run history, job/sensor status (local dev only, via `customer360-backend/start.sh`). |
 | MinIO (dev only) | `9000` (S3 API) / `9001` (console) | only in `dev-docker-compose.yml`, not in production `docker-compose.yml`. |
 
 **Three Compose variants, different purposes:**
@@ -390,8 +390,8 @@ The variants intentionally share project names, container names, and volumes whe
 - `customer360-event-api/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8010`.
 - `ads-server/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 9009`.
 - `customer360-frontend/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8890`.
-- `backend-system/Dockerfile` → unified Dagster webserver and daemon loading all nine
-    backend-system code locations on port `3000`; identity resolution runs as a
+- `customer360-backend/Dockerfile` → unified Dagster webserver and daemon loading all nine
+    customer360-backend code locations on port `3000`; identity resolution runs as a
     Dagster job and sensor in this image.
 - `postgres/Dockerfile` → `FROM postgis/postgis:16-3.5` + `postgresql-16-pgvector`; copies `database-schema.sql`/`init-core-database.sql` into `/docker-entrypoint-initdb.d/`, which only run on a first-ever (empty data directory) container start.
 - `redis/Dockerfile` → `FROM redis:8-alpine`, custom `redis.conf`, port `6580`.
@@ -429,7 +429,7 @@ Container and Compose health monitoring covers:
 - `keycloak`: raw TCP probe of `GET /health/ready` on management port `9000`.
 - `dagster`: HTTP readiness on port `3000`; individual backend jobs are monitored through Dagster run status, sensors, logs, and the Dagster webserver.
 
-`GET /api/v1/metadata/` (public, in `EXEMPT_PATHS`) reports overall API health plus per-dependency status (Postgres, Redis, Dagster webserver reachability). `GET /api/v1/metadata/dagster` reports Dagster connectivity plus the configured job/location/repository names for every backend-system service.
+`GET /api/v1/metadata/` (public, in `EXEMPT_PATHS`) reports overall API health plus per-dependency status (Postgres, Redis, Dagster webserver reachability). `GET /api/v1/metadata/dagster` reports Dagster connectivity plus the configured job/location/repository names for every customer360-backend service.
 
 ### 6.4 Troubleshooting Guide
 
@@ -475,7 +475,7 @@ Container and Compose health monitoring covers:
 ## References
 
 - [README.md](../../README.md) — high-level overview, composable CDP rationale, architecture diagram.
-- [backend-system/README.md](../../backend-system/README.md) — Dagster architecture notes (verify against `workspace.yaml` for the current full list of services).
+- [customer360-backend/README.md](../../customer360-backend/README.md) — Dagster architecture notes (verify against `workspace.yaml` for the current full list of services).
 - [CIR-improvement.md](../identity-resolution/CIR-improvement.md) — CIR engine deep dive.
 - [PLAN-CRM-PROFILES-API-IMPROVEMENT.md](../api-plans/PLAN-CRM-PROFILES-API-IMPROVEMENT.md), [PLAN-SEGMENTS-API-IMPROVEMENT.md](../api-plans/PLAN-SEGMENTS-API-IMPROVEMENT.md), [PLAN-EVENTS-API-IMPROVEMENT.md](../api-plans/PLAN-EVENTS-API-IMPROVEMENT.md) — in-progress improvement plans.
 - [CIR-Tech-Slides-VN.md](../identity-resolution/CIR-Tech-Slides-VN.md) — tech talk slides (Vietnamese).

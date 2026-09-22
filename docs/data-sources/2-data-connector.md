@@ -13,7 +13,7 @@ flowchart LR
         ZALO["Zalo OA v3.0 API"]
     end
 
-    subgraph SyncService["backend-system / data_synch"]
+    subgraph SyncService["customer360-backend / data_synch"]
         ORCH["Dagster Scheduler / data_synch_job"]
         WORKER["API Connector Worker"]
         REDIS["Redis Rate Limits & Cursors"]
@@ -96,7 +96,7 @@ Credentials, OAuth secrets, and target endpoints are stored encrypted in `sys_da
 
 ## 4. Orchestration & Execution
 
-Connector jobs are scheduled and monitored through Dagster in `backend-system/data_synch/`:
+Connector jobs are scheduled and monitored through Dagster in `customer360-backend/data_synch/`:
 - **Job Name**: `data_synch_job`
 - **Execution Interval**: Configurable per source (default: Hourly at `0 * * * *` or Daily at `0 2 * * *`).
 - **Telemetry & Monitoring**: Dagster run status is queried and logged; failures report directly to administrator alerts.

@@ -83,7 +83,7 @@ pgadmin_proxy_port = 4050                       # (unused while pgadmin_sso = fa
 
 # --- Portainer agents on OTHER boxes (one Portainer manages every box) --------
 # Portainer runs on the api box and by default only sees the api box's containers. To manage the
-# BACKEND box (server key "backend" = 10.100.1.4, runs backend-system/Dagster) from the SAME Portainer,
+# BACKEND box (server key "backend" = 10.100.1.4, runs customer360-backend/Dagster) from the SAME Portainer,
 # run portainer/agent there and register it as an environment (no second Portainer). Comma-separate
 # for more boxes. Portainer reaches the agent over the private VPC at <box-private-ip>:9001.
 # PREREQUISITE (infra, one-time): open tcp/9001 on the Default secgroup from the api box's private

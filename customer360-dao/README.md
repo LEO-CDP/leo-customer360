@@ -2,7 +2,7 @@
 
 `leo-customer360-dao` is the shared Python package for Customer 360 database
 access. It is the persistence boundary used by `customer360-api` and the
-Dagster services under `backend-system`.
+Dagster services under `customer360-backend`.
 
 The package owns:
 
@@ -65,7 +65,7 @@ bash customer360-dao/install-local.sh
 ```
 
 This covers `customer360-api`, `customer360-event-api`, `ads-server`, the shared
-`backend-system` environment, and each backend Dagster code location. Missing
+`customer360-backend` environment, and each backend Dagster code location. Missing
 `.venv` directories are created. The script installs the DAO with
 `--no-deps --editable`, so it never tries to download the unpublished package
 from PyPI.
@@ -81,7 +81,7 @@ To target one service while debugging:
 
 ```bash
 bash customer360-dao/install-local.sh --service customer360-api
-bash customer360-dao/install-local.sh --service backend-system/segmentation --requirements
+bash customer360-dao/install-local.sh --service customer360-backend/segmentation --requirements
 ```
 
 The local installer must run before a service installs a requirements file that

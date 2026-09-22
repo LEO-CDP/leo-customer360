@@ -10,7 +10,7 @@ Most of the Segments API surface **already exists** (`core/routers/segment_api.p
 
 - **No dry-run rule validation**: Admins/AI agents building a segment in the jQuery QueryBuilder UI have no way to preview match count/sample profiles for a rule tree *before* saving it as a segment row — `sql_rules` must already be persisted to test it.
 
-- **No batch/scheduled recompute**: Unlike identity resolution (`backend-system/identity_resolution`, Dagster job + sensor), segment recomputation has no equivalent background job — it's entirely on-demand/live-query today.
+- **No batch/scheduled recompute**: Unlike identity resolution (`customer360-backend/identity_resolution`, Dagster job + sensor), segment recomputation has no equivalent background job — it's entirely on-demand/live-query today.
 
 ## 2) Target behavior 
 
@@ -22,7 +22,7 @@ Most of the Segments API surface **already exists** (`core/routers/segment_api.p
 2. **Dry-run validation** — `POST /api/v1/segments/dry-run`:
    - Accepts an unsaved `sql_rules` fragment (+ `tenant_id`, `domain`), validates it with the same `validate_sql_where_fragment` safety net, executes it read-only, and returns `{ "matched_count": N, "sample_profiles": [...] }` without persisting anything.
 
-3. **Scheduled recompute (Dagster)** — a `backend-system/segmentation/` job (already a placeholder per `backend-system/README.md`) periodically calls the same recompute logic for all `is_active = true` segments across tenants, keeping `member_count`/tags fresh without an explicit admin action.
+3. **Scheduled recompute (Dagster)** — a `customer360-backend/segmentation/` job (already a placeholder per `customer360-backend/README.md`) periodically calls the same recompute logic for all `is_active = true` segments across tenants, keeping `member_count`/tags fresh without an explicit admin action.
 
 4. **Existing CRUD/matched-profiles/seed-defaults endpoints stay unchanged** — this plan only adds the recompute + dry-run layer on top.
 
@@ -33,7 +33,7 @@ Most of the Segments API surface **already exists** (`core/routers/segment_api.p
 | **member_count / last_computed_at never populated** | Columns exist, default to 0/NULL, never updated | `POST /segments/{id}/recompute` updates both after running `sql_rules` | High |
 | **No tag write-back to master profiles** | `segmentation_tags` read by `content.py` but nothing writes segment membership into it | Recompute syncs `segment_tag` into/out of `cdp_master_profiles.segmentation_tags` for matching/non-matching profiles | High |
 | **No dry-run/preview of unsaved rules** | Rules must be saved as a segment row before they can be tested | `POST /segments/dry-run` validates + executes an ad-hoc fragment, returns count + sample, no persistence | Medium |
-| **No scheduled recompute** | ~~Fully on-demand; segments go stale if no admin recomputes them~~ **Done** — `backend-system/segmentation` now has a real `segmentation_job` + `segmentation_poll_sensor` (polls every `SEGMENTATION_POLL_INTERVAL_SECONDS`, default 10s, only running when `cdp_master_profiles` changed) | `backend-system/segmentation` Dagster job periodically recomputes all active segments | Medium |
+| **No scheduled recompute** | ~~Fully on-demand; segments go stale if no admin recomputes them~~ **Done** — `customer360-backend/segmentation` now has a real `segmentation_job` + `segmentation_poll_sensor` (polls every `SEGMENTATION_POLL_INTERVAL_SECONDS`, default 10s, only running when `cdp_master_profiles` changed) | `customer360-backend/segmentation` Dagster job periodically recomputes all active segments | Medium |
 | **No tests for recompute/dry-run** | `tests/test_segment_router.py` covers CRUD + matched-profiles + seed-defaults only | Add unit tests for recompute (count/tag updates) and dry-run (validation + execution) | High |
 
 ## 4) Implementation (recommended sequence)
@@ -66,9 +66,9 @@ Most of the Segments API surface **already exists** (`core/routers/segment_api.p
 2. Add `POST /segments/dry-run` route reusing `_validated_where_fragment` + a read-only query identical in shape to `get_segment_matched_profiles`, but against the request body instead of a stored segment row. No DB write.
 
 ### Phase 3: Scheduled recompute job (2–3 hours) — ✅ DONE
-> Implemented: `backend-system/segmentation/segmentation/recompute.py`
+> Implemented: `customer360-backend/segmentation/segmentation/recompute.py`
 > (`recompute_all_active_segments`, `count_recently_changed_master_profiles`)
-> + `backend-system/segmentation/dagster_defs.py` (`recompute_segments_op` /
+> + `customer360-backend/segmentation/dagster_defs.py` (`recompute_segments_op` /
 > `segmentation_job` / `segmentation_poll_sensor`). The sensor polls every
 > `SEGMENTATION_POLL_INTERVAL_SECONDS` (default **10s**, env-configurable)
 > and only requests a `segmentation_job` run when at least one
@@ -78,13 +78,13 @@ Most of the Segments API surface **already exists** (`core/routers/segment_api.p
 > `identity_resolution_poll_sensor`, since no `worker.py` loop drives this
 > job today). Verified end-to-end against a live dev PostgreSQL instance
 > (`segmentation_job.execute_in_process()`), plus unit tests in
-> `backend-system/segmentation/tests/test_dagster_defs.py`.
-1. Replace the placeholder single-op job in `backend-system/segmentation/dagster_defs.py` with an op that queries all `is_active = true` segments across tenants and calls the same `recompute_segment_membership` logic (import shared code or duplicate the SQL, matching the existing `identity_resolution` Dagster job style).
-2. Optionally add a schedule (e.g. every 6 hours) analogous to `identity_resolution`'s sensor, documented in `backend-system/README.md`.
+> `customer360-backend/segmentation/tests/test_dagster_defs.py`.
+1. Replace the placeholder single-op job in `customer360-backend/segmentation/dagster_defs.py` with an op that queries all `is_active = true` segments across tenants and calls the same `recompute_segment_membership` logic (import shared code or duplicate the SQL, matching the existing `identity_resolution` Dagster job style).
+2. Optionally add a schedule (e.g. every 6 hours) analogous to `identity_resolution`'s sensor, documented in `customer360-backend/README.md`.
 
 ### Phase 4: Tests (1–2 hours)
 1. `tests/test_segment_router.py`: add cases for `recompute` (count updates, tag sync, 400 when no `sql_rules`, 404 for missing segment) and `dry-run` (valid fragment returns count+sample, unsafe fragment rejected with 400).
-2. `backend-system/segmentation/` (or wherever Dagster tests live, mirroring `identity_resolution/tests/test_dagster_defs.py`): smoke test that the job executes without error against sample data.
+2. `customer360-backend/segmentation/` (or wherever Dagster tests live, mirroring `identity_resolution/tests/test_dagster_defs.py`): smoke test that the job executes without error against sample data.
 
 ## 5) Suggested API request shapes
 
@@ -131,7 +131,7 @@ Response: {
 - [x] `POST /api/v1/segments/{segment_id}/recompute` endpoint wired, 400 when no `sql_rules`, 404 for missing segment
 - [ ] `POST /api/v1/segments/dry-run` endpoint wired, validates fragment, executes read-only, no persistence
 - [x] Cache invalidation on recompute for `segments/matched_profiles*` prefixes
-- [x] `backend-system/segmentation/dagster_defs.py` replaced with real recompute-all-active-segments job + `segmentation_poll_sensor` (default 10s poll, gated on actual `cdp_master_profiles` changes)
+- [x] `customer360-backend/segmentation/dagster_defs.py` replaced with real recompute-all-active-segments job + `segmentation_poll_sensor` (default 10s poll, gated on actual `cdp_master_profiles` changes)
 - [x] Unit tests added for recompute (count/tag sync/error cases) — dry-run tests still pending (Phase 2 not yet implemented)
 - [ ] `docs/customer360-api.md` updated with `/segments/{id}/recompute` and `/segments/dry-run` sections
 - [ ] Code review + team sign-off

@@ -89,7 +89,7 @@
   Admin-only (see btn-persona-add in persona-list-view.js). Creates a new
   customer360.cdp_persona_archetypes row via POST /persona/archetypes --
   centroid scores are never sent (PersonaArchetypeCreate no longer accepts
-  them at all) and stay null until backend-system/identity_resolution's
+  them at all) and stay null until customer360-backend/identity_resolution's
   PersonaResolutionEngine (re)computes them as profiles are matched. Saving
   this form also submits identity_resolution_job to Dagster (see
   persona_api.py's _trigger_persona_centroid_recompute) so that computation

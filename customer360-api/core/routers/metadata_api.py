@@ -53,7 +53,7 @@ def get_dagster_metadata(
     repository: MetadataRepository = Depends(get_metadata_repository),
 ) -> dict[str, Any]:
     """Returns Dagster webserver connectivity plus the configured
-    backend-system code locations/jobs that this API can trigger. Does not
+    customer360-backend code locations/jobs that this API can trigger. Does not
     submit or query any job runs."""
     return repository.get_dagster_metadata()
 

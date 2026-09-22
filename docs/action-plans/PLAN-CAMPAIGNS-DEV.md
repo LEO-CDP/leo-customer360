@@ -462,7 +462,7 @@ Three small integration changes:
 
 ## Phase 4: Dagster pipeline nhập dữ liệu thực từ Adjust API & GA4 Data API
 
-FOLDER: `backend-system/data_synch/`
+FOLDER: `customer360-backend/data_synch/`
 
 ### Overview
 
@@ -477,7 +477,7 @@ Replace the placeholder `data_synch_job` with real ops. Follow the same structur
 
 ### Task 4.1: Adjust Pull-API Op
 
-**Target file:** `backend-system/data_synch/ops/adjust_pull.py`
+**Target file:** `customer360-backend/data_synch/ops/adjust_pull.py`
 
 Implement `adjust_pull_op` using Adjust Pull API v5:
 
@@ -503,7 +503,7 @@ Config inputs (Dagster `Config`): `app_id`, `lookback_days` (default 7), `dry_ru
 
 ### Task 4.2: GA4 Data API Op
 
-**Target file:** `backend-system/data_synch/ops/ga4_pull.py`
+**Target file:** `customer360-backend/data_synch/ops/ga4_pull.py`
 
 Implement `ga4_pull_op` using Google Analytics Data API v1beta (via `google-analytics-data` SDK):
 
@@ -524,7 +524,7 @@ Config inputs: `property_id`, `lookback_days` (default 7), `dry_run` flag.
 
 ### Task 4.3: DB Upsert Helper
 
-**Target file:** `backend-system/data_synch/ops/db_upsert.py`
+**Target file:** `customer360-backend/data_synch/ops/db_upsert.py`
 
 Shared helper used by both ops:
 
@@ -541,7 +541,7 @@ Uses psycopg2 (same as seed scripts) — reads `DB_*` env vars. Logs row count u
 
 ### Task 4.4: Campaign Lookup Cache
 
-**Target file:** `backend-system/data_synch/ops/campaign_lookup.py`
+**Target file:** `customer360-backend/data_synch/ops/campaign_lookup.py`
 
 ```python
 def build_campaign_lookup(conn, tenant_id: str) -> dict[str, str]:
@@ -555,7 +555,7 @@ Fetches once per job run and passes the dict to both ops via Dagster's op output
 
 ### Task 4.5: Dagster Job & Sensor Definitions
 
-**Target file:** `backend-system/data_synch/dagster_defs.py` (replace placeholder)
+**Target file:** `customer360-backend/data_synch/dagster_defs.py` (replace placeholder)
 
 Define the following:
 
@@ -577,7 +577,7 @@ Define the following:
 
 ### Task 4.6: Requirements & Environment
 
-**Target file:** `backend-system/data_synch/requirements.txt`
+**Target file:** `customer360-backend/data_synch/requirements.txt`
 
 Add:
 ```
@@ -588,7 +588,7 @@ psycopg2-binary>=2.9
 python-dotenv>=1.0
 ```
 
-**Environment variables** (document in `backend-system/data_synch/.env.example`):
+**Environment variables** (document in `customer360-backend/data_synch/.env.example`):
 ```
 ADJUST_API_TOKEN=           # Adjust Reports API bearer token
 ADJUST_APP_TOKEN=           # Adjust app token used in report filters

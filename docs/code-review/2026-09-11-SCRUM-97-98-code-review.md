@@ -17,8 +17,8 @@
 ## 1. Overview
 
 - **SCRUM-97** replaces the two placeholder Dagster jobs with real pipelines:
-  - `campaign_activation` (`backend-system/campaign_activation/`): loads the campaign tenant-scoped, **hard-gates on `approval_status == 'Approved'`**, validates the template is Approved, marks the campaign `Running`, and submits an out-of-process `email_engine_job` run via Dagster GraphQL.
-  - `email_engine` (`backend-system/email_engine/`): resolves segment members by `segment_tag`, filters suppressed/ineligible, renders per recipient, dispatches via a pluggable adapter (`mock` default / `smtp`), and writes an idempotent `cdp_campaign_dispatch_logs` ledger (UNIQUE `(campaign_id, master_profile_id)`, terminal rows never re-sent). Per-tenant SMTP config in `crm_email_provider_config` (DB source-of-truth, Redis-cached).
+  - `campaign_activation` (`customer360-backend/campaign_activation/`): loads the campaign tenant-scoped, **hard-gates on `approval_status == 'Approved'`**, validates the template is Approved, marks the campaign `Running`, and submits an out-of-process `email_engine_job` run via Dagster GraphQL.
+  - `email_engine` (`customer360-backend/email_engine/`): resolves segment members by `segment_tag`, filters suppressed/ineligible, renders per recipient, dispatches via a pluggable adapter (`mock` default / `smtp`), and writes an idempotent `cdp_campaign_dispatch_logs` ledger (UNIQUE `(campaign_id, master_profile_id)`, terminal rows never re-sent). Per-tenant SMTP config in `crm_email_provider_config` (DB source-of-truth, Redis-cached).
 - **SCRUM-98** adds public tracking + compliance in `customer360-api`: open-pixel, click-redirect, unsubscribe, and a provider webhook; HMAC-signed tracking tokens; events normalize into the S3 event envelope; hard bounce/complaint/unsubscribe add to `cdp_email_suppression`, which the send path consults.
 
 **What's genuinely good (verified):** ledger idempotency (UNIQUE + `WHERE status NOT IN ('Sent','Suppressed')` never downgrades a terminal row); RLS `ENABLE`+`FORCE`+`tenant_policy` on all four new tables; public writes set `app.tenant_id` **from the signed token** (not a header) so RLS holds; constant-time HMAC compare on decode; soft bounces excluded from suppression; the approval gate is re-checked in `email_engine` (defense in depth); migrations are idempotent with rollbacks; naming matches the epic gate (`sync_segment_crm`, `email_*`, `campaign_*`, `crm_*`/`cdp_*`).
@@ -63,13 +63,13 @@ The destination `url` is a separate, **unsigned** query param; the token signs o
 **Fix:** sign the destination into the token (or an accompanying HMAC'd param) and reject on mismatch, or allow-list per-campaign hosts.
 
 ### H2 — HIGH · Concurrent/crash double-send (actual emails, not just ledger rows)
-`backend-system/email_engine/email_engine/send.py:313-361` (+ `campaign_activation/.../activation.py:105-121`) · **CONFIRMED**
+`customer360-backend/email_engine/email_engine/send.py:313-361` (+ `campaign_activation/.../activation.py:105-121`) · **CONFIRMED**
 The `Sent` row is written *after* `adapter.send()` and committed per batch (`conn.commit()` at end of `_process_batch`). The `_current_status` pre-check is not a lock, and activation unconditionally re-submits an `email_engine` run (Dagster `RetryPolicy(max_retries=2)`). Two overlapping runs — or a retry after a crash between send and commit — both pass the pre-check and both actually send. The UNIQUE ledger prevents duplicate *rows*, not duplicate *emails*.
 **Failure:** `submit_job_execution` succeeds server-side but the client times out → op retry submits a 2nd run → two runs double-send still-`Pending` recipients.
 **Fix:** serialize sends per campaign (advisory lock on `campaign_id`), or claim each recipient (`Pending` + `attempt_count`) in its own committed txn *before* calling the adapter.
 
 ### M1 — MEDIUM · Suppression lookup fails OPEN
-`backend-system/email_engine/email_engine/send.py:135-158` · **CONFIRMED**
+`customer360-backend/email_engine/email_engine/send.py:135-158` · **CONFIRMED**
 `_suppressed_emails` wraps the query in a bare `except Exception` returning an empty set. The docstring frames this as tolerating an absent table, but it also swallows transient errors/timeouts/deadlocks.
 **Failure:** a transient DB error during the suppression SELECT for a batch → every recipient treated as not-suppressed → hard-bounced/complained/unsubscribed users get emailed (compliance breach).
 **Fix:** tolerate only `UndefinedTable`/`relation does not exist`; on any other error, fail the batch/recipient rather than send.
@@ -87,13 +87,13 @@ The former event-table path required a raw profile link; if the master profile h
 **Fix:** fall back to a synthetic/placeholder raw_profile_id (or relax the constraint for engagement rows) and at minimum count the drop.
 
 ### M4 — MEDIUM · Dev seeder has no production guard
-`backend-system/scripts/seed_email_campaign.py:109-146` · **CONFIRMED**
+`customer360-backend/scripts/seed_email_campaign.py:109-146` · **CONFIRMED**
 No env gate/confirmation; it acts on whatever `DB_*` points at, creating an Approved template + Approved campaign and (with `TAG_PROFILES>0`) appending the segment tag to **real** active profiles.
 **Failure:** `TENANT_ID=<prod> TAG_PROFILES=5 python seed_email_campaign.py` against a prod DB → 5 real customers tagged into an Approved campaign → activation sends them real email.
 **Fix:** refuse unless `SEED_ALLOW=1` (or a non-prod marker); only tag profiles you also give an `@example.com` address.
 
 ### M5 — MEDIUM · Activation validates the template but not the segment
-`backend-system/campaign_activation/campaign_activation/activation.py:92-103` · **CONFIRMED**
+`customer360-backend/campaign_activation/campaign_activation/activation.py:92-103` · **CONFIRMED**
 Template existence + Approved status is enforced; the segment is only checked for a non-null `segment_id`. A dangling/deleted `segment_id` passes, the "snapshot" count silently returns 0, the campaign is marked `Running`, and an `email_engine` run is triggered that then raises far from the cause.
 **Fix:** validate the segment row/`segment_tag` in activation (mirror the template check); consider refusing on `snapshot_count == 0`.
 

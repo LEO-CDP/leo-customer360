@@ -38,7 +38,7 @@ Full inventory in the module READMEs and `*/overlays/{uat,prod}.tfvars`. Condens
 | Box | Flavor | vCPU/RAM | Runs |
 |---|---|---|---|
 | `c360-api-uat-api` (10.100.1.5) | `s-general-1x2` | 1 / 2 GB | customer360-api, redis, keycloak, customer360-frontend, ads-server, **Caddy**, **whole monitoring stack** (Portainer, Netdata, Jaeger, pgAdmin, oauth2-proxy) |
-| `c360-api-uat-backend` (10.100.1.4) | `s-general-1x2` | 1 / 2 GB | Dagster (backend-system), Portainer agent |
+| `c360-api-uat-backend` (10.100.1.4) | `s-general-1x2` | 1 / 2 GB | Dagster (customer360-backend), Portainer agent |
 | `c360-api-uat-tracking` (10.100.1.8) | `s-general-1x2` | 1 / 2 GB | customer360-event-api, Portainer agent |
 
 The api box is explicitly oversubscribed (1 vCPU/2 GB running ~11 containers; a resize to
@@ -118,7 +118,7 @@ Outside the cluster, same VPC (unchanged):
 | ads-server (:9009, high-QPS) | `Deployment` + `Service` + **HPA** | biggest autoscale beneficiary |
 | customer360-frontend (:8890) | `Deployment` + `Service` | static-ish; browser calls API/Keycloak via ingress |
 | keycloak (:8080, mgmt :9000) | `Deployment` (or `StatefulSet`) + `Service` | external DB `db_keycloak`; set `KC_HTTP_RELATIVE_PATH=/auth`; liveness on :9000 |
-| dagster / backend-system (:3000) | `Deployment` + `Service` | needs PG; if it needs run storage, add a PVC |
+| dagster / customer360-backend (:3000) | `Deployment` + `Service` | needs PG; if it needs run storage, add a PVC |
 | customer360-event-api (:8010) | `Deployment` + `Service` + **HPA** | ✅ **now built + published to GHCR by CI** (`ci.yml`); `deploy-tracking.sh` pulls it by default (`BUILD_LOCAL=0`). Redis Streams broker plus S3 creds and OTLP endpoint must be provided via `Secret`/env |
 | c360-redis container (uat) / MemStore (prod) | **Keep managed MemStore for both** (recommended) or in-cluster `StatefulSet` + PVC | managed removes stateful-in-cluster risk; RWO block volume only if in-cluster |
 | **Caddy** (path routing + TLS) | **Ingress + cert-manager** | deletes `proxy/`, `set-domain.sh`, the cutover runbook |

@@ -33,7 +33,7 @@ Schema gaps that must be addressed in this story:
 - `crm_campaign` currently has no `segment_id`, `template_id`, or campaign-content relation table.
 - No dedicated email-template table exists yet.
 
-### Dagster service reality (`backend-system/*/dagster_defs.py`)
+### Dagster service reality (`customer360-backend/*/dagster_defs.py`)
 
 Implemented and active:
 
@@ -124,7 +124,7 @@ Schema supports direct implementation of your three goals with no missing column
 
 ### SUBTASK-02: Segment-ID Driven CRM Sync Engine
 
-Component: `customer360-api/core` + `backend-system/data_synch`  
+Component: `customer360-api/core` + `customer360-backend/data_synch`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01  
 Blocks: SUBTASK-03, SUBTASK-05, SUBTASK-08  
@@ -171,7 +171,7 @@ Marketer can select a segment and synchronize profile subsets into the expected 
 
 ### SUBTASK-03: AI Email Template Authoring (Gemini/OpenAI)
 
-Component: `customer360-api/core` + `backend-system/email_engine`  
+Component: `customer360-api/core` + `customer360-backend/email_engine`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01, SUBTASK-02  
 Blocks: SUBTASK-05, SUBTASK-08  
@@ -213,7 +213,7 @@ AI template generation works with strict draft-and-review governance.
 
 ### SUBTASK-04: AI Campaign Strategy and Draft Creation
 
-Component: `customer360-api/core` + `backend-system/campaign_orchestration`  
+Component: `customer360-api/core` + `customer360-backend/campaign_orchestration`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01, SUBTASK-02, SUBTASK-03  
 Blocks: SUBTASK-05, SUBTASK-08  
@@ -256,7 +256,7 @@ AI can prepare complete campaign drafts; human approval remains mandatory gate t
 
 ### SUBTASK-05: Dagster Execution Modernization (Campaign + Email)
 
-Component: `backend-system/campaign_activation` + `backend-system/email_engine`  
+Component: `customer360-backend/campaign_activation` + `customer360-backend/email_engine`
 Priority: P0 Blocker  
 Depends on: SUBTASK-02, SUBTASK-03, SUBTASK-04  
 Blocks: SUBTASK-06, SUBTASK-08  
@@ -324,7 +324,7 @@ Closed-loop event capture and compliance suppression updates are operational.
 
 ### SUBTASK-07: Customer 360 Feedback and Performance Rollups
 
-Component: `backend-system` + `customer360-api` + `analytics`  
+Component: `customer360-backend` + `customer360-api` + `analytics`
 Priority: P0 Blocker  
 Depends on: SUBTASK-06  
 Blocks: SUBTASK-08  
@@ -353,7 +353,7 @@ Email engagement data becomes actionable in profile and campaign analytics.
 
 ### SUBTASK-08: End-to-End Automated Test Suite (Learn from Simulator)
 
-Component: cross-cutting (`all-data-simulator`, `backend-system`, `customer360-api`)  
+Component: cross-cutting (`all-data-simulator`, `customer360-backend`, `customer360-api`)
 Priority: P0 Blocker (Beta Gate)  
 Depends on: SUBTASK-01..07  
 Estimate: 8 pts

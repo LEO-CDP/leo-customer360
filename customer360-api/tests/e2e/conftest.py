@@ -349,7 +349,7 @@ def email_feature(email_client, email_p):
 @pytest.fixture(scope="session")
 def mint_token():
     """Build a signed email tracking token (tenant|campaign|profile), matching
-    backend-system email_engine's format, keyed by EMAIL_TRACKING_SECRET."""
+    customer360-backend email_engine's format, keyed by EMAIL_TRACKING_SECRET."""
     def _mint(tenant_id, campaign_id, master_profile_id, secret=EMAIL_TRACKING_SECRET):
         raw = f"{tenant_id}|{campaign_id}|{master_profile_id}"
         sig = hmac.new(secret.encode(), raw.encode(), hashlib.sha256).hexdigest()[:20]

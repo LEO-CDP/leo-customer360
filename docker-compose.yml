@@ -214,12 +214,12 @@ services:
         psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360} -tc "SELECT 1 FROM pg_database WHERE datname = '$$DAGSTER_PG_DB'" | grep -q 1 || psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360} -c "CREATE DATABASE \"$$DAGSTER_PG_DB\""
 
   # ---------------------------------------------------------------------------
-  # 6) Dagster webserver - all nine backend-system code locations.
+  # 6) Dagster webserver - all nine customer360-backend code locations.
   # ---------------------------------------------------------------------------
   dagster:
     build:
       context: .
-      dockerfile: backend-system/Dockerfile
+      dockerfile: customer360-backend/Dockerfile
     image: customer360-dagster:local
     container_name: customer360-dagster
     restart: unless-stopped
@@ -278,7 +278,7 @@ services:
   dagster-daemon:
     build:
       context: .
-      dockerfile: backend-system/Dockerfile
+      dockerfile: customer360-backend/Dockerfile
     image: customer360-dagster:local
     container_name: customer360-dagster-daemon
     restart: unless-stopped
@@ -484,7 +484,7 @@ services:
     profiles: ["dev"]
     build:
       context: .
-      dockerfile: backend-system/Dockerfile
+      dockerfile: customer360-backend/Dockerfile
     image: customer360-dagster:local
     container_name: customer360-cir-demo-seed
     restart: "no"

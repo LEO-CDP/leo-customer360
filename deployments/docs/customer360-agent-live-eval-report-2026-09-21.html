@@ -367,7 +367,7 @@
            &lt;p&gt;&lt;a href="{{ unsubscribe_url }}"&gt;Unsubscribe&lt;/a&gt;&lt;/p&gt;
 <span class="lbl">text_body:</span> Hi {{ name }}, … Shop now: https://shop.example.com/winback</pre>
 
-  <div class="stagelabel"><b>Step 4</b> · send-time render (backend-system/email_engine/rendering.py)</div>
+  <div class="stagelabel"><b>Step 4</b> · send-time render (customer360-backend/email_engine/rendering.py)</div>
   <div class="finding fix" style="margin-top:0">
     <p class="ft"><span class="sev">Design</span> Plain <span class="mono">{{ }}</span> substitution — deliberately NOT Jinja</p>
     <p>Rendering is a fixed regex substitution over a known context, not a template engine — so an AI/marketer-authored template can <b>never execute code</b>. Per-recipient context: <code>{first_name, last_name, name, email, unsubscribe_url}</code>. HTML-body values are HTML-escaped (a profile field can't inject markup); unknown placeholders render empty (no leaked <code>{{ raw }}</code>); then links are rewritten for click-tracking and a 1×1 open pixel is injected.</p>

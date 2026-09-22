@@ -49,7 +49,7 @@ case is a prompt template, not a new model.**
 
 ### 1.2 Subsystem map
 
-The Dagster workspace (`backend-system/`) has nine code locations; three are
+The Dagster workspace (`customer360-backend/`) has nine code locations; three are
 implemented, six are runnable placeholders. Those placeholders — `scoring`,
 `data_synch`, `email_engine`, `notification_engine`, `campaign_activation`,
 `personalization` — are exactly where the model's structured/generative output

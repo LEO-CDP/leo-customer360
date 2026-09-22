@@ -10,7 +10,7 @@ The code in this repo is not an abstract demo. It reflects a real platform layou
 - a PostgreSQL 16 schema for master profiles, raw profiles, links, CRM entities, personas, and segmentation metadata
 - a reusable `leo-customer360-dao` Python package containing shared models, schemas, CRUD, repositories, and database utilities
 - a FastAPI API in `customer360-api/` for CRUD, reporting, auth, and tenant-scoped access
-- a Dagster workspace in `backend-system/` that runs identity resolution, segmentation, and analytics jobs
+- a Dagster workspace in `customer360-backend/` that runs identity resolution, segmentation, and analytics jobs
 - a FastAPI ad-serving service in `ads-server/`
 - a browser-based admin UI in `customer360-frontend/` that calls the API over HTTP
 - local Docker-based startup and demo seeding scripts in the repo root
@@ -23,21 +23,21 @@ The current repo contains four application services, three active Dagster jobs, 
 
 | Area | Status | Notes |
 |---|---|---|
-| `backend-system/identity_resolution/` | Implemented | Dagster identity-resolution job; resolves raw profile matches into master profiles |
-| `backend-system/segmentation/` | Implemented | Recomputes active segments and syncs member/tag data back to master profiles |
-| `backend-system/analytics/` | Implemented | Hourly Dagster job that aggregates tracking logs and updates source totals |
+| `customer360-backend/identity_resolution/` | Implemented | Dagster identity-resolution job; resolves raw profile matches into master profiles |
+| `customer360-backend/segmentation/` | Implemented | Recomputes active segments and syncs member/tag data back to master profiles |
+| `customer360-backend/analytics/` | Implemented | Hourly Dagster job that aggregates tracking logs and updates source totals |
 | `customer360-api/` | Implemented | Main REST API for identity, CRM, persona, reporting, and metadata |
 | `customer360-event-api/` | Implemented | Durably queues dynamic tracking events in Redis Streams and writes immutable hourly per-source S3/MinIO objects |
 | `ads-server/` | Implemented | Multi-tenant FastAPI ad-serving API with placements, campaigns, creatives, and a browser loader |
 | `customer360-frontend/` | Implemented | FastAPI shell for the UI, backed by client-side JS and API requests |
-| `backend-system/scoring/`, `data_synch/`, `email_engine/`, `notification_engine/`, `campaign_activation/`, `personalization/` | Placeholder | Runnable Dagster scaffolds ready for their service logic |
+| `customer360-backend/scoring/`, `data_synch/`, `email_engine/`, `notification_engine/`, `campaign_activation/`, `personalization/` | Placeholder | Runnable Dagster scaffolds ready for their service logic |
 
 ## Repository structure
 
 | Path | Purpose |
 |---|---|
 | [`customer360-database/`](customer360-database) | Schema source: `database-schema.sql`, seed/init scripts, and SQL views |
-| [`backend-system/`](backend-system) | Dagster workspace with nine code locations: identity resolution, segmentation, analytics, and six placeholder services |
+| [`customer360-backend/`](customer360-backend) | Dagster workspace with nine code locations: identity resolution, segmentation, analytics, and six placeholder services |
 | [`customer360-api/`](customer360-api) | FastAPI service with routers, auth, SQLAlchemy models, and business logic |
 | [`customer360-dao/`](customer360-dao) | Installable shared Python DAO package and package-owned unit tests |
 | [`customer360-event-api/`](customer360-event-api) | FastAPI ingestion service that queues dynamic events in Redis Streams and writes hourly tracking-log objects to S3/MinIO |
@@ -90,7 +90,7 @@ In a separate terminal, start the API and backend workers:
 cd customer360-api
 ./start.sh
 
-cd ../backend-system/identity_resolution
+cd ../customer360-backend/identity_resolution
 ./run-demo.sh
 ```
 
@@ -119,8 +119,8 @@ The repo uses these primary entrypoints:
 - `customer360-api/app.py` — FastAPI API entrypoint
 - `customer360-event-api/app.py` — CDP tracking-log FastAPI entrypoint (port 8010)
 - `ads-server/app.py` — ad-serving FastAPI entrypoint (port 9009 by default)
-- `backend-system/workspace.yaml` — Dagster workspace containing all nine backend code locations
-- `backend-system/identity_resolution/worker.py` — legacy local polling helper; production runs the Dagster job
+- `customer360-backend/workspace.yaml` — Dagster workspace containing all nine backend code locations
+- `customer360-backend/identity_resolution/worker.py` — legacy local polling helper; production runs the Dagster job
 - `customer360-frontend/app.py` — admin frontend shell
 - `manage-c360.sh` — production-style Docker stack manager
 - `dev-c360.sh` — local dev infrastructure bootstrap
@@ -158,7 +158,7 @@ Start here for deeper context:
 - [`customer360-api/README.md`](customer360-api/README.md)
 - [`customer360-event-api/README.md`](customer360-event-api/README.md)
 - [`ads-server/README.md`](ads-server/README.md)
-- [`backend-system/README.md`](backend-system/README.md)
+- [`customer360-backend/README.md`](customer360-backend/README.md)
 - [`customer360-frontend/README.md`](customer360-frontend/README.md)
 - [`deployments/README.md`](deployments/README.md)
 - [`k8s/README.md`](k8s/README.md)

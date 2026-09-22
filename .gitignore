@@ -18,6 +18,7 @@ dist/
 .pytest_cache/
 .env
 logs/
+*.log
 /.idea
 docs/release-documents/
 
@@ -33,3 +34,6 @@ docs-site/node_modules/
 .claude/
 .specify/
 specs/
+
+.dagster_home
+*/.dagster_home/*

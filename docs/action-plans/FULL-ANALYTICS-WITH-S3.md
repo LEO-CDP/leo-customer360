@@ -78,7 +78,7 @@ Relevant current implementation:
 - [customer360-api/core/repositories/event_query_repository.py](../../customer360-api/core/repositories/event_query_repository.py) validates active tenant-owned sources, derives `data-tracking-<data_source_id>` buckets, reads RAW JSONL, and processes rows with Polars.
 - [customer360-api/core/cache.py](../../customer360-api/core/cache.py) provides fail-open Redis response caching; the events route includes tenant, datetime, source, filter, and pagination parameters in its cache key.
 - [customer360-api/core/crud/profile360.py](../../customer360-api/core/crud/profile360.py) reads behavioral events through the tenant-scoped S3 event repository.
-- [backend-system/analytics/source_analytics/tracking_log_aggregation.py](../../backend-system/analytics/source_analytics/tracking_log_aggregation.py) scans S3 and updates source metrics.
+- [customer360-backend/analytics/source_analytics/tracking_log_aggregation.py](../../customer360-backend/analytics/source_analytics/tracking_log_aggregation.py) scans S3 and updates source metrics.
 - [customer360-database/database-schema.sql](../../customer360-database/database-schema.sql) defines S3/MinIO as the behavioral-event system of record.
 
 The current implementation has an intentional split: the public tracking API is
@@ -478,13 +478,13 @@ service gate below.
 | [customer360-api/core/cache.py](../../customer360-api/core/cache.py) | Shared fail-open Redis response cache; datetime-aware keys now support event time filters | 2, 3 |
 | [customer360-api/core/crud/profile360.py](../../customer360-api/core/crud/profile360.py) | Read behavioral events through the S3 query repository and keep CRM aggregates in PostgreSQL | 3 |
 | [customer360-api/core/routers/identity_api.py](../../customer360-api/core/routers/identity_api.py) | Update timeline/engagement dependencies if the router exposes those profile analytics | 3 |
-| [backend-system/analytics/source_analytics/tracking_log_aggregation.py](../../backend-system/analytics/source_analytics/tracking_log_aggregation.py) | Process MinIO `events/` and `_processed/` state, compact Silver data, reconcile counts, and retain Redis as cache only | 1, 3 |
-| [backend-system/analytics/dagster_defs.py](../../backend-system/analytics/dagster_defs.py) | Register compaction, reconciliation, backfill, and replay jobs/schedules | 3, 4 |
+| [customer360-backend/analytics/source_analytics/tracking_log_aggregation.py](../../customer360-backend/analytics/source_analytics/tracking_log_aggregation.py) | Process MinIO `events/` and `_processed/` state, compact Silver data, reconcile counts, and retain Redis as cache only | 1, 3 |
+| [customer360-backend/analytics/dagster_defs.py](../../customer360-backend/analytics/dagster_defs.py) | Register compaction, reconciliation, backfill, and replay jobs/schedules | 3, 4 |
 | [customer360-database/database-schema.sql](../../customer360-database/database-schema.sql) | Keep tracking state out of the public API database; remove raw-event table only in Phase 6 | 1, 6 |
 | [customer360-database/migrations/001_harden_tenant_rls_policies.sql](../../customer360-database/migrations/001_harden_tenant_rls_policies.sql) | Keep the public tracking service outside PostgreSQL tenant-control paths | 1 |
 | [customer360-api/core/config.py](../../customer360-api/core/config.py) | Add event backend, query engine, time-range, bucket, and feature-flag settings | 2, 3, 5 |
 | [customer360-event-api/core/config.py](../../customer360-event-api/core/config.py) | Add envelope, bucket, compression, request-limit, Redis idempotency, and processed-state settings | 1 |
-| [backend-system/analytics/source_analytics/](../../backend-system/analytics/source_analytics/) | Add state-marker handling, compaction, quarantine, reconciliation, and backfill modules | 3, 4 |
+| [customer360-backend/analytics/source_analytics/](../../customer360-backend/analytics/source_analytics/) | Add state-marker handling, compaction, quarantine, reconciliation, and backfill modules | 3, 4 |
 | [deployments/server/deploy-tracking.sh](../../deployments/server/deploy-tracking.sh) | Inject production S3 prefixes, Redis idempotency, and observability settings without PostgreSQL credentials | 1, 5 |
 | [deployments/server/deploy-backend.sh](../../deployments/server/deploy-backend.sh) | Inject Dagster compaction/backfill settings and S3 permissions | 3, 4 |
 | [deployments/storage/variables.tf](../../deployments/storage/variables.tf) | Add event-bucket lifecycle/versioning/retention inputs | 1 |
@@ -495,14 +495,14 @@ service gate below.
 | File | Purpose |
 |---|---|
 | `customer360-api/core/event_storage.py` or shared equivalent | Common event envelope and S3 enqueue adapter used by legacy API and tracking API |
-| `backend-system/analytics/source_analytics/event_state.py` | MinIO `_processed/` state reads, versioned status transitions, checksum validation, and idempotency |
-| `backend-system/analytics/source_analytics/event_compaction.py` | Bronze validation, deduplication, Parquet/Iceberg writes, and quarantine |
-| `backend-system/analytics/source_analytics/event_reconciliation.py` | Count, checksum, range, tenant, and replay verification |
-| `backend-system/analytics/source_analytics/event_backfill.py` | Partitioned PostgreSQL export to canonical S3 RAW objects with resumable checkpoints and state markers |
+| `customer360-backend/analytics/source_analytics/event_state.py` | MinIO `_processed/` state reads, versioned status transitions, checksum validation, and idempotency |
+| `customer360-backend/analytics/source_analytics/event_compaction.py` | Bronze validation, deduplication, Parquet/Iceberg writes, and quarantine |
+| `customer360-backend/analytics/source_analytics/event_reconciliation.py` | Count, checksum, range, tenant, and replay verification |
+| `customer360-backend/analytics/source_analytics/event_backfill.py` | Partitioned PostgreSQL export to canonical S3 RAW objects with resumable checkpoints and state markers |
 | `customer360-api/core/repositories/event_query_repository.py` | Tenant-safe event queries against Silver data or a dedicated query engine |
 | `customer360-api/tests/test_event_storage.py` | Envelope, deduplication, retry, and S3 acknowledgement tests |
-| `backend-system/analytics/tests/test_event_compaction.py` | Validation, compaction, quarantine, state-marker, and reconciliation tests |
-| `backend-system/analytics/tests/test_event_backfill.py` | Resumable backfill and partition checksum tests |
+| `customer360-backend/analytics/tests/test_event_compaction.py` | Validation, compaction, quarantine, state-marker, and reconciliation tests |
+| `customer360-backend/analytics/tests/test_event_backfill.py` | Resumable backfill and partition checksum tests |
 
 The exact module names may change after the implementation agent inspects local package boundaries. The responsibilities must not disappear.
 
@@ -518,7 +518,7 @@ The exact module names may change after the implementation agent inspects local 
 | [docs/operations/database/check-db-data.sql](../operations/database/check-db-data.sql) | Replace raw-event row checks with aggregate checks; pair with S3 state, lag, quarantine, and reconciliation checks |
 | [all-data-simulator/README.md](../../all-data-simulator/README.md) | Verify S3 RAW objects, `_processed/` state, compaction output, and query results rather than requiring a matching PostgreSQL event row |
 | [all-data-simulator/run_tracking_analytics_e2e.sh](../../all-data-simulator/run_tracking_analytics_e2e.sh) | Change E2E validation to assert Bronze upload, raw/Silver state markers, Silver materialization, and aggregate correctness |
-| [backend-system/deployment.md](../../backend-system/deployment.md) | Add compaction/backfill/replay jobs and S3 readiness requirements |
+| [customer360-backend/deployment.md](../../customer360-backend/deployment.md) | Add compaction/backfill/replay jobs and S3 readiness requirements |
 | [docs/code-review/README.md](../code-review/README.md) | Update raw-event storage/security review checklist after the design is implemented |
 
 ## 7. Tests and Acceptance Evidence
@@ -627,7 +627,7 @@ The repository implementation now follows this contract:
 1. `customer360-event-api` validates external batches and writes canonical gzip
   JSONL RAW objects plus `_processed/` state markers to S3/MinIO. It never
   connects to PostgreSQL.
-2. `backend-system/analytics` scans active-source `events/` objects with
+2. `customer360-backend/analytics` scans active-source `events/` objects with
   resumable Redis cursors, counts each immutable object once, normalizes
   governed fields against the versioned JSON Schema, optionally upserts
   identity-bearing `cdp_raw_profiles_stage` records, and updates bounded source
@@ -637,7 +637,7 @@ The repository implementation now follows this contract:
   only to resolve the caller's active tenant-owned data sources. Responses are
   cached in Redis with fail-open behavior. Silver Parquet querying is not yet
   implemented.
-4. `backend-system/identity_resolution/scripts/init_sample_data.py` seeds raw
+4. `customer360-backend/identity_resolution/scripts/init_sample_data.py` seeds raw
   profile staging and identity-resolution inputs, not behavioral events.
 5. `all-data-simulator/test_web_user_simulator.py` verifies the gzip canonical
   envelope in MinIO, analytics statistics, and the customer API S3 query.

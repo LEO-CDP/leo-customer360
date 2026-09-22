@@ -640,7 +640,7 @@ def seed_default_segments_with_breakdown(
     for tenant_id in target_tenant_ids:
         # Scope this connection to the tenant being seeded before touching
         # any tenant-scoped/RLS-protected table -- same pattern as
-        # backend-system/identity_resolution's per-row set_config (see resolver.py).
+        # customer360-backend/identity_resolution's per-row set_config (see resolver.py).
         db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": str(tenant_id)})
 
         existing_tags = {

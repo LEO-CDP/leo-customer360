@@ -451,7 +451,7 @@ def recompute_all_segments(request: Request):
     1M+ rows in production, and scanning it once per active segment inside
     an HTTP request handler would block an API worker for the whole scan and
     risk request timeouts. Instead this submits a run of
-    ``backend-system/segmentation``'s ``segmentation_job``, scoped to the
+    ``customer360-backend/segmentation``'s ``segmentation_job``, scoped to the
     caller's tenant via run_config, to the Dagster webserver (see
     core/utils/dagster_client.py) -- Dagster's daemon/run worker executes it
     out-of-process, with its own retry policy, and the caller polls

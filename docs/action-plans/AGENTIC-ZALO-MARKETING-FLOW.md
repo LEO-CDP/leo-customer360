@@ -132,7 +132,7 @@ Schema supports deterministic Zalo OA workflow with governance and dispatch obse
 
 ### SUBTASK-02: Segment-ID Driven CRM Sync and Zalo Eligibility
 
-Component: `customer360-api/core` + `backend-system/data_synch`  
+Component: `customer360-api/core` + `customer360-backend/data_synch`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01  
 Blocks: SUBTASK-03, SUBTASK-05, SUBTASK-08  
@@ -171,7 +171,7 @@ Marketer can select one segment and produce a deterministic Zalo-eligible audien
 
 ### SUBTASK-03: AI Zalo Template Authoring (Gemini/OpenAI)
 
-Component: `customer360-api/core` + `backend-system/notification_engine`  
+Component: `customer360-api/core` + `customer360-backend/notification_engine`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01, SUBTASK-02  
 Blocks: SUBTASK-04, SUBTASK-05, SUBTASK-08  
@@ -211,7 +211,7 @@ AI Zalo template generation works with enforceable governance.
 
 ### SUBTASK-04: AI Campaign Strategy and Draft Creation (Zalo OA)
 
-Component: `customer360-api/core` + `backend-system/campaign_orchestration`  
+Component: `customer360-api/core` + `customer360-backend/campaign_orchestration`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01, SUBTASK-02, SUBTASK-03  
 Blocks: SUBTASK-05, SUBTASK-08  
@@ -254,7 +254,7 @@ AI can prepare complete Zalo campaign drafts while human approval remains mandat
 
 ### SUBTASK-05: Dagster Execution Modernization (Campaign + Notification)
 
-Component: `backend-system/campaign_activation` + `backend-system/notification_engine`  
+Component: `customer360-backend/campaign_activation` + `customer360-backend/notification_engine`
 Priority: P0 Blocker  
 Depends on: SUBTASK-02, SUBTASK-03, SUBTASK-04  
 Blocks: SUBTASK-06, SUBTASK-08  
@@ -320,7 +320,7 @@ Closed-loop callback handling and suppression updates are operational.
 
 ### SUBTASK-07: Customer 360 Feedback and Zalo Performance Rollups
 
-Component: `backend-system/analytics` + `customer360-api`  
+Component: `customer360-backend/analytics` + `customer360-api`
 Priority: P0 Blocker  
 Depends on: SUBTASK-06  
 Blocks: SUBTASK-08  
@@ -349,7 +349,7 @@ Zalo engagement data becomes actionable inside profile and campaign analytics.
 
 ### SUBTASK-08: End-to-End Automated Test Suite (Learn from Simulator)
 
-Component: cross-cutting (`all-data-simulator`, `backend-system`, `customer360-api`)  
+Component: cross-cutting (`all-data-simulator`, `customer360-backend`, `customer360-api`)
 Priority: P0 Blocker (Beta Gate)  
 Depends on: SUBTASK-01..07  
 Estimate: 8 pts

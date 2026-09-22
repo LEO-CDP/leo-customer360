@@ -44,7 +44,7 @@ Schema gaps that must be addressed in this story:
 - Admin API and schema docs are present under `ads-server/static/admin` and `ads-server/sql-scripts`.
 - Current gap for this epic: no proven orchestrated bridge from Customer 360 segment workflows into `leo_ads` activation and closed-loop attribution.
 
-### Dagster service reality (`backend-system/*/dagster_defs.py`)
+### Dagster service reality (`customer360-backend/*/dagster_defs.py`)
 
 Implemented and active:
 
@@ -137,7 +137,7 @@ Schema supports deterministic ad-tech workflow with CRM ownership and external m
 
 ### SUBTASK-02: Segment-ID Driven CRM Sync and Audience Export
 
-Component: `customer360-api/core` + `backend-system/data_synch`  
+Component: `customer360-api/core` + `customer360-backend/data_synch`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01  
 Blocks: SUBTASK-03, SUBTASK-05, SUBTASK-08  
@@ -218,7 +218,7 @@ AI ad creative generation works with enforceable governance.
 
 ### SUBTASK-04: AI Campaign Strategy and Draft Creation (Ad Tech)
 
-Component: `customer360-api/core` + `backend-system/campaign_orchestration`  
+Component: `customer360-api/core` + `customer360-backend/campaign_orchestration`
 Priority: P0 Blocker  
 Depends on: SUBTASK-01, SUBTASK-02, SUBTASK-03  
 Blocks: SUBTASK-05, SUBTASK-08  
@@ -263,7 +263,7 @@ AI can prepare complete ad campaign drafts while human approval remains a hard g
 
 ### SUBTASK-05: Activation Pipeline Modernization (Campaign + Data Sync)
 
-Component: `backend-system/campaign_activation` + `backend-system/data_synch` + `ads-server`  
+Component: `customer360-backend/campaign_activation` + `customer360-backend/data_synch` + `ads-server`
 Priority: P0 Blocker  
 Depends on: SUBTASK-02, SUBTASK-03, SUBTASK-04  
 Blocks: SUBTASK-06, SUBTASK-08  
@@ -333,7 +333,7 @@ Ad event feedback is reliably ingested and normalized.
 
 ### SUBTASK-07: Customer 360 Feedback and Ad Performance Rollups
 
-Component: `backend-system/analytics` + `customer360-api`  
+Component: `customer360-backend/analytics` + `customer360-api`
 Priority: P0 Blocker  
 Depends on: SUBTASK-06  
 Blocks: SUBTASK-08  
@@ -362,7 +362,7 @@ Ad engagement becomes actionable inside Customer 360 profile and campaign analyt
 
 ### SUBTASK-08: End-to-End Automated Test Suite (Learn from Simulator)
 
-Component: cross-cutting (`all-data-simulator`, `backend-system`, `customer360-api`, `ads-server`)  
+Component: cross-cutting (`all-data-simulator`, `customer360-backend`, `customer360-api`, `ads-server`)
 Priority: P0 Blocker (Beta Gate)  
 Depends on: SUBTASK-01..07  
 Estimate: 8 pts

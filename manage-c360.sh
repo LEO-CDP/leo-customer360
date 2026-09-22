@@ -412,7 +412,7 @@ cmd_down() {
 }
 
 cmd_seed_demo() {
-  local cir_dir="${SCRIPT_DIR}/backend-system/identity_resolution"
+  local cir_dir="${SCRIPT_DIR}/customer360-backend/identity_resolution"
   local venv_dir="${cir_dir}/.venv"
   local recreate_venv="0"
 

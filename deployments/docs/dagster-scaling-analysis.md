@@ -1,9 +1,9 @@
 # Customer 360 — Scaling the Dagster Backend (Orchestrator + Worker Pools)
 
-> **Status:** research / decision-support · **Date:** 2026-09-03 · **Scope:** `backend-system/` (Dagster) on VKS, UAT + PROD
+> **Status:** research / decision-support · **Date:** 2026-09-03 · **Scope:** `customer360-backend/` (Dagster) on VKS, UAT + PROD
 > **Platform:** GreenNode / VNG Cloud VKS — see [`vks-target-architecture.svg`](./vks-target-architecture.svg)
 > **Companions:** [`vks-migration-technical-analysis.md`](./vks-migration-technical-analysis.md) · [`vks-cost-analysis.md`](./vks-cost-analysis.md)
-> **Source of truth for today's shape:** [`../../backend-system/deployment.md`](../../backend-system/deployment.md) · [`../../k8s/base/dagster.yaml`](../../k8s/base/dagster.yaml)
+> **Source of truth for today's shape:** [`../../customer360-backend/deployment.md`](../../customer360-backend/deployment.md) · [`../../k8s/base/dagster.yaml`](../../k8s/base/dagster.yaml)
 
 This document turns the conceptual target below into a concrete Dagster production
 topology, explains **why the current single-pod `dagster dev` cannot be scaled as-is**,
@@ -52,7 +52,7 @@ workers:
 ## 2. Current state (baseline)
 
 From [`k8s/base/dagster.yaml`](../../k8s/base/dagster.yaml) and
-[`backend-system/deployment.md`](../../backend-system/deployment.md):
+[`customer360-backend/deployment.md`](../../customer360-backend/deployment.md):
 
 | Aspect | Today |
 |---|---|
@@ -428,7 +428,7 @@ spec:
 
 1. **Phase 0 — storage (no topology change). ✅ Implemented, adaptive & fail-open.** The instance
    config is **rendered at container start** by `entrypoint.sh` →
-   [`scripts/render_dagster_instance.py`](../../backend-system/scripts/render_dagster_instance.py),
+   [`scripts/render_dagster_instance.py`](../../customer360-backend/scripts/render_dagster_instance.py),
    which probes the backends and writes `$DAGSTER_HOME/dagster.yaml`:
    **shared PostgreSQL** run/event/schedule storage (dedicated `dagster` DB, created best-effort) **if
    the DB is reachable, else local SQLite**; **S3/MinIO compute logs** (`S3ComputeLogManager`, path-style)
@@ -439,7 +439,7 @@ spec:
    **Existing-data cutover:** the old SQLite run history is operational metadata (business data lives
    in the customer360 DB + S3) and the VM's `DAGSTER_HOME` is ephemeral — `deploy-backend.sh` auto-backs
    it up before redeploy, and a best-effort importer
-   ([`backend-system/scripts/migrate_dagster_sqlite_to_postgres.py`](../../backend-system/scripts/migrate_dagster_sqlite_to_postgres.py))
+   ([`customer360-backend/scripts/migrate_dagster_sqlite_to_postgres.py`](../../customer360-backend/scripts/migrate_dagster_sqlite_to_postgres.py))
    + runbook in `deployment.md` cover migrating it into Postgres if needed.
 2. **Phase 1 — split the control plane.** Replace the `dagster dev` Deployment with
    `dagster-webserver ×2` + `dagster-daemon ×1`; add the webserver HPA. Storage from Phase 0 makes

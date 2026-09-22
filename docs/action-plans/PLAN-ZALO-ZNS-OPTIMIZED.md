@@ -37,7 +37,7 @@ flowchart TB
         APPR{"approval gate<br/>approval_status"}
     end
 
-    subgraph DAG["backend-system · Dagster jobs"]
+    subgraph DAG["customer360-backend · Dagster jobs"]
         direction LR
         TR["token-refresh schedule<br/>(repo's first schedule)"]
         ACT["campaign_activation<br/>validate + mark Running"]
@@ -95,7 +95,7 @@ flowchart TB
     class ZALOAPI ext;
 ```
 
-**Read it by lane:** **customer360-api** authors (OA connect + template sync + segment sync + AI draft + approval gate). **backend-system/Dagster** runs the async jobs (token refresh, activation, the `notification_engine` ZNS dispatch, analytics). **customer360-event-api** owns the inbound webhook. **PostgreSQL** and the **S3 event lake** are the two datastores. Note the green nodes cluster into just the new work — most of every lane is grey reuse. **Two sinks, exactly like email:** send ledger + suppression live in Postgres; every engagement callback is written to the **S3 event lake** via the shared `TrackingLogService` (that S3 stream, not Postgres, is what `analytics_job` reads). See `docs/architecture/TECHNICAL-DOCUMENTATION.md` §3 (Data Flow) and §5.1 (S3/MinIO event lake).
+**Read it by lane:** **customer360-api** authors (OA connect + template sync + segment sync + AI draft + approval gate). **customer360-backend/Dagster** runs the async jobs (token refresh, activation, the `notification_engine` ZNS dispatch, analytics). **customer360-event-api** owns the inbound webhook. **PostgreSQL** and the **S3 event lake** are the two datastores. Note the green nodes cluster into just the new work — most of every lane is grey reuse. **Two sinks, exactly like email:** send ledger + suppression live in Postgres; every engagement callback is written to the **S3 event lake** via the shared `TrackingLogService` (that S3 stream, not Postgres, is what `analytics_job` reads). See `docs/architecture/TECHNICAL-DOCUMENTATION.md` §3 (Data Flow) and §5.1 (S3/MinIO event lake).
 
 ## 3. What's genuinely NEW (the whole scope)
 
@@ -252,7 +252,7 @@ Concrete, file-level task list mapped to the phases in §5. `[new]` = create, `[
 - `[reuse] models/crm.py` + `schemas/crm.py` — reuse the existing `ConnectorConfig` model and add the tenant Zalo connector read/write schemas.
 - `[edit] config.py` — remove process-level Zalo settings; the API reads the tenant connector row.
 
-**backend-system** (`backend-system/notification_engine/`)
+**customer360-backend** (`customer360-backend/notification_engine/`)
 - `[new] notification_engine/token_refresh.py` — refresh-before-expiry op; persist rotated refresh_token (DB only, RLS-scoped).
 - `[edit] dagster_defs.py` — replace the placeholder with a real job + **the repo's first `ScheduleDefinition`** (interval token refresh).
 
@@ -268,7 +268,7 @@ Concrete, file-level task list mapped to the phases in §5. `[new]` = create, `[
 *Exit: approved ZNS templates visible in the CDP.*
 
 ### Phase 2 — Dispatch (fill notification_engine)
-- Clone the `email_engine` package shape into `backend-system/notification_engine/notification_engine/`:
+- Clone the `email_engine` package shape into `customer360-backend/notification_engine/notification_engine/`:
   - `[new] adapters.py` — `ZNSDispatchAdapter(DispatchAdapter)` + `MockZNSAdapter` + `build_adapter()`; returns `DispatchResult(ok, provider_message_id, error)`.
     - `[new] provider_config.py` — resolve OA token and dispatch settings from the tenant's `crm_connector_config` row (`CHAT/ZALO`; `credentials` and `config` JSONB).
   - `[new] rendering.py` — bind typed params against `crm_email_templates.variables` for the `zalo_zns` template (assert all required params satisfied before send).
@@ -284,7 +284,7 @@ Concrete, file-level task list mapped to the phases in §5. `[new]` = create, `[
 
 ### Phase 3 — Close the loop (webhook + feedback)
 - `[edit] customer360-event-api/core/routers/` — extract a shared `make_webhook_router(prefix, secret_attr, event_map, suppress_reasons, channel)` factory and refactor `email_tracking.py` onto it (email regression-tested); then `[new] zalo_tracking.py` = a few-line call with the `zalo-*` event-map. The webhook records **every** event (incl. opt-out, `suppression_reason` in the payload) to **S3 via `TrackingLogService`** (`tracking_channel="zalo"`, `data_source_id=_source_id(tenant_id)`) — **no DB write in the request path**. ⚠️ Confirm Zalo's signature scheme (HMAC vs `mac`/appsecret) before wiring `verify_webhook_signature` (§8).
-- `[new] backend-system/notification_engine/…` **opt-out projection op** — reads new `zalo-opt-out`/`zalo-failed` events from S3 and sets `cdp_master_profiles.communication_preferences->>'zalo_opt_in'=false` (the *only* place consent is written; rebuildable by replay; mirrors how email suppression is materialized from S3). Schedule it or fold into `analytics_job`.
+- `[new] customer360-backend/notification_engine/…` **opt-out projection op** — reads new `zalo-opt-out`/`zalo-failed` events from S3 and sets `cdp_master_profiles.communication_preferences->>'zalo_opt_in'=false` (the *only* place consent is written; rebuildable by replay; mirrors how email suppression is materialized from S3). Schedule it or fold into `analytics_job`.
 - `[edit] customer360-event-api/core/app.py` — mount the router (twice, under `/api/v1` and `/data/api/v1`, like email).
 - `[edit] customer360-event-api/core/config.py` — keep webhook ingestion free of database access; signing is supplied by the deployment webhook-security provider.
 - `[reuse]` `TrackingLogService` / `storage.py` (S3 writer) / `redis_queue.py` / `analytics_job` — **no change**; Zalo events ride the exact same ingest→Redis-Stream→S3(NDJSON/Parquet)→analytics path as web + email tracking. This is the sink the user flagged: Zalo tracking persists to S3, not Postgres.
@@ -299,7 +299,7 @@ Concrete, file-level task list mapped to the phases in §5. `[new]` = create, `[
 
 ### Tests (per phase, reuse the harness)
 - `[new] customer360-event-api/tests/test_zalo_tracking.py` — clone `test_email_tracking.py` (signature accept/reject, suppression on opt-out, dedup).
-- `[new] backend-system/notification_engine/tests/` — token-refresh unit test, param-binding test (all required params satisfied), mock-adapter send + idempotent re-run.
+- `[new] customer360-backend/notification_engine/tests/` — token-refresh unit test, param-binding test (all required params satisfied), mock-adapter send + idempotent re-run.
 - `[edit] all-data-simulator` E2E — extend the email E2E: select segment → sync → AI draft → approve → activate (mock ZNS adapter) → simulate webhook → assert `cdp_campaign_dispatch_logs` + suppression + campaign metrics (dual API + Postgres verification).
 
 ### Will NOT touch (reuse verbatim)
@@ -344,7 +344,7 @@ async def zalo_redirect(request: Request, oa_id: str, code: str, state: str):
     return {"status": "connected", "oa_id": oa_id}
 ```
 
-### Phase 0 · token-refresh op + first schedule — `backend-system/notification_engine/…/token_refresh.py` + `dagster_defs.py`
+### Phase 0 · token-refresh op + first schedule — `customer360-backend/notification_engine/…/token_refresh.py` + `dagster_defs.py`
 
 ```python
 # token_refresh.py
@@ -395,7 +395,7 @@ async def sync_zns_templates(request: Request):
     return {"synced": upserted}
 ```
 
-### Phase 2 · ZNS dispatch adapter — `backend-system/notification_engine/…/adapters.py`
+### Phase 2 · ZNS dispatch adapter — `customer360-backend/notification_engine/…/adapters.py`
 
 ```python
 # Mirrors email_engine.adapters: DispatchAdapter base + DispatchResult(ok, provider_message_id, error).
@@ -563,12 +563,12 @@ The zero-new-table decisions (OA config, ZNS templates, opt-out) and the shared 
 
 | Area | MAX reuse | MIN reuse | Recommended |
 |---|---|---|---|
-| Dispatch engine (db/rls/send loop) | Extract channel-agnostic core to `backend-system/shared/`, inject adapter+renderer | Clone `email_engine` package, swap `adapters.py`+`rendering.py` | **MIN** — matches repo convention, no email regression |
+| Dispatch engine (db/rls/send loop) | Extract channel-agnostic core to `customer360-backend/shared/`, inject adapter+renderer | Clone `email_engine` package, swap `adapters.py`+`rendering.py` | **MIN** — matches repo convention, no email regression |
 
 ### Dispatch engine
 
 ```python
-# ── MAX reuse ── backend-system/shared/dispatch_core.py  (email + zalo both call this)
+# ── MAX reuse ── customer360-backend/shared/dispatch_core.py  (email + zalo both call this)
 def run_dispatch(conn, campaign, adapter, render, eligible_sql):
     set_tenant_context(conn, campaign.tenant_id)
     for pid, addr in query(conn, eligible_sql, campaign):
@@ -577,7 +577,7 @@ def run_dispatch(conn, campaign, adapter, render, eligible_sql):
 # zalo: run_dispatch(conn, c, ZNSDispatchAdapter(tok), render_zns, ZALO_ELIGIBLE_SQL)
 # email refactored to call the same core.  ← touches working email code.
 
-# ── MIN reuse ── backend-system/notification_engine/.../send.py  (email untouched)
+# ── MIN reuse ── customer360-backend/notification_engine/.../send.py  (email untouched)
 def run_send(conn, campaign, cfg):                         # cloned from email_engine.send
     adapter = build_adapter(cfg); set_tenant_context(conn, campaign.tenant_id)
     for pid, phone in eligible_recipients(conn, campaign):

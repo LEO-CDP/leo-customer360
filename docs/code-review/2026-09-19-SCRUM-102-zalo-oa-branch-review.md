@@ -95,7 +95,7 @@ All active findings fixed on branch `feat/SCRUM-102-...`; **#1 suppressed** (tea
 ### 3. ✅ Unconnected tenant → whole segment falsely `Sent`
 
 > ✅ **FIXED** — commit `fcdd8e3`
-**`backend-system/notification_engine/notification_engine/adapters.py:80`** (`build_zns_adapter`), **`send.py:226-228`**.
+**`customer360-backend/notification_engine/notification_engine/adapters.py:80`** (`build_zns_adapter`), **`send.py:226-228`**.
 
 `build_zns_adapter` returns `MockZNSAdapter` whenever `access_token` is falsy — even with the connector's dispatch adapter set to `zns` — and `send_zalo_campaign` has no "OA connected" precondition.
 
@@ -106,7 +106,7 @@ All active findings fixed on branch `feat/SCRUM-102-...`; **#1 suppressed** (tea
 ### 4. ✅ Double-send on a paid channel
 
 > ✅ **FIXED** — commit `fcdd8e3`
-**`backend-system/notification_engine/notification_engine/send.py:~300` (`_process_batch`).**
+**`customer360-backend/notification_engine/notification_engine/send.py:~300` (`_process_batch`).**
 
 `adapter.send()` (external, non-transactional) runs *before* `_upsert_dispatch`, both inside `SAVEPOINT recipient`.
 
@@ -158,7 +158,7 @@ Restoring `003` on its own does **not** work here because of the ordering; the r
 ### 6. ◦ Token refresh strands the rotated refresh_token
 
 > ✅ **FIXED** — commit `fcdd8e3`
-**`backend-system/notification_engine/notification_engine/token_refresh.py:70`.**
+**`customer360-backend/notification_engine/notification_engine/token_refresh.py:70`.**
 
 On a successful refresh (Zalo has already rotated + invalidated the old refresh_token server-side), any exception before commit rolls back the DB write. `int(data.get('expires_in', 3600))` raises `TypeError` when Zalo returns `expires_in: null` (key present → `None`), or the UPDATE fails → `rollback()` discards `new` (with the rotated token). DB keeps the dead old refresh_token → every future refresh 400s → access_token expires → sends fall through to mock (compounds #3).
 
@@ -226,7 +226,7 @@ The "framework-neutral" DAO (per `database.py` docstring) imports `fastapi.HTTPE
 
 > ↩️ **REVIEWED — nothing removed.** All three were initially cut, then restored: each is an interface/convention member whose siblings are deliberately kept even though uncalled today. Deleting the odd one broke symmetry.
 - `customer360-event-api/core/routers/zalo_tracking.py` — `all_zalo_tracking_routers` export: initially removed as unused, then **restored**. The sibling `email_tracking.py` keeps `all_email_tracking_routers` (also unused by `app.py`, which imports `router` directly) — it's a per-module export convention, so removing only zalo's broke symmetry. **Kept.**
-- `backend-system/notification_engine/notification_engine/adapters.py` — `DispatchAdapter.provider_name = "base"`: initially removed as never-read, then **restored**. It declares the interface attribute every adapter carries (`send.py` reads `adapter.provider_name`); the base default documents the contract. **Kept.**
+- `customer360-backend/notification_engine/notification_engine/adapters.py` — `DispatchAdapter.provider_name = "base"`: initially removed as never-read, then **restored**. It declares the interface attribute every adapter carries (`send.py` reads `adapter.provider_name`); the base default documents the contract. **Kept.**
 - `customer360-api/core/utils/dagster_client.py` — `NotificationEngineDagsterService.dispatch()` was initially removed as "no caller", then **restored**. It is the API-side trigger contract for `notification_engine_job`, symmetric with `EmailEngineDagsterService.send_campaign()` (also uncalled from the API today but deliberately kept). The live activation path submits the same job from `campaign_activation/triggers.py`; the API-side method is the intended entry point if an endpoint wires it up. Not dead code — keeping it preserves the facade convention. **Kept.**
 
 ### 14. ◦ CI skips the new suites
@@ -234,9 +234,9 @@ The "framework-neutral" DAO (per `database.py` docstring) imports `fastapi.HTTPE
 > ✅ **FIXED** — commit `0d816e1`
 **`.github/workflows/ci.yml:104`.**
 
-The backend-system runner only executes `identity_resolution` + `segmentation` `run_tests.sh`, so the new `notification_engine` (`test_notification_engine.py`) and `campaign_activation` tests never run in CI → a regression in the entire new ZNS engine ships green.
+The customer360-backend runner only executes `identity_resolution` + `segmentation` `run_tests.sh`, so the new `notification_engine` (`test_notification_engine.py`) and `campaign_activation` tests never run in CI → a regression in the entire new ZNS engine ships green.
 
-**Fix:** add `notification_engine` / `campaign_activation` `run_tests.sh` to the backend-system runner list.
+**Fix:** add `notification_engine` / `campaign_activation` `run_tests.sh` to the customer360-backend runner list.
 
 ---
 

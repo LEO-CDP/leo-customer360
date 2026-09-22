@@ -42,7 +42,7 @@ backends = {
   }
   # --- ops tools stay raw on their own ports (they don't sub-path cleanly; see proxy/README) ---
   "dagster" = {
-    member_ip   = "10.100.1.4" # c360-api-uat-backend (backend-system / Dagster)
+    member_ip   = "10.100.1.4" # c360-api-uat-backend (customer360-backend / Dagster)
     member_port = 3000
     listen_port = 3000
     health_path = null

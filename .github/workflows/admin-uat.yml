@@ -18,7 +18,7 @@ on:
           - seed-demo          # seed CIR/demo data (idempotent)
           - bootstrap-realm    # re-run idempotent Keycloak realm/roles/client bootstrap
           - restart-apps       # restart api + ads + frontend containers
-          - restart-backend    # restart backend-system (Dagster)
+          - restart-backend    # restart customer360-backend (Dagster)
           - redeploy-apps      # pull latest images + recreate api/ads/frontend/backend
           - flush-cache        # FLUSHDB the Redis cache (requires confirm below)
       confirm:

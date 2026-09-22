@@ -1,20 +1,20 @@
 """OOP wrapper around ``dagster_graphql.DagsterGraphQLClient`` for triggering
-``backend-system``'s Dagster jobs asynchronously from the API process.
+``customer360-backend``'s Dagster jobs asynchronously from the API process.
 
-Why this exists: several backend-system pipelines (segment membership
+Why this exists: several customer360-backend pipelines (segment membership
 recompute, identity resolution, scoring, ...) do full-table scans against
 ``cdp_master_profiles``, which can hold 1M+ rows in production. Running that
 kind of work synchronously inside an HTTP request handler would block an API
 worker for as long as the scan takes and risks request-timeout failures
 under load. Instead, this module submits a run of the target service's
-already-existing Dagster job (``backend-system/<service>/dagster_defs.py``)
+already-existing Dagster job (``customer360-backend/<service>/dagster_defs.py``)
 to the Dagster webserver's GraphQL API and returns immediately with a
 ``run_id`` -- the actual work executes out-of-process in a Dagster run
 worker, tracked/retried by Dagster itself, and progress can be polled via
 ``get_status()``.
 
-customer360-api and backend-system/* are separate deployables (see
-backend-system/README.md's "Independent code locations" section) -- this
+customer360-api and customer360-backend/* are separate deployables (see
+customer360-backend/README.md's "Independent code locations" section) -- this
 module only talks to the Dagster webserver over HTTP/GraphQL, it never
 imports any service's business-logic package directly.
 
@@ -24,8 +24,8 @@ Layout:
     than a raw 500.
   - ``DagsterService`` -- base class wrapping ONE Dagster code location's
     default job: knows how to ``submit()`` a run and ``get_status()`` a
-    previously submitted run_id. Subclassed once per backend-system service.
-  - One subclass per backend-system code location, each adding
+    previously submitted run_id. Subclassed once per customer360-backend service.
+  - One subclass per customer360-backend code location, each adding
     domain-specific convenience methods on top of ``submit()``:
     ``AnalyticsDagsterService``, ``IdentityResolutionDagsterService``,
     ``ScoringDagsterService``, ``SegmentationDagsterService``,
@@ -239,7 +239,7 @@ class DagsterService:
 
 
 class AnalyticsDagsterService(DagsterService):
-    """backend-system/analytics -- data-source tracking-log aggregation."""
+    """customer360-backend/analytics -- data-source tracking-log aggregation."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -258,7 +258,7 @@ class AnalyticsDagsterService(DagsterService):
 
 
 class IdentityResolutionDagsterService(DagsterService):
-    """backend-system/identity_resolution -- Customer Identity Resolution
+    """customer360-backend/identity_resolution -- Customer Identity Resolution
     (CIR) batch cycle."""
 
     def __init__(self) -> None:
@@ -311,8 +311,8 @@ class IdentityResolutionDagsterService(DagsterService):
 
 
 class ScoringDagsterService(DagsterService):
-    """backend-system/scoring -- profile scoring run (placeholder job today,
-    see backend-system/scoring/dagster_defs.py)."""
+    """customer360-backend/scoring -- profile scoring run (placeholder job today,
+    see customer360-backend/scoring/dagster_defs.py)."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -328,7 +328,7 @@ class ScoringDagsterService(DagsterService):
 
 
 class SegmentationDagsterService(DagsterService):
-    """backend-system/segmentation -- segment membership recompute.
+    """customer360-backend/segmentation -- segment membership recompute.
 
     ``refresh``/``create``/``update`` all submit the SAME underlying
     ``segmentation_job`` -- there is no separate Dagster op per action,
@@ -343,7 +343,7 @@ class SegmentationDagsterService(DagsterService):
     ``refresh`` can optionally pass ``segment_id``; ``create`` and ``update``
     always pass it so only the changed segment is recomputed. All values are sent via
     ``RecomputeSegmentsConfig`` (see
-    ``backend-system/segmentation/dagster_defs.py``) -- this can never
+    ``customer360-backend/segmentation/dagster_defs.py``) -- this can never
     accidentally trigger a cross-tenant/global recompute from an on-demand
     API call. ``tenant_id`` must be the caller's own tenant
     (``request.state.tenant_id``), enforced by the router, not this class.
@@ -397,8 +397,8 @@ class SegmentationDagsterService(DagsterService):
 
 
 class DataSynchDagsterService(DagsterService):
-    """backend-system/data_synch -- external data synchronization
-    (placeholder job today, see backend-system/data_synch/dagster_defs.py)."""
+    """customer360-backend/data_synch -- external data synchronization
+    (placeholder job today, see customer360-backend/data_synch/dagster_defs.py)."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -413,9 +413,9 @@ class DataSynchDagsterService(DagsterService):
 
 
 class EmailEngineDagsterService(DagsterService):
-    """backend-system/email_engine -- outbound email campaign/journey
+    """customer360-backend/email_engine -- outbound email campaign/journey
     execution (placeholder job today, see
-    backend-system/email_engine/dagster_defs.py)."""
+    customer360-backend/email_engine/dagster_defs.py)."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -430,10 +430,10 @@ class EmailEngineDagsterService(DagsterService):
 
 
 class CampaignActivationDagsterService(DagsterService):
-    """backend-system/campaign_activation -- real campaign orchestration
+    """customer360-backend/campaign_activation -- real campaign orchestration
    : validates an Approved campaign, snapshots its segment, marks
     it Running, then submits the email_engine run that dispatches it (see
-    backend-system/campaign_activation/dagster_defs.py)."""
+    customer360-backend/campaign_activation/dagster_defs.py)."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -451,8 +451,8 @@ class CampaignActivationDagsterService(DagsterService):
 
 
 class NotificationEngineDagsterService(DagsterService):
-    """backend-system/notification_engine -- outbound Zalo ZNS dispatch
-    (send_zalo_campaign_op), see backend-system/notification_engine/dagster_defs.py."""
+    """customer360-backend/notification_engine -- outbound Zalo ZNS dispatch
+    (send_zalo_campaign_op), see customer360-backend/notification_engine/dagster_defs.py."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -472,7 +472,7 @@ class NotificationEngineDagsterService(DagsterService):
 
 
 class DagsterClient:
-    """Facade grouping one ``DagsterService`` per backend-system code
+    """Facade grouping one ``DagsterService`` per customer360-backend code
     location. Use the module-level ``dagster_client`` singleton below
     rather than instantiating this directly.
 
