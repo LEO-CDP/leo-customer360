@@ -4,7 +4,7 @@ leo-customer360-dao
 leo-customer360-agent
 
 # Web framework and ASGI server
-fastapi>=0.111,<1
+fastapi>=0.141.1,<1
 uvicorn[standard]>=0.30,<1
 psutil
 

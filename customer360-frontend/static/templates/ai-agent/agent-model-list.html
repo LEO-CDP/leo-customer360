@@ -57,6 +57,29 @@
         <option value="FAILED">Failed</option>
       </select>
 
+      <!-- Operational State Filters -->
+      <select id="scoring-models-model-filter" aria-label="Filter by model configuration" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All models</option>
+        <option value="configured">Model configured</option>
+        <option value="missing">Model not configured</option>
+      </select>
+
+      <select id="scoring-models-prompt-filter" aria-label="Filter by prompt configuration" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All prompt states</option>
+        <option value="backed">Prompt-backed</option>
+        <option value="none">No prompt</option>
+      </select>
+
+      <select id="scoring-models-schedule-filter" aria-label="Filter by execution schedule" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All run modes</option>
+        <option value="scheduled">Scheduled</option>
+        <option value="on_demand">On demand</option>
+      </select>
+
+      <button id="btn-scoring-models-clear-filters" type="button" title="Clear AI agent filters" aria-label="Clear AI agent filters" class="inline-flex items-center justify-center h-8 w-8 border border-slate-200/80 bg-white rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors shadow-sm">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m14.836 2A7.5 7.5 0 005.582 9m0 0H9m11 11v-5h-.581m0 0a7.5 7.5 0 01-13.837-2M15 20h3" /></svg>
+      </button>
+
       <!-- Add AI Agent -->
       <button id="btn-scoring-model-add" class="inline-flex items-center gap-1.5 bg-violet-600 text-white rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-violet-700 transition-colors shadow-sm shadow-violet-100">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
@@ -101,8 +124,8 @@
   POST/PATCH /metadata/ai-agents (see scoring-model-view.js).
   =============================================================================
 -->
-<div id="scoring-model-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-100 max-h-[90vh] overflow-y-auto">
+<div id="ai-agent-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-6">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[calc(100vh-1.5rem)] sm:h-auto sm:max-h-[92vh] p-6 border border-slate-100 overflow-y-auto">
 
     <!-- Modal Header -->
     <div class="flex items-center gap-3 mb-5 pb-3 border-b border-slate-100">
@@ -116,7 +139,7 @@
     </div>
 
     <!-- Form Fields -->
-    <div class="space-y-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Agent Code *</label>
@@ -128,12 +151,12 @@
         </div>
       </div>
 
-      <div>
+      <div class="lg:col-span-2">
         <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Runtime Model</label>
         <input id="scoring-model-add-model-name" type="text" placeholder="e.g. gpt-5.6 or churn-model-v2" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
       </div>
 
-      <div>
+      <div class="lg:col-span-2">
         <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Description</label>
         <textarea id="scoring-model-add-description" rows="2" placeholder="What this model predicts/computes..." class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none resize-none"></textarea>
       </div>
@@ -161,18 +184,18 @@
         </div>
       </div>
 
-      <div>
+      <div class="lg:col-span-2">
         <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Schedule Definition (cron)</label>
         <input id="scoring-model-add-schedule" type="text" placeholder="e.g. 0 2 * * *" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
         <p id="scoring-model-add-schedule-explanation" class="hidden text-[11px] text-slate-500 mt-1.5" aria-live="polite"></p>
       </div>
 
-      <div>
+      <div class="lg:col-span-2">
         <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Input Features (comma-separated)</label>
         <input id="scoring-model-add-features" type="text" placeholder="last_activity_at, total_spend, support_tickets_count" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
       </div>
 
-      <div>
+      <div class="lg:col-span-2">
         <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Hyperparameters (JSON Object)</label>
         <textarea id="scoring-model-add-hyperparameters" rows="2" placeholder='{"max_depth": 6, "learning_rate": 0.1}' class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none resize-none"></textarea>
       </div>
@@ -188,7 +211,7 @@
         </div>
       </div>
 
-      <div>
+      <div class="lg:col-span-2">
         <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">System Instructions</label>
         <textarea id="scoring-model-add-instructions" rows="4" placeholder="Current prompt or system instruction body" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none resize-y"></textarea>
       </div>

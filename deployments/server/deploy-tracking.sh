@@ -109,7 +109,7 @@ fi
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/s3.sh"
 SERVICE="customer360-event-api"          # source dir + GHCR image name (ghcr.io/leo-cdp/leo-customer360/customer360-event-api)
-CONTAINER="customer360-tracking-api" # runtime container name (matches dev-docker-compose.yml)
+CONTAINER="customer360-event-api" # runtime container name (matches dev-docker-compose.yml)
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
 GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
 if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
@@ -151,7 +151,7 @@ tmp="$(mktemp)"; printf %s "$1" | base64 -d > "$tmp"; set -a; . "$tmp"; set +a; 
 S3_SECRET_KEY="$(printf %s "$S3_SECRET_B64" | base64 -d)"
 REDIS_PW="$(printf %s "${REDIS_PW_B64:-}" | base64 -d 2>/dev/null || true)"
 GHCR_TOKEN="$(printf %s "${GHCR_TOKEN_B64:-}" | base64 -d 2>/dev/null || true)"
-DEPLOY_MODE="${DEPLOY_MODE:-build}"; IMAGE="${IMAGE:-}"; GHCR_USER="${GHCR_USER:-token}"; CONTAINER="${CONTAINER:-customer360-tracking-api}"
+DEPLOY_MODE="${DEPLOY_MODE:-build}"; IMAGE="${IMAGE:-}"; GHCR_USER="${GHCR_USER:-token}"; CONTAINER="${CONTAINER:-customer360-event-api}"
 REPLICAS="${REPLICAS:-1}"; LB_IMAGE="${LB_IMAGE:-nginx:alpine}"; NETWORK="${NETWORK:-c360-tracking}"; LB_NAME="customer360-tracking-lb"
 RL_REQUESTS="${RL_REQUESTS:-}"; RL_WINDOW="${RL_WINDOW:-}"
 if ! command -v docker >/dev/null 2>&1; then

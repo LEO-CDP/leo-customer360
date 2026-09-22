@@ -169,14 +169,14 @@ services:
         echo "Bucket $$MINIO_BUCKET ready."
 
   # ---------------------------------------------------------------------------
-  # 5) CDP data tracking API - DEV uses the in-network customer360-minio.
+  # 5) CDP event data tracking API - DEV uses the in-network customer360-minio.
   # ---------------------------------------------------------------------------
   tracking-api:
     build:
       context: ./customer360-event-api
       dockerfile: Dockerfile
-    image: customer360-tracking-api:local
-    container_name: customer360-tracking-api
+    image: customer360-event-api:local
+    container_name: customer360-event-api
     restart: unless-stopped
     init: true
     <<: *default-hardening

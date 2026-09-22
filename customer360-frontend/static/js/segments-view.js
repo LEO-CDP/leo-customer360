@@ -308,11 +308,11 @@ window.C360 = window.C360 || {};
         label: "Segment", type: "identity", nameField: "segment_name", subField: "segment_tag", subStyle: "tag",
         avatarField: "domainIcon", avatarBgField: "domainIconBg", avatarTextClass: "text-base"
       },
-      { label: "Domain", field: "domainLabel", capitalize: true },
-      { label: "Processed By", type: "badge", field: "processedByLabel", classField: "processedByBadgeClass" },
-      { label: "Members", field: "memberCountLabel" },
-      { label: "Status", type: "badge", field: "activeLabel", classField: "activeBadgeClass" },
-      { label: "Created", field: "createdLabel", muted: true }
+      { label: "Business Domain", field: "domainLabel", capitalize: true },
+      { label: "Created By", type: "badge", field: "processedByLabel", classField: "processedByBadgeClass" },
+      { label: "Matched Profiles", field: "memberCountLabel" },
+      { label: "Lifecycle", type: "badge", field: "activeLabel", classField: "activeBadgeClass" },
+      { label: "Created On", field: "createdLabel", muted: true }
     ],
     rowVm: segmentRowVm,
     rowId: function (vm) { return vm.segment_id; },
@@ -328,7 +328,15 @@ window.C360 = window.C360 || {};
           (vm.segment_tag || "").toLowerCase().indexOf(needle) !== -1 ||
           (vm.description || "").toLowerCase().indexOf(needle) !== -1;
       },
-      domain: function (vm, value) { return vm.domain === value; }
+      domain: function (vm, value) { return vm.domain === value; },
+      status: function (vm, value) {
+        return value === "active" ? !!vm.is_active : !vm.is_active;
+      },
+      owner: function (vm, value) { return vm.processed_by === value; },
+      members: function (vm, value) {
+        var memberCount = Number(vm.member_count) || 0;
+        return value === "empty" ? memberCount === 0 : memberCount > 0;
+      }
     },
     fetch: function (params) {
       return api("/segments/", params).done(function (segments) {
@@ -540,6 +548,17 @@ window.C360 = window.C360 || {};
       });
   }
 
+  function clearListFilters() {
+    [
+      "#segments-search-input",
+      "#segments-domain-filter",
+      "#segments-status-filter",
+      "#segments-owner-filter",
+      "#segments-members-filter"
+    ].forEach(function (selector) { $(selector).val(""); });
+    listDtv.clearFilters();
+  }
+
   function refreshSegmentDetail() {
     var segmentId = currentSegmentId;
     if (!segmentId) return;
@@ -572,12 +591,16 @@ window.C360 = window.C360 || {};
     listDtv.bindLoadMore();
     listDtv.bindSearch("#segments-search-input", "q", 300);
     listDtv.bindSelect("#segments-domain-filter", "domain");
+    listDtv.bindSelect("#segments-status-filter", "status");
+    listDtv.bindSelect("#segments-owner-filter", "owner");
+    listDtv.bindSelect("#segments-members-filter", "members");
     // Matched-profiles rows share the ".profile-row" click delegation
     // already bound once by C360.profileListView.bindEvents() (both tables render
     // the same profile columns/rowVm) -- only "load more" needs re-binding
     // here since #segment-matched-* is fresh DOM on every loadDetail().
     $(document).on("click", "#btn-back-to-segments", function () { C360.router.navigate("/segments"); });
     $(document).on("click", "#btn-segments-refresh", function () { refreshAllSegments(); });
+    $(document).on("click", "#btn-segments-clear-filters", clearListFilters);
     $(document).on("click", "#btn-segment-detail-refresh", function () { refreshSegmentDetail(); });
     $(document).on("click", "#btn-copy-sql", function () {
       var sql = $("#segment-sql-content").text().trim();

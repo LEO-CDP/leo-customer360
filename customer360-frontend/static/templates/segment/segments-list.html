@@ -37,14 +37,36 @@
         <option value="">All domains</option>
       </select>
 
+      <select id="segments-status-filter" aria-label="Filter by segment status" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All statuses</option>
+        <option value="active">Active</option>
+        <option value="inactive">Inactive</option>
+      </select>
+
+      <select id="segments-owner-filter" aria-label="Filter by segment creation source" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All sources</option>
+        <option value="human">Created by user</option>
+        <option value="ai_agent">Created by AI agent</option>
+      </select>
+
+      <select id="segments-members-filter" aria-label="Filter by audience size" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="">All audience sizes</option>
+        <option value="empty">No members</option>
+        <option value="populated">Has members</option>
+      </select>
+
+      <button id="btn-segments-clear-filters" type="button" title="Clear segment filters" aria-label="Clear segment filters" class="inline-flex items-center justify-center h-8 w-8 border border-slate-200/80 bg-white rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors shadow-sm">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m14.836 2A7.5 7.5 0 005.582 9m0 0H9m11 11v-5h-.581m0 0a7.5 7.5 0 01-13.837-2M15 20h3" /></svg>
+      </button>
+
       <!-- Refresh segments with member data -->
-      <button id="btn-segments-refresh" class="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-slate-100 transition-colors shadow-sm">
+      <button id="btn-segments-refresh" title="Recompute all segment memberships" class="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-slate-100 transition-colors shadow-sm">
         <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
         <span>Refresh</span>
       </button>
 
       <!-- Create new segment -->
-      <button id="btn-segments-create" class="inline-flex items-center gap-1.5 bg-indigo-600 text-white rounded-xl px-4 py-2 text-xs font-semibold hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-100">
+      <button id="btn-segments-create" title="Create audience segment" class="inline-flex items-center gap-1.5 bg-indigo-600 text-white rounded-xl px-4 py-2 text-xs font-semibold hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-100">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
         <span>Create segment</span>
       </button>
@@ -67,7 +89,9 @@
 
   <!-- Empty State -->
   <div id="segments-list-empty" class="hidden p-12 text-center text-sm text-slate-400">
-    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">🗂️</div>
+    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
+      <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5v10.5H3.75V6.75zm3-3h10.5v3H6.75v-3zM8.25 12h7.5" /></svg>
+    </div>
     <div class="font-medium text-slate-600">No segments found</div>
     <p class="text-xs text-slate-400 mt-1">Get started by creating an audience segment, or adjust your search query.</p>
   </div>

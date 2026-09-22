@@ -73,7 +73,7 @@ REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
 MINIO_CONTAINER="customer360-minio"
 MINIO_INIT_CONTAINER="customer360-minio-init"
-TRACKING_CONTAINER="customer360-tracking-api"
+TRACKING_CONTAINER="customer360-event-api"
 
 # --- Parse args (order-independent) ---
 ACTION="up"

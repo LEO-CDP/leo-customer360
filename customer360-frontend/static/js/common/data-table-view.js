@@ -304,6 +304,12 @@ window.C360 = window.C360 || {};
       load(false);
     }
 
+    function clearFilters() {
+      state.filters = {};
+      if (o.pagination) state.page = 1;
+      load(false);
+    }
+
     // Search/select filter controls are static markup already present in the
     // DOM (unlike rows), so plain direct binding is enough -- no delegation.
     function bindSearch(selector, filterName, debounceMs) {
@@ -408,6 +414,7 @@ window.C360 = window.C360 || {};
       reload: reload,
       resetClientCache: resetClientCache,
       setFilter: setFilter,
+      clearFilters: clearFilters,
       bindSearch: bindSearch,
       bindSelect: bindSelect,
       bindLoadMore: bindLoadMore,

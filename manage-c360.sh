@@ -44,7 +44,7 @@ REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
 DAGSTER_CONTAINER="customer360-dagster"
 API_CONTAINER="customer360-api"
-TRACKING_CONTAINER="customer360-tracking-api"
+TRACKING_CONTAINER="customer360-event-api"
 ALL_CONTAINERS=("$POSTGRES_CONTAINER" "$REDIS_CONTAINER" "$KEYCLOAK_CONTAINER" "$DAGSTER_CONTAINER" "$API_CONTAINER" "$TRACKING_CONTAINER")
 
 # Required secrets that MUST be changed from the .env.example placeholder

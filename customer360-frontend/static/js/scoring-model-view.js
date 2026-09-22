@@ -70,13 +70,13 @@ window.C360 = window.C360 || {};
         label: "Agent", type: "identity", nameField: "display_name", subField: "agent_code", subStyle: "tag",
         avatarField: "typeIcon", avatarBg: "bg-violet-100", avatarColor: "text-violet-700", avatarTextClass: "text-base"
       },
-      { label: "Type", type: "badge", field: "typeLabel", classField: "typeBadgeClass" },
-      { label: "Runtime", field: "modelLabel" },
-      { label: "Status", type: "badge", field: "statusLabel", classField: "statusBadgeClass" },
-      { label: "Prompt", field: "promptVersionLabel" },
-      { label: "Schedule", field: "scheduleLabel", titleField: "scheduleTitle" },
-      { label: "Features", field: "featureCountLabel" },
-      { label: "Updated", field: "updatedLabel" }
+      { label: "Agent Type", type: "badge", field: "typeLabel", classField: "typeBadgeClass" },
+      { label: "Model", field: "modelLabel" },
+      { label: "Lifecycle", type: "badge", field: "statusLabel", classField: "statusBadgeClass" },
+      { label: "Prompt Version", field: "promptVersionLabel" },
+      { label: "Run Schedule", field: "scheduleLabel", titleField: "scheduleTitle" },
+      { label: "Input Features", field: "featureCountLabel" },
+      { label: "Last Updated", field: "updatedLabel" }
     ],
     rowVm: rowVm,
     rowId: function (vm) { return vm.agent_code; },
@@ -96,7 +96,16 @@ window.C360 = window.C360 || {};
           (vm.description || "").toLowerCase().indexOf(needle) !== -1;
       },
       type: function (vm, value) { return vm.model_type === value; },
-      status: function (vm, value) { return vm.status === value; }
+      status: function (vm, value) { return vm.status === value; },
+      model: function (vm, value) {
+        return value === "configured" ? !!vm.model_name : !vm.model_name;
+      },
+      prompt: function (vm, value) {
+        return value === "backed" ? !!vm.prompt_key : !vm.prompt_key;
+      },
+      schedule: function (vm, value) {
+        return value === "scheduled" ? !!vm.schedule_definition : !vm.schedule_definition;
+      }
     },
     onFetched: function (items) { aiAgentsByCode = {}; items.forEach(function (m) { aiAgentsByCode[m.agent_code] = m; }); },
     onError: function (xhr) { showApiError("loading AI agents", xhr); },
@@ -152,7 +161,7 @@ window.C360 = window.C360 || {};
     $("#scoring-model-add-prompt-engine").val("none");
     $("#scoring-model-add-instructions").val("");
     $("#scoring-model-add-required-vars").val("");
-    $("#scoring-model-form-modal").removeClass("hidden");
+    $("#ai-agent-form-modal").removeClass("hidden");
   }
 
   function openEditAiAgentModal(name) {
@@ -180,11 +189,11 @@ window.C360 = window.C360 || {};
     $("#scoring-model-add-prompt-engine").val(m.prompt_engine || "none");
     $("#scoring-model-add-instructions").val(m.system_instructions || "");
     $("#scoring-model-add-required-vars").val((m.required_variables || []).join(", "));
-    $("#scoring-model-form-modal").removeClass("hidden");
+    $("#ai-agent-form-modal").removeClass("hidden");
   }
 
   function closeAiAgentModal() {
-    $("#scoring-model-form-modal").addClass("hidden");
+    $("#ai-agent-form-modal").addClass("hidden");
   }
 
   function submitAiAgentForm() {
@@ -261,18 +270,34 @@ window.C360 = window.C360 || {};
       .fail(function (xhr) { showApiError("deleting AI agent", xhr); });
   }
 
+  function clearFilters() {
+    [
+      "#scoring-models-search-input",
+      "#scoring-models-type-filter",
+      "#scoring-models-status-filter",
+      "#scoring-models-model-filter",
+      "#scoring-models-prompt-filter",
+      "#scoring-models-schedule-filter"
+    ].forEach(function (selector) { $(selector).val(""); });
+    dtv.clearFilters();
+  }
+
   function bindEvents() {
     dtv.bindSearch("#scoring-models-search-input", "q", 300);
     dtv.bindSelect("#scoring-models-type-filter", "type");
     dtv.bindSelect("#scoring-models-status-filter", "status");
+    dtv.bindSelect("#scoring-models-model-filter", "model");
+    dtv.bindSelect("#scoring-models-prompt-filter", "prompt");
+    dtv.bindSelect("#scoring-models-schedule-filter", "schedule");
     dtv.bindRowEdit();
 
+    $(document).on("click", "#btn-scoring-models-clear-filters", clearFilters);
     $(document).on("click", "#btn-scoring-model-add", openAddAiAgentModal);
     $(document).on("click", "#btn-scoring-model-add-cancel", closeAiAgentModal);
     $(document).on("click", "#btn-scoring-model-add-save", submitAiAgentForm);
     $(document).on("click", "#btn-scoring-model-delete", deleteAiAgent);
     $(document).on("input", "#scoring-model-add-schedule", updateScheduleExplanation);
-    $(document).on("click", "#scoring-model-form-modal", function (e) {
+    $(document).on("click", "#ai-agent-form-modal", function (e) {
       if (e.target === this) closeAiAgentModal();
     });
   }

@@ -34,7 +34,7 @@ Deployed with `deployments/server/deploy-tracking.sh uat` (this session's multi-
 |---|---|
 | Env / box | UAT - server key `tracking` - `s-general-1x2` |
 | Box IPs | floating `49.213.71.192` (SSH) - private `10.100.1.8` (VPC) |
-| App replicas | **3** - `customer360-tracking-api-1/2/3` (`TRACKING_REPLICAS` default uat=3) |
+| App replicas | **3** - `customer360-event-api-1/2/3` (`TRACKING_REPLICAS` default uat=3) |
 | Image | `ghcr.io/leo-cdp/leo-customer360/customer360-event-api@sha256:bcebc2518b3e2fc6221cf54af91928b436f2c184779650cb4bea98963f475fdc` |
 | Runtime | uvicorn (1 process/replica) on `:8010`, FastAPI |
 | Private network | docker bridge `c360-tracking` - replicas `172.18.0.2/.3/.4`, LB `172.18.0.5` |
