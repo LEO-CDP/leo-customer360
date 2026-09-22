@@ -169,7 +169,8 @@ fi
 # Preserve the OLD instance's Dagster storage before removing its container and
 # image layers. The old container ran with an EPHEMERAL DAGSTER_HOME (no -v
 # mount), so its SQLite run/event/schedule history lives ONLY inside the
-# container layer.
+# container layer. Import later with
+# customer360-backend/scripts/migrate_dagster_sqlite_to_postgres.py.
 if sudo docker ps -a --format '{{.Names}}' | grep -qx customer360-backend; then
   ts="$(date -u +%Y%m%d-%H%M%S)"; bak="/opt/c360/dagster-home-backup-$ts.tar"
   echo "   backing up old DAGSTER_HOME -> $bak"
@@ -187,10 +188,9 @@ for n in customer360-backend customer360-backend-daemon customer360-backend-redi
 done
 # Reclaim disk before we write/pull anything. Each deploy pulls a new SHA-pinned image
 # and the old ones pile up until a small VM fills its disk ("No space left on device"
-# on the very first env-file write). This runs before any disk write (the heredoc streams
-# over stdin) so it recovers even from an already-full disk. The currently-running
-# customer360-backend still holds its image here, so `image prune -a` keeps it and drops only
-# the stale ones. Best-effort: never fail the deploy on cleanup.
+# on the very first env-file write). This runs before the env-file write (the heredoc
+# streams over stdin) so it recovers even from an already-full disk. Best-effort:
+# never fail the deploy on cleanup.
 if command -v docker >/dev/null 2>&1; then
   echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
   sudo docker container prune -f  >/dev/null 2>&1 || true
