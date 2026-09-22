@@ -75,7 +75,7 @@ title_of() { case "$1" in
   frontend)      echo "frontend-admin (admin UI)";;
   ads)           echo "ads-server (LEO Ad Server, schema leo_ads)";;
   agent)         echo "customer360-agent (AI Agent service, LiteLLM, :8009)";;
-  tracking)      echo "data-tracking-api (event ingestion -> S3, /data)";;
+  tracking)      echo "customer360-event-api (event ingestion -> S3, /data)";;
   docs-search)   echo "docs-vector-search (local-model RAG, pgvector on the vDB)";;
   monitoring)    echo "Portainer + Netdata (+ oauth2-proxy SSO gate)";;
   seed)          echo "CIR demo data seed (~1000 profiles, demo tenant)";;

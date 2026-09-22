@@ -43,7 +43,7 @@ jobs:
           set +e
           runners="ads-server/run_unit_tests.sh \
                    customer360-api/run_unit_tests.sh \
-                   data-tracking-api/run_unit_tests.sh \
+                   customer360-event-api/run_unit_tests.sh \
                    backend-system/identity_resolution/run_tests.sh \
                    backend-system/segmentation/run_tests.sh \
                    tools/docs-vector-search/run_unit_tests.sh"

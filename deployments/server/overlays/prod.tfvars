@@ -46,13 +46,13 @@ servers = {
     root_disk_size = 50
     name           = "agent" # -> c360-api-prod-agent
   }
-  # Uncomment to give data-tracking-api its own prod box (see deployments/server/deploy-tracking.sh).
+  # Uncomment to give customer360-event-api its own prod box (see deployments/server/deploy-tracking.sh).
   # PROD is the gen-2 (s2-general) family, whose smallest tier is 2x4 (no 1x2) — bump if beacon
   # traffic needs it. After apply: set proxy/overlays/prod.tfvars data_upstream to this box's
   # private ip, open 8010/6580/4318 on the secgroup, and add "tracking" to monitoring's
   # portainer_agent_server_keys.
   # "tracking" = {
-  #   flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB — data-tracking-api (smallest gen-2 tier)
+  #   flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB — customer360-event-api (smallest gen-2 tier)
   #   root_disk_size = 50
   #   name           = "tracking" # -> c360-api-prod-tracking
   # }

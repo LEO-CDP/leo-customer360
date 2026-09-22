@@ -55,7 +55,7 @@ belongs.
 flowchart LR
     subgraph Ingest
       RAW[cdp_raw_profiles_stage]
-      TRK[data-tracking-api -> S3/MinIO]
+      TRK[customer360-event-api -> S3/MinIO]
     end
     subgraph Core["Core identity + understanding (implemented)"]
       IDR[identity_resolution]

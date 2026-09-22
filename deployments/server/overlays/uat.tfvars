@@ -25,7 +25,7 @@ servers = {
     root_disk_size = 20
   }
   "tracking" = {
-    # data-tracking-api (FastAPI event ingestion on :8010 -> S3/vStorage NDJSON, Redis session
+    # customer360-event-api (FastAPI event ingestion on :8010 -> S3/vStorage NDJSON, Redis session
     # cache + rate limit). Its OWN dedicated box (not co-located on the shared api box) so a
     # beacon-traffic spike can't starve api/keycloak/redis. Deployed by ../server/deploy-tracking.sh.
     flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB
@@ -103,12 +103,12 @@ ssh_ingress_cidr = "0.0.0.0/0" # <-- change to "<your-public-ip>/32"
 # are fail-open when degraded. VERIFY IPs with `terraform output servers`; apply out-of-band
 # with `./deploy.sh uat apply` (CD never runs infra Terraform).
 #   * 9001 -> Portainer agent on the tracking box, reached by the Portainer box (api 10.100.1.5).
-#   * 8010 -> data-tracking-api on the tracking box, reached by Caddy on the api box (10.100.1.5) for /data.
+#   * 8010 -> customer360-event-api on the tracking box, reached by Caddy on the api box (10.100.1.5) for /data.
 #   * 6580 -> the api-box Redis (10.100.1.5), reached by the tracking box (10.100.1.8) for its cache.
 #   * 4318 -> the api-box Jaeger OTLP/HTTP (10.100.1.5), reached by the tracking box for request traces.
 extra_ingress = [
   { port = 9001, cidr = "10.100.1.5/32" }, # Portainer agent   <- api box (Portainer)
-  { port = 8010, cidr = "10.100.1.5/32" }, # data-tracking-api <- api box (Caddy /data)
+  { port = 8010, cidr = "10.100.1.5/32" }, # customer360-event-api <- api box (Caddy /data)
   { port = 8001, cidr = "10.100.1.5/32" }, # docs-vector-search <- api box (frontend-admin /ai proxy). Only the docs box listens on 8001.
   { port = 6580, cidr = "10.100.1.8/32" }, # api-box Redis      <- tracking box (rate-limit + session cache)
   { port = 4318, cidr = "10.100.1.8/32" }, # api-box Jaeger OTLP <- tracking box (request traces)

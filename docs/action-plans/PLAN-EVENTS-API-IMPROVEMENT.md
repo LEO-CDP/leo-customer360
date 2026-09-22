@@ -1,7 +1,7 @@
 # Event Ingestion Migration Note
 
 The legacy `customer360-api` `/events` and `/events/bulk` write API has been
-removed. New behavioral-event writers must use `data-tracking-api`:
+removed. New behavioral-event writers must use `customer360-event-api`:
 
 - `POST /api/v1/tracking/logs` for public SDK/webhook ingestion.
 - The authenticated internal compatibility endpoint only when a trusted

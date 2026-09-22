@@ -1,4 +1,4 @@
-"""Generate fresh synthetic traffic and submit it only to data-tracking-api.
+"""Generate fresh synthetic traffic and submit it only to customer360-event-api.
 
 This command deliberately has no database, S3, MinIO, Docker, or analytics
 integration. The tracking API owns validation, durable storage, and any later

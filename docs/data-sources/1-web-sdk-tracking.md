@@ -13,7 +13,7 @@ sequenceDiagram
     participant Iframe as /cdp-sdk/html/cdp-event-proxy.html
     participant Observer as leo.observer.js
     participant Log as LEO Log Domain
-    participant API as data-tracking-api
+    participant API as customer360-event-api
     participant Staging as S3/MinIO RAW event lake
 
     User->>Host: Load Page
@@ -54,7 +54,7 @@ The tracking code below represents the production-standard integration snippet f
     window.srcTouchpointUrl = encodeURIComponent(location.href);
 
     // Dynamic Loader for the Main Proxy CDP JS
-    var leoproxyJsPath = '/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js';
+    var leoproxyJsPath = '/customer360-event-api/static/c360-web-sdk/observer/leo.proxy.js';
     var src = location.protocol + '//' + window.leoObserverCdnJS + leoproxyJsPath;
     var jsNode = document.createElement('script');
     jsNode.async = true; 

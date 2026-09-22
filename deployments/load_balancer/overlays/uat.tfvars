@@ -69,7 +69,7 @@ backends = {
     health_path = "/misc/ping"
   }
 }
-# data-tracking-api is fronted by Caddy at https://beta.leocdp.com/data (no dedicated LB listener;
+# customer360-event-api is fronted by Caddy at https://beta.leocdp.com/data (no dedicated LB listener;
 # it rides the existing :443 caddy_https passthrough). Jaeger is likewise fronted by Caddy at
 # https://beta.leocdp.com/jaeger — no dedicated LB listener.
 

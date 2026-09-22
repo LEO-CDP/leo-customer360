@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# data-tracking-api -- Unit Test Runner
+# customer360-event-api -- Unit Test Runner
 #
 # Runs the pytest suite in tests/ (event-ingestion endpoints, S3 NDJSON sink,
 # rate-limit / session-cache fail-open behaviour). No real S3/Redis needed —

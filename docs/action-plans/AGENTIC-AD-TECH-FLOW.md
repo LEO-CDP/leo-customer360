@@ -300,7 +300,7 @@ Ad-tech execution path is production-like and orchestrated through real jobs.
 
 ### SUBTASK-06: Ad Tracking and Platform Webhook Normalization
 
-Component: `customer360-api/core/routers` + `data-tracking-api`  
+Component: `customer360-api/core/routers` + `customer360-event-api`
 Priority: P0 Blocker  
 Depends on: SUBTASK-05  
 Blocks: SUBTASK-07, SUBTASK-08  

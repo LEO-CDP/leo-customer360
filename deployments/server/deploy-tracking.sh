@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy data-tracking-api (FastAPI event ingestion) onto its OWN "tracking" server VM,
+# Deploy customer360-event-api (FastAPI event ingestion) onto its OWN "tracking" server VM,
 # as N auto-load-balanced replicas behind a local nginx round-robin LB.
 #   ./deploy-tracking.sh <uat|prod>
 #
@@ -20,13 +20,13 @@
 #   TRACKING_REPLICAS (how many app instances behind the local LB; default uat=3, prod=5)
 #   TRACKING_LB_IMAGE (nginx image for the LB; default nginx:alpine)
 #   TRACKING_NETWORK  (private docker bridge name; default c360-tracking)
-#   BUILD_LOCAL (default 0 — data-tracking-api is now built + published to GHCR by CI, so it
+#   BUILD_LOCAL (default 0 — customer360-event-api is now built + published to GHCR by CI, so it
 #               pulls the image; set BUILD_LOCAL=1 to build on the VM from source instead)
 #   S3_AUTO_CREATE_BUCKETS (default true — per-source and master-profile buckets)
 #   MASTER_PROFILE_S3_BUCKET (default c360-master-profiles)
 set -euo pipefail
 cd "$(dirname "$0")"                 # deployments/server
-REPO_ROOT="$(cd ../.. && pwd)"       # repo root (contains data-tracking-api/)
+REPO_ROOT="$(cd ../.. && pwd)"       # repo root (contains customer360-event-api/)
 
 ENV="${1:-}"
 case "$ENV" in
@@ -104,19 +104,19 @@ else
   echo ">> Redis: NOT CONFIGURED — Redis Streams enqueue will be unavailable; ingestion will return 503."
 fi
 
-# --- CD image source: pull the CI-built image from GHCR by default (data-tracking-api is now
+# --- CD image source: pull the CI-built image from GHCR by default (customer360-event-api is now
 #     published by CI, like the other services); set BUILD_LOCAL=1 to build on the VM instead. ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/s3.sh"
-SERVICE="data-tracking-api"          # source dir + GHCR image name (ghcr.io/leo-cdp/leo-customer360/data-tracking-api)
+SERVICE="customer360-event-api"          # source dir + GHCR image name (ghcr.io/leo-cdp/leo-customer360/customer360-event-api)
 CONTAINER="customer360-tracking-api" # runtime container name (matches dev-docker-compose.yml)
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
 GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
 if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
   DEPLOY_MODE="build"; IMAGE=""
   echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
-  echo ">> Shipping data-tracking-api/ ..."
-  tar -C "$REPO_ROOT" -czf - data-tracking-api \
+  echo ">> Shipping customer360-event-api/ ..."
+  tar -C "$REPO_ROOT" -czf - customer360-event-api \
     | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
 else
   DEPLOY_MODE="ghcr"
@@ -209,9 +209,9 @@ if [ "$DEPLOY_MODE" = "ghcr" ]; then
 else
   echo "   building image (a few minutes on a small box)..."
   # docker.io ships no buildx, so strip the BuildKit-only `RUN --mount` (a pip-cache opt).
-  sed -i 's/ --mount=[^ ]*//g' /opt/c360/data-tracking-api/Dockerfile
-  sudo docker build -t data-tracking-api /opt/c360/data-tracking-api
-  RUN_IMG="data-tracking-api"
+  sed -i 's/ --mount=[^ ]*//g' /opt/c360/customer360-event-api/Dockerfile
+  sudo docker build -t customer360-event-api /opt/c360/customer360-event-api
+  RUN_IMG="customer360-event-api"
 fi
 ensure_s3_bucket "$RUN_IMG" /opt/c360/tracking.env "$MASTER_PROFILE_S3_BUCKET" "$S3_AUTO_CREATE"
 echo "   pulling LB image $LB_IMAGE ..."
@@ -280,7 +280,7 @@ sudo docker ps --filter "name=${LB_NAME}" --format '   {{.Names}} ({{.Status}}) 
 REMOTE
 )
 
-echo ">> Done. $REPLICAS data-tracking-api replica(s) behind the local nginx LB on :8010 (health: /health)."
+echo ">> Done. $REPLICAS customer360-event-api replica(s) behind the local nginx LB on :8010 (health: /health)."
 echo "   Public (Caddy /data + LB): https://beta.leocdp.com/data/api/v1/tracking/logs"
 echo "   Direct (admin tunnel): ssh -i $SSH_KEY -L 8010:localhost:8010 $BASTION  # http://localhost:8010/health (via LB), /lb-health"
 

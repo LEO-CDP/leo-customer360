@@ -275,7 +275,7 @@
       <section class="layout">
         <form id="request-form" class="panel">
           <h2>Request Builder</h2>
-          <p class="panel-note">Send schema-valid event batches accepted by <code>data-tracking-api</code>.</p>
+          <p class="panel-note">Send schema-valid event batches accepted by <code>customer360-event-api</code>.</p>
 
           <label>
             Endpoint URL
@@ -856,8 +856,8 @@
         var loadUrls = [
           "/static/c360-web-sdk/observer/leo.proxy.js?cb=" + Date.now(),
           "/cdp-sdk/observer/leo.proxy.js?cb=" + Date.now(),
-          "../../data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js?cb=" + Date.now(),
-          "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js"
+          "../../customer360-event-api/static/c360-web-sdk/observer/leo.proxy.js?cb=" + Date.now(),
+          "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main/customer360-event-api/static/c360-web-sdk/observer/leo.proxy.js"
         ];
 
         function tryLoadProxy(urls) {

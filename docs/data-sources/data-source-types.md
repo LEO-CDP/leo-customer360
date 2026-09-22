@@ -16,7 +16,7 @@ flowchart TD
 
     subgraph IngestionTier["2. Ingestion & Storage Tier"]
         LOG["Log Ingest Domain & Tracker Proxy"]
-        API["data-tracking-api /tracking/logs"]
+        API["customer360-event-api /tracking/logs"]
         S3["S3 / MinIO Event Storage Partition"]
     end
 

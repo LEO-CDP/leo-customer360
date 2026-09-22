@@ -480,14 +480,14 @@ def test_rate_limiter_rejects_invalid_whitelist_entry():
 
 def test_rate_limit_key_contains_ip_data_source_and_origin():
     key = build_rate_limit_key(
-        "data-tracking-api",
+        "customer360-event-api",
         "172.22.0.1",
         SOURCE_ID,
         "https://c360.example.com",
     )
 
     assert key == (
-        "data-tracking-api:rate:ip:172.22.0.1"
+        "customer360-event-api:rate:ip:172.22.0.1"
         f":data-source:{SOURCE_ID}:origin:https://c360.example.com"
     )
 
@@ -507,7 +507,7 @@ def test_rate_limiter_passes_scoped_key_to_redis():
     protection.allow_request(request, SOURCE_ID)
 
     assert client.eval_calls[0][2] == (
-        "data-tracking-api:rate:ip:172.22.0.1"
+        "customer360-event-api:rate:ip:172.22.0.1"
         f":data-source:{SOURCE_ID}:origin:https://c360.example.com"
     )
 

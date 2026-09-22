@@ -34,7 +34,7 @@
 #                                    print DB status counts.
 #   ./dev-c360.sh no-seed           Same, but skip the CIR demo data seed step.
 #   ./dev-c360.sh seed-new-data     Generate fresh synthetic traffic locally and
-#                                    POST it only to the running data-tracking-api;
+#                                    POST it only to the running customer360-event-api;
 #                                    never starts Docker or touches DB/S3 directly.
 #   ./dev-c360.sh upgrade           Local DEV upgrade: refresh images/containers
 #                                    with current repo code and restart core
@@ -128,7 +128,7 @@ if [ "$ACTION" = "seed-new-data" ]; then
   "$SIMULATOR_PYTHON" -m pip install -q -r "$SIMULATOR_DIR/requirements-api-seed.txt"
   seed_tracking_url="${SEED_TRACKING_API_URL:-http://127.0.0.1:${C360_TRACKING_API_PORT:-8010}/api/v1/tracking/logs}"
   seed_data_source_id="${SEED_TRACKING_DATA_SOURCE_ID:-${TRACKING_DATA_SOURCE_ID:-15dc39d4-ae42-5c60-9c77-66f05dcae448}}"
-  echo "🌐 Sending simulated traffic through data-tracking-api only..."
+  echo "🌐 Sending simulated traffic through customer360-event-api only..."
   echo "   Endpoint: $seed_tracking_url"
   echo "   Data source: $seed_data_source_id"
   (cd "$SIMULATOR_DIR" && "$SIMULATOR_PYTHON" seed_api_data.py \

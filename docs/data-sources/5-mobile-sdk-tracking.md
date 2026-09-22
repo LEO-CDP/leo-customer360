@@ -11,7 +11,7 @@ sequenceDiagram
     participant App as Mobile App Runtime (iOS / Android / Flutter)
     participant SDK as LeoCDP Mobile SDK
     participant Storage as SQLite Offline Queue
-    participant API as data-tracking-api /tracking/logs
+    participant API as customer360-event-api /tracking/logs
     participant Queue as Redis Streams
     participant ObjectStore as S3 / MinIO NDJSON
     participant CIR as CIR Engine (Device Matching)

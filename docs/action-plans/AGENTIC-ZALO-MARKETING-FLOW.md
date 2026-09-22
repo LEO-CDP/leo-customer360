@@ -291,7 +291,7 @@ Zalo OA execution path is production-like and orchestrated via real jobs.
 
 ### SUBTASK-06: Zalo Webhooks, Compliance, and Suppression Feedback
 
-Component: `customer360-api/core/routers` + `data-tracking-api`  
+Component: `customer360-api/core/routers` + `customer360-event-api`
 Priority: P0 Blocker  
 Depends on: SUBTASK-05  
 Blocks: SUBTASK-07, SUBTASK-08  

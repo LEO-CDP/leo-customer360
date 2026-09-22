@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-IMAGE_NAME="data-tracking-api"
-CONTAINER_NAME="data-tracking-api"
+IMAGE_NAME="customer360-event-api"
+CONTAINER_NAME="customer360-event-api"
 
 echo "Stopping and removing existing container (if any)..."
 docker stop "$CONTAINER_NAME" 2>/dev/null || true

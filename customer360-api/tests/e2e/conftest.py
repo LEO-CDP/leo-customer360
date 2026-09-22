@@ -215,7 +215,7 @@ def email_client():
 
 @pytest.fixture(scope="session")
 def email_p():
-    """Prefix a public email-tracking route on data-tracking-api."""
+    """Prefix a public email-tracking route on customer360-event-api."""
     return lambda path: f"{TRACKING_API_PREFIX}{path}"
 
 
@@ -340,7 +340,7 @@ def campaign_create_starts_in_draft_feature(client, p, tenant_id):
 
 @pytest.fixture(scope="session")
 def email_feature(email_client, email_p):
-    """Skip email-tracking tests when data-tracking-api is not deployed."""
+    """Skip email-tracking tests when customer360-event-api is not deployed."""
     r = email_client.get(email_p("/track/email/open"))
     if r.status_code != 200:
         pytest.skip("email tracking endpoints not deployed on E2E_TRACKING_BASE_URL")

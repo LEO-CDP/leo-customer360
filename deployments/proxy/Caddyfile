@@ -49,7 +49,7 @@
 		reverse_proxy {$AGENT_UPSTREAM}
 	}
 
-	# The web SDK iframe must reach data-tracking-api, not the frontend catch-all.
+	# The web SDK iframe must reach customer360-event-api, not the frontend catch-all.
 	# SAMEORIGIN cannot allow an iframe embedded by a different origin.
 	@cdp_sdk path /cdp-sdk/*
 	handle @cdp_sdk {
@@ -60,7 +60,7 @@
 		reverse_proxy {$DATA_UPSTREAM}
 	}
 
-	# --- data-tracking-api under /data. STRIPPED (handle_path): the tracking service has NO
+	# --- customer360-event-api under /data. STRIPPED (handle_path): the tracking service has NO
 	#     root_path of its own and its hot path is a single POST (no self-referential absolute
 	#     redirects), so stripping /data is safe and needs zero app change — a beacon posts to
 	#     https://{$CADDY_DOMAIN}/data/api/v1/tracking/logs -> the app sees /api/v1/tracking/logs.

@@ -64,7 +64,7 @@ environment:
 bash customer360-dao/install-local.sh
 ```
 
-This covers `customer360-api`, `data-tracking-api`, `ads-server`, the shared
+This covers `customer360-api`, `customer360-event-api`, `ads-server`, the shared
 `backend-system` environment, and each backend Dagster code location. Missing
 `.venv` directories are created. The script installs the DAO with
 `--no-deps --editable`, so it never tries to download the unpublished package

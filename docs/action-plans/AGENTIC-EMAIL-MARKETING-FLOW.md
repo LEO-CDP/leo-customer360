@@ -294,7 +294,7 @@ Email campaign execution path is production-like and orchestrated through real D
 
 ### SUBTASK-06: Tracking, Webhooks, and Compliance Feedback
 
-Component: `customer360-api/core/routers` + `data-tracking-api`  
+Component: `customer360-api/core/routers` + `customer360-event-api`
 Priority: P0 Blocker  
 Depends on: SUBTASK-05  
 Blocks: SUBTASK-07, SUBTASK-08  

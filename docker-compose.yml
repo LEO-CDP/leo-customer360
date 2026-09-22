@@ -432,7 +432,7 @@ services:
   # ---------------------------------------------------------------------------
   tracking-api:
     build:
-      context: ./data-tracking-api
+      context: ./customer360-event-api
       dockerfile: Dockerfile
     image: customer360-tracking-api:local
     container_name: customer360-tracking-api

@@ -4,7 +4,7 @@
 
 `uat_tracking_traffic_simulator.py` generates production-shaped web tracking traffic for the Customer 360 UAT tracking API. It models anonymous visitors reading education content, searching for courses, optionally logging in, and sometimes purchasing an online course.
 
-The simulator sends one JSON batch per simulated browser session. It does not connect directly to PostgreSQL, Redis, or object storage. Persistence and downstream processing belong to `data-tracking-api`.
+The simulator sends one JSON batch per simulated browser session. It does not connect directly to PostgreSQL, Redis, or object storage. Persistence and downstream processing belong to `customer360-event-api`.
 
 ## End-to-End Flow
 
@@ -236,7 +236,7 @@ The process logs each accepted session and prints a final summary containing acc
 
 ## Tracking API Handoff
 
-`data-tracking-api` accepts the dynamic event dictionaries after validating the request envelope and identity fields. The API requires at least one supported identity at the batch or event level. This simulator supplies `session_id`, `anonymous_id`, and `device_fingerprint` on every event.
+`customer360-event-api` accepts the dynamic event dictionaries after validating the request envelope and identity fields. The API requires at least one supported identity at the batch or event level. This simulator supplies `session_id`, `anonymous_id`, and `device_fingerprint` on every event.
 
 The tracking service then:
 

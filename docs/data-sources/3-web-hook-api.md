@@ -8,7 +8,7 @@ Data Source Type 3 provides real-time, event-driven HTTP push ingestion. Externa
 sequenceDiagram
     autonumber
     participant Source as External Webhook Producer (e.g. Stripe, OneSignal, Shopify)
-    participant Gateway as data-tracking-api Ingestion Router
+    participant Gateway as customer360-event-api Ingestion Router
     participant Auth as Multi-Tenant & Signature Validator
     participant Lake as S3/MinIO RAW event lake
 

@@ -158,7 +158,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("REDIS_PASSWORD", "redis_password"),
     )
     tracking_redis_key_prefix: str = Field(
-        default="data-tracking-api",
+        default="customer360-event-api",
         validation_alias=AliasChoices("TRACKING_REDIS_KEY_PREFIX", "tracking_redis_key_prefix"),
     )
     tracking_session_ttl_seconds: int = Field(

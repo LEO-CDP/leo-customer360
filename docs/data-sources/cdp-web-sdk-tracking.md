@@ -2,7 +2,7 @@
 
 The LEO Web SDK collects browser events and profile updates for Customer Data
 Platform (CDP). The public integration is the proxy script in
-[leo.proxy.js](../../data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js). It
+[leo.proxy.js](../../customer360-event-api/static/c360-web-sdk/observer/leo.proxy.js). It
 creates a hidden cross-origin iframe, which loads the observer implementation
 and sends data to the configured LEO log domain.
 
@@ -26,7 +26,7 @@ flowchart LR
 
     subgraph Ingestion
         LOG["LEO log domain\n/etv /eta /etc /efb\n/cxs-pf-init /cxs-pf-update"]
-		API["data-tracking-api\nPOST /tracking/logs"]
+		API["customer360-event-api\nPOST /tracking/logs"]
     end
 
     subgraph Staging["Staging (customer360 schema)"]
@@ -72,7 +72,7 @@ flowchart LR
 | --- | --- | --- |
 | Collection | `leo.proxy.js` / `leo.observer.js` in the browser | Batched view/action/conversion/feedback events and profile updates, keyed by visitor ID, session ID, and fingerprint. |
 | Landing | LEO log domain (`/etv`, `/eta`, `/etc`, `/efb`, `/cxs-pf-init`, `/cxs-pf-update`) | Raw hits at the observer's origin. **The log domain is a separate ingestion tier from `customer360-api`** — connecting it to the tables below is an integration task (a small ETL/bridge service or a direct write from the log service), not something already wired in this repository. |
-| Event ingestion | `data-tracking-api` `POST /api/v1/tracking/logs` | Validates identity hints and writes the canonical immutable event envelope to Redis/S3. Use this endpoint, or a trusted bridge that submits the same contract, to connect SDK data to the CDP event lake. |
+| Event ingestion | `customer360-event-api` `POST /api/v1/tracking/logs` | Validates identity hints and writes the canonical immutable event envelope to Redis/S3. Use this endpoint, or a trusted bridge that submits the same contract, to connect SDK data to the CDP event lake. |
 | Identity resolution (CIR) | `backend-system/identity_resolution` (`resolver.py`, run via `daily_job.py` or the Dagster job) | Matches `cdp_raw_profiles_stage` rows onto a single `cdp_master_profiles` row per real person — the **unified user** — using the dynamic matching rules in `cdp_profile_attributes` (exact match on email/phone/device_id/advertising_id/cookie_id/external_customer_id, fuzzy match on name/address). |
 | Understanding | Persona Resolution Engine (`identity_resolution/persona_engine.py`) | Computes behavior/engagement/financial/loyalty/relationship/risk scores and a persona per unified user, stored on `cdp_customer_personas`. |
 | Activation ("unified campaign") | `cdp_segments` (Audience Builder), `crm_campaign`/`crm_campaign_member`, `backend-system/campaign_activation` | Segments query master profiles (and their personas/domain attributes) across every source system to build one audience; a campaign then targets that single, deduplicated audience instead of one list per channel. **Note:** `campaign_activation`'s Dagster job is currently a placeholder (log -> sleep -> log) - real per-channel activation (email/push/ads) still needs to be implemented against it, see [PLAN-CAMPAIGNS-DEV.md](../api-plans/PLAN-CAMPAIGNS-DEV.md). |

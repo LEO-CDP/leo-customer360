@@ -74,7 +74,7 @@ class FrontendSettings:
             observer_cdn_js=os.getenv(
                 "LEO_OBSERVER_CDN_JS",
                 "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main/"
-                "data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js",
+                "customer360-event-api/static/c360-web-sdk/observer/leo.proxy.js",
             ),
             root_path=root_path,
             docs_search_url=os.getenv(

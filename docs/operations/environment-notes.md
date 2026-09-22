@@ -120,7 +120,7 @@ independent and uses `ads-server/.env` from `ads-server/.env.example`.
 - `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`: Optional explicit credentials; omit them in AWS when using IAM roles.
 - `S3_FORCE_PATH_STYLE`: Required for MinIO. Default: `false`
 - `S3_AUTO_CREATE_BUCKETS`: Create `data-tracking-[data_source_id]` on first write. Default: `true`
-- `TRACKING_REDIS_KEY_PREFIX`: Prefix for tracking session and rate-limit keys. Default: `data-tracking-api`
+- `TRACKING_REDIS_KEY_PREFIX`: Prefix for tracking session and rate-limit keys. Default: `customer360-event-api`
 - `TRACKING_SESSION_TTL_SECONDS`: Session metadata TTL. Default: `86400`
 - `TRACKING_RATE_LIMIT_REQUESTS` / `TRACKING_RATE_LIMIT_WINDOW_SECONDS`: Per-IP request window. Defaults: `1000` / `360`
 - `TRACKING_RATE_LIMIT_FAIL_OPEN`: Allow ingestion when Redis rate limiting is unavailable. Default: `true`; use `false` for strict enforcement.

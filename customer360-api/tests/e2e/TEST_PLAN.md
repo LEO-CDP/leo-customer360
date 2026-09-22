@@ -173,7 +173,7 @@ psql "$DB" -f customer360-database/migrations/002_email_marketing_schema_foundat
 
 ## 8. SCRUM-97 — Dagster Execution Modernization (campaign activation + email dispatch)
 
-> **Deploy gate:** S97 targets campaign activation on customer360-api. S98 targets data-tracking-api through `E2E_TRACKING_BASE_URL`. Run: `CASES=S97 ./test.sh` or `CASES=S98 ./test.sh`.
+> **Deploy gate:** S97 targets campaign activation on customer360-api. S98 targets customer360-event-api through `E2E_TRACKING_BASE_URL`. Run: `CASES=S97 ./test.sh` or `CASES=S98 ./test.sh`.
 
 | ID | AC | Scenario | Type | Method | Expected | Cleanup |
 |----|----|----------|------|--------|----------|---------|
@@ -190,7 +190,7 @@ psql "$DB" -f customer360-database/migrations/002_email_marketing_schema_foundat
 
 ## 9. SCRUM-98 — Tracking, Webhooks & Compliance (public endpoints)
 
-> Tokens are minted for **synthetic random** (tenant, campaign, profile) ids using `E2E_EMAIL_TRACKING_SECRET` (must match data-tracking-api), so these exercise the contract + security fixes with **zero database footprint**. Run: `E2E_TRACKING_BASE_URL=https://<host>/data CASES=S98 ./test.sh`.
+> Tokens are minted for **synthetic random** (tenant, campaign, profile) ids using `E2E_EMAIL_TRACKING_SECRET` (must match customer360-event-api), so these exercise the contract + security fixes with **zero database footprint**. Run: `E2E_TRACKING_BASE_URL=https://<host>/data CASES=S98 ./test.sh`.
 
 | ID | AC | Scenario | Type | Method | Expected |
 |----|----|----------|------|--------|----------|

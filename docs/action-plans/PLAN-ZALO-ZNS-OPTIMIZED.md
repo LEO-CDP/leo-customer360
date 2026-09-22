@@ -50,7 +50,7 @@ flowchart TB
         ZALOAPI(("Zalo OA<br/>Open API"))
     end
 
-    subgraph DTA["data-tracking-api"]
+    subgraph DTA["customer360-event-api"]
         WH["zalo_tracking webhook<br/>+ TrackingLogService"]
     end
 
@@ -95,7 +95,7 @@ flowchart TB
     class ZALOAPI ext;
 ```
 
-**Read it by lane:** **customer360-api** authors (OA connect + template sync + segment sync + AI draft + approval gate). **backend-system/Dagster** runs the async jobs (token refresh, activation, the `notification_engine` ZNS dispatch, analytics). **data-tracking-api** owns the inbound webhook. **PostgreSQL** and the **S3 event lake** are the two datastores. Note the green nodes cluster into just the new work — most of every lane is grey reuse. **Two sinks, exactly like email:** send ledger + suppression live in Postgres; every engagement callback is written to the **S3 event lake** via the shared `TrackingLogService` (that S3 stream, not Postgres, is what `analytics_job` reads). See `docs/architecture/TECHNICAL-DOCUMENTATION.md` §3 (Data Flow) and §5.1 (S3/MinIO event lake).
+**Read it by lane:** **customer360-api** authors (OA connect + template sync + segment sync + AI draft + approval gate). **backend-system/Dagster** runs the async jobs (token refresh, activation, the `notification_engine` ZNS dispatch, analytics). **customer360-event-api** owns the inbound webhook. **PostgreSQL** and the **S3 event lake** are the two datastores. Note the green nodes cluster into just the new work — most of every lane is grey reuse. **Two sinks, exactly like email:** send ledger + suppression live in Postgres; every engagement callback is written to the **S3 event lake** via the shared `TrackingLogService` (that S3 stream, not Postgres, is what `analytics_job` reads). See `docs/architecture/TECHNICAL-DOCUMENTATION.md` §3 (Data Flow) and §5.1 (S3/MinIO event lake).
 
 ## 3. What's genuinely NEW (the whole scope)
 
@@ -153,7 +153,7 @@ erDiagram
 
 ### 3.4 Zalo webhook + suppression + S3 event lake
 
-Zalo engagement is a first-class **behavioral event source**, so it follows the same two-sink split the email channel already uses (`data-tracking-api/core/routers/email_tracking.py`; architecture in `TECHNICAL-DOCUMENTATION.md` §3/§5.1):
+Zalo engagement is a first-class **behavioral event source**, so it follows the same two-sink split the email channel already uses (`customer360-event-api/core/routers/email_tracking.py`; architecture in `TECHNICAL-DOCUMENTATION.md` §3/§5.1):
 
 ```mermaid
 flowchart LR
@@ -283,10 +283,10 @@ Concrete, file-level task list mapped to the phases in §5. `[new]` = create, `[
 *Exit: an approved `zalo_zns` campaign sends real ZNS to an eligible audience, idempotently.*
 
 ### Phase 3 — Close the loop (webhook + feedback)
-- `[edit] data-tracking-api/core/routers/` — extract a shared `make_webhook_router(prefix, secret_attr, event_map, suppress_reasons, channel)` factory and refactor `email_tracking.py` onto it (email regression-tested); then `[new] zalo_tracking.py` = a few-line call with the `zalo-*` event-map. The webhook records **every** event (incl. opt-out, `suppression_reason` in the payload) to **S3 via `TrackingLogService`** (`tracking_channel="zalo"`, `data_source_id=_source_id(tenant_id)`) — **no DB write in the request path**. ⚠️ Confirm Zalo's signature scheme (HMAC vs `mac`/appsecret) before wiring `verify_webhook_signature` (§8).
+- `[edit] customer360-event-api/core/routers/` — extract a shared `make_webhook_router(prefix, secret_attr, event_map, suppress_reasons, channel)` factory and refactor `email_tracking.py` onto it (email regression-tested); then `[new] zalo_tracking.py` = a few-line call with the `zalo-*` event-map. The webhook records **every** event (incl. opt-out, `suppression_reason` in the payload) to **S3 via `TrackingLogService`** (`tracking_channel="zalo"`, `data_source_id=_source_id(tenant_id)`) — **no DB write in the request path**. ⚠️ Confirm Zalo's signature scheme (HMAC vs `mac`/appsecret) before wiring `verify_webhook_signature` (§8).
 - `[new] backend-system/notification_engine/…` **opt-out projection op** — reads new `zalo-opt-out`/`zalo-failed` events from S3 and sets `cdp_master_profiles.communication_preferences->>'zalo_opt_in'=false` (the *only* place consent is written; rebuildable by replay; mirrors how email suppression is materialized from S3). Schedule it or fold into `analytics_job`.
-- `[edit] data-tracking-api/core/app.py` — mount the router (twice, under `/api/v1` and `/data/api/v1`, like email).
-- `[edit] data-tracking-api/core/config.py` — keep webhook ingestion free of database access; signing is supplied by the deployment webhook-security provider.
+- `[edit] customer360-event-api/core/app.py` — mount the router (twice, under `/api/v1` and `/data/api/v1`, like email).
+- `[edit] customer360-event-api/core/config.py` — keep webhook ingestion free of database access; signing is supplied by the deployment webhook-security provider.
 - `[reuse]` `TrackingLogService` / `storage.py` (S3 writer) / `redis_queue.py` / `analytics_job` — **no change**; Zalo events ride the exact same ingest→Redis-Stream→S3(NDJSON/Parquet)→analytics path as web + email tracking. This is the sink the user flagged: Zalo tracking persists to S3, not Postgres.
 
 *Exit: delivery/seen/opt-out update profiles, consent, and campaign metrics.*
@@ -298,7 +298,7 @@ Concrete, file-level task list mapped to the phases in §5. `[new]` = create, `[
 *Exit: AI proposes a template+params+schedule draft behind the existing human-approval gate.*
 
 ### Tests (per phase, reuse the harness)
-- `[new] data-tracking-api/tests/test_zalo_tracking.py` — clone `test_email_tracking.py` (signature accept/reject, suppression on opt-out, dedup).
+- `[new] customer360-event-api/tests/test_zalo_tracking.py` — clone `test_email_tracking.py` (signature accept/reject, suppression on opt-out, dedup).
 - `[new] backend-system/notification_engine/tests/` — token-refresh unit test, param-binding test (all required params satisfied), mock-adapter send + idempotent re-run.
 - `[edit] all-data-simulator` E2E — extend the email E2E: select segment → sync → AI draft → approve → activate (mock ZNS adapter) → simulate webhook → assert `cdp_campaign_dispatch_logs` + suppression + campaign metrics (dual API + Postgres verification).
 
@@ -497,7 +497,7 @@ class NotificationEngineDagsterService(DagsterService):
 # S3-FIRST: the webhook writes ONLY to the S3 event lake (every event, incl. opt-out,
 # carries suppression_reason in the payload). A separate downstream op projects opt-out
 # onto the profile consent field. No DB write in the request path.
-# data-tracking-api/core/routers/channel_webhook.py  (email_tracking.py refactored onto this)
+# customer360-event-api/core/routers/channel_webhook.py  (email_tracking.py refactored onto this)
 def make_webhook_router(*, prefix, secret_attr, event_map, suppress_reasons, channel, sig_alias):
     router = APIRouter(prefix=prefix)
     @router.post("/webhook")
@@ -518,7 +518,7 @@ def make_webhook_router(*, prefix, secret_attr, event_map, suppress_reasons, cha
         return {"status": "ok", "event": name}
     return router
 
-# data-tracking-api/core/routers/zalo_tracking.py — the whole module (no DB writer):
+# customer360-event-api/core/routers/zalo_tracking.py — the whole module (no DB writer):
 ZNS_EVENTS = {"delivered": "zalo-delivered", "user_received_message": "zalo-delivered",
               "user_seen_message": "zalo-seen", "user_click": "zalo-clicked",
               "failed": "zalo-failed", "user_unfollow": "zalo-opt-out"}

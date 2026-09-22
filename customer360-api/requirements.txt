@@ -1,3 +1,8 @@
+# Local leo-customer360 dao package
+leo-customer360-dao
+# Local leo-customer360 agent package
+leo-customer360-agent
+
 # Web framework and ASGI server
 fastapi>=0.111,<1
 uvicorn[standard]>=0.30,<1
@@ -43,7 +48,3 @@ httpx>=0.27,<1
 # Fully no-op at runtime unless OTEL_SDK_DISABLED=false (see deployments/lib/otel.sh).
 opentelemetry-distro>=0.48b0,<1
 opentelemetry-exporter-otlp>=1.27,<2
-leo-customer360-dao
-# HTTP client to the customer360-agent service (installed from /opt in the Dockerfile,
-# like the DAO). Owns the agent request/response contract the campaign_draft repo uses.
-leo-customer360-agent

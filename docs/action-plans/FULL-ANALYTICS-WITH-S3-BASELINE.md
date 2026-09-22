@@ -3,7 +3,7 @@
 > Snapshot date: 2026-09-15
 >
 > Scope: Phase 0 baseline and contract, plus the Phase 1 Bronze ingestion
-> implementation in `data-tracking-api`.
+> implementation in `customer360-event-api`.
 
 ## Baseline Snapshot
 
@@ -25,7 +25,7 @@ MinIO/S3 endpoint with credentials that can list only the event buckets.
 
 ## Confirmed Current Boundaries
 
-- `data-tracking-api` validates identity-bearing batches, enriches each event,
+- `customer360-event-api` validates identity-bearing batches, enriches each event,
   and hands them to either Redis Streams or the bounded in-process queue.
 - Redis acknowledges and deletes a message only after the S3 write returns.
 - Bronze objects are immutable batches; retries reuse deterministic event and

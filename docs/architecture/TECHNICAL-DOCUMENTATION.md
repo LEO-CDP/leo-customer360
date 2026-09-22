@@ -68,7 +68,7 @@ flowchart TB
         CIR["backend-system/identity_resolution/\nDagster identity-resolution job"]
         ANALYTICS["backend-system/analytics/\nDagster tracking-log aggregation"]
         API["customer360-api/\nFastAPI REST + reporting"]
-        TRACK["data-tracking-api/\nFastAPI event ingestion"]
+        TRACK["customer360-event-api/\nFastAPI event ingestion"]
         ADS["ads-server/\nFastAPI ad serving"]
         UI["frontend-admin/\nFastAPI-served static SPA"]
     end
@@ -112,7 +112,7 @@ flowchart TB
 - **Identity resolution is a separate, swappable worker** ([`backend-system/identity_resolution/`](../../backend-system/identity_resolution)), not baked into the API — it writes to Postgres directly via `psycopg2`, independent of `customer360-api`.
 - **One API contract** ([`customer360-api/`](../../customer360-api)) governs all reads/writes to the schema, backed by Redis for latency and Keycloak for SSO/authorization.
 - **Backend pipelines are Dagster-orchestrated** ([`backend-system/`](../../backend-system)) — `customer360-api` submits Dagster job runs asynchronously through the Dagster GraphQL API (`core/utils/dagster_client.py`) instead of running long batch work inline inside an HTTP request.
-- **Tracking ingestion and analytics are separate services** — `data-tracking-api` validates dynamic event JSON and customer identifiers, publishes batches to a Redis Streams consumer group, and uses background workers to write immutable hourly NDJSON objects to S3/MinIO. The `analytics` Dagster job aggregates those objects into source totals and Redis-backed metrics.
+- **Tracking ingestion and analytics are separate services** — `customer360-event-api` validates dynamic event JSON and customer identifiers, publishes batches to a Redis Streams consumer group, and uses background workers to write immutable hourly NDJSON objects to S3/MinIO. The `analytics` Dagster job aggregates those objects into source totals and Redis-backed metrics.
 - **Ad serving is a separate API** ([`ads-server/`](../../ads-server)) — it serves tenant-scoped placements and creatives and is deployed independently from the core Customer 360 Compose stack.
 - **The admin UI is a static single-page app** served by a thin FastAPI process — no server-side rendering of data, no direct database access from the UI tier.
 
@@ -136,7 +136,7 @@ flowchart TB
    - Holds ML score placeholders (`churn_probability`, `predictive_clv`, `lead_conversion_probability`, `engagement_score`) populated by an external scoring pipeline once implemented.
    - Holds `persona_embedding` (pgvector) for lookalike-audience/semantic search.
 
-4. **Tracking-log ingestion & analytics** — [`data-tracking-api/`](../../data-tracking-api) accepts dynamic source events, requires a usable identity at batch or event level, and returns `202` after durable Redis Stream enqueue. Its background consumer-group workers write immutable hourly NDJSON objects to S3 (MinIO in dev); the scheduled `analytics_job` reads those objects and updates source totals.
+4. **Tracking-log ingestion & analytics** — [`customer360-event-api/`](../../customer360-event-api) accepts dynamic source events, requires a usable identity at batch or event level, and returns `202` after durable Redis Stream enqueue. Its background consumer-group workers write immutable hourly NDJSON objects to S3 (MinIO in dev); the scheduled `analytics_job` reads those objects and updates source totals.
 
 5. **Segmentation & activation** — via `customer360-api` + CRM tables
    - `POST /api/v1/segments/{id}/recompute` (on-demand, synchronous) or the scheduled `segmentation_job` (Dagster, polls for changes every `SEGMENTATION_POLL_INTERVAL_SECONDS`) recompute `cdp_segments` membership.
@@ -204,8 +204,8 @@ Each placeholder service exists so `customer360-api/core/utils/dagster_client.py
 | | SQLAlchemy 2, `psycopg2-binary`, `pgvector` (Python binding) | ORM layer + vector column support. |
 | | `pydantic`, `pydantic-settings` | Request/response validation and environment-driven settings (`core/config.py`). |
 | | `dagster-graphql` | Client library used to submit Dagster job runs from the API without embedding the Dagster core package. |
-| | `redis` (Python client) | Used by `core/cache.py` for the response cache and by `data-tracking-api` for the Redis Streams broker, rate limiting, and session metadata. |
-| **Tracking API** | FastAPI + Uvicorn + Redis Streams | `data-tracking-api/` — accepts dynamic event batches, durably queues them in Redis, and writes immutable hourly per-source NDJSON objects to S3; MinIO is used in dev. |
+| | `redis` (Python client) | Used by `core/cache.py` for the response cache and by `customer360-event-api` for the Redis Streams broker, rate limiting, and session metadata. |
+| **Tracking API** | FastAPI + Uvicorn + Redis Streams | `customer360-event-api/` — accepts dynamic event batches, durably queues them in Redis, and writes immutable hourly per-source NDJSON objects to S3; MinIO is used in dev. |
 | **Ad Server** | FastAPI + Uvicorn | `ads-server/` — standalone multi-tenant ad-serving API on port `9009`, with Redis-ready caching and a browser loader. |
 | **Authentication** | Keycloak (`keycloak/keycloak:26.7`) | Real SSO service in the compose stack. `core/auth.py` calls its token-introspection endpoint directly via `urllib.request` — no Keycloak client library dependency. |
 | **Frontend** | FastAPI + Uvicorn (`frontend-admin/app.py`) | **Not Flask.** A thin FastAPI process serves a static single-page admin UI (`index.html` + `static/`) and renders one Jinja2 template (`base-templates/index.html`) to inject `FRONTEND_API_HOSTNAME`/`FRONTEND_TENANT_ID` into `static/js/config.js` at request time. No database access in this service — all customer data is fetched client-side, live, from `customer360-api`. |
@@ -359,7 +359,7 @@ cd ../frontend-admin && ./start.sh
 | PostgreSQL | `5432` | user `postgres`, db `customer360` (password from `.env`, `DB_PASSWORD`). |
 | Redis | `6580` | **not** the Redis default 6379; password required (`REDIS_PASSWORD`). |
 | customer360-api | `8008` | health check: `GET /health`. |
-| data-tracking-api | `8010` | tracking-log ingestion API; queues batches in Redis Streams and writes them asynchronously to S3 in production or MinIO in dev. |
+| customer360-event-api | `8010` | tracking-log ingestion API; queues batches in Redis Streams and writes them asynchronously to S3 in production or MinIO in dev. |
 | ads-server | `9009` | standalone ad-serving API; not part of the core Compose service list. |
 | frontend-admin | `8890` | health check: `GET /health`. |
 | Keycloak | `8080` | health endpoint served on management port `9000`, not `8080`. |
@@ -387,7 +387,7 @@ The variants intentionally share project names, container names, and volumes whe
 
 **Application and infrastructure images:**
 - `customer360-api/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8008`.
-- `data-tracking-api/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8010`.
+- `customer360-event-api/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8010`.
 - `ads-server/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 9009`.
 - `frontend-admin/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8890`.
 - `backend-system/Dockerfile` → unified Dagster webserver and daemon loading all nine
@@ -423,7 +423,7 @@ FRONTEND_API_HOSTNAME, FRONTEND_TENANT_ID   # frontend-admin only
 ### 6.3 Monitoring & Health Checks
 
 Container and Compose health monitoring covers:
-- `customer360-api`, `data-tracking-api`, `ads-server`, `frontend-admin`: HTTP GET to `/health` when deployed.
+- `customer360-api`, `customer360-event-api`, `ads-server`, `frontend-admin`: HTTP GET to `/health` when deployed.
 - `postgres`: `pg_isready`.
 - `redis`: `redis-cli ping` with the configured password.
 - `keycloak`: raw TCP probe of `GET /health/ready` on management port `9000`.

@@ -99,7 +99,7 @@ if static_dir.exists():
     if c360_sdk_dir.exists():
         app.mount("/cdp-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="cdp-sdk")
         app.mount("/data/cdp-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="data-cdp-sdk")
-        app.mount("/data-tracking-api/static/c360-web-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="data-tracking-c360-web-sdk")
+        app.mount("/customer360-event-api/static/c360-web-sdk", StaticFiles(directory=str(c360_sdk_dir)), name="data-tracking-c360-web-sdk")
     sandbox_dir = static_dir / "sandbox"
     if sandbox_dir.exists():
         app.mount("/sandbox", StaticFiles(directory=str(sandbox_dir), html=True), name="sandbox")
@@ -108,7 +108,7 @@ if static_dir.exists():
 
 @app.get("/", tags=["Health"])
 def root() -> dict[str, str]:
-    return {"service": "data-tracking-api", "status": "ok", "docs": "/docs"}
+    return {"service": "customer360-event-api", "status": "ok", "docs": "/docs"}
 
 
 @app.get("/metrics", include_in_schema=False)

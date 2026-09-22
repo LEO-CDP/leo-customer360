@@ -63,7 +63,7 @@ There are currently two event paths. They must converge before the PostgreSQL ta
 
 | Path | Current behavior | Source of truth today | Migration impact |
 |---|---|---|---|
-| Public tracking ingestion | `data-tracking-api` validates batches, publishes to Redis Streams, then writes immutable gzip JSONL to S3 | S3 object plus `_processed/` marker | Extend envelope, compaction, quarantine, and durable processing state |
+| Public tracking ingestion | `customer360-event-api` validates batches, publishes to Redis Streams, then writes immutable gzip JSONL to S3 | S3 object plus `_processed/` marker | Extend envelope, compaction, quarantine, and durable processing state |
 | Customer event query API | `customer360-api` `/api/v1/events/` is a read-only compatibility query over per-source S3/MinIO RAW objects; it validates tenant-owned active sources, normalizes with Polars, and caches responses in Redis | S3 RAW objects, with PostgreSQL used for active source lookup | Replace interim RAW queries with bounded Silver queries and preserve tenant/time predicates |
 | Profile analytics | `profile360.py` queries S3 for login counts, channels, interests, and timeline | S3 plus PostgreSQL CRM data | Keep the S3-backed query/projection layer authoritative |
 | Dagster analytics | Scans S3 JSONL, validates the JSON contract, and updates Redis plus bounded PostgreSQL aggregates/profile staging | S3 + Redis + approved PostgreSQL projections | Add state-marker discovery, compaction, validation, replay, and reconciliation; never create an event ledger in PostgreSQL |
@@ -71,9 +71,9 @@ There are currently two event paths. They must converge before the PostgreSQL ta
 
 Relevant current implementation:
 
-- [data-tracking-api/core/storage.py](../../data-tracking-api/core/storage.py) writes S3 objects.
-- [data-tracking-api/core/redis_queue.py](../../data-tracking-api/core/redis_queue.py) provides the durable Redis-to-S3 handoff.
-- [data-tracking-api/core/routers/tracking.py](../../data-tracking-api/core/routers/tracking.py) exposes the `202 Accepted` tracking ingestion route and queue-status endpoint.
+- [customer360-event-api/core/storage.py](../../customer360-event-api/core/storage.py) writes S3 objects.
+- [customer360-event-api/core/redis_queue.py](../../customer360-event-api/core/redis_queue.py) provides the durable Redis-to-S3 handoff.
+- [customer360-event-api/core/routers/tracking.py](../../customer360-event-api/core/routers/tracking.py) exposes the `202 Accepted` tracking ingestion route and queue-status endpoint.
 - [customer360-api/core/routers/events_s3_api.py](../../customer360-api/core/routers/events_s3_api.py) exposes the read-only `/api/v1/events/` compatibility query.
 - [customer360-api/core/repositories/event_query_repository.py](../../customer360-api/core/repositories/event_query_repository.py) validates active tenant-owned sources, derives `data-tracking-<data_source_id>` buckets, reads RAW JSONL, and processes rows with Polars.
 - [customer360-api/core/cache.py](../../customer360-api/core/cache.py) provides fail-open Redis response caching; the events route includes tenant, datetime, source, filter, and pagination parameters in its cache key.
@@ -93,7 +93,7 @@ not cause repeated date-by-date `ListObjectsV2` failures.
 
 ```mermaid
 flowchart LR
-    SDK[Web / Mobile SDK] --> INGEST[data-tracking-api]
+    SDK[Web / Mobile SDK] --> INGEST[customer360-event-api]
     WEBHOOK[Webhook / Connector] --> INGEST
     LEGACY[customer360-api /events] --> COMPAT[Compatibility adapter]
     COMPAT --> INGEST
@@ -382,7 +382,7 @@ An agent must complete each phase in order. Do not delete PostgreSQL event infra
 
 ### Phase 2: Route the legacy event API to S3
 
-- [X] Define the compatibility adapter boundary: `customer360-api` may use PostgreSQL for authenticated tenant/source lookup and `cdp_raw_profiles_stage` resolution, but the public `data-tracking-api` remains database-free. Neither service writes a PostgreSQL event ledger.
+- [X] Define the compatibility adapter boundary: `customer360-api` may use PostgreSQL for authenticated tenant/source lookup and `cdp_raw_profiles_stage` resolution, but the public `customer360-event-api` remains database-free. Neither service writes a PostgreSQL event ledger.
 - [X] Authorize the read-only `/api/v1/events/` path with the authenticated tenant context and active tenant-owned `sys_data_source` rows; a requested inactive, missing, malformed, or cross-tenant source is rejected before S3/Polars processing. The write-side compatibility adapter is still open.
 - [ ] Preserve `cdp_raw_profiles_stage` resolution and validation in `customer360-api`, including same-tenant and same-domain checks, without blocking the S3/Redis handoff on CIR completion.
 - [X] Remove direct legacy event-table insertion in the retired `/events` and `/events/bulk` endpoints. Generate or preserve `event_id` in every remaining writer before canonical S3/Redis enqueueing.
@@ -468,11 +468,11 @@ service gate below.
 
 | File | Planned change | Phase |
 |---|---|---:|
-| [data-tracking-api/core/storage.py](../../data-tracking-api/core/storage.py) | Canonical envelope, event IDs, compression, checksums, stable key layout, object metadata | 1 |
-| [data-tracking-api/core/service.py](../../data-tracking-api/core/service.py) | Normalize event identity and deduplication inputs before storage | 1 |
-| [data-tracking-api/core/redis_queue.py](../../data-tracking-api/core/redis_queue.py) | Preserve at-least-once behavior; carry envelope/version/checksum metadata; expose retry metrics | 1 |
-| [data-tracking-api/core/buffered_storage.py](../../data-tracking-api/core/buffered_storage.py) | Align local buffered mode with the same durable envelope and retry semantics | 1 |
-| [data-tracking-api/core/routers/tracking.py](../../data-tracking-api/core/routers/tracking.py) | Return durable batch/object identifiers and expose bounded queue status | 1 |
+| [customer360-event-api/core/storage.py](../../customer360-event-api/core/storage.py) | Canonical envelope, event IDs, compression, checksums, stable key layout, object metadata | 1 |
+| [customer360-event-api/core/service.py](../../customer360-event-api/core/service.py) | Normalize event identity and deduplication inputs before storage | 1 |
+| [customer360-event-api/core/redis_queue.py](../../customer360-event-api/core/redis_queue.py) | Preserve at-least-once behavior; carry envelope/version/checksum metadata; expose retry metrics | 1 |
+| [customer360-event-api/core/buffered_storage.py](../../customer360-event-api/core/buffered_storage.py) | Align local buffered mode with the same durable envelope and retry semantics | 1 |
+| [customer360-event-api/core/routers/tracking.py](../../customer360-event-api/core/routers/tracking.py) | Return durable batch/object identifiers and expose bounded queue status | 1 |
 | [customer360-api/core/routers/events_s3_api.py](../../customer360-api/core/routers/events_s3_api.py) | Implemented read-only `/api/v1/events/` compatibility reads from per-source S3/MinIO RAW objects, with active source validation and Redis response caching | 2, 3 |
 | [customer360-api/core/repositories/event_query_repository.py](../../customer360-api/core/repositories/event_query_repository.py) | Implemented interim Polars RAW query path; replace/extend it for Silver reads, cursor pagination, quarantine-aware errors, and query metrics | 2, 3 |
 | [customer360-api/core/cache.py](../../customer360-api/core/cache.py) | Shared fail-open Redis response cache; datetime-aware keys now support event time filters | 2, 3 |
@@ -483,7 +483,7 @@ service gate below.
 | [customer360-database/database-schema.sql](../../customer360-database/database-schema.sql) | Keep tracking state out of the public API database; remove raw-event table only in Phase 6 | 1, 6 |
 | [customer360-database/migrations/001_harden_tenant_rls_policies.sql](../../customer360-database/migrations/001_harden_tenant_rls_policies.sql) | Keep the public tracking service outside PostgreSQL tenant-control paths | 1 |
 | [customer360-api/core/config.py](../../customer360-api/core/config.py) | Add event backend, query engine, time-range, bucket, and feature-flag settings | 2, 3, 5 |
-| [data-tracking-api/core/config.py](../../data-tracking-api/core/config.py) | Add envelope, bucket, compression, request-limit, Redis idempotency, and processed-state settings | 1 |
+| [customer360-event-api/core/config.py](../../customer360-event-api/core/config.py) | Add envelope, bucket, compression, request-limit, Redis idempotency, and processed-state settings | 1 |
 | [backend-system/analytics/source_analytics/](../../backend-system/analytics/source_analytics/) | Add state-marker handling, compaction, quarantine, reconciliation, and backfill modules | 3, 4 |
 | [deployments/server/deploy-tracking.sh](../../deployments/server/deploy-tracking.sh) | Inject production S3 prefixes, Redis idempotency, and observability settings without PostgreSQL credentials | 1, 5 |
 | [deployments/server/deploy-backend.sh](../../deployments/server/deploy-backend.sh) | Inject Dagster compaction/backfill settings and S3 permissions | 3, 4 |
@@ -538,7 +538,7 @@ The implementation agent must provide evidence for each item below.
 
 ### Integration and E2E tests
 
-- [ ] Submit events through `data-tracking-api`; verify S3 Bronze objects.
+- [ ] Submit events through `customer360-event-api`; verify S3 Bronze objects.
 - [ ] Submit events through legacy `customer360-api`; verify they use the same S3 contract.
 - [ ] Run Dagster compaction; verify Silver object, state-marker status, checksums, partitions, and counts.
 - [ ] Run the event query path; compare timeline and aggregate results with the PostgreSQL baseline.
@@ -624,7 +624,7 @@ Only then:
 
 The repository implementation now follows this contract:
 
-1. `data-tracking-api` validates external batches and writes canonical gzip
+1. `customer360-event-api` validates external batches and writes canonical gzip
   JSONL RAW objects plus `_processed/` state markers to S3/MinIO. It never
   connects to PostgreSQL.
 2. `backend-system/analytics` scans active-source `events/` objects with

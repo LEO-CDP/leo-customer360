@@ -14,7 +14,7 @@ Client ──HTTPS──▶ LB :443 ─(TCP passthrough)─▶ Caddy :443 (api b
                                                   ├─ /c360api/*    → customer360-api :8008   (prefix stripped)
                                                   ├─ /auth/*       → keycloak :8080          (KC serves under /auth)
                                                   ├─ /ads/*        → ads-server :9009        (prefix stripped)
-                                                  └─ /cdp-sdk/*    → data-tracking-api :8010 (iframe + assets)
+                                                  └─ /cdp-sdk/*    → customer360-event-api :8010 (iframe + assets)
 ```
 
 The L4 NLB stays in front (it's the thing with the public IP), but for the app it now
@@ -44,7 +44,7 @@ Netdata) can stay on their existing LB ports, or move under Caddy later (see Cav
 
 ### Web SDK iframe
 
-The hidden web SDK iframe is served by `data-tracking-api` at
+The hidden web SDK iframe is served by `customer360-event-api` at
 `/cdp-sdk/html/cdp-event-proxy.html`. The route must remain before the frontend
 catch-all in [`Caddyfile`](./Caddyfile). Caddy removes any upstream
 `X-Frame-Options` header and sends `Content-Security-Policy` with the parent
@@ -184,7 +184,7 @@ LB no longer points at it.
 - **ads-server** is proxied under `/ads` with the prefix stripped — fine for its JSON
   API; if it serves UI assets it'd need its own base-path config.
 - **Web SDK iframe** is proxied under `/cdp-sdk` without stripping the prefix because
-  `data-tracking-api` mounts the SDK at that path. Its response allows only the origin
+  `customer360-event-api` mounts the SDK at that path. Its response allows only the origin
   configured by `sdk_frame_ancestor`; do not replace this with `SAMEORIGIN` for a
   cross-origin embedding site.
 - **Dagster / Portainer / Netdata** generate absolute URLs or have their own callback

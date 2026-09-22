@@ -47,7 +47,7 @@ DAG_UP="$(tfval dagster_upstream "$ovl")";   DAG_UP="${DAG_UP:-10.100.1.4:3000}"
 NET_UP="$(tfval netdata_upstream "$ovl")";   NET_UP="${NET_UP:-127.0.0.1:4199}"
 PORT_UP="$(tfval portainer_upstream "$ovl")";PORT_UP="${PORT_UP:-127.0.0.1:9443}"
 JAE_UP="$(tfval jaeger_upstream "$ovl")";     JAE_UP="${JAE_UP:-127.0.0.1:4686}"   # -> oauth2-jaeger (SSO) -> Jaeger
-DATA_UP="$(tfval data_upstream "$ovl")";      DATA_UP="${DATA_UP:-10.100.1.8:8010}" # -> data-tracking-api on its own box (/data)
+DATA_UP="$(tfval data_upstream "$ovl")";      DATA_UP="${DATA_UP:-10.100.1.8:8010}" # -> customer360-event-api on its own box (/data)
 DOCS_UP="$(tfval docs_upstream "$ovl")";      DOCS_UP="${DOCS_UP:-10.100.1.7:8001}" # -> docs-vector-search on its own box (/docs-ai)
 AGENT_UP="$(tfval agent_upstream "$ovl")";    AGENT_UP="${AGENT_UP:-127.0.0.1:8009}" # -> customer360-agent on its own box (/agent/* : /health open, /plan/* token-gated)
 SDK_FRAME_ANCESTOR="$(tfval sdk_frame_ancestor "$ovl")"

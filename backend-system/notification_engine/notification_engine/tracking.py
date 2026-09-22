@@ -1,7 +1,7 @@
 """Signed tracking-token encoding for Zalo ZNS sends.
 
 Identical format + secret to email_engine/tracking.py so the SAME
-data-tracking-api decode side works for both channels. A token carries
+customer360-event-api decode side works for both channels. A token carries
 (tenant_id, campaign_id, master_profile_id); the ZNS send embeds it as the
 ``tracking_id`` the webhook echoes back. HMAC-signed with EMAIL_TRACKING_SECRET.
 

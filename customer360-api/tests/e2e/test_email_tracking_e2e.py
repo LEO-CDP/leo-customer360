@@ -1,4 +1,4 @@
-"""SCRUM-98 E2E -- public email tracking on data-tracking-api.
+"""SCRUM-98 E2E -- public email tracking on customer360-event-api.
 
 These tests are opt-in through E2E_TRACKING_BASE_URL and use synthetic tokens,
 so they do not require customer360 database rows or bearer authentication.

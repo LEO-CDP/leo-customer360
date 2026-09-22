@@ -52,7 +52,7 @@ Fix in this order — the first five are exploitable cross-tenant data breaches 
 | 4 | Remove the hardcoded dev-JWT secret; refuse to boot with a default secret; make `SSO_LOGIN=false` fail-closed for authz. | [C4](#c4), [H2](#h2), [H3](#h3) |
 | 5 | In the CIR worker, use transaction-local `SET LOCAL` / `set_config(...,true)`; run the app as a **non-superuser** DB role and rely on `FORCE RLS`. | [C6](#c6), [M7](#medium-findings) |
 | 6 | Rework identity matching: gate merges on an identifier-strength confidence score, normalize email/phone, add transitive-merge + deterministic tie-breaks. | [C5](#c5), [H1](#h1), [H10](#h10), [H11](#h11), [M13](#medium-findings) |
-| 7 | Make ingestion + analytics idempotent and bounded; add auth to `data-tracking-api` and `ads-server`. | [H5](#h5), [H6](#h6), [H7](#h7), [H8](#h8), [M21](#medium-findings) |
+| 7 | Make ingestion + analytics idempotent and bounded; add auth to `customer360-event-api` and `ads-server`. | [H5](#h5), [H6](#h6), [H7](#h7), [H8](#h8), [M21](#medium-findings) |
 
 ---
 
@@ -221,7 +221,7 @@ valid dev token can perform admin-only actions (delete data sources, trigger rec
 cross-tenant analytics).
 
 <a id="h4"></a>
-**H4 — Unauthenticated event ingestion, tenant from body.** `data-tracking-api/core/routers/tracking.py:75`
+**H4 — Unauthenticated event ingestion, tenant from body.** `customer360-event-api/core/routers/tracking.py:75`
 — `POST /tracking/logs` has no auth dependency and trusts `data_source_id` from the body to
 select the tenant bucket + session cache. Any caller writes fabricated events into a victim
 tenant's `data-tracking-<uuid>` bucket → cross-tenant event mis-attribution / poisoning.
@@ -287,7 +287,7 @@ violation rolls back the **entire** multi-tenant batch.
 
 <a id="h13"></a>
 **H13 — IP rate limiting ignores `X-Forwarded-For`.** `customer360-api/core/auth.py:60` &
-`auth_api.py:50`, and `data-tracking-api/core/redis_cache.py:96` all key on
+`auth_api.py:50`, and `customer360-event-api/core/redis_cache.py:96` all key on
 `request.client.host`. Behind an ingress/LB that is the proxy IP for everyone: one abuser trips
 the shared counter and 429/401s all legitimate users (DoS), while real per-client throttling never
 engages. Parse a trusted `X-Forwarded-For`.
@@ -316,10 +316,10 @@ engages. Parse a trusted `X-Forwarded-For`.
 | M15 | `.../resolver.py:1067` | Whole multi-tenant batch is one transaction, committed once at the end | One poison-pill profile rolls back all tenants' work; re-fails next run → platform stall |
 | M16 | `customer360-api/core/repositories/user_repository.py:203` | User-cache eviction happens on flush, **before** the router's `db.commit()` | Concurrent read repopulates cache with stale/uncommitted data for the TTL (~120s) |
 | M17 | `customer360-api/core/cache.py:93` | `json.loads(raw)` is outside the `RedisError` try/except | A corrupt/poisoned cache value raises → 500 on every hit, defeating fail-open |
-| M18 | `data-tracking-api/core/redis_cache.py`, `data-tracking-api/core/redis_queue.py` | Redis rate/session calls and the durable Stream enqueue remain on the request path; only the S3 write is backgrounded | Redis broker degradation returns retryable `503` rather than acknowledging undurable data; rate/session operations remain fail-open where configured |
-| M19 | `data-tracking-api/core/service.py` | **Resolved:** session-cache aggregation now prefers event-level identity, matching the identity persisted to S3 | Prevents session counters from diverging from durable event data |
-| M20 | `data-tracking-api/core/storage.py:106` | `_ensure_bucket` does a `head_bucket` every request; any non-404 (e.g. 403) is fatal | Doubles S3 latency; spurious 503 → whole batch dropped when PutObject would succeed |
-| M21 | `data-tracking-api/core/storage.py:38` | Object key is `uuid4()`; no idempotency key | Client retry after a 503 writes a duplicate object → double-counted events |
+| M18 | `customer360-event-api/core/redis_cache.py`, `customer360-event-api/core/redis_queue.py` | Redis rate/session calls and the durable Stream enqueue remain on the request path; only the S3 write is backgrounded | Redis broker degradation returns retryable `503` rather than acknowledging undurable data; rate/session operations remain fail-open where configured |
+| M19 | `customer360-event-api/core/service.py` | **Resolved:** session-cache aggregation now prefers event-level identity, matching the identity persisted to S3 | Prevents session counters from diverging from durable event data |
+| M20 | `customer360-event-api/core/storage.py:106` | `_ensure_bucket` does a `head_bucket` every request; any non-404 (e.g. 403) is fatal | Doubles S3 latency; spurious 503 → whole batch dropped when PutObject would succeed |
+| M21 | `customer360-event-api/core/storage.py:38` | Object key is `uuid4()`; no idempotency key | Client retry after a 503 writes a duplicate object → double-counted events |
 | M22 | `backend-system/personalization/dagster_defs.py:33` | Copy-paste: job defined as `@job(name="scoring_job")` | No `personalization_job` exists; submissions fail; two identical `scoring_job`s in Dagit |
 | M23 | `frontend-admin/app.py:135` | `tenant_id = TENANT_ID or cookie or header`, but `TENANT_ID` always defaults to a hardcoded UUID | Per-request cookie/header tenant switching silently never works |
 | M24 | `backend-system/scripts/migrate_dagster_sqlite_to_postgres.py:99` | Drops the `id` column, `fetchall()`s whole tables, one transaction, no per-table try/except | Re-numbered event-log ids break sensor cursors; OOM / all-or-nothing abort on large history |
@@ -341,8 +341,8 @@ engages. Parse a trusted `X-Forwarded-For`.
 | L9 | `ads-server/repository/ad_repository.py:228` | Placement resolution `... LIMIT 1` with no `ORDER BY` → non-deterministic which placement wins |
 | L10 | `ads-server/repository/ad_repository.py:227` | Serving joins tenant on `tenant_key` only; no `tenant.status` check → suspended tenants keep serving |
 | L11 | `ads-server/repository/ad_cache_utils.py:1` | File is only TODO comments — the documented Redis caching/TTLs don't exist; config TTLs unused and mismatched (60 vs 300/3600) |
-| L12 | `data-tracking-api/core/routers/tracking.py:20` | `get_storage`/`get_protection` lazily assign module singletons with no lock → cold-start race leaks a client |
-| L13 | `data-tracking-api/app.py:47` | `cdp-event-proxy.html` route registered unconditionally (unlike guarded static mounts) → 500 if the file is absent |
+| L12 | `customer360-event-api/core/routers/tracking.py:20` | `get_storage`/`get_protection` lazily assign module singletons with no lock → cold-start race leaks a client |
+| L13 | `customer360-event-api/app.py:47` | `cdp-event-proxy.html` route registered unconditionally (unlike guarded static mounts) → 500 if the file is absent |
 | L14 | `all-data-simulator/google_analytics_faker.py:20` | `event_time` from naive `datetime.now()` emitted tz-less → mis-bucketed by host offset downstream |
 | L15 | `all-data-simulator/adjust_faker.py:401` | `MEDIA_SOURCE_CONFIG[campaign.media_source]` bare subscript on LLM output → `KeyError` crashes the run (also `:365`, `:459`) |
 | L16 | `backend-system/scripts/render_dagster_instance.py:68` | `s3_ready()` probes with `MINIO_ROOT_*`, but the rendered `S3ComputeLogManager` relies on `AWS_*` → probe passes, runtime upload fails |
@@ -358,7 +358,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 | `customer360-api` | 91 | ~9,700* | C1–C4 · H2,H3,H13 · M3–M6,M16,M17 · L1–L4 |
 | `backend-system/identity_resolution` | — | 8,411 | C5,C6 · H1,H10,H11,H12 · M11–M15 · L18 |
 | `ads-server` | 22 | 3,809 | H7 · M1,M2,M25 · L5–L11 |
-| `data-tracking-api` | 12 | 1,334 | H4,H5,H6 · M18–M21 · L12,L13 |
+| `customer360-event-api` | 12 | 1,334 | H4,H5,H6 · M18–M21 · L12,L13 |
 | `backend-system/analytics` | — | 732 | H8 · M7–M9 |
 | `backend-system/segmentation` | — | 627 | H9 · M10 |
 | `backend-system` (other Dagster + scripts) | — | ~475 | M22,M24 · L16 |
@@ -372,7 +372,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 ## 7. Methodology & scope
 
 - **Scope:** every `*.py` under `ads-server/`, `all-data-simulator/`, `backend-system/`,
-  `customer360-api/` (excluding `.venv`), `data-tracking-api/`, `deployments/`, `frontend-admin/`.
+  `customer360-api/` (excluding `.venv`), `customer360-event-api/`, `deployments/`, `frontend-admin/`.
   Tests were read for context but are not the review target.
 - **Approach:** the code was partitioned across six parallel reviewers, each applying ten
   finder angles (line-by-line, removed-behavior, cross-file caller/callee, language pitfalls,

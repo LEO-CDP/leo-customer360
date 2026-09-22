@@ -72,7 +72,7 @@ Luồng có hai phần:
     script.defer = true;
     script.src =
         "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main/" +
-        "data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js";
+        "customer360-event-api/static/c360-web-sdk/observer/leo.proxy.js";
 
     script.onload = function () {
         console.log("[C360 SDK] Leo Observer proxy loaded");
@@ -469,8 +469,8 @@ window.addEventListener("c360:ad-event", function (event) {
 
 - Demo đầy đủ: [c360-web-sdk-demo.html](c360-web-sdk-demo.html)
 - Tài liệu Web SDK tổng quát: [1-web-sdk-tracking.md](1-web-sdk-tracking.md)
-- Proxy SDK local: [leo.proxy.js](../../data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js)
-- Tracking API entrypoint: [data-tracking-api/app.py](../../data-tracking-api/app.py)
+- Proxy SDK local: [leo.proxy.js](../../customer360-event-api/static/c360-web-sdk/observer/leo.proxy.js)
+- Tracking API entrypoint: [customer360-event-api/app.py](../../customer360-event-api/app.py)
 
 ## 12. Tóm tắt tích hợp tối thiểu
 

@@ -92,7 +92,7 @@ the event for downstream identity resolution. An absent browser fingerprint is
 treated as an absent optional value.
 
 Session cache keys use the form
-`data-tracking-api:session:[data_source_id]:[session_id]`, expire according to
+`customer360-event-api:session:[data_source_id]:[session_id]`, expire according to
 `TRACKING_SESSION_TTL_SECONDS`, and contain only `last_seen_at`, `event_count`,
 and optional `user_id` metadata.
 

@@ -344,14 +344,14 @@ passes `run_id`) → `email_engine/send.py:255` `send_campaign`:
 unset, `401` on bad signature.
 
 **Write side** — email tracking normalizes engagement events through the
-`data-tracking-api` Redis/S3 contract. The public tracking service does not
+`customer360-event-api` Redis/S3 contract. The public tracking service does not
 open a PostgreSQL connection or insert behavioral-event rows. Deduplication is
 represented by the canonical event ID/dedup key and immutable S3 state.
 - Email tracking carries the provider event and suppression reason into the S3/MinIO event envelope.
 - Activation reads the canonical mailed address from the profile and checks `crm_suppression_list`
   by tenant, `channel='EMAIL'`, `identifier_type='EMAIL'`, active status, expiry, and campaign scope.
 
-> The `data-tracking-api/` service owns both generic web behaviour and normalized
+> The `customer360-event-api/` service owns both generic web behaviour and normalized
 > email engagement ingestion (Redis Streams → S3/MinIO).
 
 ### Stage 8 — Feedback into Customer 360 — 🟡 (SCRUM-99, capture only)

@@ -9,7 +9,7 @@ UAT environments. This folder covers three separate workflows:
 | GA4-style sample events | `google_analytics_faker.py` | JSON printed to stdout |
 | Web tracking and analytics E2E | `web_user_simulator.py` or `run_tracking_analytics_e2e.sh` | Tracking API, MinIO/S3, Dagster, PostgreSQL |
 | UAT web traffic | `uat_tracking_traffic_simulator.py` or `run_uat_tracking_traffic.sh` | UAT tracking API only |
-| API-only fresh traffic seed | `seed_api_data.py` or `./dev-c360.sh seed-new-data` | `data-tracking-api` HTTP endpoint only |
+| API-only fresh traffic seed | `seed_api_data.py` or `./dev-c360.sh seed-new-data` | `customer360-event-api` HTTP endpoint only |
 
 The web simulator does not publish to Kafka. It sends one ordered event batch
 per synthetic user to the tracking API; the tracking service writes NDJSON to

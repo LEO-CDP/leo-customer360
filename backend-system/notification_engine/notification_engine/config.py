@@ -23,7 +23,7 @@ DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
 DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 
-# --- Tracking token (shared secret with data-tracking-api + email_engine) ---
+# --- Tracking token (shared secret with customer360-event-api + email_engine) ---
 TRACKING_SECRET = os.environ.get("EMAIL_TRACKING_SECRET", "leocdp-dev-tracking-secret")
 
 # --- S3 event lake (opt-out projection reader) ---

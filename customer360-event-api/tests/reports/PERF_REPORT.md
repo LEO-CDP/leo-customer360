@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-31  **Environment:** UAT  **Target:** `https://beta.leocdp.com/data` (real endpoint)
 **Test:** stepped-RPS ramp with asynchronous S3 store verification
-**Harness:** `data-tracking-api/tests/perf_uat_tracking.py`
+**Harness:** `customer360-event-api/tests/perf_uat_tracking.py`
 **Raw data:** [`perf_results_ramp.json`](./perf_results_ramp.json) (main ramp) - [`perf_results_10rps.json`](./perf_results_10rps.json) (initial strict-cap trial)
 **Run id:** `perf-20260831T100254Z-7a216d8d`
 
@@ -35,7 +35,7 @@ Deployed with `deployments/server/deploy-tracking.sh uat` (this session's multi-
 | Env / box | UAT - server key `tracking` - `s-general-1x2` |
 | Box IPs | floating `49.213.71.192` (SSH) - private `10.100.1.8` (VPC) |
 | App replicas | **3** - `customer360-tracking-api-1/2/3` (`TRACKING_REPLICAS` default uat=3) |
-| Image | `ghcr.io/leo-cdp/leo-customer360/data-tracking-api@sha256:bcebc2518b3e2fc6221cf54af91928b436f2c184779650cb4bea98963f475fdc` |
+| Image | `ghcr.io/leo-cdp/leo-customer360/customer360-event-api@sha256:bcebc2518b3e2fc6221cf54af91928b436f2c184779650cb4bea98963f475fdc` |
 | Runtime | uvicorn (1 process/replica) on `:8010`, FastAPI |
 | Private network | docker bridge `c360-tracking` - replicas `172.18.0.2/.3/.4`, LB `172.18.0.5` |
 | Load balancer | `customer360-tracking-lb` (`nginx:alpine`) on host `:8010`, `least_conn`, `max_fails=3 fail_timeout=10s`, `proxy_next_upstream error timeout http_502/503/504` |

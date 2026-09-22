@@ -26,7 +26,7 @@ def test_render_params_binds_every_value():
     assert out == {"name": "Binh", "code": "OTP123"}
 
 
-# --- tracking token (must match data-tracking-api decode) ---
+# --- tracking token (must match customer360-event-api decode) ---
 def test_tracking_token_is_deterministic_and_decodable():
     a = encode_tracking_token("t1", "c1", "p1")
     b = encode_tracking_token("t1", "c1", "p1")

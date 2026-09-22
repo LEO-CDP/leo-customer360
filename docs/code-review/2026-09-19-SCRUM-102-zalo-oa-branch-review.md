@@ -86,7 +86,7 @@ All active findings fixed on branch `feat/SCRUM-102-...`; **#1 suppressed** (tea
 ### 2. ◦ Opt-out webhook loses consent silently
 
 > ✅ **FIXED** — commit `88aaf18`
-**`data-tracking-api/core/routers/channel_webhook.py`** — `record_channel_event` wraps everything in `try/except` that only logs, and the handler still returns `{"status":"ok"}` (200).
+**`customer360-event-api/core/routers/channel_webhook.py`** — `record_channel_event` wraps everything in `try/except` that only logs, and the handler still returns `{"status":"ok"}` (200).
 
 **Failure scenario:** Zalo posts `user_unfollow`; S3/tracking ingest throws (outage/cred issue). The except logs a warning; handler returns 200 so Zalo won't redeliver. Because the design is S3-first (no DB write in the handler), that opt-out is permanently dropped and the profile keeps `zalo_opt_in=true` → the user is messaged after unsubscribing (consent/compliance breach).
 
@@ -207,7 +207,7 @@ The "framework-neutral" DAO (per `database.py` docstring) imports `fastapi.HTTPE
 ### 11. ◦ Webhook factory duplicates email security code
 
 > ✅ **FIXED** — commit `609dfc7` (partial — HMAC verify shared; full email→factory port intentionally skipped)
-**`data-tracking-api/core/routers/channel_webhook.py` vs `core/routers/email_tracking.py`.**
+**`customer360-event-api/core/routers/channel_webhook.py` vs `core/routers/email_tracking.py`.**
 
 `_verify_signature` (ch:40) is byte-identical to `verify_webhook_signature` (email:107); `_source_id`/`record_channel_event` duplicate email:116/124. The factory docstring claims it serves "email, Zalo, …" but email was never ported — `email_tracking.py:212` still calls its own copy. Two copies of HMAC-signature/token/S3-envelope logic now drift independently on auth-relevant code.
 
@@ -225,7 +225,7 @@ The "framework-neutral" DAO (per `database.py` docstring) imports `fastapi.HTTPE
 ### 13. ◦ "Dead code" — reviewed, nothing removed
 
 > ↩️ **REVIEWED — nothing removed.** All three were initially cut, then restored: each is an interface/convention member whose siblings are deliberately kept even though uncalled today. Deleting the odd one broke symmetry.
-- `data-tracking-api/core/routers/zalo_tracking.py` — `all_zalo_tracking_routers` export: initially removed as unused, then **restored**. The sibling `email_tracking.py` keeps `all_email_tracking_routers` (also unused by `app.py`, which imports `router` directly) — it's a per-module export convention, so removing only zalo's broke symmetry. **Kept.**
+- `customer360-event-api/core/routers/zalo_tracking.py` — `all_zalo_tracking_routers` export: initially removed as unused, then **restored**. The sibling `email_tracking.py` keeps `all_email_tracking_routers` (also unused by `app.py`, which imports `router` directly) — it's a per-module export convention, so removing only zalo's broke symmetry. **Kept.**
 - `backend-system/notification_engine/notification_engine/adapters.py` — `DispatchAdapter.provider_name = "base"`: initially removed as never-read, then **restored**. It declares the interface attribute every adapter carries (`send.py` reads `adapter.provider_name`); the base default documents the contract. **Kept.**
 - `customer360-api/core/utils/dagster_client.py` — `NotificationEngineDagsterService.dispatch()` was initially removed as "no caller", then **restored**. It is the API-side trigger contract for `notification_engine_job`, symmetric with `EmailEngineDagsterService.send_campaign()` (also uncalled from the API today but deliberately kept). The live activation path submits the same job from `campaign_activation/triggers.py`; the API-side method is the intended entry point if an endpoint wires it up. Not dead code — keeping it preserves the facade convention. **Kept.**
 

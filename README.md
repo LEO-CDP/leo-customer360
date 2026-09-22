@@ -27,7 +27,7 @@ The current repo contains four application services, three active Dagster jobs, 
 | `backend-system/segmentation/` | Implemented | Recomputes active segments and syncs member/tag data back to master profiles |
 | `backend-system/analytics/` | Implemented | Hourly Dagster job that aggregates tracking logs and updates source totals |
 | `customer360-api/` | Implemented | Main REST API for identity, CRM, persona, reporting, and metadata |
-| `data-tracking-api/` | Implemented | Durably queues dynamic tracking events in Redis Streams and writes immutable hourly per-source S3/MinIO objects |
+| `customer360-event-api/` | Implemented | Durably queues dynamic tracking events in Redis Streams and writes immutable hourly per-source S3/MinIO objects |
 | `ads-server/` | Implemented | Multi-tenant FastAPI ad-serving API with placements, campaigns, creatives, and a browser loader |
 | `frontend-admin/` | Implemented | FastAPI shell for the UI, backed by client-side JS and API requests |
 | `backend-system/scoring/`, `data_synch/`, `email_engine/`, `notification_engine/`, `campaign_activation/`, `personalization/` | Placeholder | Runnable Dagster scaffolds ready for their service logic |
@@ -40,7 +40,7 @@ The current repo contains four application services, three active Dagster jobs, 
 | [`backend-system/`](backend-system) | Dagster workspace with nine code locations: identity resolution, segmentation, analytics, and six placeholder services |
 | [`customer360-api/`](customer360-api) | FastAPI service with routers, auth, SQLAlchemy models, and business logic |
 | [`customer360-dao/`](customer360-dao) | Installable shared Python DAO package and package-owned unit tests |
-| [`data-tracking-api/`](data-tracking-api) | FastAPI ingestion service that queues dynamic events in Redis Streams and writes hourly tracking-log objects to S3/MinIO |
+| [`customer360-event-api/`](customer360-event-api) | FastAPI ingestion service that queues dynamic events in Redis Streams and writes hourly tracking-log objects to S3/MinIO |
 | [`ads-server/`](ads-server) | Standalone FastAPI ad-serving service with its own database, cache, and widget code |
 | [`frontend-admin/`](frontend-admin) | Thin admin UI served by FastAPI and loaded from static templates |
 | [`all-data-simulator/`](all-data-simulator) | Synthetic raw data and optional S3/MinIO upload helpers |
@@ -117,7 +117,7 @@ This covers the main production service stack in `docker-compose.yml`, including
 The repo uses these primary entrypoints:
 
 - `customer360-api/app.py` — FastAPI API entrypoint
-- `data-tracking-api/app.py` — CDP tracking-log FastAPI entrypoint (port 8010)
+- `customer360-event-api/app.py` — CDP tracking-log FastAPI entrypoint (port 8010)
 - `ads-server/app.py` — ad-serving FastAPI entrypoint (port 9009 by default)
 - `backend-system/workspace.yaml` — Dagster workspace containing all nine backend code locations
 - `backend-system/identity_resolution/worker.py` — legacy local polling helper; production runs the Dagster job
@@ -147,7 +147,7 @@ The repo includes a consolidated test runner:
 ./run_all_tests.sh
 ```
 
-This is the current project-level test entrypoint for the Customer 360 API, identity resolution, segmentation, and LEO ad server suites. The data-tracking API also has its own `data-tracking-api/run_unit_tests.sh` runner.
+This is the current project-level test entrypoint for the Customer 360 API, identity resolution, segmentation, and LEO ad server suites. The data-tracking API also has its own `customer360-event-api/run_unit_tests.sh` runner.
 
 ## Key documentation
 
@@ -156,7 +156,7 @@ Start here for deeper context:
 - [`docs/architecture/TECHNICAL-DOCUMENTATION.md`](docs/architecture/TECHNICAL-DOCUMENTATION.md)
 - [`docs/operations/DOCKER-COMPOSE-GUIDE.md`](docs/operations/DOCKER-COMPOSE-GUIDE.md)
 - [`customer360-api/README.md`](customer360-api/README.md)
-- [`data-tracking-api/README.md`](data-tracking-api/README.md)
+- [`customer360-event-api/README.md`](customer360-event-api/README.md)
 - [`ads-server/README.md`](ads-server/README.md)
 - [`backend-system/README.md`](backend-system/README.md)
 - [`frontend-admin/README.md`](frontend-admin/README.md)

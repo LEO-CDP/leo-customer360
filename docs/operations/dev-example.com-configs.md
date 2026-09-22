@@ -17,7 +17,7 @@ the public `/c360/ai/ask` URL:
 - `ads-server`: `LEO_AD_ROOT_PATH=/ads`
 - `frontend-admin`: `FRONTEND_ROOT_PATH=/c360`, `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`, and `DOCS_SEARCH_URL=http://127.0.0.1:8001`
 - `docs-vector-search`: start locally on `127.0.0.1:8001`; `dev-c360.sh` builds the image, refreshes the index, and starts it
-- `data-tracking-api`: no root path; nginx strips `/data`
+- `customer360-event-api`: no root path; nginx strips `/data`
 - Dagster: start the UI with `--path-prefix /dagster`
 - MinIO console: `MINIO_BROWSER_REDIRECT_URL=https://s3dev.example.com/minio/`
 
@@ -63,7 +63,7 @@ With this configuration, the public endpoints are:
 | customer360-api | `https://c360.example.com/c360api/api/v1` | `127.0.0.1:8008` |
 | Keycloak | `https://c360.example.com/auth` | `127.0.0.1:8080` |
 | ads-server and docs | `https://c360.example.com/ads` and `/ads/docs` | `127.0.0.1:9009` |
-| data-tracking-api | POST `https://c360.example.com/data/api/v1/tracking/logs`; health `https://c360.example.com/data/health` | `127.0.0.1:8010` |
+| customer360-event-api | POST `https://c360.example.com/data/api/v1/tracking/logs`; health `https://c360.example.com/data/health` | `127.0.0.1:8010` |
 | Dagster UI | `https://c360.example.com/dagster` | `127.0.0.1:3000` |
 | MinIO S3 API | `https://s3dev.example.com` | `127.0.0.1:9000` |
 | MinIO console | `https://s3dev.example.com/minio` | `127.0.0.1:9001` |
@@ -81,7 +81,7 @@ MinIO itself uses `http://minio:9000` internally for console authentication;
 `S3_ENDPOINT_URL=https://s3dev.example.com` remains the public endpoint for
 host-side clients and the tracking/analytics services.
 
-The cross-origin web SDK iframe is served by `data-tracking-api`, not the admin
+The cross-origin web SDK iframe is served by `customer360-event-api`, not the admin
 frontend. Because the embedding page is `https://example.com` and the iframe
 origin is `https://c360.example.com`, do not use `X-Frame-Options: SAMEORIGIN`;
 use the iframe route's `frame-ancestors` policy below instead.
@@ -216,7 +216,7 @@ server {
     proxy_read_timeout 600s;
   }
 
-  # data-tracking-api: strip /data so /data/health reaches /health.
+  # customer360-event-api: strip /data so /data/health reaches /health.
   location = /data {
     return 308 /data/;
   }
@@ -230,7 +230,7 @@ server {
     proxy_read_timeout 600s;
   }
 
-  # c360 web SDK iframe endpoint is served by data-tracking-api at
+  # c360 web SDK iframe endpoint is served by customer360-event-api at
   # /cdp-sdk/html/cdp-event-proxy.html. Public URL can be prefixed with /data
   # (for example /data/cdp-sdk/html/cdp-event-proxy.html) because this block
   # strips /data before forwarding to the upstream service.

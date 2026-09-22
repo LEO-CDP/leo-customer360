@@ -20,7 +20,7 @@ def mount_static_assets(app: FastAPI, settings: FrontendSettings) -> None:
             )
 
     tracking_sdk_dir = (
-        settings.base_dir.parent / "data-tracking-api" / "static" / "c360-web-sdk"
+        settings.base_dir.parent / "customer360-event-api" / "static" / "c360-web-sdk"
     )
     if tracking_sdk_dir.exists():
         app.mount("/cdp-sdk", StaticFiles(directory=str(tracking_sdk_dir)), name="cdp-sdk")

@@ -19,7 +19,7 @@ INSTALL_REQUIREMENTS=0
 # both shared and per-location virtualenvs.
 SERVICE_DIRS=(
     "customer360-api"
-    "data-tracking-api"
+    "customer360-event-api"
     "ads-server"
     "backend-system"
 )

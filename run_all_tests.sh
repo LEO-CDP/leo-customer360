@@ -37,7 +37,7 @@ run_suite() {
 
 run_suite "Customer 360 DAO" "${SCRIPT_DIR}/customer360-dao/run_tests.sh" "$@"
 run_suite "Customer 360 API" "${SCRIPT_DIR}/customer360-api/run_unit_tests.sh" "$@"
-run_suite "Data Tracking API" "${SCRIPT_DIR}/data-tracking-api/run_unit_tests.sh" "$@"
+run_suite "Data Tracking API" "${SCRIPT_DIR}/customer360-event-api/run_unit_tests.sh" "$@"
 run_suite "Identity Resolution" "${SCRIPT_DIR}/backend-system/identity_resolution/run_tests.sh" "$@"
 run_suite "Segmentation" "${SCRIPT_DIR}/backend-system/segmentation/run_tests.sh" "$@"
 run_suite "Campaign Activation" "${SCRIPT_DIR}/backend-system/campaign_activation/run_tests.sh" "$@"

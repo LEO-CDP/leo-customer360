@@ -26,7 +26,7 @@ specifics, and the risks/gotchas that are particular to VKS and to this account.
 - **Main caveats for *this* account:** only **HCM03-1C** is enabled → **no cross-AZ HA** even
   though VKS supports multi-AZ; VNG **force-upgrades** clusters after a version's end-of-support;
   every `Service type=LoadBalancer` provisions a **billed NLB** (consolidate to one ingress);
-  and **data-tracking-api is now built by CI** (✅ done — it publishes to GHCR like the others).
+  and **customer360-event-api is now built by CI** (✅ done — it publishes to GHCR like the others).
 
 ---
 
@@ -39,7 +39,7 @@ Full inventory in the module READMEs and `*/overlays/{uat,prod}.tfvars`. Condens
 |---|---|---|---|
 | `c360-api-uat-api` (10.100.1.5) | `s-general-1x2` | 1 / 2 GB | customer360-api, redis, keycloak, frontend-admin, ads-server, **Caddy**, **whole monitoring stack** (Portainer, Netdata, Jaeger, pgAdmin, oauth2-proxy) |
 | `c360-api-uat-backend` (10.100.1.4) | `s-general-1x2` | 1 / 2 GB | Dagster (backend-system), Portainer agent |
-| `c360-api-uat-tracking` (10.100.1.8) | `s-general-1x2` | 1 / 2 GB | data-tracking-api, Portainer agent |
+| `c360-api-uat-tracking` (10.100.1.8) | `s-general-1x2` | 1 / 2 GB | customer360-event-api, Portainer agent |
 
 The api box is explicitly oversubscribed (1 vCPU/2 GB running ~11 containers; a resize to
 `s-general-2x4` is deferred in the overlay comment).
@@ -51,7 +51,7 @@ The api box is explicitly oversubscribed (1 vCPU/2 GB running ~11 containers; a 
 | `c360-api-prod-sso` (…1.11) | `s2-general-2x4` | 2 / 4 | Keycloak | provisioned |
 | `c360-api-prod-frontend` (…1.12) | `s2-general-2x4` | 2 / 4 | frontend-admin + Caddy | provisioned |
 | `c360-api-prod-ads` (…1.13) | `s2-general-4x8` | 4 / 8 | ads-server | provisioned |
-| `c360-api-prod-tracking` (…1.15) | `s2-general-2x4` | 2 / 4 | data-tracking-api | **commented-out** |
+| `c360-api-prod-tracking` (…1.15) | `s2-general-2x4` | 2 / 4 | customer360-event-api | **commented-out** |
 | backend/Dagster (…1.14) | — | — | Dagster | **designed, no server key** |
 
 ### 2.3 Shared (both envs)
@@ -85,7 +85,7 @@ Ingress controller (NGINX + cert-manager/Let's Encrypt)   ← replaces Caddy
   ├── /c360api     → customer360-api (Deployment + Service + HPA)
   ├── /auth        → keycloak        (Deployment/StatefulSet + Service)
   ├── /ads         → ads-server      (Deployment + Service + HPA)
-  ├── /data        → data-tracking-api (Deployment + Service + HPA)
+  ├── /data        → customer360-event-api (Deployment + Service + HPA)
   ├── /jaeger      → oauth2-proxy → jaeger-query   (SSO via Keycloak)
   ├── /netdata     → oauth2-proxy → netdata        (SSO)
   └── /pgadmin     → oauth2-proxy → pgadmin         (SSO)     ← prod already SSO-gated
@@ -119,7 +119,7 @@ Outside the cluster, same VPC (unchanged):
 | frontend-admin (:8890) | `Deployment` + `Service` | static-ish; browser calls API/Keycloak via ingress |
 | keycloak (:8080, mgmt :9000) | `Deployment` (or `StatefulSet`) + `Service` | external DB `db_keycloak`; set `KC_HTTP_RELATIVE_PATH=/auth`; liveness on :9000 |
 | dagster / backend-system (:3000) | `Deployment` + `Service` | needs PG; if it needs run storage, add a PVC |
-| data-tracking-api (:8010) | `Deployment` + `Service` + **HPA** | ✅ **now built + published to GHCR by CI** (`ci.yml`); `deploy-tracking.sh` pulls it by default (`BUILD_LOCAL=0`). Redis Streams broker plus S3 creds and OTLP endpoint must be provided via `Secret`/env |
+| customer360-event-api (:8010) | `Deployment` + `Service` + **HPA** | ✅ **now built + published to GHCR by CI** (`ci.yml`); `deploy-tracking.sh` pulls it by default (`BUILD_LOCAL=0`). Redis Streams broker plus S3 creds and OTLP endpoint must be provided via `Secret`/env |
 | c360-redis container (uat) / MemStore (prod) | **Keep managed MemStore for both** (recommended) or in-cluster `StatefulSet` + PVC | managed removes stateful-in-cluster risk; RWO block volume only if in-cluster |
 | **Caddy** (path routing + TLS) | **Ingress + cert-manager** | deletes `proxy/`, `set-domain.sh`, the cutover runbook |
 | **L4 NLB** (manual listeners/backends) | `Service type=LoadBalancer` on the ingress → **one** VNG NLB | annotations pick package/scheme/security-groups; **do not** create one LB per service |
@@ -187,7 +187,7 @@ These exist only because we run on VMs and **disappear** under VKS:
 | **Single AZ (HCM03-1C only)** | VKS multi-AZ HA unavailable; AZ outage = full outage | Same exposure as today; run ≥2 nodes for node-level resilience; ask VNG to enable a 2nd AZ if HA matters |
 | **Forced K8s upgrades** after End-of-Standard-Support | Surprise version bumps | Track the VKS release schedule; target **1.30/1.31**; test upgrades in UAT first (surge upgrade: MaxSurge 1 / MaxUnavailable 0 by default) |
 | **Each `Service type=LoadBalancer` bills an NLB** | Cost creep | Use **one** ingress LB; reuse via `vks.vngcloud.vn/load-balancer-id`; don't expose services individually |
-| ~~data-tracking-api not in CI~~ ✅ **resolved** | (was) can't deploy an image | Added to `ci.yml` (built + pushed to GHCR); `deploy-tracking.sh` now defaults to `BUILD_LOCAL=0`, and `cd.yml` deploys `tracking` |
+| ~~customer360-event-api not in CI~~ ✅ **resolved** | (was) can't deploy an image | Added to `ci.yml` (built + pushed to GHCR); `deploy-tracking.sh` now defaults to `BUILD_LOCAL=0`, and `cd.yml` deploys `tracking` |
 | **RWO block storage only** | No multi-writer volumes | Single-replica stateful pods only; use FileStorage/NFS for RWX if ever needed |
 | **HCM03-1C pricing/flavor parity** | Docs only cover HCM03-1A | Confirm flavor availability + prices for 1C with VNG before sizing |
 | **Stateful in-cluster (Keycloak/Jaeger/pgAdmin/Redis)** | Data loss on reschedule if not persisted | Keep DB/Redis managed & external; PVC-back Jaeger/pgAdmin or accept ephemeral |
@@ -198,7 +198,7 @@ These exist only because we run on VMs and **disappear** under VKS:
 
 ## 9. Recommended phased migration
 
-1. **Prereqs** — ✅ `data-tracking-api` is now in CI (done); move `.env`s into `Secret` manifests (sealed/external-secrets); pick registry (GHCR vs vCR).
+1. **Prereqs** — ✅ `customer360-event-api` is now in CI (done); move `.env`s into `Secret` manifests (sealed/external-secrets); pick registry (GHCR vs vCR).
 2. **Cluster** — Terraform a `vks` module: cluster (Public) + one node group (autoscale) in the VPC/subnet, plus keep managed PG/MemStore/object-storage modules.
 3. **Platform** — Helm-install NGINX ingress + cert-manager (Let's Encrypt), oauth2-proxy, CSI StorageClasses; keep Netdata as a DaemonSet (or adopt Prometheus/Grafana).
 4. **Stateless apps** — deploy api, frontend, ads, keycloak, dagster, tracking; wire to external PG + MemStore; add HPAs (api, ads, tracking).

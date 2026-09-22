@@ -163,7 +163,7 @@ ghcr.io/leo-cdp/leo-customer360/<service>
 ```
 
 for `<service>` ∈ `customer360-api` · `backend-system` · `ads-server` · `frontend-admin`
-· `data-tracking-api` · `docs-vector-search` · `postgres` · `redis` (each has its own `Dockerfile`; a change
+· `customer360-event-api` · `docs-vector-search` · `postgres` · `redis` (each has its own `Dockerfile`; a change
 under that folder builds it — `docs-vector-search`'s source lives under [`tools/docs-vector-search`](../tools/docs-vector-search),
 so its build `context`/`file` are overridden in `ci.yml`).
 Tags come from `docker/metadata-action`:
@@ -397,7 +397,7 @@ flowchart TB
 | pgAdmin | api box `10.100.1.5` | 5050 | Postgres admin/monitoring UI (`c360-pgadmin`); its own login, exposed **directly** on the LB (`LB :5050 → pgAdmin :5050`); plain HTTP (cleartext login — see the LB note); `pgadmin_data` volume, mem-capped |
 | Dagster | backend box `10.100.1.4` | 3000 | backend-system worker |
 | Portainer agent | backend `10.100.1.4` + tracking `10.100.1.8` | 9001 | `c360-portainer-agent`; lets the api-box Portainer manage these boxes too (private VPC, reached from `10.100.1.5`); registered as Portainer environments |
-| data-tracking-api | tracking box `10.100.1.8` | 8010 | FastAPI event ingestion on its own dedicated `s-general-1x2` box, run as **N auto-load-balanced replicas** (uat 3 / prod 5, `TRACKING_REPLICAS`) on a private docker bridge behind a local **nginx** LB that owns `:8010` (least_conn round-robin); publishes dynamic batches to the shared Redis Streams consumer group and writes NDJSON asynchronously to vStorage/S3; rate-limit + session state remains fail-open, but Redis is required for durable enqueue; OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
+| customer360-event-api | tracking box `10.100.1.8` | 8010 | FastAPI event ingestion on its own dedicated `s-general-1x2` box, run as **N auto-load-balanced replicas** (uat 3 / prod 5, `TRACKING_REPLICAS`) on a private docker bridge behind a local **nginx** LB that owns `:8010` (least_conn round-robin); publishes dynamic batches to the shared Redis Streams consumer group and writes NDJSON asynchronously to vStorage/S3; rate-limit + session state remains fail-open, but Redis is required for durable enqueue; OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
 | docs-vector-search | docs box `10.100.1.7` | 8001 | AI docs Q&A — **local-model RAG**: `paraphrase-multilingual-MiniLM-L12-v2` embed (384-dim, VN+EN) + `bge-reranker-base` rerank + `Qwen2.5-0.5B` GGUF generate; vectors in **pgvector** on the vDB (schema `rag`, table `doc_chunks`); its OWN `s-general-2x4` box; **not behind the LB directly** (reached via SSH/tunnel), but **frontend-admin proxies it at `/ai/*`** — so `https://beta.leocdp.com/ai/health` (→ docs-search `/health`) is its public health check, alongside `/ai/ask` + `/ai/search`; deploy `server/deploy-docs-search.sh` (pull GHCR image → start dedicated no-auth Redis for rate limiting on the same host network → `enrich` on box → serve) |
 | PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` + `leo_ads` + `rag` (pgvector, docs-vector-search) |
 
@@ -415,7 +415,7 @@ via the **LB IP** (see the HSTS note below).
 | Keycloak | `https://beta.leocdp.com/auth` | Caddy `/auth/*` → keycloak :8080 |
 | ads-server (+ `/ads/docs`) | `https://beta.leocdp.com/ads` | Caddy `/ads/*` → ads :9009 (`root_path=/ads`) |
 | docs-vector-search (via frontend `/ai` proxy) | `https://beta.leocdp.com/ai/health` (also `/ai/ask`, `/ai/search`) | Caddy `/` → frontend :8890; frontend `/ai/*` → docs-search :8001. `/ai/health` returns **200** when docs-search is up, **502** when it's unreachable — the public health check for the otherwise-private `docs` box. |
-| data-tracking-api (ingest) | `https://beta.leocdp.com/data` (POST `…/data/api/v1/tracking/logs`; health `…/data/health`) | Caddy `/data/*` → tracking :8010 |
+| customer360-event-api (ingest) | `https://beta.leocdp.com/data` (POST `…/data/api/v1/tracking/logs`; health `…/data/health`) | Caddy `/data/*` → tracking :8010 |
 | c360 web SDK iframe | `https://beta.leocdp.com/cdp-sdk/html/cdp-event-proxy.html` | Caddy `/cdp-sdk/*` → tracking :8010; parent origin from `proxy/overlays/<env>.tfvars` |
 | Portainer (own login) | `https://103.245.254.29:9443` | LB direct → Portainer :9443 (self-signed TLS) |
 | Netdata (SSO) | `http://103.245.254.29:19999` | LB → oauth2-proxy :4199 → Netdata (Keycloak login) |
@@ -434,9 +434,9 @@ via the **LB IP** (see the HSTS note below).
 > (ordered deploy: the [proxy runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom)).
 > To move to a **different domain**, edit one value and run [`set-domain.sh`](./set-domain.sh) (below).
 
-### Tracking feature — bring-up (data-tracking-api)
+### Tracking feature — bring-up (customer360-event-api)
 
-The web-tracking ingestion service (`data-tracking-api`) runs on its **own** vServer (server key
+The web-tracking ingestion service (`customer360-event-api`) runs on its **own** vServer (server key
 `tracking`, private `10.100.1.8`) as **N auto-load-balanced replicas** (uat 3 / prod 5) on a
 private docker bridge behind a local **nginx** LB that owns `:8010`. It is deliberately minimal —
 it uses only what the app needs:
@@ -452,7 +452,7 @@ cd deployments/server && ./deploy.sh uat apply
 terraform output servers          # confirm the tracking box private ip (expected 10.100.1.8)
 #    If it differs, fix data_upstream (proxy overlay) + the 6580/4318 cidrs (server extra_ingress), re-apply.
 
-# 2) APP — run data-tracking-api as N replicas behind the local nginx LB (:8010), wired to S3
+# 2) APP — run customer360-event-api as N replicas behind the local nginx LB (:8010), wired to S3
 #    + the api-box Redis Streams broker (pulls the CI-built image from GHCR; set BUILD_LOCAL=1 to build on the VM).
 #    Replica count defaults to uat 3 / prod 5 — override with TRACKING_REPLICAS=<n>.
 cd ../server && ./deploy-tracking.sh uat
@@ -469,7 +469,7 @@ cd ../monitoring && ./deploy-monitoring.sh uat
 - Ingestion: `POST https://beta.leocdp.com/data/api/v1/tracking/logs` (Caddy `/data` → tracking `:8010`)
 - Health (GET): `https://beta.leocdp.com/data/health`
 - Web SDK iframe: `https://beta.leocdp.com/cdp-sdk/html/cdp-event-proxy.html` (Caddy `/cdp-sdk` → tracking `:8010`)
-- Traces: `data-tracking-api` appears in the Jaeger UI at `https://beta.leocdp.com/jaeger` (Keycloak SSO)
+- Traces: `customer360-event-api` appears in the Jaeger UI at `https://beta.leocdp.com/jaeger` (Keycloak SSO)
 
 **Notes**
 

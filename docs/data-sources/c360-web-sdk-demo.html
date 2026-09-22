@@ -533,7 +533,7 @@
             window.srcTouchpointName = encodeURIComponent(document.title);
             window.srcTouchpointUrl = encodeURIComponent(location.href);
 
-            var src = "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main/data-tracking-api/static/c360-web-sdk/observer/leo.proxy.js".trim();
+            var src = "https://gcore.jsdelivr.net/gh/LEO-CDP/leo-customer360@main/customer360-event-api/static/c360-web-sdk/observer/leo.proxy.js".trim();
             if (src === "" || !/^(https?:)?\/\//i.test(src)) {
                 src = c360TrackingBase + "/data/cdp-sdk/observer/leo.proxy.js";
             }
