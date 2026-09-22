@@ -148,7 +148,7 @@
 
   <div class="chips">
     <span class="chip">mode <b>live</b></span>
-    <span class="chip">model <b>openai/gpt-5.6-luna</b></span>
+    <span class="chip">model <b>openai/gpt-5.6-luna-luna</b></span>
     <span class="chip">source <b>vars.LEO_OPENAI_MODEL_NAME</b></span>
     <span class="chip">run <b>Actions #35564830156</b></span>
     <span class="chip">commit <b>da67a16</b></span>
@@ -201,7 +201,7 @@
       <span class="verdict">usable &middot; eval 7/7 &middot; 4.94s</span>
     </div>
     <div class="req">
-      <h3>Request sent to the model <span class="send">&rarr; openai/gpt-5.6-luna &middot; temperature 0.4</span></h3>
+      <h3>Request sent to the model <span class="send">&rarr; openai/gpt-5.6-luna-luna &middot; temperature 0.4</span></h3>
       <pre class="prompt"><span class="sys">You are a marketing campaign strategist. Given a target segment, a marketer's objective, optional budget/time constraints, and a CLOSED list of candidate content items, propose a campaign plan. You MUST select recommended content only from the supplied candidate list -- you MUST NOT invent new content_item_id values or reference any item not in that list. If no candidate items are suitable, return an empty content_item_ids array rather than fabricating one. Respond with ONLY a JSON object with exactly these keys: "name", "objective", "strategy_summary", "action_plan", "start_date" (YYYY-MM-DD), "end_date" (YYYY-MM-DD), "content_item_ids" (array, each one of the candidate ids, priority-ordered).</span>
 <span class="lbl">Segment:</span> {'segment': 'dormant-90d', 'size': 1200, 'avg_order_value': 42.5, 'top_category': 'skincare', 'locale': 'vi-VN'}
 <span class="lbl">Objective:</span> reactivate customers who haven't purchased in 90 days, target a 5% return rate
@@ -260,7 +260,7 @@
       <span class="verdict">usable &middot; eval 7/7 &middot; 6.29s</span>
     </div>
     <div class="req">
-      <h3>Request sent to the model <span class="send">&rarr; openai/gpt-5.6-luna &middot; temperature 0.4</span></h3>
+      <h3>Request sent to the model <span class="send">&rarr; openai/gpt-5.6-luna-luna &middot; temperature 0.4</span></h3>
       <pre class="prompt"><span class="sys">You are a Zalo ZNS campaign strategist. Given a target segment, a marketer's objective, and a CLOSED list of APPROVED ZNS templates (each with a template_id and its required parameter names), choose exactly ONE template and fill EVERY one of its required parameters with concrete values suitable for the segment. You MUST pick a template_id from the candidate list -- never invent one -- and you MUST NOT author free message text (ZNS content is fixed by the approved template). Respond with ONLY a JSON object with keys: "template_id", "template_data", "name", "objective", "strategy_summary", "action_plan", "start_date", "end_date".</span>
 <span class="lbl">Segment:</span> {'segment': 'cart-abandoners-48h', 'size': 300, 'avg_cart_value': 68.0, 'locale': 'vi-VN'}
 <span class="lbl">Objective:</span> recover abandoned carts within 48 hours with a time-limited incentive

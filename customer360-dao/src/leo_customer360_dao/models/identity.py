@@ -318,9 +318,9 @@ class CdpProfileAttribute(Base):
         ARRAY(Text), server_default=text("ARRAY['^[0-]*$']")
     )
 
-    is_scoring_model: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
-    scoring_model_name: Mapped[Optional[str]] = mapped_column(Text)
-    scoring_model_version: Mapped[Optional[str]] = mapped_column(Text)
+    is_ai_agent: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    agent_code: Mapped[Optional[str]] = mapped_column(Text)
+    agent_version: Mapped[Optional[str]] = mapped_column(Text)
     value_type: Mapped[Optional[str]] = mapped_column(Text)
     value_min: Mapped[Optional[Decimal]] = mapped_column(Numeric)
     value_max: Mapped[Optional[Decimal]] = mapped_column(Numeric)
@@ -596,18 +596,29 @@ class CdpPersonaConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("now()"))
 
 
-class CdpScoringModel(Base):
-    """Registry of scoring models (Lead, Churn, CLV, CX, Data Quality, persona risk/loyalty)."""
+class CdpAiAgent(Base):
+    """Unified registry for ML models, rule engines, and task-oriented agents."""
 
-    __tablename__ = "cdp_scoring_models"
+    __tablename__ = "cdp_ai_agents"
 
-    scoring_model_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    agent_code: Mapped[str] = mapped_column(Text, primary_key=True)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     model_type: Mapped[str] = mapped_column(Text, nullable=False)
+    model_name: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'ACTIVE'"))
     schedule_definition: Mapped[Optional[str]] = mapped_column(Text)
     input_features: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
     hyperparameters: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    prompt_key: Mapped[Optional[str]] = mapped_column(Text)
+    prompt_engine: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'none'"))
+    prompt_versions: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    system_instructions: Mapped[Optional[str]] = mapped_column(Text)
+    required_variables: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
+    instruction_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    instruction_updated_by: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'system'"))
+    instruction_note: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()")) 

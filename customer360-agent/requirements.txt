@@ -8,7 +8,7 @@ pydantic-settings>=2.2,<3
 python-dotenv>=1.0,<2
 
 # Multi-provider LLM SDK (OpenAI / Gemini / Anthropic Claude / local OpenAI-compatible)
-litellm>=1.51,<2
+litellm>=1.101.0,<2
 
 # Postgres-backed prompt store (optional -- only used when AGENT_DATABASE_URL is set)
 SQLAlchemy>=2.0,<3
@@ -22,4 +22,4 @@ opentelemetry-exporter-otlp>=1.27,<2
 
 # Test-only (see run_unit_tests.sh)
 pytest>=7.4,<9
-httpx>=0.27,<1
+httpx>=0.23.0  # CORRECTED: Changed from 'httpx2' to 'httpx' (FastAPI TestClient dependency)

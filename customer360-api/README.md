@@ -268,11 +268,11 @@ To add a new tool:
 - POST /api/v1/metadata/data-sources
 - PATCH /api/v1/metadata/data-sources/{data_source_id}
 - DELETE /api/v1/metadata/data-sources/{data_source_id}
-- GET /api/v1/metadata/scoring-models
-- GET /api/v1/metadata/scoring-models/{scoring_model_name}
-- POST /api/v1/metadata/scoring-models
-- PATCH /api/v1/metadata/scoring-models/{scoring_model_name}
-- DELETE /api/v1/metadata/scoring-models/{scoring_model_name}
+- GET /api/v1/metadata/ai-agents
+- GET /api/v1/metadata/ai-agents/{agent_code}
+- POST /api/v1/metadata/ai-agents
+- PATCH /api/v1/metadata/ai-agents/{agent_code}
+- DELETE /api/v1/metadata/ai-agents/{agent_code}
 
 ### 9.3 CRM (Generic CRUD)
 - /api/v1/campaigns

@@ -882,9 +882,9 @@ DATA_SOURCES = [
     },
 ]
 
-SCORING_MODELS = [
+AI_AGENT_MODELS = [
     {
-        "scoring_model_name": "churn_prediction_v2",
+        "agent_code": "churn_prediction_v2",
         "display_name": "XGBoost Churn Predictor",
         "description": "Calculates the probability of a customer churning in the next 30 days based on engagement drop-offs.",
         "model_type": "classification",
@@ -894,7 +894,7 @@ SCORING_MODELS = [
         "hyperparameters": {"max_depth": 6, "learning_rate": 0.1, "objective": "binary:logistic"},
     },
     {
-        "scoring_model_name": "clv_regression_v1",
+        "agent_code": "clv_regression_v1",
         "display_name": "Customer Lifetime Value (90-Day)",
         "description": "Predicts total revenue a customer will generate over the next 90 days.",
         "model_type": "regression",
@@ -904,7 +904,7 @@ SCORING_MODELS = [
         "hyperparameters": {"algorithm": "random_forest_regressor", "n_estimators": 100},
     },
     {
-        "scoring_model_name": "b2b_lead_scoring_rules",
+        "agent_code": "b2b_lead_scoring_rules",
         "display_name": "B2B Lead Scoring Engine",
         "description": "Rule-based engine assigning points for email opens, website visits, and job titles.",
         "model_type": "rules_engine",
@@ -914,7 +914,7 @@ SCORING_MODELS = [
         "hyperparameters": {"weights": {"email_opens": 2, "website_visits": 5, "c_level_title": 20}},
     },
     {
-        "scoring_model_name": "cx_sentiment_llm_v1",
+        "agent_code": "cx_sentiment_llm_v1",
         "display_name": "Customer Experience & Sentiment Analyzer",
         "description": "Generative LLM pipeline scoring customer sentiment and feedback risk from interaction logs.",
         "model_type": "generative_llm",
@@ -924,7 +924,7 @@ SCORING_MODELS = [
         "hyperparameters": {"temperature": 0.2, "model_name": "gpt-4o-mini"},
     },
     {
-        "scoring_model_name": "data_quality_cir_confidence",
+        "agent_code": "data_quality_cir_confidence",
         "display_name": "Identity Resolution Confidence Model",
         "description": "Evaluates profile completeness, identifier uniqueness, and CIR resolution confidence.",
         "model_type": "classification",
@@ -1078,17 +1078,17 @@ def update_data_source_statistics(cursor, statistics_by_source: dict[str, dict[s
         )
 
 
-def seed_scoring_models(cursor) -> None:
-    """Seeds central catalog rows in cdp_scoring_models."""
-    logger.info("Seeding cdp_scoring_models catalog...")
-    for model in SCORING_MODELS:
+def seed_ai_agents(cursor) -> None:
+    """Seeds demo model rows in the unified cdp_ai_agents catalog."""
+    logger.info("Seeding cdp_ai_agents model catalog...")
+    for model in AI_AGENT_MODELS:
         cursor.execute(
             f"""
-            INSERT INTO {_table('cdp_scoring_models')}
-                (scoring_model_name, display_name, description, model_type, status,
+            INSERT INTO {_table('cdp_ai_agents')}
+                (agent_code, display_name, description, model_type, status,
                  schedule_definition, input_features, hyperparameters)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (scoring_model_name) DO UPDATE SET
+            ON CONFLICT (agent_code) DO UPDATE SET
                 display_name = EXCLUDED.display_name,
                 description = EXCLUDED.description,
                 model_type = EXCLUDED.model_type,
@@ -1099,7 +1099,7 @@ def seed_scoring_models(cursor) -> None:
                 updated_at = now();
             """,
             (
-                model["scoring_model_name"],
+                model["agent_code"],
                 model["display_name"],
                 model["description"],
                 model["model_type"],
@@ -2426,7 +2426,7 @@ def main() -> None:
             seed_relation_types(cursor)
             crm_ids = seed_crm_entities(cursor)
             seed_data_sources(cursor)
-            seed_scoring_models(cursor)
+            seed_ai_agents(cursor)
             reset_tenant_scoped_demo_tables(cursor)
             event_profiles = fetch_event_profiles(cursor)
             seed_campaign_performance_daily(cursor, crm_ids["campaign"])

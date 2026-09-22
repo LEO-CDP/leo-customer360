@@ -35,7 +35,7 @@ from leo_customer360_dao.models.identity import (
     CdpProfileLink,
     CdpProfileMergeHistory,
     CdpRawProfileStage,
-    CdpScoringModel,
+    CdpAiAgent,
 )
 from leo_customer360_dao.models.relations import CdpRelation, CustomerContact, RelationType, Transaction
 from leo_customer360_dao.models.segmentation import CdpSegment
@@ -83,7 +83,7 @@ __all__ = [
     "CdpProfileMergeHistory",
     "CdpRawProfileStage",
     "CdpRelation",
-    "CdpScoringModel",
+    "CdpAiAgent",
     "CdpSegment",
     "CustomerContact",
     "Transaction",

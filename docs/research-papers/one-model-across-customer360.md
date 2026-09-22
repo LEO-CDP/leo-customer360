@@ -92,27 +92,27 @@ The `customer360.cdp_ai_agents` table is a **single catalog** for every model
 the platform runs — ML scorers, rule engines, and generative agents — keyed by a
 stable `agent_code`, with a `model_type` CHECK of
 `(classification, regression, clustering, rules_engine, generative_llm)` and the
-actual `model_name` per row. The seed loads **11 agents**. The shape of that
+actual `model_name` per row. The seed loads **12 agents**. The shape of that
 seed *is* the thesis of this paper:
 
 - The **three `generative_llm` agents** — `persona_summary_generator`,
   `campaign_planner`, `zns_campaign_planner` — all carry the same
   `model_name = 'gpt-5.6'`. One model, three jobs, one row each.
-- The **eight ML / rules agents** (`lead_scoring`, `churn_scoring`,
-  `clv_scoring`, `cx_scoring`, `persona_risk_score`, `persona_loyalty_score`,
-  `data_quality`, `lifecycle_stage`) keep their **own** `model_name`
+- The **nine ML / rules agents** (`lead_scoring`, `churn_scoring`,
+  `clv_scoring`, `cx_scoring`, `identity_resolution_scoring`,
+  `persona_risk_score`, `persona_loyalty_score`, `data_quality`,
+  `lifecycle_stage`) keep their **own** `model_name`
   (`lead-scoring-model`, `churn-scoring-model`, …). The registry encodes §2.7's
   rule structurally: a calibrated numeric model is *not* swapped for the LLM.
 - Task-oriented agents store their live `system_instructions`,
   `required_variables`, and an integer `instruction_version` on the row.
-  Prompt *history* is deliberately **not** in Postgres (schema comment:
-  *"Historical prompt versions are intentionally NOT stored in PostgreSQL"*) — it
-  lives in the `customer360-agent` prompt store; the row holds only the current
-  revision.
+  Prompt history is stored on the same row in the append-only `prompt_versions`
+  JSONB array; `system_instructions` and `instruction_version` are the
+  read-optimized current revision consumed by `customer360-agent`.
 
 ```mermaid
 flowchart LR
-    REG[("customer360.cdp_ai_agents\n(11 seeded rows)")]
+    REG[("customer360.cdp_ai_agents\n(12 seeded rows)")]
 
     subgraph Gen["generative_llm — the ONE model"]
       PSG[persona_summary_generator]
@@ -389,7 +389,7 @@ placeholder, but the **scorers themselves are now registered**: `d325bd0` seeds
 `model_name` and a cron `schedule_definition`, *not* pointed at the LLM. **Do
 not** replace a calibrated numeric model with an LLM. Instead use the model to
 (a) generate human-readable **reason codes** for each score and (b) draft/validate
-`cdp_scoring_models` configs from a plain-language spec.
+`cdp_ai_agents` configurations from a plain-language spec.
 
 ```mermaid
 flowchart LR
@@ -398,7 +398,7 @@ flowchart LR
     MODEL{{"ONE model\n(Generate)"}}
     RC["reason code per score"]
     SPEC["plain-language spec"]
-    CFG["cdp_scoring_models config\n(human-validated)"]
+    CFG["cdp_ai_agents config\n(human-validated)"]
 
     CALC --> NUM
     NUM -. "explain score" .-> MODEL --> RC
@@ -510,12 +510,10 @@ One shared model touching every subsystem concentrates risk. Non-negotiables:
    are attacker-influenceable. Treat all record content as untrusted data inside
    a fenced section of the prompt; never let record text change the instruction.
 5. **Auditability is already modeled.** `cdp_ai_agents.instruction_version`
-   (with `instruction_updated_by`/`instruction_note`) pins the *current* revision
-   per agent — it replaces `prompt_template.current_version`. Full prompt
-   *history* is intentionally kept out of Postgres and lives in the
-   `customer360-agent` prompt store, so pin production calls to a store version
-   for reproducible/diffable outputs. `processed_by='ai_agent'`, `ai_plan`, and
-   the review tables give a full paper trail for every AI-authored artifact.
+  (with `instruction_updated_by`/`instruction_note`) pins the *current* revision
+  per agent, while `prompt_versions` preserves every published body and its
+  provenance in the same row. `processed_by='ai_agent'`, `ai_plan`, and the
+  review tables give a full paper trail for every AI-authored artifact.
 6. **Human-in-the-loop on writes to the golden record.** Anything that mutates
    `cdp_master_profiles`, activates a segment, or sends a campaign passes an
    approval gate. Reads and drafts are cheap and safe; writes are gated.
@@ -534,7 +532,7 @@ One shared model touching every subsystem concentrates risk. Non-negotiables:
 | Content reco | Engagement lift | A/B vs. rules-only recommendations via tracking events |
 
 Because everything routes through `customer360-agent`, evaluation is centralized:
-log `(prompt_version, inputs, output, downstream outcome)` once and it covers all
+log `(agent_code, instruction_version, inputs, output, downstream outcome)` once and it covers all
 use cases.
 
 ---

@@ -76,32 +76,48 @@ ModelTypeValue = Literal[
 ModelStatusValue = Literal["ACTIVE", "INACTIVE", "TRAINING", "DEPRECATED", "FAILED"]
 
 
-class ScoringModelBase(BaseModel):
-    scoring_model_name: str = Field(..., max_length=100)
+class AiAgentBase(BaseModel):
+    agent_code: str = Field(..., max_length=100)
     display_name: str = Field(..., max_length=255)
     description: Optional[str] = None
     model_type: ModelTypeValue
+    model_name: Optional[str] = Field(default=None, max_length=255)
     status: ModelStatusValue = "ACTIVE"
     schedule_definition: Optional[str] = Field(default=None, max_length=100)
     input_features: Optional[list[str]] = Field(default_factory=list)
     hyperparameters: Optional[dict[str, Any]] = Field(default_factory=dict)
+    prompt_key: Optional[str] = Field(default=None, max_length=200)
+    prompt_engine: str = Field(default="none", max_length=50)
+    system_instructions: Optional[str] = None
+    required_variables: Optional[list[str]] = Field(default_factory=list)
+    instruction_version: int = Field(default=1, ge=1)
+    instruction_updated_by: str = Field(default="system", max_length=255)
+    instruction_note: str = ""
+    prompt_versions: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class ScoringModelCreate(ScoringModelBase):
+class AiAgentCreate(AiAgentBase):
     pass
 
 
-class ScoringModelUpdate(BaseModel):
+class AiAgentUpdate(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=255)
     description: Optional[str] = None
     model_type: Optional[ModelTypeValue] = None
+    model_name: Optional[str] = Field(default=None, max_length=255)
     status: Optional[ModelStatusValue] = None
     schedule_definition: Optional[str] = Field(default=None, max_length=100)
     input_features: Optional[list[str]] = None
     hyperparameters: Optional[dict[str, Any]] = None
+    prompt_key: Optional[str] = Field(default=None, max_length=200)
+    prompt_engine: Optional[str] = Field(default=None, max_length=50)
+    system_instructions: Optional[str] = None
+    required_variables: Optional[list[str]] = None
+    instruction_updated_by: Optional[str] = Field(default=None, max_length=255)
+    instruction_note: Optional[str] = None
 
 
-class ScoringModelRead(ScoringModelBase):
+class AiAgentRead(AiAgentBase):
     model_config = ConfigDict(from_attributes=True)
 
     created_at: Optional[datetime] = None

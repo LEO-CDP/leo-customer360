@@ -1,7 +1,10 @@
-"""Unit tests for ai_providers: parse_json_object() plus the generic State-pattern
-provider (ProviderState / LLMProvider / build_state) over a mocked LiteLLM SDK."""
+"""Unit tests for ai_providers: complete_with_litellm(), parse_json_object() plus 
+the generic State-pattern provider (ProviderState / LLMProvider / build_state) 
+over a mocked LiteLLM SDK."""
 
+import re
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -10,7 +13,7 @@ import pytest
 # The provider tests patch litellm.completion, so the SDK must be importable.
 pytest.importorskip("litellm")
 
-from ai_providers.base import AIProviderError, parse_json_object
+from ai_providers.base import AIProviderError, parse_json_object, complete_with_litellm
 from ai_providers.provider import LLMProvider, ProviderState, build_state
 
 
@@ -19,12 +22,52 @@ def _fake_completion(text: str):
     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))])
 
 
+class CompleteWithLitellmTests(unittest.TestCase):
+    @patch("litellm.completion")
+    def test_complete_success_with_default_temperature(self, mock_completion):
+        mock_completion.return_value = _fake_completion("Expected generated text")
+        
+        result = complete_with_litellm(
+            model="openai/gpt-5.6-luna", 
+            prompt="Hello", 
+            api_key="sk-test"
+        )
+        
+        self.assertEqual(result, "Expected generated text")
+        mock_completion.assert_called_once_with(
+            model="openai/gpt-5.6-luna",
+            messages=[{"role": "user", "content": "Hello"}],
+            api_key="sk-test",
+            api_base=None,
+            temperature=0.4  # Asserting default params are passed
+        )
+
+    @patch("litellm.completion")
+    def test_raises_ai_provider_error_on_api_failure(self, mock_completion):
+        mock_completion.side_effect = Exception("API Timeout")
+        
+        with self.assertRaisesRegex(AIProviderError, "request failed: API Timeout"):
+            complete_with_litellm("openai/gpt-5.6-luna", "prompt")
+
+    @patch("litellm.completion")
+    def test_raises_ai_provider_error_on_empty_content(self, mock_completion):
+        mock_completion.return_value = _fake_completion("   \n   ")
+        
+        with self.assertRaisesRegex(AIProviderError, "did not contain generated content"):
+            complete_with_litellm("openai/gpt-5.6-luna", "prompt")
+
+
 class ParseJsonObjectTests(unittest.TestCase):
     def test_parses_plain_json(self):
         self.assertEqual(parse_json_object('{"name": "Q4 Win-Back"}'), {"name": "Q4 Win-Back"})
 
     def test_strips_json_labeled_code_fence(self):
         self.assertEqual(parse_json_object('```json\n{"name": "Q4 Win-Back"}\n```'), {"name": "Q4 Win-Back"})
+
+    def test_strips_malformed_unclosed_fence(self):
+        # Starts a fence but doesn't close it, which was handled by the split logic
+        raw = '```json\n{"incomplete": "fence"}'
+        self.assertEqual(parse_json_object(raw), {"incomplete": "fence"})
 
     def test_raises_ai_provider_error_on_invalid_json(self):
         with self.assertRaises(AIProviderError):
@@ -100,6 +143,26 @@ class BuildStateTests(unittest.TestCase):
             s.llm_extra_config = {"timeout": 30, "max_tokens": 100}
             state = build_state(extra_config={"max_tokens": 999})
         self.assertEqual(state.extra_config, {"timeout": 30, "max_tokens": 999})
+
+
+class AgentSeedModelTests(unittest.TestCase):
+    def test_generative_agent_seeds_use_litellm_openai_model_identifier(self):
+        repository_root = Path(__file__).resolve().parents[2]
+        seed_paths = (
+            repository_root / "customer360-database" / "init-core-database.sql",
+            repository_root / "customer360-database" / "init-prompt-store-seed.sql",
+        )
+
+        for seed_path in seed_paths:
+            models = re.findall(
+                r"'generative_llm',\s*'([^']+)'", seed_path.read_text(encoding="utf-8")
+            )
+            self.assertTrue(models, f"Expected generative agent seeds in {seed_path}")
+            self.assertEqual(
+                models,
+                ["openai/gpt-5.6-luna"] * len(models),
+                f"Generative agent seed models must match LiteLLM's OpenAI identifier in {seed_path}",
+            )
 
 
 if __name__ == "__main__":

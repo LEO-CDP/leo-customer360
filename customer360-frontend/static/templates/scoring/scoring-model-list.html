@@ -1,6 +1,6 @@
 <!--
   =============================================================================
-  SCORING MODELS REGISTRY VIEW CARD (cdp_scoring_models)
+  UNIFIED AI-AGENT REGISTRY VIEW (cdp_ai_agents)
   =============================================================================
   Modeled directly on metadata/attributes-list.html: same header/search/filter
   layout, same shared C360.DataTableView component for the table, same
@@ -20,8 +20,8 @@
         </svg>
       </div>
       <div>
-        <h1 class="text-base font-bold text-slate-900 tracking-tight">Scoring Models</h1>
-        <p class="text-xs text-slate-400 mt-0.5">ML &amp; rule-based model registry (Lead, Churn, CLV, CX, Data Quality)</p>
+        <h1 class="text-base font-bold text-slate-900 tracking-tight">AI Agents</h1>
+        <p class="text-xs text-slate-400 mt-0.5">Models, rules, and prompt-backed agents</p>
       </div>
     </div>
 
@@ -57,10 +57,10 @@
         <option value="FAILED">Failed</option>
       </select>
 
-      <!-- Add Scoring Model -->
+      <!-- Add AI Agent -->
       <button id="btn-scoring-model-add" class="inline-flex items-center gap-1.5 bg-violet-600 text-white rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-violet-700 transition-colors shadow-sm shadow-violet-100">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-        <span>Add Scoring Model</span>
+        <span>Add AI Agent</span>
       </button>
 
     </div>
@@ -83,7 +83,7 @@
   <!-- Empty State -->
   <div id="scoring-models-empty" class="hidden p-12 text-center text-sm text-slate-400">
     <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">🔍</div>
-    <div class="font-medium text-slate-600">No scoring models matched your filters</div>
+    <div class="font-medium text-slate-600">No AI agents matched your filters</div>
     <p class="text-xs text-slate-400 mt-1">Try adjusting your search query or filter selections.</p>
   </div>
 
@@ -96,9 +96,9 @@
 
 <!--
   =============================================================================
-  SCORING MODEL FORM MODAL
-  Creates/updates a customer360.cdp_scoring_models row via
-  POST/PATCH /metadata/scoring-models (see scoring-model-view.js).
+  AI AGENT FORM MODAL
+  Creates/updates a customer360.cdp_ai_agents row via
+  POST/PATCH /metadata/ai-agents (see scoring-model-view.js).
   =============================================================================
 -->
 <div id="scoring-model-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -110,8 +110,8 @@
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
       </div>
       <div>
-        <h2 id="scoring-model-form-title" class="text-base font-bold text-slate-900 tracking-tight">Add Scoring Model</h2>
-        <p id="scoring-model-form-subtitle" class="text-xs text-slate-400">Registers a new row in the cdp_scoring_models registry</p>
+        <h2 id="scoring-model-form-title" class="text-base font-bold text-slate-900 tracking-tight">Add AI Agent</h2>
+        <p id="scoring-model-form-subtitle" class="text-xs text-slate-400">Registers a new row in the cdp_ai_agents registry</p>
       </div>
     </div>
 
@@ -119,13 +119,18 @@
     <div class="space-y-4">
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Model Name *</label>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Agent Code *</label>
           <input id="scoring-model-add-name" type="text" placeholder="e.g. churn_prediction_v2" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
         </div>
         <div>
           <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Display Name *</label>
           <input id="scoring-model-add-display-name" type="text" placeholder="e.g. XGBoost Churn Predictor" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
         </div>
+      </div>
+
+      <div>
+        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Runtime Model</label>
+        <input id="scoring-model-add-model-name" type="text" placeholder="e.g. gpt-5.6 or churn-model-v2" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
       </div>
 
       <div>
@@ -172,6 +177,27 @@
         <textarea id="scoring-model-add-hyperparameters" rows="2" placeholder='{"max_depth": 6, "learning_rate": 0.1}' class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none resize-none"></textarea>
       </div>
 
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Prompt Key</label>
+          <input id="scoring-model-add-prompt-key" type="text" placeholder="campaign.plan.instructions" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+        <div>
+          <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Prompt Engine</label>
+          <input id="scoring-model-add-prompt-engine" type="text" value="none" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">System Instructions</label>
+        <textarea id="scoring-model-add-instructions" rows="4" placeholder="Current prompt or system instruction body" class="w-full text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none resize-y"></textarea>
+      </div>
+
+      <div>
+        <label class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Required Variables (comma-separated)</label>
+        <input id="scoring-model-add-required-vars" type="text" placeholder="target_segment, objective" class="w-full text-xs font-mono border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3.5 py-2.5 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
+      </div>
+
       <div id="scoring-model-add-error" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5"></div>
     </div>
 
@@ -185,7 +211,7 @@
           Cancel
         </button>
         <button id="btn-scoring-model-add-save" class="bg-violet-600 hover:bg-violet-700 text-white rounded-xl px-4 py-2 text-xs font-semibold transition-colors shadow-sm shadow-violet-100">
-          <span id="scoring-model-form-save-label">Save Model</span>
+          <span id="scoring-model-form-save-label">Save Agent</span>
         </button>
       </div>
     </div>

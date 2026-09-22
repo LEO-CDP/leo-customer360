@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from leo_customer360_dao.config import settings
 from core.database import get_db
-from leo_customer360_dao.models.identity import CdpScoringModel
+from leo_customer360_dao.models.identity import CdpAiAgent
 from leo_customer360_dao.models.system import SysDataSource
 from core.repositories.metadata_repository import (
     DEFAULT_TENANT_ID,
@@ -26,9 +26,9 @@ from leo_customer360_dao.schemas.system import (
     DataSourceCreate,
     DataSourceRead,
     DataSourceUpdate,
-    ScoringModelCreate,
-    ScoringModelRead,
-    ScoringModelUpdate,
+    AiAgentCreate,
+    AiAgentRead,
+    AiAgentUpdate,
 )
 
 metadata_router = APIRouter(prefix="/metadata", tags=["System Metadata"])
@@ -157,17 +157,18 @@ def delete_metadata_data_source(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@metadata_router.get("/scoring-models", response_model=list[ScoringModelRead])
-def list_metadata_scoring_models(
+@metadata_router.get("/ai-agents", response_model=list[AiAgentRead])
+@metadata_router.get("/scoring-models", response_model=list[AiAgentRead], include_in_schema=False)
+def list_metadata_ai_agents(
     status: str | None = None,
     model_type: str | None = None,
     skip: int = 0,
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
     repository: MetadataRepository = Depends(get_metadata_repository),
-) -> list[CdpScoringModel]:
-    """Returns catalog rows from ``cdp_scoring_models``."""
+) -> list[CdpAiAgent]:
+    """Returns model and task-agent rows from ``cdp_ai_agents``."""
     try:
-        return repository.list_scoring_models(
+        return repository.list_ai_agents(
             status=status,
             model_type=model_type,
             skip=skip,
@@ -177,47 +178,51 @@ def list_metadata_scoring_models(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-@metadata_router.get("/scoring-models/{scoring_model_name}", response_model=ScoringModelRead)
-def get_metadata_scoring_model(
-    scoring_model_name: str,
+@metadata_router.get("/ai-agents/{agent_code}", response_model=AiAgentRead)
+@metadata_router.get("/scoring-models/{agent_code}", response_model=AiAgentRead, include_in_schema=False)
+def get_metadata_ai_agent(
+    agent_code: str,
     repository: MetadataRepository = Depends(get_metadata_repository),
-) -> CdpScoringModel:
+) -> CdpAiAgent:
     try:
-        return repository.get_scoring_model(scoring_model_name)
+        return repository.get_ai_agent(agent_code)
     except MetadataNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@metadata_router.post("/scoring-models", response_model=ScoringModelRead, status_code=201)
-def create_metadata_scoring_model(
-    payload: ScoringModelCreate,
+@metadata_router.post("/ai-agents", response_model=AiAgentRead, status_code=201)
+@metadata_router.post("/scoring-models", response_model=AiAgentRead, status_code=201, include_in_schema=False)
+def create_metadata_ai_agent(
+    payload: AiAgentCreate,
     repository: MetadataRepository = Depends(get_metadata_repository),
-) -> CdpScoringModel:
+) -> CdpAiAgent:
     try:
-        return repository.create_scoring_model(payload.model_dump())
+        return repository.create_ai_agent(payload.model_dump())
     except MetadataConflictError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@metadata_router.patch("/scoring-models/{scoring_model_name}", response_model=ScoringModelRead)
-def update_metadata_scoring_model(
-    scoring_model_name: str,
-    payload: ScoringModelUpdate,
+@metadata_router.patch("/ai-agents/{agent_code}", response_model=AiAgentRead)
+@metadata_router.patch("/scoring-models/{agent_code}", response_model=AiAgentRead, include_in_schema=False)
+def update_metadata_ai_agent(
+    agent_code: str,
+    payload: AiAgentUpdate,
     repository: MetadataRepository = Depends(get_metadata_repository),
-) -> CdpScoringModel:
+) -> CdpAiAgent:
     try:
-        return repository.update_scoring_model(scoring_model_name, payload.model_dump(exclude_unset=True))
+        return repository.update_ai_agent(agent_code, payload.model_dump(exclude_unset=True))
     except MetadataNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@metadata_router.delete("/scoring-models/{scoring_model_name}", status_code=204)
-def delete_metadata_scoring_model(
-    scoring_model_name: str,
+@metadata_router.delete("/ai-agents/{agent_code}", status_code=204)
+@metadata_router.delete("/scoring-models/{agent_code}", status_code=204, include_in_schema=False)
+def delete_metadata_ai_agent(
+    agent_code: str,
     repository: MetadataRepository = Depends(get_metadata_repository),
 ) -> None:
     try:
-        repository.delete_scoring_model(scoring_model_name)
+        repository.delete_ai_agent(agent_code)
     except MetadataNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

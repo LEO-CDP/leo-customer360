@@ -364,9 +364,9 @@ class ProfileAttributeBase(BaseModel):
     blocked_values: list = Field(default_factory=lambda: ["null", "-1", "anonymous", "void", "abc123"])
     blocked_patterns: Optional[list[str]] = Field(default_factory=lambda: ["^[0-]*$"])
 
-    is_scoring_model: bool = False
-    scoring_model_name: Optional[str] = None
-    scoring_model_version: Optional[str] = None
+    is_ai_agent: bool = False
+    agent_code: Optional[str] = None
+    agent_version: Optional[str] = None
     value_type: Optional[str] = None
     value_min: Optional[Decimal] = None
     value_max: Optional[Decimal] = None
@@ -399,9 +399,9 @@ class ProfileAttributeUpdate(BaseModel):
     limit_timeframe: Optional[str] = None
     blocked_values: Optional[list] = None
     blocked_patterns: Optional[list[str]] = None
-    is_scoring_model: Optional[bool] = None
-    scoring_model_name: Optional[str] = None
-    scoring_model_version: Optional[str] = None
+    is_ai_agent: Optional[bool] = None
+    agent_code: Optional[str] = None
+    agent_version: Optional[str] = None
     value_type: Optional[str] = None
     value_min: Optional[Decimal] = None
     value_max: Optional[Decimal] = None

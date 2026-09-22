@@ -1,7 +1,7 @@
 /* Customer 360 Admin -- placeholder routes.
  *
  * Registers a full listing+detail route pair for every tab/entity that
- * doesn't have a real API-backed view yet: scoring models,
+ * doesn't have a real API-backed view yet: AI agents,
  * analytics reports and admin user logins. Each is wired into
  * C360.router exactly like the real views in list-view.js/segments-view.js
  * are, so replacing a placeholder with a real view later is just a matter

@@ -30,3 +30,9 @@ Repository = "https://github.com/LEO-CDP/leo-customer360/tree/main/customer360-a
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["leo_customer360_agent*"]
+
+# ADDED: Suppress the harmless Starlette/AnyIO deprecation warning during tests
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning"
+]

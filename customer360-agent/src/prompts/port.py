@@ -44,7 +44,11 @@ class PromptTemplate:
 
     def render(self, params: Mapping[str, object] | None = None) -> str:
         p = dict(params or {})
-        missing = [v for v in self.required_vars if v not in p]
+        # required_vars also carries the agent's declared runtime context. Only
+        # variables that are actual ``$name`` placeholders in this body must be
+        # supplied to render; prompt bodies without placeholders can be used by
+        # callers that append context separately.
+        missing = [v for v in declared_vars(self.body) if v not in p]
         if missing:
             raise ValueError(f"prompt {self.key!r} missing params: {', '.join(missing)}")
         return Template(self.body).safe_substitute(p)
@@ -57,3 +61,18 @@ class PromptStore(Protocol):
     def refresh(self) -> None: ...
 
     def pinned(self) -> dict[str, int]: ...
+
+    def publish(
+        self,
+        key: str,
+        body: str,
+        *,
+        engine: str = NONE,
+        note: str = "",
+        created_by: str = "admin",
+        required_vars: tuple[str, ...] | None = None,
+    ) -> int: ...
+
+    def rollback(self, key: str, version: int) -> int: ...
+
+    def history(self, key: str, limit: int = 20) -> list[dict]: ...

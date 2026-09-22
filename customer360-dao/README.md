@@ -151,7 +151,8 @@ resolution.
 - `CdpProfileMergeHistory`: profile merge audit history
 - `CdpCustomerPersona`, `CdpPersonaArchetype`, `CdpPersonaFeature`,
   `CdpPersonaHistory`, `CdpPersonaScoreDetail`: persona data
-- `CdpScoringModel`: scoring model metadata
+- `CdpAiAgent`: unified ML, rules-engine, and task-agent metadata, including
+  current prompt instructions and JSONB prompt revision history
 - `CdpIdResolutionStatus`: identity-resolution runtime state
 
 ### CRM models: `models.crm`

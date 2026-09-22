@@ -32,8 +32,9 @@ For a fresh database, run the SQL files in this order:
 
 1. `database-schema.sql`
 2. `init-core-database.sql`
-3. `data-view-for-llm.sql`
-4. `migrations/*.sql`, in filename order
+3. `init-prompt-store-seed.sql`
+4. `data-view-for-llm.sql`
+5. `migrations/*.sql`, in filename order
 
 The deployment helper [run-sql.sh](../deployments/postgres/run-sql.sh) applies
 that order automatically after the repository's PostgreSQL bootstrap scripts.
@@ -45,6 +46,7 @@ Example for a local database:
 ```bash
 psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/database-schema.sql
 psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/init-core-database.sql
+psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/init-prompt-store-seed.sql
 psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/data-view-for-llm.sql
 for migration in customer360-database/migrations/*.sql; do
 	psql -v ON_ERROR_STOP=1 -d customer360 -f "$migration"
@@ -147,8 +149,9 @@ conditions are present.
 - `cdp_persona_config` stores typed runtime scoring thresholds and weights.
 - `cdp_profile_attributes` is the governed attribute catalog used by CIR,
 	segmentation, and scoring metadata.
-- `cdp_scoring_models` registers scoring and generative models referenced by
-	profile attributes.
+- `cdp_ai_agents` is the single registry for scoring models, rule engines, and
+	task-oriented agents. It also stores current prompt instructions and the
+	append-only `prompt_versions` JSONB history used by `customer360-agent`.
 - `cdp_event_catalog` defines the cross-domain event vocabulary.
 - `cdp_content_items` stores personalized content candidates.
 - `cdp_segments` stores audience rules, generated SQL, processing source, and

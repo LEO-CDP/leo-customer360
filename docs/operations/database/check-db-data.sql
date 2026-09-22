@@ -208,10 +208,10 @@ SELECT
 FROM customer360.cdp_profile_attributes
 UNION ALL
 SELECT
-	'cdp_scoring_models',
+	'cdp_ai_agents',
 	COUNT(*)::bigint,
 	COUNT(*) FILTER (WHERE status = 'ACTIVE')::bigint
-FROM customer360.cdp_scoring_models
+FROM customer360.cdp_ai_agents
 ORDER BY table_name;
 
 -- ---------------------------------------------------------------------------

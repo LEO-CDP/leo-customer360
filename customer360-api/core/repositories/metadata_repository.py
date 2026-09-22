@@ -20,7 +20,7 @@ from core.cache import get_redis_client
 from leo_customer360_dao.config import settings
 from leo_customer360_dao.crud.base import CRUDBase
 from core.database import engine
-from leo_customer360_dao.models.identity import CdpScoringModel
+from leo_customer360_dao.models.identity import CdpAiAgent
 from leo_customer360_dao.models.system import SysDataSource, SysDomain, SysTenantDomain
 from core.utils.dagster_client import DagsterClient
 
@@ -52,7 +52,7 @@ class MetadataRepository:
 	def __init__(self, session: Optional[Session] = None):
 		self.session = session
 		self._data_source_crud = CRUDBase(SysDataSource)
-		self._scoring_model_crud = CRUDBase(CdpScoringModel)
+		self._ai_agent_crud = CRUDBase(CdpAiAgent)
 
 	def _require_session(self) -> Session:
 		if self.session is None:
@@ -307,16 +307,16 @@ class MetadataRepository:
 		obj = self.get_data_source(data_source_id)
 		self._data_source_crud.delete(self._require_session(), obj)
 
-	def list_scoring_models(
+	def list_ai_agents(
 		self,
 		status: str | None = None,
 		model_type: str | None = None,
 		skip: int = 0,
 		limit: int = 100,
-	) -> list[CdpScoringModel]:
+	) -> list[CdpAiAgent]:
 		session = self._require_session()
 		try:
-			return self._scoring_model_crud.list(
+			return self._ai_agent_crud.list(
 				session,
 				status=status,
 				model_type=model_type,
@@ -325,28 +325,63 @@ class MetadataRepository:
 				sort_by="updated_at DESC",
 			)
 		except Exception as exc:  # noqa: BLE001
-			logger.warning("Failed to load scoring model metadata from PostgreSQL", exc_info=True)
-			raise MetadataRepositoryError(f"Scoring model metadata unavailable: {exc}") from exc
+			logger.warning("Failed to load AI-agent metadata from PostgreSQL", exc_info=True)
+			raise MetadataRepositoryError(f"AI-agent metadata unavailable: {exc}") from exc
 
-	def get_scoring_model(self, scoring_model_name: str) -> CdpScoringModel:
+	def get_ai_agent(self, agent_code: str) -> CdpAiAgent:
 		session = self._require_session()
-		obj = self._scoring_model_crud.get(session, scoring_model_name)
+		obj = self._ai_agent_crud.get(session, agent_code)
 		if obj is None:
-			raise MetadataNotFoundError(f"CdpScoringModel '{scoring_model_name}' not found")
+			raise MetadataNotFoundError(f"CdpAiAgent '{agent_code}' not found")
 		return obj
 
-	def create_scoring_model(self, payload: dict[str, Any]) -> CdpScoringModel:
+	def create_ai_agent(self, payload: dict[str, Any]) -> CdpAiAgent:
 		session = self._require_session()
-		if self._scoring_model_crud.get(session, payload["scoring_model_name"]) is not None:
+		if self._ai_agent_crud.get(session, payload["agent_code"]) is not None:
 			raise MetadataConflictError(
-				f"CdpScoringModel '{payload['scoring_model_name']}' already exists"
+				f"CdpAiAgent '{payload['agent_code']}' already exists"
 			)
-		return self._scoring_model_crud.create(session, payload)
+		data = dict(payload)
+		if data.get("prompt_key") and not data.get("system_instructions"):
+			raise MetadataConflictError(
+				"Prompt-backed agents with a prompt_key must specify system_instructions"
+			)
+		if data.get("system_instructions") and not data.get("prompt_versions"):
+			data["prompt_versions"] = [self._prompt_revision(data, 1)]
+		return self._ai_agent_crud.create(session, data)
 
-	def update_scoring_model(self, scoring_model_name: str, payload: dict[str, Any]) -> CdpScoringModel:
-		obj = self.get_scoring_model(scoring_model_name)
-		return self._scoring_model_crud.update(self._require_session(), obj, payload)
+	def update_ai_agent(self, agent_code: str, payload: dict[str, Any]) -> CdpAiAgent:
+		obj = self.get_ai_agent(agent_code)
+		data = dict(payload)
+		if "system_instructions" in data and data["system_instructions"] != obj.system_instructions:
+			target_version = 1 if not obj.prompt_versions else int(obj.instruction_version or 0) + 1
+			revision_payload = {
+				**data,
+				"required_variables": data.get("required_variables", obj.required_variables or []),
+				"instruction_updated_by": data.get(
+					"instruction_updated_by", obj.instruction_updated_by or "api"
+				),
+				"instruction_note": data.get("instruction_note", obj.instruction_note or "api update"),
+			}
+			data["prompt_versions"] = list(obj.prompt_versions or []) + [
+				self._prompt_revision(revision_payload, target_version)
+			]
+			data["instruction_version"] = target_version
+			data["instruction_updated_by"] = revision_payload["instruction_updated_by"]
+			data["instruction_note"] = revision_payload["instruction_note"]
+		return self._ai_agent_crud.update(self._require_session(), obj, data)
 
-	def delete_scoring_model(self, scoring_model_name: str) -> None:
-		obj = self.get_scoring_model(scoring_model_name)
-		self._scoring_model_crud.delete(self._require_session(), obj)
+	@staticmethod
+	def _prompt_revision(payload: dict[str, Any], version: int) -> dict[str, Any]:
+		return {
+			"version": version,
+			"body": payload.get("system_instructions") or "",
+			"required_vars": payload.get("required_variables") or [],
+			"created_at": datetime.now(timezone.utc).isoformat(),
+			"created_by": payload.get("instruction_updated_by") or "api",
+			"note": payload.get("instruction_note") or "api update",
+		}
+
+	def delete_ai_agent(self, agent_code: str) -> None:
+		obj = self.get_ai_agent(agent_code)
+		self._ai_agent_crud.delete(self._require_session(), obj)

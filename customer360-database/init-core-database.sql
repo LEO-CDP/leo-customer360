@@ -211,38 +211,6 @@ ON CONFLICT (event_name) DO UPDATE SET
     updated_at            = now();
 
 
----------------------------------------------------
--- SCORING MODELS REGISTRY: SEED DATA
----------------------------------------------------
--- Must run before the cdp_profile_attributes seeds below: any row there with
--- is_scoring_model=TRUE sets scoring_model_name, which is enforced by
--- fk_cdp_pa_scoring_model (database-schema.sql) to reference a real row here
--- -- an unseeded model name would make that whole INSERT fail.
-INSERT INTO customer360.cdp_scoring_models (
-    scoring_model_name, display_name, description, model_type, status,
-    schedule_definition, input_features, hyperparameters
-) VALUES
-    ('lead_scoring_model', 'Lead Conversion Scoring Model', 'Predicts lead_conversion_probability/lead_grade for prospect-to-customer conversion.', 'classification', 'ACTIVE', '0 1 * * *', ARRAY['last_activity_at', 'source_systems', 'segmentation_tags'], '{}'::jsonb),
-    ('churn_scoring_model', 'Churn Risk Scoring Model', 'Predicts churn_probability/churn_risk_tier from engagement drop-offs.', 'classification', 'ACTIVE', '0 2 * * *', ARRAY['last_activity_at', 'historical_clv'], '{}'::jsonb),
-    ('clv_scoring_model', 'Customer Lifetime Value Model', 'Predicts predictive_clv/clv_segment.', 'regression', 'ACTIVE', '0 3 * * 0', ARRAY['historical_clv'], '{}'::jsonb),
-    ('cx_scoring_model', 'Customer Experience Scoring Model', 'Computes engagement_score/latest_nps_score/average_csat/overall_sentiment_score.', 'regression', 'ACTIVE', '0 * * * *', ARRAY['latest_nps_score', 'average_csat'], '{}'::jsonb),
-    ('data_quality_model', 'Profile Data Quality Model', 'Computes profile_completeness_score for data-quality monitoring.', 'rules_engine', 'ACTIVE', '0 1 * * *', ARRAY['email', 'phone_number', 'device_ids'], '{}'::jsonb),
-    ('identity_resolution_scoring_model', 'Identity Resolution Confidence Model', 'Computes identity_confidence_score for CIR match quality.', 'classification', 'ACTIVE', NULL, ARRAY['email', 'phone_number', 'device_ids'], '{}'::jsonb),
-    ('lifecycle_stage_model', 'Lifecycle Stage Model', 'Derives lifecycle_stage (prospect/lead/customer/vip/dormant/churn_risk).', 'rules_engine', 'ACTIVE', '0 1 * * *', ARRAY['customer_since', 'last_activity_at', 'churn_risk_tier'], '{}'::jsonb),
-    ('persona_summary_generator', 'Persona Summary Generator', 'LLM-generated narrative persona_summary for each profile.', 'generative_llm', 'ACTIVE', NULL, ARRAY['attributes', 'segmentation_tags'], '{}'::jsonb),
-    ('persona_risk_score', 'Persona Risk Score Model', 'Banking risk-persona input derived from kyc_status/risk_segment.', 'classification', 'ACTIVE', '0 4 * * *', ARRAY['kyc_status', 'risk_segment'], '{}'::jsonb),
-    ('persona_loyalty_score', 'Persona Loyalty Score Model', 'Retail loyalty-persona input derived from membership_tier.', 'classification', 'ACTIVE', NULL, ARRAY['membership_tier'], '{}'::jsonb)
-ON CONFLICT (scoring_model_name) DO UPDATE SET
-    display_name         = EXCLUDED.display_name,
-    description          = EXCLUDED.description,
-    model_type           = EXCLUDED.model_type,
-    status               = EXCLUDED.status,
-    schedule_definition  = EXCLUDED.schedule_definition,
-    input_features       = EXCLUDED.input_features,
-    hyperparameters      = EXCLUDED.hyperparameters,
-    updated_at           = now();
-
-
 -- ============================================================================
 -- Seed customer360.cdp_ai_agents
 -- ============================================================================
@@ -349,6 +317,27 @@ INSERT INTO customer360.cdp_ai_agents (
     ),
 
     (
+        'identity_resolution_scoring',
+        'Identity Resolution Confidence Agent',
+        'Computes identity_confidence_score for CIR match quality.',
+        'classification',
+        'identity-resolution-confidence-v1',
+        'ACTIVE',
+        NULL,
+        ARRAY[
+            'email',
+            'phone_number',
+            'device_ids'
+        ],
+        '{}'::jsonb,
+        NULL,
+        ARRAY[]::TEXT[],
+        1,
+        'seed',
+        'initial seed'
+    ),
+
+    (
         'data_quality',
         'Profile Data Quality Agent',
         'Computes profile_completeness_score for data-quality monitoring.',
@@ -395,7 +384,7 @@ INSERT INTO customer360.cdp_ai_agents (
         'Persona Summary Generator',
         'Generates an LLM-based narrative persona_summary for each profile.',
         'generative_llm',
-        'gpt-5.6',
+        'openai/gpt-5.6-luna',
         'ACTIVE',
         NULL,
         ARRAY[
@@ -461,7 +450,7 @@ INSERT INTO customer360.cdp_ai_agents (
         'Campaign Planning Agent',
         'Creates a marketing campaign plan from a target segment, marketer objective, optional constraints, and a closed candidate content set.',
         'generative_llm',
-        'gpt-5.6',
+        'openai/gpt-5.6-luna',
         'ACTIVE',
         NULL,
         ARRAY[
@@ -496,7 +485,7 @@ INSERT INTO customer360.cdp_ai_agents (
         'Zalo ZNS Campaign Planning Agent',
         'Selects one approved ZNS template and populates all required parameters for a target segment and campaign objective.',
         'generative_llm',
-        'gpt-5.6',
+        'openai/gpt-5.6-luna',
         'ACTIVE',
         NULL,
         ARRAY[
@@ -564,9 +553,9 @@ INSERT INTO customer360.cdp_profile_attributes (
     matching_rule,
     matching_threshold,
     consolidation_rule,
-    is_scoring_model,
-    scoring_model_name,
-    scoring_model_version,
+    is_ai_agent,
+    agent_code,
+    agent_version,
     value_type,
     value_min,
     value_max,
@@ -642,31 +631,31 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('customer_since', 'customer_since', 'Customer Since', 'Date the profile first converted from lead/prospect to paying customer.', 'LIFECYCLE', 'cdp_master_profiles', 'DATE', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, NULL, 391),
     ('last_activity_at', 'last_activity_at', 'Last Activity At', 'Timestamp of the most recent activity across any channel; updated continuously by the streaming pipeline.', 'LIFECYCLE', 'cdp_master_profiles', 'TIMESTAMP', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, 'realtime', 392),
     ('preferred_channel', 'preferred_channel', 'Preferred Channel', 'Channel the customer engages with most (e.g. Mobile App, Website, Internet Banking App); used for recommendation/next-best-action.', 'LIFECYCLE', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, 'daily', 393),
-    ('lifecycle_stage', 'lifecycle_stage', 'Lifecycle Stage', 'Current stage in the prospect-to-customer journey (prospect, lead, customer, vip, dormant, churn_risk).', 'LIFECYCLE', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'lifecycle_stage_model', 'v1', 'tier', NULL, NULL, 'daily', 394),
+    ('lifecycle_stage', 'lifecycle_stage', 'Lifecycle Stage', 'Current stage in the prospect-to-customer journey (prospect, lead, customer, vip, dormant, churn_risk).', 'LIFECYCLE', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'lifecycle_stage', 'v1', 'tier', NULL, NULL, 'daily', 394),
     ('persona_summary', 'persona_summary', 'Persona Summary', 'Longer narrative summary of the customer''s behavior/preferences, usually generated by an LLM or the segmentation pipeline; complements persona_name.', 'LIFECYCLE', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'persona_summary_generator', 'v1', 'label', NULL, NULL, 'batch', 395),
 
     -- LEAD & CONVERSION SCORING
-    ('lead_conversion_probability', 'lead_conversion_probability', 'Lead Conversion Probability', 'ML-predicted probability the profile converts or purchases a new product.', 'LEAD_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'lead_scoring_model', 'v1', 'probability', 0, 1, 'daily', 400),
-    ('lead_grade', 'lead_grade', 'Lead Grade', 'Categorical grade (e.g. A/B, Hot/Cold) derived from lead_conversion_probability for quick segmentation.', 'LEAD_SCORING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'lead_scoring_model', 'v1', 'tier', NULL, NULL, 'daily', 410),
+    ('lead_conversion_probability', 'lead_conversion_probability', 'Lead Conversion Probability', 'ML-predicted probability the profile converts or purchases a new product.', 'LEAD_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'lead_scoring', 'v1', 'probability', 0, 1, 'daily', 400),
+    ('lead_grade', 'lead_grade', 'Lead Grade', 'Categorical grade (e.g. A/B, Hot/Cold) derived from lead_conversion_probability for quick segmentation.', 'LEAD_SCORING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'lead_scoring', 'v1', 'tier', NULL, NULL, 'daily', 410),
 
     -- CHURN SCORING
-    ('churn_probability', 'churn_probability', 'Churn Probability', 'ML-predicted probability the user stops using the service/bank.', 'CHURN_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'churn_scoring_model', 'v1', 'probability', 0, 1, 'daily', 420),
-    ('churn_risk_tier', 'churn_risk_tier', 'Churn Risk Tier', 'Bucketized churn risk (low/medium/high/critical) for marketing automation.', 'CHURN_SCORING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'churn_scoring_model', 'v1', 'tier', NULL, NULL, 'daily', 430),
+    ('churn_probability', 'churn_probability', 'Churn Probability', 'ML-predicted probability the user stops using the service/bank.', 'CHURN_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'churn_scoring', 'v1', 'probability', 0, 1, 'daily', 420),
+    ('churn_risk_tier', 'churn_risk_tier', 'Churn Risk Tier', 'Bucketized churn risk (low/medium/high/critical) for marketing automation.', 'CHURN_SCORING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'churn_scoring', 'v1', 'tier', NULL, NULL, 'daily', 430),
 
     -- CUSTOMER LIFETIME VALUE (CLV) SCORING
     ('historical_clv', 'historical_clv', 'Historical CLV', 'Actual realized revenue/profit to date.', 'CLV_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'currency', 0, NULL, 'weekly', 440),
-    ('predictive_clv', 'predictive_clv', 'Predictive CLV', 'ML-predicted future revenue generation.', 'CLV_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'clv_scoring_model', 'v1', 'currency', 0, NULL, 'weekly', 450),
-    ('clv_segment', 'clv_segment', 'CLV Segment', 'Combined or segmented CLV tier (e.g. high/medium/low value).', 'CLV_SCORING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'clv_scoring_model', 'v1', 'tier', NULL, NULL, 'weekly', 460),
+    ('predictive_clv', 'predictive_clv', 'Predictive CLV', 'ML-predicted future revenue generation.', 'CLV_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'clv_scoring', 'v1', 'currency', 0, NULL, 'weekly', 450),
+    ('clv_segment', 'clv_segment', 'CLV Segment', 'Combined or segmented CLV tier (e.g. high/medium/low value).', 'CLV_SCORING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'clv_scoring', 'v1', 'tier', NULL, NULL, 'weekly', 460),
 
     -- CUSTOMER EXPERIENCE (CX) & ENGAGEMENT SCORING
-    ('engagement_score', 'engagement_score', 'Engagement Score', 'Overall interaction frequency/depth score.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring_model', 'v1', 'score', 0, 100, 'daily', 470),
-    ('latest_nps_score', 'latest_nps_score', 'Latest NPS Score', 'Most recent Net Promoter Score.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring_model', 'v1', 'score', 0, 10, 'event_driven', 480),
-    ('average_csat', 'average_csat', 'Average CSAT', 'Average Customer Satisfaction Score across interactions.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring_model', 'v1', 'score', 0, 5, 'daily', 490),
-    ('overall_sentiment_score', 'overall_sentiment_score', 'Overall Sentiment Score', 'NLP-derived sentiment from support tickets and social mentions.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring_model', 'v1', 'sentiment', -1, 1, 'daily', 500),
+    ('engagement_score', 'engagement_score', 'Engagement Score', 'Overall interaction frequency/depth score.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'score', 0, 100, 'daily', 470),
+    ('latest_nps_score', 'latest_nps_score', 'Latest NPS Score', 'Most recent Net Promoter Score.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'score', 0, 10, 'event_driven', 480),
+    ('average_csat', 'average_csat', 'Average CSAT', 'Average Customer Satisfaction Score across interactions.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'score', 0, 5, 'daily', 490),
+    ('overall_sentiment_score', 'overall_sentiment_score', 'Overall Sentiment Score', 'NLP-derived sentiment from support tickets and social mentions.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'sentiment', -1, 1, 'daily', 500),
 
     -- DATA QUALITY & IDENTITY RESOLUTION SCORING
-    ('profile_completeness_score', 'profile_completeness_score', 'Profile Completeness Score', 'Percentage of critical profile fields filled out.', 'DATA_QUALITY', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'data_quality_model', 'v1', 'percentage', 0, 100, 'daily', 510),
-    ('identity_confidence_score', 'identity_confidence_score', 'Identity Confidence Score', 'Confidence score of the identity-stitching (CIR) algorithm.', 'DATA_QUALITY', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'identity_resolution_scoring_model', 'v1', 'probability', 0, 1, 'realtime', 520),
+    ('profile_completeness_score', 'profile_completeness_score', 'Profile Completeness Score', 'Percentage of critical profile fields filled out.', 'DATA_QUALITY', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'data_quality', 'v1', 'percentage', 0, 100, 'daily', 510),
+    ('identity_confidence_score', 'identity_confidence_score', 'Identity Confidence Score', 'Confidence score of the identity-stitching (CIR) algorithm.', 'DATA_QUALITY', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'identity_resolution_scoring', 'v1', 'probability', 0, 1, 'realtime', 520),
     ('model_versions', 'model_versions', 'Model Versions', 'Tracks which ML model versions generated the current scores, e.g. {"churn_model":"v2.1","clv_model":"v1.4"}.', 'DATA_QUALITY', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 530),
     ('scores_updated_at', 'scores_updated_at', 'Scores Updated At', 'Last time the batch or streaming pipelines updated the scoring fields.', 'DATA_QUALITY', 'cdp_master_profiles', 'TIMESTAMP', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, NULL, 540)
 
@@ -685,9 +674,9 @@ ON CONFLICT (attribute_internal_code) DO UPDATE SET
     matching_rule          = EXCLUDED.matching_rule,
     matching_threshold     = EXCLUDED.matching_threshold,
     consolidation_rule     = EXCLUDED.consolidation_rule,
-    is_scoring_model       = EXCLUDED.is_scoring_model,
-    scoring_model_name     = EXCLUDED.scoring_model_name,
-    scoring_model_version  = EXCLUDED.scoring_model_version,
+    is_ai_agent       = EXCLUDED.is_ai_agent,
+    agent_code        = EXCLUDED.agent_code,
+    agent_version     = EXCLUDED.agent_version,
     value_type             = EXCLUDED.value_type,
     value_min              = EXCLUDED.value_min,
     value_max              = EXCLUDED.value_max,
@@ -713,7 +702,7 @@ ON CONFLICT (attribute_internal_code) DO UPDATE SET
 -- property_types_of_interest, preferred_location_codes,
 -- travel_loyalty_program_id, preferred_travel_class, media_subscription_id,
 -- preferred_content_genres, student_id, institution_name) are catalog-only
--- metadata today (is_identity_resolution=FALSE, is_scoring_model=FALSE) --
+-- metadata today (is_identity_resolution=FALSE, is_ai_agent=FALSE) --
 -- not yet wired into any CIR matching or scoring logic.
 -- is_segmentable=TRUE for scalar (non-array, non-raw-PII-identifier)
 -- attributes only: the Audience Builder field picker (GET /segments/
@@ -742,9 +731,9 @@ INSERT INTO customer360.cdp_profile_attributes (
     matching_rule,
     matching_threshold,
     consolidation_rule,
-    is_scoring_model,
-    scoring_model_name,
-    scoring_model_version,
+    is_ai_agent,
+    agent_code,
+    agent_version,
     value_type,
     value_min,
     value_max,
@@ -794,9 +783,9 @@ ON CONFLICT (attribute_internal_code) DO UPDATE SET
     matching_rule          = EXCLUDED.matching_rule,
     matching_threshold     = EXCLUDED.matching_threshold,
     consolidation_rule     = EXCLUDED.consolidation_rule,
-    is_scoring_model       = EXCLUDED.is_scoring_model,
-    scoring_model_name     = EXCLUDED.scoring_model_name,
-    scoring_model_version  = EXCLUDED.scoring_model_version,
+    is_ai_agent       = EXCLUDED.is_ai_agent,
+    agent_code        = EXCLUDED.agent_code,
+    agent_version     = EXCLUDED.agent_version,
     value_type             = EXCLUDED.value_type,
     value_min              = EXCLUDED.value_min,
     value_max              = EXCLUDED.value_max,

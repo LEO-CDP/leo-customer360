@@ -2,7 +2,7 @@
  *
  * Modeled directly on scoring-model-view.js: a real consumer of the shared
  * C360.DataTableView component (static/js/common/data-table-view.js) and the
- * same Add/Edit modal pattern. Unlike scoring models, GET /users returns a
+ * same Add/Edit modal pattern. Unlike AI agents, GET /users returns a
  * paginated envelope ({ total, skip, limit, items }) rather than a bare
  * array, so `fetch` unwraps `.items` before handing rows to the table (see
  * campaign-view.js for the same unwrap idiom). Filtering/searching happens

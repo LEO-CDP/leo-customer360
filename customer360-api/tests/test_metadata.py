@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 import core.repositories.metadata_repository as mr
 from core.database import get_db
-from leo_customer360_dao.models.identity import CdpScoringModel
+from leo_customer360_dao.models.identity import CdpAiAgent
 from leo_customer360_dao.models.system import SysDataSource
 from core.routers.metadata_api import all_metadata_routers
 
@@ -256,57 +256,94 @@ class SysMetadataTests(unittest.TestCase):
         delete_response = TestClient(self.app).delete(f"/metadata/data-sources/{data_source.data_source_id}")
         self.assertEqual(delete_response.status_code, 204)
 
-    def test_metadata_scoring_models_list(self):
+    def test_metadata_ai_agents_list(self):
         mock_db = MagicMock()
         mock_db.execute.return_value.scalars.return_value.all.return_value = [
-            CdpScoringModel(
-                scoring_model_name="churn_prediction_v2",
+            CdpAiAgent(
+                agent_code="churn_prediction_v2",
                 display_name="XGBoost Churn Predictor",
                 model_type="classification",
                 status="ACTIVE",
+                prompt_engine="none",
+                instruction_version=1,
+                instruction_updated_by="system",
+                instruction_note="",
+                prompt_versions=[],
             )
         ]
         self.app.dependency_overrides[get_db] = lambda: mock_db
 
-        response = TestClient(self.app).get("/metadata/scoring-models")
+        response = TestClient(self.app).get("/metadata/ai-agents")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(len(body), 1)
-        self.assertEqual(body[0]["scoring_model_name"], "churn_prediction_v2")
+        self.assertEqual(body[0]["agent_code"], "churn_prediction_v2")
         self.assertEqual(body[0]["display_name"], "XGBoost Churn Predictor")
         self.assertEqual(body[0]["model_type"], "classification")
 
         executed_stmt = mock_db.execute.call_args.args[0]
         rendered_sql = str(executed_stmt)
         self.assertIn("ORDER BY", rendered_sql)
-        self.assertIn("cdp_scoring_models.updated_at DESC", rendered_sql)
+        self.assertIn("cdp_ai_agents.updated_at DESC", rendered_sql)
 
-    def test_metadata_scoring_model_get_success_and_not_found(self):
-        model = CdpScoringModel(
-            scoring_model_name="clv_regression_v1",
+    def test_metadata_legacy_scoring_models_alias_endpoints(self):
+        mock_db = MagicMock()
+        agent = CdpAiAgent(
+            agent_code="churn_prediction_v2",
+            display_name="XGBoost Churn Predictor",
+            model_type="classification",
+            status="ACTIVE",
+            prompt_engine="none",
+            instruction_version=1,
+            instruction_updated_by="system",
+            instruction_note="",
+            prompt_versions=[],
+        )
+        mock_db.execute.return_value.scalars.return_value.all.return_value = [agent]
+        mock_db.get.side_effect = lambda model_cls, pk: agent if pk == "churn_prediction_v2" else None
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        # Test GET /metadata/scoring-models
+        list_res = TestClient(self.app).get("/metadata/scoring-models")
+        self.assertEqual(list_res.status_code, 200)
+        self.assertEqual(list_res.json()[0]["agent_code"], "churn_prediction_v2")
+
+        # Test GET /metadata/scoring-models/{agent_code}
+        get_res = TestClient(self.app).get("/metadata/scoring-models/churn_prediction_v2")
+        self.assertEqual(get_res.status_code, 200)
+        self.assertEqual(get_res.json()["agent_code"], "churn_prediction_v2")
+
+    def test_metadata_ai_agent_get_success_and_not_found(self):
+        model = CdpAiAgent(
+            agent_code="clv_regression_v1",
             display_name="Customer Lifetime Value",
             model_type="regression",
             status="ACTIVE",
+            prompt_engine="none",
+            instruction_version=1,
+            instruction_updated_by="system",
+            instruction_note="",
+            prompt_versions=[],
         )
         mock_db = MagicMock()
         mock_db.get.side_effect = lambda model_cls, pk: model if pk == "clv_regression_v1" else None
         self.app.dependency_overrides[get_db] = lambda: mock_db
 
-        res = TestClient(self.app).get("/metadata/scoring-models/clv_regression_v1")
+        res = TestClient(self.app).get("/metadata/ai-agents/clv_regression_v1")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["display_name"], "Customer Lifetime Value")
 
-        res_404 = TestClient(self.app).get("/metadata/scoring-models/non_existent")
+        res_404 = TestClient(self.app).get("/metadata/ai-agents/non_existent")
         self.assertEqual(res_404.status_code, 404)
 
-    def test_metadata_scoring_models_create_success_and_duplicate(self):
+    def test_metadata_ai_agents_create_success_and_duplicate(self):
         mock_db = MagicMock()
         mock_db.get.return_value = None
         self.app.dependency_overrides[get_db] = lambda: mock_db
 
         payload = {
-            "scoring_model_name": "new_model_v1",
+            "agent_code": "new_model_v1",
             "display_name": "New Scoring Model",
             "model_type": "classification",
             "status": "ACTIVE",
@@ -315,29 +352,49 @@ class SysMetadataTests(unittest.TestCase):
             "hyperparameters": {"learning_rate": 0.05},
         }
 
-        response = TestClient(self.app).post("/metadata/scoring-models", json=payload)
+        response = TestClient(self.app).post("/metadata/ai-agents", json=payload)
         self.assertEqual(response.status_code, 201)
         res_json = response.json()
-        self.assertEqual(res_json["scoring_model_name"], "new_model_v1")
+        self.assertEqual(res_json["agent_code"], "new_model_v1")
         self.assertEqual(res_json["display_name"], "New Scoring Model")
         self.assertEqual(res_json["input_features"], ["feature_1", "feature_2"])
         self.assertEqual(res_json["hyperparameters"], {"learning_rate": 0.05})
 
         # Test duplicate creation
-        mock_db.get.return_value = CdpScoringModel(
-            scoring_model_name="new_model_v1",
+        mock_db.get.return_value = CdpAiAgent(
+            agent_code="new_model_v1",
             display_name="Existing Model",
             model_type="classification",
+            prompt_engine="none",
+            instruction_version=1,
+            instruction_updated_by="system",
+            instruction_note="",
+            prompt_versions=[],
         )
         dup_response = TestClient(self.app).post("/metadata/scoring-models", json=payload)
         self.assertEqual(dup_response.status_code, 400)
 
-    def test_metadata_scoring_models_update_and_delete(self):
-        model = CdpScoringModel(
-            scoring_model_name="churn_prediction_v2",
+    def test_metadata_ai_agents_update_and_delete(self):
+        model = CdpAiAgent(
+            agent_code="churn_prediction_v2",
             display_name="Old Name",
             model_type="classification",
             status="ACTIVE",
+            prompt_engine="none",
+            system_instructions="Old instruction",
+            instruction_version=1,
+            instruction_updated_by="system",
+            instruction_note="",
+            prompt_versions=[
+                {
+                    "version": 1,
+                    "body": "Old instruction",
+                    "required_vars": [],
+                    "created_at": "2026-09-01T00:00:00Z",
+                    "created_by": "system",
+                    "note": "",
+                }
+            ],
         )
         mock_db = MagicMock()
         mock_db.get.return_value = model
@@ -345,20 +402,149 @@ class SysMetadataTests(unittest.TestCase):
         self.app.dependency_overrides[get_db] = lambda: mock_db
 
         patch_response = TestClient(self.app).patch(
-            "/metadata/scoring-models/churn_prediction_v2",
-            json={"display_name": "Updated Name", "status": "INACTIVE"},
+            "/metadata/ai-agents/churn_prediction_v2",
+            json={
+                "display_name": "Updated Name",
+                "status": "INACTIVE",
+                "system_instructions": "Return a concise churn explanation.",
+                "required_variables": ["profile"],
+                "instruction_updated_by": "reviewer",
+                "instruction_note": "Added explanation contract",
+            },
         )
         self.assertEqual(patch_response.status_code, 200)
         self.assertEqual(patch_response.json()["display_name"], "Updated Name")
         self.assertEqual(patch_response.json()["status"], "INACTIVE")
+        self.assertEqual(model.instruction_version, 2)
+        self.assertEqual(len(model.prompt_versions), 2)
+        self.assertEqual(model.prompt_versions[-1]["created_by"], "reviewer")
 
-        del_response = TestClient(self.app).delete("/metadata/scoring-models/churn_prediction_v2")
+        del_response = TestClient(self.app).delete("/metadata/ai-agents/churn_prediction_v2")
         self.assertEqual(del_response.status_code, 204)
 
         # Delete non-existent model
         mock_db.get.return_value = None
-        del_404 = TestClient(self.app).delete("/metadata/scoring-models/non_existent")
+        del_404 = TestClient(self.app).delete("/metadata/ai-agents/non_existent")
         self.assertEqual(del_404.status_code, 404)
+
+    def test_metadata_ai_agent_update_preserves_context_and_history_is_server_managed(self):
+        model = CdpAiAgent(
+            agent_code="campaign_planner",
+            display_name="Campaign Planner",
+            model_type="generative_llm",
+            status="ACTIVE",
+            prompt_key="campaign.plan.instructions",
+            prompt_engine="none",
+            system_instructions="Original instruction",
+            required_variables=["target_segment", "candidate_content_items"],
+            instruction_version=3,
+            instruction_updated_by="seed",
+            instruction_note="seeded",
+            prompt_versions=[
+                {
+                    "version": 3,
+                    "body": "Original instruction",
+                    "required_vars": ["target_segment", "candidate_content_items"],
+                    "created_by": "seed",
+                }
+            ],
+        )
+        mock_db = MagicMock()
+        mock_db.get.return_value = model
+        mock_db.refresh.side_effect = lambda obj: setattr(obj, "updated_at", datetime.now(timezone.utc))
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).patch(
+            "/metadata/ai-agents/campaign_planner",
+            json={
+                "system_instructions": "Updated instruction",
+                "instruction_updated_by": "reviewer",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(model.instruction_version, 4)
+        self.assertEqual(model.required_variables, ["target_segment", "candidate_content_items"])
+        self.assertEqual(model.prompt_versions[-1]["required_vars"], model.required_variables)
+        self.assertEqual(model.prompt_versions[-1]["created_by"], "reviewer")
+
+    def test_metadata_ai_agent_create_records_initial_prompt_revision(self):
+        mock_db = MagicMock()
+        mock_db.get.return_value = None
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).post(
+            "/metadata/ai-agents",
+            json={
+                "agent_code": "profile_summary",
+                "display_name": "Profile Summary",
+                "model_type": "generative_llm",
+                "system_instructions": "Summarize the profile.",
+                "required_variables": ["profile"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        created_payload = mock_db.add.call_args.args[0]
+        self.assertEqual(created_payload.instruction_version, 1)
+        self.assertEqual(created_payload.prompt_versions[0]["body"], "Summarize the profile.")
+        self.assertEqual(created_payload.prompt_versions[0]["required_vars"], ["profile"])
+
+    def test_metadata_ai_agent_create_rejects_prompt_key_without_instructions(self):
+        mock_db = MagicMock()
+        mock_db.get.return_value = None
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).post(
+            "/metadata/ai-agents",
+            json={
+                "agent_code": "agent_no_body",
+                "display_name": "No Body Agent",
+                "model_type": "generative_llm",
+                "prompt_key": "test.missing.body",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("must specify system_instructions", response.json()["detail"])
+
+    def test_metadata_ai_agent_update_without_instruction_change_keeps_version(self):
+        model = CdpAiAgent(
+            agent_code="existing_agent",
+            display_name="Existing Agent",
+            model_type="classification",
+            status="ACTIVE",
+            prompt_engine="none",
+            instruction_version=1,
+            instruction_updated_by="system",
+            instruction_note="",
+            system_instructions="Static instruction",
+            prompt_versions=[{"version": 1, "body": "Static instruction", "required_vars": []}],
+        )
+        mock_db = MagicMock()
+        mock_db.get.return_value = model
+        mock_db.refresh.side_effect = lambda obj: setattr(obj, "updated_at", datetime.now(timezone.utc))
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).patch(
+            "/metadata/ai-agents/existing_agent",
+            json={"display_name": "Renamed Agent"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(model.instruction_version, 1)
+        self.assertEqual(len(model.prompt_versions), 1)
+
+    def test_metadata_ai_agents_filter_by_status_and_model_type(self):
+        mock_db = MagicMock()
+        mock_db.execute.return_value.scalars.return_value.all.return_value = []
+        self.app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(self.app).get(
+            "/metadata/ai-agents?status=ACTIVE&model_type=generative_llm"
+        )
+        self.assertEqual(response.status_code, 200)
+        executed_stmt = str(mock_db.execute.call_args.args[0])
+        self.assertIn("cdp_ai_agents.status = :status_1", executed_stmt)
+        self.assertIn("cdp_ai_agents.model_type = :model_type_1", executed_stmt)
 
     def test_metadata_data_sources_create_rejects_invalid_source_type(self):
         mock_db = MagicMock()

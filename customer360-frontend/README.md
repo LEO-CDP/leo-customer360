@@ -9,7 +9,7 @@ The frontend is intentionally thin: it does not own the business logic or databa
 - Serves the SPA shell and static assets from `base-templates/index.html`
 - Injects runtime config (`apiBase` + tenant id) from environment variables
 - Handles auth/session flows for dev credentials and Keycloak SSO
-- Loads and displays profiles, personas, attributes, scoring models, datasources, and admin metadata
+- Loads and displays profiles, personas, attributes, AI agents, datasources, and admin metadata
 - Renders charts, dashboards, and tables using jQuery + Handlebars + Chart.js
 - Routes the browser via hash-based navigation without a framework build step
 
@@ -183,7 +183,7 @@ The single source of truth for cross-view HTTP traffic is `static/js/common/conf
 - sends `X-User-Id` when available
 - uses JSON for POST/PATCH/PUT bodies instead of form-encoded payloads
 
-The helper is reused across profiles, segments, attributes, scoring models, datasources, and admin management screens.
+The helper is reused across profiles, segments, attributes, AI agents, datasources, and admin management screens.
 
 ## Routing model
 
@@ -234,7 +234,7 @@ The UI uses a shared component pattern:
 - `common/router.js` handles hash-based route changes
 - templates live under `static/templates/` and are rendered into the section containers in `index.html`
 
-This is the basis for profiles, segments, datasources, scoring models, and system-user lists.
+This is the basis for profiles, segments, datasources, AI-agent, and system-user lists.
 
 ## Start / stop / restart
 

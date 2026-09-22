@@ -1,12 +1,12 @@
-/* Customer 360 Admin -- Scoring Models Registry view (cdp_scoring_models).
+/* Customer 360 Admin -- unified AI-agent registry view (cdp_ai_agents).
  *
  * Modeled directly on attributes-view.js: a real consumer of the shared
  * C360.DataTableView component (static/js/data-table-view.js), client-side
- * filtering (the generic CRUD router behind /metadata/scoring-models only
+ * filtering (the generic CRUD router behind /metadata/ai-agents only
  * supports skip/limit/status/model_type), and the same Add/Edit modal
  * pattern. Unlike attributes (read-only catalog, no delete route), the
- * scoring-models router also exposes DELETE, so the edit modal grows a
- * Delete button (see openEditScoringModelModal). */
+ * AI-agent router also exposes DELETE, so the edit modal grows a Delete
+ * button (see openEditAiAgentModal). */
 window.C360 = window.C360 || {};
 
 (function (C360) {
@@ -58,6 +58,8 @@ window.C360 = window.C360 || {};
       scheduleLabel: formatCronSchedule(m.schedule_definition),
       scheduleTitle: m.schedule_definition ? "Cron: " + m.schedule_definition : "",
       featureCountLabel: featureCountLabel(m.input_features),
+      modelLabel: m.model_name || "Not configured",
+      promptVersionLabel: m.prompt_key ? "v" + (m.instruction_version || 1) : "No prompt",
       updatedLabel: fmt.dateTime(m.updated_at)
     });
   }
@@ -65,36 +67,39 @@ window.C360 = window.C360 || {};
   var dtv = C360.DataTableView.create({
     columns: [
       {
-        label: "Model", type: "identity", nameField: "display_name", subField: "scoring_model_name", subStyle: "tag",
+        label: "Agent", type: "identity", nameField: "display_name", subField: "agent_code", subStyle: "tag",
         avatarField: "typeIcon", avatarBg: "bg-violet-100", avatarColor: "text-violet-700", avatarTextClass: "text-base"
       },
       { label: "Type", type: "badge", field: "typeLabel", classField: "typeBadgeClass" },
+      { label: "Runtime", field: "modelLabel" },
       { label: "Status", type: "badge", field: "statusLabel", classField: "statusBadgeClass" },
+      { label: "Prompt", field: "promptVersionLabel" },
       { label: "Schedule", field: "scheduleLabel", titleField: "scheduleTitle" },
       { label: "Features", field: "featureCountLabel" },
       { label: "Updated", field: "updatedLabel" }
     ],
     rowVm: rowVm,
-    rowId: function (vm) { return vm.scoring_model_name; },
+    rowId: function (vm) { return vm.agent_code; },
     rowClickable: false, // no dedicated detail page -- Edit modal covers view+edit+delete
-    onEdit: function (id) { openEditScoringModelModal(id); },
+    onEdit: function (id) { openEditAiAgentModal(id); },
     editLabel: "Edit",
-    resourceLabel: "scoring model",
+    resourceLabel: "AI agent",
     clientSide: true,
     clientSideLimit: 500,
-    fetch: function (params) { return api("/metadata/scoring-models", params); },
+    fetch: function (params) { return api("/metadata/ai-agents", params); },
     clientFilters: {
       q: function (vm, value) {
         var needle = value.toLowerCase();
         return (vm.display_name || "").toLowerCase().indexOf(needle) !== -1 ||
-          (vm.scoring_model_name || "").toLowerCase().indexOf(needle) !== -1 ||
+          (vm.agent_code || "").toLowerCase().indexOf(needle) !== -1 ||
+          (vm.model_name || "").toLowerCase().indexOf(needle) !== -1 ||
           (vm.description || "").toLowerCase().indexOf(needle) !== -1;
       },
       type: function (vm, value) { return vm.model_type === value; },
       status: function (vm, value) { return vm.status === value; }
     },
-    onFetched: function (items) { scoringModelsByName = {}; items.forEach(function (m) { scoringModelsByName[m.scoring_model_name] = m; }); },
-    onError: function (xhr) { showApiError("loading scoring models", xhr); },
+    onFetched: function (items) { aiAgentsByCode = {}; items.forEach(function (m) { aiAgentsByCode[m.agent_code] = m; }); },
+    onError: function (xhr) { showApiError("loading AI agents", xhr); },
     el: {
       thead: "#scoring-models-thead",
       tbody: "#scoring-models-tbody",
@@ -104,7 +109,7 @@ window.C360 = window.C360 || {};
     }
   });
 
-  var scoringModelsByName = {}; // last-fetched rows, keyed by scoring_model_name -- backs the Edit modal
+  var aiAgentsByCode = {}; // last-fetched rows, keyed by agent_code -- backs the Edit modal
 
   function load() { return dtv.load(false); }
 
@@ -122,64 +127,74 @@ window.C360 = window.C360 || {};
       .filter(function (x) { return x.length > 0; });
   }
 
-  // Non-null while the modal is editing an existing row (its scoring_model_name,
+  // Non-null while the modal is editing an existing row (its agent_code,
   // the table's own primary key) -- null means "creating a new row".
-  var editingScoringModelName = null;
+  var editingAiAgentCode = null;
 
-  function openAddScoringModelModal() {
-    editingScoringModelName = null;
-    $("#scoring-model-form-title").text("Add Scoring Model");
-    $("#scoring-model-form-subtitle").text("Registers a new row in the cdp_scoring_models registry");
-    $("#scoring-model-form-save-label").text("Save Model");
+  function openAddAiAgentModal() {
+    editingAiAgentCode = null;
+    $("#scoring-model-form-title").text("Add AI Agent");
+    $("#scoring-model-form-subtitle").text("Registers a new row in the cdp_ai_agents registry");
+    $("#scoring-model-form-save-label").text("Save Agent");
     $("#btn-scoring-model-delete").addClass("hidden");
     $("#scoring-model-add-error").addClass("hidden").text("");
     $("#scoring-model-add-name").val("").prop("disabled", false);
     $("#scoring-model-add-display-name").val("");
     $("#scoring-model-add-description").val("");
+    $("#scoring-model-add-model-name").val("");
     $("#scoring-model-add-type").val("classification");
     $("#scoring-model-add-status").val("ACTIVE");
     $("#scoring-model-add-schedule").val("");
     updateScheduleExplanation();
     $("#scoring-model-add-features").val("");
     $("#scoring-model-add-hyperparameters").val("");
+    $("#scoring-model-add-prompt-key").val("");
+    $("#scoring-model-add-prompt-engine").val("none");
+    $("#scoring-model-add-instructions").val("");
+    $("#scoring-model-add-required-vars").val("");
     $("#scoring-model-form-modal").removeClass("hidden");
   }
 
-  function openEditScoringModelModal(name) {
-    var m = scoringModelsByName[name];
+  function openEditAiAgentModal(name) {
+    var m = aiAgentsByCode[name];
     if (!m) return;
-    editingScoringModelName = name;
-    $("#scoring-model-form-title").text("Edit Scoring Model");
-    $("#scoring-model-form-subtitle").text("Updates this cdp_scoring_models registry row");
+    editingAiAgentCode = name;
+    $("#scoring-model-form-title").text("Edit AI Agent");
+    $("#scoring-model-form-subtitle").text("Updates this cdp_ai_agents registry row");
     $("#scoring-model-form-save-label").text("Save Changes");
     $("#btn-scoring-model-delete").removeClass("hidden");
     $("#scoring-model-add-error").addClass("hidden").text("");
-    // scoring_model_name is the primary key and isn't part of ScoringModelUpdate
+    // agent_code is the primary key and isn't part of AiAgentUpdate
     // -- shown for context but not editable.
-    $("#scoring-model-add-name").val(m.scoring_model_name).prop("disabled", true);
+    $("#scoring-model-add-name").val(m.agent_code).prop("disabled", true);
     $("#scoring-model-add-display-name").val(m.display_name);
     $("#scoring-model-add-description").val(m.description || "");
+    $("#scoring-model-add-model-name").val(m.model_name || "");
     $("#scoring-model-add-type").val(m.model_type);
     $("#scoring-model-add-status").val(m.status);
     $("#scoring-model-add-schedule").val(m.schedule_definition || "");
     updateScheduleExplanation();
     $("#scoring-model-add-features").val((m.input_features || []).join(", "));
     $("#scoring-model-add-hyperparameters").val(m.hyperparameters && Object.keys(m.hyperparameters).length ? JSON.stringify(m.hyperparameters, null, 2) : "");
+    $("#scoring-model-add-prompt-key").val(m.prompt_key || "");
+    $("#scoring-model-add-prompt-engine").val(m.prompt_engine || "none");
+    $("#scoring-model-add-instructions").val(m.system_instructions || "");
+    $("#scoring-model-add-required-vars").val((m.required_variables || []).join(", "));
     $("#scoring-model-form-modal").removeClass("hidden");
   }
 
-  function closeScoringModelModal() {
+  function closeAiAgentModal() {
     $("#scoring-model-form-modal").addClass("hidden");
   }
 
-  function submitScoringModelForm() {
+  function submitAiAgentForm() {
     var $error = $("#scoring-model-add-error");
     $error.addClass("hidden").text("");
 
     var name = $.trim($("#scoring-model-add-name").val());
     var displayName = $.trim($("#scoring-model-add-display-name").val());
     if (!name || !displayName) {
-      $error.removeClass("hidden").text("Model Name and Display Name are required.");
+      $error.removeClass("hidden").text("Agent Code and Display Name are required.");
       return;
     }
 
@@ -198,47 +213,52 @@ window.C360 = window.C360 || {};
       }
     }
 
-    var isEdit = editingScoringModelName !== null;
+    var isEdit = editingAiAgentCode !== null;
     var payload = {
       display_name: displayName,
       description: $.trim($("#scoring-model-add-description").val()) || null,
+      model_name: $.trim($("#scoring-model-add-model-name").val()) || null,
       model_type: $("#scoring-model-add-type").val(),
       status: $("#scoring-model-add-status").val(),
       schedule_definition: $.trim($("#scoring-model-add-schedule").val()) || null,
       input_features: parseCsvList($("#scoring-model-add-features").val()),
-      hyperparameters: hyperparameters
+      hyperparameters: hyperparameters,
+      prompt_key: $.trim($("#scoring-model-add-prompt-key").val()) || null,
+      prompt_engine: $("#scoring-model-add-prompt-engine").val(),
+      system_instructions: $.trim($("#scoring-model-add-instructions").val()) || null,
+      required_variables: parseCsvList($("#scoring-model-add-required-vars").val())
     };
-    // scoring_model_name is only settable on create (ScoringModelUpdate has
+    // agent_code is only settable on create (AiAgentUpdate has
     // no such field -- it's the immutable primary key).
-    if (!isEdit) payload.scoring_model_name = name;
+    if (!isEdit) payload.agent_code = name;
 
     var request = isEdit
-      ? api("/metadata/scoring-models/" + encodeURIComponent(editingScoringModelName), payload, "PATCH")
-      : api("/metadata/scoring-models", payload, "POST");
+      ? api("/metadata/ai-agents/" + encodeURIComponent(editingAiAgentCode), payload, "PATCH")
+      : api("/metadata/ai-agents", payload, "POST");
 
     request
       .done(function () {
-        closeScoringModelModal();
+        closeAiAgentModal();
         load();
       })
       .fail(function (xhr) {
-        var detail = (xhr.responseJSON && xhr.responseJSON.detail) || ("Could not " + (isEdit ? "update" : "create") + " scoring model.");
+        var detail = (xhr.responseJSON && xhr.responseJSON.detail) || ("Could not " + (isEdit ? "update" : "create") + " AI agent.");
         $error.removeClass("hidden").text(typeof detail === "string" ? detail : JSON.stringify(detail));
       });
   }
 
-  function deleteScoringModel() {
-    if (!editingScoringModelName) return;
-    var m = scoringModelsByName[editingScoringModelName];
-    var label = m && m.display_name ? m.display_name : editingScoringModelName;
-    if (!window.confirm("Delete scoring model '" + label + "'?")) return;
+  function deleteAiAgent() {
+    if (!editingAiAgentCode) return;
+    var m = aiAgentsByCode[editingAiAgentCode];
+    var label = m && m.display_name ? m.display_name : editingAiAgentCode;
+    if (!window.confirm("Delete AI agent '" + label + "'?")) return;
 
-    api("/metadata/scoring-models/" + encodeURIComponent(editingScoringModelName), {}, "DELETE")
+    api("/metadata/ai-agents/" + encodeURIComponent(editingAiAgentCode), {}, "DELETE")
       .done(function () {
-        closeScoringModelModal();
+        closeAiAgentModal();
         load();
       })
-      .fail(function (xhr) { showApiError("deleting scoring model", xhr); });
+      .fail(function (xhr) { showApiError("deleting AI agent", xhr); });
   }
 
   function bindEvents() {
@@ -247,13 +267,13 @@ window.C360 = window.C360 || {};
     dtv.bindSelect("#scoring-models-status-filter", "status");
     dtv.bindRowEdit();
 
-    $(document).on("click", "#btn-scoring-model-add", openAddScoringModelModal);
-    $(document).on("click", "#btn-scoring-model-add-cancel", closeScoringModelModal);
-    $(document).on("click", "#btn-scoring-model-add-save", submitScoringModelForm);
-    $(document).on("click", "#btn-scoring-model-delete", deleteScoringModel);
+    $(document).on("click", "#btn-scoring-model-add", openAddAiAgentModal);
+    $(document).on("click", "#btn-scoring-model-add-cancel", closeAiAgentModal);
+    $(document).on("click", "#btn-scoring-model-add-save", submitAiAgentForm);
+    $(document).on("click", "#btn-scoring-model-delete", deleteAiAgent);
     $(document).on("input", "#scoring-model-add-schedule", updateScheduleExplanation);
     $(document).on("click", "#scoring-model-form-modal", function (e) {
-      if (e.target === this) closeScoringModelModal();
+      if (e.target === this) closeAiAgentModal();
     });
   }
 
@@ -264,6 +284,6 @@ window.C360 = window.C360 || {};
     mount: function () { load(); }
   });
 
-  C360.scoringModelView = { load: load, bindEvents: bindEvents };
+  C360.aiAgentView = { load: load, bindEvents: bindEvents };
 })(window.C360);
  

@@ -43,7 +43,7 @@ def generate_campaign_plan(
     parsed = parse_json_object(raw_text)
 
     try:
-        return GeneratedCampaignPlan(
+        plan = GeneratedCampaignPlan(
             name=str(parsed["name"]),
             objective=str(parsed["objective"]),
             strategy_summary=str(parsed["strategy_summary"]),
@@ -54,3 +54,15 @@ def generate_campaign_plan(
         )
     except (KeyError, ValueError) as exc:
         raise AIProviderError(f"AI provider response missing/invalid required field: {exc}") from exc
+
+    candidate_ids = {
+        item["content_item_id"]
+        for item in candidate_content_items
+        if isinstance(item.get("content_item_id"), str) and item["content_item_id"].strip()
+    }
+    invalid_ids = [content_id for content_id in plan.content_item_ids if content_id not in candidate_ids]
+    if invalid_ids:
+        raise AIProviderError(f"AI selected content_item_ids not in the candidate list: {invalid_ids}")
+    if len(plan.content_item_ids) != len(set(plan.content_item_ids)):
+        raise AIProviderError("AI selected duplicate content_item_ids")
+    return plan

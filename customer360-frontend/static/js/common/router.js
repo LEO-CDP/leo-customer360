@@ -5,7 +5,7 @@
  * placeholder-view.js, ...) each register the paths they own via
  * `C360.router.define(pattern, config)` at load time -- there is no
  * central switch-statement anywhere that has to know about every view.
- * Adding a brand new listing/detail/editor view (e.g. scoring models,
+ * Adding a brand new listing/detail/editor view (e.g. AI agents,
  * data connectors, admin users) is just a new `define()` call in that
  * view's own file.
  *

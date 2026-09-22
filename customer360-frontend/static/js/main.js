@@ -225,7 +225,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       C360.personaManagementView.bindEvents();
       C360.attributesView.bindEvents();
       C360.dataSourceView.bindEvents();
-      C360.scoringModelView.bindEvents();
+      C360.aiAgentView.bindEvents();
       C360.systemUserView.bindEvents();
       C360.docsChatbot.bindEvents();
 

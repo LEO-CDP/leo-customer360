@@ -1179,7 +1179,7 @@ BEGIN
         INSERT INTO customer360.cdp_profile_attributes (
             attribute_internal_code, master_profile_column, name, description,
             attribute_group, source_table, data_type, domain_scope,
-            is_pii, status, is_segmentable, is_scoring_model, value_type, display_order
+            is_pii, status, is_segmentable, is_ai_agent, value_type, display_order
         ) VALUES (
             v_key, NULL, initcap(replace(v_key, '_', ' ')),
             'Auto-discovered from customer360.cdp_domain_profiles.domain_attributes by sync_domain_attribute_catalog().',
@@ -1851,7 +1851,10 @@ COMMENT ON TABLE customer360.cdp_event_catalog IS 'Governed vocabulary of event_
 -- system_instructions / required_variables:
 --   Current runtime instructions and input contract for task-oriented agents.
 --
--- Historical prompt versions are intentionally NOT stored in PostgreSQL.
+-- prompt_versions:
+--   Append-only JSONB history for the current instruction revisions. Keeping
+--   the history on the agent row makes cdp_ai_agents the single source of
+--   truth for both model configuration and prompt lifecycle.
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
@@ -1879,7 +1882,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
 
     -- Actual AI model / ML model name.
     -- Examples:
-    --   gpt-5.6
+    --   openai/gpt-5.6-luna-luna
     --   qwen3-14b
     --   xgboost-lead-v3
     --   lightgbm-churn-v2
@@ -1912,6 +1915,18 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
     hyperparameters JSONB DEFAULT '{}'::JSONB,
 
     -- ------------------------------------------------------------------------
+    -- Prompt identity and version history
+    -- ------------------------------------------------------------------------
+
+    -- Stable prompt address. It is separate from agent_code because callers
+    -- may already use a dotted prompt key while the runtime uses a short
+    -- agent code.
+    prompt_key TEXT,
+    prompt_engine VARCHAR(50) NOT NULL DEFAULT 'none',
+    -- Each entry is {version, body, required_vars, created_at, created_by, note}.
+    prompt_versions JSONB NOT NULL DEFAULT '[]'::JSONB,
+
+    -- ------------------------------------------------------------------------
     -- Agent instruction fields
     -- ------------------------------------------------------------------------
 
@@ -1933,8 +1948,32 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
 
     -- Audit fields
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+
+    CONSTRAINT chk_cdp_ai_agents_prompt_engine_not_blank
+        CHECK (btrim(prompt_engine) <> ''),
+    CONSTRAINT chk_cdp_ai_agents_prompt_key_not_blank
+        CHECK (prompt_key IS NULL OR btrim(prompt_key) <> ''),
+    CONSTRAINT chk_cdp_ai_agents_hyperparameters_object
+        CHECK (hyperparameters IS NULL OR jsonb_typeof(hyperparameters) = 'object'),
+    CONSTRAINT chk_cdp_ai_agents_prompt_state
+        CHECK (
+            prompt_key IS NULL
+            OR (
+                system_instructions IS NOT NULL
+                AND jsonb_array_length(prompt_versions) > 0
+            )
+        ),
+    CONSTRAINT chk_cdp_ai_agents_prompt_versions_array
+        CHECK (jsonb_typeof(prompt_versions) = 'array')
 );
+
+-- Existing databases may already have the original cdp_ai_agents shape. Add
+-- the unified prompt columns before comments and indexes reference them.
+ALTER TABLE customer360.cdp_ai_agents
+    ADD COLUMN IF NOT EXISTS prompt_key TEXT,
+    ADD COLUMN IF NOT EXISTS prompt_engine VARCHAR(50) NOT NULL DEFAULT 'none',
+    ADD COLUMN IF NOT EXISTS prompt_versions JSONB NOT NULL DEFAULT '[]'::JSONB;
 
 COMMENT ON TABLE customer360.cdp_ai_agents IS
     'Unified registry for AI/ML models and task-oriented AI agents. Stores model configuration and current agent instructions.';
@@ -1945,6 +1984,15 @@ COMMENT ON COLUMN customer360.cdp_ai_agents.agent_code IS
 COMMENT ON COLUMN customer360.cdp_ai_agents.model_name IS
     'Actual AI model or ML model name used by this agent, such as gpt-5.6, qwen3-14b, xgboost-lead-v3, or lightgbm-churn-v2.';
 
+COMMENT ON COLUMN customer360.cdp_ai_agents.prompt_key IS
+    'Stable address used by customer360-agent to load this row''s current prompt.';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.prompt_engine IS
+    'Prompt rendering engine. The current runtime supports none ($name substitution with literal JSON braces preserved).';
+
+COMMENT ON COLUMN customer360.cdp_ai_agents.prompt_versions IS
+    'Append-only JSONB prompt revision history. The active revision is instruction_version and the current body is system_instructions.';
+
 COMMENT ON COLUMN customer360.cdp_ai_agents.system_instructions IS
     'Current system-level instructions for a task-oriented AI agent. Historical versions are managed outside this table.';
 
@@ -1952,7 +2000,7 @@ COMMENT ON COLUMN customer360.cdp_ai_agents.required_variables IS
     'Runtime context variables required to execute the agent instructions.';
 
 COMMENT ON COLUMN customer360.cdp_ai_agents.instruction_version IS
-    'Current instruction revision. Replaces prompt_template.current_version.';
+    'Current published prompt/instruction revision.';
 
 CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_status
     ON customer360.cdp_ai_agents (status);
@@ -1960,6 +2008,74 @@ CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_status
 CREATE INDEX IF NOT EXISTS idx_cdp_ai_agents_model_name
     ON customer360.cdp_ai_agents (model_name)
     WHERE model_name IS NOT NULL;
+
+-- Fast lookup for prompt-backed agents.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cdp_ai_agents_prompt_key
+    ON customer360.cdp_ai_agents (prompt_key);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_cdp_ai_agents_prompt_engine_not_blank'
+          AND conrelid = 'customer360.cdp_ai_agents'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_prompt_engine_not_blank
+            CHECK (btrim(prompt_engine) <> '');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_cdp_ai_agents_prompt_versions_array'
+          AND conrelid = 'customer360.cdp_ai_agents'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_prompt_versions_array
+            CHECK (jsonb_typeof(prompt_versions) = 'array');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_cdp_ai_agents_prompt_key_not_blank'
+          AND conrelid = 'customer360.cdp_ai_agents'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_prompt_key_not_blank
+            CHECK (prompt_key IS NULL OR btrim(prompt_key) <> '');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_cdp_ai_agents_hyperparameters_object'
+          AND conrelid = 'customer360.cdp_ai_agents'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_hyperparameters_object
+            CHECK (hyperparameters IS NULL OR jsonb_typeof(hyperparameters) = 'object');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_cdp_ai_agents_prompt_state'
+          AND conrelid = 'customer360.cdp_ai_agents'::regclass
+    ) THEN
+        ALTER TABLE customer360.cdp_ai_agents
+            ADD CONSTRAINT chk_cdp_ai_agents_prompt_state
+            CHECK (
+                prompt_key IS NULL
+                OR (
+                    system_instructions IS NOT NULL
+                    AND jsonb_array_length(prompt_versions) > 0
+                )
+            );
+    END IF;
+END $$;
 
 ---------------------------------------------------
 -- PROFILE ATTRIBUTE METADATA REGISTRY
@@ -2074,12 +2190,12 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     data_type VARCHAR(50) NOT NULL DEFAULT 'TEXT',
 
     -- ------------------------------------------------------------------
-    -- ML / scoring-model metadata: Lead, Churn, CLV, Customer Experience (CX)
-    -- and Data Quality / Identity Resolution confidence scoring models.
+    -- AI-agent output metadata: Lead, Churn, CLV, Customer Experience (CX),
+    -- Data Quality, and Identity Resolution agent outputs.
     -- ------------------------------------------------------------------
-    is_scoring_model BOOLEAN NOT NULL DEFAULT FALSE,
-    scoring_model_name VARCHAR(100),
-    scoring_model_version VARCHAR(20),
+    is_ai_agent BOOLEAN NOT NULL DEFAULT FALSE,
+    agent_code VARCHAR(100),
+    agent_version VARCHAR(20),
     value_type VARCHAR(50) CHECK (value_type IS NULL OR value_type IN (
         'probability', 'score', 'tier', 'currency', 'percentage', 'sentiment',
         'count', 'label', 'metadata', 'identifier', 'timestamp'
@@ -2099,84 +2215,117 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
 COMMENT ON TABLE customer360.cdp_profile_attributes IS 'CIR attribute catalog defining consolidation and matching rules for cdp_master_profiles columns and cdp_domain_profiles JSONB keys.';
 
 -- ==========================================================
--- Scoring Models Registry
+-- Unified AI agent catalog foreign key and legacy scoring migration
 -- ==========================================================
--- This table acts as the central dictionary for all AI, ML, 
--- and rule-based models that output computed fields (like Churn, CLV, 
--- or Lead Scores) into the customer profiles.
+-- Existing deployments used scoring-model names for this metadata. Rename the
+-- columns in place so the catalog now speaks the same agent vocabulary as
+-- cdp_ai_agents while preserving all existing values.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'is_scoring_model'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'is_ai_agent'
+    ) THEN
+        ALTER TABLE customer360.cdp_profile_attributes
+            RENAME COLUMN is_scoring_model TO is_ai_agent;
+    END IF;
 
-CREATE TABLE IF NOT EXISTS customer360.cdp_scoring_models (
-    -- The user-requested primary key. This exact string must match 
-    -- the 'scoring_model_name' in cdp_profile_attributes.
-    scoring_model_name VARCHAR(100) PRIMARY KEY,
-    
-    -- Display and organizational metadata
-    display_name VARCHAR(255) NOT NULL,
-    description TEXT,
-    
-    -- Identifies the algorithmic approach
-    model_type VARCHAR(50) NOT NULL CHECK (
-        model_type IN (
-            'classification', 
-            'regression', 
-            'clustering', 
-            'rules_engine', 
-            'generative_llm'
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'scoring_model_name'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'agent_code'
+    ) THEN
+        ALTER TABLE customer360.cdp_profile_attributes
+            RENAME COLUMN scoring_model_name TO agent_code;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'scoring_model_version'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'customer360'
+          AND table_name = 'cdp_profile_attributes'
+          AND column_name = 'agent_version'
+    ) THEN
+        ALTER TABLE customer360.cdp_profile_attributes
+            RENAME COLUMN scoring_model_version TO agent_version;
+    END IF;
+END $$;
+
+ALTER TABLE customer360.cdp_profile_attributes
+    DROP CONSTRAINT IF EXISTS fk_cdp_pa_scoring_model;
+
+DO $$
+BEGIN
+    IF to_regclass('customer360.cdp_scoring_models') IS NOT NULL THEN
+        INSERT INTO customer360.cdp_ai_agents (
+            agent_code, display_name, description, model_type, status,
+            schedule_definition, input_features, hyperparameters
         )
-    ),
-    
-    -- Execution and orchestration parameters
-    status VARCHAR(20) DEFAULT 'ACTIVE' CHECK (
-        status IN ('ACTIVE', 'INACTIVE', 'TRAINING', 'DEPRECATED', 'FAILED')
-    ),
-    -- E.g., '0 0 * * *' for a daily midnight batch run
-    schedule_definition VARCHAR(100), 
-    
-    -- Model lineage and configurations
-    -- Tracks which profile attributes are fed into this model as training/inference features
-    input_features TEXT[] DEFAULT ARRAY[]::TEXT[], 
-    -- Stores dynamic model configurations, thresholds, or LLM prompts (e.g., LangGraph agent configs)
-    hyperparameters JSONB DEFAULT '{}'::jsonb,
-    
-    -- Audit fields
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-);
+        SELECT
+            CASE s.scoring_model_name
+                WHEN 'lead_scoring_model' THEN 'lead_scoring'
+                WHEN 'churn_scoring_model' THEN 'churn_scoring'
+                WHEN 'clv_scoring_model' THEN 'clv_scoring'
+                WHEN 'cx_scoring_model' THEN 'cx_scoring'
+                WHEN 'data_quality_model' THEN 'data_quality'
+                WHEN 'identity_resolution_scoring_model' THEN 'identity_resolution_scoring'
+                WHEN 'lifecycle_stage_model' THEN 'lifecycle_stage'
+                ELSE s.scoring_model_name
+            END,
+            s.display_name, s.description, s.model_type, s.status,
+            s.schedule_definition, s.input_features, s.hyperparameters
+        FROM customer360.cdp_scoring_models s
+        ON CONFLICT (agent_code) DO NOTHING;
 
-COMMENT ON TABLE customer360.cdp_scoring_models IS 'Central registry for all ML and rule-based models. Acts as the parent table for cdp_profile_attributes where is_scoring_model = true.';
+        UPDATE customer360.cdp_profile_attributes
+        SET agent_code = CASE agent_code
+            WHEN 'lead_scoring_model' THEN 'lead_scoring'
+            WHEN 'churn_scoring_model' THEN 'churn_scoring'
+            WHEN 'clv_scoring_model' THEN 'clv_scoring'
+            WHEN 'cx_scoring_model' THEN 'cx_scoring'
+            WHEN 'data_quality_model' THEN 'data_quality'
+            WHEN 'identity_resolution_scoring_model' THEN 'identity_resolution_scoring'
+            WHEN 'lifecycle_stage_model' THEN 'lifecycle_stage'
+            ELSE agent_code
+        END
+        WHERE agent_code IS NOT NULL;
+    END IF;
+END $$;
 
--- ----------------------------------------------------------------------------
--- Foreign Key Enforcement
--- ----------------------------------------------------------------------------
--- This constraint ensures that any computed attribute claiming to be generated 
--- by a model actually references a valid model in the registry.
+DROP TABLE IF EXISTS customer360.cdp_scoring_models;
 
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM pg_constraint
-        WHERE conname = 'fk_cdp_pa_scoring_model'
+        WHERE conname = 'fk_cdp_profile_attributes_agent'
           AND conrelid = 'customer360.cdp_profile_attributes'::regclass
     ) THEN
-        EXECUTE format(
-            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE RESTRICT',
-            'customer360',
-            'cdp_profile_attributes',
-            'fk_cdp_pa_scoring_model',
-            'scoring_model_name',
-            'customer360',
-            'cdp_scoring_models',
-            'scoring_model_name'
-        );
+        ALTER TABLE customer360.cdp_profile_attributes
+            ADD CONSTRAINT fk_cdp_profile_attributes_agent
+            FOREIGN KEY (agent_code)
+            REFERENCES customer360.cdp_ai_agents(agent_code)
+            ON DELETE RESTRICT;
     END IF;
 END $$;
-
--- ----------------------------------------------------------------------------
--- Indexes
--- ----------------------------------------------------------------------------
--- Optimizes queries filtering for active models in the admin UI
-CREATE INDEX IF NOT EXISTS idx_cdp_scoring_models_status ON customer360.cdp_scoring_models (status);
 
 
 -- ============================================================================
@@ -2807,9 +2956,9 @@ WHERE
     is_identity_resolution = TRUE
     AND status = 'ACTIVE';
 
-CREATE INDEX IF NOT EXISTS idx_cdp_pa_scoring_model ON customer360.cdp_profile_attributes (scoring_model_name)
+CREATE INDEX IF NOT EXISTS idx_cdp_pa_agent ON customer360.cdp_profile_attributes (agent_code)
 WHERE
-    is_scoring_model = TRUE;
+    is_ai_agent = TRUE;
 
 CREATE INDEX IF NOT EXISTS idx_graph_edges_belongs_to_industry_created_at ON customer360.graph_edges_belongs_to_industry (created_at);
 
@@ -3444,36 +3593,3 @@ $$;
 --     tenant_id =
 --     NULLIF(btrim(current_setting('app.tenant_id')), '')::uuid
 -- );
-
--- ============================================================================
--- Prompt store (customer360-agent) -- LLM prompt bodies as addressable,
--- versioned data. Global config (NOT tenant-scoped, no RLS): a prompt key like
--- 'campaign.plan.instructions' is the same for every tenant. The agent seeds the
--- in-code defaults as version 1 on startup and can publish new versions;
--- current_version = 0 means "use the agent's in-code default" (no row here).
--- Owned by customer360-agent/src/prompts (PgPromptStore); see its README.
--- ============================================================================
-CREATE TABLE IF NOT EXISTS customer360.prompt_template (
-    key             TEXT PRIMARY KEY,
-    engine          TEXT NOT NULL DEFAULT 'none',
-    current_version INTEGER NOT NULL DEFAULT 1,
-    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
-);
-COMMENT ON TABLE customer360.prompt_template IS
-    'Prompt-store pointer: current published version per prompt key (customer360-agent). Global, not tenant-scoped.';
-
--- Append-only version history; the pointer above selects the live one. No FK to
--- prompt_template so a version can be written before its pointer row (seed path).
-CREATE TABLE IF NOT EXISTS customer360.prompt_version (
-    key           TEXT NOT NULL,
-    version       INTEGER NOT NULL,
-    body          TEXT NOT NULL,
-    required_vars TEXT NOT NULL DEFAULT '',
-    created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-    created_by    TEXT NOT NULL DEFAULT 'system',
-    note          TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (key, version)
-);
-COMMENT ON TABLE customer360.prompt_version IS
-    'Prompt-store append-only version log (customer360-agent). created_by=''seed'' marks a copy of an in-code default.';

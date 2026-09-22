@@ -25,9 +25,9 @@ def get_engine():
     if url:
         from sqlalchemy import create_engine
 
-        # The prompt-store tables live in the customer360 schema (see
-        # customer360-database/database-schema.sql); set search_path so the store's
-        # unqualified SQL resolves there.
+        # The unified cdp_ai_agents registry lives in the customer360 schema
+        # (see customer360-database/database-schema.sql); set search_path so
+        # the store's SQL resolves there.
         schema = (settings.db_schema or "customer360").strip()
         _engine = create_engine(
             url,
