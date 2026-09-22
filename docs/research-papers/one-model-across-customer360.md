@@ -12,7 +12,11 @@ carries a `processed_by` flag whose legal values are `('human', 'ai_agent')`;
 `customer360.crm_campaign` already reserves `ai_plan JSONB`, `strategy_summary`,
 and a `vector(1536)` embedding column; and `customer360-agent/` already exposes
 **one** unified model endpoint (via LiteLLM, provider-agnostic across
-Gemini / OpenAI / Anthropic / local).
+Gemini / OpenAI / Anthropic / local). As of `d325bd0`, the schema even carries a
+`customer360.cdp_ai_agents` registry that seeds every ML/rules/LLM agent as a
+row — and the three `generative_llm` agents in it all name the *same*
+`model_name = 'gpt-5.6'`. "One model, many jobs" is no longer just an argument;
+it is a table.
 
 This paper answers a single question: **if we have exactly one foundation model
 available, where across the whole platform does it earn its keep?** The thesis
@@ -81,6 +85,63 @@ flowchart LR
     MODEL -. personalize .-> EMAIL
     MODEL -. next-best-action .-> PZN
 ```
+
+### 1.3 The registry that makes this literal (new — `d325bd0`)
+
+The `customer360.cdp_ai_agents` table is a **single catalog** for every model
+the platform runs — ML scorers, rule engines, and generative agents — keyed by a
+stable `agent_code`, with a `model_type` CHECK of
+`(classification, regression, clustering, rules_engine, generative_llm)` and the
+actual `model_name` per row. The seed loads **11 agents**. The shape of that
+seed *is* the thesis of this paper:
+
+- The **three `generative_llm` agents** — `persona_summary_generator`,
+  `campaign_planner`, `zns_campaign_planner` — all carry the same
+  `model_name = 'gpt-5.6'`. One model, three jobs, one row each.
+- The **eight ML / rules agents** (`lead_scoring`, `churn_scoring`,
+  `clv_scoring`, `cx_scoring`, `persona_risk_score`, `persona_loyalty_score`,
+  `data_quality`, `lifecycle_stage`) keep their **own** `model_name`
+  (`lead-scoring-model`, `churn-scoring-model`, …). The registry encodes §2.7's
+  rule structurally: a calibrated numeric model is *not* swapped for the LLM.
+- Task-oriented agents store their live `system_instructions`,
+  `required_variables`, and an integer `instruction_version` on the row.
+  Prompt *history* is deliberately **not** in Postgres (schema comment:
+  *"Historical prompt versions are intentionally NOT stored in PostgreSQL"*) — it
+  lives in the `customer360-agent` prompt store; the row holds only the current
+  revision.
+
+```mermaid
+flowchart LR
+    REG[("customer360.cdp_ai_agents\n(11 seeded rows)")]
+
+    subgraph Gen["generative_llm — the ONE model"]
+      PSG[persona_summary_generator]
+      CP[campaign_planner]
+      ZP[zns_campaign_planner]
+    end
+    GPT{{"model_name = 'gpt-5.6'"}}
+
+    subgraph ML["classification / regression / rules_engine — many models"]
+      LS["lead_scoring -> lead-scoring-model"]
+      CS["churn_scoring -> churn-scoring-model"]
+      CLV["clv_scoring -> clv-scoring-model"]
+      CX["cx_scoring -> cx-scoring-model"]
+      PR["persona_risk_score -> persona-risk-model-v1"]
+      PL["persona_loyalty_score -> persona-loyalty-model-v1"]
+      DQ["data_quality -> data-quality-rules-v1"]
+      LC["lifecycle_stage -> lifecycle-stage-rules-v1"]
+    end
+
+    REG --> Gen
+    REG --> ML
+    PSG --> GPT
+    CP --> GPT
+    ZP --> GPT
+```
+
+*Read the diagram left-to-right: every generative job funnels into the single
+`gpt-5.6`; every numeric/rules job keeps its purpose-built model. That is exactly
+the split this paper argues for — now enforced by a table, not a convention.*
 
 ---
 
@@ -322,9 +383,13 @@ gray-zone pairs — it never silently merges.*
 
 `cdp_master_profiles` already carries `predictive_clv`, `churn_probability`,
 `churn_risk_tier`, `engagement_score`. The `scoring` Dagster job is a
-placeholder. **Do not** replace a calibrated numeric model with an LLM. Instead
-use the model to (a) generate human-readable **reason codes** for each score and
-(b) draft/validate `cdp_scoring_models` configs from a plain-language spec.
+placeholder, but the **scorers themselves are now registered**: `d325bd0` seeds
+`lead_scoring`, `churn_scoring`, `clv_scoring`, and `cx_scoring` into
+`cdp_ai_agents` — each `classification`/`regression`, each with its own
+`model_name` and a cron `schedule_definition`, *not* pointed at the LLM. **Do
+not** replace a calibrated numeric model with an LLM. Instead use the model to
+(a) generate human-readable **reason codes** for each score and (b) draft/validate
+`cdp_scoring_models` configs from a plain-language spec.
 
 ```mermaid
 flowchart LR
@@ -418,6 +483,12 @@ flowchart LR
 lowest-effort, because the platform already did the schema/MV work and is just
 waiting for a prompt + a thin translator/guard. Start there.
 
+The three 🟢 rows are no longer just running code — `d325bd0` registers them as
+first-class rows in `cdp_ai_agents` (`persona_summary_generator`,
+`campaign_planner`, `zns_campaign_planner`, all `generative_llm` / `gpt-5.6`),
+each with its `system_instructions` and `required_variables` seeded. New use
+cases from this table are a new `agent_code` row, not new infrastructure.
+
 ---
 
 ## 4. Guardrails (the part that makes it shippable)
@@ -438,10 +509,13 @@ One shared model touching every subsystem concentrates risk. Non-negotiables:
 4. **Prompt-injection defense.** Profile fields, campaign text, and source data
    are attacker-influenceable. Treat all record content as untrusted data inside
    a fenced section of the prompt; never let record text change the instruction.
-5. **Auditability is already modeled.** `prompt_template`/`prompt_version` exist
-   — pin every production call to a version so outputs are reproducible and
-   diffable. `processed_by='ai_agent'`, `ai_plan`, and the review tables give a
-   full paper trail for every AI-authored artifact.
+5. **Auditability is already modeled.** `cdp_ai_agents.instruction_version`
+   (with `instruction_updated_by`/`instruction_note`) pins the *current* revision
+   per agent — it replaces `prompt_template.current_version`. Full prompt
+   *history* is intentionally kept out of Postgres and lives in the
+   `customer360-agent` prompt store, so pin production calls to a store version
+   for reproducible/diffable outputs. `processed_by='ai_agent'`, `ai_plan`, and
+   the review tables give a full paper trail for every AI-authored artifact.
 6. **Human-in-the-loop on writes to the golden record.** Anything that mutates
    `cdp_master_profiles`, activates a segment, or sends a campaign passes an
    approval gate. Reads and drafts are cheap and safe; writes are gated.
