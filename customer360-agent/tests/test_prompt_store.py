@@ -1,5 +1,5 @@
 """Prompt-store tests: template rendering, the validate rail, and the Pg store's
-snapshot read path (bodies live in the DB, seeded by database-init; no in-code
+snapshot read path (bodies live in the DB, seeded by customer360-database; no in-code
 fallback -- so these exercise logic without a live DB)."""
 
 import unittest

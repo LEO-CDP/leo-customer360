@@ -144,11 +144,11 @@ per-run E2E suite:
 
 ```bash
 # apply-then-rollback smoke (S93-10/11/12)
-psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.sql   # apply (idempotent)
-psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.sql   # re-apply: no-op
+psql "$DB" -f customer360-database/migrations/002_email_marketing_schema_foundation.sql   # apply (idempotent)
+psql "$DB" -f customer360-database/migrations/002_email_marketing_schema_foundation.sql   # re-apply: no-op
 psql "$DB" -c "\d+ customer360.crm_segment_sync_runs"                              # columns/index present
 psql "$DB" -c "SELECT polname FROM pg_policies WHERE tablename='crm_segment_sync_runs';"  # tenant_policy
-psql "$DB" -f database-init/migrations/002_email_marketing_schema_foundation.down.sql     # rollback clean
+psql "$DB" -f customer360-database/migrations/002_email_marketing_schema_foundation.down.sql     # rollback clean
 ```
 
 ## 7. Coverage summary

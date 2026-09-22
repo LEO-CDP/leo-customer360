@@ -14,7 +14,7 @@ Segment -> CRM sync routing -> AI template draft -> AI campaign draft -> Human a
 
 ## Verified Ground Truth (Repo Audit)
 
-### Database schema reality (`database-init/database-schema.sql`)
+### Database schema reality (`customer360-database/database-schema.sql`)
 
 - `cdp_segments` exists and supports segment selection by `segment_id`.
 - `cdp_master_profiles` exists and carries `lifecycle_stage` (`prospect`, `lead`, `customer`, `vip`, `dormant`, `churn_risk`) and personalization fields.
@@ -83,7 +83,7 @@ Implication: this story must convert `campaign_activation` and `email_engine` to
 
 ### SUBTASK-01: Schema and Migration Foundation
 
-Component: `database-init/migrations`  
+Component: `customer360-database/migrations`
 Priority: P0 Blocker  
 Depends on: none  
 Blocks: SUBTASK-02..08  

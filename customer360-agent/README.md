@@ -55,9 +55,9 @@ into the planner. `AGENT_DATABASE_URL` is required for planning.
   `src/db.py` — the SQLAlchemy engine (sets `search_path` to `AGENT_DB_SCHEMA`,
   default `customer360`).
 - **Schema** — `customer360.prompt_template` + `customer360.prompt_version`
-  (append-only, versioned). DDL in **`database-init/database-schema.sql`**.
+  (append-only, versioned). DDL in **`customer360-database/database-schema.sql`**.
 - **Seed** — the default prompt bodies (`campaign.plan.instructions`,
-  `campaign.zns.instructions`) live in **`database-init/init-prompt-store-seed.sql`**
+  `campaign.zns.instructions`) live in **`customer360-database/init-prompt-store-seed.sql`**
   (idempotent). Both apply on DB init and via `deployments/postgres/run-sql.sh`.
 - **Edit at runtime** — `PgPromptStore.publish()` appends a version + moves the
   pointer; `rollback(key, version)`; `history()` is the audit log.

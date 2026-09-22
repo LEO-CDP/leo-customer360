@@ -47,7 +47,7 @@ Implementation artifacts referenced in this note:
 - Demo data calibration:
   [backend-system/identity_resolution/scripts/seed_full_demo_data.py](../../backend-system/identity_resolution/scripts/seed_full_demo_data.py)
 - Persistence schema:
-  [database-init/database-schema.sql](../../database-init/database-schema.sql)
+  [customer360-database/database-schema.sql](../../customer360-database/database-schema.sql)
 
 ## 2. Formal Definition of Risk Score
 

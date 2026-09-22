@@ -25,7 +25,7 @@
 | 2 | 🔴 High | Opt-out webhook returns 200 on ingest failure → consent lost | `channel_webhook.py` |
 | 3 | 🔴 High | Unconnected tenant → whole segment falsely ledgered `Sent` (silent mock) | `adapters.py` / `send.py` |
 | 4 | 🔴 High | Double-send on paid channel (send before ledger, savepoint rollback) | `send.py` |
-| 5 | 🟠 Med | Rename has no upgrade path — runner ordering (schema before migrations, no ledger) strands beta-cycle template data | `database-init/` + `run-sql.sh` |
+| 5 | 🟠 Med | Rename has no upgrade path — runner ordering (schema before migrations, no ledger) strands beta-cycle template data | `customer360-database/` + `run-sql.sh` |
 | 6 | 🟠 Med | Token refresh strands rotated refresh_token on any post-refresh error | `token_refresh.py` |
 | 7 | 🟠 Med | `zalo_zns` campaign without `template_data` sends empty params | `send.py` |
 | 8 | 🟠 Med | O(all-objects) S3 rescan every 15 min (StartAfter/Prefix mismatch) | `s3_reader.py` |
@@ -121,7 +121,7 @@ All active findings fixed on branch `feat/SCRUM-102-...`; **#1 suppressed** (tea
 ### 5. ✅ Rename has no working upgrade path (deeper than "003 was deleted")
 
 > ✅ **FIXED** — commit `0d816e1`
-**`database-init/database-schema.sql:2676`**, **`deployments/postgres/run-sql.sh`**, deleted **`database-init/migrations/003_crm_message_templates.sql`**.
+**`customer360-database/database-schema.sql:2676`**, **`deployments/postgres/run-sql.sh`**, deleted **`customer360-database/migrations/003_crm_message_templates.sql`**.
 
 The first-pass finding ("migrations 002/003 were deleted; restore the rename migration") is only half right. Investigating the actual deploy mechanics **corrects the root cause and the fix**:
 

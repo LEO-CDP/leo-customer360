@@ -36,7 +36,7 @@ import config  # noqa: E402
 from prompts import PromptTemplate, get_store, reset_store_cache  # noqa: E402
 from campaign_planner.base import CAMPAIGN_PLAN_INSTRUCTIONS, CAMPAIGN_ZNS_INSTRUCTIONS  # noqa: E402
 
-# --- production prompt bodies (verbatim from database-init/init-prompt-store-seed.sql) ---
+# --- production prompt bodies (verbatim from customer360-database/init-prompt-store-seed.sql) ---
 EMAIL_BODY = (
     "You are a marketing campaign strategist. Given a target segment, a marketer's objective, "
     "optional budget/time constraints, and a CLOSED list of candidate content items, propose a "

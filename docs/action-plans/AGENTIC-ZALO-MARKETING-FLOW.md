@@ -14,7 +14,7 @@ Segment -> CRM sync routing -> Phone eligibility filter -> AI Zalo template draf
 
 ## Verified Ground Truth (Repo Audit)
 
-### Database schema reality (`database-init/database-schema.sql`)
+### Database schema reality (`customer360-database/database-schema.sql`)
 
 - `cdp_segments` exists and supports segment selection by `segment_id`.
 - `cdp_master_profiles` exists with lifecycle, contact, and personalization attributes used for targeting.
@@ -88,7 +88,7 @@ Implication: this story must convert `campaign_activation` and `notification_eng
 
 ### SUBTASK-01: Schema and Migration Foundation for Zalo OA
 
-Component: `database-init/migrations`  
+Component: `customer360-database/migrations`
 Priority: P0 Blocker  
 Depends on: none  
 Blocks: SUBTASK-02..08  

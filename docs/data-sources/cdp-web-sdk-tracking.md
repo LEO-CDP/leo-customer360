@@ -10,7 +10,7 @@ and sends data to the configured LEO log domain.
 
 The SDK is the *acquisition* layer of the platform. On its own it only knows
 about one browser/device; it becomes a "unified user" (a single
-[cdp_master_profiles](../../database-init/database-schema.sql) record spanning
+[cdp_master_profiles](../../customer360-database/database-schema.sql) record spanning
 web, app, POS, and CRM touchpoints) once its events reach the server-side
 pipeline documented in [CIR-improvement.md](../identity-resolution/CIR-improvement.md) and
 [TECHNICAL-DOCUMENTATION.md](../architecture/TECHNICAL-DOCUMENTATION.md). At a high level:
@@ -323,7 +323,7 @@ Guidance for wiring this into the CDP's own identity model:
   keys on their own — `cdp_profile_attributes` only treats `email`,
   `phone_number`, `device_id`, `advertising_id`, `cookie_id`, and
   `external_customer_id` as active CIR matching rules (see
-  `database-init/init-core-database.sql`); adding a new matching key requires
+  `customer360-database/init-core-database.sql`); adding a new matching key requires
   a corresponding schema/resolver change, not just sending the field.
 - If you also use the Meta/TikTok **server-side** Conversions API (to recover
   events blocked by browser tracking prevention), send the same `fbp`/`fbc`/

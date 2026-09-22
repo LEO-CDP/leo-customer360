@@ -497,9 +497,9 @@ metadata seed và trạng thái database.
 | Optional throttle helper | `backend-system/identity_resolution/identity_resolution/trigger_controller.py` |
 | Persona computation/persistence | `backend-system/identity_resolution/identity_resolution/persona_engine.py` |
 | PII-safe label | `backend-system/identity_resolution/identity_resolution/persona.py` |
-| Schema, indexes, constraints, persona tables | `database-init/database-schema.sql` |
-| Attribute catalog và CIR seed | `database-init/init-core-database.sql` |
-| FORCE RLS migration | `database-init/migrations/001_harden_tenant_rls_policies.sql` |
+| Schema, indexes, constraints, persona tables | `customer360-database/database-schema.sql` |
+| Attribute catalog và CIR seed | `customer360-database/init-core-database.sql` |
+| FORCE RLS migration | `customer360-database/migrations/001_harden_tenant_rls_policies.sql` |
 | Demo seed và hash PII | `backend-system/identity_resolution/scripts/init_sample_data.py` |
 | Demo resolution | `backend-system/identity_resolution/scripts/run_demo_resolution.py` |
 | Workspace code locations | `backend-system/workspace.yaml` |

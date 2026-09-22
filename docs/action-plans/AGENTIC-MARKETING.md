@@ -1,6 +1,6 @@
 # CRM and Agentic-AI Campaign Product Checklist
 
-This checklist is the frontend delivery baseline for Email, Zalo OA, and Ad Tech campaigns. It is derived from `database-init/database-schema.sql` and the three agentic marketing action plans under `docs/action-plans/`.
+This checklist is the frontend delivery baseline for Email, Zalo OA, and Ad Tech campaigns. It is derived from `customer360-database/database-schema.sql` and the three agentic marketing action plans under `docs/action-plans/`.
 
 Contract status used below:
 

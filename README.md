@@ -36,7 +36,7 @@ The current repo contains four application services, three active Dagster jobs, 
 
 | Path | Purpose |
 |---|---|
-| [`database-init/`](database-init) | Schema source: `database-schema.sql`, seed/init scripts, and SQL views |
+| [`customer360-database/`](customer360-database) | Schema source: `database-schema.sql`, seed/init scripts, and SQL views |
 | [`backend-system/`](backend-system) | Dagster workspace with nine code locations: identity resolution, segmentation, analytics, and six placeholder services |
 | [`customer360-api/`](customer360-api) | FastAPI service with routers, auth, SQLAlchemy models, and business logic |
 | [`customer360-dao/`](customer360-dao) | Installable shared Python DAO package and package-owned unit tests |

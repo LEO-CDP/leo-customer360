@@ -33,9 +33,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # when the data directory is empty (first-ever container start). See:
 # https://hub.docker.com/_/postgres -> "Initialization scripts".
 COPY postgres/init/00-extensions.sql /docker-entrypoint-initdb.d/00-extensions.sql
-COPY database-init/database-schema.sql /docker-entrypoint-initdb.d/01-schema.sql
-COPY database-init/init-core-database.sql /docker-entrypoint-initdb.d/02-init-core-database.sql
-COPY database-init/init-prompt-store-seed.sql /docker-entrypoint-initdb.d/03-init-prompt-store-seed.sql
+COPY customer360-database/database-schema.sql /docker-entrypoint-initdb.d/01-schema.sql
+COPY customer360-database/init-core-database.sql /docker-entrypoint-initdb.d/02-init-core-database.sql
+COPY customer360-database/init-prompt-store-seed.sql /docker-entrypoint-initdb.d/03-init-prompt-store-seed.sql
 
 # IMPROVEMENT: Increased start-period to 120s to allow large schema scripts to finish executing.
 # IMPROVEMENT: Added default fallbacks (:-postgres) so the healthcheck doesn't crash if vars are unset.

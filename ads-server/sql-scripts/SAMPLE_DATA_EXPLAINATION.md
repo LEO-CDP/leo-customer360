@@ -800,4 +800,4 @@ GROUP BY p.placement_id, p.placement_key;
 
 For schema details, see: [README.md](README.md) (comprehensive schema documentation)
 For API usage, see: [../README.md](../README.md) (ad server API endpoints)
-For full database context, see: [../../database-init/database-schema.sql](../../database-init/database-schema.sql)
+For full database context, see: [../../customer360-database/database-schema.sql](../../customer360-database/database-schema.sql)

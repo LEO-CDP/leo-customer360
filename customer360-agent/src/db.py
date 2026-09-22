@@ -26,7 +26,7 @@ def get_engine():
         from sqlalchemy import create_engine
 
         # The prompt-store tables live in the customer360 schema (see
-        # database-init/database-schema.sql); set search_path so the store's
+        # customer360-database/database-schema.sql); set search_path so the store's
         # unqualified SQL resolves there.
         schema = (settings.db_schema or "customer360").strip()
         _engine = create_engine(

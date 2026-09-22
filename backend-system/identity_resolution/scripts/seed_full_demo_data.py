@@ -1743,7 +1743,7 @@ def enrich_master_profiles(cursor, master_profiles: list) -> None:
 # Persona archetypes ("Ideal Customer Profile" per sys_domain + product/time)
 # --------------------------------------------------------------------------
 # Two curated ICP archetypes per customer360 sys_domain (see
-# database-init/init-core-database.sql's SYSTEM DOMAINS insert): a premium/
+# customer360-database/init-core-database.sql's SYSTEM DOMAINS insert): a premium/
 # high-value target and an emerging/growth target, each tied to a concrete
 # product and campaign time window (product/period are folded into
 # persona_name/persona_summary -- cdp_persona_archetypes has no dedicated

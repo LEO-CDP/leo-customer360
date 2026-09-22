@@ -43,10 +43,10 @@ deployment.
 Example for a local database:
 
 ```bash
-psql -v ON_ERROR_STOP=1 -d customer360 -f database-init/database-schema.sql
-psql -v ON_ERROR_STOP=1 -d customer360 -f database-init/init-core-database.sql
-psql -v ON_ERROR_STOP=1 -d customer360 -f database-init/data-view-for-llm.sql
-for migration in database-init/migrations/*.sql; do
+psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/database-schema.sql
+psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/init-core-database.sql
+psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/data-view-for-llm.sql
+for migration in customer360-database/migrations/*.sql; do
 	psql -v ON_ERROR_STOP=1 -d customer360 -f "$migration"
 done
 ```

@@ -128,7 +128,7 @@ session and is never in the key, so Tenant B replays Tenant A's cached PII.
 <a id="c2"></a>
 #### C2 — `graph_edges` has no tenant column and no RLS
 - **Where:** `customer360-api/core/repositories/graph_repository.py:24`; schema
-  `database-init/database-schema.sql:2533` (verified: only `from_id`/`to_id`, no `tenant_id`;
+  `customer360-database/database-schema.sql:2533` (verified: only `from_id`/`to_id`, no `tenant_id`;
   absent from every RLS migration).
 - **What:** The identity-graph edge table is not tenant-scoped at the DB layer, and
   `GraphRepository` list/get/delete/create issue no tenant filter.

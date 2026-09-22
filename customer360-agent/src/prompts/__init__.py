@@ -1,5 +1,5 @@
 """Prompt store -- prompts as addressable, versioned data in Postgres. Bodies +
-seed live in database-init; this package reads/edits them.
+seed live in customer360-database; this package reads/edits them.
 
     from prompts import get_store
     get_store().get("campaign.plan.instructions").render({...})

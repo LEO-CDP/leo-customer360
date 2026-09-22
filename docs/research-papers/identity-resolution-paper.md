@@ -36,7 +36,7 @@ Here `H` can be the same SHA-256 digest in both rows. The resolver does not reve
 
 Customer Identity Resolution (CIR) converts heterogeneous source observations into a tenant-scoped Customer 360 master profile. The current implementation uses a PostgreSQL staging queue, a Python resolver, metadata-driven matching rules, explicit row-level tenant context, and a link table that records every raw-to-master decision. Matching is intentionally separate from downstream persona resolution: the resolver first answers whether a raw observation belongs to an existing identity, then computes an explainable, versioned persona for the resulting master profile.
 
-This paper describes the implementation present in `database-init/database-schema.sql`, `database-init/init-core-database.sql`, and `backend-system/identity_resolution/identity_resolution/`. It also identifies schema capabilities that are present but not yet part of the active resolver path, so the design description does not overstate current behavior.
+This paper describes the implementation present in `customer360-database/database-schema.sql`, `customer360-database/init-core-database.sql`, and `backend-system/identity_resolution/identity_resolution/`. It also identifies schema capabilities that are present but not yet part of the active resolver path, so the design description does not overstate current behavior.
 
 ## 1. Problem and Design Answer
 

@@ -12,7 +12,7 @@ from typing import Any, Optional
 from ai_providers.provider import LLMProvider, build_state
 from prompts import get_store
 
-# Prompt-store keys; the bodies live in the DB (seeded by database-init).
+# Prompt-store keys; the bodies live in the DB (seeded by customer360-database).
 CAMPAIGN_PLAN_INSTRUCTIONS = "campaign.plan.instructions"
 CAMPAIGN_ZNS_INSTRUCTIONS = "campaign.zns.instructions"
 

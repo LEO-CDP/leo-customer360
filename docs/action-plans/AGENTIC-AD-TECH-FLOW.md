@@ -14,7 +14,7 @@ Segment -> CRM sync routing -> Ad audience export -> AI creative draft -> AI cam
 
 ## Verified Ground Truth (Repo Audit)
 
-### Database schema reality (`database-init/database-schema.sql`)
+### Database schema reality (`customer360-database/database-schema.sql`)
 
 - `cdp_segments` exists and supports segment selection by `segment_id`.
 - `cdp_master_profiles` exists and carries `lifecycle_stage` plus multi-attribute profile context for audience targeting.
@@ -95,7 +95,7 @@ Implication: this story must convert `campaign_activation` and `data_synch` into
 
 ### SUBTASK-01: Schema and Migration Foundation for Ad Tech
 
-Component: `database-init/migrations` + `ads-server/sql-scripts`  
+Component: `customer360-database/migrations` + `ads-server/sql-scripts`
 Priority: P0 Blocker  
 Depends on: none  
 Blocks: SUBTASK-02..08  

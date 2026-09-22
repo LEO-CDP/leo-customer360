@@ -1156,7 +1156,7 @@ psql -U postgres -d customer360 -f sample-data-init.sql
 - **API Documentation:** See [../README.md](../README.md) for API endpoints
 - **Sample Data Details:** See [SAMPLE_DATA_EXPLAINATION.md](SAMPLE_DATA_EXPLAINATION.md) for semantic explanation
 - **Dagster Workflows:** See `backend-system/` for task implementations
-- **Database Utilities:** See `database-init/` for additional SQL utilities
+- **Database Utilities:** See `customer360-database/` for additional SQL utilities
 
 ---
 

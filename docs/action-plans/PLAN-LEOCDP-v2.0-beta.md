@@ -68,7 +68,7 @@ It is updated to be realistic and code-accurate against the current repository s
 | CRM campaign entities and analytics endpoints | DONE | `customer360-api/core/routers/crm_api.py` (CRUD + `/campaigns/analytics`) |
 | Segment matched profiles and recompute trigger | DONE | `customer360-api/core/routers/segment_api.py` (`/{segment_id}/matched-profiles`, `/{segment_id}/recompute`) |
 | Generic event ingestion with dedup and identity resolution hints | DONE | `customer360-api/core/routers/events_api.py` (`/events`, `/events/bulk`) |
-| Core CRM/CDP schema (campaign, lead, lead source, contact, transactions, content items) | DONE | `database-init/database-schema.sql` |
+| Core CRM/CDP schema (campaign, lead, lead source, contact, transactions, content items) | DONE | `customer360-database/database-schema.sql` |
 | Active Dagster jobs for identity, segmentation, analytics | DONE | `backend-system/identity_resolution/dagster_defs.py`, `backend-system/segmentation/dagster_defs.py`, `backend-system/analytics/dagster_defs.py` |
 | Ad server runtime and data models (`leo_ads`) | DONE | `ads-server/core/application.py`, `ads-server/model/*.py`, `ads-server/tests/test_api.py` |
 | Tracking analytics E2E smoke script | DONE | `all-data-simulator/run_tracking_analytics_e2e.sh` (recent run succeeded) |
@@ -77,8 +77,8 @@ It is updated to be realistic and code-accurate against the current repository s
 
 | Capability Gap | Status | Code Evidence |
 | :--- | :--- | :--- |
-| Email-specific template, suppression, and dispatch schema from plan | BLOCKER | Missing in `database-init/database-schema.sql` |
-| Ad-tech bridge tables (`crm_ad_creatives`, platform map, audience export, sync run) | BLOCKER | Missing in `database-init/database-schema.sql` |
+| Email-specific template, suppression, and dispatch schema from plan | BLOCKER | Missing in `customer360-database/database-schema.sql` |
+| Ad-tech bridge tables (`crm_ad_creatives`, platform map, audience export, sync run) | BLOCKER | Missing in `customer360-database/database-schema.sql` |
 | Zalo connector/template/dispatch storage | READY | Reuses `crm_connector_config`, `crm_message_templates`, and `cdp_campaign_dispatch_logs` |
 | Channel-specific sync endpoints (`/admin/crm/sync-segment/*`, `/admin/adtech/*`, `/admin/zalo/*`) | BLOCKER | Not present in `customer360-api/core/routers` |
 | Channel-specific webhooks (ESP callbacks, ad callbacks, Zalo OA callbacks) | BLOCKER | Not present in `customer360-api/core/routers` |

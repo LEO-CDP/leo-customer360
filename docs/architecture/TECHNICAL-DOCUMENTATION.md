@@ -236,7 +236,7 @@ Each placeholder service exists so `customer360-api/core/utils/dagster_client.py
 - `churn_probability`, `predictive_clv`, `lead_conversion_probability`, `engagement_score`.
 - A future Dagster job in `backend-system/scoring/` (currently a placeholder) would compute these and write them back via `PATCH /api/v1/master-profiles/{id}`.
 
-## 5. Data Model (`database-init/database-schema.sql`)
+## 5. Data Model (`customer360-database/database-schema.sql`)
 
 ### 5.1 Core Tables
 

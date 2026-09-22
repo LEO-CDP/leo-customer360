@@ -8,7 +8,7 @@
 #   ./deploy-agent.sh <uat|prod> destroy    # remove the container
 #
 # CD path: PULLS the CI-built GHCR image (set BUILD_LOCAL=1 to build on the VM). The
-# prompt-store schema + seed live in database-init (applied by ../postgres/run-sql.sh),
+# prompt-store schema + seed live in customer360-database (applied by ../postgres/run-sql.sh),
 # so nothing DB-bootstrapping happens here.
 #
 # LLM (LiteLLM) config is env-var-with-defaults (OpenAI by default). Overrides (env):

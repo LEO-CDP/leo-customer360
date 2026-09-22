@@ -303,7 +303,7 @@ When adding a new runtime behavior, add a unit test at the owning layer. Keep Da
 
 ### Change database schema
 
-Update the canonical schema/migrations in `database-init/` and keep resolver SQL, indexes, and documentation aligned. Do not hide schema changes in runtime initialization code except for the explicitly defensive demo setup.
+Update the canonical schema/migrations in `customer360-database/` and keep resolver SQL, indexes, and documentation aligned. Do not hide schema changes in runtime initialization code except for the explicitly defensive demo setup.
 
 ## Operational Troubleshooting
 

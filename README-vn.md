@@ -33,7 +33,7 @@ Repository hiện có bốn application service, ba Dagster job đang hoạt đ�
 
 | Đường dẫn | Mục đích |
 |---|---|
-| [`database-init/`](database-init) | Nguồn schema: `database-schema.sql`, seed/init scripts và SQL views |
+| [`customer360-database/`](customer360-database) | Nguồn schema: `database-schema.sql`, seed/init scripts và SQL views |
 | [`backend-system/`](backend-system) | Dagster workspace với chín code location: identity resolution, segmentation, analytics và sáu placeholder service |
 | [`customer360-api/`](customer360-api) | FastAPI service với router, auth, SQLAlchemy model và business logic |
 | [`data-tracking-api/`](data-tracking-api) | FastAPI ingestion service đưa event vào Redis Streams rồi ghi tracking-log object theo giờ vào S3/MinIO |

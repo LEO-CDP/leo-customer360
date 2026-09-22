@@ -86,7 +86,7 @@ fail() {
 }
 
 if [[ "$E2E_APPLY_LOCAL_MIGRATIONS" == "true" ]]; then
-	MIGRATION_FILE="$ROOT_DIR/database-init/migrations/009_data_source_analytics.sql"
+	MIGRATION_FILE="$ROOT_DIR/customer360-database/migrations/009_data_source_analytics.sql"
 	[[ -f "$MIGRATION_FILE" ]] || fail "missing analytics migration: $MIGRATION_FILE"
 	log "Applying idempotent local analytics schema migration"
 	docker exec -i "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" \

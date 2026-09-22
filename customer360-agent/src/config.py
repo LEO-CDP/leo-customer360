@@ -29,7 +29,7 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("AGENT_DATABASE_URL", "DATABASE_URL", "database_url"),
     )
-    # Postgres schema holding the prompt-store tables (created by database-init).
+    # Postgres schema holding the prompt-store tables (created by customer360-database).
     db_schema: str = Field(
         default="customer360",
         validation_alias=AliasChoices("AGENT_DB_SCHEMA", "DB_SCHEMA", "db_schema"),

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # is down; a slow dependency should not make this endpoint hang.
 CONNECTIVITY_TIMEOUT_SECONDS = 2
 
-# The default tenant seeded by database-init/init-core-database.sql.
+# The default tenant seeded by customer360-database/init-core-database.sql.
 DEFAULT_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 

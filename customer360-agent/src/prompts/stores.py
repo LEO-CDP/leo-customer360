@@ -1,6 +1,6 @@
 """Postgres-backed prompt store.
 
-Bodies live in the DB (schema + seed owned by database-init/*.sql). The store
+Bodies live in the DB (schema + seed owned by customer360-database/*.sql). The store
 serves a process-local snapshot loaded by refresh(); get() is snapshot-only (no
 I/O). publish()/rollback()/history() are the runtime-edit surface.
 

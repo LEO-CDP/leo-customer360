@@ -242,7 +242,7 @@ Concrete, file-level task list mapped to the phases in §5. `[new]` = create, `[
 
 ### Phase 0 — Connect (OA OAuth + token lifecycle)
 
-**Schema** (`database-init/`)
+**Schema** (`customer360-database/`)
 - `[none]` **no new table** — OA config reuses the existing `crm_connector_config` table (already RLS-registered). One row per tenant: `connector_type='CHAT'`, `provider='ZALO'`, tokens in `credentials` JSONB, runtime settings in `config` JSONB.
 
 **customer360-api** (`customer360-api/core/`)

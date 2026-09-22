@@ -1,6 +1,6 @@
 """End-to-end tests for the AI Agent HTTP API — the FULL request stack, with only
 the external LLM mocked (litellm.completion) and the prompt store fed an in-memory
-snapshot (what database-init seeds in prod). Everything else is real: routing,
+snapshot (what customer360-database seeds in prod). Everything else is real: routing,
 bearer-token auth, request->brief mapping, prompt assembly from the store, the
 provider, JSON parsing, the Zalo template guardrails, and response serialization.
 
@@ -27,7 +27,7 @@ from prompts import PromptTemplate, get_store, reset_store_cache
 
 client = TestClient(app_module.app)
 
-# Bodies mimic what database-init seeds. Their content is irrelevant to the mocked
+# Bodies mimic what customer360-database seeds. Their content is irrelevant to the mocked
 # LLM, but their presence in the built prompt proves the real assembly path ran.
 _EMAIL_BODY = "You are a campaign planner. Return a JSON object for the email campaign."
 _ZNS_BODY = "You are a ZNS planner. Pick one approved template_id and fill its params. Return JSON."

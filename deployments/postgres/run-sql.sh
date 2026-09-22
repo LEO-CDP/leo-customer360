@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bootstrap the deployed vDB for an env by running, in a fixed dependency order:
 #   1) repo  postgres/**/*.sql   (extensions, keycloak db — filename order)
-#   2) repo  database-init/*.sql (the app schema) AFTER the init, in the order the
+#   2) repo  customer360-database/*.sql (the app schema) AFTER the init, in the order the
 #      project's own postgres/Dockerfile uses: database-schema -> init-core-database,
 #      then data-view-for-llm (materialized views) LAST since it reads those tables.
 #   ./run-sql.sh <uat|prod>
@@ -21,7 +21,7 @@ case "$ENV" in
 esac
 
 PG_SQL_DIR="../../postgres"       # repo-root/postgres/**  (extensions, keycloak db) — filename order
-APP_SQL_DIR="../../database-init" # the app schema; ORDER MATTERS, so run these known files first:
+APP_SQL_DIR="../../customer360-database" # the app schema; ORDER MATTERS, so run these known files first:
 APP_ORDER=(database-schema.sql init-core-database.sql data-view-for-llm.sql)
 MIGRATIONS_DIR="$APP_SQL_DIR/migrations"
 

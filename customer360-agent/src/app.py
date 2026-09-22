@@ -48,7 +48,7 @@ if not settings.api_token:
 @app.on_event("startup")
 def _init_prompt_store() -> None:
     """Load the published prompt snapshot from the DB. Schema + seed are owned by
-    database-init. Best-effort: a DB hiccup must not block startup (get() then
+    customer360-database. Best-effort: a DB hiccup must not block startup (get() then
     raises PromptNotFound and the /plan call returns 502)."""
     if not settings.database_url:
         return

@@ -391,7 +391,7 @@ read-only through `vw_campaign_performance_metrics` + `CampaignRepository`
 
 ## 5. Data model (SCRUM-93) — ✅
 
-Fresh-cluster DDL: `database-init/database-schema.sql:2914-3218`. Incremental migrations (applied by
+Fresh-cluster DDL: `customer360-database/database-schema.sql:2914-3218`. Incremental migrations (applied by
 `deployments/postgres/run-sql.sh`, which runs forward `*.sql` in name order and **excludes**
 `*.down.sql`):
 
@@ -506,7 +506,7 @@ Keycloak token), `README.md`, `TEST_PLAN.md` (AC → case traceability). Simulat
 - `scoring/dagster_defs.py` — placeholder (engagement writeback gap)
 - `workspace.yaml` — Dagster code-location registration
 
-**database-init**
+**customer360-database**
 - `database-schema.sql` (2914-3218), `migrations/002_…`, `003_…`, `004_…` (+ `.down.sql`)
 - `deployments/postgres/run-sql.sh` — migration runner
 

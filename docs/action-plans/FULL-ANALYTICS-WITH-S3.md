@@ -79,7 +79,7 @@ Relevant current implementation:
 - [customer360-api/core/cache.py](../../customer360-api/core/cache.py) provides fail-open Redis response caching; the events route includes tenant, datetime, source, filter, and pagination parameters in its cache key.
 - [customer360-api/core/crud/profile360.py](../../customer360-api/core/crud/profile360.py) reads behavioral events through the tenant-scoped S3 event repository.
 - [backend-system/analytics/source_analytics/tracking_log_aggregation.py](../../backend-system/analytics/source_analytics/tracking_log_aggregation.py) scans S3 and updates source metrics.
-- [database-init/database-schema.sql](../../database-init/database-schema.sql) defines S3/MinIO as the behavioral-event system of record.
+- [customer360-database/database-schema.sql](../../customer360-database/database-schema.sql) defines S3/MinIO as the behavioral-event system of record.
 
 The current implementation has an intentional split: the public tracking API is
 database-free, while the customer API's read-only compatibility route may use
@@ -480,8 +480,8 @@ service gate below.
 | [customer360-api/core/routers/identity_api.py](../../customer360-api/core/routers/identity_api.py) | Update timeline/engagement dependencies if the router exposes those profile analytics | 3 |
 | [backend-system/analytics/source_analytics/tracking_log_aggregation.py](../../backend-system/analytics/source_analytics/tracking_log_aggregation.py) | Process MinIO `events/` and `_processed/` state, compact Silver data, reconcile counts, and retain Redis as cache only | 1, 3 |
 | [backend-system/analytics/dagster_defs.py](../../backend-system/analytics/dagster_defs.py) | Register compaction, reconciliation, backfill, and replay jobs/schedules | 3, 4 |
-| [database-init/database-schema.sql](../../database-init/database-schema.sql) | Keep tracking state out of the public API database; remove raw-event table only in Phase 6 | 1, 6 |
-| [database-init/migrations/001_harden_tenant_rls_policies.sql](../../database-init/migrations/001_harden_tenant_rls_policies.sql) | Keep the public tracking service outside PostgreSQL tenant-control paths | 1 |
+| [customer360-database/database-schema.sql](../../customer360-database/database-schema.sql) | Keep tracking state out of the public API database; remove raw-event table only in Phase 6 | 1, 6 |
+| [customer360-database/migrations/001_harden_tenant_rls_policies.sql](../../customer360-database/migrations/001_harden_tenant_rls_policies.sql) | Keep the public tracking service outside PostgreSQL tenant-control paths | 1 |
 | [customer360-api/core/config.py](../../customer360-api/core/config.py) | Add event backend, query engine, time-range, bucket, and feature-flag settings | 2, 3, 5 |
 | [data-tracking-api/core/config.py](../../data-tracking-api/core/config.py) | Add envelope, bucket, compression, request-limit, Redis idempotency, and processed-state settings | 1 |
 | [backend-system/analytics/source_analytics/](../../backend-system/analytics/source_analytics/) | Add state-marker handling, compaction, quarantine, reconciliation, and backfill modules | 3, 4 |
