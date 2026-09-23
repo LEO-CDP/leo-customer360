@@ -111,7 +111,7 @@ customer360-frontend/
 │   │   ├── persona/
 │   │   ├── profile/
 │   │   ├── segment/
-│   │   ├── scoring/
+│   │   ├── agent/
 │   │   ├── campaign/
 │   │   └── admin/
 │   └── ...

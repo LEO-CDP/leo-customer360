@@ -3,7 +3,7 @@
  *
  * View routing itself lives in static/js/router.js (a small React-Router
  * style hash router). This file does NOT know about individual views --
- * every listing/detail/editor view (profiles, segments, personas, scoring
+ * every listing/detail/editor view (profiles, segments, personas, agent
  * models, analytics reports, data source connectors/importers, identity
  * resolution rules, admin users, ...) registers its own route(s) with
  * C360.router from its own file. Adding a new view is therefore a change
@@ -25,7 +25,7 @@ const TIME_CHECK_API_HEALTH = 60000;
     segments: "/segments",
     attributes: "/attributes",
     personas: "/personas",
-    scoring: "/scoring",
+    agent: "/agent",
     analytics: "/analytics",
     campaigns: "/campaigns",
     datasources: "/datasources",
@@ -205,7 +205,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       $("#segment-form-modal-container").html(C360.templates.html("segment-form-modal"));
       $("#view-attributes").html(C360.templates.html("attributes-list"));
       $("#view-datasources").html(C360.templates.html("data-source-list"));
-      $("#view-scoring").html(C360.templates.html("agent-model-list"));
+      $("#view-agent").html(C360.templates.html("agent-model-list"));
       $("#view-admin").html(C360.templates.html("system-user-list"));
       $("#persona-list-content").html(C360.templates.html("persona-list"));
       $("#persona-details-container").html(C360.templates.html("persona-details"));

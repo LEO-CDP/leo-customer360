@@ -123,7 +123,7 @@ window.C360 = window.C360 || {};
     clientSide: true,
     clientSideLimit: 500,
     fetch: function (params) {
-      return api("/data-sources", $.extend({ tenant_id: C360.config.current.tenantId }, params));
+      return api("/data-sources/", $.extend({ tenant_id: C360.config.current.tenantId }, params));
     },
     clientFilters: {
       q: function (vm, value) {
@@ -326,7 +326,7 @@ window.C360 = window.C360 || {};
 
     var request = isEdit
       ? api("/data-sources/" + encodeURIComponent(editingDataSourceId), payload, "PATCH")
-      : api("/data-sources", payload, "POST");
+      : api("/data-sources/", payload, "POST");
 
     request
       .done(function () {

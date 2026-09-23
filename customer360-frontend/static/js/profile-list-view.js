@@ -72,7 +72,7 @@ window.C360 = window.C360 || {};
     }
 
     $select.prop("disabled", true);
-    return api("/data-sources", {
+    return api("/data-sources/", {
       tenant_id: tenantId,
       status: 1,
       skip: 0,

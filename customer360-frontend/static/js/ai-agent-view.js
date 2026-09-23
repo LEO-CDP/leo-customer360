@@ -86,7 +86,7 @@ window.C360 = window.C360 || {};
     resourceLabel: "AI agent",
     clientSide: true,
     clientSideLimit: 500,
-    fetch: function (params) { return api("/ai-agents", params); },
+    fetch: function (params) { return api("/ai-agents/", params); },
     clientFilters: {
       q: function (vm, value) {
         var needle = value.toLowerCase();
@@ -123,8 +123,8 @@ window.C360 = window.C360 || {};
   function load() { return dtv.load(false); }
 
   function updateScheduleExplanation() {
-    var raw = $.trim($("#scoring-model-add-schedule").val());
-    $("#scoring-model-add-schedule-explanation")
+    var raw = $.trim($("#agent-model-add-schedule").val());
+    $("#agent-model-add-schedule-explanation")
       .text(raw ? "Runs: " + formatCronSchedule(raw) : "")
       .toggleClass("hidden", !raw);
   }
@@ -142,25 +142,25 @@ window.C360 = window.C360 || {};
 
   function openAddAiAgentModal() {
     editingAiAgentCode = null;
-    $("#scoring-model-form-title").text("Add AI Agent");
-    $("#scoring-model-form-subtitle").text("Registers a new row in the cdp_ai_agents registry");
-    $("#scoring-model-form-save-label").text("Save Agent");
-    $("#btn-scoring-model-delete").addClass("hidden");
-    $("#scoring-model-add-error").addClass("hidden").text("");
-    $("#scoring-model-add-name").val("").prop("disabled", false);
-    $("#scoring-model-add-display-name").val("");
-    $("#scoring-model-add-description").val("");
-    $("#scoring-model-add-model-name").val("");
-    $("#scoring-model-add-type").val("classification");
-    $("#scoring-model-add-status").val("ACTIVE");
-    $("#scoring-model-add-schedule").val("");
+    $("#agent-model-form-title").text("Add AI Agent");
+    $("#agent-model-form-subtitle").text("Registers a new row in the cdp_ai_agents registry");
+    $("#agent-model-form-save-label").text("Save Agent");
+    $("#btn-agent-model-delete").addClass("hidden");
+    $("#agent-model-add-error").addClass("hidden").text("");
+    $("#agent-model-add-name").val("").prop("disabled", false);
+    $("#agent-model-add-display-name").val("");
+    $("#agent-model-add-description").val("");
+    $("#agent-model-add-model-name").val("");
+    $("#agent-model-add-type").val("classification");
+    $("#agent-model-add-status").val("ACTIVE");
+    $("#agent-model-add-schedule").val("");
     updateScheduleExplanation();
-    $("#scoring-model-add-features").val("");
-    $("#scoring-model-add-hyperparameters").val("");
-    $("#scoring-model-add-prompt-key").val("");
-    $("#scoring-model-add-prompt-engine").val("none");
-    $("#scoring-model-add-instructions").val("");
-    $("#scoring-model-add-required-vars").val("");
+    $("#agent-model-add-features").val("");
+    $("#agent-model-add-hyperparameters").val("");
+    $("#agent-model-add-prompt-key").val("");
+    $("#agent-model-add-prompt-engine").val("none");
+    $("#agent-model-add-instructions").val("");
+    $("#agent-model-add-required-vars").val("");
     $("#ai-agent-form-modal").removeClass("hidden");
   }
 
@@ -168,27 +168,27 @@ window.C360 = window.C360 || {};
     var m = aiAgentsByCode[name];
     if (!m) return;
     editingAiAgentCode = name;
-    $("#scoring-model-form-title").text("Edit AI Agent");
-    $("#scoring-model-form-subtitle").text("Updates this cdp_ai_agents registry row");
-    $("#scoring-model-form-save-label").text("Save Changes");
-    $("#btn-scoring-model-delete").removeClass("hidden");
-    $("#scoring-model-add-error").addClass("hidden").text("");
+    $("#agent-model-form-title").text("Edit AI Agent");
+    $("#agent-model-form-subtitle").text("Updates this cdp_ai_agents registry row");
+    $("#agent-model-form-save-label").text("Save Changes");
+    $("#btn-agent-model-delete").removeClass("hidden");
+    $("#agent-model-add-error").addClass("hidden").text("");
     // agent_code is the primary key and isn't part of AiAgentUpdate
     // -- shown for context but not editable.
-    $("#scoring-model-add-name").val(m.agent_code).prop("disabled", true);
-    $("#scoring-model-add-display-name").val(m.display_name);
-    $("#scoring-model-add-description").val(m.description || "");
-    $("#scoring-model-add-model-name").val(m.model_name || "");
-    $("#scoring-model-add-type").val(m.model_type);
-    $("#scoring-model-add-status").val(m.status);
-    $("#scoring-model-add-schedule").val(m.schedule_definition || "");
+    $("#agent-model-add-name").val(m.agent_code).prop("disabled", true);
+    $("#agent-model-add-display-name").val(m.display_name);
+    $("#agent-model-add-description").val(m.description || "");
+    $("#agent-model-add-model-name").val(m.model_name || "");
+    $("#agent-model-add-type").val(m.model_type);
+    $("#agent-model-add-status").val(m.status);
+    $("#agent-model-add-schedule").val(m.schedule_definition || "");
     updateScheduleExplanation();
-    $("#scoring-model-add-features").val((m.input_features || []).join(", "));
-    $("#scoring-model-add-hyperparameters").val(m.hyperparameters && Object.keys(m.hyperparameters).length ? JSON.stringify(m.hyperparameters, null, 2) : "");
-    $("#scoring-model-add-prompt-key").val(m.prompt_key || "");
-    $("#scoring-model-add-prompt-engine").val(m.prompt_engine || "none");
-    $("#scoring-model-add-instructions").val(m.system_instructions || "");
-    $("#scoring-model-add-required-vars").val((m.required_variables || []).join(", "));
+    $("#agent-model-add-features").val((m.input_features || []).join(", "));
+    $("#agent-model-add-hyperparameters").val(m.hyperparameters && Object.keys(m.hyperparameters).length ? JSON.stringify(m.hyperparameters, null, 2) : "");
+    $("#agent-model-add-prompt-key").val(m.prompt_key || "");
+    $("#agent-model-add-prompt-engine").val(m.prompt_engine || "none");
+    $("#agent-model-add-instructions").val(m.system_instructions || "");
+    $("#agent-model-add-required-vars").val((m.required_variables || []).join(", "));
     $("#ai-agent-form-modal").removeClass("hidden");
   }
 
@@ -197,17 +197,17 @@ window.C360 = window.C360 || {};
   }
 
   function submitAiAgentForm() {
-    var $error = $("#scoring-model-add-error");
+    var $error = $("#agent-model-add-error");
     $error.addClass("hidden").text("");
 
-    var name = $.trim($("#scoring-model-add-name").val());
-    var displayName = $.trim($("#scoring-model-add-display-name").val());
+    var name = $.trim($("#agent-model-add-name").val());
+    var displayName = $.trim($("#agent-model-add-display-name").val());
     if (!name || !displayName) {
       $error.removeClass("hidden").text("Agent Code and Display Name are required.");
       return;
     }
 
-    var hyperparametersRaw = $.trim($("#scoring-model-add-hyperparameters").val());
+    var hyperparametersRaw = $.trim($("#agent-model-add-hyperparameters").val());
     var hyperparameters = {};
     if (hyperparametersRaw) {
       try {
@@ -225,17 +225,17 @@ window.C360 = window.C360 || {};
     var isEdit = editingAiAgentCode !== null;
     var payload = {
       display_name: displayName,
-      description: $.trim($("#scoring-model-add-description").val()) || null,
-      model_name: $.trim($("#scoring-model-add-model-name").val()) || null,
-      model_type: $("#scoring-model-add-type").val(),
-      status: $("#scoring-model-add-status").val(),
-      schedule_definition: $.trim($("#scoring-model-add-schedule").val()) || null,
-      input_features: parseCsvList($("#scoring-model-add-features").val()),
+      description: $.trim($("#agent-model-add-description").val()) || null,
+      model_name: $.trim($("#agent-model-add-model-name").val()) || null,
+      model_type: $("#agent-model-add-type").val(),
+      status: $("#agent-model-add-status").val(),
+      schedule_definition: $.trim($("#agent-model-add-schedule").val()) || null,
+      input_features: parseCsvList($("#agent-model-add-features").val()),
       hyperparameters: hyperparameters,
-      prompt_key: $.trim($("#scoring-model-add-prompt-key").val()) || null,
-      prompt_engine: $("#scoring-model-add-prompt-engine").val(),
-      system_instructions: $.trim($("#scoring-model-add-instructions").val()) || null,
-      required_variables: parseCsvList($("#scoring-model-add-required-vars").val())
+      prompt_key: $.trim($("#agent-model-add-prompt-key").val()) || null,
+      prompt_engine: $("#agent-model-add-prompt-engine").val(),
+      system_instructions: $.trim($("#agent-model-add-instructions").val()) || null,
+      required_variables: parseCsvList($("#agent-model-add-required-vars").val())
     };
     // agent_code is only settable on create (AiAgentUpdate has
     // no such field -- it's the immutable primary key).
@@ -243,7 +243,7 @@ window.C360 = window.C360 || {};
 
     var request = isEdit
       ? api("/ai-agents/" + encodeURIComponent(editingAiAgentCode), payload, "PATCH")
-      : api("/ai-agents", payload, "POST");
+      : api("/ai-agents/", payload, "POST");
 
     request
       .done(function () {
@@ -292,20 +292,20 @@ window.C360 = window.C360 || {};
     dtv.bindRowEdit();
 
     $(document).on("click", "#btn-agent-models-clear-filters", clearFilters);
-    $(document).on("click", "#btn-scoring-model-add", openAddAiAgentModal);
-    $(document).on("click", "#btn-scoring-model-add-cancel", closeAiAgentModal);
-    $(document).on("click", "#btn-scoring-model-add-save", submitAiAgentForm);
-    $(document).on("click", "#btn-scoring-model-delete", deleteAiAgent);
-    $(document).on("input", "#scoring-model-add-schedule", updateScheduleExplanation);
+    $(document).on("click", "#btn-agent-model-add", openAddAiAgentModal);
+    $(document).on("click", "#btn-agent-model-add-cancel", closeAiAgentModal);
+    $(document).on("click", "#btn-agent-model-add-save", submitAiAgentForm);
+    $(document).on("click", "#btn-agent-model-delete", deleteAiAgent);
+    $(document).on("input", "#agent-model-add-schedule", updateScheduleExplanation);
     $(document).on("click", "#ai-agent-form-modal", function (e) {
       if (e.target === this) closeAiAgentModal();
     });
   }
 
-  // Owns the "/scoring" tab/route (see router.js).
-  C360.router.define("/scoring", {
-    section: "view-scoring",
-    tab: "scoring",
+  // Owns the "/agent" tab/route (see router.js).
+  C360.router.define("/agent", {
+    section: "view-agent",
+    tab: "agent",
     mount: function () { load(); }
   });
 

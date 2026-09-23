@@ -282,7 +282,9 @@ else
   # The Dockerfile uses `RUN --mount=type=cache` (BuildKit-only) but docker.io ships no
   # buildx, so strip the mount (it's only a pip-cache optimization) and use the classic builder.
   sed -i 's/ --mount=[^ ]*//g' /opt/c360/customer360-api/Dockerfile
-  sudo docker build -t customer360-api -f /opt/c360/customer360-api/Dockerfile /opt/c360
+  BUILD_DATE_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  sudo docker build --build-arg "BUILD_DATE_TIME=$BUILD_DATE_TIME" \
+    -t customer360-api -f /opt/c360/customer360-api/Dockerfile /opt/c360
   RUN_IMG="customer360-api"
 fi
 ensure_s3_bucket "$RUN_IMG" /opt/c360/api.env "$MASTER_PROFILE_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"

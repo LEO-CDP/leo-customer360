@@ -1,6 +1,7 @@
 """Factory for the main Customer 360 HTTP API application."""
 
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -26,9 +27,9 @@ from core.routers.crm_sync_api import all_crm_sync_routers
 from core.routers.events_s3_api import all_events_routers
 from core.routers.graph_api import router as graph_router
 from core.routers.identity_api import all_identity_routers
-from core.routers.metadata_api import metadata_router
-from core.routers.data_source_api import all_data_source_routers, data_source_router
-from core.routers.ai_agent_api import all_ai_agent_routers, ai_agent_router
+from core.routers.metadata_api import all_metadata_routers
+from core.routers.data_source_api import all_data_source_routers
+from core.routers.ai_agent_api import all_ai_agent_routers
 
 from core.routers.persona_api import all_persona_routers
 from core.routers.relations_api import all_relations_routers
@@ -37,6 +38,7 @@ from core.routers.segment_api import all_segment_routers
 from core.routers.user_api import all_user_routers
 from core.routers.zalo_api import all_zalo_routers
 
+BUILD_DATE_TIME = os.getenv("BUILD_DATE_TIME", "unknown")
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,7 @@ NORMALIZED_OPENAPI_PUBLIC_PATHS = {
 # Registration order is part of the API contract: FastAPI evaluates routes in
 # that order when static and parameterized paths could both match.
 API_ROUTER_GROUPS = (
-    (metadata_router,),
+    all_metadata_routers,
     all_data_source_routers,
     all_ai_agent_routers,
     all_identity_routers,
@@ -260,6 +262,7 @@ def create_http_api_app(mcp_app: FastAPI) -> FastAPI:
             "status": "ok",
             "database": "reachable",
             "sso_login": settings.sso_login,
+            "BUILD_DATE_TIME": BUILD_DATE_TIME
         }
 
     return app

@@ -90,3 +90,4 @@ def get_metadata_domains(
     except MetadataRepositoryError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+all_metadata_routers = [metadata_router]
