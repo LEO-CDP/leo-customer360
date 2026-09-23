@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from sqlalchemy import text
 
-from core.auth import auth_middleware
+from core.auth import EXEMPT_PATHS, auth_middleware
 from leo_customer360_dao.config import settings
 from core.database import engine
 from core.init_core_data import init_core_data
@@ -22,7 +22,10 @@ from core.routers.crm_sync_api import all_crm_sync_routers
 from core.routers.events_s3_api import all_events_routers
 from core.routers.graph_api import router as graph_router
 from core.routers.identity_api import all_identity_routers
-from core.routers.metadata_api import all_metadata_routers
+from core.routers.metadata_api import metadata_router
+from core.routers.data_source_api import data_source_router
+from core.routers.ai_agent_api import ai_agent_router
+
 from core.routers.persona_api import all_persona_routers
 from core.routers.relations_api import all_relations_routers
 from core.routers.reporting_api import router as reporting_router
@@ -34,19 +37,38 @@ from core.routers.zalo_api import all_zalo_routers
 logger = logging.getLogger(__name__)
 
 API_PREFIX = "/api/v1"
-PUBLIC_PATHS = {
+OPENAPI_PUBLIC_PATHS = {
     "/",
     "/health",
-    "/api/v1/metadata",
-    "/api/v1/auth/login",
-    "/api/v1/auth/callback",
-    "/api/v1/auth/logout",
-    "/api/v1/auth/zalo-redirect",
-    "/mcp",
-    "/mcp/",
-    "/mcp/health",
+    *EXEMPT_PATHS,
 }
-NORMALIZED_PUBLIC_PATHS = {p.rstrip("/") or "/" for p in PUBLIC_PATHS}
+NORMALIZED_OPENAPI_PUBLIC_PATHS = {
+    path.rstrip("/") or "/" for path in OPENAPI_PUBLIC_PATHS
+}
+
+# Registration order is part of the API contract: FastAPI evaluates routes in
+# that order when static and parameterized paths could both match.
+API_ROUTER_GROUPS = (
+    all_identity_routers,
+    all_user_routers,
+    all_auth_routers,
+    (reporting_router,),
+    all_relations_routers,
+    all_events_routers,
+    all_content_routers,
+    (graph_router,),
+    all_crm_routers,
+    all_crm_sync_routers,
+    all_campaign_activation_routers,
+    all_campaign_draft_routers,
+    all_zalo_routers,
+    all_segment_routers,
+    all_persona_routers,
+    all_analytics_routers,
+    (metadata_router,),
+    (data_source_router,),
+    (ai_agent_router,),
+)
 
 
 @asynccontextmanager
@@ -63,38 +85,9 @@ async def _lifespan(_: FastAPI):
 
 def _include_api_routers(app: FastAPI) -> None:
     """Register all domain routers in dependency-aware order."""
-    for r in all_identity_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_user_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_auth_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    app.include_router(reporting_router, prefix=API_PREFIX)
-    for r in all_relations_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_events_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_content_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    app.include_router(graph_router, prefix=API_PREFIX)
-    for r in all_crm_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_crm_sync_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_campaign_activation_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_campaign_draft_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_zalo_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_segment_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_metadata_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_persona_routers:
-        app.include_router(r, prefix=API_PREFIX)
-    for r in all_analytics_routers:
-        app.include_router(r, prefix=API_PREFIX)
+    for router_group in API_ROUTER_GROUPS:
+        for router in router_group:
+            app.include_router(router, prefix=API_PREFIX)
 
 
 def _configure_openapi_security(app: FastAPI) -> None:
@@ -120,7 +113,7 @@ def _configure_openapi_security(app: FastAPI) -> None:
 
         for path, path_item in schema.get("paths", {}).items():
             normalized_path = path.rstrip("/") or "/"
-            if normalized_path in NORMALIZED_PUBLIC_PATHS:
+            if normalized_path in NORMALIZED_OPENAPI_PUBLIC_PATHS:
                 continue
             if normalized_path.startswith("/mcp"):
                 continue

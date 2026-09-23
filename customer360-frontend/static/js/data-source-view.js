@@ -123,7 +123,7 @@ window.C360 = window.C360 || {};
     clientSide: true,
     clientSideLimit: 500,
     fetch: function (params) {
-      return api("/metadata/data-sources", $.extend({ tenant_id: C360.config.current.tenantId }, params));
+      return api("/data-sources", $.extend({ tenant_id: C360.config.current.tenantId }, params));
     },
     clientFilters: {
       q: function (vm, value) {
@@ -325,8 +325,8 @@ window.C360 = window.C360 || {};
     $saveBtn.prop("disabled", true).addClass("opacity-70");
 
     var request = isEdit
-      ? api("/metadata/data-sources/" + encodeURIComponent(editingDataSourceId), payload, "PATCH")
-      : api("/metadata/data-sources", payload, "POST");
+      ? api("/data-sources/" + encodeURIComponent(editingDataSourceId), payload, "PATCH")
+      : api("/data-sources", payload, "POST");
 
     request
       .done(function () {
@@ -352,7 +352,7 @@ window.C360 = window.C360 || {};
     var label = found && found.name ? found.name : id;
     if (!window.confirm("Delete data source '" + label + "'?")) return;
 
-    api("/metadata/data-sources/" + encodeURIComponent(id), {}, "DELETE")
+    api("/data-sources/" + encodeURIComponent(id), {}, "DELETE")
       .done(function () {
         closeDetailModal();
         closeFormModal();
@@ -567,7 +567,7 @@ window.C360 = window.C360 || {};
     var cached = dataSourcesById[id];
     if (cached) openDetailModal(cached);
 
-    api("/metadata/data-sources/" + encodeURIComponent(id))
+    api("/data-sources/" + encodeURIComponent(id))
       .done(function (item) {
         dataSourcesById[item.data_source_id] = item;
         openDetailModal(item);

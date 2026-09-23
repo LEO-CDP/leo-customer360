@@ -2,7 +2,7 @@
  *
  * Modeled directly on attributes-view.js: a real consumer of the shared
  * C360.DataTableView component (static/js/data-table-view.js), client-side
- * filtering (the generic CRUD router behind /metadata/ai-agents only
+ * filtering (the generic CRUD router behind /ai-agents only
  * supports skip/limit/status/model_type), and the same Add/Edit modal
  * pattern. Unlike attributes (read-only catalog, no delete route), the
  * AI-agent router also exposes DELETE, so the edit modal grows a Delete
@@ -86,7 +86,7 @@ window.C360 = window.C360 || {};
     resourceLabel: "AI agent",
     clientSide: true,
     clientSideLimit: 500,
-    fetch: function (params) { return api("/metadata/ai-agents", params); },
+    fetch: function (params) { return api("/ai-agents", params); },
     clientFilters: {
       q: function (vm, value) {
         var needle = value.toLowerCase();
@@ -242,8 +242,8 @@ window.C360 = window.C360 || {};
     if (!isEdit) payload.agent_code = name;
 
     var request = isEdit
-      ? api("/metadata/ai-agents/" + encodeURIComponent(editingAiAgentCode), payload, "PATCH")
-      : api("/metadata/ai-agents", payload, "POST");
+      ? api("/ai-agents/" + encodeURIComponent(editingAiAgentCode), payload, "PATCH")
+      : api("/ai-agents", payload, "POST");
 
     request
       .done(function () {
@@ -262,7 +262,7 @@ window.C360 = window.C360 || {};
     var label = m && m.display_name ? m.display_name : editingAiAgentCode;
     if (!window.confirm("Delete AI agent '" + label + "'?")) return;
 
-    api("/metadata/ai-agents/" + encodeURIComponent(editingAiAgentCode), {}, "DELETE")
+    api("/ai-agents/" + encodeURIComponent(editingAiAgentCode), {}, "DELETE")
       .done(function () {
         closeAiAgentModal();
         load();

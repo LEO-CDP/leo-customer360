@@ -237,7 +237,7 @@ window.C360 = window.C360 || {};
 
     timelineDataSourcesLoading = true;
     updateTimelineLoadingState();
-    return api("/metadata/data-sources", {
+    return api("/data-sources", {
       tenant_id: tenantId,
       status: 1,
       skip: 0,
