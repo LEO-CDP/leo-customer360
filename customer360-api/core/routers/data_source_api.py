@@ -32,7 +32,7 @@ def get_metadata_repository(db: Session = Depends(get_db)) -> MetadataRepository
     return MetadataRepository(db)
 
 
-@data_source_router.get("", response_model=list[DataSourceRead])
+@data_source_router.get("/", response_model=list[DataSourceRead])
 def list_metadata_data_sources(
     tenant_id: uuid.UUID = DEFAULT_TENANT_ID,
     status: int | None = None,
@@ -64,7 +64,7 @@ def get_metadata_data_source(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@data_source_router.post("", response_model=DataSourceRead, status_code=201)
+@data_source_router.post("/", response_model=DataSourceRead, status_code=201)
 def create_metadata_data_source(
     payload: DataSourceCreate,
     repository: MetadataRepository = Depends(get_metadata_repository),

@@ -31,7 +31,7 @@ def get_metadata_repository(db: Session = Depends(get_db)) -> MetadataRepository
     return MetadataRepository(db)
 
 
-@ai_agent_router.get("", response_model=list[AiAgentRead])
+@ai_agent_router.get("/", response_model=list[AiAgentRead])
 def list_metadata_ai_agents(
     status: str | None = None,
     model_type: str | None = None,
@@ -63,7 +63,7 @@ def get_metadata_ai_agent(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@ai_agent_router.post("", response_model=AiAgentRead, status_code=201)
+@ai_agent_router.post("/", response_model=AiAgentRead, status_code=201)
 def create_metadata_ai_agent(
     payload: AiAgentCreate,
     repository: MetadataRepository = Depends(get_metadata_repository),
