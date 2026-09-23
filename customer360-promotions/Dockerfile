@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -22,6 +22,3 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=5 \
 
 CMD ["opentelemetry-instrument", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9009"]
 
-# ci: trigger image build — GHCR smoke test 2026-08-20
-
-# ci/cd: redeploy trigger 2026-08-20 #3 (no functional change)

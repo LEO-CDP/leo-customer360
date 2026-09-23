@@ -3,7 +3,7 @@
 import unittest
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -17,6 +17,9 @@ class DataSourceRouterTests(unittest.TestCase):
 	tenant_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 	def setUp(self):
+		self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
+		self._cache_patcher.start()
+		self.addCleanup(self._cache_patcher.stop)
 		self.app = FastAPI()
 		self.app.include_router(data_source_router)
 		self.db = MagicMock()
@@ -33,6 +36,20 @@ class DataSourceRouterTests(unittest.TestCase):
 		response = self.client.get("/data-sources")
 		self.assertEqual(response.status_code, 200)
 		self.assertEqual(response.json()[0]["slug"], "adjust")
+
+	def test_trailing_slash_and_no_slash_both_resolve_without_redirect(self):
+		self.db.execute.return_value.scalars.return_value.all.return_value = [self._source()]
+		# Behind reverse proxy, both variants must return 200 directly with no 307 redirect
+		r1 = self.client.get("/data-sources", follow_redirects=False)
+		r2 = self.client.get("/data-sources/", follow_redirects=False)
+		self.assertEqual(r1.status_code, 200)
+		self.assertEqual(r2.status_code, 200)
+
+	def test_count_returns_total(self):
+		self.db.execute.return_value.scalar_one.return_value = 5
+		response = self.client.get("/data-sources/count")
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response.json(), {"count": 5})
 
 	def test_list_query_matrix_and_invalid_uuid(self):
 		self.db.execute.return_value.scalars.return_value.all.return_value = []
@@ -70,3 +87,11 @@ class DataSourceRouterTests(unittest.TestCase):
 		self.assertEqual(self.client.patch(f"/data-sources/{uuid.uuid4()}", json={"source_type": 0}).status_code, 422)
 		self.db.execute.side_effect = RuntimeError("db down")
 		self.assertEqual(self.client.get("/data-sources").status_code, 503)
+
+	def test_item_database_failures_return_503(self):
+		self.db.get.side_effect = RuntimeError("db down")
+		data_source_id = uuid.uuid4()
+
+		self.assertEqual(self.client.get(f"/data-sources/{data_source_id}").status_code, 503)
+		self.assertEqual(self.client.patch(f"/data-sources/{data_source_id}", json={"name": "New"}).status_code, 503)
+		self.assertEqual(self.client.delete(f"/data-sources/{data_source_id}").status_code, 503)

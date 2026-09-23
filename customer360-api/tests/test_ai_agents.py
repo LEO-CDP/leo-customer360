@@ -2,7 +2,7 @@
 
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,6 +14,9 @@ from leo_customer360_dao.models.identity import CdpAiAgent
 
 class AiAgentRouterTests(unittest.TestCase):
 	def setUp(self):
+		self._cache_patcher = patch("core.cache.get_redis_client", return_value=None)
+		self._cache_patcher.start()
+		self.addCleanup(self._cache_patcher.stop)
 		self.app = FastAPI()
 		self.app.include_router(ai_agent_router)
 		self.db = MagicMock()
@@ -44,6 +47,20 @@ class AiAgentRouterTests(unittest.TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.assertEqual(response.json()[0]["agent_code"], "churn_prediction_v2")
 		self.assertIn("ORDER BY", str(self.db.execute.call_args.args[0]))
+
+	def test_trailing_slash_and_no_slash_both_resolve_without_redirect(self):
+		self.db.execute.return_value.scalars.return_value.all.return_value = [self._agent()]
+		# Behind reverse proxy, both variants must return 200 directly with no 307 redirect
+		r1 = self.client.get("/ai-agents", follow_redirects=False)
+		r2 = self.client.get("/ai-agents/", follow_redirects=False)
+		self.assertEqual(r1.status_code, 200)
+		self.assertEqual(r2.status_code, 200)
+
+	def test_count_returns_total(self):
+		self.db.execute.return_value.scalar_one.return_value = 3
+		response = self.client.get("/ai-agents/count")
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response.json(), {"count": 3})
 
 	def test_list_filter_and_pagination_matrix(self):
 		self.db.execute.return_value.scalars.return_value.all.return_value = []
@@ -97,3 +114,10 @@ class AiAgentRouterTests(unittest.TestCase):
 		self.db.get.return_value = None
 		self.assertEqual(self.client.patch("/ai-agents/missing", json={"display_name": "Missing"}).status_code, 404)
 		self.assertEqual(self.client.delete("/ai-agents/missing").status_code, 404)
+
+	def test_item_database_failures_return_503(self):
+		self.db.get.side_effect = RuntimeError("db down")
+
+		self.assertEqual(self.client.get("/ai-agents/churn_prediction_v2").status_code, 503)
+		self.assertEqual(self.client.patch("/ai-agents/churn_prediction_v2", json={"display_name": "New"}).status_code, 503)
+		self.assertEqual(self.client.delete("/ai-agents/churn_prediction_v2").status_code, 503)

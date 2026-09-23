@@ -278,9 +278,28 @@ class MetadataRepository:
 			logger.warning("Failed to load data-source metadata from PostgreSQL", exc_info=True)
 			raise MetadataRepositoryError(f"Data-source metadata unavailable: {exc}") from exc
 
+	def count_data_sources(
+		self,
+		tenant_id: uuid.UUID = DEFAULT_TENANT_ID,
+		status: int | None = None,
+	) -> int:
+		session = self._require_session()
+		try:
+			filters: dict[str, Any] = {"tenant_id": tenant_id}
+			if status is not None:
+				filters["status"] = status
+			return self._data_source_crud.count(session, **filters)
+		except Exception as exc:  # noqa: BLE001
+			logger.warning("Failed to count data-source metadata in PostgreSQL", exc_info=True)
+			raise MetadataRepositoryError(f"Data-source metadata unavailable: {exc}") from exc
+
 	def get_data_source(self, data_source_id: uuid.UUID) -> SysDataSource:
 		session = self._require_session()
-		obj = self._data_source_crud.get(session, data_source_id)
+		try:
+			obj = self._data_source_crud.get(session, data_source_id)
+		except Exception as exc:  # noqa: BLE001
+			logger.warning("Failed to load data-source metadata from PostgreSQL", exc_info=True)
+			raise MetadataRepositoryError(f"Data-source metadata unavailable: {exc}") from exc
 		if obj is None:
 			raise MetadataNotFoundError(f"SysDataSource '{data_source_id}' not found")
 		return obj
@@ -301,11 +320,19 @@ class MetadataRepository:
 		if "data_source_url" in data and data["data_source_url"] and "qr_code_data" not in data:
 			slug = data.get("slug") or obj.slug or "datasource"
 			data["qr_code_data"] = self._generate_qr_code_data(data["data_source_url"], slug)
-		return self._data_source_crud.update(self._require_session(), obj, data)
+		try:
+			return self._data_source_crud.update(self._require_session(), obj, data)
+		except Exception as exc:  # noqa: BLE001
+			logger.warning("Failed to update data-source metadata in PostgreSQL", exc_info=True)
+			raise MetadataRepositoryError(f"Data-source metadata unavailable: {exc}") from exc
 
 	def delete_data_source(self, data_source_id: uuid.UUID) -> None:
 		obj = self.get_data_source(data_source_id)
-		self._data_source_crud.delete(self._require_session(), obj)
+		try:
+			self._data_source_crud.delete(self._require_session(), obj)
+		except Exception as exc:  # noqa: BLE001
+			logger.warning("Failed to delete data-source metadata from PostgreSQL", exc_info=True)
+			raise MetadataRepositoryError(f"Data-source metadata unavailable: {exc}") from exc
 
 	def list_ai_agents(
 		self,
@@ -328,9 +355,30 @@ class MetadataRepository:
 			logger.warning("Failed to load AI-agent metadata from PostgreSQL", exc_info=True)
 			raise MetadataRepositoryError(f"AI-agent metadata unavailable: {exc}") from exc
 
+	def count_ai_agents(
+		self,
+		status: str | None = None,
+		model_type: str | None = None,
+	) -> int:
+		session = self._require_session()
+		try:
+			filters: dict[str, Any] = {}
+			if status is not None:
+				filters["status"] = status
+			if model_type is not None:
+				filters["model_type"] = model_type
+			return self._ai_agent_crud.count(session, **filters)
+		except Exception as exc:  # noqa: BLE001
+			logger.warning("Failed to count AI-agent metadata in PostgreSQL", exc_info=True)
+			raise MetadataRepositoryError(f"AI-agent metadata unavailable: {exc}") from exc
+
 	def get_ai_agent(self, agent_code: str) -> CdpAiAgent:
 		session = self._require_session()
-		obj = self._ai_agent_crud.get(session, agent_code)
+		try:
+			obj = self._ai_agent_crud.get(session, agent_code)
+		except Exception as exc:  # noqa: BLE001
+			logger.warning("Failed to load AI-agent metadata from PostgreSQL", exc_info=True)
+			raise MetadataRepositoryError(f"AI-agent metadata unavailable: {exc}") from exc
 		if obj is None:
 			raise MetadataNotFoundError(f"CdpAiAgent '{agent_code}' not found")
 		return obj
@@ -369,7 +417,11 @@ class MetadataRepository:
 			data["instruction_version"] = target_version
 			data["instruction_updated_by"] = revision_payload["instruction_updated_by"]
 			data["instruction_note"] = revision_payload["instruction_note"]
-		return self._ai_agent_crud.update(self._require_session(), obj, data)
+		try:
+			return self._ai_agent_crud.update(self._require_session(), obj, data)
+		except Exception as exc:  # noqa: BLE001
+			logger.warning("Failed to update AI-agent metadata in PostgreSQL", exc_info=True)
+			raise MetadataRepositoryError(f"AI-agent metadata unavailable: {exc}") from exc
 
 	@staticmethod
 	def _prompt_revision(payload: dict[str, Any], version: int) -> dict[str, Any]:
@@ -384,4 +436,8 @@ class MetadataRepository:
 
 	def delete_ai_agent(self, agent_code: str) -> None:
 		obj = self.get_ai_agent(agent_code)
-		self._ai_agent_crud.delete(self._require_session(), obj)
+		try:
+			self._ai_agent_crud.delete(self._require_session(), obj)
+		except Exception as exc:  # noqa: BLE001
+			logger.warning("Failed to delete AI-agent metadata from PostgreSQL", exc_info=True)
+			raise MetadataRepositoryError(f"AI-agent metadata unavailable: {exc}") from exc

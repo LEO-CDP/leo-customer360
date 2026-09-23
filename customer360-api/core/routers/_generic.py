@@ -48,6 +48,7 @@ def build_crud_router(
     # convenience for narrowing results, not a security boundary by itself.
     has_tenant = hasattr(model, "tenant_id")
 
+    @router.get("", response_model=list[read_schema], include_in_schema=False)
     @router.get("/", response_model=list[read_schema])
     @cache_response(f"{cache_prefix}/list", ttl=settings.cache_ttl_seconds)
     def list_items(
@@ -78,6 +79,7 @@ def build_crud_router(
             read_hook(db, obj)
         return obj
 
+    @router.post("", response_model=read_schema, status_code=201, include_in_schema=False)
     @router.post("/", response_model=read_schema, status_code=201)
     def create_item(payload: create_schema, db: Session = Depends(get_db)):  # type: ignore[valid-type]
         obj_in = payload.model_dump()
@@ -142,16 +144,16 @@ def build_crud_router(
     return router
 
 
-def insert_before_item_routes(router: APIRouter) -> None:
+def insert_before_item_routes(router: APIRouter, param_name: Optional[str] = None) -> None:
     """Moves the APIRoute most recently appended to ``router`` (i.e. the last
     entry in ``router.routes``) so it's registered ahead of the generic
-    ``GET/PATCH/DELETE /{item_id}`` routes added by :func:`build_crud_router`.
+    parameterized item routes added by :func:`build_crud_router` (or custom routers).
 
     Necessary because those routes use an untyped path template
     ("/{item_id}", with pk_type conversion happening in the handler
     signature rather than the path itself) so they match ANY single-segment
     path -- including literal static sub-paths like "/segmentable-profile-
-    attributes" added afterwards via ``@router.get(...)`` decorators.
+    attributes" or "/count" added afterwards via ``@router.get(...)`` decorators.
     Starlette dispatches to the first fully-matching route in registration
     order, so without this the static route would be shadowed by "/{item_id}"
     (returning a 422 "invalid UUID" instead of ever running).
@@ -160,7 +162,8 @@ def insert_before_item_routes(router: APIRouter) -> None:
     route onto a router returned by :func:`build_crud_router`.
     """
     new_route = router.routes.pop()
+    marker = "{" + param_name + "}" if param_name else "{"
     item_id_index = next(
-        i for i, route in enumerate(router.routes) if "{item_id}" in getattr(route, "path", "")
+        i for i, route in enumerate(router.routes) if marker in getattr(route, "path", "")
     )
     router.routes.insert(item_id_index, new_route)

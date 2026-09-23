@@ -2,31 +2,64 @@
 # Runs the Dagster webserver or singleton daemon, loading all nine code
 # locations in workspace.yaml. Identity resolution is managed by Dagster; there
 # is no separate identity-resolution worker image.
-FROM python:3.11-slim-bookworm
+FROM python:3.12-slim-bookworm AS builder
 
 WORKDIR /app
 
 RUN apt-get update \
- && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends build-essential libpq-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# Dagster core + Postgres driver. `dagster-postgres` backs the instance's
-# run/event/schedule storage; psycopg2 is used by both that and the ops that
-# connect to the customer360 schema.
-RUN pip install --no-cache-dir \
+COPY customer360-dao/pyproject.toml customer360-dao/README.md /opt/customer360-dao/
+COPY customer360-dao/src /opt/customer360-dao/src
+COPY customer360-backend/identity_resolution/requirements.txt /tmp/requirements/identity_resolution.txt
+COPY customer360-backend/scoring/requirements.txt /tmp/requirements/scoring.txt
+COPY customer360-backend/segmentation/requirements.txt /tmp/requirements/segmentation.txt
+COPY customer360-backend/analytics/requirements.txt /tmp/requirements/analytics.txt
+COPY customer360-backend/data_synch/requirements.txt /tmp/requirements/data_synch.txt
+COPY customer360-backend/email_engine/requirements.txt /tmp/requirements/email_engine.txt
+COPY customer360-backend/notification_engine/requirements.txt /tmp/requirements/notification_engine.txt
+COPY customer360-backend/campaign_activation/requirements.txt /tmp/requirements/campaign_activation.txt
+COPY customer360-backend/personalization/requirements.txt /tmp/requirements/personalization.txt
+
+# Build all wheels once. The local DAO wheel lets each code location resolve
+# its leo-customer360-dao requirement without reaching a package index.
+RUN mkdir -p /wheels /install \
+ && pip wheel --no-cache-dir --wheel-dir=/wheels /opt/customer360-dao \
+ && pip wheel --no-cache-dir --wheel-dir=/wheels --find-links=/wheels \
+      -r /tmp/requirements/identity_resolution.txt \
+      -r /tmp/requirements/scoring.txt \
+      -r /tmp/requirements/segmentation.txt \
+      -r /tmp/requirements/analytics.txt \
+      -r /tmp/requirements/data_synch.txt \
+      -r /tmp/requirements/email_engine.txt \
+      -r /tmp/requirements/notification_engine.txt \
+      -r /tmp/requirements/campaign_activation.txt \
+      -r /tmp/requirements/personalization.txt \
+      dagster dagster-webserver dagster-graphql dagster-postgres dagster-aws psycopg2-binary \
+ && pip install --no-cache-dir --no-index --find-links=/wheels --prefix=/install \
+      -r /tmp/requirements/identity_resolution.txt \
+      -r /tmp/requirements/scoring.txt \
+      -r /tmp/requirements/segmentation.txt \
+      -r /tmp/requirements/analytics.txt \
+      -r /tmp/requirements/data_synch.txt \
+      -r /tmp/requirements/email_engine.txt \
+      -r /tmp/requirements/notification_engine.txt \
+      -r /tmp/requirements/campaign_activation.txt \
+      -r /tmp/requirements/personalization.txt \
       dagster dagster-webserver dagster-graphql dagster-postgres dagster-aws psycopg2-binary
 
-COPY customer360-dao /opt/customer360-dao
-RUN pip install --no-cache-dir /opt/customer360-dao
+FROM python:3.12-slim-bookworm
 
+WORKDIR /app
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libpq5 \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /install /usr/local
 COPY customer360-backend /app
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
-
-# Install each code location's own requirements if present.
-RUN for d in identity_resolution scoring segmentation analytics data_synch email_engine notification_engine campaign_activation personalization; do \
-      if [ -f "$d/requirements.txt" ]; then pip install --no-cache-dir -r "$d/requirements.txt"; fi; \
-    done
 
 ENV DAGSTER_HOME=/dagster_home
 RUN mkdir -p /dagster_home
