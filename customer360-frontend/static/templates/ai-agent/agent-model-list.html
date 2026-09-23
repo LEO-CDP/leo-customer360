@@ -4,115 +4,127 @@
   =============================================================================
   Modeled directly on metadata/attributes-list.html: same header/search/filter
   layout, same shared C360.DataTableView component for the table, same
-  Add/Edit modal pattern -- rendered by static/js/scoring-model-view.js.
+  Add/Edit modal pattern -- rendered by static/js/ai-agent-view.js.
 -->
-<div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
+<div class="bg-white border border-slate-200 shadow-sm overflow-hidden">
 
-  <!-- Header Section -->
-  <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+  <div class="p-5 sm:p-6 border-b border-slate-200">
 
-    <!-- Title & Icon -->
-    <div class="flex items-center gap-3">
-      <div class="p-2 bg-violet-50 text-violet-600 rounded-xl">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="shrink-0 p-2 bg-violet-50 text-violet-700 rounded-lg">
         <!-- Beaker / ML Experiment Icon -->
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
         </svg>
       </div>
       <div>
-        <h1 class="text-base font-bold text-slate-900 tracking-tight">AI Agents</h1>
-        <p class="text-xs text-slate-400 mt-0.5">Models, rules, and prompt-backed agents</p>
+        <h1 class="text-lg font-semibold text-slate-900">AI Agents</h1>
+        <p class="text-xs text-slate-500 mt-0.5">Models, rules, and prompt-backed agents</p>
+      </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button id="btn-scoring-model-add" class="inline-flex min-h-9 items-center gap-1.5 bg-violet-700 text-white rounded-lg px-3.5 py-2 text-xs font-semibold hover:bg-violet-800 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 transition-colors shadow-sm">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+          <span>Add AI Agent</span>
+        </button>
       </div>
     </div>
 
-    <!-- Filter Controls -->
-    <div class="flex flex-wrap items-center gap-2.5">
-
-      <!-- Search Input with Icon -->
-      <div class="relative">
+    <div class="mt-5 pt-4 border-t border-slate-100">
+      <div class="flex flex-col gap-3 xl:flex-row xl:items-end">
+        <label class="block xl:w-80">
+          <span class="block mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Search agents</span>
+          <div class="relative">
         <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
         </span>
-        <input id="scoring-models-search-input" type="search" name="scoring_model_search"
-            placeholder="Search name, model, description…" autocomplete="off" autocorrect="off" spellcheck="false" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
-      </div>
+        <input id="agent-models-search-input" type="search" name="scoring_model_search"
+            placeholder="Name, code, model, or description" autocomplete="off" autocorrect="off" spellcheck="false" class="w-full min-h-9 text-sm border border-slate-300 bg-white hover:border-slate-400 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-600 transition-colors rounded-lg pl-9 pr-3 text-slate-800 placeholder-slate-400 outline-none" />
+          </div>
+        </label>
 
-      <!-- Model Type Filter -->
-      <select id="scoring-models-type-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <div class="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1 xl:pb-0">
+          <label class="block shrink-0">
+            <span class="block mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Type</span>
+            <select id="agent-models-type-filter" class="min-h-9 text-xs border border-slate-300 bg-white hover:border-slate-400 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-600 transition-colors rounded-lg px-3 text-slate-700 outline-none cursor-pointer">
         <option value="">All types</option>
         <option value="classification">Classification</option>
         <option value="regression">Regression</option>
         <option value="clustering">Clustering</option>
         <option value="rules_engine">Rules Engine</option>
         <option value="generative_llm">Generative LLM</option>
-      </select>
-
-      <!-- Status Filter -->
-      <select id="scoring-models-status-filter" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+            </select>
+          </label>
+          <label class="block shrink-0">
+            <span class="block mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Lifecycle</span>
+            <select id="agent-models-status-filter" class="min-h-9 text-xs border border-slate-300 bg-white hover:border-slate-400 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-600 transition-colors rounded-lg px-3 text-slate-700 outline-none cursor-pointer">
         <option value="">All status</option>
         <option value="ACTIVE">Active</option>
         <option value="INACTIVE">Inactive</option>
         <option value="TRAINING">Training</option>
         <option value="DEPRECATED">Deprecated</option>
         <option value="FAILED">Failed</option>
-      </select>
-
-      <!-- Operational State Filters -->
-      <select id="scoring-models-model-filter" aria-label="Filter by model configuration" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+            </select>
+          </label>
+          <label class="block shrink-0">
+            <span class="block mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Runtime model</span>
+            <select id="agent-models-model-filter" aria-label="Filter by model configuration" class="min-h-9 text-xs border border-slate-300 bg-white hover:border-slate-400 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-600 transition-colors rounded-lg px-3 text-slate-700 outline-none cursor-pointer">
         <option value="">All models</option>
         <option value="configured">Model configured</option>
         <option value="missing">Model not configured</option>
-      </select>
-
-      <select id="scoring-models-prompt-filter" aria-label="Filter by prompt configuration" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+            </select>
+          </label>
+          <label class="block shrink-0">
+            <span class="block mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Prompt</span>
+            <select id="agent-models-prompt-filter" aria-label="Filter by prompt configuration" class="min-h-9 text-xs border border-slate-300 bg-white hover:border-slate-400 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-600 transition-colors rounded-lg px-3 text-slate-700 outline-none cursor-pointer">
         <option value="">All prompt states</option>
         <option value="backed">Prompt-backed</option>
         <option value="none">No prompt</option>
-      </select>
-
-      <select id="scoring-models-schedule-filter" aria-label="Filter by execution schedule" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+            </select>
+          </label>
+          <label class="block shrink-0">
+            <span class="block mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Run mode</span>
+            <select id="agent-models-schedule-filter" aria-label="Filter by execution schedule" class="min-h-9 text-xs border border-slate-300 bg-white hover:border-slate-400 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-600 transition-colors rounded-lg px-3 text-slate-700 outline-none cursor-pointer">
         <option value="">All run modes</option>
         <option value="scheduled">Scheduled</option>
         <option value="on_demand">On demand</option>
-      </select>
-
-      <button id="btn-scoring-models-clear-filters" type="button" title="Clear AI agent filters" aria-label="Clear AI agent filters" class="inline-flex items-center justify-center h-8 w-8 border border-slate-200/80 bg-white rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors shadow-sm">
+            </select>
+          </label>
+        </div>
+        <button id="btn-agent-models-clear-filters" type="button" title="Clear AI agent filters" aria-label="Clear AI agent filters" class="shrink-0 inline-flex h-9 w-9 items-center justify-center border border-slate-300 bg-white rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition-colors">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m14.836 2A7.5 7.5 0 005.582 9m0 0H9m11 11v-5h-.581m0 0a7.5 7.5 0 01-13.837-2M15 20h3" /></svg>
       </button>
-
-      <!-- Add AI Agent -->
-      <button id="btn-scoring-model-add" class="inline-flex items-center gap-1.5 bg-violet-600 text-white rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-violet-700 transition-colors shadow-sm shadow-violet-100">
-        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-        <span>Add AI Agent</span>
-      </button>
-
+      </div>
     </div>
-
   </div>
 
   <!-- Table Container -->
-  <div class="overflow-x-auto">
-    <table class="w-full text-sm text-left">
-      <thead id="scoring-models-thead" class="bg-slate-50/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-100 sticky top-0 z-10"></thead>
-      <tbody id="scoring-models-tbody" class="divide-y divide-slate-100"></tbody>
+  <div class="overflow-x-auto overscroll-contain">
+    <table class="w-full min-w-[980px] text-sm text-left">
+      <thead id="agent-models-thead" class="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wide font-semibold border-b border-slate-200"></thead>
+      <tbody id="agent-models-tbody" class="divide-y divide-slate-100"></tbody>
     </table>
   </div>
 
   <!-- Loading State -->
-  <div id="scoring-models-loading" class="p-12 flex justify-center">
+  <div id="agent-models-loading" class="p-12 flex items-center justify-center" role="status" aria-label="Loading AI agents">
     <div class="spinner"></div>
   </div>
 
   <!-- Empty State -->
-  <div id="scoring-models-empty" class="hidden p-12 text-center text-sm text-slate-400">
-    <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-50 flex items-center justify-center text-xl">🔍</div>
-    <div class="font-medium text-slate-600">No AI agents matched your filters</div>
-    <p class="text-xs text-slate-400 mt-1">Try adjusting your search query or filter selections.</p>
+  <div id="agent-models-empty" class="hidden p-12 text-center text-sm text-slate-400">
+    <div class="w-11 h-11 mx-auto mb-3 rounded-lg bg-violet-50 text-violet-700 flex items-center justify-center">
+      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3v6.75L5.25 17.5A2.5 2.5 0 007.4 21h9.2a2.5 2.5 0 002.15-3.5l-4.5-7.75V3m-4.5 0h4.5" /></svg>
+    </div>
+    <div class="font-medium text-slate-700">No AI agents match this view</div>
+    <p class="text-xs text-slate-500 mt-1">Clear or adjust the filters to see more agents.</p>
   </div>
 
   <!-- Footer Count -->
-  <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
-    <span id="scoring-models-count-label" class="font-medium"></span>
+  <div class="px-5 py-3.5 sm:px-6 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 bg-slate-50/60">
+    <span id="agent-models-count-label" class="font-medium"></span>
   </div>
 
 </div>
@@ -121,7 +133,7 @@
   =============================================================================
   AI AGENT FORM MODAL
   Creates/updates a customer360.cdp_ai_agents row via
-  POST/PATCH /metadata/ai-agents (see scoring-model-view.js).
+  POST/PATCH /metadata/ai-agents (see ai-agent-view.js).
   =============================================================================
 -->
 <div id="ai-agent-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-6">

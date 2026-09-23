@@ -1,6 +1,6 @@
 /* Customer 360 Admin -- Data Sources view (sys_data_source).
  *
- * Modeled directly on scoring-model-view.js & attributes-view.js:
+ * Modeled directly on ai-agent-view.js & attributes-view.js:
  * Consumer of the shared C360.DataTableView component (static/js/common/data-table-view.js),
  * client-side searching & multi-filter support (source_type & status),
  * full Add/Edit/Detail modal lifecycle with 16:9 aspect ratio inspector,

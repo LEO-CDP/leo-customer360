@@ -1,6 +1,6 @@
 /* Customer 360 Admin -- System Users view (sys_user).
  *
- * Modeled directly on scoring-model-view.js: a real consumer of the shared
+ * Modeled directly on ai-agent-view.js: a real consumer of the shared
  * C360.DataTableView component (static/js/common/data-table-view.js) and the
  * same Add/Edit modal pattern. Unlike AI agents, GET /users returns a
  * paginated envelope ({ total, skip, limit, items }) rather than a bare

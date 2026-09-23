@@ -92,7 +92,7 @@ customer360-frontend/
 │   │   ├── placeholder-view.js
 │   │   ├── profile-detail-view.js
 │   │   ├── profile-list-view.js
-│   │   ├── scoring-model-view.js
+│   │   ├── ai-agent-view.js
 │   │   ├── segments-view.js
 │   │   ├── system-user-view.js
 │   │   └── common/
@@ -216,7 +216,7 @@ The current UI includes these primary sections:
 - Segments: `segments-view.js`
 - Attributes: `attributes-view.js`
 - Data Sources: `data-source-view.js`
-- Scoring: `scoring-model-view.js`
+- AI Agent: `ai-agent-view.js`
 - Campaigns: `campaign-view.js`
 - Personas: `persona-list-view.js`
 - Admin: `system-user-view.js`

@@ -51,7 +51,7 @@ window.C360 = window.C360 || {};
   function rowVm(m) {
     return $.extend({}, m, {
       typeIcon: typeIcon(m.model_type),
-      typeLabel: fmt.titleCase(m.model_type),
+      typeLabel: String(m.model_type || "").toUpperCase(),
       typeBadgeClass: typeBadgeClass(m.model_type),
       statusLabel: fmt.titleCase(m.status),
       statusBadgeClass: statusBadgeClass(m.status),
@@ -110,11 +110,11 @@ window.C360 = window.C360 || {};
     onFetched: function (items) { aiAgentsByCode = {}; items.forEach(function (m) { aiAgentsByCode[m.agent_code] = m; }); },
     onError: function (xhr) { showApiError("loading AI agents", xhr); },
     el: {
-      thead: "#scoring-models-thead",
-      tbody: "#scoring-models-tbody",
-      loading: "#scoring-models-loading",
-      empty: "#scoring-models-empty",
-      countLabel: "#scoring-models-count-label"
+      thead: "#agent-models-thead",
+      tbody: "#agent-models-tbody",
+      loading: "#agent-models-loading",
+      empty: "#agent-models-empty",
+      countLabel: "#agent-models-count-label"
     }
   });
 
@@ -272,26 +272,26 @@ window.C360 = window.C360 || {};
 
   function clearFilters() {
     [
-      "#scoring-models-search-input",
-      "#scoring-models-type-filter",
-      "#scoring-models-status-filter",
-      "#scoring-models-model-filter",
-      "#scoring-models-prompt-filter",
-      "#scoring-models-schedule-filter"
+      "#agent-models-search-input",
+      "#agent-models-type-filter",
+      "#agent-models-status-filter",
+      "#agent-models-model-filter",
+      "#agent-models-prompt-filter",
+      "#agent-models-schedule-filter"
     ].forEach(function (selector) { $(selector).val(""); });
     dtv.clearFilters();
   }
 
   function bindEvents() {
-    dtv.bindSearch("#scoring-models-search-input", "q", 300);
-    dtv.bindSelect("#scoring-models-type-filter", "type");
-    dtv.bindSelect("#scoring-models-status-filter", "status");
-    dtv.bindSelect("#scoring-models-model-filter", "model");
-    dtv.bindSelect("#scoring-models-prompt-filter", "prompt");
-    dtv.bindSelect("#scoring-models-schedule-filter", "schedule");
+    dtv.bindSearch("#agent-models-search-input", "q", 300);
+    dtv.bindSelect("#agent-models-type-filter", "type");
+    dtv.bindSelect("#agent-models-status-filter", "status");
+    dtv.bindSelect("#agent-models-model-filter", "model");
+    dtv.bindSelect("#agent-models-prompt-filter", "prompt");
+    dtv.bindSelect("#agent-models-schedule-filter", "schedule");
     dtv.bindRowEdit();
 
-    $(document).on("click", "#btn-scoring-models-clear-filters", clearFilters);
+    $(document).on("click", "#btn-agent-models-clear-filters", clearFilters);
     $(document).on("click", "#btn-scoring-model-add", openAddAiAgentModal);
     $(document).on("click", "#btn-scoring-model-add-cancel", closeAiAgentModal);
     $(document).on("click", "#btn-scoring-model-add-save", submitAiAgentForm);
