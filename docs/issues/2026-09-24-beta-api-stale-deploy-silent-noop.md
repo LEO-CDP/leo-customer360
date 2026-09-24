@@ -3,7 +3,7 @@
 **Date:** 2026-09-24
 **Environment:** UAT (`https://beta.leocdp.com`)
 **Severity:** High — multiple admin tabs unusable; new API code never reached the box
-**Status:** Fixed & verified (API redeployed; two deploy-script bugs fixed on `main`)
+**Status:** ✅ CLOSED (resolved & verified 2026-09-24) — see §8
 
 ---
 
@@ -200,3 +200,28 @@ Candidates (distinguished by the 401 `detail` string):
 - **Deploy-only commits vs auto-CD:** the `tag=sha-<newSHA>` auto-CD on a commit that
   builds no images will now fail loudly on the pull — decide whether to skip CD for
   `deployments/**`-only changes.
+
+---
+
+## 8. Closure
+
+**Resolved & verified 2026-09-24.** Both reported symptoms (AI Agent tab, and the login
+bounce) were the single stale-image root cause and are gone once beta runs current code.
+
+Fixes shipped to `main`:
+
+| Commit | Purpose |
+|---|---|
+| `3053c59` | source `lib/s3.sh` in `deploy-api.sh` → fixes the silent no-op |
+| `b00e2a0` | resolve customer360-agent URL/token locally → fixes `srv_ip` crash + token delivery |
+| `42baad2` | post-deploy `/health` `GIT_COMMIT_HASH` assertion → a future silent no-op fails loudly |
+
+Final verification:
+
+- `GET /c360api/health` reports a current `GIT_COMMIT_HASH` (the box runs HEAD, not a stale
+  image) — so the `ai-agents` + `data-source` routers are present.
+- The post-deploy assertion prints `post-deploy OK: … GIT_COMMIT_HASH=…` on real deploys
+  and stays green, confirming the pipeline is now self-verifying.
+- Login confirmed working by the reporter.
+
+No further action required. (The §7 follow-ups are optional hardening, not blockers.)
