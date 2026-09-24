@@ -93,6 +93,10 @@ fi
 # --- CD image source: pull the CI-built image from GHCR by default; set
 #     BUILD_LOCAL=1 to fall back to shipping source + building on the VM. ---
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/ghcr.sh"
+# ensure_s3_bucket (shipped to the box via `declare -f` in the ssh block below) lives
+# here; must be sourced or that declare fails under set -e and silently truncates the
+# remote script -> ssh runs nothing, container never updates, deploy still reports OK.
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/s3.sh"
 SERVICE="customer360-api"
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
 GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
