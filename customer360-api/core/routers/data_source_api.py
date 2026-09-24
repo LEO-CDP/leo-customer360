@@ -21,9 +21,9 @@ from leo_customer360_dao.models.system import SysDataSource
 from core.repositories.metadata_repository import (
     DEFAULT_TENANT_ID,
     MetadataNotFoundError,
-    MetadataRepository,
     MetadataRepositoryError,
 )
+from core.repositories.datasource_repository import DataSourceRepository
 from leo_customer360_dao.schemas.system import (
     DataSourceCreate,
     DataSourceRead,
@@ -37,12 +37,12 @@ CACHE_PREFIX = "sys_data_source"
 data_source_router = APIRouter(prefix="/data-sources", tags=["C360 Data Sources"])
 
 
-def get_metadata_repository(db: Session = Depends(get_db)) -> MetadataRepository:
-    """Dependency injection for the MetadataRepository."""
-    return MetadataRepository(db)
+def get_data_source_repository(db: Session = Depends(get_db)) -> DataSourceRepository:
+    """Provide the data-source repository for route handlers."""
+    return DataSourceRepository(db)
 
 
-def _get_data_source_or_404(repository: MetadataRepository, data_source_id: uuid.UUID) -> SysDataSource:
+def _get_data_source_or_404(repository: DataSourceRepository, data_source_id: uuid.UUID) -> SysDataSource:
     """Helper following segment_api._get_segment_or_404 pattern."""
     try:
         return repository.get_data_source(data_source_id)
@@ -60,7 +60,7 @@ def list_metadata_data_sources(
     status: int | None = None,
     skip: int = 0,
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: DataSourceRepository = Depends(get_data_source_repository),
 ) -> list[SysDataSource]:
     """Returns tenant-scoped rows from ``sys_data_source`` for connector setup UIs.
 
@@ -83,7 +83,7 @@ def list_metadata_data_sources(
 def count_metadata_data_sources(
     tenant_id: uuid.UUID = DEFAULT_TENANT_ID,
     status: int | None = None,
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: DataSourceRepository = Depends(get_data_source_repository),
 ) -> dict[str, int]:
     """Returns total count of data sources matching filter criteria."""
     try:
@@ -97,7 +97,7 @@ def count_metadata_data_sources(
 @cache_response(f"{CACHE_PREFIX}/item", ttl=settings.cache_ttl_seconds)
 def get_metadata_data_source(
     data_source_id: uuid.UUID,
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: DataSourceRepository = Depends(get_data_source_repository),
 ) -> SysDataSource:
     """Retrieves a specific data source by its UUID."""
     return _get_data_source_or_404(repository, data_source_id)
@@ -107,7 +107,7 @@ def get_metadata_data_source(
 @data_source_router.post("/", response_model=DataSourceRead, status_code=201)
 def create_metadata_data_source(
     payload: DataSourceCreate,
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: DataSourceRepository = Depends(get_data_source_repository),
 ) -> SysDataSource:
     """Creates a new data source and invalidates the cache."""
     try:
@@ -122,7 +122,7 @@ def create_metadata_data_source(
 def update_metadata_data_source(
     data_source_id: uuid.UUID,
     payload: DataSourceUpdate,
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: DataSourceRepository = Depends(get_data_source_repository),
 ) -> SysDataSource:
     """Partially updates an existing data source and invalidates the cache."""
     try:
@@ -138,7 +138,7 @@ def update_metadata_data_source(
 @data_source_router.delete("/{data_source_id}", status_code=204)
 def delete_metadata_data_source(
     data_source_id: uuid.UUID,
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: DataSourceRepository = Depends(get_data_source_repository),
 ) -> None:
     """Deletes a specific data source and invalidates the cache."""
     try:

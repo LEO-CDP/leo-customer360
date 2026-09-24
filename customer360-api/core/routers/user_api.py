@@ -13,11 +13,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text
+from sqlalchemy import text
 
 from core.database import SessionLocal
-from leo_customer360_dao.models.system import SysUser
-from leo_customer360_dao.repositories.user_repository import UserRepository
+from core.repositories.user_repository import UserRepository
 from leo_customer360_dao.schemas.user import UserCreate, UserUpdate, UserResponse, UserListResponse
 
 
@@ -181,12 +180,7 @@ async def list_users(
     repo = UserRepository(db)
     
     # Get total count
-    total_query = db.query(func.count(SysUser.user_id)).filter(
-        SysUser.tenant_id == tenant_id
-    )
-    if status_filter:
-        total_query = total_query.filter(SysUser.status == status_filter)
-    total = total_query.scalar() or 0
+    total = repo.count_users(tenant_id, status=status_filter)
     
     # Get paginated results
     items = repo.list_users(tenant_id, status=status_filter, skip=skip, limit=limit)
@@ -283,7 +277,7 @@ async def get_user_sso_identities(
             detail=f"User '{user_id}' not found in this workspace",
         )
     
-    return user.sso_identities or []
+    return repo.list_sso_identities(user)
 
 
 all_user_routers = [router]

@@ -15,13 +15,12 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.auth import require_tenant, require_tenant_admin
 from leo_customer360_dao.crud.email_provider import get_active_config, upsert_config
 from core.database import get_db
-from leo_customer360_dao.models.crm import Campaign, CampaignDispatchLog, ConnectorConfig
+from core.repositories.campaign_activation_repository import CampaignActivationRepository
 from leo_customer360_dao.schemas.crm import (
     CampaignActivationResponse,
     CampaignDispatchLogRead,
@@ -35,32 +34,9 @@ logger = logging.getLogger(__name__)
 campaign_activation_router = APIRouter(prefix="/admin", tags=["Campaign - Activation & Email"])
 
 
-def _to_provider_read(config: ConnectorConfig) -> EmailProviderConfigRead:
-    values = config.config if hasattr(config, "config") else {}
-    credentials = config.credentials if hasattr(config, "credentials") else {}
-    config_id = getattr(config, "connector_id", None) or getattr(config, "config_id")
-    read = EmailProviderConfigRead(
-        config_id=config_id,
-        tenant_id=config.tenant_id,
-        name=config.name,
-        provider=str(config.provider).lower(),
-        smtp_host=values.get("smtp_host", getattr(config, "smtp_host", None)),
-        smtp_port=values.get("smtp_port", getattr(config, "smtp_port", None)),
-        smtp_username=values.get("smtp_username", getattr(config, "smtp_username", None)),
-        credentials_ref=getattr(config, "credentials_ref", None),
-        smtp_use_tls=values.get("smtp_use_tls", getattr(config, "smtp_use_tls", True)),
-        from_address=values.get("from_address", getattr(config, "from_address", None)),
-        from_name=values.get("from_name", getattr(config, "from_name", None)),
-        is_active=config.is_active,
-        metadata_=getattr(config, "metadata_", None),
-        created_at=getattr(config, "created_at", None),
-        updated_at=getattr(config, "updated_at", None),
-    )
-    read.smtp_password_set = bool(
-        credentials.get("password", getattr(config, "smtp_password", None))
-        or getattr(config, "credentials_ref", None)
-    )
-    return read
+def _to_provider_read(config) -> EmailProviderConfigRead:
+    """Keep the historical response mapper available to callers and tests."""
+    return CampaignActivationRepository(None, dagster_client).provider_read(config)
 
 
 @campaign_activation_router.post("/campaigns/{campaign_id}/activate", response_model=CampaignActivationResponse)
@@ -69,8 +45,9 @@ def activate_campaign(campaign_id: uuid.UUID, request: Request, db: Session = De
     tenant_id = require_tenant(request)
     require_tenant_admin(request, "campaign activation")
 
-    campaign = db.get(Campaign, campaign_id)
-    if campaign is None or str(campaign.tenant_id) != tenant_id:
+    repo = CampaignActivationRepository(db, dagster_client)
+    campaign = repo.get_campaign(campaign_id, tenant_id)
+    if campaign is None:
         raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
 
     if (campaign.approval_status or "").strip() != "Approved":
@@ -80,7 +57,7 @@ def activate_campaign(campaign_id: uuid.UUID, request: Request, db: Session = De
         raise HTTPException(status_code=409, detail="Campaign needs both a template_id and a segment_id.")
 
     try:
-        run_id = dagster_client.campaign_activation.activate(str(campaign_id), tenant_id)
+        run_id = repo.activate(campaign_id, tenant_id)
     except DagsterJobTriggerError as exc:
         raise HTTPException(status_code=503, detail=f"Could not submit campaign activation: {exc}") from exc
 
@@ -103,13 +80,7 @@ def list_dispatch_logs(
     tenant_id = require_tenant(request)
     require_tenant_admin(request, "campaign activation")
 
-    stmt = select(CampaignDispatchLog).where(
-        CampaignDispatchLog.campaign_id == campaign_id,
-        CampaignDispatchLog.tenant_id == uuid.UUID(tenant_id),
-    )
-    if status:
-        stmt = stmt.where(CampaignDispatchLog.status == status)
-    return db.execute(stmt.order_by(CampaignDispatchLog.updated_at.desc()).limit(limit)).scalars().all()
+    return CampaignActivationRepository(db, dagster_client).list_dispatch_logs(campaign_id, tenant_id, status, limit)
 
 
 @campaign_activation_router.get("/email-provider-config", response_model=Optional[EmailProviderConfigRead])
@@ -117,8 +88,9 @@ def get_email_provider_config(request: Request, db: Session = Depends(get_db)):
     """The tenant's active email dispatch config (secret password omitted)."""
     tenant_id = require_tenant(request)
     require_tenant_admin(request, "email config")
-    config = get_active_config(db, uuid.UUID(tenant_id))
-    return _to_provider_read(config) if config is not None else None
+    repo = CampaignActivationRepository(db, dagster_client, get_active_config=get_active_config)
+    config = repo.get_provider_config(uuid.UUID(tenant_id))
+    return repo.provider_read(config) if config is not None else None
 
 
 @campaign_activation_router.put("/email-provider-config", response_model=EmailProviderConfigRead)
@@ -126,7 +98,8 @@ def put_email_provider_config(payload: EmailProviderConfigUpsert, request: Reque
     """Create/update the tenant's email dispatch config; invalidates its cache."""
     tenant_id = require_tenant(request)
     require_tenant_admin(request, "email config")
-    return _to_provider_read(upsert_config(db, uuid.UUID(tenant_id), payload))
+    repo = CampaignActivationRepository(db, dagster_client, upsert_config=upsert_config)
+    return repo.provider_read(repo.upsert_provider_config(uuid.UUID(tenant_id), payload))
 
 
 all_campaign_activation_routers = [campaign_activation_router]

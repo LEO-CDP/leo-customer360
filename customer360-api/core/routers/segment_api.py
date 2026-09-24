@@ -7,7 +7,6 @@ injection-safety validation applied before every execution).
 """
 
 import logging
-import re
 import uuid
 from collections.abc import Iterable
 from typing import Any, Optional
@@ -19,11 +18,10 @@ from sqlalchemy.orm import Session
 from core.cache import cache_response, invalidate_prefix
 from leo_customer360_dao.config import settings
 from leo_customer360_dao.crud.base import CRUDBase
-from leo_customer360_dao.crud.segmentation import DOMAIN_ATTRIBUTES_JOIN_SQL
 from core.database import get_db
 from core.init_core_data import list_tenant_ids, seed_default_segments_with_breakdown
 from leo_customer360_dao.models.segmentation import CdpSegment
-from leo_customer360_dao.repositories.segment_respository import SegmentRepository
+from core.repositories.segment_repository import SegmentRepository
 from core.routers._generic import build_crud_router, insert_before_item_routes
 from leo_customer360_dao.schemas.identity import MasterProfileRead
 from leo_customer360_dao.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
@@ -40,16 +38,6 @@ _segment_crud = CRUDBase(CdpSegment)
 # LEFT JOINed to cdp_domain_profiles (via DOMAIN_ATTRIBUTES_JOIN_SQL, aliased as
 # "dp"), so the "field picker" endpoint below offers both plain cdp_master_profiles
 # columns and cdp_domain_profiles.domain_attributes JSONB keys (as dp.domain_attributes->>'key').
-_SEGMENTABLE_SOURCE_TABLES = ("cdp_master_profiles", "cdp_domain_profiles")
-
-_RELATIVE_INTERVAL_PATTERN = re.compile(
-    r"(?P<quote>['\"])(?P<sign>[+-])\s*(?P<amount>\d+)\s+"
-    r"(?P<unit>milliseconds?|seconds?|minutes?|hours?|days?|weeks?|months?|years?)"
-    r"(?P=quote)",
-    re.IGNORECASE,
-)
-
-
 def _normalize_relative_intervals(sql_rules: str) -> str:
     """Translate UI date offsets into PostgreSQL interval expressions.
 
@@ -58,70 +46,23 @@ def _normalize_relative_intervals(sql_rules: str) -> str:
     convert it before both execution and audit SQL generation.
     """
 
-    def replace(match: re.Match[str]) -> str:
-        sign = "+" if match.group("sign") == "+" else "-"
-        amount = match.group("amount")
-        unit = match.group("unit").lower()
-        return f"(now() {sign} INTERVAL '{amount} {unit}')"
-
-    return _RELATIVE_INTERVAL_PATTERN.sub(replace, sql_rules)
+    return SegmentRepository.normalize_relative_intervals(sql_rules)
 
 
 def _has_wrapping_parentheses(value: str) -> bool:
-    stripped = value.strip()
-    if not stripped.startswith("(") or not stripped.endswith(")"):
-        return False
-
-    depth = 0
-    quote: Optional[str] = None
-    index = 0
-    while index < len(stripped):
-        char = stripped[index]
-        if quote:
-            if char == quote:
-                if index + 1 < len(stripped) and stripped[index + 1] == quote:
-                    index += 2
-                    continue
-                quote = None
-        elif char in {"'", '"'}:
-            quote = char
-        elif char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth == 0 and index != len(stripped) - 1:
-                return False
-        index += 1
-    return depth == 0 and quote is None
+    return SegmentRepository._has_wrapping_parentheses(value)
 
 
 def _final_generated_sql(sql_rules: str, tenant_id: uuid.UUID) -> str:
-    where_clause = sql_rules.strip() if _has_wrapping_parentheses(sql_rules) else f"({sql_rules.strip()})"
-    return (
-        f"SELECT master_profile_id FROM {settings.db_schema}.cdp_master_profiles "
-        f"WHERE tenant_id = '{tenant_id}'::uuid AND {where_clause}"
-    )
+    return SegmentRepository.final_generated_sql(sql_rules, tenant_id)
 
 
 def _transform_segment_create(_db: Session, payload: dict[str, Any]) -> dict[str, Any]:
-    sql_rules = payload.get("sql_rules")
-    if sql_rules:
-        normalized_rules = _normalize_relative_intervals(sql_rules)
-        payload["sql_rules"] = normalized_rules
-        payload["final_generated_sql"] = _final_generated_sql(normalized_rules, payload["tenant_id"])
-    return payload
+    return SegmentRepository.transform_create(payload)
 
 
 def _transform_segment_update(_db: Session, segment: CdpSegment, payload: dict[str, Any]) -> dict[str, Any]:
-    if "sql_rules" in payload:
-        sql_rules = payload["sql_rules"]
-        if sql_rules:
-            normalized_rules = _normalize_relative_intervals(sql_rules)
-            payload["sql_rules"] = normalized_rules
-            payload["final_generated_sql"] = _final_generated_sql(normalized_rules, segment.tenant_id)
-        else:
-            payload["final_generated_sql"] = None
-    return payload
+    return SegmentRepository.transform_update(segment, payload)
 
 
 def _trigger_segment_recompute(segment: CdpSegment, trigger_reason: str) -> None:
@@ -129,27 +70,7 @@ def _trigger_segment_recompute(segment: CdpSegment, trigger_reason: str) -> None
     segment row has been committed. A Dagster outage must not turn an already
     successful segment CRUD write into an HTTP failure; the scheduled job can
     reconcile the stale member_count later."""
-    try:
-        run_id = getattr(dagster_client.segmentation, trigger_reason)(
-            tenant_id=str(segment.tenant_id),
-            segment_id=str(segment.segment_id),
-        )
-    except DagsterJobTriggerError:
-        logger.warning(
-            "Could not submit segmentation_job for segment_id=%s (trigger_reason=%s); "
-            "member_count will be refreshed by a later recompute.",
-            segment.segment_id,
-            trigger_reason,
-        )
-        return
-
-    logger.info(
-        "Submitted segmentation_job for segment_id=%s (tenant_id=%s, trigger_reason=%s, run_id=%s)",
-        segment.segment_id,
-        segment.tenant_id,
-        trigger_reason,
-        run_id,
-    )
+    SegmentRepository.trigger_recompute(segment, trigger_reason)
 
 
 def _trigger_segment_recompute_after_create(segment: CdpSegment) -> None:
@@ -162,11 +83,7 @@ def _trigger_segment_recompute_after_update(segment: CdpSegment) -> None:
 
 def _segment_integrity_error_detail(exc: IntegrityError) -> Optional[str]:
     """Returns a client-safe conflict message for known segment constraints."""
-    original = getattr(exc, "orig", None)
-    diagnostic = getattr(original, "diag", None)
-    if getattr(diagnostic, "constraint_name", None) == "uq_cdp_segments_tenant_tag":
-        return "A segment with this tag already exists in this workspace."
-    return None
+    return SegmentRepository.integrity_error_detail(exc)
 
 segments_router = build_crud_router(
     model=CdpSegment,
@@ -177,6 +94,7 @@ segments_router = build_crud_router(
     read_schema=SegmentRead,
     prefix="/segments",
     tags=["Segmentation"],
+    crud_factory=lambda db: SegmentRepository(db).crud,
     create_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
     update_validator=lambda db, obj, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
     create_transform=_transform_segment_create,

@@ -31,6 +31,10 @@ fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
+# Unit tests use fakes and do not need a live, authenticated Redis Stream.
+# Preserve an explicit backend override for integration-style local runs.
+export TRACKING_QUEUE_BACKEND="${TRACKING_QUEUE_BACKEND:-memory}"
+
 python -m pip install --quiet --upgrade pip
 python -m pip install --quiet -r requirements.txt
 

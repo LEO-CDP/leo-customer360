@@ -17,8 +17,7 @@ from sqlalchemy.orm import Session
 
 from core.database import get_db
 from leo_customer360_dao.models.crm import Account, Campaign, CampaignMember, Contact, Industry, Lead, LeadSource, Opportunity
-from core.repositories.campaign_draft_repository import APPROVAL_STATUS_APPROVED, CampaignDraftRepository
-from leo_customer360_dao.repositories.campaign_repository import CampaignRepository
+from core.repositories.crm_repository import CrmRepository
 from core.routers._generic import build_crud_router
 from leo_customer360_dao.schemas.crm import (
     AccountCreate,
@@ -57,7 +56,7 @@ def _attach_campaign_content_items(db: Session, campaign: Campaign) -> None:
     """Enriches GET /campaigns/{id} with its content plan (specs/002-ai-campaign-draft-creation),
     via a join against crm_campaign_content_items/cdp_content_items -- see
     core.repositories.campaign_draft_repository.list_campaign_content_items."""
-    repo = CampaignDraftRepository(db)
+    repo = CrmRepository(db)
     campaign.content_items = repo.list_campaign_content_items(campaign.tenant_id, campaign.campaign_id)
 
 
@@ -69,27 +68,13 @@ def _block_edit_of_approved_campaign(db: Session, campaign: Campaign, payload: d
     CampaignDraftRepository.edit_draft(). approval_status itself is already
     excluded from CampaignUpdate, so this only needs to catch edits to an
     already-Approved row; edits before approval remain unrestricted here."""
-    if campaign.approval_status == APPROVAL_STATUS_APPROVED:
-        raise ValueError(
-            f"Campaign '{campaign.campaign_id}' is Approved; edit it via "
-            "PATCH /campaigns/{campaign_id}/draft (campaign_draft_api) instead, "
-            "which re-reviews the change and records it in the campaign's history"
-        )
+    CrmRepository(db).validate_campaign_update(campaign, payload)
 
 
 def _validate_create_campaign_starts_in_draft(db: Session, payload: dict) -> None:
     """Refuses generic POST /campaigns writes that try to bypass the draft-review
     workflow by setting approval metadata up front."""
-    if payload.get("approval_status") not in (None, "Draft"):
-        raise ValueError(
-            "Campaigns created via POST /campaigns must start in Draft; use the campaign draft "
-            "approval workflow to change approval_status"
-        )
-    if payload.get("approved_by") is not None or payload.get("approved_at") is not None:
-        raise ValueError(
-            "Campaign approval metadata may not be set via POST /campaigns; use the campaign "
-            "draft approval workflow instead"
-        )
+    CrmRepository(db).validate_create_campaign(payload)
 
 
 campaigns_router = build_crud_router(
@@ -201,7 +186,7 @@ def get_campaign_summary(
     db: Session = Depends(get_db),
 ):
     """Aggregate KPI cards: total campaigns, spend, impressions, clicks, conversions, ROAS."""
-    repo = CampaignRepository(db, tenant_id)
+    repo = CrmRepository(db, tenant_id).analytics
     return repo.get_kpi_summary()
 
 
@@ -231,7 +216,7 @@ def list_campaign_metrics(
         page=page,
         page_size=page_size,
     )
-    repo = CampaignRepository(db, tenant_id)
+    repo = CrmRepository(db, tenant_id).analytics
     items, total = repo.get_filtered_campaigns(filters)
     return PaginatedCampaignResponse(
         items=[CampaignMetricItem.model_validate(i) for i in items],
@@ -250,7 +235,7 @@ def get_spend_trend(
     db: Session = Depends(get_db),
 ):
     """Daily time-series spend data for the Campaign Spend Trend chart."""
-    repo = CampaignRepository(db, tenant_id)
+    repo = CrmRepository(db, tenant_id).analytics
     return repo.get_daily_spend_trend(start_date=start_date, end_date=end_date)
 
 
@@ -261,7 +246,7 @@ def get_top_campaigns(
     db: Session = Depends(get_db),
 ):
     """Top N campaigns by conversions and ROAS for the analytics charts."""
-    repo = CampaignRepository(db, tenant_id)
+    repo = CrmRepository(db, tenant_id).analytics
     return repo.get_top_campaigns(limit=limit)
 
 

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from core.cache import cache_response, invalidate_prefix
 from leo_customer360_dao.config import settings
 from core.database import get_db
-from leo_customer360_dao.repositories.relations_repository import RelationsRepository
+from core.repositories.relations_repository import RelationsRepository
 from leo_customer360_dao.schemas.relations import (
     CdpRelationCreate,
     CdpRelationRead,

@@ -1833,7 +1833,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_event_catalog (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-COMMENT ON TABLE customer360.cdp_event_catalog IS 'Governed vocabulary of event_category/event_name pairs (seeded below) across GENERAL/FEEDBACK/COMMERCE/FINANCE/STOCK_TRADING/TRAVEL/REAL_ESTATE. The catalog is not FK-enforced by the S3 event lake, so ingestion is never blocked by a missing catalog row; it exists for discoverability/governance.';
+COMMENT ON TABLE customer360.cdp_event_catalog IS 'Governed vocabulary of event_category/event_name pairs (seeded below) across general, commerce, service-industry, domain, assistant, and messaging journeys. The catalog is not FK-enforced by the S3 event lake, so ingestion is never blocked by a missing catalog row; it exists for discoverability/governance.';
 
 
 -- ============================================================================

@@ -7,12 +7,8 @@ hook. All three routes are added to ``core.auth.EXEMPT_PATHS`` since a caller
 by definition has no bearer token yet when hitting them.
 """
 
-import json
 import logging
-import ssl
-import urllib.error
 import urllib.parse
-import urllib.request
 from typing import Any, Optional
 from uuid import UUID
 
@@ -23,6 +19,8 @@ from leo_customer360_dao.config import settings
 from leo_customer360_dao.crud import zalo_oa
 from core.database import SessionLocal
 from core.repositories.metadata_repository import DEFAULT_TENANT_ID
+from core.repositories.zalo_repository import ZaloConnector
+from core.repositories.auth_repository import AuthRepository
 from leo_customer360_dao.schemas.crm import ZaloConnectResult
 from leo_customer360_dao.repositories.user_repository import UserRepository
 from leo_customer360_dao.schemas.auth import (
@@ -34,7 +32,7 @@ from leo_customer360_dao.schemas.auth import (
     SsoTokenResponse,
 )
 from core.utils.rate_limiter import RedisRateLimiter
-from leo_customer360_dao.utils.security import create_dev_access_token, verify_password
+from leo_customer360_dao.utils.security import verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -50,69 +48,32 @@ _login_rate_limiter = RedisRateLimiter(
 
 
 def _login_rate_limit_key(request: Request, username: str) -> str:
-    client_ip = request.client.host if request.client else "unknown"
-    return f"login:{client_ip}:{username}"
+    return AuthRepository().login_rate_limit_key(request, username)
 
 
 def _token_endpoint() -> str:
-    base_url = settings.sso_login_url.rstrip("/")
-    return f"{base_url}/realms/{settings.keycloak_realm}/protocol/openid-connect/token"
+    return AuthRepository().token_endpoint()
 
 
 def _end_session_endpoint() -> str:
-    base_url = settings.sso_login_url.rstrip("/")
-    return f"{base_url}/realms/{settings.keycloak_realm}/protocol/openid-connect/logout"
+    return AuthRepository().end_session_endpoint()
 
 
 def _issue_token(tenant_id: UUID, user_id: Optional[UUID], username: str, roles: list[str]) -> dict[str, Any]:
     """Builds the ``access_token``/``token_type``/``expires_in`` fields of
     ``LoginResponse`` for a resolved dev-mode identity."""
-    token, expires_in = create_dev_access_token(
-        tenant_id=str(tenant_id),
-        user_id=str(user_id) if user_id else None,
-        username=username,
-        roles=roles,
-    )
-    return {"access_token": token, "token_type": "Bearer", "expires_in": expires_in}
+    return AuthRepository().issue_token(tenant_id, user_id, username, roles)
 
 
 def _exchange_code_for_token(code: str, redirect_uri: str) -> dict[str, Any]:
     """Swaps an authorization code for tokens using the confidential client
     secret (never exposed to the browser -- see metadata_repository.get_system_metadata)."""
-    body = urllib.parse.urlencode(
-        {
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-            "client_id": settings.keycloak_client_id,
-            "client_secret": settings.keycloak_client_secret,
-        }
-    ).encode("utf-8")
+    return AuthRepository().exchange_code(code, redirect_uri)
 
-    req = urllib.request.Request(
-        _token_endpoint(),
-        data=body,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        method="POST",
-    )
-    context = None if settings.keycloak_verify_ssl else ssl._create_unverified_context()
 
-    try:
-        with urllib.request.urlopen(req, timeout=10, context=context) as response:
-            return json.load(response)
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="ignore")
-        logger.warning("Keycloak token exchange failed with HTTP %s: %s", exc.code, detail)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not exchange authorization code with Keycloak",
-        ) from exc
-    except Exception as exc:
-        logger.warning("Keycloak token exchange request failed", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Keycloak token endpoint unreachable",
-        ) from exc
+def _auth_repository() -> AuthRepository:
+    """Build an auth repository with the current router test seam."""
+    return AuthRepository(user_repository_cls=UserRepository)
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -151,13 +112,10 @@ async def login(payload: LoginRequest, request: Request) -> Any:
         root_user_id: Optional[UUID] = None
         try:
             db.execute(text("SELECT set_config('app.tenant_id', :t_id, true)"), {"t_id": str(tenant_id)})
-            root_user = UserRepository(db).get_user_by_username(username, tenant_id)
+            root_user, _ = _auth_repository().get_login_user(db, username, tenant_id, include_password=False)
             if root_user:
                 root_user_id = root_user.user_id
-                db.execute(
-                    text(f"UPDATE {settings.db_schema}.sys_user SET last_login_at = now() WHERE user_id = :uid"),
-                    {"uid": root_user_id},
-                )
+                _auth_repository().update_last_login(db, root_user_id)
                 db.commit()
             else:
                 logger.warning(
@@ -181,9 +139,8 @@ async def login(payload: LoginRequest, request: Request) -> Any:
     db = SessionLocal()
     try:
         db.execute(text("SELECT set_config('app.tenant_id', :t_id, true)"), {"t_id": str(tenant_id)})
-        repo = UserRepository(db)
-        user = repo.get_user_by_username(username, tenant_id)
-        password_hash = repo.get_local_password_hash(user.user_id, tenant_id) if user else None
+        auth_repo = _auth_repository()
+        user, password_hash = auth_repo.get_login_user(db, username, tenant_id)
         if not user or not password_hash or not verify_password(payload.password, password_hash):
             _login_rate_limiter.record_failure(rate_limit_key)
             raise HTTPException(
@@ -191,10 +148,7 @@ async def login(payload: LoginRequest, request: Request) -> Any:
                 detail="Invalid username or password",
             )
 
-        db.execute(
-            text(f"UPDATE {settings.db_schema}.sys_user SET last_login_at = now() WHERE user_id = :uid"),
-            {"uid": user.user_id},
-        )
+        auth_repo.update_last_login(db, user.user_id)
         db.commit()
 
         return LoginResponse(
@@ -264,15 +218,15 @@ async def zalo_redirect(
     token) -- the signed ``state`` is what binds the call to a tenant."""
     db = SessionLocal()
     try:
-        tenant_id = zalo_oa.verify_state(state)
+        zalo_connector = ZaloConnector(db)
+        tenant_id = zalo_connector.verify_state(state)
         db.info["tenant_id"] = tenant_id
         db.execute(text("SELECT set_config('app.tenant_id', :t, true)"), {"t": tenant_id})
-        connector = zalo_oa.get_oa_config(db, UUID(tenant_id))
+        connector = zalo_connector.get_oa_config(UUID(tenant_id))
         if connector is None:
             raise zalo_oa.ZaloOAError("Zalo connector configuration is not active", status=503)
-        tokens = zalo_oa.exchange_oa_code(code, connector)
-        zalo_oa.upsert_oa_tokens(
-            db,
+        tokens = zalo_connector.exchange_code(code, connector)
+        zalo_connector.save_tokens(
             UUID(tenant_id),
             oa_id=oa_id,
             access_token=tokens["access_token"],

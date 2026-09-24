@@ -72,7 +72,8 @@ VALUES
 ('real_estate',   'Real Estate',                 'Property developers, brokers and property portals',        7),
 ('education',     'Education',                   'Schools, universities and online learning',                8),
 ('manufacturing', 'Manufacturing',               'Manufacturing and industrial enterprises',                  9),
-('media',         'Media & Entertainment',       'Publishing, streaming, gaming and entertainment',         10)
+('media',          'Media & Entertainment',       'Publishing, streaming, gaming and entertainment',         10),
+('hospitality',    'Hospitality & Food Service',   'Hotels, restaurants, venues and guest services',          11)
 ON CONFLICT (domain_code) DO NOTHING;
 
 ---------------------------------------------------
@@ -209,6 +210,59 @@ ON CONFLICT (event_name) DO UPDATE SET
     value_field           = EXCLUDED.value_field,
     display_order         = EXCLUDED.display_order,
     updated_at            = now();
+
+-- Abstract assistant and omnichannel messaging metrics. The event payload
+-- carries the concrete provider/channel (for example, Zalo or Telegram),
+-- while these stable names remain reusable across domains and connectors.
+INSERT INTO customer360.cdp_event_catalog (
+    event_name,
+    event_category,
+    domain_scope,
+    description,
+    is_conversion_default,
+    value_field,
+    display_order
+)
+VALUES
+    -- Assistant AI chatbot journey metrics for travel, retail, and hospitality.
+    ('assistant-session-started', 'SERVICE_INDUSTRY', 'all', 'An AI assistant session started.', FALSE, NULL, 700),
+    ('assistant-session-ended', 'SERVICE_INDUSTRY', 'all', 'An AI assistant session ended.', FALSE, 'duration_seconds', 710),
+    ('assistant-message-received', 'SERVICE_INDUSTRY', 'all', 'The assistant received a user message.', FALSE, NULL, 720),
+    ('assistant-message-sent', 'SERVICE_INDUSTRY', 'all', 'The assistant sent a response.', FALSE, NULL, 730),
+    ('assistant-intent-detected', 'SERVICE_INDUSTRY', 'all', 'The assistant classified a user intent.', FALSE, NULL, 740),
+    ('assistant-recommendation-presented', 'SERVICE_INDUSTRY', 'all', 'The assistant presented a recommendation or option.', FALSE, NULL, 750),
+    ('assistant-action-started', 'SERVICE_INDUSTRY', 'all', 'The assistant started a requested business action.', FALSE, NULL, 760),
+    ('assistant-action-completed', 'SERVICE_INDUSTRY', 'all', 'The assistant completed a requested business action.', FALSE, 'action_value', 770),
+    ('assistant-escalated', 'SERVICE_INDUSTRY', 'all', 'The conversation was escalated to a human or another service.', FALSE, NULL, 780),
+    ('assistant-feedback-submitted', 'SERVICE_INDUSTRY', 'all', 'A user submitted feedback about the assistant interaction.', FALSE, 'feedback_score', 790),
+
+    -- Service lifecycle metrics cover travel, retail, and hospitality flows.
+    ('service-availability-checked', 'SERVICE_INDUSTRY', 'all', 'A user checked service or inventory availability.', FALSE, NULL, 795),
+    ('service-requested', 'SERVICE_INDUSTRY', 'all', 'A user requested a service, reservation, fulfillment, or follow-up.', FALSE, NULL, 796),
+    ('service-confirmed', 'SERVICE_INDUSTRY', 'all', 'A requested service was confirmed.', FALSE, NULL, 797),
+    ('service-cancelled', 'SERVICE_INDUSTRY', 'all', 'A requested service was cancelled.', FALSE, NULL, 798),
+    ('service-completed', 'SERVICE_INDUSTRY', 'all', 'A requested service was completed.', FALSE, 'service_value', 799),
+
+    -- Provider-neutral delivery metrics for Zalo, WhatsApp, Facebook Page Chat,
+    -- Telegram, and future messaging connectors.
+    ('messaging-session-started', 'GENERAL', 'all', 'A messaging interaction started.', FALSE, NULL, 800),
+    ('messaging-message-received', 'GENERAL', 'all', 'A message was received from a messaging channel.', FALSE, NULL, 810),
+    ('messaging-message-sent', 'GENERAL', 'all', 'A message was sent through a messaging channel.', FALSE, NULL, 820),
+    ('messaging-message-delivered', 'GENERAL', 'all', 'A sent message was delivered by the messaging channel.', FALSE, NULL, 830),
+    ('messaging-message-read', 'GENERAL', 'all', 'A delivered message was read by the recipient.', FALSE, NULL, 840),
+    ('messaging-message-failed', 'GENERAL', 'all', 'A message could not be sent or delivered.', FALSE, NULL, 850),
+    ('messaging-conversation-escalated', 'GENERAL', 'all', 'A messaging conversation was escalated for follow-up.', FALSE, NULL, 860),
+    ('messaging-conversation-resolved', 'GENERAL', 'all', 'A messaging conversation was resolved.', FALSE, NULL, 870),
+    ('messaging-opted-in', 'GENERAL', 'all', 'A user opted in to messaging communication.', FALSE, NULL, 880),
+    ('messaging-opted-out', 'GENERAL', 'all', 'A user opted out of messaging communication.', FALSE, NULL, 890)
+ON CONFLICT (event_name) DO UPDATE SET
+    event_category         = EXCLUDED.event_category,
+    domain_scope           = EXCLUDED.domain_scope,
+    description            = EXCLUDED.description,
+    is_conversion_default  = EXCLUDED.is_conversion_default,
+    value_field            = EXCLUDED.value_field,
+    display_order          = EXCLUDED.display_order,
+    updated_at             = now();
 
 
 -- ============================================================================
@@ -1138,3 +1192,125 @@ ON CONFLICT (tenant_id, slug) DO UPDATE SET
     javascript_tags = EXCLUDED.javascript_tags,
     qr_code_data = EXCLUDED.qr_code_data,
     updated_at = now();
+
+
+
+-- Zalo OA settings/tokens into the generic outbound connector registry.
+-- Existing connector rows win, so a partially migrated deployment is safe to rerun.
+
+INSERT INTO customer360.crm_connector_config (
+    tenant_id,
+    name,
+    connector_type,
+    provider,
+    direction,
+    status,
+    credentials,
+    config,
+    is_default,
+    is_active
+)
+SELECT
+    ds.tenant_id,
+    'zalo',
+    'CHAT',
+    'ZALO',
+    'BIDIRECTIONAL',
+    CASE WHEN ds.status = 1 THEN 'ACTIVE' ELSE 'INACTIVE' END,
+    jsonb_strip_nulls(jsonb_build_object(
+        'oa_id', ds.access_tokens ->> 'oa_id',
+        'app_id', ds.access_tokens ->> 'app_id',
+        'access_token', ds.access_tokens ->> 'access_token',
+        'refresh_token', ds.access_tokens ->> 'refresh_token',
+        'token_expires_at', ds.access_tokens ->> 'token_expires_at',
+        'app_secret', ds.security_code
+    )),
+    jsonb_build_object(
+        'oa_api_base_url', COALESCE(ds.data_source_url, 'https://openapi.zalo.me'),
+        'oauth_authorize_url', 'https://oauth.zaloapp.com/v4/oa/permission',
+        'oa_token_url', 'https://oauth.zaloapp.com/v4/oa/access_token',
+        'oauth_redirect_uri', '',
+        'token_refresh_cron', '*/30 * * * *',
+        'dispatch_adapter', 'mock',
+        'zns_api_base_url', 'https://business.openapi.zalo.me',
+        'batch_size', 500,
+        'optout_projection_cron', '*/15 * * * *',
+        'optout_lookback_hours', 6
+    ),
+    ds.status = 1,
+    ds.status = 1
+FROM customer360.sys_data_source ds
+WHERE ds.slug = 'zalo-oa'
+ON CONFLICT (tenant_id, name) DO NOTHING;
+
+
+-- Seed inactive chat connector slots for channels that can be configured later.
+-- Credentials stay empty: administrators must provide provider secrets before
+-- enabling a connector. These rows are intentionally not default connectors.
+INSERT INTO customer360.crm_connector_config (
+    tenant_id,
+    name,
+    connector_type,
+    provider,
+    direction,
+    status,
+    credentials,
+    config,
+    is_default,
+    is_active
+)
+VALUES
+(
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    'telegram',
+    'CHAT',
+    'TELEGRAM',
+    'BIDIRECTIONAL',
+    'INACTIVE',
+    '{}'::jsonb,
+    '{
+        "api_base_url": "https://api.telegram.org",
+        "webhook_url": "",
+        "parse_mode": "HTML",
+        "dispatch_adapter": "mock"
+    }'::jsonb,
+    FALSE,
+    FALSE
+),
+(
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    'whatsapp',
+    'CHAT',
+    'WHATSAPP',
+    'BIDIRECTIONAL',
+    'INACTIVE',
+    '{}'::jsonb,
+    '{
+        "api_base_url": "https://graph.facebook.com",
+        "api_version": "v20.0",
+        "business_account_id": "",
+        "phone_number_id": "",
+        "dispatch_adapter": "mock"
+    }'::jsonb,
+    FALSE,
+    FALSE
+),
+(
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    'facebook-page-chat',
+    'CHAT',
+    'FACEBOOK_PAGE_CHAT',
+    'BIDIRECTIONAL',
+    'INACTIVE',
+    '{}'::jsonb,
+    '{
+        "api_base_url": "https://graph.facebook.com",
+        "api_version": "v20.0",
+        "page_id": "",
+        "webhook_url": "",
+        "dispatch_adapter": "mock"
+    }'::jsonb,
+    FALSE,
+    FALSE
+)
+ON CONFLICT (tenant_id, name) DO NOTHING;

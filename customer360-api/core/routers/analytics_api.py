@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from redis.exceptions import RedisError
 
 from core.cache import get_redis_client
+from core.repositories.analytics_repository import AnalyticsRepository
 from leo_customer360_dao.config import settings
 from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 
@@ -61,64 +62,21 @@ def _enforce_analytics_permissions(request: Request) -> None:
 
 def _analytics_status() -> dict[str, Any]:
     """Read source locks and persisted state for the admin UI."""
-    redis_client = get_redis_client()
-    if redis_client is None:
-        raise HTTPException(status_code=503, detail="Analytics status is unavailable without Redis")
-
+    repo = AnalyticsRepository(get_redis_client(), dagster_client)
     try:
-        statuses: list[dict[str, str]] = []
-        for state_key in redis_client.scan_iter(match=f"{SOURCE_STATE_PREFIX}*"):
-            data_source_id = str(state_key)[len(SOURCE_STATE_PREFIX):]
-            state = {
-                str(key): str(value)
-                for key, value in redis_client.hgetall(state_key).items()
-            }
-            if redis_client.exists(f"{SOURCE_LOCK_PREFIX}{data_source_id}"):
-                state["status"] = "running"
-            elif state.get("status") == "running":
-                state["status"] = "stale"
-            state["data_source_id"] = data_source_id
-            statuses.append(state)
-    except RedisError as exc:
+        return repo.status(SOURCE_STATE_PREFIX, SOURCE_LOCK_PREFIX, SUBMISSION_STATE_KEY, SUBMISSION_LOCK_KEY)
+    except (RedisError, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail="Analytics status is temporarily unavailable") from exc
-
-    statuses.sort(key=lambda status: status["data_source_id"])
-    try:
-        submission_state = {
-            str(key): str(value)
-            for key, value in redis_client.hgetall(SUBMISSION_STATE_KEY).items()
-        }
-        submission_active = bool(redis_client.exists(SUBMISSION_LOCK_KEY))
-    except RedisError as exc:
-        raise HTTPException(status_code=503, detail="Analytics status is temporarily unavailable") from exc
-
-    if submission_active and submission_state.get("run_id"):
-        submission_state["status"] = "submitted"
-    running_ids = [
-        status["data_source_id"] for status in statuses if status.get("status") == "running"
-    ]
-    return {
-        "status": "running" if running_ids or submission_active else "idle",
-        "can_trigger": not running_ids and not submission_active,
-        "running_data_source_ids": running_ids,
-        "data_sources": statuses,
-        "active_submission": submission_state if submission_active else None,
-    }
 
 
 def _reserve_submission(redis_client: Any) -> bool:
-    return bool(
-        redis_client.set(
-            SUBMISSION_LOCK_KEY,
-            "reserved",
-            nx=True,
-            ex=SUBMISSION_LOCK_TTL_SECONDS,
-        )
-    )
+    """Compatibility wrapper for acquiring the analytics submission lease."""
+    return AnalyticsRepository(redis_client, dagster_client).reserve_submission(SUBMISSION_LOCK_KEY, SUBMISSION_LOCK_TTL_SECONDS)
 
 
 def _release_submission(redis_client: Any) -> None:
-    redis_client.delete(SUBMISSION_LOCK_KEY)
+    """Compatibility wrapper for releasing the analytics submission lease."""
+    AnalyticsRepository(redis_client, dagster_client).release_submission(SUBMISSION_LOCK_KEY)
 
 
 @analytics_router.get("/source-analytics/status")
@@ -150,16 +108,13 @@ def process_source_analytics(request: Request) -> dict[str, str]:
     except RedisError as exc:
         raise HTTPException(status_code=503, detail="Analytics trigger is temporarily unavailable") from exc
     try:
-        run_id = dagster_client.analytics.process_tracking_logs()
+        run_id = AnalyticsRepository(redis_client, dagster_client).process()
     except DagsterJobTriggerError as exc:
         _release_submission(redis_client)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     try:
-        redis_client.hset(
-            SUBMISSION_STATE_KEY,
-            mapping={"run_id": run_id, "status": "submitted", "trigger_reason": "manual_api"},
-        )
+        AnalyticsRepository(redis_client, dagster_client).record_submission(SUBMISSION_STATE_KEY, run_id)
     except RedisError as exc:
         _release_submission(redis_client)
         raise HTTPException(status_code=503, detail="Analytics status could not be recorded") from exc
@@ -180,7 +135,8 @@ def get_source_analytics_run_status(request: Request, run_id: str) -> dict[str, 
     """Return the status of a manually submitted analytics run."""
     _enforce_analytics_permissions(request)
     try:
-        result = dagster_client.analytics.get_status(run_id)
+        repo = AnalyticsRepository(get_redis_client(), dagster_client)
+        result = repo.get_status(run_id)
         if result["status"] in {"success", "failure"}:
             redis_client = get_redis_client()
             if redis_client is not None:

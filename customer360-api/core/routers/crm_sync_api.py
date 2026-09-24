@@ -15,14 +15,16 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.auth import require_tenant, require_tenant_admin
-from leo_customer360_dao.crud.crm_sync import sync_segment_to_crm
 from core.database import get_db
+from core.repositories.crm_sync_repository import (
+    CrmSyncRepository,
+    SegmentRepository,
+    sync_segment_to_crm,
+)
 from leo_customer360_dao.models.crm import SegmentSyncRun
-from leo_customer360_dao.repositories.segment_respository import SegmentRepository
 from leo_customer360_dao.schemas.crm import SegmentCrmSyncResponse, SegmentSyncRunRead
 
 logger = logging.getLogger(__name__)
@@ -87,11 +89,12 @@ def list_segment_sync_runs(
     caller_tenant_id = _require_tenant(request)
     _enforce_sync_permissions(request)
 
-    stmt = select(SegmentSyncRun).where(SegmentSyncRun.tenant_id == uuid.UUID(caller_tenant_id))
-    if segment_id is not None:
-        stmt = stmt.where(SegmentSyncRun.segment_id == segment_id)
-    stmt = stmt.order_by(SegmentSyncRun.started_at.desc()).limit(limit)
-    return db.execute(stmt).scalars().all()
+    return CrmSyncRepository(db).list_sync_runs(
+        SegmentSyncRun,
+        uuid.UUID(caller_tenant_id),
+        segment_id=segment_id,
+        limit=limit,
+    )
 
 
 @crm_sync_router.get("/sync-runs/{sync_run_id}", response_model=SegmentSyncRunRead)
@@ -100,7 +103,7 @@ def get_segment_sync_run(sync_run_id: uuid.UUID, request: Request, db: Session =
     caller_tenant_id = _require_tenant(request)
     _enforce_sync_permissions(request)
 
-    run = db.get(SegmentSyncRun, sync_run_id)
+    run = CrmSyncRepository(db).get_sync_run(SegmentSyncRun, sync_run_id)
     if run is None or str(run.tenant_id) != caller_tenant_id:
         raise HTTPException(status_code=404, detail=f"SegmentSyncRun '{sync_run_id}' not found")
     return run

@@ -1,11 +1,4 @@
-"""Keycloak-based authentication middleware for the Customer 360 API.
-
-Also resolves the caller's ``tenant_id`` / ``user_id`` (sys_tenant.tenant_id
-/ sys_user.user_id) onto ``request.state`` so ``core.database.get_db`` can
-set the ``app.tenant_id`` / ``app.user_id`` Postgres session variables that
-the tenant_policy Row-Level Security policies rely on (see the "ROW LEVEL
-SECURITY" section of core-customer360/database-schema.sql).
-"""
+"""Authentication middleware, identity resolution, and auth dependencies."""
 
 import json
 import logging
@@ -29,30 +22,23 @@ from leo_customer360_dao.utils.security import decode_dev_access_token
 
 logger = logging.getLogger(__name__)
 
+# Public paths that do not require a bearer token.
 EXEMPT_PATHS = {
     "/health",
-    # GET /metadata is part of the login flow itself: the login screen calls
-    # it (unauthenticated) to learn sso_login/sso_config and decide whether
-    # to render the Keycloak button or the dev credential form (see
-    # customer360-frontend/static/js/auth-view.js). Every OTHER /metadata/* route
-    # (dagster/domains/data-sources) is real protected API data with no
-    # pre-login need and must NOT be exempt.
     "/api/v1/metadata",
-    # Auth endpoints are the front door -- callers by definition have no
-    # bearer token yet when hitting them (see core/routers/auth_api.py).
     "/api/v1/auth/login",
     "/api/v1/auth/callback",
     "/api/v1/auth/logout",
     "/api/v1/auth/zalo-redirect",
 }
-SSO_LOGIN=settings.sso_login
-# TTL for the resolved (tenant_id, user_id) identity cache, independent of
-# the Keycloak token TTL -- keeps a sys_user lookup off the hot path without
-# staying stale for too long if a user's tenant/role changes.
-IDENTITY_CACHE_TTL_SECONDS = 200
 
-# Throttles repeated failed-auth attempts per client IP -- protects
-# introspection/dev-token validation from brute force / credential stuffing.
+# Runtime auth configuration.
+SSO_LOGIN = settings.sso_login
+IDENTITY_CACHE_TTL_SECONDS = 200
+TENANT_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "tenant_admin", "admin"}
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
+
+# Failed-auth rate limiter, keyed by client IP.
 _failed_auth_rate_limiter = RedisRateLimiter(
     max_attempts=settings.auth_rate_limit_max_attempts,
     window_seconds=settings.auth_rate_limit_window_seconds,
@@ -60,10 +46,12 @@ _failed_auth_rate_limiter = RedisRateLimiter(
 
 
 def _client_ip(request: Request) -> str:
+    """Return the request client address for rate-limit keys."""
     return request.client.host if request.client else "unknown"
 
 
 def _build_introspection_url() -> str:
+    """Build the Keycloak token-introspection endpoint URL."""
     base_url = settings.sso_login_url.rstrip("/")
     return (
         f"{base_url}/realms/{settings.keycloak_realm}/protocol/openid-connect/token/introspect"
@@ -106,6 +94,7 @@ def _introspect_with_keycloak(token: str) -> Optional[dict[str, Any]]:
 
 
 def _cache_token(token: str, payload: dict[str, Any]) -> None:
+    """Cache a Keycloak introspection payload until its token expires."""
     client = get_redis_client()
     if client is None:
         return
@@ -126,6 +115,7 @@ def _cache_token(token: str, payload: dict[str, Any]) -> None:
 
 
 def _load_cached_token(token: str) -> Optional[dict[str, Any]]:
+    """Load a cached Keycloak introspection payload, if valid."""
     client = get_redis_client()
     if client is None:
         return None
@@ -140,7 +130,8 @@ def _load_cached_token(token: str) -> Optional[dict[str, Any]]:
         return None
 
     try:
-        return json.loads(raw)
+        payload = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+        return json.loads(payload)
     except Exception:
         logger.warning("Cached token payload was not valid JSON", exc_info=True)
         return None
@@ -159,7 +150,8 @@ def _load_cached_identity(provider_subject_id: str, tenant_id: str) -> Optional[
     if not raw:
         return None
     try:
-        return json.loads(raw)
+        identity = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+        return json.loads(identity)
     except Exception:
         logger.warning("Cached identity payload was not valid JSON", exc_info=True)
         return None
@@ -177,17 +169,7 @@ def _cache_identity(provider_subject_id: str, tenant_id: str, identity: dict[str
 
 
 def _pin_transaction_tenant(db: Any, tenant_id: str) -> None:
-    """Set ``app.tenant_id`` (transaction-local) on the session's underlying
-    connection so the Row-Level Security policies on sys_user/sys_userinfo admit
-    this tenant's rows during Keycloak get-or-create provisioning.
-
-    Pins the GUC on the raw connection instead of via ``Session.execute`` so the
-    RLS session variable stays OUT of the repository's SELECT/INSERT/UPDATE
-    business-query sequence -- that sequence is the single source of truth for
-    the lookup-vs-provision logic (and what the unit tests assert on). Sessions
-    that expose no live connection (e.g. the unit-test FakeDBSession, which does
-    not enforce RLS anyway) are a no-op.
-    """
+    """Set the transaction-local tenant GUC before RLS-protected provisioning."""
     connection = getattr(db, "connection", None)
     if connection is None:
         return
@@ -197,22 +179,10 @@ def _pin_transaction_tenant(db: Any, tenant_id: str) -> None:
 
 
 def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, str]]:
-    """Provisions/updates sys_user and sys_userinfo on a successful Keycloak login.
+    """Resolve or provision the Keycloak user for a token identity.
 
-    Looks up via sys_userinfo table using auth_provider='KEYCLOAK' and
-    provider_subject_id from the token's ``sub`` claim.
-
-    - **Existing user**: stamps ``last_login_at = now()`` on both sys_user and
-      sys_userinfo, returns ``(user_id, tenant_id)``.
-    - **First-ever login for this identity**: auto-provisions both sys_user and
-      sys_userinfo rows. This REQUIRES the token to carry a ``tenant_id`` custom
-      claim (published via a Keycloak protocol mapper) identifying which tenant
-      this identity belongs to -- without it we refuse to provision (fail
-      closed: the caller gets no tenant context / no RLS-visible rows,
-      rather than being silently assigned to the wrong tenant).
-
-    Local import of SessionLocal avoids a hard import-time dependency
-    between core.auth and core.database.
+    Provisioning requires the token's tenant claim; missing identity data fails
+    closed. The local session import avoids an auth/database import cycle.
     """
     provider_subject_id = payload.get("sub")
     tenant_id = payload.get("tenant_id")
@@ -229,10 +199,7 @@ def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, 
 
     db = SessionLocal()
     try:
-        # sys_user/sys_userinfo are RLS-protected; this get-or-create lookup+insert
-        # must run with app.tenant_id set to this identity's tenant (from the token),
-        # otherwise current_setting('app.tenant_id') is unset/empty and the tenant_policy's
-        # ::uuid cast fails (managed non-superuser DB; a local superuser bypasses RLS).
+        # Pin the tenant before the RLS-protected lookup/insert.
         _pin_transaction_tenant(db, str(tenant_id))
         repo = AuthRepository(db)
         result = repo.get_or_create_keycloak_user(tenant_id, payload, provider_subject_id)
@@ -251,42 +218,30 @@ def _get_or_create_user_on_login(payload: dict[str, Any]) -> Optional[dict[str, 
 
 
 def _resolve_tenant_and_user(payload: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
-    """Resolves (tenant_id, user_id) for an authenticated request.
-
-    Prefers explicit ``tenant_id``/``user_id`` custom claims on the Keycloak
-    token (if a protocol mapper publishes them); otherwise falls back to a
-    (Redis-cached) ``sys_userinfo`` get-or-create keyed by the standard ``sub``
-    claim and tenant_id -- see ``_get_or_create_user_on_login``. Caching means 
-    last_login_at is refreshed at most once per IDENTITY_CACHE_TTL_SECONDS per 
-    user, not on every single request.
-    
-    Returns (None, None) if tenant_id claim is missing or user can't be resolved
-    (fail-closed principle: better to deny access than grant with incomplete identity).
-    """
+    """Resolve tenant and user IDs from token claims or cached provisioning."""
     tenant_id = payload.get("tenant_id")
     user_id = payload.get("user_id")
     
-    # Explicit claims in token short-circuit everything
+    # Explicit claims avoid a database lookup.
     if tenant_id and user_id:
         return tenant_id, user_id
 
-    # Fail-closed: must have tenant_id from claims or provider_subject_id lookup
+    # A tenant claim is required for fallback provisioning.
     provider_subject_id = payload.get("sub")
     if not provider_subject_id or not tenant_id:
         return None, None
 
-    # Try to resolve user identity from cache or database
+    # Prefer the cached identity, then provision/read from the database.
     identity = _load_cached_identity(provider_subject_id, tenant_id)
     if identity is None:
         identity = _get_or_create_user_on_login(payload)
         if identity is not None:
             _cache_identity(provider_subject_id, tenant_id, identity)
 
-    # Only return identity if we successfully resolved it
     if identity is not None:
         return identity.get("tenant_id"), identity.get("user_id")
-    
-    # Fail-closed: return (None, None) if user can't be resolved
+
+    # Fail closed when identity resolution fails.
     return None, None
 
 
@@ -304,12 +259,7 @@ def _normalize_path(path: str, root_path: str = "") -> str:
 
 
 def _apply_dev_tenant_headers(request: Request) -> None:
-    """Dev/test convenience only, for EXEMPT_PATHS: when SSO_LOGIN is
-    disabled, trust X-Tenant-Id/X-User-Id headers so the app.tenant_id RLS
-    session variable (see core/database.py) is available even on the small
-    set of unauthenticated routes. NEVER used on protected routes -- those
-    always require a valid token (dev JWT or Keycloak) regardless of
-    SSO_LOGIN, see auth_middleware."""
+    """Apply tenant/user headers only on exempt routes when SSO is disabled."""
     tenant_id = request.headers.get("X-Tenant-Id")
     user_id = request.headers.get("X-User-Id")
     if tenant_id:
@@ -332,18 +282,7 @@ def _unauthorized_response(request: Request, detail: str) -> JSONResponse:
 
 
 async def auth_middleware(request: Request, call_next):
-    """Ensure API requests present a valid bearer token before continuing.
-
-    Every route not in EXEMPT_PATHS (health/root-metadata/login/callback/
-    logout) requires a token, in both modes -- there is no "no token at all"
-    bypass anymore, in either mode:
-      - SSO_LOGIN=true: token must be a real Keycloak access token (verified
-        via introspection).
-      - SSO_LOGIN=false: token must be a locally-signed dev JWT obtained from
-        POST /auth/login (see leo_customer360_dao.utils.security) -- same
-        Authorization: Bearer contract used in production, just HS256-signed
-        locally instead of by Keycloak.
-    """
+    """Require a valid Keycloak or locally signed bearer token."""
     if request.method == "OPTIONS":
         return await call_next(request)
 
@@ -403,12 +342,7 @@ async def auth_middleware(request: Request, call_next):
 
 
 def get_current_roles(request: Request) -> list[str]:
-    """Extracts the caller's role names from ``request.state.user`` (set by
-    ``authenticate_request`` above): the dev-JWT ``roles`` claim, or a real
-    Keycloak token's ``realm_access.roles`` / ``resource_access.*.roles`` --
-    same two shapes the frontend already decodes (see
-    customer360-frontend/static/js/common/config.js::currentUserFromConfig).
-    """
+    """Collect roles from dev-JWT, realm, and client Keycloak claims."""
     payload = getattr(request.state, "user", None)
     if not isinstance(payload, dict):
         return []
@@ -429,13 +363,7 @@ def get_current_roles(request: Request) -> list[str]:
 
 
 def require_admin(request: Request) -> None:
-    """FastAPI dependency: raises 403 unless the caller has the ``admin``
-    role. Local/unit-test direct calls without a populated request.state.user
-    are treated as a no-auth test harness case rather than a production
-    authenticated request. Real API traffic still flows through
-    ``auth_middleware`` and gets rejected before the route when no valid token
-    or admin role is present.
-    """
+    """Require the admin role when SSO is enabled."""
     if not SSO_LOGIN:
         return
 
@@ -445,11 +373,6 @@ def require_admin(request: Request) -> None:
 
     if "admin" not in {r.lower() for r in roles}:
         raise HTTPException(status_code=403, detail="This action requires the 'admin' role.")
-
-
-# Roles allowed to run tenant-admin actions (segment->CRM sync, campaign
-# activation, email config). Platform admins implicitly qualify.
-TENANT_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "tenant_admin", "admin"}
 
 
 def require_tenant(request: Request) -> str:
@@ -466,8 +389,7 @@ def require_tenant(request: Request) -> str:
 
 
 def require_tenant_admin(request: Request, action: str = "this action") -> None:
-    """Gate a tenant-admin action. Open in local dev (SSO off); otherwise the
-    caller must be authenticated and hold a tenant-admin role."""
+    """Require an authenticated tenant-admin role when SSO is enabled."""
     if not SSO_LOGIN:
         return
     if not isinstance(getattr(request.state, "user", None), dict):
@@ -476,16 +398,8 @@ def require_tenant_admin(request: Request, action: str = "this action") -> None:
         raise HTTPException(status_code=403, detail=f"Tenant admin role required for {action}")
 
 
-# ---------------------------------------------------------
-# MCP & System Metrics Setup (Redis API Key Protected)
-# ---------------------------------------------------------
-
-
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
-
-
 def resolve_mcp_tenant_id(api_key: str) -> str:
-    """Resolve tenant_id from Redis key mapping: ``apikey:{api_key}`` -> tenant_id."""
+    """Resolve a tenant ID from the Redis ``apikey:{key}`` mapping."""
     redis_client = get_redis_client()
     if redis_client is None:
         raise HTTPException(
@@ -522,8 +436,5 @@ def resolve_mcp_tenant_id(api_key: str) -> str:
     return tenant_id
 
 async def verify_mcp_api_key(api_key: str = Security(api_key_header)):
-    """
-    Dependency to validate MCP API key and resolve mapped tenant_id from Redis.
-    Assumes key-value mapping: ``set apikey:{api_key} {tenant_id}``.
-    """
+    """Validate an MCP API key and return its mapped tenant ID."""
     return resolve_mcp_tenant_id(api_key)

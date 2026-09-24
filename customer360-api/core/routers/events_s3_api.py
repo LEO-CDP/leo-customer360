@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from core.cache import cache_response
 from leo_customer360_dao.config import settings
 from core.database import get_db
-from leo_customer360_dao.repositories.event_query_repository import (
+from core.repositories.events_s3_repository import (
     EventDataSourceError,
     EventQueryError,
     EventQueryRepository,

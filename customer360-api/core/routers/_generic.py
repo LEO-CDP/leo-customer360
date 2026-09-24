@@ -28,6 +28,7 @@ def build_crud_router(
     read_schema: type[BaseModel],
     prefix: str,
     tags: list[str],
+    crud_factory: Optional[Callable[[Session], Any]] = None,
     create_validator: Optional[Callable[[Session, dict[str, Any]], None]] = None,
     update_validator: Optional[Callable[[Session, Any, dict[str, Any]], None]] = None,
     create_transform: Optional[Callable[[Session, dict[str, Any]], dict[str, Any]]] = None,
@@ -39,6 +40,10 @@ def build_crud_router(
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=tags)  # type: ignore[arg-type]
     crud = CRUDBase(model)
+
+    def get_crud(db: Session):
+        """Resolve the configured persistence adapter for one request."""
+        return crud_factory(db) if crud_factory is not None else crud
     cache_prefix = model.__tablename__
     # Most crm_*/cdp_* models carry a tenant_id column (see database-schema.sql's
     # "ROW LEVEL SECURITY" section); when present, expose it as an optional
@@ -58,7 +63,7 @@ def build_crud_router(
         db: Session = Depends(get_db),
     ):
         filters = {"tenant_id": tenant_id} if has_tenant else {}
-        return crud.list(db, skip=skip, limit=limit, **filters)
+        return get_crud(db).list(db, skip=skip, limit=limit, **filters)
 
     @router.get("/count")
     @cache_response(f"{cache_prefix}/count", ttl=settings.cache_ttl_seconds)
@@ -67,12 +72,12 @@ def build_crud_router(
         db: Session = Depends(get_db),
     ):
         filters = {"tenant_id": tenant_id} if has_tenant else {}
-        return {"count": crud.count(db, **filters)}
+        return {"count": get_crud(db).count(db, **filters)}
 
     @router.get("/{item_id}", response_model=read_schema)
     @cache_response(f"{cache_prefix}/item", ttl=settings.cache_ttl_seconds)
     def get_item(item_id: pk_type, db: Session = Depends(get_db)):  # type: ignore[valid-type]
-        obj = crud.get(db, item_id)
+        obj = get_crud(db).get(db, item_id)
         if obj is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")
         if read_hook is not None:
@@ -91,7 +96,7 @@ def build_crud_router(
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
-            obj = crud.create(db, obj_in)
+            obj = get_crud(db).create(db, obj_in)
         except IntegrityError as exc:
             db.rollback()
             if integrity_error_detail is None:
@@ -107,6 +112,7 @@ def build_crud_router(
 
     @router.patch("/{item_id}", response_model=read_schema)
     def update_item(item_id: pk_type, payload: update_schema, db: Session = Depends(get_db)):  # type: ignore[valid-type]
+        crud = get_crud(db)
         obj = crud.get(db, item_id)
         if obj is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")
@@ -135,6 +141,7 @@ def build_crud_router(
 
     @router.delete("/{item_id}", status_code=204)
     def delete_item(item_id: pk_type, db: Session = Depends(get_db)):  # type: ignore[valid-type]
+        crud = get_crud(db)
         obj = crud.get(db, item_id)
         if obj is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} '{item_id}' not found")

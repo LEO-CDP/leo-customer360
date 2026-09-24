@@ -20,9 +20,9 @@ from leo_customer360_dao.models.identity import CdpAiAgent
 from core.repositories.metadata_repository import (
     MetadataConflictError,
     MetadataNotFoundError,
-    MetadataRepository,
     MetadataRepositoryError,
 )
+from core.repositories.ai_agent_repository import AiAgentRepository
 from leo_customer360_dao.schemas.system import (
     AiAgentCreate,
     AiAgentRead,
@@ -37,12 +37,12 @@ CACHE_PREFIX = "cdp_ai_agents"
 ai_agent_router = APIRouter(prefix="/ai-agents", tags=["C360 - AI Agents"])
 
 
-def get_metadata_repository(db: Session = Depends(get_db)) -> MetadataRepository:
-    """Dependency injection for the MetadataRepository."""
-    return MetadataRepository(db)
+def get_ai_agent_repository(db: Session = Depends(get_db)) -> AiAgentRepository:
+    """Provide the AI-agent repository for route handlers."""
+    return AiAgentRepository(db)
 
 
-def _get_ai_agent_or_404(repository: MetadataRepository, agent_code: str) -> CdpAiAgent:
+def _get_ai_agent_or_404(repository: AiAgentRepository, agent_code: str) -> CdpAiAgent:
     """Helper following segment_api._get_segment_or_404 pattern."""
     try:
         return repository.get_ai_agent(agent_code)
@@ -60,7 +60,7 @@ def list_metadata_ai_agents(
     model_type: str | None = None,
     skip: int = 0,
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: AiAgentRepository = Depends(get_ai_agent_repository),
 ) -> list[CdpAiAgent]:
     """Returns model and task-agent rows from ``cdp_ai_agents``.
 
@@ -83,7 +83,7 @@ def list_metadata_ai_agents(
 def count_metadata_ai_agents(
     status: str | None = None,
     model_type: str | None = None,
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: AiAgentRepository = Depends(get_ai_agent_repository),
 ) -> dict[str, int]:
     """Returns total count of AI agents matching filter criteria."""
     try:
@@ -97,7 +97,7 @@ def count_metadata_ai_agents(
 @cache_response(f"{CACHE_PREFIX}/item", ttl=settings.cache_ttl_seconds)
 def get_metadata_ai_agent(
     agent_code: str,
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: AiAgentRepository = Depends(get_ai_agent_repository),
 ) -> CdpAiAgent:
     """Retrieves a specific AI agent by its string agent code."""
     return _get_ai_agent_or_404(repository, agent_code)
@@ -107,7 +107,7 @@ def get_metadata_ai_agent(
 @ai_agent_router.post("/", response_model=AiAgentRead, status_code=201)
 def create_metadata_ai_agent(
     payload: AiAgentCreate,
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: AiAgentRepository = Depends(get_ai_agent_repository),
 ) -> CdpAiAgent:
     """Creates a new AI agent and invalidates the cache."""
     try:
@@ -124,7 +124,7 @@ def create_metadata_ai_agent(
 def update_metadata_ai_agent(
     agent_code: str,
     payload: AiAgentUpdate,
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: AiAgentRepository = Depends(get_ai_agent_repository),
 ) -> CdpAiAgent:
     """Partially updates an existing AI agent and invalidates the cache."""
     try:
@@ -140,7 +140,7 @@ def update_metadata_ai_agent(
 @ai_agent_router.delete("/{agent_code}", status_code=204)
 def delete_metadata_ai_agent(
     agent_code: str,
-    repository: MetadataRepository = Depends(get_metadata_repository),
+    repository: AiAgentRepository = Depends(get_ai_agent_repository),
 ) -> None:
     """Deletes an AI agent by its string agent code and invalidates the cache."""
     try:

@@ -17,7 +17,6 @@ from typing import Any, Optional
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from core.cache import invalidate_prefix
 from leo_customer360_agent.client import (
     AIProviderError,
     CampaignPlanBrief,
@@ -80,10 +79,14 @@ class CampaignDraftConflictError(RuntimeError):
 
 
 class CampaignDraftRepository:
+    """Persist campaign drafts and enforce their approval state machine."""
+
     def __init__(self, session: Session):
+        """Bind the repository to a tenant-aware SQLAlchemy session."""
         self.session = session
 
     def _get_template(self, tenant_id: uuid.UUID, template_id: uuid.UUID) -> Optional[MessageTemplate]:
+        """Load one tenant-owned campaign template."""
         return (
             self.session.query(MessageTemplate)
             .filter(MessageTemplate.template_id == template_id, MessageTemplate.tenant_id == tenant_id)
@@ -132,6 +135,7 @@ class CampaignDraftRepository:
             return items
 
         def _matches(item: CdpContentItem) -> bool:
+            """Apply the authoritative tag and objective match in Python."""
             tags = {tag.lower() for tag in (item.segment_tags or [])}
             if segment_tag and segment_tag.lower() in tags:
                 return True
@@ -275,7 +279,6 @@ class CampaignDraftRepository:
             )
         )
         self.session.commit()
-        invalidate_prefix("crm_campaign")
         self.session.refresh(campaign)
         return campaign
 
@@ -390,11 +393,11 @@ class CampaignDraftRepository:
             )
         )
         self.session.commit()
-        invalidate_prefix("crm_campaign")
         self.session.refresh(campaign)
         return campaign
 
     def get_campaign(self, tenant_id: uuid.UUID, campaign_id: uuid.UUID) -> Campaign:
+        """Load a tenant-owned campaign or raise the repository not-found error."""
         campaign = self.session.execute(
             select(Campaign).where(Campaign.campaign_id == campaign_id, Campaign.tenant_id == tenant_id)
         ).scalar_one_or_none()
@@ -403,6 +406,7 @@ class CampaignDraftRepository:
         return campaign
 
     def list_campaign_content_items(self, tenant_id: uuid.UUID, campaign_id: uuid.UUID) -> list[dict[str, Any]]:
+        """Return the ordered content plan with display fields for the API."""
         stmt = (
             select(CampaignContentItem, CdpContentItem)
             .join(CdpContentItem, CampaignContentItem.content_item_id == CdpContentItem.content_item_id)
@@ -440,6 +444,7 @@ class CampaignDraftRepository:
             )
 
     def _get_content_item_links(self, tenant_id: uuid.UUID, campaign_id: uuid.UUID) -> list[CampaignContentItem]:
+        """Load content links used by edits and approval validation."""
         stmt = select(CampaignContentItem).where(
             CampaignContentItem.tenant_id == tenant_id, CampaignContentItem.campaign_id == campaign_id
         )
@@ -539,7 +544,6 @@ class CampaignDraftRepository:
             )
         )
         self.session.commit()
-        invalidate_prefix("crm_campaign")
         self.session.refresh(campaign)
         return campaign
 
@@ -596,7 +600,6 @@ class CampaignDraftRepository:
         campaign.approved_at = datetime.now(timezone.utc)
         campaign.updated_at = datetime.now(timezone.utc)
         self.session.commit()
-        invalidate_prefix("crm_campaign")
         self.session.refresh(campaign)
         return campaign
 
@@ -625,13 +628,15 @@ class CampaignDraftRepository:
         campaign.approval_status = APPROVAL_STATUS_REJECTED
         campaign.updated_at = datetime.now(timezone.utc)
         self.session.commit()
-        invalidate_prefix("crm_campaign")
         self.session.refresh(campaign)
         return campaign
 
     def list_campaign_history(self, tenant_id: uuid.UUID, campaign_id: uuid.UUID) -> list[dict[str, Any]]:
-        """FR-014, SC-004: merges sys_audit_log create/edit rows with
-        crm_campaign_reviews approve/reject rows, oldest first."""
+        """Merge audit and review rows in chronological order.
+
+        The response is returned oldest first so the API can render the complete
+        campaign history as a coherent timeline.
+        """
         audit_stmt = (
             select(SysAuditLog)
             .where(

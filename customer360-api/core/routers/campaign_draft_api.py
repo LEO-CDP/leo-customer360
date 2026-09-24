@@ -8,12 +8,13 @@ see that feature's research.md §5).
 """
 
 import uuid
-from typing import Optional
+from typing import Optional, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from core.auth import require_tenant, require_tenant_admin
+from core.cache import invalidate_prefix
 from core.database import get_db
 from core.repositories.campaign_draft_repository import (
     CampaignDraftApprovalBlockedError,
@@ -37,12 +38,17 @@ router = APIRouter(prefix="/campaigns", tags=["AI Campaign Drafts"])
 
 
 def _current_user_id(request: Request) -> Optional[uuid.UUID]:
+    """Read the authenticated user identifier from request middleware state."""
     user_id = getattr(request.state, "user_id", None)
     return uuid.UUID(str(user_id)) if user_id else None
 
 
 def _build_response(repo: CampaignDraftRepository, campaign) -> CampaignDraftResponse:
-    content_items = repo.list_campaign_content_items(campaign.tenant_id, campaign.campaign_id)
+    """Map a persisted campaign and its content plan to the API response schema."""
+    content_items = cast(
+        list[CampaignDraftContentItemRead],
+        repo.list_campaign_content_items(campaign.tenant_id, campaign.campaign_id),
+    )
     return CampaignDraftResponse(
         campaign_id=campaign.campaign_id,
         status=campaign.status,
@@ -69,6 +75,7 @@ def generate_campaign_draft(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    """Generate and persist an email campaign draft for the current tenant."""
     tenant_id = uuid.UUID(require_tenant(request))
     created_by = _current_user_id(request)
     repo = CampaignDraftRepository(db)
@@ -87,6 +94,7 @@ def generate_campaign_draft(
     except CampaignDraftValidationError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    invalidate_prefix("crm_campaign")
     return _build_response(repo, campaign)
 
 
@@ -116,11 +124,13 @@ def generate_zns_campaign_draft(
     except CampaignDraftValidationError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    invalidate_prefix("crm_campaign")
     return _build_response(repo, campaign)
 
 
 @router.get("/{campaign_id}/content-items", response_model=list[CampaignDraftContentItemRead])
 def list_campaign_content_items(campaign_id: uuid.UUID, request: Request, db: Session = Depends(get_db)):
+    """Return the tenant-scoped content plan for one campaign."""
     tenant_id = uuid.UUID(require_tenant(request))
     repo = CampaignDraftRepository(db)
     try:
@@ -137,6 +147,7 @@ def edit_campaign_draft(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    """Edit a draft and return approved or rejected campaigns to InReview."""
     tenant_id = uuid.UUID(require_tenant(request))
     editor_id = _current_user_id(request)
     repo = CampaignDraftRepository(db)
@@ -164,11 +175,13 @@ def edit_campaign_draft(
     except CampaignDraftConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    invalidate_prefix("crm_campaign")
     return _build_response(repo, campaign)
 
 
 @router.post("/{campaign_id}/approve", response_model=CampaignDraftResponse)
 def approve_campaign_draft(campaign_id: uuid.UUID, request: Request, db: Session = Depends(get_db)):
+    """Approve a campaign after the repository revalidates its dependencies."""
     tenant_id = uuid.UUID(require_tenant(request))
     require_tenant_admin(request, "campaign draft approval")
     reviewer_id = _current_user_id(request)
@@ -183,6 +196,7 @@ def approve_campaign_draft(campaign_id: uuid.UUID, request: Request, db: Session
     except (CampaignDraftApprovalBlockedError, CampaignDraftConflictError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    invalidate_prefix("crm_campaign")
     return _build_response(repo, campaign)
 
 
@@ -193,6 +207,7 @@ def reject_campaign_draft(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    """Reject a campaign draft with an optional reviewer reason."""
     tenant_id = uuid.UUID(require_tenant(request))
     require_tenant_admin(request, "campaign draft approval")
     reviewer_id = _current_user_id(request)
@@ -207,11 +222,13 @@ def reject_campaign_draft(
     except (CampaignDraftApprovalBlockedError, CampaignDraftConflictError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    invalidate_prefix("crm_campaign")
     return _build_response(repo, campaign)
 
 
 @router.get("/{campaign_id}/history")
 def list_campaign_history(campaign_id: uuid.UUID, request: Request, db: Session = Depends(get_db)):
+    """Return the merged audit and review timeline for one campaign."""
     tenant_id = uuid.UUID(require_tenant(request))
     repo = CampaignDraftRepository(db)
     try:

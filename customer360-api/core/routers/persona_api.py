@@ -29,7 +29,7 @@ from leo_customer360_dao.models.identity import (
     CdpPersonaHistory,
     CdpPersonaScoreDetail,
 )
-from leo_customer360_dao.repositories.persona_repository import PersonaRepository
+from core.repositories.persona_repository import PersonaRepository
 from leo_customer360_dao.schemas.identity import (
     CustomerPersonaCreate,
     CustomerPersonaRead,
