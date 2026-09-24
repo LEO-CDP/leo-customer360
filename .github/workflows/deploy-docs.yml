@@ -17,7 +17,10 @@ permissions:
 
 concurrency:
   group: "pages"
-  cancel-in-progress: false
+  # A newer push supersedes an in-progress/queued docs deploy, so a run stuck in
+  # "waiting" (e.g. on the pages environment) can't wedge the group and block all
+  # later deploys — the failure mode that silently kept the site stale for ~15h.
+  cancel-in-progress: true
 
 env:
   QUARTZ_REF: "v4.5.2"
