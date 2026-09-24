@@ -101,14 +101,15 @@ SERVICE="customer360-api"
 GHCR_USER="${GHCR_USER:-${GITHUB_ACTOR:-token}}"
 GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
 if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
-  DEPLOY_MODE="build"; IMAGE=""
+  DEPLOY_MODE="build"; IMAGE=""; TAG=""
   echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
   echo ">> Shipping customer360-api/ and customer360-dao/ ..."
   tar -C "$REPO_ROOT" -czf - customer360-api customer360-dao \
     | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
 else
   DEPLOY_MODE="ghcr"
-  IMAGE="$(image_ref "$SERVICE" "$(resolve_tag "overlays/$ENV.tfvars")")"
+  TAG="$(resolve_tag "overlays/$ENV.tfvars")"
+  IMAGE="$(image_ref "$SERVICE" "$TAG")"
   echo ">> Image: $IMAGE   (pull from GHCR; BUILD_LOCAL=1 to build on the VM)"
 fi
 
@@ -171,6 +172,12 @@ EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-true}"
 S3_AUTO_CREATE="${S3_AUTO_CREATE_BUCKETS:-$(tfval s3_auto_create_buckets "$store/overlays/$ENV.tfvars")}"; S3_AUTO_CREATE="${S3_AUTO_CREATE:-true}"
 MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-$(tfval master_profile_s3_bucket "$store/overlays/$ENV.tfvars")}"; MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
 SOURCE_GIT_COMMIT_HASH="${GITHUB_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
+# Expected commit hash for the post-deploy /health assertion. A ghcr sha-<git> tag bakes
+# that sha; a local build bakes SOURCE_GIT_COMMIT_HASH; a release vX.Y.Z tag bakes an
+# unknown commit sha, so leave it empty there (the box then only asserts a hash is served).
+if [[ "$DEPLOY_MODE" == "build" ]]; then EXPECTED_GIT_HASH="$SOURCE_GIT_COMMIT_HASH"
+elif [[ "${TAG:-}" == sha-* ]]; then EXPECTED_GIT_HASH="${TAG#sha-}"
+else EXPECTED_GIT_HASH=""; fi
 # Region must be a short lowercase token (boto3 rejects anything else).
 [[ "$EVENT_S3_REGION" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: S3_REGION='${EVENT_S3_REGION:0:24}...' is not a region (expected e.g. us-east-1)." >&2; exit 1; }
 echo ">> Master profile S3: bucket=$MASTER_PROFILE_S3_BUCKET (auto_create=$S3_AUTO_CREATE)"
@@ -181,7 +188,7 @@ AGENT_SERVICE_URL=""; [[ -n "$AGENT_IP" ]] && AGENT_SERVICE_URL="http://$AGENT_I
 AGENT_API_TOKEN_B64="$(printf %s "${AGENT_API_TOKEN:-}" | base64 | tr -d '\r\n')"
 # ssh flattens argv and silently drops empty args (shifting later fields); pass one
 # base64 newline-joined blob so empties survive, split remotely with mapfile.
-ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" | base64 | tr -d '\r\n')"
+ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" | base64 | tr -d '\r\n')"
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ARGV_B64" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 mapfile -t A < <(printf %s "${1:-}" | base64 -d)   # fields in order, empties preserved
@@ -206,6 +213,7 @@ MASTER_PROFILE_S3_BUCKET="${A[29]:-c360-master-profiles}"
 GIT_COMMIT_HASH="${A[30]:-unknown}"
 AGENT_SERVICE_URL="${A[31]:-}"
 AGENT_API_TOKEN="$(printf %s "${A[32]:-}" | base64 -d 2>/dev/null || true)"
+EXPECTED_GIT_HASH="${A[33]:-}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -327,6 +335,25 @@ case "$SMTP_STATUS" in
   disabled)  echo "   -> email dispatch is mock (no SMTP configured for this env)." ;;
   *) echo "::warning::customer360-api SMTP health: status=${SMTP_STATUS:-error} (email may not send -- check the env's smtp.<env>.env / BREVO_SMTP_PASSWORD secret)" ;;
 esac
+# Post-deploy freshness gate (HARD): the running container must serve /health with a
+# GIT_COMMIT_HASH. Empty/unknown/unreachable => silent no-op, crash-loop, or an image so
+# old it has no such key => fail loudly instead of a false green. When the expected sha is
+# known (sha-<git> tag / local build) also assert it MATCHES, catching a stale/wrong image.
+DEPLOYED_HASH=""
+for _ in $(seq 1 10); do
+  DEPLOYED_HASH="$(sudo docker exec customer360-api python -c "import urllib.request,json;print(json.load(urllib.request.urlopen('http://127.0.0.1:8008/health',timeout=3)).get('GIT_COMMIT_HASH',''))" 2>/dev/null || true)"
+  [ -n "$DEPLOYED_HASH" ] && [ "$DEPLOYED_HASH" != "unknown" ] && break
+  sleep 3
+done
+if [ -z "$DEPLOYED_HASH" ] || [ "$DEPLOYED_HASH" = "unknown" ]; then
+  echo "::error::customer360-api post-deploy check FAILED: /health served no GIT_COMMIT_HASH after ~30s (container not running the new image / crash-loop)." >&2
+  exit 1
+fi
+if [ -n "$EXPECTED_GIT_HASH" ] && [ "$DEPLOYED_HASH" != "$EXPECTED_GIT_HASH" ]; then
+  echo "::error::customer360-api post-deploy check FAILED: /health GIT_COMMIT_HASH=$DEPLOYED_HASH != expected $EXPECTED_GIT_HASH (stale image / deploy skew)." >&2
+  exit 1
+fi
+echo "   post-deploy OK: customer360-api serving GIT_COMMIT_HASH=$DEPLOYED_HASH"
 REMOTE
 )
 
