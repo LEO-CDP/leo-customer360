@@ -166,12 +166,13 @@ EVENT_S3_SECRET_B64="$(printf %s "${S3_SECRET_ACCESS_KEY:-${TF_VAR_secret_key:-$
 EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-true}"
 S3_AUTO_CREATE="${S3_AUTO_CREATE_BUCKETS:-$(tfval s3_auto_create_buckets "$store/overlays/$ENV.tfvars")}"; S3_AUTO_CREATE="${S3_AUTO_CREATE:-true}"
 MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-$(tfval master_profile_s3_bucket "$store/overlays/$ENV.tfvars")}"; MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
+SOURCE_GIT_COMMIT_HASH="${GITHUB_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
 # Region must be a short lowercase token (boto3 rejects anything else).
 [[ "$EVENT_S3_REGION" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: S3_REGION='${EVENT_S3_REGION:0:24}...' is not a region (expected e.g. us-east-1)." >&2; exit 1; }
 echo ">> Master profile S3: bucket=$MASTER_PROFILE_S3_BUCKET (auto_create=$S3_AUTO_CREATE)"
 # ssh flattens argv and silently drops empty args (shifting later fields); pass one
 # base64 newline-joined blob so empties survive, split remotely with mapfile.
-ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" | base64 | tr -d '\r\n')"
+ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" | base64 | tr -d '\r\n')"
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ARGV_B64" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 mapfile -t A < <(printf %s "${1:-}" | base64 -d)   # fields in order, empties preserved
@@ -193,6 +194,7 @@ EVENT_S3_FORCE_PATH_STYLE="${A[26]:-false}"
 SMTP_B64="${A[27]:-}"
 S3_AUTO_CREATE_BUCKETS="${A[28]:-true}"
 MASTER_PROFILE_S3_BUCKET="${A[29]:-c360-master-profiles}"
+GIT_COMMIT_HASH="${A[30]:-unknown}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -284,6 +286,7 @@ else
   sed -i 's/ --mount=[^ ]*//g' /opt/c360/customer360-api/Dockerfile
   BUILD_DATE_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   sudo docker build --build-arg "BUILD_DATE_TIME=$BUILD_DATE_TIME" \
+    --build-arg "GIT_COMMIT_HASH=$GIT_COMMIT_HASH" \
     -t customer360-api -f /opt/c360/customer360-api/Dockerfile /opt/c360
   RUN_IMG="customer360-api"
 fi

@@ -3,13 +3,15 @@
 FROM python:3.12-slim
 
 ARG BUILD_DATE_TIME=unknown
+ARG GIT_COMMIT_HASH=unknown
 
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    BUILD_DATE_TIME=${BUILD_DATE_TIME}
+    BUILD_DATE_TIME=${BUILD_DATE_TIME} \
+    GIT_COMMIT_HASH=${GIT_COMMIT_HASH}
 
 COPY customer360-dao /opt/customer360-dao
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \

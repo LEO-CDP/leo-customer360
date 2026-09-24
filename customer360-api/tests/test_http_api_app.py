@@ -1,7 +1,9 @@
 """Contract tests for the Customer 360 HTTP application factory."""
 
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+import core.apps.http_api_app as http_api_app
 from core.apps.http_api_app import create_http_api_app
 
 
@@ -21,3 +23,27 @@ def test_openapi_marks_only_public_paths_as_unauthenticated():
     assert "security" not in schema["paths"]["/api/v1/metadata/"]["get"]
     assert schema["paths"]["/api/v1/data-sources/"]["get"]["security"] == [{"BearerAuth": []}]
     assert schema["paths"]["/api/v1/ai-agents/"]["post"]["security"] == [{"BearerAuth": []}]
+
+
+def test_health_reports_git_commit_hash(monkeypatch):
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def execute(self, statement):
+            assert str(statement) == "SELECT 1"
+
+    class FakeEngine:
+        def connect(self):
+            return FakeConnection()
+
+    monkeypatch.setattr(http_api_app, "engine", FakeEngine())
+    monkeypatch.setattr(http_api_app, "GIT_COMMIT_HASH", "test-commit")
+
+    response = TestClient(create_http_api_app(FastAPI())).get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["GIT_COMMIT_HASH"] == "test-commit"

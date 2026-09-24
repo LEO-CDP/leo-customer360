@@ -50,7 +50,18 @@ image_ref() {
 resolve_tag() {
   local ovl="$1" t="${IMAGE_TAG:-}"
   if [ -z "$t" ] && command -v tfval >/dev/null 2>&1; then t="$(tfval image_tag "$ovl" 2>/dev/null)"; fi
-  printf '%s' "${t:-latest}"
+  if [ -z "$t" ]; then
+    if [ "${REQUIRE_IMMUTABLE_TAG:-0}" = "1" ]; then
+      printf 'ERROR: an immutable image tag is required for registry deployments; refusing latest\n' >&2
+      return 1
+    fi
+    t="latest"
+  fi
+  if [ "${REQUIRE_IMMUTABLE_TAG:-0}" = "1" ] && [ "$t" = "latest" ]; then
+    printf 'ERROR: an immutable image tag is required for registry deployments; refusing latest\n' >&2
+    return 1
+  fi
+  printf '%s' "$t"
 }
 
 # docker_pull_retry <image-ref>

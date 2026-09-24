@@ -39,6 +39,7 @@ from core.routers.user_api import all_user_routers
 from core.routers.zalo_api import all_zalo_routers
 
 BUILD_DATE_TIME = os.getenv("BUILD_DATE_TIME", "unknown")
+GIT_COMMIT_HASH = os.getenv("GIT_COMMIT_HASH", "unknown")
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +263,8 @@ def create_http_api_app(mcp_app: FastAPI) -> FastAPI:
             "status": "ok",
             "database": "reachable",
             "sso_login": settings.sso_login,
-            "BUILD_DATE_TIME": BUILD_DATE_TIME
+            "BUILD_DATE_TIME": BUILD_DATE_TIME,
+            "GIT_COMMIT_HASH": GIT_COMMIT_HASH
         }
 
     return app

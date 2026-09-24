@@ -14,7 +14,7 @@ name: CD
 # 2. workflow_dispatch (manual) — Actions "Run workflow" form (or `gh workflow
 #    run cd.yml -f ...`) to deploy/ROLL BACK any environment to any image tag:
 #      environment: uat | prod
-#      image_tag:   v1.2.3 | sha-<git> | latest   (immutable tags for rollback)
+#      image_tag:   v1.2.3 | sha-<git>             (immutable tags for rollback)
 #      services:    comma list (default: db-schema,api,backend,ads,frontend,tracking)
 #    This is the rollback path — pick a previously-built tag and redeploy it.
 #
@@ -50,7 +50,7 @@ on:
         options: [uat, prod]
         required: true
       image_tag:
-        description: "Image tag to deploy — use an immutable tag to roll back (vX.Y.Z or sha-<git>); avoid 'latest'"
+        description: "Image tag to deploy — immutable only (vX.Y.Z or sha-<git>)"
         type: string
         required: true
       services:
@@ -64,10 +64,12 @@ permissions:
   packages: read
 
 concurrency:
-  # Serialise per environment (single writer). For workflow_run the branch/tag
-  # name maps to the env; for a manual run the chosen environment does.
-  group: cd-${{ github.event.workflow_run.head_branch || inputs.environment }}
-  cancel-in-progress: false
+  # Serialize per target environment (single writer). Automatic main deploys
+  # target UAT; release-tag deploys target prod; manual runs use their input.
+  group: cd-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event.workflow_run.head_branch == 'main' && 'uat' || 'prod') }}
+  # A newer successful CI run must win. Leaving older workflow_run events queued
+  # lets GitHub start them later and roll the environment back to an older SHA.
+  cancel-in-progress: true
 
 jobs:
   # Decide whether/where/what to deploy — from the finished CI run, or from the
@@ -87,6 +89,9 @@ jobs:
           EVENT: ${{ github.event_name }}
           # workflow_run context (branch name, or tag name for tag pushes)
           REF: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
           # workflow_dispatch inputs
           IN_ENV: ${{ inputs.environment }}
           IN_TAG: ${{ inputs.image_tag }}
@@ -107,9 +112,18 @@ jobs:
             echo "→ manual deploy/rollback: env=$IN_ENV tag=$IN_TAG services=$svc"
           else
             if [[ "$REF" == "main" ]]; then
+              # workflow_run events can be queued out of order. Skip an older
+              # successful CI run once main has advanced; its newer CI run will
+              # perform the deployment for the current commit.
+              CURRENT_MAIN_SHA="$(gh api "repos/$REPOSITORY/commits/main" --jq .sha)"
+              if [[ "$CURRENT_MAIN_SHA" != "$HEAD_SHA" ]]; then
+                echo "-> skip stale CI run: head=$HEAD_SHA current-main=$CURRENT_MAIN_SHA"
+                echo "deploy=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
               # Every successful push/merge to main deploys uat automatically (no opt-in marker).
-              { echo "deploy=true"; echo "env=uat"; echo "tag=sha-${{ github.event.workflow_run.head_sha }}"; echo "services=$DEFAULT_SVC"; } >> "$GITHUB_OUTPUT"
-              echo "→ deploy uat (exact CI-built image for ${{ github.event.workflow_run.head_sha }})"
+              { echo "deploy=true"; echo "env=uat"; echo "tag=sha-$HEAD_SHA"; echo "services=$DEFAULT_SVC"; } >> "$GITHUB_OUTPUT"
+              echo "-> deploy uat (exact CI-built image for $HEAD_SHA)"
             elif [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
               { echo "deploy=true"; echo "env=prod"; echo "tag=$REF"; echo "services=$DEFAULT_SVC"; } >> "$GITHUB_OUTPUT"
               echo "→ deploy prod (tag $REF)"
@@ -132,6 +146,7 @@ jobs:
     env:
       ENVIRONMENT: ${{ needs.select.outputs.env }}
       IMAGE_TAG: ${{ needs.select.outputs.tag }}   # consumed by lib/ghcr.sh resolve_tag
+      REQUIRE_IMMUTABLE_TAG: "1"                    # CD must deploy a SHA or release tag
       SERVICES: ${{ needs.select.outputs.services }}
       # vStorage S3 creds for the remote Terraform backend (state read on the runner).
       AWS_ACCESS_KEY_ID: ${{ secrets.VSTORAGE_ACCESS_KEY }}

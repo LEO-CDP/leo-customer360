@@ -221,6 +221,7 @@ jobs:
           build-args: |
             BUILD_VERSION=${{ steps.build-version.outputs.value }}
             BUILD_DATE_TIME=${{ steps.build-date-time.outputs.value }}
+            GIT_COMMIT_HASH=${{ github.sha }}
           # Per-service layer cache so services don't evict each other.
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
