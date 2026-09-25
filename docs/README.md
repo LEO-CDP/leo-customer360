@@ -21,14 +21,18 @@ Local development, deployment, environment, database, and Compose runbooks.
 - [Development domain configuration](operations/dev-example.com-configs.md)
 - [Database tools](operations/database/README.md)
 
-## API Plans
+## Action Plans
 
-Implementation plans for Customer 360 API and campaign capabilities.
+Implementation plans for Customer 360 API, agentic marketing, and campaign capabilities.
 
-- [Campaigns](api-plans/PLAN-CAMPAIGNS-DEV.md)
-- [CRM profiles](api-plans/PLAN-CRM-PROFILES-API-IMPROVEMENT.md)
-- [Events](api-plans/PLAN-EVENTS-API-IMPROVEMENT.md)
-- [Segments](api-plans/PLAN-SEGMENTS-API-IMPROVEMENT.md)
+- [Marketing playbooks (recurring & triggered campaigns)](action-plans/PLAN-MARKETING-PLAYBOOKS-AGENTIC.md)
+- [Zalo ZNS integration (canonical channel plan)](action-plans/PLAN-ZALO-ZNS-OPTIMIZED.md)
+- [Agentic email marketing flow](action-plans/AGENTIC-EMAIL-MARKETING-FLOW.md)
+- [Agentic marketing product checklist](action-plans/AGENTIC-MARKETING.md)
+- [Campaigns](action-plans/PLAN-CAMPAIGNS-DEV.md)
+- [CRM profiles](action-plans/PLAN-CRM-PROFILES-API-IMPROVEMENT.md)
+- [Events](action-plans/PLAN-EVENTS-API-IMPROVEMENT.md)
+- [Segments](action-plans/PLAN-SEGMENTS-API-IMPROVEMENT.md)
 
 ## Data Sources
 
