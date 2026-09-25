@@ -96,9 +96,22 @@ window.C360 = window.C360 || {};
     scrollToBottom();
   }
 
+  // Pure text->HTML conversion, factored out of setAnswer so it can be unit
+  // tested without jQuery/DOM (see static/js/__tests__/docs-chatbot-view.test.js).
+  function renderAnswerHtml(text) {
+    var raw = text == null ? "" : String(text);
+    if (window.marked && window.DOMPurify) {
+      // The LLM answer is markdown; render it, then sanitize before it touches
+      // the DOM (this is the one place we allow real HTML, via DOMPurify).
+      return DOMPurify.sanitize(marked.parse(raw));
+    }
+    // marked/DOMPurify failed to load -- fall back to the old escape+<br> behavior
+    // rather than risk unsanitized markup.
+    return esc(raw).replace(/\n/g, "<br>");
+  }
+
   function setAnswer($msg, text) {
-    // Escaped first, then \n -> <br> so paragraphs survive without allowing markup.
-    $msg.find(".docs-chat-answer").html(esc(text).replace(/\n/g, "<br>"));
+    $msg.find(".docs-chat-answer").html(renderAnswerHtml(text));
     scrollToBottom();
   }
 
@@ -241,6 +254,8 @@ window.C360 = window.C360 || {};
     ask: ask,
     open: open,
     close: close,
-    toggle: toggle
+    toggle: toggle,
+    // Exposed for unit testing (static/js/__tests__/docs-chatbot-view.test.js).
+    renderAnswerHtml: renderAnswerHtml
   };
 })(window.C360);
