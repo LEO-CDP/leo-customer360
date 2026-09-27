@@ -79,10 +79,35 @@ browser redirect and the backend introspection), `api_keycloak_realm`,
 ../server/deploy-api.sh uat    # prints ">> SSO: ENABLED ..."; injects SSO_LOGIN=true + KEYCLOAK_*
 ```
 
-The bootstrap fixes the client access token, realm SSO idle session, and realm
-SSO maximum session lifetimes at **30 minutes** (1,800 seconds). Re-run the
-bootstrap after deploying this change; tokens issued before the update retain
-their original Keycloak lifetime until they expire or are revoked.
+### Session lifetimes
+
+The bootstrap sets the access-token lifetime and the realm's SSO idle/maximum
+session lifetimes from env vars, defaulting to **60 minutes** for the token and
+**8h idle / 10h maximum** for the session:
+
+| Variable | Default | Sets |
+| --- | --- | --- |
+| `KEYCLOAK_TOKEN_EXPIRES_MINUTES` | 60 | `accessTokenLifespan` + the client's `access.token.lifespan` |
+| `KEYCLOAK_SSO_SESSION_IDLE_MINUTES` | 480 | `ssoSessionIdleTimeout` |
+| `KEYCLOAK_SSO_SESSION_MAX_MINUTES` | 600 | `ssoSessionMaxLifespan` |
+
+Two constraints the bootstrap enforces, because violating either logs admins
+out mid-session:
+
+- **The session bounds must exceed one token lifetime.** `ssoSessionMaxLifespan`
+  is an absolute cap: once it elapses, no refresh can save the session and the
+  user must sign in again. Setting it equal to the token lifetime (as an earlier
+  revision did, all three at 30 minutes) means the session dies with the first
+  access token and refreshing is pointless.
+- **`KEYCLOAK_TOKEN_EXPIRES_MINUTES` must match the API's variable of the same
+  name.** The API rejects any token older than its own value, so a realm issuing
+  longer-lived tokens just gets them refused.
+
+The admin UI renews its access token against `POST /auth/refresh` shortly before
+expiry, so an admin stays signed in for the whole SSO session rather than one
+token lifetime. Re-run the bootstrap after deploying this change; tokens issued
+before the update retain their original Keycloak lifetime until they expire or
+are revoked.
 
 Verify headlessly (direct-grant token -> protected endpoint):
 

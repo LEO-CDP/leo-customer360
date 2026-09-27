@@ -76,9 +76,9 @@ if [[ -n "$REDIS_HOST" ]]; then echo ">> Redis: ${REDIS_HOST}:${REDIS_PORT} (cac
 #     of the dev local-JWT login. Client secret from ../sso/.env (bootstrap-realm.py). ---
 sso="../sso"
 SSO_LOGIN="false"; SSO_URL=""; KC_REALM=""; KC_CLIENT=""; KC_SECRET=""
-KC_TOKEN_EXPIRES_MINUTES="${KEYCLOAK_TOKEN_EXPIRES_MINUTES:-30}"
-[[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^([1-9]|[12][0-9]|30)$ ]] || {
-  echo "ERROR: KEYCLOAK_TOKEN_EXPIRES_MINUTES must be an integer from 1 to 30." >&2
+KC_TOKEN_EXPIRES_MINUTES="${KEYCLOAK_TOKEN_EXPIRES_MINUTES:-60}"
+[[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^[0-9]+$ ]] && (( KC_TOKEN_EXPIRES_MINUTES >= 1 && KC_TOKEN_EXPIRES_MINUTES <= 1440 )) || {
+  echo "ERROR: KEYCLOAK_TOKEN_EXPIRES_MINUTES must be an integer from 1 to 1440." >&2
   exit 1
 }
 if [[ "$(tfval api_sso_enabled "$sso/overlays/$ENV.tfvars")" == "true" ]]; then
@@ -219,8 +219,8 @@ GIT_COMMIT_HASH="${A[30]:-unknown}"
 AGENT_SERVICE_URL="${A[31]:-}"
 AGENT_API_TOKEN="$(printf %s "${A[32]:-}" | base64 -d 2>/dev/null || true)"
 EXPECTED_GIT_HASH="${A[33]:-}"
-KC_TOKEN_EXPIRES_MINUTES="${A[34]:-30}"
-[[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^([1-9]|[12][0-9]|30)$ ]] || {
+KC_TOKEN_EXPIRES_MINUTES="${A[34]:-60}"
+[[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^[0-9]+$ ]] && (( KC_TOKEN_EXPIRES_MINUTES >= 1 && KC_TOKEN_EXPIRES_MINUTES <= 1440 )) || {
   echo "ERROR: received KEYCLOAK_TOKEN_EXPIRES_MINUTES is invalid." >&2
   exit 1
 }

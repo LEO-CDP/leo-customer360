@@ -313,10 +313,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "SSO_LOGIN_URL", "sso_login_url", "ssoLoginUrl"),
     )
+    # Access-token lifetime the API enforces. MUST match the realm's
+    # accessTokenLifespan (deployments/sso/bootstrap-realm.py) -- a value
+    # lower than the realm's silently expires tokens Keycloak still considers
+    # valid, which logs admins out mid-session.
     keycloak_token_expires_minutes: int = Field(
-        default=30,
+        default=60,
         ge=1,
-        le=30,
+        le=1440,
         validation_alias=AliasChoices(
             "KEYCLOAK_TOKEN_EXPIRES_MINUTES",
             "keycloak_token_expires_minutes",
@@ -348,7 +352,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DEV_JWT_SECRET", "dev_jwt_secret"),
     )
     dev_jwt_expires_minutes: int = Field(
-        default=30,
+        default=60,
+        ge=1,
         validation_alias=AliasChoices("DEV_JWT_EXPIRES_MINUTES", "dev_jwt_expires_minutes"),
     )
 

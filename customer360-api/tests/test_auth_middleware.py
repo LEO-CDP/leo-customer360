@@ -186,7 +186,7 @@ class AuthMiddlewareTests(unittest.TestCase):
             response2 = client.get("/secure", headers={"Authorization": "Bearer newtoken"})
         self.assertEqual(response2.status_code, 200)
 
-    def test_caches_token_ttl_capped_at_30_minutes(self):
+    def test_caches_token_ttl_capped_at_configured_lifetime(self):
         client = TestClient(_build_app())
         fake_redis = FakeRedis()
 
@@ -200,15 +200,17 @@ class AuthMiddlewareTests(unittest.TestCase):
         }
 
         with patch("core.auth.SSO_LOGIN", True), patch(
-            "core.auth.get_redis_client", return_value=fake_redis
-        ), patch("core.auth._introspect_with_keycloak", return_value=introspect_payload):
+            "core.auth._token_lifetime_seconds", return_value=3600
+        ), patch("core.auth.get_redis_client", return_value=fake_redis), patch(
+            "core.auth._introspect_with_keycloak", return_value=introspect_payload
+        ):
             response = client.get("/secure", headers={"Authorization": "Bearer captoken"})
 
         self.assertEqual(response.status_code, 200)
-        # Redis TTL must be capped at 30 minutes (1800 seconds)
-        self.assertEqual(fake_redis.ttls.get("auth:token:captoken"), 1800)
+        # Cache must never outlive the lifetime the middleware itself enforces.
+        self.assertEqual(fake_redis.ttls.get("auth:token:captoken"), 3600)
 
-    def test_rejects_token_exceeding_max_lifespan_30_minutes(self):
+    def test_rejects_token_older_than_configured_lifetime(self):
         client = TestClient(_build_app())
         fake_redis = FakeRedis()
 
@@ -219,17 +221,81 @@ class AuthMiddlewareTests(unittest.TestCase):
             "preferred_username": "old-session",
             "tenant_id": "11111111-1111-1111-1111-111111111111",
             "user_id": "22222222-2222-2222-2222-222222222222",
-            "iat": now - 1900,  # issued 31+ minutes ago
+            "iat": now - 4000,  # issued well over the 60-minute lifetime ago
             "exp": now + 3600,
         }
 
         with patch("core.auth.SSO_LOGIN", True), patch(
-            "core.auth.get_redis_client", return_value=fake_redis
-        ), patch("core.auth._introspect_with_keycloak", return_value=expired_by_iat_payload):
+            "core.auth._token_lifetime_seconds", return_value=3600
+        ), patch("core.auth.get_redis_client", return_value=fake_redis), patch(
+            "core.auth._introspect_with_keycloak", return_value=expired_by_iat_payload
+        ):
             response = client.get("/secure", headers={"Authorization": "Bearer oldtoken"})
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["detail"], "Invalid or expired token")
+
+    def test_accepts_token_within_lifetime_at_60_minutes(self):
+        """A 60-minute session must survive its full hour -- the regression that
+        kicked SSO admins back to the login page was this bound sitting at 30
+        minutes while the realm still called the token valid."""
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+
+        now = int(time.time())
+        payload = {
+            "active": True,
+            "sub": "user-59min",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "user_id": "22222222-2222-2222-2222-222222222222",
+            "iat": now - 3540,  # 59 minutes old
+            "exp": now + 60,
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth._token_lifetime_seconds", return_value=3600
+        ), patch("core.auth.get_redis_client", return_value=fake_redis), patch(
+            "core.auth._introspect_with_keycloak", return_value=payload
+        ):
+            response = client.get("/secure", headers={"Authorization": "Bearer hour-old"})
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_clock_skew_leeway_keeps_boundary_token_valid(self):
+        """A token a few seconds past the configured lifetime is still accepted;
+        without the leeway, a Keycloak clock running ahead makes freshly issued
+        tokens look already-expired."""
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+
+        now = int(time.time())
+        payload = {
+            "active": True,
+            "sub": "user-skew",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "user_id": "22222222-2222-2222-2222-222222222222",
+            "iat": now - 3630,  # 30s past the lifetime, inside the 60s leeway
+            "exp": now + 600,
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth._token_lifetime_seconds", return_value=3600
+        ), patch("core.auth.get_redis_client", return_value=fake_redis), patch(
+            "core.auth._introspect_with_keycloak", return_value=payload
+        ):
+            response = client.get("/secure", headers={"Authorization": "Bearer skewed"})
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_refresh_endpoint_is_exempt_from_bearer_auth(self):
+        """The admin UI calls /auth/refresh precisely because its access token
+        expired, so the middleware must not demand one."""
+        client = TestClient(_build_app())
+
+        with patch("core.auth.SSO_LOGIN", True):
+            response = client.get("/api/v1/auth/refresh")
+
+        self.assertNotEqual(response.status_code, 401)
 
     def test_expired_cached_token_is_evicted_and_rejected(self):
         client = TestClient(_build_app())
@@ -243,7 +309,7 @@ class AuthMiddlewareTests(unittest.TestCase):
                     "sub": "user-stale",
                     "tenant_id": "11111111-1111-1111-1111-111111111111",
                     "user_id": "22222222-2222-2222-2222-222222222222",
-                    "iat": now - 2000,
+                    "iat": now - 4000,
                     "exp": now + 1000,
                 }
             ),
