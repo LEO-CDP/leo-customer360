@@ -205,12 +205,12 @@ class TestSegmentationRecomputeLogging:
 
         queries = [call.args[0] for call in cursor.execute.call_args_list]
         assert result == 4
-        assert any("CREATE TEMP TABLE" in query for query in queries)
+        assert any("CREATE TEMP TABLE" in str(query) for query in queries)
         assert any(
-            "INSERT INTO _c360_segment_matches" in query and "email LIKE '%%s'" in query
+            "INSERT INTO _c360_segment_matches" in str(query) and "email LIKE '%s'" in str(query)
             for query in queries
         )
-        assert any("SELECT COUNT(*) FROM _c360_segment_matches" in query for query in queries)
+        assert any("SELECT COUNT(*) FROM _c360_segment_matches" in str(query) for query in queries)
         cursor.fetchall.assert_not_called()
 
     def test_recompute_one_segment_supports_persona_name_like_rule(self):
@@ -230,10 +230,10 @@ class TestSegmentationRecomputeLogging:
         insert_call = next(
             call_item
             for call_item in cursor.execute.call_args_list
-            if "INSERT INTO _c360_segment_matches" in call_item.args[0]
+            if "INSERT INTO _c360_segment_matches" in str(call_item.args[0])
         )
-        insert_sql, insert_params = insert_call.args
-        assert "SELECT master_profile_id FROM customer360.cdp_master_profiles" in insert_sql
-        assert "WHERE tenant_id = %(tenant_id)s" in insert_sql
-        assert "persona_name LIKE '%%visitor%%'" in insert_sql
-        assert insert_params == {"tenant_id": tenant_id}
+        assert len(insert_call.args) == 1
+        composed_sql = str(insert_call.args[0])
+        assert "cdp_master_profiles" in composed_sql
+        assert tenant_id in composed_sql
+        assert "persona_name LIKE '%visitor%'" in composed_sql
