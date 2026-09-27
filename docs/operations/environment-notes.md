@@ -73,7 +73,7 @@ independent and uses `customer360-promotions/.env` from `customer360-promotions/
 - `DEFAULT_ROOT_USERNAME`: Local bootstrap admin username. Default: `admin`
 - `DEFAULT_ROOT_PASSWORD`: Local bootstrap admin password. Default: `change_me_root_password`
 - `DEV_JWT_SECRET`: Shared secret used for local JWT issuance when SSO is disabled. Default: `change_me_dev_jwt_secret_min_32_bytes_long`
-- `DEV_JWT_EXPIRES_MINUTES`: Token lifetime for local dev JWTs. Default: `480`
+- `DEV_JWT_EXPIRES_MINUTES`: Token lifetime for local dev JWTs. Default: `30`
 - `C360_AUTH_RATE_LIMIT_MAX_ATTEMPTS`: Failed login attempts per window. Default: `10`
 - `C360_AUTH_RATE_LIMIT_WINDOW_SECONDS`: Login rate-limit window. Default: `60`
 - `SSO_LOGIN_URL`: Base URL of the Keycloak server. Default: `https://c360.example.com/auth`
@@ -82,6 +82,7 @@ independent and uses `customer360-promotions/.env` from `customer360-promotions/
 - `KEYCLOAK_CLIENT_SECRET`: Keycloak client secret. Default: `change_me_keycloak_client_secret`
 - `KEYCLOAK_CALLBACK_URL`: OAuth callback URL. Default: `https://c360.example.com/`
 - `KEYCLOAK_VERIFY_SSL`: Whether to verify SSL certificates for Keycloak requests. Default: `false`
+- `KEYCLOAK_TOKEN_EXPIRES_MINUTES`: Maximum accepted Keycloak access-token lifetime in `customer360-api`. Default: `30`; valid values are `1` through `30`. The Keycloak realm bootstrap also issues tokens with a 30-minute lifetime.
 
 ## Keycloak container settings
 

@@ -134,6 +134,7 @@ def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_frag
     syncs segment_tag into/out of segmentation_tags, and writes back
     member_count/last_computed_at onto the cdp_segments row. Returns the
     matched member count."""
+    escaped_where_fragment = where_fragment.replace("%", "%%")
     with conn.cursor() as cur:
         set_tenant_context(cur, tenant_id)
         cur.execute(
@@ -149,7 +150,7 @@ def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_frag
             INSERT INTO _c360_segment_matches (master_profile_id)
             SELECT master_profile_id FROM {DB_SCHEMA}.cdp_master_profiles
             {_DOMAIN_ATTRIBUTES_JOIN_SQL.format(schema=DB_SCHEMA)}
-            WHERE tenant_id = %(tenant_id)s AND status_code = 1 AND ({where_fragment})
+            WHERE tenant_id = %(tenant_id)s AND status_code = 1 AND ({escaped_where_fragment})
             """,
             {"tenant_id": tenant_id},
         )

@@ -84,6 +84,10 @@ SSO maximum session lifetimes at **30 minutes** (1,800 seconds). Re-run the
 bootstrap after deploying this change; tokens issued before the update retain
 their original Keycloak lifetime until they expire or are revoked.
 
+Set `KEYCLOAK_TOKEN_EXPIRES_MINUTES=30` in `deployments/server/.env` before
+running `../server/deploy-api.sh`. The deploy script passes it into the API
+container and rejects values outside the `1`-to-`30` minute range.
+
 Verify headlessly (direct-grant token -> protected endpoint):
 
 ```bash
