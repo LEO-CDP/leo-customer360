@@ -67,12 +67,29 @@ def main():
     tok = admin_token()
 
     # 1) realm
-    st, _, _ = req("GET", f"/admin/realms/{REALM}", token=tok)
+    st, realm, _ = req("GET", f"/admin/realms/{REALM}", token=tok)
+    realm_settings = {
+        "realm": REALM,
+        "enabled": True,
+        "accessTokenLifespan": 1800,
+        "ssoSessionIdleTimeout": 1800,
+        "ssoSessionMaxLifespan": 1800,
+    }
     if st == 404:
-        st, _, _ = req("POST", "/admin/realms", token=tok, body={"realm": REALM, "enabled": True})
+        st, _, _ = req("POST", "/admin/realms", token=tok, body=realm_settings)
         print(f"realm '{REALM}': created" if st in (201, 204) else f"realm create HTTP {st}")
+    elif st == 200 and isinstance(realm, dict):
+        st, _, _ = req(
+            "PUT",
+            f"/admin/realms/{REALM}",
+            token=tok,
+            body={**realm, **realm_settings},
+        )
+        if st not in (200, 204):
+            sys.exit(f"ERROR: could not set realm token lifespan (HTTP {st})")
+        print(f"realm '{REALM}': exists (lifespan set to 1800s / 30m)")
     else:
-        print(f"realm '{REALM}': exists")
+        sys.exit(f"ERROR: could not read realm '{REALM}' (HTTP {st})")
 
     # 1a) realm roles the customer360-api authorizes on. These MUST match the role sets in
     # customer360-api/core/routers/segment_api.py:
@@ -101,14 +118,21 @@ def main():
 
     # 2) client (confidential; standard flow for the browser code flow, direct grants for headless tokens)
     st, clients, _ = req("GET", f"/admin/realms/{REALM}/clients?clientId={urllib.parse.quote(CLIENT_ID)}", token=tok)
+    client_attributes = {
+        "access.token.lifespan": "1800",
+        "client.session.idle.timeout": "1800",
+        "client.session.max.lifespan": "1800",
+    }
     desired = {
         "clientId": CLIENT_ID, "enabled": True, "protocol": "openid-connect",
         "publicClient": False, "standardFlowEnabled": True, "directAccessGrantsEnabled": True,
         "serviceAccountsEnabled": False, "redirectUris": REDIRECT_URIS, "webOrigins": ["+"],
+        "attributes": client_attributes,
     }
     if clients:
         cuid = clients[0]["id"]
-        req("PUT", f"/admin/realms/{REALM}/clients/{cuid}", token=tok, body={**clients[0], **desired})
+        merged_attrs = {**(clients[0].get("attributes") or {}), **client_attributes}
+        req("PUT", f"/admin/realms/{REALM}/clients/{cuid}", token=tok, body={**clients[0], **desired, "attributes": merged_attrs})
         print(f"client '{CLIENT_ID}': exists (updated)")
     else:
         st, _, loc = req("POST", f"/admin/realms/{REALM}/clients", token=tok, body=desired)

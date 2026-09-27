@@ -313,6 +313,17 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "SSO_LOGIN_URL", "sso_login_url", "ssoLoginUrl"),
     )
+    keycloak_token_expires_minutes: int = Field(
+        default=30,
+        ge=1,
+        le=30,
+        validation_alias=AliasChoices(
+            "KEYCLOAK_TOKEN_EXPIRES_MINUTES",
+            "keycloak_token_expires_minutes",
+            "SSO_TOKEN_EXPIRES_MINUTES",
+            "sso_token_expires_minutes",
+        ),
+    )
 
     # Dev-mode login (SSO_LOGIN=false): a single root/super-admin credential
     # pair, not backed by a sys_user row, used only by POST /auth/login so
@@ -337,7 +348,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DEV_JWT_SECRET", "dev_jwt_secret"),
     )
     dev_jwt_expires_minutes: int = Field(
-        default=480,
+        default=30,
         validation_alias=AliasChoices("DEV_JWT_EXPIRES_MINUTES", "dev_jwt_expires_minutes"),
     )
 
@@ -412,6 +423,7 @@ class Settings(BaseSettings):
             "keycloakVerifySSL": str(self.keycloak_verify_ssl).lower(),
             "ssoLogin": str(self.sso_login).lower(),
             "ssoLoginUrl": self.sso_login_url,
+            "keycloakTokenExpiresMinutes": str(self.keycloak_token_expires_minutes),
         }
 
 

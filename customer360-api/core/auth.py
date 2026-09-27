@@ -93,16 +93,32 @@ def _introspect_with_keycloak(token: str) -> Optional[dict[str, Any]]:
         return None
 
 
+def _is_token_expired(payload: dict[str, Any]) -> bool:
+    """Check whether a token payload is expired based on exp or max lifespan (30 min)."""
+    now = int(time.time())
+    exp = payload.get("exp")
+    if isinstance(exp, (int, float)) and now >= int(exp):
+        return True
+    iat = payload.get("iat")
+    max_lifespan_seconds = getattr(settings, "keycloak_token_expires_minutes", 30) * 60
+    if isinstance(iat, (int, float)) and (now - int(iat)) > max_lifespan_seconds:
+        return True
+    return False
+
+
 def _cache_token(token: str, payload: dict[str, Any]) -> None:
-    """Cache a Keycloak introspection payload until its token expires."""
+    """Cache a Keycloak introspection payload until its token expires (capped at max token lifespan)."""
     client = get_redis_client()
     if client is None:
         return
 
     exp = payload.get("exp")
+    max_ttl = getattr(settings, "keycloak_token_expires_minutes", 30) * 60
     ttl_seconds: Optional[int] = None
     if isinstance(exp, (int, float)):
-        ttl_seconds = max(60, int(exp) - int(time.time()))
+        ttl_seconds = min(max_ttl, int(exp) - int(time.time()))
+    else:
+        ttl_seconds = max_ttl
     if ttl_seconds is not None and ttl_seconds > 0:
         try:
             client.set(
@@ -131,7 +147,16 @@ def _load_cached_token(token: str) -> Optional[dict[str, Any]]:
 
     try:
         payload = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
-        return json.loads(payload)
+        data = json.loads(payload)
+        if isinstance(data, dict):
+            if _is_token_expired(data):
+                try:
+                    client.delete(f"auth:token:{token}")
+                except Exception:
+                    pass
+                return None
+            return data
+        return None
     except Exception:
         logger.warning("Cached token payload was not valid JSON", exc_info=True)
         return None
@@ -323,7 +348,7 @@ async def auth_middleware(request: Request, call_next):
     payload = _load_cached_token(token)
     if payload is None:
         payload = _introspect_with_keycloak(token)
-        if not payload or not payload.get("active"):
+        if not payload or not payload.get("active") or _is_token_expired(payload):
             _failed_auth_rate_limiter.record_failure(f"auth-fail:{_client_ip(request)}")
             return _unauthorized_response(request, "Invalid or expired token")
         _cache_token(token, payload)

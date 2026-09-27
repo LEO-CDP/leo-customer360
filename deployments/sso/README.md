@@ -79,6 +79,11 @@ browser redirect and the backend introspection), `api_keycloak_realm`,
 ../server/deploy-api.sh uat    # prints ">> SSO: ENABLED ..."; injects SSO_LOGIN=true + KEYCLOAK_*
 ```
 
+The bootstrap fixes the client access token, realm SSO idle session, and realm
+SSO maximum session lifetimes at **30 minutes** (1,800 seconds). Re-run the
+bootstrap after deploying this change; tokens issued before the update retain
+their original Keycloak lifetime until they expire or are revoked.
+
 Verify headlessly (direct-grant token -> protected endpoint):
 
 ```bash
