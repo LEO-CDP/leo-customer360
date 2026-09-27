@@ -178,11 +178,14 @@ async def sso_callback(payload: SsoCallbackRequest) -> Any:
         )
 
     tokens = _exchange_code_for_token(payload.code, payload.redirect_uri)
+    max_expires_in = getattr(settings, "keycloak_token_expires_minutes", 30) * 60
+    raw_expires_in = tokens.get("expires_in")
+    expires_in = min(raw_expires_in, max_expires_in) if isinstance(raw_expires_in, int) else max_expires_in
     return SsoTokenResponse(
         access_token=tokens["access_token"],
         id_token=tokens.get("id_token"),
         refresh_token=tokens.get("refresh_token"),
-        expires_in=tokens.get("expires_in"),
+        expires_in=expires_in,
         token_type=tokens.get("token_type", "Bearer"),
     )
 

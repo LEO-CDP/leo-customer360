@@ -6,6 +6,7 @@ suite behaves the same regardless of how/where it's run.
 """
 
 import json
+import time
 import unittest
 from unittest.mock import patch
 
@@ -184,6 +185,77 @@ class AuthMiddlewareTests(unittest.TestCase):
         ):
             response2 = client.get("/secure", headers={"Authorization": "Bearer newtoken"})
         self.assertEqual(response2.status_code, 200)
+
+    def test_caches_token_ttl_capped_at_30_minutes(self):
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+
+        introspect_payload = {
+            "active": True,
+            "sub": "user-ttl",
+            "preferred_username": "ttl-guy",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "user_id": "22222222-2222-2222-2222-222222222222",
+            "exp": int(time.time()) + 7200,  # 2 hours in future
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth.get_redis_client", return_value=fake_redis
+        ), patch("core.auth._introspect_with_keycloak", return_value=introspect_payload):
+            response = client.get("/secure", headers={"Authorization": "Bearer captoken"})
+
+        self.assertEqual(response.status_code, 200)
+        # Redis TTL must be capped at 30 minutes (1800 seconds)
+        self.assertEqual(fake_redis.ttls.get("auth:token:captoken"), 1800)
+
+    def test_rejects_token_exceeding_max_lifespan_30_minutes(self):
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+
+        now = int(time.time())
+        expired_by_iat_payload = {
+            "active": True,
+            "sub": "user-expired-iat",
+            "preferred_username": "old-session",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "user_id": "22222222-2222-2222-2222-222222222222",
+            "iat": now - 1900,  # issued 31+ minutes ago
+            "exp": now + 3600,
+        }
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth.get_redis_client", return_value=fake_redis
+        ), patch("core.auth._introspect_with_keycloak", return_value=expired_by_iat_payload):
+            response = client.get("/secure", headers={"Authorization": "Bearer oldtoken"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Invalid or expired token")
+
+    def test_expired_cached_token_is_evicted_and_rejected(self):
+        client = TestClient(_build_app())
+        fake_redis = FakeRedis()
+
+        now = int(time.time())
+        fake_redis.set(
+            "auth:token:stale123",
+            json.dumps(
+                {
+                    "sub": "user-stale",
+                    "tenant_id": "11111111-1111-1111-1111-111111111111",
+                    "user_id": "22222222-2222-2222-2222-222222222222",
+                    "iat": now - 2000,
+                    "exp": now + 1000,
+                }
+            ),
+        )
+
+        with patch("core.auth.SSO_LOGIN", True), patch(
+            "core.auth.get_redis_client", return_value=fake_redis
+        ), patch("core.auth._introspect_with_keycloak", return_value={"active": False}):
+            response = client.get("/secure", headers={"Authorization": "Bearer stale123"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIsNone(fake_redis.get("auth:token:stale123"))
 
     def test_health_endpoint_is_exempt_even_without_token(self):
         client = TestClient(_build_app())

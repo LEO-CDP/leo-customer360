@@ -196,6 +196,7 @@ class MetadataRepository:
 				"login_url": settings.sso_login_url,
 				"realm": settings.keycloak_realm,
 				"client_id": settings.keycloak_client_id,
+				"token_expires_minutes": getattr(settings, "keycloak_token_expires_minutes", 30),
 			},
 			"overall_status": overall,
 			"services": services,

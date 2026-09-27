@@ -287,7 +287,13 @@ PY
   set -e
   if [[ "$probe_status" -eq 0 ]]; then
     echo "   master-profile projection bucket is empty; rebuilding active profiles ..."
+    set +e
     sudo docker exec customer360-backend python /app/identity_resolution/scripts/rebuild_master_profile_event_projections.py
+    rebuild_status=$?
+    set -e
+    if [[ "$rebuild_status" -ne 0 ]]; then
+      echo "WARNING: master-profile projection rebuild failed (status=$rebuild_status); continuing deploy" >&2
+    fi
   elif [[ "$probe_status" -eq 10 ]]; then
     echo "   master-profile projection bucket already contains objects; skipping rebuild"
   else

@@ -40,12 +40,15 @@ class FakeRedis:
 
     def __init__(self):
         self.store: dict[str, str] = {}
+        self.ttls: dict[str, Optional[int]] = {}
 
     def get(self, key: str) -> Optional[str]:
         return self.store.get(key)
 
     def set(self, key: str, value: str, ex: Optional[int] = None) -> None:
         self.store[key] = value
+        if ex is not None:
+            self.ttls[key] = ex
 
     def scan(self, cursor: int = 0, match: str = "*", count: int = 100):
         import fnmatch

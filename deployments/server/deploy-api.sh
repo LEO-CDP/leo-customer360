@@ -76,6 +76,11 @@ if [[ -n "$REDIS_HOST" ]]; then echo ">> Redis: ${REDIS_HOST}:${REDIS_PORT} (cac
 #     of the dev local-JWT login. Client secret from ../sso/.env (bootstrap-realm.py). ---
 sso="../sso"
 SSO_LOGIN="false"; SSO_URL=""; KC_REALM=""; KC_CLIENT=""; KC_SECRET=""
+KC_TOKEN_EXPIRES_MINUTES="${KEYCLOAK_TOKEN_EXPIRES_MINUTES:-30}"
+[[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^([1-9]|[12][0-9]|30)$ ]] || {
+  echo "ERROR: KEYCLOAK_TOKEN_EXPIRES_MINUTES must be an integer from 1 to 30." >&2
+  exit 1
+}
 if [[ "$(tfval api_sso_enabled "$sso/overlays/$ENV.tfvars")" == "true" ]]; then
   SSO_URL="$(tfval api_sso_login_url "$sso/overlays/$ENV.tfvars")"
   KC_REALM="$(tfval api_keycloak_realm "$sso/overlays/$ENV.tfvars")"
@@ -188,7 +193,7 @@ AGENT_SERVICE_URL=""; [[ -n "$AGENT_IP" ]] && AGENT_SERVICE_URL="http://$AGENT_I
 AGENT_API_TOKEN_B64="$(printf %s "${AGENT_API_TOKEN:-}" | base64 | tr -d '\r\n')"
 # ssh flattens argv and silently drops empty args (shifting later fields); pass one
 # base64 newline-joined blob so empties survive, split remotely with mapfile.
-ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" | base64 | tr -d '\r\n')"
+ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" "$KC_TOKEN_EXPIRES_MINUTES" | base64 | tr -d '\r\n')"
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ARGV_B64" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 mapfile -t A < <(printf %s "${1:-}" | base64 -d)   # fields in order, empties preserved
@@ -214,6 +219,11 @@ GIT_COMMIT_HASH="${A[30]:-unknown}"
 AGENT_SERVICE_URL="${A[31]:-}"
 AGENT_API_TOKEN="$(printf %s "${A[32]:-}" | base64 -d 2>/dev/null || true)"
 EXPECTED_GIT_HASH="${A[33]:-}"
+KC_TOKEN_EXPIRES_MINUTES="${A[34]:-30}"
+[[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^([1-9]|[12][0-9]|30)$ ]] || {
+  echo "ERROR: received KEYCLOAK_TOKEN_EXPIRES_MINUTES is invalid." >&2
+  exit 1
+}
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
@@ -284,6 +294,7 @@ KEYCLOAK_REALM=$KC_REALM
 KEYCLOAK_CLIENT_ID=$KC_CLIENT
 KEYCLOAK_CLIENT_SECRET=$KC_SECRET
 KEYCLOAK_VERIFY_SSL=false
+KEYCLOAK_TOKEN_EXPIRES_MINUTES=$KC_TOKEN_EXPIRES_MINUTES
 ENVS
 else
   echo "SSO_LOGIN=false" >> "$env_file"
