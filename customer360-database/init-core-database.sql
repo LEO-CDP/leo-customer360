@@ -664,6 +664,7 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('cookie_id', 'cookie_ids', 'Cookie ID (raw)', 'Raw per-event web cookie id on cdp_raw_profiles_stage; identity-resolution matching key, consolidated into cookie_ids.', 'IDENTITY_GRAPH', 'cdp_raw_profiles_stage', 'TEXT', 'all', FALSE, 'ACTIVE', TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 230),
     ('push_tokens', 'push_tokens', 'Push Notification Tokens', 'Stored push tokens, e.g. {"fcm":"token","apns":"token"}.', 'IDENTITY_GRAPH', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 240),
     ('attributes', 'attributes', 'Custom Attributes', 'Schemaless payload of dynamically extracted traits (e.g. occupation, income_segment).', 'MARKETING', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 245),
+    ('data_source_analytics', 'data_source_analytics', 'Data Source Analytics', 'Analytics metrics grouped by contributing data source.', 'LINEAGE', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 246),
 
    
     -- MARKETING
@@ -703,7 +704,7 @@ INSERT INTO customer360.cdp_profile_attributes (
 
     -- CUSTOMER EXPERIENCE (CX) & ENGAGEMENT SCORING
     ('engagement_score', 'engagement_score', 'Engagement Score', 'Overall interaction frequency/depth score.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'score', 0, 100, 'daily', 470),
-    ('latest_nps_score', 'latest_nps_score', 'Latest NPS Score', 'Most recent Net Promoter Score.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'score', 0, 10, 'event_driven', 480),
+    ('latest_nps_score', 'latest_nps_score', 'Latest NPS Score', 'Most recent Net Promoter Score.', 'CX_SCORING', 'cdp_master_profiles', 'INTEGER', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'score', 0, 10, 'event_driven', 480),
     ('average_csat', 'average_csat', 'Average CSAT', 'Average Customer Satisfaction Score across interactions.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'score', 0, 5, 'daily', 490),
     ('overall_sentiment_score', 'overall_sentiment_score', 'Overall Sentiment Score', 'NLP-derived sentiment from support tickets and social mentions.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'sentiment', -1, 1, 'daily', 500),
 

@@ -29,6 +29,19 @@ def test_generator_creates_canonical_api_events_without_storage_clients():
     assert all(event["properties"]["traffic_type"] == "synthetic_internet" for event in events)
 
 
+def test_generator_creates_uuid_event_ids_without_seed():
+    config = seed_api_data.ApiSeedConfig(event_count=2, events_per_session=2)
+    generator = seed_api_data.ApiTrafficGenerator(
+        config,
+        clock=datetime(2026, 9, 18, 12, tzinfo=timezone.utc),
+    )
+
+    events = [event for session in generator.iter_sessions() for event in session["events"]]
+
+    assert len(events) == 2
+    assert all(UUID(event["event_id"]) for event in events)
+
+
 def test_run_api_seed_uses_only_tracking_http_client(monkeypatch):
     sent = []
 
