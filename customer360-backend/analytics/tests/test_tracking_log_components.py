@@ -2,6 +2,7 @@
 
 from io import BytesIO
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 
@@ -108,6 +109,22 @@ def test_event_service_rejects_records_without_a_valid_event_time():
             "source-1",
             "tenant-1",
         )
+
+
+def test_event_service_normalizes_legacy_non_uuid_event_id():
+    service = EventRecordService("customer360")
+    record = {
+        "event_id": "event-1",
+        "event_time": "2026-09-18T12:00:00Z",
+        "payload": {"event_name": "page_view", "user_id": "User-1"},
+    }
+
+    first = service.normalize_event_record(record, "source-1", "tenant-1")
+    second = service.normalize_event_record(record, "source-1", "tenant-1")
+
+    assert UUID(first["event_id"])
+    assert first["event_id"] == second["event_id"]
+    assert first["event_id"] != "event-1"
 
 
 def test_metrics_coerce_invalid_daily_values_and_worker_counters():

@@ -141,7 +141,8 @@ window.C360 = window.C360 || {};
         label: attribute.name || attribute.field,
         data_type: attribute.data_type || "TEXT",
         value_separator: ",",
-        operators: operators
+        operators: operators,
+        optgroup: attribute.attribute_group
       });
       if (attribute.field === "status_code") {
         filter.type = "integer";

@@ -451,10 +451,11 @@ def get_segmentable_profile_attributes(
     read-only endpoint that does not require authentication, since it only
     returns metadata about the system and not any sensitive data.
 
-    Only rows with ``is_segmentable = true``, ``status = 'ACTIVE'`` and
-    ``source_table IN ('cdp_master_profiles', 'cdp_domain_profiles')`` are
-    returned. ``cdp_master_profiles`` rows return their bare column name as
-    ``field``; ``cdp_domain_profiles`` rows (JSONB keys in
+    Only rows with ``is_segmentable = true`` and ``status = 'ACTIVE'`` are
+    returned. Rows whose catalog metadata identifies a direct
+    ``cdp_master_profiles`` column are included even when their lineage also
+    mentions ``cdp_raw_profiles_stage``. ``cdp_master_profiles`` rows return
+    their bare column name as ``field``; ``cdp_domain_profiles`` rows (JSONB keys in
     ``domain_attributes``, e.g. ``risk_segment``/``membership_tier``) return
     ``dp.domain_attributes->>'<key>'`` -- the alias exposed by
     ``DOMAIN_ATTRIBUTES_JOIN_SQL``, which every ``sql_rules`` execution site

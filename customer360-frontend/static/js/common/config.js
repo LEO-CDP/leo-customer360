@@ -19,6 +19,8 @@ window.C360 = window.C360 || {};
     tenantOptions: "c360.tenantOptions",
     userId: "c360.userId",
     idToken: "c360.idToken",
+    refreshToken: "c360.refreshToken",
+    tokenExpiresAt: "c360.tokenExpiresAt",
     devUser: "c360.devUser"
   };
 
@@ -31,6 +33,8 @@ window.C360 = window.C360 || {};
     tenantOptions: [],
     userId: "",
     idToken: "",
+    refreshToken: "",
+    tokenExpiresAt: 0,
     devUser: null,
     leoObserverLogDomain: "beta.leocdp.com",
     leoObserverTrackingUri: "/data/api/v1/tracking/logs",
@@ -118,6 +122,8 @@ window.C360 = window.C360 || {};
       tenantId: tenantId,
       accessToken: localStorage.getItem(STORAGE_KEYS.accessToken) || DEFAULTS.accessToken,
       idToken: localStorage.getItem(STORAGE_KEYS.idToken) || DEFAULTS.idToken,
+      refreshToken: localStorage.getItem(STORAGE_KEYS.refreshToken) || DEFAULTS.refreshToken,
+      tokenExpiresAt: parseInt(localStorage.getItem(STORAGE_KEYS.tokenExpiresAt), 10) || DEFAULTS.tokenExpiresAt,
       userId: localStorage.getItem(STORAGE_KEYS.userId) || DEFAULTS.userId,
       devUser: storedDevUser,
       theme: localStorage.getItem(STORAGE_KEYS.theme) || DEFAULTS.theme,
@@ -339,7 +345,7 @@ window.C360 = window.C360 || {};
     };
   }
 
-  function api(path, params, method) {
+  function rawApi(path, params, method) {
     var httpMethod = method || "GET";
     var headers = { "X-Tenant-Id": CONFIG.tenantId };
     if (CONFIG.accessToken) {
@@ -365,16 +371,84 @@ window.C360 = window.C360 || {};
       options.contentType = "application/json";
       options.data = JSON.stringify(params || {});
     }
+    return $.ajax(options);
+  }
 
-    var request = $.ajax(options);
-    request.fail(function (xhr) {
-      if (xhr && xhr.status === 401 && C360.config && typeof C360.config.logout === "function") {
-        C360.config.logout(function () {
-          window.location.reload();
+  // The /auth/* endpoints are how a session is established or renewed, so a
+  // 401 from one of them is the answer, not a stale-token symptom: retrying it
+  // through a refresh would recurse, and tearing the page down would replace
+  // the login form's own error message with a reload.
+  function isSessionEndpoint(path) {
+    return String(path || "").indexOf("/auth/") === 0;
+  }
+
+  // Ends the session locally and returns to the login screen. Only reached
+  // once renewing the token is impossible or has already failed.
+  function endSession() {
+    logout(function () { window.location.reload(); });
+  }
+
+  // Single-flight: a burst of parallel calls all 401-ing (a dashboard fans out
+  // several at once) must trigger ONE refresh, not one per request -- Keycloak
+  // rotates the refresh token, so concurrent grants would invalidate each other.
+  var refreshInFlight = null;
+
+  function refreshSession() {
+    if (refreshInFlight) return refreshInFlight;
+    if (!CONFIG.refreshToken) return $.Deferred().reject().promise();
+    refreshInFlight = rawApi("/auth/refresh", { refresh_token: CONFIG.refreshToken }, "POST")
+      .done(function (resp) { setSsoSession(resp); })
+      .always(function () { refreshInFlight = null; });
+    return refreshInFlight;
+  }
+
+  // Renew slightly early so a click landing on the boundary doesn't race the
+  // expiry. A tab left open overnight wakes to an expired token, refreshes
+  // once, and carries on if Keycloak's SSO session is still alive.
+  var REFRESH_LEEWAY_MS = 60000;
+  var refreshTimer = null;
+
+  function scheduleTokenRefresh() {
+    if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+    if (!CONFIG.refreshToken || !CONFIG.tokenExpiresAt) return;
+    var delay = Math.max(0, CONFIG.tokenExpiresAt - Date.now() - REFRESH_LEEWAY_MS);
+    refreshTimer = setTimeout(function () { refreshSession(); }, delay);
+  }
+
+  // Wraps rawApi so an expired access token is renewed and the call retried,
+  // instead of dumping the user back on the login page mid-task. The returned
+  // promise resolves/rejects with jQuery's own argument shapes, so existing
+  // .done(data)/.fail(xhr) callers are unaffected.
+  function api(path, params, method) {
+    var deferred = $.Deferred();
+
+    function attempt(isRetry) {
+      rawApi(path, params, method)
+        .done(function (data, textStatus, jqXHR) {
+          deferred.resolve(data, textStatus, jqXHR);
+        })
+        .fail(function (jqXHR, textStatus, errorThrown) {
+          var unauthorized = jqXHR && jqXHR.status === 401;
+          if (!unauthorized || isSessionEndpoint(path)) {
+            deferred.reject(jqXHR, textStatus, errorThrown);
+            return;
+          }
+          if (isRetry || !CONFIG.refreshToken) {
+            endSession();
+            deferred.reject(jqXHR, textStatus, errorThrown);
+            return;
+          }
+          refreshSession()
+            .done(function () { attempt(true); })
+            .fail(function () {
+              endSession();
+              deferred.reject(jqXHR, textStatus, errorThrown);
+            });
         });
-      }
-    });
-    return request;
+    }
+
+    attempt(false);
+    return deferred.promise();
   }
 
   function showApiError(context, xhr) {
@@ -493,10 +567,14 @@ window.C360 = window.C360 || {};
   }
 
   function logout(callback) {
+    if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+    refreshInFlight = null;
     localStorage.clear();
     sessionStorage.clear();
     CONFIG.accessToken = "";
     CONFIG.idToken = "";
+    CONFIG.refreshToken = "";
+    CONFIG.tokenExpiresAt = 0;
     CONFIG.userId = "";
     CONFIG.devUser = null;
     C360.config.current = CONFIG;
@@ -522,12 +600,29 @@ window.C360 = window.C360 || {};
     C360.config.current = CONFIG;
   }
 
-  // Persists tokens returned by POST /auth/callback (SSO_LOGIN=true).
+  // Persists tokens returned by POST /auth/callback and POST /auth/refresh
+  // (SSO_LOGIN=true). The refresh token is kept because without it the session
+  // can only ever last one access-token lifetime. Keycloak rotates it on every
+  // refresh, so a response that omits one leaves the existing one in place.
   function setSsoSession(tokenResponse) {
     localStorage.setItem(STORAGE_KEYS.accessToken, tokenResponse.access_token || "");
-    localStorage.setItem(STORAGE_KEYS.idToken, tokenResponse.id_token || "");
+    // id_token and refresh_token are only overwritten when the response
+    // actually carries them: a refresh grant may omit either, and blanking the
+    // id_token would cost logout() its id_token_hint for Keycloak end-session.
+    if (tokenResponse.id_token) {
+      localStorage.setItem(STORAGE_KEYS.idToken, tokenResponse.id_token);
+    }
+    if (tokenResponse.refresh_token) {
+      localStorage.setItem(STORAGE_KEYS.refreshToken, tokenResponse.refresh_token);
+    }
+    var expiresIn = parseInt(tokenResponse.expires_in, 10);
+    localStorage.setItem(
+      STORAGE_KEYS.tokenExpiresAt,
+      String(expiresIn > 0 ? Date.now() + expiresIn * 1000 : 0)
+    );
     CONFIG = getConfig();
     C360.config.current = CONFIG;
+    scheduleTokenRefresh();
   }
 
   // POST /auth/login -- dev-mode credential login (SSO_LOGIN=false).
@@ -620,6 +715,7 @@ window.C360 = window.C360 || {};
     isAuthenticated: isAuthenticated,
     login: login,
     exchangeSsoCode: exchangeSsoCode,
+    refreshSession: refreshSession,
     buildSsoAuthorizeUrl: buildSsoAuthorizeUrl,
     parseTenantOptions: parseTenantOptions,
     currentUser: currentUserFromConfig,
@@ -634,5 +730,10 @@ window.C360 = window.C360 || {};
   };
 
   C360.themeLoader = themeLoader;
+
+  // Arm the renewal timer for a session restored from localStorage on reload.
+  // If the stored token already expired the delay is 0, so the tab refreshes
+  // immediately and the admin stays signed in rather than landing on login.
+  scheduleTokenRefresh();
 
 })(window.C360);

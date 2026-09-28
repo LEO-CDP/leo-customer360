@@ -197,10 +197,13 @@ class ApiTrafficGenerator:
         device_type: str,
     ) -> dict[str, Any]:
         event_name, event_category, platform, entity_type = self.rng.choice(EVENT_TEMPLATES)
-        event_id = self._identifier(
-            "event",
-            session_index * self.config.events_per_session + event_index,
-        )
+        if self.config.seed is None:
+            event_id = str(uuid4())
+        else:
+            event_id = self._identifier(
+                "event",
+                session_index * self.config.events_per_session + event_index,
+            )
         domain = self.rng.choice(DOMAINS)
         is_conversion = event_name == "purchase"
         return {

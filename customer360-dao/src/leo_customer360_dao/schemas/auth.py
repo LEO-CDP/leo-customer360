@@ -43,8 +43,17 @@ class SsoCallbackRequest(BaseModel):
     redirect_uri: str = Field(..., min_length=1)
 
 
+class SsoRefreshRequest(BaseModel):
+    """Refresh-token grant request (SSO_LOGIN=true)."""
+    refresh_token: str = Field(..., min_length=1)
+
+
 class SsoTokenResponse(BaseModel):
-    """Tokens handed back to the frontend after a successful code exchange."""
+    """Tokens handed back to the frontend after a successful code exchange or refresh.
+
+    ``refresh_token`` is what lets the admin UI renew an expiring access token
+    without bouncing the user back through the Keycloak login page.
+    """
     access_token: str
     id_token: Optional[str] = None
     refresh_token: Optional[str] = None

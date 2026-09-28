@@ -182,6 +182,8 @@ KEYCLOAK_COMMAND=start
 # run the API directly on the host).
 SSO_LOGIN_URL=https://id.example.com
 KEYCLOAK_VERIFY_SSL=true
+# API-side enforcement cap for Keycloak access tokens; must be 1-30 minutes.
+KEYCLOAK_TOKEN_EXPIRES_MINUTES=30
 
 # Keycloak admin console credentials -- change from defaults.
 KEYCLOAK_ADMIN=admin
@@ -212,6 +214,9 @@ REDIS_HOST_BIND=127.0.0.1
 - `KEYCLOAK_VERIFY_SSL=true` tells the API to validate the Keycloak TLS
   certificate during token introspection. Use valid certificates; self-signed
   certs will fail.
+- `KEYCLOAK_TOKEN_EXPIRES_MINUTES=30` is forwarded by
+  `deployments/server/deploy-api.sh` to the API container. It cannot exceed the
+  30-minute lifetime configured by the Keycloak realm bootstrap.
 
 ---
 

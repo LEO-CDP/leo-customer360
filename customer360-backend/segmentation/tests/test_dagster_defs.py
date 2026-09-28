@@ -199,13 +199,41 @@ class TestSegmentationRecomputeLogging:
             connection,
             tenant_id="tenant-1",
             segment_tag="segment_one",
-            where_fragment="status_code = 1",
+            where_fragment="email LIKE '%s'",
             segment_id="segment-1",
         )
 
         queries = [call.args[0] for call in cursor.execute.call_args_list]
         assert result == 4
-        assert any("CREATE TEMP TABLE" in query for query in queries)
-        assert any("INSERT INTO _c360_segment_matches" in query for query in queries)
-        assert any("SELECT COUNT(*) FROM _c360_segment_matches" in query for query in queries)
+        assert any("CREATE TEMP TABLE" in str(query) for query in queries)
+        assert any(
+            "INSERT INTO _c360_segment_matches" in str(query) and "email LIKE '%s'" in str(query)
+            for query in queries
+        )
+        assert any("SELECT COUNT(*) FROM _c360_segment_matches" in str(query) for query in queries)
         cursor.fetchall.assert_not_called()
+
+    def test_recompute_one_segment_supports_persona_name_like_rule(self):
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = (1,)
+        tenant_id = "11111111-1111-1111-1111-111111111111"
+
+        recompute._recompute_one_segment(
+            connection,
+            tenant_id=tenant_id,
+            segment_tag="visitor",
+            where_fragment="persona_name LIKE '%visitor%'",
+            segment_id="segment-1",
+        )
+
+        insert_call = next(
+            call_item
+            for call_item in cursor.execute.call_args_list
+            if "INSERT INTO _c360_segment_matches" in str(call_item.args[0])
+        )
+        assert len(insert_call.args) == 1
+        composed_sql = str(insert_call.args[0])
+        assert "cdp_master_profiles" in composed_sql
+        assert tenant_id in composed_sql
+        assert "persona_name LIKE '%visitor%'" in composed_sql

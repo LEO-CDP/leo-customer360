@@ -145,8 +145,14 @@ class EventRecordService:
             )
         try:
             event_id = str(UUID(str(event_id)))
-        except (ValueError, TypeError) as exc:
-            raise EventEnvelopeError("event_id must be a UUID") from exc
+        except (ValueError, TypeError):
+            event_id = str(
+                uuid5(
+                    NAMESPACE_URL,
+                    f"c360:legacy-event-id:{tenant_id}:{data_source_id}:{event_id}:"
+                    f"{json.dumps(record, ensure_ascii=False, sort_keys=True, default=str)}",
+                )
+            )
 
         event_time = self.parse_event_datetime(
             record.get("event_time") or payload.get("event_time")

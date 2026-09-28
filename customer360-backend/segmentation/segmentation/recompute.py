@@ -22,6 +22,7 @@ from typing import Any, Callable, Optional
 
 import psycopg2
 from dotenv import load_dotenv
+from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 
 from .rls import set_tenant_context
@@ -137,71 +138,86 @@ def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_frag
     with conn.cursor() as cur:
         set_tenant_context(cur, tenant_id)
         cur.execute(
-            f"""
+            """
             CREATE TEMP TABLE IF NOT EXISTS _c360_segment_matches (
                 master_profile_id UUID PRIMARY KEY
             ) ON COMMIT DROP
             """
         )
         cur.execute("TRUNCATE _c360_segment_matches")
-        cur.execute(
-            f"""
+
+        insert_query = sql.SQL(
+            """
             INSERT INTO _c360_segment_matches (master_profile_id)
-            SELECT master_profile_id FROM {DB_SCHEMA}.cdp_master_profiles
-            {_DOMAIN_ATTRIBUTES_JOIN_SQL.format(schema=DB_SCHEMA)}
-            WHERE tenant_id = %(tenant_id)s AND status_code = 1 AND ({where_fragment})
-            """,
-            {"tenant_id": tenant_id},
+            SELECT master_profile_id FROM {schema}.cdp_master_profiles
+            {domain_join}
+            WHERE tenant_id = {tenant_id} AND status_code = 1 AND ({where_fragment})
+            """
+        ).format(
+            schema=sql.Identifier(DB_SCHEMA),
+            domain_join=sql.SQL(_DOMAIN_ATTRIBUTES_JOIN_SQL).format(schema=sql.Identifier(DB_SCHEMA)),
+            tenant_id=sql.Literal(tenant_id),
+            where_fragment=sql.SQL(where_fragment),
         )
+        cur.execute(insert_query)
 
         # Add the tag to newly-matching profiles that don't already carry it.
-        cur.execute(
-            f"""
-            UPDATE {DB_SCHEMA}.cdp_master_profiles AS profiles
-            SET segmentation_tags = array_append(COALESCE(segmentation_tags, ARRAY[]::text[]), %(tag)s),
+        add_tag_query = sql.SQL(
+            """
+            UPDATE {schema}.cdp_master_profiles AS profiles
+            SET segmentation_tags = array_append(COALESCE(segmentation_tags, ARRAY[]::text[]), {tag}),
                 updated_at = now()
             FROM _c360_segment_matches AS matches
-            WHERE profiles.tenant_id = %(tenant_id)s
+            WHERE profiles.tenant_id = {tenant_id}
               AND profiles.master_profile_id = matches.master_profile_id
-              AND NOT (%(tag)s = ANY(COALESCE(segmentation_tags, ARRAY[]::text[])))
-            """,
-            {"tenant_id": tenant_id, "tag": segment_tag},
+              AND NOT ({tag} = ANY(COALESCE(segmentation_tags, ARRAY[]::text[])))
+            """
+        ).format(
+            schema=sql.Identifier(DB_SCHEMA),
+            tenant_id=sql.Literal(tenant_id),
+            tag=sql.Literal(segment_tag),
         )
+        cur.execute(add_tag_query)
 
         # Remove the tag from profiles that carry it but no longer match.
-        cur.execute(
-            f"""
-            UPDATE {DB_SCHEMA}.cdp_master_profiles AS profiles
-            SET segmentation_tags = array_remove(segmentation_tags, %(tag)s),
+        remove_tag_query = sql.SQL(
+            """
+            UPDATE {schema}.cdp_master_profiles AS profiles
+            SET segmentation_tags = array_remove(segmentation_tags, {tag}),
                 updated_at = now()
-            WHERE profiles.tenant_id = %(tenant_id)s
-              AND %(tag)s = ANY(COALESCE(profiles.segmentation_tags, ARRAY[]::text[]))
+            WHERE profiles.tenant_id = {tenant_id}
+              AND {tag} = ANY(COALESCE(profiles.segmentation_tags, ARRAY[]::text[]))
               AND NOT EXISTS (
                   SELECT 1
                   FROM _c360_segment_matches AS matches
                   WHERE matches.master_profile_id = profiles.master_profile_id
               )
-            """,
-            {"tenant_id": tenant_id, "tag": segment_tag},
+            """
+        ).format(
+            schema=sql.Identifier(DB_SCHEMA),
+            tenant_id=sql.Literal(tenant_id),
+            tag=sql.Literal(segment_tag),
         )
+        cur.execute(remove_tag_query)
 
         cur.execute(
             "SELECT COUNT(*) FROM _c360_segment_matches"
         )
         row = cur.fetchone()
 
-        cur.execute(
-            f"""
-            UPDATE {DB_SCHEMA}.cdp_segments
-            SET member_count = %(member_count)s, last_computed_at = now(), updated_at = now()
-            WHERE tenant_id = %(tenant_id)s AND segment_id = %(segment_id)s
-            """,
-            {
-                "tenant_id": tenant_id,
-                "member_count": int(row[0] if row else 0),
-                "segment_id": segment_id,
-            },
+        update_segment_query = sql.SQL(
+            """
+            UPDATE {schema}.cdp_segments
+            SET member_count = {member_count}, last_computed_at = now(), updated_at = now()
+            WHERE tenant_id = {tenant_id} AND segment_id = {segment_id}
+            """
+        ).format(
+            schema=sql.Identifier(DB_SCHEMA),
+            member_count=sql.Literal(int(row[0] if row else 0)),
+            tenant_id=sql.Literal(tenant_id),
+            segment_id=sql.Literal(segment_id),
         )
+        cur.execute(update_segment_query)
 
     return int(row[0] if row else 0)
 
