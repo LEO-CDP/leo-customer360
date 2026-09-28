@@ -738,6 +738,33 @@ window.C360 = window.C360 || {};
       return (isNaN(n) ? 0 : Math.max(0, Math.min(100, n))) + "%";
     }
 
+    var dataSourceAnalytics = (profile.data_source_analytics_details || []).map(function (source) {
+      var metricEntries = Object.keys(source)
+        .filter(function (key) {
+          return key !== "data_source_id" && key !== "data_source_name" && key !== "total_tracked_events";
+        })
+        .map(function (key) {
+          var rawValue = source[key];
+          return {
+            label: fmt.titleCase(key),
+            value: rawValue === null || rawValue === undefined ? "—" : String(rawValue),
+            sortValue: Number(rawValue) || 0,
+          };
+        })
+        .sort(function (left, right) {
+          return right.sortValue - left.sortValue || left.label.localeCompare(right.label);
+        });
+      return {
+        data_source_id: source.data_source_id,
+        data_source_name: source.data_source_name || "Unknown data source",
+        totalTrackedEvents: fmt.int(source.total_tracked_events),
+        eventMetricCount: metricEntries.length,
+        featuredMetrics: metricEntries.slice(0, 6),
+        additionalMetrics: metricEntries.slice(6),
+        hasAdditionalMetrics: metricEntries.length > 6,
+      };
+    });
+
     return {
       master_profile_id: profile.master_profile_id,
       domain: profile.domain,
@@ -776,6 +803,8 @@ window.C360 = window.C360 || {};
       workingDetailChips: workingDetailChips,
       hasAddressDetails: addressDetailChips.length > 0,
       addressDetailChips: addressDetailChips,
+      hasDataSourceAnalytics: dataSourceAnalytics.length > 0,
+      dataSourceAnalytics: dataSourceAnalytics,
 
       // Check if the communication_preferences object exists and has at least one key
       hasCommunicationPreferences: Object.keys(profile.communication_preferences || {}).length > 0,

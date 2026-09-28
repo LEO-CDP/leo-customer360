@@ -18,11 +18,13 @@ import logging
 import os
 import random
 import sys
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import psycopg2
 from dotenv import load_dotenv
+from psycopg2.extras import Json
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -41,6 +43,13 @@ DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 
 DEMO_TENANT_ID = "11111111-1111-1111-1111-111111111111"
+DEMO_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
+
+SOURCE_SLUGS = {
+    "Adjust": "adjust-mobile-attribution",
+    "OneSignal": "c360-tracker",
+    "WebTracking": "google-analytics-4",
+}
 
 HASHED_PII_FIELDS = ("full_name", "email", "phone_number", "national_id")
 
@@ -260,7 +269,7 @@ def seed_fuzzy_demo_profiles(cursor, raw_profiles: list[dict]) -> None:
     
     # Columns include new address/company fields
     columns = (
-        "tenant_id", "domain", "source_system", "channel", "external_customer_id",
+        "tenant_id", "data_source_id", "data_source_analytics", "domain", "source_system", "channel", "external_customer_id",
         "full_name", "first_name", "last_name", "email", "phone_number", "national_id",
         "date_of_birth", "address_line1", "address_line2", "city", "state_province",
         "postal_code", "country", "company_name",
@@ -276,8 +285,10 @@ def seed_fuzzy_demo_profiles(cursor, raw_profiles: list[dict]) -> None:
     """
     
     for profile in raw_profiles:
-        values = [DEMO_TENANT_ID]
-        for col in columns[1:]:
+        source_slug = SOURCE_SLUGS.get(profile.get("source_system"), SOURCE_SLUGS["Adjust"])
+        data_source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
+        values = [DEMO_TENANT_ID, data_source_id, Json({data_source_id: {"total_tracked_events": 1}})]
+        for col in columns[3:]:
             value = profile.get(col)
             if col in HASHED_PII_FIELDS:
                 value = hash_pii(value)

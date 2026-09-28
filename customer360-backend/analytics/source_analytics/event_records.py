@@ -23,7 +23,6 @@ EVENT_CATEGORIES = frozenset(
     }
 )
 
-
 class EventEnvelopeError(ValueError):
     """Raised when an S3 record cannot satisfy the governed event contract."""
 
@@ -109,13 +108,18 @@ class EventRecordService:
         return None
 
     @staticmethod
-    def analytics_event_flags(event: dict[str, Any]) -> tuple[bool, bool]:
-        """Return page-view and click classifications for source analytics."""
-        event_name = str(event.get("event_name") or "").strip().lower().replace("-", "_")
-        return (
-            event_name in {"page_view", "pageview", "view"},
-            event_name in {"click", "link_click", "button_click", "email_clicked"},
+    def validated_event_name(
+        event: dict[str, Any], event_catalog: frozenset[str]
+    ) -> Optional[str]:
+        """Return the catalog event name matching a raw event, if governed."""
+        event_name = (
+            str(event.get("event_name") or "")
+            .strip()
+            .lower()
+            .replace("_", "-")
+            .replace(" ", "-")
         )
+        return event_name if event_name in event_catalog else None
 
     def normalize_event_record(
         self,

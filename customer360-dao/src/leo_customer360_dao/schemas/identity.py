@@ -134,6 +134,7 @@ class MasterProfileUpdate(BaseModel):
 class MasterProfileRead(MasterProfileBase):
     model_config = ConfigDict(from_attributes=True)
     master_profile_id: uuid.UUID
+    data_source_analytics_details: list[dict[str, Any]] = Field(default_factory=list)
     linked_raw_profile_count: int = 0
     total_tracked_events: int = 0
     status_code: int

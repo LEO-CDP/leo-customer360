@@ -42,6 +42,19 @@ class AnalyticsRepository:
         sources.sort(key=lambda source: source[0])
         return sources if unlimited else sources[:limit]
 
+    def fetch_event_catalog(self, connection: Any) -> frozenset[str]:
+        """Load active governed event names used to validate raw S3 events."""
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT event_name
+                FROM {self.db_schema}.cdp_event_catalog
+                WHERE status = 'ACTIVE'
+                ORDER BY display_order, event_name
+                """
+            )
+            return frozenset(str(row[0]).strip().lower() for row in cursor.fetchall())
+
     def update_data_source_summary(
         self,
         connection: Any,

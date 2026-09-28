@@ -52,6 +52,7 @@ class AnalyticsSettings:
     source_profile_hll_prefix: str
     source_profile_analytics_prefix: str
     source_profile_event_prefix: str
+    event_catalog_cache_key: str
     lock_ttl_seconds: int
     processed_object_ttl_seconds: int
 
@@ -96,6 +97,7 @@ class AnalyticsSettings:
             source_profile_hll_prefix="analytics:data-source-profiles-hll:",
             source_profile_analytics_prefix="analytics:data-source-profile-analytics:",
             source_profile_event_prefix="analytics:data-source-profile-event:",
+            event_catalog_cache_key="analytics:event-catalog:v1",
             lock_ttl_seconds=_int_setting("ANALYTICS_LOCK_TTL_SECONDS", "3600"),
             processed_object_ttl_seconds=_int_setting(
                 "ANALYTICS_PROCESSED_OBJECT_TTL_SECONDS", str(48 * 60 * 60)

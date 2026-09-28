@@ -46,11 +46,13 @@ import logging
 import os
 import random
 import sys
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import psycopg2
 from dotenv import load_dotenv
+from psycopg2.extras import Json
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -71,6 +73,13 @@ DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 # Fixed tenant used for the demo so this script is safe to re-run: only rows
 # belonging to this tenant are ever deleted/re-seeded.
 DEMO_TENANT_ID = "11111111-1111-1111-1111-111111111111"
+DEMO_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
+
+SOURCE_SLUGS = {
+    "Adjust": "adjust-mobile-attribution",
+    "OneSignal": "c360-tracker",
+    "WebTracking": "google-analytics-4",
+}
 
 # Raw-stage/master-profile columns that hold Personal Data (PII). Values for
 # these columns are SHA-256 hashed before ever being written to the
@@ -330,7 +339,7 @@ def generate_raw_profiles(count: int = 1000, duplicate_rate: float = 0.3, seed: 
 
 
 RAW_COLUMNS = (
-    "tenant_id", "domain", "source_system", "channel", "external_customer_id",
+    "tenant_id", "data_source_id", "data_source_analytics", "domain", "source_system", "channel", "external_customer_id",
     "full_name", "email", "phone_number", "national_id", "device_id",
     "advertising_id", "platform", "app_version", "push_token", "cookie_id",
     "ga_client_id", "session_id", "media_source", "campaign", "utm_source",
@@ -418,9 +427,19 @@ def seed_raw_profiles(cursor, raw_profiles: list[dict]) -> None:
         VALUES ({placeholders});
     """
     for profile in raw_profiles:
+        source_system = str(profile.get("source_system") or "Adjust")
+        source_slug = SOURCE_SLUGS.get(source_system, SOURCE_SLUGS["Adjust"])
+        data_source_id = str(uuid.uuid5(DEMO_NAMESPACE, f"sys_data_source:{source_slug}"))
+        profile.setdefault("data_source_id", data_source_id)
+        profile.setdefault(
+            "data_source_analytics",
+            {data_source_id: {"total_tracked_events": 1}},
+        )
         values = []
         for col in RAW_COLUMNS[1:]:
             value = profile.get(col)
+            if col == "data_source_analytics":
+                value = Json(value or {})
             if col in HASHED_PII_FIELDS:
                 value = hash_pii(value)
             values.append(value)

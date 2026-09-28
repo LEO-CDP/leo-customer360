@@ -16,18 +16,24 @@ from source_analytics.tracking_log_service import TrackingLogAggregationService
 class StateRedis:
     def __init__(self):
         self.states = {}
+        self.values = {}
         self.locked_keys = set()
         self.hll = {}
         self.eval_results = []
 
     def set(self, key, value, nx=False, ex=None):
-        assert nx is True
+        if not nx:
+            self.values[key] = value
+            return True
         if key in self.locked_keys:
             return False
         self.locked_keys.add(key)
         self.states.setdefault(key, {})["token"] = value
         self.states[key]["ttl"] = ex
         return True
+
+    def get(self, key):
+        return self.values.get(key)
 
     def hset(self, key, mapping):
         self.states.setdefault(key, {}).update(mapping)
@@ -79,6 +85,20 @@ def test_event_service_streams_fallback_timestamps_from_object_partition():
     assert event["event_time"] == "2026-09-18T12:00:00+00:00"
     assert event["event_name"] == "page_view"
     assert event["payload"]["user_id"] == "User-1"
+
+
+def test_validated_event_name_uses_catalog_names():
+    catalog = frozenset({"page-view", "purchase"})
+    expected = {
+        "page_view": "page-view",
+        "purchase": "purchase",
+        "ui_click": None,
+    }
+
+    assert all(
+        EventRecordService.validated_event_name({"event_name": name}, catalog) == result
+        for name, result in expected.items()
+    )
 
 
 def test_event_service_rejects_unsupported_schema_version():
@@ -182,31 +202,27 @@ def test_source_state_accumulates_deduplicated_profile_analytics():
         "source-1",
         "raw-1",
         "event-1",
-        page_view=True,
-        click=False,
+        event_name="page-view",
     )
     duplicate = state.record_profile_event_analytics(
         "source-1",
         "raw-1",
         "event-1",
-        page_view=True,
-        click=False,
+        event_name="page-view",
     )
     second = state.record_profile_event_analytics(
         "source-1",
         "raw-1",
         "event-2",
-        page_view=False,
-        click=True,
+        event_name="purchase",
     )
 
     assert first["total_tracked_events"] == 1
     assert duplicate == first
     assert second == {
-        "page_views": 1,
-        "clicks": 1,
+        "page-view": 1,
+        "purchase": 1,
         "total_tracked_events": 2,
-        "click_through_rate": 1.0,
     }
 
 
