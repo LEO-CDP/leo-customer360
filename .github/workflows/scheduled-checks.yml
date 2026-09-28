@@ -8,6 +8,8 @@ name: Scheduled checks
 #   secrets.TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID   Telegram destination
 #   secrets.KEYCLOAK_CLIENT_SECRET / KC_TEST_USER_PASSWORD   enable the E2E leg
 #   vars.HEALTH_CHECK_URLS   space/newline-separated health URLs (overrides default)
+#   secrets.DEPLOY_SSH_KEY   enables the backend jobs-box probe (redis + restarting containers)
+#   vars.BACKEND_HOST / BACKEND_USER   jobs-box target for that probe (defaults below)
 #   vars.E2E_* / E2E_ALLOW_DATA_WRITES   same knobs as CI's E2E job
 
 on:
@@ -118,6 +120,55 @@ jobs:
           echo "fail=$fail" >> "$GITHUB_OUTPUT"
           cat health.txt
 
+      # --- Backend jobs box: Dagster's redis has no public URL, so probe it over SSH.
+      # `redis-cli ping` against the PORT is not enough — a stale container left over from
+      # a rename answers 6580 just as happily as the current one (that masked a 6-day UAT
+      # outage). Exec into the container we expect by name, and flag anything restarting.
+      - name: Probe backend redis + restarting containers
+        id: backend
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          BACKEND_HOST: ${{ vars.BACKEND_HOST || '49.213.71.59' }}
+          BACKEND_USER: ${{ vars.BACKEND_USER || 'leocdp360' }}
+        run: |
+          set +e
+          : > backend.txt
+          if [ -z "$SSH_KEY" ]; then
+            echo "  ⏭️ backend probe skipped (no DEPLOY_SSH_KEY)" >> backend.txt
+            echo "fail=0" >> "$GITHUB_OUTPUT"; cat backend.txt; exit 0
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/backend_probe; chmod 600 ~/.ssh/backend_probe
+          out=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+                    -i ~/.ssh/backend_probe "$BACKEND_USER@$BACKEND_HOST" \
+                    "sudo docker exec customer360-backend-redis redis-cli -p 6580 ping 2>&1; \
+                     echo '--RESTARTING--'; \
+                     sudo docker ps --filter status=restarting --format '{{.Names}}'" 2>&1)
+          rc=$?
+          rm -f ~/.ssh/backend_probe
+          fail=0
+          if [ "$rc" -ne 0 ]; then
+            echo "  ❌ backend unreachable over SSH ($BACKEND_HOST)" >> backend.txt
+            fail=1
+          else
+            ping_out=${out%%--RESTARTING--*}
+            restarting=$(printf '%s' "${out#*--RESTARTING--}" | tr -d '\r' | grep -v '^$')
+            if printf '%s' "$ping_out" | grep -q PONG; then
+              echo "  ✅ customer360-backend-redis PONG (6580)" >> backend.txt
+            else
+              echo "  ❌ customer360-backend-redis no PONG: $(printf '%s' "$ping_out" | tr '\n' ' ')" >> backend.txt
+              fail=1
+            fi
+            if [ -n "$restarting" ]; then
+              echo "  ❌ containers stuck restarting: $(printf '%s' "$restarting" | tr '\n' ' ')" >> backend.txt
+              fail=1
+            else
+              echo "  ✅ no containers restarting" >> backend.txt
+            fi
+          fi
+          echo "fail=$fail" >> "$GITHUB_OUTPUT"
+          cat backend.txt
+
       - name: Build summary
         id: sum
         if: always()
@@ -125,11 +176,12 @@ jobs:
           UNIT_FAIL: ${{ steps.unit.outputs.fail }}
           E2E_RESULT: ${{ steps.e2e.outputs.result }}
           HEALTH_FAIL: ${{ steps.health.outputs.fail }}
+          BACKEND_FAIL: ${{ steps.backend.outputs.fail }}
           REPO: ${{ github.repository }}
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           overall="OK"; st="success"
-          if [ "$UNIT_FAIL" = "1" ] || [ "$HEALTH_FAIL" = "1" ] || [ "$E2E_RESULT" = "FAIL" ]; then
+          if [ "$UNIT_FAIL" = "1" ] || [ "$HEALTH_FAIL" = "1" ] || [ "$BACKEND_FAIL" = "1" ] || [ "$E2E_RESULT" = "FAIL" ]; then
             overall="FAIL"; st="failure"
           fi
           # Non-success → name the failed legs (per-item details follow below).
@@ -139,6 +191,7 @@ jobs:
             [ "$UNIT_FAIL" = "1" ]      && legs="$legs unit"
             [ "$E2E_RESULT" = "FAIL" ]  && legs="$legs e2e"
             [ "$HEALTH_FAIL" = "1" ]    && legs="$legs health"
+            [ "$BACKEND_FAIL" = "1" ]   && legs="$legs backend"
             reason="Reason: failed leg(s):${legs} — see details below."
           fi
           echo "status=${st}" >> "$GITHUB_OUTPUT"
@@ -156,6 +209,9 @@ jobs:
             echo ""
             echo "Health:"
             cat health.txt 2>/dev/null || echo "  (none)"
+            echo ""
+            echo "Backend (jobs box):"
+            cat backend.txt 2>/dev/null || echo "  (none)"
             echo ""
             echo "${URL}"
             echo "TG_EOF"
