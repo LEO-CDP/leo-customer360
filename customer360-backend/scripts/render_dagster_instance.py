@@ -111,6 +111,10 @@ def s3_ready() -> bool:
         return False
 
 
+# scheme is explicit: dagster-postgres emits a bare postgresql:// URL, and
+# SQLAlchemy 2.1 changed that default from psycopg2 to psycopg3. Under psycopg3
+# the webserver's storage connection does not survive starting the nine code
+# servers and it dies on its first query ("the connection is closed").
 PG_BLOCK = f"""storage:
   postgres:
     postgres_db:
@@ -119,6 +123,7 @@ PG_BLOCK = f"""storage:
       hostname: {{ env: DB_HOST }}
       db_name: {DAGSTER_DB}
       port: {{ env: DB_PORT }}
+      scheme: postgresql+psycopg2
 """
 
 S3_BLOCK = """compute_logs:
