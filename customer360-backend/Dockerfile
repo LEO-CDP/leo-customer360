@@ -24,6 +24,9 @@ COPY customer360-backend/personalization/requirements.txt /tmp/requirements/pers
 
 # Build all wheels once. The local DAO wheel lets each code location resolve
 # its leo-customer360-dao requirement without reaching a package index.
+# Both psycopg flavours are needed: dagster-postgres builds a postgresql+psycopg
+# (psycopg3) SQLAlchemy URL for Dagster's own storage, while the code locations
+# import psycopg2 directly.
 RUN mkdir -p /wheels /install \
  && pip wheel --no-cache-dir --wheel-dir=/wheels /opt/customer360-dao \
  && pip wheel --no-cache-dir --wheel-dir=/wheels --find-links=/wheels \
@@ -36,7 +39,7 @@ RUN mkdir -p /wheels /install \
       -r /tmp/requirements/notification_engine.txt \
       -r /tmp/requirements/campaign_activation.txt \
       -r /tmp/requirements/personalization.txt \
-      dagster dagster-webserver dagster-graphql dagster-postgres dagster-aws psycopg2-binary \
+      dagster dagster-webserver dagster-graphql dagster-postgres dagster-aws psycopg2-binary "psycopg[binary]" \
  && pip install --no-cache-dir --no-index --find-links=/wheels --prefix=/install \
       -r /tmp/requirements/identity_resolution.txt \
       -r /tmp/requirements/scoring.txt \
@@ -47,7 +50,7 @@ RUN mkdir -p /wheels /install \
       -r /tmp/requirements/notification_engine.txt \
       -r /tmp/requirements/campaign_activation.txt \
       -r /tmp/requirements/personalization.txt \
-      dagster dagster-webserver dagster-graphql dagster-postgres dagster-aws psycopg2-binary
+      dagster dagster-webserver dagster-graphql dagster-postgres dagster-aws psycopg2-binary "psycopg[binary]"
 
 FROM python:3.12-slim-bookworm
 
