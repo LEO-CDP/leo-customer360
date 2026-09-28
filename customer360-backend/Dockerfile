@@ -27,7 +27,8 @@ COPY customer360-backend/personalization/requirements.txt /tmp/requirements/pers
 # Both psycopg flavours are needed: dagster-postgres builds a postgresql+psycopg
 # (psycopg3) SQLAlchemy URL for Dagster's own storage, while the code locations
 # import psycopg2 directly. dagster-postgres is pinned to the same range as
-# dagster so its driver choice cannot shift on a rebuild. Version specs and
+# dagster (Dagster ships its libraries on a 0.x scheme: core 1.9 == libs 0.25)
+# so its driver choice cannot shift on a rebuild. Version specs and
 # extras stay quoted — sh reads <, > and [] in a RUN line.
 RUN mkdir -p /wheels /install \
  && pip wheel --no-cache-dir --wheel-dir=/wheels /opt/customer360-dao \
@@ -41,7 +42,7 @@ RUN mkdir -p /wheels /install \
       -r /tmp/requirements/notification_engine.txt \
       -r /tmp/requirements/campaign_activation.txt \
       -r /tmp/requirements/personalization.txt \
-      dagster dagster-webserver dagster-graphql "dagster-postgres>=1.9,<2" dagster-aws psycopg2-binary "psycopg[binary]" \
+      dagster dagster-webserver dagster-graphql "dagster-postgres>=0.25,<1" dagster-aws psycopg2-binary "psycopg[binary]" \
  && pip install --no-cache-dir --no-index --find-links=/wheels --prefix=/install \
       -r /tmp/requirements/identity_resolution.txt \
       -r /tmp/requirements/scoring.txt \
@@ -52,7 +53,7 @@ RUN mkdir -p /wheels /install \
       -r /tmp/requirements/notification_engine.txt \
       -r /tmp/requirements/campaign_activation.txt \
       -r /tmp/requirements/personalization.txt \
-      dagster dagster-webserver dagster-graphql "dagster-postgres>=1.9,<2" dagster-aws psycopg2-binary "psycopg[binary]"
+      dagster dagster-webserver dagster-graphql "dagster-postgres>=0.25,<1" dagster-aws psycopg2-binary "psycopg[binary]"
 
 FROM python:3.12-slim-bookworm
 
