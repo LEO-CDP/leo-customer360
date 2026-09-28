@@ -183,7 +183,12 @@ fi
 # Remove the old containers before pruning: image prune preserves images still
 # referenced by running/stopped containers, which can leave too little space
 # for the replacement image's layer extraction.
-for n in customer360-backend customer360-backend-daemon customer360-backend-redis; do
+# backend-system* are the pre-3e15daf names. They run with --restart unless-stopped and
+# --network host, so the old pair kept holding :3000 and :6580 after the rename — every
+# deploy since then started customer360-backend* containers that could not bind and
+# crash-looped, while the stale image kept serving.
+for n in customer360-backend customer360-backend-daemon customer360-backend-redis \
+         backend-system backend-system-daemon backend-system-redis; do
   sudo docker rm -f "$n" >/dev/null 2>&1 || true
 done
 # Reclaim disk before we write/pull anything. Each deploy pulls a new SHA-pinned image
@@ -258,7 +263,10 @@ sudo docker ps --filter name=customer360-backend --format '   running: {{.Names}
 # uses the exact DB and S3 environment already validated above.
 if [[ "${S3_AUTO_CREATE_BUCKETS,,}" =~ ^(true|1|yes)$ ]]; then
   set +e
-  sudo docker run --rm --network host --env-file /opt/c360/backend.env --entrypoint python "$RUN_IMG" - "$MASTER_PROFILE_S3_BUCKET" <<'PY'
+  # -i is load-bearing: without it the container gets /dev/null on stdin, so `python -`
+  # reads an empty program and exits 0 — which this probe reads as "bucket is empty",
+  # re-running the one-time rebuild on every single deploy.
+  sudo docker run --rm -i --network host --env-file /opt/c360/backend.env --entrypoint python "$RUN_IMG" - "$MASTER_PROFILE_S3_BUCKET" <<'PY'
 import os
 import sys
 
