@@ -28,6 +28,7 @@ EXEMPT_PATHS = {
     "/api/v1/metadata",
     "/api/v1/auth/login",
     "/api/v1/auth/callback",
+    "/api/v1/auth/refresh",
     "/api/v1/auth/logout",
     "/api/v1/auth/zalo-redirect",
 }
@@ -35,6 +36,8 @@ EXEMPT_PATHS = {
 # Runtime auth configuration.
 SSO_LOGIN = settings.sso_login
 IDENTITY_CACHE_TTL_SECONDS = 200
+DEFAULT_TOKEN_EXPIRES_MINUTES = 60
+CLOCK_SKEW_LEEWAY_SECONDS = 60
 TENANT_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "tenant_admin", "admin"}
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
 
@@ -93,14 +96,24 @@ def _introspect_with_keycloak(token: str) -> Optional[dict[str, Any]]:
         return None
 
 
+def _token_lifetime_seconds() -> int:
+    """Max age an access token may reach before this API stops accepting it."""
+    return getattr(settings, "keycloak_token_expires_minutes", DEFAULT_TOKEN_EXPIRES_MINUTES) * 60
+
+
 def _is_token_expired(payload: dict[str, Any]) -> bool:
-    """Check whether a token payload is expired based on exp or max lifespan (30 min)."""
+    """Check whether a token payload is past ``exp`` or older than the configured lifetime.
+
+    The ``iat`` bound is a backstop against a token minted with a longer
+    lifespan than this API accepts. It allows a little clock skew, otherwise a
+    Keycloak host running slightly ahead makes freshly issued tokens look old.
+    """
     now = int(time.time())
     exp = payload.get("exp")
     if isinstance(exp, (int, float)) and now >= int(exp):
         return True
     iat = payload.get("iat")
-    max_lifespan_seconds = getattr(settings, "keycloak_token_expires_minutes", 30) * 60
+    max_lifespan_seconds = _token_lifetime_seconds() + CLOCK_SKEW_LEEWAY_SECONDS
     if isinstance(iat, (int, float)) and (now - int(iat)) > max_lifespan_seconds:
         return True
     return False
@@ -113,7 +126,7 @@ def _cache_token(token: str, payload: dict[str, Any]) -> None:
         return
 
     exp = payload.get("exp")
-    max_ttl = getattr(settings, "keycloak_token_expires_minutes", 30) * 60
+    max_ttl = _token_lifetime_seconds()
     ttl_seconds: Optional[int] = None
     if isinstance(exp, (int, float)):
         ttl_seconds = min(max_ttl, int(exp) - int(time.time()))

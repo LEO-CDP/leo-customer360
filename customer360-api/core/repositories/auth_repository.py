@@ -51,20 +51,43 @@ class AuthRepository:
         """Return the Keycloak logout endpoint."""
         return f"{settings.sso_login_url.rstrip('/')}/realms/{settings.keycloak_realm}/protocol/openid-connect/logout"
 
-    def exchange_code(self, code: str, redirect_uri: str) -> dict[str, Any]:
-        """Exchange an authorization code with Keycloak."""
-        body = urllib.parse.urlencode({"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri, "client_id": settings.keycloak_client_id, "client_secret": settings.keycloak_client_secret}).encode("utf-8")
+    def _token_grant(self, form: dict[str, str], failure_detail: str) -> dict[str, Any]:
+        """Run an OIDC grant against the Keycloak token endpoint.
+
+        The client secret is added here so it stays server-side -- neither the
+        authorization code nor the refresh token is usable without it.
+        """
+        body = urllib.parse.urlencode({**form, "client_id": settings.keycloak_client_id, "client_secret": settings.keycloak_client_secret}).encode("utf-8")
         request = urllib.request.Request(self.token_endpoint(), data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
         context = None if settings.keycloak_verify_ssl else ssl._create_unverified_context()
         try:
             with urllib.request.urlopen(request, timeout=10, context=context) as response:
                 return json.load(response)
         except urllib.error.HTTPError as exc:
-            logger.warning("Keycloak token exchange failed with HTTP %s", exc.code)
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not exchange authorization code with Keycloak") from exc
+            logger.warning("Keycloak %s grant failed with HTTP %s", form.get("grant_type"), exc.code)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail) from exc
         except Exception as exc:
-            logger.warning("Keycloak token exchange request failed", exc_info=True)
+            logger.warning("Keycloak token endpoint request failed", exc_info=True)
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Keycloak token endpoint unreachable") from exc
+
+    def exchange_code(self, code: str, redirect_uri: str) -> dict[str, Any]:
+        """Exchange an authorization code with Keycloak."""
+        return self._token_grant(
+            {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
+            "Could not exchange authorization code with Keycloak",
+        )
+
+    def refresh_tokens(self, refresh_token: str) -> dict[str, Any]:
+        """Exchange a refresh token for a fresh access token.
+
+        This is what keeps an admin signed in past one access-token lifetime;
+        Keycloak refuses the grant once the SSO session hits its own idle or
+        max lifespan, at which point the caller must sign in again.
+        """
+        return self._token_grant(
+            {"grant_type": "refresh_token", "refresh_token": refresh_token},
+            "Refresh token is expired or invalid",
+        )
 
     def user_repository(self, db):
         """Create the configured DAO user repository for a session."""

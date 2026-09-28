@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from leo_customer360_dao.config import settings
 from leo_customer360_dao.crud import zalo_oa
+from core.auth import DEFAULT_TOKEN_EXPIRES_MINUTES
 from core.database import SessionLocal
 from core.repositories.metadata_repository import DEFAULT_TENANT_ID
 from core.repositories.zalo_repository import ZaloConnector
@@ -29,6 +30,7 @@ from leo_customer360_dao.schemas.auth import (
     LogoutRequest,
     LogoutResponse,
     SsoCallbackRequest,
+    SsoRefreshRequest,
     SsoTokenResponse,
 )
 from core.utils.rate_limiter import RedisRateLimiter
@@ -168,17 +170,14 @@ async def login(payload: LoginRequest, request: Request) -> Any:
         db.close()
 
 
-@router.post("/callback", response_model=SsoTokenResponse)
-async def sso_callback(payload: SsoCallbackRequest) -> Any:
-    """Exchanges a Keycloak authorization code for tokens (SSO_LOGIN=true)."""
-    if not settings.sso_login:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="SSO_LOGIN is disabled; use the dev credential login instead",
-        )
+def _sso_token_response(tokens: dict[str, Any]) -> SsoTokenResponse:
+    """Shape a Keycloak token payload for the browser.
 
-    tokens = _exchange_code_for_token(payload.code, payload.redirect_uri)
-    max_expires_in = getattr(settings, "keycloak_token_expires_minutes", 30) * 60
+    ``expires_in`` is clamped to what the middleware will actually accept so
+    the frontend schedules its refresh before the API starts rejecting the
+    token, rather than after.
+    """
+    max_expires_in = getattr(settings, "keycloak_token_expires_minutes", DEFAULT_TOKEN_EXPIRES_MINUTES) * 60
     raw_expires_in = tokens.get("expires_in")
     expires_in = min(raw_expires_in, max_expires_in) if isinstance(raw_expires_in, int) else max_expires_in
     return SsoTokenResponse(
@@ -188,6 +187,51 @@ async def sso_callback(payload: SsoCallbackRequest) -> Any:
         expires_in=expires_in,
         token_type=tokens.get("token_type", "Bearer"),
     )
+
+
+@router.post("/callback", response_model=SsoTokenResponse)
+async def sso_callback(payload: SsoCallbackRequest) -> Any:
+    """Exchanges a Keycloak authorization code for tokens (SSO_LOGIN=true)."""
+    if not settings.sso_login:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SSO_LOGIN is disabled; use the dev credential login instead",
+        )
+
+    return _sso_token_response(_exchange_code_for_token(payload.code, payload.redirect_uri))
+
+
+@router.post("/refresh", response_model=SsoTokenResponse)
+async def sso_refresh(payload: SsoRefreshRequest, request: Request) -> Any:
+    """Renews an access token from a refresh token (SSO_LOGIN=true).
+
+    Exempt from bearer auth (see core.auth.EXEMPT_PATHS): the caller reaches
+    this precisely because its access token has expired. The refresh token is
+    the credential, and it is only redeemable together with the server-side
+    client secret. Throttled by IP so the endpoint can't be used to grind
+    through guessed refresh tokens.
+    """
+    if not settings.sso_login:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SSO_LOGIN is disabled; use the dev credential login instead",
+        )
+
+    rate_limit_key = f"refresh:{request.client.host if request.client else 'unknown'}"
+    if _login_rate_limiter.is_blocked(rate_limit_key):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed refresh attempts. Try again later.",
+        )
+
+    try:
+        tokens = _auth_repository().refresh_tokens(payload.refresh_token)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            _login_rate_limiter.record_failure(rate_limit_key)
+        raise
+
+    return _sso_token_response(tokens)
 
 
 @router.post("/logout", response_model=LogoutResponse)

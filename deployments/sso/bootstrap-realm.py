@@ -30,6 +30,29 @@ if not REDIRECT_URIS or "*" in REDIRECT_URIS:
 ENV_FILE = os.environ.get("ENV_FILE", os.path.join(os.path.dirname(__file__), ".env"))
 
 
+def minutes(name, default):
+    """Read a lifetime in whole minutes from the environment."""
+    raw = (os.environ.get(name) or "").strip() or str(default)
+    if not raw.isdigit() or int(raw) < 1:
+        sys.exit(f"ERROR: {name} must be a whole number of minutes >= 1 (got {raw!r}).")
+    return int(raw)
+
+
+# Session lifetimes. KEYCLOAK_TOKEN_EXPIRES_MINUTES must match the API's own
+# setting of the same name -- the API rejects tokens older than its value, so a
+# realm that issues longer-lived ones just gets them refused mid-session.
+# The SSO session bounds must exceed one token lifetime, otherwise the session
+# dies with the first access token and refreshing cannot keep anyone signed in.
+TOKEN_MINUTES = minutes("KEYCLOAK_TOKEN_EXPIRES_MINUTES", 60)
+SESSION_IDLE_MINUTES = minutes("KEYCLOAK_SSO_SESSION_IDLE_MINUTES", 480)
+SESSION_MAX_MINUTES = minutes("KEYCLOAK_SSO_SESSION_MAX_MINUTES", 600)
+if min(SESSION_IDLE_MINUTES, SESSION_MAX_MINUTES) < TOKEN_MINUTES:
+    sys.exit(
+        f"ERROR: SSO session idle ({SESSION_IDLE_MINUTES}m) and max ({SESSION_MAX_MINUTES}m) "
+        f"lifetimes must both be >= KEYCLOAK_TOKEN_EXPIRES_MINUTES ({TOKEN_MINUTES}m)."
+    )
+
+
 def req(method, path, token=None, body=None, form=None):
     url = path if path.startswith("http") else f"{KC_URL}{path}"
     headers = {}
@@ -71,9 +94,9 @@ def main():
     realm_settings = {
         "realm": REALM,
         "enabled": True,
-        "accessTokenLifespan": 1800,
-        "ssoSessionIdleTimeout": 1800,
-        "ssoSessionMaxLifespan": 1800,
+        "accessTokenLifespan": TOKEN_MINUTES * 60,
+        "ssoSessionIdleTimeout": SESSION_IDLE_MINUTES * 60,
+        "ssoSessionMaxLifespan": SESSION_MAX_MINUTES * 60,
     }
     if st == 404:
         st, _, _ = req("POST", "/admin/realms", token=tok, body=realm_settings)
@@ -87,7 +110,8 @@ def main():
         )
         if st not in (200, 204):
             sys.exit(f"ERROR: could not set realm token lifespan (HTTP {st})")
-        print(f"realm '{REALM}': exists (lifespan set to 1800s / 30m)")
+        print(f"realm '{REALM}': exists (token {TOKEN_MINUTES}m, session idle "
+              f"{SESSION_IDLE_MINUTES}m, session max {SESSION_MAX_MINUTES}m)")
     else:
         sys.exit(f"ERROR: could not read realm '{REALM}' (HTTP {st})")
 
@@ -119,9 +143,9 @@ def main():
     # 2) client (confidential; standard flow for the browser code flow, direct grants for headless tokens)
     st, clients, _ = req("GET", f"/admin/realms/{REALM}/clients?clientId={urllib.parse.quote(CLIENT_ID)}", token=tok)
     client_attributes = {
-        "access.token.lifespan": "1800",
-        "client.session.idle.timeout": "1800",
-        "client.session.max.lifespan": "1800",
+        "access.token.lifespan": str(TOKEN_MINUTES * 60),
+        "client.session.idle.timeout": str(SESSION_IDLE_MINUTES * 60),
+        "client.session.max.lifespan": str(SESSION_MAX_MINUTES * 60),
     }
     desired = {
         "clientId": CLIENT_ID, "enabled": True, "protocol": "openid-connect",
