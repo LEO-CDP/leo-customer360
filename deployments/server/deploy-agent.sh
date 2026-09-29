@@ -55,20 +55,12 @@ LLM_API_KEY="${LLM_API_KEY:-${LEO_OPENAI_API_KEY:-}}"
 # Shared bearer token gating /plan/* — must match customer360-api's AGENT_API_TOKEN.
 AGENT_API_TOKEN="${AGENT_API_TOKEN:-}"
 
-# Read a tfvars value: quoted-string content, or a bare token with a trailing comment stripped.
-tfval() {
-  local line; line="$(grep -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null | head -1)"
-  case "$line" in
-    *\"*\"*) line="${line#*\"}"; printf '%s' "${line%%\"*}" ;;
-    *) line="${line#*=}"; line="${line%%#*}"; printf '%s' "$(printf '%s' "$line" | tr -d '[:space:]')" ;;
-  esac
-}
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/tfvars.sh"   # tfval + srv_ip
 
 # --- resolve the target VM by map key from THIS module's outputs ---
 terraform workspace select "$ENV" >/dev/null 2>&1 || { echo "ERROR: no '$ENV' server workspace — deploy the server first."; exit 1; }
 SERVERS_JSON="$(terraform output -json servers 2>/dev/null || true)"
 [[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no servers output."; exit 1; }
-srv_ip() { printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get(sys.argv[2]) for i in (s.get("internal_interfaces") or []) if i.get(sys.argv[2])), ""))' "$1" "$2"; }
 FIP="$(srv_ip "$AGENT_SERVER_KEY" floating_ip)"
 # The 'agent' box is provisioned by this module (overlays servers map). If it isn't there yet,
 # SKIP rather than fail — so CD stays green until the box is applied; the next run picks it up.

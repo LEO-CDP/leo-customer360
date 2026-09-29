@@ -11,6 +11,27 @@
 	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 }
 
+# --- customer360-event-api backend, shared by /data/* and /cdp-sdk/* -------------------
+# DATA_UPSTREAM may hold ONE address or several separated by spaces. Several = a weighted
+# canary across the old tracking vServer and the VKS Service, e.g.
+#   data_upstream  = "10.100.1.8:8010 49.213.73.13:8010"
+#   data_lb_policy = "weighted_round_robin 5 5"     # 50/50; "1 9" to shift 10% to VKS
+#
+# The passive health checks are what make the canary safe to leave running. Ingestion
+# returns 503 when it cannot enqueue to Redis, and /health does NOT report that (it answers
+# 200 "degraded" — only an unreachable S3 makes it 503). So an ACTIVE health check would
+# happily keep sending beacons to a backend that is rejecting every one of them. Watching
+# real responses catches it: 3 x 5xx inside 30s pulls that backend out and the survivor
+# takes the whole load, with no config change.
+(event_api_backend) {
+	reverse_proxy {$DATA_UPSTREAM} {
+		lb_policy {$DATA_LB_POLICY}
+		fail_duration 30s
+		max_fails 3
+		unhealthy_status 5xx
+	}
+}
+
 {$CADDY_DOMAIN} {
 	encode zstd gzip
 
@@ -57,7 +78,7 @@
 			-X-Frame-Options
 			Content-Security-Policy "frame-ancestors {$SDK_FRAME_ANCESTOR}"
 		}
-		reverse_proxy {$DATA_UPSTREAM}
+		import event_api_backend
 	}
 
 	# --- customer360-event-api under /data. STRIPPED (handle_path): the tracking service has NO
@@ -69,7 +90,7 @@
 	#      For parity with /c360api + /ads, switch to `handle /data/*` UNSTRIPPED and set the app's
 	#      root_path=/data instead — see deploy-tracking.sh ROOT_PATH.) ---
 	handle_path /data/* {
-		reverse_proxy {$DATA_UPSTREAM}
+		import event_api_backend
 	}
 
 	# --- Jaeger trace UI under /jaeger, via its oauth2-proxy (Keycloak SSO). UNSTRIPPED

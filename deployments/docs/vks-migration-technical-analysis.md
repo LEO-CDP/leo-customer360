@@ -11,6 +11,12 @@ specifics, and the risks/gotchas that are particular to VKS and to this account.
 
 ---
 
+> **Update (2026-09-29):** the first service has migrated. `customer360-event-api` now runs
+> on VKS behind a 50/50 canary with its old vServer. What was actually built, the operational
+> runbook, and the gotchas that cost real debugging time are in
+> [`vks-event-api-migration-runbook.md`](./vks-event-api-migration-runbook.md). This document
+> remains the plan for the rest of the platform.
+
 ## 1. TL;DR
 
 - **Technically a good fit.** Nearly every workload is already a stateless Docker container

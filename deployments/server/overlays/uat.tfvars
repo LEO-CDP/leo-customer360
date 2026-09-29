@@ -13,8 +13,12 @@ otel_enabled = "true"
 
 servers = {
   "backend" = {
-    flavor_name    = "s-general-4x8" # 4 vCPU / 8 GB - jump host + customer360-backend (Dagster). UAT Mode-1 target (deployment.md); up from 2x4 to stop code-server heartbeat deaths / run-worker OOM+swap that hung runs. In-place (0 destroy), reboots box.
-    root_disk_size = 20              # boot-volume resize is NOT in-place on vngcloud (needs console volume resize + growpart, or a recreate); kept at 20 (~10G free)
+    flavor_name = "s-general-4x8" # 4 vCPU / 8 GB - jump host + customer360-backend (Dagster). UAT Mode-1 target (deployment.md); up from 2x4 to stop code-server heartbeat deaths / run-worker OOM+swap that hung runs. In-place (0 destroy), reboots box.
+    # 50, matching the LIVE volume: it was grown from 20 in the console out-of-band. Do not
+    # lower this back — vngcloud cannot shrink a boot volume, so an apply that tries returns
+    # 400 "Volume size or volume type must be changed" and blocks every other change in the
+    # same run. Growing further still needs the console + growpart; Terraform only records it.
+    root_disk_size = 50
     name           = "backend" # -> c360-api-uat-backend
   }
   "api" = {
@@ -24,14 +28,10 @@ servers = {
     flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB — for customer360-api
     root_disk_size = 20
   }
-  "tracking" = {
-    # customer360-event-api (FastAPI event ingestion on :8010 -> S3/vStorage NDJSON, Redis session
-    # cache + rate limit). Its OWN dedicated box (not co-located on the shared api box) so a
-    # beacon-traffic spike can't starve api/keycloak/redis. Deployed by ../server/deploy-tracking.sh.
-    flavor_name    = "s-general-1x2" # 1 vCPU / 2 GB
-    root_disk_size = 20
-    name           = "tracking" # -> c360-api-uat-tracking
-  }
+  # NOTE: the "tracking" box is gone — customer360-event-api now runs on the GreenNode
+  # VKS cluster as a KEDA-autoscaled Deployment (uat 1-3 pods), deployed by
+  # ../server/deploy-event-api.sh. Kubernetes owns its replication and scaling, so it no
+  # longer needs a vServer of its own.
   "docs" = {
     # docs-vector-search (local-model RAG: e5 embed + bge rerank + Qwen 0.5B, ~1.4 GB
     # resident). Its OWN box so the model footprint can't starve the shared api box.
@@ -96,22 +96,27 @@ open_ssh         = true
 ssh_ingress_cidr = "0.0.0.0/0" # <-- change to "<your-public-ip>/32"
 
 # Intra-VPC ops ports on the shared Default secgroup (it opens nothing inbound by default).
-# The tracking box (server key "tracking", 10.100.1.8) is not co-located on the api box, so its
-# cross-box hops are opened explicitly (co-located services reach each other on 127.0.0.1). The
-# tracking-api only needs: Caddy -> its app port, and it -> the api-box Redis (Redis Streams broker,
-# rate-limit, and session cache). Redis is required for durable enqueue; rate-limit/session metadata
-# are fail-open when degraded. VERIFY IPs with `terraform output servers`; apply out-of-band
-# with `./deploy.sh uat apply` (CD never runs infra Terraform).
-#   * 9001 -> Portainer agent on the tracking box, reached by the Portainer box (api 10.100.1.5).
-#   * 8010 -> customer360-event-api on the tracking box, reached by Caddy on the api box (10.100.1.5) for /data.
-#   * 6580 -> the api-box Redis (10.100.1.5), reached by the tracking box (10.100.1.8) for its cache.
-#   * 4318 -> the api-box Jaeger OTLP/HTTP (10.100.1.5), reached by the tracking box for request traces.
+# Cross-box hops are opened explicitly (co-located services reach each other on 127.0.0.1).
+# VERIFY IPs with `terraform output servers`; apply out-of-band with `./deploy.sh uat apply`
+# (CD never runs infra Terraform).
+#   * 9001 -> Portainer agent on a box, reached by the Portainer box (api 10.100.1.5).
+#   * 8001 -> docs-vector-search on the docs box, reached by the api box.
+#   * 4318 -> the api-box Jaeger OTLP/HTTP (10.100.1.5), reached by the other boxes for traces.
+#
+# customer360-event-api moved to VKS: its pods no longer run on 10.100.1.8 (that box is gone).
+# The VKS node group was placed in THIS subnet on purpose, so the pods reach the api-box Redis
+# (6580, REQUIRED — the Redis Streams queue is where batches are enqueued, so ingestion returns
+# 503 without it) and Jaeger (4318) over the same private network. Caddy's old 8010 rule is
+# dropped: it now targets the Service LoadBalancer, not a box on this VPC.
 extra_ingress = [
   { port = 9001, cidr = "10.100.1.5/32" }, # Portainer agent   <- api box (Portainer)
-  { port = 8010, cidr = "10.100.1.5/32" }, # customer360-event-api <- api box (Caddy /data)
   { port = 8001, cidr = "10.100.1.5/32" }, # docs-vector-search <- api box (customer360-frontend /ai proxy). Only the docs box listens on 8001.
-  { port = 6580, cidr = "10.100.1.8/32" }, # api-box Redis      <- tracking box (rate-limit + session cache)
-  { port = 4318, cidr = "10.100.1.8/32" }, # api-box Jaeger OTLP <- tracking box (request traces)
+  # VKS worker nodes live in THIS subnet (verified: node vks-…-19d70 is 10.100.1.11), and
+  # Cilium masquerades pod traffic leaving the cluster to the node IP — so the source
+  # address Redis sees is the node's, not the pod's 192.168.0.0/24 address. The whole /24
+  # rather than a /32 because nodes are replaced (upgrades, scaling) and get new IPs.
+  { port = 6580, cidr = "10.100.1.0/24" }, # api-box Redis      <- VKS nodes (event-api Redis Streams queue; REQUIRED)
+  { port = 4318, cidr = "10.100.1.0/24" }, # api-box Jaeger OTLP <- VKS nodes (request traces)
   { port = 4318, cidr = "10.100.1.7/32" }, # api-box Jaeger OTLP <- docs box (docs-vector-search request traces)
   { port = 8009, cidr = "10.100.1.5/32" }, # customer360-agent  <- api box (customer360-api -> agent /plan/*). Only the agent box listens on 8009.
   # api-box Jaeger OTLP <- customer360-agent box (request traces). VERIFY the agent box

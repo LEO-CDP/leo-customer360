@@ -1,0 +1,338 @@
+# customer360-event-api on GreenNode VKS — every resource for the service in one file.
+#
+# Read top to bottom: the namespace, the app (Deployment + Service + PodDisruptionBudget),
+# how it scales (KEDA ScaledObject), and the small Prometheus that feeds the scaler.
+# Environment-specific numbers (pod counts, per-pod request/backlog targets, resources)
+# are NOT here — they live in ../overlays/<env>/, and deploy-event-api.sh layers the image
+# and the Terraform-derived ConfigMap/Secret on top of that.
+
+---
+# ======================= NAMESPACE =======================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: customer360
+---
+# ==================== APP: DEPLOYMENT ====================
+# customer360-event-api (FastAPI event ingestion) on VKS.
+#
+# Replaces the vServer model (N docker replicas behind a local nginx LB on one
+# box) with a real Deployment. Safe to replicate: the write path is
+# request -> Redis Stream (XADD) -> worker thread -> S3, and the Bronze object
+# key is a uuid5 over the event ids, so two pods never clobber each other's
+# objects. The stream consumer group hands each batch to exactly one pod and
+# reclaims a dead pod's in-flight batches after TRACKING_STREAM_CLAIM_IDLE_MS.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-api
+  labels: { app: event-api }
+spec:
+  replicas: 3 # the HPA owns this at runtime (minReplicas is also 3)
+  selector:
+    matchLabels: { app: event-api }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0 # keep full ingest capacity through a rollout
+      maxSurge: 1
+  template:
+    metadata:
+      labels: { app: event-api }
+    spec:
+      # The worker drains its in-flight batch on SIGTERM; give it room to finish
+      # before the kubelet escalates to SIGKILL.
+      terminationGracePeriodSeconds: 60
+      imagePullSecrets:
+        - name: ghcr-pull # created by deploy-event-api.sh from GHCR_USER/GHCR_TOKEN
+      # Spread replicas over nodes, but never block scheduling on a small cluster.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: event-api }
+      containers:
+        - name: event-api
+          image: ghcr.io/leo-cdp/leo-customer360/customer360-event-api:latest
+          ports:
+            - { containerPort: 8010, name: http }
+          envFrom:
+            - configMapRef: { name: event-api-config }
+            - secretRef: { name: event-api-secrets }
+          lifecycle:
+            preStop:
+              # Let the Service drop this pod from its endpoints before uvicorn
+              # starts shutting down, so in-flight beacons are not refused.
+              exec: { command: ["sleep", "5"] }
+          # Probes hit `/`, not `/health`: /health returns 503 when S3 is
+          # unreachable, but with the Redis Stream backend ingestion still works
+          # (batches wait in the stream), so gating on it would pull all three
+          # pods out of service during an S3 blip. /health stays for monitoring.
+          startupProbe:
+            httpGet: { path: /, port: 8010 }
+            periodSeconds: 5
+            failureThreshold: 12 # up to 60s to boot
+          readinessProbe:
+            httpGet: { path: /, port: 8010 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: 8010 }
+            periodSeconds: 15
+            failureThreshold: 4
+          # A CPU request is required for the HPA to compute utilisation.
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+---
+# ===================== APP: SERVICE ======================
+# LoadBalancer on 8010 so Caddy's DATA_UPSTREAM keeps its existing "ip:8010"
+# shape — after the first deploy, set proxy/overlays/<env>.tfvars data_upstream
+# to this Service's EXTERNAL-IP and redeploy Caddy. Switch to ClusterIP + an
+# Ingress only if you move TLS termination into the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-api
+  labels: { app: event-api }
+spec:
+  type: LoadBalancer
+  selector: { app: event-api }
+  ports:
+    - { port: 8010, targetPort: 8010, name: http }
+---
+# ============== APP: DISRUPTION BUDGET ===================
+# Keep ingest up through node drains and cluster upgrades.
+#
+# maxUnavailable, NOT minAvailable, because the replica count is a moving target under
+# KEDA and the two behave very differently at the ends of that range:
+#   * minAvailable: 2 deadlocks a 1-replica tier — you can never evict the only pod, so
+#     a node drain hangs indefinitely. UAT's floor is 1.
+#   * minAvailable: 2 is also far too permissive at the top — at 20 replicas it would
+#     allow 18 pods to be evicted at once.
+# maxUnavailable: 1 means "one pod at a time" at every size, which is what we actually
+# want. At 1 replica that still permits the drain, accepting a brief gap — inherent to
+# running a single replica, not something a budget can paper over.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: event-api
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: { app: event-api }
+---
+# ================= AUTOSCALING (KEDA) ====================
+# KEDA-driven autoscaling on actual request rate.
+#
+# This REPLACES the plain HorizontalPodAutoscaler — KEDA creates and owns its own HPA
+# (`keda-hpa-event-api`), so a hand-written HPA on the same Deployment would fight it.
+# deploy-event-api.sh deletes the legacy `event-api` HPA if it finds one.
+#
+# Requires the KEDA operator in the cluster (CRD `scaledobjects.keda.sh`); the deploy
+# script checks for it and refuses to continue rather than half-deploying.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: event-api
+spec:
+  scaleTargetRef:
+    name: event-api
+  minReplicaCount: 3 # the HA floor — never fewer than 3 pods
+  maxReplicaCount: 12
+  pollingInterval: 15 # how often KEDA queries the triggers, seconds
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          # Traffic spikes are the reason this tier scales; react fast.
+          stabilizationWindowSeconds: 30
+          policies:
+            - { type: Percent, value: 100, periodSeconds: 30 }
+            - { type: Pods, value: 4, periodSeconds: 30 }
+          selectPolicy: Max
+        scaleDown:
+          # Slow: a removed pod still has to drain its in-flight Redis batch.
+          stabilizationWindowSeconds: 300
+          policies:
+            - { type: Pods, value: 1, periodSeconds: 60 }
+  triggers:
+    # PRIMARY — requests per second, the thing we actually want to scale on.
+    # KEDA computes desiredReplicas = ceil(query / threshold), and the query returns the
+    # rate summed over ALL pods, so `threshold` reads as "target requests/sec per pod".
+    # `or vector(0)` matters: the counter is only emitted once a pod has served its first
+    # ingest request, so before any traffic the query is empty rather than zero, and an
+    # empty result would make the scaler error instead of reporting idle.
+    - type: prometheus
+      metadata:
+        # FULLY QUALIFIED on purpose. The query is issued by the KEDA operator, which runs
+        # in the `keda` namespace — a bare Service name would resolve against THAT namespace
+        # and fail with "dial tcp: lookup event-api-prometheus". Cross-namespace callers need
+        # <service>.<namespace>.svc.cluster.local. deploy-event-api.sh patches the namespace
+        # here when EVENT_API_NAMESPACE is overridden.
+        serverAddress: http://event-api-prometheus.customer360.svc.cluster.local:9090
+        query: sum(rate(tracking_ingestion_requests_total[1m])) or vector(0)
+        threshold: "50"
+        # Below this total RPS the workload counts as idle. It cannot scale below
+        # minReplicaCount anyway, so this only affects KEDA's active/idle state.
+        activationThreshold: "1"
+    # SAFETY NET — if Prometheus is restarting or its data is stale, CPU still drives
+    # scaling. KEDA takes the highest replica count any trigger asks for, so this never
+    # holds the RPS trigger back; it only stops a metrics outage from freezing scaling.
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "70"
+    # BACKLOG — the signal RPS cannot see: requests can be steady while S3 writes slow
+    # down and the queue backs up. Scales on the consumer group's LAG (entries added to
+    # the stream that the group has not been handed yet).
+    #
+    # Deliberately NOT pendingEntriesCount: each worker holds at most
+    # TRACKING_LOG_FLUSH_BATCH_SIZE (200) messages delivered-but-unacked, so the pending
+    # count is bounded by (pods x 200) and RISES with replica count — scaling on it is a
+    # positive feedback loop (more pods -> more pending -> more pods). Lag falls as pods
+    # are added, which is the direction an autoscaler needs.
+    #
+    # stream/consumerGroup must match TRACKING_STREAM_NAME / TRACKING_STREAM_GROUP in the
+    # generated ConfigMap; deploy-event-api.sh writes those two keys explicitly so the app
+    # and this trigger cannot drift onto different streams.
+    #
+    # Host, port and password are read from the scale target's own env (KEDA resolves
+    # `envFrom`), which is why no TriggerAuthentication is needed and why the hash-suffixed
+    # Secret name is not a problem — KEDA follows the Deployment's reference, not a literal.
+    #
+    # `lag` comes from XINFO GROUPS and needs Redis >= 7 (this cluster runs Redis 8).
+    - type: redis-streams
+      metadata:
+        hostFromEnv: REDIS_HOST
+        portFromEnv: REDIS_PORT
+        passwordFromEnv: REDIS_PASSWORD
+        stream: data-tracking:events
+        consumerGroup: s3-writers
+        lagCount: "500" # target undelivered entries per pod
+        activationLagCount: "50"
+        enableTLS: "false"
+---
+# ============ METRIC SOURCE FOR THE SCALER ===============
+# A small Prometheus whose ONLY job is to feed request-rate numbers to KEDA.
+#
+# It is not a monitoring system: it scrapes just the event-api pods, keeps 6h in an
+# emptyDir (no PVC), and nothing reads it but the ScaledObject. Traces still go to the
+# api-box Jaeger; dashboards still live on the monitoring box. If you later install a
+# real cluster monitoring stack, point the ScaledObject's serverAddress at it and delete
+# this file.
+#
+# Restart behaviour: on a restart it loses history, so `rate()` needs ~1 scrape interval
+# before it reports again. The ScaledObject keeps a CPU trigger precisely so scaling
+# degrades rather than stops while that happens.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: event-api-prometheus
+---
+# Namespace-scoped: it may only list the pods in its own namespace, nothing cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: event-api-prometheus
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: event-api-prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: event-api-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: event-api-prometheus
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: event-api-prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    scrape_configs:
+      - job_name: event-api
+        kubernetes_sd_configs:
+          # own_namespace keeps this working whatever namespace the overlay picks,
+          # and matches the namespace-scoped Role above.
+          - role: pod
+            namespaces:
+              own_namespace: true
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: event-api
+          # One target per pod, on the app port — not the Prometheus pod itself.
+          - source_labels: [__meta_kubernetes_pod_container_port_number]
+            action: keep
+            regex: "8010"
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-api-prometheus
+  labels: { app: event-api-prometheus }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: event-api-prometheus }
+  template:
+    metadata:
+      labels: { app: event-api-prometheus }
+    spec:
+      serviceAccountName: event-api-prometheus
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534 # the image's nobody user; emptyDir storage needs no root
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.1.0
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=6h
+            - --web.enable-lifecycle
+          ports:
+            - { containerPort: 9090, name: http }
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus }
+            - { name: data, mountPath: /prometheus }
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9090 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /-/healthy, port: 9090 }
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 300m, memory: 512Mi }
+      volumes:
+        - name: config
+          configMap: { name: event-api-prometheus-config }
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-api-prometheus
+  labels: { app: event-api-prometheus }
+spec:
+  selector: { app: event-api-prometheus }
+  ports:
+    - { port: 9090, targetPort: 9090, name: http }

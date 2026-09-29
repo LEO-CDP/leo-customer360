@@ -21,9 +21,11 @@ portainer_upstream = "127.0.0.1:9443"   # monitoring
 # Jaeger trace UI served under /jaeger on :443 (TLS) via its oauth2-proxy SSO gate.
 jaeger_upstream = "127.0.0.1:4686"
 
-# customer360-event-api served under /data. Dedicated box in prod too — FILL with that box's
-# PRIVATE ip from ../server (prod) outputs once the "tracking" server key is provisioned.
-data_upstream = "10.101.1.15:8010" # <-- set the real tracking-box private ip
+# customer360-event-api served under /data. It runs on the VKS cluster (no prod vServer) — FILL
+# with the EXTERNAL-IP of its `event-api` Service (type LoadBalancer), still on port 8010:
+#   cd ../server && ./deploy-event-api.sh prod    # prints the EXTERNAL-IP when it finishes
+data_upstream  = "10.101.1.15:8010" # <-- set the VKS Service EXTERNAL-IP
+data_lb_policy = "random"            # single upstream; see uat.tfvars for the canary form
 
 # docs-vector-search under /docs-ai (public docs site chatbot). Dedicated box in prod — FILL with
 # that box's PRIVATE ip from ../server (prod) outputs, and open docs:8001 <- caddy box in the prod

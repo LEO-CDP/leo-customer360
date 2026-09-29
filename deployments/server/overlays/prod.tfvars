@@ -46,16 +46,11 @@ servers = {
     root_disk_size = 50
     name           = "agent" # -> c360-api-prod-agent
   }
-  # Uncomment to give customer360-event-api its own prod box (see deployments/server/deploy-tracking.sh).
-  # PROD is the gen-2 (s2-general) family, whose smallest tier is 2x4 (no 1x2) — bump if beacon
-  # traffic needs it. After apply: set proxy/overlays/prod.tfvars data_upstream to this box's
-  # private ip, open 8010/6580/4318 on the secgroup, and add "tracking" to monitoring's
-  # portainer_agent_server_keys.
-  # "tracking" = {
-  #   flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB — customer360-event-api (smallest gen-2 tier)
-  #   root_disk_size = 50
-  #   name           = "tracking" # -> c360-api-prod-tracking
-  # }
+  # customer360-event-api does NOT get a prod box: it runs on the GreenNode VKS cluster as an
+  # autoscaling Deployment (3 pods), deployed by deployments/server/deploy-event-api.sh.
+  # After that deploy: set proxy/overlays/prod.tfvars data_upstream to the Service
+  # LoadBalancer EXTERNAL-IP, and open 6580 (api-box Redis) + 4318 (Jaeger OTLP) on the
+  # secgroup to the VKS worker-node CIDR — see the extra_ingress note in uat.tfvars.
   # "8x16" = {
   #   flavor_name    = "s2-general-8x16" # 8 vCPU / 16 GB
   #   root_disk_size = 50

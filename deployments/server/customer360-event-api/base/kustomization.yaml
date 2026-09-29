@@ -1,0 +1,17 @@
+# Base for customer360-event-api on VKS. Not deployed directly — deploy-event-api.sh
+# generates ../generated/<env>/ on top of this with the image, the ConfigMap and the
+# Secret resolved from the Terraform state of ../../storage and ../../cache.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: customer360
+
+resources:
+  # Every resource for the service, in one file: namespace, app (Deployment/Service/PDB),
+  # the KEDA ScaledObject that scales it, and the Prometheus that feeds the scaler.
+  - event-api.yaml
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/name: customer360-event-api
+      app.kubernetes.io/part-of: customer360

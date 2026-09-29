@@ -1,0 +1,118 @@
+# Least-privilege identity for CI to deploy customer360-event-api.
+#
+# Apply this ONCE with an admin kubeconfig (the one from the VKS console), then use
+# ./make-kubeconfig.sh to mint a kubeconfig for this ServiceAccount and store it as the
+# VKS_KUBECONFIG secret. CI then holds an identity that can deploy this one service into
+# this one namespace — and nothing else in the cluster.
+#
+# The rules below are derived from what deploy-event-api.sh actually calls. If you add a
+# step to that script, add its verb here or the deploy fails with a Forbidden error.
+#
+# NOTE on `roles`/`rolebindings`: the deploy creates a Role for the bundled Prometheus.
+# Kubernetes forbids granting permissions you do not hold yourself, so the deployer's
+# pods get/list/watch below is what makes creating that Role legal. If the Prometheus Role
+# ever needs a new permission, this Role needs it too.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: event-api-deployer
+  namespace: customer360
+---
+# Long-lived token. Kubernetes >= 1.24 no longer auto-creates ServiceAccount token
+# Secrets, and `kubectl create token` issues a SHORT-LIVED one — which would expire and
+# break CD exactly like a job-scoped registry token does. This Secret type asks the token
+# controller for a non-expiring token instead.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: event-api-deployer-token
+  namespace: customer360
+  annotations:
+    kubernetes.io/service-account.name: event-api-deployer
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: event-api-deployer
+  namespace: customer360
+rules:
+  # The workload itself, plus the generated ConfigMap/Secret and the Prometheus SA.
+  - apiGroups: [""]
+    resources: [configmaps, secrets, services, serviceaccounts]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # KEDA owns the HPA it creates; the deploy only reads it, and deletes the legacy
+  # hand-written one left over from the pre-KEDA layout. No create/update needed.
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch, delete]
+  - apiGroups: [keda.sh]
+    resources: [scaledobjects]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # The bundled Prometheus's own RBAC (see the NOTE above).
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Read-only: `rollout status` watches ReplicaSets, and the deploy reports pods + events.
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods, events]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  # The closing dependency check runs `kubectl exec` into a pod to curl /health.
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: event-api-deployer
+  namespace: customer360
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: event-api-deployer
+subjects:
+  - kind: ServiceAccount
+    name: event-api-deployer
+    namespace: customer360
+---
+# The only cluster-scoped power this identity has. Deliberately tiny:
+#   * namespaces  — the deploy is self-bootstrapping and creates its own namespace.
+#                   NO delete: teardown keeps the namespace on purpose.
+#   * CRDs (read) — the KEDA preflight checks whether scaledobjects.keda.sh exists.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: event-api-deployer
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, create, patch]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: event-api-deployer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: event-api-deployer
+subjects:
+  - kind: ServiceAccount
+    name: event-api-deployer
+    namespace: customer360
