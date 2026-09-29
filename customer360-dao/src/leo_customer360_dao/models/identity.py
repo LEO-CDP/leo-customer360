@@ -181,6 +181,8 @@ class CdpRawProfileStage(Base):
     cookie_id: Mapped[Optional[str]] = mapped_column(Text)
     ga_client_id: Mapped[Optional[str]] = mapped_column(Text)
     session_id: Mapped[Optional[str]] = mapped_column(Text)
+    anonymous_id: Mapped[Optional[str]] = mapped_column(Text)
+    device_fingerprint: Mapped[Optional[str]] = mapped_column(Text)
     ip_address: Mapped[Optional[str]] = mapped_column(INET)
     user_agent: Mapped[Optional[str]] = mapped_column(Text)
 

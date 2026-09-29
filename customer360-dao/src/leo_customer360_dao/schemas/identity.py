@@ -191,6 +191,8 @@ class RawProfileBase(BaseModel):
     cookie_id: Optional[str] = None
     ga_client_id: Optional[str] = None
     session_id: Optional[str] = None
+    anonymous_id: Optional[str] = None
+    device_fingerprint: Optional[str] = None
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
 
@@ -236,6 +238,8 @@ class RawProfileUpdate(BaseModel):
     cookie_id: Optional[str] = None
     ga_client_id: Optional[str] = None
     session_id: Optional[str] = None
+    anonymous_id: Optional[str] = None
+    device_fingerprint: Optional[str] = None
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
     media_source: Optional[str] = None

@@ -1265,6 +1265,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     cookie_id TEXT, -- Web Tracking anonymous/browser cookie id
     ga_client_id TEXT, -- Google Analytics client id
     session_id TEXT,
+    anonymous_id TEXT, -- Web tracking anonymous identifier
+    device_fingerprint TEXT, -- Web tracking device fingerprint
     ip_address INET,
     user_agent TEXT,
 
@@ -2900,6 +2902,20 @@ WHERE
 CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_cookie_id ON customer360.cdp_raw_profiles_stage (cookie_id)
 WHERE
     cookie_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_anonymous_id ON customer360.cdp_raw_profiles_stage (
+    tenant_id,
+    anonymous_id
+)
+WHERE
+    anonymous_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_device_fingerprint ON customer360.cdp_raw_profiles_stage (
+    tenant_id,
+    device_fingerprint
+)
+WHERE
+    device_fingerprint IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_national_id ON customer360.cdp_raw_profiles_stage (national_id)
 WHERE

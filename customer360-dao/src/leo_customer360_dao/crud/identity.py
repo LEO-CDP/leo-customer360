@@ -47,6 +47,8 @@ def list_master_profiles_page(
     churn_risk_tier: Optional[str] = None,
     linked_raw_profile_count_min: Optional[int] = None,
     q: Optional[str] = None,
+    anonymous_id: Optional[str] = None,
+    device_fingerprint: Optional[str] = None,
     days: Optional[int] = None,
     from_date: Optional[date] = None,
     to_date: Optional[date] = None,
@@ -106,6 +108,42 @@ def list_master_profiles_page(
         where_clauses.append(CdpMasterProfile.clv_segment == clv_segment)
     if churn_risk_tier is not None:
         where_clauses.append(CdpMasterProfile.churn_risk_tier == churn_risk_tier)
+    if anonymous_id:
+        where_clauses.append(
+            exists(
+                select(1)
+                .select_from(CdpProfileLink)
+                .join(
+                    CdpRawProfileStage,
+                    CdpRawProfileStage.raw_profile_id == CdpProfileLink.raw_profile_id,
+                )
+                .where(
+                    CdpProfileLink.master_profile_id == CdpMasterProfile.master_profile_id,
+                    CdpProfileLink.tenant_id == CdpMasterProfile.tenant_id,
+                    CdpProfileLink.status == "ACTIVE",
+                    CdpRawProfileStage.tenant_id == CdpMasterProfile.tenant_id,
+                    CdpRawProfileStage.anonymous_id == anonymous_id,
+                )
+            )
+        )
+    if device_fingerprint:
+        where_clauses.append(
+            exists(
+                select(1)
+                .select_from(CdpProfileLink)
+                .join(
+                    CdpRawProfileStage,
+                    CdpRawProfileStage.raw_profile_id == CdpProfileLink.raw_profile_id,
+                )
+                .where(
+                    CdpProfileLink.master_profile_id == CdpMasterProfile.master_profile_id,
+                    CdpProfileLink.tenant_id == CdpMasterProfile.tenant_id,
+                    CdpProfileLink.status == "ACTIVE",
+                    CdpRawProfileStage.tenant_id == CdpMasterProfile.tenant_id,
+                    CdpRawProfileStage.device_fingerprint == device_fingerprint,
+                )
+            )
+        )
 
     cutoff = cutoff_for_days(days)
     if cutoff is not None:

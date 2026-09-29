@@ -965,6 +965,14 @@ window.C360 = window.C360 || {};
     return String(value);
   }
 
+  function rawProfileIdentifier(raw, fieldName) {
+    if (raw[fieldName]) return raw[fieldName];
+
+    var eventPayload = raw.event_payload && typeof raw.event_payload === "object" ? raw.event_payload : {};
+    var identity = eventPayload.identity && typeof eventPayload.identity === "object" ? eventPayload.identity : {};
+    return eventPayload[fieldName] || identity[fieldName] || (fieldName === "anonymous_id" ? raw.external_customer_id : null);
+  }
+
   function modalRow(label, value) {
     return (
       '<div class="flex items-start justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">' +
@@ -1020,6 +1028,8 @@ window.C360 = window.C360 || {};
     var identityFieldsHtml = [
       modalRow("Raw Profile ID", raw.raw_profile_id),
       modalRow("External Customer ID", raw.external_customer_id),
+      modalRow("Anonymous ID", rawProfileIdentifier(raw, "anonymous_id")),
+      modalRow("Device Fingerprint", rawProfileIdentifier(raw, "device_fingerprint")),
       modalRow("Full Name", raw.full_name),
       modalRow("Email", raw.email),
       modalRow("Phone Number", raw.phone_number),

@@ -75,7 +75,22 @@ class EventRecordService:
         payload: dict[str, Any],
         key: str,
     ) -> Optional[str]:
-        return cls.text_value(identity.get(key) or payload.get(key))
+        profile_data = payload.get("profile_data")
+        if not isinstance(profile_data, dict):
+            profile_data = {}
+        event_data = payload.get("event_data")
+        if not isinstance(event_data, dict):
+            event_data = {}
+        for candidate in (
+            identity.get(key),
+            profile_data.get(key),
+            payload.get(key),
+            event_data.get(key),
+        ):
+            normalized = cls.text_value(candidate)
+            if normalized is not None:
+                return normalized
+        return None
 
     @classmethod
     def extract_profile_signature(cls, record: dict[str, Any]) -> Optional[str]:
@@ -93,11 +108,18 @@ class EventRecordService:
             "advertising_id",
             "cookie_id",
             "session_id",
+            "anonymous_id",
+            "device_fingerprint",
         ]
-        for key in direct_keys:
-            normalized = cls.text_value(event.get(key))
-            if normalized:
-                return f"{key}:{normalized.lower()}"
+        for source in (
+            event,
+            event.get("profile_data") if isinstance(event.get("profile_data"), dict) else {},
+            event.get("event_data") if isinstance(event.get("event_data"), dict) else {},
+        ):
+            for key in direct_keys:
+                normalized = cls.text_value(source.get(key))
+                if normalized:
+                    return f"{key}:{normalized.lower()}"
 
         identities = event.get("profile_identities")
         if isinstance(identities, dict):
@@ -412,6 +434,8 @@ class EventRecordService:
             ("advertising_id", event.get("advertising_id")),
             ("cookie_id", event.get("cookie_id")),
             ("session_id", event.get("session_id")),
+            ("anonymous_id", event.get("anonymous_id")),
+            ("device_fingerprint", event.get("device_fingerprint")),
         )
         identity_type, identity_value = next(
             ((key, value) for key, value in identity_pairs if value),
@@ -454,6 +478,8 @@ class EventRecordService:
             "cookie_id": event.get("cookie_id"),
             "ga_client_id": event.get("ga_client_id"),
             "session_id": event.get("session_id"),
+            "anonymous_id": event.get("anonymous_id"),
+            "device_fingerprint": event.get("device_fingerprint"),
             "ip_address": event.get("ip_address"),
             "user_agent": event.get("user_agent"),
             "media_source": event.get("media_source"),

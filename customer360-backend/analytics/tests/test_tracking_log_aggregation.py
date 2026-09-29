@@ -278,6 +278,8 @@ def test_web_sdk_anonymous_events_share_one_raw_profile():
     assert page_view["external_customer_id"] == "web-anonymous-1"
     assert page_view["session_id"] == "web-session-1"
     assert page_view["device_fingerprint"] == "web-fingerprint-1"
+    assert page_profile["anonymous_id"] == "web-anonymous-1"
+    assert page_profile["device_fingerprint"] == "web-fingerprint-1"
     assert page_profile["raw_profile_id"] == click_profile["raw_profile_id"]
     assert click_profile["event_payload"]["eventType"] == "click"
 

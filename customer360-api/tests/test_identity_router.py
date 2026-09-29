@@ -180,6 +180,8 @@ def _fake_raw_profile(**overrides) -> SimpleNamespace:
         "cookie_id": None,
         "ga_client_id": None,
         "session_id": None,
+        "anonymous_id": None,
+        "device_fingerprint": None,
         "ip_address": None,
         "user_agent": None,
         "media_source": None,
@@ -439,6 +441,9 @@ class MasterProfileLinkedRawDetailEndpointTests(unittest.TestCase):
             raw_profile_id=link.raw_profile_id,
             tenant_id=self.master_profile.tenant_id,
             source_system="web_tracking",
+            external_customer_id="web-anonymous-1",
+            anonymous_id="web-anonymous-1",
+            device_fingerprint="web-fingerprint-1",
             event_name="checkout_started",
             event_payload={"cart_value": 129.9},
         )
@@ -456,6 +461,9 @@ class MasterProfileLinkedRawDetailEndpointTests(unittest.TestCase):
         self.assertEqual(body["link"]["link_id"], str(link.link_id))
         self.assertEqual(body["raw_profile"]["raw_profile_id"], str(raw_profile.raw_profile_id))
         self.assertEqual(body["raw_profile"]["source_system"], "web_tracking")
+        self.assertEqual(body["raw_profile"]["external_customer_id"], "web-anonymous-1")
+        self.assertEqual(body["raw_profile"]["anonymous_id"], "web-anonymous-1")
+        self.assertEqual(body["raw_profile"]["device_fingerprint"], "web-fingerprint-1")
 
     def test_returns_404_when_master_profile_not_found(self):
         session = SimpleNamespace(execute=lambda stmt: _FakeFirstResult(None))

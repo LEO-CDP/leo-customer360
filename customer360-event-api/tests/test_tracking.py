@@ -114,6 +114,8 @@ def test_build_tracking_object_uses_utc_hour_folder_and_ndjson():
     received_at = datetime(2026, 8, 25, 21, 5, tzinfo=timezone.utc)
     event = {
         "event": "page_view",
+        "anonymous_id": "anonymous-1",
+        "device_fingerprint": "fingerprint-1",
         "properties": {"cart": {"items": ["sku-1", "sku-2"]}},
         "metadata": {"source": "web", "experiment": {"variant": 2}},
     }
@@ -132,6 +134,8 @@ def test_build_tracking_object_uses_utc_hour_folder_and_ndjson():
     assert record["domain"] == "unknown"
     assert record["source_system"] == "tracking"
     assert record["event_time"] == received_at.isoformat()
+    assert record["identity"]["anonymous_id"] == "anonymous-1"
+    assert record["identity"]["device_fingerprint"] == "fingerprint-1"
 
 
 def test_metrics_exposes_queue_depth_age_and_configured_limits():

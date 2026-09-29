@@ -17,6 +17,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
+from sqlalchemy import case, func, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -63,6 +64,8 @@ _RAW_PROFILE_COLUMNS = (
     "cookie_id",
     "ga_client_id",
     "session_id",
+    "anonymous_id",
+    "device_fingerprint",
     "media_source",
     "campaign",
     "utm_source",
@@ -76,6 +79,41 @@ _RAW_PROFILE_COLUMNS = (
 _RAW_PROFILE_UPDATE_COLUMNS = tuple(
     column for column in _RAW_PROFILE_COLUMNS if column not in {"raw_profile_id", "tenant_id"}
     ) + ("status_code", "processed_at")
+
+_RAW_PROFILE_PRESERVE_COLUMNS = {
+    "external_customer_id",
+    "full_name",
+    "first_name",
+    "last_name",
+    "email",
+    "phone_number",
+    "national_id",
+    "date_of_birth",
+    "address_line1",
+    "address_line2",
+    "city",
+    "state_province",
+    "postal_code",
+    "country",
+    "company_name",
+    "device_id",
+    "advertising_id",
+    "platform",
+    "app_version",
+    "push_token",
+    "cookie_id",
+    "ga_client_id",
+    "session_id",
+    "anonymous_id",
+    "device_fingerprint",
+    "media_source",
+    "campaign",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+}
+
+_RAW_PROFILE_EVENT_COLUMNS = {"event_name", "event_time", "event_payload"}
 
 
 class IdentityRepository:
@@ -102,6 +140,8 @@ class IdentityRepository:
         churn_risk_tier: Optional[str] = None,
         linked_raw_profile_count_min: Optional[int] = None,
         q: Optional[str] = None,
+        anonymous_id: Optional[str] = None,
+        device_fingerprint: Optional[str] = None,
         days: int = 90,
         page: int = 1,
         page_size: int = 20,
@@ -120,6 +160,8 @@ class IdentityRepository:
             churn_risk_tier=churn_risk_tier,
             linked_raw_profile_count_min=linked_raw_profile_count_min,
             q=q,
+            anonymous_id=anonymous_id,
+            device_fingerprint=device_fingerprint,
             days=days,
             page=page,
             page_size=page_size,
@@ -172,10 +214,23 @@ class IdentityRepository:
         values["event_time"] = self._as_utc_datetime(values.get("event_time"))
 
         statement = pg_insert(CdpRawProfileStage).values(**values)
-        update_values = {
-            column: getattr(statement.excluded, column)
-            for column in _RAW_PROFILE_UPDATE_COLUMNS
-        }
+        incoming_event_is_newer = or_(
+            CdpRawProfileStage.event_time.is_(None),
+            statement.excluded.event_time >= CdpRawProfileStage.event_time,
+        )
+        update_values = {}
+        for column in _RAW_PROFILE_UPDATE_COLUMNS:
+            excluded_value = getattr(statement.excluded, column)
+            current_value = getattr(CdpRawProfileStage, column)
+            if column in _RAW_PROFILE_PRESERVE_COLUMNS:
+                update_values[column] = func.coalesce(excluded_value, current_value)
+            elif column in _RAW_PROFILE_EVENT_COLUMNS:
+                update_values[column] = case(
+                    (incoming_event_is_newer, excluded_value),
+                    else_=current_value,
+                )
+            else:
+                update_values[column] = excluded_value
         statement = (
             statement.on_conflict_do_update(
                 index_elements=[CdpRawProfileStage.raw_profile_id],

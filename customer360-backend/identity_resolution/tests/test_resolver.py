@@ -69,6 +69,8 @@ class TestFetchUnprocessedProfiles:
         assert result == [{"raw_profile_id": "r1"}]
         query, params = mock_cursor.execute.call_args[0]
         assert "status_code = 1" in query
+        assert "anonymous_id" in query
+        assert "device_fingerprint" in query
         assert params == ("t1", 42)
 
 

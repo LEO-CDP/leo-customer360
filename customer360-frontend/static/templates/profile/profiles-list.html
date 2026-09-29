@@ -53,75 +53,104 @@
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-3">
-          <label class="flex items-center gap-2 text-xs font-semibold text-slate-500" title="Filter by last activity or profile update date">
-            From
-            <input id="profile-from-date" type="date" class="text-sm font-normal border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2 text-slate-700 shadow-sm outline-none" />
-          </label>
+        <div class="grid gap-4 2xl:grid-cols-12">
+          <fieldset class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 2xl:col-span-4">
+            <legend class="px-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Date range</legend>
+            <div class="grid grid-cols-2 gap-3">
+              <label for="profile-from-date" class="min-w-0 text-[11px] font-semibold text-slate-500">
+                <span class="mb-1.5 block">From</span>
+                <input id="profile-from-date" type="date" title="Filter by last activity or profile update date" class="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-700 shadow-sm outline-none transition-all hover:bg-slate-50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
+              </label>
 
-          <label class="flex items-center gap-2 text-xs font-semibold text-slate-500" title="Filter by last activity or profile update date">
-            To
-            <input id="profile-to-date" type="date" class="text-sm font-normal border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2 text-slate-700 shadow-sm outline-none" />
-          </label>
-        </div>
+              <label for="profile-to-date" class="min-w-0 text-[11px] font-semibold text-slate-500">
+                <span class="mb-1.5 block">To</span>
+                <input id="profile-to-date" type="date" title="Filter by last activity or profile update date" class="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-700 shadow-sm outline-none transition-all hover:bg-slate-50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
+              </label>
+            </div>
+          </fieldset>
 
-        <!-- Bottom Row: Filter Controls -->
-        <div class="flex flex-wrap items-center gap-3">
+          <fieldset class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 2xl:col-span-8">
+            <legend class="px-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Profile scope</legend>
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <label for="domain-filter" class="min-w-0 text-[11px] font-semibold text-slate-500">
+                <span class="mb-1.5 block">Domain</span>
+                <select id="domain-filter" class="w-full min-w-0 cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 shadow-sm outline-none transition-all hover:bg-slate-50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" title="Filter by business domain">
+                  <option value="">All domains</option>
+                </select>
+              </label>
 
-          <!-- Domain Filter -->
-          <select id="domain-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[140px]" title="Filter by business domain">
-            <option value="">All domains</option>
-          </select>
+              <label for="data-source-filter" class="min-w-0 text-[11px] font-semibold text-slate-500">
+                <span class="mb-1.5 block">Data source</span>
+                <select id="data-source-filter" class="w-full min-w-0 cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 shadow-sm outline-none transition-all hover:bg-slate-50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" title="Filter by data source">
+                  <option value="">All data sources</option>
+                </select>
+              </label>
 
-          <!-- Data Source Filter -->
-          <select id="data-source-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[140px]" title="Filter by data source">
-            <option value="">All data sources</option>
-          </select>
+              <label for="linked-raw-profile-count-input" class="min-w-0 text-[11px] font-semibold text-slate-500">
+                <span class="mb-1.5 block">Linked raw profiles</span>
+                <span class="relative block">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                  </svg>
+                  <input id="linked-raw-profile-count-input" type="number" min="0" placeholder="Minimum count" title="Minimum Linked Raw Profiles" class="w-full min-w-0 rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm font-normal text-slate-700 shadow-sm outline-none transition-all placeholder:text-slate-400 hover:bg-slate-50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
+                </span>
+              </label>
+            </div>
+          </fieldset>
 
-          <select id="tier-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[140px]" title="Filter by customer lifetime value tier">
-            <option value="">All value tiers</option>
-            <option value="low">Low Value</option>
-            <option value="medium">Medium Value</option>
-            <option value="high">High Value</option>
-          </select>
+          <fieldset class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 2xl:col-span-5">
+            <legend class="px-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Identity signals</legend>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label for="anonymous-id-filter" class="min-w-0 text-[11px] font-semibold text-slate-500">
+                <span class="mb-1.5 block">Anonymous ID</span>
+                <input id="anonymous-id-filter" type="search" name="anonymous_id" maxlength="256" placeholder="Search anonymous ID" autocomplete="off" autocorrect="off" spellcheck="false" class="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 shadow-sm outline-none transition-all placeholder:text-slate-400 hover:bg-slate-50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
+              </label>
 
-          <!-- Lifecycle Filter -->
-          <select id="lifecycle-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[160px]" title="Filter by customer lifecycle stage">
-            <option value="">All lifecycle stages</option>
-            <option value="prospect">Prospect</option>
-            <option value="lead">Lead</option>
-            <option value="customer">Customer</option>
-            <option value="vip">VIP</option>
-            <option value="dormant">Dormant</option>
-            <option value="churn_risk">Churn risk</option>
-          </select>
+              <label for="device-fingerprint-filter" class="min-w-0 text-[11px] font-semibold text-slate-500">
+                <span class="mb-1.5 block">Device fingerprint</span>
+                <input id="device-fingerprint-filter" type="search" name="device_fingerprint" maxlength="256" placeholder="Search fingerprint" autocomplete="off" autocorrect="off" spellcheck="false" class="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 shadow-sm outline-none transition-all placeholder:text-slate-400 hover:bg-slate-50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
+              </label>
+            </div>
+          </fieldset>
 
-          <!-- Churn Risk Filter -->
-          <select id="churn-risk-filter" class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg px-3 py-2.5 text-slate-700 shadow-sm outline-none cursor-pointer min-w-[140px]" title="Filter by churn risk level">
-            <option value="">All churn risks</option>
-            <option value="low">Low Risk</option>
-            <option value="medium">Medium Risk</option>
-            <option value="high">High Risk</option>
-            <option value="critical">Critical Risk</option>
-          </select>
+          <fieldset class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 2xl:col-span-7">
+            <legend class="px-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Customer segmentation</legend>
+            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <label for="lifecycle-filter" class="min-w-0 text-[11px] font-semibold text-slate-500">
+                <span class="mb-1.5 block">Lifecycle</span>
+                <select id="lifecycle-filter" class="w-full min-w-0 cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 shadow-sm outline-none transition-all hover:bg-slate-50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" title="Filter by customer lifecycle stage">
+                  <option value="">All lifecycle stages</option>
+                  <option value="prospect">Prospect</option>
+                  <option value="lead">Lead</option>
+                  <option value="customer">Customer</option>
+                  <option value="vip">VIP</option>
+                  <option value="dormant">Dormant</option>
+                  <option value="churn_risk">Churn risk</option>
+                </select>
+              </label>
 
-          <!-- Linked Raw Profile Count -->
-          <div class="relative flex-grow sm:flex-grow-0">
-            <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
-              </svg>
-            </span>
-            <input 
-              id="linked-raw-profile-count-input" 
-              type="number" 
-              min="0"
-              placeholder="Min linked profiles..." 
-              title="Minimum Linked Raw Profiles"
-              class="text-sm border border-slate-300 bg-white hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-lg pl-9 pr-3 py-2.5 w-full sm:w-48 text-slate-700 placeholder-slate-400 shadow-sm outline-none" 
-            />
-          </div>
+              <label for="tier-filter" class="min-w-0 text-[11px] font-semibold text-slate-500">
+                <span class="mb-1.5 block">Value tier</span>
+                <select id="tier-filter" class="w-full min-w-0 cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 shadow-sm outline-none transition-all hover:bg-slate-50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" title="Filter by customer lifetime value tier">
+                  <option value="">All value tiers</option>
+                  <option value="low">Low Value</option>
+                  <option value="medium">Medium Value</option>
+                  <option value="high">High Value</option>
+                </select>
+              </label>
 
+              <label for="churn-risk-filter" class="min-w-0 text-[11px] font-semibold text-slate-500">
+                <span class="mb-1.5 block">Churn risk</span>
+                <select id="churn-risk-filter" class="w-full min-w-0 cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal text-slate-700 shadow-sm outline-none transition-all hover:bg-slate-50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" title="Filter by churn risk level">
+                  <option value="">All churn risks</option>
+                  <option value="low">Low Risk</option>
+                  <option value="medium">Medium Risk</option>
+                  <option value="high">High Risk</option>
+                  <option value="critical">Critical Risk</option>
+                </select>
+              </label>
+            </div>
+          </fieldset>
         </div>
       </div>
 

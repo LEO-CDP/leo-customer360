@@ -87,6 +87,47 @@ def test_event_service_streams_fallback_timestamps_from_object_partition():
     assert event["payload"]["user_id"] == "User-1"
 
 
+def test_event_service_extracts_nested_profile_and_event_data_from_tracking_envelope():
+    service = EventRecordService("customer360")
+    event = service.normalize_event_record(
+        {
+            "schema_version": 1,
+            "event_id": "11111111-1111-1111-1111-111111111111",
+            "event_time": "2026-09-29T16:47:52.584Z",
+            "event_name": "submit-contact",
+            "identity": {
+                "anonymous_id": "anonymous-1",
+                "session_id": "session-1",
+                "device_fingerprint": "fingerprint-1",
+            },
+            "payload": {
+                "event_name": "submit-contact",
+                "anonymous_id": "anonymous-1",
+                "device_fingerprint": "fingerprint-1",
+                "event_data": {
+                    "form_id": "lottery-alert",
+                    "email": "trieu@leocdp.com",
+                },
+                "profile_data": {
+                    "user_id": "demo-subscriber",
+                    "email": "trieu@leocdp.com",
+                },
+            },
+        },
+        "source-1",
+        "tenant-1",
+    )
+
+    raw_profile = service.extract_raw_profile(event)
+
+    assert event["email"] == "trieu@leocdp.com"
+    assert event["anonymous_id"] == "anonymous-1"
+    assert event["device_fingerprint"] == "fingerprint-1"
+    assert raw_profile["email"] == "trieu@leocdp.com"
+    assert raw_profile["anonymous_id"] == "anonymous-1"
+    assert raw_profile["device_fingerprint"] == "fingerprint-1"
+
+
 def test_validated_event_name_uses_catalog_names():
     catalog = frozenset({"page-view", "purchase"})
     expected = {

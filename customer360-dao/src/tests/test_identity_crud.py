@@ -89,6 +89,24 @@ def test_master_profiles_page_supports_data_source_filter():
     assert "data_source_id" in rendered_sql
 
 
+def test_master_profiles_page_filters_by_tracking_identifiers():
+    session = _Session()
+
+    list_master_profiles_page(
+        session,
+        tenant_id=uuid.uuid4(),
+        anonymous_id="anonymous-123",
+        device_fingerprint="fingerprint-456",
+        page=1,
+        page_size=25,
+    )
+
+    rendered_sql = "\n".join(str(statement) for statement in session.statements)
+    assert "cdp_raw_profiles_stage.anonymous_id" in rendered_sql
+    assert "cdp_raw_profiles_stage.device_fingerprint" in rendered_sql
+    assert rendered_sql.count("cdp_profile_links.status") >= 2
+
+
 def test_identity_repository_upserts_raw_profile_with_tenant_scope():
     tenant_id = uuid.uuid4()
     raw_profile_id = uuid.uuid4()
@@ -121,6 +139,9 @@ def test_identity_repository_upserts_raw_profile_with_tenant_scope():
     assert "ON CONFLICT" in rendered_statement
     assert "status_code" in rendered_statement
     assert "data_source_analytics" in rendered_statement
+    lowered_statement = rendered_statement.lower()
+    for field in ("full_name", "email", "phone_number"):
+        assert f"coalesce(excluded.{field}" in lowered_statement
 
 
 def test_identity_repository_rejects_a_cross_tenant_raw_profile():

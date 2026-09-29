@@ -142,6 +142,8 @@ window.C360 = window.C360 || {};
     });
     dtv.bindSelect("#domain-filter", "domain");
     dtv.bindSelect("#data-source-filter", "data_source_id");
+    dtv.bindSearch("#anonymous-id-filter", "anonymous_id", 350);
+    dtv.bindSearch("#device-fingerprint-filter", "device_fingerprint", 350);
     dtv.bindSelect("#lifecycle-filter", "lifecycle_stage");
     dtv.bindSelect("#tier-filter", "clv_segment");
     dtv.bindSelect("#churn-risk-filter", "churn_risk_tier");

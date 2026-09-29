@@ -93,6 +93,8 @@ RAW_PROFILE_COLUMNS = (
     "advertising_id",
     "cookie_id",
     "external_customer_id",
+    "anonymous_id",
+    "device_fingerprint",
     "push_token",
 )
 

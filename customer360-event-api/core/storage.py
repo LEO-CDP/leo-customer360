@@ -365,6 +365,7 @@ def _identity(event: dict[str, Any]) -> dict[str, str | None]:
         "session_id": _string_value(event.get("session_id")),
         "device_id": _string_value(event.get("device_id")),
         "anonymous_id": _string_value(event.get("anonymous_id")),
+        "device_fingerprint": _string_value(event.get("device_fingerprint")),
         "external_customer_id": _string_value(event.get("external_customer_id")),
         "advertising_id": _string_value(event.get("advertising_id")),
         "cookie_id": _string_value(event.get("cookie_id")),
