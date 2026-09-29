@@ -8,6 +8,7 @@ section of core-customer360/identity-resolution.md.
 """
 
 import uuid
+from datetime import date, timedelta
 from math import ceil
 from typing import Optional
 from leo_customer360_dao.utils.datetime import cutoff_for_days
@@ -47,6 +48,8 @@ def list_master_profiles_page(
     linked_raw_profile_count_min: Optional[int] = None,
     q: Optional[str] = None,
     days: Optional[int] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
     page: int = 1,
     page_size: int = 100,
 ) -> dict:
@@ -107,6 +110,18 @@ def list_master_profiles_page(
     cutoff = cutoff_for_days(days)
     if cutoff is not None:
         where_clauses.append(CdpMasterProfile.created_at >= cutoff)
+
+    if from_date is not None or to_date is not None:
+        range_start = from_date or date.min
+        range_end = (to_date + timedelta(days=1)) if to_date is not None else date.max
+        where_clauses.append(
+            or_(
+                (CdpMasterProfile.last_activity_at >= range_start)
+                & (CdpMasterProfile.last_activity_at < range_end),
+                (CdpMasterProfile.updated_at >= range_start)
+                & (CdpMasterProfile.updated_at < range_end),
+            )
+        )
 
     if q:
         pattern = f"%{q}%"

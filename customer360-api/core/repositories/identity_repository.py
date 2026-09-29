@@ -1,5 +1,6 @@
 """API-layer facade for identity/profile and profile-event operations."""
 
+import uuid
 from typing import Any
 
 from sqlalchemy import select
@@ -11,7 +12,7 @@ from leo_customer360_dao.models.identity import (
     CdpCustomerPersona, CdpDomainProfile, CdpIdResolutionStatus, CdpMasterProfile,
     CdpPersonaHistory, CdpProfileLink, CdpProfileMergeHistory, CdpRawProfileStage,
 )
-from leo_customer360_dao.models.system import SysDomain
+from leo_customer360_dao.models.system import SysDataSource, SysDomain
 
 
 class IdentityRepository:
@@ -46,7 +47,48 @@ class IdentityRepository:
 
     def get_master_profile(self, master_profile_id):
         """Load one master profile by identifier."""
-        return self.master_crud.get(self.session, master_profile_id)
+        profile = self.master_crud.get(self.session, master_profile_id)
+        if profile is not None and hasattr(profile, "__dict__"):
+            setattr(profile, "data_source_analytics_details", self.get_data_source_analytics_details(profile))
+        return profile
+
+    def get_data_source_analytics_details(self, profile):
+        """Flatten source-keyed profile analytics and resolve source names.
+
+        The stored JSONB remains untouched. Unknown or legacy source keys are
+        retained with a fallback label instead of being silently discarded.
+        """
+        analytics = getattr(profile, "data_source_analytics", None)
+        if not isinstance(analytics, dict) or not analytics:
+            return []
+
+        source_ids = {}
+        for source_id in analytics:
+            try:
+                source_ids[str(source_id)] = uuid.UUID(str(source_id))
+            except (ValueError, TypeError, AttributeError):
+                continue
+
+        source_names = {}
+        if source_ids:
+            rows = self.session.execute(
+                select(SysDataSource.data_source_id, SysDataSource.name).where(
+                    SysDataSource.tenant_id == profile.tenant_id,
+                    SysDataSource.data_source_id.in_(source_ids.values()),
+                )
+            ).all()
+            source_names = {str(source_id): name for source_id, name in rows}
+
+        details = []
+        for source_id, metrics in analytics.items():
+            if not isinstance(metrics, dict):
+                continue
+            source_id_text = str(source_id)
+            detail = dict(metrics)
+            detail["data_source_id"] = source_id_text
+            detail["data_source_name"] = source_names.get(source_id_text, "Unknown data source")
+            details.append(detail)
+        return details
 
     def list_master_profile_links(self, master_profile_id, limit):
         """Load recent raw-profile links for a master profile."""
@@ -100,13 +142,17 @@ class IdentityRepository:
         statement = select(CdpPersonaHistory).join(CdpCustomerPersona, CdpPersonaHistory.persona_id == CdpCustomerPersona.persona_id).where(CdpCustomerPersona.master_profile_id == master_profile_id).order_by(CdpPersonaHistory.changed_at.desc()).limit(limit)
         return self.session.execute(statement).scalars().all()
 
-    def get_engagement_summary(self, master_profile_id, days):
+    def get_engagement_summary(self, master_profile_id, days, tenant_id=None):
         """Return the profile360 engagement summary."""
-        return self.profile360_crud.get_engagement_summary(self.session, master_profile_id, days=days)
+        return self.profile360_crud.get_engagement_summary(
+            self.session, master_profile_id, days=days, tenant_id=tenant_id
+        )
 
-    def get_channel_activity(self, master_profile_id, days):
+    def get_channel_activity(self, master_profile_id, days, tenant_id=None):
         """Return the profile360 channel activity summary."""
-        return self.profile360_crud.get_channel_activity(self.session, master_profile_id, days=days)
+        return self.profile360_crud.get_channel_activity(
+            self.session, master_profile_id, days=days, tenant_id=tenant_id
+        )
 
     def get_top_interests(self, master_profile_id, limit):
         """Return the profile360 top interests."""

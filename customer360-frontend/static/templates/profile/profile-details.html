@@ -21,10 +21,11 @@
     <!-- CENTER COLUMN: Overview, Segments, Engagement, Activity & Timeline -->
     <div class="lg:col-span-6 space-y-6">
       {{> overview}}     
+      {{> data_source_analytics}}
       {{> segments}}
       {{> engagement}}
       {{> activity}}
-       {{> domain-attributes}}
+      {{> domain-attributes}}
       {{> [linked-raw-profiles]}}
       {{> timeline}}
     </div>
@@ -36,5 +37,35 @@
       {{> [personalized-items]}}
     </div>
 
+  </div>
+</div>
+
+<div id="master-profile-edit-modal" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/40 px-4 py-8" role="dialog" aria-modal="true" aria-labelledby="master-profile-edit-title">
+  <div class="mx-auto max-w-2xl rounded-2xl bg-white shadow-2xl">
+    <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+      <div>
+        <h2 id="master-profile-edit-title" class="text-lg font-semibold text-slate-900">Edit Personal Information</h2>
+        <p class="mt-1 text-xs text-slate-500">Update the customer identity shown across Customer 360.</p>
+      </div>
+      <button type="button" class="btn-close-master-profile-edit rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Close edit profile">&times;</button>
+    </div>
+    <form id="master-profile-edit-form" class="grid grid-cols-1 gap-4 px-6 py-5 sm:grid-cols-2">
+      <label class="text-sm font-medium text-slate-700">Full name<input name="full_name" type="text" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
+      <label class="text-sm font-medium text-slate-700">First name<input name="first_name" type="text" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
+      <label class="text-sm font-medium text-slate-700">Last name<input name="last_name" type="text" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
+      <label class="text-sm font-medium text-slate-700">Email<input name="email" type="email" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
+      <label class="text-sm font-medium text-slate-700">Phone<input name="phone_number" type="tel" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
+      <label class="text-sm font-medium text-slate-700">Date of birth<input name="date_of_birth" type="date" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
+      <label class="text-sm font-medium text-slate-700">Gender<input name="gender" type="text" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
+      <label class="text-sm font-medium text-slate-700">Company<input name="company_name" type="text" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
+      <label class="text-sm font-medium text-slate-700 sm:col-span-2">Address<input name="address" type="text" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
+      <label class="text-sm font-medium text-slate-700">Lifecycle stage<select name="lifecycle_stage" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="">Not set</option><option value="prospect">Prospect</option><option value="lead">Lead</option><option value="customer">Customer</option><option value="vip">VIP</option><option value="dormant">Dormant</option><option value="churn_risk">Churn risk</option></select></label>
+      <label class="text-sm font-medium text-slate-700">Preferred channel<input name="preferred_channel" type="text" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
+      <div id="master-profile-edit-error" class="hidden sm:col-span-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></div>
+      <div class="flex justify-end gap-2 border-t border-slate-100 pt-4 sm:col-span-2">
+        <button type="button" class="btn-close-master-profile-edit rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+        <button type="submit" class="btn-save-master-profile rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Save changes</button>
+      </div>
+    </form>
   </div>
 </div>

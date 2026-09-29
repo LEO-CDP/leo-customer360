@@ -40,6 +40,7 @@ window.C360 = window.C360 || {};
     "segments": "profile/segments",
     "engagement": "profile/engagement",
     "activity": "profile/activity",
+    "data_source_analytics": "profile/data_source_analytics",
     "timeline": "profile/timeline",
     "scoring": "profile/profile-scoring",
     "persona": "profile/persona",
@@ -68,7 +69,7 @@ window.C360 = window.C360 || {};
   // Registered as Handlebars partials so profile/profile-details.html can do {{> name}}.
   var PARTIALS = [
     "identity", "channels", "overview", "domain-attributes", "segments",
-    "engagement", "activity", "timeline", "scoring", "persona", "linked-raw-profiles", "personalized-items"
+    "engagement", "activity", "data_source_analytics", "timeline", "scoring", "persona", "linked-raw-profiles", "personalized-items"
   ];
 
   var ALL_NAMES = STANDALONE.concat(STATIC_HTML, PARTIALS);

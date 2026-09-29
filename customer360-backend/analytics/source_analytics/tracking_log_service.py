@@ -103,8 +103,11 @@ class TrackingLogAggregationService:
     ) -> dict[str, int]:
         if self.db_connection is not None:
             source_items = self.source_loader(self.db_connection, data_source_limit)
+            if not source_items:
+                return AnalyticsMetrics.empty_summary()
+            event_catalog = self._load_event_catalog()
             source_results = [
-                self._process_source(data_source_id, tenant_id, global_lease)
+                self._process_source(data_source_id, tenant_id, global_lease, event_catalog)
                 for data_source_id, tenant_id in source_items
             ]
             return AnalyticsMetrics.aggregate_source_results(source_results)
@@ -115,6 +118,9 @@ class TrackingLogAggregationService:
         finally:
             seed_connection.close()
 
+        if not source_items:
+            return AnalyticsMetrics.empty_summary()
+        event_catalog = self._load_event_catalog()
         source_results: list[dict[str, Any]] = []
         for source_batch_start in range(0, len(source_items), self.settings.source_batch_size):
             source_batch = source_items[
@@ -128,6 +134,7 @@ class TrackingLogAggregationService:
                         data_source_id,
                         tenant_id,
                         global_lease,
+                        event_catalog,
                     ): (data_source_id, tenant_id)
                     for data_source_id, tenant_id in source_batch
                 }
@@ -137,11 +144,27 @@ class TrackingLogAggregationService:
                 global_lease.refresh()
         return AnalyticsMetrics.aggregate_source_results(source_results)
 
+    def _load_event_catalog(self) -> frozenset[str]:
+        """Read the governed event catalog from Redis or PostgreSQL."""
+        cached = self.state.get_event_catalog()
+        if cached is not None:
+            return cached
+        connection = self.db_connection or self.database_connector()
+        owns_connection = connection is not self.db_connection
+        try:
+            catalog = self.database.fetch_event_catalog(connection)
+            self.state.cache_event_catalog(catalog)
+            return catalog
+        finally:
+            if owns_connection:
+                connection.close()
+
     def _process_source(
         self,
         data_source_id: str,
         tenant_id: str,
         global_lease: Optional[Any],
+        event_catalog: frozenset[str],
     ) -> dict[str, Any]:
         lock_token = self.state.acquire_source_lock(data_source_id, self.run_id)
         if lock_token is None:
@@ -197,6 +220,7 @@ class TrackingLogAggregationService:
                     object_key,
                     data_source_id,
                     tenant_id,
+                    event_catalog,
                 )
                 dao_session.commit()
                 if self.state.increment_hourly_count(
@@ -295,6 +319,7 @@ class TrackingLogAggregationService:
         object_key: str,
         data_source_id: str,
         tenant_id: str,
+        event_catalog: frozenset[str],
     ) -> tuple[int, set[str]]:
         response = self.storage.get_object(bucket, object_key)
         body = response["Body"]
@@ -314,14 +339,13 @@ class TrackingLogAggregationService:
                 if signature:
                     signatures.add(signature)
                 raw_profile = self.events.extract_raw_profile(normalized_event)
-                page_view, click = self.events.analytics_event_flags(normalized_event)
+                event_name = self.events.validated_event_name(normalized_event, event_catalog)
                 raw_profile["data_source_analytics"] = {
                     str(data_source_id): self.state.record_profile_event_analytics(
                         data_source_id,
                         raw_profile["raw_profile_id"],
                         normalized_event["event_id"],
-                        page_view=page_view,
-                        click=click,
+                        event_name=event_name,
                     )
                 }
                 raw_profile_repository.upsert_raw_profile(raw_profile)

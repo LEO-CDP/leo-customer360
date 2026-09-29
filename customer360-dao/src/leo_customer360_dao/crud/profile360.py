@@ -16,7 +16,9 @@ from leo_customer360_dao.config import settings
 from leo_customer360_dao.models.identity import CdpMasterProfile
 from leo_customer360_dao.models.system import SysDataSource
 from leo_customer360_dao.repositories.event_query_repository import EventDataSourceError
-from leo_customer360_dao.repositories.event_query_repository import EventQueryRepository
+from leo_customer360_dao.repositories.master_profile_event_repository import (
+    MasterProfileEventStore,
+)
 from leo_customer360_dao.repositories.master_profile_event_repository import (
     MasterProfileEventStore,
 )
@@ -65,22 +67,25 @@ def _profile_event_rows(
     *,
     days: int,
     limit: int | None,
+    tenant_id: Optional[uuid.UUID] = None,
     data_source_id: Optional[uuid.UUID] = None,
 ) -> list[dict]:
-    tenant_id = db.execute(
-        select(CdpMasterProfile.tenant_id).where(
-            CdpMasterProfile.master_profile_id == master_profile_id
-        )
-    ).scalar_one_or_none()
+    if tenant_id is None:
+        tenant_id = db.execute(
+            select(CdpMasterProfile.tenant_id).where(
+                CdpMasterProfile.master_profile_id == master_profile_id
+            )
+        ).scalar_one_or_none()
     if tenant_id is None:
         return []
-    return EventQueryRepository(settings).query(
-        db,
+    now = datetime.now(timezone.utc)
+    return MasterProfileEventStore(settings).query(
         tenant_id,
-        days=days,
-        limit=limit,
-        master_profile_id=master_profile_id,
+        master_profile_id,
+        from_event_time=now - timedelta(days=days),
+        to_event_time=now,
         data_source_id=data_source_id,
+        limit=limit,
     )
 
 
@@ -121,10 +126,15 @@ def _safe_timeline_event_data(value: object) -> Optional[dict[str, object]]:
 
 
 def get_engagement_summary(
-    db: Session, master_profile_id: uuid.UUID, days: int = 90
+    db: Session,
+    master_profile_id: uuid.UUID,
+    days: int = 90,
+    tenant_id: Optional[uuid.UUID] = None,
 ) -> dict:
     since = _window_start(days)
-    events = _profile_event_rows(db, master_profile_id, days=days, limit=None)
+    events = _profile_event_rows(
+        db, master_profile_id, days=days, limit=None, tenant_id=tenant_id
+    )
     logins = sum(
         1
         for event in events
@@ -134,10 +144,14 @@ def get_engagement_summary(
 
     txn_row = db.execute(
         text(
-            f"SELECT COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total, "
-            f"AVG(amount) AS avg_amount, MAX(currency) AS currency "
+            f"SELECT "
+            f"COUNT(*) FILTER (WHERE transaction_time >= :since) AS cnt, "
+            f"COALESCE(SUM(amount) FILTER (WHERE transaction_time >= :since), 0) AS total, "
+            f"AVG(amount) FILTER (WHERE transaction_time >= :since) AS avg_amount, "
+            f"MAX(currency) FILTER (WHERE transaction_time >= :since) AS currency, "
+            f"MAX(transaction_time) AS latest_transaction_time "
             f"FROM {_SCHEMA}.crm_transactions "
-            f"WHERE master_profile_id = :mpid AND transaction_time >= :since"
+            f"WHERE master_profile_id = :mpid"
         ),
         {"mpid": str(master_profile_id), "since": since},
     ).mappings().first()
@@ -147,13 +161,7 @@ def get_engagement_summary(
         for event in events
         if (event_time := _as_datetime(event.get("event_time"))) is not None
     ]
-    transaction_time = db.execute(
-        text(
-            f"SELECT MAX(transaction_time) FROM {_SCHEMA}.crm_transactions "
-            "WHERE master_profile_id = :mpid"
-        ),
-        {"mpid": str(master_profile_id)},
-    ).scalar_one()
+    transaction_time = txn_row["latest_transaction_time"]
     contact_time = db.execute(
         text(
             f"SELECT MAX(contact_date) FROM {_SCHEMA}.crm_customer_contacts "
@@ -182,9 +190,16 @@ def get_engagement_summary(
     }
 
 
-def get_channel_activity(db: Session, master_profile_id: uuid.UUID, days: int = 90) -> dict:
+def get_channel_activity(
+    db: Session,
+    master_profile_id: uuid.UUID,
+    days: int = 90,
+    tenant_id: Optional[uuid.UUID] = None,
+) -> dict:
     since = _window_start(days)
-    events = _profile_event_rows(db, master_profile_id, days=days, limit=None)
+    events = _profile_event_rows(
+        db, master_profile_id, days=days, limit=None, tenant_id=tenant_id
+    )
     recent_events = [
         event
         for event in events
@@ -193,28 +208,23 @@ def get_channel_activity(db: Session, master_profile_id: uuid.UUID, days: int = 
     app_sessions = sum(1 for event in recent_events if event.get("channel") == "mobile_app")
     web_sessions = sum(1 for event in recent_events if event.get("channel") == "web")
 
-    customer_service_contacts = db.execute(
+    activity_row = db.execute(
         text(
-            f"SELECT COUNT(*) FROM {_SCHEMA}.crm_customer_contacts "
-            f"WHERE master_profile_id = :mpid AND contact_date >= :since"
+            f"SELECT "
+            f"(SELECT COUNT(*) FROM {_SCHEMA}.crm_customer_contacts "
+            f"WHERE master_profile_id = :mpid AND contact_date >= :since) AS contacts, "
+            f"(SELECT COUNT(*) FROM {_SCHEMA}.crm_transactions "
+            f"WHERE master_profile_id = :mpid AND transaction_time >= :since) AS transactions"
         ),
         {"mpid": str(master_profile_id), "since": since},
-    ).scalar_one()
-
-    transactions = db.execute(
-        text(
-            f"SELECT COUNT(*) FROM {_SCHEMA}.crm_transactions "
-            f"WHERE master_profile_id = :mpid AND transaction_time >= :since"
-        ),
-        {"mpid": str(master_profile_id), "since": since},
-    ).scalar_one()
+    ).mappings().first()
 
     return {
         "period_days": days,
         "app_sessions": app_sessions,
         "web_sessions": web_sessions,
-        "customer_service_contacts": customer_service_contacts,
-        "transactions": transactions,
+        "customer_service_contacts": activity_row["contacts"],
+        "transactions": activity_row["transactions"],
     }
 
 

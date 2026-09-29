@@ -1,6 +1,7 @@
 """Unit tests for identity CRUD query filtering and raw-profile writes."""
 
 import uuid
+from datetime import date
 
 from leo_customer360_dao.crud.identity import list_master_profiles_page
 from leo_customer360_dao.repositories.identity_repository import IdentityRepository
@@ -51,6 +52,23 @@ def test_master_profiles_page_defaults_to_last_activity_then_updated_time():
     assert "updated_at DESC NULLS LAST" in rendered_sql
     assert "created_at DESC" in rendered_sql
     assert "master_profile_id ASC" in rendered_sql
+
+
+def test_master_profiles_page_filters_last_activity_or_updated_date_range():
+    session = _Session()
+
+    list_master_profiles_page(
+        session,
+        from_date=date(2026, 9, 1),
+        to_date=date(2026, 9, 29),
+        page=1,
+        page_size=25,
+    )
+
+    rendered_sql = "\n".join(str(statement) for statement in session.statements)
+    assert "last_activity_at" in rendered_sql
+    assert "updated_at" in rendered_sql
+    assert rendered_sql.count("2026-09") == 0
 
 
 def test_master_profiles_page_supports_data_source_filter():
