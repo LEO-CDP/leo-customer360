@@ -47,7 +47,7 @@ DAG_UP="$(tfval dagster_upstream "$ovl")";   DAG_UP="${DAG_UP:-10.100.1.4:3000}"
 NET_UP="$(tfval netdata_upstream "$ovl")";   NET_UP="${NET_UP:-127.0.0.1:4199}"
 PORT_UP="$(tfval portainer_upstream "$ovl")";PORT_UP="${PORT_UP:-127.0.0.1:9443}"
 JAE_UP="$(tfval jaeger_upstream "$ovl")";     JAE_UP="${JAE_UP:-127.0.0.1:4686}"   # -> oauth2-jaeger (SSO) -> Jaeger
-DATA_UP="$(tfval data_upstream "$ovl")";      DATA_UP="${DATA_UP:-10.100.1.8:8010}" # -> customer360-event-api (/data); may be SEVERAL space-separated upstreams
+DATA_UP="$(tfval data_upstream "$ovl")" # -> customer360-event-api (/data); may be SEVERAL space-separated upstreams
 # Load-balancing policy across DATA_UP. Caddy REJECTS the config if a weight count does
 # not match the upstream count, so overlays state it explicitly rather than guessing.
 DATA_LB="$(tfval data_lb_policy "$ovl")"; DATA_LB="${DATA_LB:-random}"
@@ -58,6 +58,9 @@ SDK_FRAME_ANCESTOR="$(tfval sdk_frame_ancestor "$ovl")"
 : "${DOMAIN:?set caddy_domain in $ovl (e.g. cdp.example.com)}"
 : "${EMAIL:?set acme_email in $ovl (Let’s Encrypt account email)}"
 : "${SDK_FRAME_ANCESTOR:?set sdk_frame_ancestor in $ovl (e.g. https://beta.leocdp.com for UAT)}"
+# No default: it used to fall back to the tracking vServer, which no longer exists — a stale
+# default silently routes /data at a dead address instead of failing.
+: "${DATA_UP:?set data_upstream in $ovl (the event-api Service EXTERNAL-IP, e.g. 1.2.3.4:8010)}"
 
 # --- discover the target VM's floating IP from ../server outputs (by for_each key) ---
 SERVERS_JSON="$( (cd ../server && terraform workspace select "$ENV" >/dev/null 2>&1 && terraform output -json servers 2>/dev/null) || true )"

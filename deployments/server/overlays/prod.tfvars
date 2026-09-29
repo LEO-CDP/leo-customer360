@@ -40,14 +40,14 @@ servers = {
   "agent" = {
     # customer360-agent (AI Agent service, FastAPI :8009 -> LiteLLM). Dedicated box.
     # Requested 1 vCPU / 2 GB, but prod is the gen-2 (s2-general) family whose SMALLEST
-    # tier is 2x4 — there is no 1x2 in gen-2 (same constraint as docs/tracking). Deployed
+    # tier is 2x4 — there is no 1x2 in gen-2 (same constraint as the docs box). Deployed
     # by deployments/agent/deploy-agent.sh.
     flavor_name    = "s2-general-2x4" # 2 vCPU / 4 GB (smallest gen-2 tier)
     root_disk_size = 50
     name           = "agent" # -> c360-api-prod-agent
   }
   # customer360-event-api does NOT get a prod box: it runs on the GreenNode VKS cluster as an
-  # autoscaling Deployment (3 pods), deployed by deployments/server/deploy-event-api.sh.
+  # KEDA-autoscaled Deployment (prod profile 3-20 pods), deployed by deployments/server/deploy-event-api.sh.
   # After that deploy: set proxy/overlays/prod.tfvars data_upstream to the Service
   # LoadBalancer EXTERNAL-IP, and open 6580 (api-box Redis) + 4318 (Jaeger OTLP) on the
   # secgroup to the VKS worker-node CIDR — see the extra_ingress note in uat.tfvars.

@@ -23,27 +23,17 @@ portainer_upstream = "127.0.0.1:9443"  # Portainer HTTPS (only if you enable /po
 # Jaeger trace UI served under /jaeger on :443 (TLS) via its oauth2-proxy SSO gate.
 jaeger_upstream = "127.0.0.1:4686"
 
-# customer360-event-api served under /data — currently a 50/50 CANARY across both homes:
-#   10.100.1.8:8010    the old tracking vServer (still running; the rollback target)
-#   49.213.73.13:8010  the VKS `event-api` Service (type LoadBalancer)
+# customer360-event-api served under /data, on the VKS cluster.
+#   49.213.73.13:8010  the `event-api` Service (type LoadBalancer)
 #
-# Splitting is safe for this workload specifically. Beacons are independent POSTs with no
-# session state, both homes publish to the SAME Redis stream and the same vStorage buckets,
-# and the Bronze object key is a uuid5 over the event ids — so concurrent writers cannot
-# collide and a retry re-writes identical bytes to an identical key.
+# The old tracking vServer (10.100.1.8) was destroyed on 2026-09-29 after the canary reached
+# 100% here, so it is no longer listed — a dead address left in this file reads like a
+# rollback target that does not exist. Re-introducing a canary means adding a second address
+# back and setting data_lb_policy to "weighted_round_robin <a> <b>" (order matches).
 #
-# To shift the split, change the weights (order matches the upstream order above):
-#   "weighted_round_robin 9 1"  -> 10% to VKS
-#   "weighted_round_robin 5 5"  -> 50/50
-#   "weighted_round_robin 0 10" -> all VKS  (now)
-# Caddy rejects the config if the weight count does not match the upstream count.
-#
-# The old box stays LISTED at weight 0 rather than being removed from data_upstream:
-# a 0-weight upstream is never selected (verified with `caddy validate`), so it takes no
-# traffic, but rolling back is then a one-value edit instead of re-adding an address.
-# Drop it from data_upstream only when the vServer itself is destroyed.
-data_upstream  = "10.100.1.8:8010 49.213.73.13:8010"
-data_lb_policy = "weighted_round_robin 0 10"
+#   kubectl -n customer360 get svc event-api     # if the EXTERNAL-IP ever changes
+data_upstream  = "49.213.73.13:8010"
+data_lb_policy = "random"
 
 # docs-vector-search served under /docs-ai (the public docs site's chatbot calls it cross-origin).
 # On its OWN box (server key "docs"), so a PRIVATE cross-box ip. Reachable from the api box (Caddy)
