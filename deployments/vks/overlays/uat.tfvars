@@ -14,15 +14,19 @@ project_id = "pro-8986f5c6-02ca-4647-be9a-4070bb100559"
 
 node_group_name = "c360-uat-nodes"
 
-# ONE node, deliberately. Measured on this cluster: a node reserves ~1.3 GiB for the
-# kubelet whatever its size (4 GiB capacity -> 2590 MiB allocatable), and the cluster's
-# own system pods request ~1628 MiB of that. A second node buys redundancy but the
-# workload is 1-3 small pods, so this trades node HA for cost — accepted for UAT only.
-# PROD keeps multiple nodes.
+# TWO nodes. Scaling OUT rather than up is deliberate:
+#   * `num_nodes` is an in-place update; `flavor_id` is ForceNew, so scaling UP destroys and
+#     recreates the node group — every pod dies. Verified with `terraform plan`.
+#   * One node has no redundancy: a node failure or a drain during a cluster upgrade takes
+#     ingest down, and dropped beacons are gone (unlike queue-backed work that replays).
+#     At one node the PodDisruptionBudget and topology-spread constraint are decorative.
+#   * UAT then exercises the same multi-node topology as prod.
 #
-# Leaves ~960 MiB free. That covers event-api (1-3 x 128Mi) + Prometheus + KEDA, but it
-# IS tight at 3 pods: if pods start going Pending, add a node before anything else.
-num_nodes = 1
+# The cost is real: two small nodes pay the fixed overhead TWICE — ~1.3 GiB of kubelet
+# reservation and ~0.5 GiB of DaemonSets (cilium, envoy, csi-node) per node. One 4x8 node
+# would give more usable memory than two 2x4s. Availability won that trade; revisit if the
+# bill matters more than a node failure.
+num_nodes = 2
 disk_size = 40
 
 # Public workers: the pods must pull from ghcr.io and write to vStorage. Only set this

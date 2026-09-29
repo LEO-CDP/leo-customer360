@@ -82,9 +82,17 @@ That reservation is roughly **fixed**, so it does not shrink with the node — w
 1 CPU / 2 GB node is unusable here: ~630 MiB allocatable against system pods that want
 ~1628 MiB. The smallest node that works is 2 CPU / 4 GB.
 
-UAT runs `num_nodes = 1`: the workload is 1-3 small pods, so it trades node redundancy for
-cost. A node failure takes ingest down, and the PodDisruptionBudget and topology-spread
-constraint stop meaning anything at one node. PROD should keep at least 2.
+**Scale OUT, not up.** `num_nodes` is an in-place update; `flavor_id` is **ForceNew**, so
+moving to a bigger node destroys and recreates the node group and every pod with it. If you
+ever want a larger flavor, change it while the cluster is idle — afterwards it costs a
+maintenance window.
+
+The trade is not free: two nodes pay the fixed overhead twice — ~1324 MiB of kubelet
+reservation and ~496 MiB of DaemonSets (cilium, cilium-envoy, csi-node) **per node**. One
+`s-general-4x8` yields more usable memory than two `s-general-2x4`. Redundancy won that
+argument here: a node failure or an upgrade drain takes ingest down, and dropped beacons are
+gone — unlike queue-backed work, they do not replay. At one node the PodDisruptionBudget and
+topology-spread constraint are decorative.
 
 **Raise the node count before raising `maxReplicaCount`** in
 `../server/customer360-event-api/overlays/<env>/`. Otherwise the autoscaler scales into pods
