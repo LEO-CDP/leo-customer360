@@ -3,6 +3,8 @@
 import base64
 import gzip
 import json
+import os
+import socket
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -142,3 +144,65 @@ def test_redis_stream_publish_reports_broker_failure():
             [{"event": "page_view", "user_id": "user-1"}],
             datetime(2026, 9, 10, 8, 33, tzinfo=timezone.utc),
         )
+
+class IdleRedisStream(FakeRedisStream):
+    """Broker that keeps the worker thread looping without any work to do."""
+
+    def xgroup_create(self, *_args, **_kwargs):
+        return True
+
+    def xreadgroup(self, *_args, **_kwargs):
+        return []
+
+    def xautoclaim(self, *_args, **_kwargs):
+        return ("0-0", [])
+
+
+def _worker(**kwargs):
+    return RedisStreamTrackingStorage(
+        storage=FakeS3Storage(),
+        redis_client=IdleRedisStream(),
+        stream_name="tracking-events",
+        consumer_group="s3-writers",
+        max_stream_length=1000,
+        flush_batch_size=10,
+        block_ms=1,
+        claim_idle_ms=60000,
+        retry_seconds=0.1,
+        **kwargs,
+    )
+
+
+def test_consumer_name_identifies_the_pod_not_the_object():
+    """Replicas must be told apart by hostname+pid, never by id(self).
+
+    Identical containers allocate objects at the same address, so an id(self)
+    based name collides across pods and they claim each other's pending
+    messages. Two instances in ONE process therefore share a name (same pod),
+    while a different hostname must produce a different one.
+    """
+    first, second = _worker(), _worker()
+    try:
+        assert first.consumer_name == second.consumer_name
+        assert socket.gethostname() in first.consumer_name
+        assert str(os.getpid()) in first.consumer_name
+    finally:
+        first.close()
+        second.close()
+
+
+def test_consumer_name_changes_with_the_pod_hostname(monkeypatch):
+    monkeypatch.setattr(socket, "gethostname", lambda: "event-api-abc123")
+    worker = _worker()
+    try:
+        assert "event-api-abc123" in worker.consumer_name
+    finally:
+        worker.close()
+
+
+def test_explicit_consumer_name_is_respected():
+    worker = _worker(consumer_name="pinned-worker")
+    try:
+        assert worker.consumer_name == "pinned-worker"
+    finally:
+        worker.close()

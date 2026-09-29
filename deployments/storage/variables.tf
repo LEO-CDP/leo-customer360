@@ -71,7 +71,7 @@ variable "master_profile_s3_bucket" {
 variable "s3_auto_create_buckets" {
   type        = bool
   default     = true
-  description = "Allow the API, backend, and tracking deployment scripts to create missing S3 buckets."
+  description = "Allow the API and backend deployment scripts to create missing S3 buckets."
 }
 
 variable "enable_versioning" {

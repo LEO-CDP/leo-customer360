@@ -1,0 +1,35 @@
+# Portainer agent — lets the Portainer CE you already run on the api box manage this
+# cluster, so the VKS workloads appear in the SAME web UI as the vServers, behind the
+# admin username/password you already have (monitoring sets portainer_sso = false).
+#
+# This is the pattern ../../../monitoring/overlays/uat.tfvars already describes for the
+# other boxes ("run portainer/agent there and register it as an environment — no second
+# Portainer"); the Kubernetes agent is the same idea with a k8s-shaped manifest.
+#
+# CLUSTER-WIDE: apply ONCE with an admin kubeconfig.
+#   kubectl --kubeconfig ../../../kubeconfig-vks-uat.yaml apply -k .
+#
+# Then in Portainer: Environments -> Add environment -> Kubernetes -> Agent, and point it at
+#   10.100.1.11:30778        (the node's private IP — same 10.100.1.0/24 subnet as the api box)
+#
+# SECURITY, read before applying: the upstream manifest binds the agent's ServiceAccount to
+# cluster-admin. That is what makes Portainer able to MANAGE the cluster rather than just
+# view it — but it means anyone who can log into Portainer can do anything here. That is a
+# real widening compared with the read-only Dashboard viewer. Keep the Portainer admin
+# password strong, and prefer this only if you actually want to act from the UI.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - https://downloads.portainer.io/ce-lts/portainer-agent-k8s-nodeport.yaml
+
+patches:
+  # Upstream declares no requests, making the pod BestEffort — first evicted when the node
+  # is under memory pressure. This node is ~93% committed, so be explicit and modest.
+  - target: { kind: Deployment, name: portainer-agent, namespace: portainer }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: 25m, memory: 64Mi }
+          limits: { cpu: 200m, memory: 128Mi }

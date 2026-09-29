@@ -1,0 +1,29 @@
+# PROD scaling profile for customer360-event-api.
+# Same floor as UAT (3 pods = the HA minimum), but a higher ceiling and a higher
+# per-pod request budget, since prod boxes are the gen-2 family and beacon traffic
+# is heavier. deploy-event-api.sh layers the image + rendered config on top.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  # 3 pods floor, 20 ceiling, scale out past ~100 ingest req/sec per pod.
+  - target: { kind: ScaledObject, name: event-api }
+    patch: |-
+      - { op: replace, path: /spec/minReplicaCount, value: 3 }
+      - { op: replace, path: /spec/maxReplicaCount, value: 20 }
+      - { op: replace, path: /spec/triggers/0/metadata/threshold, value: "100" }
+      # trigger 2 = redis-streams backlog (0 = prometheus RPS, 1 = cpu)
+      - { op: replace, path: /spec/triggers/2/metadata/lagCount, value: "1000" }
+      - { op: replace, path: /spec/triggers/2/metadata/activationLagCount, value: "100" }
+
+  # Prod pods get more headroom than the UAT default.
+  - target: { kind: Deployment, name: event-api }
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: 200m, memory: 256Mi }
+          limits: { cpu: "2", memory: 1Gi }

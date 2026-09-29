@@ -1,0 +1,5 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is git-ignored.
+# SECRETS ONLY — non-secret, per-env config lives in overlays/<env>.tfvars.
+# These are the SAME vIAM service-account credentials as ../server/terraform.tfvars.
+client_id     = "your-client-id"
+client_secret = "your-client-secret"

@@ -22,13 +22,7 @@ esac
 
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
-tfval() {
-  local line; line="$(grep -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null | head -1)"
-  case "$line" in
-    *\"*\"*) line="${line#*\"}"; printf '%s' "${line%%\"*}" ;;
-    *) line="${line#*=}"; line="${line%%#*}"; printf '%s' "$(printf '%s' "$line" | tr -d '[:space:]')" ;;
-  esac
-}
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/tfvars.sh"   # tfval + srv_ip
 
 # --- SSH target: the BACKEND server's floating IP (selected by map key) ---
 BACKEND_SERVER_KEY="${BACKEND_SERVER_KEY:-backend}"

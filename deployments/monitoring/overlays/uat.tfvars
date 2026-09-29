@@ -90,6 +90,8 @@ pgadmin_proxy_port = 4050                       # (unused while pgadmin_sso = fa
 # IP — set in ../server/overlays/uat.tfvars (agent_ports) and apply with
 # `cd ../server && ./deploy.sh uat apply`. deploy-monitoring auto-registers the env via the
 # Portainer API (needs PORTAINER_ADMIN_PASSWORD in .env; else it prints the one-click UI step).
-portainer_agent_server_keys = "backend,tracking,docs,agent"   # backend (10.100.1.4) + tracking (10.100.1.8) + docs (10.100.1.7) + customer360-agent box. 9001 from the api box is already open on the shared secgroup.
+# "tracking" is gone: customer360-event-api moved to the VKS cluster, so it has no vServer to
+# run a Portainer agent on — inspect those pods with kubectl (or the VKS console) instead.
+portainer_agent_server_keys = "backend,docs,agent"   # backend (10.100.1.4) + docs (10.100.1.7) + customer360-agent box. 9001 from the api box is already open on the shared secgroup.
 portainer_agent_image       = "portainer/agent:lts"
 portainer_agent_port        = 9001

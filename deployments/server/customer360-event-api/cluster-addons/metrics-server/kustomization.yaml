@@ -1,0 +1,37 @@
+# metrics-server — the Metrics API (`kubectl top`, the HPA's Resource/cpu metric, and the
+# resource columns every dashboard shows). WITHOUT it those are all blank, and the
+# event-api ScaledObject's cpu trigger reads nothing.
+#
+# CLUSTER-WIDE: installs into kube-system and registers an APIService, so apply it ONCE
+# with an admin kubeconfig — not with the scoped CI identity, which deliberately cannot
+# write there. Same one-time-admin category as the KEDA operator.
+#
+#   kubectl --kubeconfig ../../../kubeconfig-vks-uat.yaml apply -k .
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.7.2/components.yaml
+
+patches:
+  - target: { kind: Deployment, name: metrics-server, namespace: kube-system }
+    patch: |-
+      # --kubelet-insecure-tls: metrics-server verifies the kubelet's serving certificate
+      # against the cluster CA, but managed control planes (VKS included) issue kubelets
+      # self-signed certs that the CA does not cover. Without this flag every scrape fails
+      # with "x509: cannot validate certificate", metrics-server never becomes Ready, and
+      # the APIService stays unavailable — which looks like metrics-server is broken rather
+      # than misconfigured. The scrape is in-cluster over the node's own network.
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --kubelet-insecure-tls
+      # Upstream asks for 200Mi, sized for a large cluster. This one is a single node with
+      # ~15 pods and only ~400Mi free, so memory is the scarce resource; 100Mi is ample at
+      # this scale. Raise it when the node count does.
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 100Mi
+      - op: add
+        path: /spec/template/spec/containers/0/resources/limits
+        value:
+          memory: 200Mi

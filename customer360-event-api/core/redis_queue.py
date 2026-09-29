@@ -4,6 +4,8 @@ import base64
 import hashlib
 import json
 import logging
+import os
+import socket
 from datetime import datetime
 from threading import Event, Thread
 from typing import Any, Iterable
@@ -73,7 +75,12 @@ class RedisStreamTrackingStorage:
         self.schema_version = schema_version
         self.ingestion_version = ingestion_version
         self.idempotency_ttl_seconds = max(1, int(idempotency_ttl_seconds))
-        self.consumer_name = consumer_name or f"tracking-worker-{id(self)}"
+        # Hostname+pid, not id(self): identical replicas allocate at the same
+        # address, so id(self) collides across pods and they claim each other's
+        # pending messages. In k8s the hostname is the unique pod name.
+        self.consumer_name = consumer_name or (
+            f"tracking-worker-{socket.gethostname()}-{os.getpid()}"
+        )
         self._stop_event = Event()
         self._closed = False
         try:

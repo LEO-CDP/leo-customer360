@@ -23,10 +23,17 @@ portainer_upstream = "127.0.0.1:9443"  # Portainer HTTPS (only if you enable /po
 # Jaeger trace UI served under /jaeger on :443 (TLS) via its oauth2-proxy SSO gate.
 jaeger_upstream = "127.0.0.1:4686"
 
-# customer360-event-api served under /data. On its OWN box (server key "tracking"), so this is a
-# PRIVATE cross-box ip, NOT 127.0.0.1. Assumes DHCP gives the tracking box 10.100.1.8 — verify
-# with `cd ../server && terraform output servers` and correct if it differs.
-data_upstream = "10.100.1.8:8010"
+# customer360-event-api served under /data, on the VKS cluster.
+#   49.213.73.13:8010  the `event-api` Service (type LoadBalancer)
+#
+# The old tracking vServer (10.100.1.8) was destroyed on 2026-09-29 after the canary reached
+# 100% here, so it is no longer listed — a dead address left in this file reads like a
+# rollback target that does not exist. Re-introducing a canary means adding a second address
+# back and setting data_lb_policy to "weighted_round_robin <a> <b>" (order matches).
+#
+#   kubectl -n customer360 get svc event-api     # if the EXTERNAL-IP ever changes
+data_upstream  = "49.213.73.13:8010"
+data_lb_policy = "random"
 
 # docs-vector-search served under /docs-ai (the public docs site's chatbot calls it cross-origin).
 # On its OWN box (server key "docs"), so a PRIVATE cross-box ip. Reachable from the api box (Caddy)
