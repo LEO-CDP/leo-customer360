@@ -14,7 +14,7 @@ the attribute after import is picked up by every request.
 
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import patch
@@ -554,6 +554,7 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
                 "&domain=healthcare&lifecycle_stage=customer&membership_tier=Gold"
                 "&churn_risk_tier=high&linked_raw_profile_count_min=2"
                 "&q=nguyen&page=3&page_size=15&days=30"
+                "&from_date=2026-09-01&to_date=2026-09-29"
             )
 
         self.assertEqual(response.status_code, 200)
@@ -570,6 +571,8 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             churn_risk_tier="high",
             linked_raw_profile_count_min=2,
             q="nguyen",
+            from_date=date(2026, 9, 1),
+            to_date=date(2026, 9, 29),
             days=30,
             page=3,
             page_size=15,

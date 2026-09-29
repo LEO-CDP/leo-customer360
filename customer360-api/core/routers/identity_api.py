@@ -4,7 +4,7 @@ metadata / throttle-status tables consumed by customer360-backend/identity_resol
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -111,6 +111,8 @@ def list_master_profiles(
     churn_risk_tier: Optional[str] = Query(default=None, pattern="^(low|medium|high|critical)$"),
     linked_raw_profile_count_min: Optional[int] = Query(default=None, ge=0),
     q: Optional[str] = Query(default=None, description="Free-text search over full_name/persona_name/email"),
+    from_date: Optional[date] = Query(default=None, description="Inclusive profile activity/update date"),
+    to_date: Optional[date] = Query(default=None, description="Inclusive profile activity/update date"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=settings.api_default_page_size, ge=1, le=settings.api_max_page_size),
     days: int = Query(default=90, ge=1, le=365),
@@ -120,6 +122,8 @@ def list_master_profiles(
         validate_domain_value(db, domain)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if from_date is not None and to_date is not None and from_date > to_date:
+        raise HTTPException(status_code=422, detail="from_date must be on or before to_date")
     return _identity_repository(db).list_master_profiles(
         tenant_id=tenant_id,
         data_source_id=data_source_id,
@@ -132,6 +136,8 @@ def list_master_profiles(
         churn_risk_tier=churn_risk_tier,
         linked_raw_profile_count_min=linked_raw_profile_count_min,
         q=q,
+        from_date=from_date,
+        to_date=to_date,
         days=days,
         page=page,
         page_size=page_size,
@@ -296,9 +302,10 @@ def get_master_profile_engagement_summary(
     last ``days`` days. Behavioral event metrics are being migrated to the S3
     Silver query path; CRM transactions and contacts remain PostgreSQL-backed."""
     repository = _identity_repository(db)
-    if repository.get_master_profile(master_profile_id) is None:
+    profile = repository.get_master_profile(master_profile_id)
+    if profile is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    return repository.get_engagement_summary(master_profile_id, days)
+    return repository.get_engagement_summary(master_profile_id, days, tenant_id=profile.tenant_id)
 
 
 @master_profiles_router.get("/{master_profile_id}/channel-activity", response_model=ChannelActivity)
@@ -309,9 +316,10 @@ def get_master_profile_channel_activity(
     """Cross-channel activity counts (app/web sessions, customer service
     contacts, transactions) for the last ``days`` days."""
     repository = _identity_repository(db)
-    if repository.get_master_profile(master_profile_id) is None:
+    profile = repository.get_master_profile(master_profile_id)
+    if profile is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    return repository.get_channel_activity(master_profile_id, days)
+    return repository.get_channel_activity(master_profile_id, days, tenant_id=profile.tenant_id)
 
 
 @master_profiles_router.get("/{master_profile_id}/top-interests", response_model=list[TopInterest])

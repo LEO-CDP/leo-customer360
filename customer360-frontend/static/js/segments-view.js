@@ -144,6 +144,16 @@ window.C360 = window.C360 || {};
         operators: operators,
         optgroup: attribute.attribute_group
       });
+      var isDateField = String(attribute.data_type || "").trim().toUpperCase() === "DATE" ||
+        attribute.field === "last_activity_at";
+      if (isDateField) {
+        filter.type = "date";
+        filter.input = "date";
+        filter.placeholder = "YYYY-MM-DD";
+        filter.validation = $.extend({}, filter.validation, {
+          format: /^\d{4}-\d{2}-\d{2}$/
+        });
+      }
       if (attribute.field === "status_code") {
         filter.type = "integer";
         filter.input = "select";

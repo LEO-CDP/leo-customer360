@@ -40,7 +40,9 @@ window.C360 = window.C360 || {};
         : fmt.int(p.total_tracked_events),
       clvLabel: (p.predictive_clv !== null && p.predictive_clv !== undefined) ? fmt.money(p.predictive_clv, "") : "—",
       engagementLabel: (p.engagement_score !== null && p.engagement_score !== undefined) ? fmt.score(p.engagement_score) : "—",
-      lastActivityLabel: p.last_activity_at ? fmt.dateTime(p.last_activity_at) : "—"
+      lastActivityLabel: p.last_activity_at
+        ? fmt.dateTime(p.last_activity_at)
+        : (p.updated_at ? fmt.dateTime(p.updated_at) : "—")
     });
   }
 
@@ -54,7 +56,7 @@ window.C360 = window.C360 || {};
     { label: "Churn Risk", type: "badge", field: "churn_risk_tier", classField: "churnBadgeClass" },
     { label: "Linked Profiles", field: "linkedRawProfileCountLabel" },
     { label: "Total Events", field: "trackedEventsLabel" },
-    { label: "Last Activity", type: "identity", nameField: "lastActivityLabel", avatarField: "lastActivityIcon", avatarBg: "bg-slate-100", avatarColor: "text-slate-500", compact: true }
+    { label: "Last Activity / Update", type: "identity", nameField: "lastActivityLabel", avatarField: "lastActivityIcon", avatarBg: "bg-slate-100", avatarColor: "text-slate-500", compact: true }
   ];
 
   function buildListParams(params) {
@@ -132,11 +134,25 @@ window.C360 = window.C360 || {};
   function bindEvents() {
     dtv.bindRowClick();
     dtv.bindSearch("#search-input", "q", 350);
+    $("#search-input").off("input.profileListSearch").on("input.profileListSearch", function () {
+      $("#clear-profile-search").toggleClass("hidden", !String($(this).val() || "").trim());
+    });
+    $("#clear-profile-search").off("click.profileListSearch").on("click.profileListSearch", function () {
+      $("#search-input").val("").trigger("input").focus();
+    });
     dtv.bindSelect("#domain-filter", "domain");
     dtv.bindSelect("#data-source-filter", "data_source_id");
     dtv.bindSelect("#lifecycle-filter", "lifecycle_stage");
     dtv.bindSelect("#tier-filter", "clv_segment");
     dtv.bindSelect("#churn-risk-filter", "churn_risk_tier");
+    $("#profile-from-date").off("change.profileDateFilter").on("change.profileDateFilter", function () {
+      dtv.setFilter("from_date", $(this).val());
+      $("#profile-to-date").attr("min", $(this).val() || "");
+    });
+    $("#profile-to-date").off("change.profileDateFilter").on("change.profileDateFilter", function () {
+      dtv.setFilter("to_date", $(this).val());
+      $("#profile-from-date").attr("max", $(this).val() || "");
+    });
     $("#linked-raw-profile-count-input").on("input change", function () {
       var raw = $(this).val();
       if (raw === "" || raw === null || raw === undefined) {

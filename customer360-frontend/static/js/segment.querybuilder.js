@@ -2,7 +2,7 @@ var rules_basic = {
   condition: 'AND',
   rules: [{
     field: 'customer_since',
-    value: '-30 days',
+    value: new Date().toISOString().slice(0, 10),
     operator: 'greater_or_equal'
   }]
 };
@@ -13,8 +13,21 @@ $('#builder-basic').queryBuilder({
   filters: [{
     id: 'customer_since',
     label: 'Customer since',
-    type: 'datetime',
-    input: 'text'
+    type: 'date',
+    input: 'date',
+    placeholder: 'YYYY-MM-DD',
+    validation: {
+      format: /^\d{4}-\d{2}-\d{2}$/
+    }
+  }, {
+    id: 'last_activity_at',
+    label: 'Last Activity At',
+    type: 'date',
+    input: 'date',
+    placeholder: 'YYYY-MM-DD',
+    validation: {
+      format: /^\d{4}-\d{2}-\d{2}$/
+    }
   }, {
     id: 'name',
     label: 'Name',

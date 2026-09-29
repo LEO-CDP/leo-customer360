@@ -2848,6 +2848,32 @@ CREATE INDEX IF NOT EXISTS idx_cdp_mp_cookie_ids ON customer360.cdp_master_profi
 CREATE INDEX IF NOT EXISTS idx_cdp_mp_full_name_trgm ON customer360.cdp_master_profiles USING GIN (full_name gin_trgm_ops);
 
 -- Raw staging indexes: identity fields used for matching, plus the
+
+-- Supports the profile list's default last-activity/last-update ordering.
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_tenant_activity_sort ON customer360.cdp_master_profiles (
+    tenant_id,
+    last_activity_at DESC NULLS LAST,
+    updated_at DESC NULLS LAST,
+    created_at DESC,
+    master_profile_id ASC
+);
+
+-- Date-range filters can match either the last activity or last update.
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_tenant_last_activity ON customer360.cdp_master_profiles (
+    tenant_id,
+    last_activity_at DESC,
+    master_profile_id ASC
+)
+WHERE
+    last_activity_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_tenant_updated_at ON customer360.cdp_master_profiles (
+    tenant_id,
+    updated_at DESC,
+    master_profile_id ASC
+)
+WHERE
+    updated_at IS NOT NULL;
 -- processing-queue lookup (tenant_id, status_code).
 CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_status ON customer360.cdp_raw_profiles_stage (tenant_id, status_code);
 
@@ -2921,6 +2947,15 @@ WHERE
 
 CREATE INDEX IF NOT EXISTS idx_contacts_date ON customer360.crm_customer_contacts (contact_date);
 
+CREATE INDEX IF NOT EXISTS idx_contacts_tenant_master_date ON customer360.crm_customer_contacts (
+    tenant_id,
+    master_profile_id,
+    contact_date DESC
+)
+WHERE
+    master_profile_id IS NOT NULL
+    AND contact_date IS NOT NULL;
+
 -- crm_transactions indexes: tenant timeline, resolved-profile timeline, generic
 -- entity lookups, and idempotent re-ingestion protection.
 CREATE INDEX IF NOT EXISTS idx_crm_transactions_tenant_time ON customer360.crm_transactions (
@@ -2934,6 +2969,15 @@ CREATE INDEX IF NOT EXISTS idx_crm_transactions_master_profile ON customer360.cr
 )
 WHERE
     master_profile_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_transactions_tenant_master_time ON customer360.crm_transactions (
+    tenant_id,
+    master_profile_id,
+    transaction_time DESC
+)
+WHERE
+    master_profile_id IS NOT NULL
+    AND transaction_time IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_crm_transactions_entity ON customer360.crm_transactions (entity_type, entity_id)
 WHERE

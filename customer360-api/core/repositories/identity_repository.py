@@ -142,13 +142,17 @@ class IdentityRepository:
         statement = select(CdpPersonaHistory).join(CdpCustomerPersona, CdpPersonaHistory.persona_id == CdpCustomerPersona.persona_id).where(CdpCustomerPersona.master_profile_id == master_profile_id).order_by(CdpPersonaHistory.changed_at.desc()).limit(limit)
         return self.session.execute(statement).scalars().all()
 
-    def get_engagement_summary(self, master_profile_id, days):
+    def get_engagement_summary(self, master_profile_id, days, tenant_id=None):
         """Return the profile360 engagement summary."""
-        return self.profile360_crud.get_engagement_summary(self.session, master_profile_id, days=days)
+        return self.profile360_crud.get_engagement_summary(
+            self.session, master_profile_id, days=days, tenant_id=tenant_id
+        )
 
-    def get_channel_activity(self, master_profile_id, days):
+    def get_channel_activity(self, master_profile_id, days, tenant_id=None):
         """Return the profile360 channel activity summary."""
-        return self.profile360_crud.get_channel_activity(self.session, master_profile_id, days=days)
+        return self.profile360_crud.get_channel_activity(
+            self.session, master_profile_id, days=days, tenant_id=tenant_id
+        )
 
     def get_top_interests(self, master_profile_id, limit):
         """Return the profile360 top interests."""

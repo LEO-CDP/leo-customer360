@@ -9,6 +9,7 @@ window.C360 = window.C360 || {};
   var showApiError = C360.config.showApiError;
 
   var currentProfileId = null;
+  var currentProfile = null;
   var currentContentType = "";
   var timelineLimit = 100;
   var timelineDataSourceId = "";
@@ -739,29 +740,9 @@ window.C360 = window.C360 || {};
     }
 
     var dataSourceAnalytics = (profile.data_source_analytics_details || []).map(function (source) {
-      var metricEntries = Object.keys(source)
-        .filter(function (key) {
-          return key !== "data_source_id" && key !== "data_source_name" && key !== "total_tracked_events";
-        })
-        .map(function (key) {
-          var rawValue = source[key];
-          return {
-            label: fmt.titleCase(key),
-            value: rawValue === null || rawValue === undefined ? "—" : String(rawValue),
-            sortValue: Number(rawValue) || 0,
-          };
-        })
-        .sort(function (left, right) {
-          return right.sortValue - left.sortValue || left.label.localeCompare(right.label);
-        });
       return {
-        data_source_id: source.data_source_id,
         data_source_name: source.data_source_name || "Unknown data source",
         totalTrackedEvents: fmt.int(source.total_tracked_events),
-        eventMetricCount: metricEntries.length,
-        featuredMetrics: metricEntries.slice(0, 6),
-        additionalMetrics: metricEntries.slice(6),
-        hasAdditionalMetrics: metricEntries.length > 6,
       };
     });
 
@@ -1298,6 +1279,7 @@ window.C360 = window.C360 || {};
             personaHistory,
             domainProfiles,
           );
+          currentProfile = profileRes[0];
           $("#detail-loading").addClass("hidden");
           $("#detail-content").html(
             C360.templates.render("profile-details", vm),
@@ -1318,7 +1300,79 @@ window.C360 = window.C360 || {};
     if (currentProfileId) load(currentProfileId);
   }
 
+  function editProfileValue(value) {
+    return value === null || value === undefined ? "" : String(value);
+  }
+
+  function openMasterProfileEditor() {
+    if (!currentProfile) return;
+    var address = currentProfile.address;
+    if (address && typeof address === "object") {
+      address = Object.keys(address).map(function (key) {
+        return address[key] ? key + ": " + address[key] : "";
+      }).filter(Boolean).join(", ");
+    }
+    var values = {
+      full_name: currentProfile.full_name,
+      first_name: currentProfile.first_name,
+      last_name: currentProfile.last_name,
+      email: currentProfile.email,
+      phone_number: currentProfile.phone_number,
+      date_of_birth: currentProfile.date_of_birth,
+      gender: currentProfile.gender,
+      company_name: currentProfile.company_name,
+      address: address,
+      lifecycle_stage: currentProfile.lifecycle_stage,
+      preferred_channel: currentProfile.preferred_channel,
+    };
+    Object.keys(values).forEach(function (name) {
+      $("#master-profile-edit-form [name='" + name + "']").val(editProfileValue(values[name]));
+    });
+    $("#master-profile-edit-error").addClass("hidden").text("");
+    $("#master-profile-edit-modal").removeClass("hidden");
+  }
+
+  function closeMasterProfileEditor() {
+    $("#master-profile-edit-modal").addClass("hidden");
+  }
+
+  function saveMasterProfile(event) {
+    event.preventDefault();
+    var payload = {};
+    $("#master-profile-edit-form").find(".master-profile-edit-field").each(function () {
+      var value = $.trim($(this).val());
+      if (this.name === "address") {
+        if (value) payload.address = { address_line1: value };
+      } else {
+        payload[this.name] = value || null;
+      }
+    });
+    var $button = $(".btn-save-master-profile");
+    var $error = $("#master-profile-edit-error");
+    $button.prop("disabled", true).text("Saving...");
+    $error.addClass("hidden").text("");
+    api("/master-profiles/" + currentProfileId, payload, "PATCH")
+      .done(function () {
+        closeMasterProfileEditor();
+        reload();
+      })
+      .fail(function (xhr) {
+        var detail = (xhr.responseJSON && xhr.responseJSON.detail) || "Could not save profile.";
+        $error.removeClass("hidden").text(typeof detail === "string" ? detail : JSON.stringify(detail));
+      })
+      .always(function () {
+        $button.prop("disabled", false).text("Save changes");
+      });
+  }
+
   function bindEvents() {
+    $(document).off("click.masterProfileEdit", ".btn-edit-master-profile");
+    $(document).on("click.masterProfileEdit", ".btn-edit-master-profile", openMasterProfileEditor);
+    $(document).off("click.masterProfileEdit", ".btn-close-master-profile-edit");
+    $(document).on("click.masterProfileEdit", ".btn-close-master-profile-edit", closeMasterProfileEditor);
+    $(document).off("submit.masterProfileEdit", "#master-profile-edit-form");
+    $(document).on("submit.masterProfileEdit", "#master-profile-edit-form", saveMasterProfile);
+
     $(document).on("click", ".btn-copy-id", function () {
       var val = $(this).data("value");
       navigator.clipboard && navigator.clipboard.writeText(String(val));

@@ -105,25 +105,31 @@ def test_timeline_rejects_inactive_or_cross_tenant_source():
         )
 
 
-def test_profile_event_rows_forwards_data_source_filter(monkeypatch):
+def test_profile_event_rows_reads_master_projection_and_forwards_filters(monkeypatch):
     data_source_id = uuid.uuid4()
+    tenant_id = uuid.uuid4()
+    master_profile_id = uuid.uuid4()
     calls = {}
 
-    class _Repository:
+    class _Store:
         def __init__(self, _settings):
             pass
 
-        def query(self, _db, _tenant_id, **kwargs):
-            calls.update(kwargs)
+        def query(self, tenant, profile, **kwargs):
+            calls.update(tenant=tenant, profile=profile, kwargs=kwargs)
             return []
 
-    monkeypatch.setattr(profile360, "EventQueryRepository", _Repository)
+    monkeypatch.setattr(profile360, "MasterProfileEventStore", _Store)
     profile360._profile_event_rows(
-        _TimelineSession(uuid.uuid4()),
-        uuid.uuid4(),
+        _TimelineSession(tenant_id),
+        master_profile_id,
         days=30,
         limit=8,
+        tenant_id=tenant_id,
         data_source_id=data_source_id,
     )
 
-    assert calls["data_source_id"] == data_source_id
+    assert calls["tenant"] == tenant_id
+    assert calls["profile"] == master_profile_id
+    assert calls["kwargs"]["data_source_id"] == data_source_id
+    assert calls["kwargs"]["limit"] == 8
