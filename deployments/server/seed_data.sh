@@ -27,19 +27,12 @@ case "$ENV" in uat | prod) ;; *) echo "Usage: ./seed_data.sh <uat|prod>"; exit 1
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 SEED_SERVER_KEY="${SEED_SERVER_KEY:-api}"
 DEMO_TENANT_ID="${DEMO_TENANT_ID:-11111111-1111-1111-1111-111111111111}"
-tfval() {
-  local line; line="$(grep -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null | head -1)"
-  case "$line" in
-    *\"*\"*) line="${line#*\"}"; printf '%s' "${line%%\"*}" ;;
-    *) line="${line#*=}"; line="${line%%#*}"; printf '%s' "$(printf '%s' "$line" | tr -d '[:space:]')" ;;
-  esac
-}
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/tfvars.sh"   # tfval + srv_ip
 
 # --- resolve the target box from THIS deployment's outputs ---
 terraform workspace select "$ENV" >/dev/null 2>&1 || { echo "ERROR: no '$ENV' server workspace — deploy the server first."; exit 1; }
 SERVERS_JSON="$(terraform output -json servers 2>/dev/null || true)"
 [[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no servers output."; exit 1; }
-srv_ip() { printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get(sys.argv[2]) for i in (s.get("internal_interfaces") or []) if i.get(sys.argv[2])), ""))' "$1" "$2"; }
 FIP="$(srv_ip "$SEED_SERVER_KEY" floating_ip)"
 [[ -n "$FIP" ]] || { echo "ERROR: no floating IP for server key '$SEED_SERVER_KEY'."; exit 1; }
 BASTION="${BASTION_USER:-leocdp360}@$FIP"

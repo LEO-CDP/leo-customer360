@@ -22,22 +22,13 @@ esac
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 API_SERVER_KEY="${API_SERVER_KEY:-api}"
 BACKEND_SERVER_KEY="${BACKEND_SERVER_KEY:-backend}"
-# Read a tfvars value: content between quotes for strings (keeps '#'), or the bare
-# token with any trailing comment stripped for unquoted numbers/bools (e.g. redis_port).
-tfval() {
-  local line; line="$(grep -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null | head -1)"
-  case "$line" in
-    *\"*\"*) line="${line#*\"}"; printf '%s' "${line%%\"*}" ;;
-    *) line="${line#*=}"; line="${line%%#*}"; printf '%s' "$(printf '%s' "$line" | tr -d '[:space:]')" ;;
-  esac
-}
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/tfvars.sh"   # tfval + srv_ip
 
 # --- resolve server IPs by map key from THIS deployment's outputs ---
 terraform workspace select "$ENV" >/dev/null 2>&1 || { echo "ERROR: no '$ENV' server workspace — deploy the server first."; exit 1; }
 SERVERS_JSON="$(terraform output -json servers 2>/dev/null || true)"
 [[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no servers output."; exit 1; }
 # select an IP field for a given server map key; JSON on stdin (avoids Windows/MSYS temp-path issues)
-srv_ip() { printf '%s' "$SERVERS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get(sys.argv[2]) for i in (s.get("internal_interfaces") or []) if i.get(sys.argv[2])), ""))' "$1" "$2"; }
 API_FIP="$(srv_ip "$API_SERVER_KEY" floating_ip)"
 DAG_HOST="$(srv_ip "$BACKEND_SERVER_KEY" fixed_ip)"
 [[ -n "$API_FIP" ]] || { echo "ERROR: no floating IP for server key '$API_SERVER_KEY'."; exit 1; }

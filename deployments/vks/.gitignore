@@ -3,14 +3,8 @@ terraform.tfvars
 *.auto.tfvars
 *.tfvars.json
 .env
-smtp.*.local.env
 
-# VKS kubeconfig (cluster credentials) + the overlay deploy-event-api.sh renders
-# from Terraform state, which carries the S3 key and the Redis password.
-kubeconfig-vks-*.yaml
-customer360-event-api/generated/
-
-# State (may contain secrets in plaintext).
+# State (may contain the S3 secret key in plaintext).
 # Per-env workspace state lives under terraform.tfstate.d/<env>/.
 # NOTE: overlays/*.tfvars are NON-secret and intentionally committed.
 *.tfstate

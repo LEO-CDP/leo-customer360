@@ -8,7 +8,7 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 | Folder | What it provisions |
 |--------|--------------------|
 | [`postgres`](./postgres) | Managed PostgreSQL vDB (`customer360` + `db_keycloak`), `run-sql.sh` schema/seed bootstrap |
-| [`server`](./server) | vServers (VMs): api + backend + `tracking` + **`docs`** boxes (uat); adds dedicated `sso` + `frontend` + `ads` (+ `docs`) boxes (prod) |
+| [`server`](./server) | vServers (VMs): api + backend + **`docs`** + `agent` boxes (uat); adds dedicated `sso` + `frontend` + `ads` (+ `docs`) boxes (prod). Also holds [`customer360-event-api/`](./server/customer360-event-api) — the Kubernetes manifests for the event-api on VKS (no VM) |
 | [`cache`](./cache) | Redis — uat: container on the api box; prod: managed MemStore |
 | [`sso`](./sso) | Keycloak (SSO/OIDC) — uat: container on the api box; prod: dedicated vServer |
 | [`frontend`](./frontend) | customer360-frontend (admin UI) — uat: container on the api box; prod: dedicated vServer |
@@ -17,6 +17,7 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 | [`monitoring`](./monitoring) | Portainer (direct HTTPS) + Netdata (behind oauth2-proxy / Keycloak SSO) dashboards **+ Jaeger** (OpenTelemetry request-trace UI at `/jaeger`) **+ pgAdmin** (Postgres admin UI, direct on the LB with its own login) — on the api box |
 | [`load_balancer`](./load_balancer) | L4 NLB fronting api / dagster / keycloak / frontend / ads / monitoring |
 | [`proxy`](./proxy) | **Caddy** reverse proxy — TLS termination (auto Let's Encrypt) + single-host path routing. **Live** at `https://beta.leocdp.com` (fronts frontend `/`, api `/c360api`, keycloak `/auth`, ads `/ads`, jaeger `/jaeger`); [runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom) |
+| [`vks`](./vks) | VKS (managed Kubernetes) worker **node group** — the capacity customer360-event-api runs on. The cluster itself is console-created. |
 | [`storage`](./storage) | Object storage (vStorage / S3) |
 
 > **Scope:** this table maps to the **UAT** overlay. The prod overlay differs
@@ -54,6 +55,7 @@ no-op when there is no drift.
 | 1 | Infra (Terraform) | `storage` | `storage/deploy.sh` | — (independent) |
 | 2 | Infra (Terraform) | `postgres` | `postgres/deploy.sh` | — |
 | 3 | Infra (Terraform) | `server` | `server/deploy.sh` | — |
+| 3b | Infra (Terraform) | `vks` | `vks/deploy.sh` | VKS cluster (console-created); gives the cluster its worker nodes |
 | 4 | DB bootstrap | `db-schema` | `postgres/run-sql.sh` | `server` (bastion) + `postgres` |
 | 5 | Data-plane | `cache` | `cache/deploy.sh` | `server` |
 | 6 | Data-plane | `sso` | `sso/deploy-sso.sh` | `server` + `db-schema` (`db_keycloak`) |
@@ -64,7 +66,7 @@ no-op when there is no drift.
 | 11 | SSO + apps | `api` | `server/deploy-api.sh` | `db-schema`, `cache`, `backend`, `sso-realm` (SSO optional) |
 | 12 | SSO + apps | `frontend` | `frontend/deploy-frontend.sh` | `server` |
 | 13 | SSO + apps | `ads` | `customer360-promotions/deploy-ads.sh` | `server` + `db-schema` + `cache` |
-| 14 | SSO + apps | `tracking` | `server/deploy-tracking.sh` | `server` (dedicated `tracking` box) + `storage` (+ `cache` optional) |
+| 14 | SSO + apps | `event-api` | `server/deploy-event-api.sh` | VKS cluster + `storage` + `cache` (Redis required); needs `KUBECONFIG` + `GHCR_PULL_TOKEN`. *(`tracking` still accepted as a legacy alias.)* |
 | 15 | SSO + apps | `docs-search` | `server/deploy-docs-search.sh` | `server` (dedicated `docs` box) + `postgres` (pgvector `rag` schema) |
 | 16 | SSO + apps | `monitoring` | `monitoring/deploy-monitoring.sh` | `server`; SSO gate needs `sso-realm` + `load-balancer` |
 | 17 | Demo data | `seed` *(optional)* | `server/seed_data.sh` | `api`/`db-schema`; opt-in via `--with seed` |
@@ -104,9 +106,10 @@ live in each module's own `.env` / `terraform.tfvars` (see each module's README)
 The API and identity-resolution projection use `MASTER_PROFILE_S3_BUCKET`,
 which is set to `c360-master-profiles` in each
 `storage/overlays/<env>.tfvars`. Those overlays also set
-`s3_auto_create_buckets = true`; the API, Dagster backend, and tracking
-deployment scripts read those values and idempotently create/check the bucket
-before their containers start. The bootstrap runs inside each deployed image
+`s3_auto_create_buckets = true`; the API and Dagster backend deployment
+scripts read those values and idempotently create/check the bucket before their
+containers start. (customer360-event-api does not — it never reads
+`MASTER_PROFILE_S3_BUCKET`; it auto-creates only its own per-source buckets.) The bootstrap runs inside each deployed image
 using its configured vStorage credentials, so it works for both UAT and
 production. The backend deployment also runs
 `identity_resolution/scripts/rebuild_master_profile_event_projections.py`
@@ -128,7 +131,7 @@ each environment **pull that same immutable image by tag** — instead of rebuil
 
 > **Status:** the app deploy scripts now **pull the CI-built image from GHCR by default**
 > (`server/deploy-api.sh`, `server/deploy-backend.sh`, `customer360-promotions/deploy-ads.sh`,
-> `frontend/deploy-frontend.sh`, `server/deploy-tracking.sh` → `docker pull` + `docker run`, via the shared
+> `frontend/deploy-frontend.sh` → `docker pull` + `docker run`, via the shared
 > [`lib/ghcr.sh`](./lib/ghcr.sh)). Set `BUILD_LOCAL=1` to fall back to shipping source and
 > building on the VM. The [`CD`](../.github/workflows/cd.yml) workflow runs these
 > automatically after CI succeeds (`main` commit whose title contains `--deploy-uat` → uat;
@@ -396,8 +399,8 @@ flowchart TB
 | Jaeger | api box `10.100.1.5` | 16686 (UI) · 4318/4317 (OTLP) | OpenTelemetry request-trace UI (`c360-jaeger`); **always-on** (SSO+TLS); badger storage, mem-capped; UI loopback (base path /jaeger) → **oauth2-proxy :4686 → Caddy /jaeger on :443 (Keycloak SSO, TLS)** |
 | pgAdmin | api box `10.100.1.5` | 5050 | Postgres admin/monitoring UI (`c360-pgadmin`); its own login, exposed **directly** on the LB (`LB :5050 → pgAdmin :5050`); plain HTTP (cleartext login — see the LB note); `pgadmin_data` volume, mem-capped |
 | Dagster | backend box `10.100.1.4` | 3000 | customer360-backend worker |
-| Portainer agent | backend `10.100.1.4` + tracking `10.100.1.8` | 9001 | `c360-portainer-agent`; lets the api-box Portainer manage these boxes too (private VPC, reached from `10.100.1.5`); registered as Portainer environments |
-| customer360-event-api | tracking box `10.100.1.8` | 8010 | FastAPI event ingestion on its own dedicated `s-general-1x2` box, run as **N auto-load-balanced replicas** (uat 3 / prod 5, `TRACKING_REPLICAS`) on a private docker bridge behind a local **nginx** LB that owns `:8010` (least_conn round-robin); publishes dynamic batches to the shared Redis Streams consumer group and writes NDJSON asynchronously to vStorage/S3; rate-limit + session state remains fail-open, but Redis is required for durable enqueue; OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
+| Portainer agent | backend `10.100.1.4` + docs `10.100.1.7` + agent box | 9001 | `c360-portainer-agent`; lets the api-box Portainer manage these boxes too (private VPC, reached from `10.100.1.5`); registered as Portainer environments |
+| customer360-event-api | **VKS cluster** (not a VM) | 8010 | FastAPI event ingestion as a Kubernetes `Deployment` — **3 pods** minimum, autoscaled on ingest requests/sec by **KEDA** (uat to 12, prod to 20), fronted by a `Service` of type `LoadBalancer` on `:8010`; publishes dynamic batches to the shared Redis Streams consumer group and writes NDJSON asynchronously to vStorage/S3; rate-limit + session state remains fail-open, but Redis is required for durable enqueue; OTLP request traces → api-box Jaeger; exposed at `/data` via Caddy |
 | docs-vector-search | docs box `10.100.1.7` | 8001 | AI docs Q&A — **local-model RAG**: `paraphrase-multilingual-MiniLM-L12-v2` embed (384-dim, VN+EN) + `bge-reranker-base` rerank + `Qwen2.5-0.5B` GGUF generate; vectors in **pgvector** on the vDB (schema `rag`, table `doc_chunks`); its OWN `s-general-2x4` box; **not behind the LB directly** (reached via SSH/tunnel), but **customer360-frontend proxies it at `/ai/*`** — so `https://beta.leocdp.com/ai/health` (→ docs-search `/health`) is its public health check, alongside `/ai/ask` + `/ai/search`; deploy `server/deploy-docs-search.sh` (pull GHCR image → start dedicated no-auth Redis for rate limiting on the same host network → `enrich` on box → serve) |
 | PostgreSQL | managed vDB `10.100.1.3` | 5432 | `customer360` (FORCE RLS) + `db_keycloak` + `leo_ads` + `rag` (pgvector, docs-vector-search) |
 
@@ -415,8 +418,8 @@ via the **LB IP** (see the HSTS note below).
 | Keycloak | `https://beta.leocdp.com/auth` | Caddy `/auth/*` → keycloak :8080 |
 | customer360-promotions (+ `/ads/docs`) | `https://beta.leocdp.com/ads` | Caddy `/ads/*` → ads :9009 (`root_path=/ads`) |
 | docs-vector-search (via frontend `/ai` proxy) | `https://beta.leocdp.com/ai/health` (also `/ai/ask`, `/ai/search`) | Caddy `/` → frontend :8890; frontend `/ai/*` → docs-search :8001. `/ai/health` returns **200** when docs-search is up, **502** when it's unreachable — the public health check for the otherwise-private `docs` box. |
-| customer360-event-api (ingest) | `https://beta.leocdp.com/data` (POST `…/data/api/v1/tracking/logs`; health `…/data/health`) | Caddy `/data/*` → tracking :8010 |
-| c360 web SDK iframe | `https://beta.leocdp.com/cdp-sdk/html/cdp-event-proxy.html` | Caddy `/cdp-sdk/*` → tracking :8010; parent origin from `proxy/overlays/<env>.tfvars` |
+| customer360-event-api (ingest) | `https://beta.leocdp.com/data` (POST `…/data/api/v1/tracking/logs`; health `…/data/health`) | Caddy `/data/*` → VKS Service EXTERNAL-IP :8010 |
+| c360 web SDK iframe | `https://beta.leocdp.com/cdp-sdk/html/cdp-event-proxy.html` | Caddy `/cdp-sdk/*` → VKS Service EXTERNAL-IP :8010; parent origin from `proxy/overlays/<env>.tfvars` |
 | Portainer (own login) | `https://103.245.254.29:9443` | LB direct → Portainer :9443 (self-signed TLS) |
 | Netdata (SSO) | `http://103.245.254.29:19999` | LB → oauth2-proxy :4199 → Netdata (Keycloak login) |
 | pgAdmin (own login) | `http://103.245.254.29:5050` | LB direct → pgAdmin :5050 (its own login as `admin@leocdp.com`; plain HTTP — cleartext) |
@@ -436,32 +439,38 @@ via the **LB IP** (see the HSTS note below).
 
 ### Tracking feature — bring-up (customer360-event-api)
 
-The web-tracking ingestion service (`customer360-event-api`) runs on its **own** vServer (server key
-`tracking`, private `10.100.1.8`) as **N auto-load-balanced replicas** (uat 3 / prod 5) on a
-private docker bridge behind a local **nginx** LB that owns `:8010`. It is deliberately minimal —
-it uses only what the app needs:
-**vStorage/S3** (the durable NDJSON sink); optionally the **api-box Redis** for IP rate-limiting
-+ session cache (fail-open if absent); and it exports **OpenTelemetry request traces** over OTLP to
-the **api-box Jaeger** (reusing the existing Jaeger — no new one). It is exposed publicly at
-`https://beta.leocdp.com/data` via Caddy + the LB. Bring it up on UAT in order (each step is idempotent):
+The web-tracking ingestion service (`customer360-event-api`) runs on the **GreenNode VKS
+Kubernetes cluster** as a KEDA-autoscaled `Deployment` — **1-3 pods on UAT** —
+fronted by a `Service` of type `LoadBalancer` on `:8010`. It is deliberately minimal and uses
+only what the app needs: **vStorage/S3** (the durable NDJSON sink); the **api-box Redis** as the
+Redis Streams queue (required — see the notes); and it exports **OpenTelemetry request traces**
+over OTLP to the **api-box Jaeger** (reusing the existing Jaeger — no new one). It is exposed
+publicly at `https://beta.leocdp.com/data` via Caddy.
+
+> **As-built runbook:** [`docs/vks-event-api-migration-runbook.md`](./docs/vks-event-api-migration-runbook.md)
+> — current state, canary/rollback/teardown procedures, and the migration's gotchas.
+>
+> **Migrated from a vServer.** It used to run as N docker replicas behind a local nginx LB on a
+> dedicated `tracking` box (private `10.100.1.8`). Kubernetes now owns replication and scaling,
+> so that box is gone from `server/overlays/*.tfvars`. Manifests + details:
+> [`server/customer360-event-api/`](./server/customer360-event-api/README.md).
+
+Bring it up on UAT in order (each step is idempotent):
 
 ```bash
-# 1) INFRA — provision the tracking vServer + open its cross-box secgroup ports
-#    (8010 Caddy→tracking · 6580 api-box-Redis←tracking · 4318 api-box-Jaeger←tracking · 9001 Portainer)
+# 1) INFRA — open the cross-VPC ports the PODS need, from the VKS worker-node CIDR
+#    (6580 api-box-Redis←pods · 4318 api-box-Jaeger←pods). Look the CIDR up in the VKS
+#    console (cluster → node group) and uncomment those extra_ingress rules first.
 cd deployments/server && ./deploy.sh uat apply
-terraform output servers          # confirm the tracking box private ip (expected 10.100.1.8)
-#    If it differs, fix data_upstream (proxy overlay) + the 6580/4318 cidrs (server extra_ingress), re-apply.
 
-# 2) APP — run customer360-event-api as N replicas behind the local nginx LB (:8010), wired to S3
-#    + the api-box Redis Streams broker (pulls the CI-built image from GHCR; set BUILD_LOCAL=1 to build on the VM).
-#    Replica count defaults to uat 3 / prod 5 — override with TRACKING_REPLICAS=<n>.
-cd ../server && ./deploy-tracking.sh uat
+# 2) APP — deploy to VKS (3 pods + HPA). Needs a kubeconfig for the cluster and a GHCR token.
+export KUBECONFIG=./kubeconfig-vks-uat.yaml   # from https://vks.console.greennode.ai
+export GHCR_TOKEN=<token with package:read>   # the image is private
+./deploy-event-api.sh uat                     # prints the Service EXTERNAL-IP when it finishes
 
-# 3) FRONT DOOR — add/refresh the beta.leocdp.com/data route in Caddy
+# 3) FRONT DOOR — point Caddy at the Service, then refresh the beta.leocdp.com/data route.
+#    Set data_upstream = "<EXTERNAL-IP>:8010" in proxy/overlays/uat.tfvars (same ip:8010 shape).
 cd ../proxy && ./deploy-caddy.sh uat
-
-# 4) MONITORING (optional) — register the Portainer agent on the tracking box for ops visibility
-cd ../monitoring && ./deploy-monitoring.sh uat
 ```
 
 **Endpoint once live**
@@ -475,24 +484,29 @@ cd ../monitoring && ./deploy-monitoring.sh uat
 
 - Redis is **required** for the default `TRACKING_QUEUE_BACKEND=redis_stream` durable handoff.
   Rate limiting and session metadata fail open when Redis is degraded, but ingestion returns a
-  retryable `503` instead of acknowledging an event that cannot be queued. The tracking box reuses
-  the existing api-box Redis (no dedicated instance); `deploy-tracking.sh` resolves it from
-  `../cache` and opens `6580` api-box←tracking (server `extra_ingress`).
+  retryable `503` instead of acknowledging an event that cannot be queued. The pods reuse the
+  existing api-box Redis (no dedicated instance); `deploy-event-api.sh` resolves it from `../cache`.
+  **This is the migration's main risk:** the pods reach it from the VKS worker-node subnet, not the
+  old `10.100.1.8`, so `6580` must be opened to that CIDR in `server/overlays/<env>.tfvars`
+  (`extra_ingress`). The deploy script ends with a `/health` probe from inside a pod that reports
+  whether S3 and Redis were actually reachable.
 - **Jaeger tracing** reuses the existing api-box Jaeger — the app is OTEL-instrumented and exports
   OTLP to the monitoring box's `:4318` (on/off via `otel_enabled` in `server/overlays/<env>.tfvars`
-  or `OTEL_ENABLED`). No Jaeger runs on the tracking box.
-- The tracking box is a **dedicated box**: its cross-box hops (Caddy→`:8010`, tracking→api-Redis
-  `:6580`) are opened explicitly in `server/overlays/uat.tfvars` (`extra_ingress`) and applied
-  out-of-band by step 1 (CD never runs infra Terraform).
-- **Scaling / load balancing** — the app runs as `TRACKING_REPLICAS` instances (default uat 3 /
-  prod 5) on a private docker bridge (`c360-tracking`), each still listening on `:8010` inside its
-  own namespace (built-in HEALTHCHECK intact). A tiny **nginx** container (`customer360-tracking-lb`)
-  owns host `:8010` — the single address Caddy's `data_upstream` already targets — and `least_conn`
-  round-robins across the replicas, retrying the next one on failure. So scaling is **fully contained
-  in `deploy-tracking.sh`**: the Caddy overlays, the NLB, and `data_upstream` are unchanged. Bump/lower
-  the count with `TRACKING_REPLICAS=<n> ./deploy-tracking.sh <env>` (re-runnable; a lower count removes
-  the surplus replicas). Replicas reach S3/Redis/Jaeger outbound via bridge NAT (source IP unchanged).
+  or `OTEL_ENABLED`). Same CIDR caveat as Redis.
+- **Scaling** is Kubernetes' job now, driven by **KEDA on real request rate**: a `ScaledObject`
+  queries `sum(rate(tracking_ingestion_requests_total[1m]))` from a small bundled Prometheus and
+  keeps roughly N requests/sec per pod. A second trigger watches the Redis Stream consumer-group
+  **lag**, so a slow S3 sink scales the tier out even when request rate looks calm, plus a
+  `PodDisruptionBudget` (`minAvailable: 2`) holding ingest up through node drains. The per-env
+  profile is committed — UAT 1-3 pods @ ~50 req/s per pod, PROD 3-20 @ ~100 — in
+  `server/customer360-event-api/overlays/<env>/`, so a capacity change is a reviewable diff.
+  KEDA must be installed in the cluster once; the deploy script checks and tells you how. Details:
+  [`server/customer360-event-api/README.md`](./server/customer360-event-api/README.md).
+- **Caddy is unchanged in shape.** The `Service` is type `LoadBalancer` on `:8010`, so
+  `data_upstream` stays `ip:8010` — only the address changes, to the Service `EXTERNAL-IP`.
 - No dedicated LB listener — `/data` rides the existing `:443` Caddy passthrough.
+- **Ops visibility** is via `kubectl` (or the VKS console), not Portainer: there is no vServer for a
+  Portainer agent to run on, so `tracking` was dropped from `portainer_agent_server_keys`.
 
 ### Changing the public domain
 

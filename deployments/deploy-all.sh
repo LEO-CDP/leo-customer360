@@ -46,17 +46,17 @@ ROOT="$(pwd)"
 
 # ---------------------------------------------------------------- step registry
 # Ordered list of step ids. PHASE/TITLE give the --list view its structure.
-STEPS=(storage postgres server db-schema cache sso backend load-balancer proxy sso-realm api frontend ads agent tracking docs-search monitoring seed)
+STEPS=(storage postgres server vks db-schema cache sso backend load-balancer proxy sso-realm api frontend ads agent event-api docs-search monitoring seed)
 
 # Steps NOT run by default (must be named via --with / --only / --from).
 OPTIONAL="seed"
 
 phase_of() { case "$1" in
-  storage|postgres|server) echo "1 · infrastructure (Terraform)";;
+  storage|postgres|server|vks) echo "1 · infrastructure (Terraform)";;
   db-schema)               echo "2 · database bootstrap";;
   cache|sso|backend)       echo "3 · data-plane containers";;
   load-balancer|proxy)     echo "4 · front door (LB + Caddy)";;
-  sso-realm|api|frontend|ads|agent|tracking|docs-search|monitoring) echo "5 · SSO realm + applications";;
+  sso-realm|api|frontend|ads|agent|event-api|docs-search|monitoring) echo "5 · SSO realm + applications";;
   seed)                    echo "6 · demo data (optional)";;
 esac; }
 
@@ -64,6 +64,7 @@ title_of() { case "$1" in
   storage)       echo "Object storage buckets (vStorage / S3)";;
   postgres)      echo "Managed PostgreSQL vDB (customer360 + db_keycloak)";;
   server)        echo "vServers / VMs (api box, backend box)";;
+  vks)           echo "VKS worker node group (capacity for customer360-event-api)";;
   db-schema)     echo "SQL bootstrap: extensions, keycloak db, app schema";;
   cache)         echo "Redis (uat: container on api box; prod: MemStore)";;
   sso)           echo "Keycloak (SSO / OIDC) container";;
@@ -75,7 +76,7 @@ title_of() { case "$1" in
   frontend)      echo "customer360-frontend (admin UI)";;
   ads)           echo "customer360-promotions (c360 Promotions, schema leo_ads)";;
   agent)         echo "customer360-agent (AI Agent service, LiteLLM, :8009)";;
-  tracking)      echo "customer360-event-api (event ingestion -> S3, /data)";;
+  event-api)     echo "customer360-event-api (event ingestion -> S3, /data; on VKS)";;
   docs-search)   echo "docs-vector-search (local-model RAG, pgvector on the vDB)";;
   monitoring)    echo "Portainer + Netdata (+ oauth2-proxy SSO gate)";;
   seed)          echo "CIR demo data seed (~1000 profiles, demo tenant)";;
@@ -183,6 +184,7 @@ run_one() {  # <id> <action>
     storage)       tf_step storage        deploy.sh          "$2" ;;
     postgres)      tf_step postgres        deploy.sh          "$2" ;;
     server)        tf_step server          deploy.sh          "$2" ;;
+    vks)           tf_step vks             deploy.sh          "$2" ;;
     load-balancer) tf_step load_balancer   deploy.sh          "$2" ;;
     db-schema)     oneshot_step postgres   run-sql.sh         "$2" ;;
     cache)         ssh_step cache          deploy.sh   apply  "$2" ;;
@@ -191,7 +193,9 @@ run_one() {  # <id> <action>
     frontend)      ssh_step frontend       deploy-frontend.sh deploy "$2" ;;
     ads)           ssh_step customer360-promotions     deploy-ads.sh deploy "$2" ;;
     agent)         ssh_step_env_only server deploy-agent.sh "$2" ;;
-    tracking)      ssh_step_env_only server deploy-tracking.sh "$2" ;;
+    # ssh_step (not ssh_step_env_only): this one lives in Kubernetes, so the 'server'
+    # teardown no longer removes it — it needs a destroy of its own.
+    event-api)     ssh_step server deploy-event-api.sh deploy "$2" ;;
     docs-search)   ssh_step_env_only server deploy-docs-search.sh "$2" ;;
     monitoring)    ssh_step monitoring     deploy-monitoring.sh deploy "$2" ;;
     backend)       ssh_step_env_only server deploy-backend.sh "$2" ;;
@@ -235,6 +239,22 @@ done
 if [ "$DO_LIST" != 1 ]; then
   case "$ENV" in uat|prod) ;; *) die "environment required: ./deploy-all.sh <uat|prod> [plan|apply|destroy] [flags] (see --help)";; esac
 fi
+
+# `tracking` was this step's id until customer360-event-api moved to Kubernetes. Accept
+# it as an alias so saved workflow_dispatch inputs and existing scripts keep working.
+# Exact per-item match, not a substring replace: 'docs-search' must never be rewritten
+# just because some other id contains the word.
+remap_legacy_steps() {  # <csv> -> csv with legacy ids renamed
+  local out="" item IFS=,
+  for item in $1; do
+    [ "$item" = "tracking" ] && item="event-api"
+    out="${out:+$out,}$item"
+  done
+  printf '%s' "$out"
+}
+for v in ONLY SKIP FROM WITH; do
+  [ -n "${!v}" ] && printf -v "$v" '%s' "$(remap_legacy_steps "${!v}")"
+done
 
 # ---------------------------------------------------------------- build the run list
 # Start from the full order (minus optional steps unless requested), then apply
