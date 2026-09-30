@@ -1,0 +1,162 @@
+# customer360-promotions on GreenNode VKS — every resource for the service in one file.
+#
+# Read top to bottom: the app (Deployment + Service + PodDisruptionBudget) and how it
+# scales (HorizontalPodAutoscaler). Environment-specific numbers (pod counts, resources)
+# are NOT here — they live in ../overlays/<env>/, and deploy-promotions.sh layers the image and
+# the Terraform-derived ConfigMap/Secret on top of that.
+#
+# No Namespace object here, unlike customer360-event-api's base. The namespace is SHARED
+# with event-api, whose base already declares it; a second kustomization claiming the same
+# Namespace would keep overwriting its `app.kubernetes.io/name` label with this service's.
+# deploy-promotions.sh creates the namespace itself if it is missing.
+
+---
+# ==================== APP: DEPLOYMENT ====================
+# customer360-promotions (FastAPI ad decisioning) on VKS.
+#
+# Replaces the vServer model (one docker container on the shared api box). Safe to
+# replicate: the service is stateless — every request is a read against the
+# `leo_ads` schema, there is no local state and no background worker, so any pod
+# can serve any request and a pod can be removed without draining anything.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: promotions
+  labels: { app: promotions }
+spec:
+  replicas: 1 # the HPA owns this at runtime (minReplicas is also 1)
+  selector:
+    matchLabels: { app: promotions }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0 # keep full serving capacity through a rollout
+      maxSurge: 1
+  template:
+    metadata:
+      labels: { app: promotions }
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull # created by deploy-promotions.sh from GHCR_USER/GHCR_TOKEN
+      # Spread replicas over nodes, but never block scheduling on a small cluster.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: promotions }
+      containers:
+        - name: promotions
+          image: ghcr.io/leo-cdp/leo-customer360/customer360-promotions:latest
+          ports:
+            - { containerPort: 9009, name: http }
+          envFrom:
+            - configMapRef: { name: promotions-config }
+            - secretRef: { name: promotions-secrets }
+          lifecycle:
+            preStop:
+              # Let the Service drop this pod from its endpoints before uvicorn
+              # starts shutting down, so in-flight ad requests are not refused.
+              exec: { command: ["sleep", "5"] }
+          # Readiness and liveness deliberately probe DIFFERENT paths.
+          #
+          # /health answers 503 when Postgres is unreachable. That is exactly the
+          # readiness question — a pod that cannot reach the DB cannot serve an ad,
+          # so it should leave the Service's endpoints.
+          #
+          # It is the WRONG liveness question: restarting a container does not fix a
+          # database outage, and a liveness probe on /health would put every pod into
+          # a restart loop for the duration of one. Liveness uses `/`, which only asks
+          # whether the process is still answering HTTP.
+          startupProbe:
+            httpGet: { path: /health, port: 9009 }
+            periodSeconds: 5
+            failureThreshold: 12 # up to 60s to boot
+          readinessProbe:
+            httpGet: { path: /health, port: 9009 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: 9009 }
+            periodSeconds: 15
+            failureThreshold: 4
+          # A CPU request is required for the HPA to compute utilisation.
+          resources:
+            requests: { cpu: 100m, memory: 192Mi }
+            limits: { cpu: "1", memory: 512Mi }
+---
+# ===================== APP: SERVICE ======================
+# LoadBalancer on 9009 so Caddy's ADS_UPSTREAM keeps its existing "ip:9009"
+# shape — after the first deploy, set proxy/overlays/<env>.tfvars ads_upstream
+# to this Service's EXTERNAL-IP and redeploy Caddy. Caddy forwards /ads/*
+# UNSTRIPPED and the app sets root_path=/ads, so the public URL shape is
+# unchanged by the move.
+apiVersion: v1
+kind: Service
+metadata:
+  name: promotions
+  labels: { app: promotions }
+spec:
+  type: LoadBalancer
+  selector: { app: promotions }
+  ports:
+    - { port: 9009, targetPort: 9009, name: http }
+---
+# ============== APP: DISRUPTION BUDGET ===================
+# Keep ad serving up through node drains and cluster upgrades.
+#
+# maxUnavailable, NOT minAvailable: the replica count is a moving target under the HPA,
+# and minAvailable behaves badly at both ends of that range. minAvailable: 2 deadlocks a
+# 1-replica tier — you can never evict the only pod, so a node drain hangs forever, and
+# UAT's floor is 1. maxUnavailable: 1 means "one pod at a time" at every size.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: promotions
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: { app: promotions }
+---
+# ================= AUTOSCALING (HPA) =====================
+# A plain HorizontalPodAutoscaler on CPU — NOT a KEDA ScaledObject like
+# customer360-event-api uses.
+#
+# event-api scales primarily on ingest requests/sec, read out of a small bundled
+# Prometheus that scrapes its /metrics endpoint. customer360-promotions exposes no
+# metrics at all, so that trigger has nothing to query and KEDA would reduce to its
+# CPU trigger — which is this object, with an operator and two CRDs in front of it.
+# metrics-server is already installed cluster-wide, so CPU utilisation works today.
+#
+# When the app grows a /metrics endpoint, replace this with a KEDA ScaledObject
+# carrying a prometheus trigger; event-api's base/event-api.yaml is the template.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: promotions
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: promotions
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - { type: Percent, value: 100, periodSeconds: 60 }
+        - { type: Pods, value: 2, periodSeconds: 60 }
+      selectPolicy: Max
+    scaleDown:
+      # Slow, so a lull between ad requests does not cost the tier a pod it needs
+      # back 30 seconds later. Shrinking is never urgent; growing is.
+      stabilizationWindowSeconds: 300
+      policies:
+        - { type: Pods, value: 1, periodSeconds: 60 }

@@ -1,12 +1,19 @@
-# Least-privilege identity for CI to deploy customer360-event-api.
+# Least-privilege identity for CI to deploy the customer360 services that run on VKS —
+# customer360-event-api and customer360-promotions.
 #
 # Apply this ONCE with an admin kubeconfig (the one from the VKS console), then use
 # ./make-kubeconfig.sh to mint a kubeconfig for this ServiceAccount and store it as the
-# VKS_KUBECONFIG secret. CI then holds an identity that can deploy this one service into
-# this one namespace — and nothing else in the cluster.
+# VKS_KUBECONFIG secret. CI then holds an identity that can deploy into this one
+# namespace — and nothing else in the cluster.
 #
-# The rules below are derived from what deploy-event-api.sh actually calls. If you add a
-# step to that script, add its verb here or the deploy fails with a Forbidden error.
+# The name still says `event-api-deployer` because that service got here first and the
+# minted token is in the VKS_KUBECONFIG secret; renaming it would invalidate that secret
+# for no benefit. The rules are namespace-wide with no resourceNames, so every service in
+# the namespace shares this one identity.
+#
+# The rules below are derived from what deploy-event-api.sh and deploy-promotions.sh actually
+# call. If you add a step to either script, add its verb here or the deploy fails with a
+# Forbidden error.
 #
 # NOTE on `roles`/`rolebindings`: the deploy creates a Role for the bundled Prometheus.
 # Kubernetes forbids granting permissions you do not hold yourself, so the deployer's
@@ -47,11 +54,14 @@ rules:
   - apiGroups: [policy]
     resources: [poddisruptionbudgets]
     verbs: [get, list, watch, create, update, patch, delete]
-  # KEDA owns the HPA it creates; the deploy only reads it, and deletes the legacy
-  # hand-written one left over from the pre-KEDA layout. No create/update needed.
+  # For customer360-event-api, KEDA owns the HPA it creates and the deploy only reads it
+  # (plus deletes the legacy hand-written one left over from the pre-KEDA layout).
+  # customer360-promotions, which shares this identity, has no /metrics endpoint for a
+  # prometheus trigger, so it scales with a PLAIN HPA that its own deploy creates — hence
+  # create/update/patch. Without them deploy-promotions.sh fails with Forbidden on the HPA.
   - apiGroups: [autoscaling]
     resources: [horizontalpodautoscalers]
-    verbs: [get, list, watch, delete]
+    verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: [keda.sh]
     resources: [scaledobjects]
     verbs: [get, list, watch, create, update, patch, delete]

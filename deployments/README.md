@@ -12,12 +12,12 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 | [`cache`](./cache) | Redis — uat: container on the api box; prod: managed MemStore |
 | [`sso`](./sso) | Keycloak (SSO/OIDC) — uat: container on the api box; prod: dedicated vServer |
 | [`frontend`](./frontend) | customer360-frontend (admin UI) — uat: container on the api box; prod: dedicated vServer |
-| [`customer360-promotions`](./customer360-promotions) | c360 Promotions (schema `leo_ads`) — uat: container on the api box; prod: dedicated vServer |
+| [`customer360-promotions`](./customer360-promotions) | c360 Promotions (schema `leo_ads`) — a Deployment on the **VKS** cluster (no VM); holds its own `k8s/` manifests |
 | [`docs-vector-search`](../tools/docs-vector-search) | AI docs Q&A — **local-model RAG** (paraphrase-multilingual embed + bge rerank + Qwen 0.5B), vectors in **pgvector** on the vDB (schema `rag`). Its **own dedicated `docs` box**; deploy: [`server/deploy-docs-search.sh`](./server/deploy-docs-search.sh) |
 | [`monitoring`](./monitoring) | Portainer (direct HTTPS) + Netdata (behind oauth2-proxy / Keycloak SSO) dashboards **+ Jaeger** (OpenTelemetry request-trace UI at `/jaeger`) **+ pgAdmin** (Postgres admin UI, direct on the LB with its own login) — on the api box |
 | [`load_balancer`](./load_balancer) | L4 NLB fronting api / dagster / keycloak / frontend / ads / monitoring |
 | [`proxy`](./proxy) | **Caddy** reverse proxy — TLS termination (auto Let's Encrypt) + single-host path routing. **Live** at `https://beta.leocdp.com` (fronts frontend `/`, api `/c360api`, keycloak `/auth`, ads `/ads`, jaeger `/jaeger`); [runbook](./proxy/README.md#cutover-runbook-put-the-platform-behind-betaleocdpcom) |
-| [`vks`](./vks) | VKS (managed Kubernetes) worker **node group** — the capacity customer360-event-api runs on. The cluster itself is console-created. |
+| [`vks`](./vks) | VKS (managed Kubernetes) worker **node group** — the capacity customer360-event-api and customer360-promotions run on. The cluster itself is console-created. |
 | [`storage`](./storage) | Object storage (vStorage / S3) |
 
 > **Scope:** this table maps to the **UAT** overlay. The prod overlay differs
@@ -65,7 +65,7 @@ no-op when there is no drift.
 | 10 | SSO + apps | `sso-realm` | `sso/bootstrap-realm.py` | `sso` + public HTTPS (writes `KEYCLOAK_CLIENT_SECRET` → `sso/.env`) |
 | 11 | SSO + apps | `api` | `server/deploy-api.sh` | `db-schema`, `cache`, `backend`, `sso-realm` (SSO optional) |
 | 12 | SSO + apps | `frontend` | `frontend/deploy-frontend.sh` | `server` |
-| 13 | SSO + apps | `ads` | `customer360-promotions/deploy-ads.sh` | `server` + `db-schema` + `cache` |
+| 13 | SSO + apps | `promotions` | `customer360-promotions/deploy-promotions.sh` | VKS cluster + `db-schema` (bootstraps `leo_ads`) + `cache`; needs `KUBECONFIG` + `GHCR_PULL_TOKEN` |
 | 14 | SSO + apps | `event-api` | `server/deploy-event-api.sh` | VKS cluster + `storage` + `cache` (Redis required); needs `KUBECONFIG` + `GHCR_PULL_TOKEN`. *(`tracking` still accepted as a legacy alias.)* |
 | 15 | SSO + apps | `docs-search` | `server/deploy-docs-search.sh` | `server` (dedicated `docs` box) + `postgres` (pgvector `rag` schema) |
 | 16 | SSO + apps | `monitoring` | `monitoring/deploy-monitoring.sh` | `server`; SSO gate needs `sso-realm` + `load-balancer` |
@@ -130,7 +130,7 @@ each environment **pull that same immutable image by tag** — instead of rebuil
 [`cd-process.svg`](./cd-process.svg) (vector source of the image above).
 
 > **Status:** the app deploy scripts now **pull the CI-built image from GHCR by default**
-> (`server/deploy-api.sh`, `server/deploy-backend.sh`, `customer360-promotions/deploy-ads.sh`,
+> (`server/deploy-api.sh`, `server/deploy-backend.sh`, `customer360-promotions/deploy-promotions.sh`,
 > `frontend/deploy-frontend.sh` → `docker pull` + `docker run`, via the shared
 > [`lib/ghcr.sh`](./lib/ghcr.sh)). Set `BUILD_LOCAL=1` to fall back to shipping source and
 > building on the VM. The [`CD`](../.github/workflows/cd.yml) workflow runs these
@@ -287,7 +287,7 @@ version); **never roll back to `latest`** (mutable).
 
 - **Local:** `IMAGE_TAG` overrides the tag `lib/ghcr.sh` resolves:
   ```bash
-  IMAGE_TAG=v1.2.3 ./deploy-all.sh uat --only api,backend,ads,frontend -y   # atomic, all services
+  IMAGE_TAG=v1.2.3 ./deploy-all.sh uat --only api,backend,promotions,frontend -y   # atomic, all services
   IMAGE_TAG=sha-<oldgitsha> bash server/deploy-api.sh uat                    # one service
   ```
 - **From GitHub (UI/API):** the [`CD`](../.github/workflows/cd.yml) workflow has a
@@ -341,7 +341,10 @@ flowchart TB
       redis["c360-redis (Redis 8)<br/>:6580"]
       kc["c360-keycloak (Keycloak 26)<br/>:8080 · health :9000"]
       fe["customer360-frontend (admin UI)<br/>:8890"]
-      ads["customer360-promotions (c360 Promotions)<br/>:9009 · leo_ads"]
+    end
+    subgraph vks["VKS Kubernetes cluster · namespace customer360"]
+      eventapi["customer360-event-api<br/>:8010 · KEDA 1-3 pods"]
+      ads["customer360-promotions (c360 Promotions)<br/>:9009 · leo_ads · HPA 1-2 pods"]
     end
     subgraph bebox["vServer c360-api-uat-backend · 10.100.1.4"]
       dagster["customer360-backend<br/>Dagster :3000"]
@@ -370,7 +373,10 @@ flowchart TB
   api -->|SQL| pg
   api -.->|GraphQL| dagster
   kc -->|db_keycloak| pg
+  caddy -.->|"/data · /cdp-sdk"| eventapi
+  eventapi -->|"tracking stream"| redis
   ads -->|leo_ads| pg
+  ads -.->|"response cache"| redis
   dagster -->|SQL| pg
   docs -->|"pgvector · rag.doc_chunks"| pg
   lb -->|":9443 direct TLS"| portainer
@@ -392,7 +398,7 @@ flowchart TB
 | c360-redis | api box `10.100.1.5` | 6580 | fail-open response cache; `maxmemory 256mb allkeys-lru` |
 | c360-keycloak | api box `10.100.1.5` | 8080 | Keycloak 26 `start-dev`; health on mgmt `:9000`; realm `customer360` |
 | customer360-frontend | api box `10.100.1.5` | 8890 | FastAPI admin UI; browser calls the API/Keycloak via the LB |
-| customer360-promotions | api box `10.100.1.5` | 9009 | c360 Promotions (FastAPI); own schema `leo_ads` (no RLS); reuses the local Redis |
+| customer360-promotions | **VKS** pods (Service LoadBalancer) | 9009 | c360 Promotions (FastAPI); own schema `leo_ads` (no RLS); HPA 1-2 pods on CPU; Redis reached at the api box's private IP |
 | oauth2-proxy | api box `10.100.1.5` | 4199 (Netdata) · 4686 (Jaeger) | Keycloak SSO gate in front of the no-native-auth dashboards (the L4 LB can't do OIDC); one proxy container per gated dashboard |
 | Portainer | api box `10.100.1.5` | 9443 | container ops UI (logs/exec/restart); direct HTTPS on the LB — its own login |
 | Netdata | api box `10.100.1.5` | 19999 | real-time host + per-container metrics; no native auth → oauth2-proxy SSO |
@@ -416,7 +422,7 @@ via the **LB IP** (see the HSTS note below).
 | customer360-frontend (UI) | `https://beta.leocdp.com/` | Caddy `/` → frontend :8890 |
 | customer360-api | `https://beta.leocdp.com/c360api` (base `…/c360api/api/v1`) | Caddy `/c360api/*` → api :8008 (`root_path=/c360api`) |
 | Keycloak | `https://beta.leocdp.com/auth` | Caddy `/auth/*` → keycloak :8080 |
-| customer360-promotions (+ `/ads/docs`) | `https://beta.leocdp.com/ads` | Caddy `/ads/*` → ads :9009 (`root_path=/ads`) |
+| customer360-promotions (+ `/ads/docs`) | `https://beta.leocdp.com/ads` | Caddy `/ads/*` → VKS Service EXTERNAL-IP :9009 (`root_path=/ads`, forwarded unstripped) |
 | docs-vector-search (via frontend `/ai` proxy) | `https://beta.leocdp.com/ai/health` (also `/ai/ask`, `/ai/search`) | Caddy `/` → frontend :8890; frontend `/ai/*` → docs-search :8001. `/ai/health` returns **200** when docs-search is up, **502** when it's unreachable — the public health check for the otherwise-private `docs` box. |
 | customer360-event-api (ingest) | `https://beta.leocdp.com/data` (POST `…/data/api/v1/tracking/logs`; health `…/data/health`) | Caddy `/data/*` → VKS Service EXTERNAL-IP :8010 |
 | c360 web SDK iframe | `https://beta.leocdp.com/cdp-sdk/html/cdp-event-proxy.html` | Caddy `/cdp-sdk/*` → VKS Service EXTERNAL-IP :8010; parent origin from `proxy/overlays/<env>.tfvars` |

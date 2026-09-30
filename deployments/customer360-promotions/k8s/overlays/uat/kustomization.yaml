@@ -1,0 +1,19 @@
+# UAT scaling profile for customer360-promotions. deploy-promotions.sh layers the image and
+# the Terraform-rendered ConfigMap/Secret on top of this.
+#
+# 1 pod at rest, 2 at peak. The floor of 1 means UAT is NOT highly available: at one replica
+# the base's PodDisruptionBudget and topology-spread constraint can do nothing, so a node
+# drain or failure is downtime. Accepted here — prod carries the HA floor of 2. Raising it
+# is one line, and the cluster has the room.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  # Only the ceiling differs from the base — its minReplicas and the Deployment's replicas
+  # are already 1, so patching those would be a no-op.
+  - target: { kind: HorizontalPodAutoscaler, name: promotions }
+    patch: |-
+      - { op: replace, path: /spec/maxReplicas, value: 2 }

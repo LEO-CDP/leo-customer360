@@ -15,7 +15,7 @@ name: CD
 #    run cd.yml -f ...`) to deploy/ROLL BACK any environment to any image tag:
 #      environment: uat | prod
 #      image_tag:   v1.2.3 | sha-<git>             (immutable tags for rollback)
-#      services:    comma list (default: db-schema,api,backend,ads,frontend,event-api)
+#      services:    comma list (default: db-schema,api,backend,promotions,frontend,event-api)
 #    This is the rollback path — pick a previously-built tag and redeploy it.
 #
 # It deploys by PULLING the image from GHCR — the module scripts run in ghcr
@@ -34,16 +34,16 @@ name: CD
 #   VSTORAGE_ACCESS_KEY / VSTORAGE_SECRET_KEY -> S3/vStorage remote-state creds AND
 #                        TF_VAR_access_key / TF_VAR_secret_key (event-api S3 sink)
 #   GHCR_PULL_TOKEN  PAT with read:packages, used as the VKS imagePullSecret. REQUIRED for
-#                    the 'event-api' step: unlike the vServer path (which pulls inside the
+#                    the 'event-api' and 'promotions' steps: unlike the vServer path (which pulls inside the
 #                    job), Kubernetes stores this and re-reads it on every later image pull,
 #                    so the job's own GITHUB_TOKEN would expire and break scale-ups.
 #   VKS_KUBECONFIG   full kubeconfig for the GreenNode VKS cluster — REQUIRED by the
-#                    'event-api' step, which deploys customer360-event-api as a Kubernetes
-#                    Deployment (3 pods + HPA) instead of onto a vServer. Download it from
-#                    https://vks.console.greennode.ai (cluster -> Kubeconfig) and paste it
-#                    in whole. Without it that one step fails; the others are unaffected.
+#                    'event-api' and 'promotions' steps, which deploy their services as Kubernetes
+#                    Deployments (autoscaled pods) instead of onto a vServer. Download it
+#                    from https://vks.console.greennode.ai (cluster -> Kubeconfig) and paste
+#                    it in whole. Without it those steps fail; the others are unaffected.
 # GHCR pulls on the vServers use the built-in GITHUB_TOKEN (packages: read) — those pull
-# inside the job, so a short-lived token is fine. The VKS step is the exception; see
+# inside the job, so a short-lived token is fine. The VKS steps are the exception; see
 # GHCR_PULL_TOKEN above.
 # The 'prod' GitHub Environment should carry required-reviewer protection so a
 # release (or manual prod rollback) waits for manual approval.
@@ -65,9 +65,9 @@ on:
         type: string
         required: true
       services:
-        description: "Comma-separated services to (re)deploy (e.g. api,backend,ads,frontend,event-api,docs-search,agent)"
+        description: "Comma-separated services to (re)deploy (e.g. api,backend,promotions,frontend,event-api,docs-search,agent)"
         type: string
-        default: "api,backend,ads,frontend,event-api,docs-search,agent"
+        default: "api,backend,promotions,frontend,event-api,docs-search,agent"
         required: false
 
 permissions:
@@ -111,7 +111,7 @@ jobs:
           # sso-realm runs bootstrap-realm.py (idempotent): provisions the realm, the API's
           # admin roles + confidential client before the app steps. deploy-all.sh orders it
           # ahead of api via its STEPS list. Needs KEYCLOAK_ADMIN_PASSWORD in sso/.env (above).
-          DEFAULT_SVC="db-schema,sso-realm,api,backend,ads,frontend,event-api,docs-search,agent"
+          DEFAULT_SVC="db-schema,sso-realm,api,backend,promotions,frontend,event-api,docs-search,agent"
           if [[ "$EVENT" == "workflow_dispatch" ]]; then
             svc="${IN_SERVICES:-$DEFAULT_SVC}"
             {
@@ -177,10 +177,10 @@ jobs:
           # 1.14.8); an older Terraform refuses state from a newer version.
           terraform_version: 1.14.8
 
-      # customer360-event-api deploys to the VKS Kubernetes cluster (the `event-api` step),
-      # so kubectl must be on PATH. Pinned explicitly rather than relying on whatever the
-      # runner image happens to preinstall — that set changes without notice, and the only
-      # symptom would be the event-api step failing deep into a deploy.
+      # The `event-api` and `promotions` steps deploy to the VKS Kubernetes cluster, so kubectl
+      # must be on PATH. Pinned explicitly rather than relying on whatever the runner image
+      # happens to preinstall — that set changes without notice, and the only symptom would
+      # be one of those steps failing deep into a deploy.
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
         with:
@@ -246,9 +246,9 @@ jobs:
       # the app steps, so CD NEVER runs the infra Terraform deploy.sh scripts —
       # server (vServer provisioning), storage (vStorage), postgres (vDB), or
       # load_balancer (vLB) are all managed outside this pipeline.
-      # Most steps ship containers to the vServers over SSH; the `event-api` step instead
-      # applies customer360-event-api to the VKS Kubernetes cluster. Both pull from GHCR.
-      - name: Deploy app services (vServers over SSH + event-api to VKS)
+      # Most steps ship containers to the vServers over SSH; the `event-api` and `promotions`
+      # steps instead apply their manifests to the VKS Kubernetes cluster. All pull from GHCR.
+      - name: Deploy app services (vServers over SSH + event-api/promotions to VKS)
         working-directory: deployments
         env:
           GHCR_USER: ${{ github.actor }}
@@ -265,15 +265,15 @@ jobs:
           DOCS_INTERNAL_AUTH_SECRET: ${{ secrets.DOCS_INTERNAL_AUTH_SECRET }}
           PORTAINER_ADMIN_PASSWORD: ${{ secrets.PORTAINER_ADMIN_PASSWORD }}   # monitoring step: auto-registers Portainer agent envs
           GH_TOKEN: ${{ github.token }}   # lets lib/record_deploy.sh call `gh api` (Deployments ledger)
-          VKS_KUBECONFIG: ${{ secrets.VKS_KUBECONFIG }}   # `event-api` step: customer360-event-api runs on VKS, not a vServer
+          VKS_KUBECONFIG: ${{ secrets.VKS_KUBECONFIG }}   # `event-api` + `promotions` steps: those services run on VKS, not a vServer
           # Long-lived token for the cluster's imagePullSecret. NOT GITHUB_TOKEN: that is
           # revoked when this job ends, and the kubelet re-reads the secret on every later
           # pull (scale-up, reschedule), which would then ImagePullBackOff.
           GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
-          # The `event-api` step now deploys customer360-event-api to the VKS Kubernetes
-          # cluster, so it needs a kubeconfig. Materialise it from the secret; without it
-          # deploy-event-api.sh stops with an explicit error rather than deploying nowhere.
+          # The `event-api` and `promotions` steps deploy to the VKS Kubernetes cluster, so they
+          # need a kubeconfig. Materialise it from the secret; without it those scripts stop
+          # with an explicit error rather than deploying nowhere.
           if [ -n "${VKS_KUBECONFIG:-}" ]; then
             printf '%s' "$VKS_KUBECONFIG" > "$RUNNER_TEMP/vks-kubeconfig.yaml"
             chmod 600 "$RUNNER_TEMP/vks-kubeconfig.yaml"

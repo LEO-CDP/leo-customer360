@@ -15,9 +15,10 @@
 #   db-status        Row counts for key CDP tables            (print_database_status)
 #   seed-demo        Seed CIR/demo data — idempotent          (seed_demo_if_empty)
 #   bootstrap-realm  Re-run idempotent Keycloak realm/roles/client bootstrap
-#   restart-apps     Restart api + ads + frontend containers  (restart_host_services)
+#   restart-apps     Restart the api + frontend containers on the api box
+#                    (promotions moved to VKS — this prints the kubectl command for it)
 #   restart-backend  Restart customer360-backend (Dagster)
-#   redeploy-apps    Pull latest images + recreate api/ads/frontend/backend
+#   redeploy-apps    Pull latest images + recreate api/promotions/frontend/backend
 #   flush-cache      FLUSHDB the Redis cache (needs CONFIRM=flush-cache)
 #
 # NOTE: intentionally NO destructive data reset (dev-c360's `reset -v` wipes the
@@ -58,12 +59,17 @@ case "$ACTION" in
   # --- actions that map cleanly onto existing deploy-all steps ---------------
   seed-demo)       exec bash deploy-all.sh "$ENV" --only seed -y ;;
   bootstrap-realm) exec bash deploy-all.sh "$ENV" --only sso-realm -y ;;
-  redeploy-apps)   exec bash deploy-all.sh "$ENV" --only api,ads,frontend,backend -y ;;
+  redeploy-apps)   exec bash deploy-all.sh "$ENV" --only api,promotions,frontend,backend -y ;;
 
   # --- lightweight container restarts (no image pull) -----------------------
   restart-apps)
-    echo ">> Restarting api/ads/frontend on the api box ..."
-    run_on "$(srv_ip api)" 'sudo docker restart customer360-api customer360-promotions customer360-frontend >/dev/null && sudo docker ps --filter name=customer360- --format "   {{.Names}} {{.Status}}"'
+    # customer360-promotions is NOT in this list any more: it runs as a Deployment on
+    # VKS, so there is no container to restart here and `docker restart` on a missing
+    # name fails the whole && chain (taking the status output with it).
+    echo ">> Restarting api/frontend on the api box ..."
+    run_on "$(srv_ip api)" 'sudo docker restart customer360-api customer360-frontend >/dev/null && sudo docker ps --filter name=customer360- --format "   {{.Names}} {{.Status}}"'
+    echo "   promotions (customer360-promotions) runs on VKS — restart it with:"
+    echo "     kubectl -n customer360 rollout restart deploy/promotions"
     ;;
   restart-backend)
     echo ">> Restarting customer360-backend (Dagster) on the backend box ..."

@@ -39,3 +39,5 @@ specs/
 
 .dagster_home
 */.dagster_home/*
+# Consolidated credential inventory (deployments/docs) — never commit.
+deployments/docs/env-and-tfvars-values.txt

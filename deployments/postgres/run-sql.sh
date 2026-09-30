@@ -5,7 +5,17 @@
 #      project's own postgres/Dockerfile uses: database-schema -> init-core-database,
 #      then init-prompt-store-seed, then data-view-for-llm (materialized views)
 #      LAST since it reads those tables.
+#   3) repo  customer360-promotions/sql-scripts/db-schema-init.sql (the leo_ads schema)
+#      LAST, because it is independent of everything above: leo_ads has no RLS and no
+#      foreign keys into the customer360 schema. It lives here rather than in
+#      deploy-promotions.sh because customer360-promotions moved to Kubernetes and there is no
+#      longer a VM with psql on it to bootstrap from -- but this script already reaches
+#      the private vDB through the bastion.
 #   ./run-sql.sh <uat|prod>
+#
+# PROMOTIONS_SEED_SAMPLE=true also loads customer360-promotions/sql-scripts/sample-data-init.sql
+# (demo advertisers/campaigns; ON CONFLICT DO NOTHING, so re-running is safe). Defaults to
+# true on uat and false on prod, matching what deploy-promotions.sh used to do from its overlay.
 #
 # The DB is PRIVATE (public_access is non-functional on this platform), so psql is run ON
 # a bastion inside the VPC over SSH: BASTION=<user>@<ip> (auto-discovered from the sibling
@@ -25,6 +35,7 @@ PG_SQL_DIR="../../postgres"       # repo-root/postgres/**  (extensions, keycloak
 APP_SQL_DIR="../../customer360-database" # the app schema; ORDER MATTERS, so run these known files first:
 APP_ORDER=(database-schema.sql init-core-database.sql init-prompt-store-seed.sql data-view-for-llm.sql)
 MIGRATIONS_DIR="$APP_SQL_DIR/migrations"
+PROMOTIONS_SQL_DIR="../../customer360-promotions/sql-scripts" # leo_ads (customer360-promotions); independent of the above
 
 # --- creds/config: overlay (non-secret) + .env/terraform.tfvars (secret) ---
 if [[ -f .env ]]; then set -a; source ./.env; set +a; fi
@@ -88,6 +99,15 @@ fi
 if [[ -d "$MIGRATIONS_DIR" ]]; then
   # Forward migrations only; *.down.sql are rollbacks, run by hand, never on deploy.
   while IFS= read -r f; do FILES+=("$f"); done < <(find "$MIGRATIONS_DIR" -type f -iname '*.sql' ! -iname '*.down.sql' | sort)
+fi
+# leo_ads last: independent of the customer360 schema, and the service that owns it runs
+# in Kubernetes with no box of its own to bootstrap from.
+PROMOTIONS_SEED_SAMPLE="${PROMOTIONS_SEED_SAMPLE:-$([[ "$ENV" == "uat" ]] && echo true || echo false)}"
+if [[ -f "$PROMOTIONS_SQL_DIR/db-schema-init.sql" ]]; then
+  FILES+=("$PROMOTIONS_SQL_DIR/db-schema-init.sql")
+  if [[ "$PROMOTIONS_SEED_SAMPLE" == "true" && -f "$PROMOTIONS_SQL_DIR/sample-data-init.sql" ]]; then
+    FILES+=("$PROMOTIONS_SQL_DIR/sample-data-init.sql")
+  fi
 fi
 if [[ ${#FILES[@]} -eq 0 ]]; then echo "No *.sql found under $PG_SQL_DIR or $APP_SQL_DIR — nothing to run."; exit 0; fi
 echo "Running ${#FILES[@]} SQL script(s) via psql on ${BASTION} against ${DB_NAME}@${HOST}:${PORT} (user ${DB_USER}):"
