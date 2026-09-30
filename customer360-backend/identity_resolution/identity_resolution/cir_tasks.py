@@ -12,9 +12,11 @@ from datetime import datetime, timezone
 
 import psycopg2
 from dotenv import load_dotenv
+from psycopg2.extras import RealDictCursor
 
 from identity_resolution.resolver import CustomerIdentityResolver
 from identity_resolution.profile_event_projection import MasterProfileEventProjector
+from identity_resolution.persona_engine import PersonaResolutionEngine
 from identity_resolution.rls import set_tenant_context
 
 _BACKEND_SYSTEM_ROOT = os.path.dirname(
@@ -31,7 +33,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_NAME = os.environ.get("DB_NAME", "cdp")
+DB_NAME = os.environ.get("DB_NAME", "customer360")
 DB_USER = os.environ.get("DB_USER", "postgres")
 DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
 DB_PORT = os.environ.get("DB_PORT", "5432")
@@ -186,6 +188,28 @@ def recompute_persona_archetype_match_count(tenant_id: str, persona_archetype_id
             matched_profile_count,
         )
         return matched_profile_count
+    finally:
+        conn.close()
+
+
+def recompute_master_profile_persona(tenant_id: str, master_profile_id: str) -> dict:
+    """Recompute and persist one profile's persona after an interactive edit."""
+    conn = psycopg2.connect(
+        host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
+    )
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            set_tenant_context(cursor, tenant_id)
+            result = PersonaResolutionEngine(schema=DB_SCHEMA).resolve_persona(
+                cursor, tenant_id, master_profile_id
+            )
+            if result is None:
+                raise ValueError(f"Master profile '{master_profile_id}' not found for tenant '{tenant_id}'")
+        conn.commit()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 

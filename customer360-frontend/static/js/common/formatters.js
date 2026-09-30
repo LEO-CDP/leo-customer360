@@ -17,7 +17,12 @@ window.C360 = window.C360 || {};
 
   function fmtPercent(v) { return (v === null || v === undefined) ? "—" : (Number(v) * 100).toFixed(0) + "%"; }
   function fmtScore(v) { return (v === null || v === undefined) ? "—" : Number(v).toFixed(1); }
-  function fmtDate(v) { if (!v) return "—"; var d = new Date(v); return d.toLocaleDateString(); }
+  function fmtDate(v) {
+    if (!v) return "—";
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return "—";
+    return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
+  }
   function fmtDateTime(v) { if (!v) return "—"; var d = new Date(v); return d.toLocaleString(); }
 
   function initialsOf(name) {

@@ -1003,7 +1003,17 @@ class PersonaResolutionEngine:
                AND dp.domain_id = d.domain_id
             WHERE m.master_profile_id = %s AND m.tenant_id = %s;
         """
-        cursor.execute(query, (master_profile_id, tenant_id))
+        params = (master_profile_id, tenant_id)
+        try:
+            rendered_query = cursor.mogrify(query, params).decode("utf-8")
+        except (AttributeError, TypeError):
+            rendered_query = f"{query.strip()} -- params={params!r}"
+        logger.info(
+            "Persona master profile lookup (app.tenant_id=%s):\n%s",
+            tenant_id,
+            rendered_query.strip(),
+        )
+        cursor.execute(query, params)
         return cursor.fetchone()
 
     def _fetch_current_persona(self, cursor, tenant_id, master_profile_id) -> Optional[Dict[str, Any]]:

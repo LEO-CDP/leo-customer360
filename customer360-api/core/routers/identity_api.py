@@ -3,6 +3,7 @@ profiles, raw profile staging, profile links, and the matching-rule
 metadata / throttle-status tables consumed by customer360-backend/identity_resolution.
 """
 
+import logging
 import uuid
 from datetime import date, datetime
 from typing import Optional
@@ -69,6 +70,9 @@ from leo_customer360_dao.repositories.master_profile_event_repository import (
     MasterProfileEventStoreError,
 )
 from core.utils.domains import validate_domain_value
+from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
+
+logger = logging.getLogger(__name__)
 
 # --- Master Profiles ---------------------------------------------------------
 
@@ -393,14 +397,54 @@ def update_master_profile(master_profile_id: uuid.UUID, payload: MasterProfileUp
     if obj is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
     obj_in = payload.model_dump(exclude_unset=True)
+    domain_attributes = {
+        key: obj_in.pop(key)
+        for key in ("customer_tier", "kyc_status")
+        if key in obj_in
+    }
+    if "primary_relationship" in obj_in:
+        primary_relationship = obj_in.pop("primary_relationship")
+        attributes = dict(getattr(obj, "attributes", None) or {})
+        attributes.update(dict(obj_in.get("attributes") or {}))
+        attributes["primary_relationship"] = primary_relationship
+        obj_in["attributes"] = attributes
     if "domain" in obj_in:
         try:
             validate_domain_value(db, obj_in.get("domain"))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     obj = repository.update_master_profile(obj, obj_in)
+    attribute_domain = obj_in.get("domain") or obj.domain
+    for attribute_key, attribute_value in domain_attributes.items():
+        if repository.upsert_domain_attribute(obj, attribute_domain, attribute_key, attribute_value) is None:
+            raise HTTPException(status_code=422, detail=f"Unknown domain '{attribute_domain}'")
+
+    run_id = None
+    try:
+        run_id = dagster_client.identity_resolution.recompute_personas(
+            trigger_reason="master_profile_updated",
+            tenant_id=str(obj.tenant_id),
+            master_profile_id=str(obj.master_profile_id),
+        )
+    except DagsterJobTriggerError:
+        logger.warning(
+            "Could not submit persona recompute for master_profile_id=%s; "
+            "the scheduled identity-resolution run will refresh it later.",
+            obj.master_profile_id,
+            exc_info=True,
+        )
+    setattr(obj, "persona_recompute_run_id", run_id)
     invalidate_prefix("master_profiles")
     return obj
+
+
+@master_profiles_router.get("/{master_profile_id}/persona-recompute-status/{run_id}")
+def get_master_profile_persona_recompute_status(master_profile_id: uuid.UUID, run_id: str):
+    """Return the status of the targeted persona refresh submitted after an update."""
+    try:
+        return dagster_client.identity_resolution.get_status(run_id)
+    except DagsterJobTriggerError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @master_profiles_router.delete("/{master_profile_id}", status_code=204)

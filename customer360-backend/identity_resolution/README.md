@@ -190,7 +190,7 @@ Values are read from environment variables. `.env` is loaded by `cir_tasks.py` f
 | Variable | Default | Description |
 | --- | --- | --- |
 | `DB_HOST` | `localhost` | PostgreSQL host. |
-| `DB_NAME` | `cdp` | PostgreSQL database name. |
+| `DB_NAME` | `customer360` | PostgreSQL database name. |
 | `DB_USER` | `postgres` | PostgreSQL user. |
 | `DB_PASSWORD` | `postgres` | PostgreSQL password. |
 | `DB_PORT` | `5432` | PostgreSQL port. |

@@ -98,6 +98,9 @@ class MasterProfileUpdate(BaseModel):
     cookie_ids: Optional[list[str]] = None
     push_tokens: Optional[dict] = None
     acquisition_source: Optional[str] = None
+    customer_tier: Optional[str] = None
+    kyc_status: Optional[str] = None
+    primary_relationship: Optional[str] = None
     acquisition_campaign: Optional[str] = None
     current_persona_id: Optional[uuid.UUID] = None
     persona_name: Optional[str] = None
@@ -140,6 +143,7 @@ class MasterProfileRead(MasterProfileBase):
     status_code: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    persona_recompute_run_id: Optional[str] = None
 
 
 class PaginationMeta(BaseModel):

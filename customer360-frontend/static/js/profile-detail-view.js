@@ -10,6 +10,7 @@ window.C360 = window.C360 || {};
 
   var currentProfileId = null;
   var currentProfile = null;
+  var currentDomainProfiles = [];
   var currentContentType = "";
   var timelineLimit = 100;
   var timelineDataSourceId = "";
@@ -1232,6 +1233,7 @@ window.C360 = window.C360 || {};
   function load(masterProfileId) {
     closeLinkedRawModal();
     currentProfileId = masterProfileId;
+    currentDomainProfiles = [];
     currentContentType = "";
     timelineLimit = 100;
     timelineDataSourceId = "";
@@ -1290,6 +1292,7 @@ window.C360 = window.C360 || {};
             domainProfiles,
           );
           currentProfile = profileRes[0];
+          currentDomainProfiles = domainProfiles || [];
           $("#detail-loading").addClass("hidden");
           $("#detail-content").html(
             C360.templates.render("profile-details", vm),
@@ -1316,6 +1319,11 @@ window.C360 = window.C360 || {};
 
   function openMasterProfileEditor() {
     if (!currentProfile) return;
+    var currentDomainProfile = (currentDomainProfiles || []).find(function (domainProfile) {
+      return domainProfile.domain_code === currentProfile.domain;
+    });
+    var domainAttributes = (currentDomainProfile && currentDomainProfile.domain_attributes) || {};
+    var profileAttributes = currentProfile.attributes || {};
     var address = currentProfile.address;
     if (address && typeof address === "object") {
       address = Object.keys(address).map(function (key) {
@@ -1330,13 +1338,28 @@ window.C360 = window.C360 || {};
       phone_number: currentProfile.phone_number,
       date_of_birth: currentProfile.date_of_birth,
       gender: currentProfile.gender,
+      domain: currentProfile.domain,
+      acquisition_source: currentProfile.acquisition_source,
+      customer_tier: domainAttributes.membership_tier,
+      kyc_status: domainAttributes.kyc_status,
+      primary_relationship: profileAttributes.primary_relationship,
+      status_code: currentProfile.status_code,
       company_name: currentProfile.company_name,
       address: address,
       lifecycle_stage: currentProfile.lifecycle_stage,
       preferred_channel: currentProfile.preferred_channel,
     };
     Object.keys(values).forEach(function (name) {
-      $("#master-profile-edit-form [name='" + name + "']").val(editProfileValue(values[name]));
+      var value = editProfileValue(values[name]);
+      if (name === "date_of_birth") {
+        value = fmt.date(value);
+        if (value === "—") value = "";
+      }
+      if (name === "gender") {
+        value = value.toLowerCase();
+        if (["male", "female", "other"].indexOf(value) === -1) value = "";
+      }
+      $("#master-profile-edit-form [name='" + name + "']").val(value);
     });
     $("#master-profile-edit-error").addClass("hidden").text("");
     $("#master-profile-edit-modal").removeClass("hidden");
@@ -1362,9 +1385,15 @@ window.C360 = window.C360 || {};
     $button.prop("disabled", true).text("Saving...");
     $error.addClass("hidden").text("");
     api("/master-profiles/" + currentProfileId, payload, "PATCH")
-      .done(function () {
+      .done(function (updatedProfile) {
+        showToast("Master profile updated successfully.", "info");
         closeMasterProfileEditor();
-        reload();
+        var runId = updatedProfile && updatedProfile.persona_recompute_run_id;
+        if (!runId) {
+          showPersonaRefreshReadyToast("Profile update is complete. Reload to see the latest data.");
+          return;
+        }
+        pollMasterProfilePersonaRefresh(runId, 1);
       })
       .fail(function (xhr) {
         var detail = (xhr.responseJSON && xhr.responseJSON.detail) || "Could not save profile.";
@@ -1372,6 +1401,57 @@ window.C360 = window.C360 || {};
       })
       .always(function () {
         $button.prop("disabled", false).text("Save changes");
+      });
+  }
+
+  function showPersonaRefreshReadyToast(message) {
+    iziToast.show({
+      title: "Success",
+      message: message,
+      position: "topRight",
+      color: "green",
+      timeout: false,
+      close: false,
+      buttons: [
+        [
+          "<button>OK</button>",
+          function (instance, toast) {
+            reload();
+            instance.hide({ transitionOut: "fadeOut" }, toast, "button");
+          },
+          true,
+        ],
+        [
+          "<button>Cancel</button>",
+          function (instance, toast) {
+            instance.hide({ transitionOut: "fadeOut" }, toast, "button");
+          },
+        ],
+      ],
+    });
+  }
+
+  function pollMasterProfilePersonaRefresh(runId, attempt) {
+    api("/master-profiles/" + currentProfileId + "/persona-recompute-status/" + runId)
+      .done(function (result) {
+        if (result.status === "success") {
+          showPersonaRefreshReadyToast("Persona refresh is complete. Reload to see the updated profile.");
+          return;
+        }
+        if (result.status === "failure") {
+          showToast("Persona refresh failed. The profile was saved, but the summary may be stale.", "error");
+          return;
+        }
+        if (attempt >= 30) {
+          showToast("Persona refresh is still running. Reload later to see the updated profile.", "info");
+          return;
+        }
+        setTimeout(function () {
+          pollMasterProfilePersonaRefresh(runId, attempt + 1);
+        }, 1000);
+      })
+      .fail(function () {
+        showToast("Could not check persona refresh status. Reload later to see the updated profile.", "error");
       });
   }
 

@@ -278,6 +278,7 @@ class IdentityResolutionDagsterService(DagsterService):
         trigger_reason: str,
         tenant_id: Optional[str] = None,
         persona_archetype_id: Optional[str] = None,
+        master_profile_id: Optional[str] = None,
     ) -> str:
         """Triggers ``identity_resolution_job`` after a
         ``cdp_persona_archetypes`` row is created/edited. When
@@ -293,17 +294,22 @@ class IdentityResolutionDagsterService(DagsterService):
         run_config = None
         if tenant_id:
             tags["tenant_id"] = str(tenant_id)
-        if persona_archetype_id:
+        if persona_archetype_id or master_profile_id:
             if not tenant_id:
-                raise ValueError("tenant_id is required when persona_archetype_id is provided")
-            tags["persona_archetype_id"] = str(persona_archetype_id)
+                raise ValueError("tenant_id is required for a targeted persona refresh")
+            if persona_archetype_id and master_profile_id:
+                raise ValueError("persona_archetype_id and master_profile_id are mutually exclusive")
+            config = {"tenant_id": str(tenant_id)}
+            if persona_archetype_id:
+                tags["persona_archetype_id"] = str(persona_archetype_id)
+                config["persona_archetype_id"] = str(persona_archetype_id)
+            else:
+                tags["master_profile_id"] = str(master_profile_id)
+                config["master_profile_id"] = str(master_profile_id)
             run_config = {
                 "ops": {
                     "resolve_identities_op": {
-                        "config": {
-                            "tenant_id": str(tenant_id),
-                            "persona_archetype_id": str(persona_archetype_id),
-                        }
+                        "config": config
                     }
                 }
             }

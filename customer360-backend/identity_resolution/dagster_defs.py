@@ -50,6 +50,7 @@ from dagster import (  # noqa: E402
 )
 
 from identity_resolution.cir_tasks import (  # noqa: E402
+    recompute_master_profile_persona,
     recompute_persona_archetype_match_count,
     run_identity_resolution_tasks,
 )
@@ -64,6 +65,7 @@ class IdentityResolutionConfig(Config):
 
     tenant_id: Optional[str] = None
     persona_archetype_id: Optional[str] = None
+    master_profile_id: Optional[str] = None
 
 
 @op(retry_policy=RetryPolicy(max_retries=2, delay=10))
@@ -83,6 +85,21 @@ def resolve_identities_op(context: OpExecutionContext, config: IdentityResolutio
             matched_profile_count,
         )
         return matched_profile_count
+
+    if config.master_profile_id:
+        if not config.tenant_id:
+            raise ValueError("tenant_id is required for a targeted master profile refresh")
+        result = recompute_master_profile_persona(
+            tenant_id=config.tenant_id,
+            master_profile_id=config.master_profile_id,
+        )
+        context.log.info(
+            "Master profile persona recompute: master_profile_id=%s tenant_id=%s persona_id=%s",
+            config.master_profile_id,
+            config.tenant_id,
+            result["persona_id"],
+        )
+        return 1
 
     context.log.info("CIR identity resolution job: started")
     processed = run_identity_resolution_tasks()
