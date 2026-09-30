@@ -151,7 +151,7 @@ window.C360 = window.C360 || {};
         filter.input = "date";
         filter.placeholder = "YYYY-MM-DD";
         filter.validation = $.extend({}, filter.validation, {
-          format: /^\d{4}-\d{2}-\d{2}$/
+          format: "YYYY-MM-DD"
         });
       }
       if (attribute.field === "status_code") {

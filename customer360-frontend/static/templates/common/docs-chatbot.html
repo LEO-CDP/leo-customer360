@@ -8,17 +8,6 @@
   Custom .docs-chat-* classes are styled in static/css/app.css.
 -->
 
-<!-- Floating launcher -->
-<button id="docs-chat-launcher" type="button"
-  aria-expanded="false" aria-controls="docs-chat-panel"
-  title="Ask the Docs — documentation assistant"
-  class="fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white pl-4 pr-5 py-3 shadow-lg shadow-indigo-300/40 transition-all">
-  <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor">
-    <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.7 9.7 0 01-4-.86L3 20l1.06-3.18A7.9 7.9 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-  </svg>
-  <span class="text-sm font-semibold">Ask LEO</span>
-</button>
-
 <!-- Chat panel -->
 <div id="docs-chat-panel" role="dialog" aria-modal="false" aria-label="Documentation assistant"
   class="hidden fixed bottom-5 right-5 z-40 w-[min(26rem,calc(100vw-2.5rem))] max-h-[min(38rem,calc(100vh-2.5rem))] flex flex-col rounded-2xl border shadow-2xl overflow-hidden">

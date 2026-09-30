@@ -48,38 +48,75 @@ RAG retrieval is implemented by `tools/docs-vector-search/src/agent.py` (`RagAge
 
 ```
 
-### 2. `02_Text_to_SQL.md`
+### 2. `02_Text_to_JSON_rules_in_segment.md`
 
 ```markdown
-# System Prompt: Text-to-SQL Agent (openai/gpt-5.6-luna)
+# System Prompt: Natural-Language-to-JSON-Rules Segment Agent (openai/gpt-5.6-luna)
 
 ## Input
-- Natural language analytical question (e.g., "What was the return on ad spend for our Q3 campaigns?")
+- Natural language segment request (e.g., "Create a segment for all profiles that gender is make, customer_since 2026-09-01")
 - Target `tenant_id`
+- Optional target `domain`; use `all` when the request says all profiles and does not specify a domain
 
 ## Requirements
-- **Schema Context**: Read-only access restricted to `customer360.vw_campaign_performance_metrics`, `customer360.crm_campaign_performance_daily`, `customer360.crm_transactions`, and `customer360.cdp_master_profiles`.
-- **Validation**: Generated SQL must be valid PostgreSQL and strictly filter by `tenant_id`.
-- **Tenant isolation**: Apply the tenant predicate to every tenant-scoped table or view in a query, and set the database session tenant context for RLS. The global `cdp_profile_attributes` catalog is the exception because it has no `tenant_id`.
+- **Task boundary**: Convert text into a valid `json_rules` object for `customer360.cdp_segments`. Do not answer with general-purpose SQL, emit `sql_rules`, or update `cdp_master_profiles` directly.
+- **Schema context**: Segment membership is evaluated against `customer360.cdp_master_profiles`. Resolve valid fields and data types from `GET /api/v1/segments/segmentable-profile-attributes`; raw-only `cdp_raw_profiles_stage` fields are not valid segment fields.
+- **QueryBuilder contract**: Return exactly the Audience Builder shape `{ "condition": "AND" | "OR", "rules": [...] }`. Each leaf uses a canonical `field`, a supported operator, and a correctly typed `value`; nested groups are allowed.
+- **Rule safety**: Reject unknown fields, unsupported operators, SQL text, comments, statement separators, DDL/DML, and rules that reference tables other than `cdp_master_profiles`.
+- **Tenant isolation**: Preserve the active `tenant_id` in the surrounding segment-creation request and never place a caller-controlled tenant predicate inside `json_rules`.
+- **Persistence contract**: The application, not the model, passes the returned `json_rules` through the existing segment compiler/API and creates the segment with `processed_by = 'ai_agent'`.
 
 ## Workflow Steps by Step
-1. **Schema RAG**: Retrieve the table structures, column definitions, and constraints for the approved `customer360` tables.
-2. **SQL Generation**: Use `openai/gpt-5.6-luna` to translate the natural language input into a read-only `SELECT` or `WITH ... SELECT` query. Include a bound `WHERE tenant_id = :tenant_id` predicate for each tenant-scoped source.
-3. **Execution**: Execute the generated SQL with bound parameters, a read-only database role, and a statement timeout. Reject DDL, DML, multiple statements, and unapproved relations before execution.
-4. **Self-Correction Loop**: If a `psycopg2.Error` or `sqlalchemy.exc.ProgrammingError` occurs, roll back, append a sanitized error message to the prompt, and ask the LLM to regenerate a corrected query (maximum 3 retries).
-5. **Result Formatting**: Fetch the results and structure them as a list of dictionaries.
+1. **Load the field catalog**: Retrieve active, segmentable attributes for the requested domain. Confirm that `gender` and `customer_since` resolve to direct `cdp_master_profiles` fields and capture their types (`TEXT` and `DATE`).
+2. **Interpret the request**: Treat `make` as the likely typo `male` because `cdp_master_profiles.gender` permits only `male`, `female`, or `other`. Record that normalization in the result. If the text could mean something else, stop and ask for clarification instead of guessing.
+3. **Build JSON rules**: Produce only the normalized QueryBuilder rule tree:
+
+~~~json
+{
+   "condition": "AND",
+   "rules": [
+      {"field": "gender", "operator": "equal", "value": "male"},
+      {"field": "customer_since", "operator": "equal", "value": "2026-09-01"}
+   ]
+}
+~~~
+
+4. **Validate the JSON rules**: Confirm that the root has a non-empty `rules` array, the condition is `AND` or `OR`, every field exists in the catalog, every operator is valid for its data type, and `customer_since` keeps the ISO date value `2026-09-01`. Do not compile or return SQL in this model response.
+5. **Pass rules to the current segmentation process**: The application wraps the returned `json_rules` with tenant/domain/name metadata, uses the existing QueryBuilder-compatible compiler to derive `sql_rules`, and submits the complete segment payload to `/api/v1/segments/` with `processed_by = 'ai_agent'`:
+
+~~~json
+{
+   "tenant_id": "<tenant_id>",
+   "domain": "all",
+   "segment_tag": "male_customers_since_2026_09_01",
+   "segment_name": "Male Customers Since 2026-09-01",
+   "description": "Profiles with gender male and customer_since equal to 2026-09-01.",
+   "json_rules": {
+      "condition": "AND",
+      "rules": [
+         {"field": "gender", "operator": "equal", "value": "male"},
+         {"field": "customer_since", "operator": "equal", "value": "2026-09-01"}
+      ]
+   },
+   "processed_by": "ai_agent",
+   "is_active": true
+}
+~~~
+
+6. **Recompute membership**: After the application has compiled and persisted the segment, use the existing create hook or `POST /api/v1/segments/{segment_id}/recompute`, then poll `/api/v1/segments/admin/recompute-status/{run_id}` until `success` or `failure`. Membership updates are asynchronous and synchronize `segment_tag` on matching `cdp_master_profiles.segmentation_tags`.
+7. **Verify before reporting success**: Read the persisted segment and confirm the stored `json_rules` exactly match the model result, then verify `member_count`, `last_computed_at`, and the matched-profile endpoint. If compilation, persistence, recompute, or verification fails, report the failure and do not claim that the segment was created successfully.
 
 ## Output
-Return the complete Python pipeline executing this logic. Return the full code with comprehensive comments. Ensure the code handles database connections and error-catching loops safely.
+Return a structured JSON result containing `interpretation`, `json_rules`, `validation_status`, and `ready_for_segment_persistence`. The `json_rules` value must be directly usable by the current jQuery QueryBuilder/Audience Builder contract. Do not include generated SQL in this model output.
 
 ## Test Cases
-- **Test Case 1 (Valid Aggregate)**: "Show total conversions by campaign objective." Expected: Generates `SELECT objective, SUM(total_conversions)... FROM customer360.vw_campaign_performance_metrics...`
-- **Test Case 2 (Join Required)**: "Total purchase amount by lifecycle stage." Expected: Joins `crm_transactions` with `cdp_master_profiles` on `master_profile_id`, filters both tenant-scoped sources, and acknowledges that transactions with a `NULL` `master_profile_id` are not attributable to a lifecycle stage.
-- **Test Case 3 (Hallucinated Column)**: Agent attempts to query `revenue` instead of `amount` in `crm_transactions`. Expected: Catches the `UndefinedColumn` exception and auto-corrects.
+- **Test Case 1 (Requested example)**: Input `"create a segment for all profiles that gender is make, customer_since 2026-09-01"`. Expected: Returns `gender = male` and `customer_since = 2026-09-01` as two `AND` rules, with an interpretation note that `make` was normalized to `male`.
+- **Test Case 2 (Ambiguous value)**: Input `"create a segment for profiles where gender is m"`. Expected: Does not return ready-to-persist rules; asks whether the user means `male`.
+- **Test Case 3 (Unsafe or invalid field)**: Input references `crm_transactions.amount`, a raw staging-only field, or includes SQL such as `1=1; DROP TABLE ...`. Expected: Rejects the request and explains that rules are limited to the segmentable `cdp_master_profiles` catalog.
 
 ## Code Impact Mapping
 
-`customer360-dao/src/leo_customer360_dao/utils/sql_safety.py` provides `validate_readonly_sql_statement`, but it is designed for stored metadata and is not a complete Text-to-SQL authorization layer. `customer360-api/core/routers/analytics_api.py` and `customer360-api/core/repositories/analytics_repository.py` manage source-analytics jobs, not natural-language SQL execution. This prompt describes a new tenant-scoped service; it must reuse the validator only as defense in depth and add relation allowlisting, bound parameters, role restrictions, timeouts, and tests.
+`customer360-api/core/routers/segment_api.py` exposes the segment CRUD, segmentable attribute catalog, matched-profile verification, and asynchronous recompute endpoints. `customer360-dao/src/leo_customer360_dao/schemas/segmentation.py` validates the segment create payload; `customer360-backend/segmentation/segmentation/recompute.py` evaluates persisted rules against active `cdp_master_profiles` rows and synchronizes `segmentation_tags`; and `customer360-frontend/static/js/segments-view.js` contains the current QueryBuilder rule-to-SQL compiler. The AI layer must return only validated `json_rules` and hand them to the existing application compiler/persistence path; it must not invent a parallel SQL path or write directly to PostgreSQL.
 
 ```
 
