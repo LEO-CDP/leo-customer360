@@ -2,13 +2,12 @@
 
 - Ref: docs/notebooks/LEOCDP_RAG_FULL_TEST_9_use_cases.ipynb
 - Ref: customer360-database/database-schema.sql
-- Model IDs below are OpenRouter IDs. The companion notebook uses an in-memory SQLite demo for several flows; it does not validate PostgreSQL schema writes.
-
+- Model policy: use only `openai/gpt-5.6-luna` and `google/gemini-3.5-flash-lite`. The repository currently defaults Gemini configuration to an older Flash Lite release, so configure `gemini-3.5-flash-lite` explicitly where the provider account supports it. The companion notebook uses an in-memory SQLite demo for several flows; it does not validate PostgreSQL schema writes.
 
 ### 1. `01_Customer_Support.md`
 
 ```markdown
-# System Prompt: Customer Support Agent (deepseek/deepseek-chat)
+# System Prompt: Customer Support Agent (google/gemini-3.5-flash-lite)
 
 ## Input
 - User query text (e.g., "How do I reset my password?")
@@ -25,7 +24,7 @@
 1. **Identity Resolution**: Query `customer360.cdp_master_profiles` using the provided email or phone number and `tenant_id` to retrieve the `master_profile_id`.
 2. **Context Retrieval**: Embed the user query and search the help-center vector database.
 3. **Fallback Evaluation**: If retrieval returns the configured `NOT_FOUND_ANSWERS` result, execute a Tavily search restricted to the company's verified domain. Do not hard-code a similarity threshold unless the retriever defines and tests one.
-4. **Answer Generation**: Synthesize the retrieved context or search results to formulate a concise, helpful response using `deepseek-chat`.
+4. **Answer Generation**: Synthesize the retrieved context or search results to formulate a concise, helpful response using `google/gemini-3.5-flash-lite`.
 5. **Interaction Logging**: Insert a new record into `customer360.crm_customer_contacts` mapping the interaction:
    - `tenant_id` = active tenant
    - `master_profile_id` = resolved ID
@@ -43,12 +42,16 @@ Return the complete Python script (using LangChain or LlamaIndex) implementing t
 - **Test Case 2 (Fallback Hit)**: User asks about a recent feature not in the vector DB. Expected: Triggers Tavily search, returns accurate answer, and logs to `crm_customer_contacts`.
 - **Test Case 3 (Unknown User)**: Query comes from an unmapped email. Expected: Returns the answer, but skips the contact insert (or records it in a separately defined anonymous-event store); never inserts `NULL` into `master_profile_id`.
 
+## Code Impact Mapping
+
+RAG retrieval is implemented by `tools/docs-vector-search/src/agent.py` (`RagAgent`, `retrieve`, `query`). Profile lookup and contact CRUD are in `customer360-api/core/routers/identity_api.py` and `customer360-api/core/routers/relations_api.py`, backed by `customer360-dao` relation models and repositories. The combined support-answer, Tavily fallback, and contact-logging workflow is not currently implemented as one service.
+
 ```
 
 ### 2. `02_Text_to_SQL.md`
 
 ```markdown
-# System Prompt: Text-to-SQL Agent (deepseek/deepseek-v4-pro)
+# System Prompt: Text-to-SQL Agent (openai/gpt-5.6-luna)
 
 ## Input
 - Natural language analytical question (e.g., "What was the return on ad spend for our Q3 campaigns?")
@@ -61,7 +64,7 @@ Return the complete Python script (using LangChain or LlamaIndex) implementing t
 
 ## Workflow Steps by Step
 1. **Schema RAG**: Retrieve the table structures, column definitions, and constraints for the approved `customer360` tables.
-2. **SQL Generation**: Use `deepseek/deepseek-v4-pro` to translate the natural language input into a read-only `SELECT` or `WITH ... SELECT` query. Include a bound `WHERE tenant_id = :tenant_id` predicate for each tenant-scoped source.
+2. **SQL Generation**: Use `openai/gpt-5.6-luna` to translate the natural language input into a read-only `SELECT` or `WITH ... SELECT` query. Include a bound `WHERE tenant_id = :tenant_id` predicate for each tenant-scoped source.
 3. **Execution**: Execute the generated SQL with bound parameters, a read-only database role, and a statement timeout. Reject DDL, DML, multiple statements, and unapproved relations before execution.
 4. **Self-Correction Loop**: If a `psycopg2.Error` or `sqlalchemy.exc.ProgrammingError` occurs, roll back, append a sanitized error message to the prompt, and ask the LLM to regenerate a corrected query (maximum 3 retries).
 5. **Result Formatting**: Fetch the results and structure them as a list of dictionaries.
@@ -74,12 +77,16 @@ Return the complete Python pipeline executing this logic. Return the full code w
 - **Test Case 2 (Join Required)**: "Total purchase amount by lifecycle stage." Expected: Joins `crm_transactions` with `cdp_master_profiles` on `master_profile_id`, filters both tenant-scoped sources, and acknowledges that transactions with a `NULL` `master_profile_id` are not attributable to a lifecycle stage.
 - **Test Case 3 (Hallucinated Column)**: Agent attempts to query `revenue` instead of `amount` in `crm_transactions`. Expected: Catches the `UndefinedColumn` exception and auto-corrects.
 
+## Code Impact Mapping
+
+`customer360-dao/src/leo_customer360_dao/utils/sql_safety.py` provides `validate_readonly_sql_statement`, but it is designed for stored metadata and is not a complete Text-to-SQL authorization layer. `customer360-api/core/routers/analytics_api.py` and `customer360-api/core/repositories/analytics_repository.py` manage source-analytics jobs, not natural-language SQL execution. This prompt describes a new tenant-scoped service; it must reuse the validator only as defense in depth and add relation allowlisting, bound parameters, role restrictions, timeouts, and tests.
+
 ```
 
 ### 3. `03_Campaign_Orchestration.md`
 
 ```markdown
-# System Prompt: Campaign Orchestration (moonshotai/kimi-k3)
+# System Prompt: Campaign Orchestration (openai/gpt-5.6-luna)
 
 ## Input
 - High-level marketer objective (e.g., "Draft an email campaign for high-value dormant users.")
@@ -87,38 +94,43 @@ Return the complete Python pipeline executing this logic. Return the full code w
 - Active `user_id` (marketer)
 
 ## Requirements
-- **Tool-Calling**: Agent must use Python functions to interact with the database.
+- **Tool-Calling**: Agent must call the existing application services and repositories; it must not bypass their validation with raw database writes.
 - **Database Schema**: Strictly use `customer360.crm_campaign`, `customer360.cdp_segments`, `customer360.cdp_content_items`, and `customer360.crm_campaign_content_items`.
 - **Tenant isolation**: Set the database session tenant context and include the active `tenant_id` on every read and write, including content-link rows.
+- **Current draft-service contract**: `/campaigns/draft` requires an existing tenant-owned `segment_id` that passes `is_active` and `status_code == 1`, plus a tenant-owned `template_id`; the template must be `Approved`. It does not create a segment or copy template inline.
 
 ## Workflow Steps by Step
 1. **Intent Analysis**: Parse the marketer's objective to identify the target audience and channel.
-2. **Audience Mapping (Tool)**: Query `customer360.cdp_segments` by `tenant_id` and the requested `segment_name` or `segment_tag`. If none exists, insert `tenant_id`, a unique `segment_tag`, `segment_name`, a valid non-empty `json_rules` rule tree, and `processed_by = 'ai_agent'`. Do not invent membership rules; ask for clarification or mark the segment for review when the objective is underspecified.
+2. **Audience Mapping (Tool)**: Query `customer360.cdp_segments` by `tenant_id` and the requested `segment_name` or `segment_tag`. The current `/campaigns/draft` service requires an existing segment with `is_active = TRUE` and `status_code = 1`; operationally, its membership computation should also be complete before drafting. If none exists, call the separate `/segments` creation flow with `tenant_id`, a unique `segment_tag`, `segment_name`, a valid non-empty `json_rules` rule tree, and `processed_by = 'ai_agent'`; wait for the tenant-scoped recompute to complete before retrying the draft. Do not invent membership rules or proceed while the segment is not resolvable.
 3. **Campaign Draft (Tool)**: Insert a new row into `customer360.crm_campaign` setting:
    - `tenant_id` = active tenant
    - `name` = generated campaign title
    - `status` = 'Draft'
-   - `approval_status` = 'Draft'
+   - `approval_status` = 'InReview' (the current draft repository creates a human-reviewable draft in this state)
    - `segment_id` = ID from step 2
    - `user_id` = active marketer ID
-   - `channel` and `objective` = validated values inferred from the brief
-   - For an email campaign, set `template_id` only to a template belonging to the same tenant; otherwise leave it `NULL` until copy drafting creates one.
-4. **Content Linking (Tool)**: Query `customer360.cdp_content_items` for relevant recommendations. Insert linking rows into `customer360.crm_campaign_content_items` for the created `campaign_id`.
-   - Each link must include the active `tenant_id`, a deterministic `position`, and an optional `role`; source content must belong to the same tenant and have an active `status_code`.
+   - `template_id` = a tenant-owned `Approved` template selected before calling `/campaigns/draft`
+   - `objective` = validated objective from the brief
+   - The current `CampaignDraftRequest` accepts `segment_id`, `template_id`, `objective`, and optional `budget_time_constraints`; it does not accept `channel`.
+4. **Content Linking (Tool)**: Let `CampaignDraftRepository.create_draft` build the closed candidate list from active tenant-owned `cdp_content_items`, let the AI return only candidate IDs, and let the repository validate and persist `crm_campaign_content_items` with deterministic positions and roles. Do not insert arbitrary content IDs directly from model output.
 
 ## Output
 Return the complete Python implementation utilizing an LLM tool-calling framework (e.g., LangChain agents). Return the full code with comprehensive comments for every tool definition and database interaction.
 
 ## Test Cases
 - **Test Case 1 (End-to-End Creation)**: Valid request matching an existing segment. Expected: Outputs a successfully created `campaign_id` with linked content.
-- **Test Case 2 (Missing Segment)**: Goal targets a demographic not currently segmented. Expected: Generates and inserts a new segment before drafting the campaign.
+- **Test Case 2 (Missing Segment)**: Goal targets a demographic not currently segmented. Expected: Creates the segment through the separate segment API, waits for its tenant-scoped recompute, then calls the campaign draft endpoint; it must not pretend the campaign was created before the segment is resolvable.
+
+## Code Impact Mapping
+
+`customer360-api/core/routers/campaign_draft_api.py` exposes `/campaigns/draft` and `/campaigns/zalo-draft`. `customer360-api/core/repositories/campaign_draft_repository.py` validates the segment/template, calls the planner, enforces `InReview`, and persists only candidate content IDs. Planner code is in `customer360-agent/src/campaign_planner/email.py` and `zalo.py`; shared provider and prompt resolution is in `base.py` and `customer360-agent/src/prompts/`. Segment creation and recomputation are owned by `customer360-api/core/routers/segment_api.py` and `segment_repository.py`.
 
 ```
 
 ### 4. `04_Copy_Drafting.md`
 
 ```markdown
-# System Prompt: Copy Drafting Agent (~deepseek/deepseek-v4-flash-latest)
+# System Prompt: Copy Drafting Agent (google/gemini-3.5-flash-lite)
 
 ## Input
 - Brief/Campaign details (e.g., "Announce our summer sale to VIPs")
@@ -131,7 +143,7 @@ Return the complete Python implementation utilizing an LLM tool-calling framewor
 
 ## Workflow Steps by Step
 1. **Context Loading**: Retrieve brand voice guidelines from an explicitly configured source and the persona summary from `cdp_persona_archetypes` (if `persona_archetype_id` is passed). Do not treat unspecified local context as available data.
-2. **Copy Generation**: Formulate the copy using `~deepseek/deepseek-v4-flash-latest`, outputting a strict JSON object containing:
+2. **Copy Generation**: Formulate the copy using `google/gemini-3.5-flash-lite`, outputting a strict JSON object containing:
    - `name`
    - `subject`
    - `message_body` (plain text)
@@ -153,12 +165,16 @@ Return the complete Python script executing the structured output prompt and the
 - **Test Case 1 (Standard Brief)**: General product announcement. Expected: Outputs well-formatted HTML and subject line, inserts successfully.
 - **Test Case 2 (Persona-Driven)**: Brief includes a `persona_archetype_id` for "Gen-Z Shopper". Expected: Copy tone is distinctively tailored, and the template row saves with the archetype's `persona_id` foreign key linked.
 
+## Code Impact Mapping
+
+`customer360-dao/src/leo_customer360_dao/models/crm.py` defines `MessageTemplate` and the associated approval fields. Campaign drafting reads tenant-owned `Approved` templates through `customer360-api/core/repositories/campaign_draft_repository.py`; activation also requires an approved template. No dedicated email copy-generation route or service currently exists, so this prompt describes new orchestration that must preserve the existing Draft -> InReview -> Approved/Rejected lifecycle.
+
 ```
 
 ### 5. `05_Analytics_Chat.md`
 
 ```markdown
-# System Prompt: Analytics Chat (deepseek/deepseek-v4-pro + ~deepseek/deepseek-v4-flash-latest)
+# System Prompt: Analytics Chat (openai/gpt-5.6-luna + google/gemini-3.5-flash-lite)
 
 ## Input
 - Multi-turn conversation history
@@ -172,23 +188,27 @@ Return the complete Python script executing the structured output prompt and the
 
 ## Workflow Steps by Step
 1. **State Retrieval**: Load the previous user query and the last generated SQL string.
-2. **Query Modification (Pro)**: Pass the history and new prompt to `deepseek/deepseek-v4-pro`. Instruct it to modify the previous SQL while preserving its safety checks and tenant predicates. Use `crm_campaign_performance_daily` when the request needs `report_date`; the lifetime view has no `report_date` column.
+2. **Query Modification (Luna)**: Pass the history and new prompt to `openai/gpt-5.6-luna`. Instruct it to modify the previous SQL while preserving its safety checks and tenant predicates. Use `crm_campaign_performance_daily` when the request needs `report_date`; the lifetime view has no `report_date` column.
 3. **Execution**: Execute the modified SQL against the `customer360` schema.
-4. **Data Transformation (Flash)**: Pass the raw tabular JSON results to `~deepseek/deepseek-v4-flash-latest`. Ask it to output a UI-ready JSON format (e.g., `{ "labels": [...], "series": [...] }`) and a single conversational summary sentence without inventing values.
+4. **Data Transformation (Gemini)**: Pass the raw tabular JSON results to `google/gemini-3.5-flash-lite`. Ask it to output a UI-ready JSON format (e.g., `{ "labels": [...], "series": [...] }`) and a single conversational summary sentence without inventing values.
 
 ## Output
 Return the complete Python conversational loop class. Return the full code with comprehensive comments detailing the prompt chaining between the two models.
 
 ## Test Cases
-- **Test Case 1 (Contextual Follow-up)**: Turn 1: "Show daily spend." Turn 2: "Filter that to just December." Expected: `deepseek/deepseek-v4-pro` uses `crm_campaign_performance_daily` and appends a bounded `WHERE report_date` clause while retaining tenant isolation.
-- **Test Case 2 (Chart Formatting)**: A tenant-scoped query returns 5 rows of `channel` versus `total_clicks` from the lifetime view. Expected: `~deepseek/deepseek-v4-flash-latest` outputs mapped arrays for `labels` (channels) and `series` (clicks).
+- **Test Case 1 (Contextual Follow-up)**: Turn 1: "Show daily spend." Turn 2: "Filter that to just December." Expected: `openai/gpt-5.6-luna` uses `crm_campaign_performance_daily` and appends a bounded `WHERE report_date` clause while retaining tenant isolation.
+- **Test Case 2 (Chart Formatting)**: A tenant-scoped query returns 5 rows of `channel` versus `total_clicks` from the lifetime view. Expected: `google/gemini-3.5-flash-lite` outputs mapped arrays for `labels` (channels) and `series` (clicks).
+
+## Code Impact Mapping
+
+`customer360-api/core/routers/analytics_api.py` and `customer360-api/core/repositories/analytics_repository.py` operate tracking-log aggregation jobs through Dagster and Redis. `customer360-frontend/static/js/analytics.js` renders existing analytics views. There is no conversational SQL-history or chart-narrative service; implement this as a new service using the same safety controls as Text-to-SQL rather than extending the job-submission endpoint.
 
 ```
 
 ### 6. `06_Ticket_Classification.md`
 
 ```markdown
-# System Prompt: Ticket Classification (nvidia/nemotron-3-nano-30b-a3b)
+# System Prompt: Ticket Classification (google/gemini-3.5-flash-lite)
 
 ## Input
 - Batch of support contacts selected by the application (from `customer360.crm_customer_contacts` where `tenant_id = :tenant_id` and `contact_type = 'support'`)
@@ -200,7 +220,7 @@ Return the complete Python conversational loop class. Return the full code with 
 
 ## Workflow Steps by Step
 1. **Data Ingestion**: Query `customer360.crm_customer_contacts` for `contact_id` and non-null `contact_content`, scoped by `tenant_id`; maintain a separate checkpoint or store if only previously unclassified contacts should be processed.
-2. **Classification Prompts**: Feed the batch texts to `nemotron-3-nano-30b-a3b` with a strict prompt demanding a structured JSON array back.
+2. **Classification Prompts**: Feed the batch texts to `google/gemini-3.5-flash-lite` with a strict prompt demanding a structured JSON array back.
 3. **Categorization Rules**:
    - `urgency`: 'High', 'Medium', 'Low'
    - `sentiment`: 'Positive', 'Neutral', 'Negative'
@@ -214,12 +234,16 @@ Return the complete Python batch processing script. Return the full code with co
 - **Test Case 1 (High Urgency)**: "My account was charged twice, I need a refund immediately!" Expected: Urgency: High, Sentiment: Negative, Routing: Billing, subject to the tenant routing policy.
 - **Test Case 2 (Low Urgency)**: "How do I change my profile picture?" Expected: Urgency: Low, Sentiment: Neutral, Routing: General.
 
+## Code Impact Mapping
+
+`customer360-api/core/routers/relations_api.py` exposes tenant-scoped contact CRUD, backed by `CustomerContact` in `customer360-dao`. `customer360-dao/src/leo_customer360_dao/crud/crm_sync.py` also creates contact-log rows from profile signals. No classification worker, routing-policy service, or classification persistence model currently exists; keep this feature outside `crm_customer_contacts` until a dedicated, tenant-scoped result store is introduced.
+
 ```
 
 ### 7. `07_Campaign_Performance_Narrative.md`
 
 ```markdown
-# System Prompt: Campaign Performance Narrative (~deepseek/deepseek-v4-flash-latest)
+# System Prompt: Campaign Performance Narrative (google/gemini-3.5-flash-lite)
 
 ## Input
 - A tenant-scoped JSON dictionary representing a single row from `customer360.vw_campaign_performance_metrics` (includes `total_spend`, `total_revenue`, `total_conversions`, `total_impressions`, `cpa`, `roas`, `ctr_percentage`).
@@ -231,7 +255,7 @@ Return the complete Python batch processing script. Return the full code with co
 ## Workflow Steps by Step
 1. **Data Parsing**: Load the metric JSON payload.
 2. **Insight Extraction**: Identify the strongest performing KPI (e.g., highest ROAS or CTR) and the weakest performing KPI (e.g., high CPA or low impressions).
-3. **Narrative Generation**: Use `~deepseek/deepseek-v4-flash-latest` to draft a summary explaining what the numbers mean for the business. Highlight efficiency and scale, and never interpret `cpa = 0.00` as good performance when `total_conversions = 0`.
+3. **Narrative Generation**: Use `google/gemini-3.5-flash-lite` to draft a summary explaining what the numbers mean for the business. Highlight efficiency and scale, and never interpret `cpa = 0.00` as good performance when `total_conversions = 0`.
 4. **Formatting**: Output the final string. No database updates are necessary.
 
 ## Output
@@ -241,12 +265,16 @@ Return the complete Python script executing this transformation via the LLM API.
 - **Test Case 1 (Highly Profitable)**: High ROAS, Low CPA. Expected narrative focuses on efficiency and recommends scaling spend.
 - **Test Case 2 (High Spend, Zero Conversions)**: Expected narrative detects `total_conversions = 0`, avoids treating the derived `cpa = 0.00` as positive, and tactfully describes the conversion-funnel risk. Any pause or scaling recommendation must come from an explicit business policy, not the prompt alone.
 
+## Code Impact Mapping
+
+`customer360-database/database-schema.sql` defines `vw_campaign_performance_metrics`, and existing analytics/dashboard surfaces consume campaign metrics. No LLM campaign-narrative module exists in the repository. Implement this as a read-only service that receives an already tenant-scoped result row; do not add database writes or embed it in campaign activation.
+
 ```
 
 ### 8. `08_Schema_Mapping_Assistant.md`
 
 ```markdown
-# System Prompt: Schema-Mapping Assistant (z-ai/glm-5.3)
+# System Prompt: Schema-Mapping Assistant (openai/gpt-5.6-luna)
 
 ## Input
 - A list of raw client CSV header strings (e.g., `["client_mail", "cell", "ltv", "address_1"]`)
@@ -258,7 +286,7 @@ Return the complete Python script executing this transformation via the LLM API.
 
 ## Workflow Steps by Step
 1. **Context Retrieval**: Load the exact column names and datatypes available in `customer360.cdp_raw_profiles_stage`.
-2. **Semantic Matching**: Prompt `z-ai/glm-5.3` to evaluate each raw client header against the target columns and datatypes.
+2. **Semantic Matching**: Prompt `openai/gpt-5.6-luna` to evaluate each raw client header against the target columns and datatypes.
 3. **Decision Logic**:
    - Obvious matches (e.g., `client_mail` -> `email`) map directly.
    - Non-obvious or unmapped fields must return `"target_column": null` and `"requires_review": true` unless the ingestion contract explicitly preserves the value inside `event_payload` JSONB.
@@ -272,12 +300,16 @@ Return the complete Python script that runs the semantic mapping prompt and pars
 - **Test Case 1 (Direct Match)**: Inputs `['usr_fname', 'usr_lname']`. Expected: Maps strictly to `first_name` and `last_name` with `requires_review: false`.
 - **Test Case 2 (Ambiguous Match)**: Input `['membership_points']`. Expected: Returns `target_column: null` with `requires_review: true` unless a documented ingestion contract says to preserve it under `event_payload`; it must not be presented as a canonical stage column.
 
+## Code Impact Mapping
+
+`customer360-api/core/routers/identity_api.py` exposes profile and profile-attribute metadata. `customer360-database/init-core-database.sql` seeds the governed `cdp_profile_attributes` catalog, while `customer360-database/database-schema.sql` is the source of truth for stage columns. No raw-header mapping assistant currently exists; implement it as a review-first ingestion service and route accepted records through the existing raw-profile API or ingestion pipeline.
+
 ```
 
 ### 9. `09_Persona_Decision_Loop.md`
 
 ```markdown
-# System Prompt: Persona Decision Loop (~deepseek/deepseek-v4-flash-latest)
+# System Prompt: Persona Decision Loop (google/gemini-3.5-flash-lite; proposed extension)
 
 ## Input
 - `master_profile_id`
@@ -287,6 +319,7 @@ Return the complete Python script that runs the semantic mapping prompt and pars
 - **Actionability**: The generated Next Best Action (NBA) must be specific and measurable.
 - **Database Schema**: Use `customer360.cdp_master_profiles`, `customer360.crm_transactions`, `customer360.cdp_customer_personas`, `customer360.cdp_profile_links`, and `customer360.cdp_raw_profiles_stage` when raw browsing or event evidence is required.
 - **Tenant isolation and history**: Scope every query by `tenant_id`. `cdp_customer_personas` is versioned; prefer inserting a new computed version and deactivating the previous active row in one transaction instead of overwriting history.
+- **Current implementation boundary**: The existing `PersonaResolutionEngine` computes the NBA from the master-profile snapshot and uses deterministic rules; optional Google Gemini/offline helpers generate non-PII labels and summaries. It does not currently call the proposed Gemini reasoning flow or load transactions/raw events for this decision loop.
 
 ## Workflow Steps by Step
 1. **Context Gathering**: 
@@ -294,15 +327,19 @@ Return the complete Python script that runs the semantic mapping prompt and pars
    - Query `crm_transactions` for the last 5 transactions (sorted by `transaction_time DESC`); do not describe them as browsing events.
    - If browsing or product-interest evidence is required, join `cdp_profile_links` to `cdp_raw_profiles_stage` by `raw_profile_id`, then filter both by `tenant_id` and the requested `master_profile_id`; inspect `event_name`, `event_time`, and `event_payload` only when the available ingestion data supports it.
    - Query `cdp_customer_personas` for active rows (`is_active = TRUE`) scoped by tenant and profile, ordered by `computed_at DESC`; the schema does not guarantee only one active row across archetypes, so handle multiple rows explicitly.
-2. **Analysis (Perception -> Interpretation)**: Pass the combined customer context to `~deepseek/deepseek-v4-flash-latest`. Have the model analyze the timeline to interpret the customer's current intent and label generated hypotheses as hypotheses, not facts.
+2. **Analysis (Perception -> Interpretation)**: Pass the combined customer context to `google/gemini-3.5-flash-lite`. Have the model analyze the timeline to interpret the customer's current intent and label generated hypotheses as hypotheses, not facts.
 3. **NBA Generation**: Generate a concise "Next Best Action" string (e.g., "Trigger abandoned cart SMS for [Product]").
 4. **Record Update**: In one transaction, deactivate the prior active persona row and insert the new `next_best_action` with an incremented `computed_version`, preserving the same tenant, profile, and archetype. Only use an `UPDATE` when the application explicitly accepts loss of version history; if so, include `tenant_id`, `master_profile_id`, `persona_archetype_id`, and `is_active = TRUE` in the predicate.
 
 ## Output
-Return the complete Python script executing the data gathering, LLM inference, and database update. Return the full code with comprehensive comments.
+Return the complete Python script for this proposed extension, including data gathering, LLM inference, and the versioned persona update. Do not replace or bypass `PersonaResolutionEngine` without documenting the integration boundary. Return the full code with comprehensive comments.
 
 ## Test Cases
 - **Test Case 1 (Churn Risk)**: Profile shows high value historically, but no transactions in 6 months. Expected NBA: "Dispatch win-back campaign with 20% discount offer."
 - **Test Case 2 (Recent Engagement)**: Available raw event evidence shows a product-category browse today but no matching purchase. Expected NBA: "Deploy retargeting ad focusing on recently browsed category." If no browse event exists in `cdp_raw_profiles_stage`, the agent must say the evidence is unavailable rather than infer it.
+
+## Code Impact Mapping
+
+`customer360-backend/identity_resolution/identity_resolution/persona_engine.py` owns deterministic scoring, NBA calculation, versioned persona inserts, deactivation, and history. `cir_tasks.py` exposes `recompute_master_profile_persona`; `persona.py` optionally creates non-PII labels and summaries with Google Gemini or an offline fallback. This Gemini transaction/event reasoning loop is not implemented today. Integrate it as an explicit extension around the engine's versioned persistence path rather than issuing a standalone update to `cdp_customer_personas`.
 
 ```
