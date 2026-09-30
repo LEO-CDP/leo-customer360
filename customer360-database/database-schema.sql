@@ -2311,8 +2311,6 @@ BEGIN
     END IF;
 END $$;
 
-DROP TABLE IF EXISTS customer360.cdp_scoring_models;
-
 DO $$
 BEGIN
     IF NOT EXISTS (
