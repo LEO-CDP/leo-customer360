@@ -156,6 +156,7 @@ class CampaignDraftResponse(BaseModel):
 
 
 class EditCampaignDraftRequest(BaseModel):
+    segment_id: Optional[uuid.UUID] = None
     objective: Optional[str] = None
     strategy_summary: Optional[str] = None
     start_date: Optional[date] = None
@@ -165,6 +166,71 @@ class EditCampaignDraftRequest(BaseModel):
 
 class RejectCampaignDraftRequest(BaseModel):
     reason: Optional[str] = None
+
+
+class CampaignExperimentVariantInput(BaseModel):
+    variant_key: str = Field(..., min_length=1, max_length=50)
+    name: str = Field(..., min_length=1, max_length=255)
+    segment_id: uuid.UUID
+    template_id: Optional[uuid.UUID] = None
+    allocation_percentage: Decimal = Field(..., ge=0, le=100)
+    is_control: bool = False
+
+
+class CampaignExperimentCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    primary_metric: str = Field(default="conversions", pattern="^(conversions|revenue|roas|cvr)$")
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    variants: list[CampaignExperimentVariantInput] = Field(..., min_length=2)
+
+
+class CampaignExperimentUpdate(BaseModel):
+    status: Optional[str] = Field(default=None, pattern="^(Draft|Running|Paused|Completed|Cancelled)$")
+    winning_variant_id: Optional[uuid.UUID] = None
+    end_date: Optional[date] = None
+    updated_at: Optional[datetime] = None
+
+
+class CampaignExperimentVariantRead(CampaignExperimentVariantInput):
+    model_config = ConfigDict(from_attributes=True)
+
+    variant_id: uuid.UUID
+    experiment_id: uuid.UUID
+    status: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class CampaignExperimentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    experiment_id: uuid.UUID
+    tenant_id: uuid.UUID
+    campaign_id: uuid.UUID
+    name: str
+    status: str
+    primary_metric: str
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    winning_variant_id: Optional[uuid.UUID] = None
+    variants: list[CampaignExperimentVariantRead] = Field(default_factory=list)
+    created_by: Optional[uuid.UUID] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class CampaignExperimentPerformanceRead(BaseModel):
+    variant_id: uuid.UUID
+    variant_key: str
+    variant_name: str
+    spend: Decimal
+    impressions: int
+    clicks: int
+    conversions: int
+    revenue_estimated: Decimal
+    conversion_rate: Decimal
+    roas: Decimal
 
 
 class CampaignMemberBase(BaseModel):

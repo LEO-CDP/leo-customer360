@@ -452,6 +452,7 @@ class ReviewerContentPlanAdjustmentTests(unittest.TestCase):
         self.campaign = SimpleNamespace(
             campaign_id=self.campaign_id,
             tenant_id=DEMO_TENANT_ID,
+            segment_id=None,
             objective="Original objective",
             strategy_summary="Original strategy",
             start_date=date.today() + timedelta(days=1),
@@ -493,6 +494,7 @@ class OptimisticConcurrencyTests(unittest.TestCase):
         self.campaign = SimpleNamespace(
             campaign_id=uuid.uuid4(),
             tenant_id=DEMO_TENANT_ID,
+            segment_id=None,
             template_id=None,
             approval_status=APPROVAL_STATUS_IN_REVIEW,
             approved_by=None,

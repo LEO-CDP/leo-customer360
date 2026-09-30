@@ -80,6 +80,8 @@ def build_tracking_object(
                 "device_type": _string_value(event.get("device_type")) or "unknown",
                 "event_name": _event_name(event),
                 "event_category": _event_category(event),
+                "campaign_id": _string_value(event.get("campaign_id")),
+                "experiment_variant_id": _string_value(event.get("experiment_variant_id")),
                 "event_dedup_key": _event_dedup_key(event),
                 "identity": _identity(event),
                 "master_profile_id": event.get("master_profile_id"),

@@ -12,7 +12,20 @@ from decimal import Decimal
 from typing import Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Boolean, Date, ForeignKey, Integer, Numeric, String, Text, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Date,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -82,8 +95,103 @@ class CampaignReview(Base):
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 
 
+class CampaignExperiment(Base):
+    """Tenant-scoped A/B experiment definition for one campaign."""
+
+    __tablename__ = "crm_campaign_experiments"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "experiment_id", name="ux_campaign_experiment_tenant_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "experiment_id", "winning_variant_id"],
+            ["crm_campaign_experiment_variants.tenant_id", "crm_campaign_experiment_variants.experiment_id", "crm_campaign_experiment_variants.variant_id"],
+            name="fk_campaign_experiment_winner",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
+
+    experiment_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="Draft")
+    primary_metric: Mapped[str] = mapped_column(String(50), nullable=False, server_default="conversions")
+    start_date: Mapped[Optional[date]] = mapped_column(Date)
+    end_date: Mapped[Optional[date]] = mapped_column(Date)
+    winning_variant_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CampaignExperimentVariant(Base):
+    """One audience/template arm in a campaign experiment."""
+
+    __tablename__ = "crm_campaign_experiment_variants"
+    __table_args__ = (
+        UniqueConstraint("experiment_id", "variant_key", name="uq_campaign_experiment_variant_key"),
+        UniqueConstraint("tenant_id", "variant_id", name="ux_campaign_experiment_variant_tenant_variant"),
+        UniqueConstraint("tenant_id", "experiment_id", "variant_id", name="ux_campaign_experiment_variant_tenant_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "experiment_id"],
+            ["crm_campaign_experiments.tenant_id", "crm_campaign_experiments.experiment_id"],
+            name="fk_campaign_experiment_variant_tenant_experiment",
+            ondelete="CASCADE",
+        ),
+    )
+
+    variant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    experiment_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    variant_key: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    segment_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("cdp_segments.segment_id"), nullable=False
+    )
+    template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("crm_message_templates.template_id", ondelete="SET NULL")
+    )
+    allocation_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    is_control: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="Draft")
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
 class CRMCampaignPerformanceDaily(Base):
     __tablename__ = "crm_campaign_performance_daily"
+    __table_args__ = (
+        Index(
+            "ux_campaign_daily_performance_base",
+            "tenant_id",
+            "campaign_id",
+            "report_date",
+            unique=True,
+            postgresql_where=text("experiment_variant_id IS NULL"),
+        ),
+        Index(
+            "ux_campaign_daily_performance_variant",
+            "tenant_id",
+            "campaign_id",
+            "report_date",
+            "experiment_variant_id",
+            unique=True,
+            postgresql_where=text("experiment_variant_id IS NOT NULL"),
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "experiment_variant_id"],
+            ["crm_campaign_experiment_variants.tenant_id", "crm_campaign_experiment_variants.variant_id"],
+            name="fk_campaign_performance_experiment_variant_tenant",
+            ondelete="SET NULL",
+        ),
+    )
 
     performance_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
@@ -91,6 +199,9 @@ class CRMCampaignPerformanceDaily(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
     campaign_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("crm_campaign.campaign_id", ondelete="CASCADE"), nullable=False
+    )
+    experiment_variant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True)
     )
     report_date: Mapped[date] = mapped_column(Date, nullable=False)
     spend: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2), server_default=text("0.00"))

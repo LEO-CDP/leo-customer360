@@ -138,6 +138,25 @@ def test_build_tracking_object_uses_utc_hour_folder_and_ndjson():
     assert record["identity"]["device_fingerprint"] == "fingerprint-1"
 
 
+def test_build_tracking_object_preserves_experiment_variant_attribution():
+    campaign_id = "22222222-2222-2222-2222-222222222222"
+    variant_id = "33333333-3333-3333-3333-333333333333"
+    event = {
+        "event_name": "purchase",
+        "campaign_id": campaign_id,
+        "experiment_variant_id": variant_id,
+        "event_value": 125.5,
+        "anonymous_id": "anonymous-1",
+    }
+
+    _, _, body = build_tracking_object(SOURCE_ID, [event], datetime.now(timezone.utc))
+    record = json.loads(gzip.decompress(body).decode().strip())
+
+    assert record["campaign_id"] == campaign_id
+    assert record["experiment_variant_id"] == variant_id
+    assert record["payload"]["experiment_variant_id"] == variant_id
+
+
 def test_metrics_exposes_queue_depth_age_and_configured_limits():
     app.dependency_overrides[get_tracking_service] = lambda: TrackingLogService(
         FakeStorage(), FakeSessionCache()
