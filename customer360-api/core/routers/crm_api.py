@@ -57,7 +57,7 @@ def _attach_campaign_content_items(db: Session, campaign: Campaign) -> None:
     via a join against crm_campaign_content_items/cdp_content_items -- see
     core.repositories.campaign_draft_repository.list_campaign_content_items."""
     repo = CrmRepository(db)
-    campaign.content_items = repo.list_campaign_content_items(campaign.tenant_id, campaign.campaign_id)
+    campaign.content_items = repo.list_campaign_content_items(campaign)
 
 
 def _block_edit_of_approved_campaign(db: Session, campaign: Campaign, payload: dict) -> None:

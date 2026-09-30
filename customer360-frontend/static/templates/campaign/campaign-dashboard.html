@@ -19,12 +19,18 @@
       </div>
     </div>
     <!-- Added focus-visible for better a11y, unified transition -->
+    <div class="flex items-center gap-2">
+    <button id="btn-campaign-create" aria-label="Create campaign" class="inline-flex items-center gap-2 bg-indigo-600 text-white rounded-xl px-4 py-2.5 text-sm font-semibold hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 transition-all shadow-sm">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+      <span>Create campaign</span>
+    </button>
     <button id="btn-campaign-refresh" aria-label="Refresh Dashboard" class="inline-flex items-center gap-2 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-4 py-2.5 text-sm font-semibold hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 transition-all shadow-sm active:scale-95">
       <svg class="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true">
         <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
       </svg>
       <span>Refresh</span>
     </button>
+    </div>
   </header>
 
   <!-- KPI Cards Section: Optimized grid breakpoints for smoother scaling -->
@@ -258,7 +264,10 @@
   <section aria-label="Campaign Data Table" class="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden flex flex-col">
 
     <header class="p-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
-      <h2 class="text-base font-bold text-slate-900">Campaign Performance</h2>
+      <div>
+        <h2 class="text-base font-bold text-slate-900">Campaign Performance</h2>
+        <p class="text-xs text-slate-500 mt-1">Select a campaign to inspect strategy, approvals, content, and report data.</p>
+      </div>
     </header>
 
     <div class="overflow-x-auto w-full">
