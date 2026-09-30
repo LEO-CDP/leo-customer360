@@ -509,19 +509,29 @@ window.C360 = window.C360 || {};
 
   function renderDetailMetadata(campaign) {
     var fields = [
-      ["Campaign code", campaign.campaign_code], ["Owner", campaign.user_id],
-      ["Channel", campaign.channel], ["Platform", campaign.platform],
-      ["Objective", campaign.objective], ["Language", campaign.lang],
-      ["Schedule", [campaign.start_date, campaign.end_date].filter(Boolean).join(" - ")],
-      ["Budget", campaign.budget_amount == null ? null : String(campaign.budget_amount) + " " + (campaign.currency || "")],
-      ["Segment", campaign.segment_id], ["Template", campaign.template_id],
-      ["Created", campaign.created_at], ["Updated", campaign.updated_at]
+      { label: "Campaign code", value: campaign.campaign_code, icon: "bi-hash", technical: true },
+      { label: "Owner", value: campaign.user_id || "System / unassigned", icon: "bi-person" },
+      { label: "Channel", value: campaign.channel, icon: "bi-broadcast" },
+      { label: "Platform", value: campaign.platform, icon: "bi-grid-1x2" },
+      { label: "Language", value: campaign.lang, icon: "bi-translate" },
+      { label: "Schedule", value: [campaign.start_date, campaign.end_date].filter(Boolean).join(" - ") || "Not scheduled", icon: "bi-calendar3" },
+      { label: "Budget", value: campaign.budget_amount == null ? "No budget set" : String(campaign.budget_amount) + " " + (campaign.currency || ""), icon: "bi-wallet2" },
+      { label: "Objective", value: campaign.objective, icon: "bi-bullseye", wide: true },
+      { label: "Description", value: campaign.description, icon: "bi-card-text", wide: true },
+      { label: "Keywords", value: (campaign.keywords || []).join(", "), icon: "bi-tags", wide: true },
+      { label: "Template reference", value: campaign.template_id, icon: "bi-file-earmark-text", technical: true },
+      { label: "Created", value: fmt.dateTime(campaign.created_at), icon: "bi-clock-history" },
+      { label: "Updated", value: fmt.dateTime(campaign.updated_at), icon: "bi-arrow-repeat" }
     ];
     var $metadata = $("#campaign-details-metadata").empty();
     fields.forEach(function (field) {
-      var $item = $("<div>");
-      $("<dt>").addClass("text-xs uppercase tracking-wider text-slate-500").text(field[0]).appendTo($item);
-      $("<dd>").addClass("mt-1 text-sm font-medium text-slate-800 break-words").text(field[1] || "-").appendTo($item);
+      var $item = $("<div>").addClass("rounded-xl border border-slate-200 bg-slate-50/50 p-4 transition hover:border-slate-300 hover:bg-white");
+      if (field.wide) $item.addClass("sm:col-span-2 xl:col-span-3");
+      var $heading = $("<div>").addClass("flex items-center gap-2");
+      $("<i>").addClass("bi " + field.icon + " text-slate-400").attr("aria-hidden", "true").appendTo($heading);
+      $("<dt>").addClass("text-[11px] font-semibold uppercase tracking-wider text-slate-500").text(field.label).appendTo($heading);
+      $heading.appendTo($item);
+      $("<dd>").addClass("mt-2 break-words text-sm font-semibold text-slate-800 " + (field.technical ? "font-mono text-xs" : "")).text(field.value || "-").appendTo($item);
       $metadata.append($item);
     });
     $("#campaign-details-strategy").text(campaign.strategy_summary || "No strategy summary is available.");
@@ -533,6 +543,48 @@ window.C360 = window.C360 || {};
       [item.position, item.title || item.content_item_id, item.item_type, item.role].forEach(function (value) { $("<td>").addClass("py-3 pr-4 text-slate-700").text(value || "-").appendTo($row); });
       $("#campaign-details-content-items").append($row);
     });
+  }
+
+  function renderDetailAudience(segmentId, segment, loading) {
+    $("#campaign-details-audience-id").text(segmentId || "No segment linked");
+    $("#campaign-details-audience-status").removeClass("hidden");
+    if (!segmentId) {
+      $("#campaign-details-audience-name").text("No target audience");
+      $("#campaign-details-audience-meta").text("This campaign is not linked to a saved segment.");
+      $("#campaign-details-audience-status").attr("class", "shrink-0 rounded-md bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600").text("Unassigned");
+      $("#btn-campaign-copy-segment-id").addClass("hidden");
+      return;
+    }
+    $("#btn-campaign-copy-segment-id").removeClass("hidden").data("segment-id", segmentId);
+    if (loading) {
+      $("#campaign-details-audience-name").text("Loading audience...");
+      $("#campaign-details-audience-meta").text("Fetching segment details");
+      $("#campaign-details-audience-status").attr("class", "shrink-0 rounded-md bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600").text("Loading");
+      return;
+    }
+    if (!segment) {
+      $("#campaign-details-audience-name").text("Segment unavailable");
+      $("#campaign-details-audience-meta").text("The saved segment could not be loaded for this tenant.");
+      $("#campaign-details-audience-status").attr("class", "shrink-0 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700").text("Unavailable");
+      return;
+    }
+    var meta = [
+      segment.segment_tag ? "#" + segment.segment_tag : null,
+      segment.domain && segment.domain !== "all" ? segment.domain : null,
+      fmt.int(segment.member_count || 0) + " profiles"
+    ].filter(Boolean).join("  ·  ");
+    $("#campaign-details-audience-name").text(segment.segment_name || "Unnamed segment");
+    $("#campaign-details-audience-meta").text(meta);
+    var ready = segmentIsReady(segment);
+    $("#campaign-details-audience-status").attr("class", ready ? "shrink-0 rounded-md bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700" : "shrink-0 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700").text(ready ? "Ready" : "Needs attention");
+  }
+
+  function loadDetailAudience(segmentId) {
+    renderDetailAudience(segmentId, null, true);
+    if (!segmentId) return;
+    api("/segments/" + encodeURIComponent(segmentId))
+      .done(function (segment) { renderDetailAudience(segmentId, segment); })
+      .fail(function () { renderDetailAudience(segmentId, null); });
   }
 
   function renderDetailHistory(history) {
@@ -731,6 +783,7 @@ window.C360 = window.C360 || {};
       .done(function (campaignResult, historyResult) {
         var campaign = campaignResult[0];
         renderDetailMetadata(campaign);
+        loadDetailAudience(campaign.segment_id);
         renderDetailHistory(historyResult[0]);
         $("#campaign-details-title").text(campaign.name || "Campaign details");
         $("#campaign-details-subtitle").text([campaign.campaign_code, campaign.channel, campaign.platform].filter(Boolean).join(" / "));
@@ -767,6 +820,15 @@ window.C360 = window.C360 || {};
     $doc.on("submit.c360campaignworkspace", "#campaign-experiment-form", function (event) { createCampaignExperiment($(this).data("campaign-id"), event); });
     $doc.on("change.c360campaignworkspace", ".campaign-experiment-status", function () { var $control = $(this); api("/campaign-experiments/" + encodeURIComponent($control.data("experiment-id")), { status: $control.val() }, "PATCH").fail(function (xhr) { showExperimentError(campaignError(xhr)); }); });
     $doc.on("click.c360campaignworkspace", ".campaign-experiment-winner", function () { var $button = $(this); api("/campaign-experiments/" + encodeURIComponent($button.data("experiment-id")), { winning_variant_id: $button.data("variant-id"), status: "Completed" }, "PATCH").done(function () { var campaignId = $("#campaign-experiment-form").data("campaign-id"); loadCampaignExperiments(campaignId); }).fail(function (xhr) { showExperimentError(campaignError(xhr)); }); });
+    $doc.on("click.c360campaignworkspace", "#btn-campaign-copy-segment-id", function () {
+      var segmentId = $(this).data("segment-id");
+      if (!segmentId || !navigator.clipboard) return;
+      var $label = $("#campaign-copy-segment-label");
+      navigator.clipboard.writeText(String(segmentId)).then(function () {
+        $label.text("Copied");
+        setTimeout(function () { $label.text("Copy ID"); }, 1400);
+      });
+    });
     $doc.on("click.c360campaignworkspace", "#btn-campaign-select-segment, #btn-campaign-change-segment", openSegmentPicker);
     $doc.on("click.c360campaignworkspace", "#btn-campaign-segment-modal-close, #btn-campaign-segment-modal-cancel", closeSegmentPicker);
     $doc.on("click.c360campaignworkspace", "#campaign-segment-modal", function (event) { if (event.target === this) closeSegmentPicker(); });
