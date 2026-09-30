@@ -579,6 +579,8 @@ class MasterProfilesPaginationEndpointTests(unittest.TestCase):
             churn_risk_tier="high",
             linked_raw_profile_count_min=2,
             q="nguyen",
+            anonymous_id=None,
+            device_fingerprint=None,
             from_date=date(2026, 9, 1),
             to_date=date(2026, 9, 29),
             days=30,
