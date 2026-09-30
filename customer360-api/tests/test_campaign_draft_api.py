@@ -23,6 +23,7 @@ from core.repositories.campaign_draft_repository import (
     APPROVAL_STATUS_IN_REVIEW,
     APPROVAL_STATUS_REJECTED,
     CampaignDraftApprovalBlockedError,
+    CampaignDraftActorNotFoundError,
     CampaignDraftNotFoundError,
     CampaignDraftValidationError,
     CampaignSegmentNotFoundError,
@@ -79,6 +80,7 @@ class FakeCampaignDraftRepository:
     reviews: dict[uuid.UUID, list[dict]] = {}
     create_side_effect: Optional[Exception] = None
     approve_side_effect: Optional[Exception] = None
+    edit_side_effect: Optional[Exception] = None
     last_create_kwargs: dict[str, Any] = {}
 
     def __init__(self, session):
@@ -91,6 +93,7 @@ class FakeCampaignDraftRepository:
         cls.reviews = {}
         cls.create_side_effect = None
         cls.approve_side_effect = None
+        cls.edit_side_effect = None
         cls.last_create_kwargs = {}
 
     def create_draft(self, **kwargs):
@@ -115,6 +118,8 @@ class FakeCampaignDraftRepository:
         return FakeCampaignDraftRepository.content_items.get(campaign_id, [])
 
     def edit_draft(self, tenant_id, campaign_id, editor_id, **fields):
+        if FakeCampaignDraftRepository.edit_side_effect is not None:
+            raise FakeCampaignDraftRepository.edit_side_effect
         campaign = self.get_campaign(tenant_id, campaign_id)
         if fields.get("segment_id", SEGMENT_UNSET) is not SEGMENT_UNSET and fields.get("segment_id") is not None:
             campaign.segment_id = fields["segment_id"]
@@ -293,6 +298,19 @@ class ReviewCampaignDraftTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["segment_id"], replacement_segment_id)
+
+    def test_edit_rejects_user_missing_from_active_tenant_with_401(self):
+        FakeCampaignDraftRepository.edit_side_effect = CampaignDraftActorNotFoundError(
+            "Authenticated user is not a member of the active tenant; sign in again"
+        )
+
+        response = self.client.patch(
+            f"/campaigns/{self.campaign_id}/draft",
+            json={"objective": "Updated objective"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("sign in again", response.json()["detail"])
 
     def test_reject_sets_approval_status_rejected(self):
         response = self.client.post(f"/campaigns/{self.campaign_id}/reject", json={"reason": "Budget too aggressive"})

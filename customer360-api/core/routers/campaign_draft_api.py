@@ -18,6 +18,7 @@ from core.cache import invalidate_prefix
 from core.database import get_db
 from core.repositories.campaign_draft_repository import (
     CampaignDraftApprovalBlockedError,
+    CampaignDraftActorNotFoundError,
     CampaignDraftConflictError,
     CampaignDraftNotFoundError,
     CampaignDraftRepository,
@@ -172,6 +173,8 @@ def edit_campaign_draft(
         )
     except CampaignDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CampaignDraftActorNotFoundError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     except CampaignDraftValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CampaignDraftConflictError as exc:

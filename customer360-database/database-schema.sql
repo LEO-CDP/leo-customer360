@@ -2280,46 +2280,6 @@ ALTER TABLE customer360.cdp_profile_attributes
 
 DO $$
 BEGIN
-    IF to_regclass('customer360.cdp_scoring_models') IS NOT NULL THEN
-        INSERT INTO customer360.cdp_ai_agents (
-            agent_code, display_name, description, model_type, status,
-            schedule_definition, input_features, hyperparameters
-        )
-        SELECT
-            CASE s.scoring_model_name
-                WHEN 'lead_scoring_model' THEN 'lead_scoring'
-                WHEN 'churn_scoring_model' THEN 'churn_scoring'
-                WHEN 'clv_scoring_model' THEN 'clv_scoring'
-                WHEN 'cx_scoring_model' THEN 'cx_scoring'
-                WHEN 'data_quality_model' THEN 'data_quality'
-                WHEN 'identity_resolution_scoring_model' THEN 'identity_resolution_scoring'
-                WHEN 'lifecycle_stage_model' THEN 'lifecycle_stage'
-                ELSE s.scoring_model_name
-            END,
-            s.display_name, s.description, s.model_type, s.status,
-            s.schedule_definition, s.input_features, s.hyperparameters
-        FROM customer360.cdp_scoring_models s
-        ON CONFLICT (agent_code) DO NOTHING;
-
-        UPDATE customer360.cdp_profile_attributes
-        SET agent_code = CASE agent_code
-            WHEN 'lead_scoring_model' THEN 'lead_scoring'
-            WHEN 'churn_scoring_model' THEN 'churn_scoring'
-            WHEN 'clv_scoring_model' THEN 'clv_scoring'
-            WHEN 'cx_scoring_model' THEN 'cx_scoring'
-            WHEN 'data_quality_model' THEN 'data_quality'
-            WHEN 'identity_resolution_scoring_model' THEN 'identity_resolution_scoring'
-            WHEN 'lifecycle_stage_model' THEN 'lifecycle_stage'
-            ELSE agent_code
-        END
-        WHERE agent_code IS NOT NULL;
-    END IF;
-END $$;
-
-DROP TABLE IF EXISTS customer360.cdp_scoring_models;
-
-DO $$
-BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM pg_constraint
@@ -3153,39 +3113,15 @@ BEGIN
             DEFERRABLE INITIALLY DEFERRED;
     END IF;
 END $$;
-            ON DELETE SET NULL;
-    END IF;
-END $$;
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'fk_campaign_performance_experiment_variant'
-          AND conrelid = 'customer360.crm_campaign_performance_daily'::regclass
-    ) THEN
-        ALTER TABLE customer360.crm_campaign_performance_daily
-            ADD CONSTRAINT fk_campaign_performance_experiment_variant
-            FOREIGN KEY (experiment_variant_id)
-            REFERENCES customer360.crm_campaign_experiment_variants(variant_id)
-            ON DELETE SET NULL;
-    END IF;
-END $$;
-
 ALTER TABLE customer360.crm_campaign_performance_daily
-    DROP CONSTRAINT IF EXISTS uq_campaign_daily_performance;
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'uq_campaign_daily_performance'
-          AND conrelid = 'customer360.crm_campaign_performance_daily'::regclass
-    ) THEN
-        ALTER TABLE customer360.crm_campaign_performance_daily
-            ADD CONSTRAINT uq_campaign_daily_performance
-            UNIQUE (tenant_id, campaign_id, report_date, experiment_variant_id);
-    END IF;
-END $$;
+    ADD COLUMN IF NOT EXISTS experiment_variant_id UUID;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_base
+    ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date)
+    WHERE experiment_variant_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_variant
+    ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date, experiment_variant_id)
+    WHERE experiment_variant_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_campaign_performance_variant
     ON customer360.crm_campaign_performance_daily (tenant_id, experiment_variant_id, report_date DESC);
 

@@ -27,7 +27,7 @@ from leo_customer360_agent.client import (
 )
 from leo_customer360_dao.models.content import CdpContentItem
 from leo_customer360_dao.models.crm import Campaign, CampaignContentItem, CampaignReview, MessageTemplate
-from leo_customer360_dao.models.system import SysAuditLog
+from leo_customer360_dao.models.system import SysAuditLog, SysUser
 from leo_customer360_dao.repositories.segment_respository import SegmentRepository
 
 APPROVAL_STATUS_DRAFT = "Draft"
@@ -77,6 +77,10 @@ class CampaignDraftApprovalBlockedError(RuntimeError):
 class CampaignDraftConflictError(RuntimeError):
     """Raised when a concurrent edit/approve/reject conflicts with the
     campaign's current state (optimistic-concurrency guard)."""
+
+
+class CampaignDraftActorNotFoundError(LookupError):
+    """Raised when the authenticated actor is not a user in the active tenant."""
 
 
 class CampaignDraftRepository:
@@ -469,6 +473,18 @@ class CampaignDraftRepository:
         snapshot, and returns the campaign to InReview whenever it was
         Approved (fresh approval required) or Rejected (resubmission,
         non-terminal per data-model.md)."""
+        if editor_id is not None:
+            editor_exists = self.session.execute(
+                select(SysUser.user_id).where(
+                    SysUser.tenant_id == tenant_id,
+                    SysUser.user_id == editor_id,
+                )
+            ).scalar_one_or_none()
+            if editor_exists is None:
+                raise CampaignDraftActorNotFoundError(
+                    "Authenticated user is not a member of the active tenant; sign in again"
+                )
+
         campaign = self.get_campaign(tenant_id, campaign_id)
         expected_updated_at = campaign.updated_at
         current_segment_id = campaign.segment_id

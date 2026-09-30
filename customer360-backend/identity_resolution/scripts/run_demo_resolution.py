@@ -51,7 +51,7 @@ def _short_hash(value):
     return f"{value[:12]}..."
 
 
-def print_summary(cursor) -> None:
+def print_summary(cursor) -> int:
     cursor.execute(
         f"""
         SELECT m.master_profile_id, m.domain, m.full_name, m.email, m.phone_number,
@@ -99,6 +99,7 @@ def print_summary(cursor) -> None:
     print("\n=== raw profile status_code counts (3 = processed) ===")
     for row in cursor.fetchall():
         print(f"- status_code={row['status_code']}: {row['cnt']}")
+    return len(masters)
 
 
 def main() -> None:
@@ -117,7 +118,11 @@ def main() -> None:
 
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             set_tenant_context(cursor, DEMO_TENANT_ID)
-            print_summary(cursor)
+            resolved_count = print_summary(cursor)
+            if resolved_count == 0:
+                raise RuntimeError(
+                    f"Identity resolution produced no master profiles for tenant {DEMO_TENANT_ID}"
+                )
     finally:
         conn.close()
 

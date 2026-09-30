@@ -936,7 +936,84 @@ AI_AGENT_MODELS = [
 ]
 
 
-def seed_campaign_performance_daily(cursor, campaign_ids: dict) -> None:
+def seed_campaign_experiments(cursor, campaign_ids: dict) -> dict[str, list[str]]:
+    """Seed one deterministic two-arm experiment for the primary campaign."""
+    campaign_name = CAMPAIGNS[0][0]
+    campaign_id = campaign_ids.get(campaign_name)
+    if campaign_id is None:
+        raise RuntimeError(f"Campaign '{campaign_name}' was not seeded")
+
+    cursor.execute(
+        f"""
+        SELECT segment_id
+        FROM {_table('cdp_segments')}
+        WHERE tenant_id = %s AND is_active = TRUE AND status_code = 1
+        ORDER BY segment_name, segment_id
+        LIMIT 2;
+        """,
+        (DEMO_TENANT_ID,),
+    )
+    segment_ids = [str(row["segment_id"]) for row in cursor.fetchall()]
+    if len(segment_ids) < 2:
+        raise RuntimeError("At least two active computed segments are required for demo A/B testing")
+
+    experiment_id = demo_id("crm_campaign_experiment:education-google-uac")
+    variant_ids = [
+        demo_id("crm_campaign_experiment_variant:education-google-uac:A"),
+        demo_id("crm_campaign_experiment_variant:education-google-uac:B"),
+    ]
+    today = datetime.now().date()
+    cursor.execute(
+        f"""
+        INSERT INTO {_table('crm_campaign_experiments')}
+            (experiment_id, tenant_id, campaign_id, name, status, primary_metric, start_date, winning_variant_id, created_by)
+        VALUES (%s, %s, %s, %s, 'Completed', 'conversions', %s, %s, NULL)
+        ON CONFLICT (experiment_id) DO UPDATE SET
+            tenant_id = EXCLUDED.tenant_id,
+            campaign_id = EXCLUDED.campaign_id,
+            name = EXCLUDED.name,
+            status = EXCLUDED.status,
+            primary_metric = EXCLUDED.primary_metric,
+            start_date = EXCLUDED.start_date,
+            winning_variant_id = EXCLUDED.winning_variant_id,
+            updated_at = NOW();
+        """,
+        (
+            experiment_id,
+            DEMO_TENANT_ID,
+            campaign_id,
+            "Education audience targeting test",
+            today - timedelta(days=30),
+            variant_ids[1],
+        ),
+    )
+    for variant_id, variant_key, name, segment_id, is_control in (
+        (variant_ids[0], "A", "Control audience", segment_ids[0], True),
+        (variant_ids[1], "B", "Expansion audience", segment_ids[1], False),
+    ):
+        cursor.execute(
+            f"""
+            INSERT INTO {_table('crm_campaign_experiment_variants')}
+                (variant_id, tenant_id, experiment_id, variant_key, name, segment_id,
+                 allocation_percentage, is_control, status)
+            VALUES (%s, %s, %s, %s, %s, %s, 50.00, %s, 'Completed')
+            ON CONFLICT (variant_id) DO UPDATE SET
+                tenant_id = EXCLUDED.tenant_id,
+                experiment_id = EXCLUDED.experiment_id,
+                variant_key = EXCLUDED.variant_key,
+                name = EXCLUDED.name,
+                segment_id = EXCLUDED.segment_id,
+                allocation_percentage = EXCLUDED.allocation_percentage,
+                is_control = EXCLUDED.is_control,
+                status = EXCLUDED.status,
+                updated_at = NOW();
+            """,
+            (variant_id, DEMO_TENANT_ID, experiment_id, variant_key, name, segment_id, is_control),
+        )
+    return {str(campaign_id): variant_ids}
+
+
+def seed_campaign_performance_daily(cursor, campaign_ids: dict, experiment_variants: dict[str, list[str]] | None = None) -> None:
     """Inserts daily performance rows for each seeded campaign.
 
     Metrics are generated with a per-platform profile and a deterministic RNG
@@ -975,7 +1052,9 @@ def seed_campaign_performance_daily(cursor, campaign_ids: dict) -> None:
                     (performance_id, tenant_id, campaign_id, report_date,
                      spend, impressions, clicks, conversions, revenue_estimated)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (tenant_id, campaign_id, report_date) DO UPDATE SET
+                ON CONFLICT (tenant_id, campaign_id, report_date)
+                    WHERE experiment_variant_id IS NULL
+                DO UPDATE SET
                     spend = EXCLUDED.spend,
                     impressions = EXCLUDED.impressions,
                     clicks = EXCLUDED.clicks,
@@ -989,6 +1068,36 @@ def seed_campaign_performance_daily(cursor, campaign_ids: dict) -> None:
                     spend, impressions, clicks, conversions, revenue,
                 ),
             )
+            for variant_index, variant_id in enumerate((experiment_variants or {}).get(str(campaign_id), [])):
+                cursor.execute(
+                    f"""
+                    INSERT INTO {_table('crm_campaign_performance_daily')}
+                        (performance_id, tenant_id, campaign_id, report_date, experiment_variant_id,
+                         spend, impressions, clicks, conversions, revenue_estimated)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (tenant_id, campaign_id, report_date, experiment_variant_id)
+                        WHERE experiment_variant_id IS NOT NULL
+                    DO UPDATE SET
+                        spend = EXCLUDED.spend,
+                        impressions = EXCLUDED.impressions,
+                        clicks = EXCLUDED.clicks,
+                        conversions = EXCLUDED.conversions,
+                        revenue_estimated = EXCLUDED.revenue_estimated,
+                        updated_at = NOW();
+                    """,
+                    (
+                        demo_id(f"perf:{campaign_code}:variant:{variant_id}:{current.isoformat()}"),
+                        DEMO_TENANT_ID,
+                        campaign_id,
+                        current,
+                        variant_id,
+                        round(spend * (0.48 + variant_index * 0.04), 2),
+                        int(impressions * (0.48 + variant_index * 0.04)),
+                        int(clicks * (0.48 + variant_index * 0.04)),
+                        int(conversions * (0.45 + variant_index * 0.15)),
+                        round(revenue * (0.45 + variant_index * 0.15), 2),
+                    ),
+                )
             current += timedelta(days=1)
 
 
@@ -1118,6 +1227,8 @@ def reset_tenant_scoped_demo_tables(cursor) -> None:
     cursor.execute(f"DELETE FROM {_table('crm_transactions')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('cdp_content_items')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('crm_campaign_performance_daily')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
+    cursor.execute(f"DELETE FROM {_table('crm_campaign_experiment_variants')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
+    cursor.execute(f"DELETE FROM {_table('crm_campaign_experiments')} WHERE tenant_id = %s;", (DEMO_TENANT_ID,))
     cursor.execute(f"DELETE FROM {_table('graph_edges')} WHERE metadata->>'demo_tenant' = %s;", (DEMO_TENANT_ID,))
 
 
@@ -2414,12 +2525,10 @@ def main() -> None:
             set_tenant_context(cursor, DEMO_TENANT_ID)
             master_profiles = fetch_master_profiles(cursor)
             if not master_profiles:
-                logger.error(
-                    "No resolved master profiles found for tenant_id=%s -- run "
-                    "scripts/init_sample_data.py + scripts/run_demo_resolution.py first.",
-                    DEMO_TENANT_ID,
+                raise RuntimeError(
+                    f"No resolved master profiles found for tenant_id={DEMO_TENANT_ID} -- "
+                    "run scripts/init_sample_data.py + scripts/run_demo_resolution.py first."
                 )
-                return
 
             detail_profiles = master_profiles[:DETAIL_PROFILE_LIMIT]
 
@@ -2429,7 +2538,8 @@ def main() -> None:
             seed_ai_agents(cursor)
             reset_tenant_scoped_demo_tables(cursor)
             event_profiles = fetch_event_profiles(cursor)
-            seed_campaign_performance_daily(cursor, crm_ids["campaign"])
+            experiment_variants = seed_campaign_experiments(cursor, crm_ids["campaign"])
+            seed_campaign_performance_daily(cursor, crm_ids["campaign"], experiment_variants)
             seed_relations(cursor, detail_profiles)
             seed_customer_contacts(cursor, detail_profiles)
             seed_transactions(cursor, detail_profiles)

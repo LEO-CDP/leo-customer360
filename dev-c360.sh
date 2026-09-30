@@ -16,7 +16,9 @@
 #      contains every key currently in '.env.example'.
 #   2. Starts (or resets) postgres/redis/keycloak/minio via
 #      `docker compose -f dev-docker-compose.yml`.
-#   3. Builds the docs-vector-search index against the local PostgreSQL service
+#   3. Waits for PostgreSQL, applies every SQL file in
+#      customer360-database/migrations in lexical order, then builds the
+#      docs-vector-search index against the local PostgreSQL service
 #      and starts the AI service on DOCS_SEARCH_HOST_PORT.
 #   4. Waits for postgres/redis/keycloak/minio/tracking-api/docs-vector-search containers to
 #      report healthy, then waits for the one-shot `minio-init` bucket-bootstrap
@@ -556,7 +558,87 @@ wait_for_completed() {
   echo "🟢 '${container}' completed successfully."
 }
 
+wait_for_database_relation() {
+  local relation="$1"
+  local max_attempts="${2:-60}"
+  local attempt=1
+  local present
+  echo "⏳ Waiting for PostgreSQL schema initialization to create '${relation}'..."
+  until present="$(docker exec -u postgres "$POSTGRES_CONTAINER" \
+    psql -U "${DB_USER:-postgres}" -d "${DB_NAME:-customer360}" -tAc \
+    "SELECT to_regclass('${DB_SCHEMA:-customer360}.${relation}') IS NOT NULL" 2>/dev/null || true)" && [ "$present" = "t" ]; do
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      echo "❌ Error: PostgreSQL schema did not create '${relation}' after ${max_attempts} attempts." >&2
+      docker logs --tail=100 "$POSTGRES_CONTAINER" >&2 || true
+      exit 1
+    fi
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+  echo "🟢 PostgreSQL schema initialization completed."
+}
+
+apply_database_migrations() {
+  local migration_dir="$SCRIPT_DIR/customer360-database/migrations"
+  local migration
+  local migrations=()
+
+  if [ ! -d "$migration_dir" ]; then
+    echo "ℹ️  No database migrations directory found at '$migration_dir'."
+    return 0
+  fi
+
+  while IFS= read -r migration; do
+    migrations+=("$migration")
+  done < <(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' -print | sort)
+
+  if [ "${#migrations[@]}" -eq 0 ]; then
+    echo "ℹ️  No database migrations found in '$migration_dir'."
+    return 0
+  fi
+
+  echo "🗃️  Applying ${#migrations[@]} database migration(s) in lexical order..."
+  for migration in "${migrations[@]}"; do
+    echo "   ▶ $(basename "$migration")"
+    local attempt=1
+    local max_attempts=15
+    local migration_output=""
+    while true; do
+      if migration_output="$(docker exec -i -u postgres "$POSTGRES_CONTAINER" \
+        psql -v ON_ERROR_STOP=1 \
+          -U "${DB_USER:-postgres}" \
+          -d "${DB_NAME:-customer360}" < "$migration" 2>&1)"; then
+        printf '%s\n' "$migration_output"
+        break
+      fi
+
+      if [[ "$migration_output" =~ "database system is shutting down" ||
+            "$migration_output" =~ "the database system is starting up" ||
+            "$migration_output" =~ "could not connect to server" ]]; then
+        if (( attempt >= max_attempts )); then
+          printf '%s\n' "$migration_output" >&2
+          echo "❌ Migration '$(basename "$migration")' could not connect to PostgreSQL after ${max_attempts} attempts." >&2
+          exit 1
+        fi
+        echo "   ⏳ PostgreSQL is temporarily unavailable; retrying migration in 2s (${attempt}/${max_attempts})..."
+        sleep 2
+        attempt=$((attempt + 1))
+        continue
+      fi
+
+      printf '%s\n' "$migration_output" >&2
+      echo "❌ Migration '$(basename "$migration")' failed." >&2
+      exit 1
+    done
+  done
+  echo "🟢 Database migrations applied successfully."
+}
+
 wait_for_healthy "$POSTGRES_CONTAINER"
+if [ "$ACTION" = "reset" ]; then
+  wait_for_database_relation "crm_campaign_content_items"
+fi
+apply_database_migrations
 wait_for_healthy "$REDIS_CONTAINER"
 wait_for_healthy "$MINIO_CONTAINER"
 wait_for_healthy "$TRACKING_CONTAINER"
