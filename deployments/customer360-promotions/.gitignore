@@ -1,4 +1,8 @@
-# Optional local overrides / logs — no secrets in this deployment (DB/Redis creds
-# are read from ../postgres and ../cache).
+# Optional local overrides / logs.
 .env
 *.log
+
+# VKS kubeconfig (cluster credentials) + the overlay deploy-promotions.sh renders from
+# Terraform state, which carries the database password and the Redis password.
+kubeconfig-vks-*.yaml
+k8s/generated/

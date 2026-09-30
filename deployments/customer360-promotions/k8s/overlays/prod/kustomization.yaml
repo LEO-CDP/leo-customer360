@@ -1,0 +1,33 @@
+# PROD scaling profile for customer360-promotions.
+# A floor of 2 (so a node failure never leaves zero ad-serving pods), a higher ceiling,
+# and more headroom per pod. deploy-promotions.sh layers the image + rendered config on top.
+#
+# NOT DEPLOYABLE YET: there is no prod VKS cluster — deployments/vks/overlays/prod.tfvars
+# is still cluster_id = "CHANGE_ME". Prod customer360-promotions stays on the dedicated
+# `ads` vServer until a prod cluster and node group exist. This file is committed so the
+# capacity profile is reviewable and the cutover is a deploy, not a design exercise.
+#
+# The per-pod DB pool is NOT set here: the ConfigMap is created by deploy-promotions.sh in the
+# generated layer ABOVE this one, so a patch targeting it here would match nothing and
+# fail the build. It lives in ../../../overlays/prod.tfvars (promotions_db_pool_size) instead —
+# which is where the rest of this service's per-env configuration already is.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - target: { kind: HorizontalPodAutoscaler, name: promotions }
+    patch: |-
+      - { op: replace, path: /spec/minReplicas, value: 2 }
+      - { op: replace, path: /spec/maxReplicas, value: 8 }
+
+  - target: { kind: Deployment, name: promotions }
+    patch: |-
+      - { op: replace, path: /spec/replicas, value: 2 }
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: 200m, memory: 384Mi }
+          limits: { cpu: "2", memory: 1Gi }

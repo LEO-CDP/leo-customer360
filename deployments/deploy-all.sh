@@ -26,7 +26,7 @@
 #   2 db bootstrap      : db-schema           (needs server as bastion + DB up)
 #   3 data-plane        : cache · sso · backend
 #   4 front door        : load-balancer · proxy   (Caddy needs LB :80/:443 -> box)
-#   5 sso realm + apps  : sso-realm · api · frontend · ads · monitoring
+#   5 sso realm + apps  : sso-realm · api · frontend · promotions · monitoring
 #   6 demo data (opt.)  : seed                 (opt-in: --with seed / --only seed)
 #
 # The "sso-realm" step (bootstrap-realm.py) and everything that needs the PUBLIC
@@ -46,7 +46,7 @@ ROOT="$(pwd)"
 
 # ---------------------------------------------------------------- step registry
 # Ordered list of step ids. PHASE/TITLE give the --list view its structure.
-STEPS=(storage postgres server vks db-schema cache sso backend load-balancer proxy sso-realm api frontend ads agent event-api docs-search monitoring seed)
+STEPS=(storage postgres server vks db-schema cache sso backend load-balancer proxy sso-realm api frontend promotions agent event-api docs-search monitoring seed)
 
 # Steps NOT run by default (must be named via --with / --only / --from).
 OPTIONAL="seed"
@@ -56,7 +56,7 @@ phase_of() { case "$1" in
   db-schema)               echo "2 · database bootstrap";;
   cache|sso|backend)       echo "3 · data-plane containers";;
   load-balancer|proxy)     echo "4 · front door (LB + Caddy)";;
-  sso-realm|api|frontend|ads|agent|event-api|docs-search|monitoring) echo "5 · SSO realm + applications";;
+  sso-realm|api|frontend|promotions|agent|event-api|docs-search|monitoring) echo "5 · SSO realm + applications";;
   seed)                    echo "6 · demo data (optional)";;
 esac; }
 
@@ -64,8 +64,8 @@ title_of() { case "$1" in
   storage)       echo "Object storage buckets (vStorage / S3)";;
   postgres)      echo "Managed PostgreSQL vDB (customer360 + db_keycloak)";;
   server)        echo "vServers / VMs (api box, backend box)";;
-  vks)           echo "VKS worker node group (capacity for customer360-event-api)";;
-  db-schema)     echo "SQL bootstrap: extensions, keycloak db, app schema";;
+  vks)           echo "VKS worker node group (capacity for event-api + promotions)";;
+  db-schema)     echo "SQL bootstrap: extensions, keycloak db, app schema, leo_ads";;
   cache)         echo "Redis (uat: container on api box; prod: MemStore)";;
   sso)           echo "Keycloak (SSO / OIDC) container";;
   backend)       echo "customer360-backend (Dagster orchestrator)";;
@@ -74,7 +74,7 @@ title_of() { case "$1" in
   sso-realm)     echo "Keycloak realm + confidential client (bootstrap-realm.py)";;
   api)           echo "customer360-api (FastAPI)";;
   frontend)      echo "customer360-frontend (admin UI)";;
-  ads)           echo "customer360-promotions (c360 Promotions, schema leo_ads)";;
+  promotions)    echo "customer360-promotions (c360 Promotions, schema leo_ads; on VKS)";;
   agent)         echo "customer360-agent (AI Agent service, LiteLLM, :8009)";;
   event-api)     echo "customer360-event-api (event ingestion -> S3, /data; on VKS)";;
   docs-search)   echo "docs-vector-search (local-model RAG, pgvector on the vDB)";;
@@ -191,7 +191,10 @@ run_one() {  # <id> <action>
     sso)           ssh_step sso            deploy-sso.sh deploy "$2" ;;
     proxy)         ssh_step proxy          deploy-caddy.sh deploy "$2" ;;
     frontend)      ssh_step frontend       deploy-frontend.sh deploy "$2" ;;
-    ads)           ssh_step customer360-promotions     deploy-ads.sh deploy "$2" ;;
+    # ssh_step is about the CALL SHAPE (this script takes a `destroy` subcommand), not
+    # the transport: like event-api below, `promotions` now applies manifests to the VKS cluster
+    # rather than shipping a container over SSH.
+    promotions)    ssh_step customer360-promotions     deploy-promotions.sh deploy "$2" ;;
     agent)         ssh_step_env_only server deploy-agent.sh "$2" ;;
     # ssh_step (not ssh_step_env_only): this one lives in Kubernetes, so the 'server'
     # teardown no longer removes it — it needs a destroy of its own.
@@ -240,14 +243,16 @@ if [ "$DO_LIST" != 1 ]; then
   case "$ENV" in uat|prod) ;; *) die "environment required: ./deploy-all.sh <uat|prod> [plan|apply|destroy] [flags] (see --help)";; esac
 fi
 
-# `tracking` was this step's id until customer360-event-api moved to Kubernetes. Accept
-# it as an alias so saved workflow_dispatch inputs and existing scripts keep working.
+# Legacy step ids, accepted as aliases so saved workflow_dispatch inputs and existing
+# scripts keep working:  `tracking` -> `event-api` (renamed when it moved to Kubernetes),
+# `ads` -> `promotions` (renamed to match the service, customer360-promotions).
 # Exact per-item match, not a substring replace: 'docs-search' must never be rewritten
 # just because some other id contains the word.
 remap_legacy_steps() {  # <csv> -> csv with legacy ids renamed
   local out="" item IFS=,
   for item in $1; do
     [ "$item" = "tracking" ] && item="event-api"
+    [ "$item" = "ads" ] && item="promotions"
     out="${out:+$out,}$item"
   done
   printf '%s' "$out"
@@ -307,7 +312,7 @@ if [ "$DO_LIST" = 1 ]; then
   printf '   ./deploy-all.sh uat                 # apply all (except optional)\n'
   printf '   ./deploy-all.sh uat --with seed     # apply all + demo data\n'
   printf '   ./deploy-all.sh uat --from proxy    # resume from the Caddy cutover onward\n'
-  printf '   ./deploy-all.sh uat --only api,frontend,ads   # just those, in order\n'
+  printf '   ./deploy-all.sh uat --only api,frontend,promotions   # just those, in order\n'
   printf '   ./deploy-all.sh uat destroy         # tear down (reverse order)\n'
   exit 0
 fi

@@ -3,7 +3,7 @@
 # Portainer admin password lives in .env, not in this file).
 
 mon_server_key = "api"    # SHARE c360-api-uat-api (10.100.1.5): the box that runs
-                          # api + ads + frontend + keycloak + redis.
+                          # api + frontend + keycloak + redis.
 
 # Portainer — container-ops UI (status/logs/exec/restart). HTTPS, bridge net.
 portainer_enabled = true
@@ -95,3 +95,23 @@ pgadmin_proxy_port = 4050                       # (unused while pgadmin_sso = fa
 portainer_agent_server_keys = "backend,docs,agent"   # backend (10.100.1.4) + docs (10.100.1.7) + customer360-agent box. 9001 from the api box is already open on the shared secgroup.
 portainer_agent_image       = "portainer/agent:lts"
 portainer_agent_port        = 9001
+
+# The VKS cluster as one more Portainer environment — this is how customer360-promotions
+# and customer360-event-api become visible, since they are pods and no Docker agent above
+# can see them. ONE agent covers the whole cluster; there is no per-service agent.
+#
+# Nothing is installed by setting this. The Kubernetes agent is a cluster add-on applied
+# once by hand (../server/customer360-event-api/cluster-addons/portainer-agent/); this only
+# registers it. Leave empty to skip — prod has no cluster yet.
+#
+# <node-ip>:<agent NodePort>. Any node works (kube-proxy forwards to whichever node the
+# agent pod runs on), but it IS a node ip, so it goes stale if the node group is replaced —
+# re-read it with `kubectl get nodes -o wide`. If registration times out, suspect the VKS
+# node security group rather than the manifest: 30778 must be open from the api box.
+#
+# The NAME is the identity: registration matches on name, NOT url, so a second name
+# pointing at this same agent silently creates a duplicate environment for one cluster.
+# Keep it "c360-vks-uat" — the c360- prefix every other environment uses. (An earlier
+# hand-registered "leocdp-uat" pointed at this same agent and was removed as redundant.)
+portainer_k8s_agent_url     = "10.100.1.11:30778"
+portainer_k8s_agent_name    = "c360-vks-uat"

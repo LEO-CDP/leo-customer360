@@ -28,7 +28,7 @@
 #   OAUTH2_PROXY_COOKIE_SECRET  — session-cookie key; auto-generated once if missing.
 #
 # Dashboard ports dodge the api box's in-use ports (redis 6580, api 8008, keycloak 8080 +
-# 9000, frontend 8890, ads 9009). Do NOT move Portainer onto :9000 — Keycloak owns it.
+# 9000, frontend 8890). Do NOT move Portainer onto :9000 — Keycloak owns it.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -94,6 +94,11 @@ PG_EMAIL="${PGADMIN_DEFAULT_EMAIL:-$(tfval pgadmin_email "$ovl")}"; PG_EMAIL="${
 PA_KEYS="$(tfval portainer_agent_server_keys "$ovl")"
 PA_IMG="$(tfval portainer_agent_image "$ovl")";  PA_IMG="${PA_IMG:-portainer/agent:lts}"
 PA_PORT="$(tfval portainer_agent_port "$ovl")";  PA_PORT="${PA_PORT:-9001}"
+# The VKS cluster as one more environment. Unlike the boxes above there is nothing to
+# install here — the Kubernetes agent is a cluster add-on applied once by hand — so this is
+# only <node-ip>:<agent NodePort>. Empty = skip (e.g. prod, which has no cluster yet).
+PA_K8S_URL="$(tfval portainer_k8s_agent_url "$ovl")"
+PA_K8S_NAME="$(tfval portainer_k8s_agent_name "$ovl")"; PA_K8S_NAME="${PA_K8S_NAME:-c360-vks-$ENV}"
 # sso gate
 OA_EN="$(tfval oauth2_enabled "$ovl")";    OA_EN="${OA_EN:-false}"
 OA_IMG="$(tfval oauth2_image "$ovl")";     OA_IMG="${OA_IMG:-quay.io/oauth2-proxy/oauth2-proxy:v7.6.0}"
@@ -379,6 +384,35 @@ if [ "$P_GATED" = "true" ] || [ "$N_GATED" = "true" ] || [ "$J_GATED" = "true" ]
 fi
 REMOTE
 
+# register one environment in the api-box Portainer. Runs ON the mon box against its
+# loopback API. Idempotent (skips when the name already exists) and best-effort: a failure
+# prints the manual steps rather than failing the deploy. Two callers — the per-box Docker
+# agents below, and the VKS Kubernetes agent after them.
+portainer_register_env() { # <display-name> <host:port of the agent>
+  local NAME="$1" URL="$2"
+  if [[ -z "${PORTAINER_ADMIN_PASSWORD:-}" ]]; then
+    echo "   NOTE: PORTAINER_ADMIN_PASSWORD not in .env — add it in the UI: Environments -> Add -> Agent -> $URL"
+    return 0
+  fi
+  ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$P_PORT" "$(printf %s "$PORTAINER_ADMIN_PASSWORD" | base64 | tr -d '\n')" "$NAME" "$URL" <<'RREMOTE'
+set -eu
+PPORT="$1"; PW="$(printf %s "$2" | base64 -d)"; NAME="$3"; URL="$4"; base="https://127.0.0.1:$PPORT"
+jwt="$(curl -sk -X POST "$base/api/auth" -H 'Content-Type: application/json' -d "{\"Username\":\"admin\",\"Password\":\"$PW\"}" | sed -n 's/.*"jwt":"\([^"]*\)".*/\1/p')"
+[ -n "$jwt" ] || { echo "   WARN: Portainer auth failed — register manually: Environments -> Add -> Agent -> $URL"; exit 0; }
+if curl -sk "$base/api/endpoints" -H "Authorization: Bearer $jwt" | grep -q "\"Name\":\"$NAME\""; then
+  echo "   Portainer env '$NAME': already registered"
+else
+  # Agent endpoints need the tcp:// scheme, else Portainer 500s with "Unable to parse docker host".
+  # The SAME call registers a Kubernetes agent: Portainer probes the agent and sets the
+  # endpoint type from what answers, so no separate Kubernetes-specific request is needed.
+  code="$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$base/api/endpoints" -H "Authorization: Bearer $jwt" \
+    -F "Name=$NAME" -F "EndpointCreationType=2" -F "URL=tcp://$URL" -F "TLS=true" -F "TLSSkipVerify=true" -F "TLSSkipClientVerify=true")"
+  case "$code" in 200|201|204) echo "   Portainer env '$NAME' -> $URL: registered";;
+    *) echo "   WARN: endpoint create HTTP $code — add manually: Environments -> Add -> Agent -> $URL";; esac
+fi
+RREMOTE
+}
+
 # ---------- Portainer agents on OTHER boxes (one Portainer, many environments) ----------
 # For each ../server key in PA_KEYS: run portainer/agent on that box (reached via its floating IP)
 # and register it in the api-box Portainer as an Agent environment (reached over the private VPC
@@ -404,27 +438,28 @@ sudo docker run -d --name c360-portainer-agent --restart unless-stopped \
   "$IMG" >/dev/null
 sudo docker ps --filter name=c360-portainer-agent --format '   agent: {{.Names}} ({{.Status}})'
 AREMOTE
-    # register the environment in Portainer (run ON the mon box against its loopback API)
-    if [[ -n "${PORTAINER_ADMIN_PASSWORD:-}" ]]; then
-      ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$P_PORT" "$(printf %s "$PORTAINER_ADMIN_PASSWORD" | base64 | tr -d '\n')" "c360-$key" "$apriv:$PA_PORT" <<'RREMOTE'
-set -eu
-PPORT="$1"; PW="$(printf %s "$2" | base64 -d)"; NAME="$3"; URL="$4"; base="https://127.0.0.1:$PPORT"
-jwt="$(curl -sk -X POST "$base/api/auth" -H 'Content-Type: application/json' -d "{\"Username\":\"admin\",\"Password\":\"$PW\"}" | sed -n 's/.*"jwt":"\([^"]*\)".*/\1/p')"
-[ -n "$jwt" ] || { echo "   WARN: Portainer auth failed — register manually: Environments -> Add -> Agent -> $URL"; exit 0; }
-if curl -sk "$base/api/endpoints" -H "Authorization: Bearer $jwt" | grep -q "\"Name\":\"$NAME\""; then
-  echo "   Portainer env '$NAME': already registered"
-else
-  # Agent endpoints need the tcp:// scheme, else Portainer 500s with "Unable to parse docker host".
-  code="$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$base/api/endpoints" -H "Authorization: Bearer $jwt" \
-    -F "Name=$NAME" -F "EndpointCreationType=2" -F "URL=tcp://$URL" -F "TLS=true" -F "TLSSkipVerify=true" -F "TLSSkipClientVerify=true")"
-  case "$code" in 200|201|204) echo "   Portainer env '$NAME' -> $URL: registered";;
-    *) echo "   WARN: endpoint create HTTP $code — add manually: Environments -> Add -> Agent -> $URL";; esac
-fi
-RREMOTE
-    else
-      echo "   NOTE: PORTAINER_ADMIN_PASSWORD not in .env — add the env in the UI: Environments -> Add -> Agent -> $apriv:$PA_PORT"
-    fi
+    portainer_register_env "c360-$key" "$apriv:$PA_PORT"
   done
+fi
+
+# ---------- the VKS Kubernetes cluster as a Portainer environment ----------
+# customer360-promotions and customer360-event-api run as pods, not containers on a box, so
+# they are invisible to every Docker agent above. The Kubernetes agent that makes them
+# visible is a CLUSTER add-on applied once by hand (see
+# ../server/customer360-event-api/cluster-addons/portainer-agent/) — this only registers the
+# already-running agent as an environment, which used to be a manual click that nobody
+# repeats after a Portainer rebuild.
+#
+# One agent covers the WHOLE cluster: there is no per-service agent, so promotions shows up
+# through this single environment alongside event-api.
+#
+# The address is a NODE ip plus the agent's NodePort. Any node works — kube-proxy forwards
+# to whichever node the agent pod is on — but it is still a node ip, so it goes stale if the
+# node group is replaced. Re-read it with:
+#   kubectl get nodes -o wide
+if [[ "$P_EN" == "true" && -n "$PA_K8S_URL" ]]; then
+  echo ">> Portainer environment for the VKS cluster ($PA_K8S_NAME -> $PA_K8S_URL)"
+  portainer_register_env "$PA_K8S_NAME" "$PA_K8S_URL"
 fi
 
 echo ">> Done."

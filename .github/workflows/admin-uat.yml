@@ -17,9 +17,9 @@ on:
           - db-status          # read-only: key CDP table row counts
           - seed-demo          # seed CIR/demo data (idempotent)
           - bootstrap-realm    # re-run idempotent Keycloak realm/roles/client bootstrap
-          - restart-apps       # restart api + ads + frontend containers
+          - restart-apps       # restart api + frontend containers (promotions is on VKS)
           - restart-backend    # restart customer360-backend (Dagster)
-          - redeploy-apps      # pull latest images + recreate api/ads/frontend/backend
+          - redeploy-apps      # pull latest images + recreate api/promotions/frontend/backend
           - flush-cache        # FLUSHDB the Redis cache (requires confirm below)
       confirm:
         description: "Confirm destructive actions — type the action name (required for flush-cache)"
