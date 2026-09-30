@@ -17,12 +17,14 @@ from core.repositories.campaign_draft_repository import (
     APPROVAL_STATUS_IN_REVIEW,
     APPROVAL_STATUS_REJECTED,
     CampaignDraftApprovalBlockedError,
+    CampaignDraftActorNotFoundError,
     CampaignDraftConflictError,
     CampaignDraftRepository,
     CampaignDraftValidationError,
     CampaignSegmentNotFoundError,
     CampaignTemplateNotFoundError,
 )
+from leo_customer360_dao.models.system import SysUser
 
 DEMO_TENANT_ID = uuid.uuid4()
 DEMO_SEGMENT_ID = uuid.uuid4()
@@ -46,6 +48,9 @@ class _FakeScalarsResult:
         # None means "no conflict" in these tests (no real concurrent writer).
         return None
 
+    def scalar_one_or_none(self):
+        return self._items[0] if self._items else None
+
 
 class FakeSession:
     """Minimal SQLAlchemy Session stand-in: execute() always returns the
@@ -55,11 +60,15 @@ class FakeSession:
 
     def __init__(self, candidate_content_items=None):
         self._candidate_content_items = candidate_content_items or []
+        self.audit_user_exists = True
         self.added: list = []
         self.committed = False
         self.flushed = False
 
-    def execute(self, _stmt):
+    def execute(self, statement):
+        descriptions = statement.column_descriptions
+        if descriptions and descriptions[0]["entity"] is SysUser:
+            return _FakeScalarsResult([uuid.uuid4()] if self.audit_user_exists else [])
         return _FakeScalarsResult(self._candidate_content_items)
 
     def add(self, obj):
@@ -452,6 +461,7 @@ class ReviewerContentPlanAdjustmentTests(unittest.TestCase):
         self.campaign = SimpleNamespace(
             campaign_id=self.campaign_id,
             tenant_id=DEMO_TENANT_ID,
+            segment_id=None,
             objective="Original objective",
             strategy_summary="Original strategy",
             start_date=date.today() + timedelta(days=1),
@@ -493,6 +503,7 @@ class OptimisticConcurrencyTests(unittest.TestCase):
         self.campaign = SimpleNamespace(
             campaign_id=uuid.uuid4(),
             tenant_id=DEMO_TENANT_ID,
+            segment_id=None,
             template_id=None,
             approval_status=APPROVAL_STATUS_IN_REVIEW,
             approved_by=None,
@@ -504,12 +515,28 @@ class OptimisticConcurrencyTests(unittest.TestCase):
         """A concurrent writer already changed approval_status/updated_at."""
 
         class _ConflictResult:
+            def scalar_one_or_none(self_inner):
+                return uuid.uuid4()
+
             def first(self_inner):
                 return SimpleNamespace(updated_at=datetime(2026, 1, 2), approval_status=APPROVAL_STATUS_APPROVED)
 
         session = self.session
         session.execute = lambda _stmt: _ConflictResult()
         return session
+
+    def test_edit_rejects_actor_missing_from_active_tenant(self):
+        self.session.audit_user_exists = False
+
+        with self.assertRaises(CampaignDraftActorNotFoundError):
+            self.repo.edit_draft(
+                DEMO_TENANT_ID,
+                self.campaign.campaign_id,
+                uuid.uuid4(),
+                objective="Updated objective",
+            )
+
+        self.assertFalse(self.session.committed)
 
     def test_approve_raises_conflict_when_row_changed_concurrently(self):
         self._conflicting_session()

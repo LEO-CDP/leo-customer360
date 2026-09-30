@@ -305,7 +305,7 @@ window.C360 = window.C360 || {};
     $("#campaign-segment-selected-meta").text(selected ? segmentMeta(segment) : "");
     $("#campaign-segment-warning").toggleClass("hidden", !options.warning).text(options.warning || "");
     $("#btn-campaign-select-segment, #btn-campaign-change-segment").prop("disabled", !!options.locked).toggleClass("opacity-50 cursor-not-allowed", !!options.locked);
-    $("#btn-campaign-clear-segment").toggleClass("hidden", !selected || !!options.locked);
+    $("#btn-campaign-clear-segment").toggleClass("hidden", !selected || options.allowClear === false || !!options.locked);
   }
 
   function segmentMatches(segment, query) {
@@ -367,21 +367,23 @@ window.C360 = window.C360 || {};
     $("#campaign-segment-modal").addClass("hidden");
   }
 
-  function loadSelectedSegment(segmentId, locked) {
+  function loadSelectedSegment(segmentId, locked, allowClear) {
     if (!segmentId) {
-      renderSegmentSelection(null, { locked: locked });
+      renderSegmentSelection(null, { locked: locked, allowClear: allowClear });
       return;
     }
     api("/segments/" + encodeURIComponent(segmentId))
       .done(function (segment) {
         renderSegmentSelection(segment, {
           locked: locked,
+          allowClear: allowClear,
           warning: segmentIsReady(segment) ? "" : "This segment is no longer active or has no computed membership snapshot. Choose another segment before saving."
         });
       })
       .fail(function () {
         renderSegmentSelection({ segment_id: segmentId, segment_name: "Unavailable segment", segment_tag: "" }, {
           locked: locked,
+          allowClear: allowClear,
           warning: "The saved segment could not be loaded. Choose another segment before saving."
         });
       });
@@ -432,7 +434,7 @@ window.C360 = window.C360 || {};
     $("#campaign-field-template").val(campaign.template_id || "").prop("disabled", !!campaign.campaign_id);
     $("#campaign-field-objective").val(campaign.objective || "");
     $("#campaign-field-strategy").val(campaign.strategy_summary || "");
-    loadSelectedSegment(campaign.segment_id, !!campaign.campaign_id);
+    loadSelectedSegment(campaign.segment_id, false, !campaign.campaign_id);
   }
 
   function loadCampaignEditor(campaignId) {
@@ -485,6 +487,7 @@ window.C360 = window.C360 || {};
       delete general.template_id;
       delete general.objective;
       request = api("/campaigns/" + encodeURIComponent(campaignId) + "/draft", {
+        segment_id: payload.segment_id || null,
         objective: payload.objective,
         strategy_summary: fieldValue("#campaign-field-strategy").trim() || null,
         start_date: payload.start_date,
@@ -506,19 +509,29 @@ window.C360 = window.C360 || {};
 
   function renderDetailMetadata(campaign) {
     var fields = [
-      ["Campaign code", campaign.campaign_code], ["Owner", campaign.user_id],
-      ["Channel", campaign.channel], ["Platform", campaign.platform],
-      ["Objective", campaign.objective], ["Language", campaign.lang],
-      ["Schedule", [campaign.start_date, campaign.end_date].filter(Boolean).join(" - ")],
-      ["Budget", campaign.budget_amount == null ? null : String(campaign.budget_amount) + " " + (campaign.currency || "")],
-      ["Segment", campaign.segment_id], ["Template", campaign.template_id],
-      ["Created", campaign.created_at], ["Updated", campaign.updated_at]
+      { label: "Campaign code", value: campaign.campaign_code, icon: "bi-hash", technical: true },
+      { label: "Owner", value: campaign.user_id || "System / unassigned", icon: "bi-person" },
+      { label: "Channel", value: campaign.channel, icon: "bi-broadcast" },
+      { label: "Platform", value: campaign.platform, icon: "bi-grid-1x2" },
+      { label: "Language", value: campaign.lang, icon: "bi-translate" },
+      { label: "Schedule", value: [campaign.start_date, campaign.end_date].filter(Boolean).join(" - ") || "Not scheduled", icon: "bi-calendar3" },
+      { label: "Budget", value: campaign.budget_amount == null ? "No budget set" : String(campaign.budget_amount) + " " + (campaign.currency || ""), icon: "bi-wallet2" },
+      { label: "Objective", value: campaign.objective, icon: "bi-bullseye", wide: true },
+      { label: "Description", value: campaign.description, icon: "bi-card-text", wide: true },
+      { label: "Keywords", value: (campaign.keywords || []).join(", "), icon: "bi-tags", wide: true },
+      { label: "Template reference", value: campaign.template_id, icon: "bi-file-earmark-text", technical: true },
+      { label: "Created", value: fmt.dateTime(campaign.created_at), icon: "bi-clock-history" },
+      { label: "Updated", value: fmt.dateTime(campaign.updated_at), icon: "bi-arrow-repeat" }
     ];
     var $metadata = $("#campaign-details-metadata").empty();
     fields.forEach(function (field) {
-      var $item = $("<div>");
-      $("<dt>").addClass("text-xs uppercase tracking-wider text-slate-500").text(field[0]).appendTo($item);
-      $("<dd>").addClass("mt-1 text-sm font-medium text-slate-800 break-words").text(field[1] || "-").appendTo($item);
+      var $item = $("<div>").addClass("rounded-xl border border-slate-200 bg-slate-50/50 p-4 transition hover:border-slate-300 hover:bg-white");
+      if (field.wide) $item.addClass("sm:col-span-2 xl:col-span-3");
+      var $heading = $("<div>").addClass("flex items-center gap-2");
+      $("<i>").addClass("bi " + field.icon + " text-slate-400").attr("aria-hidden", "true").appendTo($heading);
+      $("<dt>").addClass("text-[11px] font-semibold uppercase tracking-wider text-slate-500").text(field.label).appendTo($heading);
+      $heading.appendTo($item);
+      $("<dd>").addClass("mt-2 break-words text-sm font-semibold text-slate-800 " + (field.technical ? "font-mono text-xs" : "")).text(field.value || "-").appendTo($item);
       $metadata.append($item);
     });
     $("#campaign-details-strategy").text(campaign.strategy_summary || "No strategy summary is available.");
@@ -530,6 +543,48 @@ window.C360 = window.C360 || {};
       [item.position, item.title || item.content_item_id, item.item_type, item.role].forEach(function (value) { $("<td>").addClass("py-3 pr-4 text-slate-700").text(value || "-").appendTo($row); });
       $("#campaign-details-content-items").append($row);
     });
+  }
+
+  function renderDetailAudience(segmentId, segment, loading) {
+    $("#campaign-details-audience-id").text(segmentId || "No segment linked");
+    $("#campaign-details-audience-status").removeClass("hidden");
+    if (!segmentId) {
+      $("#campaign-details-audience-name").text("No target audience");
+      $("#campaign-details-audience-meta").text("This campaign is not linked to a saved segment.");
+      $("#campaign-details-audience-status").attr("class", "shrink-0 rounded-md bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600").text("Unassigned");
+      $("#btn-campaign-copy-segment-id").addClass("hidden");
+      return;
+    }
+    $("#btn-campaign-copy-segment-id").removeClass("hidden").data("segment-id", segmentId);
+    if (loading) {
+      $("#campaign-details-audience-name").text("Loading audience...");
+      $("#campaign-details-audience-meta").text("Fetching segment details");
+      $("#campaign-details-audience-status").attr("class", "shrink-0 rounded-md bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600").text("Loading");
+      return;
+    }
+    if (!segment) {
+      $("#campaign-details-audience-name").text("Segment unavailable");
+      $("#campaign-details-audience-meta").text("The saved segment could not be loaded for this tenant.");
+      $("#campaign-details-audience-status").attr("class", "shrink-0 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700").text("Unavailable");
+      return;
+    }
+    var meta = [
+      segment.segment_tag ? "#" + segment.segment_tag : null,
+      segment.domain && segment.domain !== "all" ? segment.domain : null,
+      fmt.int(segment.member_count || 0) + " profiles"
+    ].filter(Boolean).join("  ·  ");
+    $("#campaign-details-audience-name").text(segment.segment_name || "Unnamed segment");
+    $("#campaign-details-audience-meta").text(meta);
+    var ready = segmentIsReady(segment);
+    $("#campaign-details-audience-status").attr("class", ready ? "shrink-0 rounded-md bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700" : "shrink-0 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700").text(ready ? "Ready" : "Needs attention");
+  }
+
+  function loadDetailAudience(segmentId) {
+    renderDetailAudience(segmentId, null, true);
+    if (!segmentId) return;
+    api("/segments/" + encodeURIComponent(segmentId))
+      .done(function (segment) { renderDetailAudience(segmentId, segment); })
+      .fail(function () { renderDetailAudience(segmentId, null); });
   }
 
   function renderDetailHistory(history) {
@@ -579,6 +634,147 @@ window.C360 = window.C360 || {};
     });
   }
 
+  var experimentSegments = [];
+
+  function showExperimentError(message) {
+    $("#campaign-experiment-error").toggleClass("hidden", !message).text(message || "");
+  }
+
+  function loadExperimentSegments(callback) {
+    if (experimentSegments.length) {
+      callback(experimentSegments);
+      return;
+    }
+    api("/segments/", { skip: 0, limit: 100 }).done(function (segments) {
+      experimentSegments = (segments || []).filter(segmentIsReady);
+      callback(experimentSegments);
+    }).fail(function () {
+      showExperimentError("Could not load active segments for the experiment.");
+    });
+  }
+
+  function updateExperimentAllocation() {
+    var total = 0;
+    $(".campaign-experiment-allocation-input").each(function () { total += Number($(this).val()) || 0; });
+    var valid = total === 100;
+    $("#campaign-experiment-allocation").text(total + "% allocated").toggleClass("text-emerald-700", valid).toggleClass("text-rose-700", !valid);
+    $("#campaign-experiment-form button[type=submit]").prop("disabled", !valid).toggleClass("opacity-50 cursor-not-allowed", !valid);
+  }
+
+  function addExperimentVariant(variant) {
+    variant = variant || {};
+    var index = $("#campaign-experiment-variants .campaign-experiment-variant").length;
+    var key = variant.variant_key || String.fromCharCode(65 + index);
+    var $row = $("<div>").addClass("campaign-experiment-variant rounded-xl border border-slate-200 bg-slate-50/60 p-4").attr("data-variant-key", key);
+    var $top = $("<div>").addClass("grid grid-cols-1 md:grid-cols-12 gap-3 items-end");
+    var $name = $("<label>").addClass("text-xs font-semibold text-slate-600 md:col-span-4").text("Variant " + key + " name");
+    $("<input>").attr({ type: "text", required: true }).addClass("campaign-experiment-variant-name mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm").val(variant.name || (index === 0 ? "Control" : "Variant " + key)).appendTo($name);
+    var $segment = $("<label>").addClass("text-xs font-semibold text-slate-600 md:col-span-4").text("Target segment");
+    var $select = $("<select>").addClass("campaign-experiment-segment mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm");
+    $("<option>").val("").text("Choose segment...").appendTo($select);
+    experimentSegments.forEach(function (segment) { $("<option>").val(segment.segment_id).text(segment.segment_name + " (" + fmt.int(segment.member_count || 0) + " profiles)").appendTo($select); });
+    $select.val(variant.segment_id || "").appendTo($segment);
+    var $allocation = $("<label>").addClass("text-xs font-semibold text-slate-600 md:col-span-2").text("Traffic %");
+    $("<input>").attr({ type: "number", min: "0", max: "100", step: "1" }).addClass("campaign-experiment-allocation-input mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm").val(variant.allocation_percentage == null ? (index < 2 ? 50 : 0) : variant.allocation_percentage).appendTo($allocation);
+    var $control = $("<label>").addClass("flex items-center gap-2 pb-2 text-xs font-semibold text-slate-600 md:col-span-1");
+    $("<input>").attr({ type: "checkbox" }).addClass("campaign-experiment-control h-4 w-4 rounded border-slate-300 text-indigo-600").prop("checked", variant.is_control || index === 0).appendTo($control);
+    $("<span>").text("Control").appendTo($control);
+    var $remove = $("<button>").attr({ type: "button", title: "Remove variant", "aria-label": "Remove variant" }).addClass("campaign-experiment-remove inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 md:col-span-1");
+    $("<i>").addClass("bi bi-trash3").attr("aria-hidden", "true").appendTo($remove);
+    $top.append($name, $segment, $allocation, $control, $remove);
+    $row.append($top).appendTo("#campaign-experiment-variants");
+    updateExperimentAllocation();
+  }
+
+  function resetExperimentForm() {
+    $("#campaign-experiment-name").val("");
+    $("#campaign-experiment-metric").val("conversions");
+    $("#campaign-experiment-variants").empty();
+    loadExperimentSegments(function () {
+      addExperimentVariant({ variant_key: "A", name: "Control", allocation_percentage: 50, is_control: true });
+      addExperimentVariant({ variant_key: "B", name: "Variant B", allocation_percentage: 50, is_control: false });
+    });
+  }
+
+  function createCampaignExperiment(campaignId, event) {
+    event.preventDefault();
+    showExperimentError("");
+    var variants = [];
+    var total = 0;
+    var controls = 0;
+    var valid = true;
+    $("#campaign-experiment-variants .campaign-experiment-variant").each(function () {
+      var $row = $(this);
+      var allocation = Number($row.find(".campaign-experiment-allocation-input").val()) || 0;
+      var segmentId = $row.find(".campaign-experiment-segment").val();
+      var name = $.trim($row.find(".campaign-experiment-variant-name").val());
+      var isControl = $row.find(".campaign-experiment-control").prop("checked");
+      total += allocation;
+      controls += isControl ? 1 : 0;
+      if (!name || !segmentId) valid = false;
+      variants.push({ variant_key: $row.data("variant-key"), name: name, segment_id: segmentId, allocation_percentage: allocation, is_control: isControl });
+    });
+    if (variants.length < 2 || total !== 100 || controls !== 1 || !valid) {
+      showExperimentError("Add at least two variants, choose a segment for each, select one control, and allocate exactly 100% traffic.");
+      return;
+    }
+    var $submit = $("#campaign-experiment-form button[type=submit]").prop("disabled", true).text("Creating...");
+    api("/campaigns/" + encodeURIComponent(campaignId) + "/experiments", {
+      name: $.trim($("#campaign-experiment-name").val()),
+      primary_metric: $("#campaign-experiment-metric").val(),
+      variants: variants
+    }, "POST").done(function () {
+      resetExperimentForm();
+      loadCampaignExperiments(campaignId);
+    }).fail(function (xhr) {
+      showExperimentError(campaignError(xhr));
+    }).always(function () { $submit.prop("disabled", false).text("Create experiment"); });
+  }
+
+  function renderExperimentCard(experiment) {
+    var $card = $("<article>").addClass("bg-white border border-slate-200 rounded-2xl p-6");
+    var $header = $("<div>").addClass("flex flex-wrap items-start justify-between gap-3");
+    var $title = $("<div>");
+    $("<h3>").addClass("text-base font-bold text-slate-900").text(experiment.name).appendTo($title);
+    $("<p>").addClass("mt-1 text-xs text-slate-500").text("Metric: " + experiment.primary_metric + "  ·  " + experiment.variants.length + " variants").appendTo($title);
+    var $status = $("<select>").addClass("campaign-experiment-status rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold").attr("data-experiment-id", experiment.experiment_id);
+    ["Draft", "Running", "Paused", "Completed", "Cancelled"].forEach(function (status) { $("<option>").val(status).text(status).prop("selected", status === experiment.status).appendTo($status); });
+    $header.append($title, $status);
+    var $table = $("<table>").addClass("mt-5 w-full text-sm");
+    var $head = $("<tr>").addClass("border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500");
+    ["Variant", "Segment", "Allocation", "Conversions", "CVR", "ROAS", "Winner"].forEach(function (label) { $("<th>").addClass("py-3 pr-3").text(label).appendTo($head); });
+    $("<thead>").append($head).appendTo($table);
+    var $body = $("<tbody>").addClass("divide-y divide-slate-100");
+    var performanceById = {};
+    api("/campaign-experiments/" + encodeURIComponent(experiment.experiment_id) + "/performance").done(function (performance) {
+      (performance || []).forEach(function (item) { performanceById[item.variant_id] = item; });
+      $body.empty();
+      experiment.variants.forEach(function (variant) {
+        var item = performanceById[variant.variant_id] || {};
+        var $row = $("<tr>");
+        var segment = experimentSegments.filter(function (candidate) { return candidate.segment_id === variant.segment_id; })[0];
+        [variant.name, segment ? segment.segment_name : variant.segment_id, variant.allocation_percentage + "%", item.conversions || 0, (Number(item.conversion_rate) || 0).toFixed(2) + "%", (Number(item.roas) || 0).toFixed(2) + "x"].forEach(function (value) { $("<td>").addClass("py-3 pr-3 text-slate-700").text(value).appendTo($row); });
+        var $winner = $("<button>").attr({ type: "button", title: "Select winning variant", "aria-label": "Select " + variant.name + " as winner" }).addClass("campaign-experiment-winner rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700").attr("data-experiment-id", experiment.experiment_id).attr("data-variant-id", variant.variant_id).text(experiment.winning_variant_id === variant.variant_id ? "Winner" : "Select");
+        $("<td>").addClass("py-3").append($winner).appendTo($row);
+        $body.append($row);
+      });
+    });
+    $table.append($body);
+    $card.append($header, $table);
+    return $card;
+  }
+
+  function loadCampaignExperiments(campaignId) {
+    api("/campaigns/" + encodeURIComponent(campaignId) + "/experiments").done(function (experiments) {
+      var $list = $("#campaign-experiments-list").empty();
+      if (!experiments || !experiments.length) {
+        $("<div>").addClass("rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500").text("No experiments yet. Create one to compare audience segments.").appendTo($list);
+        return;
+      }
+      experiments.forEach(function (experiment) { $list.append(renderExperimentCard(experiment)); });
+    }).fail(function (xhr) { showExperimentError(campaignError(xhr)); });
+  }
+
   function loadCampaignDetails(campaignId) {
     setCampaignMessage("#campaign-details-error", "");
     $("#campaign-details-loading").removeClass("hidden");
@@ -587,6 +783,7 @@ window.C360 = window.C360 || {};
       .done(function (campaignResult, historyResult) {
         var campaign = campaignResult[0];
         renderDetailMetadata(campaign);
+        loadDetailAudience(campaign.segment_id);
         renderDetailHistory(historyResult[0]);
         $("#campaign-details-title").text(campaign.name || "Campaign details");
         $("#campaign-details-subtitle").text([campaign.campaign_code, campaign.channel, campaign.platform].filter(Boolean).join(" / "));
@@ -600,11 +797,13 @@ window.C360 = window.C360 || {};
         $("#btn-campaign-details-reject").toggleClass("hidden", !canReview);
         $("#campaign-details-loading").addClass("hidden");
         $("#campaign-details-content").removeClass("hidden");
+        $("#campaign-experiment-form").attr("data-campaign-id", campaignId);
         $("#btn-campaign-details-edit").off("click.c360campaign").on("click.c360campaign", function () { C360.router.navigate("/campaigns/" + encodeURIComponent(campaignId) + "/edit"); });
         $("#btn-campaign-report-refresh").off("click.c360campaign").on("click.c360campaign", function () { loadCampaignReport(campaign); });
         $("#btn-campaign-details-approve").off("click.c360campaign").on("click.c360campaign", function () { api("/campaigns/" + encodeURIComponent(campaignId) + "/approve", {}, "POST").done(function () { loadCampaignDetails(campaignId); }).fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); }); });
         $("#btn-campaign-details-reject").off("click.c360campaign").on("click.c360campaign", function () { var reason = window.prompt("Reason for rejection:"); if (reason === null) return; api("/campaigns/" + encodeURIComponent(campaignId) + "/reject", { reason: reason }, "POST").done(function () { loadCampaignDetails(campaignId); }).fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); }); });
         loadCampaignReport(campaign);
+        loadExperimentSegments(function () { resetExperimentForm(); loadCampaignExperiments(campaignId); });
       })
       .fail(function (xhr) { $("#campaign-details-loading").addClass("hidden"); setCampaignMessage("#campaign-details-error", campaignError(xhr)); });
   }
@@ -615,6 +814,21 @@ window.C360 = window.C360 || {};
     $doc.on("click.c360campaignworkspace", "#btn-campaign-create", function () { C360.router.navigate("/campaigns/new/edit"); });
     $doc.on("click.c360campaignworkspace", "#btn-campaign-editor-back, #btn-campaign-editor-cancel, #btn-campaign-details-back", function () { C360.router.navigate("/campaigns"); });
     $doc.on("submit.c360campaignworkspace", "#campaign-editor-form", saveCampaignEditor);
+    $doc.on("click.c360campaignworkspace", "#btn-campaign-experiment-add-variant", function () { loadExperimentSegments(function () { addExperimentVariant(); }); });
+    $doc.on("click.c360campaignworkspace", ".campaign-experiment-remove", function () { if ($("#campaign-experiment-variants .campaign-experiment-variant").length > 2) { $(this).closest(".campaign-experiment-variant").remove(); updateExperimentAllocation(); } });
+    $doc.on("input.c360campaignworkspace", ".campaign-experiment-allocation-input", updateExperimentAllocation);
+    $doc.on("submit.c360campaignworkspace", "#campaign-experiment-form", function (event) { createCampaignExperiment($(this).data("campaign-id"), event); });
+    $doc.on("change.c360campaignworkspace", ".campaign-experiment-status", function () { var $control = $(this); api("/campaign-experiments/" + encodeURIComponent($control.data("experiment-id")), { status: $control.val() }, "PATCH").fail(function (xhr) { showExperimentError(campaignError(xhr)); }); });
+    $doc.on("click.c360campaignworkspace", ".campaign-experiment-winner", function () { var $button = $(this); api("/campaign-experiments/" + encodeURIComponent($button.data("experiment-id")), { winning_variant_id: $button.data("variant-id"), status: "Completed" }, "PATCH").done(function () { var campaignId = $("#campaign-experiment-form").data("campaign-id"); loadCampaignExperiments(campaignId); }).fail(function (xhr) { showExperimentError(campaignError(xhr)); }); });
+    $doc.on("click.c360campaignworkspace", "#btn-campaign-copy-segment-id", function () {
+      var segmentId = $(this).data("segment-id");
+      if (!segmentId || !navigator.clipboard) return;
+      var $label = $("#campaign-copy-segment-label");
+      navigator.clipboard.writeText(String(segmentId)).then(function () {
+        $label.text("Copied");
+        setTimeout(function () { $label.text("Copy ID"); }, 1400);
+      });
+    });
     $doc.on("click.c360campaignworkspace", "#btn-campaign-select-segment, #btn-campaign-change-segment", openSegmentPicker);
     $doc.on("click.c360campaignworkspace", "#btn-campaign-segment-modal-close, #btn-campaign-segment-modal-cancel", closeSegmentPicker);
     $doc.on("click.c360campaignworkspace", "#campaign-segment-modal", function (event) { if (event.target === this) closeSegmentPicker(); });

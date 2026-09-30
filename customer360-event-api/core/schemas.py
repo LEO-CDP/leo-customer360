@@ -14,6 +14,7 @@ IDENTIFIER_FIELDS = (
     "device_fingerprint",
     "user_id",
 )
+EVENT_UUID_FIELDS = ("campaign_id", "experiment_variant_id")
 MAX_IDENTIFIER_LENGTH = 256
 
 
@@ -34,6 +35,16 @@ def normalize_identifier(value: Any, field_name: str) -> str | None:
     if any(ord(character) < 32 or ord(character) == 127 for character in normalized):
         raise ValueError(f"{field_name} contains control characters")
     return normalized
+
+
+def normalize_event_uuid(value: Any, field_name: str) -> str | None:
+    """Validate optional campaign attribution IDs before durable storage."""
+    if value is None:
+        return None
+    try:
+        return str(UUID(str(value)))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError(f"{field_name} must be a valid UUID") from exc
 
 
 class TrackingLogRequest(BaseModel):
@@ -60,6 +71,11 @@ class TrackingLogRequest(BaseModel):
             for field_name in IDENTIFIER_FIELDS:
                 if field_name in normalized_event:
                     normalized_event[field_name] = normalize_identifier(
+                        normalized_event[field_name], field_name
+                    )
+            for field_name in EVENT_UUID_FIELDS:
+                if field_name in normalized_event:
+                    normalized_events[field_name] = normalize_event_uuid(
                         normalized_event[field_name], field_name
                     )
             normalized_events.append(normalized_event)

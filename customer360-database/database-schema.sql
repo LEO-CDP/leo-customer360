@@ -431,6 +431,7 @@ CREATE TABLE IF NOT EXISTS customer360.crm_campaign_performance_daily (
     performance_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
     campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    experiment_variant_id UUID,
     
     -- Time dimension for daily trend aggregation
     report_date DATE NOT NULL,
@@ -444,11 +445,15 @@ CREATE TABLE IF NOT EXISTS customer360.crm_campaign_performance_daily (
     
     -- System audit fields
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    
-    -- Constraint: Only one performance record per campaign per day per tenant
-    CONSTRAINT uq_campaign_daily_performance UNIQUE (tenant_id, campaign_id, report_date)
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_base
+    ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date)
+    WHERE experiment_variant_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_variant
+    ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date, experiment_variant_id)
+    WHERE experiment_variant_id IS NOT NULL;
 
 COMMENT ON TABLE customer360.crm_campaign_performance_daily IS 'Daily aggregated performance metrics for omnichannel campaigns. Tracks spend, impressions, clicks, conversions, and estimated revenue over time.';
 
@@ -2275,46 +2280,6 @@ ALTER TABLE customer360.cdp_profile_attributes
 
 DO $$
 BEGIN
-    IF to_regclass('customer360.cdp_scoring_models') IS NOT NULL THEN
-        INSERT INTO customer360.cdp_ai_agents (
-            agent_code, display_name, description, model_type, status,
-            schedule_definition, input_features, hyperparameters
-        )
-        SELECT
-            CASE s.scoring_model_name
-                WHEN 'lead_scoring_model' THEN 'lead_scoring'
-                WHEN 'churn_scoring_model' THEN 'churn_scoring'
-                WHEN 'clv_scoring_model' THEN 'clv_scoring'
-                WHEN 'cx_scoring_model' THEN 'cx_scoring'
-                WHEN 'data_quality_model' THEN 'data_quality'
-                WHEN 'identity_resolution_scoring_model' THEN 'identity_resolution_scoring'
-                WHEN 'lifecycle_stage_model' THEN 'lifecycle_stage'
-                ELSE s.scoring_model_name
-            END,
-            s.display_name, s.description, s.model_type, s.status,
-            s.schedule_definition, s.input_features, s.hyperparameters
-        FROM customer360.cdp_scoring_models s
-        ON CONFLICT (agent_code) DO NOTHING;
-
-        UPDATE customer360.cdp_profile_attributes
-        SET agent_code = CASE agent_code
-            WHEN 'lead_scoring_model' THEN 'lead_scoring'
-            WHEN 'churn_scoring_model' THEN 'churn_scoring'
-            WHEN 'clv_scoring_model' THEN 'clv_scoring'
-            WHEN 'cx_scoring_model' THEN 'cx_scoring'
-            WHEN 'data_quality_model' THEN 'data_quality'
-            WHEN 'identity_resolution_scoring_model' THEN 'identity_resolution_scoring'
-            WHEN 'lifecycle_stage_model' THEN 'lifecycle_stage'
-            ELSE agent_code
-        END
-        WHERE agent_code IS NOT NULL;
-    END IF;
-END $$;
-
-DROP TABLE IF EXISTS customer360.cdp_scoring_models;
-
-DO $$
-BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM pg_constraint
@@ -3084,6 +3049,82 @@ CREATE INDEX IF NOT EXISTS idx_crm_message_templates_tenant_type ON customer360.
 CREATE INDEX IF NOT EXISTS idx_crm_message_templates_persona ON customer360.crm_message_templates (persona_id)
     WHERE persona_id IS NOT NULL;
 
+-- Campaign A/B experiments. This block intentionally follows both
+-- cdp_segments and crm_message_templates so fresh schema initialization can
+-- resolve the foreign keys in one pass.
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_experiments (
+    experiment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'Draft',
+    primary_metric VARCHAR(50) NOT NULL DEFAULT 'conversions',
+    start_date DATE,
+    end_date DATE,
+    winning_variant_id UUID,
+    metadata JSONB,
+    created_by UUID REFERENCES customer360.sys_user(user_id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    CONSTRAINT chk_campaign_experiment_status CHECK (status IN ('Draft', 'Running', 'Paused', 'Completed', 'Cancelled')),
+    CONSTRAINT chk_campaign_experiment_metric CHECK (primary_metric IN ('conversions', 'revenue', 'roas', 'cvr')),
+    CONSTRAINT chk_campaign_experiment_dates CHECK (end_date IS NULL OR start_date IS NULL OR end_date >= start_date)
+);
+
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_experiment_variants (
+    variant_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    experiment_id UUID NOT NULL REFERENCES customer360.crm_campaign_experiments(experiment_id) ON DELETE CASCADE,
+    variant_key VARCHAR(50) NOT NULL,
+    name TEXT NOT NULL,
+    segment_id UUID NOT NULL REFERENCES customer360.cdp_segments(segment_id),
+    template_id UUID REFERENCES customer360.crm_message_templates(template_id) ON DELETE SET NULL,
+    allocation_percentage NUMERIC(5, 2) NOT NULL CHECK (allocation_percentage >= 0 AND allocation_percentage <= 100),
+    is_control BOOLEAN NOT NULL DEFAULT FALSE,
+    status VARCHAR(20) NOT NULL DEFAULT 'Draft',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    CONSTRAINT uq_campaign_experiment_variant_key UNIQUE (experiment_id, variant_key),
+    CONSTRAINT chk_campaign_experiment_variant_status CHECK (status IN ('Draft', 'Running', 'Paused', 'Completed', 'Cancelled'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_experiment_tenant_id
+    ON customer360.crm_campaign_experiments (tenant_id, experiment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_experiment_variant_tenant_id
+    ON customer360.crm_campaign_experiment_variants (tenant_id, experiment_id, variant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_experiment_variant_tenant_variant
+    ON customer360.crm_campaign_experiment_variants (tenant_id, variant_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_experiments_tenant_campaign
+    ON customer360.crm_campaign_experiments (tenant_id, campaign_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_experiment_variants_experiment
+    ON customer360.crm_campaign_experiment_variants (tenant_id, experiment_id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_campaign_experiment_winner'
+          AND conrelid = 'customer360.crm_campaign_experiments'::regclass
+    ) THEN
+        ALTER TABLE customer360.crm_campaign_experiments
+            ADD CONSTRAINT fk_campaign_experiment_winner
+            FOREIGN KEY (tenant_id, experiment_id, winning_variant_id)
+            REFERENCES customer360.crm_campaign_experiment_variants(tenant_id, experiment_id, variant_id)
+            DEFERRABLE INITIALLY DEFERRED;
+    END IF;
+END $$;
+ALTER TABLE customer360.crm_campaign_performance_daily
+    ADD COLUMN IF NOT EXISTS experiment_variant_id UUID;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_base
+    ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date)
+    WHERE experiment_variant_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_variant
+    ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date, experiment_variant_id)
+    WHERE experiment_variant_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_campaign_performance_variant
+    ON customer360.crm_campaign_performance_daily (tenant_id, experiment_variant_id, report_date DESC);
+
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_segment' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
@@ -3474,6 +3515,12 @@ BEGIN
             {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_template","child_columns":"tenant_id, template_id","parent_table":"crm_message_templates","parent_columns":"tenant_id, template_id","on_delete":"SET NULL (template_id)"},
             {"child_table":"crm_campaign_reviews","constraint_name":"fk_crm_campaign_reviews_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
             {"child_table":"crm_campaign_reviews","constraint_name":"fk_crm_campaign_reviews_tenant_user","child_columns":"tenant_id, reviewer_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"RESTRICT"},
+            {"child_table":"crm_campaign_experiments","constraint_name":"fk_crm_campaign_experiments_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_experiments","constraint_name":"fk_crm_campaign_experiments_tenant_user","child_columns":"tenant_id, created_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (created_by)"},
+            {"child_table":"crm_campaign_experiment_variants","constraint_name":"fk_crm_campaign_experiment_variants_tenant_experiment","child_columns":"tenant_id, experiment_id","parent_table":"crm_campaign_experiments","parent_columns":"tenant_id, experiment_id","on_delete":"CASCADE"},
+            {"child_table":"crm_campaign_experiment_variants","constraint_name":"fk_crm_campaign_experiment_variants_tenant_segment","child_columns":"tenant_id, segment_id","parent_table":"cdp_segments","parent_columns":"tenant_id, segment_id","on_delete":"RESTRICT"},
+            {"child_table":"crm_campaign_experiment_variants","constraint_name":"fk_crm_campaign_experiment_variants_tenant_template","child_columns":"tenant_id, template_id","parent_table":"crm_message_templates","parent_columns":"tenant_id, template_id","on_delete":"SET NULL (template_id)"},
+            {"child_table":"crm_campaign_performance_daily","constraint_name":"fk_crm_campaign_performance_daily_tenant_variant","child_columns":"tenant_id, experiment_variant_id","parent_table":"crm_campaign_experiment_variants","parent_columns":"tenant_id, variant_id","on_delete":"SET NULL (experiment_variant_id)"},
             {"child_table":"crm_campaign_content_items","constraint_name":"fk_crm_campaign_content_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
             {"child_table":"crm_campaign_content_items","constraint_name":"fk_crm_campaign_content_tenant_item","child_columns":"tenant_id, content_item_id","parent_table":"cdp_content_items","parent_columns":"tenant_id, content_item_id","on_delete":"CASCADE"},
             {"child_table":"crm_segment_sync_runs","constraint_name":"fk_crm_segment_sync_tenant_segment","child_columns":"tenant_id, segment_id","parent_table":"cdp_segments","parent_columns":"tenant_id, segment_id","on_delete":"CASCADE"},
@@ -3590,6 +3637,8 @@ DECLARE
         'sys_audit_log',
         'crm_campaign',
         'crm_campaign_performance_daily',
+        'crm_campaign_experiments',
+        'crm_campaign_experiment_variants',
         'crm_campaign_member',
         'crm_lead',
         'crm_lead_source',

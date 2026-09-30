@@ -18,9 +18,11 @@ from core.cache import invalidate_prefix
 from core.database import get_db
 from core.repositories.campaign_draft_repository import (
     CampaignDraftApprovalBlockedError,
+    CampaignDraftActorNotFoundError,
     CampaignDraftConflictError,
     CampaignDraftNotFoundError,
     CampaignDraftRepository,
+    SEGMENT_UNSET,
     CampaignDraftValidationError,
     CampaignSegmentNotFoundError,
     CampaignTemplateNotFoundError,
@@ -162,6 +164,7 @@ def edit_campaign_draft(
             tenant_id,
             campaign_id,
             editor_id,
+            segment_id=payload.segment_id if "segment_id" in payload.model_fields_set else SEGMENT_UNSET,
             objective=payload.objective,
             strategy_summary=payload.strategy_summary,
             start_date=payload.start_date,
@@ -170,6 +173,8 @@ def edit_campaign_draft(
         )
     except CampaignDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CampaignDraftActorNotFoundError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     except CampaignDraftValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CampaignDraftConflictError as exc:

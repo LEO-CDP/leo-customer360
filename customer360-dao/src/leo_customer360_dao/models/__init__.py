@@ -6,6 +6,8 @@ from leo_customer360_dao.models.content import CdpContentItem
 from leo_customer360_dao.models.crm import (
     Account,
     Campaign,
+    CampaignExperiment,
+    CampaignExperimentVariant,
     CampaignContentItem,
     CampaignDispatchLog,
     CampaignMember,
@@ -54,6 +56,8 @@ __all__ = [
     "Base",
     "Account",
     "Campaign",
+    "CampaignExperiment",
+    "CampaignExperimentVariant",
     "CampaignContentItem",
     "CampaignDispatchLog",
     "CampaignMember",

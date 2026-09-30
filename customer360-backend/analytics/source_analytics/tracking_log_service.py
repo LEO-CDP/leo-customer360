@@ -298,6 +298,8 @@ class TrackingLogAggregationService:
         except Exception as exc:
             if dao_session is not None:
                 dao_session.rollback()
+            if source_connection is not None:
+                source_connection.rollback()
             self.state.set_state(
                 data_source_id,
                 status="failed",
@@ -349,6 +351,11 @@ class TrackingLogAggregationService:
                     )
                 }
                 raw_profile_repository.upsert_raw_profile(raw_profile)
+                self.database.upsert_campaign_performance_event(
+                    source_connection,
+                    tenant_id,
+                    normalized_event,
+                )
         finally:
             close = getattr(body, "close", None)
             if close:

@@ -128,6 +128,29 @@ def test_event_service_extracts_nested_profile_and_event_data_from_tracking_enve
     assert raw_profile["device_fingerprint"] == "fingerprint-1"
 
 
+def test_event_service_normalizes_campaign_experiment_attribution():
+    service = EventRecordService("customer360")
+    event = service.normalize_event_record(
+        {
+            "event_id": "11111111-1111-1111-1111-111111111111",
+            "event_time": "2026-09-30T12:00:00Z",
+            "payload": {
+                "event_name": "purchase",
+                "campaign_id": "22222222-2222-2222-2222-222222222222",
+                "experiment_variant_id": "33333333-3333-3333-3333-333333333333",
+                "event_value": 125.5,
+                "user_id": "user-1",
+            },
+        },
+        "source-1",
+        "tenant-1",
+    )
+
+    assert event["campaign_id"] == "22222222-2222-2222-2222-222222222222"
+    assert event["experiment_variant_id"] == "33333333-3333-3333-3333-333333333333"
+    assert service.extract_raw_profile(event)["event_payload"]["experiment_variant_id"] == event["experiment_variant_id"]
+
+
 def test_validated_event_name_uses_catalog_names():
     catalog = frozenset({"page-view", "purchase"})
     expected = {

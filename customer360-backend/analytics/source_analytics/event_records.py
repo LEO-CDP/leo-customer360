@@ -203,6 +203,13 @@ class EventRecordService:
         ).upper()
         if event_category not in EVENT_CATEGORIES:
             event_category = "GENERAL"
+        campaign_id = self._optional_uuid(
+            record.get("campaign_id") or payload.get("campaign_id"), "campaign_id"
+        )
+        experiment_variant_id = self._optional_uuid(
+            record.get("experiment_variant_id") or payload.get("experiment_variant_id"),
+            "experiment_variant_id",
+        )
         identity = record.get("identity")
         if not isinstance(identity, dict):
             identity = {}
@@ -276,6 +283,8 @@ class EventRecordService:
             "utm_campaign": self.text_value(payload.get("utm_campaign")),
             "channel": self.text_value(payload.get("channel")),
             "event_category": event_category,
+            "campaign_id": campaign_id,
+            "experiment_variant_id": experiment_variant_id,
             "event_name": event_name,
             "event_dedup_key": self.text_value(
                 record.get("event_dedup_key") or payload.get("event_dedup_key")
@@ -292,6 +301,15 @@ class EventRecordService:
             "received_at": record.get("received_at") or event_time.isoformat(),
             "payload": payload,
         }
+
+    @staticmethod
+    def _optional_uuid(value: Any, field_name: str) -> Optional[str]:
+        if value is None or value == "":
+            return None
+        try:
+            return str(UUID(str(value)))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise EventEnvelopeError(f"{field_name} must be a valid UUID") from exc
 
     def iter_normalized_event_records(
         self,

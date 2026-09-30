@@ -27,13 +27,14 @@ from leo_customer360_agent.client import (
 )
 from leo_customer360_dao.models.content import CdpContentItem
 from leo_customer360_dao.models.crm import Campaign, CampaignContentItem, CampaignReview, MessageTemplate
-from leo_customer360_dao.models.system import SysAuditLog
+from leo_customer360_dao.models.system import SysAuditLog, SysUser
 from leo_customer360_dao.repositories.segment_respository import SegmentRepository
 
 APPROVAL_STATUS_DRAFT = "Draft"
 APPROVAL_STATUS_IN_REVIEW = "InReview"
 APPROVAL_STATUS_APPROVED = "Approved"
 APPROVAL_STATUS_REJECTED = "Rejected"
+SEGMENT_UNSET = object()
 
 
 def _utc_now_naive() -> datetime:
@@ -76,6 +77,10 @@ class CampaignDraftApprovalBlockedError(RuntimeError):
 class CampaignDraftConflictError(RuntimeError):
     """Raised when a concurrent edit/approve/reject conflicts with the
     campaign's current state (optimistic-concurrency guard)."""
+
+
+class CampaignDraftActorNotFoundError(LookupError):
+    """Raised when the authenticated actor is not a user in the active tenant."""
 
 
 class CampaignDraftRepository:
@@ -189,7 +194,7 @@ class CampaignDraftRepository:
             )
 
         candidate_items = self.get_candidate_content_items(
-            tenant_id, segment_id, segment_tag=getattr(segment, "segment_tag", None), objective=objective
+            tenant_id, segment_id, segment_tag=segment.segment_tag, objective=objective
         )
         candidate_payload = [
             {"content_item_id": str(item.content_item_id), "title": item.title, "item_type": item.item_type}
@@ -455,6 +460,7 @@ class CampaignDraftRepository:
         tenant_id: uuid.UUID,
         campaign_id: uuid.UUID,
         editor_id: Optional[uuid.UUID],
+        segment_id: object = SEGMENT_UNSET,
         objective: Optional[str] = None,
         strategy_summary: Optional[str] = None,
         start_date: Optional[date] = None,
@@ -467,8 +473,34 @@ class CampaignDraftRepository:
         snapshot, and returns the campaign to InReview whenever it was
         Approved (fresh approval required) or Rejected (resubmission,
         non-terminal per data-model.md)."""
+        if editor_id is not None:
+            editor_exists = self.session.execute(
+                select(SysUser.user_id).where(
+                    SysUser.tenant_id == tenant_id,
+                    SysUser.user_id == editor_id,
+                )
+            ).scalar_one_or_none()
+            if editor_exists is None:
+                raise CampaignDraftActorNotFoundError(
+                    "Authenticated user is not a member of the active tenant; sign in again"
+                )
+
         campaign = self.get_campaign(tenant_id, campaign_id)
         expected_updated_at = campaign.updated_at
+        current_segment_id = campaign.segment_id
+
+        segment_changed = segment_id is not SEGMENT_UNSET and segment_id != current_segment_id
+        selected_segment = None
+        if segment_changed:
+            if not isinstance(segment_id, uuid.UUID):
+                raise CampaignDraftValidationError("A campaign must keep a target segment")
+            selected_segment = SegmentRepository(self.session).get_segment(segment_id)
+            if selected_segment is None:
+                raise CampaignDraftValidationError("The selected segment does not belong to the active tenant")
+            if selected_segment.tenant_id != tenant_id:
+                raise CampaignDraftValidationError("The selected segment does not belong to the active tenant")
+            if not selected_segment.is_active or selected_segment.status_code != 1:
+                raise CampaignDraftValidationError("The selected segment is inactive or has no computed membership snapshot")
 
         effective_start = start_date if start_date is not None else campaign.start_date
         effective_end = end_date if end_date is not None else campaign.end_date
@@ -477,12 +509,22 @@ class CampaignDraftRepository:
 
         existing_links = self._get_content_item_links(tenant_id, campaign_id)
         before_data = {
+            "segment": self._segment_audit_snapshot(tenant_id, current_segment_id),
             "objective": campaign.objective,
             "strategy_summary": campaign.strategy_summary,
             "start_date": campaign.start_date.isoformat() if campaign.start_date else None,
             "end_date": campaign.end_date.isoformat() if campaign.end_date else None,
             "content_item_ids": [str(link.content_item_id) for link in existing_links],
         }
+
+        if segment_changed:
+            if selected_segment is None:
+                raise CampaignDraftValidationError("The selected segment could not be loaded")
+            campaign.segment_id = selected_segment.segment_id
+            # A strategy generated for the old audience must not be presented
+            # as valid for the newly selected audience.
+            campaign.strategy_summary = None
+            campaign.ai_plan = None
 
         if objective is not None:
             campaign.objective = objective
@@ -513,6 +555,7 @@ class CampaignDraftRepository:
                 after_content_item_ids.append(str(content_item_id))
 
         after_data = {
+            "segment": self._segment_audit_snapshot(tenant_id, campaign.segment_id),
             "objective": campaign.objective,
             "strategy_summary": campaign.strategy_summary,
             "start_date": campaign.start_date.isoformat() if campaign.start_date else None,
@@ -546,6 +589,20 @@ class CampaignDraftRepository:
         self.session.commit()
         self.session.refresh(campaign)
         return campaign
+
+    def _segment_audit_snapshot(self, tenant_id: uuid.UUID, segment_id: Optional[uuid.UUID]) -> Optional[dict[str, Any]]:
+        """Return safe segment identity details for campaign audit history."""
+        if segment_id is None:
+            return None
+        segment = SegmentRepository(self.session).get_segment(segment_id)
+        if segment is None or segment.tenant_id != tenant_id:
+            return {"segment_id": str(segment_id), "segment_name": None}
+        return {
+            "segment_id": str(segment.segment_id),
+            "segment_name": segment.segment_name,
+            "segment_tag": segment.segment_tag,
+            "member_count": segment.member_count,
+        }
 
     def approve(self, tenant_id: uuid.UUID, campaign_id: uuid.UUID, reviewer_id: uuid.UUID) -> Campaign:
         """FR-009, FR-010, FR-013, FR-016: re-validates the linked template is
