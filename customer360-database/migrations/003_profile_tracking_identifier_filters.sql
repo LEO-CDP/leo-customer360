@@ -1,7 +1,3 @@
-ALTER TABLE customer360.cdp_raw_profiles_stage
-    ADD COLUMN IF NOT EXISTS anonymous_id TEXT,
-    ADD COLUMN IF NOT EXISTS device_fingerprint TEXT;
-
 UPDATE customer360.cdp_raw_profiles_stage
 SET
     anonymous_id = COALESCE(

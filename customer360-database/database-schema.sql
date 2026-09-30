@@ -2903,6 +2903,11 @@ CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_cookie_id ON customer360.cdp_r
 WHERE
     cookie_id IS NOT NULL;
 
+-- 
+ALTER TABLE customer360.cdp_raw_profiles_stage
+    ADD COLUMN IF NOT EXISTS anonymous_id TEXT,
+    ADD COLUMN IF NOT EXISTS device_fingerprint TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_anonymous_id ON customer360.cdp_raw_profiles_stage (
     tenant_id,
     anonymous_id
