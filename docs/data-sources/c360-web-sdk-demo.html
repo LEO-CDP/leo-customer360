@@ -613,11 +613,44 @@
                 return Boolean(window.LeoObserver && typeof window.LeoObserver[methodName] === 'function');
             }
 
+            function readUrlAttribution() {
+                const params = new URLSearchParams(window.location.search);
+                const attribution = {};
+                const utmFields = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+                const uuidFields = [
+                    { paramName: 'leocpid', fieldName: 'campaign_id' },
+                    { paramName: 'leoexvrid', fieldName: 'experiment_variant_id' }
+                ];
+                const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+                utmFields.forEach(function (fieldName) {
+                    const value = params.get(fieldName);
+                    if (value && value.trim()) attribution[fieldName] = value.trim();
+                });
+                uuidFields.forEach(function (field) {
+                    const value = params.get(field.paramName);
+                    if (!value) return;
+                    if (uuidPattern.test(value.trim())) {
+                        attribution[field.fieldName] = value.trim();
+                    } else {
+                        console.warn('[C360 SDK] Ignoring invalid attribution UUID', field.paramName, value);
+                    }
+                });
+
+                return attribution;
+            }
+
+            const URL_ATTRIBUTION = readUrlAttribution();
+
             function createTrackingPayload(eventData) {
-                const payload = Object.assign({
-                    page_url: window.location.href,
-                    occurred_at: new Date().toISOString()
-                }, eventData || {});
+                const payload = Object.assign(
+                    {
+                        page_url: window.location.href,
+                        occurred_at: new Date().toISOString()
+                    },
+                    URL_ATTRIBUTION,
+                    eventData || {}
+                );
 
                 delete payload.event;
                 return payload;
@@ -640,6 +673,7 @@
              */
             const C360DemoSDK = window.C360DemoSDK = {
                 pendingPageViews: [],
+                attribution: Object.assign({}, URL_ATTRIBUTION),
 
                 send: function (eventName, eventData) {
                     const payload = createTrackingPayload(eventData);
@@ -945,7 +979,7 @@
             function trackAdEvent(eventType, extraData) {
                 const eventData = Object.assign({
                     ad_id: adData.adId,
-                    campaign_id: adData.campaign.id,
+                    campaign: adData.campaign.name,
                     creative_id: adData.creative.id,
                     placement_id: adData.placement.id,
                     destination_url: adData.destination.url,

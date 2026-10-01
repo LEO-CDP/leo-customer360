@@ -105,11 +105,15 @@ class FakeRedis:
         self.results = iter(results)
         self.eval_calls = []
         self.states = {}
+        self.values = {}
         self.hll = {}
         self.locked = False
         self.locked_keys = set()
 
-    def set(self, key, _value, nx=False, ex=None):
+    def set(self, key, value, nx=False, ex=None):
+        if not nx:
+            self.values[key] = value
+            return True
         assert nx is True
         assert ex in {
             aggregation.LOCK_TTL_SECONDS,
@@ -119,6 +123,9 @@ class FakeRedis:
             return False
         self.locked_keys.add(key)
         return True
+
+    def get(self, key):
+        return self.values.get(key)
 
     def hset(self, key, mapping):
         self.states.setdefault(key, {}).update(mapping)
@@ -387,6 +394,12 @@ def test_process_tracking_logs_counts_new_objects_and_skips_checkpointed_objects
         "fetch_data_sources",
         MagicMock(return_value=[("source-1", "tenant-1")]),
     )
+    campaign_writer = MagicMock(return_value=False)
+    monkeypatch.setattr(
+        aggregation.AnalyticsRepository,
+        "upsert_campaign_performance_event",
+        campaign_writer,
+    )
     monkeypatch.setattr(aggregation, "current_system_gmt_hour", lambda: "2026-08-25-08")
 
     summary = aggregation.process_tracking_logs(
@@ -403,6 +416,10 @@ def test_process_tracking_logs_counts_new_objects_and_skips_checkpointed_objects
         "events_added": 2,
         "sources_total": 1,
     }
+    assert campaign_writer.call_count == 3
+    assert all(
+        call.args[0] is connection for call in campaign_writer.call_args_list
+    )
     assert len(s3.get_calls) == 2
     increment_call = next(call for call in redis_client.eval_calls if "HINCRBY" in call[0])
     assert increment_call[3] == "s3://data-tracking-source-1/events/2026-08-25-08/first.jsonl.gz"

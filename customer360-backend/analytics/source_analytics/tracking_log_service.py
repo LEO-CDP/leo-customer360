@@ -216,6 +216,7 @@ class TrackingLogAggregationService:
                 self.state.refresh_source_lock(data_source_id, lock_token)
                 event_count, signatures = self._process_object(
                     raw_profile_repository,
+                    source_connection,
                     bucket,
                     object_key,
                     data_source_id,
@@ -317,6 +318,7 @@ class TrackingLogAggregationService:
     def _process_object(
         self,
         raw_profile_repository: Any,
+        source_connection: Any,
         bucket: str,
         object_key: str,
         data_source_id: str,

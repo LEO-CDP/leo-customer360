@@ -253,6 +253,8 @@
 
                 // Elevate UTM parameters to top-level event for fast querying
                 if (evtData && typeof evtData === 'object') {
+                    if (evtData.campaign_id || evtData.leocpid) singleEvent.campaign_id = evtData.campaign_id || evtData.leocpid;
+                    if (evtData.experiment_variant_id || evtData.leoexvrid) singleEvent.experiment_variant_id = evtData.experiment_variant_id || evtData.leoexvrid;
                     if (evtData.utm_source) singleEvent.utm_source = evtData.utm_source;
                     if (evtData.utm_medium) singleEvent.utm_medium = evtData.utm_medium;
                     if (evtData.utm_campaign) singleEvent.utm_campaign = evtData.utm_campaign;

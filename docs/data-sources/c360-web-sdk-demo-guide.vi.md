@@ -1,6 +1,6 @@
-# Hướng dẫn tích hợp Leo C360 Web SDK
+# Hướng dẫn kiểm thử Leo C360 Web SDK
 
-Tài liệu này giải thích luồng hoạt động của [c360-web-sdk-demo.html](c360-web-sdk-demo.html) và hướng dẫn lập trình viên web tích hợp Leo C360 Web SDK vào website thực tế.
+Tài liệu này hướng dẫn QA và lập trình viên kiểm thử luồng tracking từ [c360-web-sdk-demo.html](c360-web-sdk-demo.html) qua Leo Observer đến Tracking Log API. Các ví dụ cũng là mẫu tham khảo khi tích hợp SDK vào website thực tế.
 
 Demo sử dụng website kết quả xổ số để minh họa các tình huống phổ biến:
 
@@ -14,13 +14,42 @@ Demo sử dụng website kết quả xổ số để minh họa các tình huố
 
 > Demo sử dụng dữ liệu xổ số ngẫu nhiên và quảng cáo minh họa. Khi tích hợp thực tế, hãy thay các dữ liệu này bằng dữ liệu nghiệp vụ của website.
 
+## Mục tiêu và tiêu chí đạt
+
+Một lượt kiểm thử đạt khi proxy khởi tạo thành công, thao tác tạo đúng event dự kiến, Tracking Log API chấp nhận batch và payload lưu giữ đúng định danh cùng attribution. Log trong Console chỉ xác nhận SDK đã tạo event; cần kiểm tra thêm request và response trong Network để xác nhận API đã nhận dữ liệu.
+
+### Mô phỏng UTM, campaign và A/B experiment
+
+Demo đọc các tham số UTM `utm_source`, `utm_medium`, `utm_campaign`, `utm_term` và `utm_content` từ URL, sau đó tự thêm chúng vào mỗi event được gửi qua `C360DemoSDK`.
+
+Để gắn campaign và biến thể thử nghiệm, dùng hai tham số UUID rút gọn:
+
+| Tham số URL | Trường event API |
+| --- | --- |
+| `leocpid` | `campaign_id` |
+| `leoexvrid` | `experiment_variant_id` |
+
+Ví dụ:
+
+```text
+c360-web-sdk-demo.html?utm_source=newsletter&utm_medium=email&utm_campaign=spring-launch&utm_term=family-plan&utm_content=hero&leocpid=<CAMPAIGN_UUID>&leoexvrid=<VARIANT_UUID>
+```
+
+Thay các giá trị UUID bằng campaign và variant có thật trong môi trường cần kiểm tra. Tải lại trang với UUID của từng variant để mô phỏng các nhánh A/B khác nhau. SDK bỏ qua UUID sai định dạng; event API chuẩn hóa các alias về tên trường canonical trong payload.
+
 ### Demo trực tiếp
 
-Mở bản demo tương tác trong trình duyệt để quan sát luồng navigation, tracking event, cấu hình SDK và log debug trong DevTools:
+Mở bản demo tương tác để quan sát luồng navigation, tracking event, cấu hình SDK và log debug trong DevTools:
 
 [Mở demo Leo C360 Web SDK](https://raw.githack.com/LEO-CDP/leo-customer360/main/docs/data-sources/c360-web-sdk-demo.html)
 
-> Liên kết sử dụng `raw.githack.com` để chạy trực tiếp file HTML từ nhánh `main`. Nếu cần kiểm tra phiên bản code trong workspace hiện tại, hãy mở [file demo local](c360-web-sdk-demo.html) thay vì link trực tiếp.
+Liên kết trên chạy phiên bản từ nhánh `main`. Để kiểm tra code trong workspace hiện tại, chạy static server từ thư mục repository:
+
+```bash
+python3 -m http.server 8000 --directory docs/data-sources
+```
+
+Sau đó mở `http://localhost:8000/c360-web-sdk-demo.html`. Không nên mở bằng `file://`: trình duyệt có thể chặn các request cross-origin. Nếu tracking domain không cho phép origin `http://localhost:8000`, cần cấu hình CORS cho môi trường kiểm thử.
 
 ## 1. Kiến trúc tổng quan
 
@@ -333,7 +362,7 @@ Demo render ad bằng JSON + Handlebars. Payload ad có các nhóm chính:
 ```javascript
 const adData = {
     adId: "campaign-creative-01",
-    campaign: { id: "campaign-2026" },
+    campaign: { name: "Campaign 2026" },
     placement: { id: "sidebar-300x250", width: 300, height: 250 },
     creative: { id: "creative-01", cta: "Xem ưu đãi" },
     destination: { url: "https://example.com" }
@@ -351,13 +380,14 @@ Click được bắt bằng delegated listener trên ad container. Hai event dem
 ```javascript
 C360DemoSDK.send("ad_impression", {
     ad_id: adData.adId,
-    campaign_id: adData.campaign.id,
+    campaign: adData.campaign.name,
     creative_id: adData.creative.id,
     placement_id: adData.placement.id
 });
 
 C360DemoSDK.send("ad_clicked", {
     ad_id: adData.adId,
+    campaign: adData.campaign.name,
     destination_url: adData.destination.url,
     link_text: adData.creative.cta
 });
@@ -426,15 +456,31 @@ Nếu thấy:
 [C360 SDK] Queued page_view until Leo Observer is ready
 ```
 
-thì event chưa bị mất; nó đang chờ callback `leoObserverProxyReady`.
+thì page view đang chờ callback `leoObserverProxyReady`; sau callback, kiểm tra Console và Network để xác nhận queue đã được flush.
 
 Nếu thấy:
 
 ```text
-[C360 SDK] Proxy is ready but LeoObserver.recordEventPageView is unavailable
+[C360 SDK] Cannot flush page_views; Leo Observer is unavailable
 ```
 
-hãy kiểm tra version của `leo.proxy.js` hoặc thứ tự tải script.
+hãy kiểm tra proxy có tải thành công không, callback `leoObserverProxyReady` có được gọi không và method tương ứng có sẵn trên `window.LeoObserver` không.
+
+`sentToLeoObserver: true` chỉ có nghĩa method Observer đã được gọi ở phía browser; đây không phải xác nhận server đã nhận event. Cũng vậy, event `c360:sdk-event` được phát cục bộ trước khi có kết quả từ API.
+
+Ví dụ log SDK:
+
+```javascript
+{
+    sentToLeoObserver: true,
+    payload: {
+        page_url: "https://example.test/",
+        occurred_at: "2026-10-01T10:00:00.000Z"
+    }
+}
+```
+
+Event name xuất hiện riêng trong log `[C360 SDK] Event <event_name>`. Với listener `c360:sdk-event`, `event.detail.event` là event name; payload không có trường `event` vì facade xóa trường này trước khi gọi Observer.
 
 Có thể nghe event debug cục bộ:
 
@@ -448,7 +494,80 @@ window.addEventListener("c360:ad-event", function (event) {
 });
 ```
 
-## 10. Checklist trước khi production
+## 10. Quy trình kiểm thử chấp nhận
+
+### 10.1 Chuẩn bị
+
+1. Dùng một `data source ID` đang hoạt động và một tracking domain có thể truy cập từ trình duyệt.
+2. Mở **SDK settings**, nhập data source ID và hostname của tracking domain. Chỉ nhập hostname, không thêm `https://` hoặc dấu `/` cuối; lưu cấu hình để trang reload.
+3. Mở DevTools trước khi thao tác. Bật **Preserve log** trong Console và Network để không mất log khi trang reload.
+4. Dùng dữ liệu định danh tổng hợp. Không nhập thông tin cá nhân thật hoặc token production vào form demo.
+5. Nếu kiểm thử campaign reporting, dùng campaign UUID và experiment variant UUID thực trong cùng tenant; variant phải thuộc campaign đó. UUID đúng định dạng nhưng không tồn tại vẫn có thể được ghi nhận ở tầng ingestion, song không đủ để tạo số liệu campaign theo variant.
+
+Để kiểm tra URL attribution, thêm các tham số sau vào URL trước khi tải trang:
+
+```text
+?utm_source=qa&utm_medium=manual&utm_campaign=sdk-smoke&utm_term=lottery&utm_content=hero&leocpid=<CAMPAIGN_UUID>&leoexvrid=<VARIANT_UUID>
+```
+
+SDK đọc UTM và hai alias UUID khi khởi tạo trang, rồi thêm chúng vào từng event. API chuẩn hóa `leocpid` thành `campaign_id` và `leoexvrid` thành `experiment_variant_id`. Để so sánh hai nhánh A/B, dùng cùng campaign và mỗi variant UUID trong một browser profile riêng; tải lại trang sau khi đổi URL.
+
+### 10.2 Ma trận kiểm thử
+
+| ID | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| WEB-01 | Tải trang lần đầu | `leo.proxy.js` tải được; proxy ready; có một page view. Nếu proxy chưa sẵn sàng, page view được queue và flush sau callback. |
+| WEB-02 | Chọn menu như XSMN | Có một click event với `menu_key: "xsmn"`; hash navigation không tạo thêm page view. |
+| WEB-03 | Chọn Đăng nhập và Đăng ký | Tương ứng có event login và signup; demo dùng profile giả lập, không xác thực tài khoản thật. |
+| WEB-04 | Điền form nhận thông báo bằng dữ liệu tổng hợp rồi submit | Có `form_submit`, signup và conversion demo; trạng thái form báo đăng ký thành công. |
+| WEB-05 | Đưa quảng cáo vào vùng nhìn thấy ít nhất 50% trong 1 giây, sau đó click | Có tối đa một impression cho lifecycle hiện tại và một click; `c360:ad-event` hiển thị loại ad event. |
+| ATTR-01 | Tải trang có đủ UTM, `leocpid` và `leoexvrid` | Event debug và request chứa UTM cùng canonical `campaign_id`/`experiment_variant_id`; alias URL không thay đổi tên trường canonical trong event đã chuẩn hóa. |
+| ATTR-02 | Truyền UUID sai định dạng qua URL alias | SDK ghi warning và bỏ qua UUID sai; event còn lại vẫn có thể được gửi. API từ chối UUID sai nếu client gửi trực tiếp. |
+
+Observer gom event theo batch. Trong cấu hình hiện tại, chờ khoảng 6 giây sau thao tác cuối để batch được flush; request cũng có thể được gửi sớm hơn khi đạt batch size.
+
+### 10.3 Xác nhận tại Network và API
+
+Trong DevTools → **Network**, lọc theo `tracking/logs` và mở request `POST` tới `/data/api/v1/tracking/logs`. Xác nhận:
+
+- Request có `data_source_id` đúng và `events` không rỗng.
+- Event có các trường attribution mong đợi. UTM được giữ nguyên; campaign và variant được gửi dưới tên canonical `campaign_id` và `experiment_variant_id`.
+- Response thành công là `202 Accepted`; `event_count` bằng số event trong batch. Response có thể kèm `bucket`, `object_key` và `queue_message_id`.
+
+`202` xác nhận batch được Tracking API nhận vào storage/queue, không nhất thiết có nghĩa worker đã upload object lên S3 xong. Nếu cần xác nhận durable storage, kiểm tra queue status tại `/data/api/v1/tracking/queue-status` và sau đó kiểm tra object trong bucket `data-tracking-<data_source_id>`. Object là gzip-compressed NDJSON dưới prefix `events/<UTC-hour>/`; mỗi dòng có campaign/variant canonical ở envelope và event gốc trong `payload`.
+
+Các mã phản hồi thường gặp:
+
+| HTTP | Ý nghĩa khi kiểm thử |
+| --- | --- |
+| `202` | Batch được chấp nhận; kiểm tra `accepted`, `event_count` và thông tin queue/storage trong response. |
+| `413` | Batch vượt giới hạn số event hoặc giới hạn kích thước request. |
+| `422` | Request không hợp lệ, thiếu identity cần thiết hoặc UUID attribution sai định dạng. |
+| `429` | Rate limit; kiểm tra `Retry-After` và dùng nguồn kiểm thử được phép. |
+| `503` | Queue hoặc storage tạm thời không khả dụng; kiểm tra trạng thái dịch vụ rồi retry có kiểm soát. |
+
+Tracking API ghi dữ liệu bất đồng bộ vào object storage; không dùng việc một event xuất hiện ngay trong database làm tiêu chí duy nhất cho kiểm thử ingestion.
+
+### 10.4 An toàn dữ liệu kiểm thử
+
+- Chỉ dùng email, user ID, transaction ID và giá trị giao dịch giả lập.
+- Không đưa access token, mật khẩu, dữ liệu thanh toán hoặc thông tin cá nhân production vào query string hay event payload.
+- URL query có thể được lưu trong browser history, proxy log và analytics; chỉ đặt UUID campaign/variant và giá trị UTM không nhạy cảm ở đó.
+- Không dùng UUID campaign/variant thuộc tenant khác. Giữ phạm vi dữ liệu trong đúng data source và tenant kiểm thử.
+
+## 11. Xử lý lỗi thường gặp
+
+| Triệu chứng | Kiểm tra và hướng xử lý |
+| --- | --- |
+| Không có request `tracking/logs` | Kiểm tra Console, `leo.proxy.js`, endpoint trong SDK settings, ad blocker và CORS. Chờ batch flush khoảng 6 giây. |
+| Page view nằm trong queue | Xác nhận callback `leoObserverProxyReady` được gọi; kiểm tra `LeoObserver.recordEventPageView` tồn tại sau khi proxy ready. |
+| `sentToLeoObserver` là `true` nhưng API không nhận | Đây chỉ là xác nhận local. Tìm request trong Network; kiểm tra URL, trạng thái HTTP, response body và CORS. |
+| API trả `422` cho attribution | Dùng UUID hợp lệ. Campaign và variant phải là UUID; khi cần campaign metrics, variant phải liên kết với campaign trong cùng tenant. |
+| API trả `429` | Tuân thủ `Retry-After`; kiểm tra rate limit và whitelist môi trường dev nếu được quản trị cấu hình. |
+| API trả `503` hoặc queue depth tăng | Kiểm tra Redis/S3 worker và queue status. Không gửi vòng lặp retry nhanh từ browser. |
+| Event có trong Console nhưng chưa thấy object S3 | `202` là xác nhận nhận batch; chờ worker flush rồi kiểm tra bucket, object key và queue depth. |
+
+## 12. Checklist trước khi production
 
 - [ ] Dùng đúng `leoC360DataSourceId` do Customer 360 cấp.
 - [ ] Dùng đúng log domain của môi trường hiện tại.
@@ -465,14 +584,14 @@ window.addEventListener("c360:ad-event", function (event) {
 - [ ] Ad impression có visibility threshold và không ghi nhận lặp.
 - [ ] Có debug log ở staging nhưng cân nhắc giảm log ở production.
 
-## 11. Các file tham khảo
+## 13. Các file tham khảo
 
 - Demo đầy đủ: [c360-web-sdk-demo.html](c360-web-sdk-demo.html)
 - Tài liệu Web SDK tổng quát: [1-web-sdk-tracking.md](1-web-sdk-tracking.md)
 - Proxy SDK local: [leo.proxy.js](../../customer360-event-api/static/c360-web-sdk/observer/leo.proxy.js)
 - Tracking API entrypoint: [customer360-event-api/app.py](../../customer360-event-api/app.py)
 
-## 12. Tóm tắt tích hợp tối thiểu
+## 14. Tóm tắt tích hợp tối thiểu
 
 Nếu chỉ cần một luồng cơ bản, thứ tự triển khai nên là:
 

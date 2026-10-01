@@ -15,6 +15,10 @@ IDENTIFIER_FIELDS = (
     "user_id",
 )
 EVENT_UUID_FIELDS = ("campaign_id", "experiment_variant_id")
+EVENT_UUID_ALIASES = {
+    "leocpid": "campaign_id",
+    "leoexvrid": "experiment_variant_id",
+}
 MAX_IDENTIFIER_LENGTH = 256
 
 
@@ -73,9 +77,21 @@ class TrackingLogRequest(BaseModel):
                     normalized_event[field_name] = normalize_identifier(
                         normalized_event[field_name], field_name
                     )
+            for alias, field_name in EVENT_UUID_ALIASES.items():
+                if alias not in normalized_event:
+                    continue
+                alias_value = normalize_event_uuid(normalized_event.pop(alias), alias)
+                if field_name in normalized_event:
+                    canonical_value = normalize_event_uuid(
+                        normalized_event[field_name], field_name
+                    )
+                    if alias_value is not None and alias_value != canonical_value:
+                        raise ValueError(f"{alias} conflicts with {field_name}")
+                elif alias_value is not None:
+                    normalized_event[field_name] = alias_value
             for field_name in EVENT_UUID_FIELDS:
                 if field_name in normalized_event:
-                    normalized_events[field_name] = normalize_event_uuid(
+                    normalized_event[field_name] = normalize_event_uuid(
                         normalized_event[field_name], field_name
                     )
             normalized_events.append(normalized_event)

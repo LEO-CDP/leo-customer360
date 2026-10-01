@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from redis.exceptions import RedisError
 
 from app import app
@@ -18,6 +19,7 @@ from core.redis_cache import (
     build_redis_client,
     build_rate_limit_key,
 )
+from core.schemas import TrackingLogRequest
 from core.routers.tracking import (
     _stream_socket_timeout_seconds,
     build_tracking_request,
@@ -155,6 +157,82 @@ def test_build_tracking_object_preserves_experiment_variant_attribution():
     assert record["campaign_id"] == campaign_id
     assert record["experiment_variant_id"] == variant_id
     assert record["payload"]["experiment_variant_id"] == variant_id
+
+
+def test_tracking_request_validates_and_persists_campaign_experiment_attribution():
+    campaign_id = "22222222-2222-2222-2222-222222222222"
+    variant_id = "33333333-3333-3333-3333-333333333333"
+    request = TrackingLogRequest(
+        data_source_id=SOURCE_ID,
+        events=[
+            {
+                "event_name": "purchase",
+                "campaign_id": campaign_id.upper(),
+                "experiment_variant_id": variant_id.upper(),
+                "utm_source": "newsletter",
+                "utm_medium": "email",
+                "utm_campaign": "spring-launch",
+                "utm_term": "family-plan",
+                "utm_content": "variant-a",
+            }
+        ],
+    )
+
+    event = request.events[0]
+    assert event["campaign_id"] == campaign_id
+    assert event["experiment_variant_id"] == variant_id
+
+    _, _, body = build_tracking_object(
+        SOURCE_ID, request.events, datetime.now(timezone.utc)
+    )
+    record = json.loads(gzip.decompress(body).decode().strip())
+    assert record["campaign_id"] == campaign_id
+    assert record["experiment_variant_id"] == variant_id
+    assert record["payload"]["utm_source"] == "newsletter"
+    assert record["payload"]["utm_medium"] == "email"
+    assert record["payload"]["utm_campaign"] == "spring-launch"
+    assert record["payload"]["utm_term"] == "family-plan"
+    assert record["payload"]["utm_content"] == "variant-a"
+
+
+def test_tracking_request_maps_short_attribution_names_to_canonical_fields():
+    campaign_id = "22222222-2222-2222-2222-222222222222"
+    variant_id = "33333333-3333-3333-3333-333333333333"
+    request = TrackingLogRequest(
+        data_source_id=SOURCE_ID,
+        events=[
+            {
+                "event_name": "purchase",
+                "leocpid": campaign_id.upper(),
+                "leoexvrid": variant_id.upper(),
+            }
+        ],
+    )
+
+    event = request.events[0]
+    assert event["campaign_id"] == campaign_id
+    assert event["experiment_variant_id"] == variant_id
+    assert "leocpid" not in event
+    assert "leoexvrid" not in event
+
+    _, _, body = build_tracking_object(
+        SOURCE_ID, request.events, datetime.now(timezone.utc)
+    )
+    record = json.loads(gzip.decompress(body).decode().strip())
+    assert record["campaign_id"] == campaign_id
+    assert record["experiment_variant_id"] == variant_id
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["campaign_id", "experiment_variant_id", "leocpid", "leoexvrid"],
+)
+def test_tracking_request_rejects_invalid_campaign_attribution_uuid(field_name):
+    with pytest.raises(ValidationError, match="must be a valid UUID"):
+        TrackingLogRequest(
+            data_source_id=SOURCE_ID,
+            events=[{"event_name": "purchase", field_name: "not-a-uuid"}],
+        )
 
 
 def test_metrics_exposes_queue_depth_age_and_configured_limits():
