@@ -1,0 +1,3 @@
+# Rendered by ../server/deploy-event-api.sh from Terraform state — carries the S3 key
+# and the Redis password.
+generated/

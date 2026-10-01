@@ -446,7 +446,7 @@ fi
 # customer360-promotions and customer360-event-api run as pods, not containers on a box, so
 # they are invisible to every Docker agent above. The Kubernetes agent that makes them
 # visible is a CLUSTER add-on applied once by hand (see
-# ../server/customer360-event-api/cluster-addons/portainer-agent/) — this only registers the
+# ../customer360-event-api/cluster-addons/portainer-agent/) — this only registers the
 # already-running agent as an environment, which used to be a manual click that nobody
 # repeats after a Portainer rebuild.
 #

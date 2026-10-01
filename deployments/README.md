@@ -8,10 +8,11 @@ deployment with per-env `overlays/<env>.tfvars`, Terraform workspaces, and a
 | Folder | What it provisions |
 |--------|--------------------|
 | [`postgres`](./postgres) | Managed PostgreSQL vDB (`customer360` + `db_keycloak`), `run-sql.sh` schema/seed bootstrap |
-| [`server`](./server) | vServers (VMs): api + backend + **`docs`** + `agent` boxes (uat); adds dedicated `sso` + `frontend` + `ads` (+ `docs`) boxes (prod). Also holds [`customer360-event-api/`](./server/customer360-event-api) — the Kubernetes manifests for the event-api on VKS (no VM) |
+| [`server`](./server) | vServers (VMs): api + backend + **`docs`** + `agent` boxes (uat); adds dedicated `sso` + `frontend` + `ads` (+ `docs`) boxes (prod). Also holds `deploy-event-api.sh`, which deploys [`customer360-event-api`](./customer360-event-api) — it reads this folder's Terraform outputs |
 | [`cache`](./cache) | Redis — uat: container on the api box; prod: managed MemStore |
 | [`sso`](./sso) | Keycloak (SSO/OIDC) — uat: container on the api box; prod: dedicated vServer |
 | [`frontend`](./frontend) | customer360-frontend (admin UI) — uat: container on the api box; prod: dedicated vServer |
+| [`customer360-event-api`](./customer360-event-api) | c360 Event API (tracking ingestion → S3) — a KEDA-scaled Deployment on the **VKS** cluster (no VM); deployed by [`server/deploy-event-api.sh`](./server/deploy-event-api.sh) |
 | [`customer360-promotions`](./customer360-promotions) | c360 Promotions (schema `leo_ads`) — a Deployment on the **VKS** cluster (no VM); holds its own `k8s/` manifests |
 | [`docs-vector-search`](../tools/docs-vector-search) | AI docs Q&A — **local-model RAG** (paraphrase-multilingual embed + bge rerank + Qwen 0.5B), vectors in **pgvector** on the vDB (schema `rag`). Its **own dedicated `docs` box**; deploy: [`server/deploy-docs-search.sh`](./server/deploy-docs-search.sh) |
 | [`monitoring`](./monitoring) | Portainer (direct HTTPS) + Netdata (behind oauth2-proxy / Keycloak SSO) dashboards **+ Jaeger** (OpenTelemetry request-trace UI at `/jaeger`) **+ pgAdmin** (Postgres admin UI, direct on the LB with its own login) — on the api box |
@@ -459,7 +460,7 @@ publicly at `https://beta.leocdp.com/data` via Caddy.
 > **Migrated from a vServer.** It used to run as N docker replicas behind a local nginx LB on a
 > dedicated `tracking` box (private `10.100.1.8`). Kubernetes now owns replication and scaling,
 > so that box is gone from `server/overlays/*.tfvars`. Manifests + details:
-> [`server/customer360-event-api/`](./server/customer360-event-api/README.md).
+> [`customer360-event-api/`](./customer360-event-api/README.md).
 
 Bring it up on UAT in order (each step is idempotent):
 
@@ -505,9 +506,9 @@ cd ../proxy && ./deploy-caddy.sh uat
   **lag**, so a slow S3 sink scales the tier out even when request rate looks calm, plus a
   `PodDisruptionBudget` (`minAvailable: 2`) holding ingest up through node drains. The per-env
   profile is committed — UAT 1-3 pods @ ~50 req/s per pod, PROD 3-20 @ ~100 — in
-  `server/customer360-event-api/overlays/<env>/`, so a capacity change is a reviewable diff.
+  `customer360-event-api/overlays/<env>/`, so a capacity change is a reviewable diff.
   KEDA must be installed in the cluster once; the deploy script checks and tells you how. Details:
-  [`server/customer360-event-api/README.md`](./server/customer360-event-api/README.md).
+  [`customer360-event-api/README.md`](./customer360-event-api/README.md).
 - **Caddy is unchanged in shape.** The `Service` is type `LoadBalancer` on `:8010`, so
   `data_upstream` stays `ip:8010` — only the address changes, to the Service `EXTERNAL-IP`.
 - No dedicated LB listener — `/data` rides the existing `:443` Caddy passthrough.

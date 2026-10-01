@@ -5,7 +5,7 @@
 #
 # Replaces the old vServer model (N docker replicas behind a local nginx LB on the
 # "tracking" box). Kubernetes now owns replication, restarts, rollouts and scaling;
-# the manifests live in ./customer360-event-api/base and this script renders the
+# the manifests live in ../customer360-event-api/base and this script renders the
 # env-specific overlay from the SAME Terraform state the vServer deploy used:
 #   * S3-compatible object storage (../storage — vStorage on VNG): the durable NDJSON sink.
 #   * Redis (../cache, on the api box): REQUIRED by the default Redis Streams tracking
@@ -29,7 +29,7 @@
 #   EVENT_API_RATE_LIMIT_RPS | *_REQUESTS / *_WINDOW_SECONDS   per-client-IP rate limit
 #
 # Pod counts and the requests/sec target are NOT env vars — they are committed, per-env,
-# in ./customer360-event-api/overlays/<env>/kustomization.yaml so a scaling change is a
+# in ../customer360-event-api/overlays/<env>/kustomization.yaml so a scaling change is a
 # reviewable diff. Autoscaling is driven by KEDA on real ingest RPS; see that folder's README.
 #
 # NOT done here (unlike the vServer script): the c360-master-profiles bucket bootstrap.
@@ -37,7 +37,7 @@
 # deploy-backend.sh already ensure that bucket for the services that do.
 set -euo pipefail
 cd "$(dirname "$0")"                 # deployments/server
-MANIFESTS="customer360-event-api"
+MANIFESTS="../customer360-event-api"
 
 ENV="${1:-}"
 case "$ENV" in
@@ -79,7 +79,7 @@ KUBECTL=(kubectl)
 "${KUBECTL[@]}" auth can-i create deployments -n "$NAMESPACE" >/dev/null 2>&1 || {
   echo "ERROR: this kubeconfig cannot create Deployments in namespace '$NAMESPACE'."
   echo "       Check the identity, or re-mint the CI kubeconfig with"
-  echo "       ./$MANIFESTS/ci-access/make-kubeconfig.sh"
+  echo "       $MANIFESTS/ci-access/make-kubeconfig.sh"
   exit 1
 }
 echo ">> Cluster: $("${KUBECTL[@]}" config current-context)  (namespace $NAMESPACE)"

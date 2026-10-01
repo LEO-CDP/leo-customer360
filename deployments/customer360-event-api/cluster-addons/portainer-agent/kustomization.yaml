@@ -2,12 +2,12 @@
 # cluster, so the VKS workloads appear in the SAME web UI as the vServers, behind the
 # admin username/password you already have (monitoring sets portainer_sso = false).
 #
-# This is the pattern ../../../monitoring/overlays/uat.tfvars already describes for the
+# This is the pattern ../../monitoring/overlays/uat.tfvars already describes for the
 # other boxes ("run portainer/agent there and register it as an environment — no second
 # Portainer"); the Kubernetes agent is the same idea with a k8s-shaped manifest.
 #
 # CLUSTER-WIDE: apply ONCE with an admin kubeconfig.
-#   kubectl --kubeconfig ../../../kubeconfig-vks-uat.yaml apply -k .
+#   kubectl --kubeconfig ../../server/kubeconfig-vks-uat.yaml apply -k .
 #
 # Then in Portainer: Environments -> Add environment -> Kubernetes -> Agent, and point it at
 #   10.100.1.11:30778        (the node's private IP — same 10.100.1.0/24 subnet as the api box)

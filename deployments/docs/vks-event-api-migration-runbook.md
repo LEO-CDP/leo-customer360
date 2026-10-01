@@ -45,7 +45,7 @@ Where things live:
 ```
 deployments/vks/                                  node group (Terraform)
 deployments/server/deploy-event-api.sh            the deploy
-deployments/server/customer360-event-api/
+deployments/customer360-event-api/
   base/event-api.yaml                             all app resources in one file
   overlays/{uat,prod}/                            per-env scaling profile
   ci-access/                                      least-privilege identity for CD
@@ -66,7 +66,7 @@ kubectl --kubeconfig ../server/kubeconfig-vks-uat.yaml apply --server-side \
   -f https://github.com/kedacore/keda/releases/download/v2.17.1/keda-2.17.1.yaml
 
 # 3. metrics-server — without it `kubectl top`, every UI graph, and the CPU trigger are blank
-cd ../server/customer360-event-api/cluster-addons
+cd ../customer360-event-api/cluster-addons
 kubectl --kubeconfig ../../kubeconfig-vks-uat.yaml apply -k metrics-server
 
 # 4. VPC — pods reach the api box's private Redis from the NODE subnet

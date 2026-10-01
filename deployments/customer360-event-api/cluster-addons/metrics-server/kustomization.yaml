@@ -6,7 +6,7 @@
 # with an admin kubeconfig — not with the scoped CI identity, which deliberately cannot
 # write there. Same one-time-admin category as the KEDA operator.
 #
-#   kubectl --kubeconfig ../../../kubeconfig-vks-uat.yaml apply -k .
+#   kubectl --kubeconfig ../../server/kubeconfig-vks-uat.yaml apply -k .
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

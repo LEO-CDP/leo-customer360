@@ -101,7 +101,7 @@ portainer_agent_port        = 9001
 # can see them. ONE agent covers the whole cluster; there is no per-service agent.
 #
 # Nothing is installed by setting this. The Kubernetes agent is a cluster add-on applied
-# once by hand (../server/customer360-event-api/cluster-addons/portainer-agent/); this only
+# once by hand (../customer360-event-api/cluster-addons/portainer-agent/); this only
 # registers it. Leave empty to skip — prod has no cluster yet.
 #
 # <node-ip>:<agent NodePort>. Any node works (kube-proxy forwards to whichever node the
