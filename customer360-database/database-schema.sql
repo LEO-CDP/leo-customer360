@@ -448,6 +448,9 @@ CREATE TABLE IF NOT EXISTS customer360.crm_campaign_performance_daily (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
+ALTER TABLE customer360.crm_campaign_performance_daily
+    ADD COLUMN IF NOT EXISTS experiment_variant_id UUID;
+
 CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_base
     ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date)
     WHERE experiment_variant_id IS NULL;
@@ -3113,9 +3116,6 @@ BEGIN
             DEFERRABLE INITIALLY DEFERRED;
     END IF;
 END $$;
-ALTER TABLE customer360.crm_campaign_performance_daily
-    ADD COLUMN IF NOT EXISTS experiment_variant_id UUID;
-
 CREATE UNIQUE INDEX IF NOT EXISTS ux_campaign_daily_performance_base
     ON customer360.crm_campaign_performance_daily (tenant_id, campaign_id, report_date)
     WHERE experiment_variant_id IS NULL;
