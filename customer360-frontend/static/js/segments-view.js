@@ -17,6 +17,11 @@ window.C360 = window.C360 || {};
 
   var segmentsById = {};
   var editingSegmentId = null;
+  // True once the AI filled the builder in this form session; saved as processed_by='ai_agent'.
+  var rulesFromAi = false;
+  // "Describe with AI" state for this form session. Untrusted text: render with .text()/.val() only.
+  var aiSoFar = null;
+  var aiLastQuestion = null;
   var queryBuilderReady = false;
   var segmentAttributes = [];
   var attributeLoadSequence = 0;
@@ -236,8 +241,115 @@ window.C360 = window.C360 || {};
     $("#segment-form-tag").val(segment ? segment.segment_tag : "");
     $("#segment-form-description").val(segment ? (segment.description || "") : "");
     $("#segment-form-domain").val(segment ? (segment.domain || "all") : "all");
+    rulesFromAi = false;
+    $("#segment-form-ai-text").val("");
+    $("#segment-form-ai-result").addClass("hidden");
+    resetAiState();
     $("#segment-form-modal").removeClass("hidden");
     loadSegmentAttributes(segment ? segment.domain : "all", segment ? segment.json_rules : null);
+  }
+
+  // Sync the AI state into the UI; call after every state change.
+  function renderAiState() {
+    var hasState = !!(aiSoFar || aiLastQuestion);
+    if (aiSoFar) {
+      $("#segment-form-ai-sofar-wrap").removeClass("hidden");
+      $("#segment-form-ai-sofar").val(aiSoFar);
+    } else {
+      $("#segment-form-ai-sofar-wrap").addClass("hidden");
+      $("#segment-form-ai-sofar").val("");
+    }
+    if (aiLastQuestion) {
+      $("#segment-form-ai-question").removeClass("hidden").text(aiLastQuestion);
+    } else {
+      $("#segment-form-ai-question").addClass("hidden").text("");
+    }
+    $("#btn-segment-form-ai-reset").toggleClass("hidden", !hasState);
+    $("#segment-form-ai-label").text(hasState ? "Update rules" : "Generate rules");
+  }
+
+  // Clears the AI state only, not the builder or the name/tag fields.
+  function resetAiState() {
+    aiSoFar = null;
+    aiLastQuestion = null;
+    renderAiState();
+  }
+
+  function showAiResult(kind, message, suggestions) {
+    var styles = {
+      valid: "border border-emerald-200 bg-emerald-50 text-emerald-800",
+      needs_clarification: "border border-amber-200 bg-amber-50 text-amber-800",
+      rejected: "border border-red-200 bg-red-50 text-red-700"
+    };
+    // .text(), never .html(): untrusted.
+    $("#segment-form-ai-result").removeClass("hidden " + Object.keys(styles).map(function (k) { return styles[k]; }).join(" "))
+      .addClass(styles[kind] || styles.rejected);
+    $("#segment-form-ai-message").text(message || "");
+    var hasSuggestions = !!(suggestions && suggestions.length);
+    $("#segment-form-ai-suggestions").toggleClass("hidden", !hasSuggestions)
+      .text(hasSuggestions ? "Options: " + suggestions.join(", ") : "");
+  }
+
+  // Text -> validated json_rules; rulesSql() on save stays the only SQL path.
+  function generateRulesFromText() {
+    var description = $.trim($("#segment-form-ai-text").val());
+    if (!description) {
+      showAiResult("needs_clarification", "Describe the customers you want in this segment.");
+      return;
+    }
+    if (!queryBuilderReady) {
+      showAiResult("needs_clarification", "The rule builder is still loading. Try again in a moment.");
+      return;
+    }
+    var domain = $("#segment-form-domain").val() || "all";
+    // Pick up user edits to "So far".
+    aiSoFar = $.trim($("#segment-form-ai-sofar").val()) || null;
+    var currentRules = null;
+    try {
+      // null unless the builder is valid.
+      var existingRules = $("#segment-query-builder").queryBuilder("getRules");
+      if (existingRules && existingRules.rules && existingRules.rules.length) currentRules = existingRules;
+    } catch (error) {
+      currentRules = null;
+    }
+    var $btn = $("#btn-segment-form-ai").prop("disabled", true).addClass("opacity-60");
+    $("#segment-form-ai-label").text("Generating...");
+    api("/segments/from-description", {
+      description: description,
+      domain: domain,
+      so_far: aiSoFar,
+      last_question: aiLastQuestion,
+      current_rules: currentRules
+    }, "POST")
+      .done(function (result) {
+        aiSoFar = (result && result.so_far) || aiSoFar;
+        aiLastQuestion = (result && result.validation_status === "needs_clarification") ? (result.question || null) : null;
+        if (!result || result.validation_status !== "valid" || !result.ready_for_segment_persistence) {
+          showAiResult(result && result.validation_status, (result && (result.question || result.interpretation)) ||
+            "Could not turn that description into rules.", result && result.suggestions);
+          return;
+        }
+        try {
+          $("#segment-query-builder").queryBuilder("setRules", normalizeSegmentRules(result.json_rules));
+        } catch (error) {
+          showAiResult("rejected", "The generated rules could not be loaded: " + error.message);
+          return;
+        }
+        rulesFromAi = true;
+        if (!$.trim($("#segment-form-name").val()) && result.segment_name) $("#segment-form-name").val(result.segment_name);
+        if (!$.trim($("#segment-form-tag").val()) && result.segment_tag) $("#segment-form-tag").val(result.segment_tag);
+        if (!$.trim($("#segment-form-description").val())) $("#segment-form-description").val(description);
+        $("#segment-form-ai-text").val("");
+        showAiResult("valid", result.interpretation || "Rules generated. Review them below before saving.");
+      })
+      .fail(function (xhr) {
+        var detail = xhr && xhr.responseJSON && xhr.responseJSON.detail;
+        showAiResult("rejected", typeof detail === "string" ? detail : "The AI service could not generate rules right now.");
+      })
+      .always(function () {
+        $btn.prop("disabled", false).removeClass("opacity-60");
+        renderAiState();
+      });
   }
 
   function submitSegmentForm() {
@@ -266,7 +378,7 @@ window.C360 = window.C360 || {};
         description: $.trim($("#segment-form-description").val()) || null,
         json_rules: rules,
         sql_rules: sqlRules,
-        processed_by: "human",
+        processed_by: rulesFromAi ? "ai_agent" : "human",
         is_active: true
       };
       if (!editingSegmentId) payload.tenant_id = C360.config.current.tenantId;
@@ -629,12 +741,18 @@ window.C360 = window.C360 || {};
     $(document).on("click", "#btn-segments-create", function () { openSegmentForm(null); });
     $(document).on("click", "#btn-segment-detail-edit", function () { openSegmentForm(segmentsById[currentSegmentId]); });
     $(document).on("click", "#btn-segment-form-save", submitSegmentForm);
+    $(document).on("click", "#btn-segment-form-ai", generateRulesFromText);
+    $(document).on("click", "#btn-segment-form-ai-reset", resetAiState);
     $(document).on("click", "#btn-segment-form-cancel, #btn-segment-form-close", closeSegmentForm);
     $(document).on("click", "#segment-form-modal", function (e) {
       if (e.target === this) closeSegmentForm();
     });
     $(document).on("change", "#segment-form-domain", function () {
-      if (!$("#segment-form-modal").hasClass("hidden")) loadSegmentAttributes($(this).val(), null);
+      if (!$("#segment-form-modal").hasClass("hidden")) {
+        rulesFromAi = false;  // the builder reloads empty; any AI rules are gone
+        resetAiState();
+        loadSegmentAttributes($(this).val(), null);
+      }
     });
   }
 

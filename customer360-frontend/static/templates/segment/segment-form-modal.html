@@ -37,6 +37,31 @@
       </div>
     </div>
 
+    <!-- AI fills the rule builder below; it never saves. "So far" is editable and sent back
+         next turn. Untrusted text: .text()/.val() only. -->
+    <div class="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 md:p-4 mb-4">
+      <div class="flex items-center justify-between gap-2 mb-1.5">
+        <label for="segment-form-ai-text" class="block text-[11px] text-indigo-500 uppercase tracking-wider font-semibold">Describe with AI</label>
+        <button id="btn-segment-form-ai-reset" type="button" class="hidden text-[11px] font-semibold text-slate-400 hover:text-slate-600">Start over</button>
+      </div>
+
+      <div id="segment-form-ai-sofar-wrap" class="hidden mb-2">
+        <label for="segment-form-ai-sofar" class="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-1">So far</label>
+        <textarea id="segment-form-ai-sofar" rows="1" maxlength="2000" class="w-full text-xs border border-slate-200 bg-white rounded-xl px-3.5 py-2 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="Summary of the audience so far"></textarea>
+      </div>
+      <p id="segment-form-ai-question" class="hidden text-xs text-indigo-700 font-medium mb-2"></p>
+
+      <div class="flex flex-col md:flex-row gap-2">
+        <textarea id="segment-form-ai-text" rows="2" maxlength="2000" class="flex-1 text-xs border border-slate-200 bg-white rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="e.g. Khách hàng nữ ở Hà Nội, customer since 2026-09-01"></textarea>
+        <button id="btn-segment-form-ai" type="button" class="md:self-start inline-flex items-center justify-center gap-1.5 border border-indigo-200 bg-white text-indigo-700 rounded-xl px-4 py-2 text-xs font-semibold hover:bg-indigo-50"><span id="segment-form-ai-label">Generate rules</span></button>
+      </div>
+      <div id="segment-form-ai-result" class="hidden mt-2 rounded-lg px-3 py-2 text-xs" role="status" aria-live="polite">
+        <p id="segment-form-ai-message"></p>
+        <p id="segment-form-ai-suggestions" class="hidden mt-1 text-slate-500"></p>
+      </div>
+      <p class="text-[11px] text-slate-400 mt-1.5">AI output is a draft: review the rules below before saving. It only builds this segment's rules.</p>
+    </div>
+
     <div class="rounded-xl border border-slate-200 bg-slate-50/40 p-3 md:p-4">
       <div class="flex items-center justify-between gap-3 mb-3">
         <div>
