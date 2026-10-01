@@ -9,7 +9,7 @@ into the deploy would make every CD run fail. Apply them **once, with an admin k
 the same category as the KEDA operator.
 
 ```bash
-KC=../../kubeconfig-vks-uat.yaml
+KC=../../server/kubeconfig-vks-uat.yaml
 kubectl --kubeconfig $KC apply -k metrics-server     # always: everything else shows blanks without it
 kubectl --kubeconfig $KC apply -k portainer-agent    # web UI with username/password
 ```
@@ -34,7 +34,7 @@ Patched in two ways versus upstream:
 ## Portainer agent
 
 Registers this cluster as an environment in the Portainer CE already running on the api box
-(`../../../monitoring`, `portainer_sso = false` → local admin/password). After applying:
+(`../../monitoring`, `portainer_sso = false` → local admin/password). After applying:
 **Environments → Add environment → Kubernetes → Agent**, address `<node-private-ip>:30778`.
 
 Two things to know:
@@ -42,7 +42,7 @@ Two things to know:
 * **It binds cluster-admin.** That is what lets Portainer manage rather than just display,
   and it means Portainer's admin password now guards this cluster too.
 * **The likely snag is the node's security group, not the manifest.** `extra_ingress` in
-  `../../../server/overlays/<env>.tfvars` applies to the Default secgroup on the vServers;
+  `../../server/overlays/<env>.tfvars` applies to the Default secgroup on the vServers;
   the VKS nodes have their own VKS-managed group. If Portainer cannot reach `:30778`, open it
   there — console, or the `security_groups` attribute on `vngcloud_vks_cluster_node_group`.
 

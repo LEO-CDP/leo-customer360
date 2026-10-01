@@ -7,7 +7,7 @@ schema in the shared `customer360` database and uses the shared Redis as a respo
 It used to run as a single docker container on the shared api box (uat) with a dedicated
 `ads` vServer planned for prod. Kubernetes now owns replication, restarts, rollouts and
 scaling. The cluster, the GHCR pull secret, the namespace and the CI identity are shared
-with [`customer360-event-api`](../server/customer360-event-api/README.md), which migrated
+with [`customer360-event-api`](../customer360-event-api/README.md), which migrated
 first — see its [runbook](../docs/vks-event-api-migration-runbook.md) for the cluster-level
 background. Where this service deliberately differs from it is covered below.
 
@@ -94,7 +94,7 @@ with an operator and two CRDs in front of it. metrics-server is already installe
 cluster-wide, so plain CPU utilisation works today.
 
 Swap in a KEDA ScaledObject once the app grows a `/metrics` endpoint;
-`../server/customer360-event-api/base/event-api.yaml` is the template.
+`../customer360-event-api/base/event-api.yaml` is the template.
 
 ## Dependencies
 

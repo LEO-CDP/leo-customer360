@@ -4,7 +4,7 @@ Event ingestion (`POST /data/api/v1/tracking/logs` → Redis Stream → S3/vStor
 runs here as a KEDA-autoscaled Deployment — **1-3 pods on UAT**, 3-20 on prod.
 
 Operational runbook — canary, rollback, teardown, and the gotchas found migrating:
-[`deployments/docs/vks-event-api-migration-runbook.md`](../../docs/vks-event-api-migration-runbook.md).
+[`deployments/docs/vks-event-api-migration-runbook.md`](../docs/vks-event-api-migration-runbook.md).
 
 It used to run as N docker replicas behind a local nginx load balancer on a dedicated
 `tracking` vServer. Kubernetes now owns replication, restarts, rollouts and scaling, so
@@ -20,7 +20,7 @@ base/event-api.yaml     every resource for the service, in one file:
                           a small Prometheus that scrapes the pods to feed the scaler
 overlays/uat/           UAT profile:  1-3 pods,  ~50 req/s  + 500 backlog per pod
 overlays/prod/          PROD profile: 3-20 pods, ~100 req/s + 1000 backlog per pod, bigger pods
-generated/<env>/        rendered by ../deploy-event-api.sh — GITIGNORED, holds credentials
+generated/<env>/        rendered by ../server/deploy-event-api.sh — GITIGNORED, holds credentials
 ci-access/              one-time bootstrap: a least-privilege identity for CI
   rbac.yaml               ServiceAccount + Role/ClusterRole it deploys with
   make-kubeconfig.sh      mints a kubeconfig for it -> VKS_KUBECONFIG
@@ -30,9 +30,9 @@ Three layers: `base/` is env-agnostic, `overlays/<env>/` carries the committed p
 scaling profile (so a capacity change is a reviewable diff, not an env var someone
 remembers to set), and `generated/<env>/` is what actually gets applied.
 
-`../deploy-event-api.sh <uat|prod>` renders that last layer on top of the overlay, filling
+`../server/deploy-event-api.sh <uat|prod>` renders that last layer on top of the overlay, filling
 the image digest, ConfigMap and Secret from the **same Terraform state the vServer deploy
-used** — `../../storage` for the S3 endpoint and keys, `../../cache` + the `server` outputs
+used** — `../storage` for the S3 endpoint and keys, `../cache` + the `server` outputs
 for the Redis host and password.
 
 To change capacity, edit the overlay and redeploy:
@@ -73,9 +73,9 @@ can deploy this one service into this one namespace.
 Run once, with the admin kubeconfig:
 
 ```bash
-cd deployments/server/customer360-event-api/ci-access
-KUBECONFIG=../../kubeconfig-vks-uat.yaml ./make-kubeconfig.sh
-gh secret set VKS_KUBECONFIG < ../../kubeconfig-vks-ci.yaml
+cd deployments/customer360-event-api/ci-access
+KUBECONFIG=../../server/kubeconfig-vks-uat.yaml ./make-kubeconfig.sh
+gh secret set VKS_KUBECONFIG < ../../server/kubeconfig-vks-ci.yaml
 ```
 
 It applies `rbac.yaml`, waits for the token, writes the kubeconfig, and then prints what the
@@ -117,8 +117,8 @@ these are the only variables you pass. `deployments/server/.env` is sourced if p
 |---|---|
 | `KUBECONFIG` | The VKS cluster is not in the default kubeconfig. Falls back to `./kubeconfig-vks-<env>.yaml`, then `~/.kube/vks-<env>.yaml`. For CI prefer the scoped one from `ci-access/` over the console's admin kubeconfig. |
 | `GHCR_PULL_TOKEN` | Becomes the cluster's `ghcr-pull` imagePullSecret. Must be **long-lived** (a PAT with `read:packages`) — see the warning below. Skippable only if the secret already exists in the namespace. |
-| `TF_VAR_access_key` / `TF_VAR_secret_key` | vStorage S3 credentials. Read from `../../storage/terraform.tfvars` when set locally; that file is gitignored, so CI must pass them. |
-| `TF_VAR_redis_password` | Redis password. Read from `../../cache/terraform.tfvars` locally. Without it the pods start but cannot enqueue, and ingestion returns 503. |
+| `TF_VAR_access_key` / `TF_VAR_secret_key` | vStorage S3 credentials. Read from `../storage/terraform.tfvars` when set locally; that file is gitignored, so CI must pass them. |
+| `TF_VAR_redis_password` | Redis password. Read from `../cache/terraform.tfvars` locally. Without it the pods start but cannot enqueue, and ingestion returns 503. |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Only for the Terraform **remote state** backend on vStorage, to resolve the Redis host. |
 
 **Optional**
@@ -129,9 +129,9 @@ these are the only variables you pass. `deployments/server/.env` is sourced if p
 | `KUBE_CONTEXT` | the kubeconfig's current context |
 | `INSTALL_KEDA` | `0` — the script reports and stops instead of installing an operator cluster-wide |
 | `KEDA_VERSION` | `v2.17.1` (only used by `INSTALL_KEDA=1`) |
-| `REDIS_SERVER_KEY` / `MON_SERVER_KEY` | `api` — which `../overlays/<env>.tfvars` server runs Redis / Jaeger |
-| `IMAGE_TAG` | `image_tag` from `../overlays/<env>.tfvars`, else `latest` |
-| `OTEL_ENABLED` | `otel_enabled` from `../overlays/<env>.tfvars` |
+| `REDIS_SERVER_KEY` / `MON_SERVER_KEY` | `api` — which `../server/overlays/<env>.tfvars` server runs Redis / Jaeger |
+| `IMAGE_TAG` | `image_tag` from `../server/overlays/<env>.tfvars`, else `latest` |
+| `OTEL_ENABLED` | `otel_enabled` from `../server/overlays/<env>.tfvars` |
 | `S3_AUTO_CREATE_BUCKETS` | `s3_auto_create_buckets` from the storage overlay |
 | `EVENT_API_RATE_LIMIT_RPS` *(or `_REQUESTS` + `_WINDOW_SECONDS`)* | the app default, 120 req / 60s per client IP |
 
@@ -219,6 +219,6 @@ pins. The `memory` backend keeps the queue inside one process and is single-pod 
   the generated ConfigMap so the app and the trigger can never end up on different streams.
 * **Network prerequisite.** The pods must reach the api box's private Redis (`:6580`) and
   Jaeger (`:4318`) across the VPC. Open those to the VKS worker-node CIDR in
-  `../overlays/<env>.tfvars` (`extra_ingress`) — the old rules were scoped to the deleted
+  `../server/overlays/<env>.tfvars` (`extra_ingress`) — the old rules were scoped to the deleted
   tracking box's `/32` and will not match. The deploy script's closing health check reports
   whether the pods actually got through.

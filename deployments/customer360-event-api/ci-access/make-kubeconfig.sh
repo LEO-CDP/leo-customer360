@@ -21,7 +21,7 @@ cd "$(dirname "$0")"
 NAMESPACE="${EVENT_API_NAMESPACE:-customer360}"
 SA_NAME="${SA_NAME:-event-api-deployer}"
 SECRET_NAME="${SA_NAME}-token"
-OUT="${1:-../../kubeconfig-vks-ci.yaml}"   # gitignored by deployments/server/.gitignore
+OUT="${1:-../../server/kubeconfig-vks-ci.yaml}"   # gitignored by deployments/server/.gitignore
 
 command -v kubectl >/dev/null 2>&1 || { echo "ERROR: kubectl not found on PATH."; exit 1; }
 [[ -n "${KUBECONFIG:-}" ]] || echo ">> NOTE: KUBECONFIG is unset — using kubectl's default context."
@@ -100,6 +100,6 @@ printf '   %-34s : %s (expected: no)\n' "list nodes" "$(can list nodes)"
 
 echo
 echo ">> Wrote $OUT"
-echo "   Use it locally:   KUBECONFIG=$OUT ../../deploy-event-api.sh <uat|prod>"
+echo "   Use it locally:   KUBECONFIG=$OUT ../../server/deploy-event-api.sh <uat|prod>"
 echo "   Store it for CD:  gh secret set VKS_KUBECONFIG < $OUT"
 echo "   It contains a non-expiring token — treat it as a credential and do not commit it."

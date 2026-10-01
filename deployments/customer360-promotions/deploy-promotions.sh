@@ -77,11 +77,11 @@ KUBECTL=(kubectl)
 # Deliberately not `cluster-info`: it lists kube-system services, which the scoped CI
 # ServiceAccount cannot do. This asks the one question that matters, and works for both a
 # cluster-admin kubeconfig and the least-privilege one from
-# ../server/customer360-event-api/ci-access/make-kubeconfig.sh.
+# ../customer360-event-api/ci-access/make-kubeconfig.sh.
 "${KUBECTL[@]}" auth can-i create deployments -n "$NAMESPACE" >/dev/null 2>&1 || {
   echo "ERROR: this kubeconfig cannot create Deployments in namespace '$NAMESPACE'."
   echo "       Check the identity, or re-mint the CI kubeconfig with"
-  echo "       ../server/customer360-event-api/ci-access/make-kubeconfig.sh"
+  echo "       ../customer360-event-api/ci-access/make-kubeconfig.sh"
   exit 1
 }
 echo ">> Cluster: $("${KUBECTL[@]}" config current-context)  (namespace $NAMESPACE)"

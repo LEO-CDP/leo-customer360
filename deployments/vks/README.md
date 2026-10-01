@@ -1,7 +1,7 @@
 # VKS — worker node group
 
 Terraform for the **worker node group** of the GreenNode VKS (managed Kubernetes)
-cluster that runs [customer360-event-api](../server/customer360-event-api/README.md).
+cluster that runs [customer360-event-api](../customer360-event-api/README.md).
 
 The **cluster itself is created in the console** and referenced here by id, so Terraform
 owns only the node group — nothing in this module can destroy the control plane.
@@ -95,7 +95,7 @@ gone — unlike queue-backed work, they do not replay. At one node the PodDisrup
 topology-spread constraint are decorative.
 
 **Raise the node count before raising `maxReplicaCount`** in
-`../server/customer360-event-api/overlays/<env>/`. Otherwise the autoscaler scales into pods
+`../customer360-event-api/overlays/<env>/`. Otherwise the autoscaler scales into pods
 that cannot be scheduled: they sit `Pending` while the ScaledObject reports the scale-up as
 having succeeded.
 
@@ -109,5 +109,5 @@ vStorage, so private workers need a NAT gateway first.
 | 1. Cluster | VKS console (not Terraform) |
 | 2. Node group | **this module** |
 | 3. KEDA operator | `kubectl apply --server-side -f <keda release>` — one-time, cluster-wide |
-| 4. CI identity | [`../server/customer360-event-api/ci-access/`](../server/customer360-event-api/ci-access) |
+| 4. CI identity | [`../customer360-event-api/ci-access/`](../customer360-event-api/ci-access) |
 | 5. The app | `../server/deploy-event-api.sh <env>` |
