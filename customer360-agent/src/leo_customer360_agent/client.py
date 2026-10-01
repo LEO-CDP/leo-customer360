@@ -69,6 +69,33 @@ class GeneratedZnsCampaignPlan:
     end_date: Optional[date] = None
 
 
+@dataclass(frozen=True)
+class SegmentRulesBrief:
+    """Description plus the catalog it may filter on (the agent has no DB access)."""
+
+    description: str
+    attributes: list[dict[str, Any]]
+    domain: Optional[str] = None
+    model: Optional[str] = None
+    extra_config: Optional[dict[str, Any]] = None
+    # Multi-turn state, sent instead of the raw chat.
+    current_rules: Optional[dict[str, Any]] = None
+    so_far: Optional[str] = None
+    last_question: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class GeneratedSegmentRules:
+    """A rule tree, not SQL; the caller validates it with `rule_validator.validate_rules`."""
+
+    segment_tag: str
+    segment_name: str
+    json_rules: dict[str, Any]
+    explanation: str = ""
+    outcome: str = "rules"  # rules | ask | not_possible
+    so_far: Optional[str] = None
+
+
 def _parse_date(value: Any) -> Optional[date]:
     return date.fromisoformat(value) if value else None
 
@@ -147,4 +174,29 @@ def generate_zalo_campaign_plan(
         action_plan=list(data.get("action_plan", [])),
         start_date=_parse_date(data.get("start_date")),
         end_date=_parse_date(data.get("end_date")),
+    )
+
+
+def generate_segment_rules(brief: SegmentRulesBrief) -> GeneratedSegmentRules:
+    """POST /plan/segment. Raises `AIProviderError` if unreachable or not a rule tree."""
+    data = _post(
+        "/plan/segment",
+        {
+            "description": brief.description,
+            "attributes": brief.attributes,
+            "domain": brief.domain,
+            "model": brief.model,
+            "extra_config": brief.extra_config,
+            "current_rules": brief.current_rules,
+            "so_far": brief.so_far,
+            "last_question": brief.last_question,
+        },
+    )
+    return GeneratedSegmentRules(
+        segment_tag=data["segment_tag"],
+        segment_name=data["segment_name"],
+        json_rules=dict(data.get("json_rules") or {}),
+        explanation=data.get("explanation", ""),
+        outcome=data.get("outcome", "rules"),
+        so_far=data.get("so_far"),
     )

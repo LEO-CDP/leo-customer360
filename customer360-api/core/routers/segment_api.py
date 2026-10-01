@@ -15,16 +15,28 @@ from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from core.auth import require_tenant
 from core.cache import cache_response, invalidate_prefix
 from leo_customer360_dao.config import settings
 from leo_customer360_dao.crud.base import CRUDBase
 from core.database import get_db
 from core.init_core_data import list_tenant_ids, seed_default_segments_with_breakdown
 from leo_customer360_dao.models.segmentation import CdpSegment
+from core.repositories.segment_draft_repository import (
+    SegmentDraftGenerationError,
+    SegmentDraftRepository,
+    SegmentDraftValidationError,
+)
 from core.repositories.segment_repository import SegmentRepository
 from core.routers._generic import build_crud_router, insert_before_item_routes
 from leo_customer360_dao.schemas.identity import MasterProfileRead
-from leo_customer360_dao.schemas.segmentation import SegmentCreate, SegmentRead, SegmentUpdate
+from leo_customer360_dao.schemas.segmentation import (
+    SegmentCreate,
+    SegmentDraftRequest,
+    SegmentDraftResult,
+    SegmentRead,
+    SegmentUpdate,
+)
 from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 from core.utils.domains import validate_domain_value
 from leo_customer360_dao.utils.sql_safety import validate_sql_where_fragment
@@ -483,6 +495,41 @@ def get_segmentable_profile_attributes(
 # Static sub-path added after build_crud_router(); must be reordered ahead of
 # the generic "/{item_id}" routes or it'd be shadowed by them (see
 # insert_before_item_routes docstring).
+insert_before_item_routes(segments_router)
+
+
+@segments_router.post("/from-description", response_model=SegmentDraftResult)
+def draft_segment_from_description(
+    payload: SegmentDraftRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Description -> validated ``json_rules`` for the form. Saves nothing; no server state.
+
+    200 for valid / needs_clarification / rejected; 422 bad request; 502 agent failure.
+    """
+    tenant_id = uuid.UUID(require_tenant(request))
+    try:
+        validate_domain_value(db, payload.domain, allow_all=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        return SegmentDraftRepository(db).draft_from_description(
+            tenant_id,
+            payload.description,
+            payload.domain,
+            current_rules=payload.current_rules,
+            so_far=payload.so_far,
+            last_question=payload.last_question,
+        )
+    except SegmentDraftValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SegmentDraftGenerationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+# Also a static path: keep it ahead of the "/{item_id}" routes.
 insert_before_item_routes(segments_router)
 
 all_segment_routers = [segments_router]

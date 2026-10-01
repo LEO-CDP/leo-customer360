@@ -17,10 +17,13 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ai_providers.base import AIProviderError
 from campaign_planner import generate_campaign_plan, generate_zalo_campaign_plan
+from segment_planner import generate_segment_rules
 from config import settings
 from models import (
     EmailCampaignPlanRequest,
     EmailCampaignPlanResponse,
+    SegmentRulesRequest,
+    SegmentRulesResponse,
     ZnsCampaignPlanRequest,
     ZnsCampaignPlanResponse,
 )
@@ -105,6 +108,14 @@ def plan_email(req: EmailCampaignPlanRequest) -> EmailCampaignPlanResponse:
     # Exception handling is now managed by the global ai_provider_exception_handler
     plan = generate_campaign_plan(req.to_brief(), req.candidate_content_items)
     return EmailCampaignPlanResponse(**vars(plan))
+
+
+@app.post("/plan/segment", response_model=SegmentRulesResponse, tags=["Planning"],
+          dependencies=[Depends(require_token)])
+def plan_segment(req: SegmentRulesRequest) -> SegmentRulesResponse:
+    """Description -> QueryBuilder rule tree from the caller's catalog. Never SQL."""
+    rules = generate_segment_rules(req.to_brief())
+    return SegmentRulesResponse(**vars(rules))
 
 
 @app.post("/plan/zalo", response_model=ZnsCampaignPlanResponse, tags=["Planning"],
