@@ -7,7 +7,7 @@ name: customer360
 #
 #   docker compose -f dev-docker-compose.yml up -d
 #
-# Starts only postgres + redis + keycloak. Use this when you run
+# Starts postgres + redis + keycloak + customer360-agent. Use this when you run
 # customer360-api and customer360-backend/identity_resolution (CIR) directly on the host
 # (see customer360-api/start.sh, customer360-backend/identity_resolution/run-demo.sh,
 # and docs/operations/DOCKER-COMPOSE-GUIDE.md section 10) instead of the fully containerized
@@ -198,7 +198,48 @@ services:
       start_period: 60s
 
   # ---------------------------------------------------------------------------
-  # 5) MinIO - local S3-compatible object storage, DEV ONLY. Lets you test
+  # 5) Customer 360 AI Agent - host-run customer360-api calls localhost:8009.
+  # ---------------------------------------------------------------------------
+  agent:
+    build:
+      context: ./customer360-agent
+      dockerfile: Dockerfile
+    image: customer360-agent:local
+    container_name: customer360-agent
+    restart: unless-stopped
+    init: true
+    <<: *default-hardening
+    env_file:
+      - .env
+    environment:
+      AGENT_DATABASE_URL: postgresql+psycopg2://${DB_USER:-postgres}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-customer360}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${C360_AGENT_HOST:-127.0.0.1}:${C360_AGENT_PORT:-8009}:8009"
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8009/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # 6) MinIO - local S3-compatible object storage, DEV ONLY. Lets you test
   #    file-based event ingestion (e.g. importing events from CSV/JSON dropped
   #    into a bucket, see docs/api-plans/PLAN-EVENTS-API-IMPROVEMENT.md "Import from S3")
   #    against a real S3 API without touching production S3. NOT present in
@@ -324,4 +365,3 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-

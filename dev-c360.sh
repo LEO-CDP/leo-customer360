@@ -4,7 +4,8 @@
 # Customer 360 Platform - local DEV bootstrap
 #
 # Starts the development stack in dev-docker-compose.yml (postgres + redis +
-# keycloak + minio + tracking-api) and the local docs-vector-search service so
+# keycloak + customer360-agent + minio + tracking-api) and the local
+# docs-vector-search service so
 # customer360-api and
 # customer360-backend/identity_resolution (CIR) can be run directly on the host
 # against dockerized Postgres/Redis -- see
@@ -14,13 +15,13 @@
 # What it does, in order:
 #   1. Ensures '.env' exists (created from '.env.example' if missing) and
 #      contains every key currently in '.env.example'.
-#   2. Starts (or resets) postgres/redis/keycloak/minio via
+#   2. Starts (or resets) postgres/redis/keycloak/customer360-agent/minio via
 #      `docker compose -f dev-docker-compose.yml`.
 #   3. Waits for PostgreSQL, applies every SQL file in
 #      customer360-database/migrations in lexical order, then builds the
 #      docs-vector-search index against the local PostgreSQL service
 #      and starts the AI service on DOCS_SEARCH_HOST_PORT.
-#   4. Waits for postgres/redis/keycloak/minio/tracking-api/docs-vector-search containers to
+#   4. Waits for postgres/redis/keycloak/customer360-agent/minio/tracking-api/docs-vector-search containers to
 #      report healthy, then waits for the one-shot `minio-init` bucket-bootstrap
 #      job to complete.
 #   5. Checks whether the Keycloak 'leocdp' realm exists yet; there is no
@@ -41,7 +42,7 @@
 #   ./dev-c360.sh upgrade           Local DEV upgrade: refresh images/containers
 #                                    with current repo code and restart core
 #                                    host services (non-destructive).
-#   ./dev-c360.sh restart           Restart docs-vector-search,
+#   ./dev-c360.sh restart           Restart docs-vector-search, customer360-agent,
 #                                    customer360-api, customer360-backend, and customer360-frontend.
 #   ./dev-c360.sh reset             DESTRUCTIVE: `docker compose down -v`
 #                                    (drops the postgres/redis/minio volumes
@@ -76,6 +77,8 @@ KEYCLOAK_CONTAINER="customer360-keycloak"
 MINIO_CONTAINER="customer360-minio"
 MINIO_INIT_CONTAINER="customer360-minio-init"
 TRACKING_CONTAINER="customer360-event-api"
+AGENT_CONTAINER="customer360-agent"
+AGENT_SERVICE="agent"
 
 # --- Parse args (order-independent) ---
 ACTION="up"
@@ -429,6 +432,36 @@ reset_docs_service() {
   "${DOCS_DC_CMD[@]}" down -v --remove-orphans
 }
 
+wait_for_healthy() {
+  local container="$1"
+  local max_attempts="${2:-30}"
+  local attempt=1
+  echo "⏳ Waiting for '${container}' to become healthy (max ${max_attempts} attempts)..."
+
+  until docker inspect "$container" >/dev/null 2>&1; do
+    if [ "$attempt" -ge 10 ]; then
+      echo "❌ Error: Container '${container}' was not created after 10 attempts." >&2
+      "${DC_CMD[@]}" logs --tail=50 "$container" 2>/dev/null || echo "(logs unavailable)"
+      exit 1
+    fi
+    sleep 1
+    attempt=$((attempt + 1))
+  done
+
+  attempt=1
+  until [ "$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null)" = "healthy" ]; do
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      echo "❌ Error: '${container}' did not become healthy after ${max_attempts} attempts." >&2
+      echo "Container status: $(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo 'unknown')"
+      "${DC_CMD[@]}" logs --tail=50 "$container" 2>/dev/null || true
+      exit 1
+    fi
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+  echo "🟢 '${container}' is healthy."
+}
+
 upgrade_docs_service() {
   ensure_docs_env_file
   load_docs_provider_env
@@ -456,6 +489,9 @@ wait_for_docs_healthy() {
 if [ "$ACTION" = "restart" ]; then
   restart_docs_service
   wait_for_docs_healthy
+  echo "🔁 Restarting customer360-agent..."
+  "${DC_CMD[@]}" up -d --build --force-recreate "$AGENT_SERVICE"
+  wait_for_healthy "$AGENT_CONTAINER"
   restart_host_services
   exit 0
 fi
@@ -494,7 +530,7 @@ if [ "$ACTION" = "upgrade" ]; then
   echo "   - Rebuilding and force-recreating containers without deleting volumes..."
   "${DC_CMD[@]}" up -d --build --force-recreate
 else
-  echo "🚀 Starting postgres + redis + keycloak + minio (${COMPOSE_FILE})..."
+  echo "🚀 Starting postgres + redis + keycloak + customer360-agent + minio (${COMPOSE_FILE})..."
   "${DC_CMD[@]}" up -d --build
 fi
 
@@ -502,38 +538,6 @@ fi
 # 3) Wait for the healthchecked services, then for the one-shot minio-init
 #    bucket-bootstrap job to finish.
 # =============================================================================
-wait_for_healthy() {
-  local container="$1"
-  local max_attempts="${2:-30}"
-  local attempt=1
-  echo "⏳ Waiting for '${container}' to become healthy (max ${max_attempts} attempts)..."
-
-  # First, wait for container to exist
-  until docker inspect "$container" >/dev/null 2>&1; do
-    if [ "$attempt" -ge 10 ]; then
-      echo "❌ Error: Container '${container}' was not created after 10 attempts." >&2
-      "${DC_CMD[@]}" logs --tail=50 "$container" 2>/dev/null || echo "(logs unavailable)"
-      exit 1
-    fi
-    sleep 1
-    attempt=$((attempt + 1))
-  done
-
-  # Then wait for health status
-  attempt=1
-  until [ "$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null)" = "healthy" ]; do
-    if [ "$attempt" -ge "$max_attempts" ]; then
-      echo "❌ Error: '${container}' did not become healthy after ${max_attempts} attempts." >&2
-      echo "Container status: $(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo 'unknown')"
-      "${DC_CMD[@]}" logs --tail=50 "$container" 2>/dev/null || true
-      exit 1
-    fi
-    sleep 2
-    attempt=$((attempt + 1))
-  done
-  echo "🟢 '${container}' is healthy."
-}
-
 wait_for_completed() {
   local container="$1"
   local max_attempts=30
@@ -642,6 +646,7 @@ apply_database_migrations
 wait_for_healthy "$REDIS_CONTAINER"
 wait_for_healthy "$MINIO_CONTAINER"
 wait_for_healthy "$TRACKING_CONTAINER"
+wait_for_healthy "$AGENT_CONTAINER"
 wait_for_completed "$MINIO_INIT_CONTAINER"
 
 if [[ "${SSO_LOGIN:-true}" == "true" ]]; then
@@ -779,11 +784,12 @@ restart_host_services
 
 print_final_service_table() {
   local postgres_status redis_status minio_status tracking_status docs_status
-  local backend_status api_status frontend_status
+  local backend_status api_status frontend_status agent_status
   postgres_status="$(docker inspect -f '{{.State.Health.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || echo "unknown")"
   redis_status="$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER" 2>/dev/null || echo "unknown")"
   minio_status="$(docker inspect -f '{{.State.Health.Status}}' "$MINIO_CONTAINER" 2>/dev/null || echo "unknown")"
   tracking_status="$(docker inspect -f '{{.State.Health.Status}}' "$TRACKING_CONTAINER" 2>/dev/null || echo "unknown")"
+  agent_status="$(docker inspect -f '{{.State.Health.Status}}' "$AGENT_CONTAINER" 2>/dev/null || echo "unknown")"
   docs_status="$(docker inspect -f '{{.State.Health.Status}}' "$DOCS_SEARCH_CONTAINER" 2>/dev/null || echo "unknown")"
   backend_status="$(get_host_service_status "$SCRIPT_DIR/$BACKEND_SYSTEM_DIR/.dagster.pid")"
   api_status="$(get_host_service_status "$SCRIPT_DIR/$CUSTOMER360_API_DIR/.uvicorn.pid")"
@@ -797,6 +803,7 @@ print_final_service_table() {
   printf '%-12s | %-10s | %-25s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6580}"
   printf '%-12s | %-10s | %-25s\n' "minio" "$minio_status" "localhost:${MINIO_API_HOST_PORT:-9000} (console ${MINIO_CONSOLE_HOST_PORT:-9001})"
   printf '%-12s | %-10s | %-25s\n' "tracking-api" "$tracking_status" "localhost:${C360_TRACKING_API_PORT:-8010}"
+  printf '%-12s | %-10s | %-25s\n' "ai-agent" "$agent_status" "localhost:${C360_AGENT_PORT:-8009}"
   printf '%-12s | %-10s | %-25s\n' "docs-ai" "$docs_status" "localhost:${DOCS_SEARCH_HOST_PORT} (/health)"
   printf '%-12s | %-10s | %-25s\n' "backend" "$backend_status" "localhost:${DAGSTER_UI_PORT:-3000}"
   printf '%-12s | %-10s | %-25s\n' "api" "$api_status" "localhost:${C360_API_PORT:-8008}"

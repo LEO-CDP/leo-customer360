@@ -13,6 +13,7 @@ proxy; `DOCS_SEARCH_URL` is the private local upstream and must not be set to
 the public `/c360/ai/ask` URL:
 
 - `customer360-api`: `root_path=/c360api`
+- `customer360-agent`: `AGENT_ROOT_PATH=/agent` when exposing its API through Nginx
 - Keycloak: `KC_HTTP_RELATIVE_PATH=/auth`
 - `customer360-promotions`: `c360_PROMOTION_ROOT_PATH=/ads`
 - `customer360-frontend`: `FRONTEND_ROOT_PATH=/c360`, `FRONTEND_API_HOSTNAME=https://c360.example.com/c360api`, and `DOCS_SEARCH_URL=http://127.0.0.1:8001`
@@ -27,6 +28,9 @@ are:
 ```dotenv
 FRONTEND_ROOT_PATH=/c360
 FRONTEND_API_HOSTNAME=https://c360.example.com/c360api
+AGENT_SERVICE_URL=http://127.0.0.1:8009
+AGENT_ROOT_PATH=/agent
+C360_AGENT_PORT=8009
 DOCS_SEARCH_HOST_PORT=8001
 DOCS_SEARCH_URL=http://127.0.0.1:8001
 DOCS_SEARCH_TIMEOUT=120
@@ -61,6 +65,7 @@ With this configuration, the public endpoints are:
 | customer360-frontend (UI) | `https://c360.example.com/c360/` | `127.0.0.1:8890` |
 | customer360-frontend AI proxy | `https://c360.example.com/c360/ai/ask` | `127.0.0.1:8890` -> `127.0.0.1:8001/ask` |
 | customer360-api | `https://c360.example.com/c360api/api/v1` | `127.0.0.1:8008` |
+| customer360-agent | `https://c360.example.com/agent` | `127.0.0.1:8009` |
 | Keycloak | `https://c360.example.com/auth` | `127.0.0.1:8080` |
 | customer360-promotions and docs | `https://c360.example.com/ads` and `/ads/docs` | `127.0.0.1:9009` |
 | customer360-event-api | POST `https://c360.example.com/data/api/v1/tracking/logs`; health `https://c360.example.com/data/health` | `127.0.0.1:8010` |
@@ -98,6 +103,11 @@ upstream c360_frontend {
 # c360 core API
 upstream c360_core_api {
   server 127.0.0.1:8008;
+}
+
+# customer360-agent
+upstream c360_agent {
+  server 127.0.0.1:8009;
 }
 
 # Keycloak
@@ -176,6 +186,20 @@ server {
     proxy_set_header X-Forwarded-Port $server_port;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_read_timeout 600s;
+  }
+
+  # customer360-agent: preserve /agent because AGENT_ROOT_PATH=/agent.
+  location = /agent {
+    return 308 /agent/;
+  }
+
+  location ^~ /agent/ {
+    proxy_pass http://c360_agent;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Port $server_port;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 120s;
   }
 
   # Keycloak: preserve /auth because KC_HTTP_RELATIVE_PATH is /auth.
