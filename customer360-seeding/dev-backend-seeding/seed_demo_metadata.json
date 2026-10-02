@@ -1,0 +1,1725 @@
+{
+  "behavioral_source_slugs": {
+    "adjust": "adjust-mobile-attribution",
+    "onesignal": "c360-tracker",
+    "webtracking": "google-analytics-4",
+    "googleanalytics": "google-analytics-4"
+  },
+  "behavioral_event_templates": {
+    "travel": [
+      [
+        "search-flight",
+        "TRAVEL",
+        "trip",
+        false,
+        "web"
+      ],
+      [
+        "view-destination",
+        "TRAVEL",
+        "destination",
+        false,
+        "web"
+      ],
+      [
+        "booking",
+        "TRAVEL",
+        "booking",
+        true,
+        "mobile_app"
+      ],
+      [
+        "add-travel-wishlist",
+        "TRAVEL",
+        "trip",
+        false,
+        "mobile_app"
+      ]
+    ],
+    "media": [
+      [
+        "content-view",
+        "GENERAL",
+        "content",
+        false,
+        "web"
+      ],
+      [
+        "play-video",
+        "GENERAL",
+        "content",
+        false,
+        "mobile_app"
+      ],
+      [
+        "finish-video",
+        "GENERAL",
+        "content",
+        false,
+        "mobile_app"
+      ],
+      [
+        "subscribe-media",
+        "COMMERCE",
+        "subscription",
+        true,
+        "mobile_app"
+      ]
+    ],
+    "hospitality": [
+      [
+        "search-restaurant",
+        "SERVICE_INDUSTRY",
+        "restaurant",
+        false,
+        "web"
+      ],
+      [
+        "view-menu",
+        "SERVICE_INDUSTRY",
+        "restaurant",
+        false,
+        "mobile_app"
+      ],
+      [
+        "reservation-started",
+        "SERVICE_INDUSTRY",
+        "reservation",
+        false,
+        "mobile_app"
+      ],
+      [
+        "reservation-completed",
+        "SERVICE_INDUSTRY",
+        "reservation",
+        true,
+        "mobile_app"
+      ]
+    ],
+    "retail": [
+      [
+        "item-view",
+        "GENERAL",
+        "product",
+        false,
+        "web"
+      ],
+      [
+        "add-to-cart",
+        "COMMERCE",
+        "product",
+        false,
+        "web"
+      ],
+      [
+        "purchase",
+        "COMMERCE",
+        "product",
+        true,
+        "web"
+      ],
+      [
+        "add-wishlist",
+        "COMMERCE",
+        "product",
+        false,
+        "mobile_app"
+      ],
+      [
+        "user-login",
+        "GENERAL",
+        "app",
+        false,
+        "mobile_app"
+      ]
+    ],
+    "real_estate": [
+      [
+        "view-property",
+        "REAL_ESTATE",
+        "property",
+        false,
+        "web"
+      ],
+      [
+        "contact-agent",
+        "REAL_ESTATE",
+        "property",
+        true,
+        "web"
+      ],
+      [
+        "request-property-tour",
+        "REAL_ESTATE",
+        "property",
+        false,
+        "mobile_app"
+      ]
+    ],
+    "healthcare": [
+      [
+        "search-provider",
+        "SERVICE_INDUSTRY",
+        "provider",
+        false,
+        "web"
+      ],
+      [
+        "book-appointment",
+        "SERVICE_INDUSTRY",
+        "appointment",
+        true,
+        "web"
+      ],
+      [
+        "start-telehealth",
+        "SERVICE_INDUSTRY",
+        "appointment",
+        true,
+        "mobile_app"
+      ],
+      [
+        "refill-prescription",
+        "SERVICE_INDUSTRY",
+        "prescription",
+        true,
+        "mobile_app"
+      ]
+    ],
+    "education": [
+      [
+        "enroll-course",
+        "EDUCATION",
+        "course",
+        true,
+        "web"
+      ],
+      [
+        "start-course",
+        "EDUCATION",
+        "course",
+        false,
+        "web"
+      ],
+      [
+        "complete-course",
+        "EDUCATION",
+        "course",
+        false,
+        "web"
+      ],
+      [
+        "start-lesson",
+        "EDUCATION",
+        "lesson",
+        false,
+        "mobile_app"
+      ],
+      [
+        "complete-lesson",
+        "EDUCATION",
+        "lesson",
+        false,
+        "mobile_app"
+      ]
+    ]
+  },
+  "industries": [
+    [
+      "Travel & Hospitality",
+      "Airlines, hotels, OTAs, and tour operators serving leisure and business travelers."
+    ],
+    [
+      "Media & Entertainment",
+      "Streaming, publishing, music, gaming, and digital entertainment businesses."
+    ],
+    [
+      "Hospitality & Food Service",
+      "Hotels, resorts, restaurants, cafes, and food-service operators."
+    ],
+    [
+      "Retail & E-Commerce",
+      "Omni-channel retailers, marketplaces, and direct-to-consumer brands."
+    ],
+    [
+      "Real Estate",
+      "Residential and commercial property developers, agencies, and portals."
+    ],
+    [
+      "Healthcare",
+      "Providers, clinics, telehealth services, pharmacies, and wellness programs."
+    ],
+    [
+      "Education & EdTech",
+      "Online learning platforms, universities, and career upskilling providers."
+    ]
+  ],
+  "accounts": [
+    [
+      "Voyara",
+      "Travel & Hospitality"
+    ],
+    [
+      "Tripvera",
+      "Travel & Hospitality"
+    ],
+    [
+      "Roamora",
+      "Travel & Hospitality"
+    ],
+    [
+      "Journeva",
+      "Travel & Hospitality"
+    ],
+    [
+      "Streamora",
+      "Media & Entertainment"
+    ],
+    [
+      "Cinevia",
+      "Media & Entertainment"
+    ],
+    [
+      "Tunehaus",
+      "Media & Entertainment"
+    ],
+    [
+      "Playforge",
+      "Media & Entertainment"
+    ],
+    [
+      "Staywell Hotels",
+      "Hospitality & Food Service"
+    ],
+    [
+      "Dinevera",
+      "Hospitality & Food Service"
+    ],
+    [
+      "TableAndThyme",
+      "Hospitality & Food Service"
+    ],
+    [
+      "Feastline",
+      "Hospitality & Food Service"
+    ],
+    [
+      "UrbanNest",
+      "Retail & E-Commerce"
+    ],
+    [
+      "MarketSpring",
+      "Retail & E-Commerce"
+    ],
+    [
+      "Cartiva",
+      "Retail & E-Commerce"
+    ],
+    [
+      "Shopora",
+      "Retail & E-Commerce"
+    ],
+    [
+      "TerraPeak",
+      "Real Estate"
+    ],
+    [
+      "Propella",
+      "Real Estate"
+    ],
+    [
+      "Estatera",
+      "Real Estate"
+    ],
+    [
+      "Landora",
+      "Real Estate"
+    ],
+    [
+      "Wellvia",
+      "Healthcare"
+    ],
+    [
+      "Carepoint",
+      "Healthcare"
+    ],
+    [
+      "Mediora",
+      "Healthcare"
+    ],
+    [
+      "Healthspring",
+      "Healthcare"
+    ],
+    [
+      "NexaLearn",
+      "Education & EdTech"
+    ],
+    [
+      "BrightForge",
+      "Education & EdTech"
+    ],
+    [
+      "Skillora",
+      "Education & EdTech"
+    ],
+    [
+      "Learnova",
+      "Education & EdTech"
+    ]
+  ],
+  "lead_sources": [
+    [
+      "Website Contact Form",
+      "Inbound leads from the corporate website."
+    ],
+    [
+      "Trade Show",
+      "Leads captured at industry conferences/booths."
+    ],
+    [
+      "Referral Partner",
+      "Leads referred by an existing customer or partner."
+    ],
+    [
+      "Cold Outreach",
+      "Outbound SDR prospecting (email/call)."
+    ],
+    [
+      "Paid Search",
+      "Leads from Google/Bing search ads."
+    ]
+  ],
+  "campaigns": [
+    [
+      "Travel Seasonal Booking - Google UAC",
+      "TRAVEL-BOOK-GOOG-001",
+      "Active",
+      "Paid Search",
+      "Google",
+      "Conversions",
+      250000000,
+      -60,
+      30,
+      "google",
+      "cpc"
+    ],
+    [
+      "Retail Mega Sale - Meta Retargeting",
+      "RETAIL-MEGA-META-002",
+      "Active",
+      "Paid Social",
+      "Meta",
+      "Conversions",
+      320000000,
+      -45,
+      15,
+      "meta",
+      "paid_social"
+    ],
+    [
+      "Real Estate Awareness - TikTok",
+      "RE-AWARE-TIKTOK-003",
+      "Active",
+      "Paid Social",
+      "TikTok",
+      "Awareness",
+      180000000,
+      -30,
+      60,
+      "tiktok",
+      "paid_social"
+    ],
+    [
+      "Hospitality Dining Discovery - Zalo Ads",
+      "HOSP-DINING-ZALO-004",
+      "Paused",
+      "Paid Social",
+      "Zalo",
+      "Leads",
+      150000000,
+      -90,
+      -10,
+      "zalo",
+      "paid_social"
+    ],
+    [
+      "Media Premium Streaming - Adjust Retargeting",
+      "MEDIA-RET-ADJ-005",
+      "Active",
+      "Push Notification",
+      "Adjust",
+      "Retention",
+      180000000,
+      -20,
+      40,
+      "adjust",
+      "push"
+    ],
+    [
+      "Retail Email Re-engagement",
+      "RETAIL-EMAIL-006",
+      "Completed",
+      "Email",
+      "Google",
+      "Conversions",
+      80000000,
+      -120,
+      -30,
+      "email",
+      "email"
+    ],
+    [
+      "Healthcare Preventive Care - C360 Tracker",
+      "HEALTHCARE-C360-007",
+      "Active",
+      "Owned Media",
+      "C360Tracker",
+      "Engagement",
+      140000000,
+      -25,
+      60,
+      "c360_tracker",
+      "owned"
+    ],
+    [
+      "Travel Recovery - Google Performance Max",
+      "TRAVEL-PMAX-008",
+      "Draft",
+      "Paid Search",
+      "Google",
+      "Conversions",
+      400000000,
+      5,
+      90,
+      "google",
+      "pmax"
+    ]
+  ],
+  "lead_first_names": [
+    "Minh",
+    "Linh",
+    "Huy",
+    "Trang",
+    "Khoa",
+    "My",
+    "Duc",
+    "Anh",
+    "Hoa",
+    "Tuan",
+    "Thao",
+    "Nam",
+    "Phuong",
+    "Quang",
+    "Vy",
+    "Long",
+    "Emma",
+    "Noah",
+    "Olivia",
+    "Liam",
+    "Sophia",
+    "Mason",
+    "Ava",
+    "Ethan",
+    "Amelia",
+    "James",
+    "Chloe",
+    "Benjamin",
+    "Harper",
+    "Lucas",
+    "Mia",
+    "Henry",
+    "Luca",
+    "Sofia",
+    "Mateo",
+    "Elena",
+    "Hugo",
+    "Nora",
+    "Marta",
+    "Leo",
+    "Ines",
+    "Jonas",
+    "Clara",
+    "Felix",
+    "Anna",
+    "Theo",
+    "Mila",
+    "Arthur",
+    "Alex",
+    "Daniel",
+    "Maria",
+    "David",
+    "Laura",
+    "Samuel",
+    "Julia",
+    "Max"
+  ],
+  "lead_last_names": [
+    "Nguyen",
+    "Tran",
+    "Le",
+    "Pham",
+    "Hoang",
+    "Vo",
+    "Bui",
+    "Dang",
+    "Do",
+    "Ho",
+    "Ngo",
+    "Duong",
+    "Phan",
+    "Vu",
+    "Huynh",
+    "Truong",
+    "Smith",
+    "Johnson",
+    "Williams",
+    "Brown",
+    "Jones",
+    "Miller",
+    "Davis",
+    "Wilson",
+    "Anderson",
+    "Taylor",
+    "Thomas",
+    "Moore",
+    "Jackson",
+    "Martin",
+    "Thompson",
+    "White",
+    "Schmidt",
+    "Rossi",
+    "Novak",
+    "Dubois",
+    "Kovacs",
+    "Muller",
+    "Garcia",
+    "Silva",
+    "Moreau",
+    "Ionescu",
+    "Laurent",
+    "Fischer",
+    "Weber",
+    "Costa",
+    "Santos",
+    "Bianchi",
+    "Morgan",
+    "Carter",
+    "Parker",
+    "Bennett",
+    "Cooper",
+    "Reed"
+  ],
+  "vn_profile_first_names": [
+    "Minh",
+    "Linh",
+    "Huy",
+    "Trang",
+    "Khoa",
+    "My",
+    "Duc",
+    "Anh",
+    "Hoa",
+    "Tuan",
+    "Thao",
+    "Nam",
+    "Phuong",
+    "Quang",
+    "Vy",
+    "Long",
+    "Nhi",
+    "Thuy",
+    "Dat",
+    "Mai",
+    "Bao",
+    "Son",
+    "Hung",
+    "Lan"
+  ],
+  "vn_profile_last_names": [
+    "Nguyen",
+    "Tran",
+    "Le",
+    "Pham",
+    "Hoang",
+    "Vo",
+    "Bui",
+    "Dang",
+    "Do",
+    "Ho",
+    "Ngo",
+    "Duong",
+    "Phan",
+    "Vu",
+    "Huynh",
+    "Truong",
+    "Dang",
+    "Dinh",
+    "Mai",
+    "Ta",
+    "Cao",
+    "Ly"
+  ],
+  "eu_profile_first_names": [
+    "Luca",
+    "Sofia",
+    "Mateo",
+    "Elena",
+    "Hugo",
+    "Nora",
+    "Marta",
+    "Leo",
+    "Ines",
+    "Jonas",
+    "Clara",
+    "Felix",
+    "Anna",
+    "Theo",
+    "Mila",
+    "Arthur",
+    "Louis",
+    "Amelie",
+    "Marco",
+    "Giulia",
+    "Lorenzo",
+    "Chiara",
+    "Nicolas",
+    "Emma",
+    "Freya",
+    "Oscar"
+  ],
+  "eu_profile_last_names": [
+    "Rossi",
+    "Novak",
+    "Schmidt",
+    "Dubois",
+    "Kovacs",
+    "Muller",
+    "Garcia",
+    "Silva",
+    "Moreau",
+    "Ionescu",
+    "Laurent",
+    "Fischer",
+    "Weber",
+    "Costa",
+    "Santos",
+    "Bianchi",
+    "Martin",
+    "Bernard",
+    "Fontana",
+    "Romano",
+    "Lefevre",
+    "Petrov",
+    "Horvat",
+    "Keller"
+  ],
+  "us_profile_first_names": [
+    "Emma",
+    "Olivia",
+    "Ava",
+    "Liam",
+    "Noah",
+    "Mason",
+    "Amelia",
+    "James",
+    "Ethan",
+    "Chloe",
+    "Sophia",
+    "Jackson",
+    "Mia",
+    "Lucas",
+    "Harper",
+    "Benjamin",
+    "Ella",
+    "Alexander",
+    "Evelyn",
+    "Daniel",
+    "Scarlett",
+    "Henry",
+    "Grace",
+    "Michael",
+    "Lily",
+    "William",
+    "Emily"
+  ],
+  "us_profile_last_names": [
+    "Smith",
+    "Johnson",
+    "Williams",
+    "Brown",
+    "Jones",
+    "Miller",
+    "Davis",
+    "Wilson",
+    "Anderson",
+    "Taylor",
+    "Thomas",
+    "Moore",
+    "Jackson",
+    "Martin",
+    "Thompson",
+    "White",
+    "Harris",
+    "Clark",
+    "Lewis",
+    "Walker",
+    "Hall",
+    "Allen",
+    "Young",
+    "King"
+  ],
+  "platform_profile": {
+    "Google": [
+      [
+        8000,
+        40000
+      ],
+      0.045,
+      0.08,
+      1200000
+    ],
+    "Meta": [
+      [
+        15000,
+        60000
+      ],
+      0.018,
+      0.05,
+      900000
+    ],
+    "TikTok": [
+      [
+        20000,
+        80000
+      ],
+      0.012,
+      0.03,
+      600000
+    ],
+    "Zalo": [
+      [
+        5000,
+        25000
+      ],
+      0.025,
+      0.06,
+      800000
+    ],
+    "Adjust": [
+      [
+        3000,
+        15000
+      ],
+      0.06,
+      0.15,
+      500000
+    ],
+    "C360Tracker": [
+      [
+        10000,
+        55000
+      ],
+      0.035,
+      0.09,
+      750000
+    ],
+    "YouTube": [
+      [
+        30000,
+        120000
+      ],
+      0.005,
+      0.015,
+      1500000
+    ]
+  },
+  "default_profile": [
+    [
+      5000,
+      20000
+    ],
+    0.03,
+    0.05,
+    700000
+  ],
+  "ai_agent_models": [
+    {
+      "agent_code": "churn_prediction_v2",
+      "display_name": "XGBoost Churn Predictor",
+      "description": "Calculates the probability of a customer churning in the next 30 days based on engagement drop-offs.",
+      "model_type": "classification",
+      "status": "ACTIVE",
+      "schedule_definition": "0 2 * * *",
+      "input_features": [
+        "last_activity_at",
+        "total_spend",
+        "support_tickets_count"
+      ],
+      "hyperparameters": {
+        "max_depth": 6,
+        "learning_rate": 0.1,
+        "objective": "binary:logistic"
+      }
+    },
+    {
+      "agent_code": "clv_regression_v1",
+      "display_name": "Customer Lifetime Value (90-Day)",
+      "description": "Predicts total revenue a customer will generate over the next 90 days.",
+      "model_type": "regression",
+      "status": "ACTIVE",
+      "schedule_definition": "0 3 * * 0",
+      "input_features": [
+        "historical_clv",
+        "average_order_value",
+        "purchase_frequency"
+      ],
+      "hyperparameters": {
+        "algorithm": "random_forest_regressor",
+        "n_estimators": 100
+      }
+    },
+    {
+      "agent_code": "b2b_lead_scoring_rules",
+      "display_name": "B2B Lead Scoring Engine",
+      "description": "Rule-based engine assigning points for email opens, website visits, and job titles.",
+      "model_type": "rules_engine",
+      "status": "ACTIVE",
+      "schedule_definition": "*/15 * * * *",
+      "input_features": [
+        "email_opens",
+        "website_visits",
+        "job_title"
+      ],
+      "hyperparameters": {
+        "weights": {
+          "email_opens": 2,
+          "website_visits": 5,
+          "c_level_title": 20
+        }
+      }
+    },
+    {
+      "agent_code": "cx_sentiment_llm_v1",
+      "display_name": "Customer Experience & Sentiment Analyzer",
+      "description": "Generative LLM pipeline scoring customer sentiment and feedback risk from interaction logs.",
+      "model_type": "generative_llm",
+      "status": "ACTIVE",
+      "schedule_definition": "0 * * * *",
+      "input_features": [
+        "feedback_text",
+        "support_notes",
+        "chat_transcripts"
+      ],
+      "hyperparameters": {
+        "temperature": 0.2,
+        "model_name": "gpt-4o-mini"
+      }
+    },
+    {
+      "agent_code": "data_quality_cir_confidence",
+      "display_name": "Identity Resolution Confidence Model",
+      "description": "Evaluates profile completeness, identifier uniqueness, and CIR resolution confidence.",
+      "model_type": "classification",
+      "status": "ACTIVE",
+      "schedule_definition": "0 1 * * *",
+      "input_features": [
+        "email_normalized",
+        "phone_normalized",
+        "device_count"
+      ],
+      "hyperparameters": {
+        "threshold": 0.85
+      }
+    }
+  ],
+  "domain_transaction_catalog": {
+    "travel": [
+      [
+        "OTA",
+        "booking",
+        "booking",
+        "Travel Booking",
+        [
+          1000000,
+          15000000
+        ],
+        "mobile_app"
+      ],
+      [
+        "Airline",
+        "ticket_purchase",
+        "flight",
+        "Airline Ticket",
+        [
+          1500000,
+          25000000
+        ],
+        "web"
+      ]
+    ],
+    "media": [
+      [
+        "StreamingPlatform",
+        "subscription",
+        "subscription",
+        "Media Subscription",
+        [
+          50000,
+          500000
+        ],
+        "mobile_app"
+      ],
+      [
+        "StreamingPlatform",
+        "pay_per_view",
+        "content",
+        "Premium Content Access",
+        [
+          30000,
+          250000
+        ],
+        "web"
+      ]
+    ],
+    "hospitality": [
+      [
+        "HotelPMS",
+        "room_booking",
+        "reservation",
+        "Hotel Reservation",
+        [
+          800000,
+          12000000
+        ],
+        "web"
+      ],
+      [
+        "RestaurantPOS",
+        "meal_purchase",
+        "restaurant",
+        "Restaurant Order",
+        [
+          100000,
+          3000000
+        ],
+        "mobile_app"
+      ]
+    ],
+    "retail": [
+      [
+        "POS",
+        "purchase",
+        "product",
+        "Retail Store Purchase",
+        [
+          100000,
+          2000000
+        ],
+        "pos"
+      ],
+      [
+        "WebStore",
+        "purchase",
+        "product",
+        "Online Order",
+        [
+          150000,
+          3000000
+        ],
+        "web"
+      ]
+    ],
+    "real_estate": [
+      [
+        "PropertyPortal",
+        "property_inquiry",
+        "property",
+        "Property Inquiry",
+        [
+          1000000000,
+          5000000000
+        ],
+        "web"
+      ],
+      [
+        "PropertyPortal",
+        "reservation_fee",
+        "property",
+        "Property Reservation Fee",
+        [
+          5000000,
+          100000000
+        ],
+        "mobile_app"
+      ]
+    ],
+    "healthcare": [
+      [
+        "ClinicPortal",
+        "appointment",
+        "appointment",
+        "Care Appointment",
+        [
+          200000,
+          3000000
+        ],
+        "web"
+      ],
+      [
+        "Pharmacy",
+        "prescription_refill",
+        "prescription",
+        "Prescription Refill",
+        [
+          100000,
+          2000000
+        ],
+        "mobile_app"
+      ]
+    ],
+    "education": [
+      [
+        "LearningPlatform",
+        "course_enrollment",
+        "course",
+        "Course Enrollment",
+        [
+          500000,
+          5000000
+        ],
+        "web"
+      ],
+      [
+        "LearningPlatform",
+        "tuition_payment",
+        "course",
+        "Tuition Payment",
+        [
+          1000000,
+          15000000
+        ],
+        "web"
+      ],
+      [
+        "LearningPlatform",
+        "certification_fee",
+        "certificate",
+        "Certification Exam Fee",
+        [
+          300000,
+          3000000
+        ],
+        "mobile_app"
+      ]
+    ]
+  },
+  "contact_master_link_accounts": [
+    [
+      "travel_account_1",
+      0,
+      "travel",
+      0
+    ],
+    [
+      "media_account_1",
+      1,
+      "media",
+      0
+    ],
+    [
+      "hospitality_account_1",
+      2,
+      "hospitality",
+      0
+    ],
+    [
+      "retail_account_1",
+      3,
+      "retail",
+      0
+    ],
+    [
+      "real_estate_account_1",
+      4,
+      "real_estate",
+      0
+    ],
+    [
+      "healthcare_account_1",
+      5,
+      "healthcare",
+      0
+    ],
+    [
+      "education_account_1",
+      6,
+      "education",
+      0
+    ]
+  ],
+  "domain_preferred_channels": {
+    "travel": [
+      "Airline App",
+      "OTA Website",
+      "Mobile App"
+    ],
+    "media": [
+      "Streaming App",
+      "Website",
+      "Mobile App"
+    ],
+    "hospitality": [
+      "Hotel App",
+      "Restaurant App",
+      "Website",
+      "In-Person"
+    ],
+    "retail": [
+      "Mobile App",
+      "Website",
+      "Store Visit"
+    ],
+    "real_estate": [
+      "Property Portal",
+      "Mobile App",
+      "Office Visit"
+    ],
+    "healthcare": [
+      "Patient Portal",
+      "Mobile App",
+      "Clinic Visit",
+      "Telehealth"
+    ],
+    "education": [
+      "Learning Platform",
+      "Mobile App",
+      "Website",
+      "Instructor Portal"
+    ]
+  },
+  "lifecycle_stages": [
+    "prospect",
+    "lead",
+    "customer",
+    "vip",
+    "dormant",
+    "churn_risk"
+  ],
+  "occupations": [
+    "engineer",
+    "teacher",
+    "business_owner",
+    "student",
+    "civil_servant",
+    "sales_professional"
+  ],
+  "income_segments": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "cities": [
+    "Ho Chi Minh City",
+    "Hanoi",
+    "Da Nang",
+    "Can Tho"
+  ],
+  "domain_clv_config": {
+    "travel": {
+      "multiplier": 2,
+      "high": 6000,
+      "medium": 2000
+    },
+    "media": {
+      "multiplier": 1,
+      "high": 2500,
+      "medium": 800
+    },
+    "hospitality": {
+      "multiplier": 2,
+      "high": 5000,
+      "medium": 1800
+    },
+    "retail": {
+      "multiplier": 1,
+      "high": 3000,
+      "medium": 1000
+    },
+    "real_estate": {
+      "multiplier": 5,
+      "high": 25000,
+      "medium": 8000
+    },
+    "healthcare": {
+      "multiplier": 3,
+      "high": 7000,
+      "medium": 2500
+    },
+    "education": {
+      "multiplier": 3,
+      "high": 7000,
+      "medium": 2500
+    }
+  },
+  "icp_archetypes": [
+    {
+      "domain": "travel",
+      "persona_code": "travel_luxury_getaway_enthusiast_2026q4",
+      "persona_name": "Luxury Getaway Enthusiast -- Q4 2026 Peak Season Package",
+      "persona_category": "Champion",
+      "product": "Premium All-Inclusive Getaway",
+      "campaign_period": "2026-10-01 to 2026-12-31",
+      "persona_summary": "ICP for the Q4 2026 peak-season premium getaway package: high-spend travelers booking all-inclusive luxury trips.",
+      "centroid": {
+        "behavior": 80,
+        "engagement": 75,
+        "financial": 88,
+        "loyalty": 70,
+        "relationship": 60,
+        "risk": 10
+      }
+    },
+    {
+      "domain": "travel",
+      "persona_code": "travel_budget_backpacker_explorer_2026",
+      "persona_name": "Budget Backpacker Explorer -- 2026 City-Break Package",
+      "persona_category": "Growth Potential",
+      "product": "Budget City-Break Package",
+      "campaign_period": "2026-01-01 to 2026-12-31",
+      "persona_summary": "ICP for the 2026 budget city-break package: frequent but low-spend independent travelers.",
+      "centroid": {
+        "behavior": 70,
+        "engagement": 60,
+        "financial": 30,
+        "loyalty": 35,
+        "relationship": 30,
+        "risk": 25
+      }
+    },
+    {
+      "domain": "media",
+      "persona_code": "media_premium_streaming_bingewatcher_2026q3",
+      "persona_name": "Premium Streaming Binge-Watcher -- Q3 2026 Ad-Free Launch",
+      "persona_category": "Champion",
+      "product": "Premium Ad-Free Streaming Tier",
+      "campaign_period": "2026-07-01 to 2026-09-30",
+      "persona_summary": "ICP for the Q3 2026 premium ad-free tier launch: daily, high-watch-time subscribers upgrading away from ads.",
+      "centroid": {
+        "behavior": 85,
+        "engagement": 92,
+        "financial": 55,
+        "loyalty": 65,
+        "relationship": 45,
+        "risk": 15
+      }
+    },
+    {
+      "domain": "media",
+      "persona_code": "media_casual_ad_supported_viewer_2026",
+      "persona_name": "Casual Ad-Supported Viewer -- 2026 Basic Tier",
+      "persona_category": "Growth Potential",
+      "product": "Ad-Supported Basic Tier",
+      "campaign_period": "2026-01-01 to 2026-12-31",
+      "persona_summary": "ICP for the 2026 ad-supported basic tier: infrequent, price-sensitive viewers with light watch time.",
+      "centroid": {
+        "behavior": 40,
+        "engagement": 40,
+        "financial": 20,
+        "loyalty": 30,
+        "relationship": 20,
+        "risk": 20
+      }
+    },
+    {
+      "domain": "hospitality",
+      "persona_code": "hospitality_resort_loyalist_2026",
+      "persona_name": "Resort Experience Loyalist -- 2026 Premium Stay Program",
+      "persona_category": "Champion",
+      "product": "Premium Resort and Dining Experiences",
+      "campaign_period": "2026-01-01 to 2026-12-31",
+      "persona_summary": "ICP for premium resort and dining experiences: repeat guests with high engagement, strong loyalty, and elevated spend.",
+      "centroid": {
+        "behavior": 78,
+        "engagement": 80,
+        "financial": 82,
+        "loyalty": 88,
+        "relationship": 70,
+        "risk": 12
+      }
+    },
+    {
+      "domain": "hospitality",
+      "persona_code": "hospitality_value_diner_2026",
+      "persona_name": "Value-Seeking Diner -- 2026 Local Discovery",
+      "persona_category": "Growth Potential",
+      "product": "Local Dining Discovery Program",
+      "campaign_period": "2026-01-01 to 2026-12-31",
+      "persona_summary": "ICP for local dining discovery: price-aware guests who browse frequently and convert when offers match their preferences.",
+      "centroid": {
+        "behavior": 58,
+        "engagement": 62,
+        "financial": 42,
+        "loyalty": 48,
+        "relationship": 55,
+        "risk": 22
+      }
+    },
+    {
+      "domain": "retail",
+      "persona_code": "retail_gen_z_sneaker_collector_2026h2",
+      "persona_name": "Gen Z Sneaker Collector -- Q3-Q4 2026 Sneaker Drop",
+      "persona_category": "Champion",
+      "product": "Limited-Edition Sneaker Drops",
+      "campaign_period": "2026-07-01 to 2026-12-31",
+      "persona_summary": "ICP for the H2 2026 limited-edition sneaker drop campaign: highly engaged Gen Z shoppers who buy frequently via the mobile app and chase every new release.",
+      "centroid": {
+        "behavior": 85,
+        "engagement": 90,
+        "financial": 55,
+        "loyalty": 65,
+        "relationship": 55,
+        "risk": 20
+      }
+    },
+    {
+      "domain": "retail",
+      "persona_code": "retail_household_essentials_loyalist_2026h2",
+      "persona_name": "Household Essentials Loyalist -- H2 2026 Subscribe & Save",
+      "persona_category": "Growth Potential",
+      "product": "Everyday Essentials Subscription",
+      "campaign_period": "2026-07-01 to 2026-12-31",
+      "persona_summary": "ICP for the H2 2026 Subscribe & Save program: steady repeat buyers of everyday essentials, moderate spend, strong loyalty-program participation.",
+      "centroid": {
+        "behavior": 60,
+        "engagement": 55,
+        "financial": 70,
+        "loyalty": 85,
+        "relationship": 60,
+        "risk": 15
+      }
+    },
+    {
+      "domain": "real_estate",
+      "persona_code": "real_estate_luxury_condo_investor_2026q4",
+      "persona_name": "Luxury Condo Investor -- Q4 2026 Riverside Launch",
+      "persona_category": "Champion",
+      "product": "Riverside Luxury Condo Launch",
+      "campaign_period": "2026-10-01 to 2026-12-31",
+      "persona_summary": "ICP for the Q4 2026 riverside luxury condo launch: high-net-worth investors buying multiple premium units.",
+      "centroid": {
+        "behavior": 65,
+        "engagement": 55,
+        "financial": 95,
+        "loyalty": 60,
+        "relationship": 55,
+        "risk": 12
+      }
+    },
+    {
+      "domain": "real_estate",
+      "persona_code": "real_estate_first_time_homebuyer_2026",
+      "persona_name": "First-Time Homebuyer -- 2026 Mortgage Program",
+      "persona_category": "Growth Potential",
+      "product": "First-Time Homebuyer Mortgage Program",
+      "campaign_period": "2026-01-01 to 2026-12-31",
+      "persona_summary": "ICP for the 2026 first-time homebuyer mortgage program: early-career buyers purchasing their first property.",
+      "centroid": {
+        "behavior": 55,
+        "engagement": 60,
+        "financial": 40,
+        "loyalty": 45,
+        "relationship": 40,
+        "risk": 30
+      }
+    },
+    {
+      "domain": "healthcare",
+      "persona_code": "healthcare_chronic_care_patient_2026",
+      "persona_name": "Chronic Care Management Patient -- 2026 Telehealth Program",
+      "persona_category": "Champion",
+      "product": "Chronic Care Telehealth Program",
+      "campaign_period": "2026-01-01 to 2026-12-31",
+      "persona_summary": "ICP for the 2026 chronic-care telehealth program: frequent, highly engaged patients requiring ongoing remote monitoring.",
+      "centroid": {
+        "behavior": 75,
+        "engagement": 80,
+        "financial": 55,
+        "loyalty": 70,
+        "relationship": 65,
+        "risk": 35
+      }
+    },
+    {
+      "domain": "healthcare",
+      "persona_code": "healthcare_preventive_wellness_seeker_2026",
+      "persona_name": "Preventive Wellness Seeker -- 2026 Annual Checkup Package",
+      "persona_category": "Growth Potential",
+      "product": "Annual Wellness Checkup Package",
+      "campaign_period": "2026-01-01 to 2026-12-31",
+      "persona_summary": "ICP for the 2026 annual wellness checkup package: healthy, occasional visitors seeking preventive rather than acute care.",
+      "centroid": {
+        "behavior": 60,
+        "engagement": 65,
+        "financial": 50,
+        "loyalty": 55,
+        "relationship": 45,
+        "risk": 10
+      }
+    },
+    {
+      "domain": "education",
+      "persona_code": "education_enterprise_lms_sponsor_fy2026",
+      "persona_name": "Enterprise LMS Sponsor -- FY2026",
+      "persona_category": "Champion",
+      "product": "Enterprise LMS + Outcome Analytics",
+      "campaign_period": "2026-01-01 to 2026-12-31",
+      "persona_summary": "ICP for enterprise learning contracts: organizations sponsoring multi-seat upskilling programs with high lifetime value.",
+      "centroid": {
+        "behavior": 70,
+        "engagement": 65,
+        "financial": 92,
+        "loyalty": 88,
+        "relationship": 75,
+        "risk": 8
+      }
+    },
+    {
+      "domain": "education",
+      "persona_code": "education_mobile_first_exam_prep_2026",
+      "persona_name": "Mobile-First Exam Prep Learner -- 2026",
+      "persona_category": "Growth Potential",
+      "product": "Digital Exam Prep + Mentorship",
+      "campaign_period": "2026-01-01 to 2026-12-31",
+      "persona_summary": "ICP for mobile exam-prep programs: younger learners with high app engagement and growing conversion potential.",
+      "centroid": {
+        "behavior": 80,
+        "engagement": 85,
+        "financial": 45,
+        "loyalty": 50,
+        "relationship": 40,
+        "risk": 25
+      }
+    }
+  ],
+  "data_sources": [
+    {
+      "name": "Adjust Mobile Attribution",
+      "slug": "adjust-mobile-attribution",
+      "source_type": 5,
+      "status": 1,
+      "data_source_url": "https://automate.adjust.com/reports-service/report",
+      "thumbnail_url": null,
+      "collect_directly": true,
+      "first_party_data": true,
+      "journey_level": 3,
+      "journey_map_id": "journey-mobile-attribution",
+      "touchpoint_hub_id": "touchpoint-mobile-ads",
+      "security_code": "ADJ-DEMO-SECURE",
+      "total_tracked_event": 0,
+      "avg_daily_event": 0,
+      "avg_events_per_profile": 0,
+      "access_tokens": {
+        "api_token": "adjust_demo_token"
+      },
+      "data_source_hosts": [
+        "automate.adjust.com",
+        "app.adjust.com"
+      ],
+      "javascript_tags": [],
+      "qr_code_data": {},
+      "environment": {
+        "url": "C360_ADJUST_DATA_SOURCE_URL",
+        "thumbnail": "C360_ADJUST_DATA_SOURCE_THUMBNAIL_URL"
+      }
+    },
+    {
+      "name": "Google Analytics 4",
+      "slug": "google-analytics-4",
+      "source_type": 1,
+      "status": 1,
+      "data_source_url": "https://analytics.google.com",
+      "thumbnail_url": null,
+      "collect_directly": true,
+      "first_party_data": true,
+      "journey_level": 3,
+      "journey_map_id": "journey-web-analytics",
+      "touchpoint_hub_id": "touchpoint-web",
+      "security_code": "GA4-DEMO-SECURE",
+      "total_tracked_event": 0,
+      "avg_daily_event": 0,
+      "avg_events_per_profile": 0,
+      "access_tokens": {
+        "measurement_id": "G-DEMO360"
+      },
+      "data_source_hosts": [
+        "www.googletagmanager.com",
+        "www.google-analytics.com",
+        "analytics.google.com"
+      ],
+      "javascript_tags": [
+        "<script async src='https://www.googletagmanager.com/gtag/js?id=G-DEMO360'></script>",
+        "gtag('config', 'G-DEMO360')"
+      ],
+      "qr_code_data": {},
+      "environment": {
+        "url": "C360_GA4_DATA_SOURCE_URL",
+        "thumbnail": "C360_GA4_DATA_SOURCE_THUMBNAIL_URL",
+        "generate_qr": true
+      }
+    },
+    {
+      "name": "C360 Tracker",
+      "slug": "c360-tracker",
+      "source_type": 1,
+      "status": 1,
+      "data_source_url": null,
+      "thumbnail_url": null,
+      "collect_directly": true,
+      "first_party_data": true,
+      "journey_level": 3,
+      "journey_map_id": "journey-c360-tracker",
+      "touchpoint_hub_id": "touchpoint-c360-tracker",
+      "security_code": "C360-DEMO-SECURE",
+      "total_tracked_event": 0,
+      "avg_daily_event": 0,
+      "avg_events_per_profile": 0,
+      "access_tokens": {
+        "write_key": "c360_tracker_demo_key"
+      },
+      "data_source_hosts": [
+        "tracker.customer360.local"
+      ],
+      "javascript_tags": [
+        "window.c360Tracker=window.c360Tracker||{track:function(){return true;}};",
+        "c360Tracker.track('page_view', {tenant: 'demo'});"
+      ],
+      "qr_code_data": {},
+      "environment": {
+        "url": "C360_TRACKER_DATA_SOURCE_URL",
+        "thumbnail": "C360_TRACKER_DATA_SOURCE_THUMBNAIL_URL",
+        "url_fallback": "LEO_OBSERVER_TRACKING_ENDPOINT",
+        "hosts": "C360_TRACKER_DATA_SOURCE_HOSTS"
+      }
+    }
+  ],
+  "relation_types": [
+    [
+      "friend",
+      "Personal friendship between two profiles."
+    ],
+    [
+      "colleague",
+      "Coworker relationship between two profiles."
+    ],
+    [
+      "family",
+      "Family/household relationship between two profiles."
+    ],
+    [
+      "customer-contact",
+      "One profile referred or is a point of contact for another."
+    ]
+  ],
+  "persona_summary_flavors": [
+    "discovered the brand through a paid social campaign",
+    "was referred by an existing customer",
+    "signed up directly via organic search",
+    "engaged first through an offline event"
+  ],
+  "contact_definitions": [
+    [
+      "Travel & Hospitality",
+      0,
+      0
+    ],
+    [
+      "Media & Entertainment",
+      0,
+      1
+    ],
+    [
+      "Hospitality & Food Service",
+      0,
+      2
+    ],
+    [
+      "Retail & E-Commerce",
+      0,
+      3
+    ],
+    [
+      "Real Estate",
+      0,
+      4
+    ],
+    [
+      "Healthcare",
+      0,
+      5
+    ],
+    [
+      "Education & EdTech",
+      0,
+      6
+    ]
+  ],
+  "opportunity_definitions": [
+    [
+      "Travel & Hospitality",
+      0,
+      "Booking Personalization Engine",
+      600000000,
+      "closed_won",
+      -10
+    ],
+    [
+      "Media & Entertainment",
+      0,
+      "Premium Subscription Growth",
+      450000000,
+      "proposal",
+      30
+    ],
+    [
+      "Hospitality & Food Service",
+      0,
+      "Guest Experience Platform",
+      500000000,
+      "qualification",
+      60
+    ],
+    [
+      "Retail & E-Commerce",
+      0,
+      "Loyalty Program Expansion",
+      350000000,
+      "proposal",
+      30
+    ],
+    [
+      "Real Estate",
+      0,
+      "Property Journey Personalization",
+      800000000,
+      "qualification",
+      90
+    ],
+    [
+      "Healthcare",
+      0,
+      "Preventive Care Engagement",
+      550000000,
+      "negotiation",
+      45
+    ],
+    [
+      "Education & EdTech",
+      0,
+      "Learner Retention Analytics Rollout",
+      900000000,
+      "negotiation",
+      45
+    ]
+  ]
+}

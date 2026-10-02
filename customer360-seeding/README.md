@@ -10,7 +10,7 @@ UAT environments. This folder covers three separate workflows:
 | Web tracking and analytics E2E | `web_user_simulator.py` or `run_tracking_analytics_e2e.sh` | Tracking API, MinIO/S3, Dagster, PostgreSQL |
 | UAT web traffic | `uat_tracking_traffic_simulator.py` or `run_uat_tracking_traffic.sh` | UAT tracking API only |
 | API-only fresh traffic seed | `seed_api_data.py` or `./dev-c360.sh seed-new-data` | `customer360-event-api` HTTP endpoint only |
-| Backend CIR demo seed | `dev-backend-seeding/init_sample_data.py` and `dev-backend-seeding/seed_full_demo_data.py` | PostgreSQL raw-profile, CRM, relation, persona, and event fixtures |
+| Backend CIR demo seed | `dev-backend-seeding/init_sample_data.py`, `seed_full_demo_data.py`, and `seeding_content_items.py` | PostgreSQL raw-profile, CRM, relation, persona, event, and seven-domain content fixtures |
 
 The web simulator does not publish to Kafka. It sends one ordered event batch
 per synthetic user to the tracking API; the tracking service writes NDJSON to
