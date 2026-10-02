@@ -343,8 +343,8 @@ engages. Parse a trusted `X-Forwarded-For`.
 | L11 | `customer360-promotions/repository/ad_cache_utils.py:1` | File is only TODO comments — the documented Redis caching/TTLs don't exist; config TTLs unused and mismatched (60 vs 300/3600) |
 | L12 | `customer360-event-api/core/routers/tracking.py:20` | `get_storage`/`get_protection` lazily assign module singletons with no lock → cold-start race leaks a client |
 | L13 | `customer360-event-api/app.py:47` | `cdp-event-proxy.html` route registered unconditionally (unlike guarded static mounts) → 500 if the file is absent |
-| L14 | `all-data-simulator/google_analytics_faker.py:20` | `event_time` from naive `datetime.now()` emitted tz-less → mis-bucketed by host offset downstream |
-| L15 | `all-data-simulator/adjust_faker.py:401` | `MEDIA_SOURCE_CONFIG[campaign.media_source]` bare subscript on LLM output → `KeyError` crashes the run (also `:365`, `:459`) |
+| L14 | `customer360-seeding/google_analytics_faker.py:20` | `event_time` from naive `datetime.now()` emitted tz-less → mis-bucketed by host offset downstream |
+| L15 | `customer360-seeding/adjust_faker.py:401` | `MEDIA_SOURCE_CONFIG[campaign.media_source]` bare subscript on LLM output → `KeyError` crashes the run (also `:365`, `:459`) |
 | L16 | `customer360-backend/scripts/render_dagster_instance.py:68` | `s3_ready()` probes with `MINIO_ROOT_*`, but the rendered `S3ComputeLogManager` relies on `AWS_*` → probe passes, runtime upload fails |
 | L17 | `deployments/sso/bootstrap-realm.py:67` | One admin token fetched once, reused across 20+ calls whose statuses are unchecked → silent partial realm provisioning on token expiry |
 | L18 | `.../persona_engine.py:194` | `apply_persona_config` mutates ~40 module-level globals shared across instances → not thread-safe if resolutions run concurrently in-process |
@@ -362,7 +362,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 | `customer360-backend/analytics` | — | 732 | H8 · M7–M9 |
 | `customer360-backend/segmentation` | — | 627 | H9 · M10 |
 | `customer360-backend` (other Dagster + scripts) | — | ~475 | M22,M24 · L16 |
-| `all-data-simulator` | 5 | 1,376 | L14,L15 |
+| `customer360-seeding` | 5 | 1,376 | L14,L15 |
 | `deployments` + `customer360-frontend` | 4 | 653 | M23 · L17 |
 
 \* excludes the vendored `.venv`.
@@ -371,7 +371,7 @@ engages. Parse a trusted `X-Forwarded-For`.
 
 ## 7. Methodology & scope
 
-- **Scope:** every `*.py` under `customer360-promotions/`, `all-data-simulator/`, `customer360-backend/`,
+- **Scope:** every `*.py` under `customer360-promotions/`, `customer360-seeding/`, `customer360-backend/`,
   `customer360-api/` (excluding `.venv`), `customer360-event-api/`, `deployments/`, `customer360-frontend/`.
   Tests were read for context but are not the review target.
 - **Approach:** the code was partitioned across six parallel reviewers, each applying ten

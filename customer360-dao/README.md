@@ -1,8 +1,8 @@
 # LEO Customer 360 DAO
 
 `leo-customer360-dao` is the shared Python package for Customer 360 database
-access. It is the persistence boundary used by `customer360-api` and the
-Dagster services under `customer360-backend`.
+access and reusable data-adjacent engines. It is the persistence boundary used
+by `customer360-api` and the Dagster services under `customer360-backend`.
 
 The package owns:
 
@@ -13,11 +13,11 @@ The package owns:
 - PostgreSQL row-level-security session context
 - S3 event-lake query support used by profile analytics
 - SQL safety, date, password, and optional Redis-cache utilities
+- Reusable persona naming and resolution engines under `agentic_engines/`
 
-It does not own FastAPI routers, HTTP middleware, Dagster orchestration, AI
-providers, SMTP health checks, or campaign-draft planning. Those remain in
-`customer360-api` because they are application services rather than reusable
-data access code.
+It does not own FastAPI routers, HTTP middleware, Dagster orchestration, SMTP
+health checks, or campaign-draft planning. Those remain in the application
+services because they are not reusable data-access or data-adjacent logic.
 
 ## Requirements
 
@@ -108,6 +108,7 @@ customer360-dao/
       models/
       repositories/
       schemas/
+      agentic_engines/
       utils/
     tests/
 ```

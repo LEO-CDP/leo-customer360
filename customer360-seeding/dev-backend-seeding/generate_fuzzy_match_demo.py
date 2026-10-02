@@ -13,22 +13,18 @@ values using the pg_trgm similarity() function (threshold 0.6 for address,
 Safe to re-run: idempotent upsert by tenant_id + email/phone.
 """
 
-import hashlib
 import logging
 import os
 import random
-import sys
 import uuid
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import Json
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from identity_resolution.rls import set_tenant_context  # noqa: E402
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
+from utils import HASHED_PII_FIELDS, hash_pii
 
 load_dotenv()
 
@@ -50,17 +46,6 @@ SOURCE_SLUGS = {
     "OneSignal": "c360-tracker",
     "WebTracking": "google-analytics-4",
 }
-
-HASHED_PII_FIELDS = ("full_name", "email", "phone_number", "national_id")
-
-
-def hash_pii(value):
-    """SHA-256 hash of normalized PII."""
-    if value is None:
-        return None
-    normalized = str(value).strip().lower()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
 
 # Vietnamese cities (major ones)
 CITIES = ("Ho Chi Minh", "Hanoi", "Da Nang", "Can Tho", "Hai Phong")
@@ -307,6 +292,8 @@ def _table(name: str) -> str:
 
 def main() -> None:
     """Generate and seed fuzzy-match demo data."""
+    conn = None
+    cursor = None
     try:
         conn = psycopg2.connect(
             host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT
@@ -328,12 +315,14 @@ def main() -> None:
         logger.info("  Address fuzzy-match threshold: 0.60")
         logger.info("  Company fuzzy-match threshold: 0.65")
         
-    except Exception as e:
-        logger.error(f"Error: {e}")
+    except Exception:
+        logger.exception("Failed to seed fuzzy-match demo data.")
         raise
     finally:
-        cursor.close()
-        conn.close()
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
 
 
 if __name__ == "__main__":

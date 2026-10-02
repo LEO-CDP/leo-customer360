@@ -1,10 +1,9 @@
-"""Unit tests for identity_resolution.persona_engine (the AI-native Customer
+"""Unit tests for the shared persona engine (the AI-native Customer
 Persona Resolution Engine: identity *understanding* on top of identity
 *matching*).
 
 Pure scoring/computation functions are tested directly (no DB, no mocks).
-PersonaResolutionEngine is tested the same way as
-identity_resolution.resolver.CustomerIdentityResolver in test_resolver.py:
+PersonaResolutionEngine is tested with the shared cursor/connection fixtures:
 psycopg2 cursor/connection are mocked via the `mock_cursor`/`mock_conn`
 fixtures in conftest.py.
 """
@@ -13,8 +12,8 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from identity_resolution import persona
-from identity_resolution.persona_engine import (
+from leo_customer360_dao.agentic_engines import persona
+from leo_customer360_dao.agentic_engines.persona_engine import (
     PERSONA_CONFIG_DEFAULTS,
     PersonaResolutionEngine,
     apply_persona_config,

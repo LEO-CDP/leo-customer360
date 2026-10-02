@@ -1,6 +1,9 @@
-"""Small database fakes shared by DAO repository tests."""
+"""Shared database fakes and cursor fixtures for DAO tests."""
 
+from unittest.mock import MagicMock
 from typing import Any, Optional
+
+import pytest
 
 
 class FakeQueryResult:
@@ -28,3 +31,20 @@ class FakeDBSession:
         if self.script:
             return self.script.pop(0)
         return FakeQueryResult(None)
+
+
+@pytest.fixture
+def mock_cursor() -> MagicMock:
+    """A MagicMock standing in for a psycopg2 cursor."""
+    return MagicMock()
+
+
+@pytest.fixture
+def mock_conn(mock_cursor: MagicMock) -> MagicMock:
+    """A MagicMock connection whose cursor context yields ``mock_cursor``."""
+    conn = MagicMock()
+    cursor_context = MagicMock()
+    cursor_context.__enter__.return_value = mock_cursor
+    cursor_context.__exit__.return_value = False
+    conn.cursor.return_value = cursor_context
+    return conn

@@ -16,8 +16,8 @@ from psycopg2.extras import RealDictCursor
 
 from identity_resolution.resolver import CustomerIdentityResolver
 from identity_resolution.profile_event_projection import MasterProfileEventProjector
-from identity_resolution.persona_engine import PersonaResolutionEngine
-from identity_resolution.rls import set_tenant_context
+from leo_customer360_dao.agentic_engines.persona_engine import PersonaResolutionEngine
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
 
 _BACKEND_SYSTEM_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

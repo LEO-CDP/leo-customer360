@@ -703,7 +703,7 @@ def get_resolution_status(db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=404,
             detail="cdp_id_resolution_status has not been initialized yet "
-            "(run customer360-backend/identity_resolution/scripts/init_sample_data.py).",
+            "(run customer360-seeding/dev-backend-seeding/init_sample_data.py).",
         )
     return obj
 

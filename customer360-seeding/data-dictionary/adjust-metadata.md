@@ -2,12 +2,12 @@
 
 ## 1. Muc tieu tai lieu
 
-Tai lieu nay mo ta metadata cho nguon du lieu Adjust trong all-data-simulator,
+Tai lieu nay mo ta metadata cho nguon du lieu Adjust trong customer360-seeding,
 duoc dung de nap vao he thong Customer 360 va phuc vu CIR.
 
 Phien ban nay da duoc cap nhat de dong bo voi:
-- all-data-simulator/data-dictionary/adjust-dictionary.csv
-- all-data-simulator/adjust_faker.py
+- customer360-seeding/data-dictionary/adjust-dictionary.csv
+- customer360-seeding/adjust_faker.py
 
 Luu y quan trong:
 - adjust-dictionary.csv la source of truth cho danh sach field.
@@ -95,10 +95,10 @@ Luu y chat luong du lieu:
 
 ## 6. Cac file lien quan trong repo
 
-- all-data-simulator/data-dictionary/adjust-dictionary.csv
-- all-data-simulator/adjust_faker.py
+- customer360-seeding/data-dictionary/adjust-dictionary.csv
+- customer360-seeding/adjust_faker.py
 - customer360-backend/identity_resolution/identity_resolution/resolver.py
-- customer360-backend/identity_resolution/scripts/init_sample_data.py
+- customer360-seeding/dev-backend-seeding/init_sample_data.py
 
 ## 7. Ket luan
 

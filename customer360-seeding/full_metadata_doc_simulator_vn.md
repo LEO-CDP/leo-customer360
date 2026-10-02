@@ -37,7 +37,7 @@ header-includes: |
 
 ## Tóm tắt
 
-Tài liệu này là hợp đồng metadata cho `all-data-simulator/full_raw_data_simulator.py`.
+Tài liệu này là hợp đồng metadata cho `customer360-seeding/full_raw_data_simulator.py`.
 Tài liệu mô tả nền tảng nguồn được đại diện bởi từng dataset, schema CSV được sinh ra,
 kiểu dữ liệu và ý nghĩa của từng field, giá trị định danh, cũng như khác biệt giữa
 payload thực tế của nền tảng và biểu diễn test dạng phẳng của trình mô phỏng này.
@@ -105,8 +105,8 @@ Merge customer identities}}
 | Random seed | `42` |
 | Encoding CSV | `utf-8-sig` (UTF-8 có BOM) |
 | Chế độ xuống dòng CSV | `newline=""` |
-| Thư mục output | `all-data-simulator/platform_cir_csv/` |
-| ZIP archive | `platform_cir_api_csv_simulated.zip` trong thư mục `all-data-simulator/` |
+| Thư mục output | `customer360-seeding/platform_cir_csv/` |
+| ZIP archive | `platform_cir_api_csv_simulated.zip` trong thư mục `customer360-seeding/` |
 | Nội dung ZIP | Năm file CSV được sinh ra, lưu bằng basename |
 | Dictionary key bị thiếu | Bị bỏ qua bởi `csv.DictWriter` vì `extrasaction="ignore"` |
 
@@ -567,12 +567,12 @@ Pull API canonical đã chọn.
 ## 9. Thuật toán CIR liên nền tảng
 
 Phần này mô tả thuật toán tham chiếu trong
-`all-data-simulator/test_cir.py`. Đây là implementation deterministic để kiểm tra
+`customer360-seeding/test_cir.py`. Đây là implementation deterministic để kiểm tra
 identity stitching trên dữ liệu simulator, không phải production identity engine.
 
 ### 9.1. Input và nguyên tắc
 
-Thuật toán đọc các file CSV sau từ `./all-data-simulator/platform_cir_csv`:
+Thuật toán đọc các file CSV sau từ `./customer360-seeding/platform_cir_csv`:
 
 | Nguồn | Grain | Vai trò trong CIR |
 |---|---|---|

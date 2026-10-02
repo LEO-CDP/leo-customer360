@@ -16,7 +16,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from .resolver import CustomerIdentityResolver
-from .rls import set_tenant_context
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
 
 logger = logging.getLogger(__name__)
 

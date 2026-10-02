@@ -444,16 +444,16 @@ cmd_seed_demo() {
   "$venv_python" -m pip install -q -r "${cir_dir}/requirements.txt"
 
   echo "🌱 Seeding base raw profiles for demo..."
-  (cd "$cir_dir" && "$venv_python" scripts/init_sample_data.py)
+  (cd "$cir_dir" && "$venv_python" ../../customer360-seeding/dev-backend-seeding/init_sample_data.py)
 
   echo "🧬 Seeding fuzzy-match demo data (Address & Company variations)..."
-  (cd "$cir_dir" && "$venv_python" scripts/generate_fuzzy_match_demo.py)
+  (cd "$cir_dir" && "$venv_python" ../../customer360-seeding/dev-backend-seeding/generate_fuzzy_match_demo.py)
 
   echo "⚙️  Running Customer Identity Resolution for demo..."
-  (cd "$cir_dir" && "$venv_python" scripts/run_demo_resolution.py)
+  (cd "$cir_dir" && "$venv_python" scripts/test_resolution_task.py)
 
   echo "🌐 Seeding full POC/UAT demo data (including cdp_content_items)..."
-  (cd "$cir_dir" && "$venv_python" scripts/seed_full_demo_data.py)
+  (cd "$cir_dir" && "$venv_python" ../../customer360-seeding/dev-backend-seeding/seed_full_demo_data.py)
 
   echo "✅ POC/UAT demo data seeding complete."
 }

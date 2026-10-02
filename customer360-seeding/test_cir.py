@@ -40,7 +40,7 @@ class IdentityGraph:
 # =====================================================================
 # 2. DATA LOADERS & STITCHING LOGIC
 # =====================================================================
-DIR_PATH = "./all-data-simulator/platform_cir_csv"
+DIR_PATH = "./customer360-seeding/platform_cir_csv"
 
 def load_csv(filename):
     path = os.path.join(DIR_PATH, filename)

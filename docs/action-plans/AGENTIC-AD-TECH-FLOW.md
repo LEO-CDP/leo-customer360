@@ -362,7 +362,7 @@ Ad engagement becomes actionable inside Customer 360 profile and campaign analyt
 
 ### SUBTASK-08: End-to-End Automated Test Suite (Learn from Simulator)
 
-Component: cross-cutting (`all-data-simulator`, `customer360-backend`, `customer360-api`, `customer360-promotions`)
+Component: cross-cutting (`customer360-seeding`, `customer360-backend`, `customer360-api`, `customer360-promotions`)
 Priority: P0 Blocker (Beta Gate)  
 Depends on: SUBTASK-01..07  
 Estimate: 8 pts
@@ -371,9 +371,9 @@ Description
 
 Build a full E2E suite based on proven simulator patterns from:
 
-- `all-data-simulator/web_user_simulator.py`
-- `all-data-simulator/test_web_user_simulator.py`
-- `all-data-simulator/run_tracking_analytics_e2e.sh`
+- `customer360-seeding/web_user_simulator.py`
+- `customer360-seeding/test_web_user_simulator.py`
+- `customer360-seeding/run_tracking_analytics_e2e.sh`
 
 Required E2E sequence
 

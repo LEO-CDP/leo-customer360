@@ -29,7 +29,7 @@ from .adapters import DispatchAdapter, build_adapter
 from .db import DB_SCHEMA, connect
 from .connector_config import load_email_config
 from .rendering import inject_tracking_pixel, render_string, rewrite_links_for_click_tracking
-from .rls import set_tenant_context
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
 from .tracking import encode_tracking_token
 
 logger = logging.getLogger(__name__)

@@ -37,15 +37,15 @@ load_from:
   - python_file:
       relative_path: data_synch/dagster_defs.py
       location_name: data_synch
-  # Email engine: placeholder for outbound email delivery workflows.
+  # Email engine: approved-campaign email delivery.
   - python_file:
       relative_path: email_engine/dagster_defs.py
       location_name: email_engine
-  # Notification engine: placeholder for push/SMS/in-app dispatch.
+  # Notification engine: Zalo OA token, ZNS delivery, and opt-out projection.
   - python_file:
       relative_path: notification_engine/dagster_defs.py
       location_name: notification_engine
-  # Campaign activation: placeholder for executable audience activation.
+  # Campaign activation: approval validation and downstream dispatch triggers.
   - python_file:
       relative_path: campaign_activation/dagster_defs.py
       location_name: campaign_activation

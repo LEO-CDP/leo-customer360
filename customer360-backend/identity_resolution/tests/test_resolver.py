@@ -8,9 +8,9 @@ import hashlib
 from unittest.mock import MagicMock
 
 from identity_resolution.models import IdentityRule
-from identity_resolution.persona import generate_persona_name
 from identity_resolution.resolver import CustomerIdentityResolver
-from identity_resolution.rls import set_tenant_context
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
+from leo_customer360_dao.agentic_engines.persona import generate_persona_name
 
 
 def make_resolver(mock_conn, **kwargs):
@@ -585,7 +585,7 @@ class TestRunResolutionBatch:
 
 class TestPersonaEngineWiring:
     """Covers CustomerIdentityResolver's integration with
-    identity_resolution.persona_engine.PersonaResolutionEngine (identity
+    leo_customer360_dao.agentic_engines.persona_engine.PersonaResolutionEngine (identity
     *understanding* on top of identity *matching*)."""
 
     def test_persona_engine_enabled_by_default(self, mock_conn):
@@ -701,4 +701,3 @@ class TestPersonaEngineWiring:
 
         mock_conn.rollback.assert_called_once()
         mock_conn.commit.assert_not_called()
-

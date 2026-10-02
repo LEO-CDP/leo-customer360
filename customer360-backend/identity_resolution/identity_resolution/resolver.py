@@ -11,7 +11,7 @@ real_estate, travel, media, and education domains.
 
 Matching rules are read dynamically from the ``cdp_profile_attributes``
 metadata table (not part of ``database-schema.sql`` -- created on demand, see
-``scripts/init_sample_data.py``).
+``customer360-seeding/dev-backend-seeding/init_sample_data.py``).
 """
 
 import logging
@@ -21,9 +21,12 @@ from typing import Any, Dict, List, Optional, Sequence
 from psycopg2.extras import Json, RealDictCursor
 
 from .models import IdentityRule
-from .persona import generate_persona_name, profile_looks_hashed
-from .persona_engine import PersonaResolutionEngine
-from .rls import set_tenant_context
+from leo_customer360_dao.agentic_engines.persona import (
+    generate_persona_name,
+    profile_looks_hashed,
+)
+from leo_customer360_dao.agentic_engines.persona_engine import PersonaResolutionEngine
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
 
 logger = logging.getLogger(__name__)
 

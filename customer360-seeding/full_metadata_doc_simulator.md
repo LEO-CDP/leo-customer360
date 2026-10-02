@@ -36,7 +36,7 @@ header-includes: |
 
 ## Abstract
 
-This document is the metadata contract for `all-data-simulator/full_raw_data_simulator.py`.
+This document is the metadata contract for `customer360-seeding/full_raw_data_simulator.py`.
 It describes the source platform represented by each dataset, the generated CSV schema,
 field types and meanings, identity value, and differences between a real platform
 payload and this simulator's flattened test representation.
@@ -104,8 +104,8 @@ Merge customer identities}}
 | Random seed | `42` |
 | CSV encoding | `utf-8-sig` (UTF-8 with BOM) |
 | CSV newline mode | `newline=""` |
-| Output directory | `all-data-simulator/platform_cir_csv/` |
-| ZIP archive | `platform_cir_api_csv_simulated.zip` under `all-data-simulator/` |
+| Output directory | `customer360-seeding/platform_cir_csv/` |
+| ZIP archive | `platform_cir_api_csv_simulated.zip` under `customer360-seeding/` |
 | ZIP contents | The five generated CSV files, stored by basename |
 | Missing dictionary keys | Ignored by `csv.DictWriter` because `extrasaction="ignore"` |
 

@@ -31,7 +31,7 @@ flowchart TD
 
 ## Starting the Simulator
 
-Run the launcher from `all-data-simulator`:
+Run the launcher from `customer360-seeding`:
 
 ```bash
 ./run_uat_tracking_traffic.sh
@@ -64,7 +64,7 @@ python uat_tracking_traffic_simulator.py --sessions 10 --seed 20260921
 | Random seed | `UAT_RANDOM_SEED` | unset | Enables repeatable journeys when provided |
 | Dry run | `UAT_DRY_RUN` | `false` | Prints the first payload and skips HTTP |
 
-The launcher loads `all-data-simulator/.env` when that file exists, then passes these values to the Python script. Command-line options take precedence over launcher defaults.
+The launcher loads `customer360-seeding/.env` when that file exists, then passes these values to the Python script. Command-line options take precedence over launcher defaults.
 
 ## Traffic Source and UTM Flow
 
@@ -256,13 +256,13 @@ Dry run prints only the first generated session, so it is useful for inspecting 
 The focused regression test is:
 
 ```bash
-python -m pytest all-data-simulator/test_uat_tracking_traffic_simulator.py -q
+python -m pytest customer360-seeding/test_uat_tracking_traffic_simulator.py -q
 ```
 
 The complete simulator test suite is:
 
 ```bash
-python -m pytest all-data-simulator -q
+python -m pytest customer360-seeding -q
 ```
 
 A fixed `UAT_RANDOM_SEED` makes UUIDs, source selection, journeys, and metrics repeatable. The event timestamps are still anchored to the current clock unless the generator is constructed directly with a fixed clock in a test.

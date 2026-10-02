@@ -18,7 +18,7 @@ from psycopg2.extras import RealDictCursor
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from identity_resolution.profile_event_projection import MasterProfileEventProjector  # noqa: E402
-from identity_resolution.rls import set_tenant_context  # noqa: E402
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
 
 load_dotenv()
 

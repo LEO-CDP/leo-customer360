@@ -57,6 +57,7 @@ RUN apt-get update \
 COPY --from=builder /install /usr/local
 COPY --from=builder /install-dao /usr/local
 COPY customer360-backend /app
+COPY customer360-seeding/dev-backend-seeding /opt/customer360-seeding
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 ENV DAGSTER_HOME=/dagster_home

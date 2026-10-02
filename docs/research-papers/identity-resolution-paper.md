@@ -225,7 +225,7 @@ The schema reserves `persona_embedding VECTOR(768)` on the shared archetype and 
 3. If the last execution is less than `throttle_seconds` ago, it rolls back and defers the work.
 4. Otherwise, it updates `last_executed_at` and runs one resolver batch.
 
-The default throttle interval is five seconds. The controller catches errors so an ingestion request is not blocked by a resolution failure. The status table is a runtime support table initialized defensively by `customer360-backend/identity_resolution/scripts/init_sample_data.py` and represented in the API model.
+The default throttle interval is five seconds. The controller catches errors so an ingestion request is not blocked by a resolution failure. The status table is a runtime support table initialized defensively by `customer360-seeding/dev-backend-seeding/init_sample_data.py` and represented in the API model.
 
 ### 5.2 Scheduled draining
 

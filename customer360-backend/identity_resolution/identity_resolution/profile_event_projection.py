@@ -19,7 +19,7 @@ from leo_customer360_dao.repositories.master_profile_event_repository import (
     MasterProfileEventStore,
 )
 
-from .rls import set_tenant_context
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
 
 logger = logging.getLogger(__name__)
 

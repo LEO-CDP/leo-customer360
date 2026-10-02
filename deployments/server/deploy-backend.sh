@@ -87,8 +87,8 @@ GHCR_TOKEN="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
 if [[ "${BUILD_LOCAL:-0}" == "1" ]]; then
   DEPLOY_MODE="build"; IMAGE=""
   echo ">> Image: BUILD_LOCAL=1 — building $SERVICE on the VM from source."
-  echo ">> Shipping customer360-backend/ and customer360-dao/ ..."
-  tar -C "$REPO_ROOT" -czf - customer360-backend customer360-dao \
+  echo ">> Shipping customer360-backend/, customer360-dao/, and backend seed scripts ..."
+  tar -C "$REPO_ROOT" -czf - customer360-backend customer360-dao customer360-seeding/dev-backend-seeding \
     | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
 else
   DEPLOY_MODE="ghcr"

@@ -74,7 +74,7 @@ flowchart LR
 | Landing | LEO log domain (`/etv`, `/eta`, `/etc`, `/efb`, `/cxs-pf-init`, `/cxs-pf-update`) | Raw hits at the observer's origin. **The log domain is a separate ingestion tier from `customer360-api`** — connecting it to the tables below is an integration task (a small ETL/bridge service or a direct write from the log service), not something already wired in this repository. |
 | Event ingestion | `customer360-event-api` `POST /api/v1/tracking/logs` | Validates identity hints and writes the canonical immutable event envelope to Redis/S3. Use this endpoint, or a trusted bridge that submits the same contract, to connect SDK data to the CDP event lake. |
 | Identity resolution (CIR) | `customer360-backend/identity_resolution` (`resolver.py`, run via `daily_job.py` or the Dagster job) | Matches `cdp_raw_profiles_stage` rows onto a single `cdp_master_profiles` row per real person — the **unified user** — using the dynamic matching rules in `cdp_profile_attributes` (exact match on email/phone/device_id/advertising_id/cookie_id/external_customer_id, fuzzy match on name/address). |
-| Understanding | Persona Resolution Engine (`identity_resolution/persona_engine.py`) | Computes behavior/engagement/financial/loyalty/relationship/risk scores and a persona per unified user, stored on `cdp_customer_personas`. |
+| Understanding | Persona Resolution Engine (`leo_customer360_dao/agentic_engines/persona_engine.py`) | Computes behavior/engagement/financial/loyalty/relationship/risk scores and a persona per unified user, stored on `cdp_customer_personas`. |
 | Activation ("unified campaign") | `cdp_segments` (Audience Builder), `crm_campaign`/`crm_campaign_member`, `customer360-backend/campaign_activation` | Segments query master profiles (and their personas/domain attributes) across every source system to build one audience; a campaign then targets that single, deduplicated audience instead of one list per channel. **Note:** `campaign_activation`'s Dagster job is currently a placeholder (log -> sleep -> log) - real per-channel activation (email/push/ads) still needs to be implemented against it, see [PLAN-CAMPAIGNS-DEV.md](../api-plans/PLAN-CAMPAIGNS-DEV.md). |
 
 In short: the SDK never talks to identity resolution directly. It only needs
@@ -333,7 +333,7 @@ Guidance for wiring this into the CDP's own identity model:
   parameters) into LEO profile updates unless your privacy/consent review has
   explicitly approved that data source and hashing scheme — the CDP's own
   hashing (see `hash_pii()` conventions in
-  `customer360-backend/identity_resolution/scripts/init_sample_data.py`) expects
+  `customer360-seeding/dev-backend-seeding/init_sample_data.py`) expects
   plain values in, and hashing an already-hashed value is not equivalent to
   hashing the original.
 

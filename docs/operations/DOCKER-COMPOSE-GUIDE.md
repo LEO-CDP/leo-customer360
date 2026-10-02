@@ -131,10 +131,10 @@ docker compose --profile dev up -d --build
 The same six long-running services, **plus** `cir-demo-seed`, a one-shot job (`restart: "no"`)
 that waits for `postgres` to be healthy, then runs, in order:
 
-1. `identity_resolution/scripts/init_sample_data.py` — seeds 1000 synthetic Adjust raw profiles
+1. `customer360-seeding/dev-backend-seeding/init_sample_data.py` — seeds 1000 synthetic Adjust raw profiles
    (retail + banking, ~30% deliberate duplicates).
-2. `identity_resolution/scripts/run_demo_resolution.py` — drains them through identity resolution.
-3. `identity_resolution/scripts/seed_full_demo_data.py` — seeds the full CRM journey graph,
+2. `identity_resolution/scripts/test_resolution_task.py` — drains them through identity resolution.
+3. `customer360-seeding/dev-backend-seeding/seed_full_demo_data.py` — seeds the full CRM journey graph,
    relations, transactions, behavioral events, and master-profile enrichment.
 
 Check it completed successfully:
@@ -333,7 +333,7 @@ tune per environment (dev/staging/prod). Highlights:
 | `TRACKING_RATE_LIMIT_WHITELIST` | empty | Comma-separated trusted client IPs/CIDRs exempt from rate limiting; keep empty in production. |
 | `TRACKING_BOT_FILTER_ENABLED` | `true` | Discards configured crawler user agents before storage and rate-limit accounting. |
 | `TRACKING_BOT_USER_AGENT_PATTERNS` | `googlebot,...` | Comma-separated, case-insensitive user-agent substrings to filter. |
-| `LEO_GOOGLE_GENAI_API_KEY` | placeholder | Leave as `YOUR_...` to keep CIR persona-name generation offline (see `identity_resolution/persona.py`). |
+| `LEO_GOOGLE_GENAI_API_KEY` | placeholder | Leave as `YOUR_...` to keep CIR persona-name generation offline (see `leo_customer360_dao/agentic_engines/persona.py`). |
 
 ---
 

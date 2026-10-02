@@ -445,7 +445,7 @@ chạy theo thứ tự:
 init_sample_data.py
     -> tạo tenant demo, reset dữ liệu của tenant demo,
        hash PII và insert 1.000 raw profiles status_code=1
-run_demo_resolution.py
+test_resolution_task.py
     -> drain CIR và in master/link/status summary
 seed_full_demo_data.py
     -> làm giàu dữ liệu CRM, event, relation và demo persona
@@ -495,13 +495,13 @@ metadata seed và trạng thái database.
 | Matching, link, merge, transaction | `customer360-backend/identity_resolution/identity_resolution/resolver.py` |
 | Tenant context | `customer360-backend/identity_resolution/identity_resolution/rls.py` |
 | Optional throttle helper | `customer360-backend/identity_resolution/identity_resolution/trigger_controller.py` |
-| Persona computation/persistence | `customer360-backend/identity_resolution/identity_resolution/persona_engine.py` |
-| PII-safe label | `customer360-backend/identity_resolution/identity_resolution/persona.py` |
+| Persona computation/persistence | `customer360-dao/src/leo_customer360_dao/agentic_engines/persona_engine.py` |
+| PII-safe label | `customer360-dao/src/leo_customer360_dao/agentic_engines/persona.py` |
 | Schema, indexes, constraints, persona tables | `customer360-database/database-schema.sql` |
 | Attribute catalog và CIR seed | `customer360-database/init-core-database.sql` |
 | FORCE RLS migration | `customer360-database/migrations/001_harden_tenant_rls_policies.sql` |
-| Demo seed và hash PII | `customer360-backend/identity_resolution/scripts/init_sample_data.py` |
-| Demo resolution | `customer360-backend/identity_resolution/scripts/run_demo_resolution.py` |
+| Demo seed và hash PII | `customer360-seeding/dev-backend-seeding/init_sample_data.py` |
+| Demo resolution | `customer360-backend/identity_resolution/scripts/test_resolution_task.py` |
 | Workspace code locations | `customer360-backend/workspace.yaml` |
 
 ---

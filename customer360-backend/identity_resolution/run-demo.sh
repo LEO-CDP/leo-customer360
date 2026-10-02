@@ -60,13 +60,13 @@ echo "📥 Installing requirements..."
 "$VENV_PYTHON" -m pip install -q -r requirements.txt
 
 echo "🌱 Seeding sample Adjust / OneSignal / Web Tracking data (retail + banking)..."
-"$VENV_PYTHON" scripts/init_sample_data.py
+"$VENV_PYTHON" ../../customer360-seeding/dev-backend-seeding/init_sample_data.py
 
 echo "⚙️  Running Customer Identity Resolution..."
-"$VENV_PYTHON" scripts/run_demo_resolution.py
+"$VENV_PYTHON" scripts/test_resolution_task.py
 
 echo "🌐 Seeding full demo data (CRM journey graph, relations, transactions, S3 behavioral events, master-profile enrichment)..."
-"$VENV_PYTHON" scripts/seed_full_demo_data.py
+"$VENV_PYTHON" ../../customer360-seeding/dev-backend-seeding/seed_full_demo_data.py
 
 DEMO_TENANT_ID="11111111-1111-1111-1111-111111111111"
 PG_CONTAINER="${PG_CONTAINER:-pgsql16_vector}"

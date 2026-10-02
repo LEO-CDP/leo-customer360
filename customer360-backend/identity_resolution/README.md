@@ -25,14 +25,15 @@ CIR is not the ingestion API. Tracking and ingestion services should validate an
 | `identity_resolution/cir_tasks.py` | Runtime configuration, Redis lease coordination, bounded batch drain, S3 projection orchestration, and targeted persona-count refreshes. This is the scheduled task entry point. |
 | `identity_resolution/resolver.py` | Matching, master-profile creation/linking, consolidation, RLS tenant switching, and per-batch commits. |
 | `identity_resolution/models.py` | Domain models used by the resolver. |
-| `identity_resolution/persona_engine.py` | Persona resolution for a matched master profile. |
-| `identity_resolution/persona.py` | Persona naming and profile helpers. |
+| `customer360-dao/src/leo_customer360_dao/agentic_engines/persona_engine.py` | Shared persona resolution for a matched master profile. |
+| `customer360-dao/src/leo_customer360_dao/agentic_engines/persona.py` | Shared persona naming and profile helpers. |
 | `identity_resolution/profile_event_projection.py` | Loads matching raw profiles, scans source event objects, and writes master-profile event JSON to the configured store. |
-| `identity_resolution/rls.py` | PostgreSQL tenant context helpers. |
+| `leo_customer360_dao/utils/tenant_context.py` | Shared PostgreSQL tenant context helper. |
 | `dagster_defs.py` | Dagster op, job, sensor, and targeted-run configuration. |
 | `worker.py` | Legacy-compatible in-process worker that executes the Dagster job repeatedly. Prefer Dagster daemon scheduling for production. |
 | `healthcheck.py` | PostgreSQL connectivity probe used by the container health check. |
-| `scripts/init_sample_data.py` | Idempotent demo-rule and sample-data setup. |
+| `customer360-seeding/dev-backend-seeding/init_sample_data.py` | Idempotent demo-rule and sample-data setup. |
+| `customer360-seeding/dev-backend-seeding/seed_full_demo_data.py` | Full CRM, relation, persona, and behavioral-event demo fixture seeding. |
 | `tests/test_cir_tasks.py` | Unit tests for lease handling, batch limits, and projection aggregation. |
 | `tests/test_resolver.py` | Resolver and matching behavior tests. |
 
@@ -246,7 +247,7 @@ The test script creates or reuses `.venv`, installs `requirements.txt`, installs
 For a quick CIR demo, initialize sample rules and data first:
 
 ```bash
-python scripts/init_sample_data.py
+python ../../customer360-seeding/dev-backend-seeding/init_sample_data.py
 python -m identity_resolution.cir_tasks
 ```
 

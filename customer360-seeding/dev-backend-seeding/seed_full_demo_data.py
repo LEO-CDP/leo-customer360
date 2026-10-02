@@ -1,10 +1,10 @@
 """Seeds comprehensive demo data covering every table/column in
 core-customer360/database-schema.sql that ``init_sample_data.py`` +
-``run_demo_resolution.py`` do NOT already exercise.
+``test_resolution_task.py`` do NOT already exercise.
 
 Those two scripts only cover the Customer Identity Resolution (CIR) slice:
 Adjust raw-profile ingestion -> resolved ``cdp_master_profiles`` rows. This
-script MUST run AFTER ``run_demo_resolution.py`` (see ``run-demo.sh``) so it
+script MUST run AFTER ``test_resolution_task.py`` (see ``run-demo.sh``) so it
 can enrich the already-resolved master profiles and link new demo rows to
 real ``master_profile_id`` values. It covers:
 
@@ -68,7 +68,7 @@ plaintext values for readability in cross-region demos (VN/EU/US naming
 mix). Retail profiles also carry plaintext ``email``/``phone_number`` (and
 ``is_hashed`` is set to ``FALSE``). Other domains may still keep hashed
 values in additional PII columns inherited from init_sample_data.py /
-run_demo_resolution.py.
+test_resolution_task.py.
 
 Note: ``crm_lead``/``crm_contact`` DO get plaintext first/last name/email/
 phone -- that's a *different* table representing a separate use case (a
@@ -106,12 +106,10 @@ import logging
 import math
 import os
 import random
-import sys
 import uuid
 import warnings
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
@@ -119,14 +117,13 @@ import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import Json, RealDictCursor
 
-# Make the identity_resolution package importable when this script is run
-# directly (python scripts/seed_full_demo_data.py) rather than as a module --
-# needed to reuse the real PersonaResolutionEngine (persona_engine.py) below
-# instead of re-implementing its SQL inline.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from identity_resolution.persona_engine import PersonaResolutionEngine, compute_persona  # noqa: E402
-from identity_resolution.rls import set_tenant_context  # noqa: E402
+# Reuse the shared PersonaResolutionEngine instead of re-implementing its SQL
+# inline in this demo-data seeder.
+from leo_customer360_dao.agentic_engines.persona_engine import (  # noqa: E402
+    PersonaResolutionEngine,
+    compute_persona,
+)
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
 
 load_dotenv()
 
@@ -140,7 +137,7 @@ DB_PASSWORD = os.environ.get("DB_PASSWORD", "password")
 DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 
-# Must match scripts/init_sample_data.py / scripts/run_demo_resolution.py.
+# Must match customer360-seeding/dev-backend-seeding/init_sample_data.py / scripts/test_resolution_task.py.
 DEMO_TENANT_ID = "11111111-1111-1111-1111-111111111111"
 
 # Fixed namespace so every "demo:<key>" -> deterministic UUID, making the
@@ -2516,7 +2513,7 @@ def seed_behavioral_events(
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "--new-data":
         raise SystemExit(
-            "--new-data moved to all-data-simulator/seed_api_data.py; "
+            "--new-data moved to customer360-seeding/seed_api_data.py; "
             "use ./dev-c360.sh seed-new-data"
         )
     conn = psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, port=DB_PORT)
@@ -2527,7 +2524,7 @@ def main() -> None:
             if not master_profiles:
                 raise RuntimeError(
                     f"No resolved master profiles found for tenant_id={DEMO_TENANT_ID} -- "
-                    "run scripts/init_sample_data.py + scripts/run_demo_resolution.py first."
+                    "run customer360-seeding/dev-backend-seeding/init_sample_data.py + scripts/test_resolution_task.py first."
                 )
 
             detail_profiles = master_profiles[:DETAIL_PROFILE_LIMIT]

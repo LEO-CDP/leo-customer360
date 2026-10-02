@@ -71,7 +71,7 @@ It is updated to be realistic and code-accurate against the current repository s
 | Core CRM/CDP schema (campaign, lead, lead source, contact, transactions, content items) | DONE | `customer360-database/database-schema.sql` |
 | Active Dagster jobs for identity, segmentation, analytics | DONE | `customer360-backend/identity_resolution/dagster_defs.py`, `customer360-backend/segmentation/dagster_defs.py`, `customer360-backend/analytics/dagster_defs.py` |
 | Ad server runtime and data models (`leo_ads`) | DONE | `customer360-promotions/core/application.py`, `customer360-promotions/model/*.py`, `customer360-promotions/tests/test_api.py` |
-| Tracking analytics E2E smoke script | DONE | `all-data-simulator/run_tracking_analytics_e2e.sh` (recent run succeeded) |
+| Tracking analytics E2E smoke script | DONE | `customer360-seeding/run_tracking_analytics_e2e.sh` (recent run succeeded) |
 
 ### 2.2 Critical Gaps (Not Implemented Yet)
 
@@ -173,9 +173,9 @@ The following sequence is realistic for current code state and aligns all three 
 
 - Build deterministic E2E suites for all three channels.
 - Reuse established simulator testing patterns from:
-  - `all-data-simulator/web_user_simulator.py`
-  - `all-data-simulator/test_web_user_simulator.py`
-  - `all-data-simulator/run_tracking_analytics_e2e.sh`
+  - `customer360-seeding/web_user_simulator.py`
+  - `customer360-seeding/test_web_user_simulator.py`
+  - `customer360-seeding/run_tracking_analytics_e2e.sh`
 - Add PR smoke + nightly full scenarios.
 
 ## 5) Unified Technical Checklist

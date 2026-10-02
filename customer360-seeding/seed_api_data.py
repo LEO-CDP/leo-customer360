@@ -233,7 +233,7 @@ class ApiTrafficGenerator:
             "transaction_status": "completed" if is_conversion else None,
             "properties": {
                 "traffic_type": "synthetic_internet",
-                "simulator": "all-data-simulator/seed_api_data.py",
+                "simulator": "customer360-seeding/seed_api_data.py",
                 "session_index": session_index,
                 "event_index": event_index,
             },

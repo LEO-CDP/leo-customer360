@@ -713,7 +713,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     -- current_persona_id (below) MUST be populated -- see the CHECK constraint at the end of
     -- this table -- since hashed PII can no longer be used as a human-readable label for
     -- browsing/semantic search. current_persona_id is computed by application code (see
-    -- customer360-backend/identity_resolution/identity_resolution/persona.py), never by the DB.
+    -- customer360-dao/src/leo_customer360_dao/agentic_engines/persona.py), never by the DB.
     is_hashed BOOLEAN NOT NULL DEFAULT FALSE,
 
     -- Primary contact info (used for primary identity stitching and marketing)
@@ -1279,7 +1279,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_raw_profiles_stage (
     user_agent TEXT,
 
     -- Granular Adjust device/app identifiers and metadata (see
-    -- all-data-simulator/data-dictionary/adjust-metadata.md sections 3.2/3.4).
+    -- customer360-seeding/data-dictionary/adjust-metadata.md sections 3.2/3.4).
     -- idfa/idfv/android_id/imei are the raw per-platform values that ingestion
     -- maps onto device_id/advertising_id above for CIR matching; kept here too
     -- for lineage/audit and as a fallback if the mapping needs to be redone.

@@ -14,7 +14,7 @@ consolidation metadata consumed by customer360-backend/identity_resolution's
 ``CustomerIdentityResolver``.
 ``CdpIdResolutionStatus`` (real-time throttle state) remains a CIR
 *runtime-only* table, created idempotently by
-customer360-backend/identity_resolution/scripts/init_sample_data.py
+customer360-seeding/dev-backend-seeding/init_sample_data.py
 (``CREATE TABLE IF NOT EXISTS``).
 """
 

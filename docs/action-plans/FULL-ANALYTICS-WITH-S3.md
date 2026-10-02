@@ -516,8 +516,8 @@ The exact module names may change after the implementation agent inspects local 
 | [docs/data-sources/5-mobile-sdk-tracking.md](../data-sources/5-mobile-sdk-tracking.md) | Document the same envelope, retry, and replay behavior as web tracking |
 | [docs/architecture/TECHNICAL-DOCUMENTATION.md](../architecture/TECHNICAL-DOCUMENTATION.md) | Update the architecture diagram and storage ownership model |
 | [docs/operations/database/check-db-data.sql](../operations/database/check-db-data.sql) | Replace raw-event row checks with aggregate checks; pair with S3 state, lag, quarantine, and reconciliation checks |
-| [all-data-simulator/README.md](../../all-data-simulator/README.md) | Verify S3 RAW objects, `_processed/` state, compaction output, and query results rather than requiring a matching PostgreSQL event row |
-| [all-data-simulator/run_tracking_analytics_e2e.sh](../../all-data-simulator/run_tracking_analytics_e2e.sh) | Change E2E validation to assert Bronze upload, raw/Silver state markers, Silver materialization, and aggregate correctness |
+| [customer360-seeding/README.md](../../customer360-seeding/README.md) | Verify S3 RAW objects, `_processed/` state, compaction output, and query results rather than requiring a matching PostgreSQL event row |
+| [customer360-seeding/run_tracking_analytics_e2e.sh](../../customer360-seeding/run_tracking_analytics_e2e.sh) | Change E2E validation to assert Bronze upload, raw/Silver state markers, Silver materialization, and aggregate correctness |
 | [customer360-backend/deployment.md](../../customer360-backend/deployment.md) | Add compaction/backfill/replay jobs and S3 readiness requirements |
 | [docs/code-review/README.md](../code-review/README.md) | Update raw-event storage/security review checklist after the design is implemented |
 
@@ -637,9 +637,9 @@ The repository implementation now follows this contract:
   only to resolve the caller's active tenant-owned data sources. Responses are
   cached in Redis with fail-open behavior. Silver Parquet querying is not yet
   implemented.
-4. `customer360-backend/identity_resolution/scripts/init_sample_data.py` seeds raw
+4. `customer360-seeding/dev-backend-seeding/init_sample_data.py` seeds raw
   profile staging and identity-resolution inputs, not behavioral events.
-5. `all-data-simulator/test_web_user_simulator.py` verifies the gzip canonical
+5. `customer360-seeding/test_web_user_simulator.py` verifies the gzip canonical
   envelope in MinIO, analytics statistics, and the customer API S3 query.
 
 The retired PostgreSQL event ledger has been removed from the canonical schema.

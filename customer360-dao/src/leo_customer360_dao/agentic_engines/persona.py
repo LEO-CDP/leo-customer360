@@ -3,7 +3,7 @@ whose personal data has been hashed (``cdp_master_profiles.is_hashed = TRUE``).
 
 Business rule (see ``core-customer360/database-schema.sql``):
     Once ``full_name``/``email``/``phone_number``/``national_id`` are
-    one-way SHA-256 hashed (see ``scripts/init_sample_data.py``'s
+    one-way SHA-256 hashed (see ``customer360-seeding/dev-backend-seeding/init_sample_data.py``'s
     ``hash_pii()``), the master profile no longer contains any
     human-readable identity signal. Browsing/searching profiles (admin UI,
     semantic search against ``persona_embedding``, etc.) needs *some*
@@ -51,7 +51,7 @@ except ImportError:  # pragma: no cover - exercised only when the optional dep i
     _GENAI_SDK_AVAILABLE = False
 
 # SHA-256 hex digests are exactly 64 lowercase hex characters -- how
-# scripts/init_sample_data.py's hash_pii() stores PII. Detecting this
+# customer360-seeding/dev-backend-seeding/init_sample_data.py's hash_pii() stores PII. Detecting this
 # pattern lets us decide "is this profile's PII hashed?" straight from the
 # data itself, instead of trusting an upstream flag that may not be set.
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")

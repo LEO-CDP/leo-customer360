@@ -10,7 +10,7 @@ import sys
 
 import psycopg2
 
-from identity_resolution.rls import set_tenant_context
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
 
 DB_HOST = os.environ.get("DB_HOST", "localhost")
 DB_NAME = os.environ.get("DB_NAME", "customer360")

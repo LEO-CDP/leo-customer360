@@ -263,8 +263,8 @@ prompt code. `core/config.py` has no LLM settings. Intended contract:
 `docs/action-plans/AGENTIC-EMAIL-MARKETING-FLOW.md:172-212`.
 
 **Reference provider-switch code to model the build on** (not wired to this feature):
-`all-data-simulator/adjust_faker.py`, `all-data-simulator/web_user_simulator.py`,
-`customer360-backend/identity_resolution/identity_resolution/persona_engine.py:874-911`.
+`customer360-seeding/adjust_faker.py`, `customer360-seeding/web_user_simulator.py`,
+`customer360-dao/src/leo_customer360_dao/agentic_engines/persona_engine.py:874-911`.
 
 ### Stage 3 — AI campaign draft — 🟡 (SCRUM-96)
 
@@ -460,7 +460,7 @@ Template: `.env.example` (§ around `EMAIL_*` / `CRM_EMAIL_*`).
 Harness: `conftest.py` (env config, `--case` selection mapped to `TEST_PLAN.md`, GitHub summary,
 LIFO cleanup, token/URL signing re-implemented to avoid importing app code), `test.sh` (mints
 Keycloak token), `README.md`, `TEST_PLAN.md` (AC → case traceability). Simulator pattern mirrored from
-`all-data-simulator/run_tracking_analytics_e2e.sh`.
+`customer360-seeding/run_tracking_analytics_e2e.sh`.
 
 **CI/CD gate:**
 - `.github/workflows/ci.yml` → `e2e` job: `needs [changes, test]`, runs only when `customer360-api`

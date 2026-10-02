@@ -2,7 +2,7 @@
 a summary of the resulting master profiles so you can verify the results
 yourself (e.g. via psql) afterwards.
 
-Intended to run after scripts/init_sample_data.py has seeded sample
+Intended to run after customer360-seeding/dev-backend-seeding/init_sample_data.py has seeded sample
 Adjust / OneSignal / Web Tracking raw profiles, but also works as a
 general "process everything pending right now" utility.
 """
@@ -17,11 +17,11 @@ from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor
 
 # Make the identity_resolution package importable when this script is run
-# directly (python scripts/run_demo_resolution.py) rather than as a module.
+# directly (python scripts/test_resolution_task.py) rather than as a module.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from identity_resolution.resolver import CustomerIdentityResolver  # noqa: E402
-from identity_resolution.rls import set_tenant_context  # noqa: E402
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
 
 load_dotenv()
 
@@ -36,7 +36,7 @@ DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 BATCH_SIZE = int(os.environ.get("CIR_BATCH_SIZE", "5000"))
 
-# Must match scripts/init_sample_data.py
+# Must match customer360-seeding/dev-backend-seeding/init_sample_data.py
 DEMO_TENANT_ID = "11111111-1111-1111-1111-111111111111"
 
 

@@ -41,22 +41,18 @@ collision-prone to safely decide two raw profiles are the same person.
 Safe to re-run: every step is idempotent / scoped to ``DEMO_TENANT_ID``.
 """
 
-import hashlib
 import logging
 import os
 import random
-import sys
 import uuid
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import Json
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from identity_resolution.rls import set_tenant_context  # noqa: E402
+from leo_customer360_dao.utils.tenant_context import set_tenant_context
+from utils import HASHED_PII_FIELDS, hash_pii
 
 load_dotenv()
 
@@ -80,26 +76,6 @@ SOURCE_SLUGS = {
     "OneSignal": "c360-tracker",
     "WebTracking": "google-analytics-4",
 }
-
-# Raw-stage/master-profile columns that hold Personal Data (PII). Values for
-# these columns are SHA-256 hashed before ever being written to the
-# database -- see hash_pii() below.
-HASHED_PII_FIELDS = ("full_name", "email", "phone_number", "national_id")
-
-
-def hash_pii(value):
-    """Returns a SHA-256 hex digest of a normalized PII value, or None.
-
-    Normalizes (trim + lowercase) before hashing so equivalent raw values
-    (e.g. the same email reported by two different source systems) always
-    collide to the same hash, preserving identity-resolution matching
-    without ever storing the plaintext PII.
-    """
-    if value is None:
-        return None
-    normalized = str(value).strip().lower()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
 
 # --- Synthetic multi-source (Adjust / OneSignal / Web Tracking) data ------
 #
@@ -388,7 +364,8 @@ def reset_demo_data(cursor) -> None:
 
     Also clears every OTHER table that FK-references cdp_master_profiles /
     cdp_raw_profiles_stage and gets populated by
-    scripts/seed_full_demo_data.py (S3 event objects, crm_transactions,
+    customer360-seeding/dev-backend-seeding/seed_full_demo_data.py
+    (S3 event objects, crm_transactions,
     crm_customer_contacts, cdp_relations) -- those must be deleted BEFORE
     cdp_master_profiles/cdp_raw_profiles_stage or re-running this script
     after seed_full_demo_data.py has run raises a ForeignKeyViolation (the

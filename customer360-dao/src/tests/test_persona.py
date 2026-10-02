@@ -1,12 +1,12 @@
-"""Unit tests for identity_resolution.persona."""
+"""Unit tests for the shared persona naming helpers."""
 
 import hashlib
 from unittest.mock import MagicMock
 
 import pytest
 
-from identity_resolution import persona
-from identity_resolution.persona import (
+from leo_customer360_dao.agentic_engines import persona
+from leo_customer360_dao.agentic_engines.persona import (
     _has_configured_api_key,
     generate_persona_name,
     is_hashed_value,

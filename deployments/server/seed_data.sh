@@ -4,9 +4,9 @@
 #
 # Mirrors the docker-compose `cir-demo-seed` job (dev profile): builds the
 # unified customer360-backend Dagster image and runs, in order:
-#   identity_resolution/scripts/init_sample_data.py   (demo tenant + ~1000 raw profiles)
-#   identity_resolution/scripts/run_demo_resolution.py(identity resolution -> master profiles)
-#   identity_resolution/scripts/seed_full_demo_data.py(full CRM / relations / events / personas)
+#   customer360-seeding/dev-backend-seeding/init_sample_data.py   (demo tenant + ~1000 raw profiles)
+#   identity_resolution/scripts/test_resolution_task.py(identity resolution -> master profiles)
+#   customer360-seeding/dev-backend-seeding/seed_full_demo_data.py(full CRM / relations / events / personas)
 #
 # Runs on the api box by default (SEED_SERVER_KEY=api) — it has headroom; the
 # backend box (Dagster) is memory-tight. All rows belong to the DEMO_TENANT_ID.
@@ -52,9 +52,10 @@ GENAI_KEY="${LEO_GOOGLE_GENAI_API_KEY:-}"
 echo ">> Seeding CIR demo data on $BASTION (server key $SEED_SERVER_KEY)"
 echo "   DB: ${DB_NAME}@${DB_HOST}:${DB_PORT} (user ${DB_USER})   tenant=${DEMO_TENANT_ID}"
 
-# --- ship customer360-backend/ to the VM ---
-echo ">> Shipping customer360-backend/ ..."
-tar -C "$REPO_ROOT" --exclude='customer360-backend/.venv' --exclude='customer360-backend/*/.venv' --exclude='customer360-backend/logs' -czf - customer360-backend \
+# --- ship the Docker build context to the VM ---
+echo ">> Shipping customer360-backend/, customer360-dao/, and backend seed scripts ..."
+tar -C "$REPO_ROOT" --exclude='customer360-backend/.venv' --exclude='customer360-backend/*/.venv' --exclude='customer360-backend/logs' -czf - \
+  customer360-backend customer360-dao customer360-seeding/dev-backend-seeding \
   | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360 && sudo chown "$(id -un)" /opt/c360 && tar -C /opt/c360 -xzf -'
 
 echo ">> Building the unified Dagster image and running the seed (a few minutes on a small box) ..."
@@ -68,7 +69,7 @@ if ! command -v docker >/dev/null 2>&1; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
   sudo systemctl enable --now docker
 fi
-sudo docker build -t customer360-dagster /opt/c360/customer360-backend
+sudo docker build -t customer360-dagster -f /opt/c360/customer360-backend/Dockerfile /opt/c360
 # One-shot seed. PGOPTIONS sets app.tenant_id for every connection so RLS-forced
 # writes for the demo tenant succeed under the non-superuser role. DB_SCHEMA=DB_NAME
 # (the app convention; the schema is named the same as the database).
@@ -79,9 +80,9 @@ sudo docker run --rm --network host \
   ${GK:+-e LEO_GOOGLE_GENAI_API_KEY="$GK"} \
   customer360-backend sh -c '
     set -e
-    echo "== init_sample_data =="   && python identity_resolution/scripts/init_sample_data.py &&
-    echo "== run_demo_resolution ==" && python identity_resolution/scripts/run_demo_resolution.py &&
-    echo "== seed_full_demo_data ==" && python identity_resolution/scripts/seed_full_demo_data.py'
+    echo "== init_sample_data =="   && python /opt/customer360-seeding/init_sample_data.py &&
+    echo "== test_resolution_task ==" && python identity_resolution/scripts/test_resolution_task.py &&
+    echo "== seed_full_demo_data ==" && python /opt/customer360-seeding/seed_full_demo_data.py'
 echo "   CIR seed finished."
 REMOTE
 echo ">> Done. Verify: rows for the demo tenant in cdp_master_profiles / cdp_raw_profiles_stage."

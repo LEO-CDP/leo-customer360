@@ -477,6 +477,6 @@ Return the complete Python script for this proposed extension, including data ga
 
 ## Code Impact Mapping
 
-`customer360-backend/identity_resolution/identity_resolution/persona_engine.py` owns deterministic scoring, NBA calculation, versioned persona inserts, deactivation, and history. `cir_tasks.py` exposes `recompute_master_profile_persona`; `persona.py` optionally creates non-PII labels and summaries with Google Gemini or an offline fallback. This Gemini transaction/event reasoning loop is not implemented today. Integrate it as an explicit extension around the engine's versioned persistence path rather than issuing a standalone update to `cdp_customer_personas`.
+`customer360-dao/src/leo_customer360_dao/agentic_engines/persona_engine.py` owns deterministic scoring, NBA calculation, versioned persona inserts, deactivation, and history. `cir_tasks.py` exposes `recompute_master_profile_persona`; `persona.py` optionally creates non-PII labels and summaries with Google Gemini or an offline fallback. This Gemini transaction/event reasoning loop is not implemented today. Integrate it as an explicit extension around the engine's versioned persistence path rather than issuing a standalone update to `cdp_customer_personas`.
 
 ```

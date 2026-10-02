@@ -11,8 +11,8 @@ from datetime import datetime, timedelta
 # =====================================================================
 class Config:
     NUM_ROWS = 20
-    OUT_DIR = "./all-data-simulator/platform_cir_csv"
-    ZIP_PATH = "./all-data-simulator/platform_cir_api_csv_simulated.zip"
+    OUT_DIR = "./customer360-seeding/platform_cir_csv"
+    ZIP_PATH = "./customer360-seeding/platform_cir_api_csv_simulated.zip"
     BASE_DATE = datetime(2026, 8, 1, 9, 0, 0)
     SEED = 42 # Ensures generated data is identical across runs for CIR testing
 

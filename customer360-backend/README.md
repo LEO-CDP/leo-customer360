@@ -1,6 +1,6 @@
 # `customer360-backend/` — Dagster Orchestration for the Customer 360 Backend
 
-Last updated: August 26, 2026
+Last updated: October 2, 2026
 
 This directory contains the backend data-processing and orchestration services for the **Customer 360 / CDP platform**. Each backend capability is managed as a **Dagster code location** and can contain its own jobs, ops, sensors, schedules, business logic, dependencies, and tests.
 
@@ -65,9 +65,11 @@ The core design principle is:
 
 > **Dagster orchestrates the CDP domain pipelines; Polars performs high-performance data transformation; S3/MinIO stores raw and curated analytical data; PostgreSQL serves the operational Customer 360 layer; and activation services generate new behavioral data that feeds back into analytics.**
 
-The diagrams in this document show the intended logical data flow. Today, only
-`identity_resolution`, `segmentation`, and `analytics` contain implemented
-processing; the other six code locations are runnable placeholder jobs.
+The diagrams in this document show the intended logical data flow. Today,
+`identity_resolution`, `segmentation`, `analytics`, `campaign_activation`,
+`email_engine`, and `notification_engine` contain implemented processing.
+`scoring`, `data_synch`, and `personalization` remain runnable placeholder
+jobs.
 
 ## Workload controls
 
@@ -315,27 +317,27 @@ customer360-backend/
 │   └── tests/
 │
 ├── scoring/
-│   # Placeholder service skeleton
+│   # Placeholder scoring service
 │   └── dagster_defs.py
 │
 ├── data_synch/
-│   # Placeholder service skeleton
+│   # Placeholder synchronization service
 │   └── dagster_defs.py
 │
 ├── email_engine/
-│   # Placeholder service skeleton
+│   # Implemented email delivery service
 │   └── dagster_defs.py
 │
 ├── notification_engine/
-│   # Placeholder service skeleton
+│   # Implemented Zalo notification service
 │   └── dagster_defs.py
 │
 ├── campaign_activation/
-│   # Placeholder service skeleton
+│   # Implemented campaign activation service
 │   └── dagster_defs.py
 │
 ├── personalization/
-│   # Placeholder service skeleton
+│   # Placeholder personalization service
 │   └── dagster_defs.py
 │
 ├── Dockerfile
@@ -355,12 +357,12 @@ customer360-backend/
 | --- | --- | --- | --- |
 | `identity_resolution` | Implemented | `identity_resolution_job`; `identity_resolution_poll_sensor` (running by default) | CIR matching, identity links, and master-profile merge |
 | `segmentation` | Implemented | `segmentation_job`; `segmentation_poll_sensor` (running by default) | Active segment recomputation and profile tag synchronization |
-| `analytics` | Implemented | `analytics_job`; `analytics_hourly_schedule` (running by default) | Hourly tracking JSONL aggregation from S3/MinIO |
+| `analytics` | Implemented | `analytics_job`; `analytics_hourly_schedule` (running by default) | Tracking JSONL aggregation from S3/MinIO every three minutes |
 | `scoring` | Placeholder | `scoring_job` | Customer scoring pipeline skeleton; currently sleeps and logs |
 | `data_synch` | Placeholder | `data_synch_job` | Data ingestion and synchronization skeleton |
-| `email_engine` | Placeholder | `email_engine_job` | Email activation pipeline skeleton |
-| `notification_engine` | Placeholder | `notification_engine_job` | Push/SMS/in-app notification skeleton |
-| `campaign_activation` | Placeholder | `campaign_activation_job` | Campaign activation skeleton |
+| `email_engine` | Implemented | `email_engine_job` | Approved-campaign email delivery with recipient-level idempotency |
+| `notification_engine` | Implemented | `zalo_token_refresh_job`; `notification_engine_job`; `zalo_optout_projection_job` | Zalo OA token refresh, Zalo ZNS delivery, and S3-first opt-out projection |
+| `campaign_activation` | Implemented | `campaign_activation_job` | Approval validation, segment snapshot, and downstream email/Zalo submission |
 | `personalization` | Placeholder | `scoring_job` (placeholder name) | Personalization and next-best-action skeleton |
 
 The current implementation therefore represents the early production foundation of the CDP:
@@ -371,15 +373,15 @@ IMPLEMENTED
     +-- identity_resolution
     +-- segmentation
     +-- analytics
+    +-- campaign_activation
+    +-- email_engine
+    +-- notification_engine
 
 SCAFFOLDED
     |
     +-- scoring
     +-- data_synch
     +-- personalization
-    +-- campaign_activation
-    +-- email_engine
-    +-- notification_engine
 ```
 
 ---
@@ -559,15 +561,20 @@ Customer Audience
 
 ## `analytics`
 
-The `analytics` service is currently responsible for hourly tracking-log aggregation.
+The `analytics` service is currently responsible for bounded tracking-log
+aggregation from S3/MinIO.
 
-It processes the first ten data sources from:
+It processes the configured data sources from:
 
 ```text
 sys_data_source
 ```
 
-on an hourly UTC schedule.
+`ANALYTICS_DATA_SOURCE_LIMIT` can cap the number of sources; its default value
+of `0` means there is no source-count limit.
+
+on the `analytics_hourly_schedule` Dagster schedule, currently configured for
+every three minutes in UTC.
 
 For each source, it:
 
@@ -644,8 +651,8 @@ A duplicate manual submission returns:
 
 ### Future Analytics Direction
 
-The current hourly tracking aggregation is the implemented analytics job. It
-counts valid JSONL records and updates Redis/PostgreSQL state; it does not yet
+The current tracking aggregation is the implemented analytics job. It counts
+valid JSONL records and updates Redis/PostgreSQL state; it does not yet
 materialize the broader customer-feature or Parquet pipeline described below.
 That broader pipeline remains the target direction.
 
@@ -949,7 +956,9 @@ Personalized Decision
 
 ## `campaign_activation`
 
-Campaign orchestration converts segments and personalization decisions into executable audiences.
+Campaign orchestration validates approved campaign configuration, snapshots
+the target segment, marks the campaign `Running`, and submits the downstream
+email or Zalo delivery job.
 
 ```text
 Segments
@@ -972,7 +981,10 @@ Activation
 
 ## `email_engine`
 
-The email engine will handle email-specific activation.
+The email engine handles email-specific activation for one approved campaign
+and segment at a time. It renders templates, applies suppression and
+eligibility checks, dispatches through the configured adapter, and records
+idempotent recipient delivery state.
 
 ```text
 Campaign
@@ -1012,16 +1024,9 @@ This creates a closed feedback loop.
 
 ## `notification_engine`
 
-The notification engine is intended to support non-email activation channels such as:
-
-```text
-Push
-SMS
-In-App
-Other Notification Channels
-```
-
-The intended flow is:
+The notification engine currently implements Zalo ZNS activation and Zalo OA
+token maintenance. It also projects Zalo opt-out events from the S3 event lake
+onto customer communication preferences.
 
 ```text
 Campaign
@@ -1029,14 +1034,9 @@ Campaign
     v
 notification_engine
     |
-    v
-Notification Provider
-    |
-    v
-Customer Response
-    |
-    v
-Analytics
+    +-- Zalo OA token refresh
+    +-- Zalo ZNS delivery
+    +-- S3-first opt-out projection
 ```
 
 ---
@@ -1148,9 +1148,6 @@ The following code locations currently provide the basic Dagster skeleton requir
 ```text
 scoring
 data_synch
-email_engine
-notification_engine
-campaign_activation
 personalization
 ```
 
@@ -1163,7 +1160,10 @@ done
 
 This confirms that the Dagster code location can load and execute correctly before production business logic is introduced.
 
-The placeholder structure is intentionally lightweight so each service can evolve independently.
+The remaining placeholder structure is intentionally lightweight so each
+service can evolve independently. Campaign activation, email delivery, and
+Zalo notification delivery now contain production-shaped implementations and
+are documented in their service-level READMEs.
 
 ---
 
@@ -1244,15 +1244,12 @@ The local Dagster setup currently uses the following variables.
 | `CIR_POLL_INTERVAL_SECONDS`          | `600`                          | Polling interval for the identity-resolution sensor (10 minutes) |
 | `SEGMENTATION_POLL_INTERVAL_SECONDS` | `10`                           | Polling interval for the segmentation sensor        |
 
-Placeholder jobs also accept service-specific sleep settings, each defaulting
-to `2` seconds:
+Placeholder jobs accept service-specific sleep settings, each defaulting to
+`2` seconds:
 
 ```text
 SCORING_PLACEHOLDER_SLEEP_SECONDS
 DATA_SYNCH_PLACEHOLDER_SLEEP_SECONDS
-EMAIL_ENGINE_PLACEHOLDER_SLEEP_SECONDS
-NOTIFICATION_ENGINE_PLACEHOLDER_SLEEP_SECONDS
-CAMPAIGN_ACTIVATION_PLACEHOLDER_SLEEP_SECONDS
 PERSONALIZATION_PLACEHOLDER_SLEEP_SECONDS
 ```
 
@@ -1269,9 +1266,13 @@ intentionally not identical:
 | Services | Declared dependency profile |
 | --- | --- |
 | `identity_resolution` | PostgreSQL driver, test tooling, dotenv, Gemini SDK, Pydantic, and Dagster |
-| `analytics`, `segmentation`, `personalization` | PostgreSQL, S3/MinIO, Redis, dotenv, test tooling, Polars, and Dagster |
-| `scoring` | Dagster and `pymc-marketing` |
-| `data_synch`, `email_engine`, `notification_engine`, `campaign_activation` | Dagster only |
+| `analytics` | PostgreSQL, S3/MinIO, Redis, dotenv, test tooling, Polars, and Dagster |
+| `segmentation`, `personalization` | PostgreSQL, S3/MinIO, Redis, dotenv, test tooling, Polars, Dagster, and the DAO |
+| `scoring` | Dagster, `pymc-marketing`, the DAO, and test tooling |
+| `data_synch` | Dagster and the DAO |
+| `email_engine` | Dagster, PostgreSQL, dotenv, the DAO, and test tooling |
+| `notification_engine` | Dagster, PostgreSQL, S3/MinIO, Redis, dotenv, the DAO, and test tooling |
+| `campaign_activation` | Dagster, Dagster GraphQL, PostgreSQL, dotenv, the DAO, and test tooling |
 
 The analytical-service dependency set includes:
 
@@ -1510,9 +1511,9 @@ analytics           Implemented
 scoring             Placeholder
 segmentation        Implemented
 personalization     Placeholder
-campaign_activation Placeholder
-email_engine        Placeholder
-notification_engine Placeholder
+campaign_activation Implemented
+email_engine        Implemented
+notification_engine Implemented
 
 
 TARGET

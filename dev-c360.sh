@@ -109,7 +109,7 @@ fi
 # API-only traffic seeding intentionally runs before any environment bootstrap,
 # Docker Compose command, database status query, or host-service restart.
 if [ "$ACTION" = "seed-new-data" ]; then
-  SIMULATOR_DIR="$SCRIPT_DIR/all-data-simulator"
+  SIMULATOR_DIR="$SCRIPT_DIR/customer360-seeding"
   SIMULATOR_VENV="$SIMULATOR_DIR/.venv"
   SIMULATOR_PYTHON="$SIMULATOR_VENV/bin/python"
 
@@ -118,7 +118,7 @@ if [ "$ACTION" = "seed-new-data" ]; then
     exit 1
   fi
   if [ ! -x "$SIMULATOR_PYTHON" ] || ! "$SIMULATOR_PYTHON" --version >/dev/null 2>&1; then
-    echo "📦 Creating all-data-simulator virtualenv for API-only seed-new-data..."
+    echo "📦 Creating customer360-seeding virtualenv for API-only seed-new-data..."
     python3 -m venv "$SIMULATOR_VENV"
   fi
   if [ ! -x "$SIMULATOR_PYTHON" ] || ! "$SIMULATOR_PYTHON" --version >/dev/null 2>&1; then
@@ -126,7 +126,7 @@ if [ "$ACTION" = "seed-new-data" ]; then
     exit 1
   fi
 
-  echo "📥 Ensuring all-data-simulator dependencies are installed..."
+  echo "📥 Ensuring customer360-seeding dependencies are installed..."
   "$SIMULATOR_PYTHON" -m pip install -q -r "$SIMULATOR_DIR/requirements-api-seed.txt"
   seed_tracking_url="${SEED_TRACKING_API_URL:-http://127.0.0.1:${C360_TRACKING_API_PORT:-8010}/api/v1/tracking/logs}"
   seed_data_source_id="${SEED_TRACKING_DATA_SOURCE_ID:-${TRACKING_DATA_SOURCE_ID:-15dc39d4-ae42-5c60-9c77-66f05dcae448}}"

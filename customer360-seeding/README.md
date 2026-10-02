@@ -10,10 +10,16 @@ UAT environments. This folder covers three separate workflows:
 | Web tracking and analytics E2E | `web_user_simulator.py` or `run_tracking_analytics_e2e.sh` | Tracking API, MinIO/S3, Dagster, PostgreSQL |
 | UAT web traffic | `uat_tracking_traffic_simulator.py` or `run_uat_tracking_traffic.sh` | UAT tracking API only |
 | API-only fresh traffic seed | `seed_api_data.py` or `./dev-c360.sh seed-new-data` | `customer360-event-api` HTTP endpoint only |
+| Backend CIR demo seed | `dev-backend-seeding/init_sample_data.py` and `dev-backend-seeding/seed_full_demo_data.py` | PostgreSQL raw-profile, CRM, relation, persona, and event fixtures |
 
 The web simulator does not publish to Kafka. It sends one ordered event batch
 per synthetic user to the tracking API; the tracking service writes NDJSON to
 S3-compatible storage, and the analytics job aggregates those objects.
+
+The backend CIR demo seed scripts are documented separately in
+[dev-backend-seeding/README.md](dev-backend-seeding/README.md). They are kept
+with the simulator tooling because they generate synthetic seed data, while
+the identity-resolution service continues to own matching and resolution.
 
 ## Prerequisites
 
@@ -26,21 +32,21 @@ containers.
 Create a local configuration file from [example.env](example.env):
 
 ```bash
-cd all-data-simulator
+cd customer360-seeding
 cp example.env .env
 ```
 
 Keep `.env` private. The web simulator also searches the repository-root
 `.env`; the batch helper expects its `.env` in this directory because it runs
-the fakers from `all-data-simulator`.
+the fakers from `customer360-seeding`.
 
 ## Install and Run
 
-The helper creates or reuses `all-data-simulator/.venv`, installs
+The helper creates or reuses `customer360-seeding/.venv`, installs
 [requirements.txt](requirements.txt), and runs both batch generators:
 
 ```bash
-cd all-data-simulator
+cd customer360-seeding
 ./run_data_simulator.sh
 ```
 
@@ -105,7 +111,7 @@ choose the actions. Each user produces one ordered batch for the tracking API.
 First run a local dry run without external services:
 
 ```bash
-cd all-data-simulator
+cd customer360-seeding
 .venv/bin/python web_user_simulator.py --offline --dry-run --users 2 --seed 7 --verbose
 ```
 
@@ -167,7 +173,7 @@ With the local tracking API already running:
 Run the simulator directly for a smaller smoke test:
 
 ```bash
-cd all-data-simulator
+cd customer360-seeding
 .venv/bin/python seed_api_data.py --events 100 --events-per-session 10 --seed 7 --verbose
 ```
 
@@ -238,7 +244,7 @@ master-profile analytics merge, the `Web Visitor` persona, and the Customer
 Start the local services first, then run from this directory:
 
 ```bash
-cd all-data-simulator
+cd customer360-seeding
 ./run_tracking_analytics_e2e.sh
 ```
 
@@ -276,7 +282,7 @@ requirements. Install it into the local simulator environment when running
 tests:
 
 ```bash
-cd all-data-simulator
+cd customer360-seeding
 .venv/bin/python -m pip install pytest
 .venv/bin/python -m pytest -q test_web_user_simulator.py
 ```
