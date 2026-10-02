@@ -1,0 +1,104 @@
+name: Prewarm VM image layers
+
+# Pull :latest on every app VM so the next SHA-tagged CD deploy only transfers
+# the changed layers (typically just src/) rather than the full image.
+#
+# Fires after every successful CI build on main (images freshly pushed to GHCR)
+# and on a nightly fallback (recovers after reboots or manual image pruning).
+# The prewarm is best-effort: a failed SSH or pull does not block any other job.
+#
+# VMs targeted (uat only — prod is gated on releases):
+#   api box     → customer360-api, customer360-frontend
+#   backend box → customer360-dagster
+#   docs box    → docs-vector-search
+#   agent box   → customer360-agent
+#
+# Required secrets: DEPLOY_SSH_KEY, VSTORAGE_ACCESS_KEY, VSTORAGE_SECRET_KEY
+# (same as cd.yml). GITHUB_TOKEN supplies the GHCR read token.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+  schedule:
+    - cron: '0 2 * * *'   # 02:00 UTC nightly
+  workflow_dispatch:
+
+concurrency:
+  group: prewarm
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  prewarm:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.VSTORAGE_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.VSTORAGE_SECRET_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.8
+
+      - name: Install deploy SSH key
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/c360-api_ed25519
+          chmod 600 ~/.ssh/c360-api_ed25519
+
+      - name: Init server terraform module
+        working-directory: deployments/server
+        run: terraform init -input=false >/dev/null
+
+      - name: Pre-pull :latest on each VM
+        working-directory: deployments/server
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          REPO_LC="${REPO,,}"
+          REGISTRY="ghcr.io/$REPO_LC"
+          TOKEN_B64="$(printf '%s' "$GHCR_TOKEN" | base64 | tr -d '\n')"
+          SSH_OPTS="-i $HOME/.ssh/c360-api_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ServerAliveInterval=30"
+
+          terraform workspace select uat >/dev/null 2>&1
+          SERVERS="$(terraform output -json servers 2>/dev/null || echo '{}')"
+
+          get_ip() {
+            printf '%s' "$SERVERS" | python3 -c \
+              'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}
+print(next((i.get("floating_ip") for i in (s.get("internal_interfaces") or []) if i.get("floating_ip")), ""))' "$1"
+          }
+
+          # SSH to a VM and docker pull each image:latest. Non-fatal on failure.
+          prewarm() {
+            local key="$1" ip="$2"; shift 2; local images=("$@")
+            if [ -z "$ip" ]; then echo "   skip '$key' — no IP"; return 0; fi
+            echo ">> prewarm '$key' at $ip: ${images[*]}"
+            local cmds="printf '%s' '$TOKEN_B64' | base64 -d | sudo docker login ghcr.io -u '$GHCR_USER' --password-stdin >/dev/null 2>&1"
+            for img in "${images[@]}"; do
+              cmds="$cmds; sudo docker pull ${img}:latest >/dev/null 2>&1 && echo '  + ${img##*/}:latest' || echo '  ! ${img##*/}:latest (skipped)'"
+            done
+            # shellcheck disable=SC2086
+            ssh $SSH_OPTS "leocdp360@$ip" "$cmds" \
+              || echo "   WARN: prewarm '$key' ($ip) failed — continuing"
+          }
+
+          prewarm api     "$(get_ip api)"     "$REGISTRY/customer360-api" "$REGISTRY/customer360-frontend"
+          prewarm backend "$(get_ip backend)" "$REGISTRY/customer360-dagster"
+          prewarm docs    "$(get_ip docs)"    "$REGISTRY/docs-vector-search"
+          prewarm agent   "$(get_ip agent)"   "$REGISTRY/customer360-agent"
+          echo ">> Prewarm complete."

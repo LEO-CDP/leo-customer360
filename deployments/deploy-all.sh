@@ -46,17 +46,17 @@ ROOT="$(pwd)"
 
 # ---------------------------------------------------------------- step registry
 # Ordered list of step ids. PHASE/TITLE give the --list view its structure.
-STEPS=(storage postgres server vks db-schema cache sso backend load-balancer proxy sso-realm api frontend promotions agent event-api docs-search monitoring seed)
+STEPS=(storage postgres server vks db-schema cache sso backend load-balancer proxy sso-realm api frontend promotions agent event-api docs-search docs-index monitoring seed)
 
 # Steps NOT run by default (must be named via --with / --only / --from).
-OPTIONAL="seed"
+OPTIONAL="seed,docs-index"   # comma-separated (in_csv)
 
 phase_of() { case "$1" in
   storage|postgres|server|vks) echo "1 · infrastructure (Terraform)";;
   db-schema)               echo "2 · database bootstrap";;
   cache|sso|backend)       echo "3 · data-plane containers";;
   load-balancer|proxy)     echo "4 · front door (LB + Caddy)";;
-  sso-realm|api|frontend|promotions|agent|event-api|docs-search|monitoring) echo "5 · SSO realm + applications";;
+  sso-realm|api|frontend|promotions|agent|event-api|docs-search|docs-index|monitoring) echo "5 · SSO realm + applications";;
   seed)                    echo "6 · demo data (optional)";;
 esac; }
 
@@ -78,6 +78,7 @@ title_of() { case "$1" in
   agent)         echo "customer360-agent (AI Agent service, LiteLLM, :8009)";;
   event-api)     echo "customer360-event-api (event ingestion -> S3, /data; on VKS)";;
   docs-search)   echo "docs-vector-search (local-model RAG, pgvector on the vDB)";;
+  docs-index)    echo "docs-vector-search re-index only: ship docs/*.md + enrich (no pull/restart)";;
   monitoring)    echo "Portainer + Netdata (+ oauth2-proxy SSO gate)";;
   seed)          echo "CIR demo data seed (~1000 profiles, demo tenant)";;
 esac; }
@@ -144,6 +145,14 @@ oneshot_step() {  # <dir> <script> <action>
   esac
 }
 
+# one-shot step with a fixed sub-action (e.g. docs-index -> deploy-docs-search.sh <env> reindex).
+oneshot_step_arg() {  # <dir> <script> <arg> <action>
+  case "$4" in
+    apply)   run bash "$ROOT/$1/$2" "$ENV" "$3" ;;
+    *)       info "'$CUR' only runs on 'apply' — skipped for '$4'" ;;
+  esac
+}
+
 # sso realm bootstrap: idempotently provision the realm + confidential client and
 # write KEYCLOAK_CLIENT_SECRET into sso/.env (consumed by deploy-api.sh).
 realm_step() {  # <action>
@@ -200,6 +209,8 @@ run_one() {  # <id> <action>
     # teardown no longer removes it — it needs a destroy of its own.
     event-api)     ssh_step server deploy-event-api.sh deploy "$2" ;;
     docs-search)   ssh_step_env_only server deploy-docs-search.sh "$2" ;;
+    # Optional (not in the default set): the docs-only refresh docs-vector-index.yml dispatches.
+    docs-index)    oneshot_step_arg server deploy-docs-search.sh reindex "$2" ;;
     monitoring)    ssh_step monitoring     deploy-monitoring.sh deploy "$2" ;;
     backend)       ssh_step_env_only server deploy-backend.sh "$2" ;;
     api)           ssh_step_env_only server deploy-api.sh     "$2" ;;
