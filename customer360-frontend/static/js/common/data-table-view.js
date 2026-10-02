@@ -104,7 +104,8 @@ window.C360 = window.C360 || {};
       if (!o.el.thead) return;
       $(o.el.thead).html(C360.templates.render("data-table-head", {
         columns: o.columns,
-        showActionColumn: o.rowClickable || !!o.onEdit
+        showActionColumn: o.rowClickable || !!o.onEdit,
+        compactTable: !!o.compactTable
       }));
     }
 
@@ -130,7 +131,10 @@ window.C360 = window.C360 || {};
           cells: o.columns.map(function (col) { return buildCellVm(col, vm); })
         };
       });
-      return C360.templates.render("data-table-rows", { rows: rows });
+      return C360.templates.render("data-table-rows", {
+        rows: rows,
+        compactTable: !!o.compactTable
+      });
     }
 
     function setLoading(loading) { if (o.el.loading) $(o.el.loading).toggleClass("hidden", !loading); }

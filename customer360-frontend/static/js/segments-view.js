@@ -25,6 +25,10 @@ window.C360 = window.C360 || {};
   var queryBuilderReady = false;
   var segmentAttributes = [];
   var attributeLoadSequence = 0;
+  var workflowSteps = [];
+  var workflowAgents = [];
+  var workflowContentItems = [];
+  var workflowCatalogLoaded = false;
 
   function sqlQuote(value) {
     return "'" + String(value == null ? "" : value).replace(/'/g, "''") + "'";
@@ -488,7 +492,13 @@ window.C360 = window.C360 || {};
   var matchedDtv = null;
   function createMatchedDtv() {
     return C360.DataTableView.create({
-      columns: C360.profileListView.columns,
+      // The matched-profile table is a dense drill-down inside a tab panel.
+      // Keep the main profile list's comfortable spacing, but render its
+      // Profile identity with the same compact treatment as Domain.
+      columns: C360.profileListView.columns.map(function (column, index) {
+        return index === 0 ? $.extend({}, column, { compact: true }) : column;
+      }),
+      compactTable: true,
       rowVm: C360.profileListView.rowVm,
       rowId: function (vm) { return vm.master_profile_id; },
       rowSelectorClass: "profile-row",
@@ -519,7 +529,7 @@ window.C360 = window.C360 || {};
       lastComputedLabel: fmt.dateTime(s.last_computed_at),
       createdLabel: fmt.dateTime(s.created_at),
       updatedLabel: fmt.dateTime(s.updated_at),
-      display_sql: displaySql,
+      display_sql: fmt.formatSqlForDisplay(displaySql),
       hasSqlRules: !!displaySql,
       hasJsonRules: !!(s.json_rules && Object.keys(s.json_rules).length)
     });
@@ -535,6 +545,277 @@ window.C360 = window.C360 || {};
     return matchedDtv.load(append);
   }
 
+  function activateSegmentInsightPanel(panelId, moveFocus) {
+    var $tabs = $(".segment-insight-tab");
+    var $panels = $(".segment-insight-panel");
+    var $selected = $tabs.filter("[data-segment-panel='" + panelId + "']");
+    if (!$selected.length) return;
+
+    $tabs.each(function () {
+      var selected = $(this).attr("data-segment-panel") === panelId;
+      $(this)
+        .attr("aria-selected", selected ? "true" : "false")
+        .toggleClass("border-indigo-200 bg-indigo-50 text-indigo-700 shadow-sm", selected)
+        .toggleClass("border-transparent text-slate-600", !selected);
+    });
+    $panels.each(function () {
+      $(this).toggleClass("hidden", $(this).attr("id") !== panelId);
+    });
+    if (moveFocus) $selected.trigger("focus");
+  }
+
+  function bindSegmentInsightTabs() {
+    var $tabs = $(".segment-insight-tab");
+    $tabs.off(".segmentInsightTabs");
+    $tabs.on("click.segmentInsightTabs", function () {
+      activateSegmentInsightPanel($(this).attr("data-segment-panel"), false);
+    });
+    $tabs.on("keydown.segmentInsightTabs", function (event) {
+      var $current = $(this);
+      var $allTabs = $(".segment-insight-tab");
+      var index = $allTabs.index($current);
+      var nextIndex = index;
+      if (event.key === "ArrowDown" || event.key === "ArrowRight") nextIndex = (index + 1) % $allTabs.length;
+      if (event.key === "ArrowUp" || event.key === "ArrowLeft") nextIndex = (index - 1 + $allTabs.length) % $allTabs.length;
+      if (event.key === "Home") nextIndex = 0;
+      if (event.key === "End") nextIndex = $allTabs.length - 1;
+      if (nextIndex === index) return;
+      event.preventDefault();
+      activateSegmentInsightPanel($allTabs.eq(nextIndex).attr("data-segment-panel"), true);
+    });
+    activateSegmentInsightPanel("segment-panel-sql", false);
+  }
+
+  function workflowError(message) {
+    $("#segment-workflow-error").removeClass("hidden").text(message || "Could not load the agent workflow.");
+  }
+
+  function workflowAgent(agentCode) {
+    return workflowAgents.find(function (agent) { return agent.agent_code === agentCode; }) || null;
+  }
+
+  function scheduleLabel(expression) {
+    return expression ? formatCronSchedule(expression) : "No schedule configured";
+  }
+
+  function workflowStepTemplate(step, index) {
+    var $row = $("<div></div>")
+      .addClass("workflow-step rounded-xl border border-slate-200 bg-slate-50/60 p-4")
+      .attr("data-workflow-index", index);
+    var $header = $("<div></div>").addClass("flex flex-wrap items-center justify-between gap-2");
+    var $title = $("<div></div>").addClass("flex items-center gap-2");
+    $("<span></span>").addClass("workflow-step-number inline-flex h-6 w-6 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700").text(index + 1).appendTo($title);
+    $("<span></span>").addClass("text-sm font-semibold text-slate-800").text("Workflow step " + (index + 1)).appendTo($title);
+    var $actions = $("<div></div>").addClass("flex items-center gap-1.5");
+    function action(label, className, title) {
+      return $("<button></button>").attr({ type: "button", title: title }).addClass(className).text(label);
+    }
+    action("↑", "workflow-step-up rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-100", "Move step up").appendTo($actions);
+    action("↓", "workflow-step-down rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-100", "Move step down").appendTo($actions);
+    action("Remove", "workflow-step-remove rounded border border-red-200 bg-white px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50", "Remove this step").appendTo($actions);
+    $header.append($title, $actions).appendTo($row);
+
+    var $grid = $("<div></div>").addClass("mt-3 grid gap-3 lg:grid-cols-3");
+    var $agentLabel = $("<label></label>").addClass("block");
+    $("<span></span>").addClass("mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500").text("AI agent").appendTo($agentLabel);
+    var $agent = $("<select></select>").addClass("workflow-agent w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700");
+    workflowAgents.forEach(function (agent) {
+      $("<option></option>").attr("value", agent.agent_code).text(agent.display_name + " (" + agent.agent_code + ")").appendTo($agent);
+    });
+    $agent.val(step.agent_code);
+    $agentLabel.append($agent).appendTo($grid);
+
+    var $orderLabel = $("<label></label>").addClass("block");
+    $("<span></span>").addClass("mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500").text("Run order").appendTo($orderLabel);
+    $("<input>").attr({ type: "number", min: 1, step: 1 }).addClass("workflow-order w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700").val(step.execution_order || index + 1).appendTo($orderLabel);
+    $("<span></span>").addClass("mt-1 block text-[11px] text-slate-400").text("Lowest number runs first.").appendTo($orderLabel);
+    $orderLabel.appendTo($grid);
+
+    var $activeLabel = $("<label></label>").addClass("flex items-center gap-2 self-end pb-2 text-sm text-slate-700");
+    $("<input>").attr({ type: "checkbox" }).addClass("workflow-active h-4 w-4 rounded border-slate-300 text-violet-700").prop("checked", step.is_active !== false).appendTo($activeLabel);
+    $("<span></span>").text("Active step").appendTo($activeLabel);
+    $activeLabel.appendTo($grid);
+
+    var $scheduleLabel = $("<label></label>").addClass("block lg:col-span-2");
+    $("<span></span>").addClass("mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500").text("Schedule override (cron)").appendTo($scheduleLabel);
+    $("<input>").attr({ type: "text", maxlength: 100, placeholder: "Blank = inherit agent schedule, e.g. 0 2 * * *" }).addClass("workflow-schedule w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-700").val(step.schedule_definition || "").appendTo($scheduleLabel);
+    var $inherited = $("<span></span>").addClass("workflow-inherited-schedule mt-1 block text-[11px] text-slate-400");
+    $scheduleLabel.append($inherited).appendTo($grid);
+
+    var $candidateLabel = $("<label></label>").addClass("block");
+    $("<span></span>").addClass("mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500").text("Candidate content/products").appendTo($candidateLabel);
+    var $candidate = $("<select></select>").attr({ multiple: "multiple", size: 4 }).addClass("workflow-candidates w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700");
+    workflowContentItems.forEach(function (item) {
+      $("<option></option>").attr("value", item.content_item_id).text(item.title + " [" + item.item_type + "]").appendTo($candidate);
+    });
+    $candidate.val(step.candidate_content_item_ids || []);
+    $("<span></span>").addClass("mt-1 block text-[11px] text-slate-400").text("Hold Ctrl/Cmd to select multiple candidates.").appendTo($candidateLabel);
+    $candidateLabel.prepend($candidate).appendTo($grid);
+
+    var $configLabel = $("<label></label>").addClass("block");
+    $("<span></span>").addClass("mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500").text("Agent configuration (JSON)").appendTo($configLabel);
+    $("<textarea></textarea>").attr({ rows: 4 }).addClass("workflow-configuration w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-700").val(JSON.stringify(step.configuration || {}, null, 2)).appendTo($configLabel);
+    $grid.append($candidateLabel, $configLabel);
+    $row.append($grid);
+    function refreshInheritedSchedule() {
+      var agent = workflowAgent($agent.val());
+      var inherited = agent && agent.schedule_definition;
+      $inherited.text("Agent default: " + scheduleLabel(inherited));
+    }
+    $agent.on("change", refreshInheritedSchedule);
+    refreshInheritedSchedule();
+    return $row;
+  }
+
+  function renderWorkflow() {
+    var $list = $("#segment-workflow-list").empty();
+    workflowSteps.forEach(function (step, index) {
+      $list.append(workflowStepTemplate(step, index));
+    });
+    var hasSteps = workflowSteps.length > 0;
+    $list.toggleClass("hidden", !hasSteps);
+    $("#segment-workflow-empty").toggleClass("hidden", hasSteps);
+    $("#btn-segment-workflow-save, #btn-segment-workflow-add").prop("disabled", false);
+  }
+
+  function loadWorkflowCatalog() {
+    if (workflowCatalogLoaded) return $.Deferred().resolve().promise();
+    return $.when(
+      api("/ai-agents/", { limit: 500 }),
+      api("/content-items/", { limit: 100 })
+    ).done(function (agents, contentItems) {
+      var agentRows = agents && agents[0] ? agents[0] : [];
+      var contentRows = contentItems && contentItems[0] ? contentItems[0] : [];
+      // Keep inactive agents in the catalog so existing steps remain editable;
+      // only active agents are offered when adding a new step.
+      workflowAgents = agentRows;
+      workflowContentItems = contentRows.filter(function (item) { return item.status_code === 1; });
+      workflowCatalogLoaded = true;
+    });
+  }
+
+  function collectWorkflowSteps() {
+    var seenAgents = {};
+    var steps = [];
+    var invalidConfiguration = false;
+    $("#segment-workflow-list .workflow-step").each(function (index) {
+      var $row = $(this);
+      var agentCode = String($row.find(".workflow-agent").val() || "");
+      if (!agentCode || seenAgents[agentCode]) {
+        throw new Error("Each agent may appear only once in a workflow.");
+      }
+      seenAgents[agentCode] = true;
+      var executionOrder = Number($row.find(".workflow-order").val());
+      if (!Number.isInteger(executionOrder) || executionOrder < 1) {
+        throw new Error("Run order must be a positive whole number.");
+      }
+      var configuration;
+      try {
+        configuration = JSON.parse(String($row.find(".workflow-configuration").val() || "{}"));
+      } catch (error) {
+        invalidConfiguration = true;
+        return;
+      }
+      if (!configuration || Array.isArray(configuration) || typeof configuration !== "object") {
+        invalidConfiguration = true;
+        return;
+      }
+      steps.push({
+        agent_code: agentCode,
+        execution_order: executionOrder,
+        is_active: $row.find(".workflow-active").is(":checked"),
+        schedule_definition: String($row.find(".workflow-schedule").val() || "").trim() || null,
+        candidate_content_item_ids: ($row.find(".workflow-candidates").val() || []),
+        configuration: configuration
+      });
+    });
+    if (invalidConfiguration) throw new Error("Every agent configuration must be a JSON object.");
+    var orders = steps.map(function (step) { return step.execution_order; });
+    if (orders.length !== new Set(orders).size) {
+      throw new Error("Each workflow step must have a unique run order.");
+    }
+    steps.sort(function (left, right) { return left.execution_order - right.execution_order; });
+    return steps;
+  }
+
+  function bindWorkflowEvents() {
+    $("#btn-segment-workflow-add").on("click", function () {
+      var used = {};
+      workflowSteps.forEach(function (step) { used[step.agent_code] = true; });
+      var available = workflowAgents.find(function (agent) {
+        return agent.status === "ACTIVE" && !used[agent.agent_code];
+      });
+      if (!available) {
+        workflowError("All active agents are already configured for this segment.");
+        return;
+      }
+      workflowSteps.push({
+        agent_code: available.agent_code,
+        execution_order: workflowSteps.length + 1,
+        is_active: true,
+        schedule_definition: null,
+        candidate_content_item_ids: [],
+        configuration: {}
+      });
+      $("#segment-workflow-error").addClass("hidden").text("");
+      renderWorkflow();
+    });
+    $("#btn-segment-workflow-save").on("click", function () {
+      var steps;
+      try {
+        steps = collectWorkflowSteps();
+      } catch (error) {
+        workflowError(error.message);
+        return;
+      }
+      var $button = $(this);
+      $button.prop("disabled", true).text("Saving...");
+      api("/segments/" + currentSegmentId + "/workflow", { steps: steps }, "PUT")
+        .done(function (saved) {
+          workflowSteps = saved || [];
+          renderWorkflow();
+          $("#segment-workflow-save-status").removeClass("hidden").text("Saved");
+          setTimeout(function () { $("#segment-workflow-save-status").addClass("hidden"); }, 2500);
+        })
+        .fail(function (xhr) {
+          workflowError((xhr.responseJSON && xhr.responseJSON.detail) || "Could not save the agent workflow.");
+        })
+        .always(function () { $button.prop("disabled", false).text("Save workflow"); });
+    });
+    $("#segment-workflow-list").on("click", ".workflow-step-remove", function () {
+      var index = Number($(this).closest(".workflow-step").attr("data-workflow-index"));
+      workflowSteps.splice(index, 1);
+      renderWorkflow();
+    });
+    $("#segment-workflow-list").on("click", ".workflow-step-up, .workflow-step-down", function () {
+      var index = Number($(this).closest(".workflow-step").attr("data-workflow-index"));
+      var target = $(this).hasClass("workflow-step-up") ? index - 1 : index + 1;
+      if (target < 0 || target >= workflowSteps.length) return;
+      var moved = workflowSteps.splice(index, 1)[0];
+      workflowSteps.splice(target, 0, moved);
+      workflowSteps.forEach(function (step, position) { step.execution_order = position + 1; });
+      renderWorkflow();
+    });
+  }
+
+  function loadWorkflow(segmentId) {
+    workflowSteps = [];
+    workflowCatalogLoaded = false;
+    $("#segment-workflow-loading").removeClass("hidden");
+    $("#segment-workflow-empty, #segment-workflow-list").addClass("hidden");
+    $("#segment-workflow-error").addClass("hidden").text("");
+    return $.when(api("/segments/" + segmentId + "/workflow"), loadWorkflowCatalog())
+      .done(function (workflowResponse) {
+        workflowSteps = workflowResponse[0] || [];
+        renderWorkflow();
+        bindWorkflowEvents();
+      })
+      .fail(function (xhr) {
+        workflowError((xhr.responseJSON && xhr.responseJSON.detail) || "Could not load the agent workflow.");
+      })
+      .always(function () { $("#segment-workflow-loading").addClass("hidden"); });
+  }
+
   function loadDetail(segmentId) {
     currentSegmentId = segmentId;
     $("#segment-detail-content").empty();
@@ -545,6 +826,8 @@ window.C360 = window.C360 || {};
         segmentsById[segment.segment_id] = segment;
         $("#segment-detail-loading").addClass("hidden");
         $("#segment-detail-content").html(C360.templates.render("segment-details", segmentDetailVm(segment)));
+        bindSegmentInsightTabs();
+        loadWorkflow(segmentId);
         matchedDtv = createMatchedDtv();
         matchedDtv.bindLoadMore();
         loadMatchedProfiles(segmentId, false);

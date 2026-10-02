@@ -31,8 +31,8 @@ documents or backups.
 For a fresh database, run the SQL files in this order:
 
 1. `database-schema.sql`
-2. `init-core-database.sql`
-3. `init-prompt-store-seed.sql`
+2. `init-cdp-ai-agents.sql`
+3. `init-core-database.sql`
 4. `data-view-for-llm.sql`
 5. `migrations/*.sql`, in filename order
 
@@ -45,8 +45,8 @@ Example for a local database:
 
 ```bash
 psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/database-schema.sql
+psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/init-cdp-ai-agents.sql
 psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/init-core-database.sql
-psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/init-prompt-store-seed.sql
 psql -v ON_ERROR_STOP=1 -d customer360 -f customer360-database/data-view-for-llm.sql
 for migration in customer360-database/migrations/*.sql; do
 	psql -v ON_ERROR_STOP=1 -d customer360 -f "$migration"
@@ -60,7 +60,11 @@ when existing data cannot be safely backfilled or constrained.
 
 ## Initialization And Seeds
 
-`init-core-database.sql` is the seed/setup script. It:
+`init-cdp-ai-agents.sql` is the unified AI-agent registry seed. It creates
+prompt-backed agents and the 20 core scoring/orchestration agents. Run it before
+`init-core-database.sql`, whose profile-attribute seed references those agents.
+
+`init-core-database.sql` is the remaining seed/setup script. It:
 
 - creates the default tenant `11111111-1111-1111-1111-111111111111`;
 - seeds system domains and default tenant-domain assignments;
@@ -156,6 +160,54 @@ conditions are present.
 - `cdp_content_items` stores personalized content candidates.
 - `cdp_segments` stores audience rules, generated SQL, processing source, and
 	computed membership counts.
+- `cdp_agent_workflow` links the global `cdp_ai_agents` registry to tenant-owned
+	segments in a many-to-many relationship. Each row configures one agent for
+	one segment, with a positive `execution_order`, `is_active`, JSONB
+	`configuration`, and a `candidate_content_item_ids` list referencing
+	`cdp_content_items` (including products). Candidate IDs must be distinct,
+	exist, and belong to the same tenant; referenced items cannot be deleted or
+	have their tenant/ID changed until removed from all workflow lists.
+
+### Segment agent workflows
+
+An agent can be reused across any number of segments; each segment can have
+any number of different agents. Agent membership and queue positions are
+unique per tenant/segment. For example, configure Churn Risk Intelligence at
+position 1, Offer & Incentive Optimization at 2, and 1-to-1 Email Personalizer
+at 3. Recommendation agents can have different candidate lists and ranking
+configuration in each segment.
+
+Load a segment's enabled steps in ascending order:
+
+```sql
+SELECT agent_workflow_id, agent_code, execution_order,
+       candidate_content_item_ids, configuration
+FROM customer360.cdp_agent_workflow
+WHERE tenant_id = :tenant_id AND segment_id = :segment_id AND is_active
+ORDER BY execution_order;
+```
+
+This table defines workflow configuration, not a job queue or execution
+ledger. The workflow runner must serialize runs of the same segment, await
+each step's completion before starting the next, and pass earlier results
+to later steps. Separate segments may run concurrently. The schema does not
+implement a runner, retries, or failure policy. Empty candidate lists mean
+no explicit candidates, not permission to rank the entire catalog.
+
+Set `app.tenant_id` within the transaction before accessing workflow data.
+Use `SET CONSTRAINTS customer360.uq_cdp_agent_workflow_execution_order DEFERRED`
+within a transaction to swap queue positions without transient uniqueness
+conflicts. Writers should update `updated_at` when editing configuration.
+
+Candidate references use a UUID array to keep this feature in one new table.
+Validation triggers lock content rows while linking them and restrict
+deletion/key changes while referenced. Use the normal `READ COMMITTED`
+isolation level for these writes; the triggers are not native array foreign
+keys, so candidate-list writes and content deletion/key changes explicitly
+reject `REPEATABLE READ` rather than permit stale-snapshot integrity checks.
+For stronger transaction isolation, use `SERIALIZABLE` and retry serialization
+failures. The invoker-rights validation trigger needs `SELECT` and `UPDATE`
+privileges on `cdp_content_items` to acquire row locks; tenant RLS still applies.
 
 ### Graph storage
 
@@ -226,6 +278,24 @@ view scripts:
 | `005_profile_quality_and_tenant_domain_rls.sql` | Harden profile score ranges, hash state, timestamps, domain assignments, and related tenant constraints. |
 | `006_suppression_expiry_exclusion.sql` | Enforce non-overlapping active suppression windows while allowing expired records to be replaced. |
 | `007_zalo_connector_config.sql` | Move legacy Zalo OA settings and tokens from `sys_data_source` into `crm_connector_config`. |
+
+The migrations directory also contains
+[`006_cdp_agent_workflow.sql`](migrations/006_cdp_agent_workflow.sql), which adds
+the ordered segment/agent relation, candidate integrity triggers, indexes,
+and forced tenant RLS to existing databases. It is safe to reapply after the
+canonical schema.
+
+Run the workflow regression checks against an isolated PostgreSQL 16 database
+after applying the schema or migration:
+
+```bash
+psql -v ON_ERROR_STOP=1 -d customer360_test \
+    -f customer360-database/tests/cdp_agent_workflow.sql
+```
+
+The checks create fixtures and a temporary non-superuser role within a
+transaction, then roll everything back; run them as a test database
+administrator.
 
 Review data-changing migrations before production execution. In particular,
 migration 004 stops if existing graph edges cannot be assigned to a tenant,

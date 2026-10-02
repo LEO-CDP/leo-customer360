@@ -80,8 +80,45 @@
     </div>
   </div>
 
+  <!-- 2. Segment workspaces: vertical tabs on desktop, horizontally scrollable
+       tabs on small screens. Only one data-heavy panel is visible at a time. -->
+  <div class="rounded-2xl border border-slate-200/80 bg-white shadow-xs overflow-hidden">
+    <div class="flex flex-col md:flex-row md:min-h-[520px]">
+      <nav class="w-full shrink-0 border-b border-slate-200 bg-slate-50/70 p-3 md:w-56 md:border-b-0 md:border-r md:p-4" aria-label="Segment workspaces">
+        <div class="flex gap-2 overflow-x-auto md:flex-col md:overflow-visible" role="tablist" aria-orientation="vertical">
+          <button id="segment-tab-sql" type="button" class="segment-insight-tab inline-flex min-w-max items-center gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-3 text-left text-indigo-700 shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 md:w-full" role="tab" aria-selected="true" aria-controls="segment-panel-sql" data-segment-panel="segment-panel-sql">
+            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-indigo-600 ring-1 ring-indigo-100">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>
+            </span>
+            <span class="min-w-0">
+              <span class="block text-xs font-bold">Audience SQL Query</span>
+              <span class="mt-0.5 block text-[11px] text-indigo-500">Rules and generated SQL</span>
+            </span>
+          </button>
+          <button id="segment-tab-matched" type="button" class="segment-insight-tab inline-flex min-w-max items-center gap-3 rounded-xl border border-transparent px-3 py-3 text-left text-slate-600 transition-colors hover:border-slate-200 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 md:w-full" role="tab" aria-selected="false" aria-controls="segment-panel-matched" data-segment-panel="segment-panel-matched">
+            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-emerald-600 ring-1 ring-slate-200">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c-.285-1.113-.786-2.07-1.766M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0z" /></svg>
+            </span>
+            <span class="min-w-0">
+              <span class="block text-xs font-bold">Matched Profiles</span>
+              <span class="mt-0.5 block text-[11px] text-slate-400">People in this audience</span>
+            </span>
+          </button>
+          <button id="segment-tab-workflow" type="button" class="segment-insight-tab inline-flex min-w-max items-center gap-3 rounded-xl border border-transparent px-3 py-3 text-left text-slate-600 transition-colors hover:border-slate-200 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 md:w-full" role="tab" aria-selected="false" aria-controls="segment-panel-workflow" data-segment-panel="segment-panel-workflow">
+            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-violet-600 ring-1 ring-slate-200">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 6.75h6M9 12h6m-6 5.25h6M5.25 4.5h.008v.008H5.25V4.5zm0 5.25h.008v.008H5.25V9.75zm0 5.25h.008v.008H5.25V15zm13.5-10.5h.008v.008h-.008V4.5zm0 5.25h.008v.008h-.008V9.75zm0 5.25h.008v.008h-.008V15z" /></svg>
+            </span>
+            <span class="min-w-0">
+              <span class="block text-xs font-bold">Agent Workflow</span>
+              <span class="mt-0.5 block text-[11px] text-slate-400">Ordered processing steps</span>
+            </span>
+          </button>
+        </div>
+      </nav>
 
-  <!-- 2. Rule Definition Card (SQL Rules Column Only) -->
+      <div class="min-w-0 flex-1 bg-white p-4 sm:p-6">
+        <div id="segment-panel-sql" class="segment-insight-panel" role="tabpanel" aria-labelledby="segment-tab-sql">
+  <!-- Audience SQL Query -->
   <div class="bg-white border border-slate-200/80 rounded-2xl shadow-xs p-6 sm:p-7 transition-all">
     
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -115,7 +152,7 @@
         </div>
         <span class="text-slate-400 font-semibold tracking-wide uppercase text-[10px]">Generated SQL</span>
       </div>
-      <pre id="segment-sql-content" class="text-xs sm:text-sm font-mono text-emerald-300 p-5 overflow-x-auto leading-relaxed tracking-wide selection:bg-indigo-500/40">{{#if final_generated_sql}}{{final_generated_sql}}{{else}}{{display_sql}}{{/if}}</pre>
+      <pre id="segment-sql-content" class="text-xs sm:text-sm font-mono text-emerald-300 p-5 overflow-x-auto leading-relaxed tracking-wide selection:bg-indigo-500/40">{{display_sql}}</pre>
     </div>
     {{else}}
     <div class="flex flex-col items-center justify-center p-8 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-slate-400 text-xs">
@@ -131,8 +168,43 @@
     {{/if}}
   </div>
 
+        </div>
+        <div id="segment-panel-workflow" class="segment-insight-panel hidden" role="tabpanel" aria-labelledby="segment-tab-workflow">
+  <!-- Agent Workflow -->
+  <div class="bg-white border border-slate-200/80 rounded-2xl shadow-xs p-6 sm:p-7 transition-all">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex items-center gap-3.5">
+        <div class="w-10 h-10 shrink-0 bg-violet-50 text-violet-600 rounded-xl flex items-center justify-center ring-1 ring-violet-500/10 shadow-2xs">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 6.75h6M9 12h6m-6 5.25h6M5.25 4.5h.008v.008H5.25V4.5zm0 5.25h.008v.008H5.25V9.75zm0 5.25h.008v.008H5.25V15zm13.5-10.5h.008v.008h-.008V4.5zm0 5.25h.008v.008h-.008V9.75zm0 5.25h.008v.008h-.008V15z" /></svg>
+        </div>
+        <div>
+          <h3 class="font-bold text-slate-900 text-base">Agent Workflow</h3>
+          <p class="text-xs text-slate-400 mt-0.5">Agents run sequentially in order; separate segments may run concurrently</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="segment-workflow-save-status" class="hidden text-xs font-medium text-emerald-600"></span>
+        <button id="btn-segment-workflow-add" type="button" class="inline-flex items-center gap-1.5 border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 rounded-lg px-3 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+          <span aria-hidden="true">+</span> Add agent
+        </button>
+        <button id="btn-segment-workflow-save" type="button" class="inline-flex items-center gap-1.5 bg-violet-700 text-white hover:bg-violet-800 rounded-lg px-3 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+          Save workflow
+        </button>
+      </div>
+    </div>
+    <div id="segment-workflow-error" class="hidden mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"></div>
+    <div id="segment-workflow-loading" class="p-8 flex justify-center">
+      <div class="spinner"></div>
+    </div>
+    <div id="segment-workflow-empty" class="hidden mt-5 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-6 text-center text-xs text-slate-500">
+      No agents are configured for this segment. Add an agent to create the first workflow step.
+    </div>
+    <div id="segment-workflow-list" class="hidden mt-5 space-y-3"></div>
+  </div>
 
-  <!-- 3. Matched Profiles Table Card -->
+        </div>
+        <div id="segment-panel-matched" class="segment-insight-panel hidden" role="tabpanel" aria-labelledby="segment-tab-matched">
+  <!-- Matched Profiles Table Card -->
   <div class="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden transition-all">
     
     <!-- Header -->
@@ -149,7 +221,7 @@
 
     <!-- Table Container -->
     <div class="overflow-x-auto">
-      <table class="w-full text-sm text-left">
+      <table class="w-full text-xs text-left">
         <thead id="segment-matched-thead" class="bg-slate-50/90 text-slate-500 text-xs uppercase tracking-wider font-semibold border-b border-slate-200/80 sticky top-0 z-10"></thead>
         <tbody id="segment-matched-tbody" class="divide-y divide-slate-100"></tbody>
       </table>
@@ -171,6 +243,10 @@
     <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/40">
       <span id="segment-matched-count-label" class="font-medium text-slate-600"></span>
       <button id="btn-segment-matched-load-more" class="hidden border border-slate-200/80 bg-white rounded-lg px-3.5 py-1.5 font-semibold text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Load more</button>
+    </div>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>

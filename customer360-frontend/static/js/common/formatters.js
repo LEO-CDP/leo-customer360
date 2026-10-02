@@ -54,6 +54,74 @@ window.C360 = window.C360 || {};
 
   function titleCase(s) { return (s || "").replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
 
+  // Apply a transformation only to SQL text outside quoted literals. This
+  // keeps display formatting from changing values such as 'New   Customer'.
+  function transformSqlOutsideLiterals(sql, transform) {
+    var output = "";
+    var chunk = "";
+    var quote = null;
+    for (var index = 0; index < sql.length; index += 1) {
+      var character = sql.charAt(index);
+      if (quote) {
+        output += character;
+        if (character === quote) {
+          if (sql.charAt(index + 1) === quote) {
+            output += sql.charAt(index + 1);
+            index += 1;
+          } else {
+            quote = null;
+          }
+        }
+        continue;
+      }
+      if (character === "'" || character === '"') {
+        output += transform(chunk);
+        chunk = "";
+        quote = character;
+        output += character;
+      } else {
+        chunk += character;
+      }
+    }
+    return output + transform(chunk);
+  }
+
+  function parenthesisDeltaOutsideLiterals(line) {
+    var delta = 0;
+    transformSqlOutsideLiterals(line, function (chunk) {
+      delta += (chunk.match(/\(/g) || []).length;
+      delta -= (chunk.match(/\)/g) || []).length;
+      return chunk;
+    });
+    return delta;
+  }
+
+  function formatSqlForDisplay(sql) {
+    var value = String(sql || "").trim();
+    if (!value) return "";
+
+    value = transformSqlOutsideLiterals(value, function (chunk) {
+      return chunk.replace(/\s+/g, " ");
+    }).trim();
+
+    value = transformSqlOutsideLiterals(value, function (chunk) {
+      return chunk
+        .replace(/\s+(SELECT|FROM|WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|OFFSET|RETURNING)\s+/gi, "\n$1 ")
+        .replace(/\s+(AND|OR)\s+/gi, "\n$1 ");
+    }).trim();
+
+    var depth = 0;
+    return value.split("\n").map(function (line) {
+      var trimmed = line.trim();
+      var closesBeforeContent = trimmed.charAt(0) === ")";
+      var lineDepth = Math.max(0, depth - (closesBeforeContent ? 1 : 0));
+      var isPredicate = /^(AND|OR)\b/i.test(trimmed);
+      var formatted = (isPredicate ? "  " : "") + "  ".repeat(lineDepth) + trimmed;
+      depth = Math.max(0, depth + parenthesisDeltaOutsideLiterals(trimmed));
+      return formatted;
+    }).join("\n");
+  }
+
   // Default domain labels used as a fallback until the API labels are loaded.
   // The authoritative list is served by customer360-api at /metadata/domains.
   var DEFAULT_DOMAIN_LABELS = { banking: "Retail Banking", healthcare: "Healthcare", retail: "Retail Commerce", real_estate: "Real Estate", travel: "Travel", media: "Media & Entertainment", education: "Education" };
@@ -107,6 +175,8 @@ window.C360 = window.C360 || {};
     realName: realName,
     maskMiddle: maskMiddle,
     titleCase: titleCase,
+    transformSqlOutsideLiterals: transformSqlOutsideLiterals,
+    formatSqlForDisplay: formatSqlForDisplay,
     DOMAIN_LABELS: DOMAIN_LABELS,
     setDomainLabels: setDomainLabels,
     domainLabel: domainLabel,

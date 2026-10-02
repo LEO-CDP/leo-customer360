@@ -4,6 +4,7 @@ over a mocked LiteLLM SDK."""
 
 import re
 import unittest
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -149,8 +150,7 @@ class AgentSeedModelTests(unittest.TestCase):
     def test_generative_agent_seeds_use_litellm_openai_model_identifier(self):
         repository_root = Path(__file__).resolve().parents[2]
         seed_paths = (
-            repository_root / "customer360-database" / "init-core-database.sql",
-            repository_root / "customer360-database" / "init-prompt-store-seed.sql",
+            repository_root / "customer360-database" / "init-cdp-ai-agents.sql",
         )
 
         for seed_path in seed_paths:
@@ -163,6 +163,41 @@ class AgentSeedModelTests(unittest.TestCase):
                 ["openai/gpt-5.6-luna"] * len(models),
                 f"Generative agent seed models must match LiteLLM's OpenAI identifier in {seed_path}",
             )
+
+    def test_unified_agent_seed_defines_each_agent_once(self):
+        repository_root = Path(__file__).resolve().parents[2]
+        seed_path = repository_root / "customer360-database" / "init-cdp-ai-agents.sql"
+        agent_codes = re.findall(
+            r"^\(\n\s*'([^']+)'", seed_path.read_text(encoding="utf-8"), re.MULTILINE
+        )
+        self.assertEqual(len(agent_codes), 31)
+        self.assertEqual(len(agent_codes), len(set(agent_codes)))
+        self.assertEqual(agent_codes.count("campaign_planner"), 1)
+        self.assertIn("notification_planner", agent_codes)
+        self.assertNotIn("zns_campaign_planner", agent_codes)
+
+        model_types = re.findall(
+            r"^\(\n\s*'[^']+',.*?\n\s*'(classification|regression|clustering|rules_engine|generative_llm)',",
+            seed_path.read_text(encoding="utf-8"),
+            re.MULTILINE | re.DOTALL,
+        )
+        counts = Counter(model_types)
+        self.assertEqual(set(counts), {
+            "classification",
+            "regression",
+            "clustering",
+            "rules_engine",
+            "generative_llm",
+        })
+        self.assertTrue(all(count >= 2 for count in counts.values()), counts)
+
+    def test_core_seed_does_not_insert_agent_registry_rows(self):
+        repository_root = Path(__file__).resolve().parents[2]
+        seed_path = repository_root / "customer360-database" / "init-core-database.sql"
+        self.assertNotRegex(
+            seed_path.read_text(encoding="utf-8"),
+            r"(?i)INSERT\s+INTO\s+customer360\.cdp_ai_agents",
+        )
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ relationship/FK resolution and any metadata-driven tooling)."""
 
 from leo_customer360_dao.models.base import Base
 from leo_customer360_dao.models.content import CdpContentItem
+from leo_customer360_dao.models.agent_workflow import CdpAgentWorkflow
 from leo_customer360_dao.models.crm import (
     Account,
     Campaign,
@@ -63,6 +64,7 @@ __all__ = [
     "CampaignMember",
     "CampaignReview",
     "CdpContentItem",
+    "CdpAgentWorkflow",
     "Contact",
     "ConnectorConfig",
     "EmailProviderConfig",

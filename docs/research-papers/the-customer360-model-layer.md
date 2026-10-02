@@ -130,7 +130,7 @@ flowchart LR
     subgraph Gen["generative_llm -> gpt-5.6"]
       PSG[persona_summary_generator]
       CP[campaign_planner]
-      ZP[zns_campaign_planner]
+      ZP[notification_planner]
     end
     subgraph SD["structured_decision -> jev (new)"]
       IA[identity_adjudicator]

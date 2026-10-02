@@ -116,7 +116,7 @@ Mọi thao tác đọc hoặc ghi hướng tới khách hàng đều phải tuâ
 | Sự kiện hành vi thô | S3 hoặc MinIO event lake | Đối tượng NDJSON hàng giờ bất biến; các thông báo Redis Stream mang tính bàn giao bền vững |
 | Hàng đợi sự kiện, giới hạn rate limit, siêu dữ liệu phiên, ánh xạ API-key, caches | Redis | Redis Streams là bắt buộc để xác nhận sự kiện bền vững; các bộ nhớ đệm tùy chọn có thể fail-open nếu được cấu hình |
 | Vị trí quảng cáo, chiến dịch, mẫu sáng tạo, endpoint theo dõi | PostgreSQL `leo_ads` | Thuộc sở hữu của `customer360-promotions`; tiền tố route công khai là `/ads` |
-| Tác nhân AI, mô hình chấm điểm, và prompt được phiên bản hóa | PostgreSQL `customer360.cdp_ai_agents` (`system_instructions` + `prompt_versions`) | Được tạo mẫu bởi `customer360-database/init-core-database.sql` và `init-prompt-store-seed.sql` |
+| Tác nhân AI, mô hình chấm điểm, và prompt được phiên bản hóa | PostgreSQL `customer360.cdp_ai_agents` (`system_instructions` + `prompt_versions`) | Được tạo mẫu bởi `customer360-database/init-cdp-ai-agents.sql` |
 
 ### Ranh giới API và Trải nghiệm
 

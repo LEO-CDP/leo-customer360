@@ -13,7 +13,7 @@ from typing import Any, Optional
 from ai_providers.base import AIProviderError, parse_json_object
 from campaign_planner import base
 
-# Seeded by init-prompt-store-seed.sql (agent_code 'segment_rule_generator').
+# Seeded by init-cdp-ai-agents.sql (agent_code 'segment_rule_generator').
 SEGMENT_RULES_INSTRUCTIONS = "segment.nl_to_rules.instructions"
 
 # Same cap as the request models; stops the summary growing turn over turn.

@@ -92,14 +92,21 @@ The current planning endpoints resolve these seeded prompt keys:
 | Agent code | Prompt key | Endpoint |
 |------------|------------|----------|
 | `campaign_planner` | `campaign.plan.instructions` | `POST /plan/email` |
-| `zns_campaign_planner` | `campaign.zns.instructions` | `POST /plan/zalo` |
+| `notification_planner` | `campaign.zns.instructions` (stable compatibility key) | `POST /plan/zalo` (ZNS adapter) |
 
-The full prompt-backed catalog is seeded by
-[`customer360-database/init-prompt-store-seed.sql`](../customer360-database/init-prompt-store-seed.sql);
-score and rules-engine catalog records are seeded by
-[`customer360-database/init-core-database.sql`](../customer360-database/init-core-database.sql).
+The full prompt-backed, scoring, and rules-engine catalog is seeded by
+[`customer360-database/init-cdp-ai-agents.sql`](../customer360-database/init-cdp-ai-agents.sql).
 Deployment reseeding updates catalog metadata but preserves a prompt body and
 history once a published revision exists.
+
+`notification_planner` defines template-based planning for web, Zalo, WhatsApp,
+chatbot, and caller-supported notification channels. Its input contract includes
+`channel`, `candidate_templates`, and `delivery_constraints`. The existing
+`/plan/zalo` endpoint remains a ZNS-only adapter; the registry entry does not
+provide notification delivery or additional HTTP endpoints. The seed does not
+rename or delete older registry rows; manage those explicitly per deployment.
+Existing published prompts are preserved, so publish a reviewed unified prompt
+revision through the prompt store before using it for other channels.
 
 `model_name` records the catalog model assigned to an agent, for example
 `openai/gpt-5.6-luna`. This service currently chooses the actual LiteLLM model
@@ -268,7 +275,7 @@ into the planner. `AGENT_DATABASE_URL` is required for planning.
   configuration, current instructions, and append-only `prompt_versions` JSONB
   history. DDL in **`customer360-database/database-schema.sql`**.
 - **Seed** — the default prompt bodies (`campaign.plan.instructions`,
-  `campaign.zns.instructions`) live in **`customer360-database/init-prompt-store-seed.sql`**
+  `campaign.zns.instructions`) live in **`customer360-database/init-cdp-ai-agents.sql`**
   (idempotent). Both apply on DB init and via `deployments/postgres/run-sql.sh`.
 - **Edit at runtime** — `PgPromptStore.publish()` appends a revision to the
   agent row and updates `system_instructions`/`instruction_version`;
@@ -299,7 +306,7 @@ revision is materialized in `system_instructions` and `instruction_version`.
 log. Schema and seed ownership stays in `customer360-database`:
 
 - DDL: `customer360-database/database-schema.sql`
-- Initial catalog: `customer360-database/init-prompt-store-seed.sql`
+- Initial catalog: `customer360-database/init-cdp-ai-agents.sql`
 - Runtime implementation: `src/prompts/stores.py`
 
 There is no in-code prompt fallback. An unpublished or invalid prompt key causes

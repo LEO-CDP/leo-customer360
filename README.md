@@ -114,7 +114,7 @@ Every customer-facing read or write must respect `tenant_id`. Authentication res
 | Raw behavioral events | S3 or MinIO event lake | Immutable hourly NDJSON objects; Redis Stream messages carry the durable handoff |
 | Event queue, rate limits, session metadata, API-key mappings, caches | Redis | Redis Streams are required for durable event acknowledgement; optional caches fail open where configured |
 | Promotion placements, campaigns, creatives, tracking endpoints | PostgreSQL `leo_ads` | Owned by `customer360-promotions`; public route prefix is `/ads` |
-| AI agents, scoring models, and versioned prompts | PostgreSQL `customer360.cdp_ai_agents` (`system_instructions` + `prompt_versions`) | Seeded by `customer360-database/init-core-database.sql` and `init-prompt-store-seed.sql` |
+| AI agents, scoring models, and versioned prompts | PostgreSQL `customer360.cdp_ai_agents` (`system_instructions` + `prompt_versions`) | Seeded by `customer360-database/init-cdp-ai-agents.sql` |
 
 ### API and experience boundaries
 

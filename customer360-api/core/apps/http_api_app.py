@@ -31,6 +31,7 @@ from core.routers.identity_api import all_identity_routers
 from core.routers.metadata_api import all_metadata_routers
 from core.routers.data_source_api import all_data_source_routers
 from core.routers.ai_agent_api import all_ai_agent_routers
+from core.routers.agent_workflow_api import router as agent_workflow_router
 
 from core.routers.persona_api import all_persona_routers
 from core.routers.relations_api import all_relations_routers
@@ -60,6 +61,7 @@ API_ROUTER_GROUPS = (
     all_metadata_routers,
     all_data_source_routers,
     all_ai_agent_routers,
+    (agent_workflow_router,),
     all_identity_routers,
     all_user_routers,
     all_auth_routers,

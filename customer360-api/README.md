@@ -338,6 +338,17 @@ Campaign activation and email administration under `/admin`:
 - Generic CRUD: `/segments`
 - `GET /segments/{segment_id}/matched-profiles`
 - `GET /segments/{segment_id}/matched-profiles/count`
+- `GET /segments/{segment_id}/workflow`
+- `PUT /segments/{segment_id}/workflow` (atomically replace and reorder steps)
+- `POST /segments/{segment_id}/workflow`
+- `PATCH /segments/{segment_id}/workflow/{workflow_id}`
+- `DELETE /segments/{segment_id}/workflow/{workflow_id}`
+
+Workflow steps run in ascending `execution_order`. Each step may provide a
+five-field `schedule_definition` cron override; when it is blank, the
+workflow inherits the selected agent's global `cdp_ai_agents.schedule_definition`.
+`PUT /segments/{segment_id}/workflow` replaces the complete ordered list
+atomically, which is the preferred endpoint for editors that reorder steps.
 - `POST /segments/{segment_id}/recompute`
 - `POST /segments/admin/defaults/seed`
 - `POST /segments/admin/recompute-all`

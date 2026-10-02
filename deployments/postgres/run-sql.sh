@@ -2,8 +2,8 @@
 # Bootstrap the deployed vDB for an env by running, in a fixed dependency order:
 #   1) repo  postgres/**/*.sql   (extensions, keycloak db — filename order)
 #   2) repo  customer360-database/*.sql (the app schema) AFTER the init, in the order the
-#      project's own postgres/Dockerfile uses: database-schema -> init-core-database,
-#      then init-prompt-store-seed, then data-view-for-llm (materialized views)
+#      project's own postgres/Dockerfile uses: database-schema -> init-cdp-ai-agents,
+#      then init-core-database, then data-view-for-llm (materialized views)
 #      LAST since it reads those tables.
 #   3) repo  customer360-promotions/sql-scripts/db-schema-init.sql (the leo_ads schema)
 #      LAST, because it is independent of everything above: leo_ads has no RLS and no
@@ -33,7 +33,7 @@ esac
 
 PG_SQL_DIR="../../postgres"       # repo-root/postgres/**  (extensions, keycloak db) — filename order
 APP_SQL_DIR="../../customer360-database" # the app schema; ORDER MATTERS, so run these known files first:
-APP_ORDER=(database-schema.sql init-core-database.sql init-prompt-store-seed.sql data-view-for-llm.sql)
+APP_ORDER=(database-schema.sql init-cdp-ai-agents.sql init-core-database.sql data-view-for-llm.sql)
 MIGRATIONS_DIR="$APP_SQL_DIR/migrations"
 PROMOTIONS_SQL_DIR="../../customer360-promotions/sql-scripts" # leo_ads (customer360-promotions); independent of the above
 

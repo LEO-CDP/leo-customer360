@@ -265,326 +265,19 @@ ON CONFLICT (event_name) DO UPDATE SET
     updated_at             = now();
 
 
--- ============================================================================
--- Seed customer360.cdp_ai_agents
--- ============================================================================
-
-INSERT INTO customer360.cdp_ai_agents (
-    agent_code,
-    display_name,
-    description,
-    model_type,
-    model_name,
-    status,
-    schedule_definition,
-    input_features,
-    hyperparameters,
-    system_instructions,
-    required_variables,
-    instruction_version,
-    instruction_updated_by,
-    instruction_note
-) VALUES
-
-    -- ------------------------------------------------------------------------
-    -- Scoring / ML agents
-    -- ------------------------------------------------------------------------
-
-    (
-        'lead_scoring',
-        'Lead Conversion Scoring Agent',
-        'Predicts lead_conversion_probability and lead_grade for prospect-to-customer conversion.',
-        'classification',
-        'lead-scoring-model',
-        'ACTIVE',
-        '0 1 * * *',
-        ARRAY[
-            'last_activity_at',
-            'source_systems',
-            'segmentation_tags'
-        ],
-        '{}'::jsonb,
-        NULL,
-        ARRAY[]::TEXT[],
-        1,
-        'seed',
-        'initial seed'
-    ),
-
-    (
-        'churn_scoring',
-        'Churn Risk Scoring Agent',
-        'Predicts churn_probability and churn_risk_tier from engagement drop-offs.',
-        'classification',
-        'churn-scoring-model',
-        'ACTIVE',
-        '0 2 * * *',
-        ARRAY[
-            'last_activity_at',
-            'historical_clv'
-        ],
-        '{}'::jsonb,
-        NULL,
-        ARRAY[]::TEXT[],
-        1,
-        'seed',
-        'initial seed'
-    ),
-
-    (
-        'clv_scoring',
-        'Customer Lifetime Value Agent',
-        'Predicts predictive_clv and clv_segment.',
-        'regression',
-        'clv-scoring-model',
-        'ACTIVE',
-        '0 3 * * 0',
-        ARRAY[
-            'historical_clv'
-        ],
-        '{}'::jsonb,
-        NULL,
-        ARRAY[]::TEXT[],
-        1,
-        'seed',
-        'initial seed'
-    ),
-
-    (
-        'cx_scoring',
-        'Customer Experience Scoring Agent',
-        'Computes engagement_score, latest_nps_score, average_csat and overall_sentiment_score.',
-        'regression',
-        'cx-scoring-model',
-        'ACTIVE',
-        '0 * * * *',
-        ARRAY[
-            'latest_nps_score',
-            'average_csat'
-        ],
-        '{}'::jsonb,
-        NULL,
-        ARRAY[]::TEXT[],
-        1,
-        'seed',
-        'initial seed'
-    ),
-
-    (
-        'identity_resolution_scoring',
-        'Identity Resolution Confidence Agent',
-        'Computes identity_confidence_score for CIR match quality.',
-        'classification',
-        'identity-resolution-confidence-v1',
-        'ACTIVE',
-        NULL,
-        ARRAY[
-            'email',
-            'phone_number',
-            'device_ids'
-        ],
-        '{}'::jsonb,
-        NULL,
-        ARRAY[]::TEXT[],
-        1,
-        'seed',
-        'initial seed'
-    ),
-
-    (
-        'data_quality',
-        'Profile Data Quality Agent',
-        'Computes profile_completeness_score for data-quality monitoring.',
-        'rules_engine',
-        'data-quality-rules-v1',
-        'ACTIVE',
-        '0 1 * * *',
-        ARRAY[
-            'email',
-            'phone_number',
-            'device_ids'
-        ],
-        '{}'::jsonb,
-        NULL,
-        ARRAY[]::TEXT[],
-        1,
-        'seed',
-        'initial seed'
-    ),
-
-    (
-        'lifecycle_stage',
-        'Lifecycle Stage Agent',
-        'Derives lifecycle_stage such as prospect, lead, customer, vip, dormant and churn_risk.',
-        'rules_engine',
-        'lifecycle-stage-rules-v1',
-        'ACTIVE',
-        '0 1 * * *',
-        ARRAY[
-            'customer_since',
-            'last_activity_at',
-            'churn_risk_tier'
-        ],
-        '{}'::jsonb,
-        NULL,
-        ARRAY[]::TEXT[],
-        1,
-        'seed',
-        'initial seed'
-    ),
-
-    (
-        'persona_summary_generator',
-        'Persona Summary Generator',
-        'Generates an LLM-based narrative persona_summary for each profile.',
-        'generative_llm',
-        'openai/gpt-5.6-luna',
-        'ACTIVE',
-        NULL,
-        ARRAY[
-            'attributes',
-            'segmentation_tags'
-        ],
-        '{
-            "temperature": 0.2,
-            "max_output_tokens": 500
-        }'::jsonb,
-        NULL,
-        ARRAY[]::TEXT[],
-        1,
-        'seed',
-        'initial seed'
-    ),
-
-    (
-        'persona_risk_score',
-        'Persona Risk Score Agent',
-        'Derives banking risk-persona input from kyc_status and risk_segment.',
-        'classification',
-        'persona-risk-model-v1',
-        'ACTIVE',
-        '0 4 * * *',
-        ARRAY[
-            'kyc_status',
-            'risk_segment'
-        ],
-        '{}'::jsonb,
-        NULL,
-        ARRAY[]::TEXT[],
-        1,
-        'seed',
-        'initial seed'
-    ),
-
-    (
-        'persona_loyalty_score',
-        'Persona Loyalty Score Agent',
-        'Derives retail loyalty-persona input from membership_tier.',
-        'classification',
-        'persona-loyalty-model-v1',
-        'ACTIVE',
-        NULL,
-        ARRAY[
-            'membership_tier'
-        ],
-        '{}'::jsonb,
-        NULL,
-        ARRAY[]::TEXT[],
-        1,
-        'seed',
-        'initial seed'
-    ),
-
-    -- ------------------------------------------------------------------------
-    -- Task-oriented AI agents
-    -- ------------------------------------------------------------------------
-
-    (
-        'campaign_planner',
-        'Campaign Planning Agent',
-        'Creates a marketing campaign plan from a target segment, marketer objective, optional constraints, and a closed candidate content set.',
-        'generative_llm',
-        'openai/gpt-5.6-luna',
-        'ACTIVE',
-        NULL,
-        ARRAY[
-            'target_segment',
-            'objective',
-            'budget',
-            'time_constraints',
-            'candidate_content_items'
-        ],
-        '{
-            "temperature": 0.2,
-            "max_output_tokens": 1200
-        }'::jsonb,
-
-        'You are a marketing campaign strategist. Given a target segment, a marketer''s objective, optional budget/time constraints, and a CLOSED list of candidate content items, propose a campaign plan. You MUST select recommended content only from the supplied candidate list -- you MUST NOT invent new content_item_id values or reference any item not in that list. If no candidate items are suitable, return an empty content_item_ids array rather than fabricating one. Respond with ONLY a JSON object with exactly these keys: "name" (string), "objective" (string), "strategy_summary" (string), "action_plan" (array of short strings), "start_date" (string, YYYY-MM-DD), "end_date" (string, YYYY-MM-DD), "content_item_ids" (array of strings, each exactly one of the candidate content_item_id values, ordered by recommended priority).',
-
-        ARRAY[
-            'target_segment',
-            'objective',
-            'budget',
-            'time_constraints',
-            'candidate_content_items'
-        ],
-
-        1,
-        'seed',
-        'initial seed'
-    ),
-
-    (
-        'zns_campaign_planner',
-        'Zalo ZNS Campaign Planning Agent',
-        'Selects one approved ZNS template and populates all required parameters for a target segment and campaign objective.',
-        'generative_llm',
-        'openai/gpt-5.6-luna',
-        'ACTIVE',
-        NULL,
-        ARRAY[
-            'target_segment',
-            'objective',
-            'approved_zns_templates'
-        ],
-        '{
-            "temperature": 0.2,
-            "max_output_tokens": 1000
-        }'::jsonb,
-
-        'You are a Zalo ZNS campaign strategist. Given a target segment, a marketer''s objective, and a CLOSED list of APPROVED ZNS templates (each with a template_id and its required parameter names), choose exactly ONE template and fill EVERY one of its required parameters with concrete values suitable for the segment. You MUST pick a template_id from the candidate list -- never invent one -- and you MUST NOT author free message text (ZNS content is fixed by the approved template). Respond with ONLY a JSON object with exactly these keys: "template_id" (string, one of the candidates), "template_data" (object mapping every required param name to a string value), "name" (string), "objective" (string), "strategy_summary" (string), "action_plan" (array of short strings), "start_date" (YYYY-MM-DD), "end_date" (YYYY-MM-DD).',
-
-        ARRAY[
-            'target_segment',
-            'objective',
-            'approved_zns_templates'
-        ],
-
-        1,
-        'seed',
-        'initial seed'
-    )
-
-ON CONFLICT (agent_code) DO UPDATE SET
-
-    display_name          = EXCLUDED.display_name,
-    description           = EXCLUDED.description,
-    model_type            = EXCLUDED.model_type,
-    model_name            = EXCLUDED.model_name,
-    status                = EXCLUDED.status,
-    schedule_definition   = EXCLUDED.schedule_definition,
-    input_features        = EXCLUDED.input_features,
-    hyperparameters       = EXCLUDED.hyperparameters,
-
-    -- Do not overwrite current instructions on deployment re-seed.
-    -- This protects any instruction changed through an admin/runtime flow.
-    updated_at            = now();
 
 -- ============================================================================
+-- AI/ML and prompt-backed agent catalog data is centralized in
+-- init-cdp-ai-agents.sql and must run before this file's profile-attribute
+-- metadata because agent_code is foreign-key constrained.
+
 -- FULL ATTRIBUTE CATALOG SEED
 -- ============================================================================
 -- Catalog of cdp_master_profiles columns and cdp_raw_profiles_stage matching
 -- keys used by customer360-backend/identity_resolution for dynamic CIR matching.
+-- AI output rows below use the canonical agent_code values from init-cdp-ai-agents.sql. Keep
+-- these references aligned with cdp_ai_agents.agent_code because the schema
+-- enforces the relationship with a foreign key.
 -- Domain-specific attributes (national_id, kyc_status, loyalty_id, etc.) are
 -- seeded separately below, right after this block -- they are stored as
 -- JSONB keys in cdp_domain_profiles.domain_attributes (source_table =
@@ -686,8 +379,8 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('customer_since', 'customer_since', 'Customer Since', 'Date the profile first converted from lead/prospect to paying customer.', 'LIFECYCLE', 'cdp_master_profiles', 'DATE', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, NULL, 391),
     ('last_activity_at', 'last_activity_at', 'Last Activity At', 'Timestamp of the most recent activity across any channel; updated continuously by the streaming pipeline.', 'LIFECYCLE', 'cdp_master_profiles', 'TIMESTAMP', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, 'realtime', 392),
     ('preferred_channel', 'preferred_channel', 'Preferred Channel', 'Channel the customer engages with most (e.g. Mobile App, Website, Internet Banking App); used for recommendation/next-best-action.', 'LIFECYCLE', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'label', NULL, NULL, 'daily', 393),
-    ('lifecycle_stage', 'lifecycle_stage', 'Lifecycle Stage', 'Current stage in the prospect-to-customer journey (prospect, lead, customer, vip, dormant, churn_risk).', 'LIFECYCLE', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'lifecycle_stage', 'v1', 'tier', NULL, NULL, 'daily', 394),
-    ('persona_summary', 'persona_summary', 'Persona Summary', 'Longer narrative summary of the customer''s behavior/preferences, usually generated by an LLM or the segmentation pipeline; complements persona_name.', 'LIFECYCLE', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'persona_summary_generator', 'v1', 'label', NULL, NULL, 'batch', 395),
+    ('lifecycle_stage', 'lifecycle_stage', 'Lifecycle Stage', 'Current stage in the prospect-to-customer journey (prospect, lead, customer, vip, dormant, churn_risk).', 'LIFECYCLE', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'lifecycle_intelligence', 'v1', 'tier', NULL, NULL, 'daily', 394),
+    ('persona_summary', 'persona_summary', 'Persona Summary', 'Longer narrative summary of the customer''s behavior/preferences, usually generated by an LLM or the segmentation pipeline; complements persona_name.', 'LIFECYCLE', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'persona_intelligence', 'v1', 'label', NULL, NULL, 'batch', 395),
 
     -- LEAD & CONVERSION SCORING
     ('lead_conversion_probability', 'lead_conversion_probability', 'Lead Conversion Probability', 'ML-predicted probability the profile converts or purchases a new product.', 'LEAD_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'lead_scoring', 'v1', 'probability', 0, 1, 'daily', 400),
@@ -703,14 +396,14 @@ INSERT INTO customer360.cdp_profile_attributes (
     ('clv_segment', 'clv_segment', 'CLV Segment', 'Combined or segmented CLV tier (e.g. high/medium/low value).', 'CLV_SCORING', 'cdp_master_profiles', 'TEXT', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'clv_scoring', 'v1', 'tier', NULL, NULL, 'weekly', 460),
 
     -- CUSTOMER EXPERIENCE (CX) & ENGAGEMENT SCORING
-    ('engagement_score', 'engagement_score', 'Engagement Score', 'Overall interaction frequency/depth score.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'score', 0, 100, 'daily', 470),
-    ('latest_nps_score', 'latest_nps_score', 'Latest NPS Score', 'Most recent Net Promoter Score.', 'CX_SCORING', 'cdp_master_profiles', 'INTEGER', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'score', 0, 10, 'event_driven', 480),
-    ('average_csat', 'average_csat', 'Average CSAT', 'Average Customer Satisfaction Score across interactions.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'score', 0, 5, 'daily', 490),
-    ('overall_sentiment_score', 'overall_sentiment_score', 'Overall Sentiment Score', 'NLP-derived sentiment from support tickets and social mentions.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_scoring', 'v1', 'sentiment', -1, 1, 'daily', 500),
+    ('engagement_score', 'engagement_score', 'Engagement Score', 'Overall interaction frequency/depth score.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_intelligence', 'v1', 'score', 0, 100, 'daily', 470),
+    ('latest_nps_score', 'latest_nps_score', 'Latest NPS Score', 'Most recent Net Promoter Score.', 'CX_SCORING', 'cdp_master_profiles', 'INTEGER', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_intelligence', 'v1', 'score', 0, 10, 'event_driven', 480),
+    ('average_csat', 'average_csat', 'Average CSAT', 'Average Customer Satisfaction Score across interactions.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_intelligence', 'v1', 'score', 0, 5, 'daily', 490),
+    ('overall_sentiment_score', 'overall_sentiment_score', 'Overall Sentiment Score', 'NLP-derived sentiment from support tickets and social mentions.', 'CX_SCORING', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'cx_intelligence', 'v1', 'sentiment', -1, 1, 'daily', 500),
 
     -- DATA QUALITY & IDENTITY RESOLUTION SCORING
     ('profile_completeness_score', 'profile_completeness_score', 'Profile Completeness Score', 'Percentage of critical profile fields filled out.', 'DATA_QUALITY', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'data_quality', 'v1', 'percentage', 0, 100, 'daily', 510),
-    ('identity_confidence_score', 'identity_confidence_score', 'Identity Confidence Score', 'Confidence score of the identity-stitching (CIR) algorithm.', 'DATA_QUALITY', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'identity_resolution_scoring', 'v1', 'probability', 0, 1, 'realtime', 520),
+    ('identity_confidence_score', 'identity_confidence_score', 'Identity Confidence Score', 'Confidence score of the identity-stitching (CIR) algorithm.', 'DATA_QUALITY', 'cdp_master_profiles', 'NUMERIC', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, TRUE, 'identity_resolution', 'v1', 'probability', 0, 1, 'realtime', 520),
     ('model_versions', 'model_versions', 'Model Versions', 'Tracks which ML model versions generated the current scores, e.g. {"churn_model":"v2.1","clv_model":"v1.4"}.', 'DATA_QUALITY', 'cdp_master_profiles', 'JSONB', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'metadata', NULL, NULL, NULL, 530),
     ('scores_updated_at', 'scores_updated_at', 'Scores Updated At', 'Last time the batch or streaming pipelines updated the scoring fields.', 'DATA_QUALITY', 'cdp_master_profiles', 'TIMESTAMP', 'all', FALSE, 'ACTIVE', FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'timestamp', NULL, NULL, NULL, 540)
 
@@ -797,14 +490,14 @@ INSERT INTO customer360.cdp_profile_attributes (
 ) VALUES
     -- BANKING
     ('national_id', NULL, 'National ID (KYC)', 'Government-issued national identity/passport number (SHA-256 hashed); identity-resolution matching key stored as a JSONB key in cdp_domain_profiles.domain_attributes (banking domain).', 'BANKING', 'cdp_domain_profiles', 'TEXT', 'banking', TRUE, 'ACTIVE', FALSE, TRUE, 'exact', NULL, 'non_null', FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 550),
-    ('kyc_status', NULL, 'KYC Status', 'Know-Your-Customer verification status (verified/pending/unverified/rejected); the verified_field for the email/phone_number verified_first consolidation policy and a persona risk-score input. Not itself a CIR matching key.', 'BANKING', 'cdp_domain_profiles', 'TEXT', 'banking', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, TRUE, 'persona_risk_score', 'v1', 'label', NULL, NULL, 'event_driven', 551),
+    ('kyc_status', NULL, 'KYC Status', 'Know-Your-Customer verification status (verified/pending/unverified/rejected); the verified_field for the email/phone_number verified_first consolidation policy and a persona risk-score input. Not itself a CIR matching key.', 'BANKING', 'cdp_domain_profiles', 'TEXT', 'banking', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, TRUE, 'persona_intelligence', 'v1', 'label', NULL, NULL, 'event_driven', 551),
     ('cif_number', NULL, 'Core Banking CIF Number', 'Customer Information File number assigned by the core banking system.', 'BANKING', 'cdp_domain_profiles', 'TEXT', 'banking', TRUE, 'ACTIVE', FALSE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 552),
     ('account_numbers', NULL, 'Account Numbers', 'Array of bank account numbers held by the customer.', 'BANKING', 'cdp_domain_profiles', 'ARRAY', 'banking', TRUE, 'ACTIVE', FALSE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 553),
-    ('risk_segment', NULL, 'Risk Segment', 'Banking risk classification (low/medium/high/critical); a persona risk-score input.', 'BANKING', 'cdp_domain_profiles', 'TEXT', 'banking', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, TRUE, 'persona_risk_score', 'v1', 'tier', NULL, NULL, 'daily', 554),
+    ('risk_segment', NULL, 'Risk Segment', 'Banking risk classification (low/medium/high/critical); a persona risk-score input.', 'BANKING', 'cdp_domain_profiles', 'TEXT', 'banking', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, TRUE, 'persona_intelligence', 'v1', 'tier', NULL, NULL, 'daily', 554),
 
     -- RETAIL
     ('loyalty_id', NULL, 'Loyalty ID', 'Retail loyalty program membership identifier.', 'RETAIL', 'cdp_domain_profiles', 'TEXT', 'retail', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 560),
-    ('membership_tier', NULL, 'Membership Tier', 'Retail loyalty tier (bronze/silver/gold/platinum); a persona loyalty-score input.', 'RETAIL', 'cdp_domain_profiles', 'TEXT', 'retail', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, TRUE, 'persona_loyalty_score', 'v1', 'tier', NULL, NULL, 'event_driven', 561),
+    ('membership_tier', NULL, 'Membership Tier', 'Retail loyalty tier (bronze/silver/gold/platinum); a persona loyalty-score input.', 'RETAIL', 'cdp_domain_profiles', 'TEXT', 'retail', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, TRUE, 'persona_intelligence', 'v1', 'tier', NULL, NULL, 'event_driven', 561),
     ('preferred_store_code', NULL, 'Preferred Store Code', 'Store code of the customer''s preferred physical location.', 'RETAIL', 'cdp_domain_profiles', 'TEXT', 'retail', FALSE, 'ACTIVE', TRUE, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, 'identifier', NULL, NULL, NULL, 562),
 
     -- REAL_ESTATE

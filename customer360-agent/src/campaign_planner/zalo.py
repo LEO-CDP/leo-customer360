@@ -29,6 +29,8 @@ class GeneratedZnsCampaignPlan(BaseGeneratedPlan):
 
 def _build_prompt(brief: ZnsCampaignPlanBrief, candidate_templates: list[dict[str, Any]]) -> str:
     lines = [base._instructions(CAMPAIGN_ZNS_INSTRUCTIONS), *base._brief_lines(brief)]
+    lines.append("Requested notification channel: zalo (ZNS approved-template delivery).")
+    lines.append(f"Delivery constraints: {brief.budget_time_constraints or 'Not supplied; do not infer delivery permission or timing.'}")
     lines.append(f"Candidate approved ZNS templates (choose one template_id, fill its params): {candidate_templates}")
     return "\n".join(lines)
 

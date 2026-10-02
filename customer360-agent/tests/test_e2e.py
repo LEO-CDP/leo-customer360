@@ -213,6 +213,8 @@ def test_zalo_plan_end_to_end():
     prompt = mock_llm.call_args.kwargs["messages"][0]["content"]
     assert _ZNS_BODY in prompt
     assert "tpl-promo" in prompt
+    assert "Requested notification channel: zalo" in prompt
+    assert "Delivery constraints:" in prompt
 
 
 def test_zalo_off_list_template_maps_to_502():
