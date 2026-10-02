@@ -174,28 +174,41 @@ if sudo docker ps -a --format '{{.Names}}' | grep -qx customer360-backend; then
     rm -f "$bak"; echo "   (nothing to back up, or copy failed — continuing)"
   fi
 fi
-# Remove the old containers before pruning: image prune preserves images still
-# referenced by running/stopped containers, which can leave too little space
-# for the replacement image's layer extraction.
 # backend-system* are the pre-3e15daf names. They run with --restart unless-stopped and
 # --network host, so the old pair kept holding :3000 and :6580 after the rename — every
 # deploy since then started customer360-backend* containers that could not bind and
 # crash-looped, while the stale image kept serving.
-for n in customer360-backend customer360-backend-daemon customer360-backend-redis \
-         backend-system backend-system-daemon backend-system-redis; do
+for n in backend-system backend-system-daemon backend-system-redis; do
   sudo docker rm -f "$n" >/dev/null 2>&1 || true
 done
-# Reclaim disk before we write/pull anything. Each deploy pulls a new SHA-pinned image
-# and the old ones pile up until a small VM fills its disk ("No space left on device"
-# on the very first env-file write). This runs before the env-file write (the heredoc
-# streams over stdin) so it recovers even from an already-full disk. Best-effort:
-# never fail the deploy on cleanup.
-if command -v docker >/dev/null 2>&1; then
+CURRENT_CONTAINERS="customer360-backend customer360-backend-daemon customer360-backend-redis"
+remove_current_containers() {
+  for n in $CURRENT_CONTAINERS; do sudo docker rm -f "$n" >/dev/null 2>&1 || true; done
+}
+reclaim_disk() {
   echo "   reclaiming disk (df before): $(df -h --output=avail / | tail -1 | tr -d ' ') free"
   sudo docker container prune -f  >/dev/null 2>&1 || true
   sudo docker image prune -a -f   >/dev/null 2>&1 || true
   sudo docker builder prune -a -f >/dev/null 2>&1 || true
   echo "   reclaiming disk (df after):  $(df -h --output=avail / | tail -1 | tr -d ' ') free"
+}
+# Reclaim disk before we write/pull anything. Each deploy pulls a new SHA-pinned image
+# and the old ones pile up until a small VM fills its disk ("No space left on device"
+# on the very first env-file write). Best-effort: never fail the deploy on cleanup.
+#
+# The RUNNING containers are kept through the pull: `image prune -a` spares the images
+# they use, so the new image's unchanged layers (python base + the large third-party
+# deps layer) stay on disk and the pull fetches only what changed. Removing them first
+# (the previous behaviour) wiped every layer, so each deploy re-downloaded the whole
+# image (~5.5 min) with Dagster down the entire time. If disk is genuinely short, or the
+# pull fails (e.g. ENOSPC on a deploy where most layers did change), fall back to
+# removing them and pruning everything, as before.
+if command -v docker >/dev/null 2>&1; then
+  reclaim_disk
+  if [ "$(df --output=avail / | tail -1 | tr -d ' ')" -lt 1572864 ]; then   # < 1.5 GiB
+    echo "   low disk — removing the running backend containers before the pull"
+    remove_current_containers; reclaim_disk
+  fi
 fi
 ensure_swap() {
   # Identity/segmentation workers (Polars/pandas) can spike RAM; create swap before
@@ -223,11 +236,17 @@ sudo chmod 600 /opt/c360/backend.env
 if [ "$DEPLOY_MODE" = "ghcr" ]; then
   echo "   pulling $IMAGE ..."
   [ -n "$GHCR_TOKEN" ] && printf %s "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
-  docker_pull_retry "$IMAGE"
+  if ! sudo docker pull "$IMAGE"; then
+    echo "   pull failed with the old containers still up — freeing their layers and retrying"
+    remove_current_containers; reclaim_disk
+    docker_pull_retry "$IMAGE"
+  fi
   ensure_swap
   RUN_IMG="$IMAGE"
 else
   echo "   building image (this can take a few minutes on a small box)..."
+  # An on-box build needs the RAM the running Dagster holds; stop it first (old behaviour).
+  remove_current_containers
   ensure_swap
   sudo docker build -t customer360-dagster -f /opt/c360/customer360-backend/Dockerfile /opt/c360
   RUN_IMG="customer360-dagster"
@@ -241,14 +260,26 @@ ensure_s3_bucket "$RUN_IMG" /opt/c360/backend.env "$MASTER_PROFILE_S3_BUCKET" "$
 # and the daemon (schedules, sensors, run queue, run monitoring). `dagster-webserver`
 # alone runs NO daemon, so the run queue would never drain — the daemon is required.
 # Both use --network host + the same env-file; the daemon binds no port, so no conflict.
+# Swap point: the new image is on disk, so the old containers go only now (seconds of
+# downtime instead of the whole pull).
+remove_current_containers
 # Local Redis cache for all Dagster tasks (analytics dedup "already-processed" state + counters).
 # 127.0.0.1:6580; appendonly so the processed-state survives a restart (else logs would re-process).
 sudo docker run -d --name customer360-backend-redis --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host -v c360-dagster-redis:/data redis:7-alpine redis-server --port 6580 --appendonly yes
 # --log-opt: cap the json-file log (unbounded by default) so it can't fill the VM disk.
 sudo docker run -d --name customer360-backend --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/backend.env "$RUN_IMG"
 sudo docker run -d --name customer360-backend-daemon --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --network host --env-file /opt/c360/backend.env --entrypoint /app/entrypoint.sh "$RUN_IMG" dagster-daemon run -w workspace.yaml
-sleep 3
 sudo docker ps --filter name=customer360-backend --format '   running: {{.Names}} ({{.Status}}) image={{.Image}}'
+echo "   waiting for Dagster webserver (:3000, up to 30s) ..."
+for _i in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:3000" >/dev/null 2>&1; then
+    echo "   Dagster up (:3000) after ${_i}s"; break
+  fi
+  [ "$_i" -eq 30 ] && echo "   WARN: Dagster not responding after 30s" || sleep 1
+done
+# Drop the previous image now that nothing references it; the next deploy's pre-pull
+# reclaim keeps this one (it is in use), so only one image's worth of layers stays.
+sudo docker image prune -a -f >/dev/null 2>&1 || true
 
 # Existing master profiles predate the incremental CIR projection hook. When
 # the shared projection bucket is empty, rebuild all active profiles once from

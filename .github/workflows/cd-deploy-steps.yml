@@ -1,0 +1,178 @@
+name: CD deploy steps
+
+# Reusable body of cd.yml: run ONE group of deploy-all.sh steps (`--only <steps>`) against
+# one environment. cd.yml calls it once for db-schema, then once per host group IN
+# PARALLEL — groups touch disjoint hosts, so they no longer queue behind each other.
+#
+# It deploys by PULLING the image from GHCR — the module scripts run in ghcr mode
+# (BUILD_LOCAL unset), so nothing is rebuilt here. See cd.yml for the secret list.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      image_tag:
+        type: string
+        required: true
+      steps:
+        description: "Comma-separated deploy-all.sh step ids for this group"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: read
+  deployments: write
+
+jobs:
+  deploy:
+    name: ${{ inputs.steps }}
+    runs-on: ubuntu-latest
+    # Binds to a GitHub Environment — attach protection rules to 'prod'.
+    environment: ${{ inputs.environment }}
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      IMAGE_TAG: ${{ inputs.image_tag }}   # consumed by lib/ghcr.sh resolve_tag
+      REQUIRE_IMMUTABLE_TAG: "1"            # CD must deploy a SHA or release tag
+      SERVICES: ${{ inputs.steps }}
+      # vStorage S3 creds for the remote Terraform backend (state read on the runner).
+      AWS_ACCESS_KEY_ID: ${{ secrets.VSTORAGE_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.VSTORAGE_SECRET_KEY }}
+    steps:
+      - name: Checkout the deploy scripts
+        uses: actions/checkout@v7
+        with:
+          # For an automatic run, the exact commit CI validated; for a manual run, the
+          # dispatched ref's commit (the image itself is pinned by tag). Read straight from
+          # the event (a called workflow sees the caller's github context), NOT passed in
+          # as an input: an immutable event SHA is what keeps this privileged,
+          # Environment-gated job from checking out code that could change after approval
+          # (CodeQL actions/untrusted-checkout-toctou).
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          # Must be >= the Terraform that wrote the remote state (migrated with
+          # 1.14.8); an older Terraform refuses state from a newer version.
+          terraform_version: 1.14.8
+
+      # The `event-api` and `promotions` steps deploy to the VKS Kubernetes cluster, so kubectl
+      # must be on PATH. Pinned explicitly rather than relying on whatever the runner image
+      # happens to preinstall — that set changes without notice, and the only symptom would
+      # be one of those steps failing deep into a deploy.
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          # Matches the VKS control plane (v1.32.9). kubectl supports only +/-1 minor
+          # skew, so bump this when the cluster is upgraded.
+          version: v1.32.9
+
+      - name: Install the deploy SSH key
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/c360-api_ed25519
+          chmod 600 ~/.ssh/c360-api_ed25519
+
+      # READ-ONLY. The app deploy scripts read the vServer IPs / DB host / redis
+      # host from these modules' Terraform OUTPUTS. init connects to the shared
+      # S3/vStorage remote backend (creds from the AWS_* env above) so the runner
+      # sees the same state operators use. This runs `init` + `output` only — it
+      # never `apply`s and never provisions or mutates the vDB, vLB, or vStorage.
+      #
+      # Only the modules each group's scripts actually call `terraform output` on
+      # are initialised — skipping unused modules saves one remote-state round-trip
+      # per skipped module (~5-10 s each).
+      - name: terraform init (read-only — remote state, output resolution only)
+        working-directory: deployments
+        env:
+          SERVICES: ${{ inputs.steps }}
+        run: |
+          # Map the step group to the minimum set of modules it reads outputs from.
+          # api/sso-realm reads cache (Redis host); backend/docs use local or DB-only;
+          # frontend and agent only need the server VM IP.
+          case ",$SERVICES," in
+            *,api,*|*,sso-realm,*|*,promotions,*|*,event-api,*|*,ads,*|*,tracking,*)
+              _mods="server postgres cache" ;;
+            *,backend,*|*,docs-search,*|*,docs-index,*)
+              _mods="server postgres" ;;
+            *,frontend,*|*,agent,*)
+              _mods="server" ;;
+            *,db-schema,*)
+              _mods="postgres" ;;
+            *)
+              _mods="server postgres cache" ;;
+          esac
+          echo "-> terraform init: $_mods  (steps: $SERVICES)"
+          for _m in $_mods; do
+            terraform -chdir="$_m" init -input=false >/dev/null
+          done
+
+      # SSO client secret for customer360-api. deployments/sso/.env is git-ignored
+      # (bootstrap-realm.py writes it locally), so it is ABSENT on the runner — and
+      # without KEYCLOAK_CLIENT_SECRET deploy-api.sh treats the SSO config as
+      # "incomplete" and downgrades the API to SSO_LOGIN=false, which the frontend
+      # then reads from GET /metadata. Recreate the file from the environment secret
+      # so the API (and thus the UI) keeps SSO enabled.
+      - name: Provision Keycloak secrets (deployments/sso/.env)
+        working-directory: deployments/sso
+        env:
+          KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+          # The 'sso-realm' step (bootstrap-realm.py) needs BOTH of these: KEYCLOAK_ADMIN_PASSWORD
+          # (to log in as the KC admin) AND KC_TEST_USER_PASSWORD (to set the c360admin test-user
+          # password). If either is missing the step SKIPS (deploy-all realm_step).
+          KEYCLOAK_ADMIN_PASSWORD: ${{ secrets.KEYCLOAK_ADMIN_PASSWORD }}
+          KC_TEST_USER_PASSWORD: ${{ secrets.KC_TEST_USER_PASSWORD }}
+        run: |
+          umask 077
+          : > .env
+          if [ -n "$KEYCLOAK_CLIENT_SECRET" ]; then
+            printf 'KEYCLOAK_CLIENT_SECRET=%s\n' "$KEYCLOAK_CLIENT_SECRET" >> .env
+            echo "sso/.env: KEYCLOAK_CLIENT_SECRET set."
+          else
+            echo "::warning::KEYCLOAK_CLIENT_SECRET not set for '$ENVIRONMENT' — API will deploy with SSO_LOGIN=false."
+          fi
+          [ -n "$KEYCLOAK_ADMIN_PASSWORD" ] && printf 'KEYCLOAK_ADMIN_PASSWORD=%s\n' "$KEYCLOAK_ADMIN_PASSWORD" >> .env
+          [ -n "$KC_TEST_USER_PASSWORD" ]   && printf 'KC_TEST_USER_PASSWORD=%s\n'   "$KC_TEST_USER_PASSWORD"   >> .env
+          if [ -n "$KEYCLOAK_ADMIN_PASSWORD" ] && [ -n "$KC_TEST_USER_PASSWORD" ]; then
+            echo "sso/.env: KEYCLOAK_ADMIN_PASSWORD + KC_TEST_USER_PASSWORD set (enables the sso-realm bootstrap)."
+          else
+            echo "::warning::KEYCLOAK_ADMIN_PASSWORD and/or KC_TEST_USER_PASSWORD not set — sso-realm will SKIP (realm not re-provisioned). Add both repo/env secrets to enable it."
+          fi
+
+      # Deploys to the vSERVERS ONLY: pull the image from GHCR and `docker run`
+      # over SSH for the selected app containers. `--only` restricts execution to
+      # the app steps, so CD NEVER runs the infra Terraform deploy.sh scripts.
+      # The `event-api` and `promotions` steps instead apply their manifests to VKS.
+      - name: Deploy ${{ inputs.steps }}
+        working-directory: deployments
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
+          BREVO_SMTP_PASSWORD: ${{ secrets.BREVO_SMTP_PASSWORD }}   # uat email_engine SMTP send + /metadata/smtp (absent => mock)
+          TF_VAR_access_key: ${{ secrets.VSTORAGE_ACCESS_KEY }}
+          TF_VAR_secret_key: ${{ secrets.VSTORAGE_SECRET_KEY }}
+          LEO_OPENAI_API_KEY: ${{ secrets.LEO_OPENAI_API_KEY }}   # customer360-agent -> LLM_API_KEY (OpenAI)
+          LEO_OPENAI_MODEL_NAME: ${{ vars.LEO_OPENAI_MODEL_NAME }}   # customer360-agent -> LLM_MODEL (deploy-agent.sh adds the openai/ prefix)
+          AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}   # shared bearer token: agent /plan/* auth == customer360-api sender
+          DOCS_OPENAI_API_KEY: ${{ secrets.DOCS_OPENAI_API_KEY }}   # docs-vector-search OpenAI embeddings + LLM
+          DOCS_INTERNAL_AUTH_SECRET: ${{ secrets.DOCS_INTERNAL_AUTH_SECRET }}   # shared by the frontend /ai proxy and docs-vector-search
+          PORTAINER_ADMIN_PASSWORD: ${{ secrets.PORTAINER_ADMIN_PASSWORD }}   # monitoring step: auto-registers Portainer agent envs
+          GH_TOKEN: ${{ github.token }}   # lets lib/record_deploy.sh call `gh api` (Deployments ledger)
+          VKS_KUBECONFIG: ${{ secrets.VKS_KUBECONFIG }}   # `event-api` + `promotions` steps: those services run on VKS, not a vServer
+          # Long-lived token for the cluster's imagePullSecret. NOT GITHUB_TOKEN: that is
+          # revoked when this job ends, and the kubelet re-reads the secret on every later
+          # pull (scale-up, reschedule), which would then ImagePullBackOff.
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          if [ -n "${VKS_KUBECONFIG:-}" ]; then
+            printf '%s' "$VKS_KUBECONFIG" > "$RUNNER_TEMP/vks-kubeconfig.yaml"
+            chmod 600 "$RUNNER_TEMP/vks-kubeconfig.yaml"
+            export KUBECONFIG="$RUNNER_TEMP/vks-kubeconfig.yaml"
+          fi
+          # Invoke via `bash` (not ./) — scripts committed from Windows lack the
+          # git executable bit, so ./deploy-all.sh would fail with exit 126.
+          bash deploy-all.sh "$ENVIRONMENT" --only "$SERVICES" -y

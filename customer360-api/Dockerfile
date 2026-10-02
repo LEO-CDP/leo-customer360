@@ -2,16 +2,11 @@
 
 FROM python:3.12-slim
 
-ARG BUILD_DATE_TIME=unknown
-ARG GIT_COMMIT_HASH=unknown
-
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    BUILD_DATE_TIME=${BUILD_DATE_TIME} \
-    GIT_COMMIT_HASH=${GIT_COMMIT_HASH}
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 COPY customer360-dao /opt/customer360-dao
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
@@ -29,6 +24,14 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
 RUN opentelemetry-bootstrap -a install
 
 COPY customer360-api/ .
+
+# Per-build metadata LAST: these change on every commit, and an ENV that references
+# them invalidates every layer below it. Declared at the top, they forced a fresh
+# deps layer on every build, which each deploy then re-downloaded onto the VM.
+ARG BUILD_DATE_TIME=unknown
+ARG GIT_COMMIT_HASH=unknown
+ENV BUILD_DATE_TIME=${BUILD_DATE_TIME} \
+    GIT_COMMIT_HASH=${GIT_COMMIT_HASH}
 
 EXPOSE 8008
 

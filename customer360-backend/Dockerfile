@@ -11,7 +11,6 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY customer360-dao/pyproject.toml customer360-dao/README.md /opt/customer360-dao/
-COPY customer360-dao/src /opt/customer360-dao/src
 COPY customer360-backend/identity_resolution/requirements.txt /tmp/requirements/identity_resolution.txt
 COPY customer360-backend/scoring/requirements.txt /tmp/requirements/scoring.txt
 COPY customer360-backend/segmentation/requirements.txt /tmp/requirements/segmentation.txt
@@ -22,8 +21,11 @@ COPY customer360-backend/notification_engine/requirements.txt /tmp/requirements/
 COPY customer360-backend/campaign_activation/requirements.txt /tmp/requirements/campaign_activation.txt
 COPY customer360-backend/personalization/requirements.txt /tmp/requirements/personalization.txt
 
-# Build all wheels once. The local DAO wheel lets each code location resolve
-# its leo-customer360-dao requirement without reaching a package index.
+# Third-party dependencies FIRST, in their own layer, keyed only on the requirement
+# files + the DAO's declared dependencies (read from its pyproject.toml). The DAO
+# SOURCE is copied after this, so a DAO code change no longer rebuilds every wheel —
+# and, more importantly, no longer produces a new multi-hundred-MB /install layer
+# that every deploy has to re-download onto the VM (that was ~5.5 min of CD).
 # Both psycopg flavours are needed: dagster-postgres builds a postgresql+psycopg
 # (psycopg3) SQLAlchemy URL for Dagster's own storage, while the code locations
 # import psycopg2 directly. dagster-postgres is pinned to the same range as
@@ -31,29 +33,18 @@ COPY customer360-backend/personalization/requirements.txt /tmp/requirements/pers
 # so its driver choice cannot shift on a rebuild. Version specs and
 # extras stay quoted — sh reads <, > and [] in a RUN line.
 RUN mkdir -p /wheels /install \
- && pip wheel --no-cache-dir --wheel-dir=/wheels /opt/customer360-dao \
- && pip wheel --no-cache-dir --wheel-dir=/wheels --find-links=/wheels \
-      -r /tmp/requirements/identity_resolution.txt \
-      -r /tmp/requirements/scoring.txt \
-      -r /tmp/requirements/segmentation.txt \
-      -r /tmp/requirements/analytics.txt \
-      -r /tmp/requirements/data_synch.txt \
-      -r /tmp/requirements/email_engine.txt \
-      -r /tmp/requirements/notification_engine.txt \
-      -r /tmp/requirements/campaign_activation.txt \
-      -r /tmp/requirements/personalization.txt \
+ && python -c "import tomllib; [print(d) for d in tomllib.load(open('/opt/customer360-dao/pyproject.toml', 'rb'))['project']['dependencies']]" \
+      > /tmp/requirements/_dao-deps.txt \
+ && grep -hv '^leo-customer360-dao' /tmp/requirements/*.txt > /tmp/third-party.txt \
+ && pip wheel --no-cache-dir --wheel-dir=/wheels -r /tmp/third-party.txt \
       dagster dagster-webserver dagster-graphql "dagster-postgres>=0.25,<1" dagster-aws psycopg2-binary "psycopg[binary]" \
- && pip install --no-cache-dir --no-index --find-links=/wheels --prefix=/install \
-      -r /tmp/requirements/identity_resolution.txt \
-      -r /tmp/requirements/scoring.txt \
-      -r /tmp/requirements/segmentation.txt \
-      -r /tmp/requirements/analytics.txt \
-      -r /tmp/requirements/data_synch.txt \
-      -r /tmp/requirements/email_engine.txt \
-      -r /tmp/requirements/notification_engine.txt \
-      -r /tmp/requirements/campaign_activation.txt \
-      -r /tmp/requirements/personalization.txt \
+ && pip install --no-cache-dir --no-index --find-links=/wheels --prefix=/install -r /tmp/third-party.txt \
       dagster dagster-webserver dagster-graphql "dagster-postgres>=0.25,<1" dagster-aws psycopg2-binary "psycopg[binary]"
+
+# The local DAO package last: a small layer that is the only one a DAO change touches.
+# --no-deps: its dependencies are already in /install from the layer above.
+COPY customer360-dao/src /opt/customer360-dao/src
+RUN pip install --no-cache-dir --no-deps --prefix=/install-dao /opt/customer360-dao
 
 FROM python:3.12-slim-bookworm
 
@@ -64,6 +55,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /install /usr/local
+COPY --from=builder /install-dao /usr/local
 COPY customer360-backend /app
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 

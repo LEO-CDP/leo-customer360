@@ -6,16 +6,9 @@ FROM python:3.12-slim
 # Set the working directory
 WORKDIR /app
 
-ARG BUILD_VERSION
-RUN if ! printf '%s' "$BUILD_VERSION" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$'; then \
-            echo "BUILD_VERSION must match yyyy-mm-dd-HH-MM" >&2; \
-            exit 1; \
-        fi
-
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    BUILD_VERSION=${BUILD_VERSION}
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Copy and install dependencies first
 COPY requirements.txt .
@@ -25,6 +18,16 @@ RUN opentelemetry-bootstrap -a install
 
 # Copy the application code
 COPY . .
+
+# Per-build metadata LAST: BUILD_VERSION changes on every build, and referencing it
+# above the dependency install invalidated the deps layer every time (a fresh
+# download of it on every deploy).
+ARG BUILD_VERSION
+RUN if ! printf '%s' "$BUILD_VERSION" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$'; then \
+            echo "BUILD_VERSION must match yyyy-mm-dd-HH-MM" >&2; \
+            exit 1; \
+        fi
+ENV BUILD_VERSION=${BUILD_VERSION}
 
 # Expose the application port
 EXPOSE 8890

@@ -15,18 +15,41 @@ name: CD
 #    run cd.yml -f ...`) to deploy/ROLL BACK any environment to any image tag:
 #      environment: uat | prod
 #      image_tag:   v1.2.3 | sha-<git>             (immutable tags for rollback)
-#      services:    comma list (default: db-schema,api,backend,promotions,frontend,event-api)
+#      services:    comma list (default: db-schema,sso-realm,api,backend,promotions,frontend,event-api,agent,docs-search)
+#                   docs-index = docs-search re-index only (ship docs/*.md + enrich, no pull or
+#                   restart) — what docs-vector-index.yml dispatches for docs-only changes.
 #    This is the rollback path — pick a previously-built tag and redeploy it.
 #
 # It deploys by PULLING the image from GHCR — the module scripts run in ghcr
 # mode (BUILD_LOCAL unset), so nothing is rebuilt here.
 #
+# Job graph:
+#   select ─┬─► docs-search : docs-search | docs-index          (own VM; no app-schema
+#           │                                                    dependency — enrich creates
+#           │                                                    its own rag schema)
+#           └─► db-schema ─┬─► api box  : sso-realm → api      (same VM as frontend;
+#                          │                                    api reads the realm secret
+#                          │                                    sso-realm writes)
+#                          ├─► frontend : frontend               (same VM; no deploy-time
+#                          │                                    dependency on api running —
+#                          │                                    the browser calls the API,
+#                          │                                    not this container)
+#                          ├─► backend  : backend (Dagster)      (own VM)
+#                          ├─► vks      : promotions → event-api (VKS cluster)
+#                          └─► agent    : agent                  (own VM)
+# Groups touch disjoint hosts (or independent containers on the same host), so they run
+# in parallel; each runs deploy-all.sh --only <its steps> through the reusable
+# cd-deploy-steps.yml. Any unrecognised step named in a manual `services` list joins the
+# api-box group (deploy-all keeps its dependency order).
+# Note for prod: every job binds the 'prod' Environment, so a reviewer approves db-schema,
+# then the parallel groups (one review dialog covers all of them).
+#
 # Required repo secrets:
 #   DEPLOY_SSH_KEY   private key for the deploy user on the VNG Cloud VMs
 #   DB_PASSWORD      -> TF_VAR_db_password    (read by the app deploy scripts)
 #   REDIS_PASSWORD   -> TF_VAR_redis_password (used by the API cache and the event-api Redis Stream queue; docs-search uses a dedicated no-auth local Redis)
-#   BREVO_SMTP_PASSWORD -> Brevo SMTP password for uat (email_engine real send + /metadata/smtp); absent => uat email stays mock. prod has no smtp.prod.env so stays mock regardless.
 #   DOCS_OPENAI_API_KEY -> docs-vector-search OpenAI embeddings and LLM
+#   BREVO_SMTP_PASSWORD -> Brevo SMTP password for uat (email_engine real send + /metadata/smtp); absent => uat email stays mock. prod has no smtp.prod.env so stays mock regardless.
 #   LEO_OPENAI_API_KEY  -> customer360-agent LLM_API_KEY (OpenAI via LiteLLM)
 #   (var) LEO_OPENAI_MODEL_NAME -> customer360-agent LLM_MODEL (bare name; deploy-agent.sh adds openai/)
 #   AGENT_API_TOKEN     -> shared bearer token gating the agent's /plan/* (agent + api both get it)
@@ -65,9 +88,9 @@ on:
         type: string
         required: true
       services:
-        description: "Comma-separated services to (re)deploy (e.g. api,backend,promotions,frontend,event-api,docs-search,agent)"
+        description: "Comma-separated services to (re)deploy (e.g. db-schema,sso-realm,api,backend,promotions,frontend,event-api,agent,docs-search; docs-index = re-index only)"
         type: string
-        default: "api,backend,promotions,frontend,event-api,docs-search,agent"
+        default: "db-schema,sso-realm,api,backend,promotions,frontend,event-api,agent,docs-search"
         required: false
 
 permissions:
@@ -77,7 +100,9 @@ permissions:
 concurrency:
   # Serialize per target environment (single writer). Automatic main deploys
   # target UAT; release-tag deploys target prod; manual runs use their input.
-  group: cd-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event.workflow_run.head_branch == 'main' && 'uat' || 'prod') }}
+  # A docs-only re-index (services=docs-index, from docs-vector-index.yml) gets its OWN
+  # group: sharing this one let a docs change merged mid-deploy CANCEL the full deploy.
+  group: cd-${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event.workflow_run.head_branch == 'main' && 'uat' || 'prod') }}${{ github.event_name == 'workflow_dispatch' && inputs.services == 'docs-index' && '-docs-index' || '' }}
   # A newer successful CI run must win. Leaving older workflow_run events queued
   # lets GitHub start them later and roll the environment back to an older SHA.
   cancel-in-progress: true
@@ -93,6 +118,9 @@ jobs:
       env: ${{ steps.pick.outputs.env }}
       tag: ${{ steps.pick.outputs.tag }}
       services: ${{ steps.pick.outputs.services }}
+      schema: ${{ steps.groups.outputs.schema }}
+      docs: ${{ steps.groups.outputs.docs }}
+      groups: ${{ steps.groups.outputs.groups }}
     steps:
       - name: Pick target environment
         id: pick
@@ -111,7 +139,7 @@ jobs:
           # sso-realm runs bootstrap-realm.py (idempotent): provisions the realm, the API's
           # admin roles + confidential client before the app steps. deploy-all.sh orders it
           # ahead of api via its STEPS list. Needs KEYCLOAK_ADMIN_PASSWORD in sso/.env (above).
-          DEFAULT_SVC="db-schema,sso-realm,api,backend,promotions,frontend,event-api,docs-search,agent"
+          DEFAULT_SVC="db-schema,sso-realm,api,backend,promotions,frontend,event-api,agent,docs-search"
           if [[ "$EVENT" == "workflow_dispatch" ]]; then
             svc="${IN_SERVICES:-$DEFAULT_SVC}"
             {
@@ -144,141 +172,81 @@ jobs:
             fi
           fi
 
-  deploy:
+      # Split the selected steps into db-schema (runs first) and per-host groups (run in
+      # parallel after it). Order inside a group is kept by deploy-all.sh's STEPS list.
+      - name: Group steps by target host
+        id: groups
+        if: steps.pick.outputs.deploy == 'true'
+        env:
+          SERVICES: ${{ steps.pick.outputs.services }}
+        run: |
+          schema=""; docs=""; apibox=""; frontend=""; backend=""; vks=""; agent=""
+          for s in ${SERVICES//,/ }; do
+            case "$s" in
+              db-schema)                         schema="db-schema" ;;
+              backend)                           backend="backend" ;;
+              promotions|event-api|ads|tracking) vks="${vks:+$vks,}$s" ;;
+              agent)                             agent="agent" ;;
+              docs-search|docs-index)            docs="${docs:+$docs,}$s" ;;
+              frontend)                          frontend="frontend" ;;
+              *)                                 apibox="${apibox:+$apibox,}$s" ;;
+            esac
+          done
+          groups="$(jq -nc --arg a "$apibox" --arg b "$backend" --arg v "$vks" --arg g "$agent" --arg f "$frontend" \
+            '[$a, $b, $v, $g, $f] | map(select(. != ""))')"
+          echo "schema=$schema" >> "$GITHUB_OUTPUT"
+          echo "docs=$docs" >> "$GITHUB_OUTPUT"
+          echo "groups=$groups" >> "$GITHUB_OUTPUT"
+          echo "-> docs (starts now): ${docs:-(none)}   first: ${schema:-(none)}   then in parallel: $groups"
+
+  # docs-search has its own VM and creates its own rag schema, so it does not wait for
+  # db-schema: it starts right away, alongside it.
+  docs-search:
     needs: select
-    if: ${{ needs.select.outputs.deploy == 'true' }}
-    runs-on: ubuntu-latest
-    # Binds to a GitHub Environment — attach protection rules to 'prod'.
-    environment: ${{ needs.select.outputs.env }}
+    if: ${{ needs.select.outputs.deploy == 'true' && needs.select.outputs.docs != '' }}
+    permissions:
+      contents: read
+      packages: read
+      deployments: write
+    uses: ./.github/workflows/cd-deploy-steps.yml
+    with:
+      environment: ${{ needs.select.outputs.env }}
+      image_tag: ${{ needs.select.outputs.tag }}
+      steps: ${{ needs.select.outputs.docs }}
+    secrets: inherit
+
+  db-schema:
+    needs: select
+    if: ${{ needs.select.outputs.deploy == 'true' && needs.select.outputs.schema != '' }}
+    permissions:
+      contents: read
+      packages: read
+      deployments: write
+    uses: ./.github/workflows/cd-deploy-steps.yml
+    with:
+      environment: ${{ needs.select.outputs.env }}
+      image_tag: ${{ needs.select.outputs.tag }}
+      steps: db-schema
+    secrets: inherit
+
+  deploy:
+    needs: [select, db-schema]
+    # Run when db-schema succeeded OR was not selected (skipped); never after it failed.
+    if: >-
+      ${{ !cancelled() && needs.select.outputs.deploy == 'true'
+          && needs.select.outputs.groups != '[]' && needs.select.outputs.groups != ''
+          && (needs.db-schema.result == 'success' || needs.db-schema.result == 'skipped') }}
     permissions:
       contents: read
       packages: read
       deployments: write   # record each deploy to the GitHub Deployments API (release ledger)
-    env:
-      ENVIRONMENT: ${{ needs.select.outputs.env }}
-      IMAGE_TAG: ${{ needs.select.outputs.tag }}   # consumed by lib/ghcr.sh resolve_tag
-      REQUIRE_IMMUTABLE_TAG: "1"                    # CD must deploy a SHA or release tag
-      SERVICES: ${{ needs.select.outputs.services }}
-      # vStorage S3 creds for the remote Terraform backend (state read on the runner).
-      AWS_ACCESS_KEY_ID: ${{ secrets.VSTORAGE_ACCESS_KEY }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.VSTORAGE_SECRET_KEY }}
-    steps:
-      - name: Checkout the deploy scripts
-        uses: actions/checkout@v7
-        with:
-          # For an automatic run, use the exact commit CI validated; for a manual
-          # run, use the default branch's scripts (the image itself is pinned by tag).
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          # Must be >= the Terraform that wrote the remote state (migrated with
-          # 1.14.8); an older Terraform refuses state from a newer version.
-          terraform_version: 1.14.8
-
-      # The `event-api` and `promotions` steps deploy to the VKS Kubernetes cluster, so kubectl
-      # must be on PATH. Pinned explicitly rather than relying on whatever the runner image
-      # happens to preinstall — that set changes without notice, and the only symptom would
-      # be one of those steps failing deep into a deploy.
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          # Matches the VKS control plane (v1.32.9). kubectl supports only +/-1 minor
-          # skew, so bump this when the cluster is upgraded.
-          version: v1.32.9
-
-      - name: Install the deploy SSH key
-        run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/c360-api_ed25519
-          chmod 600 ~/.ssh/c360-api_ed25519
-
-      # READ-ONLY. The app deploy scripts read the vServer IPs / DB host / redis
-      # host from these modules' Terraform OUTPUTS. init connects to the shared
-      # S3/vStorage remote backend (creds from the AWS_* env above) so the runner
-      # sees the same state operators use. This runs `init` + `output` only — it
-      # never `apply`s and never provisions or mutates the vDB, vLB, or vStorage.
-      - name: terraform init (read-only — remote state, output resolution only)
-        working-directory: deployments
-        run: |
-          for m in server postgres cache; do
-            terraform -chdir="$m" init -input=false >/dev/null
-          done
-
-      # SSO client secret for customer360-api. deployments/sso/.env is git-ignored
-      # (bootstrap-realm.py writes it locally), so it is ABSENT on the runner — and
-      # without KEYCLOAK_CLIENT_SECRET deploy-api.sh treats the SSO config as
-      # "incomplete" and downgrades the API to SSO_LOGIN=false, which the frontend
-      # then reads from GET /metadata. Recreate the file from the environment secret
-      # so the API (and thus the UI) keeps SSO enabled. Set as a REPO secret (matches
-      # DB_PASSWORD / DEPLOY_SSH_KEY here); scope it to a GitHub Environment only if the
-      # realm secret ever differs between uat and prod (env secret overrides repo).
-      - name: Provision Keycloak secrets (deployments/sso/.env)
-        working-directory: deployments/sso
-        env:
-          KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
-          # The 'sso-realm' step (bootstrap-realm.py) needs BOTH of these: KEYCLOAK_ADMIN_PASSWORD
-          # (to log in as the KC admin) AND KC_TEST_USER_PASSWORD (to set the c360admin test-user
-          # password). If either is missing the step now SKIPS (deploy-all realm_step), so a missing
-          # secret no longer breaks the deploy — add both repo/env secrets to (re)provision the realm.
-          KEYCLOAK_ADMIN_PASSWORD: ${{ secrets.KEYCLOAK_ADMIN_PASSWORD }}
-          KC_TEST_USER_PASSWORD: ${{ secrets.KC_TEST_USER_PASSWORD }}
-        run: |
-          umask 077
-          : > .env
-          if [ -n "$KEYCLOAK_CLIENT_SECRET" ]; then
-            printf 'KEYCLOAK_CLIENT_SECRET=%s\n' "$KEYCLOAK_CLIENT_SECRET" >> .env
-            echo "sso/.env: KEYCLOAK_CLIENT_SECRET set."
-          else
-            echo "::warning::KEYCLOAK_CLIENT_SECRET not set for '$ENVIRONMENT' — API will deploy with SSO_LOGIN=false."
-          fi
-          [ -n "$KEYCLOAK_ADMIN_PASSWORD" ] && printf 'KEYCLOAK_ADMIN_PASSWORD=%s\n' "$KEYCLOAK_ADMIN_PASSWORD" >> .env
-          [ -n "$KC_TEST_USER_PASSWORD" ]   && printf 'KC_TEST_USER_PASSWORD=%s\n'   "$KC_TEST_USER_PASSWORD"   >> .env
-          if [ -n "$KEYCLOAK_ADMIN_PASSWORD" ] && [ -n "$KC_TEST_USER_PASSWORD" ]; then
-            echo "sso/.env: KEYCLOAK_ADMIN_PASSWORD + KC_TEST_USER_PASSWORD set (enables the sso-realm bootstrap)."
-          else
-            echo "::warning::KEYCLOAK_ADMIN_PASSWORD and/or KC_TEST_USER_PASSWORD not set — sso-realm will SKIP (realm not re-provisioned). Add both repo/env secrets to enable it."
-          fi
-
-      # Deploys to the vSERVERS ONLY: pull the image from GHCR and `docker run`
-      # over SSH for the selected app containers. `--only` restricts execution to
-      # the app steps, so CD NEVER runs the infra Terraform deploy.sh scripts —
-      # server (vServer provisioning), storage (vStorage), postgres (vDB), or
-      # load_balancer (vLB) are all managed outside this pipeline.
-      # Most steps ship containers to the vServers over SSH; the `event-api` and `promotions`
-      # steps instead apply their manifests to the VKS Kubernetes cluster. All pull from GHCR.
-      - name: Deploy app services (vServers over SSH + event-api/promotions to VKS)
-        working-directory: deployments
-        env:
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
-          TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
-          BREVO_SMTP_PASSWORD: ${{ secrets.BREVO_SMTP_PASSWORD }}   # uat email_engine SMTP send + /metadata/smtp (absent => mock)
-          TF_VAR_access_key: ${{ secrets.VSTORAGE_ACCESS_KEY }}
-          TF_VAR_secret_key: ${{ secrets.VSTORAGE_SECRET_KEY }}
-          DOCS_OPENAI_API_KEY: ${{ secrets.DOCS_OPENAI_API_KEY }}
-          LEO_OPENAI_API_KEY: ${{ secrets.LEO_OPENAI_API_KEY }}   # customer360-agent -> LLM_API_KEY (OpenAI)
-          LEO_OPENAI_MODEL_NAME: ${{ vars.LEO_OPENAI_MODEL_NAME }}   # customer360-agent -> LLM_MODEL (deploy-agent.sh adds the openai/ prefix)
-          AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}   # shared bearer token: agent /plan/* auth == customer360-api sender
-          DOCS_INTERNAL_AUTH_SECRET: ${{ secrets.DOCS_INTERNAL_AUTH_SECRET }}
-          PORTAINER_ADMIN_PASSWORD: ${{ secrets.PORTAINER_ADMIN_PASSWORD }}   # monitoring step: auto-registers Portainer agent envs
-          GH_TOKEN: ${{ github.token }}   # lets lib/record_deploy.sh call `gh api` (Deployments ledger)
-          VKS_KUBECONFIG: ${{ secrets.VKS_KUBECONFIG }}   # `event-api` + `promotions` steps: those services run on VKS, not a vServer
-          # Long-lived token for the cluster's imagePullSecret. NOT GITHUB_TOKEN: that is
-          # revoked when this job ends, and the kubelet re-reads the secret on every later
-          # pull (scale-up, reschedule), which would then ImagePullBackOff.
-          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-        run: |
-          # The `event-api` and `promotions` steps deploy to the VKS Kubernetes cluster, so they
-          # need a kubeconfig. Materialise it from the secret; without it those scripts stop
-          # with an explicit error rather than deploying nowhere.
-          if [ -n "${VKS_KUBECONFIG:-}" ]; then
-            printf '%s' "$VKS_KUBECONFIG" > "$RUNNER_TEMP/vks-kubeconfig.yaml"
-            chmod 600 "$RUNNER_TEMP/vks-kubeconfig.yaml"
-            export KUBECONFIG="$RUNNER_TEMP/vks-kubeconfig.yaml"
-          fi
-          # Invoke via `bash` (not ./) — scripts committed from Windows lack the
-          # git executable bit, so ./deploy-all.sh would fail with exit 126.
-          bash deploy-all.sh "$ENVIRONMENT" --only "$SERVICES" -y
+    strategy:
+      fail-fast: false     # one host failing must not cancel the others mid-deploy
+      matrix:
+        steps: ${{ fromJSON(needs.select.outputs.groups) }}
+    uses: ./.github/workflows/cd-deploy-steps.yml
+    with:
+      environment: ${{ needs.select.outputs.env }}
+      image_tag: ${{ needs.select.outputs.tag }}
+      steps: ${{ matrix.steps }}
+    secrets: inherit

@@ -68,15 +68,20 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # One test job per CHANGED service. Each writes a per-service result to the
-  # run's Step Summary and uploads its log. To test every service on every run
-  # instead, replace `matrix.service` with a static list of all four services.
+  # One combined test-then-build job per changed service. Each service tests
+  # first; if tests pass the image builds immediately — without waiting for
+  # every other service's tests to finish (the old two-job design made all
+  # builds wait for the slowest test suite). customer360-dao is library-only:
+  # it tests but has no image to build.
   # ---------------------------------------------------------------------------
-  test:
-    name: Test (${{ matrix.service }})
+  test-and-build:
+    name: Test & build (${{ matrix.service }})
     needs: changes
     if: ${{ needs.changes.outputs.services != '[]' && needs.changes.outputs.services != '' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -148,32 +153,16 @@ jobs:
             logs/${{ matrix.service }}.result
           retention-days: 7
 
-  # ---------------------------------------------------------------------------
-  # Build one image per changed service (matrix). Push to GHCR only on `main`,
-  # and only after that service's tests pass. PRs and branches build-only.
-  # ---------------------------------------------------------------------------
-  build-and-push:
-    name: Build & push (${{ matrix.service }})
-    needs: [changes, test]
-    if: ${{ needs.changes.outputs.services != '[]' && needs.changes.outputs.services != '' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        service: ${{ fromJSON(needs.changes.outputs.services) }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      # ── build (runs only when tests passed) ──────────────────────────────
+      # customer360-dao is a library — no image to build.
 
       - name: Set up Docker Buildx
+        if: ${{ steps.run.outputs.result != 'fail' }}
         uses: docker/setup-buildx-action@v3
 
       # Log in only when we are actually going to push (main branch or a release tag).
       - name: Log in to GHCR
-        if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ steps.run.outputs.result != 'fail' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -183,6 +172,7 @@ jobs:
       # Derives tags/labels. metadata-action lowercases the image name, so the
       # uppercase org (LEO-CDP) in github.repository is handled automatically.
       - name: Docker metadata
+        if: ${{ steps.run.outputs.result != 'fail' }}
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -200,16 +190,18 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
 
       - name: Generate image build version
+        if: ${{ steps.run.outputs.result != 'fail' }}
         id: build-version
         run: echo "value=$(date -u +'%Y-%m-%d-%H-%M')" >> "$GITHUB_OUTPUT"
 
       - name: Generate image build timestamp
+        if: ${{ steps.run.outputs.result != 'fail' }}
         id: build-date-time
         run: echo "value=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         id: build
-        if: ${{ matrix.service != 'customer360-dao' }}
+        if: ${{ steps.run.outputs.result != 'fail' && matrix.service != 'customer360-dao' }}
         continue-on-error: ${{ matrix.service == 'customer360-agent' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
         uses: docker/build-push-action@v6
         with:
@@ -254,7 +246,7 @@ jobs:
   # ---------------------------------------------------------------------------
   notify:
     name: Test summary & notify
-    needs: [changes, test]
+    needs: [changes, test-and-build]
     if: ${{ always() && needs.changes.outputs.services != '[]' && needs.changes.outputs.services != '' }}
     runs-on: ubuntu-latest
     steps:
@@ -303,7 +295,7 @@ jobs:
           secure: false
           username: ${{ secrets.BREVO_SMTP_LOGIN }}
           password: ${{ secrets.BREVO_SMTP_KEY }}
-          subject: "CI ${{ needs.test.result }}: unit tests (run #${{ github.run_number }})"
+          subject: "CI ${{ needs.test-and-build.result }}: unit tests (run #${{ github.run_number }})"
           to: trieu@leocdp.com
           from: ${{ secrets.BREVO_SENDER_EMAIL }}
           body: |
