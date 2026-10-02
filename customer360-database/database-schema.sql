@@ -1978,13 +1978,6 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
         CHECK (jsonb_typeof(prompt_versions) = 'array')
 );
 
--- Existing databases may already have the original cdp_ai_agents shape. Add
--- the unified prompt columns before comments and indexes reference them.
-ALTER TABLE customer360.cdp_ai_agents
-    ADD COLUMN IF NOT EXISTS prompt_key TEXT,
-    ADD COLUMN IF NOT EXISTS prompt_engine VARCHAR(50) NOT NULL DEFAULT 'none',
-    ADD COLUMN IF NOT EXISTS prompt_versions JSONB NOT NULL DEFAULT '[]'::JSONB;
-
 COMMENT ON TABLE customer360.cdp_ai_agents IS
     'Unified registry for AI/ML models and task-oriented AI agents. Stores model configuration and current agent instructions.';
 
