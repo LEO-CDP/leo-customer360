@@ -22,6 +22,9 @@ window.C360 = window.C360 || {};
   // "Describe with AI" state for this form session. Untrusted text: render with .text()/.val() only.
   var aiSoFar = null;
   var aiLastQuestion = null;
+  var aiRequest = null;
+  var aiRequestSequence = 0;
+  var aiLockedControls = [];
   var queryBuilderReady = false;
   var segmentAttributes = [];
   var attributeLoadSequence = 0;
@@ -229,6 +232,13 @@ window.C360 = window.C360 || {};
 
   function closeSegmentForm() {
     attributeLoadSequence += 1;
+    aiRequestSequence += 1;
+    if (aiRequest) {
+      var request = aiRequest;
+      aiRequest = null;
+      request.abort();
+    }
+    setSegmentAiProcessing(false);
     $("#segment-form-modal").addClass("hidden");
     if (queryBuilderReady) {
       $("#segment-query-builder").queryBuilder("destroy");
@@ -279,6 +289,48 @@ window.C360 = window.C360 || {};
     renderAiState();
   }
 
+  function setSegmentAiProcessing(processing) {
+    var $modal = $("#segment-form-modal");
+    var $progress = $("#segment-form-ai-progress");
+    var $aiButton = $("#btn-segment-form-ai");
+
+    if (processing) {
+      aiLockedControls = [];
+      $modal.find("input, textarea, select, button").each(function () {
+        if (this.id === "btn-segment-form-close") return;
+        var $control = $(this);
+        aiLockedControls.push({
+          element: this,
+          readonly: $control.prop("readonly"),
+          disabled: $control.prop("disabled")
+        });
+        if (this.tagName === "INPUT" || this.tagName === "TEXTAREA") {
+          $control.prop("readonly", true);
+        } else {
+          $control.prop("disabled", true);
+        }
+        $control.addClass("segment-ai-locked");
+      });
+      $modal.attr("aria-busy", "true");
+      $progress.removeClass("hidden").attr("aria-busy", "true");
+      $aiButton.addClass("opacity-60 cursor-not-allowed");
+      $("#segment-form-ai-spinner").removeClass("hidden");
+      $("#segment-form-ai-label").text("Processing...");
+      return;
+    }
+
+    aiLockedControls.forEach(function (control) {
+      var $control = $(control.element);
+      $control.prop("readonly", control.readonly).prop("disabled", control.disabled)
+        .removeClass("segment-ai-locked");
+    });
+    aiLockedControls = [];
+    $modal.removeAttr("aria-busy");
+    $progress.addClass("hidden").attr("aria-busy", "false");
+    $aiButton.removeClass("opacity-60 cursor-not-allowed");
+    $("#segment-form-ai-spinner").addClass("hidden");
+  }
+
   function showAiResult(kind, message, suggestions) {
     var styles = {
       valid: "border border-emerald-200 bg-emerald-50 text-emerald-800",
@@ -316,9 +368,9 @@ window.C360 = window.C360 || {};
     } catch (error) {
       currentRules = null;
     }
-    var $btn = $("#btn-segment-form-ai").prop("disabled", true).addClass("opacity-60");
-    $("#segment-form-ai-label").text("Generating...");
-    api("/segments/from-description", {
+    var requestSequence = ++aiRequestSequence;
+    setSegmentAiProcessing(true);
+    aiRequest = api("/segments/from-description", {
       description: description,
       domain: domain,
       so_far: aiSoFar,
@@ -326,6 +378,7 @@ window.C360 = window.C360 || {};
       current_rules: currentRules
     }, "POST")
       .done(function (result) {
+        if (requestSequence !== aiRequestSequence) return;
         aiSoFar = (result && result.so_far) || aiSoFar;
         aiLastQuestion = (result && result.validation_status === "needs_clarification") ? (result.question || null) : null;
         if (!result || result.validation_status !== "valid" || !result.ready_for_segment_persistence) {
@@ -347,11 +400,14 @@ window.C360 = window.C360 || {};
         showAiResult("valid", result.interpretation || "Rules generated. Review them below before saving.");
       })
       .fail(function (xhr) {
+        if (requestSequence !== aiRequestSequence) return;
         var detail = xhr && xhr.responseJSON && xhr.responseJSON.detail;
         showAiResult("rejected", typeof detail === "string" ? detail : "The AI service could not generate rules right now.");
       })
       .always(function () {
-        $btn.prop("disabled", false).removeClass("opacity-60");
+        if (requestSequence !== aiRequestSequence) return;
+        aiRequest = null;
+        setSegmentAiProcessing(false);
         renderAiState();
       });
   }

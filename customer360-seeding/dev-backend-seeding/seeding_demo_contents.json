@@ -1,0 +1,782 @@
+[
+  {
+    "slug": "travel-coastal-food-guide",
+    "domain": "travel",
+    "item_type": "article",
+    "title": "Coastal Vietnam: Food, Beaches, and Local Stays",
+    "summary": "A coastal guide combining beach planning, regional dishes, and locally operated stays for a balanced getaway.",
+    "image_url": "https://images.unsplash.com/photo-1552465011-b4e21bf6e79a",
+    "cta_label": "Read coastal guide",
+    "cta_url": "https://vietnam.travel/things-to-do",
+    "segment_tags": [
+      "travel",
+      "vietnam",
+      "coast",
+      "food",
+      "beach"
+    ]
+  },
+  {
+    "slug": "travel-cultural-heritage-route",
+    "domain": "travel",
+    "item_type": "article",
+    "title": "Cultural Heritage Routes Across Vietnam",
+    "summary": "A route-planning story connecting heritage neighborhoods, museums, local markets, and respectful cultural experiences.",
+    "image_url": "https://images.unsplash.com/photo-1559592413-7cec4d0cae2b",
+    "cta_label": "Explore heritage routes",
+    "cta_url": "https://vietnam.travel/places-to-go",
+    "segment_tags": [
+      "travel",
+      "vietnam",
+      "heritage",
+      "culture"
+    ]
+  },
+  {
+    "slug": "travel-family-holiday-planner",
+    "domain": "travel",
+    "item_type": "product",
+    "title": "Family Holiday Planner",
+    "summary": "A family-friendly collection of destinations, flexible activities, and practical travel planning tips.",
+    "image_url": "https://images.unsplash.com/photo-1504150558240-0b4dd6a7bfc5",
+    "cta_label": "Plan a family holiday",
+    "cta_url": "https://vietnam.travel/things-to-do",
+    "segment_tags": [
+      "travel",
+      "family",
+      "holiday",
+      "itinerary"
+    ]
+  },
+  {
+    "slug": "travel-responsible-beach-itinerary",
+    "domain": "travel",
+    "item_type": "video",
+    "title": "Responsible Beach Travel in Vietnam",
+    "summary": "A short itinerary video about low-impact coastal activities, local operators, and marine-area stewardship.",
+    "image_url": "https://images.unsplash.com/photo-1507525443605-0b3c7c7d9e7c",
+    "cta_label": "Watch travel tips",
+    "cta_url": "https://vietnam.travel/",
+    "segment_tags": [
+      "travel",
+      "vietnam",
+      "beach",
+      "responsible_travel"
+    ]
+  },
+  {
+    "slug": "travel-vietnam-city-break-video",
+    "domain": "travel",
+    "item_type": "video",
+    "title": "Seven Days in Vietnam: A First-Timer Route",
+    "summary": "A visual itinerary connecting Hanoi, central Vietnam, and Ho Chi Minh City with practical pacing advice.",
+    "image_url": "https://images.unsplash.com/photo-1528181304800-259b08848526",
+    "cta_label": "Watch itinerary",
+    "cta_url": "https://vietnam.travel/",
+    "segment_tags": [
+      "travel",
+      "vietnam",
+      "first_time_visitor",
+      "itinerary"
+    ]
+  },
+  {
+    "slug": "travel-vietnam-seasonal-planning",
+    "domain": "travel",
+    "item_type": "article",
+    "title": "Vietnam Travel: Seasonal Planning Guide",
+    "summary": "A practical guide to weather, school-holiday demand, and booking lead times for popular Vietnamese destinations.",
+    "image_url": "https://images.unsplash.com/photo-1528127269322-539801943592",
+    "cta_label": "Read travel guide",
+    "cta_url": "https://vietnam.travel/things-to-do",
+    "segment_tags": [
+      "travel",
+      "vietnam",
+      "domestic_travel",
+      "seasonal_planning"
+    ]
+  },
+  {
+    "slug": "travel-wellness-retreats",
+    "domain": "travel",
+    "item_type": "article",
+    "title": "Wellness Retreats and Slow Travel",
+    "summary": "A calm travel guide for wellness stays, nature walks, local treatments, and slower itineraries.",
+    "image_url": "https://images.unsplash.com/photo-1540555700478-4be289fbecef",
+    "cta_label": "Explore wellness stays",
+    "cta_url": "https://vietnam.travel/",
+    "segment_tags": [
+      "travel",
+      "wellness",
+      "slow_travel",
+      "retreat"
+    ]
+  },
+  {
+    "slug": "media-documentary-premieres",
+    "domain": "media",
+    "item_type": "video",
+    "title": "Documentary Premieres and True Stories",
+    "summary": "A documentary collection featuring science, culture, history, and human-interest stories.",
+    "image_url": "https://images.unsplash.com/photo-1485846234645-a62644f84728",
+    "cta_label": "Watch documentaries",
+    "cta_url": "https://www.imdb.com/",
+    "segment_tags": [
+      "media",
+      "documentary",
+      "culture",
+      "premium"
+    ]
+  },
+  {
+    "slug": "media-family-content-picks",
+    "domain": "media",
+    "item_type": "article",
+    "title": "Family-Friendly Content Picks",
+    "summary": "A curated collection of age-appropriate films and series for shared family viewing across devices.",
+    "image_url": "https://images.unsplash.com/photo-1485846234645-a62644f84728",
+    "cta_label": "Explore family picks",
+    "cta_url": "https://www.imdb.com/",
+    "segment_tags": [
+      "media",
+      "family",
+      "entertainment",
+      "recommendations"
+    ]
+  },
+  {
+    "slug": "media-live-sports-highlights",
+    "domain": "media",
+    "item_type": "video",
+    "title": "Live Sports Highlights and Replays",
+    "summary": "A highlights collection for sports fans who want live coverage, replay clips, and post-match analysis.",
+    "image_url": "https://images.unsplash.com/photo-1461896836934-ffe607ba8211",
+    "cta_label": "Watch highlights",
+    "cta_url": "https://www.youtube.com/",
+    "segment_tags": [
+      "media",
+      "sports",
+      "live",
+      "highlights"
+    ]
+  },
+  {
+    "slug": "media-music-discovery",
+    "domain": "media",
+    "item_type": "article",
+    "title": "Music Discovery for Every Mood",
+    "summary": "A curated discovery guide for new releases, local artists, playlists, and live music sessions.",
+    "image_url": "https://images.unsplash.com/photo-1511379938547-c1f69419868d",
+    "cta_label": "Discover music",
+    "cta_url": "https://www.youtube.com/",
+    "segment_tags": [
+      "media",
+      "music",
+      "discovery",
+      "new_releases"
+    ]
+  },
+  {
+    "slug": "media-podcast-discovery",
+    "domain": "media",
+    "item_type": "article",
+    "title": "Podcast Discovery for Every Commute",
+    "summary": "A discovery guide to news, business, comedy, and culture podcasts for listeners building a regular audio habit.",
+    "image_url": "https://images.unsplash.com/photo-1590602847861-f357a9332bbc",
+    "cta_label": "Find a podcast",
+    "cta_url": "https://www.youtube.com/",
+    "segment_tags": [
+      "media",
+      "podcast",
+      "audio",
+      "discovery"
+    ]
+  },
+  {
+    "slug": "media-premium-streaming-launch",
+    "domain": "media",
+    "item_type": "video",
+    "title": "Premium Streaming: New Releases and Ad-Free Viewing",
+    "summary": "A featured collection for viewers comparing premium access, new releases, and uninterrupted streaming experiences.",
+    "image_url": "https://images.unsplash.com/photo-1522869635100-9f4c5e86aa37",
+    "cta_label": "Start watching",
+    "cta_url": "https://www.youtube.com/",
+    "segment_tags": [
+      "media",
+      "streaming",
+      "premium",
+      "new_releases"
+    ]
+  },
+  {
+    "slug": "media-weekend-watchlist",
+    "domain": "media",
+    "item_type": "article",
+    "title": "Weekend Watchlist: Drama, Sports, and Documentaries",
+    "summary": "A curated watchlist that helps casual viewers discover popular drama, sports, and documentary programming.",
+    "image_url": "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba",
+    "cta_label": "Explore watchlist",
+    "cta_url": "https://www.imdb.com/",
+    "segment_tags": [
+      "media",
+      "entertainment",
+      "sports",
+      "documentary"
+    ]
+  },
+  {
+    "slug": "hospitality-breakfast-brunch",
+    "domain": "hospitality",
+    "item_type": "product",
+    "title": "Breakfast and Brunch Experiences",
+    "summary": "A dining collection featuring local breakfast traditions, brunch menus, and flexible reservations.",
+    "image_url": "https://images.unsplash.com/photo-1533089860892-a7c6f0a88666",
+    "cta_label": "Browse dining offers",
+    "cta_url": "https://www.tripadvisor.com/Restaurants",
+    "segment_tags": [
+      "hospitality",
+      "food_service",
+      "breakfast",
+      "brunch"
+    ]
+  },
+  {
+    "slug": "hospitality-business-stay",
+    "domain": "hospitality",
+    "item_type": "article",
+    "title": "Business Stay: Flexible Hotel Packages",
+    "summary": "A practical hotel guide for business travelers comparing location, workspace amenities, and flexible booking options.",
+    "image_url": "https://images.unsplash.com/photo-1551882547-ff40c63fe5fa",
+    "cta_label": "Plan a business stay",
+    "cta_url": "https://www.booking.com/",
+    "segment_tags": [
+      "hospitality",
+      "hotel",
+      "business_travel",
+      "flexible_booking"
+    ]
+  },
+  {
+    "slug": "hospitality-chef-experience",
+    "domain": "hospitality",
+    "item_type": "video",
+    "title": "Meet the Chef: Local Ingredients and Flavors",
+    "summary": "A behind-the-scenes video about local ingredients, signature dishes, and memorable guest dining experiences.",
+    "image_url": "https://images.unsplash.com/photo-1556910103-1c02745bae4d",
+    "cta_label": "Watch chef story",
+    "cta_url": "https://www.tripadvisor.com/Restaurants",
+    "segment_tags": [
+      "hospitality",
+      "food_service",
+      "chef",
+      "local_cuisine"
+    ]
+  },
+  {
+    "slug": "hospitality-local-food-discovery",
+    "domain": "hospitality",
+    "item_type": "article",
+    "title": "Local Food Discovery: Restaurants and Cafes",
+    "summary": "A dining guide for discovering regional dishes, neighborhood restaurants, and relaxed cafe experiences.",
+    "image_url": "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4",
+    "cta_label": "Find dining experiences",
+    "cta_url": "https://www.tripadvisor.com/Restaurants",
+    "segment_tags": [
+      "hospitality",
+      "food_service",
+      "restaurants",
+      "cafes"
+    ]
+  },
+  {
+    "slug": "hospitality-local-market-tours",
+    "domain": "hospitality",
+    "item_type": "product",
+    "title": "Local Market Food Tours",
+    "summary": "A food-service experience pairing local market visits with guided tastings and neighborhood stories.",
+    "image_url": "https://images.unsplash.com/photo-1552566626-52f8b828",
+    "cta_label": "Book a food tour",
+    "cta_url": "https://www.tripadvisor.com/Restaurants",
+    "segment_tags": [
+      "hospitality",
+      "food_service",
+      "food_tour",
+      "local_cuisine"
+    ]
+  },
+  {
+    "slug": "hospitality-resort-family-activities",
+    "domain": "hospitality",
+    "item_type": "article",
+    "title": "Family Activities at Resort Destinations",
+    "summary": "A family stay guide covering kids activities, pools, dining options, and flexible resort packages.",
+    "image_url": "https://images.unsplash.com/photo-1540541338287-41700207dee6",
+    "cta_label": "Plan a family stay",
+    "cta_url": "https://www.booking.com/",
+    "segment_tags": [
+      "hospitality",
+      "resort",
+      "family",
+      "staycation"
+    ]
+  },
+  {
+    "slug": "hospitality-vietnam-staycation",
+    "domain": "hospitality",
+    "item_type": "product",
+    "title": "Vietnam Staycation: Hotel and Resort Experiences",
+    "summary": "A staycation guide pairing flexible hotel packages with resort amenities, local experiences, and seasonal offers.",
+    "image_url": "https://images.unsplash.com/photo-1566073771259-6a8506099945",
+    "cta_label": "View stay offers",
+    "cta_url": "https://www.booking.com/",
+    "segment_tags": [
+      "hospitality",
+      "hotel",
+      "resort",
+      "staycation"
+    ]
+  },
+  {
+    "slug": "retail-back-to-school",
+    "domain": "retail",
+    "item_type": "product",
+    "title": "Back-to-School Essentials Collection",
+    "summary": "A seasonal collection of school, work, and home essentials with convenient online ordering and store pickup.",
+    "image_url": "https://images.unsplash.com/photo-1503676260728-1c00da094a0b",
+    "cta_label": "Shop essentials",
+    "cta_url": "https://www.shopify.com/retail",
+    "segment_tags": [
+      "retail",
+      "ecommerce",
+      "back_to_school",
+      "seasonal_sale"
+    ]
+  },
+  {
+    "slug": "retail-electronics-upgrade-guide",
+    "domain": "retail",
+    "item_type": "product",
+    "title": "Smart Electronics Upgrade Guide",
+    "summary": "A comparison guide for shoppers upgrading phones, accessories, and connected home devices.",
+    "image_url": "https://images.unsplash.com/photo-1468495244123-6c6c332eeece",
+    "cta_label": "Compare electronics",
+    "cta_url": "https://www.shopify.com/retail",
+    "segment_tags": [
+      "retail",
+      "ecommerce",
+      "electronics",
+      "comparison"
+    ]
+  },
+  {
+    "slug": "retail-home-organization",
+    "domain": "retail",
+    "item_type": "article",
+    "title": "Home Organization and Storage Ideas",
+    "summary": "A practical collection of storage products and simple organization ideas for busy households.",
+    "image_url": "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6",
+    "cta_label": "Shop organization ideas",
+    "cta_url": "https://www.shopify.com/retail",
+    "segment_tags": [
+      "retail",
+      "ecommerce",
+      "home",
+      "everyday_essentials"
+    ]
+  },
+  {
+    "slug": "retail-loyalty-essentials",
+    "domain": "retail",
+    "item_type": "article",
+    "title": "Loyalty Rewards for Everyday Essentials",
+    "summary": "A loyalty feature highlighting repeat-purchase rewards, digital coupons, and convenient replenishment journeys.",
+    "image_url": "https://images.unsplash.com/photo-1472851294608-062f824d29cc",
+    "cta_label": "See member rewards",
+    "cta_url": "https://www.shopify.com/retail",
+    "segment_tags": [
+      "retail",
+      "ecommerce",
+      "loyalty",
+      "everyday_essentials"
+    ]
+  },
+  {
+    "slug": "retail-mobile-app-deals",
+    "domain": "retail",
+    "item_type": "product",
+    "title": "Mobile App Deals and Personalised Offers",
+    "summary": "A mobile-first collection of relevant offers, saved products, and rewards for returning shoppers.",
+    "image_url": "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d",
+    "cta_label": "Open app offers",
+    "cta_url": "https://www.shopify.com/retail",
+    "segment_tags": [
+      "retail",
+      "ecommerce",
+      "mobile_app",
+      "personalization"
+    ]
+  },
+  {
+    "slug": "retail-omnichannel-seasonal-shopping",
+    "domain": "retail",
+    "item_type": "product",
+    "title": "Omnichannel Seasonal Shopping Event",
+    "summary": "A personalized shopping event connecting app, web, and store offers for seasonal products and everyday essentials.",
+    "image_url": "https://images.unsplash.com/photo-1441986300917-64674bd600d8",
+    "cta_label": "Shop the event",
+    "cta_url": "https://www.shopify.com/retail",
+    "segment_tags": [
+      "retail",
+      "ecommerce",
+      "omnichannel",
+      "seasonal_sale"
+    ]
+  },
+  {
+    "slug": "retail-sustainable-products",
+    "domain": "retail",
+    "item_type": "article",
+    "title": "Sustainable Products for Everyday Living",
+    "summary": "A product story highlighting reusable, durable, and responsibly sourced choices for everyday households.",
+    "image_url": "https://images.unsplash.com/photo-1542601906990-b4d3fb778b09",
+    "cta_label": "Explore sustainable picks",
+    "cta_url": "https://www.shopify.com/retail",
+    "segment_tags": [
+      "retail",
+      "ecommerce",
+      "sustainable",
+      "household"
+    ]
+  },
+  {
+    "slug": "real-estate-first-homebuyer-guide",
+    "domain": "real_estate",
+    "item_type": "article",
+    "title": "First-Time Homebuyer: From Search to Move-In",
+    "summary": "A step-by-step property guide covering neighborhood research, virtual tours, financing, and purchase preparation.",
+    "image_url": "https://images.unsplash.com/photo-1564013799919-ab600027ffc6",
+    "cta_label": "Read buyer guide",
+    "cta_url": "https://www.zillow.com/",
+    "segment_tags": [
+      "real_estate",
+      "homebuyer",
+      "property_search",
+      "mortgage"
+    ]
+  },
+  {
+    "slug": "real-estate-first-time-investor",
+    "domain": "real_estate",
+    "item_type": "article",
+    "title": "First-Time Property Investor Checklist",
+    "summary": "A beginner-friendly checklist covering financing, due diligence, rental demand, and investment risk.",
+    "image_url": "https://images.unsplash.com/photo-1560520653-9e0e4c89eb11",
+    "cta_label": "Read investor checklist",
+    "cta_url": "https://www.realtor.com/",
+    "segment_tags": [
+      "real_estate",
+      "investment",
+      "first_time_investor",
+      "property"
+    ]
+  },
+  {
+    "slug": "real-estate-neighborhood-market",
+    "domain": "real_estate",
+    "item_type": "article",
+    "title": "Neighborhood Market Briefing",
+    "summary": "A local market briefing comparing transport, schools, amenities, and property demand across growing neighborhoods.",
+    "image_url": "https://images.unsplash.com/photo-1449824913935-59a10b8d2000",
+    "cta_label": "Read market briefing",
+    "cta_url": "https://www.zillow.com/",
+    "segment_tags": [
+      "real_estate",
+      "market",
+      "neighborhood",
+      "property_search"
+    ]
+  },
+  {
+    "slug": "real-estate-rental-opportunities",
+    "domain": "real_estate",
+    "item_type": "product",
+    "title": "Rental Investment Opportunities",
+    "summary": "A property collection for investors comparing rental yield, occupancy demand, and long-term asset potential.",
+    "image_url": "https://images.unsplash.com/photo-1560518883-ce09059eeefa",
+    "cta_label": "View investment options",
+    "cta_url": "https://www.realtor.com/",
+    "segment_tags": [
+      "real_estate",
+      "investment",
+      "rental",
+      "property"
+    ]
+  },
+  {
+    "slug": "real-estate-riverside-investment",
+    "domain": "real_estate",
+    "item_type": "product",
+    "title": "Riverside Property Investment Briefing",
+    "summary": "A market briefing for investors comparing premium units, rental potential, and long-term location value.",
+    "image_url": "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c",
+    "cta_label": "View property briefing",
+    "cta_url": "https://www.realtor.com/",
+    "segment_tags": [
+      "real_estate",
+      "investment",
+      "luxury",
+      "condo"
+    ]
+  },
+  {
+    "slug": "real-estate-smart-home-features",
+    "domain": "real_estate",
+    "item_type": "video",
+    "title": "Smart Home Features Buyers Value",
+    "summary": "A property video reviewing energy efficiency, security, connectivity, and practical smart-home features.",
+    "image_url": "https://images.unsplash.com/photo-1558008258-3256797b43f3",
+    "cta_label": "Watch smart-home tour",
+    "cta_url": "https://www.zillow.com/",
+    "segment_tags": [
+      "real_estate",
+      "smart_home",
+      "property_search",
+      "technology"
+    ]
+  },
+  {
+    "slug": "real-estate-virtual-tour",
+    "domain": "real_estate",
+    "item_type": "video",
+    "title": "Virtual Tour: How to Evaluate a New Home",
+    "summary": "A virtual-tour walkthrough covering layout, light, amenities, location, and questions to ask before an in-person visit.",
+    "image_url": "https://images.unsplash.com/photo-1600607687920-4e2a09cf159d",
+    "cta_label": "Start virtual tour",
+    "cta_url": "https://www.realtor.com/",
+    "segment_tags": [
+      "real_estate",
+      "virtual_tour",
+      "homebuyer",
+      "property_search"
+    ]
+  },
+  {
+    "slug": "healthcare-digital-care-tools",
+    "domain": "healthcare",
+    "item_type": "video",
+    "title": "Digital Tools for Staying Connected to Care",
+    "summary": "A short video about patient portals, virtual visits, care reminders, and secure communication with providers.",
+    "image_url": "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d",
+    "cta_label": "Watch digital-care guide",
+    "cta_url": "https://www.who.int/health-topics/digital-health",
+    "segment_tags": [
+      "healthcare",
+      "digital_health",
+      "telehealth",
+      "patient_portal"
+    ]
+  },
+  {
+    "slug": "healthcare-family-screening",
+    "domain": "healthcare",
+    "item_type": "product",
+    "title": "Family Screening and Preventive Care",
+    "summary": "A preventive-care collection helping families plan age-appropriate screenings, checkups, and wellness visits.",
+    "image_url": "https://images.unsplash.com/photo-1576091160550-2173dba999ef",
+    "cta_label": "Plan preventive care",
+    "cta_url": "https://www.who.int/health-topics",
+    "segment_tags": [
+      "healthcare",
+      "preventive_care",
+      "screening",
+      "family"
+    ]
+  },
+  {
+    "slug": "healthcare-heart-health-basics",
+    "domain": "healthcare",
+    "item_type": "article",
+    "title": "Everyday Heart Health Basics",
+    "summary": "A patient education guide covering movement, nutrition, screening questions, and healthy routines.",
+    "image_url": "https://images.unsplash.com/photo-1505751172876-fa1923c5c528",
+    "cta_label": "Read heart health guide",
+    "cta_url": "https://www.who.int/health-topics/cardiovascular-diseases",
+    "segment_tags": [
+      "healthcare",
+      "preventive_care",
+      "heart_health",
+      "wellness"
+    ]
+  },
+  {
+    "slug": "healthcare-medication-adherence",
+    "domain": "healthcare",
+    "item_type": "article",
+    "title": "Medication Adherence and Refill Planning",
+    "summary": "A patient guide to refill reminders, medication routines, and preparing questions for the next care-team visit.",
+    "image_url": "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae",
+    "cta_label": "Read medication guide",
+    "cta_url": "https://www.who.int/health-topics/medicines",
+    "segment_tags": [
+      "healthcare",
+      "medication",
+      "prescription",
+      "chronic_care"
+    ]
+  },
+  {
+    "slug": "healthcare-mental-wellbeing",
+    "domain": "healthcare",
+    "item_type": "video",
+    "title": "Mental Wellbeing and Stress Support",
+    "summary": "A supportive video about stress awareness, healthy routines, and finding appropriate professional care.",
+    "image_url": "https://images.unsplash.com/photo-1499209974431-9dddcece7f88",
+    "cta_label": "Watch wellbeing guide",
+    "cta_url": "https://www.who.int/health-topics/mental-health",
+    "segment_tags": [
+      "healthcare",
+      "mental_health",
+      "wellness",
+      "preventive_care"
+    ]
+  },
+  {
+    "slug": "healthcare-preventive-wellness",
+    "domain": "healthcare",
+    "item_type": "article",
+    "title": "Preventive Care and Annual Wellness Planning",
+    "summary": "A patient-friendly guide to checkups, screenings, healthy routines, and planning the next care visit.",
+    "image_url": "https://images.unsplash.com/photo-1505759963531-8f6f5c8f8f8b",
+    "cta_label": "Plan wellness care",
+    "cta_url": "https://www.who.int/health-topics",
+    "segment_tags": [
+      "healthcare",
+      "preventive_care",
+      "wellness",
+      "checkup"
+    ]
+  },
+  {
+    "slug": "healthcare-telehealth-chronic-care",
+    "domain": "healthcare",
+    "item_type": "video",
+    "title": "Telehealth Support for Ongoing Care",
+    "summary": "A practical video explaining virtual visits, care-plan follow-up, and medication support for chronic conditions.",
+    "image_url": "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d",
+    "cta_label": "Watch care guide",
+    "cta_url": "https://www.who.int/health-topics/digital-health",
+    "segment_tags": [
+      "healthcare",
+      "telehealth",
+      "chronic_care",
+      "care_plan"
+    ]
+  },
+  {
+    "slug": "education-data-literacy-foundations",
+    "domain": "education",
+    "item_type": "video",
+    "title": "Data Literacy Foundations for Career Growth",
+    "summary": "A practical video series covering data interpretation, charts, and evidence-based decisions for Vietnamese learners.",
+    "image_url": "https://images.unsplash.com/photo-1516321318423-f06f85e504b3",
+    "cta_label": "Watch lesson",
+    "cta_url": "https://www.khanacademy.org/computing/computer-programming",
+    "segment_tags": [
+      "education",
+      "career_upskilling",
+      "lifelong_learning"
+    ]
+  },
+  {
+    "slug": "education-exam-prep-study-skills",
+    "domain": "education",
+    "item_type": "article",
+    "title": "Exam Preparation and Evidence-Based Study Skills",
+    "summary": "Study planning, spaced practice, and revision techniques for learners preparing for important assessments.",
+    "image_url": "https://images.unsplash.com/photo-1434030216411-0b793f4b4173",
+    "cta_label": "Read study guide",
+    "cta_url": "https://www.khanacademy.org/test-prep",
+    "segment_tags": [
+      "education",
+      "exam_prep",
+      "student"
+    ]
+  },
+  {
+    "slug": "education-lifelong-learning-habits",
+    "domain": "education",
+    "item_type": "article",
+    "title": "Building a Sustainable Lifelong Learning Habit",
+    "summary": "A realistic weekly learning routine for busy professionals balancing work, family, and continuous development.",
+    "image_url": "https://images.unsplash.com/photo-1503676260728-1c00da094a0b",
+    "cta_label": "Explore learning habits",
+    "cta_url": "https://www.edx.org/learn",
+    "segment_tags": [
+      "education",
+      "lifelong_learning",
+      "professional"
+    ]
+  },
+  {
+    "slug": "education-python-first-projects",
+    "domain": "education",
+    "item_type": "video",
+    "title": "Python Programming: First Projects",
+    "summary": "Short guided projects for learners building their first Python programs with examples suited to self-paced study.",
+    "image_url": "https://images.unsplash.com/photo-1515879218367-8466d910aaa4",
+    "cta_label": "Start course",
+    "cta_url": "https://www.python.org/about/gettingstarted/",
+    "segment_tags": [
+      "education",
+      "technology",
+      "career_upskilling"
+    ]
+  },
+  {
+    "slug": "education-workplace-english",
+    "domain": "education",
+    "item_type": "article",
+    "title": "Workplace English for Customer-Facing Teams",
+    "summary": "Practical role-play guidance for clearer email, meetings, and customer conversations in an international workplace.",
+    "image_url": "https://images.unsplash.com/photo-1524178232363-1fb2b075b655",
+    "cta_label": "Read learning guide",
+    "cta_url": "https://www.britishcouncil.vn/en/english",
+    "segment_tags": [
+      "education",
+      "language_learning",
+      "career_upskilling"
+    ]
+  },
+  {
+    "slug": "education-career-certificate",
+    "domain": "education",
+    "item_type": "product",
+    "title": "Career Certificate Learning Path",
+    "summary": "A guided certificate path for professionals building practical analytics, technology, and business skills.",
+    "image_url": "https://images.unsplash.com/photo-1523240795612-9a054b0db644",
+    "cta_label": "Explore certificate path",
+    "cta_url": "https://www.edx.org/learn",
+    "segment_tags": [
+      "education",
+      "career_upskilling",
+      "certificate",
+      "professional"
+    ]
+  },
+  {
+    "slug": "education-language-learning-practice",
+    "domain": "education",
+    "item_type": "article",
+    "title": "Language Learning Practice for Busy Professionals",
+    "summary": "Short, repeatable practice activities for improving workplace communication and confidence over time.",
+    "image_url": "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8",
+    "cta_label": "Start practice plan",
+    "cta_url": "https://www.britishcouncil.vn/en/english",
+    "segment_tags": [
+      "education",
+      "language_learning",
+      "professional",
+      "lifelong_learning"
+    ]
+  }
+]

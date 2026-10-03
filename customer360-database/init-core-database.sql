@@ -103,7 +103,8 @@ ON CONFLICT (tenant_id, domain_id) DO NOTHING;
 ---------------------------------------------------
 
 -- Core event vocabulary seed: GENERAL/FEEDBACK (cross-domain) plus the
--- requested verticals (retail, banking, real_estate, travel, media, education).
+-- supported profile verticals (retail, real_estate, travel, media,
+-- hospitality, healthcare, education) and the existing banking vocabulary.
 -- Idempotent: safe to re-run.
 INSERT INTO customer360.cdp_event_catalog (
     event_name,
@@ -186,14 +187,27 @@ INSERT INTO customer360.cdp_event_catalog (
     ('subscribe-media',           'COMMERCE', 'media', 'User subscribed to a premium media/content plan.',    TRUE,  'subscription_amount', 550),
     ('cancel-media-subscription', 'COMMERCE', 'media', 'User cancelled their media subscription.',            FALSE, NULL, 560),
 
+    -- HOSPITALITY & FOOD SERVICE
+    ('search-restaurant',       'SERVICE_INDUSTRY', 'hospitality', 'User searched for a restaurant or dining experience.', FALSE, NULL, 570),
+    ('view-menu',               'SERVICE_INDUSTRY', 'hospitality', 'User viewed a restaurant menu or food-service offering.', FALSE, NULL, 580),
+    ('reservation-started',     'SERVICE_INDUSTRY', 'hospitality', 'User started a hotel, restaurant, or venue reservation.', FALSE, NULL, 590),
+    ('reservation-completed',   'SERVICE_INDUSTRY', 'hospitality', 'User completed a hotel, restaurant, or venue reservation.', TRUE, 'reservation_value', 600),
+    ('restaurant-order',        'SERVICE_INDUSTRY', 'hospitality', 'User completed a restaurant or food-service order.', TRUE, 'order_total', 610),
+
+    -- HEALTHCARE
+    ('search-provider',         'SERVICE_INDUSTRY', 'healthcare', 'User searched for a healthcare provider or service.', FALSE, NULL, 620),
+    ('book-appointment',       'SERVICE_INDUSTRY', 'healthcare', 'User booked a healthcare appointment.', TRUE, NULL, 630),
+    ('start-telehealth',       'SERVICE_INDUSTRY', 'healthcare', 'User started a telehealth session.', TRUE, NULL, 631),
+    ('refill-prescription',    'SERVICE_INDUSTRY', 'healthcare', 'User requested a prescription refill.', TRUE, 'amount', 632),
+
     -- EDUCATION
-    ('enroll-course',     'EDUCATION', 'education', 'User enrolled in a course.',                     TRUE,  'course_fee', 570),
-    ('start-course',      'EDUCATION', 'education', 'User started a course.',                         FALSE, NULL, 580),
-    ('complete-course',   'EDUCATION', 'education', 'User completed a course.',                       FALSE, NULL, 590),
-    ('start-lesson',      'EDUCATION', 'education', 'User started a specific lesson or module.',      FALSE, NULL, 600),
-    ('complete-lesson',   'EDUCATION', 'education', 'User completed a lesson.',                       FALSE, NULL, 610),
-    ('submit-quiz',       'EDUCATION', 'education', 'User submitted a quiz or assignment.',           FALSE, 'score', 620),
-    ('download-material', 'EDUCATION', 'education', 'User downloaded course materials or syllabus.',  FALSE, NULL, 630),
+    ('enroll-course',     'EDUCATION', 'education', 'User enrolled in a course.',                     TRUE,  'course_fee',  900),
+    ('start-course',      'EDUCATION', 'education', 'User started a course.',                         FALSE, NULL,          910),
+    ('complete-course',   'EDUCATION', 'education', 'User completed a course.',                       FALSE, NULL,          920),
+    ('start-lesson',      'EDUCATION', 'education', 'User started a specific lesson or module.',      FALSE, NULL,          930),
+    ('complete-lesson',   'EDUCATION', 'education', 'User completed a lesson.',                       FALSE, NULL,          940),
+    ('submit-quiz',       'EDUCATION', 'education', 'User submitted a quiz or assignment.',           FALSE, 'score',       950),
+    ('download-material', 'EDUCATION', 'education', 'User downloaded course materials or syllabus.',  FALSE, NULL,          960),
 
     -- EMAIL MARKETING ENGAGEMENT
     ('email-delivered',    'GENERAL', 'all', 'Marketing email was accepted/delivered by the recipient MTA.', FALSE, NULL, 640),
@@ -202,6 +216,8 @@ INSERT INTO customer360.cdp_event_catalog (
     ('email-opened',       'GENERAL', 'all', 'Recipient opened the marketing email (tracking pixel).',        FALSE, NULL, 670),
     ('email-clicked',      'GENERAL', 'all', 'Recipient clicked a link in the marketing email.',              FALSE, NULL, 680),
     ('email-unsubscribed', 'GENERAL', 'all', 'Recipient unsubscribed via the email footer link.',             FALSE, NULL, 690)
+-- event_name is unique; rerunning this seed updates the governed definition
+-- instead of inserting duplicates.
 ON CONFLICT (event_name) DO UPDATE SET
     event_category        = EXCLUDED.event_category,
     domain_scope          = EXCLUDED.domain_scope,
@@ -255,6 +271,8 @@ VALUES
     ('messaging-conversation-resolved', 'GENERAL', 'all', 'A messaging conversation was resolved.', FALSE, NULL, 870),
     ('messaging-opted-in', 'GENERAL', 'all', 'A user opted in to messaging communication.', FALSE, NULL, 880),
     ('messaging-opted-out', 'GENERAL', 'all', 'A user opted out of messaging communication.', FALSE, NULL, 890)
+-- event_name is unique; rerunning this seed updates the governed definition
+-- instead of inserting duplicates.
 ON CONFLICT (event_name) DO UPDATE SET
     event_category         = EXCLUDED.event_category,
     domain_scope           = EXCLUDED.domain_scope,

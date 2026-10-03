@@ -53,7 +53,20 @@
 
       <div class="flex flex-col md:flex-row gap-2">
         <textarea id="segment-form-ai-text" rows="2" maxlength="2000" class="flex-1 text-xs border border-slate-200 bg-white rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="e.g. Khách hàng nữ ở Hà Nội, customer since 2026-09-01"></textarea>
-        <button id="btn-segment-form-ai" type="button" class="md:self-start inline-flex items-center justify-center gap-1.5 border border-indigo-200 bg-white text-indigo-700 rounded-xl px-4 py-2 text-xs font-semibold hover:bg-indigo-50"><span id="segment-form-ai-label">Generate rules</span></button>
+        <button id="btn-segment-form-ai" type="button" class="md:self-start inline-flex items-center justify-center gap-1.5 border border-indigo-200 bg-white text-indigo-700 rounded-xl px-4 py-2 text-xs font-semibold hover:bg-indigo-50" aria-describedby="segment-form-ai-progress">
+          <svg id="segment-form-ai-spinner" class="hidden w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"></path></svg>
+          <span id="segment-form-ai-label">Generate rules</span>
+        </button>
+      </div>
+      <div id="segment-form-ai-progress" class="hidden mt-3 rounded-lg border border-indigo-200 bg-white/80 px-3 py-2.5" role="status" aria-live="polite" aria-busy="true">
+        <div class="flex items-center justify-between gap-3 mb-1.5">
+          <span class="text-[11px] font-semibold text-indigo-700">Processing with AI</span>
+          <span class="text-[10px] text-indigo-500">Please wait...</span>
+        </div>
+        <div class="h-1.5 overflow-hidden rounded-full bg-indigo-100" role="progressbar" aria-label="AI is processing the segment rules">
+          <div class="segment-ai-progress-bar h-full rounded-full bg-indigo-500"></div>
+        </div>
+        <p class="mt-1.5 text-[10px] text-slate-500">Your segment fields are temporarily locked while the AI reviews your description.</p>
       </div>
       <div id="segment-form-ai-result" class="hidden mt-2 rounded-lg px-3 py-2 text-xs" role="status" aria-live="polite">
         <p id="segment-form-ai-message"></p>
