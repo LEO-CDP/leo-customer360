@@ -79,8 +79,7 @@ jobs:
 
           get_ip() {
             printf '%s' "$SERVERS" | python3 -c \
-              'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}
-print(next((i.get("floating_ip") for i in (s.get("internal_interfaces") or []) if i.get("floating_ip")), ""))' "$1"
+              'import json,sys; d=json.load(sys.stdin); s=d.get(sys.argv[1]) or {}; print(next((i.get("floating_ip") for i in (s.get("internal_interfaces") or []) if i.get("floating_ip")), ""))' "$1"
           }
 
           # SSH to a VM and docker pull each image:latest. Non-fatal on failure.
