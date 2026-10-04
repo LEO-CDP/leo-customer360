@@ -27,7 +27,7 @@ to Dagster runs. Size Dagster for the resulting queue depth and batch rate.
 | Memory | 8 GB RAM |
 | Local disk | 50 GB SSD, with at least 30 percent free |
 | Network | 1 Gbps private network; stable DNS and outbound HTTPS |
-| Dagster topology | 1 webserver, exactly 1 daemon, all 9 code locations |
+| Dagster topology | 1 webserver, exactly 1 daemon, all 8 code locations |
 | External state | PostgreSQL and S3-compatible storage; not counted in this host size |
 | Expected concurrency | Start with 1 active data job and increase only after measurement |
 
@@ -246,7 +246,7 @@ The backend system uses one image:
 
 | Image | Source | Runtime role |
 |---|---|---|
-| `customer360-dagster` | `customer360-backend/Dockerfile` | Dagster webserver or singleton daemon, plus all nine code locations |
+| `customer360-dagster` | `customer360-backend/Dockerfile` | Dagster webserver or singleton daemon, plus all eight code locations |
 
 The image includes identity resolution. Splitting each task into its own image
 is a later scaling decision, not a requirement for Dagster to manage separate
@@ -366,7 +366,7 @@ Expected conditions:
 - `/server_info` and `/health` return successfully.
 - The generated `dagster.yaml` contains PostgreSQL storage and, when
 	`DAGSTER_REQUIRE_S3=true`, an S3 compute-log manager.
-- All nine code locations load in the Dagster UI.
+- All eight code locations load in the Dagster UI.
 
 For a local smoke test without an S3 service, set
 `DAGSTER_REQUIRE_S3=false` explicitly. That validates PostgreSQL-backed Dagster
@@ -562,7 +562,7 @@ Recommended image tags:
 
 For every `customer360-dagster` image build:
 
-1. Install the dependencies for all nine registered locations.
+1. Install the dependencies for all eight registered locations.
 2. Import every `dagster_defs.py` and verify its `defs` object loads.
 3. Validate `workspace.yaml` and the resolved Compose configuration.
 4. Run the identity-resolution, segmentation, analytics, and API Dagster-client

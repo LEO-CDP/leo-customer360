@@ -151,7 +151,7 @@ flowchart TB
 
 ```
 customer360-backend/
-├── workspace.yaml            # lists all 9 code locations below
+├── workspace.yaml            # lists all 8 code locations below
 ├── requirements-dev.txt      # dagster-webserver, only needed for ./start.sh (local UI)
 ├── start.sh / stop.sh / restart.sh   # local dev: dagster dev -w workspace.yaml
 │
@@ -174,13 +174,14 @@ customer360-backend/
 
 ├── ai_agents_runners/         # Tenant-scoped API/cron workflow orchestration
 ├── data_synch/                # PLACEHOLDER — same skeleton pattern
-├── email_engine/              # PLACEHOLDER — same skeleton pattern
-├── notification_engine/       # PLACEHOLDER — same skeleton pattern
-├── campaign_activation/       # PLACEHOLDER — same skeleton pattern
-└── personalization/           # PLACEHOLDER — same skeleton pattern
+├── email_engine/              # approved-campaign email delivery
+├── notification_engine/       # Zalo notification delivery
+└── campaign_activation/       # approval and activation orchestration
 ```
 
-Each placeholder service exists so `customer360-api/core/utils/dagster_client.py` already has a real job/location/repository name triplet to submit against once real logic is implemented — the wiring (config settings, GraphQL client, workspace registration) is in place ahead of the business logic.
+The AI-agent runner selects tenant-scoped active workflow steps for API and
+cron triggers. Its personalization compatibility job remains a scaffold;
+agent-specific inference handlers are not yet implemented.
 
 **Why Dagster:**
 - One run-history UI (`localhost:3000`) across every backend service.
@@ -390,7 +391,7 @@ The variants intentionally share project names, container names, and volumes whe
 - `customer360-event-api/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8010`.
 - `customer360-promotions/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 9009`.
 - `customer360-frontend/Dockerfile` → `opentelemetry-instrument uvicorn app:app --host 0.0.0.0 --port 8890`.
-- `customer360-backend/Dockerfile` → unified Dagster webserver and daemon loading all nine
+- `customer360-backend/Dockerfile` → unified Dagster webserver and daemon loading all eight
     customer360-backend code locations on port `3000`; identity resolution runs as a
     Dagster job and sensor in this image.
 - `postgres/Dockerfile` → `FROM postgis/postgis:16-3.5` + `postgresql-16-pgvector`; copies `database-schema.sql`/`init-core-database.sql` into `/docker-entrypoint-initdb.d/`, which only run on a first-ever (empty data directory) container start.

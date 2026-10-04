@@ -77,10 +77,11 @@ low-confidence to a human); today those ride on an LLM's uncalibrated
 
 ### 1.3 Subsystem map
 
-The Dagster workspace (`customer360-backend/`) has nine code locations; three are
-implemented, six are runnable placeholders (`scoring`, `data_synch`,
-`email_engine`, `notification_engine`, `campaign_activation`, `personalization`)
-— exactly where the model layer's output belongs.
+The Dagster workspace (`customer360-backend/`) has eight code locations.
+Identity resolution, segmentation, analytics, email, notification, and campaign
+activation contain implemented processing. `ai_agents_runners` provides
+tenant-scoped workflow orchestration, while `data_synch` remains a placeholder;
+agent-specific inference handlers are not yet implemented.
 
 ```mermaid
 flowchart LR

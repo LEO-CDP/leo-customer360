@@ -150,7 +150,7 @@ from the `1/2/1` ceiling. This is the parent's own "right-size from measured que
 
 ### 4.1 Which vServer flavor fits UAT
 
-Because the whole UAT topology (control plane + all 9 in-process locations + the run compute itself)
+Because the whole UAT topology (control plane + all 8 in-process locations + the run compute itself)
 lives on **one VM**, the "which vServer" question is just: what single flavor holds it. On the
 `s-general` 1:2 family available in HCM03-1C:
 

@@ -20,7 +20,7 @@ containerized deployment.
 | `redis` | `customer360-redis:local` (redis:8-alpine) | Response cache **and Keycloak token cache** for customer360-api (see [`core/cache.py`](../../customer360-api/core/cache.py) / [`core/auth.py`](../../customer360-api/core/auth.py)) | `${REDIS_HOST_PORT:-6580}` → 6580 |
 | `keycloak-db-init` | reuses `customer360-postgres:local` | **One-shot** job that creates the dedicated `db_keycloak` database on the shared `postgres` instance, then exits | none |
 | `keycloak` | `keycloak/keycloak:26.7` | Local SSO/identity provider — issues + introspects the access tokens customer360-api requires on every endpoint except `/health` | `${KEYCLOAK_HOST_PORT:-8080}` → 8080 |
-| `dagster` | `customer360-dagster:local` (Python 3.11-slim) | Dagster webserver and daemon for all nine customer360-backend code locations, including identity resolution | `${DAGSTER_UI_PORT:-3000}` → 3000 |
+| `dagster` | `customer360-dagster:local` (Python 3.11-slim) | Dagster webserver and daemon for all eight customer360-backend code locations, including identity resolution and AI-agent runners | `${DAGSTER_UI_PORT:-3000}` → 3000 |
 | `api` | `customer360-api:local` (Python 3.11-slim) | Customer 360 / CIR REST API (FastAPI), Keycloak-secured | `${C360_API_PORT:-8008}` → 8008 |
 | `tracking-api` | `customer360-event-api:local` (Python 3.11-slim) | CDP tracking-log ingestion; AWS S3 in production, MinIO in dev | `${C360_TRACKING_API_PORT:-8010}` → 8010 |
 | `cir-demo-seed` | reuses `customer360-dagster:local` | **Dev only** one-shot job that seeds demo data, then exits | none |

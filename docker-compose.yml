@@ -214,7 +214,7 @@ services:
         psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360} -tc "SELECT 1 FROM pg_database WHERE datname = '$$DAGSTER_PG_DB'" | grep -q 1 || psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360} -c "CREATE DATABASE \"$$DAGSTER_PG_DB\""
 
   # ---------------------------------------------------------------------------
-  # 6) Dagster webserver - all nine customer360-backend code locations.
+  # 6) Dagster webserver - all eight customer360-backend code locations.
   # ---------------------------------------------------------------------------
   dagster:
     build:
