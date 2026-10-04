@@ -37,8 +37,8 @@ Layout:
     point for the rest of the codebase (mirrors the ``leo_customer360_dao.config.settings``
     singleton pattern).
 
-``scoring``/``data_synch``/``email_engine``/``notification_engine`` currently
-wrap placeholder Dagster jobs. ``analytics`` now wraps the hourly data-source
+``ai_agents_runners``/``data_synch``/``email_engine``/``notification_engine``
+currently wrap their Dagster jobs. ``analytics`` now wraps the hourly data-source
 tracking-log aggregation job; all service classes and job/location settings
 remain centralized here.
 """
@@ -316,21 +316,45 @@ class IdentityResolutionDagsterService(DagsterService):
         return self.submit(run_config=run_config, tags=tags)
 
 
-class ScoringDagsterService(DagsterService):
-    """customer360-backend/scoring -- profile scoring run (placeholder job today,
-    see customer360-backend/scoring/dagster_defs.py)."""
+class AgentWorkflowDagsterService(DagsterService):
+    """customer360-backend/ai_agents_runners -- master workflow run."""
 
     def __init__(self) -> None:
         super().__init__(
-            job_name=settings.dagster_scoring_job_name,
-            location_name=settings.dagster_scoring_location_name,
-            repository_name=settings.dagster_scoring_repository_name,
+            job_name=settings.dagster_ai_agents_runners_job_name,
+            location_name=settings.dagster_ai_agents_runners_location_name,
+            repository_name=settings.dagster_ai_agents_runners_repository_name,
         )
 
-    def run_scoring(self) -> str:
-        """Triggers a scoring run across profiles (Lead/Churn/CLV/CX/Data
-        Quality models)."""
-        return self.submit()
+    def run_workflow(
+        self,
+        tenant_id: str,
+        segment_id: str,
+        trigger_event: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """Triggers one tenant/segment master workflow run from the API."""
+        if not tenant_id or not segment_id:
+            raise ValueError("tenant_id and segment_id are required")
+        run_config = {
+            "ops": {
+                "run_agent_workflow_master_op": {
+                    "config": {
+                        "trigger": "api",
+                        "tenant_id": str(tenant_id),
+                        "segment_id": str(segment_id),
+                        "trigger_event": trigger_event or {},
+                    }
+                }
+            }
+        }
+        return self.submit(
+            run_config=run_config,
+            tags={"trigger": "api", "tenant_id": str(tenant_id), "segment_id": str(segment_id)},
+        )
+
+
+# Compatibility alias for integrations that imported the former service name.
+ScoringDagsterService = AgentWorkflowDagsterService
 
 
 class SegmentationDagsterService(DagsterService):
@@ -493,7 +517,8 @@ class DagsterClient:
     def __init__(self) -> None:
         self.analytics = AnalyticsDagsterService()
         self.identity_resolution = IdentityResolutionDagsterService()
-        self.scoring = ScoringDagsterService()
+        self.ai_agents_runners = AgentWorkflowDagsterService()
+        self.scoring = self.ai_agents_runners
         self.segmentation = SegmentationDagsterService()
         self.data_synch = DataSynchDagsterService()
         self.email_engine = EmailEngineDagsterService()

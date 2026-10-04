@@ -147,7 +147,7 @@ class BuildStateTests(unittest.TestCase):
 
 
 class AgentSeedModelTests(unittest.TestCase):
-    def test_generative_agent_seeds_use_litellm_openai_model_identifier(self):
+    def test_generative_agent_seeds_use_gpt_6_luna(self):
         repository_root = Path(__file__).resolve().parents[2]
         seed_paths = (
             repository_root / "customer360-database" / "init-cdp-ai-agents.sql",
@@ -160,8 +160,8 @@ class AgentSeedModelTests(unittest.TestCase):
             self.assertTrue(models, f"Expected generative agent seeds in {seed_path}")
             self.assertEqual(
                 models,
-                ["openai/gpt-4.1-mini-2025-04-14"] * len(models),
-                f"Generative agent seed models must match LiteLLM's OpenAI identifier in {seed_path}",
+                ["gpt-6-luna"] * len(models),
+                f"Generative agent seed models must use gpt-6-luna in {seed_path}",
             )
 
     def test_unified_agent_seed_defines_each_agent_once(self):

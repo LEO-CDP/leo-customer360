@@ -10,9 +10,9 @@ END;
 $$;
 
 SELECT pg_temp.assert_true(
-    (SELECT count(*) = 21 AND bool_and(status = 'INACTIVE')
+    (SELECT count(*) = 14 AND bool_and(status = 'INACTIVE')
      FROM customer360.cdp_ai_agents),
-    'Fresh bootstrap has 12 core templates and nine inactive compatibility entries');
+    'Fresh bootstrap has 12 core templates and two inactive service prompt agents');
 SELECT pg_temp.assert_true(
     NOT EXISTS (
         SELECT 1 FROM customer360.cdp_profile_attributes attribute

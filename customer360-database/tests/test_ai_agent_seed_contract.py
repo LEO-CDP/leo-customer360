@@ -69,7 +69,7 @@ class AiAgentSeedContractTests(unittest.TestCase):
             "graph_ml": "torch_geometric.nn.models.GraphSAGE",
             "optimization": None,
             "rules_engine": None,
-            "generative_llm": "openai/gpt-4.1-mini-2025-04-14",
+            "generative_llm": "gpt-6-luna",
         })
         self.assertTrue(all(status == "INACTIVE" for *_, status in identifiers))
         self.assertIn("'embedding_dimension', 1536", seed_body)
@@ -80,14 +80,24 @@ class AiAgentSeedContractTests(unittest.TestCase):
         self.assertRegex(self.seed_sql, r"(?m)^BEGIN;")
         self.assertRegex(self.seed_sql, r"(?m)^COMMIT;")
 
-    def test_core_attribute_agent_ownership_references_are_preserved(self):
+    def test_unassigned_attribute_ownership_does_not_require_placeholder_agents(self):
         core_sql = (
             self.repository_root / "customer360-database" / "init-core-database.sql"
         ).read_text(encoding="utf-8")
-        references = set(re.findall(r"TRUE, '([a-z_]+)', 'v\d+'", core_sql))
-        self.assertGreater(len(references), 5)
-        for agent_code in references:
-            self.assertIn(f"'{agent_code}'", self.seed_sql)
+        self.assertNotIn("compatibility_agents", self.seed_sql)
+        for agent_code in (
+            "identity_resolution",
+            "data_quality",
+            "persona_intelligence",
+            "lifecycle_intelligence",
+            "churn_scoring",
+            "clv_scoring",
+            "cx_intelligence",
+        ):
+            self.assertNotRegex(core_sql, rf"TRUE,\s*'{agent_code}',\s*'v\d+'")
+
+    def test_generative_seeds_use_gpt_6_luna(self):
+        self.assertEqual(self.seed_sql.count("'gpt-6-luna'"), 2)
 
     def test_existing_agent_endpoints_have_seeded_prompt_keys(self):
         for key in (

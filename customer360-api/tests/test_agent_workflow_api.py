@@ -62,6 +62,26 @@ def test_list_workflow_is_tenant_scoped_and_ordered():
     repo.list_steps.assert_called_once_with(uuid.UUID(TENANT_ID), uuid.UUID(SEGMENT_ID))
 
 
+def test_trigger_workflow_submits_tenant_scoped_dagster_run():
+    client, repo = make_client()
+    repo.list_steps.return_value = []
+    with patch("core.routers.agent_workflow_api.AgentWorkflowRepository", return_value=repo), patch(
+        "core.routers.agent_workflow_api.dagster_client"
+    ) as dagster:
+        dagster.ai_agents_runners.run_workflow.return_value = "run-123"
+        response = client.post(
+            f"/segments/{SEGMENT_ID}/workflow/run",
+            json={"event": {"event_name": "profile.updated"}},
+        )
+    assert response.status_code == 202
+    assert response.json() == {"run_id": "run-123", "status": "submitted"}
+    dagster.ai_agents_runners.run_workflow.assert_called_once_with(
+        tenant_id=TENANT_ID,
+        segment_id=SEGMENT_ID,
+        trigger_event={"event_name": "profile.updated"},
+    )
+
+
 def test_replace_workflow_accepts_ordered_steps_without_tenant_body_field():
     client, repo = make_client()
     repo.replace_steps.return_value = [step()]

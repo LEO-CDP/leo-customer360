@@ -70,7 +70,7 @@ flowchart LR
 
 1. A browser, mobile client, connector, or webhook submits activity to `customer360-event-api`.
 2. The event API validates and sanitizes the payload, acknowledges only after durable Redis Stream enqueue, and writes immutable hourly NDJSON objects to S3 or MinIO. The request path does not write directly to PostgreSQL.
-3. `customer360-backend` Dagster code locations consume raw data, resolve identities, recompute segments, and aggregate analytics. The active jobs are identity resolution, segmentation, and analytics; additional locations are runnable scaffolds for activation and personalization work.
+3. `customer360-backend` Dagster code locations consume raw data, resolve identities, recompute segments, aggregate analytics, and orchestrate tenant-scoped AI-agent workflows.
 4. `customer360-dao` provides tenant-aware models, repositories, CRUD, RLS context, SQL safety, and event-lake query helpers. It is installed as a package rather than imported through a source-path workaround.
 5. `customer360-api` exposes authenticated REST resources for profiles, CRM, personas, segments, reporting, metadata, and event-related reads. Its MCP sub-application exposes approved tenant-scoped tools for AI clients.
 6. `customer360-promotions` evaluates promotion data such as placements, campaigns, creatives, standard digital banners, affiliate links, sponsored native content, and recommendation candidates. Its PostgreSQL objects live in the `leo_ads` schema.

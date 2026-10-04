@@ -133,7 +133,7 @@ flowchart TB
 | `customer360-agent/src/leo_customer360_agent/client.py` | `decide()` method for callers | Modify | S |
 | `customer360-dao` | `AiDecisionLog` model | New model | S |
 | `customer360-backend/identity_resolution` | Gray-zone hook (Phase 1) | Modify | M |
-| `customer360-backend/personalization` | NBA job (Phase 2) | Fill placeholder | M |
+| `customer360-backend/ai_agents_runners` | NBA job (Phase 2) | Fill handler behind the master workflow | M |
 | `customer360-agent/tests/` | Contract tests with recorded Jev fixtures | New | M |
 
 ### 3.3 Request contract (`POST /decide/{agent_code}`)

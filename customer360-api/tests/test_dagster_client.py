@@ -17,7 +17,7 @@ from core.utils.dagster_client import (
     EmailEngineDagsterService,
     IdentityResolutionDagsterService,
     NotificationEngineDagsterService,
-    ScoringDagsterService,
+    AgentWorkflowDagsterService,
     SegmentationDagsterService,
     dagster_client,
 )
@@ -315,7 +315,7 @@ class DagsterClientFacadeTests(unittest.TestCase):
     def test_facade_exposes_one_service_per_customer360_backend_location(self):
         self.assertIsInstance(dagster_client.analytics, AnalyticsDagsterService)
         self.assertIsInstance(dagster_client.identity_resolution, IdentityResolutionDagsterService)
-        self.assertIsInstance(dagster_client.scoring, ScoringDagsterService)
+        self.assertIsInstance(dagster_client.ai_agents_runners, AgentWorkflowDagsterService)
         self.assertIsInstance(dagster_client.segmentation, SegmentationDagsterService)
         self.assertIsInstance(dagster_client.data_synch, DataSynchDagsterService)
         self.assertIsInstance(dagster_client.email_engine, EmailEngineDagsterService)
@@ -326,8 +326,8 @@ class DagsterClientFacadeTests(unittest.TestCase):
         self.assertEqual(dagster_client.analytics.location_name, "analytics")
         self.assertEqual(dagster_client.identity_resolution.job_name, "identity_resolution_job")
         self.assertEqual(dagster_client.identity_resolution.location_name, "identity_resolution")
-        self.assertEqual(dagster_client.scoring.job_name, "scoring_job")
-        self.assertEqual(dagster_client.scoring.location_name, "scoring")
+        self.assertEqual(dagster_client.ai_agents_runners.job_name, "ai_agents_master_job")
+        self.assertEqual(dagster_client.ai_agents_runners.location_name, "ai_agents_runners")
         self.assertEqual(dagster_client.segmentation.job_name, "segmentation_job")
         self.assertEqual(dagster_client.segmentation.location_name, "segmentation")
         self.assertEqual(dagster_client.data_synch.job_name, "data_synch_job")

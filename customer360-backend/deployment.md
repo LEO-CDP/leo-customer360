@@ -130,7 +130,7 @@ run multiple webservers against SQLite or a shared local filesystem.
 
 ## Dagster workspace
 
-The repository currently contains nine Dagster task directories:
+The repository currently contains eight Dagster task directories:
 
 1. `analytics`
 2. `campaign_activation`
@@ -138,11 +138,10 @@ The repository currently contains nine Dagster task directories:
 4. `email_engine`
 5. `identity_resolution`
 6. `notification_engine`
-7. `personalization`
-8. `scoring`
-9. `segmentation`
+7. `ai_agents_runners`
+8. `segmentation`
 
-`customer360-backend/workspace.yaml` registers all nine locations. Keep that list
+`customer360-backend/workspace.yaml` registers all eight locations. Keep that list
 and the dependency-install loop in `customer360-backend/Dockerfile` synchronized.
 Every task directory must provide `dagster_defs.py` and `requirements.txt` so
 the unified image can load every code location.
@@ -227,8 +226,7 @@ customer360-backend/
 	email_engine/
 	identity_resolution/
 	notification_engine/
-	personalization/
-	scoring/
+	ai_agents_runners/
 	segmentation/
 ```
 
@@ -300,7 +298,7 @@ of the following:
 - `customer360-backend/requirements-dev.txt` when the dependency is used by the container.
 - `customer360-backend` startup/configuration files copied into the image.
 
-This means a change in **any one of the nine task directories rebuilds the same
+This means a change in **any one of the eight task directories rebuilds the same
 `customer360-dagster` image** under the current architecture. The image should then
 be rolled out so the Dagster webserver and code-location processes load the new
 code.
@@ -545,7 +543,7 @@ Recommended triggers:
 
 | Changed path | Build | Deploy/restart |
 |---|---|---|
-| Any of the nine task directories | `customer360-dagster` | Dagster Deployment/container |
+| Any of the eight task directories | `customer360-dagster` | Dagster Deployment/container |
 | `identity_resolution/**` | `customer360-dagster` | Dagster identity-resolution job and sensor |
 | `workspace.yaml` | `customer360-dagster` | Dagster |
 | `customer360-backend/Dockerfile` or dependency files | `customer360-dagster` | Dagster |

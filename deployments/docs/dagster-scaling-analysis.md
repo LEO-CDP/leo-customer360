@@ -72,7 +72,7 @@ Implemented work vs. placeholders (from `deployment.md`):
 | `identity_resolution` | **implemented** — CIR batch-drain job + poll sensor | in-memory join |
 | `segmentation` | **implemented** — recompute job + poll sensor | Polars |
 | `analytics` | **implemented** — hourly tracking-log aggregation + schedule | Polars |
-| `scoring`, `personalization`, `campaign_activation`, `email_engine`, `notification_engine`, `data_synch` | **placeholder** jobs (runnable skeletons) | — |
+| `ai_agents_runners`, `campaign_activation`, `email_engine`, `notification_engine`, `data_synch` | **orchestration/placeholder** jobs | — |
 
 **Why this cannot just get `replicas: 2`:** SQLite has one writer, the PVC is `ReadWriteOnce`,
 and `dagster dev` is explicitly a **development** launcher that co-locates the webserver and
@@ -344,8 +344,7 @@ pool with the right requests/limits. Profiles below drive the mapping:
 | `campaign_activation` | orchestration / fan-out | **ingestion** | I/O + coordination, light CPU |
 | `email_engine` | outbound send fan-out | **ingestion** | network fan-out, light |
 | `notification_engine` | push/SMS/in-app dispatch | **ingestion** | network fan-out, light |
-| `scoring` | model inference | **ai** | CPU-heavy, model memory |
-| `personalization` | next-best-action (Polars + model) | **ai** | CPU + model memory |
+| `ai_agents_runners` | model/workflow orchestration | **ai** | CPU-heavy, model memory |
 | `identity_resolution` | large in-memory join / match | **compute** | memory-hungry joins |
 | `segmentation` | full-scan recompute (Polars) | **compute** | large scans, memory-hungry |
 | `analytics` | Polars aggregation over JSONL/Parquet | **compute** | memory-hungry columnar |
@@ -364,8 +363,8 @@ analytics_job = analytics_job.with_tags({
 ```
 
 > Note: `identity_resolution` and `segmentation` are memory-bound rather than CPU-bound, so they sit
-> in **compute** (16Gi) despite modest vCPU. `ai` is sized for future model inference; only `scoring`
-> and `personalization` truly need it, and both are **placeholders today** — see §9.
+> in **compute** (16Gi) despite modest vCPU. `ai` is sized for future model inference; the
+> `ai_agents_runners` location owns the consolidated workflow orchestration — see §9.
 
 ---
 
@@ -417,7 +416,7 @@ spec:
   flavors. Price it against the published vServer flavor rates in the cost doc before committing.
 - **This is why Option B (ephemeral) or KEDA-to-floor is recommended:** the `ai` pool alone reserves
   40 vCPU for jobs that are **placeholders today**. Standing capacity of that size is only justified
-  once real `scoring`/`personalization` load exists and you've measured queue depth.
+  once real `ai_agents_runners` load exists and you've measured queue depth.
 - **Right-sizing rule:** set pool ceilings from *measured* peak concurrent runs per queue over a
   representative window, not from the conceptual numbers. Treat `5/10/5` as **not-to-exceed ceilings**,
   not as a floor to provision on day one.

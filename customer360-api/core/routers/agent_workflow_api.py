@@ -1,15 +1,17 @@
 """Tenant-scoped API for ordered AI-agent workflows on segments."""
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.auth import require_tenant
 from core.cache import invalidate_prefix
 from core.database import get_db
+from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 from core.repositories.agent_workflow_repository import (
     AgentWorkflowConflictError,
     AgentWorkflowNotFoundError,
@@ -25,6 +27,12 @@ from leo_customer360_dao.schemas.agent_workflow import (
 
 router = APIRouter(prefix="/segments", tags=["Segment Agent Workflows"])
 TenantId = Annotated[str, Depends(require_tenant)]
+
+
+class AgentWorkflowTrigger(BaseModel):
+    """Optional event payload forwarded to the master workflow task."""
+
+    event: dict[str, Any] = Field(default_factory=dict)
 
 
 def _repository(db: Session) -> AgentWorkflowRepository:
@@ -56,6 +64,29 @@ def list_agent_workflow(
     """List enabled and disabled workflow steps in execution order."""
     try:
         return _repository(db).list_steps(_tenant_uuid(tenant_id), segment_id)
+    except Exception as exc:
+        _handle_error(exc)
+        raise
+
+
+@router.post("/{segment_id}/workflow/run", status_code=status.HTTP_202_ACCEPTED)
+def trigger_agent_workflow(
+    segment_id: uuid.UUID,
+    payload: AgentWorkflowTrigger,
+    tenant_id: TenantId,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    """Submit the tenant/segment workflow to the AI-agent runner."""
+    try:
+        _repository(db).list_steps(_tenant_uuid(tenant_id), segment_id)
+        run_id = dagster_client.ai_agents_runners.run_workflow(
+            tenant_id=tenant_id,
+            segment_id=str(segment_id),
+            trigger_event=payload.event,
+        )
+        return {"run_id": run_id, "status": "submitted"}
+    except DagsterJobTriggerError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         _handle_error(exc)
         raise

@@ -61,11 +61,10 @@ The production Compose topology is:
                                | loads workspace
                                v
      +------------------------------------------------------+
-     |  Nine Dagster code locations                         |
-     |  identity_resolution  scoring       segmentation     |
+     |  Eight Dagster code locations                         |
+     |  identity_resolution  ai_agents_runners segmentation |
      |  analytics             data_synch   email_engine     |
      |  notification_engine  campaign_activation           |
-     |  personalization                                      |
      +------------------------------------------------------+
                                ^
                                |
@@ -82,17 +81,16 @@ The production Compose topology is:
                     +----------------------+
 ```
 
-The nine code locations registered in `customer360-backend/workspace.yaml` are:
+The eight code locations registered in `customer360-backend/workspace.yaml` are:
 
 - `identity_resolution`
-- `scoring`
+- `ai_agents_runners`
 - `segmentation`
 - `analytics`
 - `data_synch`
 - `email_engine`
 - `notification_engine`
 - `campaign_activation`
-- `personalization`
 
 The current active jobs include `identity_resolution_job`, `analytics_job`, and
 `segmentation_job`. Some other locations currently expose placeholder jobs; a

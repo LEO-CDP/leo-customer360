@@ -35,7 +35,7 @@ From any `master_profile_id`, calls `GET /api/v1/master-profiles/{id}/links` to 
 A data operations team adds a new identity attribute (e.g. `zalo_id` from a new source) via `POST /api/v1/profile-attributes` with `is_identity_resolution=true`, `matching_rule='exact'` — the CIR engine **automatically** applies the new rule on its next batch/real-time run, with no change to `resolver.py`.
 
 ### UC8 (infrastructure ready, scoring logic not yet implemented) — Customer scoring
-The schema already has the necessary columns (`churn_probability`, `predictive_clv`, `lead_conversion_probability`, `engagement_score`, ...) and agent metadata (`is_ai_agent`, `agent_code/agent_version`, `refresh_frequency`) so an external ML pipeline (planned: a Dagster job in `customer360-backend/scoring/`, currently a placeholder) can write results via `PATCH /api/v1/master-profiles/{id}` — ready for churn prevention, next-best-offer, and lead-grading use cases once a model is deployed. Runtime model configuration is centralized in `customer360.cdp_ai_agents`.
+The schema already has the necessary columns (`churn_probability`, `predictive_clv`, `lead_conversion_probability`, `engagement_score`, ...) and agent metadata (`is_ai_agent`, `agent_code/agent_version`, `refresh_frequency`) so an external ML pipeline (the tenant-scoped orchestration job in `customer360-backend/ai_agents_runners/`) can write results via `PATCH /api/v1/master-profiles/{id}` — ready for churn prevention, next-best-offer, and lead-grading use cases once a model is deployed. Runtime model configuration is centralized in `customer360.cdp_ai_agents`.
 
 ### UC9 — Semantic search / lookalike audiences (pgvector)
 Using `persona_embedding` (master profile) or `embedding` (CRM/graph_edges), similarity queries via `ORDER BY embedding <-> :query_embedding LIMIT N` find "customers similar to" a target group described in natural language (e.g. *"software company B2B customers with >3 opportunities"*) — the infrastructure is ready; generating the embeddings (via an LLM) is outside the scope of this module.
@@ -172,7 +172,7 @@ customer360-backend/
 │   ├── source_analytics/     #   S3/MinIO log processing and source totals
 │   └── tests/
 
-├── scoring/                   # PLACEHOLDER — single op: log started -> sleep -> log done
+├── ai_agents_runners/         # Tenant-scoped API/cron workflow orchestration
 ├── data_synch/                # PLACEHOLDER — same skeleton pattern
 ├── email_engine/              # PLACEHOLDER — same skeleton pattern
 ├── notification_engine/       # PLACEHOLDER — same skeleton pattern
@@ -234,7 +234,7 @@ Each placeholder service exists so `customer360-api/core/utils/dagster_client.py
 
 **Scoring & ML integration** — `cdp_master_profiles` has placeholder columns for external ML outputs:
 - `churn_probability`, `predictive_clv`, `lead_conversion_probability`, `engagement_score`.
-- A future Dagster job in `customer360-backend/scoring/` (currently a placeholder) would compute these and write them back via `PATCH /api/v1/master-profiles/{id}`.
+- Agent-specific handlers behind `customer360-backend/ai_agents_runners/` can compute these and write them back via `PATCH /api/v1/master-profiles/{id}` once their contracts are defined.
 
 ## 5. Data Model (`customer360-database/database-schema.sql`)
 
@@ -457,7 +457,7 @@ Container and Compose health monitoring covers:
 |------------|--------|-------|
 | Synchronous API only | Long-running admin operations (e.g. recompute-all) run inline unless explicitly offloaded to Dagster | Segment recompute already has both a synchronous per-segment endpoint and a scheduled Dagster job; not every future admin operation will get this treatment automatically. |
 | Identity-resolution job has no fan-out | One Dagster sensor submits runs for all tenants/domains | Scaling beyond one run would require partitioning work (e.g. by tenant or domain) across multiple Dagster runs/ops. |
-| `scoring`, `data_synch`, `email_engine`, `notification_engine`, `campaign_activation`, `personalization` are placeholders | Their Dagster jobs exist and are wired into `customer360-api`'s Dagster client config, but contain no real business logic yet (each just logs "started" → sleeps → logs "done") | The wiring (job names, workspace registration) is ready for real implementations to be dropped in. |
+| `ai_agents_runners`, `data_synch`, `email_engine`, `notification_engine`, `campaign_activation` are orchestration/placeholder locations | Their Dagster jobs exist and are wired into `customer360-api`'s Dagster client config; AI-agent workflow selection is tenant-scoped and cron/API triggerable | The wiring (job names, workspace registration) is ready for agent-specific handlers to be added. |
 | CORS is hardcoded, not configurable | `allow_origins=["*"]` in `app.py` has no environment override | Any production CORS hardening requires a code change. |
 | Persona naming depends on an optional external LLM call | If `LEO_GOOGLE_GENAI_API_KEY` is unset or the Gemini API is unreachable, persona names fall back to a deterministic offline generator | This is intentional graceful degradation, not a bug — but persona name "quality" will vary based on whether the key is configured. |
 | No phonetic/graph-based matching in the live CIR resolver | Only exact and Levenshtein-style fuzzy matching are implemented today | A device-ID graph walk (e.g. Google Analytics `advertising_id` → login → purchase all on one device) is described conceptually (UC1/UC2) but not yet a distinct `matching_rule='graph'` implementation in `resolver.py` — verify against current `resolver.py` before relying on this in a specific deployment. |

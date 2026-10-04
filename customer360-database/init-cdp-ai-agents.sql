@@ -1436,7 +1436,7 @@ $prompt$,
         'Campaign Planning Agent',
         'Creates a marketing campaign plan from a target segment, marketer objective, constraints, and a closed candidate content set.',
         'generative_llm',
-        'openai/gpt-4.1-mini-2025-04-14',
+        'gpt-6-luna',
         'INACTIVE',
         NULL,
 
@@ -1502,6 +1502,8 @@ $prompt$,
     )
 )
 
+-- Insert AI agent definitions into the customer360.cdp_ai_agents table.
+
 INSERT INTO customer360.cdp_ai_agents (
     agent_code,
     display_name,
@@ -1556,33 +1558,8 @@ FROM seed_agents s
 ON CONFLICT (agent_code)
 DO NOTHING;
 
--- Preserve attribute ownership codes used by init-core-database.sql. These
--- entries reserve existing identities; they do not claim a deployed ML model.
-WITH compatibility_agents (agent_code, display_name, model_type) AS (
-    VALUES
-        ('identity_resolution', 'Customer Identity Resolution Agent', 'classification'),
-        ('data_quality', 'Customer Data Quality Agent', 'rules_engine'),
-        ('persona_intelligence', 'Dynamic Persona Intelligence Agent', 'classification'),
-        ('lifecycle_intelligence', 'Customer Lifecycle Intelligence Agent', 'classification'),
-        ('churn_scoring', 'Churn Risk Intelligence Agent', 'classification'),
-        ('clv_scoring', 'Customer Lifetime Value Scoring Agent', 'regression'),
-        ('cx_intelligence', 'Customer Experience Intelligence Agent', 'regression')
-)
-INSERT INTO customer360.cdp_ai_agents (
-    agent_code, display_name, description, model_type, model_name, status
-)
-SELECT
-    agent_code,
-    display_name,
-    'Compatibility identity for existing profile-attribute ownership. Configure an approved execution contract before activation.',
-    model_type,
-    NULL,
-    'INACTIVE'
-FROM compatibility_agents
-ON CONFLICT (agent_code) DO NOTHING;
-
--- The agent service loads these prompt keys independently of registry execution.
-WITH compatibility_prompts (
+-- Prompt-backed agents consumed by existing Customer 360 API endpoints.
+WITH service_prompt_seeds (
     agent_code, display_name, prompt_key, system_instructions
 ) AS (
     VALUES
@@ -1629,9 +1606,9 @@ INSERT INTO customer360.cdp_ai_agents (
 SELECT
     agent_code,
     display_name,
-    'Compatibility prompt for an existing agent-service endpoint; context is appended by the caller.',
+    'Prompt-backed agent used by an existing Customer 360 API endpoint.',
     'generative_llm',
-    'openai/gpt-4.1-mini-2025-04-14',
+    'gpt-6-luna',
     'INACTIVE',
     prompt_key,
     'none',
@@ -1642,11 +1619,11 @@ SELECT
         'required_vars', ARRAY[]::text[],
         'created_at', now(),
         'created_by', 'seed',
-        'note', 'Compatibility prompt seed'
+        'note', 'Customer 360 service prompt seed'
     )),
     'seed',
-    'Compatibility prompt seed'
-FROM compatibility_prompts
+    'Customer 360 service prompt seed'
+FROM service_prompt_seeds
 ON CONFLICT (agent_code) DO NOTHING;
 
 DO $$

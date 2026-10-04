@@ -37,7 +37,7 @@ identity_resolution     analytics
         +---------+---------+----------------+
         |                   |                |
         v                   v                v
-     scoring          segmentation    personalization
+     ai_agents_runners segmentation
         |                   |                |
         +-------------------+----------------+
                             |
@@ -68,8 +68,7 @@ The core design principle is:
 The diagrams in this document show the intended logical data flow. Today,
 `identity_resolution`, `segmentation`, `analytics`, `campaign_activation`,
 `email_engine`, and `notification_engine` contain implemented processing.
-`scoring`, `data_synch`, and `personalization` remain runnable placeholder
-jobs.
+`ai_agents_runners` and `data_synch` remain runnable orchestration services.
 
 ## Workload controls
 
@@ -132,9 +131,8 @@ customer360-backend/
 ├── data_synch/
 ├── identity_resolution/
 ├── analytics/
-├── scoring/
+├── ai_agents_runners/
 ├── segmentation/
-├── personalization/
 ├── campaign_activation/
 ├── email_engine/
 ├── notification_engine/
@@ -159,9 +157,9 @@ Dagster
 │   └── analytics
 │
 ├── Decisioning
-│   ├── scoring
+│   ├── ai_agents_runners
 │   ├── segmentation
-│   └── personalization
+│   └── ai_agents_runners
 │
 ├── Activation
 │   ├── campaign_activation
@@ -316,8 +314,8 @@ customer360-backend/
 │   ├── requirements.txt
 │   └── tests/
 │
-├── scoring/
-│   # Placeholder scoring service
+├── ai_agents_runners/
+│   # AI-agent workflow orchestration
 │   └── dagster_defs.py
 │
 ├── data_synch/
@@ -336,8 +334,7 @@ customer360-backend/
 │   # Implemented campaign activation service
 │   └── dagster_defs.py
 │
-├── personalization/
-│   # Placeholder personalization service
+│   # Placeholder ai_agents_runners service
 │   └── dagster_defs.py
 │
 ├── Dockerfile
@@ -358,12 +355,11 @@ customer360-backend/
 | `identity_resolution` | Implemented | `identity_resolution_job`; `identity_resolution_poll_sensor` (running by default) | CIR matching, identity links, and master-profile merge |
 | `segmentation` | Implemented | `segmentation_job`; `segmentation_poll_sensor` (running by default) | Active segment recomputation and profile tag synchronization |
 | `analytics` | Implemented | `analytics_job`; `analytics_hourly_schedule` (running by default) | Tracking JSONL aggregation from S3/MinIO every three minutes |
-| `scoring` | Placeholder | `scoring_job` | Customer scoring pipeline skeleton; currently sleeps and logs |
+| `ai_agents_runners` | Workflow orchestration | `ai_agents_master_job` | Tenant-scoped API and cron execution of active `cdp_agent_workflow` steps |
 | `data_synch` | Placeholder | `data_synch_job` | Data ingestion and synchronization skeleton |
 | `email_engine` | Implemented | `email_engine_job` | Approved-campaign email delivery with recipient-level idempotency |
 | `notification_engine` | Implemented | `zalo_token_refresh_job`; `notification_engine_job`; `zalo_optout_projection_job` | Zalo OA token refresh, Zalo ZNS delivery, and S3-first opt-out projection |
 | `campaign_activation` | Implemented | `campaign_activation_job` | Approval validation, segment snapshot, and downstream email/Zalo submission |
-| `personalization` | Placeholder | `scoring_job` (placeholder name) | Personalization and next-best-action skeleton |
 
 The current implementation therefore represents the early production foundation of the CDP:
 
@@ -379,9 +375,8 @@ IMPLEMENTED
 
 SCAFFOLDED
     |
-    +-- scoring
     +-- data_synch
-    +-- personalization
+    +-- ai_agents_runners
 ```
 
 ---
@@ -408,8 +403,8 @@ load_from:
       location_name: identity_resolution
 
   - python_file:
-      relative_path: scoring/dagster_defs.py
-      location_name: scoring
+      relative_path: ai_agents_runners/dagster_defs.py
+      location_name: ai_agents_runners
 
   - python_file:
       relative_path: segmentation/dagster_defs.py
@@ -436,8 +431,6 @@ load_from:
       location_name: campaign_activation
 
   - python_file:
-      relative_path: personalization/dagster_defs.py
-      location_name: personalization
 ```
 
 This gives the Dagster UI a single workspace containing multiple isolated code locations.
@@ -682,9 +675,9 @@ Curated Parquet
     v
 Customer Features
     |
-    +--> scoring
+    +--> ai_agents_runners
     +--> segmentation
-    +--> personalization
+    +--> ai_agents_runners
 ```
 
 ---
@@ -694,7 +687,7 @@ Customer Features
 Polars is the recommended DataFrame and analytical processing library for future
 CDP transformations.
 
-It is a dependency of `analytics`, `segmentation`, and `personalization`, not a
+It is a dependency of `analytics`, `segmentation`, and `ai_agents_runners`, not a
 separate service. The current tracking-log aggregation implementation uses
 Python JSONL parsing; the lazy Polars examples below describe the planned
 analytical processing path.
@@ -840,7 +833,7 @@ The Customer 360 model is the central semantic layer connecting identity, analyt
              +--------------------+--------------------+
              |                    |                    |
              v                    v                    v
-          scoring          segmentation       personalization
+          ai_agents_runners          segmentation       ai_agents_runners
              |                    |                    |
              +--------------------+--------------------+
                                   |
@@ -861,9 +854,9 @@ The important dependency is:
 
 # Decisioning and Activation
 
-## `scoring`
+## `ai_agents_runners`
 
-The future scoring service should consume Customer 360 features rather than raw events directly.
+The future ai_agents_runners service should consume Customer 360 features rather than raw events directly.
 
 Potential outputs include:
 
@@ -882,7 +875,7 @@ The intended flow is:
 Customer Features
       |
       v
-   scoring
+   ai_agents_runners
       |
       v
 Customer Scores
@@ -922,7 +915,7 @@ PRODUCT_INTEREST_A
 
 ---
 
-## `personalization`
+## `ai_agents_runners`
 
 Personalization consumes Customer 360 information, scores, and segments.
 
@@ -946,7 +939,7 @@ Customer 360
      +-- Segments
      |
      v
-personalization
+ai_agents_runners
      |
      v
 Personalized Decision
@@ -1087,7 +1080,7 @@ The complete Customer 360 architecture forms a feedback loop rather than a one-w
                   +--------------+--------------+
                   |              |              |
                   v              v              v
-              scoring      segmentation   personalization
+              ai_agents_runners      segmentation   ai_agents_runners
                   |              |              |
                   +--------------+--------------+
                                  |
@@ -1146,9 +1139,8 @@ REPEAT
 The following code locations currently provide the basic Dagster skeleton required for future implementation:
 
 ```text
-scoring
 data_synch
-personalization
+ai_agents_runners
 ```
 
 Each currently defines a basic `@op` + `@job` pattern and logs:
@@ -1267,8 +1259,7 @@ intentionally not identical:
 | --- | --- |
 | `identity_resolution` | PostgreSQL driver, test tooling, dotenv, Gemini SDK, Pydantic, and Dagster |
 | `analytics` | PostgreSQL, S3/MinIO, Redis, dotenv, test tooling, Polars, and Dagster |
-| `segmentation`, `personalization` | PostgreSQL, S3/MinIO, Redis, dotenv, test tooling, Polars, Dagster, and the DAO |
-| `scoring` | Dagster, `pymc-marketing`, the DAO, and test tooling |
+| `ai_agents_runners` | PostgreSQL, Redis, dotenv, croniter, Dagster, and the DAO |
 | `data_synch` | Dagster and the DAO |
 | `email_engine` | Dagster, PostgreSQL, dotenv, the DAO, and test tooling |
 | `notification_engine` | Dagster, PostgreSQL, S3/MinIO, Redis, dotenv, the DAO, and test tooling |
@@ -1406,7 +1397,7 @@ identity_resolution      analytics
        +--------+--------+
        |        |        |
        v        v        v
-    scoring segmentation personalization
+    ai_agents_runners segmentation ai_agents_runners
        |        |        |
        +--------+--------+
                 |
@@ -1508,9 +1499,9 @@ CURRENT
 data_synch          Placeholder
 identity_resolution Implemented
 analytics           Implemented
-scoring             Placeholder
+ai_agents_runners             Placeholder
 segmentation        Implemented
-personalization     Placeholder
+ai_agents_runners     Placeholder
 campaign_activation Implemented
 email_engine        Implemented
 notification_engine Implemented
@@ -1578,9 +1569,9 @@ It separates the CDP into domain-oriented services:
 data_synch
 identity_resolution
 analytics
-scoring
+ai_agents_runners
 segmentation
-personalization
+ai_agents_runners
 campaign_activation
 email_engine
 notification_engine

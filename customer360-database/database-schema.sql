@@ -1938,7 +1938,7 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
 
     -- Provider model ID, estimator class, or deployed artifact identifier.
     -- Examples:
-    --   openai/gpt-4.1-mini-2025-04-14
+    --   gpt-6-luna
     --   text-embedding-3-small
     --   xgboost.XGBClassifier
     --   lightgbm.LGBMRegressor

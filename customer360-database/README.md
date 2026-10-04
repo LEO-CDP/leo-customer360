@@ -61,10 +61,11 @@ when existing data cannot be safely backfilled or constrained.
 ## Initialization And Seeds
 
 `init-cdp-ai-agents.sql` is the unified AI-agent registry seed. It creates
-12 core templates (one per execution type), seven compatibility identities for
-attribute ownership, and the notification/segment prompts consumed by the agent
-service. New entries are `INACTIVE`. Run it before
-`init-core-database.sql`, whose profile-attribute seed references those agents.
+12 core templates (one per execution type) and two prompt-backed agents for the
+notification and segment endpoints. New entries are `INACTIVE`. Run it before
+`init-core-database.sql`. Profile attributes without a specific registered
+producer have `agent_code = NULL`; the seed does not create placeholder agents
+to satisfy ownership metadata.
 
 The seed is atomic and insert-only on conflicts: rerunning it preserves deployed
 configuration, activation state, feature definitions and append-only prompt
@@ -87,7 +88,7 @@ invented trained-artifact name:
 | Embedding | `text-embedding-3-small` (1536 dimensions) |
 | Graph ML | `torch_geometric.nn.models.GraphSAGE` |
 | Optimization / rules | `NULL` until an engine is selected |
-| Generative LLM | `openai/gpt-4.1-mini-2025-04-14` |
+| Generative LLM | `gpt-6-luna` |
 
 Estimator identifiers are documentation for an allow-listed implementation;
 never dynamically import code from registry values. No new runtime dependency
@@ -95,8 +96,8 @@ is installed by the seed. Hyperparameters mix estimator settings and adapter
 metadata; do not pass the entire JSON object to an estimator constructor.
 Before activating a template, provision its executor,
 pin library versions, register its trained artifact and preprocessing contract,
-and validate tenant-isolated outputs. The scoring service is currently a
-scaffold, not a trained-model pipeline.
+and validate tenant-isolated outputs. `ai_agents_runners` currently orchestrates
+workflow selection; it is not a trained-model inference pipeline.
 
 In particular, LightGBM forecasting needs lag/seasonal features, time-based
 validation and a separate prediction-interval estimator; IsolationForest does

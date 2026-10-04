@@ -365,8 +365,9 @@ read-only through `vw_campaign_performance_metrics` + `CampaignRepository`
 
 **Not built (the three headline SCRUM-99 behaviours):**
 1. Writing email touchpoints/engagement back to `cdp_master_profiles` — nothing propagates
-  S3 Silver event projections → profile fields. The `scoring` Dagster location that would bridge this is still a
-   sleep placeholder (`customer360-backend/scoring/dagster_defs.py`).
+  S3 Silver event projections → profile fields. The `ai_agents_runners` Dagster
+   location provides the tenant-scoped workflow orchestration hook
+   (`customer360-backend/ai_agents_runners/dagster_defs.py`).
 2. Email-event-driven segment refresh — the sensor watches profiles, and email events don't touch
    profiles, so opens/clicks don't trip it.
 3. Email-metric rollup into campaign performance — `crm_campaign_performance_daily` has **ad-metric
@@ -479,7 +480,7 @@ Keycloak token), `README.md`, `TEST_PLAN.md` (AC → case traceability). Simulat
 | SCRUM-95 | AI template generation (Gemini/OpenAI) + template CRUD + approve/reject/edit APIs | `customer360-api/core` (new `ai/` + template router); model on the reference provider-switch code |
 | SCRUM-96 | AI campaign planning endpoint + real Draft→InReview→Approved/Rejected→Scheduled/Running state machine | `customer360-api/core` (planning service + transition validator) |
 | SCRUM-97 | (optional) SES adapter | `email_engine/adapters.py` (one subclass + branch); DB CHECK allows `mock/smtp` only today |
-| SCRUM-99 | profile touchpoint/engagement writeback; email-driven segment refresh; email-metric rollup into `crm_campaign_performance_daily` | `customer360-backend/scoring` (currently placeholder) + new perf columns/aggregation |
+| SCRUM-99 | profile touchpoint/engagement writeback; email-driven segment refresh; email-metric rollup into `crm_campaign_performance_daily` | `customer360-backend/ai_agents_runners` + new perf columns/aggregation |
 
 ---
 
@@ -503,7 +504,7 @@ Keycloak token), `README.md`, `TEST_PLAN.md` (AC → case traceability). Simulat
 - `campaign_activation/dagster_defs.py`, `campaign_activation/{activation,triggers,rls,db}.py`
 - `email_engine/dagster_defs.py`, `email_engine/{send,adapters,rendering,connector_config,provider_config,tracking,rls,db}.py`
 - `segmentation/dagster_defs.py` + `segmentation/recompute.py` — recompute + poll sensor
-- `scoring/dagster_defs.py` — placeholder (engagement writeback gap)
+- `ai_agents_runners/dagster_defs.py` — tenant-scoped API/cron workflow orchestration
 - `workspace.yaml` — Dagster code-location registration
 
 **customer360-database**

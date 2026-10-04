@@ -21,10 +21,10 @@ load_from:
   - python_file:
       relative_path: identity_resolution/dagster_defs.py
       location_name: identity_resolution
-  # Scoring: placeholder for customer scoring pipelines.
+  # AI-agent runners: tenant-scoped workflow orchestration.
   - python_file:
-      relative_path: scoring/dagster_defs.py
-      location_name: scoring
+      relative_path: ai_agents_runners/dagster_defs.py
+      location_name: ai_agents_runners
   # Segmentation: recomputes active segment membership.
   - python_file:
       relative_path: segmentation/dagster_defs.py
@@ -49,7 +49,3 @@ load_from:
   - python_file:
       relative_path: campaign_activation/dagster_defs.py
       location_name: campaign_activation
-  # Personalization: placeholder for next-best-action decisions.
-  - python_file:
-      relative_path: personalization/dagster_defs.py
-      location_name: personalization

@@ -147,17 +147,32 @@ class Settings(BaseSettings):
         ),
     )
 
-    dagster_scoring_job_name: str = Field(
-        default="scoring_job",
-        validation_alias=AliasChoices("DAGSTER_SCORING_JOB_NAME", "dagster_scoring_job_name"),
+    dagster_ai_agents_runners_job_name: str = Field(
+        default="ai_agents_master_job",
+        validation_alias=AliasChoices(
+            "DAGSTER_AI_AGENTS_RUNNERS_JOB_NAME",
+            "DAGSTER_SCORING_JOB_NAME",
+            "dagster_ai_agents_runners_job_name",
+            "dagster_scoring_job_name",
+        ),
     )
-    dagster_scoring_location_name: str = Field(
-        default="scoring",
-        validation_alias=AliasChoices("DAGSTER_SCORING_LOCATION_NAME", "dagster_scoring_location_name"),
+    dagster_ai_agents_runners_location_name: str = Field(
+        default="ai_agents_runners",
+        validation_alias=AliasChoices(
+            "DAGSTER_AI_AGENTS_RUNNERS_LOCATION_NAME",
+            "DAGSTER_SCORING_LOCATION_NAME",
+            "dagster_ai_agents_runners_location_name",
+            "dagster_scoring_location_name",
+        ),
     )
-    dagster_scoring_repository_name: str = Field(
+    dagster_ai_agents_runners_repository_name: str = Field(
         default="__repository__",
-        validation_alias=AliasChoices("DAGSTER_SCORING_REPOSITORY_NAME", "dagster_scoring_repository_name"),
+        validation_alias=AliasChoices(
+            "DAGSTER_AI_AGENTS_RUNNERS_REPOSITORY_NAME",
+            "DAGSTER_SCORING_REPOSITORY_NAME",
+            "dagster_ai_agents_runners_repository_name",
+            "dagster_scoring_repository_name",
+        ),
     )
 
     dagster_segmentation_job_name: str = Field(

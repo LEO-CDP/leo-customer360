@@ -135,8 +135,8 @@ provision 8 vCPU to get 16 GB — it bills as **8 blocks, not 4** (parent §13.1
 
 **Why UAT should not adopt `1/2/1` as day-one:**
 
-- **Only 3 of 9 code locations do real work** (`identity_resolution`, `segmentation`, `analytics`);
-  the other six are runnable placeholders. `scoring` and `personalization` — the entire reason for
+- **Only 3 of 8 code locations do real work** (`identity_resolution`, `segmentation`, `analytics`);
+  the other five are runnable orchestration/placeholders. `ai_agents_runners` — the reason for
   the `ai` pool — are placeholders, so 2 always-on `ai` VMs (8 blocks) would idle.
 - **No scale-to-zero on vServer.** Every worker VM is a standing bill 24/7. The parent's whole cost
   argument (Option B / KEDA floor) does not exist here — you pay the ceiling continuously.
