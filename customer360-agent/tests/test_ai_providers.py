@@ -160,36 +160,48 @@ class AgentSeedModelTests(unittest.TestCase):
             self.assertTrue(models, f"Expected generative agent seeds in {seed_path}")
             self.assertEqual(
                 models,
-                ["openai/gpt-5.6-luna"] * len(models),
+                ["openai/gpt-4.1-mini-2025-04-14"] * len(models),
                 f"Generative agent seed models must match LiteLLM's OpenAI identifier in {seed_path}",
             )
 
     def test_unified_agent_seed_defines_each_agent_once(self):
         repository_root = Path(__file__).resolve().parents[2]
         seed_path = repository_root / "customer360-database" / "init-cdp-ai-agents.sql"
-        agent_codes = re.findall(
-            r"^\(\n\s*'([^']+)'", seed_path.read_text(encoding="utf-8"), re.MULTILINE
-        )
-        self.assertEqual(len(agent_codes), 31)
+        seed_text = seed_path.read_text(encoding="utf-8")
+        seed_lines = seed_text.split("WITH seed_agents", 1)[1].split(
+            "INSERT INTO customer360.cdp_ai_agents", 1
+        )[0].splitlines()
+        agent_codes = [
+            seed_lines[index + 1].strip().rstrip(",").strip("'")
+            for index, line in enumerate(seed_lines[:-1])
+            if line == "    ("
+        ]
+        self.assertEqual(len(agent_codes), 12)
         self.assertEqual(len(agent_codes), len(set(agent_codes)))
         self.assertEqual(agent_codes.count("campaign_planner"), 1)
-        self.assertIn("notification_planner", agent_codes)
-        self.assertNotIn("zns_campaign_planner", agent_codes)
 
-        model_types = re.findall(
-            r"^\(\n\s*'[^']+',.*?\n\s*'(classification|regression|clustering|rules_engine|generative_llm)',",
-            seed_path.read_text(encoding="utf-8"),
-            re.MULTILINE | re.DOTALL,
-        )
-        counts = Counter(model_types)
-        self.assertEqual(set(counts), {
+        supported_types = {
             "classification",
             "regression",
             "clustering",
+            "ranking_recommendation",
+            "forecasting",
+            "anomaly_detection",
+            "uplift_modeling",
+            "semantic_embedding",
+            "graph_ml",
+            "optimization",
             "rules_engine",
             "generative_llm",
-        })
-        self.assertTrue(all(count >= 2 for count in counts.values()), counts)
+        }
+        model_types = [
+            line.strip().rstrip(",").strip("'")
+            for line in seed_lines
+            if line.strip().rstrip(",").strip("'") in supported_types
+        ]
+        counts = Counter(model_types)
+        self.assertEqual(set(counts), supported_types)
+        self.assertEqual(counts, Counter({model_type: 1 for model_type in supported_types}))
 
     def test_core_seed_does_not_insert_agent_registry_rows(self):
         repository_root = Path(__file__).resolve().parents[2]

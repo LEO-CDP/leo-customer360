@@ -61,8 +61,85 @@ when existing data cannot be safely backfilled or constrained.
 ## Initialization And Seeds
 
 `init-cdp-ai-agents.sql` is the unified AI-agent registry seed. It creates
-prompt-backed agents and the 20 core scoring/orchestration agents. Run it before
+12 core templates (one per execution type), seven compatibility identities for
+attribute ownership, and the notification/segment prompts consumed by the agent
+service. New entries are `INACTIVE`. Run it before
 `init-core-database.sql`, whose profile-attribute seed references those agents.
+
+The seed is atomic and insert-only on conflicts: rerunning it preserves deployed
+configuration, activation state, feature definitions and append-only prompt
+history. It does **not** repair existing rows. Upgrade existing databases using
+reviewed migrations and the versioned prompt publishing API.
+
+### Model and feature readiness
+
+`model_name` identifies a documented estimator class or hosted model, not an
+invented trained-artifact name:
+
+| Core type | Seed identifier |
+| --- | --- |
+| Classification | `xgboost.XGBClassifier` |
+| Regression / forecasting | `lightgbm.LGBMRegressor` |
+| Clustering | `sklearn.cluster.MiniBatchKMeans` |
+| Ranking | `lightgbm.LGBMRanker` |
+| Anomaly detection | `sklearn.ensemble.IsolationForest` |
+| Uplift | `econml.metalearners.XLearner` |
+| Embedding | `text-embedding-3-small` (1536 dimensions) |
+| Graph ML | `torch_geometric.nn.models.GraphSAGE` |
+| Optimization / rules | `NULL` until an engine is selected |
+| Generative LLM | `openai/gpt-4.1-mini-2025-04-14` |
+
+Estimator identifiers are documentation for an allow-listed implementation;
+never dynamically import code from registry values. No new runtime dependency
+is installed by the seed. Hyperparameters mix estimator settings and adapter
+metadata; do not pass the entire JSON object to an estimator constructor.
+Before activating a template, provision its executor,
+pin library versions, register its trained artifact and preprocessing contract,
+and validate tenant-isolated outputs. The scoring service is currently a
+scaffold, not a trained-model pipeline.
+
+In particular, LightGBM forecasting needs lag/seasonal features, time-based
+validation and a separate prediction-interval estimator; IsolationForest does
+not natively return a probability in `[0, 1]`; GraphSAGE needs graph topology
+(`edge_index`) and trained weights in addition to node features; XLearner needs
+pre-treatment covariates, explicit treatment/outcome labels and validated causal
+assumptions. Prompts do not implement these algorithms.
+
+The embedding model must use the embeddings endpoint, not chat completion.
+Respect provider input limits and redact/authorize customer text before sending
+it externally. The pinned GPT model and its JSON-object response configuration
+are compatible with LiteLLM chat completion. The current agent service resolves
+models from request overrides / `LLM_MODEL`, not from this registry; seed
+activation is not an endpoint access-control mechanism.
+
+The feature catalog contains reviewed derivation **guidance**, not an executable
+feature builder. Its contract requires tenant-scoped, UTC, as-of source snapshots,
+independent aggregation before joins, and missing-value/spine normalization.
+Do not use present-day profile or campaign state to backfill training history.
+Suppression must come from the activation resolver, including identifier-only
+records and campaign/channel scope. Only literal JSON `true` grants consent.
+
+Official model references:
+[OpenAI GPT-4.1 mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini),
+[OpenAI embeddings](https://developers.openai.com/api/docs/guides/embeddings),
+[XGBoost](https://xgboost.readthedocs.io/en/stable/python/python_api.html),
+[LightGBM](https://lightgbm.readthedocs.io/en/stable/Python-API.html),
+[scikit-learn clustering](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.MiniBatchKMeans.html),
+[scikit-learn anomalies](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html),
+[EconML](https://www.pywhy.org/EconML/_autosummary/econml.metalearners.XLearner.html),
+[GraphSAGE](https://pytorch-geometric.readthedocs.io/en/latest/generated/torch_geometric.nn.models.GraphSAGE.html).
+
+Regression checks:
+
+```bash
+python -m unittest discover -s customer360-database/tests -p 'test_ai_agent_seed_contract.py'
+# Only against a disposable database, after schema + AI seed + core seed:
+psql -v ON_ERROR_STOP=1 -d seed_test -f customer360-database/tests/ai_agent_seed.sql
+```
+
+The SQL regression checks execute every catalog SQL fragment, test consent and
+tenant/time boundaries, and verify that rerunning the seed preserves deployed
+configuration and prompt history.
 
 `init-core-database.sql` is the remaining seed/setup script. It:
 
@@ -105,6 +182,11 @@ conditions are present.
 - `crm_campaign` and `crm_campaign_performance_daily` store campaigns and
 	daily omnichannel performance. `vw_campaign_performance_metrics` exposes
 	aggregate spend, funnel rates, CPA, and ROAS.
+- `crm_campaign_experiments` stores campaign-level experiment status, date
+	windows, primary metric, and winning variant. Its
+	`crm_campaign_experiment_variants` rows define each treatment/control
+	variant's segment, optional message template, allocation percentage, and
+	lifecycle status; daily performance can be attributed to a variant.
 - `crm_campaign_member`, `crm_lead`, `crm_lead_source`, `crm_contact`,
 	`crm_account`, `crm_opportunity`, and `crm_industry` model CRM journey
 	entities.
@@ -156,6 +238,10 @@ conditions are present.
 - `cdp_ai_agents` is the single registry for scoring models, rule engines, and
 	task-oriented agents. It also stores current prompt instructions and the
 	append-only `prompt_versions` JSONB history used by `customer360-agent`.
+- `cdp_ai_feature_catalog` is the allow-listed contract behind
+	`cdp_ai_agents.input_features`. Each feature has reviewed SQL and pandas
+	derivation guidance over tenant-scoped profile, S3 event, transaction,
+	contact, graph, candidate, or runtime data.
 - `cdp_event_catalog` defines the cross-domain event vocabulary.
 - `cdp_content_items` stores personalized content candidates.
 - `cdp_segments` stores audience rules, generated SQL, processing source, and
@@ -216,7 +302,15 @@ by `relation`. Known relation partitions include `belongs_to`, `comes_from`,
 `converted`, `follows`, `is_part_of`, `is_active_as`, `is_connected_to`,
 `is_from`, `created_by`, `is_driven_by`, `has_role`, `has`,
 `is_for_the`, and `belongs_to_industry`. `graph_edges_other` is the default
-partition for new relation values.
+partition for new relation values. The 15 physical child tables are
+`graph_edges_belongs_to`, `graph_edges_comes_from`,
+`graph_edges_converted`, `graph_edges_follows`, `graph_edges_is_part_of`,
+`graph_edges_is_active_as`, `graph_edges_is_connected_to`,
+`graph_edges_is_from`, `graph_edges_created_by`,
+`graph_edges_is_driven_by`, `graph_edges_has_role`, `graph_edges_has`,
+`graph_edges_is_for_the`, `graph_edges_belongs_to_industry`, and
+`graph_edges_other`. Query and manage edges through the partitioned parent
+`graph_edges` unless a partition-specific operation is required.
 
 ## Tenant Isolation
 
@@ -266,40 +360,59 @@ so it must set the tenant context before each tenant-scoped operation.
 
 ## Forward Migrations
 
-Run these files in numeric order after the base schema and seed/materialized
-view scripts:
+Forward migrations are incremental upgrades for databases that already have the
+base schema. Apply them **once, in filename order**, after
+`database-schema.sql`, the required seeds, and materialized-view setup. The
+repository's [`run-sql.sh`](../deployments/postgres/run-sql.sh) runs the base
+scripts first, then applies sorted `migrations/*.sql` files with
+`ON_ERROR_STOP=1`; it excludes `*.down.sql` rollback scripts. When using the
+manual loop in Installation Order, shell glob order is the migration order.
 
 | Migration | Purpose |
 | --- | --- |
-| `001_harden_tenant_rls_policies.sql` | Rebuild fail-closed tenant policies on existing tables. |
-| `002_crm_connector_config.sql` | Replace the legacy email-only connector table with the generic outbound connector registry. |
-| `003_crm_suppression_list.sql` | Introduce the omnichannel suppression registry and migrate legacy email suppression data. |
-| `004_tenant_consistency_and_graph_rls.sql` | Backfill tenant ownership for graph edges and role assignments, then add tenant-safe constraints and RLS. |
-| `005_profile_quality_and_tenant_domain_rls.sql` | Harden profile score ranges, hash state, timestamps, domain assignments, and related tenant constraints. |
-| `006_suppression_expiry_exclusion.sql` | Enforce non-overlapping active suppression windows while allowing expired records to be replaced. |
-| `007_zalo_connector_config.sql` | Move legacy Zalo OA settings and tokens from `sys_data_source` into `crm_connector_config`. |
+| `001_harden_tenant_rls_policies.sql` | Rebuild fail-closed tenant RLS policies on existing tenant-owned tables. |
+| `002_profile_indexes.sql` | Add tenant-leading profile, contact, and transaction indexes for common activity queries. |
+| `003_profile_tracking_identifier_filters.sql` | Backfill anonymous/device identifiers from staged event payloads and index those identifiers by tenant. |
+| `004_campaign_experiments.sql` | Create campaign experiment/variant tables with tenant-aware references, constraints, indexes, and RLS. |
+| `005_campaign_content_items.sql` | Restore the campaign-to-content relation with tenant-safe foreign keys and RLS. |
+| `006_cdp_agent_workflow.sql` | Add the tenant/segment/agent workflow queue, scheduling override, ordered execution constraints, candidate integrity triggers, indexes, and forced tenant RLS. |
 
-The migrations directory also contains
-[`006_cdp_agent_workflow.sql`](migrations/006_cdp_agent_workflow.sql), which adds
-the ordered segment/agent relation, candidate integrity triggers, indexes,
-and forced tenant RLS to existing databases. It is safe to reapply after the
-canonical schema.
+`006_cdp_agent_workflow.sql` is for existing installations. A fresh database
+already receives `cdp_agent_workflow` from `database-schema.sql`; the migration
+is intentionally safe to reapply after that canonical schema. It creates an
+empty workflow table and does not seed workflow steps or activate agents.
 
-Run the workflow regression checks against an isolated PostgreSQL 16 database
-after applying the schema or migration:
+The candidate-validation triggers verify that referenced content items exist
+for the workflow tenant and prevent deletion or tenant/key changes while an
+item is referenced. Because the trigger functions run with invoker privileges,
+the runtime role needs `SELECT` and `UPDATE` privileges on
+`cdp_content_items` to acquire the `FOR SHARE` row locks, plus `SELECT`
+privileges on `cdp_agent_workflow`; tenant RLS must remain enabled. Set
+`app.tenant_id` for the transaction. Candidate writes
+and content deletion/key changes reject `REPEATABLE READ` to avoid stale-snapshot
+integrity checks; use `READ COMMITTED` or `SERIALIZABLE` (retry serialization
+failures).
+
+Run the workflow regression checks against a **disposable PostgreSQL 16
+database** after applying the base schema and AI-agent seed, or after applying
+the migration to an existing test database with its required tables and seed
+agents:
 
 ```bash
 psql -v ON_ERROR_STOP=1 -d customer360_test \
     -f customer360-database/tests/cdp_agent_workflow.sql
 ```
 
-The checks create fixtures and a temporary non-superuser role within a
-transaction, then roll everything back; run them as a test database
-administrator.
+The checks create fixtures and a temporary non-superuser role, exercise
+ordering, tenant isolation, candidate protection, and transaction-isolation
+guards, then roll back their fixtures. Run them as a test database
+administrator; they are not production migration steps.
 
-Review data-changing migrations before production execution. In particular,
-migration 004 stops if existing graph edges cannot be assigned to a tenant,
-and migration 005 stops if existing profile scores violate the new ranges.
+Review each migration against the target database before production execution.
+These migrations can lock tables, build indexes, or alter security policy.
+Schedule and monitor production rollout accordingly. Do not rerun the complete
+bootstrap sequence against a production database as a substitute for its
+ordered migrations.
 
 ## Verification Queries
 
@@ -309,10 +422,16 @@ After initialization, verify the schema and RLS context with a non-superuser:
 SELECT current_schema();
 SELECT to_regclass('customer360.cdp_master_profiles');
 SELECT to_regclass('customer360.crm_connector_config');
+SELECT to_regclass('customer360.cdp_agent_workflow');
 SELECT relname, relrowsecurity, relforcerowsecurity
 FROM pg_class
 WHERE relnamespace = 'customer360'::regnamespace
-	AND relname IN ('cdp_master_profiles', 'crm_connector_config', 'graph_edges');
+	AND relname IN (
+		'cdp_master_profiles',
+		'crm_connector_config',
+		'cdp_agent_workflow',
+		'graph_edges'
+	);
 SELECT current_setting('app.tenant_id', true);
 ```
 

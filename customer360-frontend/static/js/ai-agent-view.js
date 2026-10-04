@@ -29,6 +29,13 @@ window.C360 = window.C360 || {};
     classification: "bg-indigo-100 text-indigo-700",
     regression: "bg-cyan-100 text-cyan-700",
     clustering: "bg-fuchsia-100 text-fuchsia-700",
+    ranking_recommendation: "bg-emerald-100 text-emerald-700",
+    forecasting: "bg-blue-100 text-blue-700",
+    anomaly_detection: "bg-rose-100 text-rose-700",
+    uplift_modeling: "bg-orange-100 text-orange-700",
+    semantic_embedding: "bg-purple-100 text-purple-700",
+    graph_ml: "bg-teal-100 text-teal-700",
+    optimization: "bg-yellow-100 text-yellow-700",
     rules_engine: "bg-slate-100 text-slate-600",
     generative_llm: "bg-violet-100 text-violet-700"
   };
@@ -38,6 +45,13 @@ window.C360 = window.C360 || {};
     classification: "\ud83c\udff7\ufe0f",
     regression: "\ud83d\udcc8",
     clustering: "\ud83e\udde9",
+    ranking_recommendation: "\ud83c\udfaf",
+    forecasting: "\ud83d\udd2e",
+    anomaly_detection: "\u26a0\ufe0f",
+    uplift_modeling: "\ud83d\udcc8",
+    semantic_embedding: "\ud83d\udcdd",
+    graph_ml: "\ud83d\udd78\ufe0f",
+    optimization: "\u2696\ufe0f",
     rules_engine: "\u2699\ufe0f",
     generative_llm: "\ud83e\udd16"
   };
@@ -51,7 +65,7 @@ window.C360 = window.C360 || {};
   function rowVm(m) {
     return $.extend({}, m, {
       typeIcon: typeIcon(m.model_type),
-      typeLabel: String(m.model_type || "").toUpperCase(),
+      typeLabel: fmt.titleCase(String(m.model_type || "").replace(/_/g, " ")),
       typeBadgeClass: typeBadgeClass(m.model_type),
       statusLabel: fmt.titleCase(m.status),
       statusBadgeClass: statusBadgeClass(m.status),
@@ -107,7 +121,11 @@ window.C360 = window.C360 || {};
         return value === "scheduled" ? !!vm.schedule_definition : !vm.schedule_definition;
       }
     },
-    onFetched: function (items) { aiAgentsByCode = {}; items.forEach(function (m) { aiAgentsByCode[m.agent_code] = m; }); },
+    onFetched: function (items) {
+      aiAgentsByCode = {};
+      items.forEach(function (m) { aiAgentsByCode[m.agent_code] = m; });
+      updateAgentSummary(items);
+    },
     onError: function (xhr) { showApiError("loading AI agents", xhr); },
     el: {
       thead: "#agent-models-thead",
@@ -120,18 +138,70 @@ window.C360 = window.C360 || {};
 
   var aiAgentsByCode = {}; // last-fetched rows, keyed by agent_code -- backs the Edit modal
 
+  function updateAgentSummary(items) {
+    var counts = { ACTIVE: 0, TRAINING: 0, FAILED: 0, INACTIVE: 0 };
+    var updatedToday = 0;
+    var today = new Date().toISOString().slice(0, 10);
+    (items || []).forEach(function (item) {
+      var status = String(item.status || "").toUpperCase();
+      if (Object.prototype.hasOwnProperty.call(counts, status)) counts[status] += 1;
+      if (item.updated_at && new Date(item.updated_at).toISOString().slice(0, 10) === today) updatedToday += 1;
+    });
+    var total = (items || []).length;
+    $("#agent-model-summary-total, #agent-model-tab-total").text(total);
+    $("#agent-model-summary-active, #agent-model-tab-active").text(counts.ACTIVE);
+    $("#agent-model-summary-training, #agent-model-tab-training").text(counts.TRAINING);
+    $("#agent-model-summary-failed, #agent-model-tab-failed").text(counts.FAILED);
+    $("#agent-model-tab-inactive").text(counts.INACTIVE);
+    $("#agent-model-summary-active-rate").text(total ? Math.round((counts.ACTIVE / total) * 100) + "% of total" : "No active agents");
+    $("#agent-model-summary-updated").text(updatedToday);
+  }
+
+  function syncStatusTab(status) {
+    $(".agent-model-status-tab").each(function () {
+      var selected = String($(this).attr("data-status") || "") === String(status || "");
+      $(this)
+        .attr("aria-selected", selected ? "true" : "false")
+        .toggleClass("border-violet-600 text-violet-700", selected)
+        .toggleClass("border-transparent text-slate-500", !selected);
+    });
+  }
+
   function load() { return dtv.load(false); }
 
+  function populateSchedulePresets() {
+    var schedule = C360.AgentWorkflowSchedule;
+    var $select = $("#agent-model-add-schedule-preset");
+    if (!schedule || !$select.length) return;
+    $select.empty();
+    schedule.presets.forEach(function (preset) {
+      $("<option></option>").attr("value", preset.value).text(preset.label).appendTo($select);
+    });
+  }
+
   function updateScheduleExplanation() {
-    var raw = $.trim($("#agent-model-add-schedule").val());
+    var schedule = C360.AgentWorkflowSchedule;
+    var $preset = $("#agent-model-add-schedule-preset");
+    var $custom = $("#agent-model-add-schedule-custom");
+    var $input = $("#agent-model-add-schedule");
+    if (!schedule || !$preset.length) return;
+
+    var presetValue = String($preset.val() || "");
+    var isCustom = presetValue === "custom";
+    var expression = isCustom ? $.trim($input.val()) : presetValue;
+    var isValid = schedule.isValid(expression);
+    $custom.toggleClass("hidden", !isCustom);
+    $input.attr("aria-invalid", isCustom && !isValid ? "true" : "false")
+      .toggleClass("border-red-300 bg-red-50", isCustom && !isValid)
+      .toggleClass("border-slate-200/80 bg-slate-50/50", !isCustom || isValid);
     $("#agent-model-add-schedule-explanation")
-      .text(raw ? "Runs: " + formatCronSchedule(raw) : "")
-      .toggleClass("hidden", !raw);
+      .text(expression ? "Runs: " + schedule.label(expression) : "Uses the agent default schedule.")
+      .toggleClass("hidden", !expression && isCustom);
   }
 
   function parseCsvList(value) {
     return String(value || "")
-      .split(",")
+      .split(/[,\n]+/)
       .map(function (x) { return x.trim(); })
       .filter(function (x) { return x.length > 0; });
   }
@@ -145,7 +215,7 @@ window.C360 = window.C360 || {};
     $("#agent-model-form-title").text("Add AI Agent");
     $("#agent-model-form-subtitle").text("Registers a new row in the cdp_ai_agents registry");
     $("#agent-model-form-save-label").text("Save Agent");
-    $("#btn-agent-model-delete").addClass("hidden");
+    $("#btn-agent-model-delete").addClass("hidden").removeClass("inline-flex");
     $("#agent-model-add-error").addClass("hidden").text("");
     $("#agent-model-add-name").val("").prop("disabled", false);
     $("#agent-model-add-display-name").val("");
@@ -153,6 +223,8 @@ window.C360 = window.C360 || {};
     $("#agent-model-add-model-name").val("");
     $("#agent-model-add-type").val("classification");
     $("#agent-model-add-status").val("ACTIVE");
+    populateSchedulePresets();
+    $("#agent-model-add-schedule-preset").val("");
     $("#agent-model-add-schedule").val("");
     updateScheduleExplanation();
     $("#agent-model-add-features").val("");
@@ -171,7 +243,7 @@ window.C360 = window.C360 || {};
     $("#agent-model-form-title").text("Edit AI Agent");
     $("#agent-model-form-subtitle").text("Updates this cdp_ai_agents registry row");
     $("#agent-model-form-save-label").text("Save Changes");
-    $("#btn-agent-model-delete").removeClass("hidden");
+    $("#btn-agent-model-delete").removeClass("hidden").addClass("inline-flex");
     $("#agent-model-add-error").addClass("hidden").text("");
     // agent_code is the primary key and isn't part of AiAgentUpdate
     // -- shown for context but not editable.
@@ -181,7 +253,12 @@ window.C360 = window.C360 || {};
     $("#agent-model-add-model-name").val(m.model_name || "");
     $("#agent-model-add-type").val(m.model_type);
     $("#agent-model-add-status").val(m.status);
+    populateSchedulePresets();
     $("#agent-model-add-schedule").val(m.schedule_definition || "");
+    var schedule = C360.AgentWorkflowSchedule;
+    $("#agent-model-add-schedule-preset").val(
+      schedule ? schedule.presetFor(m.schedule_definition || "").value : ""
+    );
     updateScheduleExplanation();
     $("#agent-model-add-features").val((m.input_features || []).join(", "));
     $("#agent-model-add-hyperparameters").val(m.hyperparameters && Object.keys(m.hyperparameters).length ? JSON.stringify(m.hyperparameters, null, 2) : "");
@@ -207,6 +284,12 @@ window.C360 = window.C360 || {};
       return;
     }
 
+    var scheduleDefinition = $.trim($("#agent-model-add-schedule").val()) || null;
+    if (scheduleDefinition && C360.AgentWorkflowSchedule && !C360.AgentWorkflowSchedule.isValid(scheduleDefinition)) {
+      $error.removeClass("hidden").text("Schedule must be a valid five-field cron expression or supported @macro.");
+      return;
+    }
+
     var hyperparametersRaw = $.trim($("#agent-model-add-hyperparameters").val());
     var hyperparameters = {};
     if (hyperparametersRaw) {
@@ -229,7 +312,7 @@ window.C360 = window.C360 || {};
       model_name: $.trim($("#agent-model-add-model-name").val()) || null,
       model_type: $("#agent-model-add-type").val(),
       status: $("#agent-model-add-status").val(),
-      schedule_definition: $.trim($("#agent-model-add-schedule").val()) || null,
+      schedule_definition: scheduleDefinition,
       input_features: parseCsvList($("#agent-model-add-features").val()),
       hyperparameters: hyperparameters,
       prompt_key: $.trim($("#agent-model-add-prompt-key").val()) || null,
@@ -280,6 +363,7 @@ window.C360 = window.C360 || {};
       "#agent-models-schedule-filter"
     ].forEach(function (selector) { $(selector).val(""); });
     dtv.clearFilters();
+    syncStatusTab("");
   }
 
   function bindEvents() {
@@ -291,14 +375,36 @@ window.C360 = window.C360 || {};
     dtv.bindSelect("#agent-models-schedule-filter", "schedule");
     dtv.bindRowEdit();
 
+    $("#agent-models-status-filter")
+      .off("change.aiAgentStatusTabs")
+      .on("change.aiAgentStatusTabs", function () { syncStatusTab($(this).val()); });
+    $("#agent-model-status-tabs")
+      .off("click.aiAgentStatusTabs")
+      .on("click.aiAgentStatusTabs", "button[data-status]", function () {
+        $("#agent-models-status-filter").val($(this).attr("data-status")).trigger("change");
+      });
+    syncStatusTab($("#agent-models-status-filter").val());
+
     $(document).on("click", "#btn-agent-models-clear-filters", clearFilters);
     $(document).on("click", "#btn-agent-model-add", openAddAiAgentModal);
     $(document).on("click", "#btn-agent-model-add-cancel", closeAiAgentModal);
+    $(document).on("click", "#btn-agent-model-modal-close", closeAiAgentModal);
     $(document).on("click", "#btn-agent-model-add-save", submitAiAgentForm);
     $(document).on("click", "#btn-agent-model-delete", deleteAiAgent);
-    $(document).on("input", "#agent-model-add-schedule", updateScheduleExplanation);
+    $(document).on("change", "#agent-model-add-schedule-preset", function () {
+      var value = String($(this).val() || "");
+      if (value !== "custom") $("#agent-model-add-schedule").val(value);
+      updateScheduleExplanation();
+    });
+    $(document).on("input", "#agent-model-add-schedule", function () {
+      $("#agent-model-add-schedule-preset").val("custom");
+      updateScheduleExplanation();
+    });
     $(document).on("click", "#ai-agent-form-modal", function (e) {
       if (e.target === this) closeAiAgentModal();
+    });
+    $(document).off("keydown.aiAgentModal").on("keydown.aiAgentModal", function (e) {
+      if (e.key === "Escape" && !$("#ai-agent-form-modal").hasClass("hidden")) closeAiAgentModal();
     });
   }
 

@@ -27,6 +27,7 @@ from leo_customer360_dao.schemas.system import (
     AiAgentCreate,
     AiAgentRead,
     AiAgentUpdate,
+    ModelTypeValue,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def _get_ai_agent_or_404(repository: AiAgentRepository, agent_code: str) -> CdpA
 @cache_response(f"{CACHE_PREFIX}/list", ttl=settings.cache_ttl_seconds)
 def list_metadata_ai_agents(
     status: str | None = None,
-    model_type: str | None = None,
+    model_type: ModelTypeValue | None = None,
     skip: int = 0,
     limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
     repository: AiAgentRepository = Depends(get_ai_agent_repository),
@@ -82,7 +83,7 @@ def list_metadata_ai_agents(
 @cache_response(f"{CACHE_PREFIX}/count", ttl=settings.cache_ttl_seconds)
 def count_metadata_ai_agents(
     status: str | None = None,
-    model_type: str | None = None,
+    model_type: ModelTypeValue | None = None,
     repository: AiAgentRepository = Depends(get_ai_agent_repository),
 ) -> dict[str, int]:
     """Returns total count of AI agents matching filter criteria."""

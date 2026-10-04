@@ -66,7 +66,7 @@ customer records.
 | Column group | Columns | Purpose |
 |--------------|---------|---------|
 | Identity | `agent_code`, `display_name`, `description` | Stable agent identifier and operator-facing metadata. `agent_code` is the primary key. |
-| Execution | `model_type`, `model_name`, `status`, `schedule_definition` | Identifies a classification, regression, rules, clustering, or `generative_llm` agent; records its configured model, lifecycle state, and optional batch schedule. |
+| Execution | `model_type`, `model_name`, `status`, `schedule_definition` | Identifies one of the 12 supported execution types: classification, regression, clustering, ranking/recommendation, forecasting, anomaly detection, uplift modeling, semantic embedding, graph ML, optimization, rules, or generative LLM; records its configured model, lifecycle state, and optional batch schedule. |
 | Inputs and tuning | `input_features`, `hyperparameters` | Declares expected source features/context and JSONB model settings such as `temperature` and `max_output_tokens`. |
 | Prompt identity | `prompt_key`, `prompt_engine` | Gives a prompt-backed agent a stable lookup key and rendering engine. The current agent service supports `none`, which performs `$name` substitution while preserving literal JSON braces. |
 | Current prompt | `system_instructions`, `required_variables`, `instruction_version` | Materializes the active instruction body, declared input variables, and published revision. |

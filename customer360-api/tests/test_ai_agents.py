@@ -2,6 +2,7 @@
 
 import unittest
 from datetime import datetime, timezone
+from typing import get_args
 from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 from core.database import get_db
 from core.routers.ai_agent_api import ai_agent_router
 from leo_customer360_dao.models.identity import CdpAiAgent
+from leo_customer360_dao.schemas.system import ModelTypeValue
 
 
 class AiAgentRouterTests(unittest.TestCase):
@@ -47,6 +49,21 @@ class AiAgentRouterTests(unittest.TestCase):
 		self.assertEqual(response.status_code, 200)
 		self.assertEqual(response.json()[0]["agent_code"], "churn_prediction_v2")
 		self.assertIn("ORDER BY", str(self.db.execute.call_args.args[0]))
+
+	def test_list_accepts_all_twelve_model_types(self):
+		model_types = list(get_args(ModelTypeValue))
+		self.db.execute.return_value.scalars.return_value.all.return_value = [
+			self._agent(f"agent_{model_type}", model_type=model_type)
+			for model_type in model_types
+		]
+
+		response = self.client.get("/ai-agents")
+
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(
+			[agent["model_type"] for agent in response.json()],
+			model_types,
+		)
 
 	def test_trailing_slash_and_no_slash_both_resolve_without_redirect(self):
 		self.db.execute.return_value.scalars.return_value.all.return_value = [self._agent()]

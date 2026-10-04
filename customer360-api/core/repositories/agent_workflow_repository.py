@@ -67,17 +67,37 @@ class AgentWorkflowRepository:
         if len(orders) != len(set(orders)):
             raise AgentWorkflowConflictError("Each workflow execution_order must be unique within the segment")
 
+        agent_types: dict[str, str] = {}
         if agent_codes:
-            existing_agents = set(
-                self.session.scalars(
-                    select(CdpAiAgent.agent_code).where(CdpAiAgent.agent_code.in_(agent_codes))
+            agent_types = {
+                agent_code: model_type
+                for agent_code, model_type in self.session.execute(
+                    select(CdpAiAgent.agent_code, CdpAiAgent.model_type).where(
+                        CdpAiAgent.agent_code.in_(agent_codes)
+                    )
                 ).all()
-            )
+            }
+            existing_agents = set(agent_types)
             missing_agents = sorted(set(agent_codes) - existing_agents)
             if missing_agents:
                 raise AgentWorkflowValidationError(
                     f"AI agent(s) not found: {', '.join(missing_agents)}"
                 )
+
+        non_ranking_agents = sorted(
+            {
+                step["agent_code"]
+                for step in steps
+                if step.get("candidate_content_item_ids")
+                and str(agent_types.get(step["agent_code"], "")).upper() != "RANKING_RECOMMENDATION"
+            }
+        )
+        if non_ranking_agents:
+            raise AgentWorkflowValidationError(
+                "Candidate content items are only supported for "
+                "RANKING_RECOMMENDATION agents: "
+                + ", ".join(non_ranking_agents)
+            )
 
         candidate_ids = {
             candidate_id

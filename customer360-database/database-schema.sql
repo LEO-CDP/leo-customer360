@@ -1851,12 +1851,51 @@ COMMENT ON TABLE customer360.cdp_event_catalog IS 'Governed vocabulary of event_
 -- ============================================================================
 -- Unified registry for ML models, rule engines, and task-oriented AI agents.
 --
+-- cdp_ai_feature_catalog is the executable contract behind
+-- cdp_ai_agents.input_features. Expressions are documentation for the
+-- implementation layer: SQL uses the documented source aliases and pandas
+-- uses the documented DataFrame names. They must be reviewed as code and
+-- never executed as unchecked user input.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS customer360.cdp_ai_feature_catalog (
+    feature_key VARCHAR(100) PRIMARY KEY,
+    source_kind VARCHAR(20) NOT NULL CHECK (
+        source_kind IN (
+            'profile',
+            'event_log',
+            'transaction',
+            'contact',
+            'graph',
+            'aggregate',
+            'candidate',
+            'runtime'
+        )
+    ),
+    data_type VARCHAR(20) NOT NULL CHECK (
+        data_type IN ('boolean', 'integer', 'numeric', 'text', 'timestamp', 'jsonb')
+    ),
+    sql_expression TEXT NOT NULL,
+    pandas_expression TEXT NOT NULL,
+    description TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE customer360.cdp_ai_feature_catalog IS
+    'Allow-listed, reviewable derivation contract for cdp_ai_agents.input_features. SQL expressions use the documented source aliases; pandas expressions use the documented DataFrame names.';
+
+COMMENT ON COLUMN customer360.cdp_ai_feature_catalog.sql_expression IS
+    'Reviewed SQL expression or aggregate fragment. It is documentation for a feature builder and must never be interpolated from an untrusted request.';
+
+COMMENT ON COLUMN customer360.cdp_ai_feature_catalog.pandas_expression IS
+    'Reviewed pandas expression using profiles, events, transactions, contacts, edges, candidates, or context DataFrames.';
+
 -- agent_code:
 --   Stable identifier used by application/agent runtime.
 --
 -- model_name:
---   Actual AI/ML model name, e.g. gpt-5.6, qwen3-14b,
---   xgboost-lead-v3, lightgbm-churn-v2, etc.
+--   Provider model ID, approved estimator class, or deployed artifact identifier.
+--   An estimator class is not a trained model. NULL means no engine selected.
 --
 -- system_instructions / required_variables:
 --   Current runtime instructions and input contract for task-oriented agents.
@@ -1885,17 +1924,24 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
             'classification',
             'regression',
             'clustering',
+            'ranking_recommendation',
+            'forecasting',
+            'anomaly_detection',
+            'uplift_modeling',
+            'semantic_embedding',
+            'graph_ml',
+            'optimization',
             'rules_engine',
             'generative_llm'
         )
     ),
 
-    -- Actual AI model / ML model name.
+    -- Provider model ID, estimator class, or deployed artifact identifier.
     -- Examples:
-    --   openai/gpt-5.6-luna-luna
-    --   qwen3-14b
-    --   xgboost-lead-v3
-    --   lightgbm-churn-v2
+    --   openai/gpt-4.1-mini-2025-04-14
+    --   text-embedding-3-small
+    --   xgboost.XGBClassifier
+    --   lightgbm.LGBMRegressor
     model_name VARCHAR(255),
 
     -- Runtime lifecycle
@@ -1913,7 +1959,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_ai_agents (
     -- Example: '0 1 * * *'
     schedule_definition VARCHAR(100),
 
-    -- Features / runtime context consumed by the model or agent.
+    -- Stable feature keys declared in cdp_ai_feature_catalog. The catalog
+    -- contains reviewed SQL and pandas derivation guidance for each key.
     input_features TEXT[] DEFAULT ARRAY[]::TEXT[],
 
     -- Model/runtime configuration.
@@ -1985,7 +2032,7 @@ COMMENT ON COLUMN customer360.cdp_ai_agents.agent_code IS
     'Stable application/runtime identifier for the AI agent or model configuration.';
 
 COMMENT ON COLUMN customer360.cdp_ai_agents.model_name IS
-    'Actual AI model or ML model name used by this agent, such as gpt-5.6, qwen3-14b, xgboost-lead-v3, or lightgbm-churn-v2.';
+    'Provider model ID, approved estimator class, or deployed artifact identifier. Estimator classes do not imply trained artifacts; NULL means an engine has not been selected. Runtime dispatch must use an implementation allow-list.';
 
 COMMENT ON COLUMN customer360.cdp_ai_agents.prompt_key IS
     'Stable address used by customer360-agent to load this row''s current prompt.';
@@ -2977,6 +3024,14 @@ WHERE
     updated_at IS NOT NULL;
 -- processing-queue lookup (tenant_id, status_code).
 CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_status ON customer360.cdp_raw_profiles_stage (tenant_id, status_code);
+
+-- Feature extraction index for tenant-scoped event windows. S3 remains the
+-- preferred source for replayable event features; this supports SQL fallback
+-- over the normalized raw-profile landing table.
+CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_tenant_event_time
+    ON customer360.cdp_raw_profiles_stage (tenant_id, event_time DESC, event_name)
+    WHERE event_time IS NOT NULL;
+
 
 CREATE INDEX IF NOT EXISTS idx_raw_profiles_stage_email ON customer360.cdp_raw_profiles_stage (email)
 WHERE
