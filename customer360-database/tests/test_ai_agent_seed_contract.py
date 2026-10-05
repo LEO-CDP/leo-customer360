@@ -99,6 +99,30 @@ class AiAgentSeedContractTests(unittest.TestCase):
     def test_generative_seeds_use_gpt_6_luna(self):
         self.assertEqual(self.seed_sql.count("'gpt-6-luna'"), 2)
 
+    def test_profile_recommendations_are_tenant_scoped_and_segment_aware(self):
+        schema = (
+            self.repository_root / "customer360-database" / "database-schema.sql"
+        ).read_text(encoding="utf-8")
+        migration = (
+            self.repository_root
+            / "customer360-database"
+            / "migrations"
+            / "006_cdp_agent_workflow.sql"
+        ).read_text(encoding="utf-8")
+        for sql in (schema, migration):
+            self.assertIn(
+                "CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendation_runs",
+                sql,
+            )
+            self.assertIn("CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendations", sql)
+            self.assertIn("PRIMARY KEY (", sql)
+            self.assertIn("status IN ('RUNNING', 'SUCCEEDED', 'FAILED')", sql)
+            self.assertIn("fk_cdp_profile_recommendations_tenant_run", sql)
+            self.assertIn("fk_cdp_profile_recommendations_tenant_profile", sql)
+            self.assertIn("fk_cdp_profile_recommendations_tenant_content", sql)
+            self.assertIn("cdp_profile_recommendation_runs FORCE ROW LEVEL SECURITY", sql)
+            self.assertIn("ALTER TABLE customer360.cdp_profile_recommendations FORCE ROW LEVEL SECURITY", sql)
+
     def test_existing_agent_endpoints_have_seeded_prompt_keys(self):
         for key in (
             "campaign.plan.instructions",

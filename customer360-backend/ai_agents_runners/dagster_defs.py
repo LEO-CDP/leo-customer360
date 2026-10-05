@@ -41,19 +41,21 @@ def run_agent_workflow_master_op(
     context: OpExecutionContext,
     config: AgentWorkflowRunConfig,
 ) -> dict:
-    """Selects active steps in order without fabricating agent outputs."""
+    """Select and execute supported ranking steps for the configured segment."""
     scheduled_at = (
         datetime.fromisoformat(config.scheduled_at.replace("Z", "+00:00"))
         if config.scheduled_at
         else None
     )
-    summary = AgentWorkflowMasterTask().run(
+    task = AgentWorkflowMasterTask()
+    summary = task.run(
         trigger=config.trigger,
         tenant_id=config.tenant_id,
         segment_id=config.segment_id,
         trigger_event=config.trigger_event,
         scheduled_at=scheduled_at,
     )
+    summary = task.execute(summary, run_id=context.run_id)
     context.log.info("AI-agent workflow master task result: %s", summary.as_dict())
     return summary.as_dict()
 

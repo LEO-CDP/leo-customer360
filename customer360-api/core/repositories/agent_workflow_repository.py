@@ -99,6 +99,20 @@ class AgentWorkflowRepository:
                 + ", ".join(non_ranking_agents)
             )
 
+        ranking_agents_without_candidates = sorted(
+            step["agent_code"]
+            for step in steps
+            if step.get("is_active", True)
+            and str(agent_types.get(step["agent_code"], "")).upper()
+            == "RANKING_RECOMMENDATION"
+            and not step.get("candidate_content_item_ids")
+        )
+        if ranking_agents_without_candidates:
+            raise AgentWorkflowValidationError(
+                "Ranking Recommendation agents require at least one selected content item: "
+                + ", ".join(ranking_agents_without_candidates)
+            )
+
         candidate_ids = {
             candidate_id
             for step in steps

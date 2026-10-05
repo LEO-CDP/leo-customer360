@@ -41,7 +41,7 @@ COMMENT ON COLUMN customer360.cdp_agent_workflow.execution_order IS
 COMMENT ON COLUMN customer360.cdp_agent_workflow.schedule_definition IS
     'Optional five-field cron override for this segment-agent step. NULL means inherit the selected cdp_ai_agents.schedule_definition.';
 COMMENT ON COLUMN customer360.cdp_agent_workflow.candidate_content_item_ids IS
-    'Per-step content/product candidates from cdp_content_items. Empty means no explicit candidates; the runner must not implicitly select the entire catalog. Triggers enforce existing same-tenant references and restrict deletion or key changes while referenced.';
+    'Per-step content/product candidates from cdp_content_items. Active ranking_recommendation steps require at least one candidate; triggers enforce same-tenant references and restrict deletion or key changes while referenced.';
 COMMENT ON COLUMN customer360.cdp_agent_workflow.configuration IS
     'Per-segment agent input/configuration overrides, such as ranking parameters. This is configuration, not workflow execution state.';
 
@@ -143,6 +143,70 @@ ALTER TABLE customer360.cdp_agent_workflow ENABLE ROW LEVEL SECURITY;
 ALTER TABLE customer360.cdp_agent_workflow FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_policy ON customer360.cdp_agent_workflow;
 CREATE POLICY tenant_policy ON customer360.cdp_agent_workflow
+    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendation_runs (
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    segment_id UUID NOT NULL,
+    run_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
+    profile_count INTEGER NOT NULL CHECK (profile_count >= 0),
+    step_count INTEGER NOT NULL CHECK (step_count > 0),
+    profile_runs_processed INTEGER NOT NULL DEFAULT 0 CHECK (profile_runs_processed >= 0),
+    recommendations_written INTEGER NOT NULL DEFAULT 0 CHECK (recommendations_written >= 0),
+    error_message TEXT,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ,
+    CONSTRAINT pk_cdp_profile_recommendation_runs PRIMARY KEY (tenant_id, segment_id, run_id),
+    CONSTRAINT fk_cdp_profile_recommendation_runs_tenant_segment
+        FOREIGN KEY (tenant_id, segment_id)
+        REFERENCES customer360.cdp_segments (tenant_id, segment_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendations (
+    tenant_id UUID NOT NULL,
+    segment_id UUID NOT NULL,
+    master_profile_id UUID NOT NULL,
+    agent_code TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    content_item_id UUID NOT NULL,
+    rank INTEGER NOT NULL CHECK (rank > 0),
+    score DOUBLE PRECISION NOT NULL CHECK (score >= 0),
+    matched_tags TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
+    reason TEXT NOT NULL,
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT pk_cdp_profile_recommendations PRIMARY KEY (
+        tenant_id, segment_id, master_profile_id, agent_code, run_id, content_item_id
+    ),
+    CONSTRAINT fk_cdp_profile_recommendations_tenant_run
+        FOREIGN KEY (tenant_id, segment_id, run_id)
+        REFERENCES customer360.cdp_profile_recommendation_runs (tenant_id, segment_id, run_id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_cdp_profile_recommendations_tenant_profile
+        FOREIGN KEY (tenant_id, master_profile_id)
+        REFERENCES customer360.cdp_master_profiles (tenant_id, master_profile_id) ON DELETE CASCADE,
+    CONSTRAINT fk_cdp_profile_recommendations_tenant_content
+        FOREIGN KEY (tenant_id, content_item_id)
+        REFERENCES customer360.cdp_content_items (tenant_id, content_item_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_cdp_profile_recommendations_lookup
+    ON customer360.cdp_profile_recommendations
+        (tenant_id, master_profile_id, segment_id, run_id, rank);
+CREATE INDEX IF NOT EXISTS idx_cdp_profile_recommendation_runs_latest
+    ON customer360.cdp_profile_recommendation_runs
+        (tenant_id, segment_id, status, completed_at DESC);
+ALTER TABLE customer360.cdp_profile_recommendation_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer360.cdp_profile_recommendation_runs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_policy ON customer360.cdp_profile_recommendation_runs;
+CREATE POLICY tenant_policy ON customer360.cdp_profile_recommendation_runs
+    USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
+ALTER TABLE customer360.cdp_profile_recommendations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer360.cdp_profile_recommendations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_policy ON customer360.cdp_profile_recommendations;
+CREATE POLICY tenant_policy ON customer360.cdp_profile_recommendations
     USING (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid)
     WITH CHECK (tenant_id = NULLIF(btrim(current_setting('app.tenant_id', true)), '')::uuid);
 

@@ -1,7 +1,7 @@
 
 """Content items repository: personalized content (news/videos/products/articles)
-shown in the Customer 360 profile dashboard, plus recommended content ranking
-by segment_tags overlap with master profile segmentation_tags.
+shown in the Customer 360 profile dashboard, plus persisted workflow-ranked
+recommendations with optional segment filtering.
 
 Uses the same synchronous SQLAlchemy Session as the rest of the API
 (see core/database.py).
@@ -68,43 +68,137 @@ class ContentRepository:
 
     def get_recommended_items(
         self,
+        tenant_id: uuid.UUID,
         master_profile_id: uuid.UUID,
+        segment_id: uuid.UUID | None = None,
         item_type: Optional[str] = None,
         limit: int = 8,
     ) -> list[dict]:
-        """Rank active content items for master_profile_id by how many
-        segment_tags overlap with the profile's segmentation_tags (ties broken
-        by most-recently published), falling back to domain-matched items with
-        no tag overlap when a profile has few/no tags."""
+        """Return persisted rankings, optionally filtered to one segment."""
         profile_row = self.session.execute(
             text(
-                f"SELECT domain, COALESCE(segmentation_tags, ARRAY[]::text[]) AS tags "
-                f"FROM {settings.db_schema}.cdp_master_profiles WHERE master_profile_id = :mpid"
+                f"SELECT domain FROM {settings.db_schema}.cdp_master_profiles "
+                "WHERE tenant_id = :tenant_id AND master_profile_id = :mpid "
+                "AND status_code = 1"
             ),
-            {"mpid": str(master_profile_id)},
+            {"tenant_id": str(tenant_id), "mpid": str(master_profile_id)},
         ).mappings().first()
 
         if profile_row is None:
             raise ValueError(f"CdpMasterProfile '{master_profile_id}' not found")
 
         sql = f"""
+            WITH profile AS (
+                SELECT domain, COALESCE(segmentation_tags, ARRAY[]::text[]) AS tags
+                FROM {settings.db_schema}.cdp_master_profiles
+                WHERE tenant_id = :tenant_id AND master_profile_id = :mpid
+                  AND status_code = 1
+            ),
+            latest_successful_segment_runs AS (
+                SELECT DISTINCT ON (recommendation_run.segment_id)
+                    recommendation_run.tenant_id,
+                    recommendation_run.segment_id,
+                    recommendation_run.run_id
+                FROM {settings.db_schema}.cdp_profile_recommendation_runs AS recommendation_run
+                JOIN {settings.db_schema}.cdp_segments AS segment
+                  ON segment.tenant_id = recommendation_run.tenant_id
+                 AND segment.segment_id = recommendation_run.segment_id
+                 AND segment.is_active = TRUE
+                WHERE recommendation_run.tenant_id = :tenant_id
+                  AND recommendation_run.status = 'SUCCEEDED'
+                  AND (
+                      CAST(:segment_id AS uuid) IS NULL
+                      OR recommendation_run.segment_id = CAST(:segment_id AS uuid)
+                  )
+                ORDER BY recommendation_run.segment_id,
+                         recommendation_run.completed_at DESC,
+                         recommendation_run.run_id DESC
+            ),
+            eligible_recommendations AS (
+                SELECT
+                    recommendation.content_item_id,
+                    recommendation.segment_id,
+                    recommendation.agent_code,
+                    recommendation.rank,
+                    recommendation.score,
+                    recommendation.matched_tags,
+                    recommendation.reason,
+                    recommendation.generated_at
+                FROM {settings.db_schema}.cdp_profile_recommendations AS recommendation
+                JOIN latest_successful_segment_runs AS latest_run
+                 ON latest_run.tenant_id = recommendation.tenant_id
+                 AND latest_run.segment_id = recommendation.segment_id
+                 AND latest_run.run_id = recommendation.run_id
+                JOIN {settings.db_schema}.cdp_segments AS segment
+                 ON segment.tenant_id = recommendation.tenant_id
+                 AND segment.segment_id = recommendation.segment_id
+                 AND segment.is_active = TRUE
+                JOIN {settings.db_schema}.cdp_agent_workflow AS workflow
+                 ON workflow.tenant_id = recommendation.tenant_id
+                 AND workflow.segment_id = recommendation.segment_id
+                 AND workflow.agent_code = recommendation.agent_code
+                 AND workflow.is_active = TRUE
+                JOIN {settings.db_schema}.cdp_ai_agents AS agent
+                 ON agent.agent_code = recommendation.agent_code
+                 AND agent.status = 'ACTIVE'
+                 AND agent.model_type = 'ranking_recommendation'
+                CROSS JOIN profile
+                WHERE recommendation.tenant_id = :tenant_id
+                  AND recommendation.master_profile_id = :mpid
+                  AND (
+                      CAST(:segment_id AS uuid) IS NULL
+                      OR recommendation.segment_id = CAST(:segment_id AS uuid)
+                  )
+                  AND segment.segment_tag = ANY(profile.tags)
+            ),
+            best_recommendation_per_item AS (
+                SELECT DISTINCT ON (content_item_id)
+                    content_item_id, segment_id, agent_code, rank, score,
+                    matched_tags, reason, generated_at
+                FROM eligible_recommendations
+                ORDER BY content_item_id, score DESC, rank, generated_at DESC,
+                         segment_id, agent_code
+            )
             SELECT
-                content_item_id, tenant_id, domain, item_type, title, summary, image_url,
-                cta_label, cta_url, segment_tags, published_at, status_code, created_at, updated_at,
-                ARRAY(SELECT UNNEST(segment_tags) INTERSECT SELECT UNNEST(CAST(:tags AS text[]))) AS matched_tags
-            FROM {settings.db_schema}.cdp_content_items
-            WHERE status_code = 1
-              AND (domain = 'all' OR domain = :domain)
-              AND (:item_type IS NULL OR item_type = :item_type)
-            ORDER BY cardinality(ARRAY(SELECT UNNEST(segment_tags) INTERSECT SELECT UNNEST(CAST(:tags AS text[])))) DESC,
-                     published_at DESC
+                content.content_item_id,
+                content.tenant_id,
+                content.domain,
+                content.item_type,
+                content.title,
+                content.summary,
+                content.image_url,
+                content.cta_label,
+                content.cta_url,
+                content.segment_tags,
+                content.published_at,
+                content.status_code,
+                content.created_at,
+                content.updated_at,
+                recommendation.matched_tags,
+                recommendation.segment_id,
+                recommendation.agent_code,
+                recommendation.rank,
+                recommendation.score,
+                recommendation.reason,
+                recommendation.generated_at
+            FROM best_recommendation_per_item AS recommendation
+            JOIN {settings.db_schema}.cdp_content_items AS content
+              ON content.tenant_id = :tenant_id
+             AND content.content_item_id = recommendation.content_item_id
+            CROSS JOIN profile
+            WHERE content.status_code = 1
+              AND (content.domain = 'all' OR content.domain = profile.domain)
+              AND (:item_type IS NULL OR content.item_type = :item_type)
+            ORDER BY recommendation.score DESC, recommendation.rank,
+                     recommendation.generated_at DESC, content.content_item_id
             LIMIT :limit
         """
         rows = self.session.execute(
             text(sql),
             {
-                "tags": list(profile_row["tags"]),
-                "domain": profile_row["domain"],
+                "tenant_id": str(tenant_id),
+                "mpid": str(master_profile_id),
+                "segment_id": str(segment_id) if segment_id else None,
                 "item_type": item_type,
                 "limit": limit,
             },

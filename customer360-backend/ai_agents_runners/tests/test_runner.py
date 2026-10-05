@@ -1,12 +1,18 @@
+import json
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
-from ai_agents_runners.runner import AgentWorkflowMasterTask
+import pytest
+
+import ai_agents_runners.runner as runner
+from ai_agents_runners.runner import AgentWorkflowMasterTask, WorkflowRunSummary
 
 
 class FakeCursor:
     def __init__(self, rows):
         self.rows = rows
         self.executed = None
+        self.calls = []
 
     def __enter__(self):
         return self
@@ -16,6 +22,7 @@ class FakeCursor:
 
     def execute(self, query, params):
         self.executed = (query, params)
+        self.calls.append((query, params))
 
     def fetchall(self):
         return self.rows
@@ -63,6 +70,35 @@ def test_api_trigger_selects_active_steps_in_database_order():
     ]
 
 
+def test_candidate_uuid_array_is_normalized_before_pipeline_input():
+    tenant_id = "11111111-1111-1111-1111-111111111111"
+    segment_id = "22222222-2222-2222-2222-222222222222"
+    candidate_ids = [
+        "33333333-3333-3333-3333-333333333333",
+        "44444444-4444-4444-4444-444444444444",
+    ]
+    row = {
+        "tenant_id": tenant_id,
+        "segment_id": segment_id,
+        "agent_code": "product_recommendation",
+        "model_type": "ranking_recommendation",
+        "execution_order": 1,
+        "configuration": {},
+        "candidate_content_item_ids": json.dumps(candidate_ids),
+        "effective_schedule": None,
+    }
+
+    connection = FakeConnection([row])
+    summary = AgentWorkflowMasterTask(lambda: connection).run(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+    )
+
+    assert summary.plan[0]["candidate_content_item_ids"] == candidate_ids
+    assert "to_json(w.candidate_content_item_ids)" in connection.cursor_instance.executed[0]
+
+
 def test_cron_trigger_skips_steps_that_are_not_due():
     rows = [
         {
@@ -82,3 +118,152 @@ def test_cron_trigger_skips_steps_that_are_not_due():
     )
     assert summary.selected_steps == 0
     assert summary.skipped_steps == 1
+
+
+def test_execute_ranking_step_persists_results_for_every_segment_profile(monkeypatch):
+    tenant_id = "11111111-1111-1111-1111-111111111111"
+    segment_id = "22222222-2222-2222-2222-222222222222"
+    content_id = "33333333-3333-3333-3333-333333333333"
+    profiles = [
+        {
+            "master_profile_id": "44444444-4444-4444-4444-444444444444",
+            "domain": "retail",
+            "segmentation_tags": ["loyal", "vip"],
+        },
+        {
+            "master_profile_id": "55555555-5555-5555-5555-555555555555",
+            "domain": "retail",
+            "segmentation_tags": ["loyal"],
+        },
+    ]
+    connections = []
+
+    def connection_factory():
+        connection = FakeConnection(profiles if not connections else [])
+        connections.append(connection)
+        return connection
+
+    pipeline_payloads = []
+    persisted_rows = []
+
+    def pipeline_executor(payload, run_id):
+        pipeline_payloads.append((payload, run_id))
+        return SimpleNamespace(
+            result={
+                "ranked_items": [
+                    {
+                        "item_id": content_id,
+                        "rank": 1,
+                        "score": 1,
+                        "matched_tags": ["loyal"],
+                        "reason": "segment_tag_overlap",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(
+        runner,
+        "execute_values",
+        lambda _cursor, _query, rows, **_kwargs: persisted_rows.append(list(rows)),
+    )
+    task = AgentWorkflowMasterTask(
+        connection_factory=connection_factory,
+        pipeline_executor=pipeline_executor,
+    )
+    summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(
+            {
+                "tenant_id": tenant_id,
+                "segment_id": segment_id,
+                "agent_code": "product_recommendation",
+                "model_type": "ranking_recommendation",
+                "execution_order": 1,
+                "configuration": {"limit": 4},
+                "candidate_content_item_ids": [content_id],
+                "trigger_event": {"event_name": "manual"},
+            },
+        ),
+    )
+
+    result = task.execute(summary, run_id="dagster-run-1")
+
+    assert result.executed_steps == 1
+    assert result.profile_runs_processed == 2
+    assert result.recommendations_written == 2
+    assert result.unsupported_steps == 0
+    assert [payload[0]["input_data"]["segmentation_tags"] for payload in pipeline_payloads] == [
+        ["loyal", "vip"],
+        ["loyal"],
+    ]
+    assert all(payload[1] == "dagster-run-1" for payload in pipeline_payloads)
+    assert [rows[0][2] for rows in persisted_rows] == [
+        profiles[0]["master_profile_id"],
+        profiles[1]["master_profile_id"],
+    ]
+    assert all(rows[0][4] == content_id for rows in persisted_rows)
+    assert connections[0].cursor_instance.calls[-1][1] == (segment_id, tenant_id)
+    assert connections[1].cursor_instance.calls[-1][1] == (
+        tenant_id,
+        segment_id,
+        "dagster-run-1",
+        len(profiles),
+        1,
+    )
+    assert connections[-1].cursor_instance.calls[1][1][0] == "SUCCEEDED"
+
+
+def test_failed_recommendation_run_is_not_published():
+    tenant_id = "11111111-1111-1111-1111-111111111111"
+    segment_id = "22222222-2222-2222-2222-222222222222"
+    content_id = "33333333-3333-3333-3333-333333333333"
+    profile = {
+        "master_profile_id": "44444444-4444-4444-4444-444444444444",
+        "domain": "retail",
+        "segmentation_tags": ["loyal"],
+    }
+    connections = []
+
+    def connection_factory():
+        connection = FakeConnection([profile] if not connections else [])
+        connections.append(connection)
+        return connection
+
+    def fail_pipeline(_payload, _run_id):
+        raise ValueError("candidate ranking failed")
+
+    task = AgentWorkflowMasterTask(
+        connection_factory=connection_factory,
+        pipeline_executor=fail_pipeline,
+    )
+    summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(
+            {
+                "tenant_id": tenant_id,
+                "segment_id": segment_id,
+                "agent_code": "product_recommendation",
+                "model_type": "ranking_recommendation",
+                "execution_order": 1,
+                "configuration": {},
+                "candidate_content_item_ids": [content_id],
+                "trigger_event": {},
+            },
+        ),
+    )
+
+    with pytest.raises(ValueError, match="candidate ranking failed"):
+        task.execute(summary, run_id="dagster-run-failed")
+
+    finish_calls = connections[-1].cursor_instance.calls
+    assert finish_calls[1][1][0] == "FAILED"
+    assert finish_calls[2][1] == (tenant_id, segment_id, "dagster-run-failed")

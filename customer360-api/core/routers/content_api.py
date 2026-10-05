@@ -1,7 +1,7 @@
 """API for personalized content items (news/videos/products/articles) shown
 in the Customer 360 profile dashboard, plus a ``/recommended`` endpoint that
-ranks items for a given master profile by ``segment_tags`` overlap with that
-profile's ``segmentation_tags`` -- computed in PostgreSQL, not hardcoded.
+serves persisted ranking-workflow results for one profile, optionally filtered
+to a segment.
 """
 
 import uuid
@@ -247,20 +247,24 @@ def create_product_item(
 
 
 @router.get("/recommended", response_model=list[RecommendedContentItem])
-@cache_response("content_items/recommended", ttl=60)
 def get_recommended_content_items(
+    tenant_context: TenantId,
     master_profile_id: uuid.UUID,
+    segment_id: uuid.UUID | None = None,
     item_type: Optional[str] = Query(default=None, pattern="^(news|video|product|article)$"),
     limit: int = Query(default=8, le=50),
     db: Session = Depends(get_db),
 ):
-    """Ranks active content items for ``master_profile_id`` by how many
-    ``segment_tags`` overlap with the profile's ``segmentation_tags`` (ties
-    broken by most-recently published), falling back to domain-matched
-    items with no tag overlap when a profile has few/no tags."""
+    """Return persisted rankings, merged across segments by default."""
     repo = ContentRepository(db)
     try:
-        items = repo.get_recommended_items(master_profile_id, item_type=item_type, limit=limit)
+        items = repo.get_recommended_items(
+            tenant_id=uuid.UUID(tenant_context),
+            master_profile_id=master_profile_id,
+            segment_id=segment_id,
+            item_type=item_type,
+            limit=limit,
+        )
         return items
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

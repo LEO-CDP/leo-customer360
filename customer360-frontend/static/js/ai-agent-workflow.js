@@ -491,12 +491,24 @@ window.C360 = window.C360 || {};
           invalidConfiguration = true;
           return;
         }
+        var isActive = $row.find(".workflow-active").is(":checked");
+        var candidateContentItemIds = $row.find(".workflow-candidates").val() || [];
+        if (
+          isActive &&
+          this.supportsCandidateContent(agentCode, this.steps[index]) &&
+          candidateContentItemIds.length === 0
+        ) {
+          throw new Error(
+            "Step " + (index + 1) +
+            " must select at least one candidate content item for ranking recommendations."
+          );
+        }
         steps.push({
           agent_code: agentCode,
           execution_order: executionOrder,
-          is_active: $row.find(".workflow-active").is(":checked"),
+          is_active: isActive,
           schedule_definition: scheduleDefinition,
-          candidate_content_item_ids: $row.find(".workflow-candidates").val() || [],
+          candidate_content_item_ids: candidateContentItemIds,
           configuration: configuration
         });
       });

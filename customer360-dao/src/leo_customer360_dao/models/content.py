@@ -1,12 +1,4 @@
-"""Personalized content items (news / videos / products / articles) shown in
-the Customer 360 profile dashboard's "Personalized Items" panel.
-
-New table (not in the original database-schema.sql) -- a lightweight content
-library that the ``/content-items/recommended`` endpoint ranks per master
-profile by ``segment_tags`` overlap with the profile's ``segmentation_tags``,
-so recommendations are computed from real PostgreSQL data rather than
-hardcoded in the frontend. See core/routers/content_api.py.
-"""
+"""Tenant-scoped content items selected by segment ranking workflows."""
 
 import uuid
 from datetime import datetime

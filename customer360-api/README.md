@@ -331,7 +331,13 @@ Campaign activation and email administration under `/admin`:
   `POST /content-items/products`
 - `GET /content-items/` supports tenant-scoped search, domain/type/status
   filters, and offset paging.
-- `GET /content-items/recommended`
+- `GET /content-items/recommended?master_profile_id=<uuid>` returns the latest
+  persisted ranking results from the profile's active segment workflows.
+  Results are merged and deduplicated across segments by default; an optional
+  `segment_id=<uuid>` restricts the response to one segment.
+- `POST /segments/{segment_id}/workflow/run` executes configured
+  `ranking_recommendation` steps for active profiles currently in that segment,
+  using only the step's selected content candidates.
 - `GET /content-items/count`
 - `POST /content-items/import/products` accepts a tenant-authenticated
   multipart `.tsv` upload (maximum 10 MiB / 5,000 rows) and returns `202` with a

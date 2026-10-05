@@ -100,10 +100,10 @@ class RankingRecommendationPipeline(AgentTypePipeline):
             segmentation_tags=segmentation_tags,
             candidate_ids=candidate_ids,
         )
-        if len(rows) != len(candidate_ids):
+        if not rows:
             raise ValueError(
-                "One or more recommendation candidates are unavailable for this tenant "
-                "or are inactive or outside the profile domain"
+                "Selected recommendation candidates are unavailable for this tenant, "
+                "active status, or profile domain"
             )
 
         return {
@@ -129,6 +129,10 @@ class RankingRecommendationPipeline(AgentTypePipeline):
         )
         with self._connection_factory() as connection:
             with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)",
+                    (str(tenant_id),),
+                )
                 cursor.execute(RANK_CANDIDATE_CONTENT_SQL, params)
                 return list(cursor.fetchall())
 

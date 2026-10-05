@@ -49,3 +49,9 @@ class ContentItemRead(ContentItemBase):
 
 class RecommendedContentItem(ContentItemRead):
     matched_tags: list[str] = Field(default_factory=list)
+    segment_id: uuid.UUID
+    agent_code: str
+    rank: int
+    score: float
+    reason: str
+    generated_at: datetime

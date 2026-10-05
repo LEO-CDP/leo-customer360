@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from core.auth import require_tenant
 from core.database import get_db
+from core.repositories.content_repository import ContentRepository
 from core.routers.content_api import router
 
 TENANT_ID = "11111111-1111-1111-1111-111111111111"
@@ -100,6 +101,78 @@ def test_content_listing_can_exclude_product_rows_for_the_contents_tab():
     assert response.status_code == 200
     assert repository.list_items.call_args.kwargs["tenant_id"] == uuid.UUID(TENANT_ID)
     assert repository.list_items.call_args.kwargs["content_only"] is True
+
+
+def test_recommended_items_default_to_combined_segments_and_accept_segment_filter():
+    client, _db = make_client()
+    repository = MagicMock()
+    recommended = make_product(
+        matched_tags=["loyal"],
+        segment_id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        agent_code="product_recommendation",
+        rank=1,
+        score=1.0,
+        reason="segment_tag_overlap",
+        generated_at=datetime.now(timezone.utc),
+    )
+    repository.get_recommended_items.return_value = [recommended]
+    with patch("core.routers.content_api.ContentRepository", return_value=repository):
+        response = client.get(
+            "/content-items/recommended",
+            params={"master_profile_id": PRODUCT_ID},
+        )
+
+    assert response.status_code == 200
+    assert response.json()[0]["rank"] == 1
+    repository.get_recommended_items.assert_called_once_with(
+        tenant_id=uuid.UUID(TENANT_ID),
+        master_profile_id=uuid.UUID(PRODUCT_ID),
+        segment_id=None,
+        item_type=None,
+        limit=8,
+    )
+
+    repository.reset_mock()
+    with patch("core.routers.content_api.ContentRepository", return_value=repository):
+        response = client.get(
+            "/content-items/recommended",
+            params={
+                "master_profile_id": PRODUCT_ID,
+                "segment_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            },
+        )
+
+    assert response.status_code == 200
+    assert repository.get_recommended_items.call_args.kwargs["segment_id"] == uuid.UUID(
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    )
+
+
+def test_recommended_items_query_deduplicates_across_segments_and_scopes_tenant():
+    session = MagicMock()
+    profile_result = MagicMock()
+    profile_result.mappings.return_value.first.return_value = {"domain": "retail"}
+    rows_result = MagicMock()
+    rows_result.mappings.return_value.all.return_value = [{"product_id": "sku-1"}]
+    session.execute.side_effect = [profile_result, rows_result]
+    repository = ContentRepository(session)
+
+    result = repository.get_recommended_items(
+        tenant_id=uuid.UUID(TENANT_ID),
+        master_profile_id=uuid.UUID(PRODUCT_ID),
+        limit=8,
+    )
+
+    assert result == [{"product_id": "sku-1"}]
+    profile_query, profile_params = session.execute.call_args_list[0].args
+    recommendations_query, query_params = session.execute.call_args_list[1].args
+    assert "tenant_id = :tenant_id AND master_profile_id = :mpid" in str(profile_query)
+    assert profile_params == {"tenant_id": TENANT_ID, "mpid": PRODUCT_ID}
+    assert "DISTINCT ON (content_item_id)" in str(recommendations_query)
+    assert "CAST(:segment_id AS uuid) IS NULL" in str(recommendations_query)
+    assert "segment.segment_tag = ANY(profile.tags)" in str(recommendations_query)
+    assert query_params["tenant_id"] == TENANT_ID
+    assert query_params["segment_id"] is None
 
 
 def test_create_product_validates_domain_and_creates_scoped_product():

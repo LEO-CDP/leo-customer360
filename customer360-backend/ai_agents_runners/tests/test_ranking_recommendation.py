@@ -154,6 +154,28 @@ def test_ranking_pipeline_rejects_candidate_not_eligible_for_tenant(monkeypatch)
         execute_agent_pipeline(_input(), run_id="dagster-run-1")
 
 
+def test_ranking_pipeline_uses_only_selected_candidates_available_for_profile_domain(
+    monkeypatch,
+):
+    connection = FakeConnection(
+        [
+            _candidate(
+                CONTENT_ITEM_1,
+                score=1,
+                matched_tags=["loyal"],
+                published_at=None,
+            )
+        ]
+    )
+    pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    output = execute_agent_pipeline(_input(), run_id="dagster-run-1")
+
+    assert len(output.result["ranked_items"]) == 1
+    assert output.result["ranked_items"][0]["item_id"] == CONTENT_ITEM_1
+
+
 def test_ranking_pipeline_uses_fallback_reason_without_tag_overlap(monkeypatch):
     connection = FakeConnection(
         [

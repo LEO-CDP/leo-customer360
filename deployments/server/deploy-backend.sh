@@ -155,10 +155,13 @@ else
   echo ">> Email: dispatch = mock (no smtp.$ENV.env for '$ENV') -- email_engine will not send real email"
 fi
 ENV_B64="$(printf %s "$ENV_CONTENT" | base64 | tr -d '\n')"
-ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ENV_B64" "$DEPLOY_MODE" "$GHCR_USER" "$IMAGE" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ENV_B64" "$DEPLOY_MODE" "$GHCR_USER" "$IMAGE" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\n')" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$PRODUCT_IMPORT_S3_BUCKET" "$CONTENT_IMPORT_S3_BUCKET" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 ENV_B64="$1"; DEPLOY_MODE="$2"; GHCR_USER="${3:-token}"; IMAGE="${4:-}"; GHCR_TOKEN="$(printf %s "${5:-}" | base64 -d 2>/dev/null || true)"
-S3_AUTO_CREATE_BUCKETS="${6:-false}"; MASTER_PROFILE_S3_BUCKET="${7:-c360-master-profiles}"
+S3_AUTO_CREATE_BUCKETS="${6:-false}"
+MASTER_PROFILE_S3_BUCKET="${7:-c360-master-profiles}"
+PRODUCT_IMPORT_S3_BUCKET="${8:-c360-product-imports}"
+CONTENT_IMPORT_S3_BUCKET="${9:-c360-content-imports}"
 if ! command -v docker >/dev/null 2>&1; then
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io
