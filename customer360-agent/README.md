@@ -374,9 +374,10 @@ AGENT_API_TOKEN=the-same-token-as-the-agent
 
 It sends `Authorization: Bearer <token>` and calls `/plan/email` or `/plan/zalo`.
 In the repository Docker Compose deployment the service is named `agent`, so the
-API uses `http://agent:8009`; the agent receives its Postgres URL through
-`AGENT_DATABASE_URL` and both services receive the shared token from the root
-`.env`.
+API and Dagster services use `http://agent:8009`. Dagster needs this URL when
+product imports check agent readiness and generate content. The agent receives
+its Postgres URL through `AGENT_DATABASE_URL`; the root `.env` supplies the
+shared token to the API, Dagster, and agent services.
 
 ## Security
 

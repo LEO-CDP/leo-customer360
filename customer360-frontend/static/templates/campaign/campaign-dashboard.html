@@ -9,25 +9,21 @@
   <header class="flex flex-wrap items-center justify-between gap-4 bg-white border border-slate-200/80 rounded-2xl shadow-sm p-6">
     <div class="flex items-center gap-4">
       <div class="p-3 bg-violet-50 text-violet-600 rounded-xl flex-shrink-0" aria-hidden="true">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.069-3.102m3.102.069a22.536 22.536 0 013.102.069m-3.102-.069c.56.021 1.12.04 1.68.057m-1.68-.057a22.53 22.53 0 00-3.102-.069m6.204.069a18.03 18.03 0 01-3.102-.069" />
-        </svg>
+        <i class="bi bi-megaphone text-lg leading-none" aria-hidden="true"></i>
       </div>
       <div>
-        <h1 class="text-xl font-bold text-slate-900 tracking-tight">Campaign Performance Dashboard</h1>
-        <p class="text-sm text-slate-500 mt-1">Omnichannel marketing analytics — Google · Meta · TikTok · Zalo · Adjust · YouTube</p>
+        <h1 class="text-lg font-bold text-slate-900 tracking-tight">Campaign Performance Dashboard</h1>
+        <p class="text-xs text-slate-400 mt-0.5">Omnichannel marketing analytics — Google · Meta · TikTok · Zalo · Adjust · YouTube</p>
       </div>
     </div>
     <!-- Added focus-visible for better a11y, unified transition -->
     <div class="flex items-center gap-2">
-    <button id="btn-campaign-create" aria-label="Create campaign" class="inline-flex items-center gap-2 bg-indigo-600 text-white rounded-xl px-4 py-2.5 text-sm font-semibold hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 transition-all shadow-sm">
-      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+    <button id="btn-campaign-create" type="button" aria-label="Create campaign" class="inline-flex items-center gap-2 bg-indigo-600 text-white rounded-xl px-4 py-2.5 text-sm font-semibold hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 transition-all shadow-sm">
+      <i class="bi bi-plus-lg text-sm leading-none" aria-hidden="true"></i>
       <span>Create campaign</span>
     </button>
-    <button id="btn-campaign-refresh" aria-label="Refresh Dashboard" class="inline-flex items-center gap-2 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-4 py-2.5 text-sm font-semibold hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 transition-all shadow-sm active:scale-95">
-      <svg class="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-      </svg>
+    <button id="btn-campaign-refresh" type="button" aria-label="Refresh Dashboard" class="inline-flex items-center gap-2 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-4 py-2.5 text-sm font-semibold hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 transition-all shadow-sm active:scale-95">
+      <i class="bi bi-arrow-clockwise text-sm text-slate-500" aria-hidden="true"></i>
       <span>Refresh</span>
     </button>
     </div>
@@ -168,8 +164,8 @@
           Top 5 Campaigns
         </h2>
         <div class="flex items-center gap-1.5" role="group" aria-label="Chart Metric Selectors">
-          <button id="btn-top-by-conversions" class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-violet-400 text-violet-700 bg-violet-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 transition-colors" aria-current="true">Conversions</button>
-          <button id="btn-top-by-roas" class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-600 hover:border-violet-400 hover:text-violet-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 transition-colors">ROAS</button>
+          <button id="btn-top-by-conversions" type="button" class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-violet-400 text-violet-700 bg-violet-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 transition-colors" aria-current="true">Conversions</button>
+          <button id="btn-top-by-roas" type="button" class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-600 hover:border-violet-400 hover:text-violet-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 transition-colors">ROAS</button>
         </div>
       </figcaption>
       <!-- Relative container for chart responsiveness -->
@@ -243,7 +239,7 @@
           <option value="roas">Sort: ROAS</option>
         </select>
 
-        <button id="campaign-filter-sort-order" data-order="desc" aria-label="Toggle Sort Order"
+        <button id="campaign-filter-sort-order" type="button" data-order="desc" aria-label="Toggle Sort Order"
           class="inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold border border-slate-300 rounded-xl bg-white text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 transition-colors shadow-sm">
           <svg id="campaign-sort-icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h9.75m4.5-4.5v12m0 0l-3.75-3.75M17.25 21L21 17.25" />
@@ -251,7 +247,7 @@
           <span id="campaign-sort-label">DESC</span>
         </button>
 
-        <button id="campaign-filter-reset" aria-label="Reset all filters" class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border border-slate-300 rounded-xl bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 transition-colors shadow-sm">
+        <button id="campaign-filter-reset" type="button" aria-label="Reset all filters" class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border border-slate-300 rounded-xl bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 transition-colors shadow-sm">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           Reset
         </button>
@@ -297,7 +293,7 @@
     <!-- Footer: count + load more -->
     <div class="p-4 px-6 border-t border-slate-200 flex items-center justify-between bg-slate-50/50">
       <span id="campaign-table-count" aria-live="polite" class="text-sm text-slate-500 font-medium"></span>
-      <button id="btn-campaign-load-more" class="hidden border border-slate-300 bg-white rounded-lg px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 transition-all shadow-sm">Load more</button>
+      <button id="btn-campaign-load-more" type="button" class="hidden border border-slate-300 bg-white rounded-lg px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 transition-all shadow-sm">Load more</button>
     </div>
 
   </section>

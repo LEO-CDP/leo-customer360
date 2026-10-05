@@ -94,7 +94,7 @@ const TIME_CHECK_API_HEALTH = 60000;
   function bindBrowserEvents() {
     $("#btn-back-to-profiles").on("click", function () { C360.router.navigate("/profiles"); });
 
-    $("#btn-export-pdf").on("click", function () { window.print(); });
+    $(document).on("click", "#btn-export-pdf", function () { window.print(); });
 
     $("#btn-settings").on("click", function () {
       populateSettingsModal();

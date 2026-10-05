@@ -154,6 +154,7 @@ window.C360 = window.C360 || {};
 
   function bindEvents() {
     $(document).on("change", "#overview-period-select", load);
+    $(document).on("click", "#btn-overview-refresh", load);
   }
 
   bindEvents();

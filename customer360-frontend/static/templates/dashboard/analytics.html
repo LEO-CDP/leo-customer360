@@ -15,9 +15,7 @@
     <div class="flex items-center gap-3">
       <div class="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
         <!-- Analytics / Dashboard Icon -->
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h13.5M3.75 19.5h16.5M9.75 9.75l3 3 4.5-4.5" />
-        </svg>
+        <i class="bi bi-graph-up-arrow text-lg leading-none" aria-hidden="true"></i>
       </div>
       <div>
         <h1 class="text-lg font-bold text-slate-900 tracking-tight">Unified Analytics Dashboard</h1>
@@ -25,24 +23,27 @@
       </div>
     </div>
     
-
-
-    <!-- Report Period (independent of the old shared header control -- see analytics.js) -->
-    <div id="analytics-report-period" class="flex items-center gap-2">
-      <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider" for="analytics-period-select">Period</label>
-      <select id="analytics-period-select" class="text-xs border border-slate-200/80 bg-white hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer font-medium">
-        <option value="3">Last 3 days</option>
-        <option value="7">Last 7 days</option>
-        <option value="30" selected >Last 30 days</option>
-        <option value="90">Last 90 days</option>
-        <option value="120">Last 120 days</option>
-        <option value="180">Last 180 days</option>
-      </select>
-
-      <button id="btn-analytics-refresh" class="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-4 py-2 text-xs font-semibold hover:bg-slate-100 transition-colors shadow-sm">
-      <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
-      <span>Refresh</span>
-    </button>
+    <!-- Report Period and Actions (independent of the old shared header control -- see analytics.js) -->
+    <div class="flex flex-wrap items-center gap-2">
+      <button id="btn-export-pdf" type="button" class="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-3.5 py-2 text-xs font-semibold transition-all shadow-sm shadow-indigo-100">
+        <i class="bi bi-file-earmark-pdf text-sm leading-none" aria-hidden="true"></i>
+        <span>Export PDF</span>
+      </button>
+      <div id="analytics-report-period" class="flex items-center gap-2">
+        <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider" for="analytics-period-select">Period</label>
+        <select id="analytics-period-select" class="text-xs border border-slate-200/80 bg-white hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer font-medium">
+          <option value="3">Last 3 days</option>
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="120">Last 120 days</option>
+          <option value="180">Last 180 days</option>
+        </select>
+      </div>
+      <button id="btn-analytics-refresh" type="button" class="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-slate-100 transition-colors shadow-sm">
+        <i class="bi bi-arrow-clockwise text-sm" aria-hidden="true"></i>
+        <span>Refresh</span>
+      </button>
     </div>
   </div>
 

@@ -6,15 +6,12 @@
 <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
   
   <!-- Header Section -->
-  <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+  <div class="p-6 border-b border-slate-100 bg-white flex flex-wrap items-center justify-between gap-4">
     
     <!-- Title & Subtitle with Icon -->
     <div class="flex items-start gap-3">
-      <div class="p-2 bg-indigo-50 text-indigo-600 rounded-xl mt-0.5">
-        <!-- Folder / Audience Icon -->
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.06-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
-        </svg>
+      <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 mt-0.5">
+        <i class="bi bi-diagram-3 text-lg leading-none" aria-hidden="true"></i>
       </div>
       <div>
         <h1 class="text-base font-bold text-slate-900 tracking-tight">Segments</h1>
@@ -23,11 +20,11 @@
     </div>
    
     <!-- Search & Action Buttons -->
-    <div class="flex flex-wrap items-center gap-2.5">
+    <div class="flex flex-wrap items-center gap-2">
       <!-- Search Input with Icon -->
       <div class="relative">
         <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+          <i class="bi bi-search text-sm leading-none" aria-hidden="true"></i>
         </span>
         <input id="segments-search-input" type="search" name="segment_search"
           placeholder="Search segments by name…" autocomplete="off" autocorrect="off" spellcheck="false" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
@@ -56,18 +53,18 @@
       </select>
 
       <button id="btn-segments-clear-filters" type="button" title="Clear segment filters" aria-label="Clear segment filters" class="inline-flex items-center justify-center h-8 w-8 border border-slate-200/80 bg-white rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors shadow-sm">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m14.836 2A7.5 7.5 0 005.582 9m0 0H9m11 11v-5h-.581m0 0a7.5 7.5 0 01-13.837-2M15 20h3" /></svg>
+        <i class="bi bi-arrow-counterclockwise text-sm leading-none" aria-hidden="true"></i>
       </button>
 
       <!-- Refresh segments with member data -->
-      <button id="btn-segments-refresh" title="Recompute all segment memberships" class="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-slate-100 transition-colors shadow-sm">
-        <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+      <button id="btn-segments-refresh" type="button" title="Recompute all segment memberships" class="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-slate-100 transition-colors shadow-sm">
+        <i class="bi bi-arrow-clockwise text-sm text-slate-400" aria-hidden="true"></i>
         <span>Refresh</span>
       </button>
 
       <!-- Create new segment -->
-      <button id="btn-segments-create" title="Create audience segment" class="inline-flex items-center gap-1.5 bg-indigo-600 text-white rounded-xl px-4 py-2 text-xs font-semibold hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-100">
-        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+      <button id="btn-segments-create" type="button" title="Create audience segment" class="inline-flex items-center gap-1.5 bg-indigo-600 text-white rounded-xl px-4 py-2 text-xs font-semibold hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 transition-colors shadow-sm shadow-indigo-100">
+        <i class="bi bi-plus-lg text-sm leading-none" aria-hidden="true"></i>
         <span>Create segment</span>
       </button>
     </div>
@@ -99,7 +96,7 @@
   <!-- Footer Pagination / Counts -->
   <div class="p-4 px-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/30">
     <span id="segments-count-label" class="font-medium"></span>
-    <button id="btn-segments-load-more" class="hidden border border-slate-200/80 bg-white rounded-lg px-3 py-1.5 font-semibold text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Load more</button>
+    <button id="btn-segments-load-more" type="button" class="hidden border border-slate-200/80 bg-white rounded-lg px-3 py-1.5 font-semibold text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">Load more</button>
   </div>
 
 </div>

@@ -9,14 +9,12 @@
 <div class="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
 
   <!-- Header Section -->
-  <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+  <div class="p-6 border-b border-slate-100 bg-white flex flex-wrap items-center justify-between gap-4">
 
     <!-- Title & Icon -->
     <div class="flex items-center gap-3">
-      <div class="p-2 bg-cyan-50 text-cyan-600 rounded-xl">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M3 7.5h18M3 12h18M3 16.5h18M4.5 7.5v9a1.5 1.5 0 001.5 1.5h12a1.5 1.5 0 001.5-1.5v-9" />
-        </svg>
+      <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-600 ring-1 ring-cyan-100">
+        <i class="bi bi-database text-lg leading-none" aria-hidden="true"></i>
       </div>
       <div>
         <h1 class="text-base font-bold text-slate-900 tracking-tight">Data Sources</h1>
@@ -25,12 +23,12 @@
     </div>
 
     <!-- Filter Controls & Actions -->
-    <div class="flex flex-wrap items-center gap-2.5">
+    <div class="flex flex-wrap items-center gap-2">
 
       <!-- Search Input with Icon -->
       <div class="relative">
         <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+          <i class="bi bi-search text-sm leading-none" aria-hidden="true"></i>
         </span>
         <input id="datasources-search-input" type="search" name="datasource_search"
             placeholder="Search name, slug, url, host…" autocomplete="off" autocorrect="off" spellcheck="false" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all rounded-xl pl-9 pr-3.5 py-2 w-64 text-slate-700 placeholder-slate-400 shadow-sm outline-none" />
@@ -55,13 +53,13 @@
 
       <!-- Refresh Data Sources -->
       <button id="btn-datasource-refresh" type="button" class="group inline-flex items-center gap-1.5 border border-slate-200/80 bg-white hover:bg-slate-50 hover:border-slate-300 active:bg-slate-100 text-slate-700 hover:text-slate-900 active:scale-[0.98] rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1 transition-all shadow-sm" title="Refresh data sources">
-        <svg class="w-3.5 h-3.5 text-slate-400 group-hover:text-cyan-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+        <i class="bi bi-arrow-clockwise text-sm text-slate-400 group-hover:text-cyan-600 transition-colors" aria-hidden="true"></i>
         <span>Refresh</span>
       </button>
 
       <!-- Add Data Source Button -->
       <button id="btn-datasource-add" type="button" class="group inline-flex items-center gap-1.5 bg-cyan-600 hover:bg-cyan-700 active:bg-cyan-800 text-white rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-1 hover:shadow-md hover:shadow-cyan-100 active:scale-[0.98] transition-all">
-        <svg class="w-3.5 h-3.5 transition-transform group-hover:rotate-90 duration-200" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+        <i class="bi bi-plus-lg text-sm transition-transform group-hover:rotate-90 duration-200" aria-hidden="true"></i>
         <span>Add Data Source</span>
       </button>
 
