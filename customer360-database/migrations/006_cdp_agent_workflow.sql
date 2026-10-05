@@ -53,6 +53,35 @@ CREATE INDEX IF NOT EXISTS idx_cdp_agent_workflow_active_queue
 CREATE INDEX IF NOT EXISTS idx_cdp_agent_workflow_candidates
     ON customer360.cdp_agent_workflow USING GIN (candidate_content_item_ids);
 
+ALTER TABLE customer360.cdp_content_items
+    ADD COLUMN IF NOT EXISTS embedding VECTOR;
+ALTER TABLE customer360.cdp_content_items
+    ADD COLUMN IF NOT EXISTS embedding_model TEXT;
+
+CREATE OR REPLACE FUNCTION customer360.invalidate_content_item_embedding()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.domain IS DISTINCT FROM OLD.domain
+       OR NEW.item_type IS DISTINCT FROM OLD.item_type
+       OR NEW.title IS DISTINCT FROM OLD.title
+       OR NEW.summary IS DISTINCT FROM OLD.summary
+       OR NEW.segment_tags IS DISTINCT FROM OLD.segment_tags THEN
+        NEW.embedding := NULL;
+        NEW.embedding_model := NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_invalidate_content_item_embedding
+    ON customer360.cdp_content_items;
+CREATE TRIGGER trg_invalidate_content_item_embedding
+    BEFORE UPDATE OF domain, item_type, title, summary, segment_tags
+    ON customer360.cdp_content_items
+    FOR EACH ROW EXECUTE FUNCTION customer360.invalidate_content_item_embedding();
+
 -- An array keeps candidate lists in the requested single relation table.
 -- Lock referenced rows to serialize validation against deletion/key changes.
 CREATE OR REPLACE FUNCTION customer360.validate_agent_workflow_candidates()
@@ -172,7 +201,10 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendations (
     run_id TEXT NOT NULL,
     content_item_id UUID NOT NULL,
     rank INTEGER NOT NULL CHECK (rank > 0),
-    score DOUBLE PRECISION NOT NULL CHECK (score >= 0),
+    score DOUBLE PRECISION NOT NULL CHECK (score BETWEEN 0 AND 1),
+    semantic_score DOUBLE PRECISION CHECK (semantic_score IS NULL OR semantic_score BETWEEN 0 AND 1),
+    tag_score DOUBLE PRECISION NOT NULL CHECK (tag_score BETWEEN 0 AND 1),
+    strategy TEXT NOT NULL CHECK (strategy IN ('tags', 'semantic', 'hybrid')),
     matched_tags TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
     reason TEXT NOT NULL,
     generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -190,6 +222,13 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendations (
         FOREIGN KEY (tenant_id, content_item_id)
         REFERENCES customer360.cdp_content_items (tenant_id, content_item_id) ON DELETE CASCADE
 );
+
+ALTER TABLE customer360.cdp_profile_recommendations
+    ADD COLUMN IF NOT EXISTS semantic_score DOUBLE PRECISION;
+ALTER TABLE customer360.cdp_profile_recommendations
+    ADD COLUMN IF NOT EXISTS tag_score DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE customer360.cdp_profile_recommendations
+    ADD COLUMN IF NOT EXISTS strategy TEXT NOT NULL DEFAULT 'tags';
 
 CREATE INDEX IF NOT EXISTS idx_cdp_profile_recommendations_lookup
     ON customer360.cdp_profile_recommendations

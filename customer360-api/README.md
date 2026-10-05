@@ -337,7 +337,18 @@ Campaign activation and email administration under `/admin`:
   `segment_id=<uuid>` restricts the response to one segment.
 - `POST /segments/{segment_id}/workflow/run` executes configured
   `ranking_recommendation` steps for active profiles currently in that segment,
-  using only the step's selected content candidates.
+  using only the step's selected content candidates. Configure the step's JSON
+  `configuration` with `strategy` (`tags`, `semantic`, or `hybrid`), `top_k`,
+  `semantic_weight`, `tag_weight`, `minimum_score`, and optional `semantic_query`.
+  Semantic/hybrid ranking uses the existing `DOCS_EMBEDDING_PROVIDER` and
+  provider-specific `DOCS_*_EMBEDDING_*` settings; selected content embeddings
+  are generated and cached lazily. Profile query text uses domain and segment tags, plus the
+  optional operator-provided context, not profile PII. Recommendation ranking
+  evaluates only the configured content candidates using pgvector cosine
+  distance and segment-tag overlap. To use Gemini, select it with the existing
+  `DOCS_EMBEDDING_PROVIDER=gemini` setting and configure the existing
+  `DOCS_GEMINI_*` embedding settings; no recommendation-specific embedding
+  variables are introduced.
 - `GET /content-items/count`
 - `POST /content-items/import/products` accepts a tenant-authenticated
   multipart `.tsv` upload (maximum 10 MiB / 5,000 rows) and returns `202` with a

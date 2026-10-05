@@ -267,3 +267,108 @@ def test_failed_recommendation_run_is_not_published():
     finish_calls = connections[-1].cursor_instance.calls
     assert finish_calls[1][1][0] == "FAILED"
     assert finish_calls[2][1] == (tenant_id, segment_id, "dagster-run-failed")
+
+
+def test_hybrid_workflow_embeds_candidates_and_profile_queries(monkeypatch):
+    monkeypatch.setenv("DOCS_EMBEDDING_PROVIDER", "gemini")
+    monkeypatch.setenv("DOCS_GEMINI_EMBEDDING_DIMENSIONS", "384")
+    tenant_id = "11111111-1111-1111-1111-111111111111"
+    segment_id = "22222222-2222-2222-2222-222222222222"
+    profile = {
+        "master_profile_id": "44444444-4444-4444-4444-444444444444",
+        "domain": "retail",
+        "segmentation_tags": ["loyal", "books"],
+    }
+    candidate_id = "33333333-3333-3333-3333-333333333333"
+    candidate = {
+        "content_item_id": candidate_id,
+        "domain": "retail",
+        "item_type": "product",
+        "title": "Book",
+        "summary": "A travel guide",
+        "segment_tags": ["books"],
+        "embedding_model": None,
+    }
+    connection_rows = [[profile], [], [candidate], [], [], [], []]
+    connections = []
+
+    def connection_factory():
+        connection = FakeConnection(connection_rows[len(connections)])
+        connections.append(connection)
+        return connection
+
+    embedded_batches = []
+    def embedder(texts, *, task):
+        embedded_batches.append((list(texts), task))
+        return [[0.1] * 384 for _ in texts]
+
+    execute_values_calls = []
+    monkeypatch.setattr(
+        runner,
+        "execute_values",
+        lambda _cursor, query, rows, **_kwargs: execute_values_calls.append(
+            (query, list(rows))
+        ),
+    )
+    pipeline_calls = []
+
+    def pipeline_executor(payload, run_id):
+        pipeline_calls.append((payload, run_id))
+        return SimpleNamespace(
+            result={
+                "ranked_items": [
+                    {
+                        "item_id": candidate_id,
+                        "rank": 1,
+                        "score": 0.9,
+                        "semantic_score": 0.95,
+                        "tag_score": 0.7,
+                        "strategy": "hybrid",
+                        "matched_tags": ["books"],
+                        "reason": "semantic_and_segment_tag_match",
+                    }
+                ]
+            }
+        )
+
+    task = AgentWorkflowMasterTask(
+        connection_factory=connection_factory,
+        pipeline_executor=pipeline_executor,
+        embedding_function=embedder,
+    )
+    summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(
+            {
+                "tenant_id": tenant_id,
+                "segment_id": segment_id,
+                "agent_code": "product_recommendation",
+                "model_type": "ranking_recommendation",
+                "execution_order": 1,
+                "configuration": {
+                    "strategy": "hybrid",
+                    "semantic_query": "prefer travel reading",
+                },
+                "candidate_content_item_ids": [candidate_id],
+                "trigger_event": {},
+            },
+        ),
+    )
+
+    result = task.execute(summary, run_id="dagster-run-vector")
+
+    assert result.recommendations_written == 1
+    assert [batch[1] for batch in embedded_batches] == ["document", "query"]
+    assert "Title: Book." in embedded_batches[0][0][0]
+    assert "prefer travel reading" in embedded_batches[1][0][0]
+    assert "profile_embedding" in pipeline_calls[0][0]["input_data"]
+    assert pipeline_calls[0][0]["configuration"]["strategy"] == "hybrid"
+    assert len(execute_values_calls) == 2
+    assert execute_values_calls[0][0] == runner.UPDATE_CONTENT_EMBEDDINGS_SQL
+    assert execute_values_calls[0][1][0][1] == candidate_id
+    assert execute_values_calls[0][1][0][3] == "gemini:gemini-embedding-001:384"
+    assert execute_values_calls[1][1][0][8:11] == (0.95, 0.7, "hybrid")

@@ -22,6 +22,7 @@ def make_product(**overrides):
         "tenant_id": uuid.UUID(TENANT_ID),
         "content_item_id": uuid.UUID(CONTENT_ID),
         "domain": "retail",
+        "item_type": "product",
         "product_type": "retail_product",
         "source_id": "shop-1",
         "source_type": "",
@@ -112,6 +113,9 @@ def test_recommended_items_default_to_combined_segments_and_accept_segment_filte
         agent_code="product_recommendation",
         rank=1,
         score=1.0,
+        semantic_score=0.9,
+        tag_score=1.0,
+        strategy="hybrid",
         reason="segment_tag_overlap",
         generated_at=datetime.now(timezone.utc),
     )
@@ -123,6 +127,7 @@ def test_recommended_items_default_to_combined_segments_and_accept_segment_filte
         )
 
     assert response.status_code == 200
+    assert response.json()[0]["item_type"] == "product"
     assert response.json()[0]["rank"] == 1
     repository.get_recommended_items.assert_called_once_with(
         tenant_id=uuid.UUID(TENANT_ID),

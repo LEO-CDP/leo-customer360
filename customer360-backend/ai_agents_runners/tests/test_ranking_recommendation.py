@@ -79,6 +79,9 @@ def _candidate(content_item_id, *, score, matched_tags, published_at):
         "published_at": published_at,
         "matched_tags": matched_tags,
         "score": score,
+        "semantic_score": 0.0,
+        "tag_score": score,
+        "strategy": "tags",
     }
 
 
@@ -86,8 +89,8 @@ def test_ranking_pipeline_scores_and_returns_explicit_candidates_in_order(monkey
     newer = datetime(2026, 10, 5, tzinfo=timezone.utc)
     connection = FakeConnection(
         [
-            _candidate(CONTENT_ITEM_1, score=2, matched_tags=["loyal", "vip"], published_at=newer),
-            _candidate(CONTENT_ITEM_2, score=1, matched_tags=["vip"], published_at=newer),
+            _candidate(CONTENT_ITEM_1, score=1, matched_tags=["loyal", "vip"], published_at=newer),
+            _candidate(CONTENT_ITEM_2, score=0.5, matched_tags=["vip"], published_at=newer),
         ]
     )
     pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
@@ -104,7 +107,10 @@ def test_ranking_pipeline_scores_and_returns_explicit_candidates_in_order(monkey
         {
             "item_id": CONTENT_ITEM_1,
             "rank": 1,
-            "score": 2,
+            "score": 1,
+            "semantic_score": 0,
+            "tag_score": 1,
+            "strategy": "tags",
             "matched_tags": ["loyal", "vip"],
             "reason": "segment_tag_overlap",
             "item_type": "product",
@@ -119,16 +125,23 @@ def test_ranking_pipeline_scores_and_returns_explicit_candidates_in_order(monkey
 
     query = connection.cursor_instance.query
     assert query == RANK_CANDIDATE_CONTENT_SQL
-    assert "content.tenant_id = %s" in query
+    assert "content.tenant_id = criteria.tenant_id" in query
     assert "content.status_code = 1" in query
-    assert "(content.domain = 'all' OR content.domain = %s)" in query
-    assert "content.content_item_id = ANY(%s::uuid[])" in query
-    assert "ORDER BY score DESC, content.published_at DESC NULLS LAST" in query
+    assert "(content.domain = 'all' OR content.domain = criteria.domain)" in query
+    assert "content.content_item_id = ANY(criteria.candidate_ids)" in query
+    assert "ORDER BY score DESC, published_at DESC NULLS LAST" in query
     assert connection.cursor_instance.params == (
         ["loyal", "vip"],
+        None,
+        "tags",
+        0.0,
+        1.0,
+        "",
+        0.0,
         TENANT_ID,
         "retail",
         [CONTENT_ITEM_1, CONTENT_ITEM_2],
+        1,
     )
 
 
@@ -161,7 +174,7 @@ def test_ranking_pipeline_uses_only_selected_candidates_available_for_profile_do
         [
             _candidate(
                 CONTENT_ITEM_1,
-                score=1,
+                score=0.5,
                 matched_tags=["loyal"],
                 published_at=None,
             )
@@ -199,6 +212,49 @@ def test_ranking_pipeline_uses_fallback_reason_without_tag_overlap(monkeypatch):
     assert item["score"] == 0
     assert item["reason"] == "no_segment_tag_overlap"
     assert item["published_at"] is None
+
+
+def test_hybrid_ranking_uses_pgvector_similarity_and_custom_weights(monkeypatch):
+    monkeypatch.setenv("DOCS_EMBEDDING_PROVIDER", "gemini")
+    monkeypatch.setenv("DOCS_GEMINI_EMBEDDING_DIMENSIONS", "384")
+    query_vector = [0.01] * 384
+    row = _candidate(
+        CONTENT_ITEM_1,
+        score=0.8,
+        matched_tags=["loyal"],
+        published_at=None,
+    )
+    row.update({"semantic_score": 0.9, "tag_score": 0.5, "strategy": "hybrid"})
+    connection = FakeConnection([row])
+    pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    output = execute_agent_pipeline(
+        _input(
+            input_data={
+                "domain": "retail",
+                "segmentation_tags": ["loyal"],
+                "profile_embedding": query_vector,
+                "embedding_model": "gemini:gemini-embedding-001:384",
+            },
+            configuration={
+                "strategy": "hybrid",
+                "top_k": 3,
+                "semantic_weight": 0.8,
+                "tag_weight": 0.2,
+            },
+            candidate_content_item_ids=[CONTENT_ITEM_1],
+        ),
+        run_id="dagster-run-1",
+    )
+
+    assert output.result["ranked_items"][0]["strategy"] == "hybrid"
+    assert output.result["ranked_items"][0]["semantic_score"] == 0.9
+    assert "<=>" in connection.cursor_instance.query
+    assert "vector" in connection.cursor_instance.query
+    assert connection.cursor_instance.params[1].startswith("[0.01,0.01")
+    assert connection.cursor_instance.params[2:5] == ("hybrid", 0.8, 0.2)
+    assert connection.cursor_instance.params[-1] == 3
 
 
 def test_ranking_pipeline_propagates_database_errors(monkeypatch):

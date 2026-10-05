@@ -349,7 +349,16 @@ window.C360 = window.C360 || {};
       var $configLabel = $("<label></label>").addClass("block lg:col-span-12");
       $("<span></span>").addClass("mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500").text("Agent configuration (JSON)").appendTo($configLabel);
       $("<textarea></textarea>").attr({ id: "workflow-configuration-" + index, rows: 5, spellcheck: "false", "aria-label": "JSON configuration for " + agentName }).addClass("workflow-configuration w-full resize-y rounded-lg border-0 bg-slate-900 px-3 py-3 font-mono text-xs leading-relaxed text-emerald-300 shadow-inner focus:outline-none focus:ring-2 focus:ring-violet-500").val(JSON.stringify(step.configuration || {}, null, 2)).appendTo($configLabel);
-      $("<span></span>").addClass("mt-1 block text-[11px] text-slate-400").text("Optional JSON object for segment-specific parameters.").appendTo($configLabel);
+      var $configHelp = $("<span></span>").addClass("mt-1 block text-[11px] text-slate-400");
+      var updateConfigurationHelp = () => {
+        $configHelp.text(
+          this.supportsCandidateContent($agent.val(), step)
+            ? 'Optional JSON. Ranking: {"strategy":"hybrid","top_k":8,"semantic_weight":0.7,"tag_weight":0.3,"minimum_score":0.25,"semantic_query":"optional context"}.'
+            : "Optional JSON object for segment-specific parameters."
+        );
+      };
+      $configHelp.appendTo($configLabel);
+      updateConfigurationHelp();
       $grid.append($configLabel);
       $card.append($header, $grid).appendTo($row);
 
@@ -373,6 +382,7 @@ window.C360 = window.C360 || {};
           ? (step.candidate_content_item_ids || [])
           : [];
         renderCandidateSection($agent.val(), candidateIds);
+        updateConfigurationHelp();
         refreshSchedule();
       });
       $schedulePreset.on("change", () => {
@@ -493,15 +503,42 @@ window.C360 = window.C360 || {};
         }
         var isActive = $row.find(".workflow-active").is(":checked");
         var candidateContentItemIds = $row.find(".workflow-candidates").val() || [];
-        if (
-          isActive &&
-          this.supportsCandidateContent(agentCode, this.steps[index]) &&
-          candidateContentItemIds.length === 0
-        ) {
-          throw new Error(
-            "Step " + (index + 1) +
-            " must select at least one candidate content item for ranking recommendations."
-          );
+        if (this.supportsCandidateContent(agentCode, this.steps[index])) {
+          var strategy = configuration.strategy === undefined ? "tags" : configuration.strategy;
+          var topK = configuration.top_k === undefined
+            ? (configuration.limit === undefined ? 8 : configuration.limit)
+            : configuration.top_k;
+          var semanticWeight = configuration.semantic_weight === undefined ? 0.7 : configuration.semantic_weight;
+          var tagWeight = configuration.tag_weight === undefined ? 0.3 : configuration.tag_weight;
+          var minimumScore = configuration.minimum_score === undefined ? 0 : configuration.minimum_score;
+          if (!["tags", "semantic", "hybrid"].includes(strategy)) {
+            throw new Error("Step " + (index + 1) + " strategy must be tags, semantic, or hybrid.");
+          }
+          if (!Number.isInteger(topK) || topK < 1 || topK > 100) {
+            throw new Error("Step " + (index + 1) + " top_k must be a whole number from 1 to 100.");
+          }
+          if (
+            typeof semanticWeight !== "number" || semanticWeight < 0 || semanticWeight > 1 ||
+            typeof tagWeight !== "number" || tagWeight < 0 || tagWeight > 1 ||
+            (strategy === "hybrid" && semanticWeight + tagWeight <= 0)
+          ) {
+            throw new Error("Step " + (index + 1) + " semantic_weight and tag_weight must be between 0 and 1; hybrid weights cannot both be zero.");
+          }
+          if (typeof minimumScore !== "number" || minimumScore < 0 || minimumScore > 1) {
+            throw new Error("Step " + (index + 1) + " minimum_score must be between 0 and 1.");
+          }
+          if (
+            configuration.semantic_query != null &&
+            (typeof configuration.semantic_query !== "string" || configuration.semantic_query.length > 2000)
+          ) {
+            throw new Error("Step " + (index + 1) + " semantic_query must be text with at most 2000 characters.");
+          }
+          if (isActive && candidateContentItemIds.length === 0) {
+            throw new Error(
+              "Step " + (index + 1) +
+              " must select at least one candidate content item for ranking recommendations."
+            );
+          }
         }
         steps.push({
           agent_code: agentCode,

@@ -123,6 +123,24 @@ class AiAgentSeedContractTests(unittest.TestCase):
             self.assertIn("cdp_profile_recommendation_runs FORCE ROW LEVEL SECURITY", sql)
             self.assertIn("ALTER TABLE customer360.cdp_profile_recommendations FORCE ROW LEVEL SECURITY", sql)
 
+    def test_content_items_store_provider_versioned_pgvector_embeddings(self):
+        schema = (
+            self.repository_root / "customer360-database" / "database-schema.sql"
+        ).read_text(encoding="utf-8")
+        workflow_migration = (
+            self.repository_root
+            / "customer360-database"
+            / "migrations"
+            / "006_cdp_agent_workflow.sql"
+        ).read_text(encoding="utf-8")
+        self.assertIn("embedding VECTOR,", schema)
+        self.assertIn("embedding_model TEXT", schema)
+        self.assertIn("ADD COLUMN IF NOT EXISTS embedding VECTOR", workflow_migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS embedding_model TEXT", workflow_migration)
+        for sql in (schema, workflow_migration):
+            self.assertIn("invalidate_content_item_embedding()", sql)
+            self.assertIn("trg_invalidate_content_item_embedding", sql)
+
     def test_existing_agent_endpoints_have_seeded_prompt_keys(self):
         for key in (
             "campaign.plan.instructions",

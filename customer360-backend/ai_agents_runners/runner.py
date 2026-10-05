@@ -42,6 +42,30 @@ SEGMENT_PROFILE_SQL = f"""
       )
     ORDER BY profile.master_profile_id
 """
+LOAD_SELECTED_CONTENT_SQL = f"""
+    SELECT
+        content.content_item_id,
+        content.domain,
+        content.item_type,
+        content.title,
+        content.summary,
+        content.segment_tags,
+        content.embedding_model,
+        vector_dims(content.embedding) AS embedding_dimensions
+    FROM {DB_SCHEMA}.cdp_content_items AS content
+    WHERE content.tenant_id = %s
+      AND content.status_code = 1
+      AND content.content_item_id = ANY(%s::uuid[])
+"""
+UPDATE_CONTENT_EMBEDDINGS_SQL = f"""
+    UPDATE {DB_SCHEMA}.cdp_content_items AS content
+    SET embedding = embedding_values.embedding::vector,
+        embedding_model = embedding_values.embedding_model,
+        updated_at = now()
+    FROM (VALUES %s) AS embedding_values(tenant_id, content_item_id, embedding, embedding_model)
+    WHERE content.tenant_id = embedding_values.tenant_id::uuid
+      AND content.content_item_id = embedding_values.content_item_id::uuid
+"""
 START_RECOMMENDATION_RUN_SQL = f"""
     INSERT INTO {DB_SCHEMA}.cdp_profile_recommendation_runs (
         tenant_id, segment_id, run_id, status, profile_count, step_count
@@ -72,13 +96,6 @@ FINISH_RECOMMENDATION_RUN_SQL = f"""
         completed_at = now()
     WHERE tenant_id = %s AND segment_id = %s AND run_id = %s
 """
-DELETE_PREVIOUS_SUCCESSFUL_RUNS_SQL = f"""
-    DELETE FROM {DB_SCHEMA}.cdp_profile_recommendation_runs
-    WHERE tenant_id = %s
-      AND segment_id = %s
-      AND status = 'SUCCEEDED'
-      AND run_id <> %s
-"""
 DELETE_FAILED_RUN_ROWS_SQL = f"""
     DELETE FROM {DB_SCHEMA}.cdp_profile_recommendations
     WHERE tenant_id = %s AND segment_id = %s AND run_id = %s
@@ -86,13 +103,16 @@ DELETE_FAILED_RUN_ROWS_SQL = f"""
 UPSERT_PROFILE_RECOMMENDATIONS_SQL = f"""
     INSERT INTO {DB_SCHEMA}.cdp_profile_recommendations (
         tenant_id, segment_id, master_profile_id, agent_code, content_item_id,
-        run_id, rank, score, matched_tags, reason
+        run_id, rank, score, semantic_score, tag_score, strategy, matched_tags, reason
     ) VALUES %s
     ON CONFLICT (
         tenant_id, segment_id, master_profile_id, agent_code, run_id, content_item_id
     ) DO UPDATE SET
         rank = EXCLUDED.rank,
         score = EXCLUDED.score,
+        semantic_score = EXCLUDED.semantic_score,
+        tag_score = EXCLUDED.tag_score,
+        strategy = EXCLUDED.strategy,
         matched_tags = EXCLUDED.matched_tags,
         reason = EXCLUDED.reason,
         generated_at = now()
@@ -178,9 +198,11 @@ class AgentWorkflowMasterTask:
         self,
         connection_factory: Callable[[], Any] = _connect,
         pipeline_executor: Callable[[dict[str, Any], str], Any] | None = None,
+        embedding_function: Callable[..., list[list[float]]] | None = None,
     ) -> None:
         self._connection_factory = connection_factory
         self._pipeline_executor = pipeline_executor or _execute_agent_pipeline
+        self._embedding_function = embedding_function
 
     def run(
         self,
@@ -282,7 +304,44 @@ class AgentWorkflowMasterTask:
             step_recommendation_count = 0
             try:
                 for step in steps:
-                    for profile in profiles:
+                    strategy = step["configuration"].get("strategy", "tags")
+                    uses_vectors = strategy in {"semantic", "hybrid"}
+                    model_key = self._embedding_model_key() if uses_vectors else ""
+                    profile_embeddings: list[list[float] | None]
+                    if uses_vectors:
+                        self._ensure_content_embeddings(
+                            tenant_id=tenant_id,
+                            candidate_ids=step["candidate_content_item_ids"],
+                            model_key=model_key,
+                        )
+                        semantic_query = step["configuration"].get("semantic_query", "")
+                        if semantic_query is None:
+                            semantic_query = ""
+                        if (
+                            not isinstance(semantic_query, str)
+                            or len(semantic_query) > 2000
+                        ):
+                            raise ValueError(
+                                "configuration.semantic_query must be text of at most 2000 characters"
+                            )
+                        profile_query_texts = [
+                            self._profile_query_text(profile, semantic_query)
+                            for profile in profiles
+                        ]
+                        profile_embeddings = self._embed(
+                            profile_query_texts,
+                            task="query",
+                        )
+                        if len(profile_embeddings) != len(profiles):
+                            raise ValueError(
+                                "Embedding provider did not return a query vector per profile"
+                            )
+                    else:
+                        profile_embeddings = [None] * len(profiles)
+
+                    for profile, profile_embedding in zip(
+                        profiles, profile_embeddings, strict=True
+                    ):
                         payload = {
                             "tenant_id": tenant_id,
                             "segment_id": segment_id,
@@ -291,6 +350,14 @@ class AgentWorkflowMasterTask:
                             "input_data": {
                                 "domain": profile["domain"],
                                 "segmentation_tags": profile["segmentation_tags"],
+                                **(
+                                    {
+                                        "profile_embedding": profile_embedding,
+                                        "embedding_model": model_key,
+                                    }
+                                    if profile_embedding is not None
+                                    else {}
+                                ),
                             },
                             "configuration": step["configuration"],
                             "candidate_content_item_ids": step["candidate_content_item_ids"],
@@ -348,6 +415,117 @@ class AgentWorkflowMasterTask:
             recommendations_written=recommendations_written,
             unsupported_steps=unsupported_steps,
         )
+
+    @staticmethod
+    def _profile_query_text(profile: dict[str, Any], semantic_query: str) -> str:
+        domain = str(profile["domain"]).strip()
+        tags = [
+            str(tag).strip()
+            for tag in (profile.get("segmentation_tags") or [])
+            if str(tag).strip()
+        ]
+        parts = [f"Customer domain: {domain}."]
+        if tags:
+            parts.append("Customer interests and segment labels: " + ", ".join(tags) + ".")
+        if semantic_query.strip():
+            parts.append("Recommendation context: " + semantic_query.strip())
+        return " ".join(parts)
+
+    def _ensure_content_embeddings(
+        self,
+        *,
+        tenant_id: str,
+        candidate_ids: list[str],
+        model_key: str,
+    ) -> None:
+        with self._connection_factory() as connection:
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)",
+                    (tenant_id,),
+                )
+                cursor.execute(
+                    LOAD_SELECTED_CONTENT_SQL,
+                    (tenant_id, candidate_ids),
+                )
+                rows = list(cursor.fetchall())
+
+        if len(rows) != len(candidate_ids):
+            raise ValueError(
+                "One or more selected content items are missing, inactive, "
+                "or outside this tenant"
+            )
+        expected_dimensions = int(model_key.rsplit(":", 1)[-1])
+        missing_rows = [
+            row
+            for row in rows
+            if row["embedding_model"] != model_key
+            or row["embedding_dimensions"] != expected_dimensions
+        ]
+        if not missing_rows:
+            return
+
+        texts = [
+            self._content_embedding_text(row)
+            for row in missing_rows
+        ]
+        vectors = self._embed(texts, task="document")
+        if len(vectors) != len(missing_rows):
+            raise ValueError("Embedding provider did not return a vector per content item")
+        values = [
+            (
+                tenant_id,
+                str(row["content_item_id"]),
+                self._vector_literal(vector),
+                model_key,
+            )
+            for row, vector in zip(missing_rows, vectors, strict=True)
+        ]
+        with self._connection_factory() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)",
+                    (tenant_id,),
+                )
+                execute_values(
+                    cursor,
+                    UPDATE_CONTENT_EMBEDDINGS_SQL,
+                    values,
+                    template="(%s, %s, %s, %s)",
+                    page_size=100,
+                )
+
+    @staticmethod
+    def _content_embedding_text(row: dict[str, Any]) -> str:
+        tags = ", ".join(row.get("segment_tags") or [])
+        return " ".join(
+            value
+            for value in (
+                f"Type: {row['item_type']}.",
+                f"Domain: {row['domain']}.",
+                f"Title: {row['title']}.",
+                f"Summary: {row.get('summary') or ''}",
+                f"Keywords: {tags}." if tags else "",
+            )
+            if value
+        )
+
+    @staticmethod
+    def _vector_literal(vector: list[float]) -> str:
+        return "[" + ",".join(str(float(value)) for value in vector) + "]"
+
+    def _embed(self, texts: list[str], *, task: str) -> list[list[float]]:
+        if self._embedding_function is not None:
+            return self._embedding_function(texts, task=task)
+        from .agent_pipeline.embeddings import embed_texts
+
+        return embed_texts(texts, task=task)
+
+    @staticmethod
+    def _embedding_model_key() -> str:
+        from .agent_pipeline.embeddings import embedding_model_key
+
+        return embedding_model_key()
 
     def _load_segment_profiles(
         self, *, tenant_id: str, segment_id: str
@@ -414,12 +592,7 @@ class AgentWorkflowMasterTask:
                         run_id,
                     ),
                 )
-                if status == "SUCCEEDED":
-                    cursor.execute(
-                        DELETE_PREVIOUS_SUCCESSFUL_RUNS_SQL,
-                        (tenant_id, segment_id, run_id),
-                    )
-                elif status == "FAILED":
+                if status == "FAILED":
                     cursor.execute(
                         DELETE_FAILED_RUN_ROWS_SQL,
                         (tenant_id, segment_id, run_id),
@@ -445,6 +618,9 @@ class AgentWorkflowMasterTask:
                 run_id,
                 item["rank"],
                 item["score"],
+                item.get("semantic_score"),
+                item.get("tag_score", 0.0),
+                item.get("strategy", "tags"),
                 item["matched_tags"],
                 item["reason"],
             )
@@ -461,7 +637,7 @@ class AgentWorkflowMasterTask:
                         cursor,
                         UPSERT_PROFILE_RECOMMENDATIONS_SQL,
                         rows,
-                        template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                         page_size=500,
                     )
 

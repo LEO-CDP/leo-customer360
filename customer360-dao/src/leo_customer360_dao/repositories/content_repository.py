@@ -121,6 +121,9 @@ class ContentRepository:
                     recommendation.agent_code,
                     recommendation.rank,
                     recommendation.score,
+                    recommendation.semantic_score,
+                    recommendation.tag_score,
+                    recommendation.strategy,
                     recommendation.matched_tags,
                     recommendation.reason,
                     recommendation.generated_at
@@ -154,7 +157,7 @@ class ContentRepository:
             best_recommendation_per_item AS (
                 SELECT DISTINCT ON (content_item_id)
                     content_item_id, segment_id, agent_code, rank, score,
-                    matched_tags, reason, generated_at
+                    semantic_score, tag_score, strategy, matched_tags, reason, generated_at
                 FROM eligible_recommendations
                 ORDER BY content_item_id, score DESC, rank, generated_at DESC,
                          segment_id, agent_code
@@ -179,6 +182,9 @@ class ContentRepository:
                 recommendation.agent_code,
                 recommendation.rank,
                 recommendation.score,
+                recommendation.semantic_score,
+                recommendation.tag_score,
+                recommendation.strategy,
                 recommendation.reason,
                 recommendation.generated_at
             FROM best_recommendation_per_item AS recommendation

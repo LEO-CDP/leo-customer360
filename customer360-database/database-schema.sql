@@ -2595,6 +2595,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_content_items (
     cta_label TEXT,
     cta_url TEXT,
     segment_tags TEXT[] DEFAULT ARRAY[]::text[],
+    embedding VECTOR,
+    embedding_model TEXT,
     published_at TIMESTAMPTZ DEFAULT now(),
     status_code SMALLINT DEFAULT 1,
     created_at TIMESTAMPTZ DEFAULT now(),
@@ -2605,6 +2607,30 @@ COMMENT ON TABLE customer360.cdp_content_items IS 'Personalized content library 
 
 CREATE INDEX IF NOT EXISTS idx_cdp_content_items_domain_type ON customer360.cdp_content_items (domain, item_type);
 CREATE INDEX IF NOT EXISTS idx_cdp_content_items_tags ON customer360.cdp_content_items USING GIN (segment_tags);
+
+CREATE OR REPLACE FUNCTION customer360.invalidate_content_item_embedding()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.domain IS DISTINCT FROM OLD.domain
+       OR NEW.item_type IS DISTINCT FROM OLD.item_type
+       OR NEW.title IS DISTINCT FROM OLD.title
+       OR NEW.summary IS DISTINCT FROM OLD.summary
+       OR NEW.segment_tags IS DISTINCT FROM OLD.segment_tags THEN
+        NEW.embedding := NULL;
+        NEW.embedding_model := NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_invalidate_content_item_embedding
+    ON customer360.cdp_content_items;
+CREATE TRIGGER trg_invalidate_content_item_embedding
+    BEFORE UPDATE OF domain, item_type, title, summary, segment_tags
+    ON customer360.cdp_content_items
+    FOR EACH ROW EXECUTE FUNCTION customer360.invalidate_content_item_embedding();
 
 -- ============================================================================
 -- cdp_product_items: tenant-scoped source product records and content linkage
@@ -3721,7 +3747,10 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendations (
     run_id TEXT NOT NULL,
     content_item_id UUID NOT NULL,
     rank INTEGER NOT NULL CHECK (rank > 0),
-    score DOUBLE PRECISION NOT NULL CHECK (score >= 0),
+    score DOUBLE PRECISION NOT NULL CHECK (score BETWEEN 0 AND 1),
+    semantic_score DOUBLE PRECISION CHECK (semantic_score IS NULL OR semantic_score BETWEEN 0 AND 1),
+    tag_score DOUBLE PRECISION NOT NULL CHECK (tag_score BETWEEN 0 AND 1),
+    strategy TEXT NOT NULL CHECK (strategy IN ('tags', 'semantic', 'hybrid')),
     matched_tags TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
     reason TEXT NOT NULL,
     generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

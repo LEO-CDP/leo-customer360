@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,5 +53,8 @@ class RecommendedContentItem(ContentItemRead):
     agent_code: str
     rank: int
     score: float
+    semantic_score: float | None = None
+    tag_score: float
+    strategy: Literal["tags", "semantic", "hybrid"]
     reason: str
     generated_at: datetime

@@ -34,6 +34,9 @@ def test_recommendations_combine_current_segment_results_by_default():
     assert "cdp_profile_recommendation_runs" in str(recommendations_query)
     assert "DISTINCT ON (content_item_id)" in str(recommendations_query)
     assert "recommendation_run.status = 'SUCCEEDED'" in str(recommendations_query)
+    assert "recommendation.semantic_score" in str(recommendations_query)
+    assert "recommendation.tag_score" in str(recommendations_query)
+    assert "recommendation.strategy" in str(recommendations_query)
     assert "segment.segment_tag = ANY(profile.tags)" in str(recommendations_query)
     assert "CAST(:segment_id AS uuid) IS NULL" in str(recommendations_query)
     assert query_params["segment_id"] is None

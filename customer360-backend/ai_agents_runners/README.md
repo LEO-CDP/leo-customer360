@@ -15,11 +15,42 @@ Customer 360 API's tenant boundary.
 | `personalization_job` | Compatibility scaffold retained from the removed personalization location |
 | `POST /api/v1/segments/{segment_id}/workflow/run` | Submit a tenant/segment API-triggered run |
 
-The master task currently produces an explicit ordered execution plan. The
-ranking handler can score explicitly configured, tenant-scoped content
-candidates by segment-tag overlap, but the master task does not yet dispatch
-agent handlers or persist their results. Other model handlers remain explicit
-scaffolds that fail rather than return placeholder success results.
+The master task executes supported `ranking_recommendation` steps for every
+active profile in the segment, using only that workflow step's selected
+tenant-owned content candidates. It persists recommendations by Dagster run
+and publishes only successful runs. Other model handlers remain explicit
+scaffolds and are reported as unsupported rather than returning placeholder
+success results.
+
+Ranking settings live in each workflow step's existing `configuration` JSON:
+
+```json
+{
+  "strategy": "hybrid",
+  "top_k": 8,
+  "semantic_weight": 0.7,
+  "tag_weight": 0.3,
+  "minimum_score": 0.25,
+  "semantic_query": "optional operator-provided context"
+}
+```
+
+`strategy` accepts `tags` (default, preserving tag-only behavior), `semantic`,
+or `hybrid`. Selected content embeddings are generated lazily from title,
+summary, domain, type, and tags. Profile query text uses only its domain and
+segment tags plus optional operator context; PII fields are not embedded.
+Embeddings use the existing Docs AI settings (`DOCS_EMBEDDING_PROVIDER` and the
+matching `DOCS_*_EMBEDDING_*` variables). The vector distance is computed only
+over the bounded workflow candidate list; no global catalog search is performed.
+The configured provider, model, and dimension are stored with each content
+vector, so vectors are refreshed when the existing Docs embedding settings
+change. Updating a content title, summary, domain, type, or segment tags also
+invalidates its cached vector.
+
+For Gemini, set the existing `DOCS_EMBEDDING_PROVIDER=gemini` and configure
+`DOCS_GEMINI_API_KEY`, `DOCS_GEMINI_EMBEDDING_MODEL`, and
+`DOCS_GEMINI_EMBEDDING_DIMENSIONS`. The same settings are passed to the Dagster
+backend deployment; no recommendation-specific embedding variables are needed.
 
 ## Agent-type strategy layout
 
@@ -92,7 +123,8 @@ Candidate IDs refer to tenant-owned content rows with:
 
 Candidate content is supported only for agents whose `model_type` is
 `ranking_recommendation`. The API and repository reject candidate IDs for other
-agent types.
+agent types. Content rows also store provider-versioned pgvector embeddings
+used by semantic and hybrid ranking.
 
 ## API-triggered execution
 
@@ -116,15 +148,15 @@ Content-Type: application/json
 
 The API returns `202 Accepted` with a Dagster `run_id`. The tenant and segment
 are sent in Dagster run configuration and tags; the event object is forwarded
-as handler context.
+as handler context. The run summary reports executed steps, profiles processed,
+and recommendations written.
 
 Saving the Agent Workplan with
 `PUT /api/v1/segments/{segment_id}/workflow` also submits a master-workflow
 run after the workflow transaction commits. The response remains the updated
 step list and includes the submitted Dagster run ID in `X-Dagster-Run-Id`.
-If submission fails, the API returns `503` and explicitly reports that the
-workflow was saved but the run was not submitted. The current master job
-selects the ordered plan; it does not yet dispatch the selected agent handlers.
+if submission fails, the API returns `503` and explicitly reports that the
+workflow was saved but the run was not submitted.
 
 ## Cron-triggered execution
 
@@ -147,8 +179,8 @@ in the execution plan.
 
 The former `personalization` code location was removed. Its runnable scaffold
 is now registered as `personalization_job` in the same Dagster code location.
-It remains a compatibility job until recommendation-specific handlers are
-implemented behind the master workflow.
+It remains a compatibility job; segment recommendation workflows execute
+through `ai_agents_master_job`.
 
 ## Development and tests
 
