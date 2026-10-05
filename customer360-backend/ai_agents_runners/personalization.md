@@ -1,8 +1,8 @@
 # Recommendation and Personalization Handlers
 
-This document describes the recommendation/personalization scope that will be
-implemented behind the consolidated `ai_agents_runners` master workflow. It is
-not a separate Dagster code location.
+This document describes recommendation execution in the consolidated
+`ai_agents_runners` master workflow and the API read path for its persisted
+results. It is not a separate Dagster code location.
 
 ## Current status
 
@@ -11,15 +11,15 @@ The current implementation provides:
 - ordered workflow selection from `cdp_agent_workflow`;
 - API and cron trigger paths;
 - active-agent and tenant filtering;
-- ranking of explicit, tenant-scoped active content candidates by overlap with
-  supplied profile segmentation tags;
-- an explicit execution plan for future handlers.
+- execution of configured `ranking_recommendation` steps for active profiles;
+- tag, semantic, and hybrid ranking over explicitly selected, tenant-owned
+  content candidates;
+- persisted recommendation run status and per-profile results;
+- an API endpoint that reads the latest successful results for a profile.
 
-The ranking handler does not perform learned-model inference, rank profiles,
-write recommendation results, or persist next-best actions. The master
-workflow currently selects steps but does not yet dispatch agent handlers.
-The compatibility `personalization_job` only preserves the former scaffold
-entry point.
+Other model types are reported as unsupported and are not dispatched. The
+compatibility `personalization_job` remains a scaffold; recommendation workflows
+execute through the master workflow.
 
 ## Registry model: `cdp_ai_agents`
 
@@ -89,35 +89,79 @@ Candidate content is valid only for an agent whose `model_type` is
 the frontend workflow editor. The database trigger validates that every
 candidate exists in the same tenant and that candidate IDs are distinct.
 
-An empty candidate array means no explicit candidate restriction. It does not
-mean that the runner should silently copy the entire catalog into the
-workflow row or query the whole catalog during execution. The ranking handler
-returns an empty `ranked_items` list when no candidate IDs are provided.
+The runner requires a non-empty candidate array for a ranking step. It does not
+copy the entire catalog into the workflow row or search the whole catalog during
+execution.
 
 For non-empty candidate lists, the ranking handler requires
 `input_data.domain` and accepts `input_data.segmentation_tags` (default `[]`).
-It selects candidates only when their `tenant_id` matches the workflow tenant,
-`status_code = 1`, and their domain is `all` or matches the profile domain.
-Every requested candidate must pass those filters; otherwise the handler
-fails rather than silently dropping a candidate. Results are ordered by the
-number of overlapping segment tags, newest publication timestamp, then
-content-item UUID for deterministic ties. The optional `configuration.limit`
-defaults to 8 and must be a positive integer.
+It considers only active content in the workflow tenant whose domain is `all`
+or matches the profile domain. `configuration.strategy` selects tag-only,
+semantic, or hybrid ranking; semantic and hybrid strategies use the configured
+Docs embedding provider at 384 or 768 dimensions and profile context built from
+domain and segmentation tags, not profile PII. `configuration.top_k` (or
+the `limit` fallback) defaults
+to 8 and must be a positive integer no greater than 100. Results include a
+one-based rank, strategy scores, matched tags, reason, and content display/CTA
+fields. The score is strategy-dependent and is not a calibrated relevance
+probability.
 
-Each returned item includes `item_id`, one-based `rank`, overlap `score`,
-`matched_tags`, a reason, and the content display/CTA fields. The score is a
-tag-overlap count, not a calibrated relevance probability. The handler does
-not persist results.
+Content vectors store canonical text, provider/model, contract version, and
+generation time. Content edits invalidate vectors; migration
+`008_content_embedding_contract.sql` preserves legacy 384- and 768-dimensional
+vectors and clears other sizes. Linked product rows have matching vector columns reserved
+for future direct product ranking; current workflows rank linked content items.
 
-The separate API endpoint
-`GET /api/v1/content-items/recommended` currently ranks content for a master
-profile by overlap between `cdp_content_items.segment_tags` and
-`cdp_master_profiles.segmentation_tags`. That endpoint is not a persisted
-workflow result and should not be confused with future agent-run output.
+The runner writes each run to `cdp_profile_recommendation_runs` and its ranked
+items to `cdp_profile_recommendations`. The API endpoint reads persisted
+results; it does not run ranking when the request arrives.
+
+If ranking returns no candidates, the step still fails rather than weakening
+its filters or inventing a fallback. The error distinguishes missing
+tenant-owned candidates, inactive content, a profile-domain mismatch, missing
+model embeddings, and scores below `minimum_score`. It reports counts at each
+filter stage, domain, strategy, and threshold; the runner adds the tenant,
+segment, agent, and profile identifiers. Diagnosis reads only the selected IDs
+in the same tenant and runs only on the failure path.
+
+## Profile recommendation read API
+
+The Customer 360 API implements:
+
+```http
+GET /api/v1/content-items/recommended?master_profile_id=<uuid>&limit=8
+```
+
+`master_profile_id` is required. `limit` defaults to 8 and accepts values from
+1 through 50. The authenticated tenant context is always used; callers cannot
+select another tenant. An optional `segment_id` restricts the results to one
+segment, and `item_type` filters to `news`, `video`, `product`, or `article`.
+
+For each profile, the API reads the latest successful run for each active
+segment the profile belongs to, then merges results and deduplicates content
+items across segments, keeping the strongest recommendation. Returned rows must
+still refer to active workflow/agent records and active content matching the
+profile domain. A missing or inactive profile returns `404`; a valid profile
+with no eligible persisted results receives an empty list. Results include the
+content fields plus `matched_tags`, `segment_id`, `agent_code`, `rank`, `score`,
+`semantic_score`, `tag_score`, `strategy`, `reason`, and `generated_at`.
+
+The read path is Redis cache lookup, then a persisted-results query on a miss.
+Cache keys isolate tenants, profiles, and request filters. Content repository
+mutations and successful Dagster recommendation runs invalidate the tenant's
+recommendation cache; other changes become visible within `CACHE_TTL_SECONDS`.
+Disable caching with `CACHE_ENABLED=false` for immediate reads while debugging.
+
+The route is implemented in
+[content_api.py](../../customer360-api/core/routers/content_api.py), and its
+tenant-scoped query is in
+[content_repository.py](../../customer360-api/core/repositories/content_repository.py).
 
 ## Profile and persona inputs
 
-Future recommendation handlers may consume tenant-scoped data from:
+The implemented ranking handler currently consumes the profile's domain and
+segmentation tags plus explicitly selected content candidates. Other
+tenant-scoped data that could support future handlers includes:
 
 - `cdp_master_profiles` — mastered profile identity, segmentation tags,
   analytics, persona summary, and profile-level derived fields;
@@ -128,22 +172,24 @@ Future recommendation handlers may consume tenant-scoped data from:
 - active segment membership represented through the segment metadata and
   profile segmentation tags.
 
-These inputs are evidence, not permission. Handlers must also apply consent,
-suppression, inventory, campaign eligibility, and domain constraints before
-returning a recommendation.
+These future inputs are not currently part of the ranking contract. Any
+handler that adds them must define their tenant-scoped read contract and apply
+the relevant consent, suppression, inventory, campaign eligibility, and domain
+constraints before returning a recommendation.
 
-## Handler contract
+## Handler and persistence contract
 
-An agent-specific handler added behind the master task should:
+The existing recommendation handler:
 
-1. receive one ordered workflow plan item and its trigger event;
-2. validate the agent's declared inputs and configuration;
-3. query only the plan item's tenant data;
-4. reject missing features, unavailable models, invalid candidates, and
-   unsupported model types explicitly;
-5. produce ranked candidates or a structured blocked/failure result;
-6. persist only to an approved owning table or schema contract;
-7. emit processed, skipped, blocked, failed, and completed metrics.
+1. receives one ordered workflow step and trigger context;
+2. validates ranking configuration and profile inputs;
+3. evaluates only the step's selected candidates within the step tenant;
+4. persists per-profile results under the Dagster run ID and records run status.
+
+Future agent handlers must validate declared inputs/configuration, query only
+the plan item's tenant data, reject unavailable or unsupported implementations
+explicitly, persist only to an approved owning table/schema contract, and emit
+clear execution outcomes.
 
 No handler may:
 

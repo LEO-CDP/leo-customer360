@@ -18,7 +18,7 @@ class ContentItemBase(BaseModel):
     image_url: Optional[str] = None
     cta_label: Optional[str] = None
     cta_url: Optional[str] = None
-    segment_tags: Optional[list[str]] = None
+    segment_tags: list[str] = Field(default_factory=list)
     published_at: Optional[datetime] = None
 
 
@@ -34,7 +34,7 @@ class ContentItemUpdate(BaseModel):
     image_url: Optional[str] = None
     cta_label: Optional[str] = None
     cta_url: Optional[str] = None
-    segment_tags: Optional[list[str]] = None
+    segment_tags: list[str] = Field(default_factory=list)
     published_at: Optional[datetime] = None
     status_code: Optional[int] = None
 

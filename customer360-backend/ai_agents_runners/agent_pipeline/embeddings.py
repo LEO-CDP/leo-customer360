@@ -24,7 +24,7 @@ def _provider() -> str:
     return value
 
 
-def embedding_model_key() -> str:
+def embedding_model_key(*, dimensions: int | None = None) -> str:
     provider = _provider()
     model = {
         "openai": os.environ.get(
@@ -38,11 +38,16 @@ def embedding_model_key() -> str:
             "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         ),
     }[provider]
-    dimensions = embedding_dimensions()
-    return f"{provider}:{model}:{dimensions}"
+    resolved_dimensions = embedding_dimensions(dimensions)
+    return f"{provider}:{model}:{resolved_dimensions}"
 
 
-def embedding_dimensions() -> int:
+def embedding_dimensions(override: int | None = None) -> int:
+    if override is not None:
+        if not 1 <= override <= 2000:
+            raise ValueError("Embedding dimensions must be between 1 and 2000")
+        return override
+
     provider = _provider()
     value = {
         "openai": os.environ.get("DOCS_OPENAI_EMBEDDING_DIMENSIONS", "384"),
@@ -55,7 +60,12 @@ def embedding_dimensions() -> int:
     return dimensions
 
 
-def embed_texts(texts: list[str], *, task: str) -> list[list[float]]:
+def embed_texts(
+    texts: list[str],
+    *,
+    task: str,
+    dimensions: int | None = None,
+) -> list[list[float]]:
     """Embed texts using DOCS_EMBEDDING_PROVIDER and its matching settings."""
     if task not in {"query", "document"}:
         raise ValueError("Embedding task must be 'query' or 'document'")
@@ -65,6 +75,7 @@ def embed_texts(texts: list[str], *, task: str) -> list[list[float]]:
         raise ValueError("Embedding inputs must be non-blank text")
 
     provider = _provider()
+    expected_dimensions = embedding_dimensions(dimensions)
     batches = [
         texts[start : start + 100]
         for start in range(0, len(texts), 100)
@@ -72,13 +83,16 @@ def embed_texts(texts: list[str], *, task: str) -> list[list[float]]:
     vectors: list[list[float]] = []
     for batch in batches:
         if provider == "gemini":
-            vectors.extend(_gemini_embeddings(batch, task=task))
+            vectors.extend(
+                _gemini_embeddings(batch, task=task, dimensions=expected_dimensions)
+            )
         elif provider == "openai":
-            vectors.extend(_openai_embeddings(batch, task=task))
+            vectors.extend(
+                _openai_embeddings(batch, task=task, dimensions=expected_dimensions)
+            )
         else:
             vectors.extend(_local_embeddings(batch, task=task))
 
-    expected_dimensions = embedding_dimensions()
     for vector in vectors:
         if len(vector) != expected_dimensions:
             raise ValueError(
@@ -92,7 +106,12 @@ def embed_texts(texts: list[str], *, task: str) -> list[list[float]]:
     return vectors
 
 
-def _gemini_embeddings(texts: list[str], *, task: str) -> list[list[float]]:
+def _gemini_embeddings(
+    texts: list[str],
+    *,
+    task: str,
+    dimensions: int,
+) -> list[list[float]]:
     api_key = os.environ.get("DOCS_GEMINI_API_KEY", "")
     if not api_key:
         raise ValueError(
@@ -100,7 +119,6 @@ def _gemini_embeddings(texts: list[str], *, task: str) -> list[list[float]]:
         )
 
     model = os.environ.get("DOCS_GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
-    dimensions = embedding_dimensions()
     task_type = "RETRIEVAL_QUERY" if task == "query" else "RETRIEVAL_DOCUMENT"
     requests = [
         {
@@ -131,7 +149,12 @@ def _gemini_embeddings(texts: list[str], *, task: str) -> list[list[float]]:
     return [[float(value) for value in vector] for vector in vectors]
 
 
-def _openai_embeddings(texts: list[str], *, task: str) -> list[list[float]]:
+def _openai_embeddings(
+    texts: list[str],
+    *,
+    task: str,
+    dimensions: int,
+) -> list[list[float]]:
     api_key = os.environ.get("DOCS_OPENAI_API_KEY", "")
     if not api_key:
         raise ValueError(
@@ -141,7 +164,6 @@ def _openai_embeddings(texts: list[str], *, task: str) -> list[list[float]]:
         "DOCS_OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
     )
     payload: dict[str, Any] = {"model": model, "input": texts}
-    dimensions = embedding_dimensions()
     if dimensions > 0:
         payload["dimensions"] = dimensions
     if "e5" in model.lower():
@@ -182,11 +204,12 @@ def _local_embedder(model: str):
 def _local_embeddings(texts: list[str], *, task: str) -> list[list[float]]:
     model = os.environ.get(
         "DOCS_LOCAL_EMBEDDING_MODEL",
-        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        MULTILINGUAL_E5_BASE_MODEL,
     )
     if "e5" in model.lower():
         prefix = "query: " if task == "query" else "passage: "
         texts = [prefix + value for value in texts]
+
     vectors = _local_embedder(model).embed(texts)
     return [[float(value) for value in vector] for vector in vectors]
 

@@ -252,7 +252,7 @@ def get_recommended_content_items(
     master_profile_id: uuid.UUID,
     segment_id: uuid.UUID | None = None,
     item_type: Optional[str] = Query(default=None, pattern="^(news|video|product|article)$"),
-    limit: int = Query(default=8, le=50),
+    limit: int = Query(default=8, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
     """Return persisted rankings, merged across segments by default."""

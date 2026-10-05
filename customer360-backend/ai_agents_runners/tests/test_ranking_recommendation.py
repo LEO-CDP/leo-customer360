@@ -5,7 +5,9 @@ import pytest
 from pydantic import ValidationError
 
 from ai_agents_runners.agent_pipeline.agent_types.ranking_recommendation import (
+    CANDIDATE_DIAGNOSTICS_SQL,
     RANK_CANDIDATE_CONTENT_SQL,
+    SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS,
     RankingRecommendationPipeline,
 )
 from ai_agents_runners.agent_pipeline.pipelines import PIPELINE_HANDLERS
@@ -18,8 +20,9 @@ CONTENT_ITEM_2 = "44444444-4444-4444-4444-444444444444"
 
 
 class FakeCursor:
-    def __init__(self, rows):
+    def __init__(self, rows, diagnostics=None):
         self.rows = rows
+        self.diagnostics = diagnostics
         self.query = None
         self.params = None
 
@@ -36,10 +39,13 @@ class FakeCursor:
     def fetchall(self):
         return self.rows
 
+    def fetchone(self):
+        return self.diagnostics
+
 
 class FakeConnection:
-    def __init__(self, rows):
-        self.cursor_instance = FakeCursor(rows)
+    def __init__(self, rows, diagnostics=None):
+        self.cursor_instance = FakeCursor(rows, diagnostics)
 
     def __enter__(self):
         return self
@@ -124,7 +130,9 @@ def test_ranking_pipeline_scores_and_returns_explicit_candidates_in_order(monkey
     ]
 
     query = connection.cursor_instance.query
-    assert query == RANK_CANDIDATE_CONTENT_SQL
+    assert query == RANK_CANDIDATE_CONTENT_SQL.replace(
+        "__VECTOR_DIMENSIONS__", "384"
+    )
     assert "content.tenant_id = criteria.tenant_id" in query
     assert "content.status_code = 1" in query
     assert "(content.domain = 'all' OR content.domain = criteria.domain)" in query
@@ -159,12 +167,62 @@ def test_empty_candidate_list_returns_empty_without_loading_catalog(monkeypatch)
 
 
 def test_ranking_pipeline_rejects_candidate_not_eligible_for_tenant(monkeypatch):
-    connection = FakeConnection([])
+    connection = FakeConnection(
+        [],
+        diagnostics={
+            "tenant_candidates": 0,
+            "active_candidates": 0,
+            "domain_candidates": 0,
+            "rankable_candidates": 0,
+        },
+    )
     pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
     monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
 
     with pytest.raises(ValueError, match="unavailable for this tenant"):
         execute_agent_pipeline(_input(), run_id="dagster-run-1")
+
+
+@pytest.mark.parametrize(
+    ("counts", "reason"),
+    [
+        ((2, 0, 0, 0), "selected candidates are inactive"),
+        ((2, 2, 0, 0), "selected candidates do not match the profile domain"),
+        ((2, 2, 2, 0), "selected candidates lack embeddings"),
+        ((2, 2, 2, 2), "no candidate score meets minimum_score"),
+    ],
+)
+def test_empty_rankings_explain_the_excluding_filter(monkeypatch, counts, reason):
+    connection = FakeConnection(
+        [],
+        diagnostics=dict(
+            zip(
+                (
+                    "tenant_candidates",
+                    "active_candidates",
+                    "domain_candidates",
+                    "rankable_candidates",
+                ),
+                counts,
+            )
+        ),
+    )
+    pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match=reason) as error:
+        execute_agent_pipeline(
+            _input(configuration={"minimum_score": 0.75}),
+            run_id="dagster-run-1",
+        )
+
+    assert "minimum_score=0.75" in str(error.value)
+    assert "domain=retail" in str(error.value)
+    assert connection.cursor_instance.query == CANDIDATE_DIAGNOSTICS_SQL
+    assert connection.cursor_instance.params[-2:] == (
+        TENANT_ID,
+        [CONTENT_ITEM_1, CONTENT_ITEM_2],
+    )
 
 
 def test_ranking_pipeline_uses_only_selected_candidates_available_for_profile_domain(
@@ -216,8 +274,8 @@ def test_ranking_pipeline_uses_fallback_reason_without_tag_overlap(monkeypatch):
 
 def test_hybrid_ranking_uses_pgvector_similarity_and_custom_weights(monkeypatch):
     monkeypatch.setenv("DOCS_EMBEDDING_PROVIDER", "gemini")
-    monkeypatch.setenv("DOCS_GEMINI_EMBEDDING_DIMENSIONS", "384")
-    query_vector = [0.01] * 384
+    monkeypatch.setenv("DOCS_GEMINI_EMBEDDING_DIMENSIONS", "768")
+    query_vector = [0.01] * 768
     row = _candidate(
         CONTENT_ITEM_1,
         score=0.8,
@@ -235,7 +293,7 @@ def test_hybrid_ranking_uses_pgvector_similarity_and_custom_weights(monkeypatch)
                 "domain": "retail",
                 "segmentation_tags": ["loyal"],
                 "profile_embedding": query_vector,
-                "embedding_model": "gemini:gemini-embedding-001:384",
+                "embedding_model": "gemini:gemini-embedding-001:768",
             },
             configuration={
                 "strategy": "hybrid",
@@ -251,10 +309,42 @@ def test_hybrid_ranking_uses_pgvector_similarity_and_custom_weights(monkeypatch)
     assert output.result["ranked_items"][0]["strategy"] == "hybrid"
     assert output.result["ranked_items"][0]["semantic_score"] == 0.9
     assert "<=>" in connection.cursor_instance.query
+    assert "::vector(768)" in connection.cursor_instance.query
     assert "vector" in connection.cursor_instance.query
     assert connection.cursor_instance.params[1].startswith("[0.01,0.01")
     assert connection.cursor_instance.params[2:5] == ("hybrid", 0.8, 0.2)
     assert connection.cursor_instance.params[-1] == 3
+
+
+@pytest.mark.parametrize("dimensions", sorted(SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS))
+def test_semantic_ranking_builds_query_for_supported_vector_sizes(monkeypatch, dimensions):
+    embedding_model = f"gemini:gemini-embedding-001:{dimensions}"
+    profile_embedding = [0.01] * dimensions
+    row = _candidate(
+        CONTENT_ITEM_1,
+        score=0.8,
+        matched_tags=["loyal"],
+        published_at=None,
+    )
+    connection = FakeConnection([row])
+    pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    execute_agent_pipeline(
+        _input(
+            input_data={
+                "domain": "retail",
+                "segmentation_tags": ["loyal"],
+                "profile_embedding": profile_embedding,
+                "embedding_model": embedding_model,
+            },
+            configuration={"strategy": "semantic"},
+            candidate_content_item_ids=[CONTENT_ITEM_1],
+        ),
+        run_id="dagster-run-1",
+    )
+
+    assert f"::vector({dimensions})" in connection.cursor_instance.query
 
 
 def test_ranking_pipeline_propagates_database_errors(monkeypatch):

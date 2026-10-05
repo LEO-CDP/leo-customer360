@@ -15,6 +15,8 @@ from croniter import croniter
 from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor, execute_values
 
+from leo_customer360_dao.repositories.content_repository import ContentRepository
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,8 @@ DB_USER = os.environ.get("DB_USER", "postgres")
 DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
 DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
+SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS = frozenset({384, 768})
+CONTENT_EMBEDDING_VERSION = "1"
 SEGMENT_PROFILE_SQL = f"""
     SELECT
         profile.master_profile_id,
@@ -50,7 +54,9 @@ LOAD_SELECTED_CONTENT_SQL = f"""
         content.title,
         content.summary,
         content.segment_tags,
+        content.embedding_text,
         content.embedding_model,
+        content.embedding_version,
         vector_dims(content.embedding) AS embedding_dimensions
     FROM {DB_SCHEMA}.cdp_content_items AS content
     WHERE content.tenant_id = %s
@@ -61,8 +67,14 @@ UPDATE_CONTENT_EMBEDDINGS_SQL = f"""
     UPDATE {DB_SCHEMA}.cdp_content_items AS content
     SET embedding = embedding_values.embedding::vector,
         embedding_model = embedding_values.embedding_model,
+        embedding_text = embedding_values.embedding_text,
+        embedding_version = embedding_values.embedding_version,
+        embedding_updated_at = now(),
         updated_at = now()
-    FROM (VALUES %s) AS embedding_values(tenant_id, content_item_id, embedding, embedding_model)
+    FROM (VALUES %s) AS embedding_values(
+        tenant_id, content_item_id, embedding, embedding_model,
+        embedding_text, embedding_version
+    )
     WHERE content.tenant_id = embedding_values.tenant_id::uuid
       AND content.content_item_id = embedding_values.content_item_id::uuid
 """
@@ -363,7 +375,14 @@ class AgentWorkflowMasterTask:
                             "candidate_content_item_ids": step["candidate_content_item_ids"],
                             "trigger_event": step["trigger_event"],
                         }
-                        output = self._pipeline_executor(payload, run_id)
+                        try:
+                            output = self._pipeline_executor(payload, run_id)
+                        except ValueError as exc:
+                            raise ValueError(
+                                f"Recommendation failed for tenant={tenant_id}, "
+                                f"segment={segment_id}, agent={step['agent_code']}, "
+                                f"profile={profile['master_profile_id']}: {exc}"
+                            ) from exc
                         ranked_items = output.result["ranked_items"]
                         self._insert_profile_recommendations(
                             tenant_id=tenant_id,
@@ -404,6 +423,7 @@ class AgentWorkflowMasterTask:
                 recommendations_written=step_recommendation_count,
                 error_message=None,
             )
+            ContentRepository.invalidate_recommendation_cache(uuid.UUID(tenant_id))
             executed_steps += len(steps)
             profile_runs_processed += step_profile_count
             recommendations_written += step_recommendation_count
@@ -456,11 +476,21 @@ class AgentWorkflowMasterTask:
                 "or outside this tenant"
             )
         expected_dimensions = int(model_key.rsplit(":", 1)[-1])
+        if expected_dimensions not in SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS:
+            raise ValueError(
+                "Recommendation embeddings must use 384 or 768 dimensions"
+            )
+        content_text_by_id = {
+            str(row["content_item_id"]): self._content_embedding_text(row)
+            for row in rows
+        }
         missing_rows = [
             row
             for row in rows
             if row["embedding_model"] != model_key
+            or row["embedding_version"] != CONTENT_EMBEDDING_VERSION
             or row["embedding_dimensions"] != expected_dimensions
+            or row["embedding_text"] != content_text_by_id[str(row["content_item_id"])]
         ]
         if not missing_rows:
             return
@@ -478,6 +508,8 @@ class AgentWorkflowMasterTask:
                 str(row["content_item_id"]),
                 self._vector_literal(vector),
                 model_key,
+                content_text_by_id[str(row["content_item_id"])],
+                CONTENT_EMBEDDING_VERSION,
             )
             for row, vector in zip(missing_rows, vectors, strict=True)
         ]
@@ -491,7 +523,7 @@ class AgentWorkflowMasterTask:
                     cursor,
                     UPDATE_CONTENT_EMBEDDINGS_SQL,
                     values,
-                    template="(%s, %s, %s, %s)",
+                    template="(%s, %s, %s, %s, %s, %s)",
                     page_size=100,
                 )
 
@@ -525,7 +557,24 @@ class AgentWorkflowMasterTask:
     def _embedding_model_key() -> str:
         from .agent_pipeline.embeddings import embedding_model_key
 
-        return embedding_model_key()
+        model_key = embedding_model_key()
+        provider = model_key.partition(":")[0]
+        if provider not in {"openai", "gemini"}:
+            raise ValueError(
+                "Recommendation embeddings require DOCS_EMBEDDING_PROVIDER "
+                "to be 'openai' or 'gemini'"
+            )
+
+        dimensions = int(model_key.rsplit(":", 1)[-1])
+        if dimensions not in SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS:
+            supported = ", ".join(
+                str(value)
+                for value in sorted(SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS)
+            )
+            raise ValueError(
+                f"Recommendation embeddings must use one of these dimensions: {supported}"
+            )
+        return model_key
 
     def _load_segment_profiles(
         self, *, tenant_id: str, segment_id: str

@@ -2233,7 +2233,8 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_profile_attributes (
     -- Exact string values blocked from being promoted to external identifiers.
     blocked_values JSONB NOT NULL DEFAULT '["null", "-1", "anonymous", "void", "abc123"]'::JSONB,
     -- Regex patterns blocked from being promoted to external identifiers.
-    blocked_patterns TEXT[] NOT NULL DEFAULT ARRAY['^[0-]*$'],
+    -- A typed array literal avoids nested-bracket highlighting in SQL editors.
+    blocked_patterns TEXT[] NOT NULL DEFAULT '{"^[0-]*$"}'::TEXT[],
 
     -- segmentation metadata: whether this attribute can be used for audience segmentation, and its data type TEXT, NUMERIC, DATE, TIMESTAMP, BOOLEAN, JSONB.
     is_segmentable BOOLEAN NOT NULL DEFAULT TRUE,
@@ -2583,30 +2584,71 @@ COMMENT ON TABLE customer360.crm_transactions IS 'Source-agnostic transaction fa
 -- Items are selected and ranked by the segment's configured ranking workflow,
 -- persisted per profile, and served by GET /api/v1/content-items/recommended.
 CREATE TABLE IF NOT EXISTS customer360.cdp_content_items (
+
     content_item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+
+    tenant_id UUID NOT NULL
+        REFERENCES customer360.sys_tenant(tenant_id),
+
     -- Validated against sys_domain ('all' + active domain codes) at the API
     -- layer, see cdp_master_profiles.domain above.
     domain TEXT NOT NULL DEFAULT 'all',
-    item_type TEXT NOT NULL CHECK (item_type IN ('news', 'video', 'product', 'article')),
+
+    item_type TEXT NOT NULL CHECK (
+        item_type IN ('news', 'video', 'product', 'article')
+    ),
+
     title TEXT NOT NULL,
     summary TEXT,
+
     image_url TEXT,
     cta_label TEXT,
     cta_url TEXT,
-    segment_tags TEXT[] DEFAULT ARRAY[]::text[],
+
+    segment_tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+
+    -- Semantic embedding; the runner generates vectors lazily for selected items.
+    embedding_text TEXT,
     embedding VECTOR,
     embedding_model TEXT,
+    embedding_version VARCHAR(50),
+    embedding_updated_at TIMESTAMPTZ,
+
     published_at TIMESTAMPTZ DEFAULT now(),
     status_code SMALLINT DEFAULT 1,
+
     created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now()
+    updated_at TIMESTAMPTZ DEFAULT now(),
+
+    CONSTRAINT chk_cdp_content_items_embedding_dimensions
+        CHECK (embedding IS NULL OR vector_dims(embedding) IN (384, 768))
 );
 
-COMMENT ON TABLE customer360.cdp_content_items IS 'Personalized content library (news/video/product/article) used as candidate content for segment ranking workflows and served by /api/v1/content-items/recommended.';
+COMMENT ON TABLE customer360.cdp_content_items IS
+    'Tenant-scoped content candidates for segment ranking, recommendations, and personalization.';
+COMMENT ON COLUMN customer360.cdp_content_items.embedding_text IS
+    'Canonical text embedded for recommendation ranking; refreshed when source content changes.';
+COMMENT ON COLUMN customer360.cdp_content_items.embedding IS
+    '384- or 768-dimensional content embedding used for semantic and hybrid recommendation ranking.';
+COMMENT ON COLUMN customer360.cdp_content_items.embedding_model IS
+    'Provider and model key used to generate the current content embedding.';
+COMMENT ON COLUMN customer360.cdp_content_items.embedding_version IS
+    'Application embedding contract version used to generate the current vector.';
+COMMENT ON COLUMN customer360.cdp_content_items.embedding_updated_at IS
+    'Time the current content embedding was generated.';
 
-CREATE INDEX IF NOT EXISTS idx_cdp_content_items_domain_type ON customer360.cdp_content_items (domain, item_type);
-CREATE INDEX IF NOT EXISTS idx_cdp_content_items_tags ON customer360.cdp_content_items USING GIN (segment_tags);
+CREATE INDEX IF NOT EXISTS idx_cdp_content_items_domain_type
+    ON customer360.cdp_content_items (tenant_id, domain, item_type);
+CREATE INDEX IF NOT EXISTS idx_cdp_content_items_tags
+    ON customer360.cdp_content_items USING GIN (segment_tags);
+CREATE INDEX IF NOT EXISTS idx_cdp_content_items_embedding_384_hnsw
+    ON customer360.cdp_content_items
+    USING hnsw ((embedding::VECTOR(384)) vector_cosine_ops)
+    WHERE vector_dims(embedding) = 384;
+CREATE INDEX IF NOT EXISTS idx_cdp_content_items_embedding_768_hnsw
+    ON customer360.cdp_content_items
+    USING hnsw ((embedding::VECTOR(768)) vector_cosine_ops)
+    WHERE vector_dims(embedding) = 768;
 
 CREATE OR REPLACE FUNCTION customer360.invalidate_content_item_embedding()
 RETURNS TRIGGER
@@ -2619,7 +2661,10 @@ BEGIN
        OR NEW.summary IS DISTINCT FROM OLD.summary
        OR NEW.segment_tags IS DISTINCT FROM OLD.segment_tags THEN
         NEW.embedding := NULL;
+        NEW.embedding_text := NULL;
         NEW.embedding_model := NULL;
+        NEW.embedding_version := NULL;
+        NEW.embedding_updated_at := NULL;
     END IF;
     RETURN NEW;
 END;
@@ -2639,33 +2684,78 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_content_items_tenant_id
     ON customer360.cdp_content_items (tenant_id, content_item_id);
 
 CREATE TABLE IF NOT EXISTS customer360.cdp_product_items (
-    product_item_id TEXT PRIMARY KEY DEFAULT (gen_random_uuid()::text),
-    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+
+    product_item_id TEXT PRIMARY KEY
+        DEFAULT (gen_random_uuid()::TEXT),
+
+    tenant_id UUID NOT NULL
+        REFERENCES customer360.sys_tenant(tenant_id)
+        ON DELETE CASCADE,
+
     content_item_id UUID,
+
     domain TEXT NOT NULL,
     product_type TEXT NOT NULL,
+
     source_id TEXT NOT NULL,
     source_type TEXT NOT NULL DEFAULT '',
-    product_id_type TEXT NOT NULL CHECK (btrim(product_id_type) <> ''),
-    product_id TEXT NOT NULL CHECK (btrim(product_id) <> ''),
-    keywords TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
-    ext_attributes JSONB NOT NULL DEFAULT '{}'::jsonb
+
+    product_id_type TEXT NOT NULL
+        CHECK (btrim(product_id_type) <> ''),
+    product_id TEXT NOT NULL
+        CHECK (btrim(product_id) <> ''),
+
+    keywords TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+
+    ext_attributes JSONB NOT NULL DEFAULT '{}'::JSONB
         CHECK (jsonb_typeof(ext_attributes) = 'object'),
-    original_price NUMERIC(18, 4) CHECK (original_price IS NULL OR original_price >= 0),
-    sale_price NUMERIC(18, 4) CHECK (sale_price IS NULL OR sale_price >= 0),
+
+    original_price NUMERIC(18, 4)
+        CHECK (original_price IS NULL OR original_price >= 0),
+    sale_price NUMERIC(18, 4)
+        CHECK (sale_price IS NULL OR sale_price >= 0),
+
     currency VARCHAR(3),
-    source_fields JSONB NOT NULL CHECK (jsonb_typeof(source_fields) = 'object'),
+
+    source_fields JSONB NOT NULL
+        CHECK (jsonb_typeof(source_fields) = 'object'),
+
+    -- Reserved for product similarity; current workflows rank linked content.
+    embedding_text TEXT,
+    embedding VECTOR,
+    embedding_model VARCHAR(255),
+    embedding_version VARCHAR(50),
+    embedding_updated_at TIMESTAMPTZ,
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
     CONSTRAINT uq_cdp_product_items_source_identity
-        UNIQUE (tenant_id, source_type, source_id, product_id_type, product_id),
+        UNIQUE (
+            tenant_id,
+            source_type,
+            source_id,
+            product_id_type,
+            product_id
+        ),
+
     CONSTRAINT uq_cdp_product_items_tenant_content
         UNIQUE (tenant_id, content_item_id),
+
     CONSTRAINT fk_cdp_product_items_tenant_content
-        FOREIGN KEY (tenant_id, content_item_id)
-        REFERENCES customer360.cdp_content_items (tenant_id, content_item_id)
+        FOREIGN KEY (
+            tenant_id,
+            content_item_id
+        )
+        REFERENCES customer360.cdp_content_items (
+            tenant_id,
+            content_item_id
+        )
         ON DELETE CASCADE
-        DEFERRABLE INITIALLY DEFERRED
+        DEFERRABLE INITIALLY DEFERRED,
+
+    CONSTRAINT chk_cdp_product_items_embedding_dimensions
+        CHECK (embedding IS NULL OR vector_dims(embedding) IN (384, 768))
 );
 
 COMMENT ON TABLE customer360.cdp_product_items IS
@@ -2674,10 +2764,60 @@ COMMENT ON COLUMN customer360.cdp_product_items.source_fields IS
     'Complete source TSV row as JSONB; all source fields are provided to the product-content LLM and retained for audit/re-generation.';
 COMMENT ON COLUMN customer360.cdp_product_items.ext_attributes IS
     'Optional structured product metadata from the TSV ext_attributes JSON object.';
+COMMENT ON COLUMN customer360.cdp_product_items.embedding_text IS
+    'Canonical product text reserved for future product-vector generation.';
+COMMENT ON COLUMN customer360.cdp_product_items.embedding IS
+    '384- or 768-dimensional product embedding reserved for product similarity and recommendation.';
+COMMENT ON COLUMN customer360.cdp_product_items.embedding_model IS
+    'Provider and model key used to generate the current product embedding.';
+COMMENT ON COLUMN customer360.cdp_product_items.embedding_version IS
+    'Application embedding contract version used to generate the current product vector.';
+COMMENT ON COLUMN customer360.cdp_product_items.embedding_updated_at IS
+    'Time the current product embedding was generated.';
 CREATE INDEX IF NOT EXISTS idx_cdp_product_items_tenant_domain
     ON customer360.cdp_product_items (tenant_id, domain);
 CREATE INDEX IF NOT EXISTS idx_cdp_product_items_content
     ON customer360.cdp_product_items (tenant_id, content_item_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_product_items_embedding_384_hnsw
+    ON customer360.cdp_product_items
+    USING hnsw ((embedding::VECTOR(384)) vector_cosine_ops)
+    WHERE vector_dims(embedding) = 384;
+CREATE INDEX IF NOT EXISTS idx_cdp_product_items_embedding_768_hnsw
+    ON customer360.cdp_product_items
+    USING hnsw ((embedding::VECTOR(768)) vector_cosine_ops)
+    WHERE vector_dims(embedding) = 768;
+
+CREATE OR REPLACE FUNCTION customer360.invalidate_product_item_embedding()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.domain IS DISTINCT FROM OLD.domain
+       OR NEW.product_type IS DISTINCT FROM OLD.product_type
+       OR NEW.keywords IS DISTINCT FROM OLD.keywords
+       OR NEW.ext_attributes IS DISTINCT FROM OLD.ext_attributes
+       OR NEW.source_fields IS DISTINCT FROM OLD.source_fields THEN
+        NEW.embedding := NULL;
+        NEW.embedding_text := NULL;
+        NEW.embedding_model := NULL;
+        NEW.embedding_version := NULL;
+        NEW.embedding_updated_at := NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_invalidate_product_item_embedding
+    ON customer360.cdp_product_items;
+CREATE TRIGGER trg_invalidate_product_item_embedding
+    BEFORE UPDATE OF
+        domain,
+        product_type,
+        keywords,
+        ext_attributes,
+        source_fields
+    ON customer360.cdp_product_items
+    FOR EACH ROW EXECUTE FUNCTION customer360.invalidate_product_item_embedding();
 
 -- ============================================================================
 -- cdp_segments: segmentation tag metadata (Audience Builder)
@@ -3908,47 +4048,21 @@ END;
 $$;
 
 ---------------------------------------------------
--- ROW LEVEL SECURITY (RBAC / Multi-Tenant Isolation)
+-- Row-Level Security: RBAC and tenant isolation
 ---------------------------------------------------
--- Tenant isolation via PostgreSQL Row-Level Security.
--- ============================================================================
--- Every table below carries a NOT NULL tenant_id FK to customer360.sys_tenant
--- (see the "all crm_*/cdp_* tables must have tenant_id" convention introduced
--- alongside the RBAC tables -- sys_tenant/sys_organization/sys_user/sys_role/
--- sys_permission/sys_role_permission/sys_user_role/sys_audit_log -- above).
+-- RLS policies below scope tenant_id to app.tenant_id. Set it transaction-
+-- locally on every connection before querying:
+--   SELECT set_config('app.tenant_id', '<tenant-uuid>', true);
+-- Every tenant-owned table must have a NOT NULL tenant_id FK to sys_tenant.
 --
--- The application must SET the current tenant on every pooled connection
--- before running any query, e.g.:
---   SELECT set_config('app.tenant_id', '<tenant-uuid>', true);  -- true = tx-local
--- or via SQLAlchemy: conn.execute(text("SELECT set_config('app.tenant_id', :t, true)"), {"t": tenant_id})
+-- ENABLE + FORCE enforce policies for table owners. Superusers and roles with
+-- BYPASSRLS still bypass RLS; production API roles must be non-superusers
+-- without BYPASSRLS. Local DB_USER=postgres may bypass RLS, so do not use it
+-- to verify isolation. Grant the app role only its required schema/table access.
 --
--- FORCE ROW LEVEL SECURITY is applied in addition to ENABLE so that the
--- policy is also enforced for the table owner (the role the application
--- normally connects as) -- without FORCE, RLS is bypassed for the owner of
--- the table, which would silently defeat tenant isolation for the app's own
--- DB user. Only a superuser (or BYPASSRLS role) can still see cross-tenant
--- rows; the app's runtime DB role should NOT be granted BYPASSRLS/superuser.
---
--- IMPORTANT (verified): PostgreSQL superusers ALWAYS bypass RLS, regardless
--- of ENABLE/FORCE -- this cannot be overridden. The default local/dev
--- DB_USER=postgres in .env.example is typically a superuser, so RLS has NO
--- effect on that connection. For RLS to actually protect production data,
--- customer360-api (and any other tenant-facing consumer) MUST connect as a
--- dedicated non-superuser role, e.g.:
---   CREATE ROLE customer360_app LOGIN PASSWORD '...';
---   GRANT USAGE ON SCHEMA customer360 TO customer360_app;
---   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA customer360 TO customer360_app;
--- customer360-backend/identity_resolution (CIR) intentionally processes many tenants per
--- batch/connection (see run_resolution_batch in resolver.py), so it either
--- needs its own BYPASSRLS role, OR -- the approach taken here -- it re-issues
--- set_config('app.tenant_id', ...) per row before each row's queries, which
--- works fine against a plain (non-BYPASSRLS) role too.
---
--- current_setting('app.tenant_id') is called with missing_ok = true so a
--- connection that never set app.tenant_id gets NULL (and therefore denies
--- all rows, since tenant_id can never equal NULL) rather than raising an
--- error -- fail-closed instead of fail-open.
--- ============================================================================
+-- CIR processes multiple tenants per connection; it sets app.tenant_id for
+-- each tenant before querying and does not need BYPASSRLS. A missing setting
+-- yields NULL (current_setting(..., true)), denying rows by default.
 
 DO $$
 DECLARE

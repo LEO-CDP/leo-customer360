@@ -40,7 +40,6 @@ def test_embedding_response_dimension_must_match_docs_configuration(monkeypatch)
         "_post_json",
         lambda *_args, **_kwargs: {"embeddings": [{"values": [0.1] * 768}]},
     )
-
     with pytest.raises(ValueError, match="DOCS_\\*_EMBEDDING_DIMENSIONS"):
         embeddings.embed_texts(["bad dimension"], task="document")
 
@@ -51,3 +50,33 @@ def test_gemini_provider_requires_existing_docs_key(monkeypatch):
 
     with pytest.raises(ValueError, match="DOCS_GEMINI_API_KEY"):
         embeddings.embed_texts(["text"], task="query")
+
+
+def test_recommendation_dimensions_override_docs_vector_dimension(monkeypatch):
+    monkeypatch.setenv("DOCS_EMBEDDING_PROVIDER", "gemini")
+    monkeypatch.setenv("DOCS_GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("DOCS_GEMINI_EMBEDDING_DIMENSIONS", "384")
+    requests = []
+
+    def fake_post(_url, payload, _timeout, **_kwargs):
+        requests.append(payload)
+        dimensions = payload["requests"][0]["outputDimensionality"]
+        return {
+            "embeddings": [{"values": [0.25] * dimensions}]
+            for _request in payload["requests"]
+        }
+
+    monkeypatch.setattr(embeddings, "_post_json", fake_post)
+    for dimension in (384, 768):
+        vectors = embeddings.embed_texts(
+            ["Recommendation content"],
+            task="document",
+            dimensions=dimension,
+        )
+
+        assert len(vectors[0]) == dimension
+        assert requests[-1]["requests"][0]["outputDimensionality"] == dimension
+        assert (
+            embeddings.embedding_model_key(dimensions=dimension)
+            == f"gemini:gemini-embedding-001:{dimension}"
+        )

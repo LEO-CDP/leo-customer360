@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ForeignKey, SmallInteger, Text, text
+from sqlalchemy import ForeignKey, SmallInteger, String, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -31,9 +31,14 @@ class CdpContentItem(Base):
     cta_label: Mapped[Optional[str]] = mapped_column(Text)
     cta_url: Mapped[Optional[str]] = mapped_column(Text)
 
-    segment_tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), server_default=text("ARRAY[]::text[]"))
+    segment_tags: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("ARRAY[]::text[]")
+    )
+    embedding_text: Mapped[Optional[str]] = mapped_column(Text)
     embedding: Mapped[Optional[list[float]]] = mapped_column(Vector())
     embedding_model: Mapped[Optional[str]] = mapped_column(Text)
+    embedding_version: Mapped[Optional[str]] = mapped_column(String(50))
+    embedding_updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
 
     published_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     status_code: Mapped[int] = mapped_column(SmallInteger, server_default="1")

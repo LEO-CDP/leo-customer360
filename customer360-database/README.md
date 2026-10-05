@@ -58,6 +58,13 @@ a replacement for migrations on an existing volume. Review migration impact
 before running against production data. Several migrations deliberately fail
 when existing data cannot be safely backfilled or constrained.
 
+Migration `008_content_embedding_contract.sql` makes content tags non-null
+(converting existing nulls to empty arrays), supports 384- and 768-dimensional
+recommendation vectors with size-specific HNSW indexes, adds embedding
+source/version metadata, and clears unsupported vector sizes for lazy
+regeneration. Product-vector columns are reserved for future direct product
+ranking; current ranking uses linked content embeddings.
+
 ## Initialization And Seeds
 
 `init-cdp-ai-agents.sql` is the unified AI-agent registry seed. It creates

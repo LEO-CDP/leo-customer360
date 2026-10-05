@@ -275,6 +275,23 @@ The `metadata_repository.py` and `campaign_draft_repository.py` modules remain
 in `customer360-api` because they combine database operations with API health
 probes, Dagster configuration, AI planning, and approval orchestration.
 
+### Recommendation reads
+
+`ContentRepository.get_recommended_items` reads precomputed Dagster results;
+it does not execute ranking. The query selects the latest successful run per
+segment, checks current membership and active workflow/agent/content records,
+and keeps the best recommendation per content item. When the query returns no
+rows, a separate tenant-scoped existence check distinguishes a missing/inactive
+profile from a valid profile with no recommendations.
+
+Redis uses the existing `CACHE_ENABLED` and `CACHE_TTL_SECONDS` settings. Keys
+include the database schema, tenant, profile, segment/type filters, and limit.
+Content mutations and successful recommendation runs rotate a tenant cache
+token with one Redis write; old entries expire by TTL. Other changes, including
+profile membership and agent/workflow status updates outside these paths, may
+remain cached until the TTL expires. Redis failures are logged and reads fall
+back to PostgreSQL. Invalid payloads are logged, discarded, and reloaded.
+
 ## Schemas
 
 `schemas/` contains Pydantic models grouped by domain:

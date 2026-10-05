@@ -8,17 +8,34 @@ from uuid import UUID
 from psycopg2.extras import RealDictCursor
 from pydantic import Field, FiniteFloat
 
-from ...runner import DB_SCHEMA, _connect
+from ...runner import (
+    DB_SCHEMA,
+    SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS,
+    _connect,
+)
 from ..contracts import AgentPipelineInput, AgentResultModel, ModelType
-from ..embeddings import embedding_dimensions
 from .base import AgentTypePipeline
 
 DEFAULT_RESULT_LIMIT = 8
+CANDIDATE_DIAGNOSTICS_SQL = f"""
+    SELECT
+        COUNT(*) AS tenant_candidates,
+        COUNT(*) FILTER (WHERE status_code = 1) AS active_candidates,
+        COUNT(*) FILTER (
+            WHERE status_code = 1 AND (domain = 'all' OR domain = %s)
+        ) AS domain_candidates,
+        COUNT(*) FILTER (
+            WHERE status_code = 1 AND (domain = 'all' OR domain = %s)
+              AND (%s = 'tags' OR (embedding IS NOT NULL AND embedding_model = %s))
+        ) AS rankable_candidates
+    FROM {DB_SCHEMA}.cdp_content_items
+    WHERE tenant_id = %s AND content_item_id = ANY(%s::uuid[])
+"""
 RANK_CANDIDATE_CONTENT_SQL = f"""
     WITH criteria AS (
         SELECT
             %s::text[] AS profile_tags,
-            %s::vector AS profile_embedding,
+            %s::vector(__VECTOR_DIMENSIONS__) AS profile_embedding,
             %s::text AS strategy,
             %s::double precision AS semantic_weight,
             %s::double precision AS tag_weight,
@@ -48,8 +65,15 @@ RANK_CANDIDATE_CONTENT_SQL = f"""
             CASE
                 WHEN criteria.strategy = 'tags' THEN 0.0
                 ELSE GREATEST(
-                    0.0,
-                    LEAST(1.0, (1.0 - (content.embedding <=> criteria.profile_embedding)) / 2.0)
+                    0.0, LEAST(
+                        1.0,
+                        (
+                            1.0 - (
+                                content.embedding::vector(__VECTOR_DIMENSIONS__)
+                                <=> criteria.profile_embedding
+                            )
+                        ) / 2.0
+                    )
                 )
             END AS semantic_score,
             criteria.*
@@ -72,6 +96,7 @@ RANK_CANDIDATE_CONTENT_SQL = f"""
                 criteria.strategy = 'tags'
                 OR (
                     content.embedding IS NOT NULL
+                    AND vector_dims(content.embedding) = __VECTOR_DIMENSIONS__
                     AND content.embedding_model = criteria.embedding_model
                 )
           )
@@ -207,10 +232,14 @@ class RankingRecommendationPipeline(AgentTypePipeline):
                 raise ValueError("input_data.profile_embedding must contain finite numbers")
             if not isinstance(model_key, str) or not model_key.strip():
                 raise ValueError("semantic recommendation requires input_data.embedding_model")
-            if len(profile_embedding) != embedding_dimensions():
+            if len(profile_embedding) not in SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS:
+                raise ValueError(
+                    "input_data.profile_embedding must have 384 or 768 dimensions"
+                )
+            if len(profile_embedding) != int(model_key.rsplit(":", 1)[-1]):
                 raise ValueError(
                     "input_data.profile_embedding dimension does not match "
-                    "the configured DOCS embedding dimension"
+                    "input_data.embedding_model"
                 )
         else:
             profile_embedding = None
@@ -234,12 +263,6 @@ class RankingRecommendationPipeline(AgentTypePipeline):
             minimum_score=float(minimum_score),
             top_k=limit,
         )
-        if not rows:
-            raise ValueError(
-                "Selected recommendation candidates are unavailable for this tenant, "
-                "active status, or profile domain"
-            )
-
         return {
             "ranked_items": [
                 self._serialize_candidate(row, rank)
@@ -275,14 +298,55 @@ class RankingRecommendationPipeline(AgentTypePipeline):
             [str(candidate_id) for candidate_id in candidate_ids],
             top_k,
         )
+        dimensions = (
+            len(profile_embedding)
+            if profile_embedding is not None
+            else min(SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS)
+        )
+        query = RANK_CANDIDATE_CONTENT_SQL.replace(
+            "__VECTOR_DIMENSIONS__", str(dimensions)
+        )
         with self._connection_factory() as connection:
             with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(
                     "SELECT set_config('app.tenant_id', %s, true)",
                     (str(tenant_id),),
                 )
-                cursor.execute(RANK_CANDIDATE_CONTENT_SQL, params)
-                return list(cursor.fetchall())
+                cursor.execute(query, params)
+                rows = list(cursor.fetchall())
+                if rows:
+                    return rows
+
+                cursor.execute(
+                    CANDIDATE_DIAGNOSTICS_SQL,
+                    (
+                        domain,
+                        domain,
+                        strategy,
+                        embedding_model,
+                        str(tenant_id),
+                        [str(candidate_id) for candidate_id in candidate_ids],
+                    ),
+                )
+                counts = cursor.fetchone()
+                if counts["tenant_candidates"] == 0:
+                    reason = "selected candidates are unavailable for this tenant"
+                elif counts["active_candidates"] == 0:
+                    reason = "selected candidates are inactive"
+                elif counts["domain_candidates"] == 0:
+                    reason = "selected candidates do not match the profile domain"
+                elif counts["rankable_candidates"] == 0:
+                    reason = "selected candidates lack embeddings for the configured model"
+                else:
+                    reason = "no candidate score meets minimum_score"
+                raise ValueError(
+                    f"Recommendation ranking failed: {reason}; "
+                    f"domain={domain}, strategy={strategy}, minimum_score={minimum_score}, "
+                    f"selected={len(candidate_ids)}, tenant={counts['tenant_candidates']}, "
+                    f"active={counts['active_candidates']}, "
+                    f"domain_matching={counts['domain_candidates']}, "
+                    f"rankable={counts['rankable_candidates']}"
+                )
 
     @staticmethod
     def _serialize_candidate(row: Mapping[str, Any], rank: int) -> dict[str, Any]:

@@ -39,18 +39,22 @@ Ranking settings live in each workflow step's existing `configuration` JSON:
 or `hybrid`. Selected content embeddings are generated lazily from title,
 summary, domain, type, and tags. Profile query text uses only its domain and
 segment tags plus optional operator context; PII fields are not embedded.
-Embeddings use the existing Docs AI settings (`DOCS_EMBEDDING_PROVIDER` and the
-matching `DOCS_*_EMBEDDING_*` variables). The vector distance is computed only
+Recommendation vectors support 384 or 768 dimensions, selected through the
+existing provider/model dimension setting. Separate partial HNSW indexes cover
+each size. The vector distance is computed only
 over the bounded workflow candidate list; no global catalog search is performed.
-The configured provider, model, and dimension are stored with each content
-vector, so vectors are refreshed when the existing Docs embedding settings
-change. Updating a content title, summary, domain, type, or segment tags also
-invalidates its cached vector.
+The configured provider, model, dimension, embedding contract version, and
+canonical source text are stored with each content vector. Vectors are regenerated when the
+provider/model changes or content title, summary, domain, type, or segment tags
+change. Apply migration `008_content_embedding_contract.sql` to preserve
+384/768-dimensional vectors and clear unsupported sizes for lazy refresh.
 
-For Gemini, set the existing `DOCS_EMBEDDING_PROVIDER=gemini` and configure
+For Gemini, set `DOCS_EMBEDDING_PROVIDER=gemini` and configure
 `DOCS_GEMINI_API_KEY`, `DOCS_GEMINI_EMBEDDING_MODEL`, and
-`DOCS_GEMINI_EMBEDDING_DIMENSIONS`. The same settings are passed to the Dagster
-backend deployment; no recommendation-specific embedding variables are needed.
+`DOCS_GEMINI_EMBEDDING_DIMENSIONS` to either 384 or 768. Provider/model/dimension
+must remain the same between profile and content embeddings.
+The local FastEmbed provider remains available for other consumers, but
+recommendation workflows reject it; recommendations use OpenAI or Gemini only.
 
 ## Agent-type strategy layout
 
