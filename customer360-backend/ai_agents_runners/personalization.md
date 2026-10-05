@@ -11,12 +11,15 @@ The current implementation provides:
 - ordered workflow selection from `cdp_agent_workflow`;
 - API and cron trigger paths;
 - active-agent and tenant filtering;
-- ranking-agent candidate-content validation;
+- ranking of explicit, tenant-scoped active content candidates by overlap with
+  supplied profile segmentation tags;
 - an explicit execution plan for future handlers.
 
-It does **not** yet perform model inference, rank profiles, write
-recommendation results, or persist next-best actions. The compatibility
-`personalization_job` only preserves the former scaffold entry point.
+The ranking handler does not perform learned-model inference, rank profiles,
+write recommendation results, or persist next-best actions. The master
+workflow currently selects steps but does not yet dispatch agent handlers.
+The compatibility `personalization_job` only preserves the former scaffold
+entry point.
 
 ## Registry model: `cdp_ai_agents`
 
@@ -88,7 +91,23 @@ candidate exists in the same tenant and that candidate IDs are distinct.
 
 An empty candidate array means no explicit candidate restriction. It does not
 mean that the runner should silently copy the entire catalog into the
-workflow row.
+workflow row or query the whole catalog during execution. The ranking handler
+returns an empty `ranked_items` list when no candidate IDs are provided.
+
+For non-empty candidate lists, the ranking handler requires
+`input_data.domain` and accepts `input_data.segmentation_tags` (default `[]`).
+It selects candidates only when their `tenant_id` matches the workflow tenant,
+`status_code = 1`, and their domain is `all` or matches the profile domain.
+Every requested candidate must pass those filters; otherwise the handler
+fails rather than silently dropping a candidate. Results are ordered by the
+number of overlapping segment tags, newest publication timestamp, then
+content-item UUID for deterministic ties. The optional `configuration.limit`
+defaults to 8 and must be a positive integer.
+
+Each returned item includes `item_id`, one-based `rank`, overlap `score`,
+`matched_tags`, a reason, and the content display/CTA fields. The score is a
+tag-overlap count, not a calibrated relevance probability. The handler does
+not persist results.
 
 The separate API endpoint
 `GET /api/v1/content-items/recommended` currently ranks content for a master

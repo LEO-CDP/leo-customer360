@@ -12,6 +12,8 @@ region      = "us-east-1"                          # keep us-east-1 (no Location
 bucket_names = ["leo-customer360-uat"]
 
 master_profile_s3_bucket = "c360-master-profiles"
+product_import_s3_bucket  = "c360-product-imports-uat"
+content_import_s3_bucket  = "c360-content-imports-uat"
 s3_auto_create_buckets   = true
 
 enable_versioning = false

@@ -156,6 +156,10 @@
         rendered by static/js/ai-agent-view.js. -->
       <section id="view-agent" class="hidden"></section>
 
+      <!-- Content and Product management: listing/create/import rendered by
+        static/js/item-view.js. -->
+      <section id="view-content-products" class="hidden"></section>
+
       <!-- Campaign Performance Dashboard. Content rendered from
          static/templates/campaign/campaign-dashboard.html by static/js/campaign-view.js -->
       <section id="view-campaigns" class="hidden">
@@ -250,6 +254,7 @@
   <script src="{{ static_base }}/js/attributes-view.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/data-source-view.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/ai-agent-view.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/item-view.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/system-user-view.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/placeholder-view.js?cb={{ cache_bust }}"></script>
 

@@ -442,6 +442,66 @@ class DataSynchDagsterService(DagsterService):
         return self.submit()
 
 
+class ProductContentImportDagsterService(DagsterService):
+    """Submits asynchronous tenant-scoped product catalog imports."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            job_name=settings.dagster_product_content_import_job_name,
+            location_name=settings.dagster_data_synch_location_name,
+            repository_name=settings.dagster_data_synch_repository_name,
+        )
+
+    def import_products(self, *, tenant_id: str, bucket: str, object_key: str) -> str:
+        """Submit a staged S3 product import and return its Dagster run ID."""
+        if not tenant_id or not bucket or not object_key:
+            raise ValueError("tenant_id, bucket, and object_key are required")
+        return self.submit(
+            run_config={
+                "ops": {
+                    "import_product_content_op": {
+                        "config": {
+                            "tenant_id": str(tenant_id),
+                            "bucket": bucket,
+                            "object_key": object_key,
+                        }
+                    }
+                }
+            },
+            tags={"tenant_id": str(tenant_id), "import_type": "product_tsv"},
+        )
+
+
+class ContentItemImportDagsterService(DagsterService):
+    """Submits asynchronous tenant-scoped content TSV imports."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            job_name=settings.dagster_content_item_import_job_name,
+            location_name=settings.dagster_data_synch_location_name,
+            repository_name=settings.dagster_data_synch_repository_name,
+        )
+
+    def import_content(self, *, tenant_id: str, bucket: str, object_key: str) -> str:
+        """Submit a staged S3 content import and return its Dagster run ID."""
+        if not tenant_id or not bucket or not object_key:
+            raise ValueError("tenant_id, bucket, and object_key are required")
+        return self.submit(
+            run_config={
+                "ops": {
+                    "import_content_items_op": {
+                        "config": {
+                            "tenant_id": str(tenant_id),
+                            "bucket": bucket,
+                            "object_key": object_key,
+                        }
+                    }
+                }
+            },
+            tags={"tenant_id": str(tenant_id), "import_type": "content_tsv"},
+        )
+
+
 class EmailEngineDagsterService(DagsterService):
     """customer360-backend/email_engine -- outbound email campaign/journey
     execution (placeholder job today, see
@@ -521,6 +581,8 @@ class DagsterClient:
         self.scoring = self.ai_agents_runners
         self.segmentation = SegmentationDagsterService()
         self.data_synch = DataSynchDagsterService()
+        self.product_content_import = ProductContentImportDagsterService()
+        self.content_item_import = ContentItemImportDagsterService()
         self.email_engine = EmailEngineDagsterService()
         self.campaign_activation = CampaignActivationDagsterService()
         self.notification_engine = NotificationEngineDagsterService()

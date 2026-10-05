@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import app as app_module
 from ai_providers.base import AIProviderError
 from campaign_planner import GeneratedCampaignPlan
+from models.products import GeneratedProductContent, ProductContentGenerationResponse
 
 client = TestClient(app_module.app)
 
@@ -18,6 +19,7 @@ def test_health():
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+    assert "llm_configured" in resp.json()
 
 
 def test_plan_campaign_success():
@@ -69,3 +71,39 @@ def test_health_is_open_even_when_token_configured():
 def test_auth_disabled_when_token_blank():
     with patch.object(app_module.settings, "api_token", ""):
         assert _plan().status_code == 200
+
+
+def test_product_content_generation_requires_token_and_returns_generated_content():
+    product_key = "store\x1fISBN-13\x1f978-1"
+    generated = ProductContentGenerationResponse(
+        products=[
+            GeneratedProductContent(
+                product_key=product_key,
+                title="Generated title",
+                summary="Generated summary",
+            )
+        ]
+    )
+    payload = {
+        "products": [
+            {
+                "product_key": product_key,
+                "source_fields": {"Name": "Source title", "Sale_Price": "10.00"},
+            }
+        ]
+    }
+    with (
+        patch.object(app_module.settings, "api_token", "secret"),
+        patch.object(app_module, "generate_product_content", return_value=generated) as generate,
+    ):
+        unauthorized = client.post("/products/generate-content", json=payload)
+        response = client.post(
+            "/products/generate-content",
+            json=payload,
+            headers={"Authorization": "Bearer secret"},
+        )
+
+    assert unauthorized.status_code == 401
+    assert response.status_code == 200
+    assert response.json()["products"][0]["title"] == "Generated title"
+    generate.assert_called_once()

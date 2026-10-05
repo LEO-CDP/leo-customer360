@@ -325,6 +325,8 @@ tune per environment (dev/staging/prod). Highlights:
 | `C360_TRACKING_API_PORT` | `8010` | Host-published port for the CDP tracking-log API. |
 | `OBJECT_STORAGE_MODE` | `s3` | `s3` in the production-shaped stack; `minio` is forced by the dev Compose files. |
 | `S3_ENDPOINT_URL` | empty | Optional S3-compatible endpoint. Dev Compose overrides it to `http://minio:9000`. |
+| `PRODUCT_IMPORT_S3_BUCKET` | `c360-product-imports` | Product TSV staging bucket; the Customer 360 API creates it at startup if absent. |
+| `CONTENT_IMPORT_S3_BUCKET` | `c360-content-imports` | Content-import bucket provisioned by the Customer 360 API at startup. |
 | `S3_REGION` | `us-east-1` | AWS region used by the tracking API. |
 | `S3_AUTO_CREATE_BUCKETS` | `true` | Creates `data-tracking-[data_source_id]` on first write; set `false` when infrastructure provisions buckets. |
 | `TRACKING_SESSION_TTL_SECONDS` | `86400` | TTL for non-payload session metadata in Redis. |

@@ -6,6 +6,8 @@ window.C360 = window.C360 || {};
 
   var SCHEDULE_PRESETS = [
     { value: "", label: "Use agent default", expression: "" },
+    { value: "*/10 * * * *", label: "Every 10 minutes", expression: "*/10 * * * *" },
+    { value: "*/30 * * * *", label: "Every 30 minutes", expression: "*/30 * * * *" },
     { value: "0 0 * * *", label: "At midnight", expression: "0 0 * * *" },
     { value: "0 9 * * *", label: "Every morning at 09:00", expression: "0 9 * * *" },
     { value: "0 15 * * *", label: "Every afternoon at 15:00", expression: "0 15 * * *" },
@@ -537,10 +539,15 @@ window.C360 = window.C360 || {};
         var $button = $("#btn-segment-workflow-save");
         $button.prop("disabled", true).text("Saving...");
         this.api("/segments/" + this.segmentId + "/workflow", { steps: steps }, "PUT")
-          .done((saved) => {
+          .done((saved, _textStatus, xhr) => {
             this.steps = saved || [];
             this.render();
-            $("#segment-workflow-save-status").removeClass("hidden text-amber-600").addClass("inline-flex text-emerald-600").text("Saved");
+            var runId = xhr && xhr.getResponseHeader("X-Dagster-Run-Id");
+            $("#segment-workflow-save-status")
+              .removeClass("hidden text-amber-600")
+              .addClass("inline-flex text-emerald-600")
+              .attr("title", runId ? "Dagster run ID: " + runId : "")
+              .text(runId ? "Saved · run queued" : "Saved");
             setTimeout(() => $("#segment-workflow-save-status").addClass("hidden"), 2500);
           })
           .fail((xhr) => this.showError(this.errorMessage(xhr, "Could not save the agent workflow."), false))

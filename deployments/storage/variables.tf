@@ -68,6 +68,28 @@ variable "master_profile_s3_bucket" {
   }
 }
 
+variable "product_import_s3_bucket" {
+  type        = string
+  default     = "c360-product-imports"
+  description = "Product TSV staging bucket configured for customer360-api and the Data Synch worker."
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.product_import_s3_bucket))
+    error_message = "product_import_s3_bucket must be lowercase, 3-63 chars, and start/end with a letter or digit."
+  }
+}
+
+variable "content_import_s3_bucket" {
+  type        = string
+  default     = "c360-content-imports"
+  description = "Content import bucket reserved for asynchronous content imports."
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.content_import_s3_bucket))
+    error_message = "content_import_s3_bucket must be lowercase, 3-63 chars, and start/end with a letter or digit."
+  }
+}
+
 variable "s3_auto_create_buckets" {
   type        = bool
   default     = true

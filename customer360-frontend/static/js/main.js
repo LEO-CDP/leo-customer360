@@ -186,6 +186,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       $("#view-attributes").html(C360.templates.html("attributes-list"));
       $("#view-datasources").html(C360.templates.html("data-source-list"));
       $("#view-agent").html(C360.templates.html("agent-model-list"));
+      $("#view-content-products").html(C360.templates.html("content-product-list"));
       $("#view-admin").html(C360.templates.html("system-user-list"));
       $("#persona-list-content").html(C360.templates.html("persona-list"));
       $("#persona-details-container").html(C360.templates.html("persona-details"));
@@ -206,6 +207,7 @@ const TIME_CHECK_API_HEALTH = 60000;
       C360.attributesView.bindEvents();
       C360.dataSourceView.bindEvents();
       C360.aiAgentView.bindEvents();
+      C360.itemView.bindEvents();
       C360.systemUserView.bindEvents();
       C360.docsChatbot.bindEvents();
 

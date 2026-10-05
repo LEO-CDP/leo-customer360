@@ -2608,6 +2608,53 @@ CREATE INDEX IF NOT EXISTS idx_cdp_content_items_domain_type ON customer360.cdp_
 CREATE INDEX IF NOT EXISTS idx_cdp_content_items_tags ON customer360.cdp_content_items USING GIN (segment_tags);
 
 -- ============================================================================
+-- cdp_product_items: tenant-scoped source product records and content linkage
+-- ============================================================================
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_content_items_tenant_id
+    ON customer360.cdp_content_items (tenant_id, content_item_id);
+
+CREATE TABLE IF NOT EXISTS customer360.cdp_product_items (
+    product_item_id TEXT PRIMARY KEY DEFAULT (gen_random_uuid()::text),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    content_item_id UUID,
+    domain TEXT NOT NULL,
+    product_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT '',
+    product_id_type TEXT NOT NULL CHECK (btrim(product_id_type) <> ''),
+    product_id TEXT NOT NULL CHECK (btrim(product_id) <> ''),
+    keywords TEXT[] NOT NULL DEFAULT ARRAY[]::text[],
+    ext_attributes JSONB NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(ext_attributes) = 'object'),
+    original_price NUMERIC(18, 4) CHECK (original_price IS NULL OR original_price >= 0),
+    sale_price NUMERIC(18, 4) CHECK (sale_price IS NULL OR sale_price >= 0),
+    currency VARCHAR(3),
+    source_fields JSONB NOT NULL CHECK (jsonb_typeof(source_fields) = 'object'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_cdp_product_items_source_identity
+        UNIQUE (tenant_id, source_type, source_id, product_id_type, product_id),
+    CONSTRAINT uq_cdp_product_items_tenant_content
+        UNIQUE (tenant_id, content_item_id),
+    CONSTRAINT fk_cdp_product_items_tenant_content
+        FOREIGN KEY (tenant_id, content_item_id)
+        REFERENCES customer360.cdp_content_items (tenant_id, content_item_id)
+        ON DELETE CASCADE
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+COMMENT ON TABLE customer360.cdp_product_items IS
+    'Tenant-scoped source products imported from TSV; content_item_id is populated when LLM-generated cdp_content_items content is available. Re-imports upsert by tenant, source_type, source_id, and product identity.';
+COMMENT ON COLUMN customer360.cdp_product_items.source_fields IS
+    'Complete source TSV row as JSONB; all source fields are provided to the product-content LLM and retained for audit/re-generation.';
+COMMENT ON COLUMN customer360.cdp_product_items.ext_attributes IS
+    'Optional structured product metadata from the TSV ext_attributes JSON object.';
+CREATE INDEX IF NOT EXISTS idx_cdp_product_items_tenant_domain
+    ON customer360.cdp_product_items (tenant_id, domain);
+CREATE INDEX IF NOT EXISTS idx_cdp_product_items_content
+    ON customer360.cdp_product_items (tenant_id, content_item_id);
+
+-- ============================================================================
 -- cdp_segments: segmentation tag metadata (Audience Builder)
 -- ============================================================================
 -- One row per named audience/segment tag (the same tag strings that end up in
@@ -3844,6 +3891,7 @@ DECLARE
         'cdp_segments',
         'cdp_agent_workflow',
         'cdp_content_items',
+        'cdp_product_items',
         'cdp_customer_personas',
         'cdp_persona_archetypes',
         'crm_message_templates',

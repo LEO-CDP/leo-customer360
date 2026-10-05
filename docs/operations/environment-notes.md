@@ -121,6 +121,7 @@ independent and uses `customer360-promotions/.env` from `customer360-promotions/
 - `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`: Optional explicit credentials; omit them in AWS when using IAM roles.
 - `S3_FORCE_PATH_STYLE`: Required for MinIO. Default: `false`
 - `S3_AUTO_CREATE_BUCKETS`: Create `data-tracking-[data_source_id]` on first write. Default: `true`
+- `PRODUCT_IMPORT_S3_BUCKET` / `CONTENT_IMPORT_S3_BUCKET`: Product TSV and content-import buckets (defaults: `c360-product-imports` / `c360-content-imports`). The Customer 360 API verifies them at startup and creates any missing bucket when `S3_AUTO_CREATE_BUCKETS=true`.
 - `TRACKING_REDIS_KEY_PREFIX`: Prefix for tracking session and rate-limit keys. Default: `customer360-event-api`
 - `TRACKING_SESSION_TTL_SECONDS`: Session metadata TTL. Default: `86400`
 - `TRACKING_RATE_LIMIT_REQUESTS` / `TRACKING_RATE_LIMIT_WINDOW_SECONDS`: Per-IP request window. Defaults: `1000` / `360`

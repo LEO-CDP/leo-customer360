@@ -69,84 +69,101 @@
   </div>
 
   <!-- Navigation Bar -->
-  <nav class="max-w-[1600px] mx-auto px-6 flex gap-8 text-sm font-semibold overflow-x-auto scrollbar-none border-t border-slate-100">
+  <nav aria-label="Primary navigation" class="max-w-[1600px] mx-auto px-6 flex gap-1.5 text-sm font-semibold overflow-x-auto scrollbar-none border-t border-slate-100">
 
     <!-- Overview -->
     <a href="#/overview"
       title="System health, recent activities, and key performance metrics"
       data-tab="overview"
-      class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">
-      Overview
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-grid-1x2" aria-hidden="true"></i>
+      <span>Overview</span>
     </a>
 
     <!-- Analytics -->
     <a href="#/analytics"
       title="Analyze customer behavior, events, and performance"
       data-tab="analytics"
-      class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">
-      Analytics
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
+      <span>Analytics</span>
     </a>
 
     <!-- Customer Intelligence -->
     <a href="#/profiles"
       title="Manage customer profiles"
       data-tab="profiles"
-      class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">
-      Profiles
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-people" aria-hidden="true"></i>
+      <span>Profiles</span>
     </a>
 
     <a href="#/segments"
       title="Manage customer segments"
       data-tab="segments"
-      class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">
-      Segments
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-diagram-3" aria-hidden="true"></i>
+      <span>Segments</span>
     </a>
 
     <a href="#/personas"
       title="Manage customer personas"
       data-tab="personas"
-      class="hidden tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">
-      Personas
+      class="hidden tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-person-badge" aria-hidden="true"></i>
+      <span>Personas</span>
     </a>
 
-    <a href="#/agent"
-      title="Manage models, rules, and AI agents"
-      data-tab="agent"
-      class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">
-      AI Agents
+    <a href="#/attributes"
+      title="Manage customer attributes and profile properties"
+      data-tab="attributes"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-sliders" aria-hidden="true"></i>
+      <span>Attributes</span>
     </a>
 
     <!-- Data Management -->
     <a href="#/datasources"
       title="Manage data sources and integrations"
       data-tab="datasources"
-      class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">
-      Data Sources
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-database" aria-hidden="true"></i>
+      <span>Data Sources</span>
     </a>
 
-    <!-- Customer Attributes -->
-    <a href="#/attributes"
-      title="Manage customer attributes and profile properties"
-      data-tab="attributes"
-      class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">
-      Attributes
+    <!-- Content & Product Management -->
+    <a href="#/content-products"
+      title="Manage content and product items"
+      data-tab="content-products"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-box-seam" aria-hidden="true"></i>
+      <span>Content &amp; Products</span>
     </a>
 
     <!-- Activation -->
     <a href="#/campaigns"
       title="Manage marketing campaigns"
       data-tab="campaigns"
-      class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">
-      Campaigns
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-megaphone" aria-hidden="true"></i>
+      <span>Campaigns</span>
     </a>
 
+    <!-- AI & Administration -->
+    <a href="#/agent"
+      title="Manage models, rules, and AI agents"
+      data-tab="agent"
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-robot" aria-hidden="true"></i>
+      <span>AI Agents</span>
+    </a>
 
-    <!-- Administration -->
     <a href="#/admin"
       title="Administer system settings, permissions, and configurations"
       data-tab="admin"
-      class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors">
-      Admin
+      class="tab-btn inline-flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 border-transparent px-3 text-slate-500 hover:text-indigo-600 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">
+      <i class="bi bi-gear" aria-hidden="true"></i>
+      <span>Admin</span>
     </a>
 
   </nav>

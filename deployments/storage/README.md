@@ -109,6 +109,13 @@ the workspace and pass the overlay yourself:
   overlays. It is intentionally not included in either overlay's
   environment-specific `bucket_names` list because UAT and PROD use separate
   Terraform workspaces while the bucket name is globally unique.
+  Product/content import buckets are separate per environment:
+  `c360-product-imports-uat` / `c360-content-imports-uat` and
+  `c360-product-imports-prod` / `c360-content-imports-prod`. Terraform provisions
+  these through the `product_import_s3_bucket` and `content_import_s3_bucket`
+  variables, and the API verifies or creates both configured buckets during
+  startup. The corresponding names must also be passed to the API and Dagster
+  worker by their deployment env files.
   When `s3_auto_create_buckets = true`, `server/deploy-api.sh`,
   `server/deploy-backend.sh`, and `server/deploy-tracking.sh` perform an
   idempotent `head_bucket`/`create_bucket` bootstrap before starting their

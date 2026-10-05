@@ -29,6 +29,7 @@ window.C360 = window.C360 || {};
     "data-source-list": "data-source/data-source-list",
     "agent-model-list": "ai-agent/agent-model-list",
     "system-user-list": "admin/system-user-list",
+    "content-product-list": "content-product/item-list",
 
     "profile-details": "profile/profile-details",
     "profiles-list": "profile/profiles-list",
@@ -66,7 +67,7 @@ window.C360 = window.C360 || {};
   ];
 
   // Injected as static HTML once (no Handlebars variables of their own).
-  var STATIC_HTML = ["tabs", "settings-modal", "login-screen", "docs-chatbot", "profiles-list", "placeholder", "segments-list", "segment-form-modal", "attributes-list", "data-source-list", "agent-model-list", "system-user-list", "analytics", "campaign-dashboard", "campaign-editor", "campaign-details", "persona-list", "persona-details"];
+  var STATIC_HTML = ["tabs", "settings-modal", "login-screen", "docs-chatbot", "profiles-list", "placeholder", "segments-list", "segment-form-modal", "attributes-list", "data-source-list", "agent-model-list", "system-user-list", "analytics", "campaign-dashboard", "campaign-editor", "campaign-details", "persona-list", "persona-details", "content-product-list"];
 
   // Registered as Handlebars partials so profile/profile-details.html can do {{> name}}.
   var PARTIALS = [

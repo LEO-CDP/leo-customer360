@@ -1,5 +1,11 @@
 """Contract tests for the Customer 360 HTTP application factory."""
 
+import asyncio
+
+import pytest
+import asyncio
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -47,3 +53,80 @@ def test_health_reports_git_commit_hash(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["GIT_COMMIT_HASH"] == "test-commit"
+
+
+def test_lifespan_ensures_import_buckets_before_database_initialization(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        http_api_app,
+        "ensure_import_buckets",
+        lambda: calls.append("buckets") or ("product-bucket", "content-bucket"),
+    )
+    monkeypatch.setattr(http_api_app, "init_core_data", lambda: calls.append("core"))
+
+    async def run_lifespan():
+        async with http_api_app._lifespan(FastAPI()):
+            assert calls == ["buckets", "core"]
+
+    asyncio.run(run_lifespan())
+
+
+def test_lifespan_fails_before_initializing_core_data_if_bucket_setup_fails(monkeypatch):
+    initialized = False
+
+    def fail_bucket_setup():
+        raise RuntimeError("S3 unavailable")
+
+    def init_core_data():
+        nonlocal initialized
+        initialized = True
+
+    monkeypatch.setattr(http_api_app, "ensure_import_buckets", fail_bucket_setup)
+    monkeypatch.setattr(http_api_app, "init_core_data", init_core_data)
+
+    async def run_lifespan():
+        async with http_api_app._lifespan(FastAPI()):
+            pass
+
+    with pytest.raises(RuntimeError, match="S3 unavailable"):
+        asyncio.run(run_lifespan())
+    assert not initialized
+
+
+def test_startup_ensures_import_buckets_before_core_initialization(monkeypatch):
+    order = []
+    monkeypatch.setattr(
+        http_api_app,
+        "ensure_import_buckets",
+        lambda: order.append("buckets") or ("products", "content"),
+    )
+    monkeypatch.setattr(http_api_app, "init_core_data", lambda: order.append("core"))
+    app = FastAPI()
+
+    async def run_lifespan():
+        async with http_api_app._lifespan(app):
+            assert order == ["buckets", "core"]
+
+    asyncio.run(run_lifespan())
+
+
+def test_startup_does_not_continue_if_import_buckets_cannot_be_ready(monkeypatch):
+    initialized = False
+
+    def fail_bucket_check():
+        raise RuntimeError("S3 unavailable")
+
+    def init_core():
+        nonlocal initialized
+        initialized = True
+
+    monkeypatch.setattr(http_api_app, "ensure_import_buckets", fail_bucket_check)
+    monkeypatch.setattr(http_api_app, "init_core_data", init_core)
+
+    async def run_lifespan():
+        async with http_api_app._lifespan(FastAPI()):
+            pass
+
+    with pytest.raises(RuntimeError, match="S3 unavailable"):
+        asyncio.run(run_lifespan())
+    assert not initialized

@@ -11,6 +11,7 @@ from dagster_graphql import DagsterGraphQLClientError
 
 from core.utils.dagster_client import (
     AnalyticsDagsterService,
+    ContentItemImportDagsterService,
     DagsterJobTriggerError,
     DagsterService,
     DataSynchDagsterService,
@@ -18,6 +19,7 @@ from core.utils.dagster_client import (
     IdentityResolutionDagsterService,
     NotificationEngineDagsterService,
     AgentWorkflowDagsterService,
+    ProductContentImportDagsterService,
     SegmentationDagsterService,
     dagster_client,
 )
@@ -318,6 +320,14 @@ class DagsterClientFacadeTests(unittest.TestCase):
         self.assertIsInstance(dagster_client.ai_agents_runners, AgentWorkflowDagsterService)
         self.assertIsInstance(dagster_client.segmentation, SegmentationDagsterService)
         self.assertIsInstance(dagster_client.data_synch, DataSynchDagsterService)
+        self.assertIsInstance(
+            dagster_client.product_content_import,
+            ProductContentImportDagsterService,
+        )
+        self.assertIsInstance(
+            dagster_client.content_item_import,
+            ContentItemImportDagsterService,
+        )
         self.assertIsInstance(dagster_client.email_engine, EmailEngineDagsterService)
         self.assertIsInstance(dagster_client.notification_engine, NotificationEngineDagsterService)
 
@@ -332,10 +342,100 @@ class DagsterClientFacadeTests(unittest.TestCase):
         self.assertEqual(dagster_client.segmentation.location_name, "segmentation")
         self.assertEqual(dagster_client.data_synch.job_name, "data_synch_job")
         self.assertEqual(dagster_client.data_synch.location_name, "data_synch")
+        self.assertEqual(
+            dagster_client.product_content_import.job_name,
+            "product_content_import_job",
+        )
+        self.assertEqual(
+            dagster_client.product_content_import.location_name,
+            "data_synch",
+        )
+        self.assertEqual(
+            dagster_client.content_item_import.job_name,
+            "content_item_import_job",
+        )
+        self.assertEqual(
+            dagster_client.content_item_import.location_name,
+            "data_synch",
+        )
         self.assertEqual(dagster_client.email_engine.job_name, "email_engine_job")
         self.assertEqual(dagster_client.email_engine.location_name, "email_engine")
         self.assertEqual(dagster_client.notification_engine.job_name, "notification_engine_job")
         self.assertEqual(dagster_client.notification_engine.location_name, "notification_engine")
+
+
+class ProductContentImportDagsterServiceTests(unittest.TestCase):
+    def test_import_products_submits_tenant_scoped_run_config(self):
+        service = ProductContentImportDagsterService()
+        service.submit = MagicMock(return_value="run-123")
+
+        run_id = service.import_products(
+            tenant_id="tenant-1",
+            bucket="product-imports",
+            object_key="product-imports/tenant-1/upload.json",
+        )
+
+        self.assertEqual(run_id, "run-123")
+        service.submit.assert_called_once_with(
+            run_config={
+                "ops": {
+                    "import_product_content_op": {
+                        "config": {
+                            "tenant_id": "tenant-1",
+                            "bucket": "product-imports",
+                            "object_key": "product-imports/tenant-1/upload.json",
+                        }
+                    }
+                }
+            },
+            tags={"tenant_id": "tenant-1", "import_type": "product_tsv"},
+        )
+
+    def test_import_products_requires_complete_staging_reference(self):
+        service = ProductContentImportDagsterService()
+        with self.assertRaisesRegex(ValueError, "required"):
+            service.import_products(
+                tenant_id="tenant-1",
+                bucket="",
+                object_key="product-imports/tenant-1/upload.json",
+            )
+
+
+class ContentItemImportDagsterServiceTests(unittest.TestCase):
+    def test_import_content_submits_staged_object_to_dagster(self):
+        service = ContentItemImportDagsterService()
+        service.submit = MagicMock(return_value="content-run-123")
+
+        run_id = service.import_content(
+            tenant_id="tenant-1",
+            bucket="content-imports",
+            object_key="content-imports/tenant-1/file.json",
+        )
+
+        self.assertEqual(run_id, "content-run-123")
+        service.submit.assert_called_once_with(
+            run_config={
+                "ops": {
+                    "import_content_items_op": {
+                        "config": {
+                            "tenant_id": "tenant-1",
+                            "bucket": "content-imports",
+                            "object_key": "content-imports/tenant-1/file.json",
+                        }
+                    }
+                }
+            },
+            tags={"tenant_id": "tenant-1", "import_type": "content_tsv"},
+        )
+
+    def test_import_content_requires_complete_staging_reference(self):
+        service = ContentItemImportDagsterService()
+        with self.assertRaisesRegex(ValueError, "required"):
+            service.import_content(
+                tenant_id="tenant-1",
+                bucket="",
+                object_key="content-imports/tenant-1/file.json",
+            )
 
 
 if __name__ == "__main__":

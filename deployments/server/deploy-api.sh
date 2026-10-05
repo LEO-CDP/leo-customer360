@@ -167,6 +167,8 @@ EVENT_S3_SECRET_B64="$(printf %s "${S3_SECRET_ACCESS_KEY:-${TF_VAR_secret_key:-$
 EVENT_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-true}"
 S3_AUTO_CREATE="${S3_AUTO_CREATE_BUCKETS:-$(tfval s3_auto_create_buckets "$store/overlays/$ENV.tfvars")}"; S3_AUTO_CREATE="${S3_AUTO_CREATE:-true}"
 MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-$(tfval master_profile_s3_bucket "$store/overlays/$ENV.tfvars")}"; MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
+PRODUCT_IMPORT_S3_BUCKET="${PRODUCT_IMPORT_S3_BUCKET:-$(tfval product_import_s3_bucket "$store/overlays/$ENV.tfvars")}"; PRODUCT_IMPORT_S3_BUCKET="${PRODUCT_IMPORT_S3_BUCKET:-c360-product-imports}"
+CONTENT_IMPORT_S3_BUCKET="${CONTENT_IMPORT_S3_BUCKET:-$(tfval content_import_s3_bucket "$store/overlays/$ENV.tfvars")}"; CONTENT_IMPORT_S3_BUCKET="${CONTENT_IMPORT_S3_BUCKET:-c360-content-imports}"
 SOURCE_GIT_COMMIT_HASH="${GITHUB_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
 # Expected commit hash for the post-deploy /health assertion. A ghcr sha-<git> tag bakes
 # that sha; a local build bakes SOURCE_GIT_COMMIT_HASH; a release vX.Y.Z tag bakes an
@@ -176,7 +178,7 @@ elif [[ "${TAG:-}" == sha-* ]]; then EXPECTED_GIT_HASH="${TAG#sha-}"
 else EXPECTED_GIT_HASH=""; fi
 # Region must be a short lowercase token (boto3 rejects anything else).
 [[ "$EVENT_S3_REGION" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: S3_REGION='${EVENT_S3_REGION:0:24}...' is not a region (expected e.g. us-east-1)." >&2; exit 1; }
-echo ">> Master profile S3: bucket=$MASTER_PROFILE_S3_BUCKET (auto_create=$S3_AUTO_CREATE)"
+echo ">> S3 buckets: master=$MASTER_PROFILE_S3_BUCKET product-import=$PRODUCT_IMPORT_S3_BUCKET content-import=$CONTENT_IMPORT_S3_BUCKET (auto_create=$S3_AUTO_CREATE)"
 # customer360-agent wiring resolved LOCALLY (srv_ip isn't shipped to the box): empty
 # AGENT_IP => keep the DAO default; token base64'd like the other secrets.
 AGENT_IP="$(srv_ip agent fixed_ip)"
@@ -184,7 +186,7 @@ AGENT_SERVICE_URL=""; [[ -n "$AGENT_IP" ]] && AGENT_SERVICE_URL="http://$AGENT_I
 AGENT_API_TOKEN_B64="$(printf %s "${AGENT_API_TOKEN:-}" | base64 | tr -d '\r\n')"
 # ssh flattens argv and silently drops empty args (shifting later fields); pass one
 # base64 newline-joined blob so empties survive, split remotely with mapfile.
-ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" "$KC_TOKEN_EXPIRES_MINUTES" | base64 | tr -d '\r\n')"
+ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" "$KC_TOKEN_EXPIRES_MINUTES" "$PRODUCT_IMPORT_S3_BUCKET" "$CONTENT_IMPORT_S3_BUCKET" | base64 | tr -d '\r\n')"
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ARGV_B64" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 mapfile -t A < <(printf %s "${1:-}" | base64 -d)   # fields in order, empties preserved
@@ -211,6 +213,8 @@ AGENT_SERVICE_URL="${A[31]:-}"
 AGENT_API_TOKEN="$(printf %s "${A[32]:-}" | base64 -d 2>/dev/null || true)"
 EXPECTED_GIT_HASH="${A[33]:-}"
 KC_TOKEN_EXPIRES_MINUTES="${A[34]:-60}"
+PRODUCT_IMPORT_S3_BUCKET="${A[35]:-c360-product-imports}"
+CONTENT_IMPORT_S3_BUCKET="${A[36]:-c360-content-imports}"
 [[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^[0-9]+$ ]] && (( KC_TOKEN_EXPIRES_MINUTES >= 1 && KC_TOKEN_EXPIRES_MINUTES <= 1440 )) || {
   echo "ERROR: received KEYCLOAK_TOKEN_EXPIRES_MINUTES is invalid." >&2
   exit 1
@@ -260,6 +264,8 @@ S3_SECRET_ACCESS_KEY=$EVENT_S3_SECRET_ACCESS_KEY
 S3_FORCE_PATH_STYLE=$EVENT_S3_FORCE_PATH_STYLE
 S3_AUTO_CREATE_BUCKETS=$S3_AUTO_CREATE_BUCKETS
 MASTER_PROFILE_S3_BUCKET=$MASTER_PROFILE_S3_BUCKET
+PRODUCT_IMPORT_S3_BUCKET=$PRODUCT_IMPORT_S3_BUCKET
+CONTENT_IMPORT_S3_BUCKET=$CONTENT_IMPORT_S3_BUCKET
 ENVF
 # --- customer360-agent: URL + token resolved locally and passed in via ARGV (srv_ip
 #     runs on the deployer, not the box). Empty URL => keep the DAO default; token
@@ -311,6 +317,8 @@ else
   RUN_IMG="customer360-api"
 fi
 ensure_s3_bucket "$RUN_IMG" /opt/c360/api.env "$MASTER_PROFILE_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
+ensure_s3_bucket "$RUN_IMG" /opt/c360/api.env "$PRODUCT_IMPORT_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
+ensure_s3_bucket "$RUN_IMG" /opt/c360/api.env "$CONTENT_IMPORT_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
 sudo docker rm -f customer360-api >/dev/null 2>&1 || true
 # Keep logs visible to Portainer through the shared Docker socket while bounding disk usage.
 sudo docker run -d --name customer360-api --restart unless-stopped \

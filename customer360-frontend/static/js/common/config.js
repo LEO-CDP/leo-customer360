@@ -367,6 +367,10 @@ window.C360 = window.C360 || {};
     // work for POST calls that pass no params at all (e.g. recompute-all).
     if (httpMethod === "GET" || httpMethod === "DELETE") {
       options.data = params || {};
+    } else if (window.FormData && params instanceof window.FormData) {
+      options.data = params;
+      options.contentType = false;
+      options.processData = false;
     } else {
       options.contentType = "application/json";
       options.data = JSON.stringify(params || {});

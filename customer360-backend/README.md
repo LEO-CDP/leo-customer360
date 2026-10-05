@@ -356,7 +356,7 @@ customer360-backend/
 | `segmentation` | Implemented | `segmentation_job`; `segmentation_poll_sensor` (running by default) | Active segment recomputation and profile tag synchronization |
 | `analytics` | Implemented | `analytics_job`; `analytics_hourly_schedule` (running by default) | Tracking JSONL aggregation from S3/MinIO every three minutes |
 | `ai_agents_runners` | Workflow orchestration | `ai_agents_master_job` | Tenant-scoped API and cron execution of active `cdp_agent_workflow` steps |
-| `data_synch` | Placeholder | `data_synch_job` | Data ingestion and synchronization skeleton |
+| `data_synch` | Implemented imports | `data_synch_job`; `product_content_import_job`; `content_item_import_job` | Tenant-scoped product/content TSV staging, validation, and PostgreSQL persistence |
 | `email_engine` | Implemented | `email_engine_job` | Approved-campaign email delivery with recipient-level idempotency |
 | `notification_engine` | Implemented | `zalo_token_refresh_job`; `notification_engine_job`; `zalo_optout_projection_job` | Zalo OA token refresh, Zalo ZNS delivery, and S3-first opt-out projection |
 | `campaign_activation` | Implemented | `campaign_activation_job` | Approval validation, segment snapshot, and downstream email/Zalo submission |

@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from ai_agents_runners.agent_pipeline.contracts import AgentPipelineInput, AgentPipelineOutput
+from ai_agents_runners.agent_pipeline.agent_types.classification import ClassificationPipeline
 from ai_agents_runners.agent_pipeline.pipelines import (
     PIPELINE_HANDLERS,
     execute_agent_pipeline,
@@ -56,18 +57,23 @@ def test_pipeline_input_rejects_invalid_payload(overrides, message):
         AgentPipelineInput.model_validate(_input(**overrides))
 
 
-@pytest.mark.parametrize("model_type", list(PIPELINE_HANDLERS))
+@pytest.mark.parametrize(
+    "model_type",
+    [model_type for model_type in PIPELINE_HANDLERS if model_type != "ranking_recommendation"],
+)
 def test_each_agent_type_has_an_explicit_unimplemented_handler(model_type):
     with pytest.raises(NotImplementedError, match=model_type):
         execute_agent_pipeline(_input(model_type), run_id="dagster-run-1")
 
 
 def test_pipeline_dispatch_returns_validated_tenant_scoped_output(monkeypatch):
-    monkeypatch.setitem(
-        pipelines.PIPELINE_HANDLERS,
-        "classification",
+    handler = ClassificationPipeline()
+    monkeypatch.setattr(
+        handler,
+        "process",
         lambda _payload: {"label": "high_value", "probability": 0.9},
     )
+    monkeypatch.setitem(pipelines.PIPELINE_HANDLERS, "classification", handler)
 
     output = execute_agent_pipeline(_input(), run_id="dagster-run-1")
 
@@ -78,13 +84,11 @@ def test_pipeline_dispatch_returns_validated_tenant_scoped_output(monkeypatch):
 
 
 def test_pipeline_dispatch_validates_handler_output(monkeypatch):
-    monkeypatch.setitem(
-        pipelines.PIPELINE_HANDLERS,
-        "classification",
-        lambda _payload: {"probability": 0.9},
-    )
+    handler = ClassificationPipeline()
+    monkeypatch.setattr(handler, "process", lambda _payload: {"probability": 0.9})
+    monkeypatch.setitem(pipelines.PIPELINE_HANDLERS, "classification", handler)
 
-    with pytest.raises(ValidationError, match="missing required"):
+    with pytest.raises(ValidationError, match="label"):
         execute_agent_pipeline(_input(), run_id="dagster-run-1")
 
 
@@ -106,6 +110,9 @@ def test_pipeline_dispatch_validates_handler_output(monkeypatch):
     ],
 )
 def test_pipeline_output_validates_each_agent_result_shape(model_type, result):
+    result = PIPELINE_HANDLERS[model_type].result_model.model_validate(
+        result
+    ).model_dump(mode="json")
     output = AgentPipelineOutput.model_validate(
         {
             "run_id": "dagster-run-1",
@@ -135,17 +142,7 @@ def test_pipeline_output_validates_each_agent_result_shape(model_type, result):
 )
 def test_pipeline_output_rejects_invalid_agent_results(model_type, result):
     with pytest.raises(ValidationError):
-        AgentPipelineOutput.model_validate(
-            {
-                "run_id": "dagster-run-1",
-                "tenant_id": TENANT_ID,
-                "segment_id": SEGMENT_ID,
-                "agent_code": "test_agent",
-                "model_type": model_type,
-                "result": result,
-                "completed_at": datetime.now(timezone.utc),
-            }
-        )
+        PIPELINE_HANDLERS[model_type].result_model.model_validate(result)
 
 
 @pytest.mark.parametrize(
@@ -168,12 +165,6 @@ def test_pipeline_output_rejects_invalid_agent_results(model_type, result):
             {"cluster_id": "cluster-a", "membership_score": 0.8},
             marks=pytest.mark.skip(reason="TODO: implement clustering inference"),
             id="clustering",
-        ),
-        pytest.param(
-            "ranking_recommendation",
-            {"ranked_items": [{"item_id": SEGMENT_ID, "rank": 1, "score": 0.95}]},
-            marks=pytest.mark.skip(reason="TODO: implement ranking and recommendation"),
-            id="ranking-recommendation",
         ),
         pytest.param(
             "forecasting",

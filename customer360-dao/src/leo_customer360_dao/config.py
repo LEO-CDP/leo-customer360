@@ -81,10 +81,28 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("S3_VERIFY_SSL", "event_s3_verify_ssl"),
     )
+    s3_auto_create_buckets: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "S3_AUTO_CREATE_BUCKETS", "s3_auto_create_buckets"
+        ),
+    )
     master_profile_s3_bucket: str = Field(
         default="c360-master-profiles",
         validation_alias=AliasChoices(
             "MASTER_PROFILE_S3_BUCKET", "master_profile_s3_bucket"
+        ),
+    )
+    product_import_s3_bucket: str = Field(
+        default="c360-product-imports",
+        validation_alias=AliasChoices(
+            "PRODUCT_IMPORT_S3_BUCKET", "product_import_s3_bucket"
+        ),
+    )
+    content_import_s3_bucket: str = Field(
+        default="c360-content-imports",
+        validation_alias=AliasChoices(
+            "CONTENT_IMPORT_S3_BUCKET", "content_import_s3_bucket"
         ),
     )
 
@@ -199,6 +217,20 @@ class Settings(BaseSettings):
     dagster_data_synch_repository_name: str = Field(
         default="__repository__",
         validation_alias=AliasChoices("DAGSTER_DATA_SYNCH_REPOSITORY_NAME", "dagster_data_synch_repository_name"),
+    )
+    dagster_product_content_import_job_name: str = Field(
+        default="product_content_import_job",
+        validation_alias=AliasChoices(
+            "DAGSTER_PRODUCT_CONTENT_IMPORT_JOB_NAME",
+            "dagster_product_content_import_job_name",
+        ),
+    )
+    dagster_content_item_import_job_name: str = Field(
+        default="content_item_import_job",
+        validation_alias=AliasChoices(
+            "DAGSTER_CONTENT_ITEM_IMPORT_JOB_NAME",
+            "dagster_content_item_import_job_name",
+        ),
     )
 
     dagster_email_engine_job_name: str = Field(

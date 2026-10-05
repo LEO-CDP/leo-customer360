@@ -291,6 +291,7 @@ window.C360 = window.C360 || {};
             state.hasNext = !!pagination.has_next;
           }
 
+          if (o.onFetched) o.onFetched(items);
           appendItems(items, append);
           if (o.pagination) {
             renderPaginationUi();

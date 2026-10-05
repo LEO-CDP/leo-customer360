@@ -24,7 +24,7 @@ ensure_s3_bucket() {
 
   [[ -n "$image" ]] || { echo "ERROR: cannot bootstrap S3 bucket without an image." >&2; return 1; }
   [[ -f "$env_file" ]] || { echo "ERROR: S3 env file not found: $env_file" >&2; return 1; }
-  [[ -n "$bucket" ]] || { echo "ERROR: master-profile S3 bucket name is empty." >&2; return 1; }
+  [[ -n "$bucket" ]] || { echo "ERROR: S3 bucket name is empty." >&2; return 1; }
 
   echo "   ensuring S3 bucket exists: $bucket"
   sudo docker run --rm --network host --env-file "$env_file" --entrypoint python "$image" - "$bucket" <<'PY'

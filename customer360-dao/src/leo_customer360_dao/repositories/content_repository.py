@@ -10,7 +10,7 @@ Uses the same synchronous SQLAlchemy Session as the rest of the API
 import uuid
 from typing import Optional
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from leo_customer360_dao.config import settings
@@ -31,18 +31,40 @@ class ContentRepository:
         tenant_id: Optional[uuid.UUID] = None,
         domain: Optional[str] = None,
         item_type: Optional[str] = None,
+        status_code: Optional[int] = None,
+        q: Optional[str] = None,
+        content_only: bool = False,
     ) -> list[CdpContentItem]:
-        """List all content items with optional filters."""
+        """List content items with tenant, type, status, domain, and text filters."""
         if limit is None:
             limit = settings.api_default_page_size
-        return self._crud.list(
-            self.session,
-            skip=skip,
-            limit=limit,
-            tenant_id=tenant_id,
-            domain=domain,
-            item_type=item_type,
+        conditions = []
+        if tenant_id is not None:
+            conditions.append(CdpContentItem.tenant_id == tenant_id)
+        if domain:
+            conditions.append(CdpContentItem.domain == domain)
+        if item_type:
+            conditions.append(CdpContentItem.item_type == item_type)
+        if content_only:
+            conditions.append(CdpContentItem.item_type != "product")
+        if status_code is not None:
+            conditions.append(CdpContentItem.status_code == status_code)
+        if q and q.strip():
+            pattern = f"%{q.strip()}%"
+            conditions.append(
+                or_(
+                    CdpContentItem.title.ilike(pattern),
+                    CdpContentItem.summary.ilike(pattern),
+                )
+            )
+        statement = (
+            select(CdpContentItem)
+            .where(*conditions)
+            .order_by(CdpContentItem.updated_at.desc().nullslast(), CdpContentItem.content_item_id)
+            .offset(skip)
+            .limit(limit)
         )
+        return list(self.session.scalars(statement).all())
 
     def get_recommended_items(
         self,
@@ -98,27 +120,43 @@ class ContentRepository:
         """Count content items matching optional filters."""
         return self._crud.count(self.session, tenant_id=tenant_id, domain=domain, item_type=item_type)
 
-    def get_item(self, content_item_id: uuid.UUID) -> Optional[CdpContentItem]:
-        """Get content item by ID."""
-        return self._crud.get(self.session, content_item_id)
+    def get_item(
+        self,
+        content_item_id: uuid.UUID,
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> Optional[CdpContentItem]:
+        """Get a content item, optionally constrained to its tenant."""
+        statement = select(CdpContentItem).where(
+            CdpContentItem.content_item_id == content_item_id
+        )
+        if tenant_id is not None:
+            statement = statement.where(CdpContentItem.tenant_id == tenant_id)
+        return self.session.scalar(statement)
 
     def create_item(self, payload: ContentItemCreate) -> CdpContentItem:
         """Create new content item."""
         return self._crud.create(self.session, payload.model_dump())
 
     def update_item(
-        self, content_item_id: uuid.UUID, payload: ContentItemUpdate
+        self,
+        content_item_id: uuid.UUID,
+        payload: ContentItemUpdate,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> Optional[CdpContentItem]:
         """Update existing content item."""
-        obj = self._crud.get(self.session, content_item_id)
+        obj = self.get_item(content_item_id, tenant_id)
         if obj is None:
             return None
         obj_in = payload.model_dump(exclude_unset=True)
         return self._crud.update(self.session, obj, obj_in)
 
-    def delete_item(self, content_item_id: uuid.UUID) -> bool:
+    def delete_item(
+        self,
+        content_item_id: uuid.UUID,
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> bool:
         """Delete content item by ID. Returns True if deleted, False if not found."""
-        obj = self._crud.get(self.session, content_item_id)
+        obj = self.get_item(content_item_id, tenant_id)
         if obj is None:
             return False
         self._crud.delete(self.session, obj)

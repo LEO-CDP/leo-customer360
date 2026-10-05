@@ -8,8 +8,15 @@
 # supported and is wired up below behind var.enable_versioning.
 # ---------------------------------------------------------------------------
 
+locals {
+  managed_bucket_names = toset(concat(
+    var.bucket_names,
+    [var.product_import_s3_bucket, var.content_import_s3_bucket],
+  ))
+}
+
 resource "aws_s3_bucket" "this" {
-  for_each = toset(var.bucket_names)
+  for_each = local.managed_bucket_names
 
   bucket = each.value
 
@@ -21,7 +28,7 @@ resource "aws_s3_bucket" "this" {
 resource "aws_s3_bucket_versioning" "this" {
   # Only manage versioning when explicitly enabled, so a minimal apply never
   # issues a PutBucketVersioning call.
-  for_each = var.enable_versioning ? toset(var.bucket_names) : toset([])
+  for_each = var.enable_versioning ? local.managed_bucket_names : toset([])
 
   bucket = aws_s3_bucket.this[each.value].id
 

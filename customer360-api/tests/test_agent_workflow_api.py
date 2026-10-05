@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from core.auth import require_tenant
 from core.database import get_db
 from core.routers.agent_workflow_api import router
+from core.utils.dagster_client import DagsterJobTriggerError
 from core.repositories.agent_workflow_repository import (
     AgentWorkflowConflictError,
     AgentWorkflowNotFoundError,
@@ -85,7 +86,10 @@ def test_trigger_workflow_submits_tenant_scoped_dagster_run():
 def test_replace_workflow_accepts_ordered_steps_without_tenant_body_field():
     client, repo = make_client()
     repo.replace_steps.return_value = [step()]
-    with patch("core.routers.agent_workflow_api.AgentWorkflowRepository", return_value=repo):
+    with patch("core.routers.agent_workflow_api.AgentWorkflowRepository", return_value=repo), patch(
+        "core.routers.agent_workflow_api.dagster_client"
+    ) as dagster:
+        dagster.ai_agents_runners.run_workflow.return_value = "run-123"
         response = client.put(
             f"/segments/{SEGMENT_ID}/workflow",
             json={
@@ -100,9 +104,15 @@ def test_replace_workflow_accepts_ordered_steps_without_tenant_body_field():
             },
         )
     assert response.status_code == 200
+    assert response.headers["x-dagster-run-id"] == "run-123"
     repo.replace_steps.assert_called_once()
     assert repo.replace_steps.call_args.args[0] == uuid.UUID(TENANT_ID)
     assert repo.replace_steps.call_args.args[2][0]["agent_code"] == "recommendation"
+    dagster.ai_agents_runners.run_workflow.assert_called_once_with(
+        tenant_id=TENANT_ID,
+        segment_id=SEGMENT_ID,
+        trigger_event={"event_name": "agent_workflow.updated"},
+    )
 
 
 def test_replace_workflow_rejects_duplicate_candidates_before_repository():
@@ -127,7 +137,10 @@ def test_replace_workflow_rejects_duplicate_candidates_before_repository():
 def test_replace_workflow_accepts_cron_override_and_rejects_invalid_schedule():
     client, repo = make_client()
     repo.replace_steps.return_value = [step()]
-    with patch("core.routers.agent_workflow_api.AgentWorkflowRepository", return_value=repo):
+    with patch("core.routers.agent_workflow_api.AgentWorkflowRepository", return_value=repo), patch(
+        "core.routers.agent_workflow_api.dagster_client"
+    ) as dagster:
+        dagster.ai_agents_runners.run_workflow.return_value = "run-123"
         response = client.put(
             f"/segments/{SEGMENT_ID}/workflow",
             json={
@@ -158,6 +171,27 @@ def test_replace_workflow_accepts_cron_override_and_rejects_invalid_schedule():
         )
     assert response.status_code == 422
     assert repo.replace_steps.call_count == 1
+    dagster.ai_agents_runners.run_workflow.assert_called_once()
+
+
+def test_replace_workflow_reports_saved_state_when_dagster_submission_fails():
+    client, repo = make_client()
+    repo.replace_steps.return_value = [step()]
+    with patch("core.routers.agent_workflow_api.AgentWorkflowRepository", return_value=repo), patch(
+        "core.routers.agent_workflow_api.dagster_client"
+    ) as dagster:
+        dagster.ai_agents_runners.run_workflow.side_effect = DagsterJobTriggerError(
+            "Dagster unavailable"
+        )
+        response = client.put(
+            f"/segments/{SEGMENT_ID}/workflow",
+            json={"steps": [{"agent_code": "recommendation", "execution_order": 1}]},
+        )
+
+    assert response.status_code == 503
+    assert "Workflow was saved" in response.json()["detail"]
+    assert "Dagster unavailable" in response.json()["detail"]
+    repo.replace_steps.assert_called_once()
 
 
 def test_workflow_repository_errors_map_to_client_statuses():

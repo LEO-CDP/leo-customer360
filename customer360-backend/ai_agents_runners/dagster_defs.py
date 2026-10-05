@@ -9,10 +9,10 @@ from typing import Any, Optional
 from dagster import Config, Definitions, OpExecutionContext, RunRequest, job, op, sensor
 from pydantic import Field
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runner import AgentWorkflowMasterTask  # noqa: E402
-from agent_pipeline import execute_agent_pipeline  # noqa: E402
+from ai_agents_runners.agent_pipeline import execute_agent_pipeline  # noqa: E402
+from ai_agents_runners.runner import AgentWorkflowMasterTask  # noqa: E402
 
 WORKFLOW_POLL_SECONDS = int(os.environ.get("AI_AGENTS_WORKFLOW_POLL_SECONDS", "60"))
 PERSONALIZATION_PLACEHOLDER_SLEEP_SECONDS = int(

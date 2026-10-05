@@ -17,6 +17,7 @@ from core.auth import EXEMPT_PATHS, auth_middleware
 from leo_customer360_dao.config import settings
 from core.database import engine
 from core.init_core_data import init_core_data
+from core.utils.s3_buckets import ensure_import_buckets
 from core.routers.analytics_api import all_analytics_routers
 from core.routers.auth_api import all_auth_routers
 from core.routers.campaign_draft_api import all_campaign_draft_routers
@@ -138,6 +139,8 @@ async def _lifespan(app: FastAPI):
         settings.default_root_username,
         has_default_password,
     )
+    buckets = ensure_import_buckets()
+    logger.info("Customer360 import buckets ready: %s", ", ".join(buckets))
     init_core_data()
     route_paths = [getattr(r, "path", "") for r in app.routes if getattr(r, "path", None)]
     logger.info(
@@ -219,6 +222,7 @@ def create_http_api_app(mcp_app: FastAPI) -> FastAPI:
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Dagster-Run-Id"],
     )
     app.middleware("http")(auth_middleware)
     app.add_middleware(RequestLoggingMiddleware)

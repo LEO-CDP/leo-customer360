@@ -15,9 +15,20 @@ Customer 360 API's tenant boundary.
 | `personalization_job` | Compatibility scaffold retained from the removed personalization location |
 | `POST /api/v1/segments/{segment_id}/workflow/run` | Submit a tenant/segment API-triggered run |
 
-The master task currently produces an explicit ordered execution plan. Agent
-specific inference, ranking, persistence, and profile writeback handlers are
-not silently substituted with placeholder success results.
+The master task currently produces an explicit ordered execution plan. The
+ranking handler can score explicitly configured, tenant-scoped content
+candidates by segment-tag overlap, but the master task does not yet dispatch
+agent handlers or persist their results. Other model handlers remain explicit
+scaffolds that fail rather than return placeholder success results.
+
+## Agent-type strategy layout
+
+Each canonical `model_type` has a dedicated module under
+`ai_agents_runners/agent_pipeline/agent_types/`. Its strategy owns that type's
+result schema and processing implementation. `pipelines.py` is the shared
+dispatcher; `contracts.py` contains only the common input and output envelope.
+New model types should add their strategy and result model in their own module,
+then register the strategy in `PIPELINE_HANDLERS`.
 
 ## Database contract
 
@@ -106,6 +117,14 @@ Content-Type: application/json
 The API returns `202 Accepted` with a Dagster `run_id`. The tenant and segment
 are sent in Dagster run configuration and tags; the event object is forwarded
 as handler context.
+
+Saving the Agent Workplan with
+`PUT /api/v1/segments/{segment_id}/workflow` also submits a master-workflow
+run after the workflow transaction commits. The response remains the updated
+step list and includes the submitted Dagster run ID in `X-Dagster-Run-Id`.
+If submission fails, the API returns `503` and explicitly reports that the
+workflow was saved but the run was not submitted. The current master job
+selects the ordered plan; it does not yet dispatch the selected agent handlers.
 
 ## Cron-triggered execution
 

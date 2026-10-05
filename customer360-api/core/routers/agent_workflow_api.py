@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -97,9 +97,10 @@ def replace_agent_workflow(
     segment_id: uuid.UUID,
     payload: AgentWorkflowReplace,
     tenant_id: TenantId,
+    response: Response,
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    """Replace all segment steps atomically, supporting queue reordering."""
+    """Save the ordered workflow and submit a Dagster run for the new plan."""
     try:
         result = _repository(db).replace_steps(
             _tenant_uuid(tenant_id),
@@ -107,6 +108,21 @@ def replace_agent_workflow(
             [step.model_dump() for step in payload.steps],
         )
         invalidate_prefix("cdp_agent_workflow")
+        try:
+            run_id = dagster_client.ai_agents_runners.run_workflow(
+                tenant_id=tenant_id,
+                segment_id=str(segment_id),
+                trigger_event={"event_name": "agent_workflow.updated"},
+            )
+        except DagsterJobTriggerError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Workflow was saved, but Dagster could not submit its execution run. "
+                    f"Retry with POST /segments/{segment_id}/workflow/run. Details: {exc}"
+                ),
+            ) from exc
+        response.headers["X-Dagster-Run-Id"] = run_id
         return result
     except Exception as exc:
         _handle_error(exc)

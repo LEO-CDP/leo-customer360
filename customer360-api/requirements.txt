@@ -6,6 +6,7 @@ leo-customer360-agent
 # Web framework and ASGI server
 fastapi>=0.141.1,<1
 uvicorn[standard]>=0.30,<1
+python-multipart>=0.0.9,<1
 psutil
 
 # Database and ORM

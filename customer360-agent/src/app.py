@@ -27,6 +27,11 @@ from models import (
     ZnsCampaignPlanRequest,
     ZnsCampaignPlanResponse,
 )
+from models.products import (
+    ProductContentGenerationRequest,
+    ProductContentGenerationResponse,
+)
+from product_content import generate_product_content
 
 # Setup module-level loggers
 logging.basicConfig(level=logging.INFO)
@@ -98,7 +103,12 @@ async def ai_provider_exception_handler(request: Request, exc: AIProviderError):
 @app.get("/health", tags=["Health"])
 def health() -> dict:
     """Basic health check endpoint."""
-    return {"service": "customer360-agent", "status": "ok", "model": settings.llm_model}
+    return {
+        "service": "customer360-agent",
+        "status": "ok",
+        "model": settings.llm_model,
+        "llm_configured": bool(settings.llm_api_key or settings.llm_base_url),
+    }
 
 
 @app.post("/plan/email", response_model=EmailCampaignPlanResponse, tags=["Planning"],
@@ -125,6 +135,19 @@ def plan_zalo(req: ZnsCampaignPlanRequest) -> ZnsCampaignPlanResponse:
     # Exception handling is now managed by the global ai_provider_exception_handler
     plan = generate_zalo_campaign_plan(req.to_brief(), req.candidate_templates)
     return ZnsCampaignPlanResponse(**vars(plan))
+
+
+@app.post(
+    "/products/generate-content",
+    response_model=ProductContentGenerationResponse,
+    tags=["Product content"],
+    dependencies=[Depends(require_token)],
+)
+def generate_product_display_content(
+    request: ProductContentGenerationRequest,
+) -> ProductContentGenerationResponse:
+    """Generate validated title/summary fields for imported product rows."""
+    return generate_product_content(request)
 
 
 if __name__ == "__main__":

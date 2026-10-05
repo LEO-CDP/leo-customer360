@@ -327,8 +327,56 @@ Campaign activation and email administration under `/admin`:
 ### Content and graph
 
 - Content CRUD: `/content-items`
+- Product listing and create: `GET /content-items/products`,
+  `POST /content-items/products`
+- `GET /content-items/` supports tenant-scoped search, domain/type/status
+  filters, and offset paging.
 - `GET /content-items/recommended`
 - `GET /content-items/count`
+- `POST /content-items/import/products` accepts a tenant-authenticated
+  multipart `.tsv` upload (maximum 10 MiB / 5,000 rows) and returns `202` with a
+  Dagster `run_id`. The API validates and stages the complete source rows in
+  the configured `PRODUCT_IMPORT_S3_BUCKET`; the `data_synch` Dagster location
+  generates display titles/summaries through `customer360-agent`, then
+  transactionally upserts `cdp_product_items` and linked `cdp_content_items`.
+  Re-imports update the existing product identified by
+  `(tenant_id, Source_Type, Store_ID, Product_ID_Type, Product_ID)`. `Store_ID`
+  maps to product-table `source_id`; the optional `Source_Type` TSV column
+  maps to non-null `source_type` and defaults to an empty string. Apply database
+  migration `007_cdp_product_items.sql` first. The upload API and Dagster
+  worker must share the product-import bucket and S3 settings; the worker must
+  also be able to reach `AGENT_SERVICE_URL` and use the matching
+  `AGENT_API_TOKEN` when configured.
+
+  TSV mapping: `Product_Type` uses `<domain>_product` and maps to content
+  `domain` plus `item_type=product`; `STOCK` maps to the canonical `banking`
+  domain;
+  `Keywords` map to `segment_tags`;
+  `Image_URL` and `Full_URL` map to content image and CTA URL; source identity,
+  prices, currency, `ext_attributes`, and every original TSV column are
+  retained in `cdp_product_items`. A blank `ext_attributes` cell maps to `{}`;
+  non-blank cells must contain a JSON object. `Name`, `Description`, and all
+  other source fields are sent to the agent service to generate the content
+  title and summary. Product titles/summaries are not written if enrichment
+  fails. If the agent reports that neither `LLM_API_KEY` nor `LLM_BASE_URL` is
+  configured, the worker skips generation, saves the source products with
+  `ext_attributes.next_actions = "generate_content_item"`, and leaves their
+  `content_item_id` unset for later enrichment. Provider/network failures still
+  fail the import instead of being treated as a credential-free run.
+- `POST /content-items/import/content` accepts a tenant-authenticated content
+  TSV with `Domain`, `Item_Type` (`article`, `news`, or `video`), and `Title`
+  required; summary, image/CTA fields, tags, publication time, and active status
+  are optional. The API validates every field and active domain, stages the rows
+  in `CONTENT_IMPORT_S3_BUCKET`, and returns `202` with a Dagster run ID. The
+  Data Synch worker inserts the content items transactionally; rerunning the
+  same staged job is idempotent.
+
+At API startup, the service checks `PRODUCT_IMPORT_S3_BUCKET` and
+`CONTENT_IMPORT_S3_BUCKET` using the configured S3-compatible endpoint. Missing
+buckets are created when `S3_AUTO_CREATE_BUCKETS=true` (the default); API
+startup fails explicitly if access is denied or bucket creation fails. The
+Data Synch worker must use the same product-import bucket name and S3
+credentials/endpoint.
 - Graph edges: `GET /graph-edges/`, `GET /graph-edges/count`,
    `GET /graph-edges/{edge_id}`, `POST /graph-edges/`,
    `DELETE /graph-edges/{edge_id}`

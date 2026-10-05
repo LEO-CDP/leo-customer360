@@ -169,6 +169,18 @@ window.C360 = window.C360 || {};
 
   function load() { return dtv.load(false); }
 
+  function refreshAiAgents() {
+    var $button = $("#btn-agent-model-refresh");
+    if ($button.prop("disabled")) return;
+
+    $button.prop("disabled", true).attr("aria-busy", "true");
+    $button.find("i").addClass("animate-spin");
+    dtv.reload().always(function () {
+      $button.prop("disabled", false).removeAttr("aria-busy");
+      $button.find("i").removeClass("animate-spin");
+    });
+  }
+
   function populateSchedulePresets() {
     var schedule = C360.AgentWorkflowSchedule;
     var $select = $("#agent-model-add-schedule-preset");
@@ -386,6 +398,7 @@ window.C360 = window.C360 || {};
     syncStatusTab($("#agent-models-status-filter").val());
 
     $(document).on("click", "#btn-agent-models-clear-filters", clearFilters);
+    $(document).on("click", "#btn-agent-model-refresh", refreshAiAgents);
     $(document).on("click", "#btn-agent-model-add", openAddAiAgentModal);
     $(document).on("click", "#btn-agent-model-add-cancel", closeAiAgentModal);
     $(document).on("click", "#btn-agent-model-modal-close", closeAiAgentModal);

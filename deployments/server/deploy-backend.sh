@@ -71,6 +71,8 @@ if [[ -z "$S3_AUTO_CREATE" ]]; then
   fi
 fi
 MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-$(tfval master_profile_s3_bucket "$store/overlays/$ENV.tfvars")}"; MASTER_PROFILE_S3_BUCKET="${MASTER_PROFILE_S3_BUCKET:-c360-master-profiles}"
+PRODUCT_IMPORT_S3_BUCKET="${PRODUCT_IMPORT_S3_BUCKET:-$(tfval product_import_s3_bucket "$store/overlays/$ENV.tfvars")}"; PRODUCT_IMPORT_S3_BUCKET="${PRODUCT_IMPORT_S3_BUCKET:-c360-product-imports}"
+CONTENT_IMPORT_S3_BUCKET="${CONTENT_IMPORT_S3_BUCKET:-$(tfval content_import_s3_bucket "$store/overlays/$ENV.tfvars")}"; CONTENT_IMPORT_S3_BUCKET="${CONTENT_IMPORT_S3_BUCKET:-c360-content-imports}"
 if [[ -n "$S3_ENDPOINT" && -n "$S3_BUCKET" && -n "$S3_ACCESS_KEY" && -n "$S3_SECRET_KEY" ]]; then
   echo ">> S3: $S3_ENDPOINT bucket=$S3_BUCKET (region $S3_REGION, path-style, auto_create=$S3_AUTO_CREATE) — compute logs -> vStorage"
 else
@@ -121,6 +123,8 @@ S3_ACCESS_KEY_ID=$S3_ACCESS_KEY
 S3_SECRET_ACCESS_KEY=$S3_SECRET_KEY
 S3_AUTO_CREATE_BUCKETS=$S3_AUTO_CREATE
 MASTER_PROFILE_S3_BUCKET=$MASTER_PROFILE_S3_BUCKET
+PRODUCT_IMPORT_S3_BUCKET=$PRODUCT_IMPORT_S3_BUCKET
+CONTENT_IMPORT_S3_BUCKET=$CONTENT_IMPORT_S3_BUCKET
 REDIS_HOST=$REDIS_HOST
 REDIS_PORT=$REDIS_PORT
 REDIS_DB=0
@@ -252,6 +256,8 @@ else
   RUN_IMG="customer360-dagster"
 fi
 ensure_s3_bucket "$RUN_IMG" /opt/c360/backend.env "$MASTER_PROFILE_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
+ensure_s3_bucket "$RUN_IMG" /opt/c360/backend.env "$PRODUCT_IMPORT_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
+ensure_s3_bucket "$RUN_IMG" /opt/c360/backend.env "$CONTENT_IMPORT_S3_BUCKET" "$S3_AUTO_CREATE_BUCKETS"
 # NOTE: the container's entrypoint (render_dagster_instance.py) ensures the
 # dedicated `dagster` database exists and picks storage adaptively — shared
 # PostgreSQL if reachable, else local SQLite — so the deploy does NOT hard-depend
