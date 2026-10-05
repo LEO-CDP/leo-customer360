@@ -16,22 +16,6 @@ const TIME_CHECK_API_HEALTH = 60000;
 
   Handlebars.registerHelper("json", function (v) { return JSON.stringify(v); });
 
-  // Nav tab -> the path it navigates to. Each of these paths (and any
-  // sub-routes registered under it, e.g. /segments/:id or
-  // /datasources/connectors) is owned by the corresponding view module.
-  var TAB_DEFAULT_PATH = {
-    overview: "/overview",
-    profiles: "/profiles",
-    segments: "/segments",
-    attributes: "/attributes",
-    personas: "/personas",
-    agent: "/agent",
-    analytics: "/analytics",
-    campaigns: "/campaigns",
-    datasources: "/datasources",
-    admin: "/admin"
-  };
-
   function toggleSettingsModal(visible) {
     var $modal = $("#user-settings-modal");
     if (!$modal.length) return;
@@ -109,10 +93,6 @@ const TIME_CHECK_API_HEALTH = 60000;
 
   function bindBrowserEvents() {
     $("#btn-back-to-profiles").on("click", function () { C360.router.navigate("/profiles"); });
-
-    $(".tab-btn").on("click", function () {
-      C360.router.navigate(TAB_DEFAULT_PATH[$(this).data("tab")] || "/overview");
-    });
 
     $("#btn-export-pdf").on("click", function () { window.print(); });
 
