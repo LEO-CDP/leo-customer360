@@ -1,6 +1,50 @@
-# Personalization and recommendation workflow
+---
+title: "Personalization and Recommendation Workflow"
+subtitle: "System Design, Ranking Methods, and Operational Behavior"
+author: "Trieu Nguyen - trieu@leocdp.com"
+date: 2026-10-07
 
-This guide describes the implemented recommendation flow from segment
+geometry:
+  - a4paper
+  - margin=1.2cm
+
+fontsize: 10pt
+linestretch: 0.95
+
+mainfont: "DejaVu Serif"
+
+header-includes:
+  - \usepackage{anyfontsize}
+  - \usepackage{titlesec}
+  - \usepackage{setspace}
+  - \usepackage{microtype}
+  - \titlespacing*{\section}{0pt}{0.7em}{0.4em}
+  - \titlespacing*{\subsection}{0pt}{0.5em}{0.3em}
+  - \titlespacing*{\subsubsection}{0pt}{0.4em}{0.2em}
+  - \setstretch{0.95}
+---
+
+## Abstract
+
+This paper documents the implemented Customer 360 personalization and content
+recommendation workflow, from tenant-scoped segment configuration to results
+served by the recommendation API. The production path runs through the
+`ai_agents_runners` Dagster master job. Active `ranking_recommendation` steps
+rank explicitly selected, tenant-owned content for eligible profiles using
+tag, semantic, or hybrid strategies. This paper describes orchestration,
+candidate validation, scoring, embedding lifecycle, persistence, API behavior,
+and operational testing. Other model types are not dispatched, and persona
+records are not currently ranking inputs; the description distinguishes
+implemented behavior from scaffolded or prospective capabilities.
+
+**Keywords:** Customer 360, Personalization, Content Recommendation, Ranking,
+Dagster, Tenant Isolation, Semantic Similarity
+
+---
+
+# 1. Introduction
+
+This paper describes the implemented recommendation flow from segment
 configuration to the API response. It is intended for operators configuring a
 segment and engineers implementing, operating, or troubleshooting the workflow.
 
@@ -8,7 +52,7 @@ The production path runs through the `ai_agents_runners` Dagster master job. It
 is not the separate compatibility `personalization_job`, which remains a
 scaffold.
 
-## Scope and current behavior
+## 1.1 Scope and Current Behavior
 
 The current workflow:
 
@@ -25,7 +69,132 @@ The current workflow:
 
 Other model types are logged and skipped; this workflow does not dispatch them.
 
-## Personalization flow: end-to-end execution
+## 1.2 Methodology of the Personalization Flow and Its Correctness
+
+This section describes the implemented ranking method, rather than a proposed
+persona model. The flow was checked against the
+[workflow API](../../customer360-api/core/routers/agent_workflow_api.py),
+[Dagster definitions](./dagster_defs.py), [runner queries](./runner.py),
+[ranking SQL](./agent_pipeline/agent_types/ranking_recommendation.py), and the
+[workflow/recommendation migration](../../customer360-database/migrations/006_cdp_agent_workflow.sql).
+The sample below is synthetic and adapted from the unit-test fixtures.
+
+### 1.2.1 Implementation Method
+
+1. **Trigger and plan.** The workflow API submits a tenant/segment run to
+   Dagster; the cron sensor submits a scheduled run. The master job passes its
+   Dagster run ID through execution so persisted recommendations can be traced
+   to that run. The runner joins
+   [cdp_agent_workflow](../../customer360-database/database-schema.sql#L2885)
+   to
+   [cdp_ai_agents](../../customer360-database/database-schema.sql#L1909),
+   selects active workflow steps and active agents, applies the requested
+   tenant/segment scope, and orders steps by `execution_order`. Cron runs also
+   match the effective step-or-agent schedule. Only
+   `ranking_recommendation` steps are dispatched.
+2. **Audience selection.** For each step, the runner selects profiles whose
+   tenant matches the step, whose status is active, and whose stored
+   `segmentation_tags` contain the active segment's `segment_tag`. Thus the
+   runner consumes materialized segment membership; it does not re-execute the
+   segment's `sql_rules` or `final_generated_sql` during recommendation runs.
+   Profile selection is implemented by the tenant-scoped query in
+   [runner.py](./runner.py).
+3. **Candidate validation and ranking.** A ranking step uses only its
+   configured `candidate_content_item_ids`. The database trigger checks that
+   candidate IDs are distinct and exist under the workflow tenant; the ranking
+   query independently filters for that tenant, active content, a matching
+   domain (`all` or the profile domain), and the selected IDs. The `tags`
+   strategy scores the fraction of profile tags matched by each candidate:
+
+   $$
+   \operatorname{tag\_score}(c)=
+   \begin{cases}
+   0, & \operatorname{cardinality}(T_p)=0,\\[2pt]
+   \dfrac{|\operatorname{distinct}(T_c)\cap\operatorname{set}(T_p)|}
+         {\operatorname{cardinality}(T_p)}, & \operatorname{cardinality}(T_p)>0,
+   \end{cases}
+   $$
+
+   where $T_p$ is the profile tag array and $T_c$ is the candidate tag array.
+   The numerator counts distinct candidate tags present in the profile array;
+   the denominator is the profile array's cardinality.
+   The semantic strategy maps cosine distance to a bounded score,
+   $\operatorname{clamp}(1-\operatorname{distance}/2,0,1)$. The hybrid strategy
+   combines semantic and tag scores using the configured weights normalized by
+   their sum. A configured `minimum_score` filters results; remaining rows are
+   sorted by score, publication time, and content ID before `top_k` is applied.
+   These formulas and filters are in
+   [ranking_recommendation.py](./agent_pipeline/agent_types/ranking_recommendation.py).
+4. **Persistence.** The runner writes a run record and per-profile recommendation
+   rows. The migration constrains run status, score ranges, ranking strategy,
+   and tenant-consistent references to the run, profile, and content item. On
+   failure, the runner marks the run failed and removes its partial
+   recommendations; on success, it marks the run successful and invalidates
+   the tenant's recommendation cache. The read API serves persisted successful
+   results rather than performing ranking during the request.
+
+### 1.2.2 Worked Synthetic Example
+
+The following values reuse the tenant, segment, candidate IDs, profile domain,
+and profile tags from
+[`test_ranking_pipeline_scores_and_returns_explicit_candidates_in_order`](./tests/test_ranking_recommendation.py).
+Candidate tag arrays and the active segment row are synthetic source rows; they
+are not production customer data. The candidate tags are chosen to illustrate
+the matched tags and scores supplied by that test's fake database cursor.
+
+Here `T`, `S`, `C1`, and `C2` abbreviate the fixture's tenant, segment, and two
+content-item IDs, respectively.
+
+| Record | Compact synthetic values |
+| --- | --- |
+| Segment `S` | Tenant `T`; active; `segment_tag = loyal` |
+| Profile | Tenant `T`; active; domain `retail`; tags `loyal, vip` |
+| Workflow step | Active `product_recommendation` (`ranking_recommendation`); order 1; candidates `C1, C2`; `limit = 1` |
+| Candidate `C1` | Tenant `T`; active; domain `retail`; tags/matches `loyal, vip`; score `2 / 2 = 1.0` |
+| Candidate `C2` | Tenant `T`; active; domain `retail`; tags/matches `vip`; score `1 / 2 = 0.5` |
+
+The profile is eligible because it contains the active segment tag `loyal`.
+The configuration defaults to the `tags` strategy, and `limit: 1` is accepted
+as the result-count setting. Score-descending order and `top_k = 1` return `C1`
+at rank 1, with reason `segment_tag_overlap`, as expected by the ranking unit
+test.
+
+### 1.2.3 Correctness Rationale and Evidence Limits
+
+The ranking and persistence contract is internally consistent for its stated
+inputs for three reasons:
+
+- **Scope is explicit.** Tenant, active-status, domain, segment-membership, and
+  selected-candidate checks are applied before a candidate can be ranked.
+  Workflow candidate validation and composite foreign keys provide additional
+  database safeguards.
+- **Scores and ordering are bounded and reproducible.** The strategies produce
+  scores in the 0–1 range, `minimum_score` and `top_k` are validated, and the
+  SQL defines deterministic tie-breaking. The recommendation table also checks
+  score/rank ranges and permitted strategies.
+- **Results are traceable.** Recommendation rows are keyed to a run and profile;
+  the runner tests verify the run ID is passed through, successful results are
+  persisted per profile, and failed-run rows are removed.
+
+These are implementation-level correctness checks, not evidence of improved
+conversion, causal impact, or recommendation quality in production. The
+ranking and runner tests use fake database connections: they check generated
+SQL, parameters, outputs, and persistence calls, but do not execute the
+migration or ranking query against PostgreSQL.
+
+One runtime condition also remains to be verified. The migration forces
+row-level security on `cdp_agent_workflow` and its policy requires
+`app.tenant_id`. The runner's `_load_steps` query adds a tenant predicate for
+API runs but does not set that session variable; cron runs call the same query
+without a tenant predicate. Unless the deployed database role bypasses RLS or
+the connection initializes the tenant context externally, RLS can hide the
+workflow rows. A single tenant context would also limit cron to that tenant,
+so an all-tenant cron scan needs an authorized service-role mechanism or
+per-tenant iteration. The unit tests do not cover this database-session
+behavior, so end-to-end access under the deployed runner role should be
+confirmed before claiming that the RLS-protected workflow lookup is proven.
+
+# 2. Personalization Flow: End-to-End Execution
 
 At a business level, the configured workflow selects eligible profiles in a
 segment, ranks the chosen content for each profile, and makes successful
@@ -88,7 +257,7 @@ The orchestration is implemented in [dagster_defs.py](./dagster_defs.py) and
    recommendation run or relevant content mutation invalidates the tenant
    cache.
 
-### Runtime flow
+## 2.1 Runtime Flow
 ```mermaid
 %%{init: {"flowchart": {"nodeSpacing": 10, "rankSpacing": 14, "padding": 4}, "themeVariables": {"fontSize": "10px"}}}%%
 flowchart TD
@@ -110,7 +279,7 @@ persistence, and the recommendation read API. Each table name links to its
 `CREATE TABLE` definition in
 [database-schema.sql](../../customer360-database/database-schema.sql).
 
-## Manual test walkthrough
+# 3. Manual Test Walkthrough
 
 Use this walkthrough to verify the customer-facing flow and the backend
 execution path. The segment detail view and workflow editor are implemented in
@@ -138,7 +307,7 @@ flowchart TD
     M --> O["Verify run ID in Dagster<br/>read results from API"]
 ```
 
-### Test procedure
+## 3.1 Test Procedure
 
 1. **Confirm prerequisites.** Use an active segment with active profiles in the
    authenticated tenant. The segment's `segment_tag` must appear in each test
@@ -195,7 +364,7 @@ If ranking fails, inspect the Dagster run and confirm the profile is an active
 segment member, candidates are active and tenant-owned, their domains match,
 and the selected strategy has the required embedding configuration.
 
-### Automated unit tests
+## 3.2 Automated Unit Tests
 
 Run the ranking handler tests from `customer360-backend`. The command measures
 statement and branch coverage for the handler and fails unless both reach
@@ -211,7 +380,7 @@ PYTHONPATH=.:../customer360-dao/src pytest -q \
 The test cases are in
 [test_ranking_recommendation.py](./tests/test_ranking_recommendation.py).
 
-## Agent registry: [cdp_ai_agents](../../customer360-database/database-schema.sql#L1909)
+# 4. Agent Registry: [cdp_ai_agents](../../customer360-database/database-schema.sql#L1909)
 
 Agent definitions are global and use `agent_code` as their stable primary key.
 For workflow selection, the runner uses the agent code, `model_type`, `status`,
@@ -229,7 +398,7 @@ content/product ranking. The seeded recommendation agent is
 `product_recommendation`; its current lifecycle status must still be checked
 at runtime rather than assumed from seed data.
 
-## Segment workflow: [cdp_agent_workflow](../../customer360-database/database-schema.sql#L2885)
+# 5. Segment Workflow: [cdp_agent_workflow](../../customer360-database/database-schema.sql#L2885)
 
 Workflow rows are tenant-owned and attach one registered agent from
 [cdp_ai_agents](../../customer360-database/database-schema.sql#L1909) to one
@@ -249,9 +418,9 @@ The runner processes active steps in ascending `execution_order` and ignores
 inactive agents. API-triggered runs are immediate; schedule matching is applied
 to cron runs.
 
-## Candidate selection and ranking
+# 6. Candidate Selection and Ranking
 
-### Candidate catalog and tenant checks
+## 6.1 Candidate Catalog and Tenant Checks
 
 Candidate IDs refer to
 [cdp_content_items](../../customer360-database/database-schema.sql#L2586).
@@ -267,7 +436,7 @@ runner evaluates only the selected IDs; it does not search the full catalog.
 At runtime, candidates must also be active and have domain `all` or the
 profile's domain.
 
-### Profile inputs and configuration
+## 6.2 Profile Inputs and Configuration
 
 For each profile, the handler requires a non-blank `input_data.domain` and
 accepts `input_data.segmentation_tags` as a list of non-blank strings (default
@@ -288,7 +457,7 @@ For `semantic`, the handler uses semantic weight 1 and tag weight 0. For `tags`,
 it uses tag weight 1 and semantic weight 0. The configured hybrid weights are
 normalized when the two scores are combined.
 
-### Scoring and result ordering
+## 6.3 Scoring and Result Ordering
 
 - **Tags:** the number of matched profile tags divided by the number of profile
   tags; the score is 0 when the profile has no tags.
@@ -303,7 +472,7 @@ the deterministic tie-breaker. Each result includes a one-based rank, the
 strategy scores, matched tags, a reason code, and the content display fields.
 Scores are strategy-specific ranking values, not calibrated probabilities.
 
-### Embedding lifecycle
+## 6.4 Embedding Lifecycle
 
 Semantic and hybrid ranking require the configured `DOCS_EMBEDDING_PROVIDER`
 to be `openai` or `gemini`. The runner supports 384- and 768-dimensional
@@ -317,7 +486,7 @@ Products are ranked through their linked content items in the current
 workflow. Product-table vector columns are reserved for possible future direct
 product ranking.
 
-### Persistence and failure handling
+## 6.5 Persistence and Failure Handling
 
 The runner records run status in
 [cdp_profile_recommendation_runs](../../customer360-database/database-schema.sql#L3864)
@@ -334,7 +503,7 @@ counts at each filter stage and the tenant, segment, agent, and profile
 identifiers. The detailed diagnostic query runs only on the failure path and
 uses the same tenant and selected candidate IDs.
 
-## Recommendation read API
+# 7. Recommendation Read API
 
 The Customer 360 API exposes the persisted recommendations through:
 
@@ -370,7 +539,7 @@ The route is implemented in
 tenant-scoped query is in
 [content_repository.py](../../customer360-api/core/repositories/content_repository.py).
 
-## Current and future profile inputs
+# 8. Current and Future Profile Inputs
 
 The current ranking contract reads only:
 
@@ -392,7 +561,7 @@ Any future handler that adds these inputs must define tenant-scoped reads and
 apply relevant consent, suppression, inventory, campaign-eligibility, and
 domain constraints before returning a recommendation.
 
-## Data ownership and engineering guardrails
+# 9. Data Ownership and Engineering Guardrails
 
 The ranking handler validates its profile inputs and configuration, evaluates
 only the step's selected candidates within the step tenant, and returns ranked
@@ -407,6 +576,15 @@ The workflow must not:
 - rank candidates outside the configured, tenant-eligible set;
 - send campaigns or notifications directly; or
 - overwrite another handler's output without an explicit ownership contract.
+
+# 10. Conclusion
+
+The implemented workflow connects tenant-scoped segment configuration to
+persisted content rankings that the recommendation API can serve. Its current
+contract is limited to active `ranking_recommendation` steps, explicitly
+selected eligible content, and the documented tag, semantic, and hybrid
+strategies. Tenant ownership, deterministic ordering, and explicit failure
+handling define the operational boundaries of this implementation.
 
 ## References
 
