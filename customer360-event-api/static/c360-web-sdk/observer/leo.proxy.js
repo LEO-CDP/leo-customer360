@@ -61,6 +61,13 @@
 	}
 
 	var TIME_TO_ADD_PROXY_IFRAME = typeof window.leoProxyDelay === 'number' ? window.leoProxyDelay : 300; // delay to avoid blocking page load
+	var consentGranted = window.leoTrackingConsent !== false;
+	var iframeTimer = null;
+	var revokeAckTimer = null;
+	var pendingRevokeToken = null;
+	var revokingIframe = null;
+	var revokeSequence = 0;
+	var dataLayerSubscriptions = [];
     
     if (typeof window.LeoObserverProxy === "undefined") {
     	
@@ -156,6 +163,7 @@
         	'synchLeoVisitorCallback' : false,
         	'personalizationCallbacks': {},
         	'isReady': false,
+			'consentGranted': consentGranted,
 			 'anonymousId': '',
         	'sessionKey': '',
 			 'deviceFingerprint': ''
@@ -165,84 +173,400 @@
         
         var pendingEvents = [];
         var iframeId = "leotech_event_proxy";
-        setTimeout(function(){
-        	var node = document.getElementById(iframeId);
+        var createProxyIframe = function() {
+            if (!consentGranted) {
+                return false;
+            }
+            var node = document.getElementById(iframeId);
 
-        	if( node == null ){
-        		// Check for cross-domain visitor ID in query parameter, hash, or injected global
-        		var leosyn = '';
-        		var searchStr = window.location.search || '';
-        		var hashStr = window.location.hash || '';
-        		var match = searchStr.match(/[?&]leosyn=([^&#]+)/) || hashStr.match(/[#&]leosyn=([^&#]+)/);
-        		if (match) {
-        			try {
-        				leosyn = decodeURIComponent(match[1]);
-        			} catch (e) {
-        				leosyn = match[1];
-        			}
-        		}
-        		if (!leosyn && typeof window.injectedVisitorId === 'string' && window.injectedVisitorId.length > 5) {
-        			leosyn = window.injectedVisitorId;
-        		}
+            if (node == null) {
+                var leosyn = '';
+                var searchStr = window.location.search || '';
+                var hashStr = window.location.hash || '';
+                var match = searchStr.match(/[?&]leosyn=([^&#]+)/) || hashStr.match(/[#&]leosyn=([^&#]+)/);
+                if (match) {
+                    try {
+                        leosyn = decodeURIComponent(match[1]);
+                    } catch (e) {
+                        leosyn = match[1];
+                    }
+                }
+                if (!leosyn && typeof window.injectedVisitorId === 'string' && window.injectedVisitorId.length > 5) {
+                    leosyn = window.injectedVisitorId;
+                }
 
-        		var iframeProxyUrl = proxyHtmlUrl + cleanLogDomain + '_' + encodeURIComponent(leoProxyOrigin);
-    	        if( leosyn && leosyn.length > 5 ) {
-    	        	iframeProxyUrl = iframeProxyUrl + '_' + encodeURIComponent(leosyn);
-    	        }
-			if (leoC360SourceId) {
-				iframeProxyUrl = iframeProxyUrl + '_' + encodeURIComponent(leoC360SourceId);
-			}
+                var iframeHash = cleanLogDomain + '_' + encodeURIComponent(leoProxyOrigin);
+                if (leosyn && leosyn.length > 5) {
+                    iframeHash += '_' + encodeURIComponent(leosyn);
+                }
+                if (leoC360SourceId) {
+                    iframeHash += '_' + encodeURIComponent(leoC360SourceId);
+                }
+                var proxyPageUrl = proxyHtmlUrl.slice(0, -1);
+                var consentSeparator = proxyPageUrl.indexOf('?') >= 0 ? '&' : '?';
+                var iframeProxyUrl = proxyPageUrl + consentSeparator + 'leo_tracking=disabled#' + iframeHash;
 
-    	        // Cross domain iframe
-    	        var iframeProxy = document.createElement("iframe");
-    	        iframeProxy.setAttribute("style", "display:none!important;width:0px!important;height:0px!important;border:none!important;" );
-    	        iframeProxy.setAttribute("sandbox", "allow-scripts allow-same-origin");
-    	        iframeProxy.width = 0;
-    	        iframeProxy.height = 0;
-    	        iframeProxy.id = iframeId;
-    	        iframeProxy.name = iframeId;
-    	        iframeProxy.src = iframeProxyUrl;
+                var iframeProxy = document.createElement("iframe");
+                iframeProxy.setAttribute("style", "display:none!important;width:0px!important;height:0px!important;border:none!important;");
+                iframeProxy.setAttribute("sandbox", "allow-scripts allow-same-origin");
+                iframeProxy.width = 0;
+                iframeProxy.height = 0;
+                iframeProxy.id = iframeId;
+                iframeProxy.name = iframeId;
+                iframeProxy.src = iframeProxyUrl;
+                iframeProxy.addEventListener("load", function() {
+                    if (!consentGranted && revokingIframe === iframeProxy && pendingRevokeToken) {
+                        notifyIframeConsentDenied(iframeProxy, pendingRevokeToken);
+                    }
+                });
 
-    	        // Append to trigger iframe post back data to server
-    	        var body = document.getElementsByTagName("body");
-    	        if (body.length > 0) {
-    	            body[0].appendChild(iframeProxy);
-    	            window.LeoIframeProxy = iframeProxy;
-    	        } else if (document.documentElement) {
-    	        	document.documentElement.appendChild(iframeProxy);
-    	        	window.LeoIframeProxy = iframeProxy;
-    	        }
-        	}
+                var body = document.getElementsByTagName("body");
+                if (body.length > 0) {
+                    body[0].appendChild(iframeProxy);
+                    window.LeoIframeProxy = iframeProxy;
+                } else if (document.documentElement) {
+                    document.documentElement.appendChild(iframeProxy);
+                    window.LeoIframeProxy = iframeProxy;
+                }
+            }
+            return !!window.LeoIframeProxy;
+        };
+
+        iframeTimer = setTimeout(function() {
+            if (consentGranted) {
+                createProxyIframe();
+            }
         }, TIME_TO_ADD_PROXY_IFRAME);
 
-        // Put message to the queue in the child iframe
         var putEventToQueue = function(msg) {
-        	if (!LeoObserverProxy.isReady || !window.LeoIframeProxy || !window.LeoIframeProxy.contentWindow) {
-        		pendingEvents.push(msg);
-        		return;
-        	}
-        	try {
-        		window.LeoIframeProxy.contentWindow.postMessage(msg, targetPostMessage);
-        	} catch(err) {
-        		try {
-        			window.LeoIframeProxy.contentWindow.postMessage(msg, '*');
-        		} catch(e) {}
-        	}
+            if (!consentGranted) {
+                return false;
+            }
+            if (!LeoObserverProxy.isReady || !window.LeoIframeProxy || !window.LeoIframeProxy.contentWindow) {
+                pendingEvents.push(msg);
+                return true;
+            }
+            try {
+                window.LeoIframeProxy.contentWindow.postMessage(msg, targetPostMessage);
+                return true;
+            } catch (err) {
+                console.error("[LeoProxy] Could not post message to observer iframe:", err);
+                return false;
+            }
         };
 
         var flushPendingEvents = function() {
-        	if (window.LeoIframeProxy && window.LeoIframeProxy.contentWindow && pendingEvents.length > 0) {
-        		while (pendingEvents.length > 0) {
-        			var queuedMsg = pendingEvents.shift();
-        			try {
-        				window.LeoIframeProxy.contentWindow.postMessage(queuedMsg, targetPostMessage);
-        			} catch(err) {
-        				try {
-        					window.LeoIframeProxy.contentWindow.postMessage(queuedMsg, '*');
-        				} catch(e) {}
-        			}
-        		}
-        	}
+            if (consentGranted && window.LeoIframeProxy && window.LeoIframeProxy.contentWindow && pendingEvents.length > 0) {
+                while (pendingEvents.length > 0) {
+                    var queuedMsg = pendingEvents.shift();
+                    try {
+                        window.LeoIframeProxy.contentWindow.postMessage(queuedMsg, targetPostMessage);
+                    } catch (err) {
+                        console.error("[LeoProxy] Could not flush pending observer message:", err);
+                    }
+                }
+            }
+        };
+
+        function dispatchConsentChange() {
+            if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+                window.dispatchEvent(new CustomEvent('leo_consent_changed', {
+                    detail: { granted: consentGranted }
+                }));
+            }
+        }
+
+        function finishConsentRevocation(token, timedOut, storageCleared) {
+            if (token !== pendingRevokeToken) {
+                return;
+            }
+            if (revokeAckTimer) {
+                clearTimeout(revokeAckTimer);
+                revokeAckTimer = null;
+            }
+            if (timedOut) {
+                console.warn("[LeoProxy] Consent revoke acknowledgement timed out; removing observer iframe");
+            } else if (storageCleared === false) {
+                console.error("[LeoProxy] Observer iframe could not confirm local cache removal");
+            }
+
+            var iframe = revokingIframe;
+            revokingIframe = null;
+            pendingRevokeToken = null;
+            if (iframe) {
+                iframe.remove();
+                if (window.LeoIframeProxy === iframe) {
+                    window.LeoIframeProxy = false;
+                }
+            }
+        }
+
+        function notifyIframeConsentDenied(iframe, token) {
+            if (!iframe || !iframe.contentWindow || token !== pendingRevokeToken) {
+                return false;
+            }
+            try {
+                iframe.contentWindow.postMessage({
+                    call: 'setConsent',
+                    granted: false,
+                    requestId: token
+                }, targetPostMessage);
+                return true;
+            } catch (error) {
+                console.warn('[LeoProxy] Unable to notify iframe of consent withdrawal', error);
+                return false;
+            }
+        }
+
+        function detachDataLayerSubscription(subscription) {
+            subscription.active = false;
+            dataLayerSubscriptions.forEach(function(other) {
+                if (
+                    other !== subscription &&
+                    other.layer === subscription.layer &&
+                    other.originalPush === subscription.wrappedPush
+                ) {
+                    other.originalPush = subscription.originalPush;
+                }
+            });
+            if (subscription.layer && subscription.wrappedPush && subscription.layer.push === subscription.wrappedPush) {
+                subscription.layer.push = subscription.originalPush;
+            }
+            subscription.layer = null;
+            subscription.wrappedPush = null;
+            subscription.originalPush = null;
+        }
+
+        function dispatchDataLayerEntry(entry, subscription) {
+            if (!consentGranted || !entry || typeof entry !== 'object' || Array.isArray(entry)) {
+                return false;
+            }
+
+            var eventName = typeof entry.event === 'string' ? entry.event : '';
+            var eventConfig = subscription.options.eventMap && subscription.options.eventMap[eventName];
+            if (!eventConfig && !subscription.options.captureAll) {
+                return false;
+            }
+            if (typeof eventConfig === 'string') {
+                eventConfig = { metricName: eventConfig };
+            }
+            eventConfig = eventConfig || {};
+
+            var metricName = eventConfig.metricName || eventName;
+            if (!metricName) {
+                return false;
+            }
+            var data = entry;
+            if (eventConfig.dataPath) {
+                data = String(eventConfig.dataPath).split('.').reduce(function(value, key) {
+                    return value === null || typeof value === 'undefined' ? undefined : value[key];
+                }, entry);
+            }
+            if (data === null || typeof data === 'undefined') {
+                return false;
+            }
+            if (typeof data === 'object' && !Array.isArray(data)) {
+                data = Object.assign({}, data);
+                if (typeof data.data_layer_event === 'undefined') {
+                    data.data_layer_event = eventName;
+                }
+            } else {
+                data = { value: data, data_layer_event: eventName };
+            }
+
+            var eventType = String(eventConfig.type || subscription.options.eventType || 'action').toLowerCase();
+            var queued = false;
+            if (eventType === 'view') {
+                queued = LeoObserverProxy.recordViewEvent(metricName, data);
+            } else if (eventType === 'conversion') {
+                var transactionId = eventConfig.transactionIdPath
+                    ? eventConfig.transactionIdPath.split('.').reduce(function(value, key) {
+                        return value === null || typeof value === 'undefined' ? undefined : value[key];
+                    }, entry)
+                    : data.transaction_id;
+                var transactionValue = eventConfig.valuePath
+                    ? eventConfig.valuePath.split('.').reduce(function(value, key) {
+                        return value === null || typeof value === 'undefined' ? undefined : value[key];
+                    }, entry)
+                    : data.value;
+                var currencyCode = eventConfig.currencyPath
+                    ? eventConfig.currencyPath.split('.').reduce(function(value, key) {
+                        return value === null || typeof value === 'undefined' ? undefined : value[key];
+                    }, entry)
+                    : data.currency;
+                var items = eventConfig.itemsPath
+                    ? eventConfig.itemsPath.split('.').reduce(function(value, key) {
+                        return value === null || typeof value === 'undefined' ? undefined : value[key];
+                    }, entry)
+                    : data.items;
+                queued = LeoObserverProxy.recordConversionEvent(
+                    metricName,
+                    data,
+                    typeof transactionId === 'string' ? transactionId : '',
+                    Array.isArray(items) ? items : [],
+                    typeof transactionValue === 'number' ? transactionValue : 0,
+                    typeof currencyCode === 'string' ? currencyCode : 'USD'
+                );
+            } else if (eventType === 'feedback') {
+                queued = LeoObserverProxy.recordFeedbackEvent(metricName, data);
+            } else {
+                queued = LeoObserverProxy.recordActionEvent(metricName, data);
+            }
+
+            if (queued && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+                window.dispatchEvent(new CustomEvent('leo_data_layer_event_queued', {
+                    detail: {
+                        dataLayerName: subscription.layerName || 'manual',
+                        dataLayerEvent: eventName,
+                        metricName: metricName,
+                        eventType: eventType,
+                        eventData: data
+                    }
+                }));
+            }
+            return queued;
+        }
+
+        function attachDataLayerSubscription(subscription) {
+            if (!consentGranted || !subscription.active || subscription.layer) {
+                return false;
+            }
+            var layer = window[subscription.layerName];
+            if (!Array.isArray(layer)) {
+                if (!subscription.warnedMissingLayer) {
+                    console.warn('[LeoProxy] Data layer must be an array before watching:', subscription.layerName);
+                    subscription.warnedMissingLayer = true;
+                }
+                return false;
+            }
+
+            subscription.layer = layer;
+            subscription.warnedMissingLayer = false;
+            subscription.originalPush = layer.push;
+            subscription.wrappedPush = function() {
+                var entries = Array.prototype.slice.call(arguments);
+                var result = subscription.originalPush.apply(this, arguments);
+                if (consentGranted && subscription.active) {
+                    entries.forEach(function(entry) {
+                        dispatchDataLayerEntry(entry, subscription);
+                    });
+                }
+                return result;
+            };
+            layer.push = subscription.wrappedPush;
+
+            if (subscription.options.includeExisting === true) {
+                layer.slice().forEach(function(entry) {
+                    dispatchDataLayerEntry(entry, subscription);
+                });
+            }
+            return true;
+        }
+
+        LeoObserverProxy.setConsent = function(granted) {
+            var nextValue = granted === true;
+            consentGranted = nextValue;
+            window.leoTrackingConsent = nextValue;
+            LeoObserverProxy.consentGranted = nextValue;
+
+            if (!nextValue) {
+                pendingEvents = [];
+                LeoObserverProxy.isReady = false;
+                LeoObserverProxy.anonymousId = '';
+                LeoObserverProxy.sessionKey = '';
+                LeoObserverProxy.deviceFingerprint = '';
+                LeoObserverProxy.personalizationCallbacks = {};
+                LeoObserverProxy.synchLeoVisitorCallback = false;
+                if (iframeTimer) {
+                    clearTimeout(iframeTimer);
+                    iframeTimer = null;
+                }
+                if (window.LeoIframeProxy && !pendingRevokeToken) {
+                    var iframe = window.LeoIframeProxy;
+                    var revokeToken = String(++revokeSequence);
+                    revokingIframe = iframe;
+                    pendingRevokeToken = revokeToken;
+                    try {
+                        if (iframe.contentWindow) {
+                            revokeAckTimer = setTimeout(function() {
+                                finishConsentRevocation(revokeToken, true);
+                            }, 250);
+                            notifyIframeConsentDenied(iframe, revokeToken);
+                        } else {
+                            finishConsentRevocation(revokeToken, true);
+                        }
+                    } catch (error) {
+                        console.error('[LeoProxy] Consent withdrawal failed before iframe notification', error);
+                        finishConsentRevocation(revokeToken, true);
+                    }
+                }
+                dataLayerSubscriptions.forEach(detachDataLayerSubscription);
+            } else {
+                if (pendingRevokeToken) {
+                    finishConsentRevocation(pendingRevokeToken, false);
+                }
+                dataLayerSubscriptions.forEach(attachDataLayerSubscription);
+                if (!window.LeoIframeProxy) {
+                    createProxyIframe();
+                }
+            }
+            dispatchConsentChange();
+            return consentGranted;
+        };
+
+        LeoObserverProxy.trackDataLayerEvent = function(entry, eventConfig) {
+            if (!consentGranted || !entry || typeof entry !== 'object' || Array.isArray(entry)) {
+                return false;
+            }
+            var subscription = {
+                options: {
+                    captureAll: true,
+                    eventType: eventConfig && eventConfig.type || 'action',
+                    eventMap: {}
+                }
+            };
+            if (eventConfig) {
+                subscription.options.eventMap[entry.event || 'custom'] = eventConfig;
+            }
+            return dispatchDataLayerEntry(entry, subscription);
+        };
+
+        LeoObserverProxy.watchDataLayer = function(options) {
+            options = options || {};
+            var layerName = options.dataLayerName || options.layerName || 'dataLayer';
+            if (typeof layerName !== 'string' || !/^[A-Za-z_$][\w$]*$/.test(layerName)) {
+                throw new TypeError('dataLayerName must be a valid window property name');
+            }
+            var subscription = {
+                layerName: layerName,
+                options: options,
+                active: true,
+                layer: null,
+                originalPush: null,
+                wrappedPush: null,
+                warnedMissingLayer: false
+            };
+            dataLayerSubscriptions.push(subscription);
+            if (consentGranted && !attachDataLayerSubscription(subscription)) {
+                dataLayerSubscriptions = dataLayerSubscriptions.filter(function(item) {
+                    return item !== subscription;
+                });
+                subscription.active = false;
+                return false;
+            }
+
+            return {
+                dataLayerName: layerName,
+                isWatching: function() {
+                    return !!subscription.layer;
+                },
+                stop: function() {
+                    detachDataLayerSubscription(subscription);
+                    dataLayerSubscriptions = dataLayerSubscriptions.filter(function(item) {
+                        return item !== subscription;
+                    });
+                }
+            };
         };
 
         LeoObserverProxy.messageHandler = function(data) {
@@ -260,6 +584,35 @@
         		eventPayload = data;
         		eventType = eventPayload.event || '';
         	}
+
+            if (eventType === 'LeoConsentBridgeReady') {
+                if (consentGranted && window.LeoIframeProxy && window.LeoIframeProxy.contentWindow) {
+                    try {
+                        window.LeoIframeProxy.contentWindow.postMessage(
+                            { call: 'setConsent', granted: true },
+                            targetPostMessage
+                        );
+                    } catch (error) {
+                        console.error('[LeoProxy] Could not grant consent to observer iframe:', error);
+                    }
+                } else if (!consentGranted && pendingRevokeToken) {
+                    notifyIframeConsentDenied(revokingIframe, pendingRevokeToken);
+                }
+                return;
+            }
+            if (eventType === 'LeoConsentRevoked') {
+                if (eventPayload && eventPayload.requestId === pendingRevokeToken) {
+                    finishConsentRevocation(
+                        pendingRevokeToken,
+                        false,
+                        eventPayload.storageCleared
+                    );
+                }
+                return;
+            }
+            if (!consentGranted) {
+                return;
+            }
 
             if (eventType === "LeoObserverProxyLoaded") {
  				initLeoContextSession();
@@ -449,18 +802,22 @@
 		};
 		
 		LeoObserverProxy.synchLeoVisitorId = function(callback) {
-			LeoObserverProxy.synchLeoVisitorCallback = callback;
-			if (LeoObserverProxy.anonymousId && typeof callback === 'function') {
-				callback(LeoObserverProxy.anonymousId);
-			}
+		    if (!consentGranted) {
+		        return false;
+		    }
+		    LeoObserverProxy.synchLeoVisitorCallback = callback;
+		    if (LeoObserverProxy.anonymousId && typeof callback === 'function') {
+		        callback(LeoObserverProxy.anonymousId);
+		    }
             var payload = JSON.stringify({
                 'call': 'synchLeoVisitorId'
             });
-            putEventToQueue(payload);
+            return putEventToQueue(payload);
         };
 
         // event-view(pageview|screenview|storeview|trueview|placeview,contentId,sessionKey,visitorId)
         LeoObserverProxy.recordViewEvent = function(metricName, eventData) {
+            if (!consentGranted) return false;
             if (typeof eventData !== "object" || eventData === null) {
             	eventData = {};
             }
@@ -474,11 +831,12 @@
                 'params': params,
                 'eventType': 'view'
             });
-            putEventToQueue(payload);
+            return putEventToQueue(payload);
         };
 
         // event-action(click|play|touch|contact|watch|test,sessionKey,visitorId)
         LeoObserverProxy.recordActionEvent = function(metricName, eventData) {
+            if (!consentGranted) return false;
             if (typeof eventData !== "object" || eventData === null) {
             	eventData = {};
             }
@@ -488,11 +846,12 @@
                 'params': params,
                 'eventType': 'action'
             });
-            putEventToQueue(payload);
+            return putEventToQueue(payload);
         };
 
         // event-conversion(add_to_cart|submit_form|checkout|join,sessionKey,visitorId)
         LeoObserverProxy.recordConversionEvent = function(metricName, eventData, transactionId, shoppingCartItems, transactionValue, currencyCode) {
+            if (!consentGranted) return false;
             if (typeof eventData !== "object" || eventData === null) {
             	eventData = {};
             }
@@ -502,11 +861,12 @@
                 'params': params,
                 'eventType': 'conversion'
             });
-            putEventToQueue(payload);
+            return putEventToQueue(payload);
         };
         
         // event-feedback(submit-survey|submit-ces-form|submit-csat-form|submit-nps-form)
         LeoObserverProxy.recordFeedbackEvent = function(metricName, eventData) {
+            if (!consentGranted) return false;
             if (typeof eventData !== "object" || eventData === null) {
             	eventData = {};
             }
@@ -516,40 +876,44 @@
                 'params': params,
                 'eventType': 'feedback'
             });
-            putEventToQueue(payload);
+            return putEventToQueue(payload);
         };
         
         // Update contact profile identities using Embedded Web Form or login session
         LeoObserverProxy.updateProfileBySession = function(profileObject, extData) {
-            if (typeof profileObject === "object" && profileObject !== null) {
+            if (consentGranted && typeof profileObject === "object" && profileObject !== null) {
                 var payload = JSON.stringify({
                     'call': 'updateProfile',
                     'params': getObserverParams(false, false, profileObject, extData)
                 });
-                putEventToQueue(payload);
+                return putEventToQueue(payload);
             }
+            return false;
         };
 
         // Customer personalization: query personalized content or recommendations for current visitor
         LeoObserverProxy.getPersonalization = function(slotId, callback) {
-        	if (typeof callback === 'function' && slotId) {
-        		LeoObserverProxy.personalizationCallbacks[slotId] = callback;
-        	}
-        	var payload = JSON.stringify({
-        		'call': 'getPersonalization',
-        		'slotId': slotId || '',
-        		'params': getObserverParams(false)
-        	});
-        	putEventToQueue(payload);
+            if (!consentGranted) return false;
+            if (typeof callback === 'function' && slotId) {
+                LeoObserverProxy.personalizationCallbacks[slotId] = callback;
+            }
+            var payload = JSON.stringify({
+                'call': 'getPersonalization',
+                'slotId': slotId || '',
+                'params': getObserverParams(false)
+            });
+            return putEventToQueue(payload);
         };
 
         // Helpers to inspect resolved visitor & session identity
         LeoObserverProxy.getAnonymousId = function() {
+            if (!consentGranted) return '';
             return LeoObserverProxy.anonymousId || '';
         };
 
         LeoObserverProxy.getSessionKey = function() {
-        	return LeoObserverProxy.sessionKey || '';
+            if (!consentGranted) return '';
+            return LeoObserverProxy.sessionKey || '';
         };
 
         // Expose high-level LeoObserver helper facade
@@ -657,5 +1021,20 @@
 
         window.LeoObserver = LeoObserver;
         window.LeoObserverProxy = LeoObserverProxy;
+
+        LeoObserverProxy.hasConsent = function() {
+            return consentGranted;
+        };
+        if (window.leoDataLayerConfig) {
+            var dataLayerConfigs = Array.isArray(window.leoDataLayerConfig)
+                ? window.leoDataLayerConfig
+                : [window.leoDataLayerConfig];
+            dataLayerConfigs.forEach(function(config) {
+                LeoObserverProxy.watchDataLayer(config);
+            });
+        }
+        if (!consentGranted) {
+            LeoObserverProxy.setConsent(false);
+        }
     }
 })();

@@ -25,13 +25,15 @@ flowchart LR
     end
 
     subgraph Ingestion
-        LOG["LEO log domain\n/etv /eta /etc /efb\n/cxs-pf-init /cxs-pf-update"]
-		API["customer360-event-api\nPOST /tracking/logs"]
+        API["customer360-event-api\nPOST /data/api/v1/tracking/logs"]
+        QUEUE["Redis Streams"]
+        S3["S3 / MinIO Bronze\nimmutable JSONL event objects"]
     end
 
     subgraph Staging["Staging (customer360 schema)"]
         RAW["cdp_raw_profiles_stage\n(per-source identity + attribution)"]
-		EVT["S3/MinIO RAW + Silver\n(behavioral/transactional facts)"]
+        EVT["S3/MinIO event lake\n(raw and projected events)"]
+        CAMPAIGN["crm_campaign_performance_daily\n(daily experiment aggregates)"]
     end
 
     subgraph Resolution["Identity & Understanding"]
@@ -50,12 +52,12 @@ flowchart LR
     GTM --> SDK
     FB -.identity hints.-> SDK
     TT -.identity hints.-> SDK
-    SDK -->|"visitor/session events"| LOG
-    SDK -->|"updateProfileBySession()"| LOG
-    LOG -->|"bridge / ETL (integration point,\nnot yet implemented in this repo)"| RAW
-    LOG --> EVT
-    API --> RAW
-    API --> EVT
+    SDK -->|"visitor/session/custom events\nand profile_data"| API
+    API --> QUEUE
+    QUEUE --> S3
+    S3 --> EVT
+    S3 -->|"analytics job normalizes profile fields"| RAW
+    S3 -->|"eligible campaign events"| CAMPAIGN
     RAW --> CIR
     EVT --> CIR
     CIR --> MP
@@ -70,26 +72,26 @@ flowchart LR
 
 | Stage | Where it happens | What it produces |
 | --- | --- | --- |
-| Collection | `leo.proxy.js` / `leo.observer.js` in the browser | Batched view/action/conversion/feedback events and profile updates, keyed by visitor ID, session ID, and fingerprint. |
-| Landing | LEO log domain (`/etv`, `/eta`, `/etc`, `/efb`, `/cxs-pf-init`, `/cxs-pf-update`) | Raw hits at the observer's origin. **The log domain is a separate ingestion tier from `customer360-api`** — connecting it to the tables below is an integration task (a small ETL/bridge service or a direct write from the log service), not something already wired in this repository. |
-| Event ingestion | `customer360-event-api` `POST /api/v1/tracking/logs` | Validates identity hints and writes the canonical immutable event envelope to Redis/S3. Use this endpoint, or a trusted bridge that submits the same contract, to connect SDK data to the CDP event lake. |
+| Collection | `leo.proxy.js` / `leo.observer.js` in the browser | Batches view/action/conversion/feedback events and profile updates, keyed by visitor/session identifiers. |
+| Event ingestion | `customer360-event-api` `POST /data/api/v1/tracking/logs` | The configured observer/log domain routes to this API. The API validates identity hints, enqueues the batch in Redis Streams, and a worker writes the immutable event envelope to S3/MinIO. |
+| Profile staging and analytics | `customer360-backend/analytics/source_analytics` | The analytics job reads S3 event objects, normalizes event/profile fields, upserts per-source rows in `cdp_raw_profiles_stage`, and aggregates eligible experiment metrics in `crm_campaign_performance_daily`. The staging row is not a full per-event history; the raw S3 objects remain the event record. |
 | Identity resolution (CIR) | `customer360-backend/identity_resolution` (`resolver.py`, run via `daily_job.py` or the Dagster job) | Matches `cdp_raw_profiles_stage` rows onto a single `cdp_master_profiles` row per real person — the **unified user** — using the dynamic matching rules in `cdp_profile_attributes` (exact match on email/phone/device_id/advertising_id/cookie_id/external_customer_id, fuzzy match on name/address). |
 | Understanding | Persona Resolution Engine (`leo_customer360_dao/agentic_engines/persona_engine.py`) | Computes behavior/engagement/financial/loyalty/relationship/risk scores and a persona per unified user, stored on `cdp_customer_personas`. |
 | Activation ("unified campaign") | `cdp_segments` (Audience Builder), `crm_campaign`/`crm_campaign_member`, `customer360-backend/campaign_activation` | Segments query master profiles (and their personas/domain attributes) across every source system to build one audience; a campaign then targets that single, deduplicated audience instead of one list per channel. **Note:** `campaign_activation`'s Dagster job is currently a placeholder (log -> sleep -> log) - real per-channel activation (email/push/ads) still needs to be implemented against it, see [PLAN-CAMPAIGNS-DEV.md](../api-plans/PLAN-CAMPAIGNS-DEV.md). |
 
-In short: the SDK never talks to identity resolution directly. It only needs
-to consistently send the same identity fields (`loginId`/`email`/`phone` via
-`updateProfileBySession`, plus the ad-network click IDs described below) so
-that, once the event lake and profile-staging bridge are processed, CIR can
-merge them into one `cdp_master_profiles` row that every downstream segment
-and campaign can target.
+In short: the SDK does not call identity resolution directly. It sends event
+and profile data to the tracking API; the analytics job projects the supported
+profile fields from S3 into raw-profile staging, then CIR resolves them into
+`cdp_master_profiles`. `updateProfileBySession` does not synchronously update
+PostgreSQL. Keep identity fields consistent across events and profile updates
+so downstream resolution can link them.
 
 ## SDK Files
 
 | File | Purpose |
 | --- | --- |
 | `observer/leo.proxy.js` | Public page-side API, tag audit, iframe creation, and `postMessage` bridge. |
-| `html/cdp-event-proxy.html` | Hidden iframe bridge. It loads FingerprintJS2 and the observer implementation. |
+| `html/cdp-event-proxy.html` | Hidden iframe bridge. It loads FingerprintJS2 and the observer implementation only while tracking consent is allowed. |
 | `observer/leo.observer.js` | Observer implementation: fingerprinting, visitor/session state, network requests, and batching. |
 | `observer/hash.js` | Fingerprint hashing/cache library source. The current iframe HTML loads FingerprintJS2 2.1.5 from CDN instead of this file directly. |
 | `observer/leo.newsletter.modal.js` | Optional standalone newsletter subscription modal. It dispatches browser events but does not send CDP events by itself. |
@@ -141,6 +143,36 @@ or after the integration has otherwise confirmed readiness.
 All methods are available on `window.LeoObserverProxy` and accept a metric name
 plus an event data object. Event data is application-defined JSON; the SDK does
 not validate a business schema.
+
+### Data Layer integration
+
+The SDK does not automatically read a data layer. After the proxy script loads,
+opt in to watching `window.dataLayer` or `window.scopeDataLayer` and map named
+data-layer events to LEO event types:
+
+```js
+window.LeoObserverProxy.watchDataLayer({
+	dataLayerName: "scopeDataLayer",
+	eventMap: {
+		leo_purchase: {
+			metricName: "purchase",
+			type: "conversion",
+			dataPath: "ecommerce",
+			transactionIdPath: "ecommerce.transaction_id",
+			valuePath: "ecommerce.value",
+			currencyPath: "ecommerce.currency",
+			itemsPath: "ecommerce.items",
+		},
+	},
+});
+```
+
+The watcher observes future calls to the array's `.push()`; set
+`includeExisting: true` to also process entries already present. Nested objects
+and arrays are passed through as event JSON. Call the returned handle's `stop()`
+to stop watching. Alternatively, set `window.leoDataLayerConfig` before loading
+the proxy to start one or more watchers automatically. Event names and fields
+should be allowlisted rather than forwarding an entire layer.
 
 ### View events
 
@@ -226,9 +258,9 @@ The first object is serialized as profile data and the second as extension
 data. The request includes the current visitor ID and cached session key and is
 sent to `/cxs-pf-update`.
 
-Only include fields that the application is permitted to collect. The SDK does
-not provide consent management, field-level validation, or profile-schema
-validation.
+Only include fields that the application is permitted to collect. The SDK
+provides a tracking consent gate, but does not provide a CMP/user-facing consent
+flow, field-level validation, or profile-schema validation.
 
 ## Visitor ID Synchronization
 
@@ -405,9 +437,11 @@ from the GTM UI and fire LEO events from GTM triggers alongside GA4/Ads tags.
    ```
 
 Trigger ordering matters: set tag **priority** so the base tag fires before
-any event tag on the same page, and gate all LEO tags behind your consent
-management trigger (e.g. GTM's built-in Consent Mode checks) the same way you
-would gate GA4/Ads tags, since the SDK itself performs no consent checks (see
+any event tag on the same page. Set `window.leoTrackingConsent` from the CMP
+before loading the proxy, then call `LeoObserverProxy.setConsent()` when that
+decision changes. The SDK's compatibility default is allow when no decision
+was configured. Also gate the base tag itself in GTM/CMP when denied consent
+must prevent even downloading the proxy script (see
 [Security and Deployment Requirements](#security-and-deployment-requirements)).
 
 ## Using with React.js
@@ -577,28 +611,39 @@ validation accepts digits, spaces, plus signs, and dashes, with 7 to 15 digits.
 
 ## Request Lifecycle
 
-1. The proxy waits approximately 500 ms, then appends a hidden iframe at
+1. The proxy waits approximately 300 ms by default (configurable with
+	 `window.leoProxyDelay`), then appends a hidden iframe at
 	 `https://<log-domain>/cdp-sdk/html/cdp-event-proxy.html`.
 	 In deployments that forward `/data/*` to the tracking service with prefix
 	 stripping, configure `window.leoCdpProxyPath` as
 	 `/data/cdp-sdk/html/cdp-event-proxy.html`.
-2. The iframe reads the log domain and parent origin from its URL hash, loads
-	 FingerprintJS2 2.1.5, and loads the observer implementation.
-3. The iframe initializes a context session with `GET /cxs-pf-init` when no
-	 cached session key exists. The server response can update the session key.
-4. The iframe notifies the parent that the observer is ready. Calls from the
+2. The iframe starts with tracking disabled, reads the log domain and parent
+	 origin, and sends `LeoConsentBridgeReady` to the parent. The parent sends an
+	 explicit grant only if consent is allowed; otherwise FingerprintJS2 and the
+	 observer scripts are not loaded.
+3. After grant, the iframe loads FingerprintJS2 2.1.5 and the observer.
+	 `getContextSession()` creates the session context locally; it does not call
+	 `GET /cxs-pf-init`.
+4. On consent withdrawal, the parent blocks new events and sends a revoke
+	 message. The iframe clears its queues/cache, aborts active XHRs and
+	 acknowledges before the parent removes it; a bounded timeout removes a
+	 non-responding iframe.
+5. The iframe notifies the parent that the observer is ready. Calls from the
 	 page are serialized and sent to the iframe with `postMessage`.
-5. The observer sends profile updates immediately. Tracking events are queued
+6. The observer sends profile updates immediately. Tracking events are queued
 	 per endpoint and flushed when the configured batch size is reached, every
 	 5555 ms, and during `pagehide` or `beforeunload`.
 
 The observer uses form-encoded requests with `XMLHttpRequest` and enables
 `withCredentials`. Batches contain an encoded `events` JSON value and may
 include a session key; the event count is provided as the `evc` query
-parameter. When a session key is not yet available, the observer uses XHR so it
-can read the session response. Once a session key exists, supported browsers
-may use `navigator.sendBeacon` for tracking batches. Beacon delivery is queued
-by the browser and does not expose a response to page JavaScript.
+parameter. If no local session key exists, the observer uses XHR so it can read
+the response; the tracking API currently does not return a session key, so the
+SDK normally keeps using its locally generated key. Once a session key exists,
+supported browsers may use `navigator.sendBeacon` for tracking batches. Beacon
+delivery is queued by the browser and does not expose a response to page
+JavaScript; a Beacon already accepted by the browser cannot be recalled after
+consent is withdrawn.
 
 ## Security and Deployment Requirements
 
@@ -612,6 +657,15 @@ by the browser and does not expose a response to page JavaScript.
 	they are necessarily visible to browser code.
 - Review consent and privacy requirements before enabling fingerprinting or
 	sending profile fields.
+- Set `window.leoTrackingConsent = false` before loading the proxy when consent
+	has been denied, or call `LeoObserverProxy.setConsent(false)` when the CMP
+	revokes consent. The SDK retains its legacy allow behavior if consent is
+	unknown. A denied state prevents iframe creation, fingerprinting, profile
+	updates, personalization, queued events and XHR/Beacon flushes; it also
+	clears pending events and local visitor/session/profile cache. When consent
+	is granted, call `LeoObserverProxy.setConsent(true)`. Gate loading the proxy
+	script itself in the CMP for zero LEO-origin requests: JavaScript cannot
+	prevent a script download the page already initiated.
 - The proxy validates incoming `postMessage` events against the configured log
 	origin. Do not alter the iframe URL hash format unless the proxy and iframe
 	implementations are updated together.
@@ -621,7 +675,7 @@ by the browser and does not expose a response to page JavaScript.
 | Symptom | Checks |
 | --- | --- |
 | `LeoObserverProxy` is undefined | Confirm the proxy script loaded, `leoC360SourceId` is a string, and the globals were assigned before the script tag. |
-| Ready callback never runs | Inspect the hidden iframe, CDN loading errors, `/cxs-pf-init`, CORS headers, and browser console errors. |
+| Ready callback never runs | Inspect the consent bridge handshake, hidden iframe, CDN loading errors, CORS headers, and browser console errors. |
 | Events disappear | Wait for `leoObserverProxyReady`, verify `leoObserverBatchSize`, and keep the page open long enough for the batch timer or unload flush. |
 | Profile update has no effect | Confirm the profile object is a plain object, the log domain is reachable, and the request to `/cxs-pf-update` is accepted by the server. |
 | Visitor ID changes unexpectedly | Check iframe-origin local storage, injected visitor ID configuration, and whether the observer log domain changed between environments. |

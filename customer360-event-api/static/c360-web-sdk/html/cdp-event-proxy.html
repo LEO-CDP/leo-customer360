@@ -12,10 +12,6 @@
         Copyright 2020
     -->
 
-    <!-- FingerprintJS2 must be loaded before leo.observer.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fingerprintjs2/2.1.5/fingerprint2.min.js"
-        crossorigin="anonymous">
-        </script>
 </head>
 
 <body>
@@ -31,6 +27,9 @@
 
             var ROOT_DOMAIN = '';
             var PARENT_ORIGIN = '';
+            var trackingParam = new URLSearchParams(window.location.search).get('leo_tracking');
+            var TRACKING_ALLOWED = trackingParam === null || trackingParam === 'enabled';
+            window.LEO_TRACKING_CONSENT = TRACKING_ALLOWED;
 
             var INJECTED_VISITOR_ID = false;
 
@@ -47,6 +46,7 @@
 
             var OBSERVER_SCRIPT_LOADED = false;
             var OBSERVER_READY = false;
+            var OBSERVER_LOAD_STARTED = false;
 
             var queueTracking = [];
             var queueUpdating = [];
@@ -315,6 +315,12 @@
 
             function processQueue() {
                 queueScheduled = false;
+                if (!TRACKING_ALLOWED) {
+                    queueTracking = [];
+                    queueUpdating = [];
+                    synchVisitorCall = false;
+                    return;
+                }
 
                 /*
                  * Tracking events
@@ -402,6 +408,28 @@
                 );
             }
 
+            function clearObserverCache() {
+                var storageKeys = [
+                    'leocache-leocdp_vid',
+                    'leocache-leocdp_vid-cacheexpiration',
+                    'leocache-leoctxsk',
+                    'leocache-leoctxsk-cacheexpiration',
+                    'leocache-leocdp_fgp',
+                    'leocache-leocdp_fgp-cacheexpiration',
+                    'leocache-leocdp_profile',
+                    'leocache-leocdp_profile-cacheexpiration'
+                ];
+                try {
+                    storageKeys.forEach(function(key) {
+                        window.localStorage.removeItem(key);
+                    });
+                    return true;
+                } catch (error) {
+                    console.error('[LeoProxy] Could not clear observer local cache after consent withdrawal:', error);
+                    return false;
+                }
+            }
+
             // ============================================================
             // HANDLE CALL FROM PARENT
             // ============================================================
@@ -413,9 +441,43 @@
 
                 switch (data.call) {
 
+                    case 'setConsent':
+                        var wasTrackingAllowed = TRACKING_ALLOWED;
+                        TRACKING_ALLOWED = data.granted === true;
+                        window.LEO_TRACKING_CONSENT = TRACKING_ALLOWED;
+                        if (!TRACKING_ALLOWED) {
+                            queueTracking = [];
+                            queueUpdating = [];
+                            synchVisitorCall = false;
+                            OBSERVER_READY = false;
+                            queueScheduled = false;
+                            var storageCleared = clearObserverCache();
+                            if (observerAvailable() && typeof window.LeoEventObserver.setConsent === 'function') {
+                                window.LeoEventObserver.setConsent(false);
+                            }
+                            if (data.requestId) {
+                                sendMessage({
+                                    event: 'LeoConsentRevoked',
+                                    requestId: data.requestId,
+                                    storageCleared: storageCleared
+                                });
+                            }
+                        } else if (!wasTrackingAllowed) {
+                            if (OBSERVER_SCRIPT_LOADED && observerAvailable()) {
+                                if (typeof window.LeoEventObserver.setConsent === 'function') {
+                                    window.LeoEventObserver.setConsent(true);
+                                }
+                                codeIsReady();
+                            } else {
+                                loadLeoObserver();
+                            }
+                        }
+                        break;
+
                     case 'doTracking':
 
                         if (
+                            TRACKING_ALLOWED &&
                             data.eventType &&
                             data.params
                         ) {
@@ -428,6 +490,7 @@
                     case 'getContextSession':
 
                         if (
+                            TRACKING_ALLOWED &&
                             observerAvailable() &&
                             typeof window.LeoEventObserver.getContextSession === 'function'
                         ) {
@@ -447,7 +510,7 @@
 
                     case 'updateProfile':
 
-                        if (data.params) {
+                        if (TRACKING_ALLOWED && data.params) {
                             queueUpdating.push(data);
                             scheduleQueueFlush();
                         }
@@ -456,14 +519,17 @@
 
                     case 'synchLeoVisitorId':
 
-                        synchVisitorCall = data;
-                        scheduleQueueFlush();
+                        if (TRACKING_ALLOWED) {
+                            synchVisitorCall = data;
+                            scheduleQueueFlush();
+                        }
 
                         break;
 
                     case 'getPersonalization':
 
                         if (
+                            TRACKING_ALLOWED &&
                             observerAvailable() &&
                             typeof window.LeoEventObserver.getPersonalization === 'function'
                         ) {
@@ -674,6 +740,9 @@
             // ============================================================
 
             function codeIsReady() {
+                if (!TRACKING_ALLOWED) {
+                    return;
+                }
 
                 if (!observerAvailable()) {
 
@@ -704,6 +773,9 @@
                 }
 
                 OBSERVER_SCRIPT_LOADED = true;
+                if (typeof window.LeoEventObserver.setConsent === 'function') {
+                    window.LeoEventObserver.setConsent(true);
+                }
 
                 /*
                  * Injected anonymous ID can take precedence over
@@ -721,6 +793,9 @@
 
                     window.LeoEventObserver.initFingerprint(
                         function (fingerprintId) {
+                            if (!TRACKING_ALLOWED) {
+                                return;
+                            }
 
                             /*
                              * Only use generated anonymous ID when
@@ -792,6 +867,10 @@
             // ============================================================
 
             function loadLeoObserver() {
+                if (!TRACKING_ALLOWED || OBSERVER_LOAD_STARTED) {
+                    return;
+                }
+                OBSERVER_LOAD_STARTED = true;
                 var cbKey = String(Date.now());
                 
                 // Primary path: relative to proxy html (works across any host/domain)
@@ -801,6 +880,9 @@
                 var fallbackUrl3 = '/cdp-sdk/observer/leo.observer.js?cb=' + cbKey;
 
                 function doLoadObserverScript(url, onFail) {
+                    if (!TRACKING_ALLOWED) {
+                        return;
+                    }
                     console.info('[LeoProxy] Loading observer from:', url);
                     loadScript(
                         url,
@@ -823,30 +905,11 @@
                 }
 
                 function ensureFingerprintAndLoad() {
-                    if (typeof window.Fingerprint2 === 'undefined') {
-                        // Load fallback local hash.js if cdnjs was blocked
-                        loadScript('../observer/hash.js?cb=' + cbKey, {
-                            timeout: 5000,
-                            callback: function() {
-                                doLoadObserverScript(primaryUrl, function() {
-                                    doLoadObserverScript(fallbackUrl1, function() {
-                                        doLoadObserverScript(fallbackUrl2, function() {
-                                            doLoadObserverScript(fallbackUrl3);
-                                        });
-                                    });
-                                });
-                            },
-                            onError: function() {
-                                doLoadObserverScript(primaryUrl, function() {
-                                    doLoadObserverScript(fallbackUrl1, function() {
-                                        doLoadObserverScript(fallbackUrl2, function() {
-                                            doLoadObserverScript(fallbackUrl3);
-                                        });
-                                    });
-                                });
-                            }
-                        });
-                    } else {
+                    if (!TRACKING_ALLOWED) {
+                        return;
+                    }
+
+                    function loadObserverWithFallback() {
                         doLoadObserverScript(primaryUrl, function() {
                             doLoadObserverScript(fallbackUrl1, function() {
                                 doLoadObserverScript(fallbackUrl2, function() {
@@ -854,6 +917,26 @@
                                 });
                             });
                         });
+                    }
+
+                    if (typeof window.Fingerprint2 === 'undefined') {
+                        loadScript('https://cdnjs.cloudflare.com/ajax/libs/fingerprintjs2/2.1.5/fingerprint2.min.js', {
+                            timeout: 7000,
+                            callback: loadObserverWithFallback,
+                            onError: function() {
+                                if (!TRACKING_ALLOWED) {
+                                    return;
+                                }
+                                // Load local hash fallback only after consent.
+                                loadScript('../observer/hash.js?cb=' + cbKey, {
+                                    timeout: 5000,
+                                    callback: loadObserverWithFallback,
+                                    onError: loadObserverWithFallback
+                                });
+                            }
+                        });
+                    } else {
+                        loadObserverWithFallback();
                     }
                 }
 
@@ -865,20 +948,18 @@
             // ============================================================
 
             function init() {
-
                 if (!parseConfig()) {
                     return;
                 }
-
-                /*
-                 * Make initialization asynchronous so the DOM and
-                 * externally loaded dependencies are ready.
-                 */
+                if (!TRACKING_ALLOWED) {
+                    sendMessage({ event: 'LeoConsentBridgeReady' });
+                    return;
+                }
                 setTimeout(
                     function () {
-
-                        loadLeoObserver();
-
+                        if (TRACKING_ALLOWED) {
+                            loadLeoObserver();
+                        }
                     },
                     0
                 );
@@ -890,33 +971,22 @@
             // OPTIONAL DEBUG API
             // ============================================================
 
-            /*
-             * Expose a small read-only-ish debug object.
-             * Useful while testing iframe integration.
-             */
             window.LeoObserverProxy = {
-
                 getStatus: function () {
-
                     return {
                         rootDomain: ROOT_DOMAIN,
                         parentOrigin: PARENT_ORIGIN,
-                        observerScriptLoaded:
-                            OBSERVER_SCRIPT_LOADED,
-                        observerReady:
-                            OBSERVER_READY,
-                        trackingQueueLength:
-                            queueTracking.length,
-                        profileQueueLength:
-                            queueUpdating.length,
-                        anonymousId:
-                            observerAvailable()
+                        trackingAllowed: TRACKING_ALLOWED,
+                        observerScriptLoaded: OBSERVER_SCRIPT_LOADED,
+                        observerReady: OBSERVER_READY,
+                        trackingQueueLength: queueTracking.length,
+                        profileQueueLength: queueUpdating.length,
+                        anonymousId: observerAvailable() && TRACKING_ALLOWED
                             ? window.LeoEventObserver.anonymousId
-                                : null,
-                        deviceFingerprint:
-                            observerAvailable()
+                            : null,
+                        deviceFingerprint: observerAvailable() && TRACKING_ALLOWED
                             ? window.LeoEventObserver.deviceFingerprint
-                                : null
+                            : null
                     };
                 }
             };

@@ -8,6 +8,18 @@
 
     <title>CDP Tracking Sandbox</title>
 
+    <script>
+        (function () {
+            var state = new URLSearchParams(window.location.search).get("leo_consent");
+            window.__c360InitialConsent = ["granted", "denied"].includes(state) ? state : "unknown";
+            if (window.__c360InitialConsent === "denied") {
+                window.leoTrackingConsent = false;
+            } else if (window.__c360InitialConsent === "granted") {
+                window.leoTrackingConsent = true;
+            }
+        })();
+    </script>
+
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 </head>
@@ -142,6 +154,33 @@
                                             class="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-gray-900 outline-none focus:border-blue-600">
                                     </div>
                                 </div>
+                            </div>
+
+                            <div class="rounded-lg border border-amber-200 bg-amber-50/60 p-3 min-[601px]:col-span-2">
+                                <h3 class="mb-2 text-sm font-semibold text-gray-900">Consent test</h3>
+                                <p class="mb-3 text-xs text-gray-600">
+                                    Unknown preserves legacy allow behavior. Denied blocks LEO iframe, fingerprinting and event requests.
+                                    Use the startup link to verify no observer iframe is created when the page starts denied.
+                                </p>
+                                <div class="flex flex-wrap items-end gap-2">
+                                    <div class="flex min-w-[220px] flex-col gap-1.5">
+                                        <label class="text-xs font-semibold text-gray-500" for="consent-state">Tracking consent</label>
+                                        <select id="consent-state" class="rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-gray-900">
+                                            <option value="unknown">Unknown (legacy allow)</option>
+                                            <option value="granted">Granted</option>
+                                            <option value="denied">Denied</option>
+                                        </select>
+                                    </div>
+                                    <button id="btn-apply-consent" type="button"
+                                        class="cursor-pointer rounded-lg border border-gray-200 bg-white px-[13px] py-[9px] text-[13px] font-semibold text-gray-900 hover:border-blue-600 hover:text-blue-600">
+                                        Apply now
+                                    </button>
+                                    <button id="btn-reload-denied" type="button"
+                                        class="cursor-pointer rounded-lg border border-red-200 bg-white px-[13px] py-[9px] text-[13px] font-semibold text-red-700 hover:border-red-600">
+                                        Reload with consent denied
+                                    </button>
+                                </div>
+                                <p id="consent-status" class="mt-2 text-xs font-medium text-gray-700" aria-live="polite"></p>
                             </div>
 
                         </div>
@@ -360,6 +399,68 @@
             <!-- RIGHT -->
             <section>
 
+                <div class="mb-[18px] overflow-hidden rounded-[14px] border border-gray-200 bg-white">
+                    <div class="border-b border-gray-200 px-[18px] py-4">
+                        <h2 class="text-base font-semibold">Data Layer / Custom Event</h2>
+                        <p class="mt-1 text-xs text-gray-500">
+                            Start the adapter, then push a custom event. Nested JSON and <code>items[]</code> are passed to LEO.
+                        </p>
+                    </div>
+                    <div class="space-y-3 p-[18px]">
+                        <div class="grid gap-3 min-[601px]:grid-cols-[1fr_auto]">
+                            <label class="flex flex-col gap-1.5 text-xs font-semibold text-gray-500" for="data-layer-name">
+                                Data layer to watch
+                                <select id="data-layer-name" class="rounded-lg border border-gray-200 bg-white px-2.5 py-[9px] text-sm font-normal text-gray-900">
+                                    <option value="dataLayer">window.dataLayer</option>
+                                    <option value="scopeDataLayer">window.scopeDataLayer</option>
+                                </select>
+                            </label>
+                            <button id="btn-watch-data-layer" type="button"
+                                class="self-end cursor-pointer rounded-lg border border-blue-600 bg-blue-600 px-[13px] py-[9px] text-[13px] font-semibold text-white hover:border-blue-700 hover:bg-blue-700">
+                                Start watching
+                            </button>
+                        </div>
+                        <label class="flex flex-col gap-1.5 text-xs font-semibold text-gray-500" for="data-layer-event">
+                            Event JSON (editable)
+                            <textarea id="data-layer-event" rows="12" spellcheck="false"
+                                class="w-full rounded-lg border border-gray-200 bg-slate-950 p-3 font-mono text-xs leading-5 text-green-200 outline-none focus:border-blue-600">{
+  "event": "leo_purchase",
+  "ecommerce": {
+    "transaction_id": "SANDBOX-ORDER-1001",
+    "value": 59.98,
+    "currency": "USD",
+    "items": [
+      {
+        "item_id": "SKU-101",
+        "item_name": "CDP Book",
+        "price": 25,
+        "quantity": 2,
+        "details": {
+          "category": "books",
+          "tags": ["cdp", "analytics"]
+        }
+      },
+      {
+        "item_id": "SKU-205",
+        "item_name": "Shipping",
+        "price": 9.98,
+        "quantity": 1
+      }
+    ]
+  }
+}</textarea>
+                        </label>
+                        <button id="btn-push-data-layer" type="button"
+                            class="cursor-pointer rounded-lg border border-gray-200 bg-white px-[13px] py-[9px] text-[13px] font-semibold text-gray-900 hover:border-blue-600 hover:text-blue-600">
+                            Push event to selected data layer
+                        </button>
+                        <div id="data-layer-status" class="rounded-lg bg-slate-50 p-2.5 text-xs text-gray-600" role="status" aria-live="polite">
+                            The LEO adapter is not watching a data layer yet. Push alone does not send an event.
+                        </div>
+                        <pre id="data-layer-preview" class="max-h-48 overflow-auto rounded-lg bg-gray-100 p-3 font-mono text-[11px] text-gray-700">No leo_purchase event pushed yet.</pre>
+                    </div>
+                </div>
+
                 <div class="mb-[18px] grid gap-2.5 min-[601px]:grid-cols-3">
 
                     <div class="rounded-[10px] border border-gray-200 bg-white p-3">
@@ -432,15 +533,20 @@
 
     <script>
 
+        const trackingAllowedAtStartup = window.leoTrackingConsent !== false;
         const trackingContext = {
             tenantId: "demo-tenant",
             environment: "sandbox",
-            sessionId:
+            sessionId: trackingAllowedAtStartup
+                ?
                 "sess_" +
-                crypto.randomUUID(),
-            visitorId:
+                crypto.randomUUID()
+                : "",
+            visitorId: trackingAllowedAtStartup
+                ?
                 "visitor_" +
-                crypto.randomUUID(),
+                crypto.randomUUID()
+                : "",
             profileId: null,
             source: "web",
             sourceSystem: "leo-tracking-sandbox"
@@ -520,6 +626,15 @@
         window.leoObserverTrackingEndpoint = "https://" + observerConfig.logDomain + window.leoObserverTrackingUri;
         window.leoObserverCdnJS = observerConfig.cdnDomain;
         window.leoCdpProxyPath = "/data/cdp-sdk/html/cdp-event-proxy.html";
+        const initialConsentState = window.__c360InitialConsent || "unknown";
+        $("#consent-state").val(initialConsentState);
+        if (initialConsentState === "denied") {
+            window.leoTrackingConsent = false;
+        } else if (initialConsentState === "granted") {
+            window.leoTrackingConsent = true;
+        } else {
+            delete window.leoTrackingConsent;
+        }
 
         window.srcTouchpointName =
             encodeURIComponent(document.title);
@@ -653,7 +768,9 @@
         function proxyReady() {
 
             return (
+                window.leoTrackingConsent !== false &&
                 window.LeoObserverProxy &&
+                window.LeoObserverProxy.consentGranted !== false &&
                 typeof window.LeoObserverProxy
                     .recordViewEvent === "function"
             );
@@ -683,6 +800,12 @@
                 envelope,
                 "generated"
             );
+
+            if (window.leoTrackingConsent === false ||
+                (window.LeoObserverProxy && window.LeoObserverProxy.consentGranted === false)) {
+                updateEventStatus(envelope.event_id, "blocked: consent denied");
+                return envelope;
+            }
 
 
             /*
@@ -832,7 +955,14 @@
 
         function fireEvent(eventName) {
             eventActions[eventName]?.();
-            markFlowStep(eventName);
+            if (window.leoTrackingConsent === false) {
+                const $button = $(`[data-step="${eventName}"] button`);
+                $button.text("Blocked")
+                    .removeClass(stepButtonClasses.primary + " " + stepButtonClasses.secondary + " " + stepButtonClasses.sent)
+                    .addClass("border-red-600 bg-red-50 text-red-700");
+            } else {
+                markFlowStep(eventName);
+            }
             updateMetrics();
         }
 
@@ -919,7 +1049,11 @@
 
         function updateMetrics() {
             $("#metric-events").text(eventHistory.length);
-            $("#metric-session").text(`${trackingContext.sessionId.slice(0, 14)}...`);
+            $("#metric-session").text(
+                trackingContext.sessionId
+                    ? `${trackingContext.sessionId.slice(0, 14)}...`
+                    : "-"
+            );
             $("#metric-conversion").text(
                 eventHistory.some(event => event.event_name === EventName.PURCHASE)
                     ? "100%"
@@ -985,6 +1119,146 @@
             renderEmpty("Event stream cleared.");
             updateMetrics();
         });
+
+        let dataLayerWatchHandle = null;
+
+        function setConsentStatus(message, state) {
+            const $status = $("#consent-status");
+            $status.text(message);
+            $status.toggleClass("text-red-700", state === "denied")
+                .toggleClass("text-green-700", state === "granted")
+                .toggleClass("text-gray-700", state === "unknown");
+        }
+
+        function applyConsentSelection() {
+            const state = $("#consent-state").val();
+            const granted = state !== "denied";
+            window.leoTrackingConsent = granted;
+
+            if (!granted) {
+                trackingContext.sessionId = "";
+                trackingContext.visitorId = "";
+                trackingContext.profileId = null;
+            } else {
+                trackingContext.sessionId ||= "sess_" + crypto.randomUUID();
+                trackingContext.visitorId ||= "visitor_" + crypto.randomUUID();
+            }
+
+            if (window.LeoObserverProxy && typeof window.LeoObserverProxy.setConsent === "function") {
+                window.LeoObserverProxy.setConsent(granted);
+            }
+
+            if (state === "denied") {
+                setConsentStatus("Consent denied: new events are blocked and pending events are discarded; iframe cleanup follows observer acknowledgement.", state);
+            } else if (state === "granted") {
+                setConsentStatus("Consent granted: Observer may initialize and send tracking events.", state);
+            } else {
+                setConsentStatus("Unknown maps to allow for backward compatibility. Select Denied to block tracking.", state);
+            }
+        }
+
+        function initDataLayerTest() {
+            $("#btn-watch-data-layer").on("click", function () {
+                if (dataLayerWatchHandle) {
+                    dataLayerWatchHandle.stop();
+                    dataLayerWatchHandle = null;
+                }
+
+                const layerName = $("#data-layer-name").val();
+                if (!Array.isArray(window[layerName])) {
+                    window[layerName] = [];
+                }
+
+                try {
+                    dataLayerWatchHandle = window.LeoObserverProxy.watchDataLayer({
+                        dataLayerName: layerName,
+                        eventMap: {
+                            leo_purchase: {
+                                metricName: "purchase",
+                                type: "conversion",
+                                dataPath: "ecommerce",
+                                transactionIdPath: "ecommerce.transaction_id",
+                                valuePath: "ecommerce.value",
+                                currencyPath: "ecommerce.currency",
+                                itemsPath: "ecommerce.items"
+                            }
+                        }
+                    });
+                    if (!dataLayerWatchHandle) {
+                        $("#data-layer-status").text(
+                            "window." + layerName + " must be an array before the adapter can watch it."
+                        );
+                        return;
+                    }
+                    $("#data-layer-status").text(
+                        "Watching window." + layerName + " for leo_purchase. Push an event to test nested item data."
+                    );
+                } catch (error) {
+                    $("#data-layer-status").text("Could not watch data layer: " + error.message);
+                }
+            });
+
+            $("#btn-push-data-layer").on("click", function () {
+                const layerName = $("#data-layer-name").val();
+                let eventData;
+                try {
+                    eventData = JSON.parse($("#data-layer-event").val());
+                } catch (error) {
+                    $("#data-layer-status").text("Invalid event JSON: " + error.message);
+                    return;
+                }
+                if (
+                    !eventData ||
+                    typeof eventData !== "object" ||
+                    Array.isArray(eventData) ||
+                    eventData.event !== "leo_purchase" ||
+                    !eventData.ecommerce ||
+                    !Array.isArray(eventData.ecommerce.items)
+                ) {
+                    $("#data-layer-status").text(
+                        'Expected an object with event "leo_purchase" and ecommerce.items array.'
+                    );
+                    return;
+                }
+
+                if (!Array.isArray(window[layerName])) {
+                    window[layerName] = [];
+                }
+                window[layerName].push(eventData);
+                $("#data-layer-preview").text(JSON.stringify(eventData, null, 2));
+                const message = window.leoTrackingConsent === false
+                    ? "Pushed locally only. Consent is denied, so the SDK did not forward this event."
+                    : (dataLayerWatchHandle
+                        ? "Pushed event. The LEO adapter handles it if consent is granted."
+                        : "Pushed locally only. Start watching to forward this event to LEO.");
+                $("#data-layer-status").text(message);
+                console.log("[Sandbox Data Layer]", layerName, eventData);
+            });
+        }
+
+        $("#btn-apply-consent").on("click", applyConsentSelection);
+        $("#btn-reload-denied").on("click", function () {
+            const url = new URL(window.location.href);
+            url.searchParams.set("leo_consent", "denied");
+            window.location.assign(url.toString());
+        });
+
+        window.addEventListener("leo_data_layer_event_queued", function (event) {
+            const detail = event.detail || {};
+            const envelope = createEventEnvelope(
+                detail.metricName || "custom-event",
+                detail.eventType === "conversion" ? EventType.CONVERSION : EventType.ACTION,
+                Object.assign({
+                    data_layer_name: detail.dataLayerName,
+                    data_layer_event: detail.dataLayerEvent
+                }, detail.eventData || {})
+            );
+            addEventToStream(envelope, "queued to Observer");
+        });
+
+        initDataLayerTest();
+        applyConsentSelection();
+
         const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
     </script>
 

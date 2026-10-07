@@ -14,6 +14,7 @@
 
     // Global session tracking variable
     var localSessionKey = "";
+    var consentGranted = global.LEO_TRACKING_CONSENT !== false;
 
     function hasOwn(obj, key) {
         return Object.prototype.hasOwnProperty.call(obj, key);
@@ -49,6 +50,8 @@
 
     // --- Network Layer ---
 
+    var activeRequests = [];
+
     function createXHR() {
         if (window.XMLHttpRequest) {
             return new XMLHttpRequest();
@@ -63,8 +66,12 @@
 
     var Network = {
         request: function(method, url, data, headers, callback) {
+            if (!consentGranted) {
+                return null;
+            }
+
             var xhr = createXHR();
-            if (!xhr) return;
+            if (!xhr) return null;
 
             xhr.open(method, url, true);
             
@@ -75,9 +82,16 @@
             }
 
             xhr.withCredentials = true;
+            activeRequests.push(xhr);
 
             xhr.onreadystatechange = function() {
                 if (xhr.readyState === 4) {
+                    activeRequests = activeRequests.filter(function(request) {
+                        return request !== xhr;
+                    });
+                    if (!consentGranted) {
+                        return;
+                    }
                     var isSuccess = (xhr.status >= 200 && xhr.status < 300) || xhr.status === 304 || xhr.status === 1223;
                     if (callback) {
                         callback(isSuccess, xhr.responseText, xhr);
@@ -86,6 +100,17 @@
             };
 
             xhr.send(data);
+            return xhr;
+        },
+
+        abortAll: function() {
+            var requests = activeRequests.slice();
+            activeRequests = [];
+            requests.forEach(function(xhr) {
+                if (xhr.readyState !== 4) {
+                    xhr.abort();
+                }
+            });
         },
 
         get: function(url, callback) {
@@ -135,6 +160,10 @@
          * @param {boolean} forceXHR - If true, bypasses Beacon to ensure we get a response
          */
         sendBeaconOrXHR: function(url, payload, callback, forceXHR) {
+            if (!consentGranted) {
+                return false;
+            }
+
             // Determine content type from payload
             var isJson = typeof payload === 'string' && (payload.charAt(0) === '{' || payload.charAt(0) === '[');
             var mimeType = isJson ? 'application/json' : CONFIG.CONTENT_TYPE_FORM;
@@ -145,7 +174,7 @@
                     var queued = navigator.sendBeacon(url, blob);
                     if (queued) {
                         if (callback) callback(true, null);
-                        return;
+                        return true;
                     }
                 } catch (e) {
                     log("Beacon failed, falling back to XHR: " + e.message, "error");
@@ -162,6 +191,7 @@
                     if (callback) callback(true, resp);
                 });
             }
+            return true;
         }
     };
 
@@ -293,6 +323,10 @@
         },
 
         enqueue: function(url, data, batchSize) {
+            if (!consentGranted) {
+                return false;
+            }
+
             var eventId = data && data.event_id;
             if (eventId) {
                 var now = Date.now();
@@ -303,7 +337,7 @@
                 }
                 var seenAt = this.seenEventIds[eventId];
                 if (seenAt && now - seenAt < 86400000) {
-                    return;
+                    return false;
                 }
                 this.seenEventIds[eventId] = now;
             }
@@ -315,14 +349,19 @@
             if (this.queues[url].length >= batchSize) {
                 this.flush(url);
             }
+            return true;
         },
 
         flush: function(url) {
+            if (!consentGranted) {
+                return false;
+            }
+
             var self = this;
             var queue = this.queues[url];
 
             if (!queue || queue.length === 0 || this.isFlushing[url]) {
-                return;
+                return false;
             }
 
             this.isFlushing[url] = true;
@@ -336,6 +375,9 @@
 
             Network.sendBeaconOrXHR(url, payloadJson, function(success, responseText) {
                 self.isFlushing[url] = false;
+                if (!consentGranted) {
+                    return;
+                }
 
                 if (success) {
                     if (responseText) {
@@ -349,6 +391,13 @@
                     self.queues[url] = buffer.concat(self.queues[url]);
                 }
             }, forceXHR);
+            return true;
+        },
+
+        clear: function() {
+            this.queues = {};
+            this.isFlushing = {};
+            this.seenEventIds = {};
         }
     };
 
@@ -357,24 +406,38 @@
     var LeoCorsRequest = {
         // Allow external setting of key if needed
         setSessionKey: function(key) {
-			if(key && key !== "") localSessionKey = key;
+			localSessionKey = consentGranted && key ? key : "";
+        },
+
+        setConsent: function(granted) {
+            consentGranted = granted === true;
+            global.LEO_TRACKING_CONSENT = consentGranted;
+            if (!consentGranted) {
+                localSessionKey = "";
+                Network.abortAll();
+                BatchManager.clear();
+            }
+            return consentGranted;
         },
 
         get: function(url) {
-            Network.get(url, trackingCallback);
+            if (consentGranted) Network.get(url, trackingCallback);
         },
         
         post: function(url, params) {
-            Network.post(url, params, trackingCallback);
+            if (consentGranted) Network.post(url, params, trackingCallback);
         },
 
         batchSend: function(url, paramsObj, batchSize) {
-            BatchManager.enqueue(url, paramsObj, batchSize || 10);
+            if (consentGranted) BatchManager.enqueue(url, paramsObj, batchSize || 10);
         }
     };
 
     // --- Automatic Flush Timer ---
     var flushPendingQueues = function() {
+        if (!consentGranted) {
+            return;
+        }
         Object.keys(BatchManager.queues).forEach(function(url) {
             BatchManager.flush(url);
         });
@@ -804,6 +867,8 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     'use strict';
 
     var LeoEventObserver = {'deviceFingerprint' : ""};
+    var consentGranted = global.LEO_TRACKING_CONSENT !== false;
+    var fingerprintGeneration = 0;
     var sessionKey = false;
     var debug = false;
     var eventSequence = 0;
@@ -1024,6 +1089,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     }
     
     function setSessionKey(key){
+        if (!consentGranted) {
+            return "";
+        }
         sessionKey = createLocalSessionId();
         lscache.set(leoSessionStringKey, sessionKey);
         if (global.LeoCorsRequest && typeof global.LeoCorsRequest.setSessionKey === 'function') {
@@ -1032,6 +1100,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     }
     
     function getSessionKey(autoResfresh){
+        if (!consentGranted) {
+            return "";
+        }
         var generatedSessionKey = createLocalSessionId();
         if (sessionKey !== generatedSessionKey) {
             sessionKey = generatedSessionKey;
@@ -1045,6 +1116,11 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     }
     
     function initFingerprint(callback){
+        if (!consentGranted) {
+            return;
+        }
+        var generation = fingerprintGeneration;
+
     	if (typeof Fingerprint2 === 'undefined' || typeof Fingerprint2.get !== 'function') {
     		if (typeof callback === 'function') {
     			callback('');
@@ -1054,6 +1130,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
 
     	var options = { excludes: { enumerateDevices : true, deviceMemory : true}};
     	Fingerprint2.get(options, function (components) {
+            if (!consentGranted || generation !== fingerprintGeneration) {
+                return;
+            }
     	    if (!components || !components.length) {
     	        if (typeof callback === 'function') {
     	            callback('');
@@ -1079,6 +1158,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     
 
     function generateAnonymousId() {
+        if (!consentGranted) {
+            return '';
+        }
         var injectedVid = (typeof global.INJECTED_VISITOR_ID === 'string' && global.INJECTED_VISITOR_ID)
             || (typeof INJECTED_VISITOR_ID === 'string' && INJECTED_VISITOR_ID)
             || (global.LeoEventObserver && global.LeoEventObserver.anonymousId)
@@ -1113,6 +1195,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     }
     
     function getAnonymousId() {
+        if (!consentGranted) {
+            return '';
+        }
         var key = leoVisitorIdStringKey;
         var uuid =  lscache.get(key); 
         
@@ -1146,6 +1231,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     }
 
     function createLocalSessionId() {
+        if (!consentGranted) {
+            return '';
+        }
         var deviceFingerprint = lscache.get("leocdp_fgp") || LeoEventObserver.deviceFingerprint || "";
         var anonymousId = getAnonymousId();
         var sessionKeyHint = getSessionKeyHint();
@@ -1154,6 +1242,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     }
 
     var doTracking = function(eventType, params) {
+        if (!consentGranted) {
+            return false;
+        }
         if (!params || typeof params !== 'object') {
             params = {};
         }
@@ -1202,7 +1293,7 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
 
         var batchMgr = global.BatchManager || BatchManager;
         if (batchMgr && typeof batchMgr.enqueue === 'function') {
-            batchMgr.enqueue(targetUrl, payload, batchSize);
+            return batchMgr.enqueue(targetUrl, payload, batchSize);
         }
         if (CONFIG.DEBUG || debug) {
             log("LeoEventObserver queued " + eventType + " event for: " + targetUrl, "debug");
@@ -1210,6 +1301,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     };
 
     var updateProfile = function(params) {
+        if (!consentGranted) {
+            return false;
+        }
         if (!params || typeof params !== 'object') {
             params = {};
         }
@@ -1252,11 +1346,15 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
         // Immediate flush for profile updates so identity resolution happens promptly
         var batchMgr = global.BatchManager || BatchManager;
         if (batchMgr && typeof batchMgr.enqueue === 'function') {
-            batchMgr.enqueue(targetUrl, payload, 1);
+            return batchMgr.enqueue(targetUrl, payload, 1);
         }
+        return false;
     };
 
     var getPersonalization = function(slotId, params, callback) {
+        if (!consentGranted) {
+            return null;
+        }
         var profile = lscache.get("leocdp_profile") || {};
         var anonymousId = getAnonymousId();
         var sessionKey = getSessionKey(true);
@@ -1273,6 +1371,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     };
 
     var objectToQueryString = function(params) {
+        if (!consentGranted) {
+            return '';
+        }
         if (!params || typeof params !== 'object') {
             return '';
         }
@@ -1311,6 +1412,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     };
     
     function leoObserverProxyReady(data) {
+        if (!consentGranted) {
+            return;
+        }
     	if (data && data.sessionKey) {
     		setSessionKey(data.sessionKey);
     	}
@@ -1333,6 +1437,9 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     }
 
     var getContextSession = function(params) {
+        if (!consentGranted) {
+            return null;
+        }
         if (!params || typeof params !== 'object') {
             params = {};
         }
@@ -1347,7 +1454,27 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
         };
 
         leoObserverProxyReady(sessionData);
+        return sessionData;
     };
+
+    function setConsent(granted) {
+        var nextValue = granted === true;
+        var changed = consentGranted !== nextValue;
+        consentGranted = nextValue;
+        fingerprintGeneration += 1;
+        if (global.LeoCorsRequest && typeof global.LeoCorsRequest.setConsent === 'function') {
+            global.LeoCorsRequest.setConsent(nextValue);
+        }
+        if (!nextValue) {
+            sessionKey = false;
+            LeoEventObserver.anonymousId = '';
+            LeoEventObserver.deviceFingerprint = '';
+            ['leocdp_vid', 'leoctxsk', 'leocdp_fgp', 'leocdp_profile'].forEach(function(key) {
+                lscache.remove(key);
+            });
+        }
+        return changed;
+    }
 
     // --- Expose Public API ---
     LeoEventObserver.doTracking = doTracking;
@@ -1360,6 +1487,14 @@ var leoSessionNamespaceUuid = (typeof window !== 'undefined' && (
     LeoEventObserver.getVisitorId = getAnonymousId;
     LeoEventObserver.getSessionKey = getSessionKey;
 	LeoEventObserver.setSessionKey = setSessionKey;
+    LeoEventObserver.setConsent = setConsent;
+    LeoEventObserver.hasConsent = function() {
+        return consentGranted;
+    };
+
+    if (!consentGranted) {
+        setConsent(false);
+    }
 
     global.LeoEventObserver = LeoEventObserver;
 

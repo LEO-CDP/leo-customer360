@@ -446,6 +446,82 @@
         </div>
     </div>
 
+    <section class="container mb-4" aria-labelledby="data-layer-demo-title">
+        <div class="card border-primary-subtle">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                    <div>
+                        <h2 id="data-layer-demo-title" class="h5 mb-1">Thử Data Layer và custom event</h2>
+                        <p class="text-muted small mb-3">
+                            SDK không tự đọc Data Layer. Nút 1 chỉ push event vào
+                            <code>window.dataLayer</code>; nút 2 đọc event mới nhất rồi map sang LEO.
+                        </p>
+                    </div>
+                    <span class="badge text-bg-secondary">Demo adapter</span>
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-lg-6">
+                        <label for="c360-data-layer-event-json" class="form-label small fw-semibold">
+                            Custom purchase event JSON
+                        </label>
+                        <textarea id="c360-data-layer-event-json" class="form-control font-monospace small"
+                            rows="12" spellcheck="false" aria-describedby="c360-data-layer-help">{
+  "event": "leo_purchase",
+  "ecommerce": {
+    "transaction_id": "DEMO-ORDER-1001",
+    "value": 599000,
+    "currency": "VND",
+    "items": [
+      {
+        "item_id": "SKU-101",
+        "item_name": "Vé số mẫu",
+        "price": 299000,
+        "quantity": 1,
+        "details": {
+          "draw": "2026-10-07",
+          "numbers": ["12", "34", "56"]
+        }
+      },
+      {
+        "item_id": "SKU-205",
+        "item_name": "Gói thống kê",
+        "price": 300000,
+        "quantity": 1
+      }
+    ]
+  }
+}</textarea>
+                        <small id="c360-data-layer-help" class="form-text text-muted">
+                            Có thể sửa payload hoặc thêm nested properties/arrays trước khi push.
+                        </small>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            <button id="c360-data-layer-push" type="button" class="btn btn-outline-primary btn-sm">
+                                1. Push vào window.dataLayer
+                            </button>
+                            <button id="c360-data-layer-send" type="button" class="btn btn-primary btn-sm">
+                                2. Đọc event mới nhất và gửi LEO
+                            </button>
+                        </div>
+                        <div id="c360-data-layer-status" class="small alert alert-info py-2" role="status" aria-live="polite">
+                            Push event để bắt đầu. Push không tự gửi event tới LEO.
+                        </div>
+                        <label for="c360-data-layer-preview" class="form-label small fw-semibold">
+                            Data Layer preview
+                        </label>
+                        <pre id="c360-data-layer-preview" class="border rounded bg-light p-2 small"
+                            style="max-height: 260px; overflow: auto;">Chưa có event leo_purchase trong window.dataLayer.</pre>
+                        <small class="text-muted">
+                            Nút gửi tạo request tracking thật theo SDK settings hiện tại. Chỉ gửi khi endpoint đã cấu hình và consent đã được cấp.
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <div class="c360-settings-launcher">
         <button id="c360-settings-open" type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#c360-settings-modal">
             SDK settings
@@ -1137,12 +1213,143 @@
             });
         }
 
+        function initDataLayerDemo() {
+            if (!window.dataLayer) {
+                window.dataLayer = [];
+            }
+
+            const $eventJson = $('#c360-data-layer-event-json');
+            const status = document.getElementById('c360-data-layer-status');
+            const preview = document.getElementById('c360-data-layer-preview');
+
+            function setStatus(message, type) {
+                status.className = 'small alert alert-' + type + ' py-2';
+                status.textContent = message;
+            }
+
+            function getLatestPurchaseEvent() {
+                if (!Array.isArray(window.dataLayer)) {
+                    throw new TypeError('window.dataLayer is not an array');
+                }
+
+                for (let index = window.dataLayer.length - 1; index >= 0; index -= 1) {
+                    const entry = window.dataLayer[index];
+                    if (entry && typeof entry === 'object' && entry.event === 'leo_purchase') {
+                        return entry;
+                    }
+                }
+                return null;
+            }
+
+            function renderLatestPurchaseEvent() {
+                const event = getLatestPurchaseEvent();
+                preview.textContent = event
+                    ? JSON.stringify(event, null, 2)
+                    : 'Chưa có event leo_purchase trong window.dataLayer.';
+            }
+
+            function pushEventFromEditor() {
+                let event;
+                try {
+                    event = JSON.parse($eventJson.val());
+                } catch (error) {
+                    setStatus('JSON không hợp lệ: ' + error.message, 'danger');
+                    return;
+                }
+
+                if (!event || typeof event !== 'object' || Array.isArray(event) || event.event !== 'leo_purchase') {
+                    setStatus('Event phải là object JSON có "event": "leo_purchase".', 'danger');
+                    return;
+                }
+                if (!event.ecommerce || typeof event.ecommerce !== 'object' || Array.isArray(event.ecommerce)) {
+                    setStatus('Event cần có object ecommerce.', 'danger');
+                    return;
+                }
+
+                if (!Array.isArray(window.dataLayer)) {
+                    setStatus('window.dataLayer không phải array; không thể push event.', 'danger');
+                    return;
+                }
+
+                window.dataLayer.push(event);
+                renderLatestPurchaseEvent();
+                setStatus('Đã push vào window.dataLayer. Event chưa được gửi tới LEO.', 'success');
+                console.log('[Data Layer demo] Pushed event', event);
+            }
+
+            function sendLatestPurchaseEvent() {
+                let event;
+                try {
+                    event = getLatestPurchaseEvent();
+                } catch (error) {
+                    setStatus(error.message, 'danger');
+                    return;
+                }
+
+                if (!event) {
+                    setStatus('Không tìm thấy event leo_purchase. Hãy push một event trước.', 'warning');
+                    return;
+                }
+
+                const ecommerce = event.ecommerce;
+                const transactionId = String(ecommerce && ecommerce.transaction_id || '').trim();
+                const value = Number(ecommerce && ecommerce.value);
+                const currency = String(ecommerce && ecommerce.currency || '').trim();
+                const items = ecommerce && ecommerce.items;
+                if (!transactionId || !Number.isFinite(value) || !currency || !Array.isArray(items)) {
+                    setStatus('ecommerce cần transaction_id, value dạng số, currency và items array.', 'danger');
+                    return;
+                }
+
+                if (
+                    !window.LeoObserverProxy ||
+                    !window.LeoObserverProxy.isReady ||
+                    !window.LeoObserver ||
+                    typeof window.LeoObserver.recordEventConversion !== 'function' ||
+                    !window.C360DemoSDK ||
+                    typeof window.C360DemoSDK.trackConversion !== 'function'
+                ) {
+                    setStatus('LEO Observer chưa sẵn sàng. Chờ trạng thái ready rồi thử lại.', 'warning');
+                    return;
+                }
+
+                const trackingEvent = {
+                    transaction_id: transactionId,
+                    value: value,
+                    currency: currency,
+                    items: items,
+                    data_layer_event: event.event,
+                    ecommerce: ecommerce
+                };
+                window.C360DemoSDK.trackConversion(trackingEvent);
+                preview.textContent = JSON.stringify({
+                    source: 'window.dataLayer',
+                    mapped_event: trackingEvent
+                }, null, 2);
+                setStatus('Đã map event từ Data Layer sang custom conversion event của LEO.', 'success');
+            }
+
+            $('#c360-data-layer-push').on('click', pushEventFromEditor);
+            $('#c360-data-layer-send').on('click', sendLatestPurchaseEvent);
+            window.C360DemoDataLayerAdapter = {
+                pushEventFromEditor: pushEventFromEditor,
+                sendLatestPurchaseEvent: sendLatestPurchaseEvent
+            };
+
+            if (!Array.isArray(window.dataLayer)) {
+                setStatus('window.dataLayer đã tồn tại nhưng không phải array.', 'warning');
+                return;
+            }
+            renderLatestPurchaseEvent();
+        }
+
         function initPage() {
             initSettings();
             initNavigation();
             initAccountActions();
             initLotteryAlertForm();
             initProductTracking();
+            initDataLayerDemo();
             loadAdvertisingBanner();
             loadLotteryInformation('home', { trackPageView: true });
         }
