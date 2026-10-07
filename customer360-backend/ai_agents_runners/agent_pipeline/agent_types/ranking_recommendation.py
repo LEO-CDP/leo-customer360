@@ -11,6 +11,7 @@ from pydantic import Field, FiniteFloat
 from ...runner import (
     DB_SCHEMA,
     SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS,
+    SUPPORTED_RECOMMENDATION_EMBEDDING_PROVIDERS,
     _connect,
 )
 from ..contracts import AgentPipelineInput, AgentResultModel, ModelType
@@ -26,7 +27,14 @@ CANDIDATE_DIAGNOSTICS_SQL = f"""
         ) AS domain_candidates,
         COUNT(*) FILTER (
             WHERE status_code = 1 AND (domain = 'all' OR domain = %s)
-              AND (%s = 'tags' OR (embedding IS NOT NULL AND embedding_model = %s))
+              AND (
+                  %s = 'tags'
+                  OR (
+                      embedding IS NOT NULL
+                      AND vector_dims(embedding) = %s
+                      AND embedding_model = %s
+                  )
+              )
         ) AS rankable_candidates
     FROM {DB_SCHEMA}.cdp_content_items
     WHERE tenant_id = %s AND content_item_id = ANY(%s::uuid[])
@@ -67,11 +75,9 @@ RANK_CANDIDATE_CONTENT_SQL = f"""
                 ELSE GREATEST(
                     0.0, LEAST(
                         1.0,
-                        (
-                            1.0 - (
-                                content.embedding::vector(__VECTOR_DIMENSIONS__)
-                                <=> criteria.profile_embedding
-                            )
+                        1.0 - (
+                            content.embedding::vector(__VECTOR_DIMENSIONS__)
+                            <=> criteria.profile_embedding
                         ) / 2.0
                     )
                 )
@@ -142,8 +148,6 @@ class RankedContentItem(AgentResultModel):
     item_id: UUID
     rank: int = Field(gt=0, strict=True)
     score: FiniteFloat = Field(ge=0, le=1)
-    semantic_score: FiniteFloat | None = Field(default=None, ge=0, le=1)
-    tag_score: FiniteFloat = Field(default=0.0, ge=0, le=1)
     strategy: Literal["tags", "semantic", "hybrid"] = "tags"
     semantic_score: FiniteFloat | None = Field(default=None, ge=0, le=1)
     tag_score: FiniteFloat = Field(ge=0, le=1)
@@ -190,7 +194,11 @@ class RankingRecommendationPipeline(AgentTypePipeline):
             )
 
         strategy = payload.configuration.get("strategy", "tags")
-        if strategy not in {"tags", "semantic", "hybrid"}:
+        if not isinstance(strategy, str) or strategy not in {
+            "tags",
+            "semantic",
+            "hybrid",
+        }:
             raise ValueError("configuration.strategy must be tags, semantic, or hybrid")
 
         limit = payload.configuration.get(
@@ -208,12 +216,10 @@ class RankingRecommendationPipeline(AgentTypePipeline):
         tag_weight = _weight(payload.configuration, "tag_weight", 0.3)
         if strategy == "hybrid" and semantic_weight + tag_weight <= 0:
             raise ValueError("hybrid semantic_weight and tag_weight must sum to more than zero")
-        minimum_score = payload.configuration.get("minimum_score", 0.0)
-        if (
-            isinstance(minimum_score, bool)
-            or not isinstance(minimum_score, (int, float))
-            or not 0 <= minimum_score <= 1
-        ):
+        minimum_score = _finite_number(
+            payload.configuration.get("minimum_score", 0.0)
+        )
+        if minimum_score is None or not 0 <= minimum_score <= 1:
             raise ValueError("configuration.minimum_score must be between 0 and 1")
 
         profile_embedding = payload.input_data.get("profile_embedding")
@@ -223,20 +229,30 @@ class RankingRecommendationPipeline(AgentTypePipeline):
                 raise ValueError(
                     f"{strategy} recommendation requires input_data.profile_embedding"
                 )
+            if len(profile_embedding) not in SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS:
+                raise ValueError(
+                    "input_data.profile_embedding must have 384 or 768 dimensions"
+                )
             if any(
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
+                _finite_number(value) is None
                 for value in profile_embedding
             ):
                 raise ValueError("input_data.profile_embedding must contain finite numbers")
             if not isinstance(model_key, str) or not model_key.strip():
                 raise ValueError("semantic recommendation requires input_data.embedding_model")
-            if len(profile_embedding) not in SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS:
+            provider = model_key.partition(":")[0]
+            if provider not in SUPPORTED_RECOMMENDATION_EMBEDDING_PROVIDERS:
                 raise ValueError(
-                    "input_data.profile_embedding must have 384 or 768 dimensions"
+                    "Recommendation embeddings require a supported provider: "
+                    "'openai' or 'gemini'"
                 )
-            if len(profile_embedding) != int(model_key.rsplit(":", 1)[-1]):
+            try:
+                model_dimensions = int(model_key.rsplit(":", 1)[-1])
+            except ValueError as exc:
+                raise ValueError(
+                    "input_data.embedding_model must end with its vector dimension"
+                ) from exc
+            if len(profile_embedding) != model_dimensions:
                 raise ValueError(
                     "input_data.profile_embedding dimension does not match "
                     "input_data.embedding_model"
@@ -285,6 +301,11 @@ class RankingRecommendationPipeline(AgentTypePipeline):
         minimum_score: float,
         top_k: int,
     ) -> list[Mapping[str, Any]]:
+        dimensions = (
+            len(profile_embedding)
+            if profile_embedding is not None
+            else min(SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS)
+        )
         params = (
             list(segmentation_tags),
             _vector_literal(profile_embedding) if profile_embedding is not None else None,
@@ -297,11 +318,6 @@ class RankingRecommendationPipeline(AgentTypePipeline):
             domain,
             [str(candidate_id) for candidate_id in candidate_ids],
             top_k,
-        )
-        dimensions = (
-            len(profile_embedding)
-            if profile_embedding is not None
-            else min(SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS)
         )
         query = RANK_CANDIDATE_CONTENT_SQL.replace(
             "__VECTOR_DIMENSIONS__", str(dimensions)
@@ -323,6 +339,7 @@ class RankingRecommendationPipeline(AgentTypePipeline):
                         domain,
                         domain,
                         strategy,
+                        dimensions,
                         embedding_model,
                         str(tenant_id),
                         [str(candidate_id) for candidate_id in candidate_ids],
@@ -382,16 +399,21 @@ class RankingRecommendationPipeline(AgentTypePipeline):
         }
 
 
+def _finite_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _weight(configuration: dict[str, Any], name: str, default: float) -> float:
-    value = configuration.get(name, default)
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-        or not 0 <= value <= 1
-    ):
+    value = _finite_number(configuration.get(name, default))
+    if value is None or not 0 <= value <= 1:
         raise ValueError(f"configuration.{name} must be between 0 and 1")
-    return float(value)
+    return value
 
 
 def _vector_literal(vector: list[float] | None) -> str | None:

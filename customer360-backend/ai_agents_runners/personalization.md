@@ -1,204 +1,412 @@
-# Recommendation and Personalization Handlers
+# Personalization and recommendation workflow
 
-This document describes recommendation execution in the consolidated
-`ai_agents_runners` master workflow and the API read path for its persisted
-results. It is not a separate Dagster code location.
+This guide describes the implemented recommendation flow from segment
+configuration to the API response. It is intended for operators configuring a
+segment and engineers implementing, operating, or troubleshooting the workflow.
 
-## Current status
+The production path runs through the `ai_agents_runners` Dagster master job. It
+is not the separate compatibility `personalization_job`, which remains a
+scaffold.
 
-The current implementation provides:
+## Scope and current behavior
 
-- ordered workflow selection from `cdp_agent_workflow`;
-- API and cron trigger paths;
-- active-agent and tenant filtering;
-- execution of configured `ranking_recommendation` steps for active profiles;
-- tag, semantic, and hybrid ranking over explicitly selected, tenant-owned
-  content candidates;
-- persisted recommendation run status and per-profile results;
-- an API endpoint that reads the latest successful results for a profile.
+The current workflow:
 
-Other model types are reported as unsupported and are not dispatched. The
-compatibility `personalization_job` remains a scaffold; recommendation workflows
-execute through the master workflow.
+- selects active, tenant-scoped workflow steps in execution order from
+  [cdp_agent_workflow](../../customer360-database/database-schema.sql#L2885);
+- supports API-triggered runs and cron-triggered runs;
+- dispatches active `ranking_recommendation` agents for eligible segment
+  members;
+- ranks explicitly selected, tenant-owned
+  [cdp_content_items](../../customer360-database/database-schema.sql#L2586)
+  using tags, semantic similarity, or a hybrid score;
+- persists run status and ranked items per profile; and
+- serves the latest successful persisted results through the Customer 360 API.
 
-## Registry model: `cdp_ai_agents`
+Other model types are logged and skipped; this workflow does not dispatch them.
 
-Agent definitions are global and addressed by the stable `agent_code` primary
-key. A handler must load and honor:
+## Personalization flow: end-to-end execution
 
-- `model_type`
-- `model_name`
-- `status`
-- `input_features`
-- `hyperparameters`
-- `schedule_definition`
-- `required_variables`
-- `system_instructions`
-- `prompt_key`, `prompt_engine`, `instruction_version`, and `prompt_versions`
+At a business level, the configured workflow selects eligible profiles in a
+segment, ranks the chosen content for each profile, and makes successful
+recommendations available to the API. At runtime, the Dagster job coordinates
+the work asynchronously.
 
-Only `status = 'ACTIVE'` agents can be selected by the master task. A model
-name is metadata, not proof that a trained artifact is available; runtime
-dispatch must use an implementation allow-list and fail explicitly when a
-handler is unavailable.
+The orchestration is implemented in [dagster_defs.py](./dagster_defs.py) and
+[runner.py](./runner.py). The shared model-type dispatcher is in
+[pipelines.py](./agent_pipeline/pipelines.py); ranking logic is in
+[ranking_recommendation.py](./agent_pipeline/agent_types/ranking_recommendation.py).
+
+1. **Trigger the run.** An API request supplies a tenant and optionally one
+   segment. The cron sensor submits a run that checks eligible workflow
+   schedules. Dagster assigns a run ID; recommendation records use this same ID.
+2. **Build the execution plan.** The runner joins active
+   [cdp_agent_workflow](../../customer360-database/database-schema.sql#L2885)
+   steps to active registered
+   [cdp_ai_agents](../../customer360-database/database-schema.sql#L1909),
+   applies the requested tenant and segment scope, and orders steps by
+   `execution_order`. Cron runs use the workflow schedule override when present,
+   otherwise the registered agent's schedule. This path executes only
+   `ranking_recommendation` steps; other model types are logged and skipped.
+3. **Select the audience.** For each tenant/segment pair, the runner loads
+   active Customer 360 master profiles (the unified customer profiles) from
+   [cdp_master_profiles](../../customer360-database/database-schema.sql#L685)
+   that belong to the active
+   [cdp_segments](../../customer360-database/database-schema.sql#L2833)
+   row. A profile belongs to the segment when its `segmentation_tags` contains
+   the segment's `segment_tag`. The tenant ID scopes profile selection,
+   candidate reads, and all writes; tenant ownership is rooted in
+   [sys_tenant](../../customer360-database/database-schema.sql#L34).
+4. **Prepare ranking inputs.** The `tags` strategy does not require embeddings.
+   For `semantic` and `hybrid`, the runner checks that each selected candidate
+   belongs to the tenant and is active. It generates or refreshes a canonical
+   content vector when the source text, model, contract version, or vector
+   dimensions have changed. It also embeds a profile query built from the
+   profile's domain, segment tags, and optional `semantic_query`; it does not
+   include personally identifiable information (PII). The configured
+   embedding provider must produce 384- or 768-dimensional vectors.
+5. **Rank content for each profile.** The runner passes the tenant, segment,
+   agent, configuration, selected candidate IDs, profile domain and tags, and
+   optional query vector to `execute_agent_pipeline`. The pipeline validates
+   the payload and dispatches by `model_type` to
+   `RankingRecommendationPipeline`. The handler rechecks tenant ownership,
+   active status, selected IDs, and domain (`all` or the profile's domain).
+   It scores candidates using tag overlap, semantic similarity, or a weighted
+   combination; applies `minimum_score`; orders results consistently; and
+   returns no more than `top_k` items.
+6. **Persist the outcome.** The runner creates or resets a `RUNNING` row in
+   [cdp_profile_recommendation_runs](../../customer360-database/database-schema.sql#L3864),
+   then upserts each profile's ranked items into
+   [cdp_profile_recommendations](../../customer360-database/database-schema.sql#L3882).
+   On success, it marks the run `SUCCEEDED` and invalidates the tenant's
+   recommendation cache. On failure, it marks the run `FAILED`, removes partial
+   rows for that run, and propagates the error.
+7. **Serve results.** `GET /api/v1/content-items/recommended` reads stored
+   results; the request does not run ranking. The API checks Redis first. On a
+   cache miss, it queries successful runs, merges eligible segment results,
+   deduplicates content items, and returns the response. A successful
+   recommendation run or relevant content mutation invalidates the tenant
+   cache.
+
+### Runtime flow
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 10, "rankSpacing": 14, "padding": 4}, "themeVariables": {"fontSize": "10px"}}}%%
+flowchart TD
+    A["API or cron trigger<br/>tenant, segment, run ID"] --> B["Select active steps<br/>scope, schedule, order"]
+    B --> C["Load eligible profiles<br/>initialize run"]
+    C --> D{"Strategy"}
+    D -->|tags| E["Use profile tags<br/>no embedding required"]
+    D -->|semantic / hybrid| F["Prepare content vectors<br/>embed profile context"]
+    F --> G["Filter and rank candidates<br/>score, threshold, top_k"]
+    E --> G
+    G --> H{"Outcome"}
+    H -->|failure| I["Mark FAILED<br/>remove partial results"]
+    H -->|success| J["Persist ranked items<br/>mark SUCCEEDED, invalidate cache"]
+    J --> K["Recommendation API<br/>Redis, then stored results"]
+```
+
+The following sections describe workflow configuration, ranking behavior,
+persistence, and the recommendation read API. Each table name links to its
+`CREATE TABLE` definition in
+[database-schema.sql](../../customer360-database/database-schema.sql).
+
+## Manual test walkthrough
+
+Use this walkthrough to verify the customer-facing flow and the backend
+execution path. The segment detail view and workflow editor are implemented in
+[segment-details.html](../../customer360-frontend/static/templates/segment/segment-details.html)
+and
+[ai-agent-workflow.js](../../customer360-frontend/static/js/ai-agent-workflow.js).
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 10, "rankSpacing": 14, "padding": 4}, "themeVariables": {"fontSize": "10px"}}}%%
+flowchart TD
+    A["Select a segment"] --> B["Open Agent Workflow<br/>add an active ranking agent"]
+    B --> C["Set order and strategy<br/>select active content"]
+    C --> D{"Action"}
+    D -->|Save| E["PUT workflow<br/>save and submit run"]
+    D -->|Rerun| F["POST workflow/run"]
+    E --> G["customer360-api<br/>validate and submit through Dagster GraphQL"]
+    F --> G
+    G --> H["Dagster master job<br/>ai_agents_master_job"]
+    H --> I["Select segment profiles<br/>prepare embeddings if needed"]
+    I --> J["Validate and dispatch<br/>execute_agent_pipeline"]
+    J --> K["RankingRecommendationPipeline.process<br/>filter, score, top_k"]
+    K --> L{"Outcome"}
+    L -->|success| M["Persist results<br/>SUCCEEDED; invalidate cache"]
+    L -->|failure| N["FAILED<br/>remove partial results"]
+    M --> O["Verify run ID in Dagster<br/>read results from API"]
+```
+
+### Test procedure
+
+1. **Confirm prerequisites.** Use an active segment with active profiles in the
+   authenticated tenant. The segment's `segment_tag` must appear in each test
+   profile's `segmentation_tags`. Confirm that the agent catalog has an active
+   agent with `model_type = ranking_recommendation` and that the tenant has
+   active content items.
+2. **Open the workflow editor.** In the Segments page, open the target
+   segment's details, select **Agent Workflow**, and click **Add agent**.
+   Choose the active ranking agent, keep the step enabled, and set its
+   execution order.
+3. **Set ranking options and candidates.** For an initial smoke test, use
+   `{"strategy": "tags", "top_k": 8}`; this does not require an embedding
+   provider. Select at least one active content item or product. Each candidate
+   must belong to the tenant and have domain `all` or the test profile's
+   domain. Semantic and hybrid tests also require a supported embedding
+   provider configured to generate 384- or 768-dimensional vectors.
+4. **Save once to configure and run.** Click **Save workflow**. The UI sends
+   `PUT /api/v1/segments/{segment_id}/workflow` with the complete ordered
+   `steps` list. This is a full replacement of the segment workflow, not a
+   partial update. The API validates and saves the configuration, then submits
+   a Dagster run. The response includes `X-Dagster-Run-Id`; the UI displays
+   **Saved · run queued**. Do not also call the run endpoint for the same test
+   unless a second run is intended.
+5. **Rerun without editing (optional).** To execute a saved workflow again,
+   call `POST /api/v1/segments/{segment_id}/workflow/run` with the authenticated
+   tenant context and a body such as
+   `{"event": {"event_name": "personalization.manual_test"}}`. The API returns
+   `202 Accepted` with `{"run_id": "...", "status": "submitted"}`. A manual
+   API run is not held until the cron schedule; schedule matching applies to
+   cron runs.
+6. **Trace execution.** The API submits the run asynchronously to Dagster
+   through
+   [agent_workflow_api.py](../../customer360-api/core/routers/agent_workflow_api.py)
+   and
+   [dagster_client.py](../../customer360-api/core/utils/dagster_client.py).
+   It does not call the Python ranking handler in the request process. Dagster
+   starts `ai_agents_master_job` in the backend `ai_agents_runners` code
+   location. The runner loads eligible profiles, prepares embeddings when
+   required, and calls `execute_agent_pipeline` for each profile. The pipeline
+   registry dispatches `ranking_recommendation` to
+   [RankingRecommendationPipeline](./agent_pipeline/agent_types/ranking_recommendation.py),
+   which applies the tenant, candidate, status, and domain filters before
+   ranking.
+7. **Verify the result.** Use `run_id` to find the run in the Dagster UI.
+   `submitted` confirms that Dagster accepted the run; it does not mean the run
+   has completed. After the run succeeds, call
+   `GET /api/v1/content-items/recommended?master_profile_id=<profile_uuid>&segment_id=<segment_uuid>&limit=8`
+   for an active profile in the segment. The response contains persisted
+   recommendations for eligible items, or an empty list when none are eligible.
+
+If saving returns `503` because Dagster could not accept the run, the workflow
+may already be saved; retry with `POST /api/v1/segments/{segment_id}/workflow/run`.
+If ranking fails, inspect the Dagster run and confirm the profile is an active
+segment member, candidates are active and tenant-owned, their domains match,
+and the selected strategy has the required embedding configuration.
+
+### Automated unit tests
+
+Run the ranking handler tests from `customer360-backend`. The command measures
+statement and branch coverage for the handler and fails unless both reach
+100%:
+
+```sh
+PYTHONPATH=.:../customer360-dao/src pytest -q \
+  ai_agents_runners/tests/test_ranking_recommendation.py \
+  --cov=ai_agents_runners.agent_pipeline.agent_types.ranking_recommendation \
+  --cov-branch --cov-report=term-missing --cov-fail-under=100
+```
+
+The test cases are in
+[test_ranking_recommendation.py](./tests/test_ranking_recommendation.py).
+
+## Agent registry: [cdp_ai_agents](../../customer360-database/database-schema.sql#L1909)
+
+Agent definitions are global and use `agent_code` as their stable primary key.
+For workflow selection, the runner uses the agent code, `model_type`, `status`,
+and `schedule_definition`. Only agents with `status = 'ACTIVE'` are selected.
+
+The registry also stores `model_name`, `input_features`, `hyperparameters`,
+`required_variables`, `system_instructions`, and prompt metadata. These fields
+are metadata for consumers that need them; the current ranking path does not
+pass them to its handler. In particular, `model_name` does not prove that a
+trained artifact is available. Runtime dispatch uses the implementation
+registered for the supported `model_type`.
 
 The database supports `ranking_recommendation` as the model type used for
 content/product ranking. The seeded recommendation agent is
 `product_recommendation`; its current lifecycle status must still be checked
 at runtime rather than assumed from seed data.
 
-## Workflow model: `cdp_agent_workflow`
+## Segment workflow: [cdp_agent_workflow](../../customer360-database/database-schema.sql#L2885)
 
-Workflow rows are tenant-owned and attach one registered agent to one
-tenant-owned segment:
+Workflow rows are tenant-owned and attach one registered agent from
+[cdp_ai_agents](../../customer360-database/database-schema.sql#L1909) to one
+tenant-owned
+[cdp_segments](../../customer360-database/database-schema.sql#L2833) row under
+[sys_tenant](../../customer360-database/database-schema.sql#L34).
 
-```text
-sys_tenant
-   |
-   +-- cdp_segments (tenant_id, segment_id)
-           |
-           +-- cdp_agent_workflow
-                   |
-                   +-- cdp_ai_agents.agent_code
-```
+| Field | Purpose |
+| --- | --- |
+| `execution_order` | Positive, unique position within the tenant/segment workflow; lower values run first. |
+| `is_active` | Controls whether the workflow step is eligible to run. |
+| `schedule_definition` | Optional five-field cron override; if unset, the agent's schedule is used for cron runs. |
+| `configuration` | JSON object containing strategy-specific settings. |
+| `candidate_content_item_ids` | Selected content UUIDs for ranking; the API accepts up to 500 unique IDs per step. |
 
-The workflow table stores:
+The runner processes active steps in ascending `execution_order` and ignores
+inactive agents. API-triggered runs are immediate; schedule matching is applied
+to cron runs.
 
-- `execution_order` — positive, unique queue position per tenant/segment;
-- `is_active` — whether the step is eligible for execution;
-- `schedule_definition` — optional five-field cron override;
-- `configuration` — JSONB object for segment-specific parameters;
-- `candidate_content_item_ids` — bounded UUID array;
-- audit timestamps.
+## Candidate selection and ranking
 
-The master task executes selection in ascending `execution_order`. It does not
-use inactive workflow rows or inactive agents.
+### Candidate catalog and tenant checks
 
-## Candidate content contract
+Candidate IDs refer to
+[cdp_content_items](../../customer360-database/database-schema.sql#L2586).
+Each row belongs to a tenant and stores its item type (`news`, `video`,
+`product`, or `article`), display and call-to-action fields, segment tags,
+status, and publication metadata.
 
-Candidate IDs refer to `cdp_content_items`, which are independently scoped by
-`tenant_id`. The table stores:
+The workflow editor offers candidate selection only for
+`ranking_recommendation` agents. The API validates that each selected ID exists
+in the authenticated tenant; the database also enforces tenant ownership and
+distinct IDs. An active ranking step must contain at least one candidate. The
+runner evaluates only the selected IDs; it does not search the full catalog.
+At runtime, candidates must also be active and have domain `all` or the
+profile's domain.
 
-- `item_type`: `news`, `video`, `product`, or `article`;
-- `title`, summary, image, and CTA metadata;
-- `segment_tags`;
-- `status_code`;
-- publication and audit timestamps.
+### Profile inputs and configuration
 
-Candidate content is valid only for an agent whose `model_type` is
-`ranking_recommendation`. This is enforced by the API repository as well as by
-the frontend workflow editor. The database trigger validates that every
-candidate exists in the same tenant and that candidate IDs are distinct.
+For each profile, the handler requires a non-blank `input_data.domain` and
+accepts `input_data.segmentation_tags` as a list of non-blank strings (default
+`[]`). Semantic and hybrid strategies also receive a profile embedding and an
+embedding model key from the runner. Profile context is built from the domain,
+segment tags, and optional `semantic_query`; it does not contain PII.
 
-The runner requires a non-empty candidate array for a ranking step. It does not
-copy the entire catalog into the workflow row or search the whole catalog during
-execution.
+| Setting | Default | Validation and behavior |
+| --- | --- | --- |
+| `strategy` | `tags` | One of `tags`, `semantic`, or `hybrid`. |
+| `top_k` (or `limit`) | `8` | Integer from 1 to 100; maximum result count. |
+| `minimum_score` | `0` | Number from 0 to 1; lower-scoring candidates are excluded. |
+| `semantic_weight` | `0.7` | Number from 0 to 1; used by `hybrid`. |
+| `tag_weight` | `0.3` | Number from 0 to 1; used by `hybrid`. Hybrid weights must sum to more than 0. |
+| `semantic_query` | empty | Optional text appended to the profile query; maximum 2,000 characters. |
 
-For non-empty candidate lists, the ranking handler requires
-`input_data.domain` and accepts `input_data.segmentation_tags` (default `[]`).
-It considers only active content in the workflow tenant whose domain is `all`
-or matches the profile domain. `configuration.strategy` selects tag-only,
-semantic, or hybrid ranking; semantic and hybrid strategies use the configured
-Docs embedding provider at 384 or 768 dimensions and profile context built from
-domain and segmentation tags, not profile PII. `configuration.top_k` (or
-the `limit` fallback) defaults
-to 8 and must be a positive integer no greater than 100. Results include a
-one-based rank, strategy scores, matched tags, reason, and content display/CTA
-fields. The score is strategy-dependent and is not a calibrated relevance
-probability.
+For `semantic`, the handler uses semantic weight 1 and tag weight 0. For `tags`,
+it uses tag weight 1 and semantic weight 0. The configured hybrid weights are
+normalized when the two scores are combined.
 
-Content vectors store canonical text, provider/model, contract version, and
-generation time. Content edits invalidate vectors; migration
-`008_content_embedding_contract.sql` preserves legacy 384- and 768-dimensional
-vectors and clears other sizes. Linked product rows have matching vector columns reserved
-for future direct product ranking; current workflows rank linked content items.
+### Scoring and result ordering
 
-The runner writes each run to `cdp_profile_recommendation_runs` and its ranked
-items to `cdp_profile_recommendations`. The API endpoint reads persisted
-results; it does not run ranking when the request arrives.
+- **Tags:** the number of matched profile tags divided by the number of profile
+  tags; the score is 0 when the profile has no tags.
+- **Semantic:** `1 - cosine distance / 2`, clamped to the range 0–1.
+- **Hybrid:** the weighted average of the tag and semantic scores. If the
+  profile has no tags, the handler uses the semantic score when its weight is
+  positive.
 
-If ranking returns no candidates, the step still fails rather than weakening
-its filters or inventing a fallback. The error distinguishes missing
-tenant-owned candidates, inactive content, a profile-domain mismatch, missing
-model embeddings, and scores below `minimum_score`. It reports counts at each
-filter stage, domain, strategy, and threshold; the runner adds the tenant,
-segment, agent, and profile identifiers. Diagnosis reads only the selected IDs
-in the same tenant and runs only on the failure path.
+Candidates below `minimum_score` are excluded. Results are sorted by score
+descending, publication time descending (null values last), and content ID as
+the deterministic tie-breaker. Each result includes a one-based rank, the
+strategy scores, matched tags, a reason code, and the content display fields.
+Scores are strategy-specific ranking values, not calibrated probabilities.
 
-## Profile recommendation read API
+### Embedding lifecycle
 
-The Customer 360 API implements:
+Semantic and hybrid ranking require the configured `DOCS_EMBEDDING_PROVIDER`
+to be `openai` or `gemini`. The runner supports 384- and 768-dimensional
+vectors. For selected content, it generates or refreshes a vector when the
+canonical text, provider/model, contract version, or dimension is stale.
+Migration
+[`008_content_embedding_contract.sql`](../../customer360-database/migrations/008_content_embedding_contract.sql)
+preserves legacy 384- and 768-dimensional vectors and clears other sizes.
+
+Products are ranked through their linked content items in the current
+workflow. Product-table vector columns are reserved for possible future direct
+product ranking.
+
+### Persistence and failure handling
+
+The runner records run status in
+[cdp_profile_recommendation_runs](../../customer360-database/database-schema.sql#L3864)
+and per-profile ranked items in
+[cdp_profile_recommendations](../../customer360-database/database-schema.sql#L3882).
+The read API serves these persisted records; it does not run ranking during the
+request.
+
+If ranking produces no eligible results, the step fails rather than relaxing
+its filters or inventing a fallback. Failure diagnostics distinguish
+tenant-missing candidates, inactive content, profile-domain mismatch,
+unavailable embeddings, and scores below `minimum_score`. The error includes
+counts at each filter stage and the tenant, segment, agent, and profile
+identifiers. The detailed diagnostic query runs only on the failure path and
+uses the same tenant and selected candidate IDs.
+
+## Recommendation read API
+
+The Customer 360 API exposes the persisted recommendations through:
 
 ```http
 GET /api/v1/content-items/recommended?master_profile_id=<uuid>&limit=8
 ```
 
-`master_profile_id` is required. `limit` defaults to 8 and accepts values from
-1 through 50. The authenticated tenant context is always used; callers cannot
-select another tenant. An optional `segment_id` restricts the results to one
-segment, and `item_type` filters to `news`, `video`, `product`, or `article`.
+`master_profile_id` is required. `limit` defaults to 8 and must be from 1
+through 50. The API derives tenant scope from the authenticated request; a
+caller cannot request another tenant's data. Optional `segment_id` and
+`item_type` parameters restrict the result set.
 
 For each profile, the API reads the latest successful run for each active
-segment the profile belongs to, then merges results and deduplicates content
-items across segments, keeping the strongest recommendation. Returned rows must
-still refer to active workflow/agent records and active content matching the
-profile domain. A missing or inactive profile returns `404`; a valid profile
-with no eligible persisted results receives an empty list. Results include the
-content fields plus `matched_tags`, `segment_id`, `agent_code`, `rank`, `score`,
-`semantic_score`, `tag_score`, `strategy`, `reason`, and `generated_at`.
+segment the profile belongs to. It then merges results across those segments
+and keeps only the strongest recommendation for duplicate content items.
+Returned items must still match the profile domain and refer to active
+workflow, agent, and content records.
 
-The read path is Redis cache lookup, then a persisted-results query on a miss.
-Cache keys isolate tenants, profiles, and request filters. Content repository
-mutations and successful Dagster recommendation runs invalidate the tenant's
-recommendation cache; other changes become visible within `CACHE_TTL_SECONDS`.
-Disable caching with `CACHE_ENABLED=false` for immediate reads while debugging.
+A missing or inactive profile returns `404`. A valid profile with no eligible
+persisted recommendations receives an empty list. Each result includes the
+content display fields and `matched_tags`, `segment_id`, `agent_code`, `rank`,
+`score`, `semantic_score`, `tag_score`, `strategy`, `reason`, and
+`generated_at`.
+
+The API checks Redis before querying persisted results. Cache keys are scoped
+to the tenant, profile, and request filters. Content mutations and successful
+recommendation runs invalidate the tenant's recommendation cache; other
+changes become visible within `CACHE_TTL_SECONDS`. Set `CACHE_ENABLED=false`
+to bypass the cache while debugging.
 
 The route is implemented in
 [content_api.py](../../customer360-api/core/routers/content_api.py), and its
 tenant-scoped query is in
 [content_repository.py](../../customer360-api/core/repositories/content_repository.py).
 
-## Profile and persona inputs
+## Current and future profile inputs
 
-The implemented ranking handler currently consumes the profile's domain and
-segmentation tags plus explicitly selected content candidates. Other
-tenant-scoped data that could support future handlers includes:
+The current ranking contract reads only:
 
-- `cdp_master_profiles` — mastered profile identity, segmentation tags,
-  analytics, persona summary, and profile-level derived fields;
-- `cdp_customer_personas` — versioned profile/persona matches and score
-  details;
-- `cdp_persona_archetypes` — shared persona metadata and embeddings;
-- `cdp_content_items` — eligible content/product candidates;
-- active segment membership represented through the segment metadata and
-  profile segmentation tags.
+- the profile's domain and segmentation tags from
+  [cdp_master_profiles](../../customer360-database/database-schema.sql#L685);
+- segment membership from
+  [cdp_segments](../../customer360-database/database-schema.sql#L2833); and
+- explicitly selected content candidates from
+  [cdp_content_items](../../customer360-database/database-schema.sql#L2586).
 
-These future inputs are not currently part of the ranking contract. Any
-handler that adds them must define their tenant-scoped read contract and apply
-the relevant consent, suppression, inventory, campaign eligibility, and domain
-constraints before returning a recommendation.
+It does not currently use persona-match records from
+[cdp_customer_personas](../../customer360-database/database-schema.sql#L1475)
+or shared persona definitions from
+[cdp_persona_archetypes](../../customer360-database/database-schema.sql#L1430).
+Additional analytics or persona fields stored on a master profile are also
+outside the current ranking input contract.
 
-## Handler and persistence contract
+Any future handler that adds these inputs must define tenant-scoped reads and
+apply relevant consent, suppression, inventory, campaign-eligibility, and
+domain constraints before returning a recommendation.
 
-The existing recommendation handler:
+## Data ownership and engineering guardrails
 
-1. receives one ordered workflow step and trigger context;
-2. validates ranking configuration and profile inputs;
-3. evaluates only the step's selected candidates within the step tenant;
-4. persists per-profile results under the Dagster run ID and records run status.
+The ranking handler validates its profile inputs and configuration, evaluates
+only the step's selected candidates within the step tenant, and returns ranked
+items. The runner—not the ranking handler—persists per-profile results under
+the Dagster run ID and updates run status.
 
-Future agent handlers must validate declared inputs/configuration, query only
-the plan item's tenant data, reject unavailable or unsupported implementations
-explicitly, persist only to an approved owning table/schema contract, and emit
-clear execution outcomes.
+The workflow must not:
 
-No handler may:
-
-- cross tenant boundaries;
+- read or write data across tenant boundaries;
 - rewrite identity links or source events;
-- treat a missing model as a successful default;
-- select candidates outside the tenant's eligible set;
-- send campaigns or notifications directly;
-- overwrite another agent's owned output without an explicit contract.
+- treat an unavailable handler or model as a successful default;
+- rank candidates outside the configured, tenant-eligible set;
+- send campaigns or notifications directly; or
+- overwrite another handler's output without an explicit ownership contract.
 
 ## References
 

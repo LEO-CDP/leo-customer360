@@ -8,7 +8,7 @@ import os
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 import psycopg2
 from croniter import croniter
@@ -28,6 +28,7 @@ DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
 DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS = frozenset({384, 768})
+SUPPORTED_RECOMMENDATION_EMBEDDING_PROVIDERS = frozenset({"openai", "gemini"})
 CONTENT_EMBEDDING_VERSION = "1"
 SEGMENT_PROFILE_SQL = f"""
     SELECT
@@ -319,7 +320,7 @@ class AgentWorkflowMasterTask:
                     strategy = step["configuration"].get("strategy", "tags")
                     uses_vectors = strategy in {"semantic", "hybrid"}
                     model_key = self._embedding_model_key() if uses_vectors else ""
-                    profile_embeddings: list[list[float] | None]
+                    profile_embeddings: Sequence[list[float] | None]
                     if uses_vectors:
                         self._ensure_content_embeddings(
                             tenant_id=tenant_id,
@@ -559,7 +560,7 @@ class AgentWorkflowMasterTask:
 
         model_key = embedding_model_key()
         provider = model_key.partition(":")[0]
-        if provider not in {"openai", "gemini"}:
+        if provider not in SUPPORTED_RECOMMENDATION_EMBEDDING_PROVIDERS:
             raise ValueError(
                 "Recommendation embeddings require DOCS_EMBEDDING_PROVIDER "
                 "to be 'openai' or 'gemini'"

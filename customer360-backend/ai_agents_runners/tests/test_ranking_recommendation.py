@@ -1,4 +1,6 @@
+import re
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -9,9 +11,13 @@ from ai_agents_runners.agent_pipeline.agent_types.ranking_recommendation import 
     RANK_CANDIDATE_CONTENT_SQL,
     SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS,
     RankingRecommendationPipeline,
+    _vector_literal,
+    _weight,
 )
-from ai_agents_runners.agent_pipeline.pipelines import PIPELINE_HANDLERS
-from ai_agents_runners.agent_pipeline.pipelines import execute_agent_pipeline
+from ai_agents_runners.agent_pipeline.pipelines import (
+    PIPELINE_HANDLERS,
+    execute_agent_pipeline,
+)
 
 TENANT_ID = "11111111-1111-1111-1111-111111111111"
 SEGMENT_ID = "22222222-2222-2222-2222-222222222222"
@@ -19,12 +25,22 @@ CONTENT_ITEM_1 = "33333333-3333-3333-3333-333333333333"
 CONTENT_ITEM_2 = "44444444-4444-4444-4444-444444444444"
 
 
+def test_semantic_score_normalizes_cosine_distance_to_unit_interval():
+    expression = re.compile(
+        r"1\.0 - \(\s*content\.embedding::vector\(__VECTOR_DIMENSIONS__\)"
+        r"\s*<=>\s*criteria\.profile_embedding\s*\)\s*/ 2\.0",
+        re.DOTALL,
+    )
+
+    assert expression.search(RANK_CANDIDATE_CONTENT_SQL)
+
+
 class FakeCursor:
     def __init__(self, rows, diagnostics=None):
         self.rows = rows
         self.diagnostics = diagnostics
-        self.query = None
-        self.params = None
+        self.query: str = ""
+        self.params: tuple[Any, ...] = ()
 
     def __enter__(self):
         return self
@@ -32,7 +48,7 @@ class FakeCursor:
     def __exit__(self, *_):
         return False
 
-    def execute(self, query, params):
+    def execute(self, query: str, params: tuple[Any, ...]) -> None:
         self.query = query
         self.params = params
 
@@ -57,7 +73,7 @@ class FakeConnection:
         return self.cursor_instance
 
 
-def _input(**overrides):
+def _input(**overrides: Any) -> dict[str, Any]:
     payload = {
         "tenant_id": TENANT_ID,
         "segment_id": SEGMENT_ID,
@@ -73,7 +89,13 @@ def _input(**overrides):
     return payload
 
 
-def _candidate(content_item_id, *, score, matched_tags, published_at):
+def _candidate(
+    content_item_id: str,
+    *,
+    score: float,
+    matched_tags: list[str],
+    published_at: datetime | None,
+) -> dict[str, Any]:
     return {
         "content_item_id": UUID(content_item_id),
         "item_type": "product",
@@ -219,6 +241,7 @@ def test_empty_rankings_explain_the_excluding_filter(monkeypatch, counts, reason
     assert "minimum_score=0.75" in str(error.value)
     assert "domain=retail" in str(error.value)
     assert connection.cursor_instance.query == CANDIDATE_DIAGNOSTICS_SQL
+    assert connection.cursor_instance.params[-4] == 384
     assert connection.cursor_instance.params[-2:] == (
         TENANT_ID,
         [CONTENT_ITEM_1, CONTENT_ITEM_2],
@@ -308,6 +331,10 @@ def test_hybrid_ranking_uses_pgvector_similarity_and_custom_weights(monkeypatch)
 
     assert output.result["ranked_items"][0]["strategy"] == "hybrid"
     assert output.result["ranked_items"][0]["semantic_score"] == 0.9
+    assert (
+        output.result["ranked_items"][0]["reason"]
+        == "semantic_and_segment_tag_match"
+    )
     assert "<=>" in connection.cursor_instance.query
     assert "::vector(768)" in connection.cursor_instance.query
     assert "vector" in connection.cursor_instance.query
@@ -400,3 +427,316 @@ def test_ranking_pipeline_rejects_invalid_profile_or_limit(
             _input(input_data=input_data, configuration=configuration),
             run_id="dagster-run-1",
         )
+
+
+@pytest.mark.parametrize("strategy", ["unknown", None, [], {"unexpected": "tags"}])
+def test_ranking_pipeline_rejects_unsupported_strategies(monkeypatch, strategy):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="configuration.strategy"):
+        execute_agent_pipeline(
+            _input(configuration={"strategy": strategy}),
+            run_id="dagster-run-1",
+        )
+
+
+def test_ranking_pipeline_rejects_top_k_above_maximum(monkeypatch):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="must not exceed 100"):
+        execute_agent_pipeline(
+            _input(configuration={"top_k": 101}),
+            run_id="dagster-run-1",
+        )
+
+
+def test_hybrid_ranking_requires_a_positive_combined_weight(monkeypatch):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="sum to more than zero"):
+        execute_agent_pipeline(
+            _input(
+                configuration={
+                    "strategy": "hybrid",
+                    "semantic_weight": 0,
+                    "tag_weight": 0,
+                }
+            ),
+            run_id="dagster-run-1",
+        )
+
+
+@pytest.mark.parametrize("minimum_score", [None, True, "0.5", -0.1, 1.1])
+def test_ranking_pipeline_rejects_invalid_minimum_score(monkeypatch, minimum_score):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="minimum_score"):
+        execute_agent_pipeline(
+            _input(
+                configuration={
+                    "minimum_score": minimum_score,
+                }
+            ),
+            run_id="dagster-run-1",
+        )
+
+
+@pytest.mark.parametrize("strategy", ["semantic", "hybrid"])
+@pytest.mark.parametrize("profile_embedding", [None, "", []])
+def test_vector_strategies_require_a_nonempty_profile_embedding(
+    monkeypatch, strategy, profile_embedding
+):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="input_data.profile_embedding"):
+        execute_agent_pipeline(
+            _input(
+                input_data={
+                    "domain": "retail",
+                    "segmentation_tags": [],
+                    "profile_embedding": profile_embedding,
+                    "embedding_model": "gemini:model:384",
+                },
+                configuration={"strategy": strategy},
+            ),
+            run_id="dagster-run-1",
+        )
+
+
+@pytest.mark.parametrize(
+    "profile_embedding",
+    [
+        [True] * 384,
+        ["0.1"] * 384,
+        [10**1000] * 384,
+    ],
+)
+def test_vector_strategies_reject_nonfinite_or_non_numeric_values(
+    monkeypatch, profile_embedding
+):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="finite numbers"):
+        execute_agent_pipeline(
+            _input(
+                input_data={
+                    "domain": "retail",
+                    "segmentation_tags": [],
+                    "profile_embedding": profile_embedding,
+                    "embedding_model": "gemini:model:384",
+                },
+                configuration={"strategy": "semantic"},
+            ),
+            run_id="dagster-run-1",
+        )
+
+
+@pytest.mark.parametrize("embedding_model", [None, "  "])
+def test_vector_strategies_require_an_embedding_model_key(
+    monkeypatch, embedding_model
+):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="input_data.embedding_model"):
+        execute_agent_pipeline(
+            _input(
+                input_data={
+                    "domain": "retail",
+                    "segmentation_tags": [],
+                    "profile_embedding": [0.1] * 384,
+                    "embedding_model": embedding_model,
+                },
+                configuration={"strategy": "semantic"},
+            ),
+            run_id="dagster-run-1",
+        )
+
+
+@pytest.mark.parametrize(
+    "embedding_model",
+    ["local:model:384", ":384"],
+)
+def test_vector_strategies_reject_unsupported_embedding_providers(
+    monkeypatch, embedding_model
+):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="supported provider"):
+        execute_agent_pipeline(
+            _input(
+                input_data={
+                    "domain": "retail",
+                    "segmentation_tags": [],
+                    "profile_embedding": [0.1] * 384,
+                    "embedding_model": embedding_model,
+                },
+                configuration={"strategy": "semantic"},
+            ),
+            run_id="dagster-run-1",
+        )
+
+
+def test_vector_strategies_reject_unsupported_embedding_dimensions(monkeypatch):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="384 or 768"):
+        execute_agent_pipeline(
+            _input(
+                input_data={
+                    "domain": "retail",
+                    "segmentation_tags": [],
+                    "profile_embedding": [0.1],
+                    "embedding_model": "gemini:model:1",
+                },
+                configuration={"strategy": "semantic"},
+            ),
+            run_id="dagster-run-1",
+        )
+
+
+def test_vector_strategies_reject_malformed_model_dimensions(monkeypatch):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="end with its vector dimension"):
+        execute_agent_pipeline(
+            _input(
+                input_data={
+                    "domain": "retail",
+                    "segmentation_tags": [],
+                    "profile_embedding": [0.1] * 384,
+                    "embedding_model": "gemini:model:unknown",
+                },
+                configuration={"strategy": "semantic"},
+            ),
+            run_id="dagster-run-1",
+        )
+
+
+def test_vector_strategies_reject_model_vector_dimension_mismatch(monkeypatch):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="dimension does not match"):
+        execute_agent_pipeline(
+            _input(
+                input_data={
+                    "domain": "retail",
+                    "segmentation_tags": [],
+                    "profile_embedding": [0.1] * 384,
+                    "embedding_model": "gemini:model:768",
+                },
+                configuration={"strategy": "semantic"},
+            ),
+            run_id="dagster-run-1",
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, "0.5", float("nan"), float("inf"), 10**1000, -0.1, 1.1],
+)
+def test_weight_rejects_invalid_values(value):
+    with pytest.raises(ValueError, match="configuration.semantic_weight"):
+        _weight({"semantic_weight": value}, "semantic_weight", 0.7)
+
+
+def test_vector_literal_handles_none_and_numeric_vectors():
+    assert _vector_literal(None) is None
+    assert _vector_literal([0.5, 1]) == "[0.5,1.0]"
+
+
+@pytest.mark.parametrize(
+    ("semantic_score", "matched_tags", "expected_reason"),
+    [
+        (0.8, ["loyal"], "semantic_and_segment_tag_match"),
+        (0.8, [], "semantic_similarity"),
+        (0.0, ["loyal"], "segment_tag_overlap"),
+        (None, [], "no_segment_tag_overlap"),
+    ],
+)
+def test_serialization_selects_reason_from_score_and_tag_evidence(
+    semantic_score, matched_tags, expected_reason
+):
+    row = _candidate(
+        CONTENT_ITEM_1,
+        score=0.5,
+        matched_tags=matched_tags,
+        published_at=None,
+    )
+    row.update(
+        {
+            "semantic_score": semantic_score,
+            "tag_score": 0.5,
+            "strategy": "hybrid",
+        }
+    )
+
+    result = RankingRecommendationPipeline._serialize_candidate(row, rank=1)
+
+    assert result["reason"] == expected_reason
+
+
+def test_semantic_diagnostics_require_matching_vector_dimensions(monkeypatch):
+    diagnostics = {
+        "tenant_candidates": 1,
+        "active_candidates": 1,
+        "domain_candidates": 1,
+        "rankable_candidates": 0,
+    }
+    connection = FakeConnection([], diagnostics=diagnostics)
+    pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    with pytest.raises(ValueError, match="lack embeddings"):
+        execute_agent_pipeline(
+            _input(
+                input_data={
+                    "domain": "retail",
+                    "segmentation_tags": [],
+                    "profile_embedding": [0.1] * 768,
+                    "embedding_model": "gemini:model:768",
+                },
+                configuration={"strategy": "semantic"},
+            ),
+            run_id="dagster-run-1",
+        )
+
+    assert "vector_dims(embedding) = %s" in connection.cursor_instance.query
+    assert connection.cursor_instance.params[-4:] == (
+        768,
+        "gemini:model:768",
+        TENANT_ID,
+        [CONTENT_ITEM_1, CONTENT_ITEM_2],
+    )
