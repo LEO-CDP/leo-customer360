@@ -1,5 +1,6 @@
 import io
 import json
+import urllib.error
 import uuid
 from decimal import Decimal
 from unittest.mock import patch
@@ -128,6 +129,15 @@ def test_agent_readiness_reports_llm_configuration(configured):
         )
         is configured
     )
+
+
+def test_agent_readiness_defers_content_generation_when_agent_is_unreachable(caplog):
+    assert not product_import._agent_llm_is_configured(
+        opener=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            urllib.error.URLError("Connection refused")
+        )
+    )
+    assert "product content generation will be deferred" in caplog.text
 
 
 def _response(payload):

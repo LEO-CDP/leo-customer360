@@ -229,7 +229,7 @@ def _agent_llm_is_configured(
     *,
     opener: Callable[..., Any] = urllib.request.urlopen,
 ) -> bool:
-    """Read non-secret LLM readiness from customer360-agent before enrichment."""
+    """Read LLM readiness, deferring enrichment if the agent cannot be reached."""
     request = urllib.request.Request(
         settings.agent_service_url.rstrip("/") + "/health",
         headers={"Accept": "application/json"},
@@ -240,7 +240,13 @@ def _agent_llm_is_configured(
             health = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise ProductImportError(f"Could not check AI-agent readiness: HTTP {exc.code}") from exc
-    except (urllib.error.URLError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (urllib.error.URLError, TimeoutError) as exc:
+        logger.warning(
+            "Could not reach AI agent for readiness check; product content generation will be deferred: %s",
+            exc,
+        )
+        return False
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ProductImportError(f"Could not check AI-agent readiness: {exc}") from exc
     if not isinstance(health, dict) or not isinstance(health.get("llm_configured"), bool):
         raise ProductImportError("AI-agent health response is missing llm_configured readiness")
@@ -452,8 +458,8 @@ def import_product_file(
         else:
             generated = None
             logger.info(
-                "Product content generation skipped because no LLM API key or base URL is configured "
-                "(tenant_id=%s); products will be queued for content generation",
+                "Product content generation skipped because the AI agent has no configured LLM "
+                "or is unavailable (tenant_id=%s); products will be queued for content generation",
                 parsed_tenant_id,
             )
         imported = persist_product_records(
