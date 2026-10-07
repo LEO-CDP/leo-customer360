@@ -141,6 +141,26 @@ class AiAgentSeedContractTests(unittest.TestCase):
             self.assertIn("invalidate_content_item_embedding()", sql)
             self.assertIn("trg_invalidate_content_item_embedding", sql)
 
+    def test_content_item_embedding_metadata_is_added_before_schema_references(self):
+        schema = (
+            self.repository_root / "customer360-database" / "database-schema.sql"
+        ).read_text(encoding="utf-8")
+        upgrade = schema.index("ALTER TABLE customer360.cdp_content_items\n")
+        references = schema.index(
+            "COMMENT ON COLUMN customer360.cdp_content_items.embedding_text"
+        )
+
+        self.assertLess(upgrade, references)
+        for column, sql_type in (
+            ("embedding_text", "TEXT"),
+            ("embedding_version", "VARCHAR(50)"),
+            ("embedding_updated_at", "TIMESTAMPTZ"),
+        ):
+            self.assertIn(
+                f"ADD COLUMN IF NOT EXISTS {column} {sql_type}",
+                schema[upgrade:references],
+            )
+
     def test_existing_agent_endpoints_have_seeded_prompt_keys(self):
         for key in (
             "campaign.plan.instructions",

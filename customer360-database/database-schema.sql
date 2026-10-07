@@ -2624,6 +2624,11 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_content_items (
         CHECK (embedding IS NULL OR vector_dims(embedding) IN (384, 768))
 );
 
+ALTER TABLE customer360.cdp_content_items
+    ADD COLUMN IF NOT EXISTS embedding_text TEXT,
+    ADD COLUMN IF NOT EXISTS embedding_version VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS embedding_updated_at TIMESTAMPTZ;
+
 COMMENT ON TABLE customer360.cdp_content_items IS
     'Tenant-scoped content candidates for segment ranking, recommendations, and personalization.';
 COMMENT ON COLUMN customer360.cdp_content_items.embedding_text IS
