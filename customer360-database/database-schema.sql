@@ -2763,6 +2763,13 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_product_items (
         CHECK (embedding IS NULL OR vector_dims(embedding) IN (384, 768))
 );
 
+ALTER TABLE customer360.cdp_product_items
+    ADD COLUMN IF NOT EXISTS embedding_text TEXT,
+    ADD COLUMN IF NOT EXISTS embedding VECTOR,
+    ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS embedding_version VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS embedding_updated_at TIMESTAMPTZ;
+
 COMMENT ON TABLE customer360.cdp_product_items IS
     'Tenant-scoped source products imported from TSV; content_item_id is populated when LLM-generated cdp_content_items content is available. Re-imports upsert by tenant, source_type, source_id, and product identity.';
 COMMENT ON COLUMN customer360.cdp_product_items.source_fields IS
