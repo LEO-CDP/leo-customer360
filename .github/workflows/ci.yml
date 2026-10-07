@@ -91,6 +91,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python 3.11
+        if: ${{ matrix.service != 'customer360-frontend' && matrix.service != 'postgres' && matrix.service != 'redis' }}
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
