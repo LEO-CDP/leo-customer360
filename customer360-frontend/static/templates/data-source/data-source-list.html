@@ -101,7 +101,7 @@
   POST/PATCH /metadata/data-sources (see data-source-view.js).
   =============================================================================
 -->
-<div id="datasource-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+<div id="datasource-form-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="datasource-form-title">
   <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 border border-slate-100 max-h-[90vh] overflow-y-auto">
 
     <!-- Modal Header -->
@@ -207,7 +207,7 @@
   Displays full connector snapshot, volume analytics, tracking tags, and QR code.
   =============================================================================
 -->
-<div id="datasource-detail-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 lg:p-8">
+<div id="datasource-detail-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 lg:p-8" role="dialog" aria-modal="true" aria-labelledby="detail-datasource-name">
   <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl aspect-[4/3] max-h-[95vh] border border-slate-100 flex flex-col overflow-hidden">
 
     <!-- Modal Header -->

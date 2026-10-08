@@ -701,6 +701,13 @@ window.C360 = window.C360 || {};
     return docsFetch("/ask", { question: question }, signal);
   }
 
+  // LEO Assistant answers go through customer360-api (tenant + auth headers), not the docs proxy, because
+  // the API logs each ask and resolves anything about the page the user is on.
+  function assistantAsk(question, context) {
+    var body = $.extend({ question: question }, context || {});
+    return api("/assistant/ask", body, "POST");
+  }
+
   function docsSearch(query, topN, signal) {
     return docsFetch("/search", { query: query, top_n: topN || 8 }, signal);
   }
@@ -729,6 +736,7 @@ window.C360 = window.C360 || {};
     getDataPeriodDays: getDataPeriodDays,
     isAdmin: isAdmin,
     docsAsk: docsAsk,
+    assistantAsk: assistantAsk,
     docsSearch: docsSearch,
     personaCategoryOptions: PERSONA_CATEGORY_OPTIONS
   };

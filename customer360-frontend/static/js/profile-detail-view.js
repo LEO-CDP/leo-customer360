@@ -1230,6 +1230,21 @@ window.C360 = window.C360 || {};
     requestTimeline();
   }
 
+  // Activity cards (engagement, channels, interests, timeline) come from the event store, which may be
+  // down or empty on a given deployment. One failing card must not blank the whole profile, so a failed
+  // call resolves with an empty value and the page says some activity data is unavailable.
+  function optionalCall(request, emptyValue, state) {
+    var deferred = $.Deferred();
+    request
+      .done(function (data, textStatus, jqXHR) { deferred.resolve(data, textStatus, jqXHR); })
+      .fail(function (xhr) {
+        state.degraded = true;
+        if (window.console) console.warn("Profile activity call failed (HTTP " + (xhr && xhr.status) + ")");
+        deferred.resolve(emptyValue, "error", xhr);
+      });
+    return deferred.promise();
+  }
+
   function load(masterProfileId) {
     closeLinkedRawModal();
     currentProfileId = masterProfileId;
@@ -1251,18 +1266,19 @@ window.C360 = window.C360 || {};
     $("#detail-loading").removeClass("hidden");
 
     var days = periodDays();
+    var state = { degraded: false };
     $.when(
       api("/master-profiles/" + masterProfileId),
-      api("/master-profiles/" + masterProfileId + "/engagement-summary", {
+      optionalCall(api("/master-profiles/" + masterProfileId + "/engagement-summary", {
         days: days,
-      }),
-      api("/master-profiles/" + masterProfileId + "/channel-activity", {
+      }), { period_days: days }, state),
+      optionalCall(api("/master-profiles/" + masterProfileId + "/channel-activity", {
         days: days,
-      }),
-      api("/master-profiles/" + masterProfileId + "/top-interests", {
+      }), {}, state),
+      optionalCall(api("/master-profiles/" + masterProfileId + "/top-interests", {
         limit: 5,
-      }),
-      api("/master-profiles/" + masterProfileId + "/timeline", timelineRequestParams()),
+      }), [], state),
+      optionalCall(api("/master-profiles/" + masterProfileId + "/timeline", timelineRequestParams()), [], state),
       loadProfileLinks(masterProfileId),
       loadPersona(masterProfileId),
       loadPersonaHistory(masterProfileId),
@@ -1297,6 +1313,13 @@ window.C360 = window.C360 || {};
           $("#detail-content").html(
             C360.templates.render("profile-details", vm),
           );
+          if (state.degraded) {
+            $("#detail-content").prepend(
+              '<p class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">' +
+                "Some activity data is unavailable right now (the event store did not respond). " +
+                "The rest of the profile is shown.</p>",
+            );
+          }
           initializeTimelineRange(false);
           populateDomainAttributeDomainSelect(profileRes[0].domain);
           loadTimelineDataSources();

@@ -42,8 +42,9 @@ from .config import (
     RETRIEVE_TOP_N,
     TOP_K_MAX,
     TOP_N_MAX,
+    STRUCTURED_ANSWERS,
 )
-from .providers import embed, rerank
+from .providers import embed, rerank, rerank_stats
 from .rate_limit import limiter
 
 _log = logging.getLogger("uvicorn.error")
@@ -54,9 +55,18 @@ def _retrieve_sync(question: str, top_n: int) -> list[dict]:
         return retrieve(question, conn, top_n)
 
 
-def _query_sync(question: str, top_n: int, top_k: int) -> dict:
+def _query_sync(
+    question: str,
+    top_n: int,
+    top_k: int,
+    page: str | None = None,
+    context: list[str] | None = None,
+    view: str | None = None,
+    dialog: str | None = None,
+    context_title: str | None = None,
+) -> dict:
     with store.connect() as conn:
-        return query(question, conn, top_n, top_k)
+        return query(question, conn, top_n, top_k, page, context, view, dialog, context_title)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -99,6 +109,15 @@ class AskRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=QUESTION_MAX_LEN)
     top_n: int = Field(RETRIEVE_TOP_N, ge=1, le=TOP_N_MAX)
     top_k: int = Field(RERANK_TOP_K, ge=1, le=TOP_K_MAX)
+    # The route pattern the user is on, e.g. "/profiles/:id"; selects a page card (public docs text).
+    page: str | None = Field(None, max_length=120)
+    # Facts about the profile on screen. Trusted caller only (see _trusted_context).
+    context: list[str] | None = Field(None, max_length=40)
+    # Heading for the facts block, e.g. "Segment on screen". Trusted caller only (see _trusted_context).
+    context_title: str | None = Field(None, max_length=60)
+    # The open tab / dialog on screen (UI labels). Trusted caller only (see _trusted_context).
+    view: str | None = Field(None, max_length=60)
+    dialog: str | None = Field(None, max_length=80)
 
 
 class SearchRequest(BaseModel):
@@ -112,6 +131,26 @@ def _require_reindex_access(request: Request) -> None:
             status_code=403,
             detail="Reindex requires the configured X-Internal-Auth credential.",
         )
+
+
+def _trusted_context(
+    req: "AskRequest", request: Request
+) -> tuple[list[str] | None, str | None, str | None, str | None]:
+    """Profile facts (and their heading) and the open tab/dialog are accepted only from a trusted
+    internal caller (customer360-api).
+
+    /ask is public and rate-limited, so a browser must not be able to put text of its own
+    into the facts block heading, the "Profile on screen" facts, or the "Part of the page in
+    front of the user" block of the prompt.
+    """
+    if (req.context or req.view or req.dialog or req.context_title) and not (
+        INTERNAL_API_SECRET and limiter.is_internal(request)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="context, context_title, view and dialog require the X-Internal-Auth credential.",
+        )
+    return req.context, req.view, req.dialog, req.context_title
 
 
 @app.get("/health")
@@ -135,9 +174,12 @@ def health():
         "rerank_model": (
             OPENAI_RERANK_MODEL if DOCS_RERANK_PROVIDER == "openai" else DOCS_RERANK_MODEL
         ) if DOCS_RERANK_ENABLED else None,
+        # Hosted rerank calls that failed fall back to the first-stage order without an error.
+        "rerank_stats": rerank_stats() if DOCS_RERANK_ENABLED and DOCS_RERANK_PROVIDER == "openai" else None,
         "llm_provider": LLM_PROVIDER,
         "generator": generator,
         "hybrid_search": HYBRID_SEARCH_ENABLED,
+        "structured_answers": STRUCTURED_ANSWERS,
     }
 
 
@@ -164,7 +206,18 @@ async def ask(req: AskRequest, request: Request):
     # Rate-limit every caller except a trusted internal one (X-Internal-Auth secret).
     await limiter.enforce(request)
     started = time.perf_counter()
-    result = await asyncio.to_thread(_query_sync, req.question, req.top_n, req.top_k)
+    context, view, dialog, context_title = _trusted_context(req, request)
+    result = await asyncio.to_thread(
+        _query_sync,
+        req.question,
+        req.top_n,
+        req.top_k,
+        req.page,
+        context,
+        view,
+        dialog,
+        context_title,
+    )
     _log.info("/ask completed in %.2fs question_chars=%d sources=%d", time.perf_counter() - started, len(req.question), len(result["sources"]))
     return result
 

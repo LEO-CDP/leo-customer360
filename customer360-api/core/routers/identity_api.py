@@ -5,6 +5,7 @@ metadata / throttle-status tables consumed by customer360-backend/identity_resol
 
 import logging
 import uuid
+from contextlib import contextmanager
 from datetime import date, datetime
 from typing import Optional
 
@@ -75,6 +76,18 @@ from core.utils.dagster_client import DagsterJobTriggerError, dagster_client
 logger = logging.getLogger(__name__)
 
 # --- Master Profiles ---------------------------------------------------------
+
+@contextmanager
+def _event_store_unavailable():
+    """Event-lake failures (no S3, bad projection, failed query) are a handled 503, not a bare 500 that
+    the browser reports as a CORS error."""
+    try:
+        yield
+    except EventQueryError as exc:
+        raise HTTPException(status_code=503, detail="Event lake query failed") from exc
+    except MasterProfileEventStoreError as exc:
+        raise HTTPException(status_code=503, detail="Master profile event projection unavailable") from exc
+
 
 master_profiles_router = APIRouter(prefix="/master-profiles", tags=["Identity Resolution - Master Profiles"])
 _master_crud = CRUDBase(CdpMasterProfile)
@@ -313,7 +326,8 @@ def get_master_profile_engagement_summary(
     profile = repository.get_master_profile(master_profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    return repository.get_engagement_summary(master_profile_id, days, tenant_id=profile.tenant_id)
+    with _event_store_unavailable():
+        return repository.get_engagement_summary(master_profile_id, days, tenant_id=profile.tenant_id)
 
 
 @master_profiles_router.get("/{master_profile_id}/channel-activity", response_model=ChannelActivity)
@@ -327,7 +341,8 @@ def get_master_profile_channel_activity(
     profile = repository.get_master_profile(master_profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    return repository.get_channel_activity(master_profile_id, days, tenant_id=profile.tenant_id)
+    with _event_store_unavailable():
+        return repository.get_channel_activity(master_profile_id, days, tenant_id=profile.tenant_id)
 
 
 @master_profiles_router.get("/{master_profile_id}/top-interests", response_model=list[TopInterest])
@@ -341,7 +356,8 @@ def get_master_profile_top_interests(
     repository = _identity_repository(db)
     if repository.get_master_profile(master_profile_id) is None:
         raise HTTPException(status_code=404, detail=f"CdpMasterProfile '{master_profile_id}' not found")
-    return repository.get_top_interests(master_profile_id, limit)
+    with _event_store_unavailable():
+        return repository.get_top_interests(master_profile_id, limit)
 
 
 @master_profiles_router.get("/{master_profile_id}/timeline", response_model=list[TimelineEntry])
