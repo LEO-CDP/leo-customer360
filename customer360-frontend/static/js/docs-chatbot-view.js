@@ -4,12 +4,14 @@
  * same-origin /ai/* proxy (app.py), which forwards to tools/docs-vector-search
  * (semantic search + grounded question answering over the docs corpus).
  *
- * UX is two-phase because /ask runs a local LLM on a small box and is slow:
- *   1. POST /ai/search  -> render the top source docs immediately (sub-second).
- *   2. POST /ai/ask     -> replace with the grounded answer + reconciled sources.
+ * Every question is independent (single-turn, no conversation memory). The flow is
+ * two-phase because the grounded answer is slow:
+ *   1. POST /ai/search        -> render the top source docs immediately (sub-second).
+ *   2. POST /assistant/ask    -> replace with the grounded answer + the sources it used.
  *
- * Only one question is in flight at a time -- a new question aborts the previous
- * request (single-inflight via AbortController).
+ * The log lives only in the page: it survives hash-route changes but is not saved
+ * anywhere, so a reload starts empty. Only one question is in flight at a time:
+ * Send is disabled until the answer arrives.
  *
  * Registered like the other view modules: this file attaches C360.docsChatbot,
  * main.js injects the template into #docs-chatbot-root and calls bindEvents(). */
@@ -18,7 +20,7 @@ window.C360 = window.C360 || {};
 (function (C360) {
   "use strict";
 
-  var controller = null; // AbortController for the in-flight question, or null
+  var busy = false; // a question is waiting for its answer
 
   // --- helpers -----------------------------------------------------------------
 
@@ -74,6 +76,9 @@ window.C360 = window.C360 || {};
         '<div class="docs-chat-bubble docs-chat-bubble-bot">' +
           '<div class="docs-chat-answer"></div>' +
           '<div class="docs-chat-status"></div>' +
+          '<div class="docs-chat-asked docs-chat-basis hidden"></div>' +
+          '<div class="docs-chat-missing docs-chat-basis hidden"></div>' +
+          '<div class="docs-chat-basis docs-chat-basis-line hidden"></div>' +
           '<div class="docs-chat-sources"></div>' +
         "</div>" +
       "</div>"
@@ -115,6 +120,36 @@ window.C360 = window.C360 || {};
     scrollToBottom();
   }
 
+  // "Based on: this segment's details · this page's guide": what screen context the answer used.
+  // Level 2: on-screen facts arrive as screen_data with the loader's screen_label; the profile
+  // page (screen_data without a label, or the older profile_data only) still reads
+  // "this customer's profile". Empty when the service did not say (sources only).
+  function basisText(basis) {
+    var parts = [];
+    if (basis && (basis.screen_data || basis.profile_data)) {
+      parts.push((basis.screen_label && String(basis.screen_label)) || "this customer's profile");
+    }
+    if (basis && basis.page_guide) parts.push("this page's guide");
+    return parts.length ? "Based on: " + parts.join(" · ") : "";
+  }
+
+  function renderBasis($msg, basis) {
+    var text = basisText(basis);
+    $msg.find(".docs-chat-basis-line").text(text).toggleClass("hidden", !text);
+  }
+
+  // A partly answered question (status "partial") names what the docs do not cover, so the user can
+  // see why the answer stops short.
+  function missingText(res) {
+    var missing = res && res.status === "partial" && res.missing ? res.missing.filter(Boolean) : [];
+    return missing.length ? "Not covered in the docs: " + missing.join("; ") : "";
+  }
+
+  function renderMissing($msg, res) {
+    var text = missingText(res);
+    $msg.find(".docs-chat-missing").text(text).toggleClass("hidden", !text);
+  }
+
   function renderSources($msg, sources) {
     var list = dedupeByPath(sources);
     var $box = $msg.find(".docs-chat-sources");
@@ -148,47 +183,313 @@ window.C360 = window.C360 || {};
     scrollToBottom();
   }
 
-  // --- conversation ------------------------------------------------------------
+  // --- page context ------------------------------------------------------------
+
+  // Suggestions per page, keyed by the router's route pattern (the page key the API and the docs
+  // page cards use too). Only questions the page card can answer belong here.
+  var PAGE_CHIPS = {
+    "/overview": [
+      "What can I do on this page?",
+      "Summarise these numbers",
+      "How many customers do we have?",
+      "Is data still being processed?",
+      "Where does our data come from?"
+    ],
+    "/analytics": [
+      "What can I do on this page?",
+      "Summarise these numbers",
+      "How many events happened?",
+      "Which device do customers use most?",
+      "Why is Conversions empty?"
+    ],
+    "/profiles": [
+      "What can I do on this page?",
+      "How do I find one customer?",
+      'What does "Linked Profiles" mean?',
+      "How do I narrow to VIPs or at-risk customers?"
+    ],
+    "/segments": [
+      "What can I do on this page?",
+      "How do I create a segment?",
+      "Why is Matched Profiles 0?",
+      "Can I write the rules in plain language?"
+    ],
+    "/segments/:id": [
+      "What can I do on this page?",
+      "Why is this segment's audience size what it is?",
+      "Explain this segment's rules",
+      "Why would a segment's audience size be 0?",
+      "What is the Agent Workflow for?"
+    ],
+    "/personas": [
+      "What can I do on this page?",
+      "What is a persona archetype?",
+      "How do I see who matches a persona?",
+      "Why is Avg Confidence 0%?"
+    ],
+    "/personas/:archetypeId/matched-profiles": [
+      "What can I do on this page?",
+      "Summarise this persona",
+      "What are the centroid component scores?",
+      "Why would a persona have no matched profiles?",
+      "How do I change a persona?"
+    ],
+    "/campaigns": [
+      "What can I do on this page?",
+      "What do the campaign statuses mean?",
+      "What does ROAS mean?",
+      "How do I change a campaign?"
+    ],
+    "/campaigns/:id": [
+      "What can I do on this page?",
+      "How is this campaign doing?",
+      "Why can't I approve or reject?",
+      "What do the approval statuses mean?",
+      "Which variant is winning?"
+    ],
+    "/campaigns/:id/edit": [
+      "What can I do on this page?",
+      "How is this campaign doing?",
+      "How do I create a new campaign?",
+      "Why can't I save a campaign?",
+      "What happens to an approved campaign when I edit it?"
+    ],
+    "/datasources": [
+      "What can I do on this page?",
+      "How do I add a website tracking source?",
+      "What do the source types mean?",
+      "Where do I get the tracking code or webhook example?"
+    ],
+    "/attributes": [
+      "What can I do on this page?",
+      "What does the PII flag do?",
+      "What does Segmentable mean?",
+      "What are CIR and Priority?"
+    ],
+    "/agent": [
+      "What can I do on this page?",
+      "How do I add an agent?",
+      "What is the difference between Active and Training?",
+      "Where do I set the run schedule?"
+    ],
+    "/admin/users": [
+      "What can I do on this page?",
+      "How do I add a staff user?",
+      "How do I remove someone's access?",
+      "Can I reset a password here?"
+    ],
+    "/profiles/:id": [
+      "How valuable is this customer?",
+      "What is this customer's churn risk?",
+      "What should I do next with this customer?",
+      "What can I do on this page?",
+      "Where do I change a customer's lifecycle stage or tier?"
+    ]
+  };
+  // Shown as "You are on: <label>"; same names as the page cards in docs/pages/.
+  var PAGE_LABELS = {
+    "/overview": "Overview dashboard",
+    "/analytics": "Analytics dashboard",
+    "/profiles": "Master profiles",
+    "/profiles/:id": "Customer profile",
+    "/segments": "Segments",
+    "/segments/:id": "Segment detail",
+    "/personas": "Personas",
+    "/personas/:archetypeId/matched-profiles": "Persona matched profiles",
+    "/campaigns": "Campaigns",
+    "/campaigns/:id": "Campaign detail",
+    "/campaigns/:id/edit": "Campaign editor",
+    "/datasources": "Data sources",
+    "/attributes": "Attribute catalog",
+    "/agent": "AI agents",
+    "/admin/users": "System users"
+  };
+  var defaultChipsHtml = null;
+
+  // Whitespace-collapse a label (the tab/dialog text can contain nested markup and newlines).
+  function collapse(value) {
+    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+  }
+
+  // The visible selected tab. Its data-assistant-label is the title only (added by the page
+  // templates); until that lands, fall back to the tab's own text.
+  function viewLabel() {
+    var $tab = $('[role="tab"][aria-selected="true"]:visible').first();
+    if (!$tab.length) return "";
+    var label = collapse($tab.attr("data-assistant-label")) || collapse($tab.text());
+    return label.slice(0, 60);
+  }
+
+  // Title of an open dialog: the text of the element(s) it points at with aria-labelledby
+  // (space-separated ids), else its aria-label.
+  function dialogTitle($dialog) {
+    var ids = collapse($dialog.attr("aria-labelledby"));
+    if (!ids) return "";
+    return ids.split(" ").map(function (id) {
+      var el = document.getElementById(id);
+      return el ? $(el).text() : "";
+    }).join(" ");
+  }
+
+  // The dialog in front of the user, if any: visible [role="dialog"] elements that are not the
+  // assistant panel itself. Several visible at once -> the last in DOM order (the topmost).
+  function dialogLabel() {
+    var $dialog = $('[role="dialog"]:visible').filter(function () {
+      return !$(this).closest("#docs-chatbot-root").length;
+    }).last();
+    if (!$dialog.length) return "";
+    var label = collapse(dialogTitle($dialog)) || collapse($dialog.attr("aria-label"));
+    return label.slice(0, 80);
+  }
+
+  // The route's id parameter identifies the object on screen (Level 2 contract). The campaign
+  // editor's id is "new" when creating, which is not an entity. Keys come from the pattern's
+  // ":name" parts (see common/router.js compilePattern/matchPath).
+  function entityIdFor(pattern, params) {
+    if (!params) return "";
+    if (pattern === "/segments/:id") return params.id || "";
+    if (pattern === "/campaigns/:id" || pattern === "/campaigns/:id/edit") {
+      return params.id === "new" ? "" : (params.id || "");
+    }
+    if (pattern === "/personas/:archetypeId/matched-profiles") return params.archetypeId || "";
+    if (pattern === "/profiles/:id") return params.id || "";
+    return "";
+  }
+
+  var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  // The selected period on the two dashboards; the views read the same selects (analytics.js,
+  // overview-view.js). getDataPeriodDays returns an integer (90 when nothing parses), so the
+  // range check is what keeps a stray value out of the request.
+  var PERIOD_SELECTORS = {
+    "/overview": "#overview-period-select",
+    "/analytics": "#analytics-period-select"
+  };
+
+  // Where the user is: the route pattern, the profile id on a profile page, the id of the
+  // object on screen, the selected dashboard period, the visible sub-tab, and the open dialog.
+  // Read when the question is sent, so it is never stale.
+  function pageContext() {
+    var loc = C360.router && C360.router.current && C360.router.current();
+    var pattern = loc && loc.route && loc.route.pattern;
+    if (!pattern) return {};
+    var ctx = { page: pattern };
+    var entityId = entityIdFor(pattern, loc.params);
+    if (entityId && UUID_RE.test(entityId)) ctx.entity_id = entityId;
+    // Only a well-formed id is sent: a malformed one (hand-edited URL) would be a 422 and no answer.
+    if (pattern === "/profiles/:id" && loc.params && UUID_RE.test(loc.params.id || "")) ctx.master_profile_id = loc.params.id;
+    var periodSelector = PERIOD_SELECTORS[pattern];
+    if (periodSelector && C360.config && C360.config.getDataPeriodDays) {
+      var days = C360.config.getDataPeriodDays(periodSelector);
+      if (days >= 1 && days <= 400) ctx.period_days = days;
+    }
+    var view = viewLabel();
+    if (view) ctx.view = view;
+    var dialog = dialogLabel();
+    if (dialog) ctx.dialog = dialog;
+    return ctx;
+  }
+
+  // "Segment detail · Agent Workflow · Create segment": the page, then the part in front of the
+  // user (selected tab, open dialog). Kept short; shown as "You are on: <line>".
+  function contextLine(ctx) {
+    ctx = ctx || pageContext();
+    var parts = [];
+    var base = PAGE_LABELS[ctx.page] || ctx.page;
+    if (base) parts.push(base);
+    if (ctx.view && ctx.view !== base && parts.indexOf(ctx.view) === -1) parts.push(ctx.view);
+    if (ctx.dialog && parts.indexOf(ctx.dialog) === -1) parts.push(ctx.dialog);
+    return parts.join(" · ");
+  }
+
+  // Same page and same object? An answer that arrives after the user has moved on is still shown (it
+  // answers the question above it) but says where it was asked, so it is not mistaken for the new page.
+  function contextKey(ctx) {
+    return [ctx.page || "", ctx.entity_id || "", ctx.master_profile_id || ""].join("|");
+  }
+
+  function renderAskedOn($msg, askedKey, askedLabel) {
+    var moved = contextKey(pageContext()) !== askedKey;
+    $msg.find(".docs-chat-asked").text(moved && askedLabel ? "Asked on: " + askedLabel : "").toggleClass("hidden", !(moved && askedLabel));
+  }
+
+  function renderContext(ctx) {
+    var $label = $("#docs-chat-context");
+    var text = contextLine(ctx);
+    if (!text) {
+      $label.addClass("hidden").empty();
+      return;
+    }
+    $label.removeClass("hidden").text("You are on: " + text);
+  }
+
+  // Swap the greeting's chips for the ones that fit the current page (or restore the generic ones).
+  function renderChips() {
+    var $first = $("#docs-chat-log .docs-chat-suggestion").first();
+    if (!$first.length) return; // the greeting is gone
+    var $box = $first.parent();
+    if (defaultChipsHtml === null) defaultChipsHtml = $box.html();
+    var ctx = pageContext();
+    var chips = PAGE_CHIPS[ctx.page];
+    if (!chips) {
+      $box.html(defaultChipsHtml);
+      $("#docs-chat-context").addClass("hidden").empty();
+      return;
+    }
+    $box.html(chips.map(function (q) {
+      return '<button type="button" class="docs-chat-suggestion" data-q="' + esc(q) + '">' + esc(q) + "</button>";
+    }).join(""));
+    renderContext(ctx);
+  }
+
+  // --- asking ------------------------------------------------------------------
+
+  function setBusy(value) {
+    busy = value;
+    $("#docs-chat-send").prop("disabled", value).toggleClass("opacity-50 cursor-not-allowed", value);
+  }
 
   function ask(question) {
     question = String(question || "").trim();
-    if (!question) return;
+    if (!question || busy) return;
 
-    if (controller) controller.abort(); // supersede any in-flight question
-    controller = ("AbortController" in window) ? new AbortController() : null;
-    var signal = controller ? controller.signal : undefined;
+    var context = pageContext();
+    renderContext(context); // keep the visible "You are on" line in step with what we send
+    var askedKey = contextKey(context);
+    var askedLabel = contextLine(context);
 
+    setBusy(true);
     appendUser(question);
     var $msg = appendAssistant();
     setStatus($msg, "Searching the docs…", true);
 
     // Phase 1: fast retrieval for an immediate source list.
-    C360.config.docsSearch(question, 8, signal)
+    C360.config.docsSearch(question, 8)
       .then(function (res) {
         renderSources($msg, res && res.hits);
-        setStatus($msg, "Generating answer…", true);
       })
-      .catch(function (err) {
-        // Abort must stop the whole flow; other search failures are non-fatal --
-        // we still try /ask, which returns its own sources.
-        if (err && err.name === "AbortError") throw err;
-        setStatus($msg, "Generating answer…", true);
-      })
+      .catch(function () { /* non-fatal: the answer brings its own sources */ })
       // Phase 2: the grounded answer.
       .then(function () {
-        return C360.config.docsAsk(question, signal);
+        setStatus($msg, "Generating answer…", true);
+        return C360.config.assistantAsk(question, context);
       })
       .then(function (res) {
+        setBusy(false);
         setStatus($msg, "", false);
         setAnswer($msg, (res && res.answer) || "I couldn't find an answer in the documentation.");
-        if (res && res.sources && res.sources.length) renderSources($msg, res.sources);
+        // The final list is only the documents the answer used (possibly none, e.g. an answer from
+        // the customer's profile alone), so it replaces the early candidates either way. A refusal or
+        // a clarifying question is shown without sources.
+        if (res && res.found === false) renderSources($msg, []);
+        else if (res && res.sources) renderSources($msg, res.sources);
+        renderBasis($msg, res && res.found !== false ? res.basis : null);
+        renderMissing($msg, res);
+        renderAskedOn($msg, askedKey, askedLabel);
       })
       .catch(function (err) {
-        if (err && err.name === "AbortError") return; // a newer question took over
+        setBusy(false);
         renderError($msg, err);
-      })
-      .then(function () {
-        controller = null;
       });
   }
 
@@ -199,6 +500,7 @@ window.C360 = window.C360 || {};
   }
 
   function open() {
+    renderChips();
     $("#docs-chat-panel").removeClass("hidden");
     $("#docs-chat-launcher").attr("aria-expanded", "true");
     setTimeout(function () { $("#docs-chat-input").trigger("focus"); }, 50);
@@ -216,7 +518,7 @@ window.C360 = window.C360 || {};
   function submitFromInput() {
     var $input = $("#docs-chat-input");
     var question = $input.val();
-    if (!String(question || "").trim()) return;
+    if (busy || !String(question || "").trim()) return; // keep what was typed while an answer is pending
     $input.val("");
     ask(question);
   }
@@ -243,9 +545,27 @@ window.C360 = window.C360 || {};
       ask($(this).data("q"));
     });
 
-    // Esc closes the panel when it's open and focused.
+    // Follow the user from page to page while the panel is open. Deferred so the router's own
+    // hashchange handler (which sets the new route) has run before the context is read.
+    $(window).on("hashchange", function () {
+      if (isOpen()) setTimeout(function () { renderChips(); }, 0);
+    });
+
+    // Esc closes the panel. Bound on the panel first so a keypress inside it stops before the
+    // document-level Escape handlers views use to close their dialogs -- otherwise Esc in the
+    // panel input would close the dialog underneath as well.
+    $("#docs-chat-panel").on("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      close();
+    });
+
+    // Esc elsewhere on the page still closes the panel, but not while the focus is inside a
+    // modal dialog: that dialog owns the keypress, so the panel stays open for the user.
     $(document).on("keydown", function (e) {
-      if (e.key === "Escape" && isOpen()) close();
+      if (e.key !== "Escape" || !isOpen()) return;
+      if ($(e.target).closest('[role="dialog"]').not("#docs-chat-panel").length) return;
+      close();
     });
   }
 
@@ -256,6 +576,11 @@ window.C360 = window.C360 || {};
     close: close,
     toggle: toggle,
     // Exposed for unit testing (static/js/__tests__/docs-chatbot-view.test.js).
-    renderAnswerHtml: renderAnswerHtml
+    renderAnswerHtml: renderAnswerHtml,
+    basisText: basisText,
+    contextKey: contextKey,
+    missingText: missingText,
+    pageContext: pageContext,
+    PAGE_CHIPS: PAGE_CHIPS
   };
 })(window.C360);

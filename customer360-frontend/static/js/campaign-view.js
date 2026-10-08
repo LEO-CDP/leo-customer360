@@ -808,6 +808,18 @@ window.C360 = window.C360 || {};
       .fail(function (xhr) { $("#campaign-details-loading").addClass("hidden"); setCampaignMessage("#campaign-details-error", campaignError(xhr)); });
   }
 
+  function activateCampaignDetailsTab(panel) {
+    $(".campaign-details-tab").each(function () {
+      var selected = $(this).data("panel") === panel;
+      $(this)
+        .attr("aria-selected", selected ? "true" : "false")
+        .toggleClass("border-indigo-600 text-indigo-700", selected)
+        .toggleClass("border-transparent text-slate-500", !selected);
+    });
+    $(".campaign-details-panel").addClass("hidden");
+    $("#campaign-details-panel-" + panel).removeClass("hidden");
+  }
+
   function bindWorkspaceEvents() {
     var $doc = $(document);
     $doc.off(".c360campaignworkspace");
@@ -840,7 +852,7 @@ window.C360 = window.C360 || {};
       renderSegmentSelection(segment);
       closeSegmentPicker();
     });
-    $doc.on("click.c360campaignworkspace", ".campaign-details-tab", function () { var panel = $(this).data("panel"); $(".campaign-details-tab").removeClass("border-indigo-600 text-indigo-700").addClass("border-transparent text-slate-500"); $(this).removeClass("border-transparent text-slate-500").addClass("border-indigo-600 text-indigo-700"); $(".campaign-details-panel").addClass("hidden"); $("#campaign-details-panel-" + panel).removeClass("hidden"); });
+    $doc.on("click.c360campaignworkspace", ".campaign-details-tab", function () { activateCampaignDetailsTab($(this).data("panel")); });
   }
 
   // ---- filter / control bindings ----

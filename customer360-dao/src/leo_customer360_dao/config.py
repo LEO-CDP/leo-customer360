@@ -458,6 +458,21 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AGENT_API_TOKEN", "agent_api_token"),
     )
 
+    # Docs/support RAG service (tools/docs-vector-search) used by /support/ask. Same env names
+    # as the admin frontend's docs proxy.
+    docs_search_url: str = Field(
+        default="http://127.0.0.1:8001",
+        validation_alias=AliasChoices("DOCS_SEARCH_URL", "docs_search_url"),
+    )
+    docs_internal_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("DOCS_INTERNAL_AUTH_SECRET", "DOCS_INTERNAL_SECRET", "docs_internal_secret"),
+    )
+    docs_search_timeout: float = Field(
+        default=120.0,
+        validation_alias=AliasChoices("DOCS_SEARCH_TIMEOUT", "docs_search_timeout"),
+    )
+
     @property
     def database_url(self) -> str:
         return (

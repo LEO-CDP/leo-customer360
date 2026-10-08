@@ -142,6 +142,10 @@ GEMINI_REQUEST_TIMEOUT_SECONDS = float(
     os.getenv("DOCS_GEMINI_REQUEST_TIMEOUT_SECONDS", "120")
 )
 
+# Ask the generator for a structured {status, answer, missing} reply (schema-enforced). Turn
+# off to use the plain-text prompt with the NOT_FOUND_ANSWERS marker instead.
+STRUCTURED_ANSWERS = os.getenv("DOCS_STRUCTURED_ANSWERS", "true").lower() == "true"
+
 if LLM_PROVIDER not in {"openai", "gemini", "local"}:
     raise ValueError(f"Unsupported DOCS_LLM_PROVIDER: {LLM_PROVIDER}")
 if DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS < 1:

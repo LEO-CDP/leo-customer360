@@ -344,6 +344,13 @@ html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
   box-shadow: var(--c360-qb-group-shadow);
 }
 
+/* Keep the assistant panel above modal overlays (Tailwind z-50) so it stays usable while a
+   dialog is open. The panel itself is z-40 inside this root, which now forms a stacking context. */
+#docs-chatbot-root {
+  position: relative;
+  z-index: 60;
+}
+
 /* Docs panel container colors should follow app theme regardless of dark-class strategy. */
 #docs-chat-panel {
   background: var(--c360-card);
@@ -468,6 +475,11 @@ html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
   color: var(--c360-muted);
 }
 
+.docs-chat-context {
+  font-size: 0.75rem;
+  color: var(--c360-muted);
+}
+
 /* three-dot typing indicator */
 .docs-chat-typing { display: inline-flex; gap: 3px; align-items: center; }
 .docs-chat-typing span {
@@ -482,6 +494,7 @@ html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
   40% { opacity: 1; }
 }
 
+.docs-chat-basis { margin-top: 0.5rem; font-size: 0.72rem; color: var(--c360-muted); }
 .docs-chat-sources { margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.3rem; }
 .docs-chat-sources-title {
   font-size: 0.65rem;

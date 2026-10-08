@@ -1,0 +1,436 @@
+"""Unit tests for ``POST /assistant/ask``: page context, audit log, and PII masking."""
+
+import unittest
+import uuid
+from datetime import datetime
+from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import httpx
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from core.database import get_db
+from core.repositories import screen_facts
+from core.repositories.assistant_repository import AssistantRepository, build_profile_facts
+from core.repositories.screen_facts import ScreenFacts
+from core.routers import assistant_api
+from leo_customer360_dao.models.system import SysAuditLog
+
+TENANT = uuid.uuid4()
+USER = uuid.uuid4()
+PROFILE = uuid.uuid4()
+DOCS_ANSWER = {
+    "answer": "This page shows one customer.",
+    "found": True,
+    "status": "answered",
+    "missing": [],
+    "clarify": None,
+    "sources": [{"path": "data-sources/x.md", "title": "X", "heading": "X"}],
+}
+
+
+class MaskQuestionTests(unittest.TestCase):
+    def test_emails_and_phone_numbers_are_masked(self):
+        text = "Why did linh.nguyen@example.com (0901 234 567, +84 901 234 567) churn?"
+        masked = assistant_api.mask_text(text, 500)
+        self.assertNotIn("@", masked)
+        self.assertNotRegex(masked, r"\d{4}")
+        self.assertEqual(masked, "Why did [email] ([phone], [phone]) churn?")
+
+    def test_ordinary_numbers_and_text_survive_and_length_is_capped(self):
+        self.assertEqual(assistant_api.mask_text("Top 5 customers in 2026", 500), "Top 5 customers in 2026")
+        self.assertEqual(len(assistant_api.mask_text("x" * 5000, 500)), 500)
+        self.assertEqual(assistant_api.mask_text("", 500), "")
+
+    def test_dates_and_figures_are_not_taken_for_phone_numbers(self):
+        for text in ("report for 2026-10-06 please", "import 1 000 000 rows", "version 1.2.3.4", "call at 12:30"):
+            self.assertEqual(assistant_api.mask_text(text, 500), text)
+        self.assertEqual(assistant_api.mask_text("id 123456789012 and 028 3822 1234", 500), "id [phone] and [phone]")
+
+
+class SanitizeLabelTests(unittest.TestCase):
+    def test_whitespace_and_control_characters_collapse_to_single_spaces(self):
+        self.assertEqual(assistant_api.sanitize_label("  Agent   Workflow\nOrdered\tprocessing ", 60),
+                         "Agent Workflow Ordered processing")
+        self.assertEqual(assistant_api.sanitize_label("Timeline\n\n  Tab\x00", 60), "Timeline Tab")
+
+    def test_pii_is_masked_and_unicode_is_kept(self):
+        self.assertEqual(assistant_api.sanitize_label("Edit user jane@x.com", 80), "Edit user [email]")
+        self.assertEqual(assistant_api.sanitize_label("Tổng quan", 60), "Tổng quan")
+
+    def test_blank_or_missing_becomes_none(self):
+        for text in (None, "", "   ", "\n\t\x00"):
+            self.assertIsNone(assistant_api.sanitize_label(text, 60), text)
+
+    def test_the_result_is_capped(self):
+        self.assertEqual(assistant_api.sanitize_label("x" * 200, 60), "x" * 60)
+
+
+class _AskHarness(unittest.TestCase):
+    def setUp(self):
+        self.app = FastAPI()
+
+        @self.app.middleware("http")
+        async def _identity(request, call_next):
+            request.state.tenant_id = str(TENANT)
+            request.state.user_id = str(USER)
+            return await call_next(request)
+
+        self.app.include_router(assistant_api.assistant_router)
+        self.db = MagicMock()
+        self.app.dependency_overrides[get_db] = lambda: self.db
+        self.client = TestClient(self.app)
+
+    def _ask(self, docs=None, facts=(), **body):
+        with patch("core.routers.assistant_api.ask_docs", return_value=docs or DOCS_ANSWER) as ask, patch.object(
+            screen_facts.AssistantRepository, "profile_facts", return_value=None if facts is None else list(facts)
+        ) as load:
+            response = self.client.post("/assistant/ask", json={"question": "What is this page?", **body})
+        self.loaded = load
+        return response, ask
+
+
+class AssistantAskTests(_AskHarness):
+    def test_the_page_is_forwarded_and_the_structured_reply_comes_back(self):
+        response, ask = self._ask(page="/profiles/:id", master_profile_id=str(PROFILE))
+
+        self.loaded.assert_called_once_with(TENANT, PROFILE)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual((data["found"], data["status"]), (True, "answered"))
+        self.assertEqual(data["sources"][0]["path"], "data-sources/x.md")
+        ask.assert_called_once_with(
+            "What is this page?", page="/profiles/:id", context=None,
+            context_title="Customer profile on screen", view=None, dialog=None,
+        )
+
+    def test_the_basis_line_is_passed_through_and_absent_when_unknown(self):
+        response, _ = self._ask(docs={**DOCS_ANSWER, "basis": {"page_guide": True, "profile_data": False}})
+        self.assertEqual(
+            response.json()["basis"],
+            {"page_guide": True, "profile_data": False, "screen_data": False, "screen_label": None},
+        )
+
+        response, _ = self._ask()
+        self.assertIsNone(response.json()["basis"])
+
+    def test_every_ask_is_recorded_with_the_masked_question(self):
+        response, _ = self._ask(
+            page="/profiles/:id",
+            master_profile_id=str(PROFILE),
+            view="Timeline",
+            question="Why did linh@example.com churn? call 0901234567",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row = self.db.add.call_args.args[0]
+        self.assertIsInstance(row, SysAuditLog)
+        self.assertEqual((row.tenant_id, row.user_id), (TENANT, USER))
+        self.assertEqual((row.action, row.resource_type, row.resource_id), ("ASK", "leo_assistant", str(PROFILE)))
+        self.assertEqual(row.after_data["question"], "Why did [email] churn? call [phone]")
+        self.assertEqual(row.after_data["page"], "/profiles/:id")
+        self.assertEqual(row.after_data["view"], "Timeline")
+        self.assertEqual(row.after_data["status"], "answered")
+        self.assertEqual(row.after_data["source_paths"], ["data-sources/x.md"])
+        self.assertIsInstance(row.after_data["latency_ms"], int)
+        self.assertNotIn("linh@example.com", str(row.after_data))
+        self.db.commit.assert_called_once()
+
+    def test_without_a_profile_the_log_points_at_the_page(self):
+        self._ask(page="/segments")
+        self.assertEqual(self.db.add.call_args.args[0].resource_id, "/segments")
+
+    def test_a_logging_failure_never_costs_the_user_the_answer(self):
+        self.db.commit.side_effect = RuntimeError("db down")
+
+        response, _ = self._ask(page="/segments")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["answer"], DOCS_ANSWER["answer"])
+        self.db.rollback.assert_called_once()
+
+    def test_docs_service_failure_is_a_502_and_nothing_is_logged(self):
+        with patch("core.routers.support_api.httpx.Client.post", side_effect=httpx.ConnectError("down")):
+            response = self.client.post("/assistant/ask", json={"question": "Q?", "page": "/segments"})
+        self.assertEqual(response.status_code, 502)
+        self.db.add.assert_not_called()
+
+    def test_tenant_and_user_come_from_the_session_not_the_body(self):
+        other = str(uuid.uuid4())
+        self._ask(page="/segments", tenant_id=other, user_id=other)
+        row = self.db.add.call_args.args[0]
+        self.assertEqual((row.tenant_id, row.user_id), (TENANT, USER))
+
+    def test_bad_input_is_rejected(self):
+        for body in (
+            {"question": ""},
+            {"question": "x" * 2001},
+            {"question": "Q?", "page": "https://evil.example/profiles"},
+            {"question": "Q?", "page": "/a b"},
+            {"question": "Q?", "page": "/" + "a" * 130},
+            {"question": "Q?", "view": "x" * 61},
+            {"question": "Q?", "dialog": "x" * 81},
+            {"question": "Q?", "master_profile_id": "not-a-uuid"},
+            {"question": "Q?", "entity_id": "not-a-uuid"},
+            {"question": "Q?", "page": "/overview", "period_days": 0},
+            {"question": "Q?", "page": "/overview", "period_days": 401},
+            {"question": "Q?", "page": "/overview", "period_days": -1},
+        ):
+            with patch("core.routers.assistant_api.ask_docs") as ask:
+                response = self.client.post("/assistant/ask", json=body)
+            self.assertEqual(response.status_code, 422, body)
+            ask.assert_not_called()
+
+    def test_page_is_optional(self):
+        response, ask = self._ask()
+        self.assertEqual(response.status_code, 200)
+        ask.assert_called_once_with(
+            "What is this page?", page=None, context=None, context_title=None, view=None, dialog=None,
+        )
+
+    def test_view_and_dialog_reach_the_docs_service_sanitized(self):
+        response, ask = self._ask(
+            page="/segments/:id",
+            view="  Agent   Workflow\nOrdered\tprocessing steps ",
+            dialog="Edit user jane@x.com",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        ask.assert_called_once_with(
+            "What is this page?",
+            page="/segments/:id",
+            context=None,
+            context_title=None,
+            view="Agent Workflow Ordered processing steps",
+            dialog="Edit user [email]",
+        )
+
+    def test_control_characters_and_newlines_in_labels_are_collapsed(self):
+        _, ask = self._ask(page="/segments", view="Timeline\n\n  Tab\x00", dialog="Add\tData  Source")
+
+        ask.assert_called_once_with(
+            "What is this page?",
+            page="/segments",
+            context=None,
+            context_title=None,
+            view="Timeline Tab",
+            dialog="Add Data Source",
+        )
+
+    def test_an_email_in_a_dialog_title_is_masked_in_the_audit_row(self):
+        response, _ = self._ask(page="/segments", dialog="Edit user jane@x.com")
+
+        self.assertEqual(response.status_code, 200)
+        after = self.db.add.call_args.args[0].after_data
+        self.assertEqual(after["dialog"], "Edit user [email]")
+        self.assertNotIn("jane@x.com", str(after))
+
+    def test_missing_tenant_is_a_400(self):
+        bare = FastAPI()
+        bare.include_router(assistant_api.assistant_router)
+        bare.dependency_overrides[get_db] = lambda: MagicMock()
+        self.assertEqual(TestClient(bare).post("/assistant/ask", json={"question": "Q?"}).status_code, 400)
+
+
+    def test_profile_facts_are_loaded_in_the_callers_tenant_and_sent_with_the_question(self):
+        facts = ["Churn risk tier (churn_risk_tier): high — Bucketized churn risk", "Next best action: call back"]
+        response, ask = self._ask(facts=facts, page="/profiles/:id", master_profile_id=str(PROFILE))
+
+        self.assertEqual(response.status_code, 200)
+        self.loaded.assert_called_once_with(TENANT, PROFILE)
+        ask.assert_called_once_with(
+            "What is this page?", page="/profiles/:id", context=facts,
+            context_title="Customer profile on screen", view=None, dialog=None,
+        )
+        # The log records WHICH fields were sent, never their values, and which loader ran.
+        after = self.db.add.call_args.args[0].after_data
+        self.assertEqual(after["fact_fields"], ["Churn risk tier", "Next best action"])
+        self.assertEqual(after["facts_page"], "/profiles/:id")
+        self.assertNotIn("profile_fields", after)
+        self.assertNotIn("high", str(after["fact_fields"]))
+
+    def test_a_profile_outside_the_tenant_is_a_404_and_the_docs_service_is_never_called(self):
+        response, ask = self._ask(facts=None, page="/profiles/:id", master_profile_id=str(PROFILE))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "Profile not found.")
+        ask.assert_not_called()
+        self.db.add.assert_not_called()
+
+    def test_no_profile_id_means_no_lookup(self):
+        _, ask = self._ask(page="/segments")
+        self.loaded.assert_not_called()
+        ask.assert_called_once_with(
+            "What is this page?", page="/segments", context=None, context_title=None, view=None, dialog=None,
+        )
+
+    def test_entity_id_and_master_profile_id_are_equivalent_on_the_profile_page(self):
+        facts = ["Next best action: call back"]
+        for body in (
+            {"master_profile_id": str(PROFILE)},
+            {"entity_id": str(PROFILE)},
+            {"entity_id": str(PROFILE), "master_profile_id": str(PROFILE)},
+        ):
+            response, ask = self._ask(facts=facts, page="/profiles/:id", **body)
+            self.assertEqual(response.status_code, 200, body)
+            self.loaded.assert_called_once_with(TENANT, PROFILE)
+            ask.assert_called_once_with(
+                "What is this page?", page="/profiles/:id", context=facts,
+                context_title="Customer profile on screen", view=None, dialog=None,
+            )
+
+    def test_conflicting_ids_on_the_profile_page_are_a_422(self):
+        response, ask = self._ask(
+            page="/profiles/:id", entity_id=str(PROFILE), master_profile_id=str(uuid.uuid4())
+        )
+        self.assertEqual(response.status_code, 422)
+        self.loaded.assert_not_called()
+        ask.assert_not_called()
+
+    def test_an_id_page_without_an_id_answers_without_facts(self):
+        response, ask = self._ask(page="/profiles/:id")
+        self.assertEqual(response.status_code, 200)
+        self.loaded.assert_not_called()
+        ask.assert_called_once_with(
+            "What is this page?", page="/profiles/:id", context=None, context_title=None, view=None, dialog=None,
+        )
+
+    def test_a_page_without_a_loader_answers_without_facts(self):
+        response, ask = self._ask(page="/segments", period_days=30)
+        self.assertEqual(response.status_code, 200)
+        self.loaded.assert_not_called()
+        ask.assert_called_once_with(
+            "What is this page?", page="/segments", context=None, context_title=None, view=None, dialog=None,
+        )
+        after = self.db.add.call_args.args[0].after_data
+        self.assertEqual(after["fact_fields"], [])
+        self.assertIsNone(after["facts_page"])
+
+    def test_a_loader_added_for_another_id_page_receives_the_entity_id_and_period(self):
+        seen = {}
+
+        def loader(db, tenant_id, entity_id, period_days):
+            seen.update(tenant_id=tenant_id, entity_id=entity_id, period_days=period_days)
+            return ScreenFacts(
+                title="Segment on screen",
+                label="this segment's details",
+                lines=["Name: X"],
+                fields=["Name"],
+            )
+
+        with patch.dict(screen_facts.SCREEN_FACTS, {"/segments/:id": loader}):
+            response, ask = self._ask(page="/segments/:id", entity_id=str(PROFILE), period_days=30)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(seen, {"tenant_id": TENANT, "entity_id": PROFILE, "period_days": 30})
+        ask.assert_called_once_with(
+            "What is this page?", page="/segments/:id", context=["Name: X"],
+            context_title="Segment on screen", view=None, dialog=None,
+        )
+        self.assertEqual(self.db.add.call_args.args[0].after_data["facts_page"], "/segments/:id")
+
+    def test_a_missing_object_on_another_id_page_is_a_generic_404(self):
+        with patch.dict(screen_facts.SCREEN_FACTS, {"/segments/:id": lambda *args: None}):
+            response, ask = self._ask(page="/segments/:id", entity_id=str(PROFILE))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "Not found.")
+        ask.assert_not_called()
+
+    def test_period_days_at_the_bounds_is_accepted(self):
+        for days in (1, 400):
+            response, _ = self._ask(page="/overview", period_days=days)
+            self.assertEqual(response.status_code, 200, days)
+
+    def test_screen_label_is_present_only_when_facts_were_sent(self):
+        docs = {**DOCS_ANSWER, "basis": {"page_guide": True, "profile_data": True}}
+        facts = ["Next best action: call back"]
+        response, _ = self._ask(docs=docs, facts=facts, page="/profiles/:id", master_profile_id=str(PROFILE))
+        self.assertEqual(
+            response.json()["basis"],
+            {"page_guide": True, "profile_data": True, "screen_data": True,
+             "screen_label": "this customer's profile"},
+        )
+
+        response, _ = self._ask(docs=docs, page="/segments")
+        self.assertIsNone(response.json()["basis"]["screen_label"])
+        # screen_data is copied from profile_data when the docs service did not send it yet
+        self.assertTrue(response.json()["basis"]["screen_data"])
+
+    def test_screen_data_from_the_docs_service_is_passed_through(self):
+        docs = {**DOCS_ANSWER, "basis": {"page_guide": False, "profile_data": False, "screen_data": True}}
+        response, _ = self._ask(docs=docs, page="/overview")
+        self.assertTrue(response.json()["basis"]["screen_data"])
+
+
+class ProfileFactsTests(unittest.TestCase):
+    CATALOG = {
+        "lifecycle_stage": ("Current stage in the journey.", False),
+        "churn_risk_tier": ("Bucketized churn risk (low/medium/high/critical).", False),
+        "churn_probability": ("ML-predicted probability.", False),
+        "segmentation_tags": ("Computed labels.", False),
+        "last_activity_at": ("Most recent activity.", False),
+        "persona_name": ("Non-PII label.", False),
+    }
+
+    def _profile(self, **extra):
+        values = {
+            "lifecycle_stage": "customer", "churn_risk_tier": "high", "churn_probability": Decimal("0.3780"),
+            "segmentation_tags": ["gen_z", "frequent"], "last_activity_at": datetime(2026, 10, 1, 8, 30), "persona_name": None,
+            # everything below must never reach the prompt
+            "full_name": "ZZPII Linh Nguyen", "email": "ZZPII@example.com", "phone_number": "ZZPII0901234567",
+            "address": "ZZPII 1 Le Loi", "attributes": {"note": "ZZPII"}, "communication_preferences": {"x": "ZZPII"},
+            "persona_summary": "ZZPII Linh is a loyal shopper", "external_ids": ["ZZPII"], "date_of_birth": "ZZPII",
+        }
+        values.update(extra)
+        return SimpleNamespace(**values)
+
+    def test_only_allowlisted_non_pii_fields_are_sent_and_catalog_help_is_attached(self):
+        lines = build_profile_facts(self._profile(), None, self.CATALOG)
+
+        self.assertIn("Lifecycle stage (lifecycle_stage): customer — Current stage in the journey.", lines)
+        self.assertIn("Churn probability (churn_probability): 0.38 — ML-predicted probability.", lines)
+        self.assertIn("Segmentation tags (segmentation_tags): gen_z, frequent — Computed labels.", lines)
+        self.assertIn("Last activity (last_activity_at): 2026-10-01 — Most recent activity.", lines)
+        self.assertEqual(len(lines), 6)  # persona_name is None: nothing to say; plus the "no persona yet" line
+        self.assertIn("Persona: not computed yet for this customer, so there is no Next Best Action", lines)
+
+    def test_no_pii_sentinel_ever_appears_in_the_facts(self):
+        persona = SimpleNamespace(next_best_action="Call back", risk_level="medium", full_name="ZZPII", persona_summary="ZZPII")
+        text = "\n".join(build_profile_facts(self._profile(), persona, self.CATALOG))
+        self.assertNotIn("ZZPII", text)
+        self.assertIn("Next best action: Call back", text)
+
+    def test_a_field_marked_pii_or_missing_from_the_catalog_is_not_sent(self):
+        catalog = dict(self.CATALOG, churn_risk_tier=("Churn risk.", True))
+        del catalog["lifecycle_stage"]
+
+        text = "\n".join(build_profile_facts(self._profile(), None, catalog))
+
+        self.assertNotIn("churn_risk_tier", text)
+        self.assertNotIn("lifecycle_stage", text)
+        self.assertIn("churn_probability", text)
+
+    def test_persona_fields_are_formatted_and_empty_ones_skipped(self):
+        persona = SimpleNamespace(
+            customer_value_tier="high", risk_level=None, persona_score=Decimal("71.5"), next_best_action="",
+            match_score=None, confidence_score=Decimal("0.8123"),
+        )
+        lines = build_profile_facts(SimpleNamespace(), persona, {})
+        self.assertEqual(lines, ["Customer value tier: high", "Persona score: 71.50", "Persona confidence: 0.81"])
+
+    def test_the_repository_refuses_a_profile_from_another_tenant(self):
+        session = MagicMock()
+        session.get.return_value = SimpleNamespace(tenant_id=uuid.uuid4(), current_persona_id=None)
+        self.assertIsNone(AssistantRepository(session).profile_facts(TENANT, PROFILE))
+        session.execute.assert_not_called()
+
+        session.get.return_value = None
+        self.assertIsNone(AssistantRepository(session).profile_facts(TENANT, PROFILE))
+
+
+if __name__ == "__main__":
+    unittest.main()
+

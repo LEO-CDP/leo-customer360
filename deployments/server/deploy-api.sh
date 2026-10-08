@@ -184,9 +184,19 @@ echo ">> S3 buckets: master=$MASTER_PROFILE_S3_BUCKET product-import=$PRODUCT_IM
 AGENT_IP="$(srv_ip agent fixed_ip)"
 AGENT_SERVICE_URL=""; [[ -n "$AGENT_IP" ]] && AGENT_SERVICE_URL="http://$AGENT_IP:${AGENT_PORT:-8009}"
 AGENT_API_TOKEN_B64="$(printf %s "${AGENT_API_TOKEN:-}" | base64 | tr -d '\r\n')"
+# Docs/support RAG service (docs-vector-search) for /assistant/ask and /support/ask: private ip of the
+# "docs" box, resolved like the frontend deploy does (an explicit DOCS_SEARCH_URL wins). The secret must
+# equal the docs deploy's DOCS_INTERNAL_AUTH_SECRET, or the docs service refuses the on-screen facts.
+DOCS_SEARCH_URL="${DOCS_SEARCH_URL:-}"
+if [[ -z "$DOCS_SEARCH_URL" ]]; then
+  DOCS_IP="$(srv_ip "${DOCS_SEARCH_SERVER_KEY:-docs}" fixed_ip)"
+  [[ -n "$DOCS_IP" ]] && DOCS_SEARCH_URL="http://$DOCS_IP:${DOCS_SEARCH_PORT:-8001}"
+fi
+if [[ -n "$DOCS_SEARCH_URL" ]]; then echo ">> Docs assistant -> $DOCS_SEARCH_URL"; else echo "::warning::no docs box fixed_ip in $ENV - the API keeps the default DOCS_SEARCH_URL; /assistant/ask returns 502 until the docs box is applied."; fi
+DOCS_INTERNAL_AUTH_SECRET_B64="$(printf %s "${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-leoragbot}}" | base64 | tr -d '\r\n')"
 # ssh flattens argv and silently drops empty args (shifting later fields); pass one
 # base64 newline-joined blob so empties survive, split remotely with mapfile.
-ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" "$KC_TOKEN_EXPIRES_MINUTES" "$PRODUCT_IMPORT_S3_BUCKET" "$CONTENT_IMPORT_S3_BUCKET" | base64 | tr -d '\r\n')"
+ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" "$KC_TOKEN_EXPIRES_MINUTES" "$PRODUCT_IMPORT_S3_BUCKET" "$CONTENT_IMPORT_S3_BUCKET" "$DOCS_SEARCH_URL" "$DOCS_INTERNAL_AUTH_SECRET_B64" | base64 | tr -d '\r\n')"
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ARGV_B64" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 mapfile -t A < <(printf %s "${1:-}" | base64 -d)   # fields in order, empties preserved
@@ -215,6 +225,8 @@ EXPECTED_GIT_HASH="${A[33]:-}"
 KC_TOKEN_EXPIRES_MINUTES="${A[34]:-60}"
 PRODUCT_IMPORT_S3_BUCKET="${A[35]:-c360-product-imports}"
 CONTENT_IMPORT_S3_BUCKET="${A[36]:-c360-content-imports}"
+DOCS_SEARCH_URL="${A[37]:-}"
+DOCS_INTERNAL_AUTH_SECRET="$(printf %s "${A[38]:-}" | base64 -d 2>/dev/null || true)"
 [[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^[0-9]+$ ]] && (( KC_TOKEN_EXPIRES_MINUTES >= 1 && KC_TOKEN_EXPIRES_MINUTES <= 1440 )) || {
   echo "ERROR: received KEYCLOAK_TOKEN_EXPIRES_MINUTES is invalid." >&2
   exit 1
@@ -272,6 +284,9 @@ ENVF
 #     written only when set (must match the agent's AGENT_API_TOKEN). ---
 [[ -n "$AGENT_SERVICE_URL" ]] && echo "AGENT_SERVICE_URL=$AGENT_SERVICE_URL" >> "$env_file"
 [[ -n "$AGENT_API_TOKEN" ]] && echo "AGENT_API_TOKEN=$AGENT_API_TOKEN" >> "$env_file"
+# Docs service for the LEO Assistant / support endpoints; empty URL => keep the DAO default.
+[[ -n "$DOCS_SEARCH_URL" ]] && echo "DOCS_SEARCH_URL=$DOCS_SEARCH_URL" >> "$env_file"
+[[ -n "$DOCS_INTERNAL_AUTH_SECRET" ]] && echo "DOCS_INTERNAL_AUTH_SECRET=$DOCS_INTERNAL_AUTH_SECRET" >> "$env_file"
 if [[ -n "$REDIS_HOST" && -n "$REDIS_PW" ]]; then
   cat >> "$env_file" <<ENVR
 REDIS_HOST=$REDIS_HOST

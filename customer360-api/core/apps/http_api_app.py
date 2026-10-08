@@ -33,11 +33,13 @@ from core.routers.metadata_api import all_metadata_routers
 from core.routers.data_source_api import all_data_source_routers
 from core.routers.ai_agent_api import all_ai_agent_routers
 from core.routers.agent_workflow_api import router as agent_workflow_router
+from core.routers.assistant_api import all_assistant_routers
 
 from core.routers.persona_api import all_persona_routers
 from core.routers.relations_api import all_relations_routers
 from core.routers.reporting_api import router as reporting_router
 from core.routers.segment_api import all_segment_routers
+from core.routers.support_api import all_support_routers
 from core.routers.user_api import all_user_routers
 from core.routers.zalo_api import all_zalo_routers
 
@@ -62,6 +64,8 @@ API_ROUTER_GROUPS = (
     all_metadata_routers,
     all_data_source_routers,
     all_ai_agent_routers,
+    all_support_routers,
+    all_assistant_routers,
     (agent_workflow_router,),
     all_identity_routers,
     all_user_routers,
