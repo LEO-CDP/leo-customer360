@@ -157,6 +157,7 @@ def test_cron_trigger_skips_steps_that_are_not_due():
 def test_execute_ranking_step_persists_results_for_every_segment_profile(
     monkeypatch, recommendation_cache_invalidation
 ):
+    monkeypatch.setattr(runner, "MAX_RANKING_PROFILES_PER_BATCH", 2)
     tenant_id = "11111111-1111-1111-1111-111111111111"
     segment_id = "22222222-2222-2222-2222-222222222222"
     content_id = "33333333-3333-3333-3333-333333333333"
@@ -171,6 +172,11 @@ def test_execute_ranking_step_persists_results_for_every_segment_profile(
             "domain": "retail",
             "segmentation_tags": ["loyal"],
         },
+        {
+            "master_profile_id": "77777777-7777-7777-7777-777777777777",
+            "domain": "retail",
+            "segmentation_tags": ["vip"],
+        },
     ]
     connections = []
 
@@ -179,24 +185,27 @@ def test_execute_ranking_step_persists_results_for_every_segment_profile(
         connections.append(connection)
         return connection
 
-    pipeline_payloads = []
+    pipeline_batches = []
     persisted_rows = []
 
-    def pipeline_executor(payload, run_id):
-        pipeline_payloads.append((payload, run_id))
-        return SimpleNamespace(
-            result={
-                "ranked_items": [
-                    {
-                        "item_id": content_id,
-                        "rank": 1,
-                        "score": 1,
-                        "matched_tags": ["loyal"],
-                        "reason": "segment_tag_overlap",
-                    }
-                ]
-            }
-        )
+    def pipeline_batch_executor(payloads, run_id):
+        pipeline_batches.append((list(payloads), run_id))
+        return [
+            SimpleNamespace(
+                result={
+                    "ranked_items": [
+                        {
+                            "item_id": content_id,
+                            "rank": 1,
+                            "score": 1,
+                            "matched_tags": ["loyal"],
+                            "reason": "segment_tag_overlap",
+                        }
+                    ]
+                }
+            )
+            for _ in payloads
+        ]
 
     monkeypatch.setattr(
         runner,
@@ -205,7 +214,7 @@ def test_execute_ranking_step_persists_results_for_every_segment_profile(
     )
     task = AgentWorkflowMasterTask(
         connection_factory=connection_factory,
-        pipeline_executor=pipeline_executor,
+        pipeline_batch_executor=pipeline_batch_executor,
     )
     summary = WorkflowRunSummary(
         trigger="api",
@@ -230,19 +239,20 @@ def test_execute_ranking_step_persists_results_for_every_segment_profile(
     result = task.execute(summary, run_id="dagster-run-1")
 
     assert result.executed_steps == 1
-    assert result.profile_runs_processed == 2
-    assert result.recommendations_written == 2
+    assert result.profile_runs_processed == len(profiles)
+    assert result.recommendations_written == len(profiles)
     assert result.unsupported_steps == 0
-    assert [payload[0]["input_data"]["segmentation_tags"] for payload in pipeline_payloads] == [
-        ["loyal", "vip"],
-        ["loyal"],
-    ]
-    assert all(payload[1] == "dagster-run-1" for payload in pipeline_payloads)
-    assert [rows[0][2] for rows in persisted_rows] == [
-        profiles[0]["master_profile_id"],
-        profiles[1]["master_profile_id"],
-    ]
-    assert all(rows[0][4] == content_id for rows in persisted_rows)
+    assert [len(batch[0]) for batch in pipeline_batches] == [2, 1]
+    assert [
+        payload["input_data"]["segmentation_tags"]
+        for batch, _ in pipeline_batches
+        for payload in batch
+    ] == [["loyal", "vip"], ["loyal"], ["vip"]]
+    assert all(run_id == "dagster-run-1" for _, run_id in pipeline_batches)
+    assert [
+        row[2] for batch in persisted_rows for row in batch
+    ] == [profile["master_profile_id"] for profile in profiles]
+    assert all(row[4] == content_id for batch in persisted_rows for row in batch)
     assert connections[0].cursor_instance.calls[-1][1] == (segment_id, tenant_id)
     assert connections[1].cursor_instance.calls[-1][1] == (
         tenant_id,

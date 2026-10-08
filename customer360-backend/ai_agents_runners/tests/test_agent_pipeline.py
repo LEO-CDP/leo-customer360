@@ -9,6 +9,7 @@ from ai_agents_runners.agent_pipeline.agent_types.classification import Classifi
 from ai_agents_runners.agent_pipeline.pipelines import (
     PIPELINE_HANDLERS,
     execute_agent_pipeline,
+    execute_agent_pipeline_batch,
 )
 import ai_agents_runners.agent_pipeline.pipelines as pipelines
 
@@ -57,6 +58,25 @@ def test_pipeline_input_rejects_invalid_payload(overrides, message):
         AgentPipelineInput.model_validate(_input(**overrides))
 
 
+def test_pipeline_input_allows_at_most_one_thousand_candidates():
+    candidate_ids = [str(UUID(int=index + 1)) for index in range(1001)]
+    valid = AgentPipelineInput.model_validate(
+        _input(
+            model_type="ranking_recommendation",
+            candidate_content_item_ids=candidate_ids[:1000],
+        )
+    )
+    assert len(valid.candidate_content_item_ids) == 1000
+
+    with pytest.raises(ValidationError, match="at most 1000"):
+        AgentPipelineInput.model_validate(
+            _input(
+                model_type="ranking_recommendation",
+                candidate_content_item_ids=candidate_ids,
+            )
+        )
+
+
 @pytest.mark.parametrize(
     "model_type",
     [model_type for model_type in PIPELINE_HANDLERS if model_type != "ranking_recommendation"],
@@ -90,6 +110,31 @@ def test_pipeline_dispatch_validates_handler_output(monkeypatch):
 
     with pytest.raises(ValidationError, match="label"):
         execute_agent_pipeline(_input(), run_id="dagster-run-1")
+
+
+def test_pipeline_batch_dispatches_and_validates_each_result(monkeypatch):
+    handler = ClassificationPipeline()
+    monkeypatch.setattr(
+        handler,
+        "process",
+        lambda payload: {
+            "label": payload.input_data["label"],
+            "probability": 0.9,
+        },
+    )
+    monkeypatch.setitem(pipelines.PIPELINE_HANDLERS, "classification", handler)
+    payloads = [
+        _input(input_data={"label": "first"}),
+        _input(input_data={"label": "second"}),
+    ]
+
+    outputs = execute_agent_pipeline_batch(payloads, run_id="dagster-run-batch")
+
+    assert [output.result["label"] for output in outputs] == ["first", "second"]
+    assert [output.run_id for output in outputs] == [
+        "dagster-run-batch",
+        "dagster-run-batch",
+    ]
 
 
 @pytest.mark.parametrize(

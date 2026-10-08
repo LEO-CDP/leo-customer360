@@ -13,6 +13,7 @@ from leo_customer360_dao.models.agent_workflow import CdpAgentWorkflow
 from leo_customer360_dao.models.content import CdpContentItem
 from leo_customer360_dao.models.identity import CdpAiAgent
 from leo_customer360_dao.models.segmentation import CdpSegment
+from leo_customer360_dao.schemas.agent_workflow import MAX_CANDIDATE_CONTENT_ITEMS
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,15 @@ class AgentWorkflowRepository:
         protects the actual replace operation.
         """
         steps = list(steps)
+        if any(
+            len(step.get("candidate_content_item_ids") or [])
+            > MAX_CANDIDATE_CONTENT_ITEMS
+            for step in steps
+        ):
+            raise AgentWorkflowValidationError(
+                "A workflow step may reference at most "
+                f"{MAX_CANDIDATE_CONTENT_ITEMS} content items"
+            )
         agent_codes = [step["agent_code"] for step in steps]
         if len(agent_codes) != len(set(agent_codes)):
             raise AgentWorkflowConflictError("An agent may appear only once in a segment workflow")

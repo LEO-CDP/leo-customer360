@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -6,6 +7,7 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
+from ai_agents_runners.agent_pipeline.contracts import AgentPipelineInput
 from ai_agents_runners.agent_pipeline.agent_types.ranking_recommendation import (
     CANDIDATE_DIAGNOSTICS_SQL,
     RANK_CANDIDATE_CONTENT_SQL,
@@ -17,6 +19,7 @@ from ai_agents_runners.agent_pipeline.agent_types.ranking_recommendation import 
 from ai_agents_runners.agent_pipeline.pipelines import (
     PIPELINE_HANDLERS,
     execute_agent_pipeline,
+    execute_agent_pipeline_batch,
 )
 
 TENANT_ID = "11111111-1111-1111-1111-111111111111"
@@ -28,7 +31,7 @@ CONTENT_ITEM_2 = "44444444-4444-4444-4444-444444444444"
 def test_semantic_score_normalizes_cosine_distance_to_unit_interval():
     expression = re.compile(
         r"1\.0 - \(\s*content\.embedding::vector\(__VECTOR_DIMENSIONS__\)"
-        r"\s*<=>\s*criteria\.profile_embedding\s*\)\s*/ 2\.0",
+        r"\s*<=>\s*profile_inputs\.profile_embedding\s*\)\s*/ 2\.0",
         re.DOTALL,
     )
 
@@ -95,8 +98,12 @@ def _candidate(
     score: float,
     matched_tags: list[str],
     published_at: datetime | None,
+    profile_index: int = 0,
+    rank: int = 1,
 ) -> dict[str, Any]:
     return {
+        "profile_index": profile_index,
+        "rank": rank,
         "content_item_id": UUID(content_item_id),
         "item_type": "product",
         "title": f"Product {content_item_id[-1]}",
@@ -117,8 +124,12 @@ def test_ranking_pipeline_scores_and_returns_explicit_candidates_in_order(monkey
     newer = datetime(2026, 10, 5, tzinfo=timezone.utc)
     connection = FakeConnection(
         [
-            _candidate(CONTENT_ITEM_1, score=1, matched_tags=["loyal", "vip"], published_at=newer),
-            _candidate(CONTENT_ITEM_2, score=0.5, matched_tags=["vip"], published_at=newer),
+            _candidate(
+                CONTENT_ITEM_1,
+                score=1,
+                matched_tags=["loyal", "vip"],
+                published_at=newer,
+            ),
         ]
     )
     pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
@@ -157,21 +168,31 @@ def test_ranking_pipeline_scores_and_returns_explicit_candidates_in_order(monkey
     )
     assert "content.tenant_id = criteria.tenant_id" in query
     assert "content.status_code = 1" in query
-    assert "(content.domain = 'all' OR content.domain = criteria.domain)" in query
+    assert "content.domain = 'all' OR content.domain = profile_inputs.domain" in query
     assert "content.content_item_id = ANY(criteria.candidate_ids)" in query
-    assert "ORDER BY score DESC, published_at DESC NULLS LAST" in query
+    assert "PARTITION BY profile_index" in query
+    assert "ORDER BY score DESC, published_at DESC NULLS LAST, content_item_id" in query
+    assert "WHERE rank <= top_k" in query
     assert connection.cursor_instance.params == (
-        ["loyal", "vip"],
-        None,
         "tags",
         0.0,
         1.0,
         "",
         0.0,
         TENANT_ID,
-        "retail",
         [CONTENT_ITEM_1, CONTENT_ITEM_2],
         1,
+        json.dumps(
+            [
+                {
+                    "profile_index": 0,
+                    "domain": "retail",
+                    "segmentation_tags": ["loyal", "vip"],
+                    "profile_embedding": None,
+                }
+            ],
+            separators=(",", ":"),
+        ),
     )
 
 
@@ -186,6 +207,113 @@ def test_empty_candidate_list_returns_empty_without_loading_catalog(monkeypatch)
     output = execute_agent_pipeline(payload, run_id="dagster-run-1")
 
     assert output.result == {"ranked_items": []}
+
+
+def test_batch_ranking_scores_profiles_in_one_query(monkeypatch):
+    newer = datetime(2026, 10, 5, tzinfo=timezone.utc)
+    connection = FakeConnection(
+        [
+            _candidate(
+                CONTENT_ITEM_1,
+                score=1,
+                matched_tags=["loyal"],
+                published_at=newer,
+                profile_index=0,
+            ),
+            _candidate(
+                CONTENT_ITEM_2,
+                score=0.5,
+                matched_tags=["vip"],
+                published_at=None,
+                profile_index=1,
+            ),
+        ]
+    )
+    pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+    first = _input(
+        input_data={
+            "master_profile_id": "55555555-5555-5555-5555-555555555555",
+            "domain": "retail",
+            "segmentation_tags": ["loyal"],
+        }
+    )
+    second = _input(
+        input_data={
+            "master_profile_id": "66666666-6666-6666-6666-666666666666",
+            "domain": "retail",
+            "segmentation_tags": ["vip"],
+        }
+    )
+
+    outputs = execute_agent_pipeline_batch(
+        [first, second],
+        run_id="dagster-run-batch",
+    )
+
+    assert [output.result["ranked_items"][0]["item_id"] for output in outputs] == [
+        CONTENT_ITEM_1,
+        CONTENT_ITEM_2,
+    ]
+    assert [output.result["ranked_items"][0]["rank"] for output in outputs] == [1, 1]
+    assert connection.cursor_instance.query == RANK_CANDIDATE_CONTENT_SQL.replace(
+        "__VECTOR_DIMENSIONS__", "384"
+    )
+    profiles_json = json.loads(connection.cursor_instance.params[-1])
+    assert [profile["profile_index"] for profile in profiles_json] == [0, 1]
+    assert [profile["segmentation_tags"] for profile in profiles_json] == [
+        ["loyal"],
+        ["vip"],
+    ]
+
+
+def test_maximum_sized_ranking_batch_handles_one_thousand_candidates(monkeypatch):
+    candidate_ids = [CONTENT_ITEM_1] + [
+        str(UUID(int=index + 1)) for index in range(999)
+    ]
+    batch_size = 100
+    connection = FakeConnection(
+        [
+            _candidate(
+                CONTENT_ITEM_1,
+                score=0.8,
+                matched_tags=["loyal"],
+                published_at=None,
+                profile_index=profile_index,
+            )
+            for profile_index in range(batch_size)
+        ]
+    )
+    pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+    payloads = [
+        _input(
+            input_data={
+                "master_profile_id": str(UUID(int=10_000 + profile_index)),
+                "domain": "retail",
+                "segmentation_tags": ["loyal"],
+            },
+            candidate_content_item_ids=candidate_ids,
+        )
+        for profile_index in range(batch_size)
+    ]
+
+    outputs = execute_agent_pipeline_batch(payloads, run_id="dagster-run-large-batch")
+
+    assert len(outputs) == batch_size
+    assert len(connection.cursor_instance.params[6]) == 1000
+    assert len(json.loads(connection.cursor_instance.params[-1])) == batch_size
+    assert "ROW_NUMBER() OVER" in connection.cursor_instance.query
+
+
+def test_ranking_pipeline_rejects_profiles_over_batch_limit_without_database_access():
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("batch limit must be checked first")
+    )
+    payload = AgentPipelineInput.model_validate(_input())
+
+    with pytest.raises(ValueError, match="must not exceed 100 profiles"):
+        pipeline.process_batch([payload] * 101)
 
 
 def test_ranking_pipeline_rejects_candidate_not_eligible_for_tenant(monkeypatch):
@@ -338,9 +466,15 @@ def test_hybrid_ranking_uses_pgvector_similarity_and_custom_weights(monkeypatch)
     assert "<=>" in connection.cursor_instance.query
     assert "::vector(768)" in connection.cursor_instance.query
     assert "vector" in connection.cursor_instance.query
-    assert connection.cursor_instance.params[1].startswith("[0.01,0.01")
-    assert connection.cursor_instance.params[2:5] == ("hybrid", 0.8, 0.2)
-    assert connection.cursor_instance.params[-1] == 3
+    assert connection.cursor_instance.params[:4] == (
+        "hybrid",
+        0.8,
+        0.2,
+        "gemini:gemini-embedding-001:768",
+    )
+    assert connection.cursor_instance.params[7] == 3
+    profile_inputs = json.loads(connection.cursor_instance.params[-1])
+    assert profile_inputs[0]["profile_embedding"].startswith("[0.01,0.01")
 
 
 @pytest.mark.parametrize("dimensions", sorted(SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS))

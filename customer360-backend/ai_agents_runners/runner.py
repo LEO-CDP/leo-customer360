@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor, execute_values
 
 from leo_customer360_dao.repositories.content_repository import ContentRepository
+from leo_customer360_dao.schemas.agent_workflow import MAX_CANDIDATE_CONTENT_ITEMS
 
 load_dotenv()
 
@@ -29,6 +30,7 @@ DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
 SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS = frozenset({384, 768})
 SUPPORTED_RECOMMENDATION_EMBEDDING_PROVIDERS = frozenset({"openai", "gemini"})
+MAX_RANKING_PROFILES_PER_BATCH = 100
 CONTENT_EMBEDDING_VERSION = "1"
 SEGMENT_PROFILE_SQL = f"""
     SELECT
@@ -188,6 +190,14 @@ def _execute_agent_pipeline(payload: dict[str, Any], run_id: str) -> Any:
     return execute_agent_pipeline(payload, run_id=run_id)
 
 
+def _execute_agent_pipeline_batch(
+    payloads: Sequence[dict[str, Any]], run_id: str
+) -> Sequence[Any]:
+    from ai_agents_runners.agent_pipeline import execute_agent_pipeline_batch
+
+    return execute_agent_pipeline_batch(payloads, run_id=run_id)
+
+
 def _candidate_content_ids_from_db(value: Any) -> list[str]:
     if value is None:
         return []
@@ -212,10 +222,16 @@ class AgentWorkflowMasterTask:
         connection_factory: Callable[[], Any] = _connect,
         pipeline_executor: Callable[[dict[str, Any], str], Any] | None = None,
         embedding_function: Callable[..., list[list[float]]] | None = None,
+        pipeline_batch_executor: (
+            Callable[[Sequence[dict[str, Any]], str], Sequence[Any]] | None
+        ) = None,
     ) -> None:
         self._connection_factory = connection_factory
         self._pipeline_executor = pipeline_executor or _execute_agent_pipeline
         self._embedding_function = embedding_function
+        self._pipeline_batch_executor = pipeline_batch_executor
+        if self._pipeline_batch_executor is None and pipeline_executor is None:
+            self._pipeline_batch_executor = _execute_agent_pipeline_batch
 
     def run(
         self,
@@ -301,6 +317,11 @@ class AgentWorkflowMasterTask:
                         "Ranking Recommendation agent "
                         f"'{step['agent_code']}' has no selected content items"
                     )
+                if len(step["candidate_content_item_ids"]) > MAX_CANDIDATE_CONTENT_ITEMS:
+                    raise ValueError(
+                        f"Ranking Recommendation agent '{step['agent_code']}' may "
+                        f"select at most {MAX_CANDIDATE_CONTENT_ITEMS} content items"
+                    )
 
             profiles = self._load_segment_profiles(
                 tenant_id=tenant_id,
@@ -337,64 +358,115 @@ class AgentWorkflowMasterTask:
                             raise ValueError(
                                 "configuration.semantic_query must be text of at most 2000 characters"
                             )
-                        profile_query_texts = [
-                            self._profile_query_text(profile, semantic_query)
-                            for profile in profiles
-                        ]
-                        profile_embeddings = self._embed(
-                            profile_query_texts,
-                            task="query",
-                        )
-                        if len(profile_embeddings) != len(profiles):
-                            raise ValueError(
-                                "Embedding provider did not return a query vector per profile"
-                            )
-                    else:
-                        profile_embeddings = [None] * len(profiles)
-
-                    for profile, profile_embedding in zip(
-                        profiles, profile_embeddings, strict=True
+                    for batch_start in range(
+                        0, len(profiles), MAX_RANKING_PROFILES_PER_BATCH
                     ):
-                        payload = {
-                            "tenant_id": tenant_id,
-                            "segment_id": segment_id,
-                            "agent_code": step["agent_code"],
-                            "model_type": step["model_type"],
-                            "input_data": {
-                                "domain": profile["domain"],
-                                "segmentation_tags": profile["segmentation_tags"],
-                                **(
-                                    {
-                                        "profile_embedding": profile_embedding,
-                                        "embedding_model": model_key,
-                                    }
-                                    if profile_embedding is not None
-                                    else {}
-                                ),
-                            },
-                            "configuration": step["configuration"],
-                            "candidate_content_item_ids": step["candidate_content_item_ids"],
-                            "trigger_event": step["trigger_event"],
-                        }
+                        profile_batch = profiles[
+                            batch_start : batch_start + MAX_RANKING_PROFILES_PER_BATCH
+                        ]
+                        if uses_vectors:
+                            profile_query_texts = [
+                                self._profile_query_text(profile, semantic_query)
+                                for profile in profile_batch
+                            ]
+                            profile_embeddings = self._embed(
+                                profile_query_texts,
+                                task="query",
+                            )
+                            if len(profile_embeddings) != len(profile_batch):
+                                raise ValueError(
+                                    "Embedding provider did not return a query vector "
+                                    "per profile"
+                                )
+                        else:
+                            profile_embeddings = [None] * len(profile_batch)
+
+                        payloads = [
+                            {
+                                "tenant_id": tenant_id,
+                                "segment_id": segment_id,
+                                "agent_code": step["agent_code"],
+                                "model_type": step["model_type"],
+                                "input_data": {
+                                    "master_profile_id": str(profile["master_profile_id"]),
+                                    "domain": profile["domain"],
+                                    "segmentation_tags": profile["segmentation_tags"],
+                                    **(
+                                        {
+                                            "profile_embedding": profile_embedding,
+                                            "embedding_model": model_key,
+                                        }
+                                        if profile_embedding is not None
+                                        else {}
+                                    ),
+                                },
+                                "configuration": step["configuration"],
+                                "candidate_content_item_ids": step[
+                                    "candidate_content_item_ids"
+                                ],
+                                "trigger_event": step["trigger_event"],
+                            }
+                            for profile, profile_embedding in zip(
+                                profile_batch, profile_embeddings, strict=True
+                            )
+                        ]
+
                         try:
-                            output = self._pipeline_executor(payload, run_id)
+                            if self._pipeline_batch_executor is not None:
+                                outputs = self._pipeline_batch_executor(
+                                    payloads, run_id
+                                )
+                                if len(outputs) != len(profile_batch):
+                                    raise RuntimeError(
+                                        "Ranking pipeline returned a different number "
+                                        "of results than input profiles"
+                                    )
+                            else:
+                                outputs = []
+                                for profile, payload in zip(
+                                    profile_batch, payloads, strict=True
+                                ):
+                                    try:
+                                        outputs.append(
+                                            self._pipeline_executor(payload, run_id)
+                                        )
+                                    except ValueError as exc:
+                                        raise ValueError(
+                                            f"Recommendation failed for tenant={tenant_id}, "
+                                            f"segment={segment_id}, agent={step['agent_code']}, "
+                                            f"profile={profile['master_profile_id']}: {exc}"
+                                        ) from exc
                         except ValueError as exc:
+                            if self._pipeline_batch_executor is None:
+                                raise
                             raise ValueError(
                                 f"Recommendation failed for tenant={tenant_id}, "
                                 f"segment={segment_id}, agent={step['agent_code']}, "
-                                f"profile={profile['master_profile_id']}: {exc}"
+                                f"profile_batch_start={batch_start}, "
+                                f"profile_batch_size={len(profile_batch)}: {exc}"
                             ) from exc
-                        ranked_items = output.result["ranked_items"]
-                        self._insert_profile_recommendations(
+
+                        profile_rankings = [
+                            (
+                                str(profile["master_profile_id"]),
+                                output.result["ranked_items"],
+                            )
+                            for profile, output in zip(
+                                profile_batch, outputs, strict=True
+                            )
+                        ]
+                        self._insert_profile_recommendations_batch(
                             tenant_id=tenant_id,
                             segment_id=segment_id,
-                            master_profile_id=str(profile["master_profile_id"]),
                             agent_code=step["agent_code"],
                             run_id=run_id,
-                            ranked_items=ranked_items,
+                            profile_rankings=profile_rankings,
                         )
-                        step_profile_count += 1
-                        step_recommendation_count += len(ranked_items)
+                        step_profile_count += len(profile_batch)
+                        step_recommendation_count += sum(
+                            len(ranked_items)
+                            for _, ranked_items in profile_rankings
+                        )
             except Exception as exc:
                 try:
                     self._finish_recommendation_run(
@@ -648,15 +720,14 @@ class AgentWorkflowMasterTask:
                         (tenant_id, segment_id, run_id),
                     )
 
-    def _insert_profile_recommendations(
+    def _insert_profile_recommendations_batch(
         self,
         *,
         tenant_id: str,
         segment_id: str,
-        master_profile_id: str,
         agent_code: str,
         run_id: str,
-        ranked_items: list[dict[str, Any]],
+        profile_rankings: Sequence[tuple[str, list[dict[str, Any]]]],
     ) -> None:
         rows = [
             (
@@ -674,22 +745,25 @@ class AgentWorkflowMasterTask:
                 item["matched_tags"],
                 item["reason"],
             )
+            for master_profile_id, ranked_items in profile_rankings
             for item in ranked_items
         ]
+        if not rows:
+            return
+
         with self._connection_factory() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT set_config('app.tenant_id', %s, true)",
                     (tenant_id,),
                 )
-                if rows:
-                    execute_values(
-                        cursor,
-                        UPSERT_PROFILE_RECOMMENDATIONS_SQL,
-                        rows,
-                        template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        page_size=500,
-                    )
+                execute_values(
+                    cursor,
+                    UPSERT_PROFILE_RECOMMENDATIONS_SQL,
+                    rows,
+                    template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    page_size=500,
+                )
 
     def _load_steps(
         self,

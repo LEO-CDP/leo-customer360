@@ -1,0 +1,13 @@
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "DejaVu Sans", "fontSize": "18px"}, "flowchart": {"nodeSpacing": 24, "rankSpacing": 26, "padding": 14, "curve": "linear"}}}%%
+flowchart TD
+    A["API or cron trigger<br/>tenant, segment, run ID"] --> B["Select active steps<br/>scope, schedule, order"]
+    B --> C["Load eligible profiles<br/>initialize run"]
+    C --> D{"Strategy"}
+    D -->|tags| E["Use profile tags<br/>no embedding required"]
+    D -->|semantic / hybrid| F["Prepare content vectors<br/>embed profile context"]
+    F --> G["Filter and rank candidates<br/>score, threshold, top_k"]
+    E --> G
+    G --> H{"Outcome"}
+    H -->|failure| I["Mark FAILED<br/>remove partial results"]
+    H -->|success| J["Persist ranked items<br/>mark SUCCEEDED, invalidate cache"]
+    J --> K["Recommendation API<br/>Redis, then stored results"]

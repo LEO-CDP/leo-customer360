@@ -1,6 +1,8 @@
 """Tenant-scoped content ranking pipeline and result contract."""
 
+import json
 import math
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, ClassVar, Literal, Mapping, Sequence
 from uuid import UUID
@@ -8,13 +10,20 @@ from uuid import UUID
 from psycopg2.extras import RealDictCursor
 from pydantic import Field, FiniteFloat
 
+from leo_customer360_dao.schemas.agent_workflow import MAX_CANDIDATE_CONTENT_ITEMS
+
 from ...runner import (
     DB_SCHEMA,
+    MAX_RANKING_PROFILES_PER_BATCH,
     SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS,
     SUPPORTED_RECOMMENDATION_EMBEDDING_PROVIDERS,
     _connect,
 )
-from ..contracts import AgentPipelineInput, AgentResultModel, ModelType
+from ..contracts import (
+    AgentPipelineInput,
+    AgentResultModel,
+    ModelType,
+)
 from .base import AgentTypePipeline
 
 DEFAULT_RESULT_LIMIT = 8
@@ -42,20 +51,31 @@ CANDIDATE_DIAGNOSTICS_SQL = f"""
 RANK_CANDIDATE_CONTENT_SQL = f"""
     WITH criteria AS (
         SELECT
-            %s::text[] AS profile_tags,
-            %s::vector(__VECTOR_DIMENSIONS__) AS profile_embedding,
             %s::text AS strategy,
             %s::double precision AS semantic_weight,
             %s::double precision AS tag_weight,
             %s::text AS embedding_model,
             %s::double precision AS minimum_score,
             %s::uuid AS tenant_id,
-            %s::text AS domain,
             %s::uuid[] AS candidate_ids,
             %s::integer AS top_k
     ),
+    profile_inputs AS (
+        SELECT
+            profile_index,
+            domain,
+            COALESCE(segmentation_tags, ARRAY[]::text[]) AS profile_tags,
+            profile_embedding::vector(__VECTOR_DIMENSIONS__) AS profile_embedding
+        FROM jsonb_to_recordset(%s::jsonb) AS profile_input(
+            profile_index integer,
+            domain text,
+            segmentation_tags text[],
+            profile_embedding text
+        )
+    ),
     candidate_scores AS (
         SELECT
+            profile_inputs.profile_index,
             content.content_item_id,
             content.item_type,
             content.title,
@@ -66,9 +86,9 @@ RANK_CANDIDATE_CONTENT_SQL = f"""
             content.published_at,
             overlap.matched_tags,
             CASE
-                WHEN cardinality(criteria.profile_tags) = 0 THEN 0.0
+                WHEN cardinality(profile_inputs.profile_tags) = 0 THEN 0.0
                 ELSE cardinality(overlap.matched_tags)::double precision
-                    / cardinality(criteria.profile_tags)
+                    / cardinality(profile_inputs.profile_tags)
             END AS tag_score,
             CASE
                 WHEN criteria.strategy = 'tags' THEN 0.0
@@ -77,26 +97,28 @@ RANK_CANDIDATE_CONTENT_SQL = f"""
                         1.0,
                         1.0 - (
                             content.embedding::vector(__VECTOR_DIMENSIONS__)
-                            <=> criteria.profile_embedding
+                            <=> profile_inputs.profile_embedding
                         ) / 2.0
                     )
                 )
             END AS semantic_score,
+            profile_inputs.profile_tags,
             criteria.*
         FROM {DB_SCHEMA}.cdp_content_items AS content
         CROSS JOIN criteria
+        JOIN profile_inputs
+          ON content.domain = 'all' OR content.domain = profile_inputs.domain
         CROSS JOIN LATERAL (
             SELECT COALESCE(array_agg(tag ORDER BY tag), ARRAY[]::text[]) AS matched_tags
             FROM (
                 SELECT DISTINCT candidate_tag AS tag
                 FROM unnest(COALESCE(content.segment_tags, ARRAY[]::text[]))
                     AS candidate_tags(candidate_tag)
-                WHERE candidate_tag = ANY(criteria.profile_tags)
+                WHERE candidate_tag = ANY(profile_inputs.profile_tags)
             ) AS matching_tags
         ) AS overlap
         WHERE content.tenant_id = criteria.tenant_id
           AND content.status_code = 1
-          AND (content.domain = 'all' OR content.domain = criteria.domain)
           AND content.content_item_id = ANY(criteria.candidate_ids)
           AND (
                 criteria.strategy = 'tags'
@@ -123,8 +145,19 @@ RANK_CANDIDATE_CONTENT_SQL = f"""
                     END
             END AS score
         FROM candidate_scores
+    ),
+    ranked AS (
+        SELECT
+            scored.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY profile_index
+                ORDER BY score DESC, published_at DESC NULLS LAST, content_item_id
+            ) AS rank
+        FROM scored
+        WHERE score >= minimum_score
     )
     SELECT
+        profile_index,
         content_item_id,
         item_type,
         title,
@@ -136,12 +169,33 @@ RANK_CANDIDATE_CONTENT_SQL = f"""
         matched_tags,
         tag_score,
         semantic_score,
-        score
-    FROM scored
-    WHERE score >= minimum_score
-    ORDER BY score DESC, published_at DESC NULLS LAST, content_item_id
-    LIMIT (SELECT top_k FROM criteria)
+        score,
+        rank
+    FROM ranked
+    WHERE rank <= top_k
+    ORDER BY profile_index, rank
 """
+
+
+@dataclass(frozen=True)
+class _ProfileRankingInput:
+    profile_index: int
+    domain: str
+    segmentation_tags: list[str]
+    profile_embedding: list[float] | None
+    embedding_model: str
+    profile_id: str | None
+
+
+@dataclass(frozen=True)
+class _RankingSettings:
+    strategy: Literal["tags", "semantic", "hybrid"]
+    top_k: int
+    semantic_weight: float
+    tag_weight: float
+    minimum_score: float
+    embedding_model: str
+    dimensions: int
 
 
 class RankedContentItem(AgentResultModel):
@@ -174,56 +228,182 @@ class RankingRecommendationPipeline(AgentTypePipeline):
         self._connection_factory = connection_factory
 
     def process(self, payload: AgentPipelineInput) -> dict:
-        candidate_ids = payload.candidate_content_item_ids
-        if not candidate_ids:
-            return {"ranked_items": []}
+        """Rank the selected candidates for a single profile."""
+        return self.process_batch([payload])[0]
 
-        domain = payload.input_data.get("domain")
+    def process_batch(
+        self, payloads: Sequence[AgentPipelineInput]
+    ) -> list[dict[str, Any]]:
+        """Rank a shared candidate set for a bounded batch of profiles."""
+        if not payloads:
+            return []
+        if len(payloads) > MAX_RANKING_PROFILES_PER_BATCH:
+            raise ValueError(
+                "Ranking batches must not exceed "
+                f"{MAX_RANKING_PROFILES_PER_BATCH} profiles"
+            )
+
+        first = payloads[0]
+        candidate_ids = first.candidate_content_item_ids
+        if len(candidate_ids) > MAX_CANDIDATE_CONTENT_ITEMS:
+            raise ValueError(
+                "ranking_recommendation candidate_content_item_ids must not exceed "
+                f"{MAX_CANDIDATE_CONTENT_ITEMS}"
+            )
+
+        for payload in payloads:
+            if payload.model_type != self.model_type:
+                raise ValueError(
+                    f"{self.__class__.__name__} cannot handle {payload.model_type}"
+                )
+            if (
+                payload.tenant_id != first.tenant_id
+                or payload.segment_id != first.segment_id
+                or payload.candidate_content_item_ids != candidate_ids
+                or payload.configuration != first.configuration
+            ):
+                raise ValueError(
+                    "Ranking batches must share tenant, segment, configuration, "
+                    "and candidate content IDs"
+                )
+        if not candidate_ids:
+            return [{"ranked_items": []} for _ in payloads]
+
+        strategy, top_k, semantic_weight, tag_weight, minimum_score = (
+            self._ranking_options(first.configuration)
+        )
+        profiles = []
+        for index, payload in enumerate(payloads):
+            try:
+                profiles.append(
+                    self._profile_input(index, payload.input_data, strategy)
+                )
+            except ValueError as exc:
+                profile_id = payload.input_data.get("master_profile_id")
+                profile_context = (
+                    f"profile={profile_id}, " if profile_id is not None else ""
+                )
+                raise ValueError(f"{profile_context}{exc}") from exc
+        embedding_models = {profile.embedding_model for profile in profiles}
+        if len(embedding_models) != 1:
+            raise ValueError("Ranking batches must use one embedding model")
+        embedding_model = embedding_models.pop()
+        dimensions = (
+            len(profiles[0].profile_embedding)
+            if profiles[0].profile_embedding is not None
+            else min(SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS)
+        )
+        settings = _RankingSettings(
+            strategy=strategy,
+            top_k=top_k,
+            semantic_weight=semantic_weight,
+            tag_weight=tag_weight,
+            minimum_score=minimum_score,
+            embedding_model=embedding_model,
+            dimensions=dimensions,
+        )
+
+        rows = self._load_candidates(
+            tenant_id=first.tenant_id,
+            candidate_ids=candidate_ids,
+            profiles=profiles,
+            settings=settings,
+        )
+        ranked_by_profile: list[list[dict[str, Any]]] = [[] for _ in profiles]
+        for row in rows:
+            profile_index = row["profile_index"]
+            if (
+                isinstance(profile_index, bool)
+                or not isinstance(profile_index, int)
+                or not 0 <= profile_index < len(profiles)
+            ):
+                raise RuntimeError(
+                    "Ranking query returned an invalid profile_index"
+                )
+            ranked_by_profile[profile_index].append(
+                self._serialize_candidate(row, int(row["rank"]))
+            )
+
+        for profile, ranked_items in zip(profiles, ranked_by_profile, strict=True):
+            if not ranked_items:
+                self._raise_no_candidates(
+                    tenant_id=first.tenant_id,
+                    candidate_ids=candidate_ids,
+                    profile=profile,
+                    settings=settings,
+                )
+
+        return [{"ranked_items": items} for items in ranked_by_profile]
+
+    @staticmethod
+    def _ranking_options(
+        configuration: dict[str, Any],
+    ) -> tuple[Literal["tags", "semantic", "hybrid"], int, float, float, float]:
+        strategy_value = configuration.get("strategy", "tags")
+        if strategy_value == "tags":
+            strategy: Literal["tags", "semantic", "hybrid"] = "tags"
+        elif strategy_value == "semantic":
+            strategy = "semantic"
+        elif strategy_value == "hybrid":
+            strategy = "hybrid"
+        else:
+            raise ValueError("configuration.strategy must be tags, semantic, or hybrid")
+
+        top_k = configuration.get(
+            "top_k",
+            configuration.get("limit", DEFAULT_RESULT_LIMIT),
+        )
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 1:
+            raise ValueError(
+                "ranking_recommendation configuration.top_k must be a positive integer"
+            )
+        if top_k > 100:
+            raise ValueError(
+                "ranking_recommendation configuration.top_k must not exceed 100"
+            )
+
+        semantic_weight = _weight(configuration, "semantic_weight", 0.7)
+        tag_weight = _weight(configuration, "tag_weight", 0.3)
+        if strategy == "hybrid":
+            if semantic_weight + tag_weight <= 0:
+                raise ValueError(
+                    "hybrid semantic_weight and tag_weight must sum to more than zero"
+                )
+        elif strategy == "semantic":
+            semantic_weight, tag_weight = 1.0, 0.0
+        else:
+            semantic_weight, tag_weight = 0.0, 1.0
+
+        minimum_score = _finite_number(configuration.get("minimum_score", 0.0))
+        if minimum_score is None or not 0 <= minimum_score <= 1:
+            raise ValueError("configuration.minimum_score must be between 0 and 1")
+
+        return strategy, top_k, semantic_weight, tag_weight, minimum_score
+
+    @staticmethod
+    def _profile_input(
+        profile_index: int,
+        input_data: dict[str, Any],
+        strategy: Literal["tags", "semantic", "hybrid"],
+    ) -> _ProfileRankingInput:
+        domain = input_data.get("domain")
         if not isinstance(domain, str) or not domain.strip():
             raise ValueError(
                 "ranking_recommendation input_data.domain must be a non-blank string"
             )
 
-        segmentation_tags = payload.input_data.get("segmentation_tags", [])
+        segmentation_tags = input_data.get("segmentation_tags", [])
         if not isinstance(segmentation_tags, list) or any(
-            not isinstance(tag, str) or not tag.strip() for tag in segmentation_tags
+            not isinstance(tag, str) or not tag.strip()
+            for tag in segmentation_tags
         ):
             raise ValueError(
                 "ranking_recommendation input_data.segmentation_tags must be a list "
                 "of non-blank strings"
             )
 
-        strategy = payload.configuration.get("strategy", "tags")
-        if not isinstance(strategy, str) or strategy not in {
-            "tags",
-            "semantic",
-            "hybrid",
-        }:
-            raise ValueError("configuration.strategy must be tags, semantic, or hybrid")
-
-        limit = payload.configuration.get(
-            "top_k",
-            payload.configuration.get("limit", DEFAULT_RESULT_LIMIT),
-        )
-        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-            raise ValueError(
-                "ranking_recommendation configuration.top_k must be a positive integer"
-            )
-        if limit > 100:
-            raise ValueError("ranking_recommendation configuration.top_k must not exceed 100")
-
-        semantic_weight = _weight(payload.configuration, "semantic_weight", 0.7)
-        tag_weight = _weight(payload.configuration, "tag_weight", 0.3)
-        if strategy == "hybrid" and semantic_weight + tag_weight <= 0:
-            raise ValueError("hybrid semantic_weight and tag_weight must sum to more than zero")
-        minimum_score = _finite_number(
-            payload.configuration.get("minimum_score", 0.0)
-        )
-        if minimum_score is None or not 0 <= minimum_score <= 1:
-            raise ValueError("configuration.minimum_score must be between 0 and 1")
-
-        profile_embedding = payload.input_data.get("profile_embedding")
-        model_key = payload.input_data.get("embedding_model")
+        profile_embedding = input_data.get("profile_embedding")
+        model_key = input_data.get("embedding_model")
         if strategy in {"semantic", "hybrid"}:
             if not isinstance(profile_embedding, list) or not profile_embedding:
                 raise ValueError(
@@ -233,13 +413,18 @@ class RankingRecommendationPipeline(AgentTypePipeline):
                 raise ValueError(
                     "input_data.profile_embedding must have 384 or 768 dimensions"
                 )
-            if any(
-                _finite_number(value) is None
-                for value in profile_embedding
-            ):
-                raise ValueError("input_data.profile_embedding must contain finite numbers")
+            finite_embedding = []
+            for value in profile_embedding:
+                finite_value = _finite_number(value)
+                if finite_value is None:
+                    raise ValueError(
+                        "input_data.profile_embedding must contain finite numbers"
+                    )
+                finite_embedding.append(finite_value)
             if not isinstance(model_key, str) or not model_key.strip():
-                raise ValueError("semantic recommendation requires input_data.embedding_model")
+                raise ValueError(
+                    "semantic recommendation requires input_data.embedding_model"
+                )
             provider = model_key.partition(":")[0]
             if provider not in SUPPORTED_RECOMMENDATION_EMBEDDING_PROVIDERS:
                 raise ValueError(
@@ -257,70 +442,60 @@ class RankingRecommendationPipeline(AgentTypePipeline):
                     "input_data.profile_embedding dimension does not match "
                     "input_data.embedding_model"
                 )
+            validated_embedding = finite_embedding
+            validated_model_key = model_key
         else:
-            profile_embedding = None
-            model_key = ""
+            validated_embedding = None
+            validated_model_key = ""
 
-        if strategy == "semantic":
-            semantic_weight, tag_weight = 1.0, 0.0
-        elif strategy == "tags":
-            semantic_weight, tag_weight = 0.0, 1.0
-
-        rows = self._load_candidates(
-            tenant_id=payload.tenant_id,
+        profile_id = input_data.get("master_profile_id")
+        return _ProfileRankingInput(
+            profile_index=profile_index,
             domain=domain.strip(),
             segmentation_tags=segmentation_tags,
-            candidate_ids=candidate_ids,
-            profile_embedding=profile_embedding,
-            strategy=strategy,
-            semantic_weight=semantic_weight,
-            tag_weight=tag_weight,
-            embedding_model=model_key,
-            minimum_score=float(minimum_score),
-            top_k=limit,
+            profile_embedding=validated_embedding,
+            embedding_model=validated_model_key,
+            profile_id=str(profile_id) if profile_id is not None else None,
         )
-        return {
-            "ranked_items": [
-                self._serialize_candidate(row, rank)
-                for rank, row in enumerate(rows[:limit], start=1)
-            ]
-        }
 
     def _load_candidates(
         self,
         *,
         tenant_id: UUID,
-        domain: str,
-        segmentation_tags: Sequence[str],
         candidate_ids: Sequence[UUID],
-        profile_embedding: list[float] | None,
-        strategy: str,
-        semantic_weight: float,
-        tag_weight: float,
-        embedding_model: str,
-        minimum_score: float,
-        top_k: int,
+        profiles: Sequence[_ProfileRankingInput],
+        settings: _RankingSettings,
     ) -> list[Mapping[str, Any]]:
-        dimensions = (
-            len(profile_embedding)
-            if profile_embedding is not None
-            else min(SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS)
+        profile_inputs = json.dumps(
+            [
+                {
+                    "profile_index": profile.profile_index,
+                    "domain": profile.domain,
+                    "segmentation_tags": profile.segmentation_tags,
+                    "profile_embedding": (
+                        _vector_literal(profile.profile_embedding)
+                        if profile.profile_embedding is not None
+                        else None
+                    ),
+                }
+                for profile in profiles
+            ],
+            separators=(",", ":"),
+            allow_nan=False,
         )
         params = (
-            list(segmentation_tags),
-            _vector_literal(profile_embedding) if profile_embedding is not None else None,
-            strategy,
-            semantic_weight,
-            tag_weight,
-            embedding_model,
-            minimum_score,
+            settings.strategy,
+            settings.semantic_weight,
+            settings.tag_weight,
+            settings.embedding_model,
+            settings.minimum_score,
             str(tenant_id),
-            domain,
             [str(candidate_id) for candidate_id in candidate_ids],
-            top_k,
+            settings.top_k,
+            profile_inputs,
         )
         query = RANK_CANDIDATE_CONTENT_SQL.replace(
-            "__VECTOR_DIMENSIONS__", str(dimensions)
+            "__VECTOR_DIMENSIONS__", str(settings.dimensions)
         )
         with self._connection_factory() as connection:
             with connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -329,41 +504,58 @@ class RankingRecommendationPipeline(AgentTypePipeline):
                     (str(tenant_id),),
                 )
                 cursor.execute(query, params)
-                rows = list(cursor.fetchall())
-                if rows:
-                    return rows
+                return list(cursor.fetchall())
 
+    def _raise_no_candidates(
+        self,
+        *,
+        tenant_id: UUID,
+        candidate_ids: Sequence[UUID],
+        profile: _ProfileRankingInput,
+        settings: _RankingSettings,
+    ) -> None:
+        with self._connection_factory() as connection:
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)",
+                    (str(tenant_id),),
+                )
                 cursor.execute(
                     CANDIDATE_DIAGNOSTICS_SQL,
                     (
-                        domain,
-                        domain,
-                        strategy,
-                        dimensions,
-                        embedding_model,
+                        profile.domain,
+                        profile.domain,
+                        settings.strategy,
+                        settings.dimensions,
+                        settings.embedding_model,
                         str(tenant_id),
                         [str(candidate_id) for candidate_id in candidate_ids],
                     ),
                 )
                 counts = cursor.fetchone()
-                if counts["tenant_candidates"] == 0:
-                    reason = "selected candidates are unavailable for this tenant"
-                elif counts["active_candidates"] == 0:
-                    reason = "selected candidates are inactive"
-                elif counts["domain_candidates"] == 0:
-                    reason = "selected candidates do not match the profile domain"
-                elif counts["rankable_candidates"] == 0:
-                    reason = "selected candidates lack embeddings for the configured model"
-                else:
-                    reason = "no candidate score meets minimum_score"
-                raise ValueError(
-                    f"Recommendation ranking failed: {reason}; "
-                    f"domain={domain}, strategy={strategy}, minimum_score={minimum_score}, "
-                    f"selected={len(candidate_ids)}, tenant={counts['tenant_candidates']}, "
-                    f"active={counts['active_candidates']}, "
-                    f"domain_matching={counts['domain_candidates']}, "
-                    f"rankable={counts['rankable_candidates']}"
-                )
+        if counts is None:
+            raise RuntimeError("Recommendation diagnostics returned no row")
+
+        if counts["tenant_candidates"] == 0:
+            reason = "selected candidates are unavailable for this tenant"
+        elif counts["active_candidates"] == 0:
+            reason = "selected candidates are inactive"
+        elif counts["domain_candidates"] == 0:
+            reason = "selected candidates do not match the profile domain"
+        elif counts["rankable_candidates"] == 0:
+            reason = "selected candidates lack embeddings for the configured model"
+        else:
+            reason = "no candidate score meets minimum_score"
+        profile_context = f"profile={profile.profile_id}, " if profile.profile_id else ""
+        raise ValueError(
+            f"Recommendation ranking failed: {reason}; "
+            f"{profile_context}domain={profile.domain}, "
+            f"strategy={settings.strategy}, minimum_score={settings.minimum_score}, "
+            f"selected={len(candidate_ids)}, tenant={counts['tenant_candidates']}, "
+            f"active={counts['active_candidates']}, "
+            f"domain_matching={counts['domain_candidates']}, "
+            f"rankable={counts['rankable_candidates']}"
+        )
 
     @staticmethod
     def _serialize_candidate(row: Mapping[str, Any], rank: int) -> dict[str, Any]:

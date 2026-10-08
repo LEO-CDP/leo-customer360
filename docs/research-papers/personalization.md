@@ -122,16 +122,18 @@ The sample below is synthetic and adapted from the unit-test fixtures.
    $\operatorname{clamp}(1-\operatorname{distance}/2,0,1)$. The hybrid strategy
    combines semantic and tag scores using the configured weights normalized by
    their sum. A configured `minimum_score` filters results; remaining rows are
-   sorted by score, publication time, and content ID before `top_k` is applied.
-   These formulas and filters are in
+   sorted by score, publication time, and content ID before `top_k` is applied
+   independently for each profile. The runner ranks bounded profile batches
+   through one set-based query per batch. These formulas and filters are in
    [ranking_recommendation.py](./agent_pipeline/agent_types/ranking_recommendation.py).
-4. **Persistence.** The runner writes a run record and per-profile recommendation
-   rows. The migration constrains run status, score ranges, ranking strategy,
-   and tenant-consistent references to the run, profile, and content item. On
-   failure, the runner marks the run failed and removes its partial
-   recommendations; on success, it marks the run successful and invalidates
-   the tenant's recommendation cache. The read API serves persisted successful
-   results rather than performing ranking during the request.
+4. **Persistence.** The runner writes a run record and bulk-upserts per-profile
+   recommendation rows for each profile batch. The migration constrains run
+   status, score ranges, ranking strategy, and tenant-consistent references to
+   the run, profile, and content item. On failure, the runner marks the run
+   failed and removes its partial recommendations; on success, it marks the
+   run successful and invalidates the tenant's recommendation cache. The read
+   API serves persisted successful results rather than performing ranking
+   during the request.
 
 ### 1.2.2 Worked Synthetic Example
 
@@ -230,22 +232,23 @@ The orchestration is implemented in [dagster_defs.py](./dagster_defs.py) and
    For `semantic` and `hybrid`, the runner checks that each selected candidate
    belongs to the tenant and is active. It generates or refreshes a canonical
    content vector when the source text, model, contract version, or vector
-   dimensions have changed. It also embeds a profile query built from the
-   profile's domain, segment tags, and optional `semantic_query`; it does not
-   include personally identifiable information (PII). The configured
-   embedding provider must produce 384- or 768-dimensional vectors.
-5. **Rank content for each profile.** The runner passes the tenant, segment,
-   agent, configuration, selected candidate IDs, profile domain and tags, and
-   optional query vector to `execute_agent_pipeline`. The pipeline validates
-   the payload and dispatches by `model_type` to
-   `RankingRecommendationPipeline`. The handler rechecks tenant ownership,
-   active status, selected IDs, and domain (`all` or the profile's domain).
-   It scores candidates using tag overlap, semantic similarity, or a weighted
-   combination; applies `minimum_score`; orders results consistently; and
-   returns no more than `top_k` items.
+   dimensions have changed. Profile queries use the profile's domain, segment
+   tags, and optional `semantic_query`; they do not include personally
+   identifiable information (PII). The runner embeds at most 100 profile
+   queries per batch. The configured embedding provider must produce 384- or
+   768-dimensional vectors.
+5. **Rank content in batches.** The runner sends up to 100 profiles, their
+   domains, tags and optional query vectors, plus the step's shared selected
+   candidate IDs and configuration to `execute_agent_pipeline_batch`. The
+   registry dispatches `RankingRecommendationPipeline.process_batch`, which
+   validates shared inputs once and scores each profile independently in one
+   set-based query. The query rechecks tenant ownership, active status,
+   selected IDs, and domain (`all` or the profile's domain), applies
+   `minimum_score`, and returns at most `top_k` items per profile in the
+   existing deterministic order.
 6. **Persist the outcome.** The runner creates or resets a `RUNNING` row in
    [cdp_profile_recommendation_runs](../../customer360-database/database-schema.sql#L3864),
-   then upserts each profile's ranked items into
+   then bulk-upserts each batch of per-profile ranked items into
    [cdp_profile_recommendations](../../customer360-database/database-schema.sql#L3882).
    On success, it marks the run `SUCCEEDED` and invalidates the tenant's
    recommendation cache. On failure, it marks the run `FAILED`, removes partial
@@ -258,21 +261,7 @@ The orchestration is implemented in [dagster_defs.py](./dagster_defs.py) and
    cache.
 
 ## 2.1 Runtime Flow
-```mermaid
-%%{init: {"flowchart": {"nodeSpacing": 10, "rankSpacing": 14, "padding": 4}, "themeVariables": {"fontSize": "10px"}}}%%
-flowchart TD
-    A["API or cron trigger<br/>tenant, segment, run ID"] --> B["Select active steps<br/>scope, schedule, order"]
-    B --> C["Load eligible profiles<br/>initialize run"]
-    C --> D{"Strategy"}
-    D -->|tags| E["Use profile tags<br/>no embedding required"]
-    D -->|semantic / hybrid| F["Prepare content vectors<br/>embed profile context"]
-    F --> G["Filter and rank candidates<br/>score, threshold, top_k"]
-    E --> G
-    G --> H{"Outcome"}
-    H -->|failure| I["Mark FAILED<br/>remove partial results"]
-    H -->|success| J["Persist ranked items<br/>mark SUCCEEDED, invalidate cache"]
-    J --> K["Recommendation API<br/>Redis, then stored results"]
-```
+![Runtime flow for personalization recommendations](assets/personalization-runtime-flow.png){height=85%}
 
 The following sections describe workflow configuration, ranking behavior,
 persistence, and the recommendation read API. Each table name links to its
@@ -287,25 +276,7 @@ execution path. The segment detail view and workflow editor are implemented in
 and
 [ai-agent-workflow.js](../../customer360-frontend/static/js/ai-agent-workflow.js).
 
-```mermaid
-%%{init: {"flowchart": {"nodeSpacing": 10, "rankSpacing": 14, "padding": 4}, "themeVariables": {"fontSize": "10px"}}}%%
-flowchart TD
-    A["Select a segment"] --> B["Open Agent Workflow<br/>add an active ranking agent"]
-    B --> C["Set order and strategy<br/>select active content"]
-    C --> D{"Action"}
-    D -->|Save| E["PUT workflow<br/>save and submit run"]
-    D -->|Rerun| F["POST workflow/run"]
-    E --> G["customer360-api<br/>validate and submit through Dagster GraphQL"]
-    F --> G
-    G --> H["Dagster master job<br/>ai_agents_master_job"]
-    H --> I["Select segment profiles<br/>prepare embeddings if needed"]
-    I --> J["Validate and dispatch<br/>execute_agent_pipeline"]
-    J --> K["RankingRecommendationPipeline.process<br/>filter, score, top_k"]
-    K --> L{"Outcome"}
-    L -->|success| M["Persist results<br/>SUCCEEDED; invalidate cache"]
-    L -->|failure| N["FAILED<br/>remove partial results"]
-    M --> O["Verify run ID in Dagster<br/>read results from API"]
-```
+![Manual test walkthrough for agent workflow execution](assets/personalization-test-walkthrough.png){height=85%}
 
 ## 3.1 Test Procedure
 
@@ -346,7 +317,7 @@ flowchart TD
    It does not call the Python ranking handler in the request process. Dagster
    starts `ai_agents_master_job` in the backend `ai_agents_runners` code
    location. The runner loads eligible profiles, prepares embeddings when
-   required, and calls `execute_agent_pipeline` for each profile. The pipeline
+   required, and dispatches ranking batches of up to 100 profiles. The pipeline
    registry dispatches `ranking_recommendation` to
    [RankingRecommendationPipeline](./agent_pipeline/agent_types/ranking_recommendation.py),
    which applies the tenant, candidate, status, and domain filters before
@@ -412,7 +383,7 @@ tenant-owned
 | `is_active` | Controls whether the workflow step is eligible to run. |
 | `schedule_definition` | Optional five-field cron override; if unset, the agent's schedule is used for cron runs. |
 | `configuration` | JSON object containing strategy-specific settings. |
-| `candidate_content_item_ids` | Selected content UUIDs for ranking; the API accepts up to 500 unique IDs per step. |
+| `candidate_content_item_ids` | Selected content UUIDs for ranking; the API accepts up to 1,000 unique IDs per step. |
 
 The runner processes active steps in ascending `execution_order` and ignores
 inactive agents. API-triggered runs are immediate; schedule matching is applied
@@ -456,6 +427,26 @@ segment tags, and optional `semantic_query`; it does not contain PII.
 For `semantic`, the handler uses semantic weight 1 and tag weight 0. For `tags`,
 it uses tag weight 1 and semantic weight 0. The configured hybrid weights are
 normalized when the two scores are combined.
+
+### Execution Limits and Batch Behavior
+
+The runner ranks at most 100 profiles per batch. Each batch uses one set-based
+ranking query and one bulk recommendation upsert; insert statements are paged
+at 500 rows. Profile-query embeddings are prepared a batch at a time. The
+runner still loads the segment's profile IDs, domains, and tags as a list, but
+does not retain embeddings or ranked results for the full audience.
+
+The workflow accepts up to 1,000 selected content IDs per step, while `top_k`
+remains capped at 100. At 100,000 profiles and 1,000 selected items, one step
+can require 1,000 ranking queries and up to 100 million profile-item score
+comparisons. Semantic and hybrid scoring also compare each eligible vector at
+384 or 768 dimensions. Batching bounds intermediate memory and reduces
+per-profile database and embedding overhead; it does not reduce the exact
+profile-item scoring work from \(O(P \times C)\); semantic and hybrid vector
+calculations are additionally \(O(P \times C \times D)\). Actual work is
+usually lower after tenant, status, domain, embedding, and selected-ID filters.
+Production runtime and provider cost should be benchmarked at the expected
+audience size.
 
 ## 6.3 Scoring and Result Ordering
 

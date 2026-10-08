@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from ..contracts import AgentPipelineInput, AgentResultModel, ModelType
@@ -28,3 +29,9 @@ class AgentTypePipeline:
             f"The {self.model_type} agent pipeline is a scaffold; implement its "
             "processing handler before enabling this run."
         )
+
+    def process_batch(
+        self, payloads: Sequence[AgentPipelineInput]
+    ) -> list[dict[str, Any]]:
+        """Process payloads one at a time unless a strategy supports batching."""
+        return [self.process(payload) for payload in payloads]

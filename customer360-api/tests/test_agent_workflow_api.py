@@ -134,6 +134,53 @@ def test_replace_workflow_rejects_duplicate_candidates_before_repository():
     repo.replace_steps.assert_not_called()
 
 
+def test_replace_workflow_accepts_one_thousand_unique_candidates():
+    candidate_ids = [str(uuid.uuid4()) for _ in range(1000)]
+    client, repo = make_client()
+    repo.replace_steps.return_value = [step(candidate_content_item_ids=candidate_ids[:1])]
+    with patch("core.routers.agent_workflow_api.AgentWorkflowRepository", return_value=repo), patch(
+        "core.routers.agent_workflow_api.dagster_client"
+    ) as dagster:
+        dagster.ai_agents_runners.run_workflow.return_value = "run-123"
+        response = client.put(
+            f"/segments/{SEGMENT_ID}/workflow",
+            json={
+                "steps": [
+                    {
+                        "agent_code": "recommendation",
+                        "execution_order": 1,
+                        "candidate_content_item_ids": candidate_ids,
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    saved_step = repo.replace_steps.call_args.args[2][0]
+    assert len(saved_step["candidate_content_item_ids"]) == 1000
+
+
+def test_replace_workflow_rejects_more_than_one_thousand_candidates():
+    candidate_ids = [str(uuid.uuid4()) for _ in range(1001)]
+    client, repo = make_client()
+    with patch("core.routers.agent_workflow_api.AgentWorkflowRepository", return_value=repo):
+        response = client.put(
+            f"/segments/{SEGMENT_ID}/workflow",
+            json={
+                "steps": [
+                    {
+                        "agent_code": "recommendation",
+                        "execution_order": 1,
+                        "candidate_content_item_ids": candidate_ids,
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 422
+    repo.replace_steps.assert_not_called()
+
+
 def test_replace_workflow_accepts_cron_override_and_rejects_invalid_schedule():
     client, repo = make_client()
     repo.replace_steps.return_value = [step()]

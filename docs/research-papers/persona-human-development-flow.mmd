@@ -1,17 +1,29 @@
-%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "DejaVu Sans", "fontSize": "20px"}, "flowchart": {"nodeSpacing": 24, "rankSpacing": 14, "padding": 9, "curve": "linear"}}}%%
-flowchart TD
-  person["PERSON<br/>Con người"] -->|Self Opt-in: tự nguyện tham gia| goal["PERSONAL GOAL<br/>Tôi muốn trở thành…"]
-  goal --> current["CURRENT PERSONA<br/>Trạng thái hiện tại"]
-  current --> gap["TRANSFORMATION GAP<br/>Khoảng cách tới trạng thái mong muốn"]
-  gap --> agent["AI TRAINING AGENT<br/>Tác tử AI hỗ trợ học và thực hành"]
-  agent --> learning["Learning<br/>Học"]
-  agent --> practice["Practice<br/>Thực hành"]
-  agent --> reflection["Reflection<br/>Phản tư"]
-  learning --> community["COMMUNITY<br/>Learn Together: học cùng nhau"]
-  practice --> community
-  reflection --> community
-  community --> coach["HUMAN COACH<br/>Huấn luyện viên con người"]
-  coach --> feedback["FEEDBACK<br/>Phản hồi"]
-  feedback --> evolution["PERSONA EVOLUTION<br/>Cập nhật trạng thái persona"]
-  evolution -->|Loop: chu kỳ tiếp theo| current
-  evolution -.->|Xác nhận lại hoặc sửa mục tiêu| goal
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "DejaVu Sans", "fontSize": "20px"}, "flowchart": {"nodeSpacing": 28, "rankSpacing": 24, "padding": 12, "curve": "linear"}}}%%
+flowchart TB
+  person["PERSON AT THE CENTER<br/>Con người và bối cảnh sống<br/>Values · needs · resources · constraints"]
+  intent["PERSON-DEFINED INTENT<br/>Mục tiêu · ưu tiên · đồng thuận<br/>The participant defines what matters"]
+  coordination["SHARED COORDINATION<br/>Bối cảnh · ranh giới · các ưu tiên liên miền"]
+
+  person --> intent
+  intent --> coordination
+
+  selection["SELECT ONE OR MORE RELEVANT DOMAINS<br/>Chọn một hay nhiều miền phù hợp"]
+  domainA["DOMAIN A<br/>Miền A"]
+  domainB["DOMAIN B<br/>Miền B"]
+  domainN["DOMAIN N<br/>Miền N"]
+
+  coordination --> selection
+  selection --> domainA
+  selection --> domainB
+  selection --> domainN
+
+  domainA --> cycle["REUSABLE DOMAIN CYCLE · lặp lại cho từng miền<br/>Desired outcome · current state · needs and opportunity<br/>Kết quả mong muốn · trạng thái hiện tại · nhu cầu và cơ hội"]
+  domainB --> cycle
+  domainN --> cycle
+
+  cycle --> support["PERSON-CENTERED SUPPORT & ACTION<br/>Hỗ trợ và hành động phù hợp với từng miền<br/>People · communities · services · tools · AI"]
+  support --> evidence["OUTCOMES & EVIDENCE<br/>Kết quả · bằng chứng · phản hồi của người tham gia"]
+  evidence --> reflection["CROSS-DOMAIN REFLECTION<br/>Rà soát tương tác · đánh đổi · tác động ngoài dự kiến"]
+  reflection --> update["UPDATED PERSON CONTEXT<br/>Bối cảnh và trạng thái được cập nhật"]
+  update -->|Reassess · xem xét lại| coordination
+  update -.->|Reconfirm or revise intent · xác nhận hoặc sửa mục tiêu| intent

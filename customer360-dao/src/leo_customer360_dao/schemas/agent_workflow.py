@@ -9,11 +9,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _CRON_MACROS = {"@annually", "@daily", "@hourly", "@monthly", "@reboot", "@weekly", "@yearly"}
 _CRON_FIELD = re.compile(r"^[0-9*/?,A-Za-z#LWH\-]+$")
+MAX_CANDIDATE_CONTENT_ITEMS = 1000
 
 
 def _validate_candidate_ids(value: list[uuid.UUID]) -> list[uuid.UUID]:
-    if len(value) > 500:
-        raise ValueError("A workflow step may reference at most 500 content items")
+    if len(value) > MAX_CANDIDATE_CONTENT_ITEMS:
+        raise ValueError(
+            "A workflow step may reference at most "
+            f"{MAX_CANDIDATE_CONTENT_ITEMS} content items"
+        )
     if len(value) != len(set(value)):
         raise ValueError("candidate_content_item_ids must contain unique IDs")
     return value
@@ -39,7 +43,9 @@ class AgentWorkflowStepBase(BaseModel):
     execution_order: int = Field(..., gt=0)
     is_active: bool = True
     schedule_definition: str | None = Field(default=None, max_length=100)
-    candidate_content_item_ids: list[uuid.UUID] = Field(default_factory=list)
+    candidate_content_item_ids: list[uuid.UUID] = Field(
+        default_factory=list, max_length=MAX_CANDIDATE_CONTENT_ITEMS
+    )
     configuration: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("candidate_content_item_ids")
@@ -64,7 +70,9 @@ class AgentWorkflowStepUpdate(BaseModel):
     execution_order: int | None = Field(default=None, gt=0)
     is_active: bool | None = None
     schedule_definition: str | None = Field(default=None, max_length=100)
-    candidate_content_item_ids: list[uuid.UUID] | None = None
+    candidate_content_item_ids: list[uuid.UUID] | None = Field(
+        default=None, max_length=MAX_CANDIDATE_CONTENT_ITEMS
+    )
     configuration: dict[str, Any] | None = None
 
     @field_validator("candidate_content_item_ids")

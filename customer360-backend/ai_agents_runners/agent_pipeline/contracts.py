@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from leo_customer360_dao.schemas.agent_workflow import MAX_CANDIDATE_CONTENT_ITEMS
+
 ModelType = Literal[
     "classification",
     "regression",
@@ -65,7 +67,9 @@ class AgentPipelineInput(BaseModel):
     model_type: ModelType
     input_data: dict[str, Any]
     configuration: dict[str, Any] = Field(default_factory=dict)
-    candidate_content_item_ids: list[UUID] = Field(default_factory=list)
+    candidate_content_item_ids: list[UUID] = Field(
+        default_factory=list, max_length=MAX_CANDIDATE_CONTENT_ITEMS
+    )
     trigger_event: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")

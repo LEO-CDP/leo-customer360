@@ -3,21 +3,34 @@ title: "Persona như một Vector"
 subtitle: "Lý thuyết điểm đặt (setpoint) về bản sắc con người, cá nhân hóa và chuyển hóa trong Marketing 8.0"
 author: "Trieu Nguyen (email: trieu@leocdp.com)"
 affiliation: "LEOCDP.com"
-date: "Bản sửa, tháng 10 năm 2026"
+date: "Ngày 8, tháng 10 năm 2026"
 lang: vi
-geometry: a4paper, margin=1.2cm
+
+geometry:
+  - a4paper
+  - margin=1.2cm
+
 fontsize: 10pt
-mainfont: DejaVu Serif
+linestretch: 0.95
+
+mainfont: "DejaVu Serif"
+
 header-includes:
   - \usepackage{anyfontsize}
+  - \usepackage{titlesec}
+  - \usepackage{setspace}
   - \usepackage{microtype}
+  - \titlespacing*{\section}{0pt}{0.7em}{0.4em}
+  - \titlespacing*{\subsection}{0pt}{0.5em}{0.3em}
+  - \titlespacing*{\subsubsection}{0pt}{0.4em}{0.2em}
+  - \setstretch{0.95}
 ---
 
 ## Tóm tắt
 
 Cá nhân hóa dựa trên trí tuệ nhân tạo (AI) cho phép khai thác dữ liệu hành vi để ước lượng trạng thái, tạo trải nghiệm phù hợp và liên tục điều chỉnh tương tác. Tuy nhiên, việc chỉ tối ưu lượt nhấp, đăng ký hay mua hàng có thể bỏ qua câu hỏi quan trọng hơn: một người hiện đang ở trạng thái nào, muốn trở thành ai và cần được hỗ trợ ra sao để thực hiện mục tiêu đã chọn?
 
-[![Giao điểm khái niệm giữa marketing, tâm lý học và hệ động lực làm nền cho Persona as a Vector.](https://github.com/LEO-CDP/leo-customer360/raw/main/docs/research-papers/kotler_jung_einstein.png)](/LEO-CDP/leo-customer360/blob/main/docs/research-papers/kotler_jung_einstein.png){width=95%}
+[![Giao điểm khái niệm giữa marketing, tâm lý học và hệ động lực làm nền cho Persona as a Vector.](assets/kotler_jung_einstein.png)](assets/kotler_jung_einstein.png){width=95%}
 
 Bài báo đề xuất **Persona as a Vector**, một khung lý thuyết về cá nhân hóa hướng chuyển hóa trong Marketing 8.0. Persona được biểu diễn bằng một **vector trạng thái nhiều chiều**, phụ thuộc thời gian, ngữ cảnh và độ bất định, thay vì một nhãn phân đoạn cố định hay mô tả đầy đủ về con người. **Current Persona** là trạng thái hiện tại được ước lượng; **Desired Persona Vector** là trạng thái mong muốn do người tham gia xác nhận; **Transformation Gap** là khoảng cách giữa hai trạng thái. Trạng thái mong muốn đóng vai trò **điểm đặt (setpoint)** của một hệ điều khiển vòng kín, không phải lực hút vật lý hay chuẩn mực chung áp đặt cho mọi người.
 
@@ -25,7 +38,7 @@ Luồng cốt lõi bắt đầu từ **sự tự nguyện tham gia (Self Opt-in)
 
 Về kỹ thuật, **Deep Learning** và cập nhật Bayes hỗ trợ ước lượng trạng thái cùng độ bất định; **Persona Conversion Scoring** đo mức sẵn sàng thực hiện một hành động được định nghĩa rõ; **Generative AI** tạo nội dung, lời giải thích và trải nghiệm phù hợp với trạng thái và mục tiêu. PCS là điểm thô, không mặc nhiên là xác suất chuyển đổi; diễn giải xác suất cần hiệu chuẩn và kiểm định. Phân đoạn bằng tác tử, cổng kiểm soát và nhóm đối chứng hỗ trợ lựa chọn, giám sát và đánh giá tác động của can thiệp trong vòng phản hồi:
 
-![Vòng lặp cá nhân hóa hướng chuyển hóa](persona-personalization-loop.png){width=95%}
+![Vòng lặp cá nhân hóa hướng chuyển hóa](assets/persona-personalization-loop.png){width=95%}
 
 Khung được minh họa bằng **bốn ca thuộc bốn lĩnh vực**. Trong **giáo dục**, người học chuyển từ chủ yếu xem nội dung sang thực hành, tự học và tự thực hiện dự án, với nền tảng học tập cá nhân kết hợp AI, cộng đồng và giáo viên hoặc người hướng dẫn. Trong **ngân hàng bán lẻ**, khách hàng hướng từ lo âu tài chính tới hành vi tiết kiệm và sự tự tin tài chính. Trong **bán lẻ**, người mua được hỗ trợ vượt qua do dự bằng thông tin, so sánh và giải thích mức phù hợp để ra quyết định hiểu biết và tự tin. Trong **phòng tập và thể hình**, người có khát vọng nhưng ít vận động được hỗ trợ hình thành thói quen tập luyện đều đặn. Mỗi ca nối persona hiện tại, trạng thái mong muốn, khoảng cách chuyển hóa, NBTA và kết quả cần quan sát; giao dịch hay đăng ký không tự chứng minh năng lực học tập, thay đổi hành vi hoặc sự chuyển hóa.
 
@@ -119,7 +132,7 @@ Luồng dưới đây đặt **con người và mục tiêu tự chọn** ở đ
 
 \clearpage
 
-![Luồng cốt lõi của Persona như một Vector](persona-human-development-flow.png){height=22cm}
+![Khung tổng quát cho hành trình Persona đa miền](assets/persona-human-development-flow.png){height=22cm}
 
 \clearpage
 
@@ -260,7 +273,7 @@ Carl Jung dùng khái niệm **Persona** để chỉ gương mặt xã hội mà
 
 **Bản ngã (Self)** của Jung chỉ sự toàn vẹn tâm lý, còn **cá thể hóa (individuation)** là quá trình phát triển trong đó các phần có ý thức và vô thức của nhân cách được tích hợp hơn (Jung, 1959). Ý nghĩa với marketing mang tính khái niệm hơn là lâm sàng: danh tính hướng ra ngoài có thể quan sát được, còn cấu trúc sâu tạo ra sở thích, khát vọng và hành vi chỉ quan sát được một phần.
 
-[![Persona quan sát được là biểu diễn một phần của trạng thái tâm lý con người.](https://github.com/LEO-CDP/leo-customer360/raw/main/docs/research-papers/observed_persona.png)](/LEO-CDP/leo-customer360/blob/main/docs/research-papers/observed_persona.png){width=95%}
+[![Persona quan sát được là biểu diễn một phần của trạng thái tâm lý con người.](assets/observed_persona.png)](assets/observed_persona.png){width=95%}
 
 Một hệ thống marketing không bao giờ quan sát toàn bộ con người. Nó quan sát các dấu vết: nhấp chuột, tìm kiếm, mua hàng, hội thoại, vị trí, mức tương tác nội dung, giao dịch, sở thích và thông tin do khách hàng khai báo. Persona vì vậy là một **biểu diễn suy luận**, không phải mô tả đầy đủ về cá nhân.
 
@@ -827,7 +840,7 @@ Trải nghiệm sinh ra không nên chỉ tối đa hóa lượt nhấp hay th�
 
 Lý thuyết xem cá nhân hóa là một quá trình phản hồi liên tục. Sơ đồ dưới đây mô tả tầng xử lý kỹ thuật của luồng con người ở Mục 2: mục tiêu và phạm vi đồng ý đã được xác nhận là điều kiện đầu vào; các bước học, thực hành, phản tư và hỗ trợ của cộng đồng hoặc huấn luyện viên tạo trải nghiệm cùng bằng chứng phản hồi.
 
-![Cá nhân hóa như một hệ điều khiển vòng kín](persona-closed-loop.png){width=95%}
+![Cá nhân hóa như một hệ điều khiển vòng kín](assets/persona-closed-loop.png){width=95% height=90%}
 
 **Hệ thống học không chỉ từ nhãn lịch sử mà còn từ hậu quả của chính quyết định của nó.** Một hệ thống cá nhân hóa không bao giờ hoàn toàn đúng. Khách có thể bỏ qua ưu đãi, từ chối đề xuất, đổi mục tiêu hoặc bước vào một ngữ cảnh sống mới chưa có trong dữ liệu huấn luyện. Mỗi phản ứng trở thành bằng chứng hành vi mới để cập nhật trạng thái persona suy ra và định hình can thiệp tiếp theo.
 
@@ -1105,7 +1118,7 @@ Cổng kiểm soát chặn hành động nhắm vào $E$ ngay cả khi độ tin
 
 Khung có thể triển khai trên kiến trúc Customer 360, trong đó sự kiện hành vi được hợp nhất với giao dịch, tín hiệu nội dung, tương tác chiến dịch và sở thích do khách cung cấp:
 
-![Quy trình Customer 360 bảy giai đoạn](customer360-seven-stage-flow.png){width=95%}
+![Quy trình Customer 360 bảy giai đoạn](assets/customer360-seven-stage-flow.png){width=95% height=90%}
 
 | Giai đoạn | Mục đích | Đầu vào điển hình | Đầu ra điển hình |
 | --- | --- | --- | --- |
@@ -1149,7 +1162,7 @@ Quỹ đạo mong muốn là: **xem nội dung → hiểu khái niệm → thự
 
 \clearpage
 
-![Ca giáo dục: kiến trúc nền tảng học tập cá nhân hướng chuyển hóa persona](assets/personal-learning-platform-architecture.png){width=100%}
+![Ca giáo dục: kiến trúc nền tảng học tập cá nhân hướng chuyển hóa persona](assets/personal-learning-platform-architecture.png){width=100% height=90%}
 
 \clearpage
 
@@ -1278,7 +1291,7 @@ $$
 
 với $V_c$ là giá trị khách hàng, $V_b$ là giá trị doanh nghiệp, $V_s$ là giá trị xã hội và $w_c,w_b,w_s$ là trọng số chiến lược. Trọng số có thể thay đổi theo lĩnh vực và chiến lược; nguyên tắc quan trọng là giá trị không bị quy về doanh thu ngắn hạn.
 
-[![Các chỉ số cho chuyển hóa persona](https://github.com/LEO-CDP/leo-customer360/raw/main/docs/research-papers/persona-metrics.png)](/LEO-CDP/leo-customer360/blob/main/docs/research-papers/persona-metrics.png){width=95%}
+[![Các chỉ số cho chuyển hóa persona](assets/persona-metrics.png)](assets/persona-metrics.png){width=95%}
 
 # 18. Căn chỉnh persona có đạo đức
 
@@ -1387,7 +1400,7 @@ Thách thức nghiên cứu tối hậu không chỉ là dự đoán **khách s�
 
 Bài báo đề xuất một dịch chuyển căn bản trong cách cá nhân hóa hiểu khách hàng. Khách hàng không nên chỉ được xem là **một segment, hồ sơ hay cơ hội chuyển đổi**, mà là **một persona động di chuyển trong không gian các trạng thái có thể**.
 
-[![Persona as a Vector: từ hiểu con người đến chuyển hóa](https://github.com/LEO-CDP/leo-customer360/raw/main/docs/research-papers/persona-as-vector.png)](/LEO-CDP/leo-customer360/blob/main/docs/research-papers/persona-as-vector.png){width=95%}
+[![Persona as a Vector: từ hiểu con người đến chuyển hóa](assets/persona-as-vector.png)](assets/persona-as-vector.png){width=95%}
 
 Luồng cốt lõi bắt đầu từ con người tự nguyện tham gia và mục tiêu cá nhân được xác nhận: persona hiện tại → Transformation Gap so với điểm đặt → tác tử AI hỗ trợ học, thực hành và phản tư → cộng đồng đồng hành → huấn luyện viên con người → phản hồi → persona được cập nhật. Vòng lặp tiếp tục khi người tham gia đồng ý và mục tiêu còn phù hợp. Trong khung này, mỗi công nghệ có một vai trò riêng. **Deep Learning** là cơ chế **ước lượng trạng thái persona hiện tại** từ tín hiệu hành vi quan sát được, kèm độ bất định. **Persona Conversion Scoring**, sau hiệu chuẩn, là cơ chế **ước lượng mức sẵn sàng thực hiện một hành động được định nghĩa rõ**. **AI sinh tạo** là cơ chế **tạo nội dung hỗ trợ thích ứng và theo ngữ cảnh**. **Tác tử AI** là cơ chế **đề xuất segment và hành động ở quy mô lớn**, dưới cổng kiểm soát và nhóm đối chứng. **Cộng đồng và huấn luyện viên** cung cấp hỗ trợ xã hội, phán đoán và giám sát của con người. **Hành trình khách hàng** là cơ chế **quan sát persona thay đổi theo thời gian**.
 
