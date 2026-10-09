@@ -4,14 +4,18 @@
  * same-origin /ai/* proxy (app.py), which forwards to tools/docs-vector-search
  * (semantic search + grounded question answering over the docs corpus).
  *
- * Every question is independent (single-turn, no conversation memory). The flow is
- * two-phase because the grounded answer is slow:
+ * UX is two-phase for the first question of a chat because the answer is slow:
  *   1. POST /ai/search        -> render the top source docs immediately (sub-second).
  *   2. POST /assistant/ask    -> replace with the grounded answer + the sources it used.
+ * Later questions of a chat go straight to step 2 (a follow-up means nothing searched alone).
  *
- * The log lives only in the page: it survives hash-route changes but is not saved
- * anywhere, so a reload starts empty. Only one question is in flight at a time:
- * Send is disabled until the answer arrives.
+ * Memory has two tiers. Short-term: the chat of this browser tab (sessionStorage, per page and
+ * object: the conversation id, and whether "New chat" was pressed), which the server turns into
+ * the recent messages the model sees. Long-term: the server keeps the chat (masked, 30 days,
+ * author only) and GET /assistant/conversation brings the latest one back when a new session
+ * opens the panel on the same page and object. A different page or object starts a fresh chat.
+ *
+ * Only one question is in flight at a time: Send is disabled until the answer arrives.
  *
  * Registered like the other view modules: this file attaches C360.docsChatbot,
  * main.js injects the template into #docs-chatbot-root and calls bindEvents(). */
@@ -20,6 +24,12 @@ window.C360 = window.C360 || {};
 (function (C360) {
   "use strict";
 
+  var STORAGE_KEY = "c360.assistant.chat";
+  var SESSION_MAX_CHATS = 20;
+  var greetingHtml = null; // the initial log (greeting + chips), restored by "New chat" and on a page change
+  // chat: which page/object the log shows (key), the server's conversation id, whether "New chat"
+  // was pressed in this tab (so a reload stays empty), a counter that invalidates late answers.
+  var chat = { key: null, id: null, fresh: false, gen: 0 };
   var busy = false; // a question is waiting for its answer
 
   // --- helpers -----------------------------------------------------------------
@@ -442,6 +452,90 @@ window.C360 = window.C360 || {};
     renderContext(ctx);
   }
 
+  // --- conversation ------------------------------------------------------------
+
+  // The key the server uses for a chat: the page plus the object on screen (master_profile_id on
+  // the profile page, entity_id on any other id page). pageContext sets both on the profile page,
+  // so master_profile_id || entity_id mirrors the API's "master_profile_id or entity_id".
+  function chatKey(ctx) {
+    return (ctx.page || "") + "|" + (ctx.master_profile_id || ctx.entity_id || "");
+  }
+
+  // Short-term memory: this tab's state per page/object, {key: {id, fresh}}. Session storage may be
+  // blocked or throw (private windows); the chat is then simply not remembered across a reload.
+  function readSessionMap() {
+    try {
+      return JSON.parse(window.sessionStorage.getItem(STORAGE_KEY) || "null") || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveSession() {
+    try {
+      var map = readSessionMap();
+      delete map[chat.key]; // re-insert last so the oldest entries are the ones dropped
+      map[chat.key] = { id: chat.id, fresh: chat.fresh };
+      Object.keys(map).slice(0, -SESSION_MAX_CHATS).forEach(function (k) { delete map[k]; });
+      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+    } catch (e) { /* not remembered */ }
+  }
+
+  // Empty the log back to the greeting (with the chips of the current page) and drop late answers.
+  function resetLog() {
+    chat.gen += 1;
+    setBusy(false);
+    if (greetingHtml === null) greetingHtml = $("#docs-chat-log").html();
+    else $("#docs-chat-log").html(greetingHtml);
+    renderChips();
+  }
+
+  function renderSaved(messages) {
+    messages.forEach(function (m) {
+      if (m.role === "user") {
+        appendUser(m.text);
+        return;
+      }
+      var $msg = appendAssistant();
+      setAnswer($msg, m.text);
+      if (m.sources && m.sources.length) renderSources($msg, m.sources);
+    });
+  }
+
+  // Make the log match the page and object the user is on: a different one starts a fresh chat; a
+  // chat opened in a new session is brought back from the server unless "New chat" was pressed here.
+  function syncChat() {
+    var ctx = pageContext();
+    var key = chatKey(ctx);
+    if (key === chat.key) return;
+    var stored = readSessionMap()[key] || {};
+    chat.key = key;
+    chat.id = stored.id || null;
+    chat.fresh = stored.fresh === true;
+    resetLog();
+    saveSession();
+    if (chat.fresh) return;
+    var gen = chat.gen;
+    C360.config.assistantConversation(ctx)
+      .then(function (res) {
+        if (gen !== chat.gen || busy || !res || !res.messages || !res.messages.length) return;
+        chat.id = res.conversation_id || null;
+        saveSession();
+        renderSaved(res.messages);
+      })
+      .catch(function () { /* nothing to restore; start empty */ });
+  }
+
+  function newChat() {
+    var ctx = pageContext();
+    chat.key = chatKey(ctx);
+    chat.id = null;
+    chat.fresh = true;
+    resetLog();
+    saveSession();
+    $("#docs-chat-input").trigger("focus");
+  }
+
   // --- asking ------------------------------------------------------------------
 
   function setBusy(value) {
@@ -453,30 +547,43 @@ window.C360 = window.C360 || {};
     question = String(question || "").trim();
     if (!question || busy) return;
 
+    syncChat(); // the user may have changed page since the panel was opened
+    var gen = chat.gen;
     var context = pageContext();
     renderContext(context); // keep the visible "You are on" line in step with what we send
     var askedKey = contextKey(context);
     var askedLabel = contextLine(context);
+    var firstOfChat = !chat.id;
 
     setBusy(true);
     appendUser(question);
     var $msg = appendAssistant();
-    setStatus($msg, "Searching the docs…", true);
+    setStatus($msg, firstOfChat ? "Searching the docs…" : "Generating answer…", true);
 
-    // Phase 1: fast retrieval for an immediate source list.
-    C360.config.docsSearch(question, 8)
-      .then(function (res) {
-        renderSources($msg, res && res.hits);
-      })
-      .catch(function () { /* non-fatal: the answer brings its own sources */ })
-      // Phase 2: the grounded answer.
+    // Phase 1 (first question of a chat only): fast retrieval for an immediate source list.
+    var early = firstOfChat
+      ? C360.config.docsSearch(question, 8)
+          .then(function (res) {
+            if (gen === chat.gen) renderSources($msg, res && res.hits);
+          })
+          .catch(function () { /* non-fatal: the answer brings its own sources */ })
+      : $.Deferred().resolve().promise();
+
+    // Phase 2: the grounded answer, with the conversation the server keeps.
+    early
       .then(function () {
-        setStatus($msg, "Generating answer…", true);
-        return C360.config.assistantAsk(question, context);
+        if (gen === chat.gen) setStatus($msg, "Generating answer…", true);
+        return C360.config.assistantAsk(question, context, chat.id);
       })
       .then(function (res) {
+        if (gen !== chat.gen) return; // the page or object changed: this answer belongs to another chat
         setBusy(false);
         setStatus($msg, "", false);
+        if (res && res.conversation_id) {
+          chat.id = res.conversation_id;
+          chat.fresh = false;
+          saveSession();
+        }
         setAnswer($msg, (res && res.answer) || "I couldn't find an answer in the documentation.");
         // The final list is only the documents the answer used (possibly none, e.g. an answer from
         // the customer's profile alone), so it replaces the early candidates either way. A refusal or
@@ -488,6 +595,7 @@ window.C360 = window.C360 || {};
         renderAskedOn($msg, askedKey, askedLabel);
       })
       .catch(function (err) {
+        if (gen !== chat.gen) return;
         setBusy(false);
         renderError($msg, err);
       });
@@ -500,6 +608,7 @@ window.C360 = window.C360 || {};
   }
 
   function open() {
+    syncChat();
     renderChips();
     $("#docs-chat-panel").removeClass("hidden");
     $("#docs-chat-launcher").attr("aria-expanded", "true");
@@ -526,6 +635,8 @@ window.C360 = window.C360 || {};
   function bindEvents() {
     $("#docs-chat-launcher").on("click", toggle);
     $("#docs-chat-close").on("click", close);
+    $("#docs-chat-new").on("click", newChat);
+    greetingHtml = $("#docs-chat-log").html();
 
     $("#docs-chat-form").on("submit", function (e) {
       e.preventDefault();
@@ -548,7 +659,7 @@ window.C360 = window.C360 || {};
     // Follow the user from page to page while the panel is open. Deferred so the router's own
     // hashchange handler (which sets the new route) has run before the context is read.
     $(window).on("hashchange", function () {
-      if (isOpen()) setTimeout(function () { renderChips(); }, 0);
+      if (isOpen()) setTimeout(function () { syncChat(); renderChips(); }, 0);
     });
 
     // Esc closes the panel. Bound on the panel first so a keypress inside it stops before the

@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from core.database import get_db
 from core.repositories import screen_facts
-from core.repositories.assistant_repository import AssistantRepository, build_profile_facts
+from core.repositories.assistant_repository import AssistantRepository, ConversationRepository, build_profile_facts
 from core.repositories.screen_facts import ScreenFacts
 from core.routers import assistant_api
 from leo_customer360_dao.models.system import SysAuditLog
@@ -103,7 +103,7 @@ class AssistantAskTests(_AskHarness):
         self.assertEqual(data["sources"][0]["path"], "data-sources/x.md")
         ask.assert_called_once_with(
             "What is this page?", page="/profiles/:id", context=None,
-            context_title="Customer profile on screen", view=None, dialog=None,
+            context_title="Customer profile on screen", view=None, dialog=None, history=None, summary=None,
         )
 
     def test_the_basis_line_is_passed_through_and_absent_when_unknown(self):
@@ -187,7 +187,7 @@ class AssistantAskTests(_AskHarness):
         response, ask = self._ask()
         self.assertEqual(response.status_code, 200)
         ask.assert_called_once_with(
-            "What is this page?", page=None, context=None, context_title=None, view=None, dialog=None,
+            "What is this page?", page=None, context=None, context_title=None, view=None, dialog=None, history=None, summary=None,
         )
 
     def test_view_and_dialog_reach_the_docs_service_sanitized(self):
@@ -205,6 +205,7 @@ class AssistantAskTests(_AskHarness):
             context_title=None,
             view="Agent Workflow Ordered processing steps",
             dialog="Edit user [email]",
+            history=None, summary=None,
         )
 
     def test_control_characters_and_newlines_in_labels_are_collapsed(self):
@@ -217,6 +218,7 @@ class AssistantAskTests(_AskHarness):
             context_title=None,
             view="Timeline Tab",
             dialog="Add Data Source",
+            history=None, summary=None,
         )
 
     def test_an_email_in_a_dialog_title_is_masked_in_the_audit_row(self):
@@ -242,7 +244,7 @@ class AssistantAskTests(_AskHarness):
         self.loaded.assert_called_once_with(TENANT, PROFILE)
         ask.assert_called_once_with(
             "What is this page?", page="/profiles/:id", context=facts,
-            context_title="Customer profile on screen", view=None, dialog=None,
+            context_title="Customer profile on screen", view=None, dialog=None, history=None, summary=None,
         )
         # The log records WHICH fields were sent, never their values, and which loader ran.
         after = self.db.add.call_args.args[0].after_data
@@ -264,6 +266,7 @@ class AssistantAskTests(_AskHarness):
         self.loaded.assert_not_called()
         ask.assert_called_once_with(
             "What is this page?", page="/segments", context=None, context_title=None, view=None, dialog=None,
+            history=None, summary=None,
         )
 
     def test_entity_id_and_master_profile_id_are_equivalent_on_the_profile_page(self):
@@ -278,7 +281,7 @@ class AssistantAskTests(_AskHarness):
             self.loaded.assert_called_once_with(TENANT, PROFILE)
             ask.assert_called_once_with(
                 "What is this page?", page="/profiles/:id", context=facts,
-                context_title="Customer profile on screen", view=None, dialog=None,
+                context_title="Customer profile on screen", view=None, dialog=None, history=None, summary=None,
             )
 
     def test_conflicting_ids_on_the_profile_page_are_a_422(self):
@@ -295,6 +298,7 @@ class AssistantAskTests(_AskHarness):
         self.loaded.assert_not_called()
         ask.assert_called_once_with(
             "What is this page?", page="/profiles/:id", context=None, context_title=None, view=None, dialog=None,
+            history=None, summary=None,
         )
 
     def test_a_page_without_a_loader_answers_without_facts(self):
@@ -303,6 +307,7 @@ class AssistantAskTests(_AskHarness):
         self.loaded.assert_not_called()
         ask.assert_called_once_with(
             "What is this page?", page="/segments", context=None, context_title=None, view=None, dialog=None,
+            history=None, summary=None,
         )
         after = self.db.add.call_args.args[0].after_data
         self.assertEqual(after["fact_fields"], [])
@@ -327,7 +332,7 @@ class AssistantAskTests(_AskHarness):
         self.assertEqual(seen, {"tenant_id": TENANT, "entity_id": PROFILE, "period_days": 30})
         ask.assert_called_once_with(
             "What is this page?", page="/segments/:id", context=["Name: X"],
-            context_title="Segment on screen", view=None, dialog=None,
+            context_title="Segment on screen", view=None, dialog=None, history=None, summary=None,
         )
         self.assertEqual(self.db.add.call_args.args[0].after_data["facts_page"], "/segments/:id")
 
@@ -429,6 +434,212 @@ class ProfileFactsTests(unittest.TestCase):
 
         session.get.return_value = None
         self.assertIsNone(AssistantRepository(session).profile_facts(TENANT, PROFILE))
+
+
+HISTORY = [
+    {"role": "user", "text": "how can i use profile scope ?", "clarify": False},
+    {"role": "assistant", "text": "Which feature do you mean?", "clarify": True},
+]
+CONVERSATION = uuid.uuid4()
+
+
+class ConversationMemoryTests(_AskHarness):
+    def _ask_in_chat(self, docs=None, window=(CONVERSATION, HISTORY, None), **body):
+        with patch.object(ConversationRepository, "window", return_value=window) as win, patch.object(
+            ConversationRepository, "add_exchange"
+        ) as add:
+            response, ask = self._ask(docs=docs, page="/segments", **body)
+        return response, ask, win, add
+
+    def test_the_saved_window_is_sent_with_the_question_and_the_conversation_id_comes_back(self):
+        response, ask, win, add = self._ask_in_chat(question="it is data sources", conversation_id=str(CONVERSATION))
+
+        win.assert_called_once_with(TENANT, USER, CONVERSATION, "/segments", None)
+        self.assertEqual(ask.call_args.kwargs["history"], HISTORY)
+        self.assertEqual(response.json()["conversation_id"], str(CONVERSATION))
+
+    def test_the_question_is_masked_before_the_model_and_before_storage(self):
+        response, ask, _, add = self._ask_in_chat(question="why did linh@example.com (0901234567) churn?")
+
+        masked = "why did [email] ([phone]) churn?"
+        self.assertEqual(ask.call_args.args[0], masked)
+        self.assertEqual(add.call_args.args[5], masked)
+        self.assertNotIn("linh@example.com", str(ask.call_args) + str(add.call_args))
+
+    def test_the_exchange_is_stored_with_only_the_documents_the_answer_used(self):
+        _, _, _, add = self._ask_in_chat(question="Q?")
+
+        args = add.call_args.args
+        self.assertEqual(args[:5], (TENANT, USER, CONVERSATION, "/segments", None))
+        self.assertEqual(args[6:9], (DOCS_ANSWER["answer"], "answered", None))
+        self.assertEqual(args[9], [{"path": "data-sources/x.md", "title": "X", "heading": "X"}])
+
+    def test_the_running_summary_goes_to_the_model_and_the_new_one_is_masked_and_stored(self):
+        docs = {**DOCS_ANSWER, "summary": "Asked about linh@example.com; Growth allows 25 users."}
+        _, ask, _, add = self._ask_in_chat(
+            docs=docs, window=(CONVERSATION, HISTORY, "Growth plan question."), question="Q?"
+        )
+        self.assertEqual(ask.call_args.kwargs["summary"], "Growth plan question.")
+        self.assertEqual(add.call_args.args[10], "Asked about [email]; Growth allows 25 users.")
+
+    def test_no_summary_from_the_model_stores_none(self):
+        _, _, _, add = self._ask_in_chat(question="Q?")
+        self.assertIsNone(add.call_args.args[10])
+
+    def test_a_refusal_is_stored_without_sources(self):
+        refusal = {**DOCS_ANSWER, "found": False, "status": "not_found", "clarify": "question"}
+        _, _, _, add = self._ask_in_chat(docs=refusal, question="Q?")
+        self.assertEqual(add.call_args.args[8:10], ("question", []))
+
+    def test_a_failed_save_never_costs_the_user_the_answer_or_the_audit_row(self):
+        self.db.begin_nested.return_value.__exit__.return_value = False  # let the error reach the handler
+        with patch.object(ConversationRepository, "window", return_value=(CONVERSATION, [], None)), patch.object(
+            ConversationRepository, "add_exchange", side_effect=RuntimeError("fk_tenant_user")
+        ):
+            response, _ = self._ask(page="/segments")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["answer"], DOCS_ANSWER["answer"])
+        self.assertIsInstance(self.db.add.call_args.args[0], SysAuditLog)
+        self.db.commit.assert_called_once()
+        self.db.rollback.assert_not_called()
+
+    def test_the_audit_row_links_to_the_conversation_and_keeps_the_rewrite_masked(self):
+        docs = {**DOCS_ANSWER, "rewritten": "profile scope for linh@example.com", "follows_up": True}
+        self._ask_in_chat(docs=docs, question="Q?")
+        data = self.db.add.call_args.args[0].after_data
+        self.assertEqual(
+            (data["conversation_id"], data["history_messages"], data["follows_up"]), (str(CONVERSATION), 2, True)
+        )
+        self.assertEqual(data["rewritten"], "profile scope for [email]")
+
+    def test_without_a_user_nothing_is_remembered(self):
+        app = FastAPI()
+
+        @app.middleware("http")
+        async def _api_key(request, call_next):
+            request.state.tenant_id = str(TENANT)
+            return await call_next(request)
+
+        app.include_router(assistant_api.assistant_router)
+        app.dependency_overrides[get_db] = lambda: self.db
+        with patch.object(ConversationRepository, "window") as win, patch.object(
+            ConversationRepository, "add_exchange"
+        ) as add, patch("core.routers.assistant_api.ask_docs", return_value=DOCS_ANSWER):
+            response = TestClient(app).post("/assistant/ask", json={"question": "Q?", "conversation_id": str(CONVERSATION)})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["conversation_id"])
+        win.assert_not_called()
+        add.assert_not_called()
+
+    def test_an_id_page_keys_the_chat_by_its_entity_id(self):
+        entity = uuid.uuid4()
+        with patch.object(ConversationRepository, "window", return_value=(CONVERSATION, [], None)) as win, patch.object(
+            ConversationRepository, "add_exchange"
+        ) as add:
+            response, _ = self._ask(
+                page="/reports/:id", entity_id=str(entity), conversation_id=str(CONVERSATION)
+            )
+
+        self.assertEqual(response.status_code, 200)
+        win.assert_called_once_with(TENANT, USER, CONVERSATION, "/reports/:id", entity)
+        self.assertEqual(add.call_args.args[4], entity)
+
+    def test_the_latest_chat_on_this_page_and_customer_can_be_restored(self):
+        rows = [
+            SimpleNamespace(role="user", message_text="Q?", status=None, clarify=None, sources=[], created_at=datetime(2026, 10, 6)),
+            SimpleNamespace(
+                role="assistant", message_text="A.", status="answered", clarify=None,
+                sources=[{"path": "x.md", "title": "X", "heading": "X"}], created_at=datetime(2026, 10, 6),
+            ),
+        ]
+        with patch.object(ConversationRepository, "latest", return_value=(CONVERSATION, rows)) as latest:
+            response = self.client.get("/assistant/conversation", params={"page": "/profiles/:id", "master_profile_id": str(PROFILE)})
+
+        latest.assert_called_once_with(TENANT, USER, "/profiles/:id", PROFILE)
+        data = response.json()
+        self.assertEqual(data["conversation_id"], str(CONVERSATION))
+        self.assertEqual([m["role"] for m in data["messages"]], ["user", "assistant"])
+        self.assertEqual(data["messages"][1]["sources"][0]["path"], "x.md")
+
+    def test_the_latest_chat_can_be_restored_by_entity_id(self):
+        entity = uuid.uuid4()
+        with patch.object(ConversationRepository, "latest", return_value=(CONVERSATION, [])) as latest:
+            response = self.client.get(
+                "/assistant/conversation", params={"page": "/reports/:id", "entity_id": str(entity)}
+            )
+
+        latest.assert_called_once_with(TENANT, USER, "/reports/:id", entity)
+        self.assertEqual(response.json()["conversation_id"], str(CONVERSATION))
+
+    def test_restore_rejects_a_bad_page(self):
+        self.assertEqual(self.client.get("/assistant/conversation", params={"page": "https://evil.example"}).status_code, 422)
+
+
+def _row(role, text, page="/profiles/:id", profile=PROFILE, clarify=None, summary=None):
+    return SimpleNamespace(role=role, message_text=text, page=page, master_profile_id=profile, clarify=clarify, summary=summary)
+
+
+class ConversationRepositoryTests(unittest.TestCase):
+    def setUp(self):
+        self.session = MagicMock()
+        self.repo = ConversationRepository(self.session)
+
+    def _window(self, rows, conversation_id=CONVERSATION, page="/profiles/:id", profile=PROFILE):
+        self.session.scalars.return_value = rows  # newest first, as the query returns them
+        return self.repo.window(TENANT, USER, conversation_id, page, profile)
+
+    def test_the_window_is_oldest_first_cut_short_and_flags_clarifying_replies(self):
+        rows = [_row("assistant", "A" * 900, clarify="question"), _row("user", "Q?")]
+        cid, history, _ = self._window(rows)
+
+        self.assertEqual(cid, CONVERSATION)
+        self.assertEqual([h["role"] for h in history], ["user", "assistant"])
+        self.assertEqual((len(history[1]["text"]), history[0]["clarify"], history[1]["clarify"]), (900, False, True))
+
+    def test_the_window_returns_the_newest_assistant_summary(self):
+        rows = [_row("assistant", "A2", summary="new"), _row("user", "Q2"), _row("assistant", "A1", summary="old"), _row("user", "Q1")]
+        self.assertEqual(self._window(rows)[2], "new")
+        self.assertIsNone(self._window([_row("user", "Q?")])[2])
+
+    def test_a_chat_is_not_continued_on_another_page_or_customer(self):
+        for page, profile in (("/segments", PROFILE), ("/profiles/:id", uuid.uuid4()), ("/profiles/:id", None)):
+            cid, history, _ = self._window([_row("user", "Q?")], page=page, profile=profile)
+            self.assertNotEqual(cid, CONVERSATION)
+            self.assertEqual(history, [])
+
+    def test_an_unknown_expired_or_foreign_id_starts_a_new_chat_indistinguishably(self):
+        cid, history, _ = self._window([])  # no rows for this tenant+user+id
+        self.assertNotEqual(cid, CONVERSATION)
+        self.assertEqual(history, [])
+
+    def test_without_an_id_a_new_chat_starts_and_nothing_is_read(self):
+        cid, history, summary = self.repo.window(TENANT, USER, None, "/segments", None)
+        self.assertEqual(history, [])
+        self.session.scalars.assert_not_called()
+
+    def test_every_read_is_limited_to_the_tenant_and_the_user_within_30_days(self):
+        self._window([])
+        statement = self.session.scalars.call_args.args[0].compile()
+        self.assertEqual({TENANT, USER, CONVERSATION}, {v for v in statement.params.values() if isinstance(v, uuid.UUID)})
+        self.assertIn("created_at >", str(statement))
+
+        self.session.scalar.return_value = None
+        self.repo.latest(TENANT, USER, None, None)
+        latest = self.session.scalar.call_args.args[0].compile()
+        self.assertEqual({TENANT, USER}, {v for v in latest.params.values() if isinstance(v, uuid.UUID)})
+        self.assertIn("page IS NULL", str(latest))
+
+    def test_an_exchange_is_two_ordered_rows_plus_a_tenant_scoped_purge_of_old_rows(self):
+        self.repo.add_exchange(TENANT, USER, CONVERSATION, "/segments", None, "Q?", "A.", "answered", None, [])
+
+        roles = [call.args[0].role for call in self.session.add.call_args_list]
+        self.assertEqual(roles, ["user", "assistant"])
+        self.session.flush.assert_called_once()
+        self.repo.add_exchange(TENANT, USER, CONVERSATION, "/segments", None, "Q?", "A.", "answered", None, [], "Sum.")
+        self.assertEqual(self.session.add.call_args_list[-1].args[0].summary, "Sum.")
+        purge = self.session.execute.call_args.args[0].compile()
+        self.assertTrue(str(purge).startswith("DELETE FROM customer360.sys_assistant_message"))
+        self.assertIn(TENANT, purge.params.values())
 
 
 if __name__ == "__main__":

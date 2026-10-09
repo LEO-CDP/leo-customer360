@@ -10,14 +10,16 @@ import logging
 import re
 import time
 import uuid
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.auth import require_tenant
 from core.database import get_db
+from core.repositories.assistant_repository import ConversationRepository
 from core.repositories.screen_facts import PROFILE_PAGE, SCREEN_FACTS, ScreenFacts
 from core.routers.support_api import SupportSource, ask_docs
 from core.utils.text_safety import collapse_whitespace, mask_text
@@ -29,6 +31,8 @@ assistant_router = APIRouter(prefix="/assistant", tags=["C360 - Assistant"])
 
 QUESTION_MAX_LEN = 2000
 LOGGED_QUESTION_MAX_LEN = 500
+STORED_MESSAGE_MAX_LEN = 2000
+STORED_SUMMARY_MAX_LEN = 800  # the column's CHECK
 VIEW_MAX_LEN = 60
 DIALOG_MAX_LEN = 80
 
@@ -44,6 +48,8 @@ class AssistantAskRequest(BaseModel):
     # The route's id parameter on an id page (segments, campaigns, personas). On the profile page
     # this and master_profile_id are the same id.
     entity_id: Optional[uuid.UUID] = None
+    # The chat this message belongs to, as returned by the previous answer; omit to start a new one.
+    conversation_id: Optional[uuid.UUID] = None
     # The selected period on a dashboard page, in days (1-400).
     period_days: Optional[int] = Field(default=None, ge=1, le=400)
     # The visible sub-tab on the page, one short line (e.g. "Timeline").
@@ -73,6 +79,22 @@ class AssistantAskResponse(BaseModel):
     clarify: Optional[str] = None
     sources: list[SupportSource] = []
     basis: Optional[AssistantBasis] = None
+    # None when the caller has no user (an API key): such asks are not remembered.
+    conversation_id: Optional[uuid.UUID] = None
+
+
+class ConversationMessage(BaseModel):
+    role: str
+    text: str
+    status: Optional[str] = None
+    clarify: Optional[str] = None
+    sources: list[SupportSource] = []
+    created_at: Optional[datetime] = None
+
+
+class ConversationResponse(BaseModel):
+    conversation_id: Optional[uuid.UUID] = None
+    messages: list[ConversationMessage] = []
 
 
 def sanitize_label(text: Optional[str], cap: int) -> Optional[str]:
@@ -101,9 +123,36 @@ def _record_ask(
     question: str,
     view: Optional[str],
     dialog: Optional[str],
+    conversation_id: Optional[uuid.UUID],
+    history_messages: int,
 ) -> None:
-    """One sys_audit_log row per ask. A problem here must never cost the user their answer."""
+    """The saved chat messages and one sys_audit_log row per ask, in one transaction. A problem here
+    must never cost the user their answer."""
     try:
+        found = bool(result.get("found", True))
+        if conversation_id is not None and user_id is not None:
+            try:
+                # A savepoint: if the chat cannot be saved (e.g. the session user is not a member of the
+                # session tenant) only the messages are skipped, the audit row below still lands.
+                with db.begin_nested():
+                    ConversationRepository(db).add_exchange(
+                        tenant_id,
+                        user_id,
+                        conversation_id,
+                        payload.page,
+                        payload.master_profile_id or payload.entity_id,
+                        question,
+                        mask_text(str(result.get("answer") or ""), STORED_MESSAGE_MAX_LEN),
+                        str(result.get("status") or ("answered" if found else "not_found")),
+                        result.get("clarify"),
+                        [
+                            {k: str(src.get(k) or "") for k in ("path", "title", "heading")}
+                            for src in (result.get("sources") or [] if found else [])
+                        ],
+                        mask_text(str(result.get("summary") or ""), STORED_SUMMARY_MAX_LEN) or None,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not save the assistant chat messages", exc_info=True)
         db.add(
             SysAuditLog(
                 tenant_id=tenant_id,
@@ -116,6 +165,10 @@ def _record_ask(
                     "view": view,
                     "dialog": dialog,
                     "question": question[:LOGGED_QUESTION_MAX_LEN],
+                    "conversation_id": str(conversation_id) if conversation_id else None,
+                    "history_messages": history_messages,
+                    "follows_up": result.get("follows_up"),
+                    "rewritten": mask_text(str(result.get("rewritten") or ""), LOGGED_QUESTION_MAX_LEN) or None,
                     "status": result.get("status"),
                     "found": result.get("found"),
                     "clarify": result.get("clarify"),
@@ -193,10 +246,19 @@ def assistant_ask(payload: AssistantAskRequest, request: Request, db: Session = 
 
     screen = _load_screen(db, tenant_id, payload)
 
-    # Masked first: the model and the audit log only ever see the masked text.
+    # Masked first: the model, the chat history and the audit log only ever see the masked text.
     question = mask_text(payload.question, QUESTION_MAX_LEN)
     view = sanitize_label(payload.view, VIEW_MAX_LEN)
     dialog = sanitize_label(payload.dialog, DIALOG_MAX_LEN)
+
+    # The chat is keyed by the object on screen: master_profile_id on the profile page, entity_id on
+    # any other id page (segments, campaigns, personas). Without a user (an API key) it is not remembered.
+    conversation_id, history, summary = None, [], None
+    if user_id is not None:
+        conversation_id, history, summary = ConversationRepository(db).window(
+            tenant_id, user_id, payload.conversation_id, payload.page,
+            payload.master_profile_id or payload.entity_id,
+        )
 
     started = time.perf_counter()
     result = ask_docs(
@@ -206,12 +268,15 @@ def assistant_ask(payload: AssistantAskRequest, request: Request, db: Session = 
         context_title=screen.title if screen else None,
         view=view,
         dialog=dialog,
+        history=history or None,
+        summary=summary,
     )
     _record_ask(
         db, tenant_id, user_id, payload, result, int((time.perf_counter() - started) * 1000),
         screen.fields if screen else [],
         payload.page if screen else None,
         question, view, dialog,
+        conversation_id, len(history),
     )
 
     found = bool(result.get("found", True))
@@ -223,6 +288,43 @@ def assistant_ask(payload: AssistantAskRequest, request: Request, db: Session = 
         clarify=result.get("clarify"),
         sources=result.get("sources") or [],
         basis=_build_basis(result.get("basis"), screen),
+        conversation_id=conversation_id,
+    )
+
+
+@assistant_router.get("/conversation", response_model=ConversationResponse)
+def assistant_conversation(
+    request: Request,
+    page: Optional[str] = Query(default=None, max_length=120, pattern=_PAGE_PATTERN),
+    master_profile_id: Optional[uuid.UUID] = None,
+    entity_id: Optional[uuid.UUID] = None,
+    db: Session = Depends(get_db),
+) -> ConversationResponse:
+    """The caller's latest saved chat on this page and object (so the panel can restore it).
+
+    The object is ``master_profile_id`` on the profile page and ``entity_id`` on any other id page,
+    the same key ``assistant_ask`` uses.
+    """
+    tenant_id = uuid.UUID(require_tenant(request))
+    user_id = _session_user(request)
+    if user_id is None:
+        return ConversationResponse()
+    conversation_id, rows = ConversationRepository(db).latest(
+        tenant_id, user_id, page, master_profile_id or entity_id
+    )
+    return ConversationResponse(
+        conversation_id=conversation_id,
+        messages=[
+            ConversationMessage(
+                role=row.role,
+                text=row.message_text,
+                status=row.status,
+                clarify=row.clarify,
+                sources=row.sources or [],
+                created_at=row.created_at,
+            )
+            for row in rows
+        ],
     )
 
 

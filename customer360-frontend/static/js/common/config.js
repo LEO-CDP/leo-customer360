@@ -703,9 +703,21 @@ window.C360 = window.C360 || {};
 
   // LEO Assistant answers go through customer360-api (tenant + auth headers), not the docs proxy, because
   // the API logs each ask and resolves anything about the page the user is on.
-  function assistantAsk(question, context) {
+  function assistantAsk(question, context, conversationId) {
     var body = $.extend({ question: question }, context || {});
+    if (conversationId) body.conversation_id = conversationId;
     return api("/assistant/ask", body, "POST");
+  }
+
+  // The caller's latest saved chat on this page and object: {conversation_id, messages[]}.
+  // The object is master_profile_id on the profile page and entity_id on any other id page,
+  // the same key /assistant/ask uses (the API reads master_profile_id or entity_id).
+  function assistantConversation(context) {
+    var params = {};
+    if (context && context.page) params.page = context.page;
+    if (context && context.master_profile_id) params.master_profile_id = context.master_profile_id;
+    if (context && context.entity_id) params.entity_id = context.entity_id;
+    return api("/assistant/conversation", params);
   }
 
   function docsSearch(query, topN, signal) {
@@ -737,6 +749,7 @@ window.C360 = window.C360 || {};
     isAdmin: isAdmin,
     docsAsk: docsAsk,
     assistantAsk: assistantAsk,
+    assistantConversation: assistantConversation,
     docsSearch: docsSearch,
     personaCategoryOptions: PERSONA_CATEGORY_OPTIONS
   };

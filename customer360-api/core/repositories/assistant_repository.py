@@ -7,14 +7,15 @@ text that may echo a name) are never touched.
 """
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from leo_customer360_dao.models.identity import CdpCustomerPersona, CdpMasterProfile, CdpProfileAttribute
+from leo_customer360_dao.models.system import SysAssistantMessage
 
 # (column on cdp_master_profiles, label shown to the model). Order is the order shown.
 PROFILE_FIELDS = (
@@ -51,6 +52,12 @@ PERSONA_FIELDS = (
 )
 DESCRIPTION_MAX_CHARS = 160
 MAX_TAGS = 10
+
+WINDOW_MESSAGES = 6          # short-term memory: what the model sees of the chat so far
+WINDOW_TEXT_MAX_CHARS = 1500  # each message is cut to this before it goes to the docs service, which keeps
+                              # the last 2 at this length with a summary, else 6 cut to 600
+RESTORE_MESSAGES = 50        # long-term memory: how much of a saved chat the panel gets back
+RETENTION_DAYS = 30
 
 
 def show_value(value) -> Optional[str]:
@@ -131,3 +138,128 @@ class AssistantRepository:
         ).all()
         catalog = {code: (description or "", bool(is_pii)) for code, description, is_pii in rows}
         return build_profile_facts(profile, persona, catalog)
+
+
+class ConversationRepository:
+    """LEO Assistant chat messages. Every query is limited to the caller's tenant AND user (a chat is
+    readable only by its author), within the 30-day retention window; row-level security on the
+    tenant is the second line of defence."""
+
+    def __init__(self, session: Session):
+        self.session = session
+
+    @staticmethod
+    def _cutoff() -> datetime:
+        return datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)
+
+    @staticmethod
+    def _same(column, value):
+        return column.is_(None) if value is None else column == value
+
+    def window(
+        self,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        conversation_id: Optional[uuid.UUID],
+        page: Optional[str],
+        master_profile_id: Optional[uuid.UUID],
+    ) -> tuple[uuid.UUID, list[dict], Optional[str]]:
+        """(conversation id to use, recent messages oldest first, the chat's latest summary or None).
+
+        An id that has no rows for this user (unknown, expired, someone else's) or whose chat started
+        on another page or customer is not continued: a new id and no history. The three cases look
+        the same, so the reply never reveals whether an id exists."""
+        if conversation_id is not None:
+            rows = list(
+                self.session.scalars(
+                    select(SysAssistantMessage)
+                    .where(
+                        SysAssistantMessage.tenant_id == tenant_id,
+                        SysAssistantMessage.user_id == user_id,
+                        SysAssistantMessage.conversation_id == conversation_id,
+                        SysAssistantMessage.created_at > self._cutoff(),
+                    )
+                    .order_by(SysAssistantMessage.created_at.desc())
+                    .limit(WINDOW_MESSAGES)
+                )
+            )
+            if rows and rows[0].page == page and rows[0].master_profile_id == master_profile_id:
+                return conversation_id, [
+                    {
+                        "role": row.role,
+                        "text": row.message_text[:WINDOW_TEXT_MAX_CHARS],
+                        "clarify": row.clarify is not None,
+                    }
+                    for row in reversed(rows)
+                ], next((row.summary for row in rows if row.role == "assistant"), None)
+        return uuid.uuid4(), [], None
+
+    def add_exchange(
+        self,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        page: Optional[str],
+        master_profile_id: Optional[uuid.UUID],
+        question: str,
+        answer: str,
+        status: str,
+        clarify: Optional[str],
+        sources: list[dict],
+        summary: Optional[str] = None,
+    ) -> None:
+        """Store the (already masked) question and its answer, then drop this tenant's expired rows.
+        The caller commits, so this lands in the same transaction as the audit row."""
+        common = dict(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            page=page,
+            master_profile_id=master_profile_id,
+        )
+        self.session.add(SysAssistantMessage(role="user", message_text=question, **common))
+        self.session.flush()  # keep the question before its answer
+        self.session.add(
+            SysAssistantMessage(
+                role="assistant", message_text=answer, status=status, clarify=clarify, sources=sources,
+                summary=summary, **common
+            )
+        )
+        self.session.execute(
+            delete(SysAssistantMessage).where(
+                SysAssistantMessage.tenant_id == tenant_id, SysAssistantMessage.created_at < self._cutoff()
+            )
+        )
+
+    def latest(
+        self,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        page: Optional[str],
+        master_profile_id: Optional[uuid.UUID],
+    ) -> tuple[Optional[uuid.UUID], list[SysAssistantMessage]]:
+        """This user's most recent chat on this page and customer, newest messages up to the limit."""
+        scope = (
+            SysAssistantMessage.tenant_id == tenant_id,
+            SysAssistantMessage.user_id == user_id,
+            self._same(SysAssistantMessage.page, page),
+            self._same(SysAssistantMessage.master_profile_id, master_profile_id),
+            SysAssistantMessage.created_at > self._cutoff(),
+        )
+        conversation_id = self.session.scalar(
+            select(SysAssistantMessage.conversation_id)
+            .where(*scope)
+            .order_by(SysAssistantMessage.created_at.desc())
+            .limit(1)
+        )
+        if conversation_id is None:
+            return None, []
+        rows = list(
+            self.session.scalars(
+                select(SysAssistantMessage)
+                .where(*scope, SysAssistantMessage.conversation_id == conversation_id)
+                .order_by(SysAssistantMessage.created_at.desc())
+                .limit(RESTORE_MESSAGES)
+            )
+        )
+        return conversation_id, list(reversed(rows))

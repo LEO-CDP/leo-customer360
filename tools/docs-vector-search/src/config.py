@@ -146,6 +146,11 @@ GEMINI_REQUEST_TIMEOUT_SECONDS = float(
 # off to use the plain-text prompt with the NOT_FOUND_ANSWERS marker instead.
 STRUCTURED_ANSWERS = os.getenv("DOCS_STRUCTURED_ANSWERS", "true").lower() == "true"
 
+# In a chat, rewrite a follow-up ("it is data sources", "and for Growth?") into a standalone
+# question with one small model call before searching. Off: use the word-count rule only.
+FOLLOWUP_REWRITE = os.getenv("DOCS_FOLLOWUP_REWRITE", "true").lower() == "true"
+FOLLOWUP_REWRITE_TIMEOUT_SECONDS = float(os.getenv("DOCS_FOLLOWUP_REWRITE_TIMEOUT_SECONDS", "6"))
+
 if LLM_PROVIDER not in {"openai", "gemini", "local"}:
     raise ValueError(f"Unsupported DOCS_LLM_PROVIDER: {LLM_PROVIDER}")
 if DOCS_HOSTED_LLM_MAX_OUTPUT_TOKENS < 1:

@@ -43,6 +43,7 @@ from leo_customer360_dao.models.identity import (
 from leo_customer360_dao.models.relations import CdpRelation, CustomerContact, RelationType, Transaction
 from leo_customer360_dao.models.segmentation import CdpSegment
 from leo_customer360_dao.models.system import (
+    SysAssistantMessage,
     SysAuditLog,
     SysDataSource,
     SysDomain,
@@ -94,6 +95,7 @@ __all__ = [
     "CustomerContact",
     "Transaction",
     "RelationType",
+    "SysAssistantMessage",
     "SysAuditLog",
     "SysDataSource",
     "SysDomain",

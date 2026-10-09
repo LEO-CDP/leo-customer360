@@ -60,13 +60,16 @@ def ask_docs(
     context_title: Optional[str] = None,
     view: Optional[str] = None,
     dialog: Optional[str] = None,
+    history: Optional[list[dict]] = None,
+    summary: Optional[str] = None,
 ) -> dict:
     """Call the docs service's /ask; any failure is a 502 so nothing is logged.
 
     ``page`` (a route pattern) selects a page card; ``context`` carries facts about the object on
     screen and ``context_title`` heads that block (e.g. "Segment on screen"); ``view`` and ``dialog``
-    name the open sub-tab and form/dialog. The docs service only honours all of them because of the
-    internal-auth header below.
+    name the open sub-tab and form/dialog; ``history`` carries the earlier messages of the chat
+    ({role, text, clarify}, oldest first). The docs service only honours all of them because of the
+    internal-auth header below. ``summary`` is the chat's running summary from the previous answer.
     """
     headers = {"X-Internal-Auth": settings.docs_internal_secret} if settings.docs_internal_secret else None
     body: dict = {"question": question}
@@ -80,6 +83,10 @@ def ask_docs(
         body["view"] = view
     if dialog:
         body["dialog"] = dialog
+    if history:
+        body["history"] = history
+    if summary:
+        body["summary"] = summary
     try:
         with httpx.Client(timeout=settings.docs_search_timeout) as client:
             response = client.post(f"{settings.docs_search_url.rstrip('/')}/ask", json=body, headers=headers)

@@ -50,10 +50,11 @@ def test_profile_context_is_accepted_only_from_a_trusted_caller(monkeypatch):
         raise AssertionError("browser-supplied context was accepted")
 
     # Without context nothing needs trust, and a trusted caller's context passes through.
-    assert server._trusted_context(server.AskRequest(question="Why?"), _request([])) == (None, None, None, None)
+    assert server._trusted_context(server.AskRequest(question="Why?"), _request([])) == (None, None, None, None, None)
     monkeypatch.setattr(server.limiter, "is_internal", lambda request: True)
     assert server._trusted_context(ask, _request([(b"x-internal-auth", b"test-secret")])) == (
         ["Churn risk tier: high"],
+        None,
         None,
         None,
         None,
@@ -70,7 +71,7 @@ def test_view_and_dialog_are_accepted_only_from_a_trusted_caller(monkeypatch):
             server._trusted_context(req, _request([]))
         except HTTPException as exc:
             assert exc.status_code == 403
-            assert "context, context_title, view and dialog require" in exc.detail
+            assert "context, context_title, view, dialog, history and summary require" in exc.detail
         else:
             raise AssertionError("browser-supplied view/dialog was accepted")
 
@@ -79,6 +80,7 @@ def test_view_and_dialog_are_accepted_only_from_a_trusted_caller(monkeypatch):
         None,
         "Agent Workflow",
         "Add Data Source",
+        None,
         None,
     )
 
@@ -93,7 +95,7 @@ def test_context_title_is_accepted_only_from_a_trusted_caller(monkeypatch):
             server._trusted_context(req, _request([]))
         except HTTPException as exc:
             assert exc.status_code == 403
-            assert "context, context_title, view and dialog require" in exc.detail
+            assert "context, context_title, view, dialog, history and summary require" in exc.detail
         else:
             raise AssertionError("browser-supplied context_title was accepted")
 
@@ -103,7 +105,25 @@ def test_context_title_is_accepted_only_from_a_trusted_caller(monkeypatch):
         None,
         None,
         "Segment on screen",
+        None,
     )
+
+
+def test_chat_history_is_accepted_only_from_a_trusted_caller(monkeypatch):
+    monkeypatch.setattr(server, "INTERNAL_API_SECRET", "test-secret")
+    ask = server.AskRequest(question="it is data sources", history=[{"role": "assistant", "text": "x" * 900, "clarify": True}])
+
+    monkeypatch.setattr(server.limiter, "is_internal", lambda request: False)
+    try:
+        server._trusted_context(ask, _request([]))
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    else:
+        raise AssertionError("browser-supplied history was accepted")
+
+    monkeypatch.setattr(server.limiter, "is_internal", lambda request: True)
+    _, _, _, _, history = server._trusted_context(ask, _request([(b"x-internal-auth", b"test-secret")]))
+    assert history == [{"role": "assistant", "text": "x" * 900, "clarify": True}]  # long stored answers are not rejected
 
 
 def test_ask_passes_page_context_fields_to_the_query(monkeypatch):
@@ -112,7 +132,7 @@ def test_ask_passes_page_context_fields_to_the_query(monkeypatch):
     monkeypatch.setattr(server.limiter, "enforce", lambda request: _noop())
     seen = {}
 
-    def fake_query(question, top_n, top_k, page, context, view, dialog, context_title):
+    def fake_query(question, top_n, top_k, page, context, view, dialog, context_title, history, summary):
         seen.update(
             question=question,
             page=page,
@@ -120,6 +140,8 @@ def test_ask_passes_page_context_fields_to_the_query(monkeypatch):
             view=view,
             dialog=dialog,
             context_title=context_title,
+            history=history,
+            summary=summary,
         )
         return {"sources": []}
 
@@ -134,6 +156,8 @@ def test_ask_passes_page_context_fields_to_the_query(monkeypatch):
         context_title="Segment on screen",
         view="Agent Workflow",
         dialog="Add Data Source",
+        history=[{"role": "user", "text": "hi"}, {"role": "assistant", "text": "hello"}],
+        summary="The user said hi.",
     )
     asyncio.run(server.ask(req, _request([(b"x-internal-auth", b"test-secret")])))
 
@@ -144,6 +168,8 @@ def test_ask_passes_page_context_fields_to_the_query(monkeypatch):
         "view": "Agent Workflow",
         "dialog": "Add Data Source",
         "context_title": "Segment on screen",
+        "history": [{"role": "user", "text": "hi", "clarify": False}, {"role": "assistant", "text": "hello", "clarify": False}],
+        "summary": "The user said hi.",
     }
 
 
@@ -158,6 +184,7 @@ def test_ask_request_limits_page_context_title_view_and_dialog_size():
         {"context_title": "x" * 61},
         {"view": "x" * 61},
         {"dialog": "x" * 81},
+        {"summary": "x" * 801},
     ):
         try:
             server.AskRequest(question="Q?", **bad)
