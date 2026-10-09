@@ -25,15 +25,19 @@ from core.repositories.campaign_draft_repository import (
     CampaignDraftApprovalBlockedError,
     CampaignDraftActorNotFoundError,
     CampaignDraftNotFoundError,
+    CampaignDraftStaleError,
     CampaignDraftValidationError,
     CampaignSegmentNotFoundError,
     CampaignTemplateNotFoundError,
-    SEGMENT_UNSET,
+    UNSET,
 )
+from core.repositories.campaign_planner_agent import AgentConfigurationInvalidError
 from core.routers.campaign_draft_api import router
 
 DEMO_TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 DEMO_USER_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
+AGENT_CODE = "campaign_planner_uat"
+LOADED_AT = "2026-01-01T00:00:00+00:00"
 
 
 def _campaign(**overrides) -> SimpleNamespace:
@@ -56,6 +60,7 @@ def _campaign(**overrides) -> SimpleNamespace:
         approved_at=None,
         created_at=now,
         updated_at=now,
+        metadata_={"agent_provenance": {"agent_code": AGENT_CODE, "instruction_version": 1}},
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -82,6 +87,7 @@ class FakeCampaignDraftRepository:
     approve_side_effect: Optional[Exception] = None
     edit_side_effect: Optional[Exception] = None
     last_create_kwargs: dict[str, Any] = {}
+    last_edit_kwargs: dict[str, Any] = {}
 
     def __init__(self, session):
         self.session = session
@@ -95,6 +101,7 @@ class FakeCampaignDraftRepository:
         cls.approve_side_effect = None
         cls.edit_side_effect = None
         cls.last_create_kwargs = {}
+        cls.last_edit_kwargs = {}
 
     def create_draft(self, **kwargs):
         FakeCampaignDraftRepository.last_create_kwargs = kwargs
@@ -118,10 +125,11 @@ class FakeCampaignDraftRepository:
         return FakeCampaignDraftRepository.content_items.get(campaign_id, [])
 
     def edit_draft(self, tenant_id, campaign_id, editor_id, **fields):
+        FakeCampaignDraftRepository.last_edit_kwargs = fields
         if FakeCampaignDraftRepository.edit_side_effect is not None:
             raise FakeCampaignDraftRepository.edit_side_effect
         campaign = self.get_campaign(tenant_id, campaign_id)
-        if fields.get("segment_id", SEGMENT_UNSET) is not SEGMENT_UNSET and fields.get("segment_id") is not None:
+        if fields.get("segment_id", UNSET) is not UNSET and fields.get("segment_id") is not None:
             campaign.segment_id = fields["segment_id"]
         for key in ("objective", "strategy_summary", "start_date", "end_date"):
             if fields.get(key) is not None:
@@ -148,6 +156,10 @@ class FakeCampaignDraftRepository:
         campaign = self.get_campaign(tenant_id, campaign_id)
         campaign.approval_status = APPROVAL_STATUS_REJECTED
         return campaign
+
+    def list_approved_templates(self, tenant_id, channel):
+        FakeCampaignDraftRepository.last_template_query = (tenant_id, channel)
+        return [{"template_id": uuid.uuid4(), "name": "Welcome", "channel": channel}]
 
     def list_campaign_history(self, tenant_id, campaign_id):
         return FakeCampaignDraftRepository.reviews.get(campaign_id, [])
@@ -185,6 +197,7 @@ class GenerateCampaignDraftTests(unittest.TestCase):
             "template_id": str(uuid.uuid4()),
             "objective": "Drive Q4 repeat purchases among lapsed VIP customers",
             "budget_time_constraints": "Launch within 2 weeks",
+            "agent_code": AGENT_CODE,
         }
         payload.update(overrides)
         return payload
@@ -266,6 +279,7 @@ class ReviewCampaignDraftTests(unittest.TestCase):
                 "segment_id": str(uuid.uuid4()),
                 "template_id": str(uuid.uuid4()),
                 "objective": "Win back lapsed customers",
+                "agent_code": AGENT_CODE,
             },
         ).json()
         self.campaign_id = created["campaign_id"]
@@ -280,7 +294,7 @@ class ReviewCampaignDraftTests(unittest.TestCase):
         self.assertIsNotNone(body["approved_at"])
 
     def test_edit_then_approve_reflects_edited_values(self):
-        self.client.patch(f"/campaigns/{self.campaign_id}/draft", json={"objective": "Revised objective"})
+        self.client.patch(f"/campaigns/{self.campaign_id}/draft", json={"updated_at": LOADED_AT, "objective": "Revised objective"})
         response = self.client.post(f"/campaigns/{self.campaign_id}/approve")
 
         self.assertEqual(response.status_code, 200)
@@ -293,7 +307,7 @@ class ReviewCampaignDraftTests(unittest.TestCase):
 
         response = self.client.patch(
             f"/campaigns/{self.campaign_id}/draft",
-            json={"segment_id": replacement_segment_id},
+            json={"updated_at": LOADED_AT, "segment_id": replacement_segment_id},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -306,7 +320,7 @@ class ReviewCampaignDraftTests(unittest.TestCase):
 
         response = self.client.patch(
             f"/campaigns/{self.campaign_id}/draft",
-            json={"objective": "Updated objective"},
+            json={"updated_at": LOADED_AT, "objective": "Updated objective"},
         )
 
         self.assertEqual(response.status_code, 401)
@@ -339,7 +353,7 @@ class ReviewCampaignDraftTests(unittest.TestCase):
     def test_editing_approved_campaign_reverts_to_in_review(self):
         self.client.post(f"/campaigns/{self.campaign_id}/approve")
 
-        response = self.client.patch(f"/campaigns/{self.campaign_id}/draft", json={"objective": "Post-approval edit"})
+        response = self.client.patch(f"/campaigns/{self.campaign_id}/draft", json={"updated_at": LOADED_AT, "objective": "Post-approval edit"})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["approval_status"], "InReview")
@@ -348,7 +362,7 @@ class ReviewCampaignDraftTests(unittest.TestCase):
         self.client.post(f"/campaigns/{self.campaign_id}/reject", json={})
 
         response = self.client.patch(
-            f"/campaigns/{self.campaign_id}/draft", json={"start_date": "2026-11-01", "end_date": "2026-11-15"}
+            f"/campaigns/{self.campaign_id}/draft", json={"updated_at": LOADED_AT, "start_date": "2026-11-01", "end_date": "2026-11-15"}
         )
 
         self.assertEqual(response.status_code, 200)
@@ -405,6 +419,7 @@ class CampaignDraftTenantIsolationTests(unittest.TestCase):
                 "segment_id": str(uuid.uuid4()),
                 "template_id": str(uuid.uuid4()),
                 "objective": "Tenant A's campaign",
+                "agent_code": AGENT_CODE,
             },
             headers={"X-Tenant-Id": self.TENANT_A},
         ).json()
@@ -419,7 +434,7 @@ class CampaignDraftTenantIsolationTests(unittest.TestCase):
     def test_tenant_b_cannot_edit_draft(self):
         response = self.client.patch(
             f"/campaigns/{self.tenant_a_campaign_id}/draft",
-            json={"objective": "Hijacked"},
+            json={"updated_at": LOADED_AT, "objective": "Hijacked"},
             headers={"X-Tenant-Id": self.TENANT_B},
         )
         self.assertEqual(response.status_code, 404)
@@ -435,6 +450,180 @@ class CampaignDraftTenantIsolationTests(unittest.TestCase):
             f"/campaigns/{self.tenant_a_campaign_id}/history", headers={"X-Tenant-Id": self.TENANT_B}
         )
         self.assertEqual(response.status_code, 404)
+
+
+class AgentAwarePlanningAndGovernedEditorTests(unittest.TestCase):
+    """Spec 03: registry-selected planner, provenance in responses, and the
+    governed editor's updated_at precondition."""
+
+    def setUp(self):
+        FakeCampaignDraftRepository.reset()
+        self._repo_patcher = patch(
+            "core.routers.campaign_draft_api.CampaignDraftRepository", FakeCampaignDraftRepository
+        )
+        self._repo_patcher.start()
+        self.addCleanup(self._repo_patcher.stop)
+        self.client = TestClient(_build_test_app())
+        self.payload = {
+            "segment_id": str(uuid.uuid4()),
+            "template_id": str(uuid.uuid4()),
+            "objective": "Win back lapsed customers",
+            "agent_code": AGENT_CODE,
+        }
+
+    def _create(self) -> dict:
+        return self.client.post("/campaigns/draft", json=self.payload).json()
+
+    def test_draft_requires_agent_code(self):
+        del self.payload["agent_code"]
+
+        response = self.client.post("/campaigns/draft", json=self.payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(FakeCampaignDraftRepository.campaigns, {})
+
+    def test_unusable_agent_returns_structured_409_and_creates_nothing(self):
+        FakeCampaignDraftRepository.create_side_effect = AgentConfigurationInvalidError(
+            "campaign_planner", ["status is 'INACTIVE', expected 'ACTIVE'"]
+        )
+
+        response = self.client.post("/campaigns/draft", json=dict(self.payload, agent_code="campaign_planner"))
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()["detail"],
+            {
+                "code": "agent_configuration_invalid",
+                "agent_code": "campaign_planner",
+                "reasons": ["status is 'INACTIVE', expected 'ACTIVE'"],
+            },
+        )
+        self.assertEqual(FakeCampaignDraftRepository.campaigns, {})
+
+    def test_draft_forwards_agent_and_marketer_values(self):
+        self.client.post(
+            "/campaigns/draft",
+            json=dict(self.payload, name="Tet win-back", start_date="2027-01-10", end_date="2027-01-20", budget_amount="5000000", currency="VND"),
+        )
+
+        kwargs = FakeCampaignDraftRepository.last_create_kwargs
+        self.assertEqual(kwargs["agent_code"], AGENT_CODE)
+        self.assertEqual(kwargs["name"], "Tet win-back")
+        self.assertEqual(kwargs["start_date"], date(2027, 1, 10))
+        self.assertEqual(str(kwargs["budget_amount"]), "5000000")
+
+    def test_draft_rejects_end_before_start(self):
+        response = self.client.post("/campaigns/draft", json=dict(self.payload, start_date="2027-01-20", end_date="2027-01-10"))
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_write_response_carries_provenance_and_full_campaign(self):
+        body = self._create()
+
+        self.assertEqual(body["metadata_"]["agent_provenance"]["agent_code"], AGENT_CODE)
+        self.assertIn("updated_at", body)
+        self.assertIn("tenant_id", body)
+        self.assertNotIn("embedding", body)
+
+    def test_edit_requires_updated_at(self):
+        campaign_id = self._create()["campaign_id"]
+
+        response = self.client.patch(f"/campaigns/{campaign_id}/draft", json={"objective": "No precondition"})
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_edit_refuses_client_written_agent_provenance(self):
+        campaign_id = self._create()["campaign_id"]
+
+        response = self.client.patch(
+            f"/campaigns/{campaign_id}/draft",
+            json={"updated_at": LOADED_AT, "metadata": {"agent_provenance": {"agent_code": "forged"}}},
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_edit_forwards_general_governed_and_editor_fields(self):
+        campaign_id = self._create()["campaign_id"]
+        template_id = str(uuid.uuid4())
+
+        response = self.client.patch(
+            f"/campaigns/{campaign_id}/draft",
+            json={
+                "updated_at": LOADED_AT,
+                "name": "Renamed",
+                "budget_amount": "120.50",
+                "keywords": ["vip", "tet"],
+                "template_id": template_id,
+                "metadata": {"editor_context": {"notes": "check tone"}},
+                "replan": True,
+                "agent_code": AGENT_CODE,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        kwargs = FakeCampaignDraftRepository.last_edit_kwargs
+        self.assertEqual(kwargs["general_fields"]["name"], "Renamed")
+        self.assertEqual(kwargs["general_fields"]["keywords"], ["vip", "tet"])
+        self.assertNotIn("status", kwargs["general_fields"])
+        self.assertEqual(str(kwargs["template_id"]), template_id)
+        self.assertEqual(kwargs["editor_context"], {"notes": "check tone"})
+        self.assertTrue(kwargs["replan"])
+        self.assertEqual(kwargs["expected_updated_at"], datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    def test_edit_without_template_or_metadata_leaves_them_unset(self):
+        campaign_id = self._create()["campaign_id"]
+
+        self.client.patch(f"/campaigns/{campaign_id}/draft", json={"updated_at": LOADED_AT, "objective": "x"})
+
+        kwargs = FakeCampaignDraftRepository.last_edit_kwargs
+        self.assertIs(kwargs["template_id"], UNSET)
+        self.assertIs(kwargs["editor_context"], UNSET)
+
+    def test_stale_edit_returns_409_with_current_campaign(self):
+        campaign_id = self._create()["campaign_id"]
+        FakeCampaignDraftRepository.edit_side_effect = CampaignDraftStaleError("saved after this editor loaded it")
+
+        response = self.client.patch(f"/campaigns/{campaign_id}/draft", json={"updated_at": LOADED_AT, "objective": "x"})
+
+        self.assertEqual(response.status_code, 409)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["code"], "stale_update")
+        self.assertEqual(detail["current"]["campaign_id"], campaign_id)
+        self.assertIn("updated_at", detail["current"])
+
+    def test_replan_with_unusable_agent_returns_409(self):
+        campaign_id = self._create()["campaign_id"]
+        FakeCampaignDraftRepository.edit_side_effect = AgentConfigurationInvalidError("x", ["agent is not registered in cdp_ai_agents"])
+
+        response = self.client.patch(f"/campaigns/{campaign_id}/draft", json={"updated_at": LOADED_AT, "replan": True, "agent_code": "x"})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"]["code"], "agent_configuration_invalid")
+
+
+class TemplateOptionsTests(unittest.TestCase):
+    def setUp(self):
+        FakeCampaignDraftRepository.reset()
+        patcher = patch("core.routers.campaign_draft_api.CampaignDraftRepository", FakeCampaignDraftRepository)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.client = TestClient(_build_test_app())
+
+    def test_defaults_to_email_and_scopes_to_caller_tenant(self):
+        response = self.client.get("/campaigns/draft/template-options")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(FakeCampaignDraftRepository.last_template_query, (DEMO_TENANT_ID, "email"))
+        self.assertEqual(response.json()[0]["name"], "Welcome")
+
+    def test_zns_channel_is_passed_through(self):
+        response = self.client.get("/campaigns/draft/template-options?channel=zalo_zns")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(FakeCampaignDraftRepository.last_template_query[1], "zalo_zns")
+
+    def test_unknown_channel_is_422(self):
+        self.assertEqual(self.client.get("/campaigns/draft/template-options?channel=sms").status_code, 422)
 
 
 if __name__ == "__main__":

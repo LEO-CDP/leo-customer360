@@ -61,3 +61,20 @@ def test_duplicate_content_id_is_rejected(monkeypatch):
 
     with pytest.raises(AIProviderError, match="duplicate content_item_ids"):
         cp.generate_campaign_plan(_brief(), _CANDIDATES)
+
+def test_brief_instructions_override_the_prompt_store(monkeypatch):
+    prompts = []
+
+    class _CapturingProvider(_FakeProvider):
+        def complete(self, prompt: str) -> str:
+            prompts.append(prompt)
+            return super().complete(prompt)
+
+    monkeypatch.setattr(cp.base, "_resolve_provider", lambda *args, **kwargs: _CapturingProvider(_GOOD))
+    monkeypatch.setattr(cp.base, "_instructions", lambda _key: "STORE BODY")
+    brief = cp.CampaignPlanBrief(segment_context={"size": 100}, objective="reactivate", instructions="REGISTRY v3 BODY")
+
+    cp.generate_campaign_plan(brief, _CANDIDATES)
+
+    assert prompts[0].startswith("REGISTRY v3 BODY")
+    assert "STORE BODY" not in prompts[0]

@@ -28,7 +28,7 @@ class GeneratedCampaignPlan(BaseGeneratedPlan):
 
 
 def _build_prompt(brief: CampaignPlanBrief, candidate_content_items: list[dict[str, Any]]) -> str:
-    lines = [base._instructions(CAMPAIGN_PLAN_INSTRUCTIONS), *base._brief_lines(brief)]
+    lines = [base._brief_instructions(brief, CAMPAIGN_PLAN_INSTRUCTIONS), *base._brief_lines(brief)]
     lines.append(f"Candidate content items (choose only from these, by content_item_id): {candidate_content_items}")
     return "\n".join(lines)
 

@@ -12,7 +12,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 APPROVAL_STATUS_PATTERN = "^(Draft|InReview|Approved|Rejected)$"
@@ -117,14 +117,35 @@ class CampaignRead(CampaignBase):
     content_items: Optional[list[CampaignDraftContentItemRead]] = None
 
 
-class CampaignDraftRequest(BaseModel):
+def _check_schedule_window(model):
+    """Shared request rule: an end date may not precede its start date."""
+    if model.start_date and model.end_date and model.end_date < model.start_date:
+        raise ValueError("end_date cannot be before start_date")
+    return model
+
+
+class PlannedDraftInputs(BaseModel):
+    """Planner selection plus the marketer values the planner must not replace."""
+
+    agent_code: str = Field(..., min_length=1, max_length=100)
+    campaign_code: Optional[str] = Field(default=None, max_length=100)
+    name: Optional[str] = Field(default=None, min_length=1)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    budget_amount: Optional[Decimal] = Field(default=None, ge=0)
+    currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
+
+    _schedule = model_validator(mode="after")(_check_schedule_window)
+
+
+class CampaignDraftRequest(PlannedDraftInputs):
     segment_id: uuid.UUID
     template_id: uuid.UUID
     objective: str
     budget_time_constraints: Optional[str] = None
 
 
-class ZnsCampaignDraftRequest(BaseModel):
+class ZnsCampaignDraftRequest(PlannedDraftInputs):
     """AI Zalo ZNS draft: the caller supplies a segment + objective; the AI
     SELECTS one Approved ZNS template (crm_message_templates, channel=zalo_zns) and
     fills its typed params -- no ``template_id`` is supplied by the caller."""
@@ -134,34 +155,50 @@ class ZnsCampaignDraftRequest(BaseModel):
     budget_time_constraints: Optional[str] = None
 
 
-class CampaignDraftResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class CampaignDraftResponse(CampaignRead):
+    """Every write on the governed draft path returns the full non-embedding
+    campaign, its ordered content plan and the immutable planner snapshot."""
 
-    campaign_id: uuid.UUID
-    status: Optional[str] = None
     approval_status: str
-    segment_id: Optional[uuid.UUID] = None
-    template_id: Optional[uuid.UUID] = None
-    name: Optional[str] = None
-    objective: Optional[str] = None
-    strategy_summary: Optional[str] = None
-    ai_plan: Optional[dict] = None
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    approved_by: Optional[uuid.UUID] = None
-    approved_at: Optional[datetime] = None
     content_items: list[CampaignDraftContentItemRead] = Field(default_factory=list)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+
+
+class CampaignEditorMetadata(BaseModel):
+    """The only client-writable ``metadata`` namespace; ``agent_provenance`` is
+    server-owned, so any other top-level key is refused."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    editor_context: dict = Field(default_factory=dict)
 
 
 class EditCampaignDraftRequest(BaseModel):
+    # Optimistic-concurrency precondition: the updated_at the editor loaded.
+    updated_at: datetime
+    # Governed fields: a change re-submits an Approved/Rejected campaign.
     segment_id: Optional[uuid.UUID] = None
+    template_id: Optional[uuid.UUID] = None
     objective: Optional[str] = None
     strategy_summary: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     content_items: Optional[list[CampaignContentItemInput]] = None
+    replan: bool = False
+    agent_code: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    # General fields: audited, but no re-review on their own.
+    campaign_code: Optional[str] = Field(default=None, max_length=100)
+    name: Optional[str] = Field(default=None, min_length=1)
+    status: Optional[str] = Field(default=None, max_length=50)
+    channel: Optional[str] = Field(default=None, max_length=100)
+    platform: Optional[str] = Field(default=None, max_length=100)
+    description: Optional[str] = None
+    keywords: Optional[list[str]] = None
+    lang: Optional[str] = None
+    budget_amount: Optional[Decimal] = Field(default=None, ge=0)
+    currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
+    metadata: Optional[CampaignEditorMetadata] = None
+
+    _schedule = model_validator(mode="after")(_check_schedule_window)
 
 
 class RejectCampaignDraftRequest(BaseModel):
@@ -824,6 +861,18 @@ class CampaignMetricItem(BaseModel):
     cvr_percentage: Decimal
     cpa: Decimal
     roas: Decimal
+    # Management columns joined from crm_campaign (not in the view).
+    approval_status: Optional[str] = None
+    user_id: Optional[uuid.UUID] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    budget_amount: Optional[Decimal] = None
+    currency: Optional[str] = None
+    segment_id: Optional[uuid.UUID] = None
+    template_id: Optional[uuid.UUID] = None
+    agent_code: Optional[str] = None
+    agent_display_name: Optional[str] = None
+    agent_instruction_version: Optional[int] = None
 
 
 class CampaignKPIResponse(BaseModel):
@@ -864,3 +913,62 @@ class PaginatedCampaignResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+# ---------------------------------------------------------------------------
+# Single-campaign performance report (GET /campaigns/{campaign_id}/report)
+# ---------------------------------------------------------------------------
+
+class CampaignMetricTotals(BaseModel):
+    """Summed delivery metrics plus derived rates. ``cpa`` is None (with
+    ``zero_conversion_warning``) when there were no conversions, and ``roas``
+    is None when nothing was spent -- never a misleading 0.00."""
+
+    spend: Decimal
+    impressions: int
+    clicks: int
+    conversions: int
+    revenue: Decimal
+    ctr_percentage: Decimal
+    cvr_percentage: Decimal
+    cpa: Optional[Decimal] = None
+    roas: Optional[Decimal] = None
+    zero_conversion_warning: bool
+
+
+class CampaignDailyMetric(BaseModel):
+    report_date: date
+    spend: Decimal
+    impressions: int
+    clicks: int
+    conversions: int
+    revenue: Decimal
+
+
+class CampaignReportCoverage(BaseModel):
+    """Requested filter window and the dates that actually have data in it."""
+
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    first_report_date: Optional[date] = None
+    last_report_date: Optional[date] = None
+    days_with_data: int
+
+
+class CampaignApprovalSummary(BaseModel):
+    approval_status: Optional[str] = None
+    approved_by: Optional[uuid.UUID] = None
+    approved_at: Optional[datetime] = None
+    last_review: Optional[dict] = None
+    audit_event_count: int
+    review_count: int
+
+
+class CampaignReportResponse(BaseModel):
+    campaign: CampaignRead
+    coverage: CampaignReportCoverage
+    daily: list[CampaignDailyMetric]
+    period_totals: CampaignMetricTotals
+    lifetime: CampaignMetricTotals
+    content_plan: list[CampaignDraftContentItemRead]
+    approval: CampaignApprovalSummary

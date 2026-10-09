@@ -17,7 +17,7 @@ from typing import Optional
 from sqlalchemy import asc, and_, desc, func, select, text
 from sqlalchemy.orm import Session
 
-from leo_customer360_dao.models.crm import CRMCampaignPerformanceDaily, VwCampaignPerformanceMetrics
+from leo_customer360_dao.models.crm import Campaign, CRMCampaignPerformanceDaily, VwCampaignPerformanceMetrics
 from leo_customer360_dao.schemas.crm import CampaignFilterParams
 
 # Columns that callers are allowed to sort by (allowlist prevents SQLi via
@@ -28,6 +28,31 @@ _SORTABLE_COLUMNS = frozenset({
     "total_conversions", "total_revenue", "ctr_percentage",
     "cvr_percentage", "cpa", "roas",
 })
+
+
+_HUNDRED = Decimal("100")
+_CENTS = Decimal("0.01")
+
+
+def metric_totals(spend, impressions, clicks, conversions, revenue) -> dict:
+    """Summed delivery metrics plus derived CTR/CVR/CPA/ROAS. CPA is None with a
+    warning when there were no conversions (the view reports 0.00, which reads
+    as free conversions), and ROAS is None when nothing was spent."""
+    spend = Decimal(str(spend or 0))
+    revenue = Decimal(str(revenue or 0))
+    impressions, clicks, conversions = int(impressions or 0), int(clicks or 0), int(conversions or 0)
+    return {
+        "spend": spend,
+        "impressions": impressions,
+        "clicks": clicks,
+        "conversions": conversions,
+        "revenue": revenue,
+        "ctr_percentage": (Decimal(clicks) / impressions * _HUNDRED).quantize(_CENTS) if impressions else Decimal("0.00"),
+        "cvr_percentage": (Decimal(conversions) / clicks * _HUNDRED).quantize(_CENTS) if clicks else Decimal("0.00"),
+        "cpa": (spend / conversions).quantize(_CENTS) if conversions else None,
+        "roas": (revenue / spend).quantize(_CENTS) if spend else None,
+        "zero_conversion_warning": conversions == 0,
+    }
 
 
 class CampaignRepository:
@@ -114,15 +139,102 @@ class CampaignRepository:
         order_clause = desc(sort_col) if filters.sort_order.lower() == "desc" else asc(sort_col)
 
         offset = (filters.page - 1) * filters.page_size
+        provenance = Campaign.metadata_["agent_provenance"]
         rows = self.session.execute(
-            select(VwCampaignPerformanceMetrics)
+            select(
+                *VwCampaignPerformanceMetrics.__table__.c,
+                Campaign.approval_status,
+                Campaign.user_id,
+                Campaign.start_date,
+                Campaign.end_date,
+                Campaign.budget_amount,
+                Campaign.currency,
+                Campaign.segment_id,
+                Campaign.template_id,
+                provenance["agent_code"].astext.label("agent_code"),
+                provenance["display_name"].astext.label("agent_display_name"),
+                provenance["instruction_version"].astext.label("agent_instruction_version"),
+            )
+            .join(
+                Campaign,
+                and_(
+                    Campaign.campaign_id == VwCampaignPerformanceMetrics.campaign_id,
+                    Campaign.tenant_id == self.tenant_id,
+                ),
+            )
             .where(where_clause)
             .order_by(order_clause)
             .offset(offset)
             .limit(filters.page_size)
-        ).scalars().all()
+        ).all()
 
-        return list(rows), total
+        return [dict(row._mapping) for row in rows], total
+
+    def get_campaign_performance(
+        self,
+        campaign_id: uuid.UUID,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> dict:
+        """One campaign's daily rows (date-filtered) and lifetime totals."""
+        self._set_tenant_context()
+
+        daily_stmt = (
+            select(
+                CRMCampaignPerformanceDaily.report_date,
+                func.coalesce(func.sum(CRMCampaignPerformanceDaily.spend), 0).label("spend"),
+                func.coalesce(func.sum(CRMCampaignPerformanceDaily.impressions), 0).label("impressions"),
+                func.coalesce(func.sum(CRMCampaignPerformanceDaily.clicks), 0).label("clicks"),
+                func.coalesce(func.sum(CRMCampaignPerformanceDaily.conversions), 0).label("conversions"),
+                func.coalesce(func.sum(CRMCampaignPerformanceDaily.revenue_estimated), 0).label("revenue"),
+            )
+            .where(
+                CRMCampaignPerformanceDaily.tenant_id == self.tenant_id,
+                CRMCampaignPerformanceDaily.campaign_id == campaign_id,
+            )
+            .group_by(CRMCampaignPerformanceDaily.report_date)
+            .order_by(CRMCampaignPerformanceDaily.report_date.asc())
+        )
+        if start_date:
+            daily_stmt = daily_stmt.where(CRMCampaignPerformanceDaily.report_date >= start_date)
+        if end_date:
+            daily_stmt = daily_stmt.where(CRMCampaignPerformanceDaily.report_date <= end_date)
+        daily = [
+            {
+                "report_date": row.report_date,
+                "spend": Decimal(str(row.spend)),
+                "impressions": int(row.impressions),
+                "clicks": int(row.clicks),
+                "conversions": int(row.conversions),
+                "revenue": Decimal(str(row.revenue)),
+            }
+            for row in self.session.execute(daily_stmt).all()
+        ]
+
+        lifetime = self.session.execute(
+            select(VwCampaignPerformanceMetrics).where(
+                VwCampaignPerformanceMetrics.tenant_id == self.tenant_id,
+                VwCampaignPerformanceMetrics.campaign_id == campaign_id,
+            )
+        ).scalar_one_or_none()
+
+        return {
+            "daily": daily,
+            "period_totals": metric_totals(
+                sum(day["spend"] for day in daily),
+                sum(day["impressions"] for day in daily),
+                sum(day["clicks"] for day in daily),
+                sum(day["conversions"] for day in daily),
+                sum(day["revenue"] for day in daily),
+            ),
+            "lifetime": metric_totals(
+                getattr(lifetime, "total_spend", 0),
+                getattr(lifetime, "total_impressions", 0),
+                getattr(lifetime, "total_clicks", 0),
+                getattr(lifetime, "total_conversions", 0),
+                getattr(lifetime, "total_revenue", 0),
+            ),
+        }
 
     def get_daily_spend_trend(
         self,

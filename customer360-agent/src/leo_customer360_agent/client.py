@@ -35,6 +35,7 @@ class CampaignPlanBrief:
     budget_time_constraints: Optional[str] = None
     model: Optional[str] = None
     extra_config: Optional[dict[str, Any]] = None
+    instructions: Optional[str] = None
 
 
 @dataclass
@@ -55,6 +56,7 @@ class ZnsCampaignPlanBrief:
     budget_time_constraints: Optional[str] = None
     model: Optional[str] = None
     extra_config: Optional[dict[str, Any]] = None
+    instructions: Optional[str] = None
 
 
 @dataclass
@@ -137,6 +139,7 @@ def generate_campaign_plan(
             "budget_time_constraints": brief.budget_time_constraints,
             "model": brief.model,
             "extra_config": brief.extra_config,
+            "instructions": brief.instructions,
             "candidate_content_items": candidate_content_items,
         },
     )
@@ -162,6 +165,7 @@ def generate_zalo_campaign_plan(
             "budget_time_constraints": brief.budget_time_constraints,
             "model": brief.model,
             "extra_config": brief.extra_config,
+            "instructions": brief.instructions,
             "candidate_templates": candidate_templates,
         },
     )

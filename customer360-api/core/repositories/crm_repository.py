@@ -49,3 +49,34 @@ class CrmRepository:
     def get_top_campaigns(self, limit=5):
         """Return the top campaign metrics."""
         return self.analytics.get_top_campaigns(limit=limit)
+
+    def get_campaign_report(self, campaign_id, start_date=None, end_date=None):
+        """One tenant-owned campaign's report; raises CampaignDraftNotFoundError
+        for a missing or other-tenant campaign."""
+        campaign = self.drafts.get_campaign(self.tenant_id, campaign_id)
+        performance = self.analytics.get_campaign_performance(campaign_id, start_date, end_date)
+        history = self.drafts.list_campaign_history(self.tenant_id, campaign_id)
+        reviews = [entry for entry in history if entry["type"] == "review"]
+        report_dates = [day["report_date"] for day in performance["daily"]]
+        return {
+            "campaign": campaign,
+            "coverage": {
+                "start_date": start_date,
+                "end_date": end_date,
+                "first_report_date": min(report_dates, default=None),
+                "last_report_date": max(report_dates, default=None),
+                "days_with_data": len(report_dates),
+            },
+            "daily": performance["daily"],
+            "period_totals": performance["period_totals"],
+            "lifetime": performance["lifetime"],
+            "content_plan": self.drafts.list_campaign_content_items(self.tenant_id, campaign_id),
+            "approval": {
+                "approval_status": campaign.approval_status,
+                "approved_by": campaign.approved_by,
+                "approved_at": campaign.approved_at,
+                "last_review": reviews[-1] if reviews else None,
+                "audit_event_count": len(history) - len(reviews),
+                "review_count": len(reviews),
+            },
+        }

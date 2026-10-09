@@ -8,9 +8,10 @@ see that feature's research.md §5).
 """
 
 import uuid
-from typing import Optional, cast
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from core.auth import require_tenant, require_tenant_admin
@@ -22,11 +23,14 @@ from core.repositories.campaign_draft_repository import (
     CampaignDraftConflictError,
     CampaignDraftNotFoundError,
     CampaignDraftRepository,
-    SEGMENT_UNSET,
+    CampaignDraftStaleError,
+    GENERAL_FIELDS,
+    UNSET,
     CampaignDraftValidationError,
     CampaignSegmentNotFoundError,
     CampaignTemplateNotFoundError,
 )
+from core.repositories.campaign_planner_agent import AgentConfigurationInvalidError
 from leo_customer360_dao.schemas.crm import (
     CampaignDraftContentItemRead,
     CampaignDraftRequest,
@@ -46,28 +50,25 @@ def _current_user_id(request: Request) -> Optional[uuid.UUID]:
 
 
 def _build_response(repo: CampaignDraftRepository, campaign) -> CampaignDraftResponse:
-    """Map a persisted campaign and its content plan to the API response schema."""
-    content_items = cast(
-        list[CampaignDraftContentItemRead],
-        repo.list_campaign_content_items(campaign.tenant_id, campaign.campaign_id),
+    """The full non-embedding campaign, its ordered content plan and the
+    immutable planner snapshot."""
+    data = CampaignDraftResponse.model_validate(campaign).model_dump(exclude={"content_items"})
+    data["content_items"] = repo.list_campaign_content_items(campaign.tenant_id, campaign.campaign_id)
+    return CampaignDraftResponse.model_validate(data)
+
+
+def _agent_blocked(exc: AgentConfigurationInvalidError) -> HTTPException:
+    """Structured refusal for an unusable planner; no campaign was written."""
+    return HTTPException(
+        status_code=409,
+        detail={"code": "agent_configuration_invalid", "agent_code": exc.agent_code, "reasons": exc.reasons},
     )
-    return CampaignDraftResponse(
-        campaign_id=campaign.campaign_id,
-        status=campaign.status,
-        approval_status=campaign.approval_status,
-        segment_id=campaign.segment_id,
-        template_id=campaign.template_id,
-        name=campaign.name,
-        objective=campaign.objective,
-        strategy_summary=campaign.strategy_summary,
-        ai_plan=campaign.ai_plan,
-        start_date=campaign.start_date,
-        end_date=campaign.end_date,
-        approved_by=campaign.approved_by,
-        approved_at=campaign.approved_at,
-        content_items=content_items,
-        created_at=campaign.created_at,
-        updated_at=campaign.updated_at,
+
+
+def _planned_draft_values(payload) -> dict:
+    """Planner selection plus the marketer values the plan must not replace."""
+    return payload.model_dump(
+        include={"agent_code", "budget_time_constraints", "name", "campaign_code", "start_date", "end_date", "budget_amount", "currency"}
     )
 
 
@@ -89,11 +90,13 @@ def generate_campaign_draft(
             segment_id=payload.segment_id,
             template_id=payload.template_id,
             objective=payload.objective,
-            budget_time_constraints=payload.budget_time_constraints,
+            **_planned_draft_values(payload),
         )
     except (CampaignSegmentNotFoundError, CampaignTemplateNotFoundError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except CampaignDraftValidationError as exc:
+    except AgentConfigurationInvalidError as exc:
+        raise _agent_blocked(exc) from exc
+    except (CampaignDraftValidationError, CampaignDraftConflictError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     invalidate_prefix("crm_campaign")
@@ -119,15 +122,28 @@ def generate_zns_campaign_draft(
             created_by=created_by,
             segment_id=payload.segment_id,
             objective=payload.objective,
-            budget_time_constraints=payload.budget_time_constraints,
+            **_planned_draft_values(payload),
         )
     except CampaignSegmentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except CampaignDraftValidationError as exc:
+    except AgentConfigurationInvalidError as exc:
+        raise _agent_blocked(exc) from exc
+    except (CampaignDraftValidationError, CampaignDraftConflictError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     invalidate_prefix("crm_campaign")
     return _build_response(repo, campaign)
+
+
+@router.get("/draft/template-options")
+def list_template_options(
+    request: Request,
+    channel: str = Query("email", pattern="^(email|zalo_zns)$"),
+    db: Session = Depends(get_db),
+):
+    """Approved templates the caller's tenant can plan a draft with."""
+    tenant_id = uuid.UUID(require_tenant(request))
+    return jsonable_encoder(CampaignDraftRepository(db).list_approved_templates(tenant_id, channel))
 
 
 @router.get("/{campaign_id}/content-items", response_model=list[CampaignDraftContentItemRead])
@@ -149,7 +165,9 @@ def edit_campaign_draft(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Edit a draft and return approved or rejected campaigns to InReview."""
+    """The governed campaign editor: every editable field in one guarded,
+    audited write with an ``updated_at`` precondition. A governed change
+    returns an approved or rejected campaign to InReview."""
     tenant_id = uuid.UUID(require_tenant(request))
     editor_id = _current_user_id(request)
     repo = CampaignDraftRepository(db)
@@ -159,17 +177,31 @@ def edit_campaign_draft(
         if payload.content_items is not None
         else None
     )
+    sent = payload.model_fields_set
+    # ponytail: general fields can be changed but not cleared to null; add an
+    # explicit clear list if the editor needs it.
+    general_fields = {
+        field: getattr(payload, field)
+        for field in GENERAL_FIELDS
+        if field in sent and getattr(payload, field) is not None
+    }
     try:
         campaign = repo.edit_draft(
             tenant_id,
             campaign_id,
             editor_id,
-            segment_id=payload.segment_id if "segment_id" in payload.model_fields_set else SEGMENT_UNSET,
+            segment_id=payload.segment_id if "segment_id" in sent else UNSET,
             objective=payload.objective,
             strategy_summary=payload.strategy_summary,
             start_date=payload.start_date,
             end_date=payload.end_date,
             content_items=content_items,
+            expected_updated_at=payload.updated_at,
+            template_id=payload.template_id if "template_id" in sent else UNSET,
+            general_fields=general_fields,
+            editor_context=payload.metadata.editor_context if payload.metadata is not None else UNSET,
+            replan=payload.replan,
+            agent_code=payload.agent_code,
         )
     except CampaignDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -177,6 +209,14 @@ def edit_campaign_draft(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except CampaignDraftValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AgentConfigurationInvalidError as exc:
+        raise _agent_blocked(exc) from exc
+    except CampaignDraftStaleError as exc:
+        current = _build_response(repo, repo.get_campaign(tenant_id, campaign_id))
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "stale_update", "message": str(exc), "current": jsonable_encoder(current)},
+        ) from exc
     except CampaignDraftConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

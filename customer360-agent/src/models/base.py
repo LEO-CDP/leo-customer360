@@ -16,6 +16,7 @@ class BasePlanRequest(BaseModel):
     budget_time_constraints: Optional[str] = None
     model: Optional[str] = None
     extra_config: Optional[dict[str, Any]] = None
+    instructions: Optional[str] = None
 
     def _brief_fields(self) -> dict[str, Any]:
         """The shared fields every planner brief takes (subclasses map these into
@@ -26,6 +27,7 @@ class BasePlanRequest(BaseModel):
             "budget_time_constraints": self.budget_time_constraints,
             "model": self.model,
             "extra_config": self.extra_config,
+            "instructions": self.instructions,
         }
 
 

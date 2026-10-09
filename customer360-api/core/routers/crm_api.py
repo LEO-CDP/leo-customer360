@@ -12,10 +12,12 @@ import uuid
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
+from core.auth import require_tenant
 from core.database import get_db
+from core.repositories.campaign_draft_repository import CampaignDraftNotFoundError
 from leo_customer360_dao.models.crm import Account, Campaign, CampaignMember, Contact, Industry, Lead, LeadSource, Opportunity
 from core.repositories.crm_repository import CrmRepository
 from core.routers._generic import build_crud_router
@@ -31,6 +33,7 @@ from leo_customer360_dao.schemas.crm import (
     CampaignMemberUpdate,
     CampaignMetricItem,
     CampaignRead,
+    CampaignReportResponse,
     CampaignUpdate,
     ContactCreate,
     ContactRead,
@@ -180,19 +183,24 @@ campaign_analytics_router = APIRouter(
 )
 
 
+def _request_tenant(request: Request) -> uuid.UUID:
+    """The authenticated tenant; a ``tenant_id`` query parameter is ignored."""
+    return uuid.UUID(require_tenant(request))
+
+
 @campaign_analytics_router.get("/summary", response_model=CampaignKPIResponse)
 def get_campaign_summary(
-    tenant_id: uuid.UUID = Query(..., description="Tenant UUID"),
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """Aggregate KPI cards: total campaigns, spend, impressions, clicks, conversions, ROAS."""
-    repo = CrmRepository(db, tenant_id).analytics
+    repo = CrmRepository(db, _request_tenant(request)).analytics
     return repo.get_kpi_summary()
 
 
 @campaign_analytics_router.get("", response_model=PaginatedCampaignResponse)
 def list_campaign_metrics(
-    tenant_id: uuid.UUID = Query(..., description="Tenant UUID"),
+    request: Request,
     search: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     channel: Optional[str] = Query(None),
@@ -216,7 +224,7 @@ def list_campaign_metrics(
         page=page,
         page_size=page_size,
     )
-    repo = CrmRepository(db, tenant_id).analytics
+    repo = CrmRepository(db, _request_tenant(request)).analytics
     items, total = repo.get_filtered_campaigns(filters)
     return PaginatedCampaignResponse(
         items=[CampaignMetricItem.model_validate(i) for i in items],
@@ -229,29 +237,52 @@ def list_campaign_metrics(
 
 @campaign_analytics_router.get("/spend-trend", response_model=list[DailySpendTrendItem])
 def get_spend_trend(
-    tenant_id: uuid.UUID = Query(..., description="Tenant UUID"),
+    request: Request,
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
 ):
     """Daily time-series spend data for the Campaign Spend Trend chart."""
-    repo = CrmRepository(db, tenant_id).analytics
+    repo = CrmRepository(db, _request_tenant(request)).analytics
     return repo.get_daily_spend_trend(start_date=start_date, end_date=end_date)
 
 
 @campaign_analytics_router.get("/top", response_model=list[TopCampaignItem])
 def get_top_campaigns(
-    tenant_id: uuid.UUID = Query(..., description="Tenant UUID"),
+    request: Request,
     limit: int = Query(5, ge=1, le=20),
     db: Session = Depends(get_db),
 ):
     """Top N campaigns by conversions and ROAS for the analytics charts."""
-    repo = CrmRepository(db, tenant_id).analytics
+    repo = CrmRepository(db, _request_tenant(request)).analytics
     return repo.get_top_campaigns(limit=limit)
+
+
+campaign_report_router = APIRouter(prefix="/campaigns", tags=["Campaign Analytics"])
+
+
+@campaign_report_router.get("/{campaign_id}/report", response_model=CampaignReportResponse)
+def get_campaign_report(
+    campaign_id: uuid.UUID,
+    request: Request,
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """One tenant-owned campaign: metadata, daily and lifetime metrics, date
+    coverage, content plan and approval/audit summary."""
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(status_code=422, detail="end_date cannot be before start_date")
+    tenant_id = _request_tenant(request)
+    try:
+        return CrmRepository(db, tenant_id).get_campaign_report(campaign_id, start_date, end_date)
+    except CampaignDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 all_crm_routers = [
     campaign_analytics_router,  # must precede campaigns_router to avoid /{item_id} shadowing /analytics
+    campaign_report_router,
     campaigns_router,
     campaign_members_router,
     leads_router,

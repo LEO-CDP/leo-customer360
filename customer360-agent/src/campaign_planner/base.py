@@ -26,6 +26,9 @@ class BaseBrief:
     budget_time_constraints: Optional[str] = None
     model: Optional[str] = None
     extra_config: Optional[dict[str, Any]] = None
+    # Registry prompt body resolved by the caller; overrides the prompt store so
+    # the caller's provenance snapshot names the prompt that actually ran.
+    instructions: Optional[str] = None
 
 
 @dataclass
@@ -43,6 +46,11 @@ class BaseGeneratedPlan:
 def _instructions(key: str) -> str:
     """The stored instruction body for `key` (from the prompt store / DB)."""
     return get_store().get(key).render()
+
+
+def _brief_instructions(brief: BaseBrief, key: str) -> str:
+    """The caller-resolved prompt when supplied, else the store's body for `key`."""
+    return brief.instructions or _instructions(key)
 
 
 def _resolve_provider(

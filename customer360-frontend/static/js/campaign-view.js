@@ -37,6 +37,12 @@ window.C360 = window.C360 || {};
     "Video":             "▶️"
   };
 
+  var APPROVAL_BADGE = {
+    Approved: "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200",
+    InReview: "bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-200",
+    Rejected: "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200"
+  };
+
   var STATUS_BADGE = {
     Active:    "bg-emerald-100 text-emerald-700",
     Paused:    "bg-amber-100 text-amber-700",
@@ -104,6 +110,11 @@ window.C360 = window.C360 || {};
       avatarTextClass: "text-base"
     },
     { label: "Status",   type: "badge",  field: "status",          classField: "statusBadgeClass" },
+    { label: "Approval", type: "badge",  field: "approvalLabel",   classField: "approvalBadgeClass" },
+    { label: "Owner",    field: "ownerLabel",       muted: true },
+    { label: "Schedule", field: "scheduleLabel" },
+    { label: "Budget",   field: "budgetLabel",      cellClass: "text-right" },
+    { label: "Planner",  field: "plannerLabel" },
     { label: "Channel",  type: "identity", nameField: "channel",   subField: "platform",
       avatarField: "channelIcon", avatarBg: "bg-slate-100", avatarColor: "text-slate-600", avatarTextClass: "text-base" },
     { label: "Spend",    field: "spendLabel",       cellClass: "text-right" },
@@ -121,10 +132,17 @@ window.C360 = window.C360 || {};
       statusBadgeClass:  STATUS_BADGE[c.status] || "bg-slate-100 text-slate-500",
       spendLabel:        fmtVnd(c.total_spend),
       impressionsLabel:  fmt.int(c.total_impressions),
-      ctrLabel:          (parseFloat(c.ctr_percentage) || 0).toFixed(2) + "%",
+      ctrLabel:          ratio(c.ctr_percentage, "%"),
       conversionsLabel:  fmt.int(c.total_conversions),
-      cpaLabel:          fmtVnd(c.cpa),
-      roasLabel:         (parseFloat(c.roas) || 0).toFixed(2) + "×",
+      // a zero-conversion campaign has no meaningful CPA
+      cpaLabel:          c.total_conversions ? fmtVnd(c.cpa) : "—",
+      approvalLabel:     c.approval_status || "—",
+      approvalBadgeClass: APPROVAL_BADGE[c.approval_status] || "bg-slate-100 text-slate-500",
+      ownerLabel:        c.user_id ? String(c.user_id).slice(0, 8) : "—",
+      scheduleLabel:     [c.start_date, c.end_date].filter(Boolean).join(" → ") || "—",
+      budgetLabel:       c.budget_amount == null ? "—" : fmtVnd(c.budget_amount) + " " + (c.currency || ""),
+      plannerLabel:      c.agent_display_name ? c.agent_display_name + " v" + c.agent_instruction_version : "—",
+      roasLabel:         ratio(c.roas, "×"),
       roasBadgeClass:    roasBadgeClass(c.roas)
     });
   }
@@ -138,11 +156,11 @@ window.C360 = window.C360 || {};
         $("#kpi-campaign-spend").text(fmtVnd(data.total_spend));
         $("#kpi-campaign-impressions").text(fmt.int(data.total_impressions));
         $("#kpi-campaign-clicks").text(fmt.int(data.total_clicks));
-        $("#kpi-campaign-ctr").text((parseFloat(data.overall_ctr) || 0).toFixed(2) + "%");
+        $("#kpi-campaign-ctr").text(ratio(data.overall_ctr, "%"));
         $("#kpi-campaign-conversions").text(fmt.int(data.total_conversions));
-        $("#kpi-campaign-cvr").text((parseFloat(data.overall_cvr) || 0).toFixed(2) + "%");
+        $("#kpi-campaign-cvr").text(ratio(data.overall_cvr, "%"));
         $("#kpi-campaign-revenue").text(fmtVnd(data.total_revenue));
-        $("#kpi-campaign-roas").text((parseFloat(data.overall_roas) || 0).toFixed(2) + "×");
+        $("#kpi-campaign-roas").text(ratio(data.overall_roas, "×"));
       })
       .fail(function (xhr) { showApiError("loading campaign KPIs", xhr); });
   }
@@ -253,7 +271,13 @@ window.C360 = window.C360 || {};
 
   function campaignError(xhr) {
     var detail = xhr && xhr.responseJSON ? xhr.responseJSON.detail : null;
-    if (Array.isArray(detail)) return detail.map(function (item) { return item.msg || JSON.stringify(item); }).join("; ");
+    if (Array.isArray(detail)) {
+      return detail.map(function (item) {
+        var field = Array.isArray(item.loc) ? item.loc.filter(function (part) { return part !== "body"; }).join(".") : "";
+        return (field ? field + ": " : "") + (item.msg || JSON.stringify(item));
+      }).join("; ");
+    }
+    if (detail && typeof detail === "object" && detail.message) return detail.message;
     return typeof detail === "string" ? detail : "Request failed. Please try again.";
   }
 
@@ -262,9 +286,11 @@ window.C360 = window.C360 || {};
   }
 
   function canReviewCampaign() {
-    var roles = C360.config.currentUser().roles || [];
+    var user = C360.config.currentUser();
+    var roles = user.roles || [];
     var reviewerRoles = ["platform_admin", "super_admin", "system_admin", "tenant_admin", "admin"];
-    return roles.some(function (role) { return reviewerRoles.indexOf(String(role).toLowerCase()) !== -1; });
+    // The dev root login (SSO_LOGIN=false) is the super-admin; the API lets it review too.
+    return !!user.isRoot || roles.some(function (role) { return reviewerRoles.indexOf(String(role).toLowerCase()) !== -1; });
   }
 
   function campaignStatusPresentation(status) {
@@ -389,34 +415,90 @@ window.C360 = window.C360 || {};
       });
   }
 
-  function campaignFormPayload(includeTenant) {
-    var payload = {
-      name: fieldValue("#campaign-field-name").trim(),
-      campaign_code: fieldValue("#campaign-field-code").trim() || null,
-      status: fieldValue("#campaign-field-status") || "Draft",
-      channel: fieldValue("#campaign-field-channel").trim() || null,
-      platform: fieldValue("#campaign-field-platform").trim() || null,
-      description: fieldValue("#campaign-field-description").trim() || null,
-      keywords: fieldValue("#campaign-field-keywords").split(",").map(function (item) { return item.trim(); }).filter(Boolean),
-      lang: fieldValue("#campaign-field-lang").trim() || "en",
-      start_date: fieldValue("#campaign-field-start-date") || null,
-      end_date: fieldValue("#campaign-field-end-date") || null,
-      budget_amount: fieldValue("#campaign-field-budget") === "" ? null : Number(fieldValue("#campaign-field-budget")),
-      currency: fieldValue("#campaign-field-currency").trim().toUpperCase() || "VND",
-      segment_id: fieldValue("#campaign-field-segment").trim() || null,
-      template_id: fieldValue("#campaign-field-template").trim() || null,
-      objective: fieldValue("#campaign-field-objective").trim() || null
-    };
-    if (includeTenant) payload.tenant_id = tenantId();
-    return payload;
+  // ---- campaign editor: planned-draft create (new) + governed edit (existing) ----
+
+  var ZNS_CHANNEL = "zalo_zns";
+  var editor = { mode: "create", campaign: null, stale: null, agents: {}, saveLabel: "Plan draft", scrollToReplan: false };
+
+  function setEditorMode(mode) {
+    editor.mode = mode;
+    editor.saveLabel = mode === "edit" ? "Save campaign" : "Plan draft";
+    $("#campaign-editor-view [data-mode]").each(function () { $(this).toggleClass("hidden", $(this).data("mode") !== mode); });
+    $("#btn-campaign-editor-save").text(editor.saveLabel);
+    $("#campaign-governed-title").text(mode === "edit" ? "Governed" : "Plan inputs");
+    $("#campaign-governed-hint").text(mode === "edit" ? "Governed — changes send an approved campaign back to review." : "The planner agent drafts the strategy and content plan from these inputs.");
+    $("#campaign-general-hint").text(mode === "edit" ? "Saving these fields never changes approval." : "Optional. The planner fills in anything you leave blank.");
+    $("#campaign-editor-title").text(mode === "edit" ? "Edit campaign" : "Create campaign");
+    $("#campaign-editor-subtitle").text(mode === "edit" ? "Update campaign metadata through the governed campaign API." : "Plan a draft with an AI planner agent; it is created InReview for human approval.");
+  }
+
+  function clearEditorMessages() {
+    setCampaignMessage("#campaign-editor-error", "");
+    setCampaignMessage("#campaign-editor-success", "");
+    $("#campaign-editor-blocked, #campaign-editor-stale").addClass("hidden");
+  }
+
+  // text = null clears the busy state; otherwise shows it and locks the submit/re-plan buttons.
+  function setEditorBusy(text) {
+    $("#campaign-editor-planning").toggleClass("hidden", !text);
+    $("#campaign-editor-planning-text").text(text || "");
+    $("#btn-campaign-editor-save, #btn-campaign-replan").prop("disabled", !!text).toggleClass("opacity-50 cursor-not-allowed", !!text);
+    $("#btn-campaign-editor-save").text(text ? "Working..." : editor.saveLabel);
+  }
+
+  function plannerLabel(code) {
+    var agent = editor.agents[code];
+    return agent ? agent.display_name : code;
+  }
+
+  function loadPlannerAgents(selectedCode) {
+    var $select = $("#campaign-field-agent").empty();
+    var $hint = $("#campaign-agent-hint").addClass("hidden");
+    editor.agents = {};
+    api("/ai-agents/", { status: "ACTIVE", model_type: "generative_llm", limit: 100 })
+      .done(function (agents) {
+        (agents || []).forEach(function (agent) {
+          editor.agents[agent.agent_code] = agent;
+          $("<option>").val(agent.agent_code).text(agent.display_name + " · " + (agent.model_name || "no model") + " · v" + agent.instruction_version).appendTo($select);
+        });
+        if (!$select.children().length) {
+          $("<option>").val("").text("No active planner agents").appendTo($select);
+          $hint.removeClass("hidden").text("No active generative_llm agents are registered. Create one in AI Agents first.");
+        } else if (selectedCode && editor.agents[selectedCode]) {
+          $select.val(selectedCode);
+        } else if (selectedCode) {
+          $hint.removeClass("hidden").text("The original planner \"" + selectedCode + "\" is not active; choose another.");
+        }
+      })
+      .fail(function () { $hint.removeClass("hidden").text("Could not load planner agents."); });
+  }
+
+  // Approved templates for the channel; in edit mode keeps the campaign's current template selectable.
+  function loadTemplateOptions(channel, currentId) {
+    var $select = $("#campaign-field-template").empty();
+    var $hint = $("#campaign-template-hint").addClass("hidden");
+    api("/campaigns/draft/template-options", { channel: channel })
+      .done(function (rows) {
+        var found = false;
+        $("<option>").val("").text(currentId ? "Keep current template" : "Choose an approved template...").appendTo($select);
+        (rows || []).forEach(function (row) {
+          found = found || row.template_id === currentId;
+          $("<option>").val(row.template_id).text(row.name || row.template_id).appendTo($select);
+        });
+        if (currentId && !found) $("<option>").val(currentId).text(currentId + " (current, not Approved)").appendTo($select);
+        $select.val(currentId || "");
+        if (!rows || !rows.length) $hint.removeClass("hidden").text("No Approved templates for this channel yet. Approve one in Templates first.");
+      })
+      .fail(function () { $hint.removeClass("hidden").text("Could not load templates."); });
   }
 
   function fillCampaignEditor(campaign) {
+    editor.campaign = campaign;
+    editor.stale = null;
+    $("#campaign-editor-stale").addClass("hidden");
     $("#campaign-editor-id").val(campaign.campaign_id || "");
     $("#campaign-editor-updated-at").val(campaign.updated_at || "");
     $("#campaign-editor-version").text(campaign.updated_at ? "Version " + campaign.updated_at : "New campaign");
-    $("#campaign-editor-title").text(campaign.campaign_id ? "Edit campaign" : "Create campaign");
-    $("#campaign-editor-eyebrow").text(campaign.campaign_id ? "Campaign editor" : "Campaign workspace");
     $("#campaign-editor-approval").toggleClass("hidden", !campaign.approval_status).text(campaign.approval_status || "");
     $("#campaign-field-code").val(campaign.campaign_code || "");
     $("#campaign-field-name").val(campaign.name || "");
@@ -431,20 +513,37 @@ window.C360 = window.C360 || {};
     $("#campaign-field-budget").val(campaign.budget_amount == null ? "" : campaign.budget_amount);
     $("#campaign-field-currency").val(campaign.currency || "VND");
     $("#campaign-field-segment").val(campaign.segment_id || "");
-    $("#campaign-field-template").val(campaign.template_id || "").prop("disabled", !!campaign.campaign_id);
     $("#campaign-field-objective").val(campaign.objective || "");
     $("#campaign-field-strategy").val(campaign.strategy_summary || "");
-    loadSelectedSegment(campaign.segment_id, false, !campaign.campaign_id);
+    $("#campaign-field-notes").val(((campaign.metadata_ || {}).editor_context || {}).notes || "");
+    $("#campaign-editor-ai-plan").text(JSON.stringify(campaign.ai_plan || {}, null, 2));
+    $("#campaign-editor-provenance").text(JSON.stringify((campaign.metadata_ || {}).agent_provenance || {}, null, 2));
+    loadSelectedSegment(campaign.segment_id, false, false);
+    loadTemplateOptions(campaign.channel === ZNS_CHANNEL ? ZNS_CHANNEL : "email", campaign.template_id);
+    loadPlannerAgents(((campaign.metadata_ || {}).agent_provenance || {}).agent_code);
+  }
+
+  function initCreateForm() {
+    editor.campaign = null;
+    setEditorMode("create");
+    $("#campaign-editor-id, #campaign-editor-updated-at").val("");
+    $("#campaign-editor-version").text("New campaign");
+    $("#campaign-editor-form")[0].reset();
+    $("#campaign-field-segment").val("");
+    $("#campaign-template-wrap").removeClass("hidden");
+    renderSegmentSelection(null);
+    loadTemplateOptions("email", null);
+    loadPlannerAgents(null);
   }
 
   function loadCampaignEditor(campaignId) {
-    setCampaignMessage("#campaign-editor-error", "");
-    setCampaignMessage("#campaign-editor-success", "");
+    clearEditorMessages();
+    setEditorBusy(null);
     $("#campaign-editor-loading").toggleClass("hidden", !campaignId);
     $("#campaign-editor-form").toggleClass("hidden", !!campaignId);
+    setEditorMode(campaignId ? "edit" : "create");
     if (!campaignId) {
-      fillCampaignEditor({});
-      renderSegmentSelection(null);
+      initCreateForm();
       return;
     }
     api("/campaigns/" + encodeURIComponent(campaignId))
@@ -452,6 +551,10 @@ window.C360 = window.C360 || {};
         $("#campaign-editor-loading").addClass("hidden");
         $("#campaign-editor-form").removeClass("hidden");
         fillCampaignEditor(campaign);
+        if (editor.scrollToReplan) {
+          editor.scrollToReplan = false;
+          $("#btn-campaign-replan")[0].scrollIntoView({ block: "center" });
+        }
       })
       .fail(function (xhr) {
         $("#campaign-editor-loading").addClass("hidden");
@@ -459,52 +562,169 @@ window.C360 = window.C360 || {};
       });
   }
 
+  // Routes a failed save/plan/re-plan: stale conflict banner, blocked planner panel, or a plain message.
+  function handleEditorFailure(xhr) {
+    var detail = xhr && xhr.responseJSON ? xhr.responseJSON.detail : null;
+    window.scrollTo(0, 0);
+    if (xhr && xhr.status === 409 && detail && typeof detail === "object" && !Array.isArray(detail)) {
+      if (detail.code === "stale_update") {
+        editor.stale = detail.current;
+        $("#campaign-editor-stale").removeClass("hidden");
+        return;
+      }
+      if (detail.code === "agent_configuration_invalid") {
+        var $reasons = $("#campaign-editor-blocked-reasons").empty();
+        (detail.reasons || []).forEach(function (reason) { $("<li>").text(reason).appendTo($reasons); });
+        $("#campaign-editor-blocked").removeClass("hidden");
+        return;
+      }
+    }
+    setCampaignMessage("#campaign-editor-error", campaignError(xhr));
+  }
+
+  function createPlannedDraft() {
+    var isZns = $("#campaign-field-draft-channel").val() === ZNS_CHANNEL;
+    var agentCode = fieldValue("#campaign-field-agent");
+    var payload = {
+      agent_code: agentCode,
+      segment_id: fieldValue("#campaign-field-segment").trim(),
+      objective: fieldValue("#campaign-field-objective").trim()
+    };
+    if (!payload.segment_id) return setCampaignMessage("#campaign-editor-error", "Choose an active audience segment.");
+    if (!payload.objective) return setCampaignMessage("#campaign-editor-error", "Objective is required.");
+    if (!agentCode) return setCampaignMessage("#campaign-editor-error", "Choose a planner agent.");
+    if (!isZns) {
+      payload.template_id = fieldValue("#campaign-field-template");
+      if (!payload.template_id) return setCampaignMessage("#campaign-editor-error", "Choose an approved email template.");
+    }
+    var optional = {
+      budget_time_constraints: fieldValue("#campaign-field-constraints").trim(),
+      name: fieldValue("#campaign-field-name").trim(),
+      campaign_code: fieldValue("#campaign-field-code").trim(),
+      start_date: fieldValue("#campaign-field-start-date"),
+      end_date: fieldValue("#campaign-field-end-date"),
+      budget_amount: fieldValue("#campaign-field-budget"),
+      currency: fieldValue("#campaign-field-currency").trim().toUpperCase()
+    };
+    Object.keys(optional).forEach(function (key) { if (optional[key] !== "") payload[key] = optional[key]; });
+    if (payload.budget_amount !== undefined) payload.budget_amount = Number(payload.budget_amount);
+    if (payload.start_date && payload.end_date && payload.end_date < payload.start_date) return setCampaignMessage("#campaign-editor-error", "End date cannot be before start date.");
+    setEditorBusy("Planning with " + plannerLabel(agentCode) + "… this can take up to 30 seconds");
+    api(isZns ? "/campaigns/zalo-draft" : "/campaigns/draft", payload, "POST")
+      .done(function (campaign) { C360.router.navigate("/campaigns/" + encodeURIComponent(campaign.campaign_id)); })
+      .fail(function (xhr) { setEditorBusy(null); handleEditorFailure(xhr); });
+  }
+
+  // Only the fields the user actually changed (cleared values are not sent: the API cannot null a field).
+  function editorChanges() {
+    var original = editor.campaign, changes = {};
+    [
+      ["campaign_code", "#campaign-field-code"], ["name", "#campaign-field-name"], ["status", "#campaign-field-status"],
+      ["channel", "#campaign-field-channel"], ["platform", "#campaign-field-platform"], ["description", "#campaign-field-description"],
+      ["lang", "#campaign-field-lang"], ["segment_id", "#campaign-field-segment"], ["template_id", "#campaign-field-template"],
+      ["objective", "#campaign-field-objective"], ["strategy_summary", "#campaign-field-strategy"],
+      ["start_date", "#campaign-field-start-date"], ["end_date", "#campaign-field-end-date"]
+    ].forEach(function (pair) {
+      var value = fieldValue(pair[1]).trim();
+      if (value && value !== String(original[pair[0]] == null ? "" : original[pair[0]])) changes[pair[0]] = value;
+    });
+    var currency = fieldValue("#campaign-field-currency").trim().toUpperCase();
+    if (currency && currency !== (original.currency || "")) changes.currency = currency;
+    var budget = fieldValue("#campaign-field-budget");
+    if (budget !== "" && (original.budget_amount == null || Number(budget) !== Number(original.budget_amount))) changes.budget_amount = Number(budget);
+    var keywords = fieldValue("#campaign-field-keywords").split(",").map(function (item) { return item.trim(); }).filter(Boolean);
+    if (keywords.join("\n") !== (original.keywords || []).join("\n")) changes.keywords = keywords;
+    var context = (original.metadata_ || {}).editor_context || {};
+    var notes = fieldValue("#campaign-field-notes").trim();
+    if (notes !== String(context.notes || "")) changes.metadata = { editor_context: $.extend({}, context, { notes: notes }) };
+    return changes;
+  }
+
+  function saveCampaignEdit() {
+    var campaignId = fieldValue("#campaign-editor-id");
+    if (!fieldValue("#campaign-field-name").trim()) return setCampaignMessage("#campaign-editor-error", "Campaign name is required.");
+    var start = fieldValue("#campaign-field-start-date"), end = fieldValue("#campaign-field-end-date");
+    if (start && end && end < start) return setCampaignMessage("#campaign-editor-error", "End date cannot be before start date.");
+    var changes = editorChanges();
+    if (!Object.keys(changes).length) return setCampaignMessage("#campaign-editor-error", "No changes to save.");
+    setEditorBusy("Saving...");
+    api("/campaigns/" + encodeURIComponent(campaignId) + "/draft", $.extend({ updated_at: editor.campaign.updated_at }, changes), "PATCH")
+      .done(function (campaign) { C360.router.navigate("/campaigns/" + encodeURIComponent(campaign.campaign_id || campaignId)); })
+      .fail(function (xhr) { setEditorBusy(null); handleEditorFailure(xhr); });
+  }
+
+  function replanCampaign() {
+    var agentCode = fieldValue("#campaign-field-agent");
+    clearEditorMessages();
+    if (!agentCode) return setCampaignMessage("#campaign-editor-error", "Choose a planner agent.");
+    setEditorBusy("Planning with " + plannerLabel(agentCode) + "… this can take up to 30 seconds");
+    api("/campaigns/" + encodeURIComponent(fieldValue("#campaign-editor-id")) + "/draft", { updated_at: editor.campaign.updated_at, replan: true, agent_code: agentCode }, "PATCH")
+      .done(function (campaign) {
+        fillCampaignEditor(campaign);
+        setCampaignMessage("#campaign-editor-success", "Re-planned with " + plannerLabel(agentCode) + ". The campaign is back in review if it was approved.");
+      })
+      .fail(handleEditorFailure)
+      .always(function () { setEditorBusy(null); });
+  }
+
   function saveCampaignEditor(event) {
     event.preventDefault();
-    setCampaignMessage("#campaign-editor-error", "");
-    setCampaignMessage("#campaign-editor-success", "");
-    var campaignId = fieldValue("#campaign-editor-id");
-    var payload = campaignFormPayload(!campaignId);
-    if (!payload.name) {
-      setCampaignMessage("#campaign-editor-error", "Campaign name is required.");
-      return;
-    }
-    if (!campaignId && !payload.segment_id) {
-      setCampaignMessage("#campaign-editor-error", "Choose an active audience segment before creating the campaign.");
-      return;
-    }
-    if (payload.start_date && payload.end_date && payload.end_date < payload.start_date) {
-      setCampaignMessage("#campaign-editor-error", "End date cannot be before start date.");
-      return;
-    }
-    var request;
-    if (!campaignId) {
-      request = api("/campaigns/", payload, "POST");
-    } else {
-      var general = $.extend({}, payload);
-      delete general.tenant_id;
-      delete general.segment_id;
-      delete general.template_id;
-      delete general.objective;
-      request = api("/campaigns/" + encodeURIComponent(campaignId) + "/draft", {
-        segment_id: payload.segment_id || null,
-        objective: payload.objective,
-        strategy_summary: fieldValue("#campaign-field-strategy").trim() || null,
-        start_date: payload.start_date,
-        end_date: payload.end_date
-      }, "PATCH").then(function () {
-        return api("/campaigns/" + encodeURIComponent(campaignId), general, "PATCH");
-      });
-    }
-    $("#btn-campaign-editor-save").prop("disabled", true).text("Saving...");
-    request.done(function (campaign) {
-      var id = campaign.campaign_id || campaignId;
-      C360.router.navigate("/campaigns/" + encodeURIComponent(id));
-    }).fail(function (xhr) {
-      setCampaignMessage("#campaign-editor-error", campaignError(xhr));
-    }).always(function () {
-      $("#btn-campaign-editor-save").prop("disabled", false).text("Save campaign");
+    clearEditorMessages();
+    if (editor.mode === "edit") saveCampaignEdit(); else createPlannedDraft();
+  }
+
+  // Label/value grid; rows with an empty value are skipped. All values go through .text().
+  function appendFacts($parent, rows) {
+    var $dl = $("<dl>").addClass("mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2");
+    rows.forEach(function (row) {
+      var value = row[1];
+      if (Array.isArray(value)) value = value.join(", ");
+      else if (value && typeof value === "object") value = JSON.stringify(value);
+      if (value == null || value === "") return;
+      $("<div>").addClass("rounded-lg border border-slate-200 bg-slate-50/50 p-3").append(
+        $("<dt>").addClass("text-[11px] font-semibold uppercase tracking-wider text-slate-500").text(row[0]),
+        $("<dd>").addClass("mt-1 break-words text-sm text-slate-800").text(String(value))
+      ).appendTo($dl);
     });
+    if ($dl.children().length) $dl.appendTo($parent);
+  }
+
+  function renderStrategy(campaign) {
+    $("#campaign-details-strategy").text(campaign.strategy_summary || "No strategy summary is available.");
+    var plan = campaign.ai_plan || {};
+    var $plan = $("#campaign-details-plan").empty();
+    if (Object.keys(plan).length) {
+      $("<h3>").addClass("text-sm font-bold text-slate-900").text("AI plan").appendTo($plan);
+      if (Array.isArray(plan.action_plan) && plan.action_plan.length) {
+        var $steps = $("<ol>").addClass("mt-2 list-decimal space-y-1 pl-5 text-sm text-slate-700");
+        plan.action_plan.forEach(function (step) { $("<li>").text(typeof step === "string" ? step : JSON.stringify(step)).appendTo($steps); });
+        $steps.appendTo($plan);
+      }
+      appendFacts($plan, [
+        ["Planned start", plan.start_date], ["Planned end", plan.end_date],
+        ["Chosen content items", plan.content_item_ids], ["Chosen template", plan.template_id],
+        ["Template data", plan.template_data]
+      ]);
+    }
+    var prov = (campaign.metadata_ || {}).agent_provenance || {};
+    var $prov = $("#campaign-details-provenance").empty();
+    if (Object.keys(prov).length) {
+      $("<h3>").addClass("text-sm font-bold text-slate-900").text("Planner agent").appendTo($prov);
+      appendFacts($prov, [
+        ["Agent", [prov.display_name, prov.agent_code && "(" + prov.agent_code + ")"].filter(Boolean).join(" ")],
+        ["Model", prov.model_name], ["Status at run", prov.status],
+        ["Prompt", [prov.prompt_key, prov.instruction_version != null && "v" + prov.instruction_version].filter(Boolean).join(" ")],
+        ["Required variables", prov.required_variables], ["Model settings", prov.hyperparameters],
+        ["Run at", prov.run_at ? fmt.dateTime(prov.run_at) : ""]
+      ]);
+      var body = (prov.resolved_prompt_version || {}).body;
+      if (body) {
+        var $details = $("<details>").addClass("mt-3 rounded-lg border border-slate-200 p-3 text-xs");
+        $("<summary>").addClass("cursor-pointer font-semibold text-slate-700").text("Prompt that ran").appendTo($details);
+        $("<pre>").addClass("mt-2 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-slate-700").text(body).appendTo($details);
+        $details.appendTo($prov);
+      }
+    }
   }
 
   function renderDetailMetadata(campaign) {
@@ -534,7 +754,7 @@ window.C360 = window.C360 || {};
       $("<dd>").addClass("mt-2 break-words text-sm font-semibold text-slate-800 " + (field.technical ? "font-mono text-xs" : "")).text(field.value || "-").appendTo($item);
       $metadata.append($item);
     });
-    $("#campaign-details-strategy").text(campaign.strategy_summary || "No strategy summary is available.");
+    renderStrategy(campaign);
     $("#campaign-details-ai-plan").text(JSON.stringify(campaign.ai_plan || {}, null, 2));
     $("#campaign-details-agent").text(JSON.stringify((campaign.metadata_ || {}).agent_provenance || {}, null, 2));
     $("#campaign-details-content-items").empty();
@@ -587,51 +807,96 @@ window.C360 = window.C360 || {};
       .fail(function () { renderDetailAudience(segmentId, null); });
   }
 
+  // Short display of one audited value; full snapshots are too long to read in a timeline.
+  function historyValue(value) {
+    if (value == null || value === "") return "—";
+    if (Array.isArray(value)) return value.length ? value.join(", ") : "—";
+    if (typeof value === "object") return value.segment_name || value.name || JSON.stringify(value);
+    var text = String(value);
+    return text.length > 90 ? text.slice(0, 87) + "…" : text;
+  }
+
+  // Audit rows store whole before/after snapshots; show only the fields that changed.
+  function historyLines(entry) {
+    if (entry.type === "review") return ["Reviewer: " + historyValue(entry.reviewer_id)].concat(entry.reason ? ["Reason: " + entry.reason] : []);
+    var before = entry.before_data || {};
+    var after = entry.after_data || {};
+    if (entry.action === "CREATE") {
+      var lines = ["Planned by " + (after.agent_code || "planner") + (after.instruction_version ? " v" + after.instruction_version : "")];
+      if (after.start_date || after.end_date) lines.push("Schedule: " + historyValue(after.start_date) + " → " + historyValue(after.end_date));
+      return lines;
+    }
+    return Object.keys(after).filter(function (key) {
+      return JSON.stringify(before[key]) !== JSON.stringify(after[key]);
+    }).map(function (key) {
+      if (key === "ai_plan") return "AI plan: re-planned";
+      return key.replace(/_/g, " ") + ": " + historyValue(before[key]) + " → " + historyValue(after[key]);
+    });
+  }
+
   function renderDetailHistory(history) {
     var $history = $("#campaign-details-history").empty();
     (history || []).forEach(function (entry) {
       var label = entry.type === "review" ? String(entry.decision || "review") : String(entry.action || "audit");
-      var detail = entry.reason || entry.after_data || entry.before_data || "";
-      $("<li>").addClass("border-l-2 border-indigo-200 pl-4 text-sm text-slate-700").append($("<div>").addClass("font-semibold text-slate-900").text(label), $("<div>").addClass("mt-1 whitespace-pre-wrap text-xs text-slate-500").text(typeof detail === "string" ? detail : JSON.stringify(detail)), $("<time>").addClass("mt-1 block text-xs text-slate-400").text(entry.created_at || "")).appendTo($history);
+      var lines = historyLines(entry);
+      var $lines = $("<ul>").addClass("mt-1 space-y-0.5 text-xs text-slate-600");
+      (lines.length ? lines : ["No field changes"]).forEach(function (line) { $("<li>").text(line).appendTo($lines); });
+      $("<li>").addClass("border-l-2 border-indigo-200 pl-4 text-sm text-slate-700").append($("<div>").addClass("font-semibold text-slate-900").text(label), $lines, $("<time>").addClass("mt-1 block text-xs text-slate-400").text(entry.created_at ? new Date(entry.created_at).toLocaleString() : "")).appendTo($history);
     });
     if (!$history.children().length) $("<li>").addClass("text-sm text-slate-500").text("No history recorded.").appendTo($history);
   }
 
-  function renderCampaignReport(campaign, response, isAggregateFallback) {
-    var summary = response.summary || response.metrics || response;
-    var row = summary.campaign_id ? summary : (response.items || []).filter(function (item) { return item.campaign_id === campaign.campaign_id; })[0] || {};
-    $("#campaign-report-spend").text(fmtVnd(row.total_spend));
-    $("#campaign-report-impressions").text(fmt.int(row.total_impressions || 0));
-    $("#campaign-report-conversions").text(fmt.int(row.total_conversions || 0));
-    $("#campaign-report-roas").text((parseFloat(row.roas) || 0).toFixed(2) + "x");
-    var $daily = $("#campaign-report-daily").empty();
-    (response.daily || response.daily_metrics || []).forEach(function (item) {
-      $("<tr>").append($("<td>").addClass("py-3 pr-4 text-slate-700").text(item.report_date || "-"), $("<td>").addClass("py-3 pr-4").text(fmtVnd(item.spend)), $("<td>").addClass("py-3 pr-4").text(fmt.int(item.impressions || 0)), $("<td>").addClass("py-3 pr-4").text(fmt.int(item.clicks || 0)), $("<td>").addClass("py-3 pr-4").text(fmt.int(item.conversions || 0)), $("<td>").addClass("py-3").text(fmtVnd(item.revenue_estimated))).appendTo($daily);
+  function ratio(value, suffix) {
+    return value == null ? "—" : (parseFloat(value) || 0).toFixed(2) + suffix;
+  }
+
+  // One row of KPI cards for a Totals object; CPA/ROAS are null server-side when undefined.
+  function renderTotalsCards(title, totals) {
+    var $block = $("<div>");
+    $("<h3>").addClass("mb-2 text-xs font-bold uppercase tracking-wider text-slate-500").text(title).appendTo($block);
+    var $grid = $("<div>").addClass("grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8").appendTo($block);
+    [
+      ["Spend", fmtVnd(totals.spend)], ["Impressions", fmt.int(totals.impressions || 0)], ["Clicks", fmt.int(totals.clicks || 0)],
+      ["Conversions", fmt.int(totals.conversions || 0)], ["CTR", ratio(totals.ctr_percentage, "%")], ["CVR", ratio(totals.cvr_percentage, "%")],
+      ["CPA", totals.cpa == null ? "CPA unavailable — no conversions" : fmtVnd(totals.cpa)], ["ROAS", ratio(totals.roas, "×")]
+    ].forEach(function (card) {
+      $("<article>").addClass("rounded-lg border border-slate-200 bg-slate-50/50 p-3").append(
+        $("<p>").addClass("text-[11px] uppercase tracking-wider text-slate-500").text(card[0]),
+        $("<p>").addClass("mt-1 text-sm font-bold text-slate-900").text(card[1])
+      ).appendTo($grid);
     });
-    if (!$daily.children().length && row.campaign_id) {
-      $("<tr>").append($("<td>").addClass("py-3 pr-4 text-slate-700").text("Lifetime aggregate"), $("<td>").addClass("py-3 pr-4").text(fmtVnd(row.total_spend)), $("<td>").addClass("py-3 pr-4").text(fmt.int(row.total_impressions || 0)), $("<td>").addClass("py-3 pr-4").text(fmt.int(row.total_clicks || 0)), $("<td>").addClass("py-3 pr-4").text(fmt.int(row.total_conversions || 0)), $("<td>").addClass("py-3").text(fmtVnd(row.total_revenue))).appendTo($daily);
-    }
-    var warning = row.campaign_id && !row.total_conversions ? "No conversions are recorded. CPA must not be interpreted as positive performance." : "";
-    if (isAggregateFallback && ($("#campaign-report-start").val() || $("#campaign-report-end").val())) warning = "Daily date filtering is unavailable until the single-campaign report API is enabled. Showing lifetime aggregate data.";
-    $("#campaign-report-warning").toggleClass("hidden", !warning).text(warning);
+    return $block;
+  }
+
+  function renderCampaignReport(report) {
+    var lifetime = report.lifetime || {}, period = report.period_totals || {}, coverage = report.coverage || {};
+    $("#campaign-report-spend").text(fmtVnd(lifetime.spend));
+    $("#campaign-report-impressions").text(fmt.int(lifetime.impressions || 0));
+    $("#campaign-report-conversions").text(fmt.int(lifetime.conversions || 0));
+    $("#campaign-report-roas").text(ratio(lifetime.roas, "x"));
+    $("#campaign-report-kpis").empty().append(renderTotalsCards("Lifetime", lifetime), renderTotalsCards("Selected period", period));
+    var reportWindow = coverage.start_date || coverage.end_date
+      ? (coverage.start_date || "the start") + " to " + (coverage.end_date || "today")
+      : "all dates";
+    $("#campaign-report-coverage").text(coverage.days_with_data
+      ? "Period " + reportWindow + " · " + coverage.days_with_data + " days with data (first " + coverage.first_report_date + ", last " + coverage.last_report_date + ")"
+      : "No daily report data for " + reportWindow + ".");
+    var $daily = $("#campaign-report-daily").empty();
+    (report.daily || []).forEach(function (item) {
+      $("<tr>").append($("<td>").addClass("py-3 pr-4 text-slate-700").text(item.report_date || "-"), $("<td>").addClass("py-3 pr-4").text(fmtVnd(item.spend)), $("<td>").addClass("py-3 pr-4").text(fmt.int(item.impressions || 0)), $("<td>").addClass("py-3 pr-4").text(fmt.int(item.clicks || 0)), $("<td>").addClass("py-3 pr-4").text(fmt.int(item.conversions || 0)), $("<td>").addClass("py-3").text(fmtVnd(item.revenue))).appendTo($daily);
+    });
+    if (!$daily.children().length) $("<tr>").append($("<td>").attr("colspan", 6).addClass("py-6 text-center text-slate-500").text("No daily data for this period.")).appendTo($daily);
+    var warn = lifetime.zero_conversion_warning || period.zero_conversion_warning;
+    $("#campaign-report-warning").toggleClass("hidden", !warn).text(warn ? "No conversions are recorded. CPA must not be interpreted as positive performance." : "");
   }
 
   function loadCampaignReport(campaign) {
     var params = {};
     if ($("#campaign-report-start").val()) params.start_date = $("#campaign-report-start").val();
     if ($("#campaign-report-end").val()) params.end_date = $("#campaign-report-end").val();
-    api("/campaigns/" + encodeURIComponent(campaign.campaign_id) + "/report", params).done(function (response) {
-      renderCampaignReport(campaign, response, false);
-    }).fail(function (xhr) {
-      if (!xhr || xhr.status !== 404) {
-        setCampaignMessage("#campaign-details-error", campaignError(xhr));
-        return;
-      }
-      var fallbackParams = { tenant_id: tenantId(), search: campaign.campaign_code || campaign.name, page: 1, page_size: 100 };
-      api("/campaigns/analytics", fallbackParams).done(function (response) {
-        renderCampaignReport(campaign, response, true);
-      }).fail(function (fallbackXhr) { setCampaignMessage("#campaign-details-error", campaignError(fallbackXhr)); });
-    });
+    api("/campaigns/" + encodeURIComponent(campaign.campaign_id) + "/report", params)
+      .done(renderCampaignReport)
+      .fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); });
   }
 
   var experimentSegments = [];
@@ -791,14 +1056,16 @@ window.C360 = window.C360 || {};
         $("#campaign-details-status").attr("class", "inline-flex items-center gap-1.5 text-xs font-semibold rounded-md px-2.5 py-1.5 " + statusPresentation.classes).attr("aria-label", "Campaign status: " + statusPresentation.label);
         $("#campaign-details-status-icon").attr("class", "bi " + statusPresentation.icon);
         $("#campaign-details-status-label").text(statusPresentation.label);
-        $("#campaign-details-approval").text(campaign.approval_status || "Draft").attr("class", "text-xs font-semibold rounded-md px-2.5 py-1.5 bg-indigo-50 text-indigo-700");
+        $("#campaign-details-approval").text(campaign.approval_status || "Draft").attr("class", "text-xs font-semibold rounded-md px-2.5 py-1.5 " + (APPROVAL_BADGE[campaign.approval_status] || "bg-indigo-50 text-indigo-700"));
         var canReview = canReviewCampaign() && campaign.approval_status === "InReview";
+        $("#btn-campaign-details-replan").toggleClass("hidden", !canReviewCampaign());
         $("#btn-campaign-details-approve").toggleClass("hidden", !canReview);
         $("#btn-campaign-details-reject").toggleClass("hidden", !canReview);
         $("#campaign-details-loading").addClass("hidden");
         $("#campaign-details-content").removeClass("hidden");
         $("#campaign-experiment-form").attr("data-campaign-id", campaignId);
         $("#btn-campaign-details-edit").off("click.c360campaign").on("click.c360campaign", function () { C360.router.navigate("/campaigns/" + encodeURIComponent(campaignId) + "/edit"); });
+        $("#btn-campaign-details-replan").off("click.c360campaign").on("click.c360campaign", function () { editor.scrollToReplan = true; C360.router.navigate("/campaigns/" + encodeURIComponent(campaignId) + "/edit"); });
         $("#btn-campaign-report-refresh").off("click.c360campaign").on("click.c360campaign", function () { loadCampaignReport(campaign); });
         $("#btn-campaign-details-approve").off("click.c360campaign").on("click.c360campaign", function () { api("/campaigns/" + encodeURIComponent(campaignId) + "/approve", {}, "POST").done(function () { loadCampaignDetails(campaignId); }).fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); }); });
         $("#btn-campaign-details-reject").off("click.c360campaign").on("click.c360campaign", function () { var reason = window.prompt("Reason for rejection:"); if (reason === null) return; api("/campaigns/" + encodeURIComponent(campaignId) + "/reject", { reason: reason }, "POST").done(function () { loadCampaignDetails(campaignId); }).fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); }); });
@@ -841,6 +1108,13 @@ window.C360 = window.C360 || {};
         setTimeout(function () { $label.text("Copy ID"); }, 1400);
       });
     });
+    $doc.on("change.c360campaignworkspace", "#campaign-field-draft-channel", function () {
+      var channel = $(this).val();
+      $("#campaign-template-wrap").toggleClass("hidden", channel === ZNS_CHANNEL);
+      if (channel !== ZNS_CHANNEL) loadTemplateOptions("email", null);
+    });
+    $doc.on("click.c360campaignworkspace", "#btn-campaign-replan", replanCampaign);
+    $doc.on("click.c360campaignworkspace", "#btn-campaign-editor-reload", function () { if (editor.stale) { clearEditorMessages(); fillCampaignEditor(editor.stale); } });
     $doc.on("click.c360campaignworkspace", "#btn-campaign-select-segment, #btn-campaign-change-segment", openSegmentPicker);
     $doc.on("click.c360campaignworkspace", "#btn-campaign-segment-modal-close, #btn-campaign-segment-modal-cancel", closeSegmentPicker);
     $doc.on("click.c360campaignworkspace", "#campaign-segment-modal", function (event) { if (event.target === this) closeSegmentPicker(); });
