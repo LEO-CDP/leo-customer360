@@ -9,6 +9,7 @@ import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -64,9 +65,12 @@ def _query_sync(
     view: str | None = None,
     dialog: str | None = None,
     context_title: str | None = None,
+    history: list[dict] | None = None,
+    summary: str | None = None,
+    recalled_turn: dict | None = None,
 ) -> dict:
     with store.connect() as conn:
-        return query(question, conn, top_n, top_k, page, context, view, dialog, context_title)
+        return query(question, conn, top_n, top_k, page, context, view, dialog, context_title, history, summary, recalled_turn)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -105,6 +109,19 @@ app.add_middleware(
 )
 
 
+class HistoryItem(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field(..., min_length=1, max_length=2000)  # the agent keeps the first 600 (1500 with a summary)
+    clarify: bool = False
+
+
+class RecalledTurn(BaseModel):
+    """An earlier exchange of this chat, read by position because the user asked about it ("my second question")."""
+    number: int = Field(..., ge=1, le=50)
+    question: str = Field(..., min_length=1, max_length=2000)
+    answer: str = Field(..., min_length=1, max_length=2000)
+
+
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=QUESTION_MAX_LEN)
     top_n: int = Field(RETRIEVE_TOP_N, ge=1, le=TOP_N_MAX)
@@ -118,6 +135,12 @@ class AskRequest(BaseModel):
     # The open tab / dialog on screen (UI labels). Trusted caller only (see _trusted_context).
     view: str | None = Field(None, max_length=60)
     dialog: str | None = Field(None, max_length=80)
+    # Earlier messages of this chat (newest last). Trusted caller only, like context.
+    history: list[HistoryItem] | None = Field(None, max_length=6)
+    # Running summary of the chat so far, from the previous answer. Trusted caller only.
+    summary: str | None = Field(None, max_length=800)
+    # The exact earlier exchange the user named by position. Trusted caller only.
+    recalled_turn: RecalledTurn | None = None
 
 
 class SearchRequest(BaseModel):
@@ -135,22 +158,28 @@ def _require_reindex_access(request: Request) -> None:
 
 def _trusted_context(
     req: "AskRequest", request: Request
-) -> tuple[list[str] | None, str | None, str | None, str | None]:
-    """Profile facts (and their heading) and the open tab/dialog are accepted only from a trusted
-    internal caller (customer360-api).
+) -> tuple[list[str] | None, str | None, str | None, str | None, list[dict] | None]:
+    """Profile facts (and their heading), the open tab/dialog and the chat history are accepted only
+    from a trusted internal caller (customer360-api).
 
     /ask is public and rate-limited, so a browser must not be able to put text of its own
-    into the facts block heading, the "Profile on screen" facts, or the "Part of the page in
-    front of the user" block of the prompt.
+    into the facts block heading, the "Profile on screen" facts, the "Part of the page in
+    front of the user" block, or the "Conversation so far" block of the prompt.
     """
-    if (req.context or req.view or req.dialog or req.context_title) and not (
+    if (req.context or req.view or req.dialog or req.context_title or req.history or req.summary or req.recalled_turn) and not (
         INTERNAL_API_SECRET and limiter.is_internal(request)
     ):
         raise HTTPException(
             status_code=403,
-            detail="context, context_title, view and dialog require the X-Internal-Auth credential.",
+            detail="context, context_title, view, dialog, history, summary and recalled_turn require the X-Internal-Auth credential.",
         )
-    return req.context, req.view, req.dialog, req.context_title
+    return (
+        req.context,
+        req.view,
+        req.dialog,
+        req.context_title,
+        [h.model_dump() for h in req.history] if req.history else None,
+    )
 
 
 @app.get("/health")
@@ -206,7 +235,7 @@ async def ask(req: AskRequest, request: Request):
     # Rate-limit every caller except a trusted internal one (X-Internal-Auth secret).
     await limiter.enforce(request)
     started = time.perf_counter()
-    context, view, dialog, context_title = _trusted_context(req, request)
+    context, view, dialog, context_title, history = _trusted_context(req, request)
     result = await asyncio.to_thread(
         _query_sync,
         req.question,
@@ -217,6 +246,9 @@ async def ask(req: AskRequest, request: Request):
         view,
         dialog,
         context_title,
+        history,
+        req.summary,
+        req.recalled_turn.model_dump() if req.recalled_turn else None,
     )
     _log.info("/ask completed in %.2fs question_chars=%d sources=%d", time.perf_counter() - started, len(req.question), len(result["sources"]))
     return result

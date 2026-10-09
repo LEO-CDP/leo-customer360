@@ -138,6 +138,25 @@
   color: color-mix(in srgb, var(--dark) 15%, #e05252 85%);
 }
 
+.docs-chat-retry {
+  margin-top: 0.4rem;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid var(--secondary);
+  border-radius: 0.5rem;
+  color: var(--secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.docs-chat-answer {
+  p { margin: 0 0 0.5rem; }
+  p:last-child, ul:last-child, ol:last-child { margin-bottom: 0; }
+  ul, ol { margin: 0 0 0.5rem; padding-left: 1.25rem; }
+  code { font-size: 0.85em; }
+}
+
 .docs-chat-status {
   display: flex;
   align-items: center;
