@@ -28,6 +28,12 @@ header-includes:
 
 ## Tóm tắt
 
+**Bản sách mở rộng:** [Human Persona as dynamic Vector](human_persona_as_dynamic_vector_vi.md)
+phát triển các khái niệm thành chương riêng, bổ sung toán học từ nguyên lý
+đầu tiên và chương ứng dụng cho từng lĩnh vực.
+[Đọc bản sách PDF A4](human_persona_as_dynamic_vector_vi.pdf).
+Bài báo này được giữ lại làm bản nghiên cứu nền.
+
 Cá nhân hóa dựa trên trí tuệ nhân tạo (AI) cho phép khai thác dữ liệu hành vi để ước lượng trạng thái, tạo trải nghiệm phù hợp và liên tục điều chỉnh tương tác. Tuy nhiên, việc chỉ tối ưu lượt nhấp, đăng ký hay mua hàng có thể bỏ qua câu hỏi quan trọng hơn: một người hiện đang ở trạng thái nào, muốn trở thành ai và cần được hỗ trợ ra sao để thực hiện mục tiêu đã chọn?
 
 [![Giao điểm khái niệm giữa marketing, tâm lý học và hệ động lực làm nền cho Persona as a Vector.](assets/kotler_jung_einstein.png)](assets/kotler_jung_einstein.png){width=95%}
