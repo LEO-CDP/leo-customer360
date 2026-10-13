@@ -12,6 +12,7 @@ resources:
 
 patches:
   - path: patch-config.yaml
+  - path: patch-dagster.yaml
 
 # Point every built image at your GreenNode container registry + tag.
 images:
