@@ -1,5 +1,5 @@
-dagster>=1.13.25,<2
-dagster-graphql>=1.9,<2
+dagster==1.13.26
+dagster-graphql==1.13.26
 psycopg2-binary>=2.9,<3
 python-dotenv>=1.0,<2
 pytest>=7.4,<9

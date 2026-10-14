@@ -828,7 +828,7 @@ $prompt$,
         'Ranks products, content, or offers according to customer preferences, behavior, context, and business eligibility.',
         'ranking_recommendation',
         'lightgbm.LGBMRanker',
-        'INACTIVE',
+        'ACTIVE',
         '0 * * * *',
 
         ARRAY[

@@ -180,6 +180,7 @@ def list_content_items(
     item_type: Optional[str] = Query(default=None, pattern="^(news|video|product|article)$"),
     status_code: Optional[int] = Query(default=None, ge=0),
     q: Optional[str] = Query(default=None, max_length=200),
+    tag: Optional[str] = Query(default=None, max_length=100),
     content_only: bool = False,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, le=100),
@@ -195,6 +196,7 @@ def list_content_items(
         item_type=item_type,
         status_code=status_code,
         q=q,
+        tag=tag,
         content_only=content_only,
     )
 
@@ -205,6 +207,7 @@ def list_product_items(
     tenant_id: Optional[uuid.UUID] = None,
     domain: Optional[str] = Query(default=None),
     q: Optional[str] = Query(default=None, max_length=200),
+    tag: Optional[str] = Query(default=None, max_length=100),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -215,6 +218,7 @@ def list_product_items(
         tenant_id=scoped_tenant_id,
         domain=domain,
         q=q,
+        tag=tag,
         skip=skip,
         limit=limit,
     )

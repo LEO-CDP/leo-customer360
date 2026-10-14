@@ -48,14 +48,33 @@ def run_agent_workflow_master_op(
         else None
     )
     task = AgentWorkflowMasterTask()
-    summary = task.run(
-        trigger=config.trigger,
-        tenant_id=config.tenant_id,
-        segment_id=config.segment_id,
-        trigger_event=config.trigger_event,
-        scheduled_at=scheduled_at,
+    context.log.info(
+        "Starting AI-agent workflow master op "
+        "(run_id=%s trigger=%s tenant_id=%s segment_id=%s)",
+        context.run_id,
+        config.trigger,
+        config.tenant_id or "ALL",
+        config.segment_id or "ALL",
     )
-    summary = task.execute(summary, run_id=context.run_id)
+    try:
+        summary = task.run(
+            trigger=config.trigger,
+            tenant_id=config.tenant_id,
+            segment_id=config.segment_id,
+            trigger_event=config.trigger_event,
+            scheduled_at=scheduled_at,
+        )
+        summary = task.execute(summary, run_id=context.run_id)
+    except Exception:
+        context.log.exception(
+            "AI-agent workflow master op failed "
+            "(run_id=%s trigger=%s tenant_id=%s segment_id=%s)",
+            context.run_id,
+            config.trigger,
+            config.tenant_id or "ALL",
+            config.segment_id or "ALL",
+        )
+        raise
     context.log.info("AI-agent workflow master task result: %s", summary.as_dict())
     return summary.as_dict()
 

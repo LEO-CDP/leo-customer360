@@ -71,6 +71,7 @@ def test_product_listing_query_always_includes_tenant_filter():
         skip=0,
         limit=25,
         q="book",
+        tag="featured",
     ) == []
 
     statement, params = session.execute.call_args.args
@@ -80,3 +81,4 @@ def test_product_listing_query_always_includes_tenant_filter():
     assert "SELECT *" not in str(statement)
     assert params["tenant_id"] == TENANT_ID
     assert params["search"] == "%book%"
+    assert params["tag"] == "%featured%"

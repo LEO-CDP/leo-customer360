@@ -37,7 +37,7 @@ alembic>=1.13.0,<2
 PyJWT>=2.3,<3
 
 # Submit job execution into Dagster server
-dagster-graphql>=1.0,<2
+dagster-graphql==1.13.26
 
 # Test-only dependencies (see ./run_unit_tests.sh)
 pytest>=7.4,<9

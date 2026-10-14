@@ -12,7 +12,7 @@ pgvector>=0.3,<1
 redis>=5.0,<6
 
 # To submit job execution into Dagster server
-dagster-graphql
+dagster-graphql==1.13.26
 
 # Test-only dependencies (see ./run_unit_tests.sh)
 pytest>=7.4,<9

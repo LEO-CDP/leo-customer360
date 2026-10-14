@@ -507,11 +507,13 @@ window.C360 = window.C360 || {};
   function bindEvents() {
     populateDomainSelects();
     contentTable.bindSearch("#content-search", "q", 300);
+    contentTable.bindSearch("#content-tag-filter", "tag", 300);
     contentTable.bindSelect("#content-domain-filter", "domain");
     contentTable.bindSelect("#content-type-filter", "item_type");
     contentTable.bindLoadMore();
     contentTable.bindRowEdit();
     productTable.bindSearch("#product-search", "q", 300);
+    productTable.bindSearch("#product-tag-filter", "tag", 300);
     productTable.bindSelect("#product-domain-filter", "domain");
     productTable.bindLoadMore();
     productTable.bindRowEdit();
@@ -555,11 +557,11 @@ window.C360 = window.C360 || {};
         if (event.target === this) closeModal("#" + this.id);
       })
       .on("click.contentProducts", "#content-clear-filters", function () {
-        $("#content-search, #content-domain-filter, #content-type-filter").val("");
+        $("#content-search, #content-tag-filter, #content-domain-filter, #content-type-filter").val("");
         contentTable.clearFilters();
       })
       .on("click.contentProducts", "#product-clear-filters", function () {
-        $("#product-search, #product-domain-filter").val("");
+        $("#product-search, #product-tag-filter, #product-domain-filter").val("");
         productTable.clearFilters();
       });
 

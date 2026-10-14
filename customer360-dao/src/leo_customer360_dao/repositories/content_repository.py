@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from pydantic import TypeAdapter, ValidationError
 from redis.exceptions import RedisError
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from leo_customer360_dao.cache import get_redis_client
@@ -42,9 +42,10 @@ class ContentRepository:
         item_type: Optional[str] = None,
         status_code: Optional[int] = None,
         q: Optional[str] = None,
+        tag: Optional[str] = None,
         content_only: bool = False,
     ) -> list[CdpContentItem]:
-        """List content items with tenant, type, status, domain, and text filters."""
+        """List content items with tenant, type, status, domain, text, and tag filters."""
         if limit is None:
             limit = settings.api_default_page_size
 
@@ -65,6 +66,13 @@ class ContentRepository:
                 or_(
                     CdpContentItem.title.ilike(pattern),
                     CdpContentItem.summary.ilike(pattern),
+                    func.array_to_string(CdpContentItem.segment_tags, ",").ilike(pattern),
+                )
+            )
+        if tag and tag.strip():
+            conditions.append(
+                func.array_to_string(CdpContentItem.segment_tags, ",").ilike(
+                    f"%{tag.strip()}%"
                 )
             )
         statement = (
