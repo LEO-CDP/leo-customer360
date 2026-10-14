@@ -2,10 +2,10 @@
 # Deploy / migrate the Customer360 app tier (incl. Dagster) to GreenNode VKS.
 # Idempotent. Never touches your current kubectl context: KUBECONFIG is required.
 #
-#   KUBECONFIG=~/kubeconfig-vks-uat.yaml REGISTRY=ghcr.io/acme TAG=v1 \
-#   REGISTRY_USER=u REGISTRY_PASSWORD=tok  k8s/scripts/vks-deploy.sh [preflight|build|deploy|verify|all]
+#   KUBECONFIG=deployments/kubeconfig-vks-uat.yaml SKIP_BUILD=1 TAG=sha-<40-char-sha> \
+#   k8s/scripts/vks-deploy.sh [preflight|build|deploy|verify|all]   # applies Dagster resources ONLY
 #
-# Env: KUBECONFIG (req) REGISTRY (req) TAG (default latest)
+# Env: KUBECONFIG (req) REGISTRY (default ghcr.io/leo-cdp/leo-customer360) TAG (default latest) SKIP_BUILD=1 (use CI image)
 #      REGISTRY_USER/REGISTRY_PASSWORD (pull secret; skipped if unset)
 #      REGISTRY_SERVER (default = REGISTRY host)  NAMESPACE (default customer360)
 #      DRY_RUN=1 (render + server dry-run only)
@@ -16,6 +16,7 @@ K8S="$(cd "$DIR/.." && pwd)"
 ROOT="$(cd "$K8S/.." && pwd)"
 OVL="$K8S/overlays/vks"
 NS="${NAMESPACE:-customer360}"
+REGISTRY="${REGISTRY:-ghcr.io/leo-cdp/leo-customer360}"  # CI publishes here; cluster already has the ghcr-pull secret
 TAG="${TAG:-latest}"
 STEP="${1:-all}"
 
@@ -23,9 +24,8 @@ die() { echo "error: $*" >&2; exit 1; }
 k() { kubectl --kubeconfig "$KUBECONFIG" "$@"; }
 
 preflight() {
-  for c in kubectl docker; do command -v "$c" >/dev/null || die "'$c' not on PATH"; done
+  command -v kubectl >/dev/null || die "'kubectl' not on PATH"
   [ -n "${KUBECONFIG:-}" ] && [ -f "$KUBECONFIG" ] || die "set KUBECONFIG to the VKS kubeconfig file"
-  [ -n "${REGISTRY:-}" ] || die "set REGISTRY (e.g. ghcr.io/acme)"
   [ -f "$OVL/secret.env" ] || die "create $OVL/secret.env from secret.env.example"
   if grep -n CHANGE_ME "$OVL/patch-config.yaml" "$OVL/secret.env" 2>/dev/null; then
     die "fill every CHANGE_ME above (managed DB/Redis/Kafka/S3 values)"
@@ -36,15 +36,17 @@ preflight() {
 
 build() {
   # Only the Dagster image is built here; api/frontend images come from their own CD.
+  command -v docker >/dev/null || die "'docker' not on PATH"
   echo "==> building $REGISTRY/customer360-dagster:$TAG"
   docker build -f "$ROOT/customer360-backend/Dockerfile" -t "$REGISTRY/customer360-dagster:$TAG" "$ROOT"
   docker push "$REGISTRY/customer360-dagster:$TAG"
 }
 
 ensure_pull_secret() {
-  [ -n "${REGISTRY_USER:-}" ] && [ -n "${REGISTRY_PASSWORD:-}" ] || { echo "==> REGISTRY_USER/PASSWORD unset: skipping pull secret"; return; }
+  k -n "$NS" get secret ghcr-pull >/dev/null 2>&1 && { echo "==> ghcr-pull already present"; return; }
+  [ -n "${REGISTRY_USER:-}" ] && [ -n "${REGISTRY_PASSWORD:-}" ] || die "no ghcr-pull secret in $NS: set REGISTRY_USER/REGISTRY_PASSWORD"
   # Must be long-lived: the kubelet re-reads it on every later pull (see vks-event-api runbook).
-  k -n "$NS" create secret docker-registry registry-pull \
+  k -n "$NS" create secret docker-registry ghcr-pull \
     --docker-server="${REGISTRY_SERVER:-${REGISTRY%%/*}}" \
     --docker-username="$REGISTRY_USER" --docker-password="$REGISTRY_PASSWORD" \
     --dry-run=client -o yaml | k apply -f -
@@ -66,11 +68,11 @@ ensure_dagster_db() {
 
 render() {
   # Wrap the overlay so the registry/tag are applied without editing committed files.
-  local tmp; tmp="$(mktemp -d)"
+  local tmp; tmp="$(mktemp -d "$K8S/overlays/.render.XXXXXX")"  # sibling of vks/: kustomize rejects absolute resource paths
   cat > "$tmp/kustomization.yaml" <<EOF
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: ["$OVL"]
+resources: ["../vks"]
 images:
   - name: REGISTRY.example/customer360-dagster
     newName: $REGISTRY/customer360-dagster
@@ -81,10 +83,14 @@ EOF
 
 deploy() {
   k get ns "$NS" >/dev/null 2>&1 || k create ns "$NS"
-  local tmp; tmp="$(render)"; trap 'rm -rf "$tmp"' RETURN
-  if [ "${DRY_RUN:-0}" = 1 ]; then k apply -k "$tmp" --dry-run=server; return; fi
+  tmp="$(render)"; trap 'rm -rf "$tmp"' EXIT
+  if [ "${DRY_RUN:-0}" = 1 ]; then mkdir "$tmp/out"; kubectl kustomize "$tmp" -o "$tmp/out"; k apply --dry-run=server -f "$tmp/out/v1_configmap_c360-config.yaml" -f "$tmp/out/v1_secret_c360-secrets.yaml" -f "$tmp/out/apps_v1_deployment_dagster.yaml" -f "$tmp/out/v1_service_dagster.yaml"; return; fi
   ensure_pull_secret
-  k apply -k "$tmp"
+  # The overlay renders the whole app tier; UAT already runs event-api/promotions here and
+  # api/frontend/keycloak are not part of this migration, so apply ONLY Dagster's resources.
+  local out="$tmp/out"; mkdir "$out"; kubectl kustomize "$tmp" -o "$out"
+  k apply -f "$out/v1_configmap_c360-config.yaml" -f "$out/v1_secret_c360-secrets.yaml" \
+          -f "$out/apps_v1_deployment_dagster.yaml" -f "$out/v1_service_dagster.yaml"
   ensure_dagster_db
   k -n "$NS" rollout restart deploy/dagster   # pick up the DB if the first start crash-looped
   k -n "$NS" rollout status deploy/dagster --timeout=300s
@@ -108,6 +114,6 @@ case "$STEP" in
   build) preflight; build ;;
   deploy) preflight; deploy ;;
   verify) preflight; verify ;;
-  all) preflight; [ "${DRY_RUN:-0}" = 1 ] || build; deploy; [ "${DRY_RUN:-0}" = 1 ] || verify ;;
+  all) preflight; [ "${DRY_RUN:-0}" = 1 ] || [ "${SKIP_BUILD:-0}" = 1 ] || build; deploy; [ "${DRY_RUN:-0}" = 1 ] || verify ;;
   *) die "usage: $0 [preflight|build|deploy|verify|all]" ;;
 esac

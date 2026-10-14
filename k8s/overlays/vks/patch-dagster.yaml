@@ -8,7 +8,7 @@ spec:
   template:
     spec:
       imagePullSecrets:
-        - name: registry-pull
+        - name: ghcr-pull
       containers:
         - name: dagster
           env:
