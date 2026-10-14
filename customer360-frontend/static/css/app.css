@@ -465,6 +465,11 @@ html.c360-theme-dark .dtv-edit-btn:hover { color: #00d32a; }
   white-space: nowrap;
 }
 .docs-chat-error { color: var(--c360-chat-error); }
+.docs-chat-retry {
+  margin-top: 0.4rem; padding: 0.2rem 0.65rem; font-size: 0.75rem; font-weight: 600;
+  border: 1px solid currentColor; border-radius: 0.5rem; color: var(--c360-chat-source-link); background: transparent; cursor: pointer;
+}
+.docs-chat-retry:hover { color: var(--c360-chat-source-link-hover); }
 
 .docs-chat-status {
   display: flex;

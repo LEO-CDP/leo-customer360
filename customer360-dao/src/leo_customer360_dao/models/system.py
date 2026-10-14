@@ -19,6 +19,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey, 
     SmallInteger, 
+    String,
     Table, 
     Text, 
     UniqueConstraint,
@@ -74,6 +75,32 @@ class SysAuditLog(Base):
     after_data: Mapped[Optional[dict]] = mapped_column(JSONB)
     changed_fields: Mapped[Optional[dict]] = mapped_column(JSONB)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=False), server_default=text("now()"))
+
+
+class SysAssistantMessage(Base):
+    """One LEO Assistant chat message (see database-schema.sql's sys_assistant_message).
+
+    ``message_text`` holds the question or answer with emails/phone numbers masked. Rows are grouped by
+    ``conversation_id``, belong to one user (``user_id``) and are kept for 30 days.
+    """
+
+    __tablename__ = "sys_assistant_message"
+
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_tenant.tenant_id"), nullable=False)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    page: Mapped[Optional[str]] = mapped_column(String(120))
+    master_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    role: Mapped[str] = mapped_column(String(10), nullable=False)
+    message_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[Optional[str]] = mapped_column(String(20))
+    clarify: Mapped[Optional[str]] = mapped_column(String(10))
+    sources: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()"))
 
 
 class SysUser(Base):
