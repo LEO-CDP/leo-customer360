@@ -17,3 +17,12 @@ patches:
       - { op: replace, path: /spec/template/spec/containers/0/resources/requests/memory, value: 3Gi }
       - { op: replace, path: /spec/template/spec/containers/0/resources/limits/cpu, value: "3" }
       - { op: replace, path: /spec/template/spec/containers/0/resources/limits/memory, value: 5Gi }
+      # Run only on the dedicated 4x8 group (../../../../vks/overlays/uat-dagster.tfvars). VKS sets this label.
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value: { vks.vngcloud.vn/nodegroup: c360-uat-dagster }
+      # Tolerates the taint applied after the group is created (README "Capacity"), which keeps
+      # event-api/promotions off this node.
+      - op: add
+        path: /spec/template/spec/tolerations
+        value: [{ key: c360.pool, operator: Equal, value: dagster, effect: NoSchedule }]

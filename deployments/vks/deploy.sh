@@ -22,8 +22,8 @@ ENV="${1:-}"
 ACTION="${2:-plan}"
 
 case "$ENV" in
-  uat|prod) ;;
-  *) echo "Usage: ./deploy.sh <uat|prod> [plan|apply|destroy]"; exit 1 ;;
+  uat|prod|uat-dagster) ;; # uat-dagster = the dedicated Dagster node group (own workspace/state)
+  *) echo "Usage: ./deploy.sh <uat|prod|uat-dagster> [plan|apply|destroy]"; exit 1 ;;
 esac
 
 VAR_FILE="overlays/${ENV}.tfvars"

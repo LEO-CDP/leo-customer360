@@ -30,6 +30,7 @@ def mem(v):
     for k, f in u.items():
         if v.endswith(k): return int(float(v[:-2]) * f)
     return int(int(v) / 1024 / 1024)
+sel = re.search(r"vks\.vngcloud\.vn/nodegroup: (\S+)", rendered)  # pod is pinned to a node group
 m = re.search(r"requests:\s*\n\s+cpu: (\S+)\s*\n\s+memory: (\S+)", rendered)
 need_cpu, need_mem = cpu(m.group(1).strip('"')), mem(m.group(2).strip('"'))
 used = {}
@@ -42,13 +43,16 @@ for p in json.loads(pods)["items"]:
 print(f"Dagster pod requests: {need_cpu}m CPU, {need_mem}Mi memory;  vServer-parity node floor: {min_cpu}m / {min_mem}Mi allocatable")
 print(f"{'node':40} {'alloc cpu':>9} {'alloc mem':>10} {'free cpu':>9} {'free mem':>9}  parity  fit")
 ok = False
-for n in json.loads(nodes)["items"]:
+items = json.loads(nodes)["items"]
+if sel: items = [n for n in items if n["metadata"]["labels"].get("vks.vngcloud.vn/nodegroup") == sel.group(1)]
+print(f"(pod is pinned to node group '{sel.group(1)}': {len(items)} node(s) in it)" if sel else "(pod is not pinned to a node group)")
+for n in items:
     a = n["status"]["allocatable"]; ac, am = cpu(a["cpu"]), mem(a["memory"]); uc, um = used.get(n["metadata"]["name"], [0, 0])
     parity = ac >= min_cpu and am >= min_mem; fit = ac - uc >= need_cpu and am - um >= need_mem
     print(f"{n['metadata']['name']:40} {ac:>8}m {am:>8}Mi {ac-uc:>8}m {am-um:>7}Mi  {'yes' if parity else 'NO ':6}  {'yes' if fit else 'NO'}")
     ok = ok or (parity and fit)
 if not ok:
-    print("\nRESULT: NO node can host Dagster at vServer parity. Add a node group on s-general-4x8 (or larger)"
-          " — see README 'Capacity'. Not deploying.")
+    print("\nRESULT: NO node can host Dagster at vServer parity. Create the 4x8 node group"
+          " (../vks/overlays/uat-dagster.tfvars) — see README 'Capacity'. Not deploying.")
 sys.exit(0 if ok else 1)
 PY

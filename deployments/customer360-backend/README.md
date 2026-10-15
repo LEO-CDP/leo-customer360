@@ -63,7 +63,16 @@ DaemonSets) — **they cannot host Dagster at parity**. `check-capacity.sh <env>
 every node for (1) parity with the vServer box and (2) room for the pod's requests, and
 `deploy-backend-vks.sh` refuses to apply until one node passes.
 
-To make room, add a **separate node group** on `s-general-4x8` (or larger) for Dagster instead of
-re-flavoring the existing one: `flavor_id` is ForceNew, so changing it recreates the group and kills
-event-api ingest and promotions with it. The `../vks` module manages one node group per state, so a
-second one means a second workspace/state (or the console), then pin Dagster to it with a nodeSelector.
+To make room, add a **separate node group** on `s-general-4x8` for Dagster instead of re-flavoring the
+existing one: `flavor_id` is ForceNew, so changing it recreates the group and kills event-api ingest and
+promotions with it. Cost is linear (~+946k VND/mo gen-1, ~+1,135k gen-2); retiring/downsizing the vServer
+backend box after cutover offsets most of it.
+
+1. Put the 4x8 flavor id (VKS console -> Node groups -> Create) in `../vks/overlays/uat-dagster.tfvars`.
+2. `cd ../vks && ./deploy.sh uat-dagster plan && ./deploy.sh uat-dagster apply` (its own workspace and state, so the
+   existing `uat` group is not touched). Or create it in the console with the name `c360-uat-dagster`.
+3. Taint it so only Dagster lands there (the pod already tolerates it):
+   `kubectl taint nodes -l vks.vngcloud.vn/nodegroup=c360-uat-dagster c360.pool=dagster:NoSchedule`
+4. `KUBECONFIG=../kubeconfig-vks-uat.yaml ./check-capacity.sh uat` should now pass; then deploy.
+
+The UAT pod selects the group through the `vks.vngcloud.vn/nodegroup` label that VKS sets on every node.
