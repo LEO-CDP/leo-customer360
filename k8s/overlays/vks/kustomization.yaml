@@ -12,7 +12,6 @@ resources:
 
 patches:
   - path: patch-config.yaml
-  - path: patch-dagster.yaml
 
 # Point every built image at your GreenNode container registry + tag.
 images:
@@ -33,3 +32,5 @@ secretGenerator:
 
 generatorOptions:
   disableNameSuffixHash: true
+
+# Dagster-only UAT deploy now lives in deployments/customer360-backend/ (deploy-backend-vks.sh).

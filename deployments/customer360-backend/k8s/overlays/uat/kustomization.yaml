@@ -1,0 +1,13 @@
+# UAT profile for customer360-backend. deploy-backend-vks.sh layers the image and the
+# Terraform-rendered ConfigMap/Secret on top of this.
+#
+# The UAT nodes are s-general-2x4 (~2.6 GiB allocatable each) and already carry event-api,
+# promotions and the system DaemonSets, so memory is the constraint: limit 1.5 GiB. The
+# vServer backend box was 4x8. If the pod OOMKills (all code locations loaded under load),
+# the fix is a bigger/extra node (../../../vks/overlays/uat.tfvars num_nodes or flavor_id),
+# not a bigger limit here.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
