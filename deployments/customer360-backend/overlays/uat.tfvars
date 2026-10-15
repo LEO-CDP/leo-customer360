@@ -13,3 +13,9 @@ dagster_max_concurrent_runs = 10
 # Fail the pod instead of silently falling back to local compute logs when vStorage is down.
 dagster_require_s3 = "true"
 # image_tag = "sha-<40-char-sha>"   # CI publishes sha-<long sha> and latest; IMAGE_TAG env wins
+
+# vServer parity: the backend box is s-general-4x8 (../server/overlays/uat.tfvars), raised from
+# 2x4 after code-server heartbeat deaths and run-worker OOM. A VKS node must offer at least this
+# much ALLOCATABLE (a 4x8 node ~ 3.8 CPU / 6.3 GiB after kubelet reservation). check-capacity.sh enforces it.
+dagster_min_node_cpu_m  = 3500
+dagster_min_node_mem_mi = 6000

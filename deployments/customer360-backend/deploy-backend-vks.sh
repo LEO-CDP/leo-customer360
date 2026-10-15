@@ -68,6 +68,9 @@ if [[ "$ACTION" == "destroy" ]]; then
 fi
 
 . "$ROOT/lib/tfvars.sh" # tfval + srv_ip
+# Refuse to deploy where no node is at least as big as the vServer box Dagster runs on today.
+[[ "${SKIP_CAPACITY_CHECK:-0}" == "1" ]] || ./check-capacity.sh "$ENV" || {
+  echo "ERROR: capacity check failed (override with SKIP_CAPACITY_CHECK=1 at your own risk)."; exit 1; }
 ovl="overlays/$ENV.tfvars"
 [[ -f "$ovl" ]] || { echo "ERROR: overlay $ovl not found."; exit 1; }
 DAGSTER_PORT="$(tfval dagster_port "$ovl")"; DAGSTER_PORT="${DAGSTER_PORT:-3000}"

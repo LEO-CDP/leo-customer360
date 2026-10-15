@@ -45,9 +45,7 @@ storage and S3 compute logs, and GraphQL reports every code location `LOADED`.
   use `kubectl port-forward svc/dagster 3000:3000`.
 - **Redis is the api box's, not local.** The vServer backend ran its own redis on the jobs box. Pods
   cannot, so this points at the api box's private redis; keys (analytics dedup) start empty.
-- **Memory is the UAT constraint.** The 2x4 nodes have ~2.6 GiB allocatable and already run event-api,
-  promotions and DaemonSets. If the pod OOMKills, add or enlarge a node
-  (`../vks/overlays/uat.tfvars`) rather than raising the limit.
+- **Capacity is the UAT blocker** — see below.
 
 ## Cutover
 
@@ -55,3 +53,17 @@ Deploying here does **not** move traffic. The vServer Dagster (`10.100.1.4:3000`
 in `../proxy/overlays/<env>.tfvars` (`dagster_upstream`) and `../load_balancer/overlays/<env>.tfvars`.
 Run both side by side on different `dagster_pg_db` values until verified, then repoint and stop the
 vServer container. `deploy-all.sh`'s `backend` step is still the vServer path.
+
+## Capacity (vServer parity)
+
+Dagster runs on an `s-general-4x8` vServer today (`../server/overlays/uat.tfvars`), raised from 2x4
+after code-server heartbeat deaths and run-worker OOM that hung runs. The UAT VKS nodes are
+`s-general-2x4` (~1.8 CPU / ~2.6 GiB allocatable, ~1 GiB free after event-api, promotions and
+DaemonSets) — **they cannot host Dagster at parity**. `check-capacity.sh <env>` (read-only) tests
+every node for (1) parity with the vServer box and (2) room for the pod's requests, and
+`deploy-backend-vks.sh` refuses to apply until one node passes.
+
+To make room, add a **separate node group** on `s-general-4x8` (or larger) for Dagster instead of
+re-flavoring the existing one: `flavor_id` is ForceNew, so changing it recreates the group and kills
+event-api ingest and promotions with it. The `../vks` module manages one node group per state, so a
+second one means a second workspace/state (or the console), then pin Dagster to it with a nodeSelector.
