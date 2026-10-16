@@ -11,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .config import FrontendSettings
 
 _log = logging.getLogger("customer360-frontend")
+WORKFLOW_STUDIO_FRAME_PATH = "/static/js/workflow/workflow-studio-frame.html"
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -18,7 +19,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        response.headers["X-Frame-Options"] = "DENY"
+        root_path = request.scope.get("root_path", "").rstrip("/")
+        frame_paths = {
+            WORKFLOW_STUDIO_FRAME_PATH,
+            root_path + WORKFLOW_STUDIO_FRAME_PATH,
+        }
+        response.headers["X-Frame-Options"] = (
+            "SAMEORIGIN" if request.url.path in frame_paths else "DENY"
+        )
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         return response

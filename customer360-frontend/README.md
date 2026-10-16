@@ -270,10 +270,9 @@ The frontend expects `customer360-api` to be running and reachable at the config
 - The app is served from the root of the local service, not from a bundle or SPA framework.
 - All browser requests are made to `customer360-api` over HTTP; there is no separate backend here.
 - The app uses `localStorage` for tenant and session persistence in the browser.
-- `app.py` sets response headers via `SecurityHeadersMiddleware` and serves static files from `/static`.
+- `app.py` sets response headers via `SecurityHeadersMiddleware` and serves static files from `/static`. The workflow studio frame alone allows `SAMEORIGIN`; all other frontend responses remain `DENY`.
 - The health endpoint is exposed at `/health` and reports service status.
 
 ## Summary
 
 The code in this folder is a modern, API-driven admin console for Customer 360. It is built around a FastAPI shell, shared JS utilities, hash-based routing, and browser-side data fetching from the backend API. The README here should be treated as a living document and kept in sync with the current view modules and auth flow in `app.py`, `static/js/common/*`, and the individual view files under `static/js/`.
-

@@ -228,12 +228,15 @@
     });
   </script>
   <script src="{{ static_base }}/js/common/config.js?cb={{ cache_bust }}"></script>
+  <!-- Common utility scripts -->
   <script src="{{ static_base }}/js/common/formatters.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/common/templates.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/common/utils.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/common/matrix-heatmap.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/common/data-table-view.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/common/jquery.sql.builder.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/workflow/workflow-studio.js?cb={{ cache_bust }}"
+    data-workflow-frame="{{ static_base }}/js/workflow/workflow-studio-frame.html?cb={{ cache_bust }}"></script>
 
   <!-- load router.js first -->
   <script src="{{ static_base }}/js/common/router.js?cb={{ cache_bust }}"></script>

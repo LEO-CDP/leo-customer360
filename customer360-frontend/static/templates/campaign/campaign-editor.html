@@ -64,6 +64,21 @@
 						<p id="campaign-segment-warning" class="hidden mt-2 text-xs font-normal text-amber-700"></p>
 					</div>
 				</div>
+
+				<section class="md:col-span-2 min-w-0 overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-sm" aria-labelledby="campaign-workflow-heading">
+					<div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-indigo-50/80 to-white px-5 py-4">
+						<div class="flex min-w-0 items-start gap-3">
+							<span class="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700" aria-hidden="true"><i class="bi bi-diagram-3-fill"></i></span>
+							<div class="min-w-0">
+								<h3 id="campaign-workflow-heading" class="text-base font-bold text-slate-900">Customer journey workflow</h3>
+								<p class="mt-1 text-sm text-slate-500">Design and simulate a journey using profiles from the selected audience.</p>
+							</div>
+						</div>
+						<span id="campaign-workflow-audience-status" class="max-w-full truncate rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600" aria-live="polite">Select an audience</span>
+					</div>
+					<div id="campaign-workflow-studio" class="min-w-0 bg-slate-50"></div>
+				</section>
+
 				<label class="text-sm font-semibold text-slate-700">Template ID<input id="campaign-field-template" name="template_id" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-mono text-sm" placeholder="UUID" /></label>
 				<label class="text-sm font-semibold text-slate-700 md:col-span-2">Objective<textarea id="campaign-field-objective" name="objective" rows="2" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
 				<label class="text-sm font-semibold text-slate-700 md:col-span-2">Strategy summary<textarea id="campaign-field-strategy" name="strategy_summary" rows="4" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>

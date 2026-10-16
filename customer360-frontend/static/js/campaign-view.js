@@ -58,6 +58,9 @@ window.C360 = window.C360 || {};
     loaded: false,
     tenantId: null
   };
+  var campaignWorkflowState = { segment: null, ready: false };
+  var campaignWorkflowGeneration = 0;
+  var campaignSegmentRequest = 0;
 
   // ---- helpers ----
 
@@ -295,6 +298,142 @@ window.C360 = window.C360 || {};
     return parts.join("  ·  ");
   }
 
+  function workflowProfileValue(value) {
+    var number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+  }
+
+  function workflowProfile(profile, index) {
+    var attributes = profile.attributes && typeof profile.attributes === "object"
+      ? profile.attributes
+      : {};
+    var pushTokens = profile.push_tokens && typeof profile.push_tokens === "object"
+      ? profile.push_tokens
+      : {};
+    var lastActivity = profile.last_activity_at ? Date.parse(profile.last_activity_at) : NaN;
+    var recency = Number.isFinite(lastActivity)
+      ? Math.max(0, Math.floor((Date.now() - lastActivity) / 86400000))
+      : 0;
+    var displayName = fmt.realName(profile) || profile.persona_name ||
+      ("Profile " + fmt.shortId(profile.master_profile_id));
+
+    return {
+      id: index + 1,
+      name: displayName,
+      score: workflowProfileValue(profile.engagement_score),
+      cart: workflowProfileValue(attributes.cart_value),
+      recency: recency,
+      push: Object.keys(pushTokens).length ? 1 : 0,
+      sms: profile.phone_number ? 1 : 0,
+      email: profile.email ? 1 : 0,
+      tags: Array.isArray(profile.segmentation_tags) ? profile.segmentation_tags.slice() : []
+    };
+  }
+
+  function loadCampaignSegmentProfiles(segmentId) {
+    return api("/segments/" + encodeURIComponent(segmentId) + "/matched-profiles", {
+      skip: 0,
+      limit: 32
+    }).then(function (profiles) {
+      if (!Array.isArray(profiles)) throw new Error("The segment profile response was invalid.");
+      return profiles.map(workflowProfile);
+    }, function (xhr) {
+      throw new Error(campaignError(xhr));
+    });
+  }
+
+  function workflowSegmentConfig(segment) {
+    return {
+      segment_id: String(segment.segment_id),
+      segment_name: String(segment.segment_name || "").trim(),
+      description: String(segment.description || "")
+    };
+  }
+
+  function showWorkflowPlaceholder(message, isError) {
+    var $message = $("<div>")
+      .attr("role", isError ? "alert" : "status")
+      .addClass("flex min-h-[180px] items-center justify-center p-6 text-center");
+    var $copy = $("<div>").addClass("max-w-lg");
+    $("<span>").addClass("mb-3 inline-flex h-11 w-11 items-center justify-center rounded-full bg-indigo-100 text-indigo-700")
+      .append($("<i>").addClass("bi bi-diagram-3").attr("aria-hidden", "true"))
+      .appendTo($copy);
+    $("<p>").addClass("text-sm font-semibold text-slate-800").text(message).appendTo($copy);
+    $("<p>").addClass("mt-1 text-xs text-slate-500")
+      .text("Choose an active, computed audience segment above to load its profiles.")
+      .appendTo($copy);
+    $("#campaign-workflow-studio").empty().append($message.append($copy));
+  }
+
+  function syncCampaignWorkflow(segment) {
+    var selectedSegment = segmentIsReady(segment) ? segment : null;
+    var $studio = $("#campaign-workflow-studio");
+    var studioApi = $studio.data("workflowStudio");
+    campaignWorkflowState.segment = selectedSegment;
+
+    if (!selectedSegment) {
+      $("#campaign-workflow-audience-status").text(
+        segment ? "Audience needs attention" : "Select an audience"
+      );
+      if (studioApi) {
+        if (campaignWorkflowState.ready && studioApi.getSegmentId() !== null) {
+          studioApi.setSegment(null);
+        }
+      } else {
+        showWorkflowPlaceholder(
+          segment ? "This audience is not ready for a workflow." : "Start by selecting an audience segment.",
+          !!segment
+        );
+      }
+      return;
+    }
+
+    $("#campaign-workflow-audience-status").text(
+      (selectedSegment.segment_name || "Selected audience") +
+        " · " + fmt.int(selectedSegment.member_count || 0) + " profiles"
+    );
+    if (studioApi) {
+      if (campaignWorkflowState.ready) {
+        var currentSegment = studioApi.getSegments()[0];
+        if (
+          !currentSegment ||
+          String(currentSegment.segment_id) !== String(selectedSegment.segment_id) ||
+          currentSegment.segment_name !== selectedSegment.segment_name
+        ) {
+          studioApi.setSegment(workflowSegmentConfig(selectedSegment));
+        }
+      }
+      return;
+    }
+
+    var generation = ++campaignWorkflowGeneration;
+    campaignWorkflowState.ready = false;
+    $studio.workflowStudio({
+      title: "Customer Engagement Workflow",
+      segmentId: String(selectedSegment.segment_id),
+      segmentName: selectedSegment.segment_name,
+      segments: [workflowSegmentConfig(selectedSegment)],
+      profileCount: 32,
+      loadProfiles: loadCampaignSegmentProfiles,
+      onReady: function (initialSegmentId, apiInstance) {
+        if (generation !== campaignWorkflowGeneration) return;
+        campaignWorkflowState.ready = true;
+        var latestSegment = campaignWorkflowState.segment
+          ? workflowSegmentConfig(campaignWorkflowState.segment)
+          : null;
+        var mountedSegment = apiInstance.getSegments()[0];
+        if (
+          !latestSegment ||
+          !mountedSegment ||
+          String(initialSegmentId) !== String(latestSegment.segment_id) ||
+          mountedSegment.segment_name !== latestSegment.segment_name
+        ) {
+          apiInstance.setSegment(latestSegment);
+        }
+      }
+    });
+  }
+
   function renderSegmentSelection(segment, options) {
     options = options || {};
     var selected = !!segment;
@@ -306,6 +445,7 @@ window.C360 = window.C360 || {};
     $("#campaign-segment-warning").toggleClass("hidden", !options.warning).text(options.warning || "");
     $("#btn-campaign-select-segment, #btn-campaign-change-segment").prop("disabled", !!options.locked).toggleClass("opacity-50 cursor-not-allowed", !!options.locked);
     $("#btn-campaign-clear-segment").toggleClass("hidden", !selected || options.allowClear === false || !!options.locked);
+    syncCampaignWorkflow(segment);
   }
 
   function segmentMatches(segment, query) {
@@ -368,12 +508,14 @@ window.C360 = window.C360 || {};
   }
 
   function loadSelectedSegment(segmentId, locked, allowClear) {
+    var request = ++campaignSegmentRequest;
     if (!segmentId) {
       renderSegmentSelection(null, { locked: locked, allowClear: allowClear });
       return;
     }
     api("/segments/" + encodeURIComponent(segmentId))
       .done(function (segment) {
+        if (request !== campaignSegmentRequest) return;
         renderSegmentSelection(segment, {
           locked: locked,
           allowClear: allowClear,
@@ -381,6 +523,7 @@ window.C360 = window.C360 || {};
         });
       })
       .fail(function () {
+        if (request !== campaignSegmentRequest) return;
         renderSegmentSelection({ segment_id: segmentId, segment_name: "Unavailable segment", segment_tag: "" }, {
           locked: locked,
           allowClear: allowClear,
@@ -438,13 +581,15 @@ window.C360 = window.C360 || {};
   }
 
   function loadCampaignEditor(campaignId) {
+    campaignWorkflowGeneration += 1;
+    campaignWorkflowState = { segment: null, ready: false };
+    campaignSegmentRequest += 1;
     setCampaignMessage("#campaign-editor-error", "");
     setCampaignMessage("#campaign-editor-success", "");
     $("#campaign-editor-loading").toggleClass("hidden", !campaignId);
     $("#campaign-editor-form").toggleClass("hidden", !!campaignId);
     if (!campaignId) {
       fillCampaignEditor({});
-      renderSegmentSelection(null);
       return;
     }
     api("/campaigns/" + encodeURIComponent(campaignId))
@@ -457,6 +602,7 @@ window.C360 = window.C360 || {};
         $("#campaign-editor-loading").addClass("hidden");
         setCampaignMessage("#campaign-editor-error", campaignError(xhr));
       });
+
   }
 
   function saveCampaignEditor(event) {
@@ -844,11 +990,15 @@ window.C360 = window.C360 || {};
     $doc.on("click.c360campaignworkspace", "#btn-campaign-select-segment, #btn-campaign-change-segment", openSegmentPicker);
     $doc.on("click.c360campaignworkspace", "#btn-campaign-segment-modal-close, #btn-campaign-segment-modal-cancel", closeSegmentPicker);
     $doc.on("click.c360campaignworkspace", "#campaign-segment-modal", function (event) { if (event.target === this) closeSegmentPicker(); });
-    $doc.on("click.c360campaignworkspace", "#btn-campaign-clear-segment", function () { renderSegmentSelection(null); });
+    $doc.on("click.c360campaignworkspace", "#btn-campaign-clear-segment", function () {
+      campaignSegmentRequest += 1;
+      renderSegmentSelection(null);
+    });
     $doc.on("input.c360campaignworkspace", "#campaign-segment-search", function () { renderSegmentResults($(this).val()); });
     $doc.on("click.c360campaignworkspace", ".campaign-segment-option", function () {
       var segment = segmentPickerState.byId[$(this).data("segment-id")];
       if (!segment) return;
+      campaignSegmentRequest += 1;
       renderSegmentSelection(segment);
       closeSegmentPicker();
     });
@@ -966,4 +1116,3 @@ window.C360 = window.C360 || {};
   C360.campaignView = { load: loadAll };
 
 })(window.C360);
-
