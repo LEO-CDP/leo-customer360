@@ -1,25 +1,45 @@
-"""Pydantic models: flow JSON (schema_version 2), profiles and run results."""
+"""Pydantic models for customer engagement flows: workflow JSON, profiles and journey results.
+
+The workflow JSON is the object the studio produces with ``workflowAgent.getWorkflow()``:
+``{"schema_version": 2, "root": {id, type, config, children[], branch?}}``.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
 from typing import Any, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field, field_validator
+
+SCHEMA_VERSION = 2
 
 
 class NodeDef(BaseModel):
+    """One node of the flow tree. ``branch`` is set on children of If / else and Wait for event."""
+
     id: str
     type: str
     config: dict[str, Any] = Field(default_factory=dict)
-    branch: str | None = None  # set on children of If / else (yes|no) and Wait for event (happened|timeout)
+    branch: str | None = None
     children: list[NodeDef] = Field(default_factory=list)
 
 
 class FlowDefinition(BaseModel):
-    schema_version: int = 2
+    """A complete flow: the studio's JSON, validated."""
+
+    schema_version: int = SCHEMA_VERSION
     root: NodeDef
 
+    @field_validator("schema_version")
+    @classmethod
+    def _supported_version(cls, value: int) -> int:
+        if value != SCHEMA_VERSION:
+            raise ValueError(f"unsupported workflow schema_version {value}; expected {SCHEMA_VERSION}")
+        return value
+
     def walk(self) -> Iterator[tuple[NodeDef, NodeDef | None]]:
+        """Depth-first walk yielding (node, parent)."""
         stack: list[tuple[NodeDef, NodeDef | None]] = [(self.root, None)]
         while stack:
             node, parent = stack.pop()
@@ -27,29 +47,9 @@ class FlowDefinition(BaseModel):
             stack.extend((child, node) for child in reversed(node.children))
 
 
-class Profile(BaseModel):
-    id: int
-    name: str
-    email: EmailStr | None = None
-    phone: str | None = None
-    score: int = 50
-    cart: float = 0
-    recency: int = 0  # days since last purchase
-    push: int = 1  # push opt-in and token present
-    sms: int = 1  # SMS opt-in
-    email_opt_in: int = 1
-    tags: list[str] = Field(default_factory=list)
-    # UAT script: event name -> hours after the journey starts at which the customer does it.
-    events: dict[str, float] = Field(default_factory=dict)
-
-    def template_vars(self) -> dict[str, str]:
-        cart = int(self.cart) if float(self.cart).is_integer() else self.cart
-        return {"first_name": self.name, "cart_value": str(cart)}
-
-
 class OutboundMessage(BaseModel):
     channel: Literal["email", "sms", "push"]
-    profile_id: int
+    profile_id: UUID
     to: str | None
     subject: str | None = None  # email subject or push title
     body: str
@@ -79,7 +79,7 @@ class StepRecord(BaseModel):
 
 
 class JourneyResult(BaseModel):
-    profile_id: int
+    profile_id: UUID
     name: str
     end: Literal["goal", "exit", "ended", "error"]
     elapsed_hours: float

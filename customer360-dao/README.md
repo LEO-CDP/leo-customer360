@@ -110,6 +110,7 @@ customer360-dao/
       schemas/
       agentic_engines/
       utils/
+      workflow/
     tests/
 ```
 
@@ -125,6 +126,7 @@ customer360-dao/
 | `crud/` | Generic CRUD plus identity, segmentation, CRM-sync, profile, and email-provider operations. |
 | `repositories/` | Reusable filtered, aggregate, S3, identity, CRM, graph, persona, relation, and user queries. |
 | `utils/` | Date-window helpers, password/JWT helpers, and SQL injection-safety validators. |
+| `workflow/` | Production customer engagement feature: save and load the studio's workflow JSON (`workflow.repository`), journey engine, models, and node types. |
 
 ## Models
 
@@ -270,6 +272,7 @@ routers and Dagster definitions.
 | `repositories.reporting_respository` | CIR reporting aggregates and duplicate/coverage/persona summaries. The filename spelling is retained for compatibility. |
 | `repositories.segment_respository` | Segment lookup, matched-profile queries, counts, attribute catalogs, and membership operations. The filename spelling is retained for compatibility. |
 | `repositories.user_repository` | Tenant-scoped user/SSO CRUD and optional Redis profile caching. |
+| `workflow.repository` | Saves, publishes and loads customer engagement flows (`customer360.crm_flow`, `crm_flow_version`, `crm_flow_node`, `crm_flow_edge`). Loads return the studio's JSON unchanged. |
 
 The `metadata_repository.py` and `campaign_draft_repository.py` modules remain
 in `customer360-api` because they combine database operations with API health
@@ -387,6 +390,19 @@ The repository-wide runner executes the DAO suite and then the service suites:
 FastAPI router, middleware, MCP, Dagster, AI, SMTP, and application bootstrap
 tests remain under `customer360-api/tests` because they exercise API-owned
 behavior rather than reusable DAO code.
+
+Workflow engine UAT fixtures and the demo CLI live in
+`src/tests/workflow_demo/`; they are not part of the production DAO package.
+Run the built-in demo from `customer360-dao/` with:
+
+```bash
+PYTHONPATH=src:src/tests python -m workflow_demo.cli --demo --suite engagement_score_follow_up
+```
+
+The workflow repository tests (`test_workflow_repository.py`) run against
+PostgreSQL with `customer360-database/database-schema.sql` applied. They use the
+`DB_*` settings and roll back every change. They skip when the database is
+unreachable.
 
 ## Building and Publishing
 

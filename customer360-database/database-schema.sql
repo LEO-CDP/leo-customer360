@@ -4103,6 +4103,241 @@ CREATE INDEX IF NOT EXISTS idx_sys_assistant_message_created
     ON customer360.sys_assistant_message (tenant_id, created_at);
 
 ---------------------------------------------------
+-- Customer engagement flows (workflow JSON, schema_version 2)
+---------------------------------------------------
+-- crm_flow          one row per flow: name, status and which version is live
+-- crm_flow_version  immutable JSON snapshot per save; source of truth for exact round trips
+-- crm_flow_node     one row per node, shredded from the JSON for SQL queries and joins
+-- crm_flow_edge     parent -> child links; one parent per node and one child per branch
+-- Every row carries tenant_id, so the tenant RLS policies apply to all four tables.
+-- Functions: crm_save_flow() stores a snapshot, crm_publish_flow() sets the live version,
+-- crm_load_flow() rebuilds the JSON that the studio reads with setWorkflow().
+
+CREATE TABLE IF NOT EXISTS customer360.crm_flow (
+    flow_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'active', 'paused', 'archived')),
+    live_version INT, -- NULL until the first publish
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT crm_flow_tenant_name_key UNIQUE (tenant_id, name),
+    CONSTRAINT crm_flow_id_tenant_key UNIQUE (flow_id, tenant_id)
+);
+
+CREATE TABLE IF NOT EXISTS customer360.crm_flow_version (
+    flow_id UUID NOT NULL,
+    tenant_id UUID NOT NULL,
+    version INT NOT NULL,
+    schema_version INT NOT NULL DEFAULT 2,
+    definition JSONB NOT NULL CHECK (jsonb_typeof(definition -> 'root') = 'object'),
+    created_by TEXT NOT NULL DEFAULT 'user' CHECK (created_by IN ('user', 'agent')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (flow_id, version),
+    CONSTRAINT crm_flow_version_tenant_key UNIQUE (flow_id, version, tenant_id),
+    CONSTRAINT crm_flow_version_flow_fk FOREIGN KEY (flow_id, tenant_id)
+        REFERENCES customer360.crm_flow (flow_id, tenant_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS customer360.crm_flow_node (
+    flow_id UUID NOT NULL,
+    version INT NOT NULL,
+    tenant_id UUID NOT NULL,
+    node_id TEXT NOT NULL, -- "n1", "n2", ... as in the JSON
+    node_type TEXT NOT NULL CHECK (node_type IN (
+        'trigger', 'condition', 'wait', 'wait_event', 'exit',
+        'email', 'sms', 'push', 'update_profile')),
+    config JSONB NOT NULL DEFAULT '{}',
+    PRIMARY KEY (flow_id, version, node_id),
+    CONSTRAINT crm_flow_node_version_fk FOREIGN KEY (flow_id, version, tenant_id)
+        REFERENCES customer360.crm_flow_version (flow_id, version, tenant_id) ON DELETE CASCADE,
+    CHECK (node_type NOT IN ('wait', 'wait_event') OR (config ? 'amount' AND config ? 'unit')),
+    CHECK (node_type <> 'email' OR (config ? 'subject' AND config ? 'body')),
+    CHECK (node_type <> 'update_profile' OR (config ? 'action' AND config ? 'tag'))
+);
+
+CREATE TABLE IF NOT EXISTS customer360.crm_flow_edge (
+    flow_id UUID NOT NULL,
+    version INT NOT NULL,
+    tenant_id UUID NOT NULL,
+    from_node TEXT NOT NULL,
+    to_node TEXT NOT NULL,
+    branch TEXT CHECK (branch IN ('yes', 'no', 'happened', 'timeout')), -- NULL for single-child nodes
+    position SMALLINT NOT NULL DEFAULT 0, -- left-to-right order on the canvas
+    PRIMARY KEY (flow_id, version, from_node, to_node),
+    UNIQUE (flow_id, version, to_node), -- a tree: every node has one parent
+    UNIQUE NULLS NOT DISTINCT (flow_id, version, from_node, branch), -- one child per branch
+    CONSTRAINT crm_flow_edge_from_fk FOREIGN KEY (flow_id, version, from_node)
+        REFERENCES customer360.crm_flow_node (flow_id, version, node_id) ON DELETE CASCADE,
+    CONSTRAINT crm_flow_edge_to_fk FOREIGN KEY (flow_id, version, to_node)
+        REFERENCES customer360.crm_flow_node (flow_id, version, node_id) ON DELETE CASCADE,
+    CONSTRAINT crm_flow_edge_version_fk FOREIGN KEY (flow_id, version, tenant_id)
+        REFERENCES customer360.crm_flow_version (flow_id, version, tenant_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS crm_flow_node_type_idx
+    ON customer360.crm_flow_node (flow_id, version, node_type);
+CREATE INDEX IF NOT EXISTS crm_idx_flow_tenant
+    ON customer360.crm_flow (tenant_id);
+
+-- Channel and wait duration are derived on read, so they are never stored.
+CREATE OR REPLACE VIEW customer360.crm_vw_flow_node
+WITH (security_invoker = true) AS
+SELECT
+    n.flow_id,
+    n.version,
+    n.tenant_id,
+    n.node_id,
+    n.node_type,
+    n.config,
+    CASE n.node_type
+        WHEN 'email' THEN 'EMAIL'
+        WHEN 'sms' THEN 'SMS'
+        WHEN 'push' THEN 'PUSH'
+    END AS channel,
+    CASE WHEN n.node_type IN ('wait', 'wait_event')
+        THEN (n.config ->> 'amount')::double precision * CASE n.config ->> 'unit'
+            WHEN 'minutes' THEN interval '1 minute'
+            WHEN 'hours' THEN interval '1 hour'
+            WHEN 'days' THEN interval '1 day'
+        END
+    END AS wait_for
+FROM customer360.crm_flow_node n;
+
+-- Saves a JSON snapshot and shreds its nodes and edges. Returns the new version.
+-- Pass NULL for p_flow_id to create a flow.
+CREATE OR REPLACE FUNCTION customer360.crm_save_flow(
+    p_tenant UUID,
+    p_flow_id UUID,
+    p_name TEXT,
+    p_workflow JSONB,
+    p_actor TEXT DEFAULT 'user'
+) RETURNS TABLE (flow_id UUID, version INT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_flow UUID := p_flow_id;
+    v_ver INT;
+BEGIN
+    IF jsonb_typeof(p_workflow -> 'root') IS DISTINCT FROM 'object' THEN
+        RAISE EXCEPTION 'workflow must contain a root object';
+    END IF;
+
+    IF v_flow IS NULL THEN
+        INSERT INTO customer360.crm_flow (tenant_id, name)
+        VALUES (p_tenant, p_name)
+        RETURNING customer360.crm_flow.flow_id INTO v_flow;
+    ELSE
+        UPDATE customer360.crm_flow f
+        SET name = p_name, updated_at = now()
+        WHERE f.flow_id = v_flow AND f.tenant_id = p_tenant;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'flow % not found for this tenant', v_flow;
+        END IF;
+    END IF;
+
+    SELECT COALESCE(max(fv.version), 0) + 1 INTO v_ver
+    FROM customer360.crm_flow_version fv
+    WHERE fv.flow_id = v_flow;
+
+    INSERT INTO customer360.crm_flow_version (flow_id, tenant_id, version, schema_version, definition, created_by)
+    VALUES (v_flow, p_tenant, v_ver,
+            COALESCE((p_workflow ->> 'schema_version')::int, 2), p_workflow, p_actor);
+
+    -- One walk over the JSON tree. Nodes and edges go in one statement; foreign keys are checked at its end.
+    WITH RECURSIVE t AS (
+        SELECT p_workflow -> 'root' AS n, NULL::text AS parent, NULL::text AS branch, 0::smallint AS pos
+        UNION ALL
+        SELECT c.value, t.n ->> 'id', c.value ->> 'branch', (c.ord - 1)::smallint
+        FROM t, jsonb_array_elements(COALESCE(t.n -> 'children', '[]')) WITH ORDINALITY AS c(value, ord)
+    ),
+    ins_nodes AS (
+        INSERT INTO customer360.crm_flow_node (flow_id, version, tenant_id, node_id, node_type, config)
+        SELECT v_flow, v_ver, p_tenant, n ->> 'id', n ->> 'type', COALESCE(n -> 'config', '{}')
+        FROM t
+        RETURNING 1
+    )
+    INSERT INTO customer360.crm_flow_edge (flow_id, version, tenant_id, from_node, to_node, branch, position)
+    SELECT v_flow, v_ver, p_tenant, parent, n ->> 'id', branch, pos
+    FROM t
+    WHERE parent IS NOT NULL;
+
+    flow_id := v_flow;
+    version := v_ver;
+    RETURN NEXT;
+END $$;
+
+-- Makes a saved version the live one. Returns the previous and new live versions,
+-- or no rows when the flow or version does not exist for this tenant.
+CREATE OR REPLACE FUNCTION customer360.crm_publish_flow(p_tenant UUID, p_flow_id UUID, p_version INT)
+RETURNS TABLE (previous_version INT, live_version INT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_previous INT;
+BEGIN
+    SELECT f.live_version INTO v_previous
+    FROM customer360.crm_flow f
+    WHERE f.flow_id = p_flow_id AND f.tenant_id = p_tenant
+    FOR UPDATE;
+
+    UPDATE customer360.crm_flow f
+    SET live_version = p_version, status = 'active', updated_at = now()
+    WHERE f.flow_id = p_flow_id
+      AND f.tenant_id = p_tenant
+      AND EXISTS (SELECT 1 FROM customer360.crm_flow_version v
+                  WHERE v.flow_id = p_flow_id AND v.tenant_id = p_tenant AND v.version = p_version);
+
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+
+    previous_version := v_previous;
+    live_version := p_version;
+    RETURN NEXT;
+END $$;
+
+-- Rebuilds one node and its subtree. p_branch is the branch name from the parent edge.
+CREATE OR REPLACE FUNCTION customer360.crm_node_json(p_flow UUID, p_ver INT, p_node TEXT, p_branch TEXT DEFAULT NULL)
+RETURNS JSONB LANGUAGE sql STABLE AS $$
+    SELECT jsonb_build_object(
+               'id', n.node_id,
+               'type', n.node_type,
+               'config', n.config,
+               'children', COALESCE((
+                   SELECT jsonb_agg(customer360.crm_node_json(p_flow, p_ver, e.to_node, e.branch) ORDER BY e.position)
+                   FROM customer360.crm_flow_edge e
+                   WHERE e.flow_id = p_flow AND e.version = p_ver AND e.from_node = n.node_id
+               ), '[]'::jsonb))
+           || CASE WHEN p_branch IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('branch', p_branch) END
+    FROM customer360.crm_flow_node n
+    WHERE n.flow_id = p_flow AND n.version = p_ver AND n.node_id = p_node;
+$$;
+
+-- Rebuilds the JSON for a version. p_version NULL means the live version, else the latest.
+-- The root is the node that no edge points to. Returns NULL for another tenant's flow.
+CREATE OR REPLACE FUNCTION customer360.crm_load_flow(p_tenant UUID, p_flow_id UUID, p_version INT DEFAULT NULL)
+RETURNS JSONB LANGUAGE sql STABLE AS $$
+    SELECT jsonb_build_object(
+               'schema_version', v.schema_version,
+               'root', customer360.crm_node_json(v.flow_id, v.version, r.node_id))
+    FROM customer360.crm_flow_version v
+    JOIN customer360.crm_flow f ON f.flow_id = v.flow_id AND f.tenant_id = v.tenant_id
+    JOIN LATERAL (
+        SELECT n.node_id
+        FROM customer360.crm_flow_node n
+        WHERE n.flow_id = v.flow_id AND n.version = v.version
+          AND NOT EXISTS (SELECT 1 FROM customer360.crm_flow_edge e
+                          WHERE e.flow_id = v.flow_id AND e.version = v.version AND e.to_node = n.node_id)
+        LIMIT 1
+    ) r ON true
+    WHERE f.flow_id = p_flow_id
+      AND f.tenant_id = p_tenant
+      AND v.version = COALESCE(p_version, f.live_version,
+                               (SELECT max(x.version) FROM customer360.crm_flow_version x
+                                WHERE x.flow_id = p_flow_id AND x.tenant_id = p_tenant));
+$$;
+
+---------------------------------------------------
 -- Row-Level Security: RBAC and tenant isolation
 ---------------------------------------------------
 -- RLS policies below scope tenant_id to app.tenant_id. Set it transaction-
@@ -4165,7 +4400,11 @@ DECLARE
         'crm_suppression_list',
         'sys_data_source',
         'sys_user_role',
-        'graph_edges'
+        'graph_edges',
+        'crm_flow',
+        'crm_flow_version',
+        'crm_flow_node',
+        'crm_flow_edge'
     ];
 BEGIN
     FOREACH t IN ARRAY tenant_tables LOOP
