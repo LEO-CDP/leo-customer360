@@ -74,10 +74,12 @@ log "Installing local leo-customer360-dao checkout..."
 "$VENV_PYTHON" -m pip install -q --no-deps --upgrade ../customer360-dao
 
 log "Installing requirements for: ${SERVICES[*]} (+ requirements-dev.txt for the local Dagster UI)..."
+REQUIREMENT_ARGS=()
 for svc in "${SERVICES[@]}"; do
-    "$VENV_PYTHON" -m pip install -q -r "${PROJECT_HOME}/${svc}/requirements.txt"
+    REQUIREMENT_ARGS+=(-r "${PROJECT_HOME}/${svc}/requirements.txt")
 done
-"$VENV_PYTHON" -m pip install -q -r "${PROJECT_HOME}/requirements-dev.txt"
+REQUIREMENT_ARGS+=(-r "${PROJECT_HOME}/requirements-dev.txt")
+"$VENV_PYTHON" -m pip install -q "${REQUIREMENT_ARGS[@]}"
 
 ###############################################################################
 # Ensure .env exists (symlink to ../.env if missing) -- dev mode only, skip

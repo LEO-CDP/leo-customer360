@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import uuid
+from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Sequence
@@ -327,6 +328,27 @@ class AgentWorkflowMasterTask:
                 tenant_id=tenant_id,
                 segment_id=segment_id,
             )
+            profile_domains = Counter(
+                str(profile.get("domain") or "unknown") for profile in profiles
+            )
+            logger.info(
+                "Starting AI recommendation segment "
+                "(run_id=%s tenant_id=%s segment_id=%s profiles=%d domains=%s steps=%d)",
+                run_id,
+                tenant_id,
+                segment_id,
+                len(profiles),
+                dict(sorted(profile_domains.items())),
+                len(steps),
+            )
+            if not profiles:
+                logger.warning(
+                    "No active profiles matched segment; no personalization results will be generated "
+                    "(run_id=%s tenant_id=%s segment_id=%s)",
+                    run_id,
+                    tenant_id,
+                    segment_id,
+                )
             self._start_recommendation_run(
                 tenant_id=tenant_id,
                 segment_id=segment_id,
@@ -336,11 +358,36 @@ class AgentWorkflowMasterTask:
             )
             step_profile_count = 0
             step_recommendation_count = 0
+            segment_profile_count = 0
+            segment_recommendation_count = 0
+            current_batch_start: int | None = None
+            current_batch_size = 0
             try:
                 for step in steps:
+                    current_batch_start = None
+                    current_batch_size = 0
                     strategy = step["configuration"].get("strategy", "tags")
                     uses_vectors = strategy in {"semantic", "hybrid"}
                     model_key = self._embedding_model_key() if uses_vectors else ""
+                    step_profile_count_before = step_profile_count
+                    step_recommendation_count_before = step_recommendation_count
+                    candidate_ids = step["candidate_content_item_ids"]
+                    logger.info(
+                        "Starting AI recommendation step "
+                        "(run_id=%s tenant_id=%s segment_id=%s agent=%s strategy=%s "
+                        "minimum_score=%s top_k=%s candidates=%d candidate_sample=%s)",
+                        run_id,
+                        tenant_id,
+                        segment_id,
+                        step["agent_code"],
+                        strategy,
+                        step["configuration"].get("minimum_score", 0),
+                        step["configuration"].get(
+                            "top_k", step["configuration"].get("limit", 8)
+                        ),
+                        len(candidate_ids),
+                        candidate_ids[:5],
+                    )
                     profile_embeddings: Sequence[list[float] | None]
                     if uses_vectors:
                         self._ensure_content_embeddings(
@@ -364,6 +411,19 @@ class AgentWorkflowMasterTask:
                         profile_batch = profiles[
                             batch_start : batch_start + MAX_RANKING_PROFILES_PER_BATCH
                         ]
+                        current_batch_start = batch_start
+                        current_batch_size = len(profile_batch)
+                        logger.debug(
+                            "Executing AI recommendation profile batch "
+                            "(run_id=%s tenant_id=%s segment_id=%s agent=%s "
+                            "batch_start=%d batch_size=%d)",
+                            run_id,
+                            tenant_id,
+                            segment_id,
+                            step["agent_code"],
+                            batch_start,
+                            len(profile_batch),
+                        )
                         if uses_vectors:
                             profile_query_texts = [
                                 self._profile_query_text(profile, semantic_query)
@@ -462,12 +522,54 @@ class AgentWorkflowMasterTask:
                             run_id=run_id,
                             profile_rankings=profile_rankings,
                         )
-                        step_profile_count += len(profile_batch)
-                        step_recommendation_count += sum(
+                        batch_recommendation_count = sum(
                             len(ranked_items)
                             for _, ranked_items in profile_rankings
                         )
+                        if batch_recommendation_count:
+                            logger.info(
+                                "Personalized items generated for segment "
+                                "(run_id=%s tenant_id=%s segment_id=%s agent=%s "
+                                "batch_start=%d profiles=%d items=%d)",
+                                run_id,
+                                tenant_id,
+                                segment_id,
+                                step["agent_code"],
+                                batch_start,
+                                len(profile_batch),
+                                batch_recommendation_count,
+                            )
+                        step_profile_count += len(profile_batch)
+                        step_recommendation_count += batch_recommendation_count
+                        segment_profile_count += len(profile_batch)
+                        segment_recommendation_count += batch_recommendation_count
+                    logger.info(
+                        "Completed AI recommendation step "
+                        "(run_id=%s tenant_id=%s segment_id=%s agent=%s "
+                        "profiles_processed=%d recommendations_written=%d)",
+                        run_id,
+                        tenant_id,
+                        segment_id,
+                        step["agent_code"],
+                        step_profile_count - step_profile_count_before,
+                        step_recommendation_count - step_recommendation_count_before,
+                    )
             except Exception as exc:
+                logger.exception(
+                    "AI recommendation step failed "
+                    "(run_id=%s tenant_id=%s segment_id=%s agent=%s "
+                    "batch_start=%s batch_size=%s profiles_processed=%d "
+                    "recommendations_written=%d error=%s)",
+                    run_id,
+                    tenant_id,
+                    segment_id,
+                    step.get("agent_code", "unknown"),
+                    current_batch_start,
+                    current_batch_size,
+                    step_profile_count,
+                    step_recommendation_count,
+                    exc,
+                )
                 try:
                     self._finish_recommendation_run(
                         tenant_id=tenant_id,
@@ -497,10 +599,32 @@ class AgentWorkflowMasterTask:
                 error_message=None,
             )
             ContentRepository.invalidate_recommendation_cache(uuid.UUID(tenant_id))
+            if segment_recommendation_count:
+                logger.info(
+                    "Personalization generated for segment "
+                    "(run_id=%s tenant_id=%s segment_id=%s profiles=%d items=%d steps=%d)",
+                    run_id,
+                    tenant_id,
+                    segment_id,
+                    segment_profile_count,
+                    segment_recommendation_count,
+                    len(steps),
+                )
             executed_steps += len(steps)
             profile_runs_processed += step_profile_count
             recommendations_written += step_recommendation_count
 
+        if profile_runs_processed > 0 and recommendations_written == 0:
+            logger.warning(
+                "AI recommendation workflow completed with no personalization results "
+                "(run_id=%s tenant_id=%s segment_id=%s profiles_processed=%d "
+                "executed_steps=%d)",
+                run_id,
+                summary.tenant_id,
+                summary.segment_id,
+                profile_runs_processed,
+                executed_steps,
+            )
         return replace(
             summary,
             executed_steps=executed_steps,

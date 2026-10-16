@@ -63,3 +63,29 @@ def test_load_chunks_indexes_only_lowercase_md_files(tmp_path, monkeypatch):
 
     assert chunks
     assert {chunk.path for chunk in chunks} == {"included.md"}
+
+def test_unpublished_docs_are_not_indexed(tmp_path, monkeypatch):
+    # The public site drops `draft: true` docs and everything in .documentignore, so the assistant must not
+    # cite them (a dead link, and private text in a public answer).
+    for name, text in {
+        "guide.md": "# Guide\n\nPublished.\n",
+        "secret.md": "---\ndraft: true\n---\n# Secret\n\nA draft.\n",
+        "marketing/deck.md": "# Deck\n\nSlides.\n",
+        "pages/agents.md": "# Agents\n\nCase-insensitive match on AGENTS.md.\n",
+        "other/README.md": "# Readme\n\nKept.\n",
+    }.items():
+        (tmp_path / name).parent.mkdir(exist_ok=True)
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    (tmp_path / ".documentignore").write_text(
+        "# comment\n\ndocs/marketing/deck.md\n**/AGENTS.md\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(corpus, "CORPUS_DIR", tmp_path)
+
+    assert sorted({chunk.path for chunk in corpus.load_chunks()}) == ["guide.md", "other/README.md"]
+
+
+def test_without_a_documentignore_everything_but_drafts_is_indexed(tmp_path, monkeypatch):
+    (tmp_path / "a.md").write_text("# A\n\nText.\n", encoding="utf-8")
+    (tmp_path / "d.md").write_text("---\ndraft: true\n---\n# D\n\nText.\n", encoding="utf-8")
+    monkeypatch.setattr(corpus, "CORPUS_DIR", tmp_path)
+    assert {chunk.path for chunk in corpus.load_chunks()} == {"a.md"}

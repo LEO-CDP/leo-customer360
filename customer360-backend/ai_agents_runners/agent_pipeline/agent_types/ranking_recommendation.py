@@ -1,6 +1,7 @@
 """Tenant-scoped content ranking pipeline and result contract."""
 
 import json
+import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime
@@ -27,6 +28,7 @@ from ..contracts import (
 from .base import AgentTypePipeline
 
 DEFAULT_RESULT_LIMIT = 8
+logger = logging.getLogger(__name__)
 CANDIDATE_DIAGNOSTICS_SQL = f"""
     SELECT
         COUNT(*) AS tenant_candidates,
@@ -326,11 +328,55 @@ class RankingRecommendationPipeline(AgentTypePipeline):
 
         for profile, ranked_items in zip(profiles, ranked_by_profile, strict=True):
             if not ranked_items:
+                counts = self._candidate_diagnostics(
+                    tenant_id=first.tenant_id,
+                    candidate_ids=candidate_ids,
+                    profile=profile,
+                    settings=settings,
+                )
+                if (
+                    counts["tenant_candidates"] > 0
+                    and counts["active_candidates"] > 0
+                    and counts["domain_candidates"] == 0
+                ):
+                    logger.warning(
+                        "No selected recommendation candidates match profile domain; "
+                        "returning no recommendations "
+                        "(tenant_id=%s profile_id=%s domain=%s selected=%s "
+                        "tenant=%s active=%s domain_matching=%s candidate_sample=%s)",
+                        first.tenant_id,
+                        profile.profile_id,
+                        profile.domain,
+                        len(candidate_ids),
+                        counts["tenant_candidates"],
+                        counts["active_candidates"],
+                        counts["domain_candidates"],
+                        candidate_ids[:5],
+                    )
+                    continue
+                logger.error(
+                    "Ranking produced no candidates for profile "
+                    "(tenant_id=%s profile_id=%s domain=%s profile_tag_count=%d "
+                    "strategy=%s minimum_score=%s selected=%d tenant=%d active=%d "
+                    "domain_matching=%d rankable=%d)",
+                    first.tenant_id,
+                    profile.profile_id,
+                    profile.domain,
+                    len(profile.segmentation_tags),
+                    settings.strategy,
+                    settings.minimum_score,
+                    len(candidate_ids),
+                    counts["tenant_candidates"],
+                    counts["active_candidates"],
+                    counts["domain_candidates"],
+                    counts["rankable_candidates"],
+                )
                 self._raise_no_candidates(
                     tenant_id=first.tenant_id,
                     candidate_ids=candidate_ids,
                     profile=profile,
                     settings=settings,
+                    counts=counts,
                 )
 
         return [{"ranked_items": items} for items in ranked_by_profile]
@@ -513,26 +559,14 @@ class RankingRecommendationPipeline(AgentTypePipeline):
         candidate_ids: Sequence[UUID],
         profile: _ProfileRankingInput,
         settings: _RankingSettings,
+        counts: Mapping[str, int] | None = None,
     ) -> None:
-        with self._connection_factory() as connection:
-            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(
-                    "SELECT set_config('app.tenant_id', %s, true)",
-                    (str(tenant_id),),
-                )
-                cursor.execute(
-                    CANDIDATE_DIAGNOSTICS_SQL,
-                    (
-                        profile.domain,
-                        profile.domain,
-                        settings.strategy,
-                        settings.dimensions,
-                        settings.embedding_model,
-                        str(tenant_id),
-                        [str(candidate_id) for candidate_id in candidate_ids],
-                    ),
-                )
-                counts = cursor.fetchone()
+        counts = counts or self._candidate_diagnostics(
+            tenant_id=tenant_id,
+            candidate_ids=candidate_ids,
+            profile=profile,
+            settings=settings,
+        )
         if counts is None:
             raise RuntimeError("Recommendation diagnostics returned no row")
 
@@ -556,6 +590,42 @@ class RankingRecommendationPipeline(AgentTypePipeline):
             f"domain_matching={counts['domain_candidates']}, "
             f"rankable={counts['rankable_candidates']}"
         )
+
+    def _candidate_diagnostics(
+        self,
+        *,
+        tenant_id: UUID,
+        candidate_ids: Sequence[UUID],
+        profile: _ProfileRankingInput,
+        settings: _RankingSettings,
+    ) -> dict[str, int]:
+        with self._connection_factory() as connection:
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)",
+                    (str(tenant_id),),
+                )
+                cursor.execute(
+                    CANDIDATE_DIAGNOSTICS_SQL,
+                    (
+                        profile.domain,
+                        profile.domain,
+                        settings.strategy,
+                        settings.dimensions,
+                        settings.embedding_model,
+                        str(tenant_id),
+                        [str(candidate_id) for candidate_id in candidate_ids],
+                    ),
+                )
+                counts = cursor.fetchone()
+        if counts is None:
+            raise RuntimeError("Recommendation diagnostics returned no row")
+        return {
+            "tenant_candidates": int(counts["tenant_candidates"]),
+            "active_candidates": int(counts["active_candidates"]),
+            "domain_candidates": int(counts["domain_candidates"]),
+            "rankable_candidates": int(counts["rankable_candidates"]),
+        }
 
     @staticmethod
     def _serialize_candidate(row: Mapping[str, Any], rank: int) -> dict[str, Any]:

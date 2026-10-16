@@ -155,6 +155,9 @@ ship_corpus() {
   echo ">> Shipping docs/ corpus (*.md only) ..."
   ( cd "$REPO_ROOT/docs" && find . -type f -name '*.md' -print0 | tar --null -T - -czf - ) \
     | ssh "${SSH_OPTS[@]}" "$BASTION" 'sudo mkdir -p /opt/c360/docs-vector-search && sudo chown -R "$(id -un)" /opt/c360/docs-vector-search && sudo rm -rf /opt/c360/docs-vector-search/corpus /opt/c360/docs-vector-search/docs && mkdir -p /opt/c360/docs-vector-search/corpus && tar -C /opt/c360/docs-vector-search/corpus -xzf -'
+  # .documentignore goes to the corpus root so the indexer skips what the public site does not publish
+  # (otherwise the assistant cites pages that 404 there).
+  ssh "${SSH_OPTS[@]}" "$BASTION" 'cat > /opt/c360/docs-vector-search/corpus/.documentignore' < "$REPO_ROOT/.documentignore"
 }
 
 # --- docs-only refresh: re-embed with the image already running, no pull / restart ---

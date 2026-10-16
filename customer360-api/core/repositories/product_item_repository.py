@@ -58,8 +58,9 @@ class ProductItemRepository:
         limit: int,
         domain: str | None = None,
         q: str | None = None,
+        tag: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List products for one tenant, optionally filtered by domain or text."""
+        """List products for one tenant, optionally filtered by domain, text, or tag."""
         statement = text(
             _PRODUCT_ITEM_SELECT
             + """
@@ -74,18 +75,28 @@ class ProductItemRepository:
                     OR product.product_id ILIKE :search
                     OR product.product_id_type ILIKE :search
                   )
+              AND (
+                    :tag IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                        FROM unnest(product.keywords) AS product_keyword(keyword)
+                        WHERE keyword ILIKE :tag
+                    )
+                  )
             ORDER BY COALESCE(content.updated_at, product.updated_at) DESC NULLS LAST,
                 product.product_item_id
             LIMIT :limit OFFSET :skip
             """
         )
         search = f"%{q.strip()}%" if q and q.strip() else None
+        tag_pattern = f"%{tag.strip()}%" if tag and tag.strip() else None
         rows = self.session.execute(
             statement,
             {
                 "tenant_id": tenant_id,
                 "domain": domain,
                 "search": search,
+                "tag": tag_pattern,
                 "limit": limit,
                 "skip": skip,
             },

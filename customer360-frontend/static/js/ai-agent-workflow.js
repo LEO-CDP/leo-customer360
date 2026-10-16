@@ -48,6 +48,7 @@ window.C360 = window.C360 || {};
     "@weekly": true,
     "@yearly": true
   };
+  var CANDIDATE_PAGE_SIZE = 50;
 
   function cronLabel(expression) {
     var formatter = window.formatCronSchedule;
@@ -117,13 +118,23 @@ window.C360 = window.C360 || {};
           return [];
         }
         return this.api("/content-items/", {
-          limit: 100,
+          limit: CANDIDATE_PAGE_SIZE,
+          skip: 0,
           tenant_id: C360.config.current && C360.config.current.tenantId
         }).done((contentItems) => {
           // Keep inactive items so an existing workflow reference cannot be
           // lost when the user saves unrelated changes.
           this.contentItems = contentItems || [];
         });
+      });
+    }
+
+    loadCandidateItems(query, skip) {
+      return this.api("/content-items/", {
+        limit: CANDIDATE_PAGE_SIZE,
+        skip: skip,
+        q: query || "",
+        tenant_id: C360.config.current && C360.config.current.tenantId
       });
     }
 
@@ -405,72 +416,151 @@ window.C360 = window.C360 || {};
       $heading.appendTo($candidateLabel);
 
       var selectedIds = (step.candidate_content_item_ids || []).map(String);
-      var items = this.contentItems.slice();
+      var $candidate = $("<select></select>").attr({ id: "workflow-candidates-" + index, multiple: "multiple", "aria-hidden": "true", tabindex: "-1" }).addClass("workflow-candidates hidden");
+      $candidate.appendTo($candidateLabel);
+      var $search = $("<input>").attr({ type: "search", placeholder: "Search by name or tag...", "aria-label": "Search candidate content by name or tag for " + agentName }).addClass("workflow-candidate-search w-full rounded-t-lg border-0 border-b border-slate-200 bg-slate-50/60 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-500/20");
+      var $list = $("<div></div>").addClass("workflow-candidate-list max-h-52 overflow-y-auto p-1");
+      var $loading = $("<div></div>").addClass("workflow-candidate-loading hidden px-3 py-3 text-center text-xs text-slate-500").text("Loading candidates...");
+      var $noResults = $("<div></div>").addClass("workflow-candidate-no-results px-3 py-4 text-center text-xs text-slate-500");
+      var $loadMore = $("<button></button>").attr("type", "button").text("Load more candidates").addClass("workflow-candidate-load-more hidden w-full border-t border-slate-100 px-3 py-2 text-xs font-semibold text-violet-700 transition-colors hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50");
+      var $picker = $("<div></div>").addClass("rounded-lg border border-slate-300 bg-white").append($search, $list, $loading, $noResults, $loadMore).appendTo($candidateLabel);
+      var $selected = $("<div></div>").addClass("workflow-selected-candidates mt-2 flex flex-wrap gap-1.5").appendTo($candidateLabel);
+      var $help = $("<span></span>").addClass("mt-1 block text-[11px] text-slate-400").text("Search is performed on the server. Results load 50 at a time so large catalogs stay fast.").appendTo($candidateLabel);
+      var itemById = {};
+      var visibleItems = this.contentItems.slice();
+      var currentQuery = "";
+      var nextSkip = visibleItems.length;
+      var hasMore = visibleItems.length === CANDIDATE_PAGE_SIZE;
+      var requestSequence = 0;
+      var debounceTimer = null;
+
+      var addItems = (items) => {
+        (items || []).forEach((item) => {
+          var id = String(item.content_item_id);
+          itemById[id] = item;
+        });
+      };
+      addItems(visibleItems);
       selectedIds.forEach((id) => {
-        if (!items.some((item) => String(item.content_item_id) === id)) {
-          items.push({ content_item_id: id, title: "Previously selected content", item_type: "unavailable", status_code: 0 });
+        if (!itemById[id]) {
+          itemById[id] = { content_item_id: id, title: "Previously selected content", item_type: "unavailable", status_code: 0 };
         }
       });
 
-      var $candidate = $("<select></select>").attr({ id: "workflow-candidates-" + index, multiple: "multiple", "aria-hidden": "true", tabindex: "-1" }).addClass("workflow-candidates hidden");
-      items.forEach((item) => $("<option></option>").attr("value", item.content_item_id).text(item.title || item.content_item_id).appendTo($candidate));
-      $candidate.val(selectedIds).appendTo($candidateLabel);
-      var $search = $("<input>").attr({ type: "search", placeholder: items.length ? "Search content or products..." : "No content items available", "aria-label": "Search candidate content for " + agentName }).prop("disabled", !items.length).addClass("workflow-candidate-search w-full rounded-t-lg border-0 border-b border-slate-200 bg-slate-50/60 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-500/20");
-      var $list = $("<div></div>").addClass("workflow-candidate-list max-h-52 overflow-y-auto p-1");
-      var $noResults = $("<div></div>").addClass("workflow-candidate-no-results px-3 py-4 text-center text-xs text-slate-500").text(items.length ? "No matching content items." : "No active content items are available for this tenant.").toggleClass("hidden", !!items.length);
-      items.forEach((item) => {
-        var id = String(item.content_item_id);
-        var selected = selectedIds.indexOf(id) !== -1;
-        var active = Number(item.status_code) === 1;
-        var title = item.title || id;
-        var $option = $("<label></label>").attr("data-search-text", (title + " " + (item.item_type || "") + " " + id).toLowerCase()).addClass("workflow-candidate-option flex cursor-pointer items-start gap-2 rounded-md px-2 py-2 transition-colors hover:bg-violet-50 has-[:checked]:bg-violet-50");
-        $("<input>").attr({ type: "checkbox", value: id, "aria-label": "Select " + title }).addClass("workflow-candidate-checkbox mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-violet-700 focus:ring-violet-500").prop({ checked: selected, disabled: !active && !selected }).appendTo($option);
-        var $text = $("<span></span>").addClass("min-w-0 flex-1");
-        $("<span></span>").addClass("block truncate text-xs font-medium text-slate-700").text(title).appendTo($text);
-        $("<span></span>").addClass("mt-0.5 block text-[10px] text-slate-400").text((item.item_type || "content") + (active ? "" : " · inactive, already selected")).appendTo($text);
-        $option.append($text).appendTo($list);
-      });
-      var $picker = $("<div></div>").addClass("rounded-lg border border-slate-300 bg-white").append($search, $list, $noResults).appendTo($candidateLabel);
-      var $selected = $("<div></div>").addClass("workflow-selected-candidates mt-2 flex flex-wrap gap-1.5").appendTo($candidateLabel);
-      $("<span></span>").addClass("mt-1 block text-[11px] text-slate-400").text(items.length ? "Select active items to restrict recommendations. Selected inactive items are preserved." : "No content items are available for this tenant.").appendTo($candidateLabel);
+      var syncHiddenOptions = () => {
+        $candidate.empty();
+        selectedIds.forEach((id) => {
+          var item = itemById[id] || {};
+          $("<option></option>").attr("value", id).text(item.title || id).prop("selected", true).appendTo($candidate);
+        });
+      };
+
+      var renderOptions = () => {
+        $list.empty();
+        visibleItems.forEach((item) => {
+          var id = String(item.content_item_id);
+          var selected = selectedIds.indexOf(id) !== -1;
+          var active = Number(item.status_code) === 1;
+          var title = item.title || id;
+          var tags = Array.isArray(item.segment_tags) ? item.segment_tags.join(", ") : "";
+          var $option = $("<label></label>").addClass("workflow-candidate-option flex cursor-pointer items-start gap-2 rounded-md px-2 py-2 transition-colors hover:bg-violet-50 has-[:checked]:bg-violet-50");
+          $("<input>").attr({ type: "checkbox", value: id, "aria-label": "Select " + title }).addClass("workflow-candidate-checkbox mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-violet-700 focus:ring-violet-500").prop({ checked: selected, disabled: !active && !selected }).appendTo($option);
+          var $text = $("<span></span>").addClass("min-w-0 flex-1");
+          $("<span></span>").addClass("block truncate text-xs font-medium text-slate-700").text(title).appendTo($text);
+          $("<span></span>").addClass("mt-0.5 block truncate text-[10px] text-slate-400").text((item.item_type || "content") + (tags ? " · " + tags : "") + (active ? "" : " · inactive, already selected")).appendTo($text);
+          $option.append($text).appendTo($list);
+        });
+      };
+
+      var updateResultsUi = (isLoading) => {
+        $loading.toggleClass("hidden", !isLoading);
+        $loadMore.toggleClass("hidden", isLoading || !hasMore || !visibleItems.length);
+        $noResults
+          .text(currentQuery ? "No candidates match that name or tag." : "No active content items are available for this tenant.")
+          .toggleClass("hidden", isLoading || !!visibleItems.length);
+        $help.text(currentQuery
+          ? "Showing " + visibleItems.length + " matching candidates. Search by name or tag to narrow the results."
+          : "Showing " + visibleItems.length + " candidates. Search by name or tag to narrow large catalogs.");
+      };
 
       var renderSelected = () => {
-        var ids = ($candidate.val() || []).map(String);
         $selected.empty();
-        if (!ids.length) $("<span></span>").addClass("text-[11px] italic text-slate-400").text("No content restrictions; the agent may use any eligible item.").appendTo($selected);
-        ids.forEach((id) => {
-          var item = items.find((candidate) => String(candidate.content_item_id) === id);
+        if (!selectedIds.length) $("<span></span>").addClass("text-[11px] italic text-slate-400").text("No content restrictions; the agent may use any eligible item.").appendTo($selected);
+        selectedIds.forEach((id) => {
+          var item = itemById[id];
           var title = item ? (item.title || id) : id;
           var $chip = $("<span></span>").addClass("inline-flex max-w-full items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] text-violet-700");
           $("<span></span>").addClass("max-w-[14rem] truncate").text(title).appendTo($chip);
           $("<button></button>").attr({ type: "button", "data-content-id": id, "aria-label": "Remove " + title }).addClass("workflow-candidate-remove rounded p-0.5 text-violet-500 transition-colors hover:bg-violet-100 hover:text-violet-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500").text("×").appendTo($chip);
           $chip.appendTo($selected);
         });
-        $count.text(ids.length + " selected");
+        $count.text(selectedIds.length + " selected");
       };
       var sync = () => {
-        var ids = [];
-        $list.find(".workflow-candidate-checkbox:checked").each(function () { ids.push(String($(this).val())); });
-        $candidate.val(ids);
+        selectedIds = $list.find(".workflow-candidate-checkbox:checked").map(function () {
+          return String($(this).val());
+        }).get().reduce((ids, id) => {
+          if (ids.indexOf(id) === -1) ids.push(id);
+          return ids;
+        }, selectedIds.filter((id) => !visibleItems.some((item) => String(item.content_item_id) === id)));
+        syncHiddenOptions();
         renderSelected();
       };
+      var loadResults = (query, append) => {
+        var sequence = ++requestSequence;
+        if (!append) {
+          currentQuery = query;
+          nextSkip = 0;
+          visibleItems = [];
+          renderOptions();
+          updateResultsUi(true);
+        }
+        $loadMore.prop("disabled", true);
+        this.loadCandidateItems(query, append ? nextSkip : 0)
+          .done((items) => {
+            if (sequence !== requestSequence) return;
+            var fetched = items || [];
+            addItems(fetched);
+            if (append) {
+              var existingIds = visibleItems.map((item) => String(item.content_item_id));
+              fetched.forEach((item) => {
+                if (existingIds.indexOf(String(item.content_item_id)) === -1) visibleItems.push(item);
+              });
+            } else {
+              visibleItems = fetched;
+            }
+            nextSkip = visibleItems.length;
+            hasMore = fetched.length === CANDIDATE_PAGE_SIZE;
+            renderOptions();
+            updateResultsUi(false);
+          })
+          .fail((xhr) => {
+            if (sequence !== requestSequence) return;
+            $noResults.text(this.errorMessage(xhr, "Could not load candidate items.")).removeClass("hidden");
+            $loadMore.addClass("hidden");
+            $loading.addClass("hidden");
+          })
+          .always(() => {
+            if (sequence === requestSequence) $loadMore.prop("disabled", false);
+          });
+      };
       $search.on("input", () => {
-        var query = String($search.val() || "").trim().toLowerCase();
-        var visible = 0;
-        $list.find(".workflow-candidate-option").each(function () {
-          var matches = !query || String($(this).attr("data-search-text") || "").indexOf(query) !== -1;
-          $(this).toggleClass("hidden", !matches);
-          if (matches) visible += 1;
-        });
-        $noResults.toggleClass("hidden", visible > 0);
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => loadResults(String($search.val() || "").trim(), false), 300);
       });
+      $loadMore.on("click", () => loadResults(currentQuery, true));
       $list.on("change", ".workflow-candidate-checkbox", sync);
       $selected.on("click", ".workflow-candidate-remove", (event) => {
         var id = String($(event.currentTarget).attr("data-content-id"));
-        $list.find(".workflow-candidate-checkbox").filter(function () { return String($(this).val()) === id; }).prop("checked", false);
-        sync();
+        selectedIds = selectedIds.filter((selectedId) => selectedId !== id);
+        syncHiddenOptions();
+        renderOptions();
+        renderSelected();
         this.markDirty();
       });
+      syncHiddenOptions();
+      renderOptions();
+      updateResultsUi(false);
       renderSelected();
       return $candidateLabel;
     }

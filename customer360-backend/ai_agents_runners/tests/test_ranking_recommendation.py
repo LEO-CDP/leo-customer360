@@ -337,7 +337,6 @@ def test_ranking_pipeline_rejects_candidate_not_eligible_for_tenant(monkeypatch)
     ("counts", "reason"),
     [
         ((2, 0, 0, 0), "selected candidates are inactive"),
-        ((2, 2, 0, 0), "selected candidates do not match the profile domain"),
         ((2, 2, 2, 0), "selected candidates lack embeddings"),
         ((2, 2, 2, 2), "no candidate score meets minimum_score"),
     ],
@@ -374,6 +373,24 @@ def test_empty_rankings_explain_the_excluding_filter(monkeypatch, counts, reason
         TENANT_ID,
         [CONTENT_ITEM_1, CONTENT_ITEM_2],
     )
+
+
+def test_ranking_pipeline_skips_profiles_without_domain_matching_candidates(monkeypatch):
+    connection = FakeConnection(
+        [],
+        diagnostics={
+            "tenant_candidates": 2,
+            "active_candidates": 2,
+            "domain_candidates": 0,
+            "rankable_candidates": 0,
+        },
+    )
+    pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    output = execute_agent_pipeline(_input(), run_id="dagster-run-1")
+
+    assert output.result["ranked_items"] == []
 
 
 def test_ranking_pipeline_uses_only_selected_candidates_available_for_profile_domain(

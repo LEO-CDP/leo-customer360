@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 
 import frontmatter
@@ -174,8 +175,42 @@ def _pack_blocks(
     return [chunk.strip() for chunk in chunks if chunk.strip()]
 
 
+def _unpublished_patterns() -> list[str]:
+    """Patterns of docs the public site leaves out: the repo's ``.documentignore``, shipped next to
+    the corpus (CORPUS_DIR/.documentignore) or, in a checkout, one level up. Blank lines, comments and
+    ``!`` re-includes are skipped (the file has none)."""
+    for candidate in (CORPUS_DIR / ".documentignore", CORPUS_DIR.parent / ".documentignore"):
+        if candidate.is_file():
+            lines = (line.strip() for line in candidate.read_text(encoding="utf-8").splitlines())
+            return [line.lower() for line in lines if line and not line.startswith(("#", "!"))]
+    return []
+
+
+def _is_unpublished(rel: str, patterns: list[str]) -> bool:
+    """gitignore-style match of a corpus path (relative to docs/) against .documentignore, which is
+    relative to the repo root. Case-insensitive like the site's matcher (so ``AGENTS.md`` also hides
+    ``agents.md``). Supports what the file uses: exact paths, ``**/name`` and bare names at any depth,
+    globs, and ``dir/``."""
+    repo_path = "docs/" + rel.lower()
+    parts = repo_path.split("/")
+    for pattern in patterns:
+        directory = pattern.endswith("/")
+        pattern = pattern.rstrip("/").removeprefix("**/")
+        if directory and pattern in parts[:-1]:
+            return True
+        if "/" in pattern:
+            if fnmatch(repo_path, pattern.replace("**", "*")):
+                return True
+        elif fnmatch(parts[-1], pattern):
+            return True
+    return False
+
+
 def chunk_doc(path: Path) -> list[Chunk]:
     post = frontmatter.loads(path.read_text(encoding="utf-8"))
+    # A draft is not on the public site (its build drops `draft: true`), so it must not be cited.
+    if post.get("draft") is True:
+        return []
     # Anchor the id/path to the corpus dir (stable across repo vs container, where the
     # corpus is mounted at /app/corpus) — REPO_ROOT isn't an ancestor of CORPUS_DIR there.
     rel = path.relative_to(CORPUS_DIR).as_posix()
@@ -228,6 +263,11 @@ def load_chunks() -> list[Chunk]:
         for path in CORPUS_DIR.rglob("*")
         if path.is_file() and path.suffix == ".md"
     )
+    # Only what the public site publishes: the answers cite pages by link, so an unpublished doc would
+    # be a dead link (and its content would leak into a public answer).
+    unpublished = _unpublished_patterns()
     for path in markdown_files:
+        if _is_unpublished(path.relative_to(CORPUS_DIR).as_posix(), unpublished):
+            continue
         chunks.extend(chunk_doc(path))
     return chunks

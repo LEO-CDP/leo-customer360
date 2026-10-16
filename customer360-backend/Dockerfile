@@ -29,16 +29,20 @@ COPY customer360-backend/campaign_activation/requirements.txt /tmp/requirements/
 # (psycopg3) SQLAlchemy URL for Dagster's own storage, while the code locations
 # import psycopg2 directly. dagster-postgres is pinned to the same range as
 # dagster (Dagster ships its libraries on a 0.x scheme: core 1.9 == libs 0.25)
-# so its driver choice cannot shift on a rebuild. Version specs and
-# extras stay quoted — sh reads <, > and [] in a RUN line.
+# so its driver choice cannot shift on a rebuild. The Dagster packages are
+# pinned to one release because Dagster's UI and GraphQL packages require an
+# exact matching core version. Version specs and extras stay quoted — sh reads
+# <, > and [] in a RUN line.
 RUN mkdir -p /wheels /install \
  && python -c "import tomllib; [print(d) for d in tomllib.load(open('/opt/customer360-dao/pyproject.toml', 'rb'))['project']['dependencies']]" \
       > /tmp/requirements/_dao-deps.txt \
  && grep -hv '^leo-customer360-dao' /tmp/requirements/*.txt > /tmp/third-party.txt \
  && pip wheel --no-cache-dir --wheel-dir=/wheels -r /tmp/third-party.txt \
-      dagster dagster-webserver dagster-graphql "dagster-postgres>=0.25,<1" dagster-aws psycopg2-binary "psycopg[binary]" \
+      "dagster==1.13.26" "dagster-webserver==1.13.26" "dagster-graphql==1.13.26" \
+      "dagster-postgres==0.29.26" dagster-aws psycopg2-binary "psycopg[binary]" \
  && pip install --no-cache-dir --no-index --find-links=/wheels --prefix=/install -r /tmp/third-party.txt \
-      dagster dagster-webserver dagster-graphql "dagster-postgres>=0.25,<1" dagster-aws psycopg2-binary "psycopg[binary]"
+      "dagster==1.13.26" "dagster-webserver==1.13.26" "dagster-graphql==1.13.26" \
+      "dagster-postgres==0.29.26" dagster-aws psycopg2-binary "psycopg[binary]"
 
 # The local DAO package last: a small layer that is the only one a DAO change touches.
 # --no-deps: its dependencies are already in /install from the layer above.

@@ -77,6 +77,7 @@ def test_product_list_is_tenant_scoped_and_returns_metadata():
         tenant_id=uuid.UUID(TENANT_ID),
         domain="retail",
         q="book",
+        tag=None,
         skip=0,
         limit=50,
     )
@@ -98,11 +99,30 @@ def test_content_listing_can_exclude_product_rows_for_the_contents_tab():
     repository = MagicMock()
     repository.list_items.return_value = []
     with patch("core.routers.content_api.ContentRepository", return_value=repository):
-        response = client.get("/content-items/", params={"content_only": "true"})
+        response = client.get(
+            "/content-items/",
+            params={"content_only": "true", "tag": "sports"},
+        )
 
     assert response.status_code == 200
     assert repository.list_items.call_args.kwargs["tenant_id"] == uuid.UUID(TENANT_ID)
     assert repository.list_items.call_args.kwargs["content_only"] is True
+    assert repository.list_items.call_args.kwargs["tag"] == "sports"
+
+
+def test_content_listing_search_includes_segment_tags():
+    session = MagicMock()
+    session.scalars.return_value.all.return_value = []
+    repository = ContentRepository(session)
+
+    repository.list_items(
+        tenant_id=uuid.UUID(TENANT_ID),
+        q="sports",
+        limit=50,
+    )
+
+    statement = session.scalars.call_args.args[0]
+    assert "array_to_string" in str(statement)
 
 
 def test_recommended_items_default_to_combined_segments_and_accept_segment_filter():

@@ -1,0 +1,323 @@
+{
+  "profiles": [
+    {
+      "id": 1,
+      "name": "Aiko",
+      "score": 1,
+      "cart": 44,
+      "recency": 91,
+      "push": 0
+    },
+    {
+      "id": 2,
+      "name": "Ben",
+      "score": 52,
+      "cart": 119,
+      "recency": 45,
+      "push": 1
+    },
+    {
+      "id": 3,
+      "name": "Chloe",
+      "score": 55,
+      "cart": 191,
+      "recency": 26,
+      "push": 1
+    },
+    {
+      "id": 4,
+      "name": "Dev",
+      "score": 76,
+      "cart": 144,
+      "recency": 21,
+      "push": 1
+    },
+    {
+      "id": 5,
+      "name": "Elena",
+      "score": 29,
+      "cart": 148,
+      "recency": 30,
+      "push": 0
+    },
+    {
+      "id": 6,
+      "name": "Farid",
+      "score": 25,
+      "cart": 223,
+      "recency": 20,
+      "push": 1
+    },
+    {
+      "id": 7,
+      "name": "Grace",
+      "score": 15,
+      "cart": 94,
+      "recency": 52,
+      "push": 0
+    },
+    {
+      "id": 8,
+      "name": "Hugo",
+      "score": 7,
+      "cart": 231,
+      "recency": 53,
+      "push": 0
+    },
+    {
+      "id": 9,
+      "name": "Ines",
+      "score": 68,
+      "cart": 243,
+      "recency": 59,
+      "push": 0
+    },
+    {
+      "id": 10,
+      "name": "Jonas",
+      "score": 83,
+      "cart": 39,
+      "recency": 19,
+      "push": 1
+    },
+    {
+      "id": 11,
+      "name": "Kavya",
+      "score": 43,
+      "cart": 34,
+      "recency": 11,
+      "push": 0
+    },
+    {
+      "id": 12,
+      "name": "Liam",
+      "score": 37,
+      "cart": 124,
+      "recency": 45,
+      "push": 0
+    },
+    {
+      "id": 13,
+      "name": "Mina",
+      "score": 70,
+      "cart": 181,
+      "recency": 33,
+      "push": 1
+    },
+    {
+      "id": 14,
+      "name": "Noah",
+      "score": 14,
+      "cart": 59,
+      "recency": 85,
+      "push": 1
+    },
+    {
+      "id": 15,
+      "name": "Omar",
+      "score": 19,
+      "cart": 169,
+      "recency": 33,
+      "push": 1
+    },
+    {
+      "id": 16,
+      "name": "Priya",
+      "score": 68,
+      "cart": 233,
+      "recency": 52,
+      "push": 0
+    },
+    {
+      "id": 17,
+      "name": "Quinn",
+      "score": 66,
+      "cart": 232,
+      "recency": 14,
+      "push": 1
+    },
+    {
+      "id": 18,
+      "name": "Rosa",
+      "score": 65,
+      "cart": 226,
+      "recency": 89,
+      "push": 0
+    },
+    {
+      "id": 19,
+      "name": "Sam",
+      "score": 59,
+      "cart": 242,
+      "recency": 90,
+      "push": 1
+    },
+    {
+      "id": 20,
+      "name": "Tuan",
+      "score": 82,
+      "cart": 31,
+      "recency": 49,
+      "push": 1
+    },
+    {
+      "id": 21,
+      "name": "Uma",
+      "score": 72,
+      "cart": 151,
+      "recency": 71,
+      "push": 0
+    },
+    {
+      "id": 22,
+      "name": "Vik",
+      "score": 56,
+      "cart": 211,
+      "recency": 42,
+      "push": 0
+    },
+    {
+      "id": 23,
+      "name": "Wen",
+      "score": 74,
+      "cart": 151,
+      "recency": 31,
+      "push": 1
+    },
+    {
+      "id": 24,
+      "name": "Yara",
+      "score": 1,
+      "cart": 35,
+      "recency": 88,
+      "push": 0
+    },
+    {
+      "id": 25,
+      "name": "Zoe",
+      "score": 63,
+      "cart": 33,
+      "recency": 59,
+      "push": 1
+    },
+    {
+      "id": 26,
+      "name": "Abel",
+      "score": 72,
+      "cart": 249,
+      "recency": 28,
+      "push": 0
+    },
+    {
+      "id": 27,
+      "name": "Bea",
+      "score": 65,
+      "cart": 207,
+      "recency": 59,
+      "push": 0
+    },
+    {
+      "id": 28,
+      "name": "Cal",
+      "score": 14,
+      "cart": 249,
+      "recency": 49,
+      "push": 1
+    },
+    {
+      "id": 29,
+      "name": "Dara",
+      "score": 16,
+      "cart": 117,
+      "recency": 22,
+      "push": 0
+    },
+    {
+      "id": 30,
+      "name": "Eli",
+      "score": 86,
+      "cart": 192,
+      "recency": 62,
+      "push": 0
+    },
+    {
+      "id": 31,
+      "name": "Faye",
+      "score": 61,
+      "cart": 192,
+      "recency": 89,
+      "push": 1
+    },
+    {
+      "id": 32,
+      "name": "Gus",
+      "score": 23,
+      "cart": 158,
+      "recency": 75,
+      "push": 0
+    }
+  ],
+  "workflow": {
+    "type": "1",
+    "children": [
+      {
+        "type": "2",
+        "vals": {
+          ".f-field": "score",
+          ".f-op": "ge",
+          ".f-val": "60"
+        },
+        "children": [
+          {
+            "type": "2",
+            "vals": {
+              ".f-field": "cart",
+              ".f-op": "ge",
+              ".f-val": "150"
+            },
+            "children": [
+              {
+                "type": "3",
+                "vals": {
+                  ".f-a": "{{first_name}}, early access to your cart",
+                  ".f-b": "Your ${{cart_value}} picks are held for 24 hours with free express shipping."
+                }
+              },
+              {
+                "type": "4",
+                "vals": {
+                  ".f-a": "Still thinking it over?",
+                  ".f-b": "{{first_name}}, your cart is one tap away."
+                }
+              }
+            ]
+          },
+          {
+            "type": "2",
+            "vals": {
+              ".f-field": "push",
+              ".f-op": "eq",
+              ".f-val": "1"
+            },
+            "children": [
+              {
+                "type": "4",
+                "vals": {
+                  ".f-a": "Flash sale: 15% off today",
+                  ".f-b": "{{first_name}}, your saved items are on sale for the next 6 hours."
+                }
+              },
+              {
+                "type": "3",
+                "vals": {
+                  ".f-a": "We saved your cart, {{first_name}}",
+                  ".f-b": "Come back and finish your order. Your items are still in stock."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -22,6 +22,25 @@ and publishes only successful runs. Other model handlers remain explicit
 scaffolds and are reported as unsupported rather than returning placeholder
 success results.
 
+### Troubleshooting no personalization results
+
+The master op logs a run/tenant/segment context before execution, then logs
+profile-domain counts, each ranking step's strategy and candidate count, and
+the profile batch that failed. For a successful run with zero rows, look for:
+
+- `No active profiles matched segment` — the segment currently has no active
+  matching profiles.
+- `No selected recommendation candidates match profile domain` — the selected
+  candidates are valid for the tenant but none match that profile's domain.
+- `Ranking produced no candidates for profile` — inspect the logged tenant,
+  active, domain-matching, rankable, strategy, and `minimum_score` counts.
+- `AI recommendation workflow completed with no personalization results` —
+  the run finished but wrote zero recommendation rows.
+
+The final Dagster error log also includes the Dagster run ID, trigger, tenant,
+and segment so the corresponding database run record and worker logs can be
+located quickly.
+
 Ranking settings live in each workflow step's existing `configuration` JSON:
 
 ```json
@@ -43,6 +62,9 @@ Recommendation vectors support 384 or 768 dimensions, selected through the
 existing provider/model dimension setting. Separate partial HNSW indexes cover
 each size. The vector distance is computed only
 over the bounded workflow candidate list; no global catalog search is performed.
+Candidates are matched to each profile's domain at ranking time. If a valid
+tenant-owned candidate set has no item for a particular profile domain, that
+profile receives no recommendations while other profiles continue processing.
 The configured provider, model, dimension, embedding contract version, and
 canonical source text are stored with each content vector. Vectors are regenerated when the
 provider/model changes or content title, summary, domain, type, or segment tags
