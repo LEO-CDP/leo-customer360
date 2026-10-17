@@ -33,6 +33,8 @@
     const templates = window.WorkflowTemplates;
     if (!templates)
       throw new Error("Load workflow-template.js before workflow-studio.js.");
+    if (typeof options.readOnly !== "boolean")
+      throw new TypeError("readOnly must be a boolean.");
     if (
       options.segments != null &&
       (!Array.isArray(options.segments) ||
@@ -910,6 +912,9 @@
       restoreDefaultTrigger();
       refresh();
     }
+    if (options.readOnly) {
+      $("#recipe, #bClear, #bRun, .side").hide();
+    }
     return api;
   }
 
@@ -1092,6 +1097,7 @@
     loadProfiles: null,
     profileCount: 32,
     inline: false,
+    readOnly: false,
     onClearCanvas: null,
     onRunCampaign: null,
     onRecipeChange: null,

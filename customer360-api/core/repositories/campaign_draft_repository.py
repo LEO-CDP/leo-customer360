@@ -35,6 +35,7 @@ APPROVAL_STATUS_IN_REVIEW = "InReview"
 APPROVAL_STATUS_APPROVED = "Approved"
 APPROVAL_STATUS_REJECTED = "Rejected"
 SEGMENT_UNSET = object()
+FIELD_UNSET = object()
 
 
 def _utc_now_naive() -> datetime:
@@ -461,18 +462,22 @@ class CampaignDraftRepository:
         campaign_id: uuid.UUID,
         editor_id: Optional[uuid.UUID],
         segment_id: object = SEGMENT_UNSET,
-        objective: Optional[str] = None,
-        strategy_summary: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        objective: Any = FIELD_UNSET,
+        strategy_summary: Any = FIELD_UNSET,
+        start_date: Any = FIELD_UNSET,
+        end_date: Any = FIELD_UNSET,
         content_items: Optional[list[dict[str, Any]]] = None,
+        workflow_id: Any = FIELD_UNSET,
+        workflow_version: Any = FIELD_UNSET,
+        commit: bool = True,
     ) -> Campaign:
         """FR-007, FR-008, FR-012, FR-014: validates any supplied schedule
         window, updates the supplied fields, replaces the content plan when
         content_items is supplied, records a sys_audit_log before/after
         snapshot, and returns the campaign to InReview whenever it was
         Approved (fresh approval required) or Rejected (resubmission,
-        non-terminal per data-model.md)."""
+        non-terminal per data-model.md). Set ``commit=False`` when a caller
+        must include these edits in a larger atomic transaction."""
         if editor_id is not None:
             editor_exists = self.session.execute(
                 select(SysUser.user_id).where(
@@ -502,8 +507,8 @@ class CampaignDraftRepository:
             if not selected_segment.is_active or selected_segment.status_code != 1:
                 raise CampaignDraftValidationError("The selected segment is inactive or has no computed membership snapshot")
 
-        effective_start = start_date if start_date is not None else campaign.start_date
-        effective_end = end_date if end_date is not None else campaign.end_date
+        effective_start = start_date if start_date is not FIELD_UNSET else campaign.start_date
+        effective_end = end_date if end_date is not FIELD_UNSET else campaign.end_date
         if effective_start and effective_end and effective_end < effective_start:
             raise CampaignDraftValidationError("end_date cannot be before start_date")
 
@@ -514,6 +519,8 @@ class CampaignDraftRepository:
             "strategy_summary": campaign.strategy_summary,
             "start_date": campaign.start_date.isoformat() if campaign.start_date else None,
             "end_date": campaign.end_date.isoformat() if campaign.end_date else None,
+            "workflow_id": str(getattr(campaign, "workflow_id", None)) if getattr(campaign, "workflow_id", None) else None,
+            "workflow_version": getattr(campaign, "workflow_version", None),
             "content_item_ids": [str(link.content_item_id) for link in existing_links],
         }
 
@@ -526,14 +533,18 @@ class CampaignDraftRepository:
             campaign.strategy_summary = None
             campaign.ai_plan = None
 
-        if objective is not None:
+        if objective is not FIELD_UNSET:
             campaign.objective = objective
-        if strategy_summary is not None:
+        if strategy_summary is not FIELD_UNSET:
             campaign.strategy_summary = strategy_summary
-        if start_date is not None:
+        if start_date is not FIELD_UNSET:
             campaign.start_date = start_date
-        if end_date is not None:
+        if end_date is not FIELD_UNSET:
             campaign.end_date = end_date
+        if workflow_id is not FIELD_UNSET:
+            campaign.workflow_id = workflow_id
+        if workflow_version is not FIELD_UNSET:
+            campaign.workflow_version = workflow_version
 
         after_content_item_ids = before_data["content_item_ids"]
         if content_items is not None:
@@ -560,6 +571,8 @@ class CampaignDraftRepository:
             "strategy_summary": campaign.strategy_summary,
             "start_date": campaign.start_date.isoformat() if campaign.start_date else None,
             "end_date": campaign.end_date.isoformat() if campaign.end_date else None,
+            "workflow_id": str(getattr(campaign, "workflow_id", None)) if getattr(campaign, "workflow_id", None) else None,
+            "workflow_version": getattr(campaign, "workflow_version", None),
             "content_item_ids": after_content_item_ids,
         }
         # Only demote a previously Approved/Rejected campaign back to
@@ -586,8 +599,9 @@ class CampaignDraftRepository:
                 after_data=after_data,
             )
         )
-        self.session.commit()
-        self.session.refresh(campaign)
+        if commit:
+            self.session.commit()
+            self.session.refresh(campaign)
         return campaign
 
     def _segment_audit_snapshot(self, tenant_id: uuid.UUID, segment_id: Optional[uuid.UUID]) -> Optional[dict[str, Any]]:

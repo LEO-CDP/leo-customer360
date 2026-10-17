@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The customer journey workflow is a feature inside the campaign marketing flow. It is embedded in the campaign editor's governed campaign plan, uses the campaign's selected audience, and provides a local simulation preview while campaign metadata is being prepared. It is not a separate campaign lifecycle, persistence service, or message-delivery engine.
+The customer journey workflow is a feature inside the campaign marketing flow. It is embedded in the campaign editor's governed campaign plan and uses the campaign's selected audience. Campaign and workflow data are saved together as one atomic request, with the campaign linked to an immutable workflow version. The editor's simulation remains a local preview, not a message-delivery engine.
 
 This document describes the current frontend behavior and separates it from follow-up work. The primary implementation sources are [campaign-editor.html](../../customer360-frontend/static/templates/campaign/campaign-editor.html) and [workflow-studio.js](../../customer360-frontend/static/js/workflow/workflow-studio.js), with campaign orchestration in [campaign-view.js](../../customer360-frontend/static/js/campaign-view.js).
 
@@ -12,8 +12,8 @@ This document describes the current frontend behavior and separates it from foll
 2. **Select an eligible audience.** The segment picker lists saved segments and only offers segments for which `is_active === true` and `status_code === 1`. The UI searches the loaded list by segment name, tag, or description. The selected segment is stored in the campaign's `segment_id` field and drives the workflow studio. A segment that is inactive or lacks a computed membership snapshot is shown with a warning and is not used to load profiles.
 3. **Design and simulate a journey.** Once a ready segment is selected, the campaign view mounts the workflow studio in the editor and loads up to 32 matched profiles. Marketers can start from a recipe, arrange and configure journey nodes, inspect validation checks and workflow JSON, and run a deterministic local simulation against those profiles.
 4. **Complete campaign planning fields.** The editor presents Objective as a single-select (`Awareness`, `Leads`, `Conversions`, `App Install`, or `Visit Store`), Strategy summary as a narrative describing the intended journey, and Planning constraints as hard limits for marketing planning. An existing campaign objective outside the configured choices is retained as an additional option when editing. The editor also displays AI-plan/provenance as read-only information where campaign details provide it.
-5. **Save the campaign.** The editor validates the campaign name, requires an audience when creating a campaign, and checks that the end date is not before the start date. New campaigns are sent to `POST /campaigns/`. Editing an existing campaign first patches `/campaigns/{id}/draft` with governed draft fields and then patches `/campaigns/{id}` with general metadata. On success the UI navigates to campaign details.
-6. **Review and manage the campaign.** Campaign details display operational status, approval status, audience, strategy, AI plan, agent provenance, history, and reporting. The frontend exposes approve/reject actions to reviewer roles when approval status is `InReview`. Operational status (Draft, Active, Paused, Completed) is distinct from approval status.
+5. **Save the campaign and workflow together.** The editor validates the campaign name, requires a ready audience, checks that the end date is not before the start date, and waits for the workflow studio to be ready. It submits the campaign fields and current workflow JSON in one request: new campaigns use `POST /campaigns/with-workflow`; existing campaigns use `PATCH /campaigns/{id}/with-workflow`. The API validates the tenant, audience/workflow segment match, and workflow structure, then commits the campaign changes and workflow version in one database transaction. A failure rolls back both. On success the UI navigates to campaign details.
+6. **Review and manage the campaign.** Campaign details display operational status, approval status, audience, the saved customer journey directly below the audience in the overview, strategy, AI plan, agent provenance, history, and reporting. The workflow studio is mounted in read-only mode, which hides its recipe selector, clear/run controls, and side panel; a pointer-blocking overlay prevents canvas interaction. The saved version is loaded using `GET /campaigns/{id}/workflow`. The frontend exposes approve/reject actions to reviewer roles when approval status is `InReview`. Operational status (Draft, Active, Paused, Completed) is distinct from approval status.
 7. **Measure and experiment.** Campaign reporting loads campaign metrics from the report API, with an analytics fallback when the single-campaign report endpoint returns 404. The details view also supports campaign experiments, which compare audience-segment variants. These are campaign lifecycle features separate from the journey canvas simulator.
 
 ## Frontend components and ownership
@@ -22,11 +22,13 @@ This document describes the current frontend behavior and separates it from foll
 | --- | --- |
 | [campaign-editor.html](../../customer360-frontend/static/templates/campaign/campaign-editor.html) | Campaign editor form, saved-segment picker, embedded customer journey area, planning fields, and save action. |
 | [campaign-view.js](../../customer360-frontend/static/js/campaign-view.js) | Campaign route and editor lifecycle, audience selection/loading, API requests, campaign save, approval controls, reporting, and experiments. |
+| [workflow_api.py](../../customer360-api/core/routers/workflow_api.py) and [campaign_workflow_repository.py](../../customer360-api/core/repositories/campaign_workflow_repository.py) | Tenant-scoped campaign/workflow save and load endpoints, coordinating campaign governance and workflow persistence within one transaction. |
 | [workflow-studio.js](../../customer360-frontend/static/js/workflow/workflow-studio.js) | Journey canvas, node editing, validation UI, JSON panel, profile/check/report panels, simulation action, and host integration. |
 | [workflow-core.js](../../customer360-frontend/static/js/workflow/workflow-core.js) | Workflow node registry, schema validation, safe edit operations, simulator, sample profiles, and agent manifest. |
 | [workflow-template.js](../../customer360-frontend/static/js/workflow/workflow-template.js) | Studio markup and industry journey recipes. |
 | [workflow-studio-frame.html](../../customer360-frontend/static/js/workflow/workflow-studio-frame.html) | Loads the studio's browser dependencies in the same-origin iframe. |
 | [flowy.js](../../customer360-frontend/static/js/workflow/flowy.js) and [flowy.css](../../customer360-frontend/static/css/flowy.css) | Canvas block layout/drag behavior and its styles. |
+| [repository.py](../../customer360-dao/src/leo_customer360_dao/workflow/repository.py), [models.py](../../customer360-dao/src/leo_customer360_dao/workflow/models.py), and [010_campaign_workflow_link.sql](../../customer360-database/migrations/010_campaign_workflow_link.sql) | Versioned workflow storage contract, workflow schema, and tenant-safe campaign-to-version foreign key. |
 
 The studio is hosted in an iframe so the campaign editor can embed the canvas without sharing its page styles or Flowy instance. The frame loads jQuery, Handlebars, Flowy, the workflow core, templates, and the studio script. The host waits for the studio's `onReady` callback before using the frame API.
 
@@ -65,25 +67,19 @@ Recipes and the JSON/agent manifest are editing aids. The manifest exposes node 
 
 ## Persistence and execution boundary
 
-The current journey canvas is not saved as part of a campaign:
+Campaign workflows use the DAO's versioned `customer360.crm_flow*` persistence. `crm_campaign.workflow_id` and `workflow_version` reference the exact immutable workflow version belonging to the same tenant. The API calls the DAO `WorkflowRepository` inside the campaign request's transaction, and only commits after both the campaign and workflow writes succeed.
 
-- The campaign view mounts the studio with audience configuration, `loadProfiles`, and `onReady`; it does not pass an initial saved workflow or register `onChange`, `onRunCampaign`, or `onRecipeChange` persistence callbacks.
-- The campaign form payload does not include the canvas workflow JSON. Loading an existing campaign restores campaign fields and its segment, but does not restore a saved canvas. A new studio starts from the Event trigger.
-- The studio's **Run campaign** button only invokes the local simulator. The campaign editor does not provide a workflow execution or message-delivery request.
-- `budget_time_constraints` is present in the form but is not included in the campaign save payload or sent by the campaign view to an AI planning endpoint. It should not be described as an active planning integration.
-- `strategy_summary` is loaded for existing campaigns and included in the new-campaign payload or the existing-campaign draft patch. It describes the intended strategy; it is separate from the canvas workflow JSON.
-- The workflow studio's validation governs whether its local simulation can run; campaign save uses campaign-form checks and does not save or validate a workflow definition.
+When opening an existing campaign, the frontend loads `GET /campaigns/{id}/workflow` and initializes the studio from that saved version. If no workflow has yet been associated with a legacy campaign, the response contains a null workflow and the studio starts with its default trigger. Each Save campaign request persists a new workflow version only when the submitted definition differs from the currently linked version; campaign edits and the campaign's version pointer are committed atomically. Workflow changes participate in the campaign draft audit/re-review behavior.
 
-Campaign creation and editing do call the campaign APIs, and approval/rejection is exposed through campaign details. These campaign lifecycle operations should not be conflated with workflow persistence, publication, scheduling, or execution. Server-side campaign APIs remain authoritative for tenant scope, validation, draft state, and approval.
+The studio's **Run campaign** button still only invokes the local simulator. It does not publish or execute the persisted version and does not send email, SMS, or push messages. Campaign creation/edit APIs and approval/rejection remain separate governed lifecycle concerns. Server-side APIs are authoritative for tenant scope, audience validity, workflow schema, campaign draft state, and approval.
 
-## Follow-up work to make the journey durable
+`budget_time_constraints` is present in the form but is not included in the campaign/workflow save request or sent to an AI planning endpoint. It should not be described as an active planning integration. `strategy_summary` is persisted with campaign metadata and describes the intended strategy; it is separate from the canvas workflow JSON.
 
-The following are gaps to address if campaign journeys are intended to persist and execute; they are not current frontend behavior:
+## Follow-up work
 
-1. Define the persisted campaign journey contract and its versioning, validation, and ownership in the campaign API.
-2. Load the persisted journey when editing a campaign and include it in the governed create/update or draft workflow.
-3. Connect studio change/recipe callbacks to draft state and make workflow changes participate in the same review/audit behavior as other governed campaign-plan edits.
-4. Define how the simulator preview is distinguished from a production campaign run, and provide a governed server-side execution path if sending messages is in scope.
-5. Decide whether planning constraints should invoke an AI planning endpoint and, if so, wire request/response/error handling and persist the approved plan/provenance through the campaign API.
+The following are not implemented by the workflow save integration:
 
-Do not treat browser validation, profile previews, or simulated results as authorization, durable campaign state, an approval decision, or delivery guarantees.
+1. Connect Planning constraints to an AI planning endpoint, including request/response/error handling and persistence of the approved plan/provenance.
+2. Define governed publication, scheduling, and production execution semantics for a persisted workflow if message delivery is in scope. The workflow persistence endpoint does not publish or run flows.
+
+Do not treat browser validation, profile previews, or simulated results as authorization, an approval decision, or delivery guarantees. Persisted workflow versions are durable campaign configuration, but are not evidence of execution.

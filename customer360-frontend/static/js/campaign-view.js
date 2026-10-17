@@ -58,7 +58,7 @@ window.C360 = window.C360 || {};
     loaded: false,
     tenantId: null
   };
-  var campaignWorkflowState = { segment: null, ready: false };
+  var campaignWorkflowState = { segment: null, ready: false, workflow: null };
   var campaignWorkflowGeneration = 0;
   var campaignSegmentRequest = 0;
 
@@ -413,6 +413,7 @@ window.C360 = window.C360 || {};
       segmentId: String(selectedSegment.segment_id),
       segmentName: selectedSegment.segment_name,
       segments: [workflowSegmentConfig(selectedSegment)],
+      workflow: campaignWorkflowState.workflow,
       profileCount: 32,
       loadProfiles: loadCampaignSegmentProfiles,
       onReady: function (initialSegmentId, apiInstance) {
@@ -532,7 +533,7 @@ window.C360 = window.C360 || {};
       });
   }
 
-  function campaignFormPayload(includeTenant) {
+  function campaignFormPayload() {
     var payload = {
       name: fieldValue("#campaign-field-name").trim(),
       campaign_code: fieldValue("#campaign-field-code").trim() || null,
@@ -551,7 +552,7 @@ window.C360 = window.C360 || {};
       objective: fieldValue("#campaign-field-objective").trim() || null,
       strategy_summary: fieldValue("#campaign-field-strategy").trim() || null
     };
-    if (includeTenant) payload.tenant_id = tenantId();
+    payload.tenant_id = tenantId();
     return payload;
   }
 
@@ -604,7 +605,7 @@ window.C360 = window.C360 || {};
 
   function loadCampaignEditor(campaignId) {
     campaignWorkflowGeneration += 1;
-    campaignWorkflowState = { segment: null, ready: false };
+    campaignWorkflowState = { segment: null, ready: false, workflow: null };
     campaignSegmentRequest += 1;
     setCampaignMessage("#campaign-editor-error", "");
     setCampaignMessage("#campaign-editor-success", "");
@@ -616,9 +617,17 @@ window.C360 = window.C360 || {};
     }
     api("/campaigns/" + encodeURIComponent(campaignId))
       .done(function (campaign) {
-        $("#campaign-editor-loading").addClass("hidden");
-        $("#campaign-editor-form").removeClass("hidden");
-        fillCampaignEditor(campaign);
+        api("/campaigns/" + encodeURIComponent(campaignId) + "/workflow")
+          .done(function (workflowResponse) {
+            campaignWorkflowState.workflow = workflowResponse.workflow;
+            $("#campaign-editor-loading").addClass("hidden");
+            $("#campaign-editor-form").removeClass("hidden");
+            fillCampaignEditor(campaign);
+          })
+          .fail(function (xhr) {
+            $("#campaign-editor-loading").addClass("hidden");
+            setCampaignMessage("#campaign-editor-error", campaignError(xhr));
+          });
       })
       .fail(function (xhr) {
         $("#campaign-editor-loading").addClass("hidden");
@@ -632,42 +641,48 @@ window.C360 = window.C360 || {};
     setCampaignMessage("#campaign-editor-error", "");
     setCampaignMessage("#campaign-editor-success", "");
     var campaignId = fieldValue("#campaign-editor-id");
-    var payload = campaignFormPayload(!campaignId);
+    var payload = campaignFormPayload();
     if (!payload.name) {
       setCampaignMessage("#campaign-editor-error", "Campaign name is required.");
       return;
     }
-    if (!campaignId && !payload.segment_id) {
-      setCampaignMessage("#campaign-editor-error", "Choose an active audience segment before creating the campaign.");
+    if (!payload.segment_id) {
+      setCampaignMessage("#campaign-editor-error", "Choose an active audience segment before saving the campaign.");
       return;
     }
     if (payload.start_date && payload.end_date && payload.end_date < payload.start_date) {
       setCampaignMessage("#campaign-editor-error", "End date cannot be before start date.");
       return;
     }
-    var request;
-    if (!campaignId) {
-      request = api("/campaigns/", payload, "POST");
-    } else {
-      var general = $.extend({}, payload);
-      delete general.tenant_id;
-      delete general.segment_id;
-      delete general.template_id;
-      delete general.objective;
-      delete general.strategy_summary;
-      request = api("/campaigns/" + encodeURIComponent(campaignId) + "/draft", {
-        segment_id: payload.segment_id || null,
-        objective: payload.objective,
-        strategy_summary: fieldValue("#campaign-field-strategy").trim() || null,
-        start_date: payload.start_date,
-        end_date: payload.end_date
-      }, "PATCH").then(function () {
-        return api("/campaigns/" + encodeURIComponent(campaignId), general, "PATCH");
-      });
+    var $studio = $("#campaign-workflow-studio");
+    var studioApi = $studio.data("workflowStudio");
+    if (!studioApi || !campaignWorkflowState.ready) {
+      setCampaignMessage("#campaign-editor-error", "Wait for the customer journey workflow to finish loading before saving.");
+      return;
     }
+    var workflow;
+    try {
+      workflow = studioApi.getWorkflow();
+    } catch (error) {
+      setCampaignMessage("#campaign-editor-error", "The customer journey workflow is not ready: " + error.message);
+      return;
+    }
+    if (!workflow || !workflow.root) {
+      setCampaignMessage("#campaign-editor-error", "Add an Event trigger to the customer journey before saving.");
+      return;
+    }
+    var request = campaignId
+      ? api("/campaigns/" + encodeURIComponent(campaignId) + "/with-workflow", {
+          campaign: payload,
+          workflow: workflow
+        }, "PATCH")
+      : api("/campaigns/with-workflow", {
+          campaign: payload,
+          workflow: workflow
+        }, "POST");
     $("#btn-campaign-editor-save").prop("disabled", true).text("Saving...");
-    request.done(function (campaign) {
-      var id = campaign.campaign_id || campaignId;
+    request.done(function (response) {
+      var id = response.campaign.campaign_id || campaignId;
       C360.router.navigate("/campaigns/" + encodeURIComponent(id));
     }).fail(function (xhr) {
       setCampaignMessage("#campaign-editor-error", campaignError(xhr));
@@ -948,10 +963,52 @@ window.C360 = window.C360 || {};
     setCampaignMessage("#campaign-details-error", "");
     $("#campaign-details-loading").removeClass("hidden");
     $("#campaign-details-content").addClass("hidden");
-    $.when(api("/campaigns/" + encodeURIComponent(campaignId)), api("/campaigns/" + encodeURIComponent(campaignId) + "/history"))
-      .done(function (campaignResult, historyResult) {
+    $.when(
+      api("/campaigns/" + encodeURIComponent(campaignId)),
+      api("/campaigns/" + encodeURIComponent(campaignId) + "/history"),
+      api("/campaigns/" + encodeURIComponent(campaignId) + "/workflow")
+    )
+      .done(function (campaignResult, historyResult, workflowResult) {
         var campaign = campaignResult[0];
         renderDetailMetadata(campaign);
+        var savedWorkflow = workflowResult[0];
+        var workflow = savedWorkflow && savedWorkflow.workflow;
+        var segmentId = campaign.segment_id ||
+          (workflow && workflow.root && workflow.root.config && workflow.root.config.segment_id);
+        var $workflowStudio = $("#campaign-details-workflow-studio").empty();
+        $("#campaign-details-workflow-version").empty();
+        if (!workflow) {
+          $("<div>")
+            .attr("role", "status")
+            .addClass("rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500")
+            .text("No customer journey workflow has been saved for this campaign yet.")
+            .appendTo($workflowStudio);
+        } else if (!workflow.root || !segmentId) {
+          $("<div>")
+            .attr("role", "alert")
+            .addClass("rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700")
+            .text("The saved customer journey workflow is missing its audience or has an invalid structure.")
+            .appendTo($workflowStudio);
+        } else {
+          $workflowStudio.workflowStudio({
+            title: campaign.name || "Customer Engagement Workflow",
+            workflow: workflow,
+            segmentId: String(segmentId),
+            segmentName: campaign.segment_name || "Campaign audience",
+            segments: [{
+              segment_id: String(segmentId),
+              segment_name: campaign.segment_name || "Campaign audience",
+              description: ""
+            }],
+            readOnly: true,
+            loadProfiles: function () {
+              return [];
+            }
+          });
+          $("#campaign-details-workflow-version").text(
+            "Version " + savedWorkflow.workflow_version
+          );
+        }
         loadDetailAudience(campaign.segment_id);
         renderDetailHistory(historyResult[0]);
         $("#campaign-details-title").text(campaign.name || "Campaign details");
