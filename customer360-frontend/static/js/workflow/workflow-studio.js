@@ -1024,8 +1024,8 @@
     }).css({
       display: "block",
       width: "100%",
-      height: "clamp(560px, 78vh, 920px)",
-      minHeight: "560px",
+      height: "clamp(720px, 88vh, 1200px)",
+      minHeight: "720px",
       border: 0,
     });
     $frame.on("load", function () {

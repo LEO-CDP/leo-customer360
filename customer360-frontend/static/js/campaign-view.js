@@ -548,10 +548,32 @@ window.C360 = window.C360 || {};
       currency: fieldValue("#campaign-field-currency").trim().toUpperCase() || "VND",
       segment_id: fieldValue("#campaign-field-segment").trim() || null,
       template_id: fieldValue("#campaign-field-template").trim() || null,
-      objective: fieldValue("#campaign-field-objective").trim() || null
+      objective: fieldValue("#campaign-field-objective").trim() || null,
+      strategy_summary: fieldValue("#campaign-field-strategy").trim() || null
     };
     if (includeTenant) payload.tenant_id = tenantId();
     return payload;
+  }
+
+  function populateCampaignObjectiveOptions(selectedObjective) {
+    var $objective = $("#campaign-field-objective");
+    var options = JSON.parse($objective.attr("data-objectives"));
+    if (!Array.isArray(options) || options.some(function (option) {
+      return typeof option !== "string" || !option.trim();
+    })) {
+      throw new TypeError("Campaign objective options must be a JSON array of non-empty strings.");
+    }
+
+    $objective.find("option:not([value=''])").remove();
+    options.forEach(function (option) {
+      $("<option>").val(option).text(option).appendTo($objective);
+    });
+
+    var selected = selectedObjective == null ? "" : String(selectedObjective);
+    if (selected && options.indexOf(selected) === -1) {
+      $("<option>").val(selected).text(selected).appendTo($objective);
+    }
+    $objective.val(selected);
   }
 
   function fillCampaignEditor(campaign) {
@@ -575,7 +597,7 @@ window.C360 = window.C360 || {};
     $("#campaign-field-currency").val(campaign.currency || "VND");
     $("#campaign-field-segment").val(campaign.segment_id || "");
     $("#campaign-field-template").val(campaign.template_id || "").prop("disabled", !!campaign.campaign_id);
-    $("#campaign-field-objective").val(campaign.objective || "");
+    populateCampaignObjectiveOptions(campaign.objective);
     $("#campaign-field-strategy").val(campaign.strategy_summary || "");
     loadSelectedSegment(campaign.segment_id, false, !campaign.campaign_id);
   }
@@ -632,6 +654,7 @@ window.C360 = window.C360 || {};
       delete general.segment_id;
       delete general.template_id;
       delete general.objective;
+      delete general.strategy_summary;
       request = api("/campaigns/" + encodeURIComponent(campaignId) + "/draft", {
         segment_id: payload.segment_id || null,
         objective: payload.objective,
