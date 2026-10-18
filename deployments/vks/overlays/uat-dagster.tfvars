@@ -10,7 +10,7 @@
 cluster_id = "k8s-1f88905a-95d5-422e-9d18-a6363d3cfd51"
 project_id = "pro-8986f5c6-02ca-4647-be9a-4070bb100559"
 
-# VKS stamps every node with vks.vngcloud.vn/nodegroup=<this name>; the Dagster pod selects on it.
+# After creation, label its node c360.pool=dagster; the Dagster pod selects on that label.
 node_group_name = "c360-uat-dagster"
 ssh_key_name    = "c360-uat-dagster-key"
 
