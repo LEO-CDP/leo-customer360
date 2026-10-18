@@ -246,7 +246,7 @@ services:
   #    docker-compose.yml -- production uses the real S3 bucket instead.
   # ---------------------------------------------------------------------------
   minio:
-    image: minio/minio:${MINIO_VERSION:-RELEASE.2025-09-07T16-13-09Z}
+    image: pgsty/silo:${MINIO_VERSION:-RELEASE.2026-09-16T00-00-00Z}
     container_name: customer360-minio
     restart: unless-stopped
     <<: *default-hardening
@@ -293,7 +293,7 @@ services:
   #    exists as soon as the stack comes up.
   # ---------------------------------------------------------------------------
   minio-init:
-    image: minio/mc:${MINIO_MC_VERSION:-RELEASE.2025-08-13T08-35-41Z}
+    image: pgsty/silo:${MINIO_MC_VERSION:-RELEASE.2026-09-16T00-00-00Z}
     container_name: customer360-minio-init
     restart: "no"
     <<: *default-hardening

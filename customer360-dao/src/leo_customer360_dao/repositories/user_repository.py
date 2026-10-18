@@ -12,11 +12,18 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_
+
+from leo_customer360_dao.config import settings
+from sqlalchemy import and_, bindparam, text
 
 from leo_customer360_dao.cache import get_redis_client
 from leo_customer360_dao.models.system import SysUser, SysUserInfo
-from leo_customer360_dao.schemas.user import UserCreate, UserResponse, UserUpdate
+from leo_customer360_dao.schemas.user import (
+    SYSTEM_ROLE_DEFINITIONS,
+    UserCreate,
+    UserResponse,
+    UserUpdate,
+)
 from leo_customer360_dao.utils.security import hash_password
 
 logger = logging.getLogger(__name__)
@@ -53,12 +60,13 @@ class UserRepository:
             logger.warning("Cached user profile payload was not valid JSON", exc_info=True)
             return None
 
-    def _cache_user(self, user: SysUser) -> None:
+    def _cache_user(self, user: SysUser, payload: Optional[dict] = None) -> None:
         client = get_redis_client()
         if client is None:
             return
         try:
-            payload = UserResponse.model_validate(user).model_dump(mode="json")
+            if payload is None:
+                payload = self._serialize_user(user)
             client.set(
                 _user_cache_key(user.user_id, user.tenant_id),
                 json.dumps(payload),
@@ -66,6 +74,125 @@ class UserRepository:
             )
         except Exception:
             logger.warning("Failed to cache user profile in Redis", exc_info=True)
+
+    def get_roles_for_users(self, tenant_id: UUID, user_ids: list[UUID]) -> dict[UUID, list[str]]:
+        """Return active tenant role names keyed by user ID."""
+        if not user_ids:
+            return {}
+
+        statement = text(
+            f"""
+            SELECT ur.user_id, COALESCE(NULLIF(r.role_name, ''), r.role_code) AS role_label
+            FROM {settings.db_schema}.sys_user_role ur
+            JOIN {settings.db_schema}.sys_role r
+              ON r.role_id = ur.role_id
+             AND r.tenant_id = ur.tenant_id
+            WHERE ur.tenant_id = CAST(:tenant_id AS uuid)
+              AND ur.user_id IN :user_ids
+              AND r.status = 'ACTIVE'
+            ORDER BY ur.user_id, lower(COALESCE(NULLIF(r.role_name, ''), r.role_code))
+            """
+        ).bindparams(bindparam("user_ids", expanding=True))
+        rows = self.db.execute(
+            statement,
+            {"tenant_id": str(tenant_id), "user_ids": user_ids},
+        ).mappings().all()
+
+        roles_by_user: dict[UUID, list[str]] = {user_id: [] for user_id in user_ids}
+        for row in rows:
+            user_id = UUID(str(row["user_id"]))
+            role_label = str(row["role_label"] or "").strip()
+            if role_label and user_id in roles_by_user and role_label not in roles_by_user[user_id]:
+                roles_by_user[user_id].append(role_label)
+        return roles_by_user
+
+    def get_role_codes_for_user(self, tenant_id: UUID, user_id: UUID) -> list[str]:
+        """Return active role codes assigned to one tenant user."""
+        rows = self.db.execute(
+            text(
+                f"""
+                SELECT r.role_code
+                FROM {settings.db_schema}.sys_user_role ur
+                JOIN {settings.db_schema}.sys_role r
+                  ON r.role_id = ur.role_id
+                 AND r.tenant_id = ur.tenant_id
+                WHERE ur.tenant_id = CAST(:tenant_id AS uuid)
+                  AND ur.user_id = CAST(:user_id AS uuid)
+                  AND r.status = 'ACTIVE'
+                ORDER BY r.role_code
+                """
+            ),
+            {"tenant_id": str(tenant_id), "user_id": str(user_id)},
+        ).scalars().all()
+        return [str(role_code) for role_code in rows]
+
+    def ensure_system_roles(self, tenant_id: UUID) -> None:
+        """Create or refresh the canonical role definitions for one tenant."""
+        statement = text(
+            f"""
+            INSERT INTO {settings.db_schema}.sys_role
+                (tenant_id, role_code, role_name, description, is_system_role, status)
+            VALUES
+                (:tenant_id, :role_code, :role_name, :description, TRUE, 'ACTIVE')
+            ON CONFLICT (tenant_id, role_code)
+            DO UPDATE SET
+                role_name = EXCLUDED.role_name,
+                description = EXCLUDED.description,
+                is_system_role = TRUE,
+                status = 'ACTIVE',
+                updated_at = now()
+            """
+        )
+        for role in SYSTEM_ROLE_DEFINITIONS:
+            self.db.execute(
+                statement,
+                {
+                    "tenant_id": str(tenant_id),
+                    "role_code": role["role_code"],
+                    "role_name": role["role_name"],
+                    "description": role["description"],
+                },
+            )
+
+    def replace_user_roles(self, tenant_id: UUID, user_id: UUID, role_codes: list[str]) -> None:
+        """Replace a user's active role assignments inside the current transaction."""
+        self.ensure_system_roles(tenant_id)
+        self.db.execute(
+            text(
+                f"""
+                DELETE FROM {settings.db_schema}.sys_user_role
+                WHERE tenant_id = CAST(:tenant_id AS uuid)
+                  AND user_id = CAST(:user_id AS uuid)
+                """
+            ),
+            {"tenant_id": str(tenant_id), "user_id": str(user_id)},
+        )
+        for role_code in role_codes:
+            self.db.execute(
+                text(
+                    f"""
+                    INSERT INTO {settings.db_schema}.sys_user_role (tenant_id, user_id, role_id)
+                    SELECT CAST(:tenant_id AS uuid), CAST(:user_id AS uuid), role_id
+                    FROM {settings.db_schema}.sys_role
+                    WHERE tenant_id = CAST(:tenant_id AS uuid)
+                      AND role_code = :role_code
+                      AND status = 'ACTIVE'
+                    ON CONFLICT DO NOTHING
+                    """
+                ),
+                {
+                    "tenant_id": str(tenant_id),
+                    "user_id": str(user_id),
+                    "role_code": role_code,
+                },
+            )
+        self.invalidate_user_cache(user_id, tenant_id)
+
+    def _serialize_user(self, user: SysUser) -> dict:
+        """Serialize a user profile with tenant-scoped role labels."""
+        payload = UserResponse.model_validate(user).model_dump(mode="json")
+        payload["roles"] = self.get_roles_for_users(user.tenant_id, [user.user_id]).get(user.user_id, [])
+        return payload
 
     def invalidate_user_cache(self, user_id: UUID, tenant_id: UUID) -> None:
         """Evicts the cached profile for a user. Call after any write to sys_user/sys_userinfo."""
@@ -104,8 +231,9 @@ class UserRepository:
         if user is None:
             return None
 
-        self._cache_user(user)
-        return UserResponse.model_validate(user).model_dump(mode="json")
+        payload = self._serialize_user(user)
+        self._cache_user(user, payload)
+        return payload
 
     def get_user_by_username(self, username: str, tenant_id: UUID) -> Optional[SysUser]:
         """Fetch a user by username within a tenant (enforcing lowercase check)."""
@@ -188,6 +316,7 @@ class UserRepository:
     def update_user(self, user: SysUser, user_in: UserUpdate) -> SysUser:
         """Update an existing user."""
         update_data = user_in.model_dump(exclude_unset=True)
+        update_data.pop("roles", None)
         
         # Ensure lowercase for username/email
         if "username" in update_data and update_data["username"]:

@@ -4,7 +4,8 @@
 
 Currently seeds a small set of default segmentation tags (``cdp_segments``)
 for every tenant that doesn't have any yet, so a fresh install already has a
-usable Audience Builder starting point instead of an empty segment list.
+usable Audience Builder starting point instead of an empty segment list. It
+also ensures the development root user has the canonical ``root`` RBAC role.
 
 Called once from ``app.py``'s startup eve-nt. Safe to call on every app
 startup: it's idempotent (skips tenants that already have >= 1 segment, and
@@ -209,6 +210,40 @@ def seed_root_admin_user(db: Session, *, tenant_id: uuid.UUID = DEFAULT_TENANT_I
         user_id = inserted_user[0] if inserted_user else db.execute(
             select(SysUser.user_id).where(SysUser.tenant_id == tenant_id, SysUser.username == username)
         ).scalar_one()
+
+        schema = settings.db_schema
+        db.execute(
+            text(
+                f"""
+                INSERT INTO {schema}.sys_role
+                    (tenant_id, role_code, role_name, description, is_system_role, status)
+                VALUES
+                    (:tenant_id, 'root', 'Root / Super Admin',
+                     'Unrestricted platform administration and tenant RBAC control.',
+                     TRUE, 'ACTIVE')
+                ON CONFLICT (tenant_id, role_code)
+                DO UPDATE SET
+                    role_name = EXCLUDED.role_name,
+                    description = EXCLUDED.description,
+                    is_system_role = TRUE,
+                    status = 'ACTIVE',
+                    updated_at = now()
+                """
+            ),
+            {"tenant_id": str(tenant_id)},
+        )
+        db.execute(
+            text(
+                f"""
+                INSERT INTO {schema}.sys_user_role (tenant_id, user_id, role_id)
+                SELECT :tenant_id, :user_id, role_id
+                FROM {schema}.sys_role
+                WHERE tenant_id = :tenant_id AND role_code = 'root'
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {"tenant_id": str(tenant_id), "user_id": str(user_id)},
+        )
 
         db.execute(
             pg_insert(SysUserInfo)

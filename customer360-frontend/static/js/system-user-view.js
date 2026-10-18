@@ -23,12 +23,95 @@ window.C360 = window.C360 || {};
   };
   function statusBadgeClass(v) { return STATUS_BADGE_CLASSES[v] || "bg-slate-100 text-slate-500"; }
 
+  var roleOptions = [];
+
+  function isRootUser() {
+    var user = C360.config.currentUser();
+    var roles = user.roles || [];
+    return !!user.isRoot || roles.some(function (role) {
+      return String(role).toLowerCase() === "root";
+    });
+  }
+
+  function renderRoleOptions() {
+    var $select = $("#system-user-add-roles").empty();
+    if (!roleOptions.length) {
+      $("<option>").attr("value", "").prop("disabled", true).text("No roles available").appendTo($select);
+      $select.prop("disabled", true);
+      return;
+    }
+    var rootAssignable = isRootUser();
+    roleOptions.forEach(function (role) {
+      $("<option>")
+        .attr({ value: role.role_code, title: role.description })
+        .prop("disabled", role.role_code === "root" && !rootAssignable)
+        .text(role.role_name)
+        .appendTo($select);
+    });
+    $select.prop("disabled", false);
+  }
+
+  function selectedRoles() {
+    return ($("#system-user-add-roles").val() || []).map(function (role) { return String(role); });
+  }
+
+  function setSelectedRoles(roles) {
+    var values = Array.isArray(roles) ? roles : [];
+    var selected = values.map(function (value) {
+      var needle = String(value || "").toLowerCase();
+      var option = roleOptions.filter(function (candidate) {
+        return String(candidate.role_code).toLowerCase() === needle ||
+          String(candidate.role_name).toLowerCase() === needle;
+      })[0];
+      return option ? option.role_code : null;
+    }).filter(Boolean);
+    $("#system-user-add-roles").val(selected);
+  }
+
+  function loadRoleOptions() {
+    return api("/users/roles")
+      .done(function (roles) {
+        roleOptions = Array.isArray(roles) ? roles : [];
+        renderRoleOptions();
+      })
+      .fail(function (xhr) {
+        roleOptions = [];
+        renderRoleOptions();
+        showApiError("loading system user roles", xhr);
+      });
+  }
+
+  function canManageUsers() {
+    return C360.config.isAdmin();
+  }
+
+  function syncManagementControls() {
+    $("#btn-system-user-add").toggleClass("hidden", !canManageUsers());
+  }
+
+  function userRoles(user) {
+    var roles = Array.isArray(user.roles) ? user.roles : [];
+    return roles
+      .map(function (role) { return String(role || "").trim(); })
+      .filter(function (role, index, values) { return role && values.indexOf(role) === index; });
+  }
+
+  function roleBadgeClass(roles) {
+    var normalized = roles.join(" ").toLowerCase();
+    return /\b(admin|administrator|owner|root|manager)\b/.test(normalized)
+      ? "bg-violet-100 text-violet-700"
+      : "bg-slate-100 text-slate-600";
+  }
+
   function rowVm(u) {
+    var roles = userRoles(u);
     return $.extend({}, u, {
       initials: fmt.initials(u.full_name || u.username),
       subLabel: u.email || "\u2014",
       statusLabel: fmt.titleCase(u.status),
       statusBadgeClass: statusBadgeClass(u.status),
+      roleLabel: roles.length ? roles.join(", ") : "No role assigned",
+      roleBadgeClass: roleBadgeClass(roles),
       jobLabel: u.job_title || "\u2014",
       departmentLabel: u.department || "\u2014",
       lastLoginLabel: fmt.dateTime(u.last_login_at),
@@ -42,6 +125,7 @@ window.C360 = window.C360 || {};
         label: "User", type: "identity", nameField: "full_name", subField: "username", subStyle: "tag",
         avatarField: "initials", avatarBg: "bg-violet-100", avatarColor: "text-violet-700"
       },
+      { label: "Role", type: "badge", field: "roleLabel", classField: "roleBadgeClass" },
       { label: "Email", field: "subLabel" },
       { label: "Job Title", field: "jobLabel" },
       { label: "Department", field: "departmentLabel" },
@@ -51,7 +135,9 @@ window.C360 = window.C360 || {};
     rowVm: rowVm,
     rowId: function (vm) { return vm.user_id; },
     rowClickable: false, // no dedicated detail page -- Edit modal covers view+edit+deactivate
-    onEdit: function (id) { openEditSystemUserModal(id); },
+    onEdit: function (id) {
+      if (canManageUsers()) openEditSystemUserModal(id);
+    },
     editLabel: "Edit",
     resourceLabel: "system user",
     clientSide: true,
@@ -64,7 +150,8 @@ window.C360 = window.C360 || {};
         var needle = value.toLowerCase();
         return (vm.username || "").toLowerCase().indexOf(needle) !== -1 ||
           (vm.email || "").toLowerCase().indexOf(needle) !== -1 ||
-          (vm.full_name || "").toLowerCase().indexOf(needle) !== -1;
+          (vm.full_name || "").toLowerCase().indexOf(needle) !== -1 ||
+          (vm.roleLabel || "").toLowerCase().indexOf(needle) !== -1;
       },
       status: function (vm, value) { return vm.status === value; }
     },
@@ -81,13 +168,18 @@ window.C360 = window.C360 || {};
 
   var systemUsersById = {}; // last-fetched rows, keyed by user_id -- backs the Edit modal
 
-  function load() { return dtv.load(false); }
+  function load() {
+    syncManagementControls();
+    loadRoleOptions();
+    return dtv.load(false);
+  }
 
   // Non-null while the modal is editing an existing row (its user_id) --
   // null means "creating a new row".
   var editingUserId = null;
 
   function openAddSystemUserModal() {
+    if (!canManageUsers()) return;
     editingUserId = null;
     $("#system-user-form-title").text("Add System User");
     $("#system-user-form-subtitle").text("Creates a new row in the sys_user table");
@@ -101,6 +193,7 @@ window.C360 = window.C360 || {};
     $("#system-user-add-job-title").val("");
     $("#system-user-add-department").val("");
     $("#system-user-add-status").val("ACTIVE");
+    setSelectedRoles([]);
     $("#system-user-password-fields").removeClass("hidden");
     $("#system-user-add-password").val("");
     $("#system-user-add-password-confirm").val("");
@@ -108,6 +201,7 @@ window.C360 = window.C360 || {};
   }
 
   function openEditSystemUserModal(userId) {
+    if (!canManageUsers()) return;
     var u = systemUsersById[userId];
     if (!u) return;
     editingUserId = userId;
@@ -124,6 +218,7 @@ window.C360 = window.C360 || {};
     $("#system-user-add-job-title").val(u.job_title || "");
     $("#system-user-add-department").val(u.department || "");
     $("#system-user-add-status").val(u.status);
+    setSelectedRoles(u.roles || []);
     // Password is only settable on create -- UserUpdate has no such field.
     $("#system-user-password-fields").addClass("hidden");
     $("#system-user-add-password").val("");
@@ -165,7 +260,8 @@ window.C360 = window.C360 || {};
       phone: $.trim($("#system-user-add-phone").val()) || null,
       job_title: $.trim($("#system-user-add-job-title").val()) || null,
       department: $.trim($("#system-user-add-department").val()) || null,
-      status: $("#system-user-add-status").val()
+      status: $("#system-user-add-status").val(),
+      roles: selectedRoles()
     };
 
     var request;

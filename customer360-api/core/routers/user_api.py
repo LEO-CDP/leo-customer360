@@ -1,6 +1,7 @@
-"""API router for user management endpoints (CRUD, SSO linking, profile access).
+"""API router for user management endpoints (CRUD, RBAC roles, SSO linking, profile access).
 
-Enforces multi-tenant isolation: users can only access/modify their own tenant's users.
+Enforces multi-tenant isolation: root and tenant-admin users can access/modify
+their own tenant's users and role assignments.
 Respects auth_middleware.tenant_id and user_id from request.state, which is set
 either by the dev JWT / Keycloak token's tenant_id/user_id claims, or (dev mode,
 no token) the X-Tenant-Id/X-User-Id headers -- see core/auth.py::auth_middleware
@@ -15,12 +16,43 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
+from core.auth import get_current_roles, require_user_management_admin
 from core.database import SessionLocal
 from core.repositories.user_repository import UserRepository
-from leo_customer360_dao.schemas.user import UserCreate, UserUpdate, UserResponse, UserListResponse
+from leo_customer360_dao.schemas.user import (
+    SYSTEM_ROLE_DEFINITIONS,
+    UserCreate,
+    UserListResponse,
+    UserResponse,
+    UserRoleOption,
+    UserRolesUpdate,
+    UserUpdate,
+)
 
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+
+def _validate_role_assignment(
+    request: Request,
+    repository: UserRepository,
+    tenant_id: UUID,
+    user_id: UUID,
+    requested_roles: list[str],
+) -> None:
+    """Protect the root role and prevent a root user from self-demoting."""
+    caller_roles = {role.lower() for role in get_current_roles(request)}
+    is_root = "root" in caller_roles
+    current_roles = {role.lower() for role in repository.get_role_codes_for_user(tenant_id, user_id)}
+
+    if "root" in requested_roles and not is_root:
+        raise HTTPException(status_code=403, detail="Only a root user can assign the root role")
+    if "root" in current_roles and not is_root:
+        raise HTTPException(status_code=403, detail="Only a root user can change a root user's roles")
+
+    current_user_id = getattr(request.state, "user_id", None)
+    if current_user_id and UUID(str(current_user_id)) == user_id and "root" in current_roles and "root" not in requested_roles:
+        raise HTTPException(status_code=409, detail="A root user cannot remove their own root role")
 
 
 # =============================================================================
@@ -97,6 +129,16 @@ async def get_current_user_profile(
     return current_user
 
 
+@router.get("/roles", response_model=list[UserRoleOption])
+async def list_available_roles(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+) -> list[UserRoleOption]:
+    """List the canonical roles available to tenant user management."""
+    require_user_management_admin(request)
+    return [UserRoleOption(**role) for role in SYSTEM_ROLE_DEFINITIONS]
+
+
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     user_in: UserCreate,
@@ -108,9 +150,10 @@ async def create_user(
     """
     Create a new user in the current tenant.
     
-    Only authenticated users can create users (pre-provisioning for future SSO login).
-    Username and email must be unique within the tenant.
+    Only root or tenant-admin users can create users (pre-provisioning for future
+    SSO login). Username and email must be unique within the tenant.
     """
+    require_user_management_admin(request)
     repo = UserRepository(db)
     
     # Check for duplicate username or email
@@ -131,8 +174,13 @@ async def create_user(
     
     try:
         new_user = repo.create_user(tenant_id, user_in)
+        _validate_role_assignment(request, repo, tenant_id, new_user.user_id, list(user_in.roles))
+        repo.replace_user_roles(tenant_id, new_user.user_id, list(user_in.roles))
         db.commit()
-        return new_user
+        return repo.get_user_by_id_cached(new_user.user_id, tenant_id)
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -144,11 +192,13 @@ async def create_user(
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: UUID,
+    request: Request,
     db: Session = Depends(get_db_session),
     current_user: dict = Depends(get_current_user),
     tenant_id: UUID = Depends(get_tenant_id),
 ) -> Any:
     """Fetch a specific user by ID (within current tenant). Redis read-through cached."""
+    require_user_management_admin(request)
     repo = UserRepository(db)
     user = repo.get_user_by_id_cached(user_id, tenant_id)
     
@@ -163,6 +213,7 @@ async def get_user(
 
 @router.get("", response_model=UserListResponse)
 async def list_users(
+    request: Request,
     skip: int = 0,
     limit: int = 100,
     status_filter: Optional[str] = None,
@@ -171,6 +222,7 @@ async def list_users(
     tenant_id: UUID = Depends(get_tenant_id),
 ) -> Any:
     """List all users in the current tenant (paginated)."""
+    require_user_management_admin(request)
     if skip < 0 or limit < 1 or limit > 1000:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -184,12 +236,23 @@ async def list_users(
     
     # Get paginated results
     items = repo.list_users(tenant_id, status=status_filter, skip=skip, limit=limit)
-    
+    roles_by_user = repo.get_roles_for_users(
+        tenant_id,
+        [user.user_id for user in items],
+    )
+    response_items = []
+    for user in items:
+        response_items.append(
+            UserResponse.model_validate(user).model_copy(
+                update={"roles": roles_by_user.get(user.user_id, [])}
+            )
+        )
+
     return UserListResponse(
         total=total,
         skip=skip,
         limit=limit,
-        items=items,
+        items=response_items,
     )
 
 
@@ -197,11 +260,13 @@ async def list_users(
 async def update_user(
     user_id: UUID,
     user_update: UserUpdate,
+    request: Request,
     db: Session = Depends(get_db_session),
     current_user: dict = Depends(get_current_user),
     tenant_id: UUID = Depends(get_tenant_id),
 ) -> Any:
     """Update user profile (only mutable fields: name, job_title, department, etc.)."""
+    require_user_management_admin(request)
     repo = UserRepository(db)
     user = repo.get_user_by_id(user_id, tenant_id)
     
@@ -213,8 +278,14 @@ async def update_user(
     
     try:
         updated_user = repo.update_user(user, user_update)
+        if user_update.roles is not None:
+            _validate_role_assignment(request, repo, tenant_id, user_id, list(user_update.roles))
+            repo.replace_user_roles(tenant_id, user_id, list(user_update.roles))
         db.commit()
-        return updated_user
+        return repo.get_user_by_id_cached(updated_user.user_id, tenant_id)
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -226,6 +297,7 @@ async def update_user(
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: UUID,
+    request: Request,
     hard_delete: bool = False,
     db: Session = Depends(get_db_session),
     current_user: dict = Depends(get_current_user),
@@ -237,6 +309,7 @@ async def delete_user(
     Soft delete: marks user as INACTIVE.
     Hard delete: removes user and all linked SSO identities from database.
     """
+    require_user_management_admin(request)
     repo = UserRepository(db)
     user = repo.get_user_by_id(user_id, tenant_id)
     
@@ -260,14 +333,51 @@ async def delete_user(
         ) from e
 
 
+@router.put("/{user_id}/roles", response_model=UserResponse)
+async def replace_user_roles(
+    user_id: UUID,
+    payload: UserRolesUpdate,
+    request: Request,
+    db: Session = Depends(get_db_session),
+    current_user: dict = Depends(get_current_user),
+    tenant_id: UUID = Depends(get_tenant_id),
+) -> Any:
+    """Replace one tenant user's RBAC roles; root assignment is root-only."""
+    require_user_management_admin(request)
+    repo = UserRepository(db)
+    user = repo.get_user_by_id(user_id, tenant_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User '{user_id}' not found in this workspace",
+        )
+
+    try:
+        _validate_role_assignment(request, repo, tenant_id, user_id, list(payload.roles))
+        repo.replace_user_roles(tenant_id, user_id, list(payload.roles))
+        db.commit()
+        return repo.get_user_by_id_cached(user_id, tenant_id)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update user roles: {str(e)}",
+        ) from e
+
+
 @router.get("/{user_id}/sso-identities", response_model=list)
 async def get_user_sso_identities(
     user_id: UUID,
+    request: Request,
     db: Session = Depends(get_db_session),
     current_user: dict = Depends(get_current_user),
     tenant_id: UUID = Depends(get_tenant_id),
 ) -> Any:
     """List all SSO identities linked to a user."""
+    require_user_management_admin(request)
     repo = UserRepository(db)
     user = repo.get_user_by_id(user_id, tenant_id)
     

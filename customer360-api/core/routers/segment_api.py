@@ -116,7 +116,7 @@ segments_router = build_crud_router(
     update_hook=_trigger_segment_recompute_after_update,
 )
 
-PLATFORM_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin"}
+PLATFORM_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "root"}
 TENANT_ADMIN_ROLES = PLATFORM_ADMIN_ROLES | {"tenant_admin", "admin"}
 
 

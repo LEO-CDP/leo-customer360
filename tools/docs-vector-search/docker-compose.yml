@@ -105,6 +105,10 @@ services:
     restart: unless-stopped
     networks:
       - customer360-network
+    deploy:
+      resources:
+        limits:
+          memory: 120MiB
     command:
       - redis-server
       - --port

@@ -108,6 +108,26 @@ class AuthRepository:
         )
         return user, password_hash
 
+    def get_user_roles(self, db, user_id: UUID, tenant_id: UUID) -> list[str]:
+        """Return active tenant RBAC role codes for a user."""
+        rows = db.execute(
+            text(
+                f"""
+                SELECT r.role_code
+                FROM {settings.db_schema}.sys_user_role ur
+                JOIN {settings.db_schema}.sys_role r
+                  ON r.role_id = ur.role_id
+                 AND r.tenant_id = ur.tenant_id
+                WHERE ur.tenant_id = :tenant_id
+                  AND ur.user_id = :user_id
+                  AND r.status = 'ACTIVE'
+                ORDER BY r.role_code
+                """
+            ),
+            {"tenant_id": str(tenant_id), "user_id": str(user_id)},
+        ).scalars().all()
+        return [str(role_code) for role_code in rows]
+
     def update_last_login(self, db, user_id: UUID) -> None:
         """Stamp the last successful local login for a user."""
         db.execute(

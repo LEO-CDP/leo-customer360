@@ -18,7 +18,7 @@
       </div>
       <div>
         <h1 class="text-base font-bold text-slate-900 tracking-tight">System Users</h1>
-        <p class="text-xs text-slate-400 mt-0.5">Staff/admin accounts (sys_user) for this tenant</p>
+        <p class="text-xs text-slate-400 mt-0.5">Staff/admin accounts and assigned tenant roles</p>
       </div>
     </div>
 
@@ -150,6 +150,14 @@
           <option value="ACTIVE">Active</option>
           <option value="INACTIVE">Inactive</option>
         </select>
+      </div>
+
+      <div>
+        <label for="system-user-add-roles" class="block text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">Assigned roles</label>
+        <select id="system-user-add-roles" multiple size="6" aria-describedby="system-user-roles-help" class="w-full rounded-xl border border-slate-200/80 bg-slate-50/50 px-3 py-2 text-xs text-slate-700 shadow-sm outline-none transition-all focus:border-violet-500 focus:bg-white focus:ring-2 focus:ring-violet-500/20">
+          <option value="" disabled>Loading roles...</option>
+        </select>
+        <p id="system-user-roles-help" class="mt-1.5 text-[11px] text-slate-400">Select one or more roles. Root / Super Admin can assign the root role; the API enforces this rule.</p>
       </div>
 
       <div id="system-user-add-error" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3.5 py-2.5"></div>

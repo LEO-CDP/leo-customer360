@@ -482,6 +482,44 @@ class CampaignDraftRepository:
             "member_count": segment.member_count,
         }
 
+    def submit_for_review(
+        self,
+        tenant_id: uuid.UUID,
+        campaign_id: uuid.UUID,
+        submitter_id: uuid.UUID,
+    ) -> Campaign:
+        """Move a complete Draft campaign into the admin review queue."""
+        campaign = self.get_campaign(tenant_id, campaign_id)
+        if campaign.approval_status != APPROVAL_STATUS_DRAFT:
+            raise CampaignDraftValidationError(
+                f"Campaign '{campaign_id}' is not Draft (current approval_status: "
+                f"{campaign.approval_status}); only Draft campaigns can be submitted"
+            )
+        if campaign.segment_id is None:
+            raise CampaignDraftValidationError("A campaign must have a target segment before submission")
+        if campaign.workflow_id is None or campaign.workflow_version is None:
+            raise CampaignDraftValidationError("A campaign must have a saved workflow before submission")
+
+        expected_updated_at = campaign.updated_at
+        self._check_not_concurrently_modified(campaign, expected_updated_at)
+        campaign.approval_status = APPROVAL_STATUS_IN_REVIEW
+        campaign.updated_at = datetime.now(timezone.utc)
+        self.session.add(
+            SysAuditLog(
+                tenant_id=tenant_id,
+                user_id=submitter_id,
+                action="SUBMIT_FOR_REVIEW",
+                resource_type="crm_campaign",
+                resource_id=str(campaign_id),
+                created_at=_utc_now_naive(),
+                before_data={"approval_status": APPROVAL_STATUS_DRAFT},
+                after_data={"approval_status": APPROVAL_STATUS_IN_REVIEW},
+            )
+        )
+        self.session.commit()
+        self.session.refresh(campaign)
+        return campaign
+
     def approve(self, tenant_id: uuid.UUID, campaign_id: uuid.UUID, reviewer_id: uuid.UUID) -> Campaign:
         """Re-validates linked content items before recording approval."""
         campaign = self.get_campaign(tenant_id, campaign_id)

@@ -128,14 +128,15 @@ async def login(payload: LoginRequest, request: Request) -> Any:
         finally:
             db.close()
 
+        root_roles = ["root"]
         return LoginResponse(
             user_id=root_user_id,
             tenant_id=tenant_id,
             username=settings.default_root_username,
             full_name="Root Administrator",
-            roles=["root"],
+            roles=root_roles,
             is_root=True,
-            **_issue_token(tenant_id, root_user_id, settings.default_root_username, ["root"]),
+            **_issue_token(tenant_id, root_user_id, settings.default_root_username, root_roles),
         )
 
     db = SessionLocal()
@@ -151,6 +152,7 @@ async def login(payload: LoginRequest, request: Request) -> Any:
             )
 
         auth_repo.update_last_login(db, user.user_id)
+        user_roles = auth_repo.get_user_roles(db, user.user_id, tenant_id) or ["user"]
         db.commit()
 
         return LoginResponse(
@@ -159,9 +161,9 @@ async def login(payload: LoginRequest, request: Request) -> Any:
             username=user.username,
             email=user.email,
             full_name=user.full_name,
-            roles=["user"],
+            roles=user_roles,
             is_root=False,
-            **_issue_token(tenant_id, user.user_id, user.username, ["user"]),
+            **_issue_token(tenant_id, user.user_id, user.username, user_roles),
         )
     except HTTPException:
         db.rollback()

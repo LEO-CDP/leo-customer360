@@ -663,13 +663,16 @@ window.C360 = window.C360 || {};
     return isNaN(value) ? 90 : value;
   }
 
-  // Frontend-only UX gate (show/hide edit controls) -- the API independently
-  // re-checks the 'admin' role server-side on the actual mutation (fail-closed;
+  // Frontend-only UX gate (show/hide admin controls) -- the API independently
+  // re-checks the admin role server-side on the actual mutation (fail-closed;
   // see customer360-api/core/auth.py::require_admin), so this is never the
   // only line of defense.
   function isAdmin() {
-    var roles = currentUserFromConfig().roles || [];
-    return roles.some(function (r) { return String(r).toLowerCase() === "admin"; });
+    var user = currentUserFromConfig();
+    if (user.isRoot) return true;
+    var adminRoles = ["root", "admin", "platform_admin", "super_admin", "system_admin", "tenant_admin"];
+    var roles = user.roles || [];
+    return roles.some(function (r) { return adminRoles.indexOf(String(r).toLowerCase()) !== -1; });
   }
 
   // --- Docs Assistant (RAG chatbot) client -------------------------------------

@@ -97,6 +97,32 @@ def generate_campaign_draft(
     return _build_response(repo, campaign)
 
 
+@router.post("/{campaign_id}/submit-for-approval", response_model=CampaignDraftResponse)
+def submit_campaign_for_approval(
+    campaign_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Submit a complete editor-created Draft campaign to the admin review queue."""
+    tenant_id = uuid.UUID(require_tenant(request))
+    submitter_id = _current_user_id(request)
+    if submitter_id is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    repo = CampaignDraftRepository(db)
+
+    try:
+        campaign = repo.submit_for_review(tenant_id, campaign_id, submitter_id)
+    except CampaignDraftNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CampaignDraftValidationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CampaignDraftConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    invalidate_prefix("crm_campaign")
+    return _build_response(repo, campaign)
+
+
 @router.get("/{campaign_id}/content-items", response_model=list[CampaignDraftContentItemRead])
 def list_campaign_content_items(campaign_id: uuid.UUID, request: Request, db: Session = Depends(get_db)):
     """Return the tenant-scoped content plan for one campaign."""

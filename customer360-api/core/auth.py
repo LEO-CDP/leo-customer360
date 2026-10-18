@@ -38,7 +38,7 @@ SSO_LOGIN = settings.sso_login
 IDENTITY_CACHE_TTL_SECONDS = 200
 DEFAULT_TOKEN_EXPIRES_MINUTES = 60
 CLOCK_SKEW_LEEWAY_SECONDS = 60
-TENANT_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "tenant_admin", "admin"}
+TENANT_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "tenant_admin", "admin", "root"}
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
 
 # Failed-auth rate limiter, keyed by client IP.
@@ -409,8 +409,8 @@ def require_admin(request: Request) -> None:
     if not roles and getattr(request.state, "user", None) is None:
         return
 
-    if "admin" not in {r.lower() for r in roles}:
-        raise HTTPException(status_code=403, detail="This action requires the 'admin' role.")
+    if not {"admin", "root"} & {r.lower() for r in roles}:
+        raise HTTPException(status_code=403, detail="This action requires the 'admin' or 'root' role.")
 
 
 def require_tenant(request: Request) -> str:
@@ -434,6 +434,14 @@ def require_tenant_admin(request: Request, action: str = "this action") -> None:
         raise HTTPException(status_code=401, detail="Authentication required")
     if not {r.lower() for r in get_current_roles(request)} & TENANT_ADMIN_ROLES:
         raise HTTPException(status_code=403, detail=f"Tenant admin role required for {action}")
+
+
+def require_user_management_admin(request: Request) -> None:
+    """Require a root or tenant-admin role for System Users management."""
+    if not isinstance(getattr(request.state, "user", None), dict):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not {r.lower() for r in get_current_roles(request)} & TENANT_ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Tenant admin role required for user management")
 
 
 def resolve_mcp_tenant_id(api_key: str) -> str:

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from leo_customer360_dao.models.system import SysUser, SysUserInfo
 from leo_customer360_dao.repositories.user_repository import UserRepository
-from leo_customer360_dao.schemas.user import UserCreate, UserUpdate
+from leo_customer360_dao.schemas.user import SYSTEM_ROLE_CODES, UserCreate, UserRolesUpdate, UserUpdate
 
 
 @pytest.fixture
@@ -85,6 +85,62 @@ def test_user_lookup_and_list_apply_filters(mock_db: Session, tenant_id: uuid.UU
     assert query.filter.call_count >= 3
     query.offset.assert_called_once_with(10)
     query.limit.assert_called_once_with(20)
+
+
+def test_get_roles_for_users_is_tenant_scoped_and_preserves_role_order(
+    mock_db: Session, tenant_id: uuid.UUID, user_id: uuid.UUID
+):
+    mock_db.execute.return_value.mappings.return_value.all.return_value = [
+        {"user_id": user_id, "role_label": "Administrator"},
+        {"user_id": user_id, "role_label": "Marketer"},
+    ]
+
+    roles = UserRepository(mock_db).get_roles_for_users(tenant_id, [user_id])
+
+    assert roles == {user_id: ["Administrator", "Marketer"]}
+    params = mock_db.execute.call_args.args[1]
+    assert params["tenant_id"] == str(tenant_id)
+    assert params["user_ids"] == [user_id]
+
+
+def test_system_role_catalog_and_role_payload_reject_duplicates():
+    assert SYSTEM_ROLE_CODES == (
+        "root",
+        "admin",
+        "operator",
+        "developer",
+        "auditor",
+        "partner",
+        "billing",
+        "editor",
+        "contributor",
+        "viewer",
+    )
+
+    with pytest.raises(ValueError, match="duplicates"):
+        UserRolesUpdate(roles=["admin", "admin"])
+
+
+def test_profile_cache_miss_includes_roles(
+    mock_db: Session, tenant_id: uuid.UUID, user_id: uuid.UUID, mock_user: SysUser
+):
+    _query(mock_db, mock_user)
+    mock_db.execute.return_value.mappings.return_value.all.return_value = [
+        {"user_id": user_id, "role_label": "Administrator"}
+    ]
+    redis_client = MagicMock()
+    redis_client.get.return_value = None
+
+    with (
+        patch("leo_customer360_dao.repositories.user_repository.get_redis_client", return_value=redis_client),
+        patch("leo_customer360_dao.schemas.user.UserResponse.model_validate") as validate,
+    ):
+        validate.return_value.model_dump.return_value = {"user_id": str(user_id), "status": "ACTIVE"}
+        result = UserRepository(mock_db).get_user_by_id_cached(user_id, tenant_id)
+
+    assert result["roles"] == ["Administrator"]
+    cached_payload = json.loads(redis_client.set.call_args.args[1])
+    assert cached_payload["roles"] == ["Administrator"]
 
 
 def test_create_user_normalizes_identity_fields(mock_db: Session, tenant_id: uuid.UUID):

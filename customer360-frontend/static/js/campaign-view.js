@@ -302,9 +302,33 @@ window.C360 = window.C360 || {};
   }
 
   function canReviewCampaign() {
-    var roles = C360.config.currentUser().roles || [];
-    var reviewerRoles = ["platform_admin", "super_admin", "system_admin", "tenant_admin", "admin"];
+    var user = C360.config.currentUser();
+    if (user.isRoot) return true;
+    var roles = user.roles || [];
+    var reviewerRoles = ["platform_admin", "super_admin", "system_admin", "tenant_admin", "admin", "root"];
     return roles.some(function (role) { return reviewerRoles.indexOf(String(role).toLowerCase()) !== -1; });
+  }
+
+  function campaignApprovalStatus(campaign) {
+    return String(campaign && campaign.approval_status || "Draft").trim();
+  }
+
+  function workflowApprovalStatus(workflowResponse) {
+    return String(workflowResponse && workflowResponse.approval_status || "").trim();
+  }
+
+  function isWorkflowApproved(workflowResponse) {
+    return workflowApprovalStatus(workflowResponse).toLowerCase() === "approved";
+  }
+
+  function setCampaignActionHint(message) {
+    $("#campaign-details-action-hint").toggleClass("hidden", !message).text(message || "");
+  }
+
+  function setCampaignActionBusy(selector, busy, busyText, idleText) {
+    var $button = $(selector);
+    $button.prop("disabled", busy).toggleClass("opacity-60 cursor-wait", busy);
+    $button.find("span").last().text(busy ? busyText : idleText);
   }
 
   function campaignStatusPresentation(status) {
@@ -1043,6 +1067,7 @@ window.C360 = window.C360 || {};
 
   function loadCampaignDetails(campaignId) {
     setCampaignMessage("#campaign-details-error", "");
+    setCampaignMessage("#campaign-details-success", "");
     $("#campaign-details-loading").removeClass("hidden");
     $("#campaign-details-content").addClass("hidden");
     $.when(
@@ -1101,17 +1126,100 @@ window.C360 = window.C360 || {};
         $("#campaign-details-status").attr("class", "inline-flex items-center gap-1.5 text-xs font-semibold rounded-md px-2.5 py-1.5 " + statusPresentation.classes).attr("aria-label", "Campaign status: " + statusPresentation.label);
         $("#campaign-details-status-icon").attr("class", "bi " + statusPresentation.icon);
         $("#campaign-details-status-label").text(statusPresentation.label);
-        $("#campaign-details-approval").text(campaign.approval_status || "Draft").attr("class", "text-xs font-semibold rounded-md px-2.5 py-1.5 bg-indigo-50 text-indigo-700");
-        var canReview = canReviewCampaign() && campaign.approval_status === "InReview";
-        $("#btn-campaign-details-approve").toggleClass("hidden", !canReview);
+        var approvalStatus = campaignApprovalStatus(campaign);
+        var workflowStatus = workflowApprovalStatus(savedWorkflow);
+        var workflowApproved = isWorkflowApproved(savedWorkflow);
+        var isAdmin = canReviewCampaign();
+        var canReview = isAdmin && approvalStatus === "InReview";
+        var canStart = isAdmin &&
+          approvalStatus === "Approved" &&
+          workflowApproved &&
+          String(campaign.status || "").toLowerCase() !== "running" &&
+          String(campaign.status || "").toLowerCase() !== "completed";
+        $("#campaign-details-approval").text(approvalStatus).attr("class", "text-xs font-semibold rounded-md px-2.5 py-1.5 bg-indigo-50 text-indigo-700");
+        $("#btn-campaign-details-submit").toggleClass("hidden", approvalStatus !== "Draft");
+        $("#btn-campaign-details-approve-workflow").toggleClass("hidden", !(
+          isAdmin &&
+          workflowStatus === "InReview" &&
+          savedWorkflow &&
+          savedWorkflow.workflow_id &&
+          savedWorkflow.workflow_version != null
+        ));
+        $("#btn-campaign-details-reject-workflow").toggleClass("hidden", !(
+          isAdmin &&
+          workflowStatus === "InReview" &&
+          savedWorkflow &&
+          savedWorkflow.workflow_id &&
+          savedWorkflow.workflow_version != null
+        ));
+        $("#btn-campaign-details-approve").toggleClass("hidden", !canReview || !workflowApproved);
         $("#btn-campaign-details-reject").toggleClass("hidden", !canReview);
+        $("#btn-campaign-details-start").toggleClass("hidden", !canStart);
+        if (approvalStatus === "Draft") {
+          setCampaignActionHint("Save the campaign, then submit it for approval. A tenant admin must approve it before it can run.");
+        } else if (workflowStatus === "InReview") {
+          setCampaignActionHint("The workflow is waiting for admin review. Approve the workflow first, then approve the campaign.");
+        } else if (isAdmin && workflowStatus === "Approved") {
+          setCampaignActionHint("Workflow approved. Continue with campaign approval when the campaign is InReview.");
+        } else if (approvalStatus === "InReview") {
+          setCampaignActionHint("The campaign is waiting for admin approval. Starting it is available only after approval.");
+        } else if (approvalStatus === "Approved" && !workflowApproved) {
+          setCampaignActionHint("The campaign is approved, but its pinned workflow is not approved yet.");
+        } else if (approvalStatus === "Approved" && String(campaign.status || "").toLowerCase() === "running") {
+          setCampaignActionHint("Dagster is running this campaign. Monitor the run in the Dagster UI.");
+        } else {
+          setCampaignActionHint("");
+        }
         $("#campaign-details-loading").addClass("hidden");
         $("#campaign-details-content").removeClass("hidden");
         $("#campaign-experiment-form").attr("data-campaign-id", campaignId);
         $("#btn-campaign-details-edit").off("click.c360campaign").on("click.c360campaign", function () { C360.router.navigate("/campaigns/" + encodeURIComponent(campaignId) + "/edit"); });
         $("#btn-campaign-report-refresh").off("click.c360campaign").on("click.c360campaign", function () { loadCampaignReport(campaign); });
-        $("#btn-campaign-details-approve").off("click.c360campaign").on("click.c360campaign", function () { api("/campaigns/" + encodeURIComponent(campaignId) + "/approve", {}, "POST").done(function () { loadCampaignDetails(campaignId); }).fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); }); });
+        $("#btn-campaign-details-submit").off("click.c360campaign").on("click.c360campaign", function () {
+          if (!window.confirm("Submit this campaign for admin approval?")) return;
+          setCampaignActionBusy("#btn-campaign-details-submit", true, "Submitting...", "Submit for approval");
+          api("/campaigns/" + encodeURIComponent(campaignId) + "/submit-for-approval", {}, "POST")
+            .done(function () { loadCampaignDetails(campaignId); setCampaignMessage("#campaign-details-success", "Campaign submitted for approval."); })
+            .fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); })
+            .always(function () { setCampaignActionBusy("#btn-campaign-details-submit", false, "Submitting...", "Submit for approval"); });
+        });
+        $("#btn-campaign-details-approve-workflow").off("click.c360campaign").on("click.c360campaign", function () {
+          if (!window.confirm("Approve this workflow version?")) return;
+          setCampaignActionBusy("#btn-campaign-details-approve-workflow", true, "Approving...", "Approve workflow");
+          api("/workflows/" + encodeURIComponent(savedWorkflow.workflow_id) + "/versions/" + encodeURIComponent(savedWorkflow.workflow_version) + "/review", { decision: "approve" }, "POST")
+            .done(function () { loadCampaignDetails(campaignId); })
+            .fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); })
+            .always(function () { setCampaignActionBusy("#btn-campaign-details-approve-workflow", false, "Approving...", "Approve workflow"); });
+        });
+        $("#btn-campaign-details-reject-workflow").off("click.c360campaign").on("click.c360campaign", function () {
+          var reason = window.prompt("Reason for rejecting the workflow:");
+          if (reason === null) return;
+          setCampaignActionBusy("#btn-campaign-details-reject-workflow", true, "Rejecting...", "Reject workflow");
+          api("/workflows/" + encodeURIComponent(savedWorkflow.workflow_id) + "/versions/" + encodeURIComponent(savedWorkflow.workflow_version) + "/review", { decision: "reject", reason: reason }, "POST")
+            .done(function () { loadCampaignDetails(campaignId); })
+            .fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); })
+            .always(function () { setCampaignActionBusy("#btn-campaign-details-reject-workflow", false, "Rejecting...", "Reject workflow"); });
+        });
+        $("#btn-campaign-details-approve").off("click.c360campaign").on("click.c360campaign", function () {
+          if (!window.confirm("Approve this campaign for activation?")) return;
+          setCampaignActionBusy("#btn-campaign-details-approve", true, "Approving...", "Approve campaign");
+          api("/campaigns/" + encodeURIComponent(campaignId) + "/approve", {}, "POST")
+            .done(function () { loadCampaignDetails(campaignId); })
+            .fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); })
+            .always(function () { setCampaignActionBusy("#btn-campaign-details-approve", false, "Approving...", "Approve campaign"); });
+        });
         $("#btn-campaign-details-reject").off("click.c360campaign").on("click.c360campaign", function () { var reason = window.prompt("Reason for rejection:"); if (reason === null) return; api("/campaigns/" + encodeURIComponent(campaignId) + "/reject", { reason: reason }, "POST").done(function () { loadCampaignDetails(campaignId); }).fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); }); });
+        $("#btn-campaign-details-start").off("click.c360campaign").on("click.c360campaign", function () {
+          if (!window.confirm("Start this campaign now? Dagster will execute the saved workflow for the selected audience.")) return;
+          setCampaignActionBusy("#btn-campaign-details-start", true, "Starting...", "Start campaign");
+          api("/admin/campaigns/" + encodeURIComponent(campaignId) + "/activate", {}, "POST")
+            .done(function (response) {
+              loadCampaignDetails(campaignId);
+              setCampaignMessage("#campaign-details-success", "Campaign submitted to Dagster. Run ID: " + response.run_id);
+            })
+            .fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); })
+            .always(function () { setCampaignActionBusy("#btn-campaign-details-start", false, "Starting...", "Start campaign"); });
+        });
         loadCampaignReport(campaign);
         loadExperimentSegments(function () { resetExperimentForm(); loadCampaignExperiments(campaignId); });
       })

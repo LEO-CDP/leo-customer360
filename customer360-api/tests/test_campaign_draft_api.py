@@ -133,6 +133,13 @@ class FakeCampaignDraftRepository:
             campaign.approval_status = APPROVAL_STATUS_IN_REVIEW
         return campaign
 
+    def submit_for_review(self, tenant_id, campaign_id, submitter_id):
+        campaign = self.get_campaign(tenant_id, campaign_id)
+        if campaign.approval_status != "Draft":
+            raise CampaignDraftValidationError("Only Draft campaigns can be submitted")
+        campaign.approval_status = APPROVAL_STATUS_IN_REVIEW
+        return campaign
+
     def approve(self, tenant_id, campaign_id, reviewer_id):
         if FakeCampaignDraftRepository.approve_side_effect is not None:
             raise FakeCampaignDraftRepository.approve_side_effect
@@ -267,6 +274,23 @@ class ReviewCampaignDraftTests(unittest.TestCase):
         self.assertEqual(body["approval_status"], "Approved")
         self.assertEqual(body["approved_by"], str(DEMO_USER_ID))
         self.assertIsNotNone(body["approved_at"])
+
+    def test_submit_for_approval_moves_draft_to_in_review(self):
+        campaign = FakeCampaignDraftRepository.campaigns[uuid.UUID(self.campaign_id)]
+        campaign.approval_status = "Draft"
+        campaign.workflow_id = uuid.uuid4()
+        campaign.workflow_version = 1
+
+        response = self.client.post(f"/campaigns/{self.campaign_id}/submit-for-approval")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["approval_status"], "InReview")
+
+    def test_submit_for_approval_requires_a_draft(self):
+        response = self.client.post(f"/campaigns/{self.campaign_id}/submit-for-approval")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Draft", response.json()["detail"])
 
     def test_edit_then_approve_reflects_edited_values(self):
         self.client.patch(f"/campaigns/{self.campaign_id}/draft", json={"objective": "Revised objective"})

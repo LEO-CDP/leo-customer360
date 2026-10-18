@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 analytics_router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
-PLATFORM_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin"}
+PLATFORM_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "root"}
 SOURCE_LOCK_PREFIX = "analytics:data-source-lock:"
 SOURCE_STATE_PREFIX = "analytics:data-source-state:"
 SUBMISSION_LOCK_KEY = "analytics:source-analytics-submission-lock"
