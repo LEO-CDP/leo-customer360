@@ -52,7 +52,13 @@ storage and S3 compute logs, and GraphQL reports every code location `LOADED`.
 Deploying here does **not** move traffic. The vServer Dagster (`10.100.1.4:3000`) is still the upstream
 in `../proxy/overlays/<env>.tfvars` (`dagster_upstream`) and `../load_balancer/overlays/<env>.tfvars`.
 Run both side by side on different `dagster_pg_db` values until verified, then repoint and stop the
-vServer container. `deploy-all.sh`'s `backend` step is still the vServer path.
+vServer container.
+
+**CI/CD.** `deploy-all.sh`'s `backend` step (and so `cd.yml`) deploys to the vServer unless `BACKEND_ON_VKS=1`; set
+that as a GitHub Environment variable (uat/prod) once the VKS deploy is verified. It also needs the existing
+`VKS_KUBECONFIG` and `GHCR_PULL_TOKEN` secrets and a node labelled `c360.pool=dagster`. Do not run the vServer daemon and
+the VKS pod at once: both tick the same `dagster` DB (duplicate schedule/sensor runs). Not yet adapted:
+`../../.github/workflows/admin-uat.yml` (`restart-backend`, `redeploy-apps`) and `vm-prewarm.yml` still target the vServer.
 
 ## Capacity (vServer parity)
 
