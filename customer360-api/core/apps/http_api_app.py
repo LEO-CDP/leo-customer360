@@ -23,6 +23,7 @@ from core.routers.ask_data_api import all_ask_data_routers
 from core.routers.auth_api import all_auth_routers
 from core.routers.campaign_draft_api import all_campaign_draft_routers
 from core.routers.campaign_experiment_api import all_campaign_experiment_routers
+from core.routers.workflow_api import all_workflow_routers
 from core.routers.content_api import all_content_routers
 from core.routers.campaign_activation_api import all_campaign_activation_routers
 from core.routers.crm_api import all_crm_routers
@@ -80,6 +81,7 @@ API_ROUTER_GROUPS = (
     all_crm_sync_routers,
     all_campaign_activation_routers,
     all_campaign_draft_routers,
+    all_workflow_routers,
     all_campaign_experiment_routers,
     all_zalo_routers,
     all_segment_routers,

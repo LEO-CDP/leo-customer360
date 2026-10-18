@@ -107,6 +107,8 @@ class CampaignRead(CampaignBase):
     created_at: Optional[datetime] = None
     # AI Campaign Strategy and Draft Creation (specs/002-ai-campaign-draft-creation)
     segment_id: Optional[uuid.UUID] = None
+    workflow_id: Optional[uuid.UUID] = None
+    workflow_version: Optional[int] = None
     template_id: Optional[uuid.UUID] = None
     approval_status: Optional[str] = None
     approved_by: Optional[uuid.UUID] = None

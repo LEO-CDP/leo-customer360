@@ -61,6 +61,8 @@ class Campaign(Base):
     segment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("cdp_segments.segment_id", ondelete="SET NULL")
     )
+    workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    workflow_version: Mapped[Optional[int]] = mapped_column(Integer)
     template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("crm_message_templates.template_id", ondelete="SET NULL")
     )
