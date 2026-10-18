@@ -32,6 +32,8 @@ from models.products import (
     ProductContentGenerationResponse,
 )
 from product_content import generate_product_content
+from prompts import PromptNotFound
+from use_case_routes import router as use_case_router
 
 # Setup module-level loggers
 logging.basicConfig(level=logging.INFO)
@@ -91,6 +93,10 @@ app = FastAPI(
 )
 
 
+# The use-case agents: stateless, same bearer token as /plan/*.
+app.include_router(use_case_router, dependencies=[Depends(require_token)])
+
+
 @app.exception_handler(AIProviderError)
 async def ai_provider_exception_handler(request: Request, exc: AIProviderError):
     """Globally catch AIProviderError and convert it to a 502 Bad Gateway.
@@ -98,6 +104,22 @@ async def ai_provider_exception_handler(request: Request, exc: AIProviderError):
     """
     agent_logger.error(f"AI Provider error during request {request.url.path}: {exc}")
     return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+@app.exception_handler(PromptNotFound)
+async def prompt_not_found_exception_handler(request: Request, exc: PromptNotFound):
+    """A prompt that is not published is an operator problem, not a crash: 502 naming the key."""
+    key = exc.args[0] if exc.args else "unknown"
+    agent_logger.error(f"Prompt {key!r} is not published (request {request.url.path})")
+    return JSONResponse(
+        status_code=502,
+        content={
+            "detail": (
+                f"Prompt {key!r} is not published. Seed or publish it in the prompt store "
+                "(customer360-database/init-cdp-ai-agents.sql), then restart this service."
+            )
+        },
+    )
 
 
 @app.get("/health", tags=["Health"])
