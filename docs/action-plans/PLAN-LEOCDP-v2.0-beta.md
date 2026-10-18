@@ -26,7 +26,7 @@ It is updated to be realistic and code-accurate against the current repository s
 - Target flow: `segment_id` selection -> lifecycle-based CRM routing -> AI template draft -> AI campaign draft -> human approval -> dispatch -> tracking -> feedback loop.
 - Data model direction:
   - `crm_message_templates`
-  - campaign linkage (`segment_id`, `template_id`)
+  - campaign linkage (`segment_id`, `workflow_id`, `workflow_version`)
   - run/audit tables for deterministic sync and dispatch tracking.
 - Orchestration direction:
   - convert `campaign_activation` and `email_engine` Dagster code locations from placeholders to real jobs.

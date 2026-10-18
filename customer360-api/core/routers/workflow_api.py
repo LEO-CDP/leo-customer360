@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.auth import require_tenant
+from core.auth import require_tenant, require_tenant_admin
 from core.cache import invalidate_prefix
 from core.database import get_db
 from core.repositories.campaign_draft_repository import (
@@ -24,10 +24,13 @@ from leo_customer360_dao.schemas.workflow import (
     CampaignWorkflowReadResponse,
     CampaignWorkflowSaveRequest,
     CampaignWorkflowSaveResponse,
+    WorkflowReviewRequest,
+    WorkflowReviewResponse,
 )
-from leo_customer360_dao.workflow import FlowNotFound
+from leo_customer360_dao.workflow import FlowNotFound, WorkflowRepository, WorkflowRuleViolation
 
 router = APIRouter(prefix="/campaigns", tags=["Campaign Workflows"])
+review_router = APIRouter(prefix="/workflows", tags=["Campaign Workflows"])
 
 
 def _repository(request: Request, db: Session) -> CampaignWorkflowRepository:
@@ -46,7 +49,7 @@ def _raise_http_error(error: Exception, db: Session) -> None:
         raise HTTPException(status_code=404, detail=str(error)) from error
     if isinstance(error, CampaignDraftActorNotFoundError):
         raise HTTPException(status_code=401, detail=str(error)) from error
-    if isinstance(error, CampaignDraftConflictError):
+    if isinstance(error, CampaignDraftConflictError | WorkflowRuleViolation):
         raise HTTPException(status_code=409, detail=str(error)) from error
     if isinstance(error, CampaignDraftValidationError | CampaignWorkflowValidationError | ValueError):
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -106,15 +109,52 @@ def get_campaign_workflow(
 ) -> CampaignWorkflowReadResponse:
     """Load the exact workflow version associated with the tenant-owned campaign."""
     try:
-        campaign, workflow = _repository(request, db).load(campaign_id)
+        campaign, workflow, version_info = _repository(request, db).load(campaign_id)
     except Exception as exc:
         _raise_http_error(exc, db)
     return CampaignWorkflowReadResponse(
         campaign_id=campaign.campaign_id,
         workflow_id=campaign.workflow_id,
         workflow_version=campaign.workflow_version,
+        approval_status=version_info["approval_status"] if version_info else None,
         workflow=workflow,
     )
 
 
-all_workflow_routers = [router]
+@review_router.post(
+    "/{flow_id}/versions/{version}/review",
+    response_model=WorkflowReviewResponse,
+)
+def review_workflow_version(
+    flow_id: uuid.UUID,
+    version: int,
+    payload: WorkflowReviewRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WorkflowReviewResponse:
+    """Approve or reject an agent-proposed workflow version. Only tenant admins may review."""
+    tenant_id = uuid.UUID(require_tenant(request))
+    require_tenant_admin(request, "workflow version review")
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    try:
+        status = WorkflowRepository(db, tenant_id).review(
+            flow_id,
+            version,
+            uuid.UUID(str(user_id)),
+            payload.decision,
+            payload.reason,
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        _raise_http_error(exc, db)
+    return WorkflowReviewResponse(
+        workflow_id=flow_id,
+        workflow_version=version,
+        approval_status=status,
+    )
+
+
+all_workflow_routers = [router, review_router]

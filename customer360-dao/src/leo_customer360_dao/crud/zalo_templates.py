@@ -2,9 +2,9 @@
 
 ZNS templates are created + approved inside the Zalo OA platform; here we pull
 the OA's template list from the Zalo Open API and upsert each as a
-``crm_message_templates`` row (channel/id/params in ``metadata``/``variables``), so
-the existing ``crm_campaign.template_id`` FK + Draft→Approved lifecycle work
-unchanged. No new table.
+``crm_message_templates`` row (channel/id/params in ``metadata``/``variables``).
+Templates are activated and sent by the AI-agent messaging flow, not linked to
+``crm_campaign``. No new table.
 
 ⚠️ Zalo ``template/all`` endpoint/response shape — confirm against current docs.
 """

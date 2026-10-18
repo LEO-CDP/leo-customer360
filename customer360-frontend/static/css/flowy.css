@@ -736,7 +736,7 @@ summary {
   color: #087565;
 }
 
-.build-action.sms {
+.build-action.notification {
   border-color: #c5dafa;
   color: #2467be;
 }
@@ -744,6 +744,16 @@ summary {
 .build-action.push {
   border-color: #f3cad8;
   color: #b82f60;
+}
+
+.build-action.profile {
+  border-color: #d9c9f4;
+  color: #7043ad;
+}
+
+.build-action.sync {
+  border-color: #f2d39b;
+  color: #9a5b00;
 }
 
 .build-action:disabled {
@@ -839,6 +849,41 @@ summary {
     border-top: 1px solid var(--line);
     border-left: 0;
   }
+}
+
+/* Read-only studio (workflow-studio.js adds .workflow-readonly to the studio root) */
+.workflow-readonly main {
+  grid-template-columns: 1fr;
+}
+
+.workflow-readonly header h1 {
+  margin: 0;
+}
+
+.workflow-readonly header::after {
+  content: "Read only";
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mute);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 3px 10px;
+}
+
+.workflow-readonly #canvas .block {
+  pointer-events: none;
+  cursor: default;
+}
+
+.workflow-readonly #canvas .block input,
+.workflow-readonly #canvas .block select,
+.workflow-readonly #canvas .block textarea {
+  appearance: none;
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink);
+  font-weight: 600;
 }
 
 @media (prefers-reduced-motion: reduce) {

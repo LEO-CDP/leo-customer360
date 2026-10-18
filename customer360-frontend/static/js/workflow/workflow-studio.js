@@ -165,6 +165,8 @@
     }
     function configurationField(key, definition, value) {
       const isSegment = definition.type === "segment";
+      const fieldValue =
+        value === undefined ? definition.default ?? "" : value;
       const choices = isSegment
         ? segments.map((segment) => ({
             value: segment.segment_id,
@@ -177,7 +179,7 @@
       return {
         key,
         label: definition.label || key,
-        value,
+        value: fieldValue,
         segmentName: isSegment
           ? segment
             ? segment.segment_name
@@ -189,7 +191,7 @@
         inputType: definition.type === "number" ? "number" : "text",
         options: choices.map((choice) => ({
           ...choice,
-          selected: String(value) === choice.value,
+          selected: String(fieldValue) === choice.value,
         })),
       };
     }
@@ -335,6 +337,19 @@
       setCanvasZoom(1);
       $canvas.scrollLeft(0).scrollTop(0);
     });
+    function fitCanvasToContent() {
+      const blocks = $canvas.find(".block").get();
+      const viewportWidth = $canvasNavigation.innerWidth();
+      if (!blocks.length || !viewportWidth) return;
+      let contentRight = 0;
+      blocks.forEach((block) => {
+        contentRight = Math.max(contentRight, block.offsetLeft + block.offsetWidth);
+      });
+      const margin = 40;
+      const fit = (viewportWidth - margin) / contentRight;
+      setCanvasZoom(Math.min(1, Math.floor(fit * 10) / 10));
+      $canvas.scrollLeft(0).scrollTop(0);
+    }
     $canvas.on("pointerdown", (event) => {
       const pointerEvent = event.originalEvent || event;
       if (!panModeEnabled || pointerEvent.button !== 0) return;
@@ -628,8 +643,10 @@
         canAdd,
         actions: [
           { type: "email", label: "Email", icon: "✉", className: "email" },
-          { type: "sms", label: "SMS", icon: "↗", className: "sms" },
+          { type: "notification", label: "Notification", icon: "↗", className: "notification" },
           { type: "push", label: "Push", icon: "◉", className: "push" },
+          { type: "update_profile", label: "Tag", icon: "🏷", className: "profile" },
+          { type: "run_data_synch_job", label: "Sync audience", icon: "🎯", className: "sync" },
         ].map((action) => ({ ...action, canAdd })),
         segmentName: segment ? segment.segment_name : "",
         profileCount: profiles.length,
@@ -737,7 +754,7 @@
             profiles[0],
           ),
           body: C.fill(config.body, profiles[0]),
-          isSms: node.type === "sms",
+          isSms: node.type === "notification",
           openRate: pct(stats.opened, stats.delivered),
           clickRate: pct(stats.clicked, stats.delivered),
         });
@@ -913,7 +930,9 @@
       refresh();
     }
     if (options.readOnly) {
-      $("#recipe, #bClear, #bRun, .side").hide();
+      root.addClass("workflow-readonly");
+      $("#recipe, #bClear, #bRun, .side, #pal, #bPanCanvas, #pill").hide();
+      fitCanvasToContent();
     }
     return api;
   }

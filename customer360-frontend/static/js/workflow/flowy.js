@@ -1,3 +1,7 @@
+/**
+ * Flowy.js : A JavaScript library for creating draggable and connectable workflow blocks.
+ * CSS: customer360-frontend/static/css/flowy.css
+ */
 var flowy = function (
   canvas,
   grab,

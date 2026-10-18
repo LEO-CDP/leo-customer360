@@ -46,8 +46,8 @@ class EmailGateway(ConsoleGateway):
     channel = "email"
 
 
-class SmsGateway(ConsoleGateway):
-    channel = "sms"
+class NotificationGateway(ConsoleGateway):
+    channel = "notification"
 
 
 class PushGateway(ConsoleGateway):
@@ -92,7 +92,9 @@ class ScriptedEventSource(EventSource):
 @dataclass
 class Services:
     gateways: dict[str, ChannelGateway] = field(
-        default_factory=lambda: {g.channel: g for g in (EmailGateway(), SmsGateway(), PushGateway())}
+        default_factory=lambda: {
+            g.channel: g for g in (EmailGateway(), NotificationGateway(), PushGateway())
+        }
     )
     events: EventSource = field(default_factory=ScriptedEventSource)
     profile_writer: ProfileWriter = field(default_factory=ConsoleProfileWriter)

@@ -34,13 +34,13 @@ class CampaignBase(BaseModel):
     end_date: Optional[date] = None
     budget_amount: Optional[Decimal] = None
     currency: Optional[str] = "VND"
-    # Email-marketing links + human-approval gate.
+    # Workflow ownership + human-approval gate.
     segment_id: Optional[uuid.UUID] = None
-    template_id: Optional[uuid.UUID] = None
     approval_status: Optional[str] = Field(default=None, pattern=APPROVAL_STATUS_PATTERN)
     approved_by: Optional[uuid.UUID] = None
     approved_at: Optional[datetime] = None
     strategy_summary: Optional[str] = None
+    planning_constraints: Optional[str] = None
     ai_plan: Optional[dict] = None
     metadata_: Optional[dict] = None
 
@@ -51,7 +51,7 @@ class CampaignCreate(CampaignBase):
 
 class CampaignUpdate(BaseModel):
     """Deliberately excludes the AI campaign draft governance fields
-    (segment_id, template_id, approval_status, approved_by, approved_at,
+    (segment_id, approval_status, approved_by, approved_at,
     strategy_summary, ai_plan) -- those may only change via the dedicated
     campaign_draft_api.py endpoints (create_draft/edit_draft/approve/reject),
     which enforce the state machine, audit trail, and optimistic-concurrency
@@ -109,28 +109,17 @@ class CampaignRead(CampaignBase):
     segment_id: Optional[uuid.UUID] = None
     workflow_id: Optional[uuid.UUID] = None
     workflow_version: Optional[int] = None
-    template_id: Optional[uuid.UUID] = None
     approval_status: Optional[str] = None
     approved_by: Optional[uuid.UUID] = None
     approved_at: Optional[datetime] = None
     strategy_summary: Optional[str] = None
+    planning_constraints: Optional[str] = None
     ai_plan: Optional[dict] = None
     updated_at: Optional[datetime] = None
     content_items: Optional[list[CampaignDraftContentItemRead]] = None
 
 
 class CampaignDraftRequest(BaseModel):
-    segment_id: uuid.UUID
-    template_id: uuid.UUID
-    objective: str
-    budget_time_constraints: Optional[str] = None
-
-
-class ZnsCampaignDraftRequest(BaseModel):
-    """AI Zalo ZNS draft: the caller supplies a segment + objective; the AI
-    SELECTS one Approved ZNS template (crm_message_templates, channel=zalo_zns) and
-    fills its typed params -- no ``template_id`` is supplied by the caller."""
-
     segment_id: uuid.UUID
     objective: str
     budget_time_constraints: Optional[str] = None
@@ -143,10 +132,10 @@ class CampaignDraftResponse(BaseModel):
     status: Optional[str] = None
     approval_status: str
     segment_id: Optional[uuid.UUID] = None
-    template_id: Optional[uuid.UUID] = None
     name: Optional[str] = None
     objective: Optional[str] = None
     strategy_summary: Optional[str] = None
+    planning_constraints: Optional[str] = None
     ai_plan: Optional[dict] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
@@ -161,6 +150,7 @@ class EditCampaignDraftRequest(BaseModel):
     segment_id: Optional[uuid.UUID] = None
     objective: Optional[str] = None
     strategy_summary: Optional[str] = None
+    planning_constraints: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     content_items: Optional[list[CampaignContentItemInput]] = None

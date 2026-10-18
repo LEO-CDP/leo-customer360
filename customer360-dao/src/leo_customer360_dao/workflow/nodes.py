@@ -12,6 +12,12 @@ from .models import NodeDef, NodeResult, OutboundMessage
 
 NODE_REGISTRY: dict[str, type[BaseNode]] = {}
 HOURS = {"minutes": 1 / 60, "hours": 1.0, "days": 24.0}
+# Must match EVENTS, WAIT_EVENTS and TEMPLATE_VARS in static/js/workflow/workflow-core.js.
+TRIGGER_EVENTS = frozenset({"signup", "cart_abandoned", "purchase", "inactive_30d", "birthday"})
+WAIT_EVENTS = frozenset({"purchase", "email_opened", "email_clicked"})
+MESSAGE_VARIABLES = frozenset({"first_name"})
+AUDIENCE_PLATFORMS = frozenset({"meta_ads", "google_ads", "tiktok_ads"})
+NOTIFICATION_PROVIDERS = frozenset({"sms", "zalo_oa", "whatsapp", "mobile_native"})
 NUMERIC_PROFILE_FIELDS = {
     "engagement_score",
     "lead_conversion_probability",
@@ -97,7 +103,11 @@ class TriggerNode(BaseNode):
 
     def problems(self) -> list[str]:
         event = self.config.get("event")
-        return [] if isinstance(event, str) and event.strip() else [f"{self.id}: event is required"]
+        if not isinstance(event, str) or not event.strip():
+            return [f"{self.id}: event is required"]
+        if event not in TRIGGER_EVENTS:
+            return [f"{self.id}: event must be one of {', '.join(sorted(TRIGGER_EVENTS))}"]
+        return []
 
     def execute(self, ctx: JourneyContext) -> NodeResult:
         return NodeResult(note=f"entered on {self.config.get('event')}")
@@ -135,7 +145,8 @@ class ConditionNode(BaseNode):
             return not has if op == "hasnt" else has
         actual = getattr(ctx.profile, field)
         if actual is None:
-            raise ValueError(f"node {self.id}: profile field {field} is null")
+            # A missing value never matches, so the customer takes the no branch.
+            return False
         return self.NUMERIC_OPS[op](float(actual), float(value))
 
     def execute(self, ctx: JourneyContext) -> NodeResult:
@@ -165,6 +176,8 @@ class WaitEventNode(BaseNode):
         event = self.config.get("event")
         if not isinstance(event, str) or not event.strip():
             problems.append(f"{self.id}: event is required")
+        elif event not in WAIT_EVENTS:
+            problems.append(f"{self.id}: event must be one of {', '.join(sorted(WAIT_EVENTS))}")
         return problems
 
     def execute(self, ctx: JourneyContext) -> NodeResult:
@@ -201,15 +214,23 @@ class ExitNode(BaseNode):
 class ActivationNode(BaseNode):
     """Base for message nodes. Subclasses declare the channel and how to address the message."""
 
-    channel: ClassVar[Literal["email", "sms", "push"]]
+    channel: ClassVar[Literal["email", "notification", "push"]]
     required_config: ClassVar[tuple[str, ...]] = ("body",)
 
     def problems(self) -> list[str]:
-        return [
+        problems = [
             f"{self.id}: {key} must be a string"
             for key in self.required_config
             if not isinstance(self.config.get(key), str)
         ]
+        for key in ("subject", "title", "body"):
+            text = self.config.get(key)
+            if not isinstance(text, str):
+                continue
+            for name in _PLACEHOLDER.findall(text):
+                if name not in MESSAGE_VARIABLES:
+                    problems.append(f"{self.id}: unknown placeholder {{{{{name}}}}} in {key}")
+        return problems
 
     @abstractmethod
     def reachable(self, ctx: JourneyContext) -> bool:
@@ -221,6 +242,7 @@ class ActivationNode(BaseNode):
     def message(self, ctx: JourneyContext, to: str | None, subject: str | None, body: str) -> OutboundMessage:
         return OutboundMessage(
             channel=self.channel,
+            provider=self.config.get("provider") if self.channel == "notification" else None,
             profile_id=ctx.profile.master_profile_id,
             to=to,
             node_id=self.id,
@@ -231,7 +253,7 @@ class ActivationNode(BaseNode):
 
     def opted_in(self, ctx: JourneyContext) -> bool:
         preferences = ctx.profile.communication_preferences or {}
-        return preferences.get(f"{self.channel}_opt_in") is not False
+        return preferences.get(f"{self.channel}_opt_in") is True
 
     def execute(self, ctx: JourneyContext) -> NodeResult:
         if not self.reachable(ctx):
@@ -257,11 +279,29 @@ class SendEmailNode(ActivationNode):
 
 
 @register_node
-class SendSmsNode(ActivationNode):
-    type, channel = "sms", "sms"
+class SendNotificationNode(ActivationNode):
+    type, channel = "notification", "notification"
+
+    def problems(self) -> list[str]:
+        problems = super().problems()
+        provider = self.config.get("provider", "sms")
+        if provider not in NOTIFICATION_PROVIDERS:
+            problems.append(
+                f"{self.id}: provider must be one of {', '.join(sorted(NOTIFICATION_PROVIDERS))}"
+            )
+        return problems
 
     def reachable(self, ctx: JourneyContext) -> bool:
-        return bool(ctx.profile.phone_number) and self.opted_in(ctx)
+        provider = self.config.get("provider", "sms")
+        preferences = ctx.profile.communication_preferences or {}
+        consent_key = "push_opt_in" if provider == "mobile_native" else "sms_opt_in"
+        consented = preferences.get(consent_key) is True
+        destination_available = (
+            bool(ctx.profile.push_tokens)
+            if provider == "mobile_native"
+            else bool(ctx.profile.phone_number)
+        )
+        return destination_available and consented
 
     def build(self, ctx: JourneyContext) -> OutboundMessage:
         return self.message(ctx, ctx.profile.phone_number, None, self.config["body"])
@@ -303,5 +343,32 @@ class UpdateProfileNode(BaseNode):
             ctx.tags.add(tag)
         else:
             ctx.tags.discard(tag)
-        ctx.profile.segmentation_tags = sorted(ctx.tags)
+        # The profile itself is never modified here: the ProfileWriter persists the change.
         return NodeResult(note=f"{action} {tag}")
+
+
+@register_node
+class DataSyncNode(BaseNode):
+    """Declarative campaign audience sync marker.
+
+    Campaign activation reads this node and submits one batch Dagster export.
+    It deliberately does not call a provider per profile during ``FlowEngine``
+    execution.
+    """
+
+    type = "run_data_synch_job"
+
+    def problems(self) -> list[str]:
+        platform = self.config.get("platform")
+        audience_name = self.config.get("audience_name")
+        problems = []
+        if platform not in AUDIENCE_PLATFORMS:
+            problems.append(f"{self.id}: platform must be one of {', '.join(sorted(AUDIENCE_PLATFORMS))}")
+        if not isinstance(audience_name, str) or not audience_name.strip():
+            problems.append(f"{self.id}: audience_name is required")
+        return problems
+
+    def execute(self, ctx: JourneyContext) -> NodeResult:
+        return NodeResult(
+            note=f"audience sync requested for {self.config['platform']}: {self.config['audience_name']}"
+        )

@@ -6,15 +6,18 @@ import math
 import uuid
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.repositories.campaign_draft_repository import (
     FIELD_UNSET,
     SEGMENT_UNSET,
+    CampaignDraftActorNotFoundError,
     CampaignDraftRepository,
 )
 from core.repositories.segment_repository import SegmentRepository
 from leo_customer360_dao.models.crm import Campaign
+from leo_customer360_dao.models.system import SysUser
 from leo_customer360_dao.schemas.workflow import CampaignWorkflowSaveRequest
 from leo_customer360_dao.workflow import FlowDefinition, FlowEngine, WorkflowRepository
 
@@ -95,20 +98,28 @@ class CampaignWorkflowRepository:
             config = node.config
             if node.type == "condition":
                 field, operator, value = (config.get(key) for key in ("field", "op", "value"))
-                if field not in {"score", "cart", "recency", "push", "tags"}:
+                if field not in {
+                    "engagement_score",
+                    "churn_probability",
+                    "lead_conversion_probability",
+                    "historical_clv",
+                    "latest_nps_score",
+                    "average_csat",
+                    "segmentation_tags",
+                }:
                     raise CampaignWorkflowValidationError(
                         f"Condition node {node.id} must use a supported profile field."
                     )
                 valid_operator = (
                     operator in {"has", "hasnt"}
-                    if field == "tags"
+                    if field == "segmentation_tags"
                     else operator in {"ge", "lt", "eq"}
                 )
                 if not valid_operator or value is None or not str(value).strip():
                     raise CampaignWorkflowValidationError(
                         f"Condition node {node.id} has an invalid operator or value."
                     )
-                if field != "tags":
+                if field != "segmentation_tags":
                     try:
                         number = float(value)
                     except (TypeError, ValueError, OverflowError) as exc:
@@ -191,9 +202,12 @@ class CampaignWorkflowRepository:
                 seen_branches.add(child.branch)
 
         try:
-            FlowEngine(workflow)
+            engine = FlowEngine(workflow)
         except ValueError as exc:
             raise CampaignWorkflowValidationError(str(exc)) from exc
+        problems = engine.problems()
+        if problems:
+            raise CampaignWorkflowValidationError("Workflow configuration is invalid: " + "; ".join(problems))
 
     @staticmethod
     def _workflow_payload(workflow: FlowDefinition) -> dict[str, Any]:
@@ -222,10 +236,28 @@ class CampaignWorkflowRepository:
             new_payload,
             flow_id=current_flow_id,
             actor="user",
+            user_id=self.user_id,
         )
         return saved.flow_id, saved.version
 
+    def _require_owner(self) -> uuid.UUID:
+        """Return the authenticated user who will own a new campaign, verified as a tenant member."""
+        if self.user_id is None:
+            raise CampaignDraftActorNotFoundError("Authentication required to create a campaign")
+        is_member = self.session.execute(
+            select(SysUser.user_id).where(
+                SysUser.tenant_id == self.tenant_id,
+                SysUser.user_id == self.user_id,
+            )
+        ).scalar_one_or_none()
+        if is_member is None:
+            raise CampaignDraftActorNotFoundError(
+                "Authenticated user is not a member of the active tenant; sign in again"
+            )
+        return self.user_id
+
     def create(self, payload: CampaignWorkflowSaveRequest) -> Campaign:
+        owner_id = self._require_owner()
         self._validate_tenant(payload)
         self._validate_campaign_fields(payload)
         campaign_values = payload.campaign.model_dump(exclude_unset=True)
@@ -253,6 +285,7 @@ class CampaignWorkflowRepository:
         campaign = Campaign(
             **create_values,
             tenant_id=self.tenant_id,
+            user_id=owner_id,
             approval_status="Draft",
         )
         self.session.add(campaign)
@@ -313,6 +346,11 @@ class CampaignWorkflowRepository:
                     if "strategy_summary" in fields_set
                     else FIELD_UNSET
                 ),
+                planning_constraints=(
+                    payload.campaign.planning_constraints
+                    if "planning_constraints" in fields_set
+                    else FIELD_UNSET
+                ),
                 start_date=payload.campaign.start_date if "start_date" in fields_set else FIELD_UNSET,
                 end_date=payload.campaign.end_date if "end_date" in fields_set else FIELD_UNSET,
                 workflow_id=flow_id,
@@ -349,7 +387,8 @@ class CampaignWorkflowRepository:
             self.session.rollback()
             raise
 
-    def load(self, campaign_id: uuid.UUID) -> tuple[Campaign, dict[str, Any] | None]:
+    def load(self, campaign_id: uuid.UUID) -> tuple[Campaign, dict[str, Any] | None, dict[str, Any] | None]:
+        """Return the campaign, its pinned workflow JSON, and that version's governance state."""
         from core.repositories.campaign_draft_repository import CampaignDraftNotFoundError
 
         try:
@@ -358,13 +397,12 @@ class CampaignWorkflowRepository:
             raise CampaignWorkflowNotFound(str(exc)) from exc
 
         if campaign.workflow_id is None:
-            return campaign, None
+            return campaign, None, None
         if campaign.workflow_version is None:
             raise CampaignWorkflowValidationError(
                 "The campaign workflow link is missing its saved version."
             )
-        workflow = WorkflowRepository(self.session, self.tenant_id).load_workflow(
-            campaign.workflow_id,
-            campaign.workflow_version,
-        )
-        return campaign, workflow
+        repository = WorkflowRepository(self.session, self.tenant_id)
+        workflow = repository.load_workflow(campaign.workflow_id, campaign.workflow_version)
+        version_info = repository.version_info(campaign.workflow_id, campaign.workflow_version)
+        return campaign, workflow, version_info

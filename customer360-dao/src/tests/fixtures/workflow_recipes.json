@@ -51,7 +51,7 @@
                   },
                   {
                     "id": "n6",
-                    "type": "sms",
+                    "type": "notification",
                     "config": {
                       "body": "{{first_name}}, your welcome gift is waiting."
                     },
@@ -86,7 +86,7 @@
         "type": "trigger",
         "config": {
           "segment_id": null,
-          "event": "engagement_follow_up"
+          "event": "inactive_30d"
         },
         "children": [
           {
@@ -246,7 +246,7 @@
                   },
                   {
                     "id": "n5",
-                    "type": "sms",
+                    "type": "notification",
                     "config": {
                       "body": "{{first_name}}, we would love to welcome you back."
                     },
@@ -437,7 +437,7 @@
                       },
                       {
                         "id": "n7",
-                        "type": "sms",
+                        "type": "notification",
                         "config": {
                           "body": "{{first_name}}, your trip details are ready to review."
                         },
@@ -515,7 +515,7 @@
                   },
                   {
                     "id": "n6",
-                    "type": "sms",
+                    "type": "notification",
                     "config": {
                       "body": "{{first_name}}, your course guide is ready when you are."
                     },
@@ -753,7 +753,7 @@
                       },
                       {
                         "id": "n7",
-                        "type": "sms",
+                        "type": "notification",
                         "config": {
                           "body": "{{first_name}}, how was your recent dining experience?"
                         },
@@ -839,7 +839,7 @@
                       },
                       {
                         "id": "n7",
-                        "type": "sms",
+                        "type": "notification",
                         "config": {
                           "body": "{{first_name}}, reply if you need help getting ready for your stay."
                         },
@@ -917,7 +917,7 @@
                   },
                   {
                     "id": "n6",
-                    "type": "sms",
+                    "type": "notification",
                     "config": {
                       "body": "{{first_name}}, your account is waiting. Finish in a few minutes."
                     },
@@ -1176,7 +1176,7 @@
                       },
                       {
                         "id": "n7",
-                        "type": "sms",
+                        "type": "notification",
                         "config": {
                           "body": "{{first_name}}, book your check-up in two taps."
                         },
@@ -1262,7 +1262,7 @@
                       },
                       {
                         "id": "n7",
-                        "type": "sms",
+                        "type": "notification",
                         "config": {
                           "body": "{{first_name}}, reply if you would like a call from our care team."
                         },
@@ -1312,7 +1312,7 @@
             "children": [
               {
                 "id": "n3",
-                "type": "sms",
+                "type": "notification",
                 "config": {
                   "body": "{{first_name}}, your table is booked for tomorrow. Reply to change it."
                 },
@@ -1404,7 +1404,7 @@
                       },
                       {
                         "id": "n6",
-                        "type": "sms",
+                        "type": "notification",
                         "config": {
                           "body": "{{first_name}}, renew your policy to keep your cover active."
                         },
@@ -1657,7 +1657,7 @@
                   },
                   {
                     "id": "n6",
-                    "type": "sms",
+                    "type": "notification",
                     "config": {
                       "body": "{{first_name}}, register your product to activate your warranty."
                     },
@@ -1831,7 +1831,7 @@
                   },
                   {
                     "id": "n5",
-                    "type": "sms",
+                    "type": "notification",
                     "config": {
                       "body": "{{first_name}}, a new season is ready to watch."
                     },
@@ -1917,7 +1917,7 @@
                   },
                   {
                     "id": "n6",
-                    "type": "sms",
+                    "type": "notification",
                     "config": {
                       "body": "{{first_name}}, new listings are live. Take a look."
                     },
@@ -2132,7 +2132,7 @@
         "children": [
           {
             "id": "n2",
-            "type": "sms",
+            "type": "notification",
             "config": {
               "body": "{{first_name}}, activate your line in two minutes."
             },

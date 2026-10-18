@@ -26,6 +26,8 @@ window.C360 = window.C360 || {};
 
   var PLATFORM_ICONS = {
     Google: "🔍", Meta: "📘", TikTok: "🎵",
+    google_ads: "🔍", meta_ads: "📘", tiktok_ads: "🎵",
+    email: "✉️", sms: "💬", push: "🔔",
     Zalo: "💬", Adjust: "📱", YouTube: "▶️"
   };
 
@@ -34,8 +36,43 @@ window.C360 = window.C360 || {};
     "Paid Social":       "📲",
     "Push Notification": "🔔",
     "Email":             "✉️",
+    email:               "✉️",
+    sms:                 "💬",
+    push:                "🔔",
+    audience_sync:       "🎯",
     "Video":             "▶️"
   };
+
+  var CAMPAIGN_CHANNELS = [
+    { value: "email", label: "Email" },
+    { value: "sms", label: "SMS / notification" },
+    { value: "push", label: "Web push" },
+    { value: "audience_sync", label: "Custom audience sync" }
+  ];
+
+  var CAMPAIGN_PLATFORMS = {
+    email: [{ value: "email", label: "Email provider" }],
+    sms: [
+      { value: "sms", label: "SMS provider" },
+      { value: "zalo_zns", label: "Zalo ZNS (legacy)" }
+    ],
+    push: [{ value: "push", label: "Web push provider" }],
+    audience_sync: [
+      { value: "meta_ads", label: "Meta / Facebook Ads" },
+      { value: "google_ads", label: "Google Ads" },
+      { value: "tiktok_ads", label: "TikTok Ads" }
+    ]
+  };
+
+  var CAMPAIGN_LANGUAGES = [
+    { value: "en", label: "English" },
+    { value: "vi", label: "Vietnamese" },
+    { value: "th", label: "Thai" },
+    { value: "id", label: "Indonesian" },
+    { value: "zh-CN", label: "Chinese (Simplified)" },
+    { value: "ja", label: "Japanese" },
+    { value: "ko", label: "Korean" }
+  ];
 
   var STATUS_BADGE = {
     Active:    "bg-emerald-100 text-emerald-700",
@@ -548,9 +585,9 @@ window.C360 = window.C360 || {};
       budget_amount: fieldValue("#campaign-field-budget") === "" ? null : Number(fieldValue("#campaign-field-budget")),
       currency: fieldValue("#campaign-field-currency").trim().toUpperCase() || "VND",
       segment_id: fieldValue("#campaign-field-segment").trim() || null,
-      template_id: fieldValue("#campaign-field-template").trim() || null,
       objective: fieldValue("#campaign-field-objective").trim() || null,
-      strategy_summary: fieldValue("#campaign-field-strategy").trim() || null
+      strategy_summary: fieldValue("#campaign-field-strategy").trim() || null,
+      planning_constraints: fieldValue("#campaign-field-constraints").trim() || null
     };
     payload.tenant_id = tenantId();
     return payload;
@@ -577,6 +614,50 @@ window.C360 = window.C360 || {};
     $objective.val(selected);
   }
 
+  function populateSelectOptions(selector, options, selectedValue, emptyLabel, allowLegacyValue) {
+    var $select = $(selector);
+    if (!$select.length || !Array.isArray(options)) return;
+    $select.empty().append($("<option>").val("").text(emptyLabel));
+    options.forEach(function (option) {
+      $("<option>").val(option.value).text(option.label).appendTo($select);
+    });
+    var selected = selectedValue == null ? "" : String(selectedValue);
+    if (allowLegacyValue && selected && !options.some(function (option) { return option.value === selected; })) {
+      $("<option>").val(selected).text(selected + " (existing value)").appendTo($select);
+    }
+    $select.val(selected);
+  }
+
+  function populateCampaignMetadataOptions(selectedChannel, selectedPlatform, selectedLanguage) {
+    populateSelectOptions(
+      "#campaign-field-channel",
+      CAMPAIGN_CHANNELS,
+      selectedChannel,
+      "Select a workflow channel",
+      true
+    );
+    var channel = selectedChannel == null ? "" : String(selectedChannel);
+    populateSelectOptions(
+      "#campaign-field-platform",
+      CAMPAIGN_PLATFORMS[channel] || [],
+      selectedPlatform,
+      channel ? "Select a platform" : "Select a channel first",
+      true
+    );
+    populateSelectOptions(
+      "#campaign-field-lang",
+      CAMPAIGN_LANGUAGES,
+      selectedLanguage || "en",
+      "Select a language",
+      true
+    );
+    $("#campaign-platform-help").text(
+      channel === "audience_sync"
+        ? "The workflow will export matched, consented profiles to this custom-audience platform."
+        : "Choose the provider used by the selected workflow channel."
+    );
+  }
+
   function fillCampaignEditor(campaign) {
     $("#campaign-editor-id").val(campaign.campaign_id || "");
     $("#campaign-editor-updated-at").val(campaign.updated_at || "");
@@ -587,19 +668,22 @@ window.C360 = window.C360 || {};
     $("#campaign-field-code").val(campaign.campaign_code || "");
     $("#campaign-field-name").val(campaign.name || "");
     $("#campaign-field-status").val(campaign.status || "Draft");
-    $("#campaign-field-channel").val(campaign.channel || "");
-    $("#campaign-field-platform").val(campaign.platform || "");
-    $("#campaign-field-lang").val(campaign.lang || "en");
+    populateCampaignMetadataOptions(campaign.channel, campaign.platform, campaign.lang);
     $("#campaign-field-description").val(campaign.description || "");
     $("#campaign-field-keywords").val((campaign.keywords || []).join(", "));
     $("#campaign-field-start-date").val(campaign.start_date || "");
     $("#campaign-field-end-date").val(campaign.end_date || "");
     $("#campaign-field-budget").val(campaign.budget_amount == null ? "" : campaign.budget_amount);
-    $("#campaign-field-currency").val(campaign.currency || "VND");
+    var currency = String(campaign.currency || "VND").toUpperCase();
+    var $currency = $("#campaign-field-currency");
+    if (currency && !$currency.find("option").filter(function () { return $(this).val() === currency; }).length) {
+      $("<option>").val(currency).text(currency + " (existing value)").appendTo($currency);
+    }
+    $currency.val(currency);
     $("#campaign-field-segment").val(campaign.segment_id || "");
-    $("#campaign-field-template").val(campaign.template_id || "").prop("disabled", !!campaign.campaign_id);
     populateCampaignObjectiveOptions(campaign.objective);
     $("#campaign-field-strategy").val(campaign.strategy_summary || "");
+    $("#campaign-field-constraints").val(campaign.planning_constraints || "");
     loadSelectedSegment(campaign.segment_id, false, !campaign.campaign_id);
   }
 
@@ -693,29 +777,27 @@ window.C360 = window.C360 || {};
 
   function renderDetailMetadata(campaign) {
     var fields = [
+      { label: "Schedule", value: [campaign.start_date, campaign.end_date].filter(Boolean).join(" - ") || "Not scheduled", icon: "bi-calendar3" },
+      { label: "Objective", value: campaign.objective, icon: "bi-bullseye" },
+      { label: "Description", value: campaign.description, icon: "bi-card-text" },
       { label: "Campaign code", value: campaign.campaign_code, icon: "bi-hash", technical: true },
       { label: "Owner", value: campaign.user_id || "System / unassigned", icon: "bi-person" },
       { label: "Channel", value: campaign.channel, icon: "bi-broadcast" },
       { label: "Platform", value: campaign.platform, icon: "bi-grid-1x2" },
       { label: "Language", value: campaign.lang, icon: "bi-translate" },
-      { label: "Schedule", value: [campaign.start_date, campaign.end_date].filter(Boolean).join(" - ") || "Not scheduled", icon: "bi-calendar3" },
       { label: "Budget", value: campaign.budget_amount == null ? "No budget set" : String(campaign.budget_amount) + " " + (campaign.currency || ""), icon: "bi-wallet2" },
-      { label: "Objective", value: campaign.objective, icon: "bi-bullseye", wide: true },
-      { label: "Description", value: campaign.description, icon: "bi-card-text", wide: true },
-      { label: "Keywords", value: (campaign.keywords || []).join(", "), icon: "bi-tags", wide: true },
-      { label: "Template reference", value: campaign.template_id, icon: "bi-file-earmark-text", technical: true },
+      { label: "Keywords", value: (campaign.keywords || []).join(", "), icon: "bi-tags" },
       { label: "Created", value: fmt.dateTime(campaign.created_at), icon: "bi-clock-history" },
       { label: "Updated", value: fmt.dateTime(campaign.updated_at), icon: "bi-arrow-repeat" }
     ];
     var $metadata = $("#campaign-details-metadata").empty();
     fields.forEach(function (field) {
-      var $item = $("<div>").addClass("rounded-xl border border-slate-200 bg-slate-50/50 p-4 transition hover:border-slate-300 hover:bg-white");
-      if (field.wide) $item.addClass("sm:col-span-2 xl:col-span-3");
+      var $item = $("<div>").addClass("min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 p-3 transition hover:border-slate-300 hover:bg-white");
       var $heading = $("<div>").addClass("flex items-center gap-2");
       $("<i>").addClass("bi " + field.icon + " text-slate-400").attr("aria-hidden", "true").appendTo($heading);
       $("<dt>").addClass("text-[11px] font-semibold uppercase tracking-wider text-slate-500").text(field.label).appendTo($heading);
       $heading.appendTo($item);
-      $("<dd>").addClass("mt-2 break-words text-sm font-semibold text-slate-800 " + (field.technical ? "font-mono text-xs" : "")).text(field.value || "-").appendTo($item);
+      $("<dd>").addClass("mt-1 line-clamp-2 break-words text-sm font-semibold text-slate-800 " + (field.technical ? "font-mono text-xs" : "")).text(field.value || "-").attr("title", field.value || "").appendTo($item);
       $metadata.append($item);
     });
     $("#campaign-details-strategy").text(campaign.strategy_summary || "No strategy summary is available.");
@@ -1005,9 +1087,11 @@ window.C360 = window.C360 || {};
               return [];
             }
           });
-          $("#campaign-details-workflow-version").text(
-            "Version " + savedWorkflow.workflow_version
-          );
+          var workflowVersionLabel = "Version " + savedWorkflow.workflow_version;
+          if (savedWorkflow.approval_status) {
+            workflowVersionLabel += " | " + savedWorkflow.approval_status;
+          }
+          $("#campaign-details-workflow-version").text(workflowVersionLabel);
         }
         loadDetailAudience(campaign.segment_id);
         renderDetailHistory(historyResult[0]);
@@ -1052,6 +1136,9 @@ window.C360 = window.C360 || {};
     $doc.on("click.c360campaignworkspace", "#btn-campaign-create", function () { C360.router.navigate("/campaigns/new/edit"); });
     $doc.on("click.c360campaignworkspace", "#btn-campaign-editor-back, #btn-campaign-editor-cancel, #btn-campaign-details-back", function () { C360.router.navigate("/campaigns"); });
     $doc.on("submit.c360campaignworkspace", "#campaign-editor-form", saveCampaignEditor);
+    $doc.on("change.c360campaignworkspace", "#campaign-field-channel", function () {
+      populateCampaignMetadataOptions($(this).val(), "", $("#campaign-field-lang").val());
+    });
     $doc.on("click.c360campaignworkspace", "#btn-campaign-experiment-add-variant", function () { loadExperimentSegments(function () { addExperimentVariant(); }); });
     $doc.on("click.c360campaignworkspace", ".campaign-experiment-remove", function () { if ($("#campaign-experiment-variants .campaign-experiment-variant").length > 2) { $(this).closest(".campaign-experiment-variant").remove(); updateExperimentAllocation(); } });
     $doc.on("input.c360campaignworkspace", ".campaign-experiment-allocation-input", updateExperimentAllocation);

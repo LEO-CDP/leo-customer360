@@ -269,7 +269,7 @@ prompt code. `core/config.py` has no LLM settings. Intended contract:
 ### Stage 3 — AI campaign draft — 🟡 (SCRUM-96)
 
 **Exists (data + human gate):**
-- `crm_campaign` columns `segment_id`, `template_id`, `approval_status`, `approved_by/at`,
+- `crm_campaign` columns `segment_id`, pinned workflow fields, `approval_status`, `approved_by/at`,
   `strategy_summary`, `ai_plan` (JSONB) — `core/models/crm.py:23`.
 - `crm_campaign_content_items` (content plan; `UNIQUE(campaign_id, content_item_id)`) — `core/models/crm.py:271`.
 - Campaign CRUD via `build_crud_router` and analytics sub-router — `core/routers/crm_api.py`.
@@ -288,7 +288,7 @@ is enforced at activation, below.
 
 **API entry:** `POST /api/v1/admin/campaigns/{campaign_id}/activate` →
 `core/routers/campaign_activation_api.py:44` `activate_campaign` — tenant-admin gated; re-checks
-`approval_status == "Approved"` **and** `template_id`+`segment_id` present (else `409`); submits a
+`approval_status == "Approved"` **and** pinned `workflow_id`/`workflow_version` + `segment_id` present (else `409`); submits a
 Dagster run via `core/utils/dagster_client.py:445` `CampaignActivationDagsterService.activate`
 (`503` if Dagster unreachable). Returns `run_id`.
 
@@ -296,13 +296,12 @@ Dagster run via `core/utils/dagster_client.py:445` `CampaignActivationDagsterSer
 (`customer360-backend/campaign_activation/dagster_defs.py:52`, `RetryPolicy(max_retries=2, delay=10)`) →
 `campaign_activation/activation.py:71` `activate_campaign`:
 1. `set_tenant_context` (RLS) → `_load_campaign` (`crm_campaign`).
-2. Gate: `approval_status == 'Approved'` + template/segment present (else `CampaignActivationError`).
-3. `_template_status` must be `Approved` (`crm_message_templates`).
-4. Validate `cdp_segments` row + `segment_tag`; `_segment_snapshot_count` (freeze audience size).
+2. Gate: campaign approval + approved pinned workflow + segment present (else `CampaignActivationError`).
+3. Validate `cdp_segments` row + `segment_tag`.
 5. `UPDATE crm_campaign SET status='Running'` + commit.
-6. `triggers.trigger_email_engine_job(...)` → GraphQL `submit_job_execution("email_engine_job", location="email_engine", …)` (`triggers.py:29`).
+6. `triggers.trigger_campaign_workflow_job(...)` → GraphQL `submit_job_execution("campaign_workflow_job", location="campaign_activation", …)`.
 
-### Stage 6 — Dagster: render & dispatch — ✅ (SCRUM-97)
+### Stage 6 — Dagster: execute the persisted workflow — ✅ (SCRUM-97)
 
 **Job:** `email_engine_job` → `send_campaign_op`
 (`customer360-backend/email_engine/dagster_defs.py:53`, `RetryPolicy(max_retries=2, delay=15)`,
@@ -399,7 +398,7 @@ Fresh-cluster DDL: `customer360-database/database-schema.sql:2914-3218`. Increme
 | Table | Migration (fwd / down) | Change | Idempotency / key constraint | RLS |
 |-------|------------------------|--------|------------------------------|-----|
 | `crm_message_templates` | `003` | **renamed/generalized** | message type, persona, context, variables, and approval status | ✔ |
-| `crm_campaign` (+cols) | `002` | **alter**: `segment_id`, `template_id`, `approval_status`, `approved_by/at`, `strategy_summary`, `ai_plan` | FKs → `cdp_segments`, `crm_message_templates` | (base) |
+| `crm_campaign` (+cols) | `002` + `015` | **alter**: `segment_id`, workflow pin, approval fields, strategy/AI fields; direct template link removed | FK → `cdp_segments` | (base) |
 | `crm_campaign_content_items` | `002` | **new** | `UNIQUE(campaign_id, content_item_id)` | ✔ |
 | `crm_segment_sync_runs` | `002` | **new** (audit) | status check; `segment_id` FK CASCADE | ✔ |
 | `crm_lead.lead_source_id` | `002` | **alter**: FK col | FK → `crm_lead_source` ON DELETE SET NULL | (base) |
@@ -415,7 +414,6 @@ Pydantic schemas: `customer360-api/core/schemas/crm.py` (`APPROVAL_STATUS_PATTER
 ```mermaid
 erDiagram
   cdp_segments ||--o{ crm_campaign : "segment_id"
-  crm_message_templates ||--o{ crm_campaign : "template_id"
   crm_campaign ||--o{ crm_campaign_content_items : "campaign_id"
   cdp_content_items ||--o{ crm_campaign_content_items : "content_item_id"
   crm_campaign ||--o{ cdp_campaign_dispatch_logs : "campaign_id"

@@ -427,8 +427,7 @@ class SegmentationDagsterService(DagsterService):
 
 
 class DataSynchDagsterService(DagsterService):
-    """customer360-backend/data_synch -- external data synchronization
-    (placeholder job today, see customer360-backend/data_synch/dagster_defs.py)."""
+    """Submit tenant-scoped campaign audience exports."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -437,9 +436,45 @@ class DataSynchDagsterService(DagsterService):
             repository_name=settings.dagster_data_synch_repository_name,
         )
 
-    def run_sync(self) -> str:
-        """Triggers a data synchronization run."""
-        return self.submit()
+    def run_sync(
+        self,
+        *,
+        tenant_id: str,
+        campaign_id: str,
+        platform: str,
+        segment_id: str | None = None,
+        audience_name: str | None = None,
+        dry_run: bool = False,
+        batch_size: int = 1000,
+    ) -> str:
+        """Submit one idempotent campaign audience synchronization run."""
+        if not tenant_id or not campaign_id or not platform:
+            raise ValueError("tenant_id, campaign_id, and platform are required")
+        if not 1 <= batch_size <= 100_000:
+            raise ValueError("batch_size must be between 1 and 100000")
+        return self.submit(
+            run_config={
+                "ops": {
+                    "run_data_synch_op": {
+                        "config": {
+                            "tenant_id": str(tenant_id),
+                            "campaign_id": str(campaign_id),
+                            "platform": platform,
+                            "segment_id": segment_id,
+                            "audience_name": audience_name,
+                            "dry_run": dry_run,
+                            "batch_size": batch_size,
+                        }
+                    }
+                }
+            },
+            tags={
+                "tenant_id": str(tenant_id),
+                "campaign_id": str(campaign_id),
+                "platform": platform,
+                "sync_type": "campaign_audience",
+            },
+        )
 
 
 class ProductContentImportDagsterService(DagsterService):

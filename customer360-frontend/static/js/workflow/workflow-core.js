@@ -38,13 +38,23 @@
     email_clicked: "Clicks an email",
   };
   const UNITS = ["minutes", "hours", "days"];
-  const FIELDS = ["score", "cart", "recency", "push", "tags"];
+  const FIELDS = [
+    "engagement_score",
+    "churn_probability",
+    "lead_conversion_probability",
+    "historical_clv",
+    "latest_nps_score",
+    "average_csat",
+    "segmentation_tags",
+  ];
   const FIELD_LABELS = {
-    score: "Engagement score (0-100)",
-    cart: "Cart value ($)",
-    recency: "Days since purchase",
-    push: "Push opt-in (1 = yes)",
-    tags: "Profile tags",
+    engagement_score: "Engagement score (0-100)",
+    churn_probability: "Churn probability (0-1)",
+    lead_conversion_probability: "Conversion probability (0-1)",
+    historical_clv: "Customer lifetime value ($)",
+    latest_nps_score: "Latest NPS (0-10)",
+    average_csat: "Average CSAT (1-5)",
+    segmentation_tags: "Segment tags",
   };
   const OPS = ["ge", "lt", "eq", "has", "hasnt"];
   const OP_LABELS = {
@@ -103,7 +113,7 @@
           label: "Field",
           options: FIELDS,
           labels: FIELD_LABELS,
-          default: "score",
+          default: "engagement_score",
         },
         op: {
           type: "enum",
@@ -116,9 +126,9 @@
         value: {
           type: "text",
           label: "Value",
-          default: "60",
+          default: "0",
           required: true,
-          help: "number, or a tag name when field = tags",
+          help: "number, or a tag name when field = Segment tags",
         },
       },
     },
@@ -202,13 +212,25 @@
         },
       },
     },
-    sms: {
+    notification: {
       category: "Activate",
       label: "Send notification",
-      channel: "sms",
-      description: "Send text notification",
-      use_when: "Urgent or time-limited nudges. Keep under 160 characters.",
+      channel: "notification",
+      description: "Send notification through SMS, Zalo OA, WhatsApp, or mobile-native delivery",
+      use_when: "Reach customers through SMS, Zalo OA, WhatsApp, or mobile-native messaging.",
       config: {
+        provider: {
+          type: "enum",
+          label: "Notification provider",
+          options: ["sms", "zalo_oa", "whatsapp", "mobile_native"],
+          labels: {
+            sms: "SMS",
+            zalo_oa: "Zalo OA",
+            whatsapp: "WhatsApp",
+            mobile_native: "Mobile-native notification",
+          },
+          default: "sms",
+        },
         body: {
           type: "longtext",
           label: "Message",
@@ -255,9 +277,36 @@
         tag: { type: "text", label: "Tag", default: "engaged", required: true },
       },
     },
+    run_data_synch_job: {
+      category: "Activate",
+      label: "Sync custom audience",
+      description: "Send the campaign audience to an advertising platform",
+      use_when:
+        "Use for approved campaigns that build a matched custom audience on Meta, Google Ads, or TikTok.",
+      config: {
+        platform: {
+          type: "enum",
+          label: "Ad platform",
+          options: ["meta_ads", "google_ads", "tiktok_ads"],
+          labels: {
+            meta_ads: "Meta / Facebook Ads",
+            google_ads: "Google Ads",
+            tiktok_ads: "TikTok Ads",
+          },
+          default: "meta_ads",
+        },
+        audience_name: {
+          type: "text",
+          label: "Audience name",
+          default: "Campaign audience",
+          required: true,
+          help: "The external audience is reused on retries.",
+        },
+      },
+    },
   };
 
-  const TEMPLATE_VARS = ["first_name", "cart_value"];
+  const TEMPLATE_VARS = ["first_name"];
   const FATAL = [
     "NO_ROOT",
     "ROOT_NOT_ENTRY",
@@ -391,7 +440,7 @@
           );
       });
       if (n.type === "condition" && cfg.field) {
-        const isTag = cfg.field === "tags";
+        const isTag = cfg.field === "segmentation_tags";
         if (isTag !== (cfg.op === "has" || cfg.op === "hasnt"))
           add(
             n,
@@ -466,9 +515,9 @@
             "Add a child for the missing branch.",
           );
       }
-      if (def.channel) {
+      if (def.channel || n.type === "run_data_synch_job") {
         sends++;
-        if (kids.some((k) => NODES[k.type] && NODES[k.type].channel))
+        if (def.channel && kids.some((k) => NODES[k.type] && NODES[k.type].channel))
           add(
             n,
             "warn",
@@ -480,7 +529,7 @@
       if (n.type === "exit" && cfg.kind === "goal") goals++;
       if (
         (!kids.length && !def.terminal && def.channel !== undefined) ||
-        (!kids.length && n.type === "update_profile")
+        (!kids.length && ["update_profile", "run_data_synch_job"].includes(n.type))
       )
         add(
           n,
@@ -583,12 +632,10 @@
   }
   const nodeSeed = (id) => parseInt(String(id).replace(/\D/g, ""), 10) || 1;
   const fill = (s, p) =>
-    String(s == null ? "" : s)
-      .replace(/\{\{first_name\}\}/g, p.name)
-      .replace(/\{\{cart_value\}\}/g, p.cart);
+    String(s == null ? "" : s).replace(/\{\{first_name\}\}/g, p.name);
 
   function testCondition(c, p, tags) {
-    if (c.field === "tags") {
+    if (c.field === "segmentation_tags") {
       const has = tags.has(String(c.value));
       return c.op === "hasnt" ? !has : has;
     }
@@ -599,13 +646,13 @@
   function messageOutcome(channel, p, r) {
     if (channel === "email") {
       const delivered = p.email !== 0 && r() < 0.97;
-      const opened = delivered && r() < 0.14 + p.score / 200;
+      const opened = delivered && r() < 0.14 + p.engagement_score / 200;
       const clicked = opened && r() < 0.3 + Math.min(p.cart, 300) / 700;
       return { delivered, opened, clicked, converted: clicked && r() < 0.5 };
     }
-    if (channel === "sms") {
+    if (channel === "notification") {
       const delivered = p.sms !== 0 && r() < 0.98;
-      const clicked = delivered && r() < 0.08 + p.score / 500;
+      const clicked = delivered && r() < 0.08 + p.engagement_score / 500;
       return {
         delivered,
         opened: delivered,
@@ -614,7 +661,7 @@
       };
     }
     const delivered = p.push === 1;
-    const opened = delivered && r() < 0.2 + p.score / 150;
+    const opened = delivered && r() < 0.2 + p.engagement_score / 150;
     const clicked = opened && r() < 0.4;
     return { delivered, opened, clicked, converted: clicked && r() < 0.5 };
   }
@@ -623,7 +670,7 @@
     if (event === "email_clicked" && st.clicked) return true;
     if (event === "email_opened" && st.opened) return true;
     return (
-      r() < (event === "purchase" ? 0.04 + p.score / 800 : 0.1 + p.score / 300)
+      r() < (event === "purchase" ? 0.04 + p.engagement_score / 800 : 0.1 + p.engagement_score / 300)
     );
   }
 
@@ -705,13 +752,13 @@
             st.converted = true;
           }
           st.last =
-            { email: "Email", sms: "SMS", push: "Push" }[def.channel] +
+            { email: "Email", notification: "Notification", push: "Push" }[def.channel] +
             " · " +
             (o.converted
               ? "Converted"
               : o.clicked
                 ? "Clicked"
-                : o.opened && def.channel !== "sms"
+                : o.opened && def.channel !== "notification"
                   ? "Opened"
                   : o.delivered
                     ? "Delivered"
@@ -720,6 +767,12 @@
           st.tags[n.config.action === "add_tag" ? "add" : "delete"](
             String(n.config.tag),
           );
+        } else if (n.type === "run_data_synch_job") {
+          st.last =
+            "Audience sync · " +
+            ((NODES[n.config.platform] && NODES[n.config.platform].label) ||
+              n.config.platform ||
+              "ad platform");
         } else if (n.type === "exit") {
           st.end = n.config.kind;
           next = null;
@@ -815,9 +868,13 @@
       out.push({
         id: i + 1,
         name: NAMES[i % NAMES.length],
-        score: Math.round(10 + r() * 85),
+        engagement_score: Math.round(10 + r() * 85),
+        historical_clv: Math.round(100 + r() * 1900),
+        churn_probability: Math.round(r() * 100) / 100,
+        lead_conversion_probability: Math.round(r() * 100) / 100,
+        latest_nps_score: Math.round(r() * 10),
+        average_csat: Math.round((1 + r() * 4) * 10) / 10,
         cart: Math.round((40 + r() * 340) / 5) * 5,
-        recency: Math.round(1 + r() * 59),
         push: r() < 0.7 ? 1 : 0,
         sms: r() < 0.85 ? 1 : 0,
         email: 1,

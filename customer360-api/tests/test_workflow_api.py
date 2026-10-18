@@ -8,9 +8,11 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from core.database import get_db
+from core.repositories.campaign_draft_repository import CampaignDraftActorNotFoundError
 from core.repositories.campaign_workflow_repository import CampaignWorkflowRepository
-from core.routers.workflow_api import router
+from core.routers.workflow_api import review_router, router
 from leo_customer360_dao.schemas.workflow import CampaignWorkflowSaveRequest
+from leo_customer360_dao.workflow import FlowNotFound, NodeDef, WorkflowRuleViolation
 from leo_customer360_dao.workflow.repository import SavedFlow
 
 TENANT_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -65,10 +67,16 @@ def _request_model():
 
 
 class FakeSession:
-    def __init__(self):
+    def __init__(self, is_tenant_member=True):
         self.added = []
         self.commits = 0
         self.rollbacks = 0
+        self.is_tenant_member = is_tenant_member
+
+    def execute(self, _statement):
+        return SimpleNamespace(
+            scalar_one_or_none=lambda: USER_ID if self.is_tenant_member else None
+        )
 
     def add(self, value):
         self.added.append(value)
@@ -91,6 +99,7 @@ class FakeSession:
 def _client():
     app = FastAPI()
     app.include_router(router)
+    app.include_router(review_router)
 
     @app.middleware("http")
     async def identity(request: Request, call_next):
@@ -130,7 +139,7 @@ def test_update_and_load_are_campaign_scoped():
     workflow = {"schema_version": 2, "root": {"id": "n1", "type": "trigger"}}
     repository = SimpleNamespace(
         update=lambda campaign_id, payload: _campaign(),
-        load=lambda campaign_id: (_campaign(), workflow),
+        load=lambda campaign_id: (_campaign(), workflow, {"approval_status": "InReview"}),
     )
 
     with patch("core.routers.workflow_api.CampaignWorkflowRepository", return_value=repository), patch(
@@ -146,13 +155,118 @@ def test_update_and_load_are_campaign_scoped():
         "campaign_id": str(CAMPAIGN_ID),
         "workflow_id": str(FLOW_ID),
         "workflow_version": 3,
+        "approval_status": "InReview",
         "workflow": workflow,
     }
 
 
+def test_load_without_linked_workflow_returns_null_governance_fields():
+    client = _client()
+    repository = SimpleNamespace(load=lambda campaign_id: (_campaign(), None, None))
+
+    with patch("core.routers.workflow_api.CampaignWorkflowRepository", return_value=repository):
+        loaded = client.get(f"/campaigns/{CAMPAIGN_ID}/workflow")
+
+    assert loaded.status_code == 200
+    assert loaded.json()["approval_status"] is None
+    assert loaded.json()["workflow"] is None
+
+
+def test_review_approves_version_as_tenant_admin_and_commits():
+    client = _client()
+    db = FakeSession()
+    client.app.dependency_overrides[get_db] = lambda: db
+
+    with patch("core.routers.workflow_api.require_tenant_admin") as admin_check, patch(
+        "core.routers.workflow_api.WorkflowRepository"
+    ) as workflow_repo:
+        workflow_repo.return_value.review.return_value = "Approved"
+        response = client.post(
+            f"/workflows/{FLOW_ID}/versions/3/review",
+            json={"decision": "approve", "reason": "Offer checked"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "workflow_id": str(FLOW_ID),
+        "workflow_version": 3,
+        "approval_status": "Approved",
+    }
+    admin_check.assert_called_once()
+    workflow_repo.return_value.review.assert_called_once_with(
+        FLOW_ID, 3, USER_ID, "approve", "Offer checked"
+    )
+    assert db.commits == 1
+    assert db.rollbacks == 0
+
+
+def test_review_is_forbidden_for_non_admin_and_never_touches_the_flow():
+    client = _client()
+    from fastapi import HTTPException
+
+    with patch(
+        "core.routers.workflow_api.require_tenant_admin",
+        side_effect=HTTPException(status_code=403, detail="Tenant admin role required"),
+    ), patch("core.routers.workflow_api.WorkflowRepository") as workflow_repo:
+        response = client.post(
+            f"/workflows/{FLOW_ID}/versions/3/review",
+            json={"decision": "reject"},
+        )
+
+    assert response.status_code == 403
+    workflow_repo.assert_not_called()
+
+
+def test_review_maps_creator_self_approval_to_conflict_and_rolls_back():
+    client = _client()
+    db = FakeSession()
+    client.app.dependency_overrides[get_db] = lambda: db
+
+    with patch("core.routers.workflow_api.require_tenant_admin"), patch(
+        "core.routers.workflow_api.WorkflowRepository"
+    ) as workflow_repo:
+        workflow_repo.return_value.review.side_effect = WorkflowRuleViolation(
+            "reviewer must differ from the initiator"
+        )
+        response = client.post(
+            f"/workflows/{FLOW_ID}/versions/3/review",
+            json={"decision": "approve"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "reviewer must differ from the initiator"
+    assert db.commits == 0
+    assert db.rollbacks == 1
+
+
+def test_review_unknown_version_returns_404():
+    client = _client()
+    client.app.dependency_overrides[get_db] = lambda: FakeSession()
+
+    with patch("core.routers.workflow_api.require_tenant_admin"), patch(
+        "core.routers.workflow_api.WorkflowRepository"
+    ) as workflow_repo:
+        workflow_repo.return_value.review.side_effect = FlowNotFound("missing")
+        response = client.post(
+            f"/workflows/{FLOW_ID}/versions/9/review",
+            json={"decision": "approve"},
+        )
+
+    assert response.status_code == 404
+
+
+def test_review_rejects_unknown_decision():
+    client = _client()
+    response = client.post(
+        f"/workflows/{FLOW_ID}/versions/3/review",
+        json={"decision": "publish"},
+    )
+    assert response.status_code == 422
+
+
 def test_repository_commits_campaign_and_first_workflow_version_once():
     db = FakeSession()
-    repository = CampaignWorkflowRepository(db, TENANT_ID)
+    repository = CampaignWorkflowRepository(db, TENANT_ID, USER_ID)
     segment = SimpleNamespace(tenant_id=TENANT_ID, is_active=True, status_code=1)
 
     with patch(
@@ -167,13 +281,83 @@ def test_repository_commits_campaign_and_first_workflow_version_once():
     assert campaign.campaign_id == CAMPAIGN_ID
     assert campaign.workflow_id == FLOW_ID
     assert campaign.workflow_version == 1
+    assert campaign.user_id == USER_ID
     assert db.commits == 1
     assert db.rollbacks == 0
 
 
-def test_repository_rolls_back_campaign_when_workflow_save_fails():
+def test_create_ignores_client_supplied_owner_and_uses_session_user():
+    db = FakeSession()
+    repository = CampaignWorkflowRepository(db, TENANT_ID, USER_ID)
+    segment = SimpleNamespace(tenant_id=TENANT_ID, is_active=True, status_code=1)
+    payload = _request_model()
+    payload.campaign.user_id = uuid.UUID("66666666-6666-6666-6666-666666666666")
+
+    with patch(
+        "core.repositories.campaign_workflow_repository.SegmentRepository"
+    ) as segment_repo, patch(
+        "core.repositories.campaign_workflow_repository.WorkflowRepository"
+    ) as workflow_repo:
+        segment_repo.return_value.get_segment.return_value = segment
+        workflow_repo.return_value.save.return_value = SavedFlow(flow_id=FLOW_ID, version=1)
+        campaign = repository.create(payload)
+
+    assert campaign.user_id == USER_ID
+
+
+def test_create_without_authenticated_user_is_refused_before_any_write():
     db = FakeSession()
     repository = CampaignWorkflowRepository(db, TENANT_ID)
+
+    with patch("core.repositories.campaign_workflow_repository.WorkflowRepository") as workflow_repo:
+        try:
+            repository.create(_request_model())
+        except CampaignDraftActorNotFoundError:
+            pass
+        else:
+            raise AssertionError("create without a session user must be refused")
+
+    workflow_repo.return_value.save.assert_not_called()
+    assert db.added == []
+    assert db.commits == 0
+
+
+def test_create_refuses_user_outside_the_active_tenant():
+    db = FakeSession(is_tenant_member=False)
+    repository = CampaignWorkflowRepository(db, TENANT_ID, USER_ID)
+
+    with patch("core.repositories.campaign_workflow_repository.WorkflowRepository") as workflow_repo:
+        try:
+            repository.create(_request_model())
+        except CampaignDraftActorNotFoundError:
+            pass
+        else:
+            raise AssertionError("a user outside the tenant must not own a campaign")
+
+    workflow_repo.return_value.save.assert_not_called()
+    assert db.added == []
+
+
+def test_repository_accepts_real_master_profile_condition_fields():
+    workflow = _request_model().workflow
+    workflow.root.children = [
+        NodeDef(
+            id="n2",
+            type="condition",
+            config={"field": "engagement_score", "op": "ge", "value": "60"},
+            children=[
+                NodeDef(id="n3", type="exit", config={"kind": "goal"}, branch="yes"),
+                NodeDef(id="n4", type="exit", config={"kind": "exit"}, branch="no"),
+            ],
+        )
+    ]
+
+    CampaignWorkflowRepository._validate_workflow(workflow, SEGMENT_ID)
+
+
+def test_repository_rolls_back_campaign_when_workflow_save_fails():
+    db = FakeSession()
+    repository = CampaignWorkflowRepository(db, TENANT_ID, USER_ID)
     segment = SimpleNamespace(tenant_id=TENANT_ID, is_active=True, status_code=1)
 
     with patch(
@@ -238,6 +422,7 @@ def test_repository_updates_workflow_and_campaign_in_one_transaction():
         workflow_repo.return_value.save.return_value = SavedFlow(flow_id=FLOW_ID, version=3)
         updated = repository.update(CAMPAIGN_ID, _request_model())
 
+    assert workflow_repo.return_value.save.call_args.kwargs["user_id"] == USER_ID
     assert updated.workflow_version == 3
     assert updated.objective == "Conversions"
     assert db.commits == 1

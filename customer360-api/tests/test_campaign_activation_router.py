@@ -46,8 +46,8 @@ class CampaignActivationRouterTests(unittest.TestCase):
         return SimpleNamespace(
             tenant_id=self.tenant_id,
             approval_status="Approved",
-            template_id=uuid.uuid4(),
             segment_id=uuid.uuid4(),
+            workflow_id=uuid.uuid4(),
         )
 
     def test_activate_submits_when_approved(self):
@@ -84,7 +84,7 @@ class CampaignActivationRouterTests(unittest.TestCase):
 
     def test_activate_409_when_missing_template_or_segment(self):
         campaign = self._approved_campaign()
-        campaign.template_id = None
+        campaign.workflow_id = None
         self._override_db(campaign)
         resp = TestClient(self.app).post(f"/admin/campaigns/{self.campaign_id}/activate")
         self.assertEqual(resp.status_code, 409)

@@ -111,7 +111,7 @@ ENGAGEMENT_SCORE_FOLLOW_UP = FlowDefinition.model_validate(
         "root": _node(
             "n1",
             "trigger",
-            {"event": "engagement_follow_up"},
+            {"event": "inactive_30d"},
             [
                 _node(
                     "n2",

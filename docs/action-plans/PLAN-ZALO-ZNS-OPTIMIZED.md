@@ -5,7 +5,11 @@
 
 ## 1. TL;DR
 
-The repo already ships a complete agentic outbound pipeline for **email**: segment sync → AI campaign draft → human approval → orchestrated activation → engine dispatch → signed webhook → suppression → analytics rollup. `crm_campaign` already carries `channel`, `segment_id`, `template_id`, `approval_status`, `ai_plan`, etc.
+The repo's current outbound path is the approved campaign workflow: segment
+selection → AI workflow draft → human approval → per-profile workflow
+execution → signed webhook/suppression → analytics. `crm_campaign` carries
+the selected segment and pinned workflow version; it does not link to
+`crm_message_templates`.
 
 So Zalo needs **only channel-specific code** and **zero new tables** — it reuses `crm_connector_config`, `crm_message_templates`, `cdp_campaign_dispatch_logs`, and the profile consent field. vs v1's 7 new tables + 8 P0 subtasks:
 
@@ -107,7 +111,6 @@ Schema (EER) — OA credentials reuse the generic `crm_connector_config` registr
 erDiagram
     sys_tenant ||--o{ crm_connector_config : "tenant_id (RLS)"
     sys_tenant ||--o{ crm_message_templates : "tenant_id (RLS)"
-    crm_message_templates ||--o{ crm_campaign : "template_id (existing FK)"
 
     crm_connector_config {
         uuid connector_id PK "EXISTING table (reused)"
@@ -131,7 +134,11 @@ erDiagram
     }
 ```
 
-<sub>**Every table is existing/reused — zero DDL.** Per-tenant separation is automatic (`tenant_id` + RLS on all three). OA config = one `crm_connector_config` row per tenant (`connector_type='CHAT'`, `provider='ZALO'`); credentials/tokens live in `credentials` JSONB and runtime settings live in `config` JSONB. ZNS templates live in `crm_message_templates`, which `crm_campaign.template_id` already FKs.</sub>
+<sub>Templates remain tenant-scoped in `crm_message_templates` and are
+activated by the AI-agent messaging flow. Campaigns reference only their
+segment and persisted workflow version. OA config remains one
+`crm_connector_config` row per tenant (`connector_type='CHAT'`,
+`provider='ZALO'`).</sub>
 
 - **OA config → `crm_connector_config`** (no new table): one row per tenant with `connector_type='CHAT'`, `provider='ZALO'`. Store app credentials, OA id, access/refresh tokens, and the webhook secret in `credentials` JSONB; store endpoints, schedules, adapter, and batch/lookback controls in `config` JSONB.
 - **OAuth grant endpoint** in customer360-api `auth_api.py`: a `/auth/zalo-redirect` callback that exchanges the authorization code for access+refresh tokens and upserts the tenant connector row.
@@ -140,7 +147,7 @@ erDiagram
 
 ### 3.2 ZNS template sync (read-only) → reuse `crm_email_templates`
 
-- **No new table** — ZNS templates live in `crm_email_templates` (per-tenant; already has the Draft→InReview→Approved→Rejected lifecycle + `variables`/`metadata` JSONB + approver columns, and `crm_campaign.template_id` already FKs it). Store Zalo's `zalo_template_id`/`oa_id`/`category`/`quality` and `channel:"zalo_zns"` in `metadata`, the typed ZNS param schema in `variables`; leave `subject`/`html_body`/`text_body` NULL. Filter with `metadata->>'channel' = 'zalo_zns'`.
+- **No campaign template FK** — ZNS templates live in `crm_message_templates` and retain the Draft→InReview→Approved→Rejected lifecycle. Store Zalo's `zalo_template_id`/`oa_id`/`category`/`quality` and `channel:"zalo_zns"` in `metadata`; store typed ZNS parameter schema in `variables`; leave `subject`/`html_body`/`text_body` NULL. The AI-agent messaging flow resolves these templates independently of `crm_campaign`.
 - **Sync endpoint** `POST /api/v1/admin/zalo/templates/sync` → calls Zalo `template/all`, upserts rows into `crm_email_templates` (match on `metadata->>'zalo_template_id'`). Requires `require_tenant_admin` + OA-admin authorization (per the guide, the caller must be OA admin).
 - **List/detail endpoints** for the UI, filtered to `channel=zalo_zns` (name, created time, quality, status, id + "view content").
 

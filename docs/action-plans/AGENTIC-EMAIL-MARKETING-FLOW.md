@@ -5,12 +5,13 @@
 This plan defines the v2.0 Beta path for a complete marketer workflow:
 
 1. Select a segment by `segment_id` from PostgreSQL and sync matched profiles to the correct `crm_*` tables.
-2. Create an email template draft with AI agents (Gemini or OpenAI) and human review.
-3. Create a campaign draft with AI strategy and objectives, attach schedule and content plan, then require human approval before run.
+2. Create message templates with AI agents (Gemini or OpenAI) and human review.
+3. Create a campaign workflow draft with AI strategy and objectives, attach
+   schedule and content plan, then require human approval before run.
 
 Final business outcome:
 
-Segment -> CRM sync routing -> AI template draft -> AI campaign draft -> Human approval -> Dispatch -> Track -> Feedback into Customer 360.
+Segment -> CRM sync routing -> AI message/template activation -> AI workflow draft -> Human approval -> Per-profile workflow execution -> Track -> Feedback into Customer 360.
 
 ## Verified Ground Truth (Repo Audit)
 
@@ -30,7 +31,8 @@ Segment -> CRM sync routing -> AI template draft -> AI campaign draft -> Human a
 Schema gaps that must be addressed in this story:
 
 - `crm_lead` currently has no `lead_source_id` foreign key.
-- `crm_campaign` currently has no `segment_id`, `template_id`, or campaign-content relation table.
+- `crm_campaign` owns `segment_id` and a pinned workflow version; it has no
+  direct `crm_message_templates` link.
 - No dedicated email-template table exists yet.
 
 ### Dagster service reality (`customer360-backend/*/dagster_defs.py`)
@@ -440,7 +442,9 @@ Use this checklist as the implementation tracker for all technical tasks in this
 ### B. PostgreSQL Data Tables Checklist
 
 - [ ] Create `crm_message_templates` table with message type, persona, context, subject, html/text body, variables, status, approvals, metadata, and `tenant_id`.
-- [ ] Alter `crm_campaign` to add `segment_id`, `template_id`, `approval_status`, `approved_by`, `approved_at`, and AI planning fields.
+- [ ] Alter `crm_campaign` to add `segment_id`, `workflow_id`,
+  `workflow_version`, `approval_status`, `approved_by`, `approved_at`, and AI
+  planning fields. Do not link campaigns to `crm_message_templates`.
 - [ ] Alter `crm_lead` to add `lead_source_id` FK to `crm_lead_source`.
 - [ ] Create `crm_campaign_content_items` relation table to map campaign-to-content (`cdp_content_items`).
 - [ ] Create `crm_segment_sync_runs` audit table for each segment sync run.

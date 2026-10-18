@@ -1,16 +1,9 @@
-"""Campaign activation logic.
+"""Activation boundary for persisted campaign workflows.
 
-``activate_campaign`` is the real body behind ``campaign_activation_job``:
-
-  1. load the campaign and validate it is human-Approved and points at an
-     Approved template + a segment,
-  2. snapshot the target segment size (segment_tag = ANY(segmentation_tags)),
-  3. mark the campaign execution status Running (bookkeeping distinct from the
-     human-approval gate owned elsewhere),
-  4. hand off to the email dispatch flow by submitting ``email_engine_job``.
-
-Idempotent: re-activating an already-Running campaign just re-submits the
-email_engine run, which is itself idempotent per recipient.
+An approved campaign must point to an approved workflow version and a selected
+segment. Activation marks it ``Running`` and submits ``campaign_workflow_job``.
+That job loads the profiles, evaluates the graph, and executes every action
+node.
 """
 
 import logging
@@ -20,129 +13,113 @@ from psycopg2.extras import RealDictCursor
 
 from .db import DB_SCHEMA, connect
 from .rls import set_tenant_context
-from .triggers import trigger_email_engine_job, trigger_notification_engine_job
+from .triggers import trigger_campaign_workflow_job
 
 logger = logging.getLogger(__name__)
 
 
 class CampaignActivationError(Exception):
-    """Raised when a campaign cannot be activated (not Approved, no template /
-    segment, template not Approved). Surfaces as a Dagster op failure."""
+    """Raised when a workflow campaign cannot be activated safely."""
 
 
 def _load_campaign(cur, tenant_id: str, campaign_id: str) -> Optional[dict]:
     cur.execute(
         f"""
-        SELECT campaign_id, name, approval_status, status, channel, segment_id, template_id
-        FROM {DB_SCHEMA}.crm_campaign
-        WHERE campaign_id = %(campaign_id)s AND tenant_id = %(tenant_id)s
+        SELECT c.campaign_id, c.name, c.approval_status, c.status,
+               c.segment_id, c.workflow_id, c.workflow_version,
+               v.approval_status AS workflow_approval_status
+        FROM {DB_SCHEMA}.crm_campaign c
+        LEFT JOIN {DB_SCHEMA}.crm_flow_version v
+          ON v.tenant_id = c.tenant_id
+         AND v.flow_id = c.workflow_id
+         AND v.version = c.workflow_version
+        WHERE c.campaign_id = %(campaign_id)s
+          AND c.tenant_id = %(tenant_id)s
         """,
         {"campaign_id": campaign_id, "tenant_id": tenant_id},
     )
     return cur.fetchone()
 
 
-def _template_status(cur, tenant_id: str, template_id: str) -> Optional[str]:
-    cur.execute(
-        f"SELECT status FROM {DB_SCHEMA}.crm_message_templates "
-        f"WHERE template_id = %(template_id)s AND tenant_id = %(tenant_id)s",
-        {"template_id": template_id, "tenant_id": tenant_id},
-    )
-    row = cur.fetchone()
-    return row["status"] if row else None
-
-
-def _segment_snapshot_count(cur, tenant_id: str, segment_id: str) -> int:
-    cur.execute(
-        f"""
-        SELECT count(*) AS n
-        FROM {DB_SCHEMA}.cdp_master_profiles p
-        JOIN {DB_SCHEMA}.cdp_segments s ON s.segment_id = %(segment_id)s AND s.tenant_id = %(tenant_id)s
-        WHERE p.tenant_id = %(tenant_id)s
-          AND p.status_code = 1
-          AND s.segment_tag = ANY(p.segmentation_tags)
-        """,
-        {"segment_id": segment_id, "tenant_id": tenant_id},
-    )
-    row = cur.fetchone()
-    return int(row["n"]) if row else 0
-
-
 def activate_campaign(
     campaign_id: str,
     tenant_id: str,
     *,
-    trigger_email: bool = True,
     log: Callable[[str], None] = logger.info,
 ) -> dict:
-    """Validate + snapshot an Approved campaign, mark it Running, and submit the
-    email_engine run. Returns a summary dict. See module docstring."""
+    """Mark an approved workflow campaign Running and submit its workflow job."""
     conn = connect()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             set_tenant_context(cur, tenant_id)
-
             campaign = _load_campaign(cur, tenant_id, campaign_id)
             if campaign is None:
                 raise CampaignActivationError(f"campaign {campaign_id} not found for tenant {tenant_id}")
-            if (campaign.get("approval_status") or "").strip() != "Approved":
+            if campaign.get("approval_status") != "Approved":
                 raise CampaignActivationError(
-                    f"campaign {campaign_id} is not Approved (approval_status={campaign.get('approval_status')!r})"
+                    f"campaign {campaign_id} is not Approved "
+                    f"(approval_status={campaign.get('approval_status')!r})"
                 )
-            if not campaign.get("template_id"):
-                raise CampaignActivationError(f"campaign {campaign_id} has no template_id")
+            if not campaign.get("workflow_id") or campaign.get("workflow_version") is None:
+                raise CampaignActivationError(f"campaign {campaign_id} has no pinned workflow version")
+            if campaign.get("workflow_approval_status") != "Approved":
+                raise CampaignActivationError(
+                    f"workflow {campaign['workflow_id']} version {campaign['workflow_version']} "
+                    f"is not Approved "
+                    f"(approval_status={campaign.get('workflow_approval_status')!r})"
+                )
             if not campaign.get("segment_id"):
                 raise CampaignActivationError(f"campaign {campaign_id} has no segment_id")
 
-            template_status = _template_status(cur, tenant_id, str(campaign["template_id"]))
-            if template_status != "Approved":
-                raise CampaignActivationError(
-                    f"template {campaign['template_id']} is not Approved (status={template_status!r})"
-                )
-
-            # Validate the segment row exists (mirror the template check) so a
-            # dangling/deleted segment_id fails HERE, not one job away in email_engine.
             cur.execute(
-                f"SELECT segment_tag FROM {DB_SCHEMA}.cdp_segments "
-                f"WHERE segment_id = %(segment_id)s AND tenant_id = %(tenant_id)s",
+                f"""
+                SELECT segment_tag
+                FROM {DB_SCHEMA}.cdp_segments
+                WHERE segment_id = %(segment_id)s
+                  AND tenant_id = %(tenant_id)s
+                  AND is_active
+                """,
                 {"segment_id": str(campaign["segment_id"]), "tenant_id": tenant_id},
             )
-            seg_row = cur.fetchone()
-            if not seg_row or not seg_row.get("segment_tag"):
+            segment = cur.fetchone()
+            if not segment or not segment.get("segment_tag"):
                 raise CampaignActivationError(
-                    f"segment {campaign['segment_id']} not found or has no segment_tag"
+                    f"segment {campaign['segment_id']} not found or inactive"
                 )
 
-            segment_size = _segment_snapshot_count(cur, tenant_id, str(campaign["segment_id"]))
-
             cur.execute(
-                f"UPDATE {DB_SCHEMA}.crm_campaign SET status = 'Running' "
-                f"WHERE campaign_id = %(campaign_id)s AND tenant_id = %(tenant_id)s",
+                f"""
+                UPDATE {DB_SCHEMA}.crm_campaign
+                SET status = 'Running'
+                WHERE campaign_id = %(campaign_id)s
+                  AND tenant_id = %(tenant_id)s
+                """,
                 {"campaign_id": campaign_id, "tenant_id": tenant_id},
             )
         conn.commit()
 
-        log(f"campaign_activation: campaign {campaign_id} Approved, segment size={segment_size} "
-            f"(pre-eligibility; email_engine filters no-email / opt-out / suppressed)")
-
-        channel = (campaign.get("channel") or "").strip()
-        summary = {
+        log(f"campaign_activation: campaign {campaign_id} marked Running")
+        try:
+            workflow_run_id = trigger_campaign_workflow_job(campaign_id, tenant_id, log=log)
+        except Exception:
+            with conn.cursor() as cur:
+                set_tenant_context(cur, tenant_id)
+                cur.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.crm_campaign
+                    SET status = 'Failed'
+                    WHERE campaign_id = %(campaign_id)s
+                      AND tenant_id = %(tenant_id)s
+                    """,
+                    {"campaign_id": campaign_id, "tenant_id": tenant_id},
+                )
+            conn.commit()
+            raise
+        return {
             "campaign_id": campaign_id,
             "tenant_id": tenant_id,
-            "snapshot_count": segment_size,
-            "channel": channel or "email",
-            "email_engine_run_id": None,
-            "dispatch_run_id": None,
+            "status": "Running",
+            "workflow_run_id": workflow_run_id,
         }
-        # Route to the channel's dispatch engine: zalo_zns -> notification_engine,
-        # everything else -> email_engine (existing behavior unchanged).
-        if trigger_email:
-            if channel == "zalo_zns":
-                run_id = trigger_notification_engine_job(campaign_id, tenant_id, log=log)
-            else:
-                run_id = trigger_email_engine_job(campaign_id, tenant_id, log=log)
-                summary["email_engine_run_id"] = run_id
-            summary["dispatch_run_id"] = run_id
-        return summary
     finally:
         conn.close()

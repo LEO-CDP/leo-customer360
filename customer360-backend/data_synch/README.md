@@ -1,19 +1,45 @@
-# `data_synch` — Data Synchronization Scaffold
+# `data_synch` — Campaign Audience Synchronization
 
-This code location is currently a runnable Dagster placeholder for future
-external and inbound data synchronization pipelines. It does not yet ingest
-data or write to the Customer 360 database.
+This code location exports approved campaign segment members to configured
+third-party custom audiences. It supports Meta/Facebook Ads, Google Ads
+Customer Match, and TikTok Ads.
 
 ## Dagster interface
 
 - Job: `data_synch_job`
-- Op: `data_synch_placeholder_op`
-- Behavior: logs start/end and sleeps for
-  `DATA_SYNCH_PLACEHOLDER_SLEEP_SECONDS` seconds (default `2`)
+- Op: `run_data_synch_op`
+- Audit table: `customer360.crm_ad_sync_runs`
+- Identifiers are normalized and SHA-256 hashed in memory. Raw email and phone
+  values are never sent to a provider or written to the audit table.
+- Only active profiles with a valid email or phone and no active
+  global/campaign suppression are eligible. Provider-specific consent keys
+  should be added as an explicit connector policy rather than inferred here.
+- Retries reuse the same tenant/campaign/segment/platform/audience idempotency
+  key and preserve the external audience ID.
 
-The implementation is in `dagster_defs.py`. Future work may add CRM or
-warehouse imports into `cdp_raw_profiles_stage` and outbound synchronization
-of resolved profiles.
+Run config:
+
+```yaml
+ops:
+  run_data_synch_op:
+    config:
+      tenant_id: "<uuid>"
+      campaign_id: "<uuid>"
+      platform: "meta_ads" # meta_ads | google_ads | tiktok_ads
+      segment_id: "<uuid>" # must match the campaign audience
+      audience_name: "Spring retention"
+      dry_run: false
+      batch_size: 1000
+```
+
+The tenant must have an active `crm_connector_config` row with
+`connector_type = 'ADS'`. Provider-specific non-secret settings belong in
+`config`; access tokens and developer tokens belong in `credentials`.
+
+Meta requires `ad_account_id` and `access_token`. Google Ads requires
+`customer_id`, `user_list_resource`, `developer_token`, and `access_token`.
+TikTok requires `advertiser_id` and `access_token`. Endpoint/API-version
+overrides are supported through connector `config` for provider versioning.
 
 ## Dependencies and local development
 

@@ -25,7 +25,6 @@ from core.repositories.campaign_draft_repository import (
     SEGMENT_UNSET,
     CampaignDraftValidationError,
     CampaignSegmentNotFoundError,
-    CampaignTemplateNotFoundError,
 )
 from leo_customer360_dao.schemas.crm import (
     CampaignDraftContentItemRead,
@@ -33,7 +32,6 @@ from leo_customer360_dao.schemas.crm import (
     CampaignDraftResponse,
     EditCampaignDraftRequest,
     RejectCampaignDraftRequest,
-    ZnsCampaignDraftRequest,
 )
 
 router = APIRouter(prefix="/campaigns", tags=["AI Campaign Drafts"])
@@ -56,10 +54,10 @@ def _build_response(repo: CampaignDraftRepository, campaign) -> CampaignDraftRes
         status=campaign.status,
         approval_status=campaign.approval_status,
         segment_id=campaign.segment_id,
-        template_id=campaign.template_id,
         name=campaign.name,
         objective=campaign.objective,
         strategy_summary=campaign.strategy_summary,
+        planning_constraints=getattr(campaign, "planning_constraints", None),
         ai_plan=campaign.ai_plan,
         start_date=campaign.start_date,
         end_date=campaign.end_date,
@@ -84,37 +82,6 @@ def generate_campaign_draft(
 
     try:
         campaign = repo.create_draft(
-            tenant_id=tenant_id,
-            created_by=created_by,
-            segment_id=payload.segment_id,
-            template_id=payload.template_id,
-            objective=payload.objective,
-            budget_time_constraints=payload.budget_time_constraints,
-        )
-    except (CampaignSegmentNotFoundError, CampaignTemplateNotFoundError) as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except CampaignDraftValidationError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    invalidate_prefix("crm_campaign")
-    return _build_response(repo, campaign)
-
-
-@router.post("/zalo-draft", response_model=CampaignDraftResponse, status_code=201)
-def generate_zns_campaign_draft(
-    payload: ZnsCampaignDraftRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-):
-    """AI Zalo ZNS draft: the AI picks one Approved ZNS template + fills its typed
-    params, and a channel='zalo_zns' campaign draft is created InReview (behind the
-    same human-approval gate as email drafts)."""
-    tenant_id = uuid.UUID(require_tenant(request))
-    created_by = _current_user_id(request)
-    repo = CampaignDraftRepository(db)
-
-    try:
-        campaign = repo.create_zns_draft(
             tenant_id=tenant_id,
             created_by=created_by,
             segment_id=payload.segment_id,
@@ -167,7 +134,7 @@ def edit_campaign_draft(
         ),
         "content_items": content_items,
     }
-    for field in ("objective", "strategy_summary", "start_date", "end_date"):
+    for field in ("objective", "strategy_summary", "planning_constraints", "start_date", "end_date"):
         if field in payload.model_fields_set:
             draft_fields[field] = getattr(payload, field)
     try:

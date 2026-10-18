@@ -27,7 +27,6 @@ from core.repositories.campaign_draft_repository import (
     CampaignDraftNotFoundError,
     CampaignDraftValidationError,
     CampaignSegmentNotFoundError,
-    CampaignTemplateNotFoundError,
     SEGMENT_UNSET,
 )
 from core.routers.campaign_draft_api import router
@@ -45,7 +44,6 @@ def _campaign(**overrides) -> SimpleNamespace:
         status="Draft",
         approval_status=APPROVAL_STATUS_IN_REVIEW,
         segment_id=uuid.uuid4(),
-        template_id=uuid.uuid4(),
         name="Q4 Win-Back",
         objective="Win back lapsed customers",
         strategy_summary="Re-engage with a targeted offer",
@@ -101,7 +99,7 @@ class FakeCampaignDraftRepository:
         if FakeCampaignDraftRepository.create_side_effect is not None:
             raise FakeCampaignDraftRepository.create_side_effect
 
-        campaign = _campaign(tenant_id=kwargs["tenant_id"], segment_id=kwargs["segment_id"], template_id=kwargs["template_id"])
+        campaign = _campaign(tenant_id=kwargs["tenant_id"], segment_id=kwargs["segment_id"])
         FakeCampaignDraftRepository.campaigns[campaign.campaign_id] = campaign
         FakeCampaignDraftRepository.content_items[campaign.campaign_id] = [
             _content_item_row(uuid.uuid4(), position=1, role="primary")
@@ -182,7 +180,6 @@ class GenerateCampaignDraftTests(unittest.TestCase):
     def _payload(self, **overrides) -> dict[str, Any]:
         payload = {
             "segment_id": str(uuid.uuid4()),
-            "template_id": str(uuid.uuid4()),
             "objective": "Drive Q4 repeat purchases among lapsed VIP customers",
             "budget_time_constraints": "Launch within 2 weeks",
         }
@@ -229,13 +226,6 @@ class GenerateCampaignDraftTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
 
-    def test_generate_refused_for_missing_template_returns_404(self):
-        FakeCampaignDraftRepository.create_side_effect = CampaignTemplateNotFoundError("Template not found")
-
-        response = self.client.post("/campaigns/draft", json=self._payload())
-
-        self.assertEqual(response.status_code, 404)
-
     def test_list_campaign_content_items(self):
         created = self.client.post("/campaigns/draft", json=self._payload()).json()
 
@@ -264,7 +254,6 @@ class ReviewCampaignDraftTests(unittest.TestCase):
             "/campaigns/draft",
             json={
                 "segment_id": str(uuid.uuid4()),
-                "template_id": str(uuid.uuid4()),
                 "objective": "Win back lapsed customers",
             },
         ).json()
@@ -403,7 +392,6 @@ class CampaignDraftTenantIsolationTests(unittest.TestCase):
             "/campaigns/draft",
             json={
                 "segment_id": str(uuid.uuid4()),
-                "template_id": str(uuid.uuid4()),
                 "objective": "Tenant A's campaign",
             },
             headers={"X-Tenant-Id": self.TENANT_A},

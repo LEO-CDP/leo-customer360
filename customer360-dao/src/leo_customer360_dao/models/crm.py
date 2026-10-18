@@ -55,21 +55,18 @@ class Campaign(Base):
     end_date: Mapped[Optional[date]] = mapped_column(Date)
     budget_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
     currency: Mapped[Optional[str]] = mapped_column(String(3), server_default="VND")
-    # Email-marketing links + human-approval gate (AI Campaign Strategy and
-    # Draft Creation, specs/002-ai-campaign-draft-creation): governance state
-    # machine, independent of the free-text `status` column above.
+    # Workflow ownership + human-approval gate: governance state machine,
+    # independent of the free-text `status` column above.
     segment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("cdp_segments.segment_id", ondelete="SET NULL")
     )
     workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
     workflow_version: Mapped[Optional[int]] = mapped_column(Integer)
-    template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("crm_message_templates.template_id", ondelete="SET NULL")
-    )
     approval_status: Mapped[Optional[str]] = mapped_column(String(50), server_default="Draft")
     approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
     approved_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
     strategy_summary: Mapped[Optional[str]] = mapped_column(Text)
+    planning_constraints: Mapped[Optional[str]] = mapped_column(Text)
     ai_plan: Mapped[Optional[dict]] = mapped_column(JSONB)
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))

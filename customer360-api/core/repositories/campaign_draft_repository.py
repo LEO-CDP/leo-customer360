@@ -21,12 +21,10 @@ from leo_customer360_agent.client import (
     AIProviderError,
     CampaignPlanBrief,
     GeneratedCampaignPlan,
-    ZnsCampaignPlanBrief,
     generate_campaign_plan,
-    generate_zalo_campaign_plan,
 )
 from leo_customer360_dao.models.content import CdpContentItem
-from leo_customer360_dao.models.crm import Campaign, CampaignContentItem, CampaignReview, MessageTemplate
+from leo_customer360_dao.models.crm import Campaign, CampaignContentItem, CampaignReview
 from leo_customer360_dao.models.system import SysAuditLog, SysUser
 from leo_customer360_dao.repositories.segment_respository import SegmentRepository
 
@@ -50,8 +48,7 @@ def _utc_now_naive() -> datetime:
 
 
 class CampaignDraftValidationError(ValueError):
-    """Raised for a refused planning request (unresolvable segment, template
-    not Approved, invalid schedule window) -- no crm_campaign row is created."""
+    """Raised for a refused planning request."""
 
 
 class CampaignDraftNotFoundError(LookupError):
@@ -60,11 +57,6 @@ class CampaignDraftNotFoundError(LookupError):
 
 class CampaignSegmentNotFoundError(LookupError):
     """Raised (404) when the referenced segment does not exist (or is
-    invisible to the caller's tenant via RLS)."""
-
-
-class CampaignTemplateNotFoundError(LookupError):
-    """Raised (404) when the referenced email template does not exist (or is
     invisible to the caller's tenant via RLS)."""
 
 
@@ -90,14 +82,6 @@ class CampaignDraftRepository:
     def __init__(self, session: Session):
         """Bind the repository to a tenant-aware SQLAlchemy session."""
         self.session = session
-
-    def _get_template(self, tenant_id: uuid.UUID, template_id: uuid.UUID) -> Optional[MessageTemplate]:
-        """Load one tenant-owned campaign template."""
-        return (
-            self.session.query(MessageTemplate)
-            .filter(MessageTemplate.template_id == template_id, MessageTemplate.tenant_id == tenant_id)
-            .one_or_none()
-        )
 
     def get_candidate_content_items(
         self,
@@ -157,16 +141,12 @@ class CampaignDraftRepository:
         tenant_id: uuid.UUID,
         created_by: Optional[uuid.UUID],
         segment_id: uuid.UUID,
-        template_id: uuid.UUID,
         objective: str,
         budget_time_constraints: Optional[str] = None,
     ) -> Campaign:
-        """FR-001–FR-006, FR-008: resolve segment + Approved template, build
-        the closed candidate content list, call the AI, validate the schedule
-        window, then persist campaign + content plan + audit row. Raises
-        CampaignSegmentNotFoundError/CampaignTemplateNotFoundError (404) or
-        CampaignDraftValidationError (409/422/502-mapped by the router) on
-        any refusal -- nothing is persisted on those paths.
+        """Resolve the segment, build the closed candidate content list, call
+        the planning agent, validate the schedule, and persist the campaign
+        workflow draft plus content plan.
 
         Reads and the write are deliberately two separate transactions on
         this session, not one: the AI call in between is an HTTP request
@@ -186,14 +166,6 @@ class CampaignDraftRepository:
                 f"Segment '{segment_id}' is not resolvable (inactive or no computed snapshot)"
             )
 
-        template = self._get_template(tenant_id, template_id)
-        if template is None:
-            raise CampaignTemplateNotFoundError(f"Template '{template_id}' not found")
-        if template.status != "Approved":
-            raise CampaignDraftValidationError(
-                f"Template '{template_id}' is not Approved (current status: {template.status})"
-            )
-
         candidate_items = self.get_candidate_content_items(
             tenant_id, segment_id, segment_tag=segment.segment_tag, objective=objective
         )
@@ -203,7 +175,7 @@ class CampaignDraftRepository:
         ]
         # Extract everything still needed after the AI call as plain values
         # now, while the ORM objects are still attached -- nothing below
-        # this point touches segment/template/candidate_items again.
+        # this point touches segment/candidate_items again.
         segment_name = segment.segment_name
         valid_content_ids = {str(item.content_item_id) for item in candidate_items}
 
@@ -237,13 +209,14 @@ class CampaignDraftRepository:
             status=APPROVAL_STATUS_DRAFT,
             objective=objective,
             segment_id=segment_id,
-            template_id=template_id,
             approval_status=APPROVAL_STATUS_IN_REVIEW,
             strategy_summary=generated.strategy_summary,
+            planning_constraints=budget_time_constraints,
             ai_plan={
                 "name": generated.name,
                 "objective": generated.objective,
                 "strategy_summary": generated.strategy_summary,
+                "planning_constraints": budget_time_constraints,
                 "action_plan": generated.action_plan,
                 "start_date": generated.start_date.isoformat(),
                 "end_date": generated.end_date.isoformat(),
@@ -281,120 +254,6 @@ class CampaignDraftRepository:
                     "start_date": generated.start_date.isoformat(),
                     "end_date": generated.end_date.isoformat(),
                     "content_item_ids": selected_ids,
-                },
-            )
-        )
-        self.session.commit()
-        self.session.refresh(campaign)
-        return campaign
-
-    def create_zns_draft(
-        self,
-        tenant_id: uuid.UUID,
-        created_by: Optional[uuid.UUID],
-        segment_id: uuid.UUID,
-        objective: str,
-        budget_time_constraints: Optional[str] = None,
-    ) -> Campaign:
-        """AI-drafted Zalo ZNS campaign. Unlike ``create_draft``, the caller does
-        NOT supply a template: the AI SELECTS one Approved ZNS template
-        (crm_message_templates, channel=zalo_zns) from a closed candidate list and
-        fills its typed params. Persists a ``channel='zalo_zns'`` crm_campaign
-        draft (InReview) with the chosen ``template_id`` + ``ai_plan.template_data``
-        (which the notification_engine reads at send time). Same
-        read-commit-then-AI-then-write shape as ``create_draft``."""
-        segment = SegmentRepository(self.session).get_segment(segment_id)
-        if segment is None:
-            raise CampaignSegmentNotFoundError(f"Segment '{segment_id}' not found")
-        if not segment.is_active or segment.status_code != 1:
-            raise CampaignDraftValidationError(
-                f"Segment '{segment_id}' is not resolvable (inactive or no computed snapshot)"
-            )
-
-        approved = self.session.execute(
-            select(MessageTemplate).where(
-                MessageTemplate.tenant_id == tenant_id, MessageTemplate.status == "Approved"
-            )
-        ).scalars().all()
-        candidates = [t for t in approved if (t.metadata_ or {}).get("channel") == "zalo_zns"]
-        if not candidates:
-            raise CampaignDraftValidationError(
-                "No Approved ZNS templates found; sync + approve a ZNS template first"
-            )
-        candidate_payload = [
-            {"template_id": str(t.template_id), "name": t.name, "params": (t.variables or {}).get("params", [])}
-            for t in candidates
-        ]
-        valid_template_ids = {str(t.template_id): t.template_id for t in candidates}
-        segment_name = segment.segment_name
-
-        # End the read-only transaction (nothing pending) before the AI call.
-        self.session.commit()
-
-        brief = ZnsCampaignPlanBrief(
-            segment_context={"segment_id": str(segment_id), "segment_name": segment_name},
-            objective=objective,
-            budget_time_constraints=budget_time_constraints,
-        )
-        try:
-            generated = generate_zalo_campaign_plan(brief, candidate_payload)
-        except AIProviderError as exc:
-            raise CampaignDraftValidationError(str(exc)) from exc
-
-        if generated.start_date is None or generated.end_date is None or generated.end_date < generated.start_date:
-            raise CampaignDraftValidationError("AI-generated schedule window is invalid (end_date before start_date)")
-        if generated.end_date < date.today():
-            raise CampaignDraftValidationError("AI-generated schedule window is entirely in the past")
-
-        chosen_template_id = valid_template_ids.get(generated.template_id)
-        if chosen_template_id is None:  # defense-in-depth (planner already guards this)
-            raise CampaignDraftValidationError(
-                f"AI selected template '{generated.template_id}' not in the candidate list"
-            )
-
-        campaign = Campaign(
-            tenant_id=tenant_id,
-            user_id=created_by,
-            name=generated.name,
-            status=APPROVAL_STATUS_DRAFT,
-            channel="zalo_zns",
-            objective=objective,
-            segment_id=segment_id,
-            template_id=chosen_template_id,
-            approval_status=APPROVAL_STATUS_IN_REVIEW,
-            strategy_summary=generated.strategy_summary,
-            ai_plan={
-                "name": generated.name,
-                "objective": generated.objective,
-                "strategy_summary": generated.strategy_summary,
-                "action_plan": generated.action_plan,
-                "start_date": generated.start_date.isoformat(),
-                "end_date": generated.end_date.isoformat(),
-                "template_id": generated.template_id,
-                "template_data": generated.template_data,
-            },
-            start_date=generated.start_date,
-            end_date=generated.end_date,
-        )
-        self.session.add(campaign)
-        self.session.flush()
-
-        self.session.add(
-            SysAuditLog(
-                tenant_id=tenant_id,
-                user_id=created_by,
-                action="CREATE",
-                resource_type="crm_campaign",
-                resource_id=str(campaign.campaign_id),
-                created_at=_utc_now_naive(),
-                after_data={
-                    "channel": "zalo_zns",
-                    "name": generated.name,
-                    "objective": objective,
-                    "template_id": str(chosen_template_id),
-                    "template_data": generated.template_data,
-                    "start_date": generated.start_date.isoformat(),
-                    "end_date": generated.end_date.isoformat(),
                 },
             )
         )
@@ -464,6 +323,7 @@ class CampaignDraftRepository:
         segment_id: object = SEGMENT_UNSET,
         objective: Any = FIELD_UNSET,
         strategy_summary: Any = FIELD_UNSET,
+        planning_constraints: Any = FIELD_UNSET,
         start_date: Any = FIELD_UNSET,
         end_date: Any = FIELD_UNSET,
         content_items: Optional[list[dict[str, Any]]] = None,
@@ -517,6 +377,7 @@ class CampaignDraftRepository:
             "segment": self._segment_audit_snapshot(tenant_id, current_segment_id),
             "objective": campaign.objective,
             "strategy_summary": campaign.strategy_summary,
+            "planning_constraints": getattr(campaign, "planning_constraints", None),
             "start_date": campaign.start_date.isoformat() if campaign.start_date else None,
             "end_date": campaign.end_date.isoformat() if campaign.end_date else None,
             "workflow_id": str(getattr(campaign, "workflow_id", None)) if getattr(campaign, "workflow_id", None) else None,
@@ -537,6 +398,8 @@ class CampaignDraftRepository:
             campaign.objective = objective
         if strategy_summary is not FIELD_UNSET:
             campaign.strategy_summary = strategy_summary
+        if planning_constraints is not FIELD_UNSET:
+            campaign.planning_constraints = planning_constraints
         if start_date is not FIELD_UNSET:
             campaign.start_date = start_date
         if end_date is not FIELD_UNSET:
@@ -569,6 +432,7 @@ class CampaignDraftRepository:
             "segment": self._segment_audit_snapshot(tenant_id, campaign.segment_id),
             "objective": campaign.objective,
             "strategy_summary": campaign.strategy_summary,
+            "planning_constraints": getattr(campaign, "planning_constraints", None),
             "start_date": campaign.start_date.isoformat() if campaign.start_date else None,
             "end_date": campaign.end_date.isoformat() if campaign.end_date else None,
             "workflow_id": str(getattr(campaign, "workflow_id", None)) if getattr(campaign, "workflow_id", None) else None,
@@ -619,9 +483,7 @@ class CampaignDraftRepository:
         }
 
     def approve(self, tenant_id: uuid.UUID, campaign_id: uuid.UUID, reviewer_id: uuid.UUID) -> Campaign:
-        """FR-009, FR-010, FR-013, FR-016: re-validates the linked template is
-        still Approved and every linked content item is still active before
-        recording the approval; refuses (naming the blocker) otherwise."""
+        """Re-validates linked content items before recording approval."""
         campaign = self.get_campaign(tenant_id, campaign_id)
         if campaign.approval_status != APPROVAL_STATUS_IN_REVIEW:
             raise CampaignDraftApprovalBlockedError(
@@ -629,17 +491,6 @@ class CampaignDraftRepository:
                 f"{campaign.approval_status}); only InReview campaigns can be approved"
             )
         expected_updated_at = campaign.updated_at
-
-        if campaign.template_id is not None:
-            template = self._get_template(tenant_id, campaign.template_id)
-            if template is None:
-                raise CampaignDraftApprovalBlockedError(
-                    f"Linked template '{campaign.template_id}' no longer exists"
-                )
-            if template.status != "Approved":
-                raise CampaignDraftApprovalBlockedError(
-                    f"Linked template '{campaign.template_id}' is not Approved (current status: {template.status})"
-                )
 
         content_links = self._get_content_item_links(tenant_id, campaign_id)
         if content_links:

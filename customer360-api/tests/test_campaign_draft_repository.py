@@ -7,6 +7,7 @@ the SQLAlchemy Session, matching this repo's hermetic-testing convention.
 
 import unittest
 import uuid
+from contextlib import nullcontext
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -22,13 +23,11 @@ from core.repositories.campaign_draft_repository import (
     CampaignDraftRepository,
     CampaignDraftValidationError,
     CampaignSegmentNotFoundError,
-    CampaignTemplateNotFoundError,
 )
 from leo_customer360_dao.models.system import SysUser
 
 DEMO_TENANT_ID = uuid.uuid4()
 DEMO_SEGMENT_ID = uuid.uuid4()
-DEMO_TEMPLATE_ID = uuid.uuid4()
 CONTENT_ITEM_1 = uuid.uuid4()
 CONTENT_ITEM_2 = uuid.uuid4()
 
@@ -113,7 +112,7 @@ def _fake_segment(is_active=True, status_code=1, segment_tag="vip_lapsed"):
 
 
 def _fake_template(status="Approved"):
-    return SimpleNamespace(template_id=DEMO_TEMPLATE_ID, status=status)
+    return None
 
 
 def _valid_generated_plan(content_item_ids=None) -> GeneratedCampaignPlan:
@@ -145,9 +144,7 @@ class CreateDraftTests(unittest.TestCase):
         )
 
     def _patch_template(self, template=None, side_effect=None):
-        if side_effect is not None:
-            return patch.object(CampaignDraftRepository, "_get_template", side_effect=side_effect)
-        return patch.object(CampaignDraftRepository, "_get_template", return_value=template)
+        return nullcontext()
 
     def _patch_generate(self, plan=None, side_effect=None):
         if side_effect is not None:
@@ -172,7 +169,6 @@ class CreateDraftTests(unittest.TestCase):
                 tenant_id=DEMO_TENANT_ID,
                 created_by=None,
                 segment_id=DEMO_SEGMENT_ID,
-                template_id=DEMO_TEMPLATE_ID,
                 objective="Objective",
             )
 
@@ -182,11 +178,10 @@ class CreateDraftTests(unittest.TestCase):
         with self._patch_segment(_fake_segment()), self._patch_template(_fake_template()), self._patch_generate(
             _valid_generated_plan(content_item_ids=[str(CONTENT_ITEM_1), str(CONTENT_ITEM_2)])
         ):
-            campaign = self.repo.create_draft(
+            campaign =             self.repo.create_draft(
                 tenant_id=DEMO_TENANT_ID,
                 created_by=uuid.uuid4(),
                 segment_id=DEMO_SEGMENT_ID,
-                template_id=DEMO_TEMPLATE_ID,
                 objective="Win back lapsed customers",
             )
 
@@ -209,7 +204,6 @@ class CreateDraftTests(unittest.TestCase):
                     tenant_id=DEMO_TENANT_ID,
                     created_by=None,
                     segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
                     objective="Objective",
                 )
         self.assertEqual(self.session.added, [])
@@ -224,35 +218,6 @@ class CreateDraftTests(unittest.TestCase):
                     tenant_id=DEMO_TENANT_ID,
                     created_by=None,
                     segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
-                    objective="Objective",
-                )
-        self.assertEqual(self.session.added, [])
-
-    def test_create_draft_refuses_template_not_found(self):
-        with self._patch_segment(_fake_segment()), self._patch_template(template=None), self._patch_generate(
-            _valid_generated_plan()
-        ):
-            with self.assertRaises(CampaignTemplateNotFoundError):
-                self.repo.create_draft(
-                    tenant_id=DEMO_TENANT_ID,
-                    created_by=None,
-                    segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
-                    objective="Objective",
-                )
-        self.assertEqual(self.session.added, [])
-
-    def test_create_draft_refuses_template_not_approved(self):
-        with self._patch_segment(_fake_segment()), self._patch_template(_fake_template(status="Draft")), self._patch_generate(
-            _valid_generated_plan()
-        ):
-            with self.assertRaises(CampaignDraftValidationError):
-                self.repo.create_draft(
-                    tenant_id=DEMO_TENANT_ID,
-                    created_by=None,
-                    segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
                     objective="Objective",
                 )
         self.assertEqual(self.session.added, [])
@@ -269,7 +234,6 @@ class CreateDraftTests(unittest.TestCase):
                     tenant_id=DEMO_TENANT_ID,
                     created_by=None,
                     segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
                     objective="Objective",
                 )
         self.assertEqual(self.session.added, [])
@@ -283,7 +247,6 @@ class CreateDraftTests(unittest.TestCase):
                     tenant_id=DEMO_TENANT_ID,
                     created_by=None,
                     segment_id=DEMO_SEGMENT_ID,
-                    template_id=DEMO_TEMPLATE_ID,
                     objective="Objective",
                 )
         self.assertEqual(self.session.added, [])
@@ -297,7 +260,6 @@ class CreateDraftTests(unittest.TestCase):
                 tenant_id=DEMO_TENANT_ID,
                 created_by=None,
                 segment_id=DEMO_SEGMENT_ID,
-                template_id=DEMO_TEMPLATE_ID,
                 objective="Objective",
             )
 
@@ -313,7 +275,6 @@ class ApproveRejectTests(unittest.TestCase):
         self.campaign = SimpleNamespace(
             campaign_id=uuid.uuid4(),
             tenant_id=DEMO_TENANT_ID,
-            template_id=DEMO_TEMPLATE_ID,
             approval_status=APPROVAL_STATUS_IN_REVIEW,
             approved_by=None,
             approved_at=None,
@@ -327,9 +288,7 @@ class ApproveRejectTests(unittest.TestCase):
         return patch.object(CampaignDraftRepository, "_get_content_item_links", return_value=links)
 
     def _patch_template(self, template=None, side_effect=None):
-        if side_effect is not None:
-            return patch.object(CampaignDraftRepository, "_get_template", side_effect=side_effect)
-        return patch.object(CampaignDraftRepository, "_get_template", return_value=template)
+        return nullcontext()
 
     def test_approve_success_sets_approved_and_records_review(self):
         with self._patch_get_campaign(), self._patch_content_links([]), self._patch_template(_fake_template()):
@@ -339,13 +298,6 @@ class ApproveRejectTests(unittest.TestCase):
         review_rows = [obj for obj in self.session.added if type(obj).__name__ == "CampaignReview"]
         self.assertEqual(len(review_rows), 1)
         self.assertEqual(review_rows[0].decision, "approve")
-
-    def test_approve_blocked_when_linked_template_not_approved(self):
-        with self._patch_get_campaign(), self._patch_content_links([]), self._patch_template(
-            _fake_template(status="NeedsReview")
-        ):
-            with self.assertRaises(CampaignDraftApprovalBlockedError):
-                self.repo.approve(DEMO_TENANT_ID, self.campaign.campaign_id, uuid.uuid4())
 
     def test_approve_blocked_when_content_item_archived(self):
         link = SimpleNamespace(content_item_id=CONTENT_ITEM_1)
@@ -431,8 +383,6 @@ class CandidateContentItemFilteringTests(unittest.TestCase):
         with patch(
             "core.repositories.campaign_draft_repository.SegmentRepository.get_segment",
             return_value=_fake_segment(),
-        ), patch.object(
-            CampaignDraftRepository, "_get_template", return_value=_fake_template()
         ), patch(
             "core.repositories.campaign_draft_repository.generate_campaign_plan",
             return_value=_valid_generated_plan(content_item_ids=[]),
@@ -441,7 +391,6 @@ class CandidateContentItemFilteringTests(unittest.TestCase):
                 tenant_id=DEMO_TENANT_ID,
                 created_by=None,
                 segment_id=DEMO_SEGMENT_ID,
-                template_id=DEMO_TEMPLATE_ID,
                 objective="Objective",
             )
 
@@ -504,7 +453,6 @@ class OptimisticConcurrencyTests(unittest.TestCase):
             campaign_id=uuid.uuid4(),
             tenant_id=DEMO_TENANT_ID,
             segment_id=None,
-            template_id=None,
             approval_status=APPROVAL_STATUS_IN_REVIEW,
             approved_by=None,
             approved_at=None,

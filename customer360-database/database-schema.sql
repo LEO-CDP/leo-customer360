@@ -390,11 +390,11 @@ CREATE TABLE IF NOT EXISTS customer360.crm_campaign (
 
     -- Agentic email campaign planning and approval
     segment_id UUID,
-    template_id UUID,
     approval_status VARCHAR(50) NOT NULL DEFAULT 'Draft',
     approved_by UUID,
     approved_at TIMESTAMP WITH TIME ZONE,
     strategy_summary TEXT,
+    planning_constraints TEXT,
     ai_plan JSONB,
     
     -- Dashboard Dimensions
@@ -3030,9 +3030,9 @@ CREATE TRIGGER trg_restrict_workflow_candidate_changes
 -- AI Campaign Draft Review (specs/002-ai-campaign-draft-creation)
 -- ============================================================================
 -- Records reviewer approve/reject decisions on a campaign draft. The
--- crm_campaign segment/template/approval_status columns and the
+-- crm_campaign segment/approval_status columns and the
 -- crm_campaign_content_items relation table are defined later in this file
--- (Agentic CRM Messaging Schema section), after crm_message_templates exists.
+-- (Agentic CRM Messaging Schema section).
 CREATE TABLE IF NOT EXISTS customer360.crm_campaign_reviews (
     review_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id),
@@ -3408,9 +3408,9 @@ CREATE INDEX IF NOT EXISTS idx_graph_edges_belongs_to_industry_created_at ON cus
 -- ==========================================================
 -- Agentic Email Marketing Schema
 -- ==========================================================
--- Relational structure behind the outbound CRM messaging flow
--- (segment -> CRM sync -> AI message template draft -> AI campaign draft -> human
--- approval -> dispatch). Placed after all referenced tables (sys_user,
+-- Relational structure behind the outbound workflow flow
+-- (segment -> workflow draft -> human approval -> profile actions). Placed
+-- after all referenced tables (sys_user,
 -- crm_campaign, crm_lead, crm_lead_source, cdp_segments, cdp_content_items)
 -- so foreign keys resolve. See docs/action-plans/AGENTIC-EMAIL-MARKETING-FLOW.md.
 
@@ -3544,13 +3544,6 @@ BEGIN
             'segment_id', 'customer360', 'cdp_segments', 'segment_id'
         );
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_template' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
-        EXECUTE format(
-            'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I) ON DELETE SET NULL',
-            'customer360', 'crm_campaign', 'fk_crm_campaign_template',
-            'template_id', 'customer360', 'crm_message_templates', 'template_id'
-        );
-    END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crm_campaign_approved_by' AND conrelid = 'customer360.crm_campaign'::regclass) THEN
         EXECUTE format(
             'ALTER TABLE %I.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I.%I(%I)',
@@ -3567,7 +3560,6 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_crm_campaign_segment ON customer360.crm_campaign (segment_id);
-CREATE INDEX IF NOT EXISTS idx_crm_campaign_template ON customer360.crm_campaign (template_id);
 
 DO $$
 BEGIN
@@ -3633,6 +3625,85 @@ COMMENT ON TABLE customer360.crm_segment_sync_runs IS 'Audit record for each seg
 CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_tenant ON customer360.crm_segment_sync_runs (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_segment ON customer360.crm_segment_sync_runs (segment_id);
 CREATE INDEX IF NOT EXISTS idx_crm_segment_sync_runs_tenant_started ON customer360.crm_segment_sync_runs (tenant_id, started_at DESC);
+
+-- --- External ad-platform audience synchronization ----------------
+CREATE TABLE IF NOT EXISTS customer360.crm_ad_sync_runs (
+    sync_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    segment_id UUID NOT NULL REFERENCES customer360.cdp_segments(segment_id) ON DELETE CASCADE,
+    platform VARCHAR(50) NOT NULL,
+    audience_name VARCHAR(255) NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    external_audience_id TEXT,
+    provider_request_id TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'Pending',
+    dry_run BOOLEAN NOT NULL DEFAULT FALSE,
+    attempt_count INTEGER NOT NULL DEFAULT 1,
+    matched_count INTEGER NOT NULL DEFAULT 0,
+    eligible_count INTEGER NOT NULL DEFAULT 0,
+    uploaded_count INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    finished_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT uq_crm_ad_sync_runs_key UNIQUE (tenant_id, idempotency_key),
+    CONSTRAINT chk_crm_ad_sync_runs_platform CHECK (
+        platform IN ('meta_ads', 'google_ads', 'tiktok_ads')
+    ),
+    CONSTRAINT chk_crm_ad_sync_runs_status CHECK (
+        status IN ('Pending', 'Running', 'Completed', 'Failed')
+    ),
+    CONSTRAINT chk_crm_ad_sync_runs_counts CHECK (
+        attempt_count > 0
+        AND matched_count >= 0
+        AND eligible_count >= 0
+        AND uploaded_count >= 0
+    )
+);
+
+COMMENT ON TABLE customer360.crm_ad_sync_runs IS 'Tenant-scoped, idempotent audit state for campaign segment uploads to Meta, Google Ads, and TikTok custom audiences. Raw profile identifiers are never stored.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_ad_sync_runs_tenant_started
+    ON customer360.crm_ad_sync_runs (tenant_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_crm_ad_sync_runs_campaign
+    ON customer360.crm_ad_sync_runs (tenant_id, campaign_id, platform);
+
+-- --- Per-profile workflow action ledger -------------------------
+CREATE TABLE IF NOT EXISTS customer360.crm_campaign_workflow_action_runs (
+    action_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
+    campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles(master_profile_id) ON DELETE CASCADE,
+    node_id TEXT NOT NULL,
+    action_type VARCHAR(40) NOT NULL,
+    channel VARCHAR(20),
+    status VARCHAR(20) NOT NULL DEFAULT 'Running',
+    provider VARCHAR(100),
+    provider_message_id TEXT,
+    error_message TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 1,
+    run_id TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT uq_crm_campaign_workflow_action
+        UNIQUE (campaign_id, master_profile_id, node_id),
+    CONSTRAINT chk_crm_campaign_workflow_action_status
+        CHECK (status IN ('Running', 'Sent', 'Applied', 'Skipped', 'Failed')),
+    CONSTRAINT chk_crm_campaign_workflow_action_type
+        CHECK (action_type IN ('email', 'notification', 'push', 'update_profile')),
+    CONSTRAINT chk_crm_campaign_workflow_action_attempts
+        CHECK (attempt_count > 0)
+);
+
+COMMENT ON TABLE customer360.crm_campaign_workflow_action_runs IS 'Idempotent per-profile ledger for actions executed by the persisted customer journey workflow.';
+
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_workflow_action_tenant
+    ON customer360.crm_campaign_workflow_action_runs (tenant_id, campaign_id, status);
+CREATE INDEX IF NOT EXISTS idx_crm_campaign_workflow_action_profile
+    ON customer360.crm_campaign_workflow_action_runs (tenant_id, master_profile_id);
 
 -- --- Per-recipient email send ledger --------------------------
 CREATE TABLE IF NOT EXISTS customer360.cdp_campaign_dispatch_logs (
@@ -3989,7 +4060,6 @@ BEGIN
             {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_user","child_columns":"tenant_id, user_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (user_id)"},
             {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_approved_by","child_columns":"tenant_id, approved_by","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"SET NULL (approved_by)"},
             {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_segment","child_columns":"tenant_id, segment_id","parent_table":"cdp_segments","parent_columns":"tenant_id, segment_id","on_delete":"SET NULL (segment_id)"},
-            {"child_table":"crm_campaign","constraint_name":"fk_crm_campaign_tenant_template","child_columns":"tenant_id, template_id","parent_table":"crm_message_templates","parent_columns":"tenant_id, template_id","on_delete":"SET NULL (template_id)"},
             {"child_table":"crm_campaign_reviews","constraint_name":"fk_crm_campaign_reviews_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
             {"child_table":"crm_campaign_reviews","constraint_name":"fk_crm_campaign_reviews_tenant_user","child_columns":"tenant_id, reviewer_id","parent_table":"sys_user","parent_columns":"tenant_id, user_id","on_delete":"RESTRICT"},
             {"child_table":"crm_campaign_experiments","constraint_name":"fk_crm_campaign_experiments_tenant_campaign","child_columns":"tenant_id, campaign_id","parent_table":"crm_campaign","parent_columns":"tenant_id, campaign_id","on_delete":"CASCADE"},
@@ -4103,14 +4173,21 @@ CREATE INDEX IF NOT EXISTS idx_sys_assistant_message_created
     ON customer360.sys_assistant_message (tenant_id, created_at);
 
 ---------------------------------------------------
--- Customer engagement flows (workflow JSON, schema_version 2)
+-- Customer engagement flows (workflow JSON)
 ---------------------------------------------------
 -- crm_flow          one row per flow: name, status and which version is live
 -- crm_flow_version  immutable JSON snapshot per save; source of truth for exact round trips
 -- crm_flow_node     one row per node, shredded from the JSON for SQL queries and joins
 -- crm_flow_edge     parent -> child links; one parent per node and one child per branch
 -- Every row carries tenant_id, so the tenant RLS policies apply to all four tables.
--- Functions: crm_save_flow() stores a snapshot, crm_publish_flow() sets the live version,
+--
+-- Agentic governance: a version is written by a user or by an AI agent (created_by).
+-- Agent versions start InReview and cannot go live until a human reviewer who did not
+-- start the run approves them (crm_review_flow_version). Snapshots and their node/edge
+-- projections are immutable; the only mutable fields on a version are its review fields.
+--
+-- Functions: crm_save_flow() stores a snapshot, crm_review_flow_version() approves or
+-- rejects an agent version, crm_publish_flow() sets the live version (approved only),
 -- crm_load_flow() rebuilds the JSON that the studio reads with setWorkflow().
 
 CREATE TABLE IF NOT EXISTS customer360.crm_flow (
@@ -4132,13 +4209,82 @@ CREATE TABLE IF NOT EXISTS customer360.crm_flow_version (
     version INT NOT NULL,
     schema_version INT NOT NULL DEFAULT 2,
     definition JSONB NOT NULL CHECK (jsonb_typeof(definition -> 'root') = 'object'),
+    -- 'user' = saved by a person in the studio; 'agent' = proposed by an AI agent.
     created_by TEXT NOT NULL DEFAULT 'user' CHECK (created_by IN ('user', 'agent')),
+    -- The person who saved the version, or who started the agent run.
+    created_by_user_id UUID,
+    -- Agent that proposed this version (required when created_by = 'agent').
+    agent_code VARCHAR(100),
+    -- Generation context for agent versions: model, prompt version, rationale,
+    -- input references. Informational only; never used for authorization.
+    provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- Draft / InReview / Approved / Rejected, the same vocabulary as campaign drafts.
+    approval_status VARCHAR(50) NOT NULL DEFAULT 'Draft',
+    reviewed_by UUID,
+    reviewed_at TIMESTAMPTZ,
+    review_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (flow_id, version),
     CONSTRAINT crm_flow_version_tenant_key UNIQUE (flow_id, version, tenant_id),
     CONSTRAINT crm_flow_version_flow_fk FOREIGN KEY (flow_id, tenant_id)
         REFERENCES customer360.crm_flow (flow_id, tenant_id) ON DELETE CASCADE
 );
+
+-- Upgrades: existing deployments already have crm_flow_version without these columns.
+-- Every pre-existing version was saved by a person, so it is backfilled as Approved.
+ALTER TABLE customer360.crm_flow_version
+    ADD COLUMN IF NOT EXISTS created_by_user_id UUID,
+    ADD COLUMN IF NOT EXISTS agent_code VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS approval_status VARCHAR(50) NOT NULL DEFAULT 'Draft',
+    ADD COLUMN IF NOT EXISTS reviewed_by UUID,
+    ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS review_reason TEXT;
+
+UPDATE customer360.crm_flow_version
+SET approval_status = 'Approved', reviewed_at = created_at
+WHERE approval_status = 'Draft' AND created_by = 'user';
+
+DO $$
+DECLARE
+    c RECORD;
+BEGIN
+    FOR c IN
+        SELECT * FROM (VALUES
+            ('crm_flow_version', 'crm_flow_version_agent_fk',
+             'FOREIGN KEY (agent_code) REFERENCES customer360.cdp_ai_agents (agent_code) ON DELETE RESTRICT'),
+            ('crm_flow_version', 'crm_flow_version_creator_fk',
+             'FOREIGN KEY (tenant_id, created_by_user_id) REFERENCES customer360.sys_user (tenant_id, user_id)'),
+            ('crm_flow_version', 'crm_flow_version_reviewer_fk',
+             'FOREIGN KEY (tenant_id, reviewed_by) REFERENCES customer360.sys_user (tenant_id, user_id)'),
+            ('crm_flow_version', 'crm_flow_version_approval_status_check',
+             'CHECK (approval_status IN (''Draft'', ''InReview'', ''Approved'', ''Rejected''))'),
+            ('crm_flow_version', 'crm_flow_version_provenance_object_check',
+             'CHECK (jsonb_typeof(provenance) = ''object'')'),
+            ('crm_flow_version', 'crm_flow_version_agent_actor_check',
+             'CHECK (created_by <> ''agent'' OR agent_code IS NOT NULL)'),
+            ('crm_flow_version', 'crm_flow_version_agent_creator_check',
+             'CHECK (created_by <> ''agent'' OR created_by_user_id IS NOT NULL)'),
+            ('crm_flow_version', 'crm_flow_version_user_actor_check',
+             'CHECK (created_by <> ''user'' OR agent_code IS NULL)'),
+            ('crm_flow_version', 'crm_flow_version_review_state_check',
+             'CHECK ((approval_status IN (''Approved'', ''Rejected'')) = (reviewed_at IS NOT NULL))'),
+            ('crm_flow_version', 'crm_flow_version_agent_review_check',
+             'CHECK (created_by = ''user'' OR approval_status IN (''Draft'', ''InReview'') OR reviewed_by IS NOT NULL)'),
+            ('crm_flow', 'crm_flow_live_version_fk',
+             'FOREIGN KEY (flow_id, live_version) REFERENCES customer360.crm_flow_version (flow_id, version)')
+        ) AS t(table_name, constraint_name, definition)
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = c.constraint_name
+              AND conrelid = format('customer360.%I', c.table_name)::regclass
+        ) THEN
+            EXECUTE format('ALTER TABLE customer360.%I ADD CONSTRAINT %I %s',
+                           c.table_name, c.constraint_name, c.definition);
+        END IF;
+    END LOOP;
+END $$;
 
 ALTER TABLE customer360.crm_campaign
     ADD COLUMN IF NOT EXISTS workflow_id UUID,
@@ -4174,14 +4320,15 @@ CREATE TABLE IF NOT EXISTS customer360.crm_flow_node (
     node_id TEXT NOT NULL, -- "n1", "n2", ... as in the JSON
     node_type TEXT NOT NULL CHECK (node_type IN (
         'trigger', 'condition', 'wait', 'wait_event', 'exit',
-        'email', 'sms', 'push', 'update_profile')),
+        'email', 'notification', 'push', 'update_profile', 'run_data_synch_job')),
     config JSONB NOT NULL DEFAULT '{}',
     PRIMARY KEY (flow_id, version, node_id),
     CONSTRAINT crm_flow_node_version_fk FOREIGN KEY (flow_id, version, tenant_id)
         REFERENCES customer360.crm_flow_version (flow_id, version, tenant_id) ON DELETE CASCADE,
     CHECK (node_type NOT IN ('wait', 'wait_event') OR (config ? 'amount' AND config ? 'unit')),
     CHECK (node_type <> 'email' OR (config ? 'subject' AND config ? 'body')),
-    CHECK (node_type <> 'update_profile' OR (config ? 'action' AND config ? 'tag'))
+    CHECK (node_type <> 'update_profile' OR (config ? 'action' AND config ? 'tag')),
+    CHECK (node_type <> 'run_data_synch_job' OR (config ? 'platform' AND config ? 'audience_name'))
 );
 
 CREATE TABLE IF NOT EXISTS customer360.crm_flow_edge (
@@ -4207,6 +4354,64 @@ CREATE INDEX IF NOT EXISTS crm_flow_node_type_idx
     ON customer360.crm_flow_node (flow_id, version, node_type);
 CREATE INDEX IF NOT EXISTS crm_idx_flow_tenant
     ON customer360.crm_flow (tenant_id);
+CREATE INDEX IF NOT EXISTS crm_flow_version_review_queue_idx
+    ON customer360.crm_flow_version (tenant_id, created_at)
+    WHERE approval_status = 'InReview';
+CREATE INDEX IF NOT EXISTS crm_flow_version_agent_idx
+    ON customer360.crm_flow_version (tenant_id, agent_code, created_at)
+    WHERE agent_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS crm_campaign_workflow_idx
+    ON customer360.crm_campaign (workflow_id, workflow_version)
+    WHERE workflow_id IS NOT NULL;
+
+-- A saved version is a snapshot: its JSON, author, agent and provenance never change.
+-- Only review fields move (through crm_review_flow_version). Node and edge rows are the
+-- relational projection of that snapshot and are immutable too.
+CREATE OR REPLACE FUNCTION customer360.guard_flow_version_snapshot()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.flow_id IS DISTINCT FROM OLD.flow_id
+       OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+       OR NEW.version IS DISTINCT FROM OLD.version
+       OR NEW.schema_version IS DISTINCT FROM OLD.schema_version
+       OR NEW.definition IS DISTINCT FROM OLD.definition
+       OR NEW.created_by IS DISTINCT FROM OLD.created_by
+       OR NEW.created_by_user_id IS DISTINCT FROM OLD.created_by_user_id
+       OR NEW.agent_code IS DISTINCT FROM OLD.agent_code
+       OR NEW.provenance IS DISTINCT FROM OLD.provenance
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+        RAISE EXCEPTION 'workflow version % of flow % is immutable; only its review fields can change',
+            OLD.version, OLD.flow_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION customer360.forbid_flow_projection_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'workflow nodes and edges are immutable; save a new version instead';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_guard_flow_version_snapshot ON customer360.crm_flow_version;
+CREATE TRIGGER trg_guard_flow_version_snapshot
+    BEFORE UPDATE ON customer360.crm_flow_version
+    FOR EACH ROW EXECUTE FUNCTION customer360.guard_flow_version_snapshot();
+
+DROP TRIGGER IF EXISTS trg_forbid_flow_node_update ON customer360.crm_flow_node;
+CREATE TRIGGER trg_forbid_flow_node_update
+    BEFORE UPDATE ON customer360.crm_flow_node
+    FOR EACH ROW EXECUTE FUNCTION customer360.forbid_flow_projection_update();
+
+DROP TRIGGER IF EXISTS trg_forbid_flow_edge_update ON customer360.crm_flow_edge;
+CREATE TRIGGER trg_forbid_flow_edge_update
+    BEFORE UPDATE ON customer360.crm_flow_edge
+    FOR EACH ROW EXECUTE FUNCTION customer360.forbid_flow_projection_update();
 
 -- Channel and wait duration are derived on read, so they are never stored.
 CREATE OR REPLACE VIEW customer360.crm_vw_flow_node
@@ -4220,7 +4425,7 @@ SELECT
     n.config,
     CASE n.node_type
         WHEN 'email' THEN 'EMAIL'
-        WHEN 'sms' THEN 'SMS'
+        WHEN 'notification' THEN 'NOTIFICATION'
         WHEN 'push' THEN 'PUSH'
     END AS channel,
     CASE WHEN n.node_type IN ('wait', 'wait_event')
@@ -4233,21 +4438,39 @@ SELECT
 FROM customer360.crm_flow_node n;
 
 -- Saves a JSON snapshot and shreds its nodes and edges. Returns the new version.
--- Pass NULL for p_flow_id to create a flow.
+-- Pass NULL for p_flow_id to create a flow. The flow row is locked so concurrent saves
+-- number their versions in sequence. A user save is approved at once (its author is the
+-- approver of record). An agent save is InReview and needs p_agent_code and a human
+-- reviewer before it can be published.
+DROP FUNCTION IF EXISTS customer360.crm_save_flow(UUID, UUID, TEXT, JSONB, TEXT);
 CREATE OR REPLACE FUNCTION customer360.crm_save_flow(
     p_tenant UUID,
     p_flow_id UUID,
     p_name TEXT,
     p_workflow JSONB,
-    p_actor TEXT DEFAULT 'user'
+    p_actor TEXT DEFAULT 'user',
+    p_user_id UUID DEFAULT NULL,
+    p_agent_code VARCHAR DEFAULT NULL,
+    p_provenance JSONB DEFAULT '{}'::jsonb
 ) RETURNS TABLE (flow_id UUID, version INT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_flow UUID := p_flow_id;
     v_ver INT;
+    v_status TEXT;
+    v_agent BOOLEAN := p_actor = 'agent';
 BEGIN
     IF jsonb_typeof(p_workflow -> 'root') IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'workflow must contain a root object';
+    END IF;
+    IF v_agent AND p_agent_code IS NULL THEN
+        RAISE EXCEPTION 'an agent-created workflow version must name its agent';
+    END IF;
+    IF v_agent AND p_user_id IS NULL THEN
+        RAISE EXCEPTION 'an agent-created workflow version must name its initiating user';
+    END IF;
+    IF NOT v_agent AND p_agent_code IS NOT NULL THEN
+        RAISE EXCEPTION 'only agent-created workflow versions can name an agent';
     END IF;
 
     IF v_flow IS NULL THEN
@@ -4255,21 +4478,38 @@ BEGIN
         VALUES (p_tenant, p_name)
         RETURNING customer360.crm_flow.flow_id INTO v_flow;
     ELSE
-        UPDATE customer360.crm_flow f
-        SET name = p_name, updated_at = now()
-        WHERE f.flow_id = v_flow AND f.tenant_id = p_tenant;
+        SELECT f.status INTO v_status
+        FROM customer360.crm_flow f
+        WHERE f.flow_id = v_flow AND f.tenant_id = p_tenant
+        FOR UPDATE;
         IF NOT FOUND THEN
             RAISE EXCEPTION 'flow % not found for this tenant', v_flow;
         END IF;
+        IF v_status = 'archived' THEN
+            RAISE EXCEPTION 'flow % is archived; create a new flow to save changes', v_flow;
+        END IF;
+        UPDATE customer360.crm_flow f
+        SET name = p_name, updated_at = now()
+        WHERE f.flow_id = v_flow AND f.tenant_id = p_tenant;
     END IF;
 
     SELECT COALESCE(max(fv.version), 0) + 1 INTO v_ver
     FROM customer360.crm_flow_version fv
     WHERE fv.flow_id = v_flow;
 
-    INSERT INTO customer360.crm_flow_version (flow_id, tenant_id, version, schema_version, definition, created_by)
-    VALUES (v_flow, p_tenant, v_ver,
-            COALESCE((p_workflow ->> 'schema_version')::int, 2), p_workflow, p_actor);
+    INSERT INTO customer360.crm_flow_version (
+        flow_id, tenant_id, version, schema_version, definition,
+        created_by, created_by_user_id, agent_code, provenance,
+        approval_status, reviewed_by, reviewed_at
+    )
+    VALUES (
+        v_flow, p_tenant, v_ver,
+        COALESCE((p_workflow ->> 'schema_version')::int, 2), p_workflow,
+        p_actor, p_user_id, CASE WHEN v_agent THEN p_agent_code END, COALESCE(p_provenance, '{}'::jsonb),
+        CASE WHEN v_agent THEN 'InReview' ELSE 'Approved' END,
+        CASE WHEN v_agent THEN NULL ELSE p_user_id END,
+        CASE WHEN v_agent THEN NULL ELSE now() END
+    );
 
     -- One walk over the JSON tree. Nodes and edges go in one statement; foreign keys are checked at its end.
     WITH RECURSIVE t AS (
@@ -4294,32 +4534,95 @@ BEGIN
     RETURN NEXT;
 END $$;
 
--- Makes a saved version the live one. Returns the previous and new live versions,
--- or no rows when the flow or version does not exist for this tenant.
+-- Makes an approved saved version the live one. Returns the previous and new live versions,
+-- or no rows when the flow or version does not exist for this tenant. Refuses archived
+-- flows and versions that are not Approved.
 CREATE OR REPLACE FUNCTION customer360.crm_publish_flow(p_tenant UUID, p_flow_id UUID, p_version INT)
 RETURNS TABLE (previous_version INT, live_version INT)
 LANGUAGE plpgsql AS $$
 DECLARE
     v_previous INT;
+    v_status TEXT;
+    v_approval TEXT;
 BEGIN
-    SELECT f.live_version INTO v_previous
+    SELECT f.live_version, f.status INTO v_previous, v_status
     FROM customer360.crm_flow f
     WHERE f.flow_id = p_flow_id AND f.tenant_id = p_tenant
     FOR UPDATE;
-
-    UPDATE customer360.crm_flow f
-    SET live_version = p_version, status = 'active', updated_at = now()
-    WHERE f.flow_id = p_flow_id
-      AND f.tenant_id = p_tenant
-      AND EXISTS (SELECT 1 FROM customer360.crm_flow_version v
-                  WHERE v.flow_id = p_flow_id AND v.tenant_id = p_tenant AND v.version = p_version);
-
     IF NOT FOUND THEN
         RETURN;
     END IF;
+    IF v_status = 'archived' THEN
+        RAISE EXCEPTION 'flow % is archived and cannot be published', p_flow_id;
+    END IF;
+
+    SELECT v.approval_status INTO v_approval
+    FROM customer360.crm_flow_version v
+    WHERE v.flow_id = p_flow_id AND v.tenant_id = p_tenant AND v.version = p_version;
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+    IF v_approval <> 'Approved' THEN
+        RAISE EXCEPTION 'version % of flow % is % and must be approved before it goes live',
+            p_version, p_flow_id, v_approval;
+    END IF;
+
+    UPDATE customer360.crm_flow f
+    SET live_version = p_version, status = 'active', updated_at = now()
+    WHERE f.flow_id = p_flow_id AND f.tenant_id = p_tenant;
 
     previous_version := v_previous;
     live_version := p_version;
+    RETURN NEXT;
+END $$;
+
+-- Approves or rejects a version that is InReview (normally an agent proposal). The
+-- reviewer must be a person, and must not be the person who started the run. Returns
+-- the resulting approval status.
+CREATE OR REPLACE FUNCTION customer360.crm_review_flow_version(
+    p_tenant UUID,
+    p_flow_id UUID,
+    p_version INT,
+    p_reviewer UUID,
+    p_decision TEXT,
+    p_reason TEXT DEFAULT NULL
+) RETURNS TABLE (reviewed_status TEXT)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_status TEXT;
+    v_creator UUID;
+    v_result TEXT;
+BEGIN
+    IF p_decision NOT IN ('approve', 'reject') THEN
+        RAISE EXCEPTION 'decision must be approve or reject, not %', p_decision;
+    END IF;
+    IF p_reviewer IS NULL THEN
+        RAISE EXCEPTION 'a human reviewer is required';
+    END IF;
+
+    SELECT v.approval_status, v.created_by_user_id INTO v_status, v_creator
+    FROM customer360.crm_flow_version v
+    WHERE v.flow_id = p_flow_id AND v.tenant_id = p_tenant AND v.version = p_version
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'version % of flow % not found for this tenant', p_version, p_flow_id;
+    END IF;
+    IF v_status <> 'InReview' THEN
+        RAISE EXCEPTION 'only InReview versions can be reviewed; this version is %', v_status;
+    END IF;
+    IF v_creator IS NOT NULL AND v_creator = p_reviewer THEN
+        RAISE EXCEPTION 'the person who started a run cannot approve its output';
+    END IF;
+
+    v_result := CASE WHEN p_decision = 'approve' THEN 'Approved' ELSE 'Rejected' END;
+    UPDATE customer360.crm_flow_version v
+    SET approval_status = v_result,
+        reviewed_by = p_reviewer,
+        reviewed_at = now(),
+        review_reason = p_reason
+    WHERE v.flow_id = p_flow_id AND v.tenant_id = p_tenant AND v.version = p_version;
+
+    reviewed_status := v_result;
     RETURN NEXT;
 END $$;
 
@@ -4422,6 +4725,8 @@ DECLARE
         'crm_campaign_content_items',
         'crm_campaign_reviews',
         'crm_segment_sync_runs',
+        'crm_ad_sync_runs',
+        'crm_campaign_workflow_action_runs',
         'cdp_campaign_dispatch_logs',
         'crm_connector_config',
         'crm_suppression_list',

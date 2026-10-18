@@ -401,6 +401,52 @@ class ProductContentImportDagsterServiceTests(unittest.TestCase):
             )
 
 
+class DataSynchDagsterServiceTests(unittest.TestCase):
+    def test_run_sync_submits_campaign_audience_config(self):
+        service = DataSynchDagsterService()
+        service.submit = MagicMock(return_value="audience-run-123")
+
+        run_id = service.run_sync(
+            tenant_id="tenant-1",
+            campaign_id="campaign-1",
+            platform="meta_ads",
+            segment_id="segment-1",
+            audience_name="Spring retention",
+            dry_run=True,
+            batch_size=250,
+        )
+
+        self.assertEqual(run_id, "audience-run-123")
+        service.submit.assert_called_once_with(
+            run_config={
+               "ops": {
+                   "run_data_synch_op": {
+                       "config": {
+                           "tenant_id": "tenant-1",
+                           "campaign_id": "campaign-1",
+                           "platform": "meta_ads",
+                           "segment_id": "segment-1",
+                           "audience_name": "Spring retention",
+                           "dry_run": True,
+                           "batch_size": 250,
+                       }
+                   }
+               }
+            },
+            tags={
+               "tenant_id": "tenant-1",
+               "campaign_id": "campaign-1",
+               "platform": "meta_ads",
+               "sync_type": "campaign_audience",
+            },
+        )
+
+    def test_run_sync_requires_campaign_scope(self):
+        service = DataSynchDagsterService()
+        with self.assertRaisesRegex(ValueError, "required"):
+            service.run_sync(tenant_id="tenant-1", campaign_id="", platform="meta_ads")
+
+
 class ContentItemImportDagsterServiceTests(unittest.TestCase):
     def test_import_content_submits_staged_object_to_dagster(self):
         service = ContentItemImportDagsterService()

@@ -39,12 +39,12 @@
         <span class="build-guide-icon" aria-hidden="true">1</span>
         <div class="build-guide-content">
           <p class="build-guide-eyebrow">{{#if hasSegment}}AUDIENCE{{else}}START HERE{{/if}}</p>
-          <h3 id="build-guide-title">{{#if hasSegment}}Add your first message{{else}}Select a customer segment{{/if}}</h3>
+          <h3 id="build-guide-title">{{#if hasSegment}}Add your first action{{else}}Select a customer segment{{/if}}</h3>
           <p>
             {{#if loading}}
               Loading profiles for <strong>{{segmentName}}</strong>…
             {{else if hasAudience}}
-              {{profileCount}} profiles from <strong>{{segmentName}}</strong> are ready. Choose a channel to start the journey.
+              {{profileCount}} profiles from <strong>{{segmentName}}</strong> are ready. Choose an action to start the journey.
             {{else if hasSegment}}
               No profiles were returned for <strong>{{segmentName}}</strong>. You can still build the journey, but cannot run it yet.
             {{else}}
@@ -124,7 +124,7 @@
                   "timeout",
                   node(
                     "n6",
-                    "sms",
+                    "notification",
                     {
                       body: "{{first_name}}, your welcome gift is waiting.",
                     },
@@ -147,7 +147,7 @@
             "n3",
             "condition",
             {
-              field: "cart",
+              field: "historical_clv",
               op: "ge",
               value: "150",
             },
@@ -159,7 +159,7 @@
                   "email",
                   {
                     subject: "{{first_name}}, your cart is waiting",
-                    body: "Your ${{cart_value}} picks are saved. Come back when you are ready.",
+                    body: "Your saved picks are waiting. Come back when you are ready.",
                   },
                   [
                     node(
@@ -247,7 +247,7 @@
                   "timeout",
                   node(
                     "n5",
-                    "sms",
+                    "notification",
                     {
                       body: "{{first_name}}, we would love to welcome you back.",
                     },
@@ -289,7 +289,7 @@
                   "n5",
                   "condition",
                   {
-                    field: "score",
+                    field: "engagement_score",
                     op: "ge",
                     value: "60",
                   },
@@ -365,7 +365,7 @@
                     "timeout",
                     node(
                       "n7",
-                      "sms",
+                      "notification",
                       {
                         body: "{{first_name}}, your trip details are ready to review.",
                       },
@@ -417,7 +417,7 @@
                   "timeout",
                   node(
                     "n6",
-                    "sms",
+                    "notification",
                     {
                       body: "{{first_name}}, your course guide is ready when you are.",
                     },
@@ -482,7 +482,7 @@
           "n2",
           "condition",
           {
-            field: "tags",
+            field: "segmentation_tags",
             op: "has",
             value: "loyalty_member",
           },
@@ -564,7 +564,7 @@
                     "timeout",
                     node(
                       "n7",
-                      "sms",
+                      "notification",
                       {
                         body: "{{first_name}}, how was your recent dining experience?",
                       },
@@ -617,7 +617,7 @@
                     "timeout",
                     node(
                       "n7",
-                      "sms",
+                      "notification",
                       {
                         body: "{{first_name}}, reply if you need help getting ready for your stay.",
                       },
@@ -662,7 +662,7 @@
                   "timeout",
                   node(
                     "n6",
-                    "sms",
+                    "notification",
                     {
                       body: "{{first_name}}, your account is waiting. Finish in a few minutes.",
                     },
@@ -681,7 +681,7 @@
       "Remind new cardholders to activate their card, with a stronger nudge for engaged customers.",
       node("n1", "trigger", { event: "purchase" }, [
         node("n2", "wait", { amount: 2, unit: "days" }, [
-          node("n3", "condition", { field: "score", op: "ge", value: "60" }, [
+          node("n3", "condition", { field: "engagement_score", op: "ge", value: "60" }, [
             branch(
               "yes",
               node(
@@ -797,7 +797,7 @@
                     "timeout",
                     node(
                       "n7",
-                      "sms",
+                      "notification",
                       {
                         body: "{{first_name}}, book your check-up in two taps.",
                       },
@@ -828,7 +828,7 @@
               node(
                 "n4",
                 "condition",
-                { field: "score", op: "ge", value: "60" },
+                { field: "engagement_score", op: "ge", value: "60" },
                 [
                   branch(
                     "yes",
@@ -843,7 +843,7 @@
                     "no",
                     node(
                       "n7",
-                      "sms",
+                      "notification",
                       {
                         body: "{{first_name}}, reply if you would like a call from our care team.",
                       },
@@ -865,7 +865,7 @@
         node("n2", "wait", { amount: 1, unit: "days" }, [
           node(
             "n3",
-            "sms",
+            "notification",
             {
               body: "{{first_name}}, your table is booked for tomorrow. Reply to change it.",
             },
@@ -905,7 +905,7 @@
                     "timeout",
                     node(
                       "n6",
-                      "sms",
+                      "notification",
                       {
                         body: "{{first_name}}, renew your policy to keep your cover active.",
                       },
@@ -925,7 +925,7 @@
       "Finish unfinished quotes. Higher-scoring prospects get an email, others get a push reminder.",
       node("n1", "trigger", { event: "cart_abandoned" }, [
         node("n2", "wait", { amount: 1, unit: "hours" }, [
-          node("n3", "condition", { field: "score", op: "ge", value: "50" }, [
+          node("n3", "condition", { field: "engagement_score", op: "ge", value: "50" }, [
             branch(
               "yes",
               node(
@@ -1034,7 +1034,7 @@
                   "timeout",
                   node(
                     "n6",
-                    "sms",
+                    "notification",
                     {
                       body: "{{first_name}}, register your product to activate your warranty.",
                     },
@@ -1064,7 +1064,7 @@
               node(
                 "n4",
                 "condition",
-                { field: "score", op: "ge", value: "60" },
+                { field: "engagement_score", op: "ge", value: "60" },
                 [
                   branch(
                     "yes",
@@ -1130,7 +1130,7 @@
                   "timeout",
                   node(
                     "n5",
-                    "sms",
+                    "notification",
                     { body: "{{first_name}}, a new season is ready to watch." },
                     [
                       node(
@@ -1179,7 +1179,7 @@
                   "timeout",
                   node(
                     "n6",
-                    "sms",
+                    "notification",
                     {
                       body: "{{first_name}}, new listings are live. Take a look.",
                     },
@@ -1237,7 +1237,7 @@
       "Offer a higher data plan to high-engagement customers and share plan details with others.",
       node("n1", "trigger", { event: "purchase" }, [
         node("n2", "wait", { amount: 14, unit: "days" }, [
-          node("n3", "condition", { field: "score", op: "ge", value: "70" }, [
+          node("n3", "condition", { field: "engagement_score", op: "ge", value: "70" }, [
             branch(
               "yes",
               node(
@@ -1283,7 +1283,7 @@
       node("n1", "trigger", { event: "signup" }, [
         node(
           "n2",
-          "sms",
+          "notification",
           { body: "{{first_name}}, activate your line in two minutes." },
           [
             node(
@@ -1341,12 +1341,12 @@
       <p class="sub">{{#if loading}}Loading profiles…{{else}}{{profileCount}} profiles. {{segmentHint}}{{/if}}</p>
       <table>
         <tr>
-          <th>Name</th><th>Score</th><th>Cart</th><th>Days</th><th>Push</th>
+          <th>Name</th><th>Engagement</th><th>Churn</th><th>CLV</th><th>Push</th>
           {{#if hasSimulation}}<th>Outcome</th><th>In flow</th>{{/if}}
         </tr>
         {{#each profiles}}
           <tr>
-            <td>{{name}}</td><td>{{score}}</td><td>&#36;{{cart}}</td><td>{{recency}}</td><td>{{pushLabel}}</td>
+            <td>{{name}}</td><td>{{engagement_score}}</td><td>{{churn_probability}}</td><td>&#36;{{historical_clv}}</td><td>{{pushLabel}}</td>
             {{#if ../hasSimulation}}<td>{{outcome}}</td><td>{{days}}d</td>{{/if}}
           </tr>
         {{/each}}

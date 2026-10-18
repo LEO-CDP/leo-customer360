@@ -12,11 +12,11 @@ import uuid
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from leo_customer360_dao.config import settings
-from leo_customer360_dao.workflow import FlowEngine, FlowNotFound, WorkflowRepository
+from leo_customer360_dao.workflow import FlowEngine, FlowNotFound, WorkflowRepository, WorkflowRuleViolation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "workflow_recipes.json"
 
@@ -107,8 +107,94 @@ class WorkflowRepositoryTests(unittest.TestCase):
         other = WorkflowRepository(self.session, self.other_tenant_id)
         with self.assertRaises(FlowNotFound):
             other.load_workflow(saved.flow_id)
-        with self.assertRaises(DBAPIError):
+        with self.assertRaises(FlowNotFound):
             other.save("Private", self.recipes["welcome"]["workflow"], flow_id=saved.flow_id)
+
+    def test_user_save_is_approved_on_arrival_and_records_its_author(self):
+        user_id = self._seed_user(self.tenant_id)
+        saved = self.repository.save("Manual", self.recipes["welcome"]["workflow"], user_id=user_id)
+        info = self.repository.version_info(saved.flow_id, saved.version)
+        self.assertEqual((info["approval_status"], info["created_by"]), ("Approved", "user"))
+        self.assertEqual(info["reviewed_by"], user_id)
+        self.assertIsNone(info["agent_code"])
+
+    def test_agent_version_waits_for_a_human_before_it_can_go_live(self):
+        agent = self._seed_agent()
+        initiator = self._seed_user(self.tenant_id)
+        saved = self.repository.save(
+            "Agent plan",
+            self.recipes["winback"]["workflow"],
+            actor="agent",
+            agent_code=agent,
+            user_id=initiator,
+            provenance={"model": "test-model", "prompt_version": "1"},
+        )
+        info = self.repository.version_info(saved.flow_id, saved.version)
+        self.assertEqual((info["approval_status"], info["created_by"], info["agent_code"]), ("InReview", "agent", agent))
+        self.assertIsNone(info["reviewed_by"])
+
+        with self.assertRaises(WorkflowRuleViolation):
+            with self.session.begin_nested():
+                self.repository.publish(saved.flow_id, saved.version)
+
+    def test_initiator_cannot_approve_their_own_agent_run(self):
+        agent = self._seed_agent()
+        initiator = self._seed_user(self.tenant_id)
+        reviewer = self._seed_user(self.tenant_id)
+        saved = self.repository.save(
+            "Agent plan", self.recipes["winback"]["workflow"], actor="agent", agent_code=agent, user_id=initiator
+        )
+
+        with self.assertRaises(WorkflowRuleViolation):
+            with self.session.begin_nested():
+                self.repository.review(saved.flow_id, saved.version, initiator, "approve")
+
+        status = self.repository.review(saved.flow_id, saved.version, reviewer, "approve", "checked")
+        self.assertEqual(status, "Approved")
+        self.assertEqual(self.repository.publish(saved.flow_id, saved.version), (None, saved.version))
+
+    def test_rejected_agent_version_can_never_go_live(self):
+        agent = self._seed_agent()
+        initiator = self._seed_user(self.tenant_id)
+        reviewer = self._seed_user(self.tenant_id)
+        saved = self.repository.save(
+            "Agent plan",
+            self.recipes["winback"]["workflow"],
+            actor="agent",
+            agent_code=agent,
+            user_id=initiator,
+        )
+        self.assertEqual(self.repository.review(saved.flow_id, saved.version, reviewer, "reject", "no"), "Rejected")
+
+        with self.assertRaises(WorkflowRuleViolation):
+            with self.session.begin_nested():
+                self.repository.publish(saved.flow_id, saved.version)
+
+    def test_reviewing_a_user_version_is_refused(self):
+        saved = self.repository.save("Manual", self.recipes["welcome"]["workflow"])
+        reviewer = self._seed_user(self.tenant_id)
+        with self.assertRaises(WorkflowRuleViolation):
+            with self.session.begin_nested():
+                self.repository.review(saved.flow_id, saved.version, reviewer, "approve")
+
+    def _seed_user(self, tenant_id):
+        user_id = uuid.uuid4()
+        self.session.execute(
+            text("INSERT INTO customer360.sys_user (user_id, tenant_id, username) VALUES (:id, :tenant, :name)"),
+            {"id": str(user_id), "tenant": str(tenant_id), "name": f"wf-{user_id}"},
+        )
+        return user_id
+
+    def _seed_agent(self):
+        agent_code = f"wf-test-{uuid.uuid4().hex[:12]}"
+        self.session.execute(
+            text(
+                "INSERT INTO customer360.cdp_ai_agents (agent_code, display_name, model_type, system_instructions) "
+                "VALUES (:code, 'Workflow test agent', 'generative_llm', 'test')"
+            ),
+            {"code": agent_code},
+        )
+        return agent_code
 
     def test_rejects_invalid_workflow_before_writing(self):
         with self.assertRaises(ValueError):

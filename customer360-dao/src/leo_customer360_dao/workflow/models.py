@@ -48,7 +48,8 @@ class FlowDefinition(BaseModel):
 
 
 class OutboundMessage(BaseModel):
-    channel: Literal["email", "sms", "push"]
+    channel: Literal["email", "notification", "push"]
+    provider: str | None = None
     profile_id: UUID
     to: str | None
     subject: str | None = None  # email subject or push title

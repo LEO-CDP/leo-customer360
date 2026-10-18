@@ -199,6 +199,23 @@ class RenderTests(unittest.TestCase):
 
 
 class RunSemanticsTests(unittest.TestCase):
+    def test_missing_channel_consent_skips_message(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node(
+                    "n1",
+                    "trigger",
+                    {"event": "signup"},
+                    [_node("n2", "email", {"subject": "Hi", "body": "Hello"})],
+                ),
+            }
+        )
+        profile = _profile()
+        profile.communication_preferences = {}
+        result = FlowEngine(flow).run(profile)
+        self.assertEqual(result.deliveries, [("email", "skipped")])
+
     def test_consent_gate_skips_message_without_contact(self):
         flow = FlowDefinition.model_validate(
             {
@@ -207,18 +224,146 @@ class RunSemanticsTests(unittest.TestCase):
                     "n1",
                     "trigger",
                     {"event": "signup"},
-                    [_node("n2", "sms", {"body": "Hi"}, [_node("n3", "exit", {"kind": "goal"})])],
+                    [_node("n2", "notification", {"body": "Hi"}, [_node("n3", "exit", {"kind": "goal"})])],
                 ),
             }
         )
         result = FlowEngine(flow).run(_profile(name="NoPhone", phone_number=None))
-        self.assertEqual(result.deliveries, [("sms", "skipped")])
+        self.assertEqual(result.deliveries, [("notification", "skipped")])
         self.assertEqual(result.end, "goal")
 
     def test_step_limit_stops_runaway_flow(self):
         result = FlowEngine(ENGAGEMENT_SCORE_FOLLOW_UP, max_steps=2).run(_profile(engagement_score=70))
         self.assertEqual(result.end, "error")
         self.assertIn("more than 2 steps", str(result.error))
+
+    def test_missing_numeric_value_takes_the_no_branch(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node(
+                    "n1",
+                    "trigger",
+                    {"event": "signup"},
+                    [
+                        _node(
+                            "n2",
+                            "condition",
+                            {"field": "engagement_score", "op": "ge", "value": "60"},
+                            [
+                                _node("n3", "exit", {"kind": "goal"}, branch="yes"),
+                                _node("n4", "exit", {"kind": "exit"}, branch="no"),
+                            ],
+                        )
+                    ],
+                ),
+            }
+        )
+        result = FlowEngine(flow).run(_profile(engagement_score=None))
+        self.assertIsNone(result.error)
+        self.assertEqual(result.steps[1].branch, "no")
+        self.assertEqual(result.end, "exit")
+
+    def test_update_profile_records_tags_without_mutating_the_profile(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node(
+                    "n1",
+                    "trigger",
+                    {"event": "purchase"},
+                    [
+                        _node("n2", "update_profile", {"action": "add_tag", "tag": "vip"}, [
+                            _node("n3", "exit", {"kind": "goal"}),
+                        ]),
+                    ],
+                ),
+            }
+        )
+        profile = _profile(segmentation_tags=["new"])
+        result = FlowEngine(flow).run(profile)
+        self.assertEqual(result.tags, ["new", "vip"])
+        self.assertEqual(profile.segmentation_tags, ["new"])
+
+
+class ProductionValidationTests(unittest.TestCase):
+    def _flow(self, root_event="signup", extra=None):
+        children = [extra] if extra else [_node("n2", "exit", {"kind": "goal"})]
+        return FlowDefinition.model_validate(
+            {"schema_version": 2, "root": _node("n1", "trigger", {"event": root_event}, children)}
+        )
+
+    def test_unknown_trigger_event_is_a_problem(self):
+        problems = FlowEngine(self._flow(root_event="engagement_follow_up")).problems()
+        self.assertIn("n1: event must be one of", " ".join(problems))
+
+    def test_unknown_wait_event_is_a_problem(self):
+        wait = _node(
+            "n2",
+            "wait_event",
+            {"event": "page_viewed", "amount": 1, "unit": "days"},
+            [_node("n3", "exit", {"kind": "goal"}, branch="happened"), _node("n4", "exit", {"kind": "exit"}, branch="timeout")],
+        )
+        problems = FlowEngine(self._flow(extra=wait)).problems()
+        self.assertIn("n2: event must be one of", " ".join(problems))
+
+    def test_unknown_placeholder_in_a_message_is_a_problem(self):
+        email = _node("n2", "email", {"subject": "Hi {{cart_value}}", "body": "Hello"})
+        problems = FlowEngine(self._flow(extra=email)).problems()
+        self.assertIn("n2: unknown placeholder {{cart_value}} in subject", problems)
+
+    def test_known_placeholder_passes(self):
+        email = _node("n2", "email", {"subject": "Hi {{first_name}}", "body": "Hello {{first_name}}"})
+        self.assertEqual(FlowEngine(self._flow(extra=email)).problems(), [])
+
+    def test_audience_sync_node_requires_a_supported_platform_and_name(self):
+        sync = _node(
+            "n2",
+            "run_data_synch_job",
+            {"platform": "meta_ads", "audience_name": "Spring audience"},
+        )
+        self.assertEqual(FlowEngine(self._flow(extra=sync)).problems(), [])
+        invalid = _node("n2", "run_data_synch_job", {"platform": "unknown", "audience_name": ""})
+        self.assertEqual(len(FlowEngine(self._flow(extra=invalid)).problems()), 2)
+
+    def test_notification_node_accepts_supported_providers(self):
+        for provider in ("sms", "zalo_oa", "whatsapp", "mobile_native"):
+            with self.subTest(provider=provider):
+                notification = _node(
+                    "n2",
+                    "notification",
+                    {"provider": provider, "body": "Hello {{first_name}}"},
+                )
+                self.assertEqual(FlowEngine(self._flow(extra=notification)).problems(), [])
+
+    def test_notification_node_rejects_unknown_provider(self):
+        notification = _node(
+            "n2",
+            "notification",
+            {"provider": "carrier_unknown", "body": "Hello"},
+        )
+        self.assertIn("provider must be one of", " ".join(FlowEngine(self._flow(extra=notification)).problems()))
+
+    def test_mobile_native_notification_uses_push_consent_and_tokens(self):
+        notification = _node(
+            "n2",
+            "notification",
+            {"provider": "mobile_native", "body": "Hello"},
+            [_node("n3", "exit", {"kind": "goal"})],
+        )
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node("n1", "trigger", {"event": "signup"}, [notification]),
+            }
+        )
+        profile = _profile(
+            phone_number=None,
+            communication_preferences={"push_opt_in": True},
+            push_token=True,
+        )
+        result = FlowEngine(flow).run(profile)
+        self.assertEqual(result.deliveries, [("notification", "sent")])
 
 
 if __name__ == "__main__":

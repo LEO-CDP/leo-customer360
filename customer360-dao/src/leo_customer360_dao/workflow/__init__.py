@@ -6,7 +6,7 @@ Flows are stored in the ``customer360`` schema (crm_flow, crm_flow_version, crm_
 from .engine import DEFAULT_MAX_STEPS, FlowEngine
 from .models import FlowDefinition, JourneyResult, NodeDef
 from .nodes import NODE_REGISTRY, BaseNode, register_node
-from .repository import FlowNotFound, SavedFlow, WorkflowRepository, read_workflow_file
+from .repository import FlowNotFound, SavedFlow, WorkflowRepository, WorkflowRuleViolation, read_workflow_file
 from .services import ChannelGateway, EventSource, ProfileWriter, Services
 from leo_customer360_dao.models.identity import CdpMasterProfile
 
@@ -26,6 +26,7 @@ __all__ = [
     "SavedFlow",
     "Services",
     "WorkflowRepository",
+    "WorkflowRuleViolation",
     "read_workflow_file",
     "register_node",
 ]

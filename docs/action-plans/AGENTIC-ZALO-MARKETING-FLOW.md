@@ -437,7 +437,9 @@ Use this checklist as the implementation tracker for all technical tasks in this
 - [ ] Configure `crm_connector_config` for account-level dispatch settings.
 - [ ] Use `cdp_campaign_dispatch_logs` for message-level delivery lifecycle.
 - [ ] Project opt-out/failure state into profile communication preferences.
-- [ ] Alter `crm_campaign` to add `segment_id`, `zalo_template_id`, `oa_account_id`, approval fields, and AI planning fields.
+- [ ] Use the persisted campaign workflow with `segment_id`, workflow pin,
+  approval fields, and AI planning fields. Keep ZNS templates independent in
+  `crm_message_templates`.
 - [ ] Create `crm_campaign_content_items` relation table if not already available.
 - [ ] Use `crm_segment_sync_runs` for sync-run audit data.
 - [ ] Add FK constraints for all cross-table relationships.

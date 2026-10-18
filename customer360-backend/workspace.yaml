@@ -33,7 +33,7 @@ load_from:
   - python_file:
       relative_path: analytics/dagster_defs.py
       location_name: analytics
-  # Data synchronization: placeholder for inbound/outbound data pipelines.
+  # Data synchronization: campaign custom-audience exports and catalog imports.
   - python_file:
       relative_path: data_synch/dagster_defs.py
       location_name: data_synch

@@ -1,11 +1,11 @@
 """Admin routes for campaign activation + email dispatch config.
 
 - POST /admin/campaigns/{id}/activate  -- gate on approval, submit the
-  campaign_activation Dagster job (which snapshots the segment and hands off to
-  the email send).
+  campaign_activation Dagster job (which snapshots the segment and hands off
+  the persisted workflow.
 - GET  /admin/campaigns/{id}/dispatch-logs  -- per-recipient send ledger.
-- GET/PUT /admin/email-provider-config  -- the tenant's dynamic email/SMTP
-  config the email_engine resolves at send time.
+- GET/PUT /admin/email-provider-config  -- tenant workflow email connector
+  configuration.
 
 All routes are tenant-scoped (RLS) and tenant-admin gated.
 """
@@ -53,8 +53,12 @@ def activate_campaign(campaign_id: uuid.UUID, request: Request, db: Session = De
     if (campaign.approval_status or "").strip() != "Approved":
         raise HTTPException(status_code=409, detail=f"Campaign is not Approved (approval_status={campaign.approval_status!r})",)
 
-    if not campaign.template_id or not campaign.segment_id:
-        raise HTTPException(status_code=409, detail="Campaign needs both a template_id and a segment_id.")
+    workflow_id = getattr(campaign, "workflow_id", None)
+    if not getattr(campaign, "segment_id", None) or not workflow_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Campaign needs a segment_id and a pinned workflow_id.",
+        )
 
     try:
         run_id = repo.activate(campaign_id, tenant_id)

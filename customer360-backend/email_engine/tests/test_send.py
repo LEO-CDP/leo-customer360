@@ -1,6 +1,6 @@
 """Eligibility-routing + idempotency tests for the send pipeline, driven by a
-mocked psycopg2 cursor (no real PostgreSQL). The SQL itself is exercised
-manually via scripts/seed_email_campaign.py against a real DB."""
+mocked psycopg2 cursor (no real PostgreSQL). Campaign email delivery is owned
+by the persisted campaign workflow runner."""
 
 from unittest.mock import MagicMock
 

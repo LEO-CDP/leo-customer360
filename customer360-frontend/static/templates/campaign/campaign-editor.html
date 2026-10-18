@@ -22,24 +22,71 @@
 		<input id="campaign-editor-id" type="hidden" />
 		<input id="campaign-editor-updated-at" type="hidden" />
 
-		<section class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-			<div class="mb-5">
+		<section class="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 sm:p-6">
+			<div class="mb-4">
 				<h2 class="text-base font-bold text-slate-900">Campaign metadata</h2>
-				<p class="text-sm text-slate-500 mt-1">These fields describe ownership, channel, schedule, and budget.</p>
+				<p class="text-sm text-slate-500 mt-1">These fields set the campaign route, audience language, schedule, and budget. Channel and platform follow the workflow studio options.</p>
 			</div>
-			<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-				<label class="text-sm font-semibold text-slate-700">Campaign code<input id="campaign-field-code" name="campaign_code" maxlength="100" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-mono text-sm" /></label>
-				<label class="text-sm font-semibold text-slate-700">Name<span class="text-rose-600"> *</span><input id="campaign-field-name" name="name" required class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm" /></label>
-				<label class="text-sm font-semibold text-slate-700">Operational status<select id="campaign-field-status" name="status" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"><option value="Draft">Draft</option><option value="Active">Active</option><option value="Paused">Paused</option><option value="Completed">Completed</option></select></label>
-				<label class="text-sm font-semibold text-slate-700">Channel<input id="campaign-field-channel" name="channel" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm" placeholder="Email, Paid Social, ZNS" /></label>
-				<label class="text-sm font-semibold text-slate-700">Platform<input id="campaign-field-platform" name="platform" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm" placeholder="Google, Meta, Zalo" /></label>
-				<label class="text-sm font-semibold text-slate-700">Language<input id="campaign-field-lang" name="lang" value="en" maxlength="10" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm" /></label>
-				<label class="text-sm font-semibold text-slate-700 md:col-span-2">Description<textarea id="campaign-field-description" name="description" rows="3" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea></label>
-				<label class="text-sm font-semibold text-slate-700">Keywords<span class="block text-xs font-normal text-slate-500 mt-1">Comma-separated</span><input id="campaign-field-keywords" name="keywords" class="campaign-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm" /></label>
-				<label class="text-sm font-semibold text-slate-700">Start date<input id="campaign-field-start-date" name="start_date" type="date" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm" /></label>
-				<label class="text-sm font-semibold text-slate-700">End date<input id="campaign-field-end-date" name="end_date" type="date" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm" /></label>
-				<label class="text-sm font-semibold text-slate-700">Budget amount<input id="campaign-field-budget" name="budget_amount" type="number" min="0" step="0.01" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm" /></label>
-				<label class="text-sm font-semibold text-slate-700">Currency<input id="campaign-field-currency" name="currency" maxlength="3" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm uppercase" /></label>
+			<div class="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2 xl:grid-cols-3">
+				<label class="block min-w-0 text-sm font-semibold text-slate-700">Name<span class="text-rose-600"> *</span><input id="campaign-field-name" name="name" required placeholder="Enter a clear campaign name" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /></label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700">Campaign code<input id="campaign-field-code" name="campaign_code" maxlength="100" placeholder="Optional internal reference" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-sm text-slate-800 shadow-sm transition-colors placeholder:font-sans placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /></label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700">Operational status<select id="campaign-field-status" name="status" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"><option value="Draft">Draft</option><option value="Active">Active</option><option value="Running" disabled>Running (set by activation)</option><option value="Paused">Paused</option><option value="Completed">Completed</option><option value="Failed" disabled>Failed (set by runtime)</option></select></label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700" for="campaign-field-channel">
+					Channel
+					<select id="campaign-field-channel" name="channel" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" aria-describedby="campaign-channel-help">
+						<option value="">Select a workflow channel</option>
+						<option value="email">Email</option>
+						<option value="sms">SMS / notification</option>
+						<option value="push">Web push</option>
+						<option value="audience_sync">Custom audience sync</option>
+					</select>
+					<span id="campaign-channel-help" class="mt-1 block text-xs font-normal text-slate-500">Matches the message or audience-sync actions available in the workflow studio.</span>
+				</label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700" for="campaign-field-platform">
+					Platform
+					<select id="campaign-field-platform" name="platform" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" aria-describedby="campaign-platform-help">
+						<option value="">Select a platform</option>
+					</select>
+					<span id="campaign-platform-help" class="mt-1 block text-xs font-normal text-slate-500">Choose the provider used by the selected workflow channel.</span>
+				</label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700" for="campaign-field-lang">
+					Language
+					<select id="campaign-field-lang" name="lang" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" aria-describedby="campaign-language-help">
+						<option value="en">English</option>
+						<option value="vi">Vietnamese</option>
+						<option value="th">Thai</option>
+						<option value="id">Indonesian</option>
+						<option value="zh-CN">Chinese (Simplified)</option>
+						<option value="ja">Japanese</option>
+						<option value="ko">Korean</option>
+					</select>
+					<span id="campaign-language-help" class="mt-1 block text-xs font-normal text-slate-500">Used by the planning agent and content templates.</span>
+				</label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700 md:col-span-2">Description<textarea id="campaign-field-description" name="description" rows="3" placeholder="Briefly describe the campaign and its purpose" class="campaign-field mt-2 block w-full min-w-0 resize-y rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"></textarea></label>
+				<label class="block min-w-0 text-sm font-semibold text-slate-700">Keywords<input id="campaign-field-keywords" name="keywords" placeholder="e.g. retention, launch, email" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /><span class="mt-1 block text-xs font-normal text-slate-500">Separate keywords with commas.</span></label>
+				<div class="col-span-full grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_11rem]">
+					<label class="block min-w-0 text-sm font-semibold text-slate-700">Start date<input id="campaign-field-start-date" name="start_date" type="date" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /></label>
+					<label class="block min-w-0 text-sm font-semibold text-slate-700">End date<input id="campaign-field-end-date" name="end_date" type="date" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /></label>
+					<label class="block min-w-0 text-sm font-semibold text-slate-700">Budget amount<input id="campaign-field-budget" name="budget_amount" type="number" min="0" step="0.01" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" /></label>
+					<label class="block min-w-0 text-sm font-semibold text-slate-700">Currency<select id="campaign-field-currency" name="currency" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm uppercase text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100">
+						<option value="USD">USD - US Dollar</option>
+						<option value="EUR">EUR - Euro</option>
+						<option value="GBP">GBP - Pound Sterling</option>
+						<option value="JPY">JPY - Japanese Yen</option>
+						<option value="CNY">CNY - Chinese Yuan</option>
+						<option value="INR">INR - Indian Rupee</option>
+						<option value="AUD">AUD - Australian Dollar</option>
+						<option value="CAD">CAD - Canadian Dollar</option>
+						<option value="SGD">SGD - Singapore Dollar</option>
+						<option value="HKD">HKD - Hong Kong Dollar</option>
+						<option value="KRW">KRW - South Korean Won</option>
+						<option value="THB">THB - Thai Baht</option>
+						<option value="VND">VND - Vietnamese Dong</option>
+						<option value="IDR">IDR - Indonesian Rupiah</option>
+						<option value="MYR">MYR - Malaysian Ringgit</option>
+						<option value="PHP">PHP - Philippine Peso</option>
+					</select></label>
+				</div>
 			</div>
 		</section>
 
@@ -65,20 +112,19 @@
 					</div>
 				</div>
 
-				<label class="text-sm font-semibold text-slate-700">Template ID<input id="campaign-field-template" name="template_id" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-mono text-sm" placeholder="UUID" /></label>
-				<label for="campaign-field-objective" class="text-sm font-semibold text-slate-700 md:col-span-2">Objective
-					<select id="campaign-field-objective" name="objective" data-objectives='["Awareness","Leads","Conversions","App Install","Visit Store"]' aria-describedby="campaign-objective-help" class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm">
+				<label for="campaign-field-objective" class="block min-w-0 text-sm font-semibold text-slate-700 md:col-span-2">Objective
+					<select id="campaign-field-objective" name="objective" data-objectives='["Awareness","Leads","Conversions","App Install","Visit Store"]' aria-describedby="campaign-objective-help" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100">
 						<option value="">Select a campaign objective</option>
 					</select>
 					<span id="campaign-objective-help" class="mt-1 block text-xs font-normal text-slate-500">Choose the primary outcome this campaign should achieve.</span>
 				</label>
-				<label for="campaign-field-strategy" class="text-sm font-semibold text-slate-700 md:col-span-2">Strategy summary
+				<label for="campaign-field-strategy" class="block min-w-0 text-sm font-semibold text-slate-700 md:col-span-2">Strategy summary
 					<span id="campaign-strategy-help" class="mt-1 block text-xs font-normal text-slate-500">Describe how the customer journey should work: entry point, message sequence, timing, branches, and intended outcome.</span>
-					<textarea id="campaign-field-strategy" name="strategy_summary" rows="4" aria-describedby="campaign-strategy-help" placeholder="Example: When a customer abandons a cart, send a reminder, wait two days, then follow up only if they have not purchased." class="campaign-field mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea>
+					<textarea id="campaign-field-strategy" name="strategy_summary" rows="4" aria-describedby="campaign-strategy-help" placeholder="Example: When a customer abandons a cart, send a reminder, wait two days, then follow up only if they have not purchased." class="campaign-field mt-2 block w-full min-w-0 resize-y rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"></textarea>
 				</label>
-				<label for="campaign-field-constraints" class="text-sm font-semibold text-slate-700 md:col-span-2">Planning constraints
+				<label for="campaign-field-constraints" class="block min-w-0 text-sm font-semibold text-slate-700 md:col-span-2">Planning constraints
 					<span id="campaign-constraints-help" class="mt-1 block text-xs font-normal text-slate-500">Give the marketing planning agent hard limits to respect, such as budget caps, date windows, or allowed channels.</span>
-					<textarea id="campaign-field-constraints" name="budget_time_constraints" rows="3" aria-describedby="campaign-constraints-help" placeholder="Example: Maximum budget, campaign dates, and channels to include or exclude." class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"></textarea>
+					<textarea id="campaign-field-constraints" name="budget_time_constraints" rows="3" aria-describedby="campaign-constraints-help" placeholder="Example: Maximum budget, campaign dates, and channels to include or exclude." class="mt-2 block w-full min-w-0 resize-y rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"></textarea>
 				</label>
 			</div>
 			<div class="mt-5 rounded-lg bg-slate-50 border border-slate-200 p-4 text-xs text-slate-600">AI plan and agent provenance are read-only in this editor. The customer journey workflow below is for design and local simulation.</div>
