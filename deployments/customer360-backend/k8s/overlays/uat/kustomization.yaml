@@ -1,0 +1,28 @@
+# UAT profile for customer360-backend. deploy-backend-vks.sh layers the image and the
+# Terraform-rendered ConfigMap/Secret on top of this.
+#
+# Sized for vServer parity (the backend box is s-general-4x8; at 2x4 it hit code-server deaths
+# and run-worker OOM). That needs a >= 4x8 VKS node: the current 2x4 nodes (~2.6 GiB
+# allocatable, ~1 GiB free) cannot host it, and check-capacity.sh blocks the deploy until one exists.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - target: { kind: Deployment, name: dagster }
+    patch: |-
+      - { op: replace, path: /spec/template/spec/containers/0/resources/requests/cpu, value: "1" }
+      - { op: replace, path: /spec/template/spec/containers/0/resources/requests/memory, value: 3Gi }
+      - { op: replace, path: /spec/template/spec/containers/0/resources/limits/cpu, value: "3" }
+      - { op: replace, path: /spec/template/spec/containers/0/resources/limits/memory, value: 5Gi }
+      # Run only on the node labelled c360.pool=dagster (README "Capacity": the resized 19d70 node, or a
+      # dedicated 4x8 group). The label is applied by hand with kubectl, not by VKS.
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value: { c360.pool: dagster }
+      # Tolerates the optional NoSchedule taint (README "Capacity") that keeps other apps off this node.
+      - op: add
+        path: /spec/template/spec/tolerations
+        value: [{ key: c360.pool, operator: Equal, value: dagster, effect: NoSchedule }]

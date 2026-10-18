@@ -34,6 +34,8 @@ image_ref() {
     digest="$(gh api -H 'Accept: application/vnd.github+json' \
       "/orgs/${GHCR_ORG}/packages/container/${GHCR_REPO_NAME}%2F${svc}/versions?per_page=100" \
       --jq "[.[] | select(.metadata.container.tags | index(\"$tag\"))][0].name // empty" 2>/dev/null || true)"
+    # gh prints the API error body on stdout (e.g. a 403 for missing read:packages): keep only a real digest.
+    printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$' || digest=""
   fi
   if [ -n "$digest" ]; then
     printf '%s/%s@%s' "$GHCR_REGISTRY" "$svc" "$digest"

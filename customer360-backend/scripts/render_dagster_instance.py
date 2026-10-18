@@ -69,9 +69,13 @@ def postgres_ready() -> bool:
         return False
 
 
+def s3_endpoint() -> str | None:
+    return os.environ.get("DAGSTER_S3_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT")
+
+
 def s3_ready() -> bool:
     """True if the compute-log bucket is configured AND reachable."""
-    endpoint = os.environ.get("DAGSTER_S3_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT")
+    endpoint = s3_endpoint()
     bucket = os.environ.get("DAGSTER_LOGS_BUCKET") or os.environ.get("MINIO_BUCKET")
     key = (
         os.environ.get("DAGSTER_S3_ACCESS_KEY_ID")
@@ -126,13 +130,15 @@ PG_BLOCK = f"""storage:
       scheme: postgresql+psycopg2
 """
 
+# Endpoint is written literally (not `{ env: ... }`) so the name the probe accepted
+# is the one Dagster uses; k8s ConfigMaps only define S3_ENDPOINT.
 S3_BLOCK = """compute_logs:
   module: dagster_aws.s3.compute_log_manager
   class: S3ComputeLogManager
   config:
     bucket: { env: MINIO_BUCKET }
     prefix: dagster-compute-logs
-    endpoint_url: { env: S3_ENDPOINT_URL }
+    endpoint_url: {endpoint}
     skip_empty_files: true
 """
 
@@ -171,7 +177,7 @@ def main() -> int:
     log("storage: PostgreSQL (shared)")
 
     if s3_ready():
-        parts.append(S3_BLOCK)
+        parts.append(S3_BLOCK.replace("{endpoint}", s3_endpoint()))
         log("compute logs: S3 / MinIO")
     elif os.environ.get("DAGSTER_REQUIRE_S3", "false").lower() in {"1", "true", "yes"}:
         log("compute logs: S3 / MinIO is required but unavailable; refusing to start")
