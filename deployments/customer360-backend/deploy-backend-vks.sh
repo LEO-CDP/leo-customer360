@@ -206,7 +206,7 @@ fi
 #     CREATE DATABASE, which is the renderer's best-effort path, so do it here too (idempotent). ---
 echo ">> Ensuring database '$DAGSTER_PG_DB' on $DB_HOST ..."
 "${KUBECTL[@]}" -n "$NAMESPACE" delete pod dagster-db-init --ignore-not-found >/dev/null
-"${KUBECTL[@]}" -n "$NAMESPACE" run dagster-db-init --rm -i --restart=Never --image=postgres:16-alpine \
+"${KUBECTL[@]}" -n "$NAMESPACE" run dagster-db-init --rm -i --restart=Never --pod-running-timeout=5m --image=postgres:16-alpine \
   --env="PGPASSWORD=$DB_PASS" --command -- sh -c \
   "psql -h '$DB_HOST' -p '$DB_PORT' -U '$DB_USER' -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$DAGSTER_PG_DB'\" | grep -q 1 || psql -h '$DB_HOST' -p '$DB_PORT' -U '$DB_USER' -d postgres -c 'CREATE DATABASE \"$DAGSTER_PG_DB\"'" \
   || echo "   WARNING: could not ensure '$DAGSTER_PG_DB' — pre-create it if the pod crash-loops on Postgres."
