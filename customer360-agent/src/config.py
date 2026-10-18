@@ -4,8 +4,11 @@ env / .env."""
 
 from typing import Any
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The use-case agents that can be given their own model (LLM_USE_CASE_MODELS).
+USE_CASES = ("sql", "narrative", "support", "tickets", "schema_mapping", "copy", "orchestrator", "persona")
 
 
 class Settings(BaseSettings):
@@ -59,6 +62,26 @@ class Settings(BaseSettings):
         default_factory=dict,
         validation_alias=AliasChoices("LLM_EXTRA_CONFIG", "llm_extra_config"),
     )
+    # Optional per-use-case model, e.g. {"sql": "openai/gpt-4o", "tickets": "openai/gpt-4o-mini"}.
+    # A use case without an entry uses llm_model. Keys must be names from USE_CASES.
+    llm_use_case_models: dict[str, str] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("LLM_USE_CASE_MODELS", "llm_use_case_models"),
+    )
+
+    @field_validator("llm_use_case_models")
+    @classmethod
+    def _known_use_cases(cls, value: dict[str, str]) -> dict[str, str]:
+        unknown = sorted(set(value) - set(USE_CASES))
+        if unknown:
+            raise ValueError(f"unknown use case(s) in LLM_USE_CASE_MODELS: {unknown}; allowed: {list(USE_CASES)}")
+        return value
+
+    def model_for(self, use_case: str) -> str:
+        """The model string for one use-case agent: its override, else llm_model."""
+        if use_case not in USE_CASES:
+            raise KeyError(use_case)
+        return self.llm_use_case_models.get(use_case) or self.llm_model
 
     # ASGI root_path when served behind a path-stripping proxy (Caddy handle_path
     # /agent/*). Set to "/agent" so Swagger + /openapi.json resolve under the public
