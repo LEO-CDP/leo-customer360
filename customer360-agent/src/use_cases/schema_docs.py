@@ -1,16 +1,20 @@
-"""Retrieval docs for Text-to-SQL, built from the live schema.
+"""Retrieval docs for Text-to-SQL, loaded from the live schema.
 
-Each doc is the table name, the schema authors' own `COMMENT ON TABLE` text,
-and the column names. Reading the comments from the database keeps the
-descriptions in step with the schema; a table without a comment still gets its
-columns, and the schema test suite insists new tables carry a comment."""
+The doc format comes from `leo_customer360_agent.schema_docs`, shared with
+customer360-api so both build identical docs. This module adds the SQL loader
+that reads table comments and column names through an injected runner. The
+stateless routes do not use it (the caller sends the docs); the agent's own
+database tests do."""
 
 from __future__ import annotations
 
 import re
 from typing import Any, Callable, Optional
 
-MAX_COMMENT_CHARS = 300
+from leo_customer360_agent.schema_docs import MAX_COMMENT_CHARS, build_schema_docs
+
+__all__ = ["MAX_COMMENT_CHARS", "build_schema_docs", "load_schema_docs"]
+
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 _QUERY = """SELECT c.relname AS table_name, a.attname AS column_name, obj_description(c.oid, 'pg_class') AS comment
@@ -19,31 +23,6 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
 WHERE n.nspname = '{schema}' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
 ORDER BY c.relname, a.attnum"""
-
-
-def _tidy(comment: Optional[str], max_chars: int) -> Optional[str]:
-    text = " ".join((comment or "").split())
-    if not text:
-        return None
-    if len(text) > max_chars:
-        cut = text[: max_chars - 3]
-        if " " in cut:
-            cut = cut.rsplit(" ", 1)[0]
-        text = cut.rstrip(" ,;:") + "..."
-    return text if text[-1] in ".!?" else text + "."
-
-
-def build_schema_docs(
-    columns: dict[str, list[str]],
-    comments: dict[str, Optional[str]],
-    max_comment_chars: int = MAX_COMMENT_CHARS,
-) -> dict[str, str]:
-    docs: dict[str, str] = {}
-    for table, cols in columns.items():
-        description = _tidy(comments.get(table), max_comment_chars)
-        head = f"{table}: {description}" if description else f"{table}."
-        docs[table] = f"{head} Columns: {', '.join(cols)}"
-    return docs
 
 
 def load_schema_docs(

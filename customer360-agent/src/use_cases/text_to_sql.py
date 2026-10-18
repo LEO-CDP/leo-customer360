@@ -12,8 +12,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Protocol
 
+from leo_customer360_agent.sql_guard import UnsafeSQLError, ensure_select_only
 from use_cases.instructions import instructions
-from use_cases.sql_guard import UnsafeSQLError, ensure_select_only
 
 NOT_FOUND = "NOT_FOUND_ANSWERS"
 

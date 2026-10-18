@@ -3,7 +3,7 @@ and the database, so every rejection path is pinned here."""
 
 import pytest
 
-from use_cases.sql_guard import UnsafeSQLError, ensure_select_only
+from leo_customer360_agent.sql_guard import UnsafeSQLError, ensure_select_only
 
 
 def test_plain_select_passes_unchanged():
@@ -62,6 +62,48 @@ def test_column_named_like_a_keyword_substring_is_allowed():
 def test_sql_comments_cannot_smuggle_a_second_statement():
     with pytest.raises(UnsafeSQLError):
         ensure_select_only("SELECT 1 -- ok\n; DROP TABLE customers")
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT set_config('app.tenant_id', 'someone-else', true)",
+        "SELECT pg_catalog.set_config('role', 'postgres', true)",
+        'SELECT "set_config"(\'app.tenant_id\', \'x\', true)',
+        "SELECT SET_CONFIG('app.tenant_id', 'x', true)",
+        "SELECT pg_read_file('/etc/passwd')",
+        "SELECT pg_ls_dir('/')",
+        "SELECT lo_import('/etc/passwd')",
+        "SELECT * FROM dblink('host=other', 'select 1') AS t(a int)",
+        "SELECT pg_sleep(60)",
+        "SELECT pg_terminate_backend(1)",
+        "SELECT pg_advisory_lock(1)",
+        "SELECT pg_advisory_xact_lock(1)",
+        "SELECT nextval('some_seq')",
+        "SELECT query_to_xml('select * from other_table', true, false, '')",
+    ],
+)
+def test_functions_that_change_session_state_or_reach_the_server_are_rejected(sql):
+    with pytest.raises(UnsafeSQLError, match="function"):
+        ensure_select_only(sql)
+
+
+def test_a_function_name_inside_a_string_literal_is_allowed():
+    sql = "SELECT * FROM audit WHERE action = 'set_config'"
+
+    assert ensure_select_only(sql) == sql
+
+
+def test_a_column_that_merely_contains_a_blocked_name_is_allowed():
+    sql = "SELECT set_config_value, pg_sleep_seconds FROM settings"
+
+    assert ensure_select_only(sql) == sql
+
+
+def test_ordinary_aggregate_and_date_functions_are_allowed():
+    sql = "SELECT date_trunc('day', created_at) AS d, COUNT(*), SUM(amount), AVG(amount) FROM t GROUP BY 1"
+
+    assert ensure_select_only(sql) == sql
 
 
 def test_empty_input_is_rejected():

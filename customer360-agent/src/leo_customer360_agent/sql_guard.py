@@ -14,6 +14,17 @@ _FORBIDDEN = (
 )
 _FORBIDDEN_RE = re.compile(r"\b(" + "|".join(_FORBIDDEN) + r")\b", re.IGNORECASE)
 
+# Functions a plain SELECT could still call to change session state (set_config can switch the
+# tenant setting or the role), touch the server (files, large objects, other databases, runaway
+# locks and sleeps), advance sequences, or run a nested query from a string. Whole words only, so
+# a column such as set_config_value is fine.
+_FORBIDDEN_FUNCTIONS_RE = re.compile(
+    r"\b(set_config|pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|lo_import|lo_export"
+    r"|dblink\w*|pg_sleep|pg_sleep_for|pg_sleep_until|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_\w*advisory\w*"
+    r"|nextval|setval|query_to_xml\w*|cursor_to_xml)\b",
+    re.IGNORECASE,
+)
+
 
 class UnsafeSQLError(ValueError):
     """The model produced SQL that is not a single read-only statement."""
@@ -50,4 +61,6 @@ def ensure_select_only(raw_sql: str) -> str:
         raise UnsafeSQLError("only SELECT statements are allowed")
     if _FORBIDDEN_RE.search(masked):
         raise UnsafeSQLError("statement contains a write or DDL keyword")
+    if _FORBIDDEN_FUNCTIONS_RE.search(masked):
+        raise UnsafeSQLError("statement calls a function that is not allowed")
     return sql
