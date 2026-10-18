@@ -4,277 +4,1463 @@
   const Handlebars = root.Handlebars;
   if (!Handlebars) throw new Error("Workflow templates require Handlebars.");
 
-  const icons = {
-    segment:
-      '<svg viewBox="0 0 16 16"><circle cx="6" cy="5" r="2.5"/><path d="M1.5 13.5c0-2.6 2-4 4.5-4s4.5 1.4 4.5 4"/><circle cx="12" cy="6" r="1.8"/><path d="M12 10c1.7 0 2.8 1 2.8 3"/></svg>',
-    condition:
-      '<svg viewBox="0 0 16 16"><path d="M8 14.5V8.5M8 8.5L3.5 3M8 8.5L12.5 3"/></svg>',
-    email:
-      '<svg viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="1.6"/><path d="M2 4.2l6 4.8 6-4.8"/></svg>',
-    push:
-      '<svg viewBox="0 0 16 16"><path d="M3.8 11V7.2a4.2 4.2 0 018.4 0V11l1.2 1.5H2.6z"/><path d="M6.5 14.3a1.6 1.6 0 003 0"/></svg>',
-  };
-
-  Handlebars.registerHelper("workflowIcon", (type) =>
-    new Handlebars.SafeString(icons[type] || ""),
+  Handlebars.registerPartial(
+    "workflowConfigurationField",
+    `
+      {{#if isSegment}}
+        <div class="segment-readonly" data-k="{{key}}" data-value="{{value}}" role="group" aria-label="Customer segment: {{segmentName}}">
+          <span class="segment-readonly-icon" aria-hidden="true">✦</span>
+          <span class="segment-readonly-copy">
+            <small>{{label}}</small>
+            <strong>{{segmentName}}</strong>
+          </span>
+          <span class="segment-readonly-status">Connected</span>
+        </div>
+      {{else}}
+        <label class="fl">{{label}}</label>
+        {{#if isEnum}}
+          <select data-k="{{key}}">
+            {{#each options}}
+              <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+            {{/each}}
+          </select>
+        {{else if isLongText}}
+          <textarea data-k="{{key}}">{{value}}</textarea>
+        {{else}}
+          <input data-k="{{key}}" type="{{inputType}}" value="{{value}}">
+        {{/if}}
+      {{/if}}
+    `,
+  );
+  Handlebars.registerPartial(
+    "workflowBuildGuide",
+    `
+      <section class="build-guide" aria-labelledby="build-guide-title">
+        <span class="build-guide-icon" aria-hidden="true">1</span>
+        <div class="build-guide-content">
+          <p class="build-guide-eyebrow">{{#if hasSegment}}AUDIENCE{{else}}START HERE{{/if}}</p>
+          <h3 id="build-guide-title">{{#if hasSegment}}Add your first message{{else}}Select a customer segment{{/if}}</h3>
+          <p>
+            {{#if loading}}
+              Loading profiles for <strong>{{segmentName}}</strong>…
+            {{else if hasAudience}}
+              {{profileCount}} profiles from <strong>{{segmentName}}</strong> are ready. Choose a channel to start the journey.
+            {{else if hasSegment}}
+              No profiles were returned for <strong>{{segmentName}}</strong>. You can still build the journey, but cannot run it yet.
+            {{else}}
+              Choose a segment on the Event trigger to load the profiles who will enter this journey.
+            {{/if}}
+          </p>
+          {{#if canChooseAction}}
+            <div class="build-guide-actions" role="group" aria-label="Add your first message">
+              {{#each actions}}
+                <button type="button" class="build-action {{className}}" data-add-action="{{type}}" {{#unless canAdd}}disabled{{/unless}}>
+                  <span aria-hidden="true">{{icon}}</span>{{label}}
+                </button>
+              {{/each}}
+            </div>
+          {{/if}}
+        </div>
+      </section>
+    `,
   );
 
+  const WorkflowCore = root.WorkflowCore;
+  if (!WorkflowCore)
+    throw new Error("Workflow templates require WorkflowCore.");
+
+  const node = (id, type, config = {}, children = []) => ({
+    id,
+    type,
+    config: { ...WorkflowCore.defaults(type), ...config },
+    children,
+  });
+  const branch = (name, child) => ({ ...child, branch: name });
+  const goal = (id) => node(id, "exit", { kind: "goal" });
+  const exit = (id) => node(id, "exit", { kind: "exit" });
+  const recipe = (industry, name, intent, rootNode) => ({
+    industry,
+    name,
+    intent,
+    workflow: { schema_version: 2, root: rootNode },
+  });
+
+  const RECIPES = {
+    welcome: recipe(
+      "Retail & E-Commerce",
+      "Welcome series",
+      "Welcome new sign-ups and follow up only when they have not engaged.",
+      node("n1", "trigger", { event: "signup" }, [
+        node(
+          "n2",
+          "email",
+          {
+            subject: "Welcome, {{first_name}}",
+            body: "Here is how to get started.",
+          },
+          [
+            node(
+              "n3",
+              "wait_event",
+              {
+                event: "email_opened",
+                amount: 2,
+                unit: "days",
+              },
+              [
+                branch(
+                  "happened",
+                  node(
+                    "n4",
+                    "update_profile",
+                    {
+                      action: "add_tag",
+                      tag: "welcome_engaged",
+                    },
+                    [goal("n5")],
+                  ),
+                ),
+                branch(
+                  "timeout",
+                  node(
+                    "n6",
+                    "sms",
+                    {
+                      body: "{{first_name}}, your welcome gift is waiting.",
+                    },
+                    [exit("n7")],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ]),
+    ),
+    cart_abandonment: recipe(
+      "Retail & E-Commerce",
+      "Cart abandonment",
+      "Recover abandoned carts with a relevant message and a purchase-aware follow-up.",
+      node("n1", "trigger", { event: "cart_abandoned" }, [
+        node("n2", "wait", { amount: 1, unit: "hours" }, [
+          node(
+            "n3",
+            "condition",
+            {
+              field: "cart",
+              op: "ge",
+              value: "150",
+            },
+            [
+              branch(
+                "yes",
+                node(
+                  "n4",
+                  "email",
+                  {
+                    subject: "{{first_name}}, your cart is waiting",
+                    body: "Your ${{cart_value}} picks are saved. Come back when you are ready.",
+                  },
+                  [
+                    node(
+                      "n5",
+                      "wait_event",
+                      {
+                        event: "purchase",
+                        amount: 2,
+                        unit: "days",
+                      },
+                      [
+                        branch("happened", goal("n6")),
+                        branch(
+                          "timeout",
+                          node(
+                            "n7",
+                            "push",
+                            {
+                              title: "Still thinking it over?",
+                              body: "{{first_name}}, your saved cart is one tap away.",
+                            },
+                            [exit("n8")],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              branch(
+                "no",
+                node(
+                  "n9",
+                  "push",
+                  {
+                    title: "Your cart is saved",
+                    body: "{{first_name}}, come back to your items whenever you are ready.",
+                  },
+                  [
+                    node(
+                      "n10",
+                      "wait_event",
+                      {
+                        event: "purchase",
+                        amount: 2,
+                        unit: "days",
+                      },
+                      [
+                        branch("happened", goal("n11")),
+                        branch("timeout", exit("n12")),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    winback: recipe(
+      "Retail & E-Commerce",
+      "Win-back",
+      "Re-engage inactive customers and stop follow-ups after a purchase.",
+      node("n1", "trigger", { event: "inactive_30d" }, [
+        node(
+          "n2",
+          "email",
+          {
+            subject: "We miss you, {{first_name}}",
+            body: "Take a look at what is new since your last visit.",
+          },
+          [
+            node(
+              "n3",
+              "wait_event",
+              {
+                event: "purchase",
+                amount: 7,
+                unit: "days",
+              },
+              [
+                branch("happened", goal("n4")),
+                branch(
+                  "timeout",
+                  node(
+                    "n5",
+                    "sms",
+                    {
+                      body: "{{first_name}}, we would love to welcome you back.",
+                    },
+                    [
+                      node(
+                        "n6",
+                        "update_profile",
+                        {
+                          action: "add_tag",
+                          tag: "winback_unresponsive",
+                        },
+                        [exit("n7")],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ]),
+    ),
+    post_purchase: recipe(
+      "Retail & E-Commerce",
+      "Post-purchase care",
+      "Thank customers after an order and tailor follow-up to their engagement.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 3, unit: "days" }, [
+          node(
+            "n3",
+            "email",
+            {
+              subject: "How was your order, {{first_name}}?",
+              body: "We hope everything arrived safely. Tell us what you think.",
+            },
+            [
+              node("n4", "wait", { amount: 4, unit: "days" }, [
+                node(
+                  "n5",
+                  "condition",
+                  {
+                    field: "score",
+                    op: "ge",
+                    value: "60",
+                  },
+                  [
+                    branch(
+                      "yes",
+                      node(
+                        "n6",
+                        "update_profile",
+                        {
+                          action: "add_tag",
+                          tag: "advocate",
+                        },
+                        [goal("n7")],
+                      ),
+                    ),
+                    branch(
+                      "no",
+                      node(
+                        "n8",
+                        "push",
+                        {
+                          title: "Need help with your order?",
+                          body: "We are here if anything is off, {{first_name}}.",
+                        },
+                        [exit("n9")],
+                      ),
+                    ),
+                  ],
+                ),
+              ]),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    travel_preparation: recipe(
+      "Travel & Hospitality",
+      "Trip preparation",
+      "Send useful trip information and check whether travelers have seen it.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 7, unit: "days" }, [
+          node(
+            "n3",
+            "email",
+            {
+              subject: "Your trip is coming up, {{first_name}}",
+              body: "Review your itinerary and travel details before departure.",
+            },
+            [
+              node(
+                "n4",
+                "wait_event",
+                {
+                  event: "email_opened",
+                  amount: 2,
+                  unit: "days",
+                },
+                [
+                  branch(
+                    "happened",
+                    node(
+                      "n5",
+                      "update_profile",
+                      {
+                        action: "add_tag",
+                        tag: "travel_info_viewed",
+                      },
+                      [goal("n6")],
+                    ),
+                  ),
+                  branch(
+                    "timeout",
+                    node(
+                      "n7",
+                      "sms",
+                      {
+                        body: "{{first_name}}, your trip details are ready to review.",
+                      },
+                      [exit("n8")],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    course_enrollment: recipe(
+      "Education",
+      "Course enrollment",
+      "Welcome learners, then guide them toward their first course resource.",
+      node("n1", "trigger", { event: "signup" }, [
+        node(
+          "n2",
+          "email",
+          {
+            subject: "Your learning journey starts here, {{first_name}}",
+            body: "Open your course guide and choose a good time for your first lesson.",
+          },
+          [
+            node(
+              "n3",
+              "wait_event",
+              {
+                event: "email_clicked",
+                amount: 3,
+                unit: "days",
+              },
+              [
+                branch(
+                  "happened",
+                  node(
+                    "n4",
+                    "update_profile",
+                    {
+                      action: "add_tag",
+                      tag: "course_engaged",
+                    },
+                    [goal("n5")],
+                  ),
+                ),
+                branch(
+                  "timeout",
+                  node(
+                    "n6",
+                    "sms",
+                    {
+                      body: "{{first_name}}, your course guide is ready when you are.",
+                    },
+                    [exit("n7")],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ]),
+    ),
+    replenishment_reminder: recipe(
+      "Retail & E-Commerce",
+      "Replenishment reminder",
+      "Remind repeat-purchase customers when it may be time to restock.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 30, unit: "days" }, [
+          node(
+            "n3",
+            "email",
+            {
+              subject: "Ready for a restock, {{first_name}}?",
+              body: "If you are running low, your usual items are ready to reorder.",
+            },
+            [
+              node(
+                "n4",
+                "wait_event",
+                {
+                  event: "purchase",
+                  amount: 7,
+                  unit: "days",
+                },
+                [
+                  branch("happened", goal("n5")),
+                  branch(
+                    "timeout",
+                    node(
+                      "n6",
+                      "push",
+                      {
+                        title: "Need a restock?",
+                        body: "{{first_name}}, your favorites are easy to reorder.",
+                      },
+                      [exit("n7")],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    retail_loyalty: recipe(
+      "Retail & E-Commerce",
+      "Loyalty member activation",
+      "Recognize loyalty members and invite other shoppers to join the program.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node(
+          "n2",
+          "condition",
+          {
+            field: "tags",
+            op: "has",
+            value: "loyalty_member",
+          },
+          [
+            branch(
+              "yes",
+              node(
+                "n3",
+                "push",
+                {
+                  title: "A thank-you for being a member",
+                  body: "{{first_name}}, take a look at your latest member rewards.",
+                },
+                [goal("n4")],
+              ),
+            ),
+            branch(
+              "no",
+              node(
+                "n5",
+                "email",
+                {
+                  subject: "Get more from your next visit, {{first_name}}",
+                  body: "Join our loyalty program to hear about member benefits.",
+                },
+                [
+                  node(
+                    "n6",
+                    "update_profile",
+                    {
+                      action: "add_tag",
+                      tag: "loyalty_invited",
+                    },
+                    [exit("n7")],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ]),
+    ),
+    restaurant_feedback: recipe(
+      "Hospitality & Food Service",
+      "Dining follow-up",
+      "Thank guests after a visit and offer a second feedback route if needed.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 1, unit: "days" }, [
+          node(
+            "n3",
+            "email",
+            {
+              subject: "Thanks for visiting, {{first_name}}",
+              body: "We hope you enjoyed your meal. We would value your feedback.",
+            },
+            [
+              node(
+                "n4",
+                "wait_event",
+                {
+                  event: "email_clicked",
+                  amount: 3,
+                  unit: "days",
+                },
+                [
+                  branch(
+                    "happened",
+                    node(
+                      "n5",
+                      "update_profile",
+                      {
+                        action: "add_tag",
+                        tag: "restaurant_feedback",
+                      },
+                      [goal("n6")],
+                    ),
+                  ),
+                  branch(
+                    "timeout",
+                    node(
+                      "n7",
+                      "sms",
+                      {
+                        body: "{{first_name}}, how was your recent dining experience?",
+                      },
+                      [exit("n8")],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    hospitality_prearrival: recipe(
+      "Travel & Hospitality",
+      "Pre-arrival guest journey",
+      "Share arrival information before a stay and check whether guests have seen it.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 7, unit: "days" }, [
+          node(
+            "n3",
+            "email",
+            {
+              subject: "We look forward to welcoming you, {{first_name}}",
+              body: "Your stay is coming up. Review arrival details and let us know if you need help.",
+            },
+            [
+              node(
+                "n4",
+                "wait_event",
+                {
+                  event: "email_opened",
+                  amount: 2,
+                  unit: "days",
+                },
+                [
+                  branch(
+                    "happened",
+                    node(
+                      "n5",
+                      "update_profile",
+                      {
+                        action: "add_tag",
+                        tag: "stay_prepared",
+                      },
+                      [goal("n6")],
+                    ),
+                  ),
+                  branch(
+                    "timeout",
+                    node(
+                      "n7",
+                      "sms",
+                      {
+                        body: "{{first_name}}, reply if you need help getting ready for your stay.",
+                      },
+                      [exit("n8")],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    account_opening: recipe(
+      "Banking & Financial Services",
+      "Account opening follow-up",
+      "Help new applicants finish opening an account, then tag those who start setup.",
+      node("n1", "trigger", { event: "signup" }, [
+        node(
+          "n2",
+          "email",
+          {
+            subject: "Finish opening your account, {{first_name}}",
+            body: "Your application is almost complete. Pick up where you left off.",
+          },
+          [
+            node(
+              "n3",
+              "wait_event",
+              { event: "email_clicked", amount: 3, unit: "days" },
+              [
+                branch(
+                  "happened",
+                  node(
+                    "n4",
+                    "update_profile",
+                    { action: "add_tag", tag: "account_setup_started" },
+                    [goal("n5")],
+                  ),
+                ),
+                branch(
+                  "timeout",
+                  node(
+                    "n6",
+                    "sms",
+                    {
+                      body: "{{first_name}}, your account is waiting. Finish in a few minutes.",
+                    },
+                    [exit("n7")],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ]),
+    ),
+    card_activation: recipe(
+      "Banking & Financial Services",
+      "Card activation reminder",
+      "Remind new cardholders to activate their card, with a stronger nudge for engaged customers.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 2, unit: "days" }, [
+          node("n3", "condition", { field: "score", op: "ge", value: "60" }, [
+            branch(
+              "yes",
+              node(
+                "n4",
+                "push",
+                {
+                  title: "Activate your card",
+                  body: "{{first_name}}, one tap to start using your new card.",
+                },
+                [
+                  node(
+                    "n5",
+                    "wait_event",
+                    { event: "purchase", amount: 7, unit: "days" },
+                    [
+                      branch("happened", goal("n6")),
+                      branch("timeout", exit("n7")),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            branch(
+              "no",
+              node(
+                "n8",
+                "email",
+                {
+                  subject: "Activate your card to start earning rewards",
+                  body: "Activate your card in the app to start using it today.",
+                },
+                [exit("n9")],
+              ),
+            ),
+          ]),
+        ]),
+      ]),
+    ),
+    course_reengagement: recipe(
+      "Education",
+      "Course re-engagement",
+      "Bring back learners who stopped partway through a course.",
+      node("n1", "trigger", { event: "inactive_30d" }, [
+        node(
+          "n2",
+          "email",
+          {
+            subject: "Your course is waiting, {{first_name}}",
+            body: "Pick up your next lesson where you stopped.",
+          },
+          [
+            node(
+              "n3",
+              "wait_event",
+              { event: "email_opened", amount: 3, unit: "days" },
+              [
+                branch(
+                  "happened",
+                  node(
+                    "n4",
+                    "update_profile",
+                    { action: "add_tag", tag: "course_reengaged" },
+                    [goal("n5")],
+                  ),
+                ),
+                branch(
+                  "timeout",
+                  node(
+                    "n6",
+                    "push",
+                    {
+                      title: "Your next lesson is ready",
+                      body: "{{first_name}}, a short lesson is ready when you are.",
+                    },
+                    [exit("n7")],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ]),
+    ),
+    appointment_reminder: recipe(
+      "Healthcare",
+      "Check-up reminder",
+      "Remind patients when a routine check-up is due and make booking easy.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 7, unit: "days" }, [
+          node(
+            "n3",
+            "email",
+            {
+              subject: "Your routine check-up is due, {{first_name}}",
+              body: "Choose a time that suits you. Use the app or reply to schedule.",
+            },
+            [
+              node(
+                "n4",
+                "wait_event",
+                { event: "email_clicked", amount: 3, unit: "days" },
+                [
+                  branch(
+                    "happened",
+                    node(
+                      "n5",
+                      "update_profile",
+                      { action: "add_tag", tag: "checkup_scheduling" },
+                      [goal("n6")],
+                    ),
+                  ),
+                  branch(
+                    "timeout",
+                    node(
+                      "n7",
+                      "sms",
+                      {
+                        body: "{{first_name}}, book your check-up in two taps.",
+                      },
+                      [exit("n8")],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    post_visit_care: recipe(
+      "Healthcare",
+      "Post-visit follow-up",
+      "Check in after a visit and route patients who need more support to a care contact.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 1, unit: "days" }, [
+          node(
+            "n3",
+            "email",
+            {
+              subject: "How are you feeling, {{first_name}}?",
+              body: "If anything is unclear after your visit, we are here to help.",
+            },
+            [
+              node(
+                "n4",
+                "condition",
+                { field: "score", op: "ge", value: "60" },
+                [
+                  branch(
+                    "yes",
+                    node(
+                      "n5",
+                      "update_profile",
+                      { action: "add_tag", tag: "care_plan_engaged" },
+                      [goal("n6")],
+                    ),
+                  ),
+                  branch(
+                    "no",
+                    node(
+                      "n7",
+                      "sms",
+                      {
+                        body: "{{first_name}}, reply if you would like a call from our care team.",
+                      },
+                      [exit("n8")],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    table_reservation: recipe(
+      "Hospitality & Food Service",
+      "Table reservation reminder",
+      "Confirm an upcoming booking, then check whether the guest returns.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 1, unit: "days" }, [
+          node(
+            "n3",
+            "sms",
+            {
+              body: "{{first_name}}, your table is booked for tomorrow. Reply to change it.",
+            },
+            [
+              node(
+                "n4",
+                "wait_event",
+                { event: "purchase", amount: 2, unit: "days" },
+                [branch("happened", goal("n5")), branch("timeout", exit("n6"))],
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    policy_renewal: recipe(
+      "Insurance",
+      "Policy renewal reminder",
+      "Remind policyholders before renewal, then follow up by SMS if they have not renewed.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 30, unit: "days" }, [
+          node(
+            "n3",
+            "email",
+            {
+              subject: "Your policy renews soon, {{first_name}}",
+              body: "Review your cover and renew in a few minutes.",
+            },
+            [
+              node(
+                "n4",
+                "wait_event",
+                { event: "email_clicked", amount: 14, unit: "days" },
+                [
+                  branch("happened", goal("n5")),
+                  branch(
+                    "timeout",
+                    node(
+                      "n6",
+                      "sms",
+                      {
+                        body: "{{first_name}}, renew your policy to keep your cover active.",
+                      },
+                      [exit("n7")],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    quote_followup: recipe(
+      "Insurance",
+      "Quote follow-up",
+      "Finish unfinished quotes. Higher-scoring prospects get an email, others get a push reminder.",
+      node("n1", "trigger", { event: "cart_abandoned" }, [
+        node("n2", "wait", { amount: 1, unit: "hours" }, [
+          node("n3", "condition", { field: "score", op: "ge", value: "50" }, [
+            branch(
+              "yes",
+              node(
+                "n4",
+                "email",
+                {
+                  subject: "{{first_name}}, finish your quote",
+                  body: "Your quote is saved. Complete it in a few minutes.",
+                },
+                [
+                  node(
+                    "n5",
+                    "wait_event",
+                    { event: "purchase", amount: 3, unit: "days" },
+                    [
+                      branch("happened", goal("n6")),
+                      branch("timeout", exit("n7")),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            branch(
+              "no",
+              node(
+                "n8",
+                "push",
+                {
+                  title: "Your quote is saved",
+                  body: "{{first_name}}, pick up where you left off.",
+                },
+                [exit("n9")],
+              ),
+            ),
+          ]),
+        ]),
+      ]),
+    ),
+    b2b_reorder: recipe(
+      "Manufacturing",
+      "Supply reorder reminder",
+      "Remind trade customers when a reorder is due, then escalate by push if they have not ordered.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 60, unit: "days" }, [
+          node(
+            "n3",
+            "email",
+            {
+              subject: "Time to reorder supplies, {{first_name}}",
+              body: "Your usual order is ready to confirm. Reorder in one step.",
+            },
+            [
+              node(
+                "n4",
+                "wait_event",
+                { event: "purchase", amount: 7, unit: "days" },
+                [
+                  branch("happened", goal("n5")),
+                  branch(
+                    "timeout",
+                    node(
+                      "n6",
+                      "push",
+                      {
+                        title: "Reorder reminder",
+                        body: "{{first_name}}, your supply order is ready to confirm.",
+                      },
+                      [exit("n7")],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    product_registration: recipe(
+      "Manufacturing",
+      "Product registration",
+      "Ask new buyers to register their product for warranty support, then nudge by SMS.",
+      node("n1", "trigger", { event: "signup" }, [
+        node(
+          "n2",
+          "email",
+          {
+            subject: "Register your product, {{first_name}}",
+            body: "Registering takes two minutes and activates your warranty.",
+          },
+          [
+            node(
+              "n3",
+              "wait_event",
+              { event: "email_clicked", amount: 7, unit: "days" },
+              [
+                branch(
+                  "happened",
+                  node(
+                    "n4",
+                    "update_profile",
+                    { action: "add_tag", tag: "product_registered" },
+                    [goal("n5")],
+                  ),
+                ),
+                branch(
+                  "timeout",
+                  node(
+                    "n6",
+                    "sms",
+                    {
+                      body: "{{first_name}}, register your product to activate your warranty.",
+                    },
+                    [exit("n7")],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ]),
+    ),
+    trial_activation: recipe(
+      "Media & Entertainment",
+      "Trial activation",
+      "Welcome new subscribers and recommend a first title. Engaged trials get a push.",
+      node("n1", "trigger", { event: "signup" }, [
+        node(
+          "n2",
+          "email",
+          {
+            subject: "Your trial has started, {{first_name}}",
+            body: "Here is how to find something to watch tonight.",
+          },
+          [
+            node("n3", "wait", { amount: 1, unit: "days" }, [
+              node(
+                "n4",
+                "condition",
+                { field: "score", op: "ge", value: "60" },
+                [
+                  branch(
+                    "yes",
+                    node(
+                      "n5",
+                      "push",
+                      {
+                        title: "Pick your first show",
+                        body: "{{first_name}}, new titles are waiting for you.",
+                      },
+                      [
+                        node(
+                          "n6",
+                          "wait_event",
+                          { event: "purchase", amount: 7, unit: "days" },
+                          [
+                            branch("happened", goal("n7")),
+                            branch("timeout", exit("n8")),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  branch(
+                    "no",
+                    node(
+                      "n9",
+                      "email",
+                      {
+                        subject: "Here is what to watch next",
+                        body: "Browse our top picks for new subscribers.",
+                      },
+                      [exit("n10")],
+                    ),
+                  ),
+                ],
+              ),
+            ]),
+          ],
+        ),
+      ]),
+    ),
+    lapsed_viewer: recipe(
+      "Media & Entertainment",
+      "Lapsed viewer win-back",
+      "Bring back viewers who have been inactive for 30 days with new releases, then offer a text reminder.",
+      node("n1", "trigger", { event: "inactive_30d" }, [
+        node(
+          "n2",
+          "push",
+          {
+            title: "New releases you may like",
+            body: "{{first_name}}, fresh titles just landed.",
+          },
+          [
+            node(
+              "n3",
+              "wait_event",
+              { event: "purchase", amount: 7, unit: "days" },
+              [
+                branch("happened", goal("n4")),
+                branch(
+                  "timeout",
+                  node(
+                    "n5",
+                    "sms",
+                    { body: "{{first_name}}, a new season is ready to watch." },
+                    [
+                      node(
+                        "n6",
+                        "update_profile",
+                        { action: "add_tag", tag: "lapsed_viewer" },
+                        [exit("n7")],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ]),
+    ),
+    new_listing_alert: recipe(
+      "Real Estate",
+      "New listing alert",
+      "Send buyers new homes that match their search, then follow up by SMS if they do not engage.",
+      node("n1", "trigger", { event: "signup" }, [
+        node(
+          "n2",
+          "email",
+          {
+            subject: "New homes that match your search, {{first_name}}",
+            body: "Here are the newest listings in your preferred area.",
+          },
+          [
+            node(
+              "n3",
+              "wait_event",
+              { event: "email_clicked", amount: 3, unit: "days" },
+              [
+                branch(
+                  "happened",
+                  node(
+                    "n4",
+                    "update_profile",
+                    { action: "add_tag", tag: "listing_viewed" },
+                    [goal("n5")],
+                  ),
+                ),
+                branch(
+                  "timeout",
+                  node(
+                    "n6",
+                    "sms",
+                    {
+                      body: "{{first_name}}, new listings are live. Take a look.",
+                    },
+                    [exit("n7")],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ]),
+    ),
+    viewing_followup: recipe(
+      "Real Estate",
+      "Viewing follow-up",
+      "Follow up with buyers who looked at a home but did not book a second viewing.",
+      node("n1", "trigger", { event: "cart_abandoned" }, [
+        node("n2", "wait", { amount: 1, unit: "days" }, [
+          node(
+            "n3",
+            "email",
+            {
+              subject: "Still interested in this home, {{first_name}}?",
+              body: "Book a second viewing at a time that works for you.",
+            },
+            [
+              node(
+                "n4",
+                "wait_event",
+                { event: "purchase", amount: 14, unit: "days" },
+                [
+                  branch("happened", goal("n5")),
+                  branch(
+                    "timeout",
+                    node(
+                      "n6",
+                      "push",
+                      {
+                        title: "Book a second viewing",
+                        body: "{{first_name}}, a slot is open this week.",
+                      },
+                      [exit("n7")],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ),
+    plan_upgrade: recipe(
+      "Telecommunications",
+      "Plan upgrade offer",
+      "Offer a higher data plan to high-engagement customers and share plan details with others.",
+      node("n1", "trigger", { event: "purchase" }, [
+        node("n2", "wait", { amount: 14, unit: "days" }, [
+          node("n3", "condition", { field: "score", op: "ge", value: "70" }, [
+            branch(
+              "yes",
+              node(
+                "n4",
+                "push",
+                {
+                  title: "Upgrade for more data",
+                  body: "{{first_name}}, a bigger plan is available for you.",
+                },
+                [
+                  node(
+                    "n5",
+                    "wait_event",
+                    { event: "purchase", amount: 7, unit: "days" },
+                    [
+                      branch("happened", goal("n6")),
+                      branch("timeout", exit("n7")),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            branch(
+              "no",
+              node(
+                "n8",
+                "email",
+                {
+                  subject: "Your plan at a glance",
+                  body: "Review your data, calls and included extras.",
+                },
+                [exit("n9")],
+              ),
+            ),
+          ]),
+        ]),
+      ]),
+    ),
+    line_activation: recipe(
+      "Telecommunications",
+      "Line activation",
+      "Help new subscribers activate their line by SMS, then tag those who have not activated.",
+      node("n1", "trigger", { event: "signup" }, [
+        node(
+          "n2",
+          "sms",
+          { body: "{{first_name}}, activate your line in two minutes." },
+          [
+            node(
+              "n3",
+              "wait_event",
+              { event: "purchase", amount: 3, unit: "days" },
+              [
+                branch("happened", goal("n4")),
+                branch(
+                  "timeout",
+                  node(
+                    "n5",
+                    "update_profile",
+                    { action: "add_tag", tag: "line_not_activated" },
+                    [exit("n6")],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ]),
+    ),
+  };
+
   const source = {
-    builder: `
-      <div class="cw">
-        <header class="cw-top">
-          <div class="cw-title"><b data-r="title">Campaign workflow</b><span data-r="chips"></span></div>
-          <div class="cw-actions">
-            <span class="cw-pill" data-r="valid"></span>
-            <span class="cw-dirty" data-r="dirty" hidden>Unsaved changes</span>
-            <button class="cw-btn" data-a="preview">Preview audience</button>
-            <button class="cw-btn cw-primary" data-a="save">Save workflow</button>
+    workflowPalette: `
+      {{#each categories}}
+        <h2>{{label}}</h2>
+        {{#each nodes}}
+          <div class="blockelem create-flowy t-{{type}}" data-type="{{type}}">
+            <input type="hidden" name="blockelemtype" class="blockelemtype" value="{{type}}">
+            <b>{{label}}</b>
+            <span class="d">{{description}}</span>
           </div>
-        </header>
-        <div class="cw-body">
-          <aside class="cw-pal">
-            <h3>Blocks</h3>
-            {{#each palette}}
-              <div class="cw-pitem cw-t-{{type}} create-flowy" data-type="{{type}}" role="button" tabindex="0" aria-label="Add {{label}}">
-                <input type="hidden" name="blockelemtype" class="blockelemtype" value="{{code}}">
-                <span class="cw-pi">{{{workflowIcon type}}}</span>
-                <span><b>{{label}}</b><small>{{description}}</small></span>
-              </div>
-            {{/each}}
-            <p class="cw-help">Drag a block onto the canvas, or select a node and click a block to add it below. Each If / else has a Yes and a No branch. Send blocks end a branch.</p>
-          </aside>
-          <div class="cw-stage">
-            <div class="cw-canvas" id="cw-canvas"></div>
-            <div class="cw-empty" data-r="empty">Drag <b>Customer segment</b> here to start<br><small>or select it in the left panel</small></div>
-            <div class="cw-busy" data-r="busy" hidden><span></span>Building workflow…</div>
-          </div>
-          <section class="cw-side">
-            <nav class="cw-tabs" role="tablist">
-              {{#each tabs}}<button role="tab" data-tab="{{id}}">{{label}}</button>{{/each}}
-            </nav>
-            <div class="cw-pane" data-r="pane"></div>
-          </section>
-        </div>
-        <div class="cw-toast" data-r="toast" role="status"></div>
-      </div>`,
-    nodeBody: `
-      <div class="cw-nh">
-        <span class="cw-ni">{{{workflowIcon type}}}</span>
-        <span class="cw-nt">{{label}}</span>
-        {{#if branch}}<span class="cw-br cw-{{branch}}">{{branchLabel}}</span>{{/if}}
-      </div>
-      <div class="cw-ntitle">{{title}}</div>
-      <div class="cw-nsub">{{subtitle}}</div>
-      {{#if hasCounts}}
-        <div class="cw-nc">{{reach}} reach{{#if isAction}} · {{deliverable}} deliverable{{/if}}</div>
-      {{/if}}`,
-    workflowNode: `
-      <input type="hidden" name="blockelemtype" class="blockelemtype" value="{{code}}">
-      <input type="hidden" name="blockid" class="blockid" value="{{blockId}}">
-      <div class="cw-nb"></div>`,
-    demoFlowyBlock: `
-      <input type="hidden" name="blockelemtype" class="blockelemtype" value="{{code}}">
-      <input type="hidden" name="blockid" class="blockid" value="{{blockId}}">
-      {{{body}}}`,
-    chips: `{{#each chips}}<i class="cw-chip">{{this}}</i>{{/each}}`,
-    issues: `<ul class="cw-issues">{{#each issues}}<li class="{{level}}">{{msg}}</li>{{/each}}</ul>`,
-    checklistInspector: `
-      <h4>Checklist</h4>
-      {{#if hasIssues}}{{{issuesHtml}}}{{else}}<p class="cw-ok">No issues found. The workflow is ready to save.</p>{{/if}}
-      <p class="cw-mute">Select a node to edit it.</p>`,
-    inspector: `
-      <div class="cw-ih">
-        <span class="cw-ni cw-t-{{type}}">{{{workflowIcon type}}}</span>
-        <div><b>{{label}}</b><small>{{id}}</small></div>
-      </div>
-      {{#if issuesHtml}}{{{issuesHtml}}}{{/if}}
-      {{#if isSegment}}
-        <label>Segment
-          <select data-f="segment_id">
-            {{#each segments}}
-              <option value="{{segment_id}}" {{#if selected}}selected{{/if}}>{{segment_name}}</option>
-            {{/each}}
-          </select>
-        </label>
-        {{#if segment}}
-          <dl class="cw-dl">
-            <dt>Tag</dt><dd><code>{{segment.segment_tag}}</code></dd>
-            <dt>Members</dt><dd>{{memberCount}}</dd>
-            <dt>Built by</dt><dd>{{segment.processed_by}}</dd>
-            <dt>Description</dt><dd>{{segment.description}}</dd>
-          </dl>
-        {{/if}}
-      {{/if}}
-      {{#if isCondition}}
-        <label>Field
-          <select data-f="field">
-            {{#each fields}}<option value="{{code}}" {{#if selected}}selected{{/if}}>{{name}}</option>{{/each}}
-          </select>
-        </label>
-        <label>Operator
-          <select data-f="op">
-            {{#each operators}}<option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
-          </select>
-        </label>
-        {{#if booleanValue}}
-          <label>Value
-            <select data-f="value">
-              <option value="true" {{#if valueIsTrue}}selected{{/if}}>Yes</option>
-              <option value="false" {{#if valueIsFalse}}selected{{/if}}>No</option>
-            </select>
-          </label>
-        {{else if optionValues.length}}
-          <label>Value
-            <select data-f="value">
-              {{#each optionValues}}<option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
-            </select>
-          </label>
-        {{else}}
-          <label>Value {{#if hint}}<small>({{hint}})</small>{{/if}}
-            <input data-f="value" {{#if numericValue}}type="number" step="any"{{else}}type="text" placeholder="{{placeholder}}"{{/if}} value="{{value}}">
-          </label>
-        {{/if}}
-        <p class="cw-say"><b>{{conditionSummary}}</b><br><small>Yes goes left, No goes right. Profiles with no value for this field follow No.</small></p>
-      {{/if}}
-      {{#if isAction}}
-        <label>Template
-          <select data-f="template_id">
-            <option value="">Choose a template</option>
-            {{#each templates}}
-              <option value="{{template_id}}" {{#if selected}}selected{{/if}} {{#if disabled}}disabled{{/if}}>{{name}}{{#if statusNote}} ({{status}}){{/if}}</option>
-            {{/each}}
-          </select>
-        </label>
-        {{#if emailPreview}}
-          <div class="cw-prev">
-            <div class="cw-subj">{{subject}}</div>
-            {{#if htmlEmail}}<iframe sandbox title="Email preview" srcdoc="{{htmlEmail}}"></iframe>{{else}}<pre>{{messageBody}}</pre>{{/if}}
-          </div>
-        {{/if}}
-        {{#if pushPreview}}
-          <div class="cw-push"><span class="cw-pi">{{{workflowIcon "push"}}}</span><div><b>{{subject}}</b><br>{{messageBody}}</div></div>
-        {{/if}}
-        <p class="cw-mute">Preview uses sample values. Real values are merged at send time.</p>
-      {{/if}}
-      {{#if branchOptions}}
-        <label>Branch
-          <select data-f="branch">
-            <option value="yes" {{#if branchIsYes}}selected{{/if}}>Yes</option>
-            <option value="no" {{#if branchIsNo}}selected{{/if}}>No</option>
-          </select>
-        </label>
-      {{/if}}
-      <div class="cw-row"><button class="cw-btn cw-danger" data-a="delete">Delete {{deleteLabel}}</button></div>`,
-    audienceEmpty: `
-      <h4>Audience preview</h4>
-      <p class="cw-mute">Shows how many profiles reach each block and how many can actually be messaged after consent and suppression checks.</p>
-      <button class="cw-btn cw-primary" data-a="preview">Preview audience</button>`,
-    audienceResults: `
-      <h4>Audience preview</h4>
-      <div class="cw-kpis">
-        <div><b>{{total}}</b><small>in segment</small></div>
-        <div><b>{{unrouted}}</b><small>not routed</small></div>
-      </div>
-      <table class="cw-table">
-        <tr><th>Send block</th><th>Reach</th><th>Deliverable</th><th>Rate</th></tr>
-        {{#each rows}}
-          <tr><td>{{name}}<small>{{channel}} · {{id}}</small></td><td>{{reach}}</td><td>{{deliverable}}</td><td>{{rate}}</td></tr>
         {{/each}}
-      </table>
-      <p class="cw-mute">Deliverable = has an email or push token, opted in, and not on the suppression list.</p>
-      <button class="cw-btn" data-a="preview">Refresh</button>`,
-    sqlUnavailable: `<h4>Generated SQL</h4><p class="cw-mute">Fix the issues in the checklist to generate SQL.</p>`,
-    sqlCode: `<pre class="cw-code">{{sql}}</pre><div class="cw-params">params: {{params}}</div>`,
-    sqlResults: `
-      <h4>Generated SQL</h4>
-      <p class="cw-mute">One parameterised query per send block. Values are bound parameters, never concatenated.</p>
-      {{#each statements}}
-        <details open>
-          <summary>{{nodeId}} · {{channel}} · {{templateName}}</summary>
-          <h5>Audience</h5>{{{audienceCode}}}
-          <h5>Activation (writes the dispatch ledger)</h5>{{{activationCode}}}
-        </details>
       {{/each}}
-      <button class="cw-btn" data-a="copysql">Copy all SQL</button>`,
-    reportLoading: `<h4>Campaign report</h4><p class="cw-mute">Loading…</p>`,
-    workflowJson: `
-      <h4>Workflow JSON</h4>
-      <p class="cw-mute">Stored in <code>crm_campaign.metadata.workflow</code>. Edit and apply to rebuild the canvas.</p>
-      <textarea class="cw-json" spellcheck="false">{{workflowJson}}</textarea>
-      <div class="cw-row"><button class="cw-btn" data-a="copyjson">Copy</button><button class="cw-btn cw-primary" data-a="applyjson">Apply JSON</button></div>`,
-    sparkChart: `
-      <svg viewBox="0 0 {{width}} {{height}}" class="cw-spark" role="img" aria-label="{{label}}">
-        {{#each bars}}<rect x="{{x}}" y="{{y}}" width="{{width}}" height="{{height}}" rx="1.5" fill="{{color}}"/>{{/each}}
-      </svg>`,
-    campaignReport: `
-      <h4>Campaign performance</h4>
-      <div class="cw-kpis">
-        {{#each kpis}}<div><b>{{value}}</b><small>{{label}}{{#if detail}} · {{detail}}{{/if}}</small></div>{{/each}}
+      <p>Choose a segment in the Event trigger, then drag blocks below it. Branching blocks place the first branch left and the second right. Templates support {{templateVariables}}.</p>
+    `,
+    workflowBlock: `
+      <input type="hidden" name="blockelemtype" class="blockelemtype" value="{{type}}">
+      <input type="hidden" name="blockid" class="blockid" value="{{blockId}}">
+      <div class="bh">
+        <span class="block-title">{{label}}</span>
+        <span class="hits"></span>
+        <span class="branch"></span>
       </div>
-      <div class="cw-sparks">
-        {{#each charts}}<div><small>{{label}} per day</small>{{{chart}}}</div>{{/each}}
-      </div>
-      <h4>Delivery by send block</h4>
-      <table class="cw-table"><tr><th>Send block</th>{{#each statuses}}<th>{{this}}</th>{{/each}}</tr>
-        {{#each dispatchRows}}
-          <tr><td>{{label}}<small>{{id}}</small></td>{{#each counts}}<td>{{this}}</td>{{/each}}</tr>
+      {{#each fields}}
+        {{> workflowConfigurationField}}
+      {{/each}}
+    `,
+    workflowProfiles: `
+      {{#if showBuildGuide}}{{> workflowBuildGuide}}{{/if}}
+      <h2>Audience profiles</h2>
+      <p class="sub">{{#if loading}}Loading profiles…{{else}}{{profileCount}} profiles. {{segmentHint}}{{/if}}</p>
+      <table>
+        <tr>
+          <th>Name</th><th>Score</th><th>Cart</th><th>Days</th><th>Push</th>
+          {{#if hasSimulation}}<th>Outcome</th><th>In flow</th>{{/if}}
+        </tr>
+        {{#each profiles}}
+          <tr>
+            <td>{{name}}</td><td>{{score}}</td><td>&#36;{{cart}}</td><td>{{recency}}</td><td>{{pushLabel}}</td>
+            {{#if ../hasSimulation}}<td>{{outcome}}</td><td>{{days}}d</td>{{/if}}
+          </tr>
         {{/each}}
       </table>
-      <p class="cw-mute">Totals come from <code>vw_campaign_performance_metrics</code>; delivery from <code>cdp_campaign_dispatch_logs</code>.</p>
-      <button class="cw-btn" data-a="reload">Reload report</button>`,
-    flowyError: `<p style="padding:16px;color:#b42318">{{message}}</p>`,
-    demoBlockSegment: `
-      <div class="bh"><span class="block-title">Customer segment</span><span class="hits"></span></div>
-      <div class="d" style="font-size:12px;color:#667090">Cart abandoners, last 14 days<br><b class="seglen">{{profileCount}} profiles</b></div>`,
-    demoBlockCondition: `
-      <div class="bh"><span class="block-title">If / else</span><span class="hits"></span><span class="branch"></span></div>
-      <select class="f-field">{{#each fields}}<option value="{{value}}">{{label}}</option>{{/each}}</select>
-      <div class="row2"><select class="f-op">{{#each operators}}<option value="{{value}}">{{label}}</option>{{/each}}</select><input class="f-val" type="number" value="50"></div>`,
-    demoBlockEmail: `
-      <div class="bh"><span class="block-title">Email</span><span class="hits"></span><span class="branch"></span></div>
-      <input class="f-a" placeholder="Subject" value="{{subject}}">
-      <textarea class="f-b" placeholder="Body template">{{body}}</textarea>`,
-    demoBlockPush: `
-      <div class="bh"><span class="block-title">Web push</span><span class="hits"></span><span class="branch"></span></div>
-      <input class="f-a" placeholder="Title" value="{{subject}}">
-      <textarea class="f-b" placeholder="Body template">{{body}}</textarea>`,
-    demoSegmentTable: `
-      <h2>Cart abandoners, last 14 days</h2>
-      <p class="sub">{{profileCount}} customer profiles enter the workflow.</p>
-      <table>
-        <tr><th>Name</th><th>Score</th><th>Cart</th><th>Days</th><th>Push</th>{{#if hasOutcome}}<th>Outcome</th>{{/if}}</tr>
-        {{#each profiles}}
-          <tr><td>{{name}}</td><td>{{score}}</td><td>&dollar;{{cart}}</td><td>{{recency}}</td><td>{{pushLabel}}</td>{{#if hasOutcome}}<td>{{outcome}}</td>{{/if}}</tr>
-        {{/each}}
-      </table>`,
-    demoReportEmpty: `<div class="empty">No profile reached an email or push block. Add a send block to a branch and run again.</div>`,
-    demoReport: `
+    `,
+    workflowChecks: `
+      <h2>Checks</h2>
+      {{#if showBuildGuide}}
+        {{> workflowBuildGuide}}
+      {{/if}}
+      {{#if issues.length}}
+        <ul class="issues">
+          {{#each issues}}
+            <li class="{{level}}">
+              <b>{{msg}}</b>{{#if node}} <small>({{node}})</small>{{/if}}
+              {{#if fix}}<br><small>{{fix}}</small>{{/if}}
+            </li>
+          {{/each}}
+        </ul>
+      {{else if showBuildGuide}}
+        <div class="empty">Add a message to enable Run campaign.</div>
+      {{else}}
+        <div class="empty">No issues. Run the campaign to preview results.</div>
+      {{/if}}
+    `,
+    workflowReportEmpty: `
+      <div class="empty">Run the campaign to see delivery, engagement and goals.</div>
+    `,
+    workflowReport: `
       <h2>Campaign performance</h2>
-      <p class="sub">Simulated results for {{profileCount}} profiles. {{noActionCount}} had no action.</p>
+      <p class="sub">Simulated results for {{totals.entered}} profiles. {{totals.goal}} reached the goal, {{totals.exited}} exited, {{totals.ended}} ended without an exit.</p>
       <div class="kpis">
-        {{#each kpis}}<div class="kpi"><div class="num">{{value}}</div><small>{{label}}</small></div>{{/each}}
+        {{#each kpis}}
+          <div class="kpi"><div class="num">{{value}}</div><small>{{label}}</small></div>
+        {{/each}}
       </div>
       <div class="fun">
-        {{#each funnel}}<div><span>{{label}}</span><i style="width:{{width}}%"></i><span>{{value}}</span></div>{{/each}}
+        {{#each funnel}}
+          <div><span>{{label}}</span><i style="width:{{width}}%"></i><span>{{value}}</span></div>
+        {{/each}}
       </div>
-      <h2 style="font-size:14px;margin-bottom:8px">By message</h2>
+      <h2 class="message-report-heading">By message</h2>
       {{#each messages}}
-        <div class="ncard t{{type}}">
-          <b>{{channel}}: {{subject}}</b>
+        <div class="ncard t-{{type}}">
+          <b>{{label}}: {{title}}</b>
           <div class="m">
-            <span>{{sent}} profiles</span><span>{{delivered}} delivered</span>
-            <span>{{openRate}} opened</span><span>{{clickRate}} clicked</span>
-            <span>{{conversions}} converted</span><span>&dollar;{{revenue}} revenue</span>
+            <span>{{reach}} profiles</span><span>{{delivered}} delivered</span>
+            {{#unless isSms}}<span>{{openRate}} opened</span>{{/unless}}
+            <span>{{clickRate}} clicked</span><span>{{conversions}} converted</span><span>&#36;{{revenue}} revenue</span>
           </div>
           <p>{{body}}</p>
         </div>
-      {{/each}}`,
-    demoReportIntro: `<div class="empty">Run the campaign to see delivery, engagement and revenue.</div>`,
+      {{/each}}
+    `,
+    workflowShell: `
+      <header>
+        <h1>{{title}}</h1>
+        <span id="pill" class="pill ok">Ready to run</span>
+        <select id="recipe" aria-label="Load a recipe">
+          <option value="">Load recipe…</option>
+          {{#each recipeGroups}}
+            <optgroup label="{{industry}}">
+              {{#each recipes}}<option value="{{key}}">{{name}}</option>{{/each}}
+            </optgroup>
+          {{/each}}
+        </select>
+        <button id="bClear">Clear canvas</button>
+        <button id="bRun" class="primary">Run campaign</button>
+      </header>
+      <main>
+        <aside class="pal" id="pal"></aside>
+        <div id="wrap">
+          <div class="canvas-controls" role="group" aria-label="Canvas navigation">
+            <button type="button" id="bPanCanvas" aria-pressed="false" title="Enable pan mode, then drag the empty canvas">Pan canvas</button>
+            <button type="button" id="bZoomOut" aria-label="Zoom out" title="Zoom out">−</button>
+            <span id="canvasZoomLevel" aria-live="polite">100%</span>
+            <button type="button" id="bZoomIn" aria-label="Zoom in" title="Zoom in">+</button>
+            <button type="button" id="bResetCanvasView" title="Reset zoom and return to the top-left of the canvas">Reset view</button>
+          </div>
+          <div id="canvas"></div>
+        </div>
+        <section class="side">
+          <div class="tabs" role="tablist">
+            <button role="tab" id="tabSeg" aria-selected="true">Profiles</button>
+            <button role="tab" id="tabChk" aria-selected="false">Checks</button>
+            <button role="tab" id="tabRep" aria-selected="false">Report</button>
+            <button role="tab" id="tabJson" aria-selected="false">JSON</button>
+          </div>
+          <div class="pane" id="paneSeg"><div id="segTable"></div></div>
+          <div class="pane" id="paneChk" hidden></div>
+          <div class="pane" id="paneRep" hidden></div>
+          <div class="pane" id="paneJson" hidden>
+            <h2>Workflow JSON</h2>
+            <p class="sub">The same JSON an AI agent reads and writes. Edit it and apply to rebuild the canvas.</p>
+            <textarea id="jsonData" spellcheck="false"></textarea>
+            <div class="json-actions"><button id="bApply">Apply JSON</button><button id="bCopyJson">Copy</button></div>
+            <details>
+              <summary>Agent manifest</summary>
+              <p class="sub">Node catalog, rules, tools and example recipes for an agent prompt. Also available as <code>workflowAgent.manifest()</code>.</p>
+              <button id="bCopyManifest">Copy manifest</button>
+            </details>
+          </div>
+        </section>
+      </main>
+      <div id="toast" role="status"></div>
+    `,
   };
 
-  const templates = {};
-  Object.keys(source).forEach((name) => {
-    templates[name] = Handlebars.compile(source[name]);
-  });
+  const templates = Object.fromEntries(
+    Object.entries(source).map(([name, markup]) => [
+      name,
+      Handlebars.compile(markup),
+    ]),
+  );
+  templates.RECIPES = RECIPES;
   root.WorkflowTemplates = templates;
-})(typeof window === "undefined" ? globalThis : window);
+})(typeof self !== "undefined" ? self : this);

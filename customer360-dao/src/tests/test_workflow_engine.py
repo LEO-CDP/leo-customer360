@@ -1,0 +1,225 @@
+"""Unit tests for the customer engagement flow engine (no database needed)."""
+
+import unittest
+import uuid
+
+from pydantic import ValidationError
+
+from leo_customer360_dao.models.identity import CdpMasterProfile
+from leo_customer360_dao.workflow import FlowDefinition, FlowEngine, NodeDef
+from leo_customer360_dao.workflow.nodes import render
+from workflow_demo import ENGAGEMENT_SCORE_FOLLOW_UP, UatRunner, engagement_score_follow_up_cases
+
+
+def _node(node_id, node_type, config=None, children=(), branch=None):
+    return {
+        "id": node_id,
+        "type": node_type,
+        "config": config or {},
+        "children": list(children),
+        **({"branch": branch} if branch else {}),
+    }
+
+
+def _profile(
+    *,
+    name="Ines",
+    email="ines@example.com",
+    phone_number=None,
+    engagement_score=50,
+    segmentation_tags=None,
+    communication_preferences=None,
+    push_token=True,
+):
+    return CdpMasterProfile(
+        master_profile_id=uuid.uuid4(),
+        full_name=name,
+        first_name=name.split(maxsplit=1)[0],
+        email=email,
+        phone_number=phone_number,
+        engagement_score=engagement_score,
+        segmentation_tags=segmentation_tags or [],
+        communication_preferences=communication_preferences
+        or {"email_opt_in": True, "sms_opt_in": True, "push_opt_in": True},
+        push_tokens={"push": "test-token"} if push_token else {},
+    )
+
+
+class DemoFlowUatTests(unittest.TestCase):
+    def test_built_in_uat_suite_passes(self):
+        outcomes = UatRunner(FlowEngine(ENGAGEMENT_SCORE_FOLLOW_UP)).run(engagement_score_follow_up_cases())
+        self.assertEqual([o.case for o in outcomes if not o.passed], [])
+
+    def test_built_in_flow_has_no_config_problems(self):
+        self.assertEqual(FlowEngine(ENGAGEMENT_SCORE_FOLLOW_UP).problems(), [])
+
+
+class ValidationTests(unittest.TestCase):
+    def test_rejects_unsupported_schema_version(self):
+        with self.assertRaises(ValidationError):
+            FlowDefinition.model_validate({"schema_version": 3, "root": _node("n1", "trigger", {"event": "signup"})})
+
+    def test_rejects_duplicate_node_ids(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node("n1", "trigger", {"event": "signup"}, [_node("n1", "exit", {"kind": "goal"})]),
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "Duplicate node id n1"):
+            FlowEngine(flow)
+
+    def test_rejects_unknown_node_type(self):
+        flow = FlowDefinition.model_validate({"schema_version": 2, "root": _node("n1", "trigger", {"event": "signup"}, [_node("n2", "teleport")])})
+        with self.assertRaisesRegex(ValueError, 'Unknown node type "teleport"'):
+            FlowEngine(flow)
+
+    def test_reports_flow_that_does_not_start_with_trigger(self):
+        flow = FlowDefinition(root=NodeDef(id="n1", type="exit", config={"kind": "goal"}))
+        self.assertIn("n1: the flow must start with a trigger", FlowEngine(flow).problems())
+
+    def test_condition_needs_valid_operator_for_field(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node(
+                    "n1",
+                    "trigger",
+                    {"event": "signup"},
+                    [
+                        _node(
+                            "n2",
+                            "condition",
+                            {"field": "segmentation_tags", "op": "ge", "value": "vip"},
+                        )
+                    ],
+                ),
+            }
+        )
+        self.assertIn("n2: segmentation_tags needs op has/hasnt", FlowEngine(flow).problems())
+
+    def test_condition_rejects_unknown_profile_field(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node(
+                    "n1",
+                    "trigger",
+                    {"event": "signup"},
+                    [
+                        _node(
+                            "n2",
+                            "condition",
+                            {"field": "unknown", "op": "eq", "value": 1},
+                            [
+                                _node("n3", "exit", {"kind": "goal"}, branch="yes"),
+                                _node("n4", "exit", {"kind": "exit"}, branch="no"),
+                            ],
+                        )
+                    ],
+                ),
+            }
+        )
+        self.assertIn("n2: unknown numeric field 'unknown'", FlowEngine(flow).problems())
+
+    def test_wait_rejects_negative_duration_and_unknown_unit(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node(
+                    "n1",
+                    "trigger",
+                    {"event": "signup"},
+                    [_node("n2", "wait", {"amount": -1, "unit": "weeks"})],
+                ),
+            }
+        )
+        problems = FlowEngine(flow).problems()
+        self.assertIn("n2: amount must be finite and non-negative", problems)
+        self.assertIn("n2: unit must be minutes, hours or days", problems)
+
+    def test_update_profile_rejects_unknown_action_without_removing_tag(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node(
+                    "n1",
+                    "trigger",
+                    {"event": "signup"},
+                    [
+                        _node(
+                            "n2",
+                            "update_profile",
+                            {"action": "typo", "tag": "vip"},
+                        )
+                    ],
+                ),
+            }
+        )
+        engine = FlowEngine(flow)
+        self.assertIn("n2: action must be add_tag or remove_tag", engine.problems())
+        result = engine.run(_profile(segmentation_tags=["vip"]))
+        self.assertEqual(result.end, "error")
+        self.assertIn("vip", result.tags)
+
+    def test_branch_without_matching_child_fails_as_journey_error(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node(
+                    "n1",
+                    "trigger",
+                    {"event": "signup"},
+                    [
+                        _node(
+                            "n2",
+                            "condition",
+                            {"field": "engagement_score", "op": "ge", "value": 50},
+                            [_node("n3", "exit", {"kind": "goal"}, branch="yes")],
+                        )
+                    ],
+                ),
+            }
+        )
+        result = FlowEngine(flow).run(_profile(engagement_score=10))
+        self.assertEqual(result.end, "error")
+        self.assertIn("no unique child for branch 'no'", str(result.error))
+
+    def test_engine_rejects_non_positive_step_limit(self):
+        with self.assertRaises(ValueError):
+            FlowEngine(ENGAGEMENT_SCORE_FOLLOW_UP, max_steps=0)
+
+
+class RenderTests(unittest.TestCase):
+    def test_replaces_known_placeholders_and_keeps_unknown(self):
+        self.assertEqual(render("Hi {{ first_name }} {{nickname}}", {"first_name": "Ines"}), "Hi Ines {{nickname}}")
+
+    def test_missing_template_renders_empty(self):
+        self.assertEqual(render(None, {}), "")
+
+
+class RunSemanticsTests(unittest.TestCase):
+    def test_consent_gate_skips_message_without_contact(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node(
+                    "n1",
+                    "trigger",
+                    {"event": "signup"},
+                    [_node("n2", "sms", {"body": "Hi"}, [_node("n3", "exit", {"kind": "goal"})])],
+                ),
+            }
+        )
+        result = FlowEngine(flow).run(_profile(name="NoPhone", phone_number=None))
+        self.assertEqual(result.deliveries, [("sms", "skipped")])
+        self.assertEqual(result.end, "goal")
+
+    def test_step_limit_stops_runaway_flow(self):
+        result = FlowEngine(ENGAGEMENT_SCORE_FOLLOW_UP, max_steps=2).run(_profile(engagement_score=70))
+        self.assertEqual(result.end, "error")
+        self.assertIn("more than 2 steps", str(result.error))
+
+
+if __name__ == "__main__":
+    unittest.main()
