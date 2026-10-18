@@ -90,7 +90,8 @@ jobs:
           SERVICES: ${{ inputs.steps }}
         run: |
           # Map the step group to the minimum set of modules it reads outputs from.
-          # api/sso-realm reads cache (Redis host); backend/docs use local or DB-only;
+          # api/sso-realm reads cache (Redis host); backend/docs use local or DB-only (backend on
+          # VKS reads the api box IP from `server` and the DB host from `postgres`, so same set);
           # frontend and agent only need the server VM IP.
           case ",$SERVICES," in
             *,api,*|*,sso-realm,*|*,promotions,*|*,event-api,*|*,ads,*|*,tracking,*)
@@ -162,7 +163,8 @@ jobs:
           DOCS_INTERNAL_AUTH_SECRET: ${{ secrets.DOCS_INTERNAL_AUTH_SECRET }}   # shared by the frontend /ai proxy and docs-vector-search
           PORTAINER_ADMIN_PASSWORD: ${{ secrets.PORTAINER_ADMIN_PASSWORD }}   # monitoring step: auto-registers Portainer agent envs
           GH_TOKEN: ${{ github.token }}   # lets lib/record_deploy.sh call `gh api` (Deployments ledger)
-          VKS_KUBECONFIG: ${{ secrets.VKS_KUBECONFIG }}   # `event-api` + `promotions` steps: those services run on VKS, not a vServer
+          VKS_KUBECONFIG: ${{ secrets.VKS_KUBECONFIG }}   # `event-api` + `promotions` steps (and `backend` when BACKEND_ON_VKS=1): those services run on VKS, not a vServer
+          BACKEND_ON_VKS: ${{ vars.BACKEND_ON_VKS }}   # '1' => the `backend` step deploys Dagster to VKS (deploy-backend-vks.sh); unset/0 => vServer (deploy-backend.sh)
           # Long-lived token for the cluster's imagePullSecret. NOT GITHUB_TOKEN: that is
           # revoked when this job ends, and the kubelet re-reads the secret on every later
           # pull (scale-up, reschedule), which would then ImagePullBackOff.
