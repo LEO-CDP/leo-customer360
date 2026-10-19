@@ -1,5 +1,7 @@
 # Customer 360 — Applying the Dagster Scale-Out on UAT (vServer)
 
+> **Historical note (2026-10-19):** Dagster now runs on the VKS cluster (`deployments/customer360-backend/`); the backend vServer described below was retired. Kept as the original analysis.
+
 > **Status:** applied baseline + forward plan · **Date:** 2026-09-09 · **Scope:** `customer360-backend/` (Dagster) on **vServer (VM + Docker + SSH)**, **UAT only**
 > **Platform:** GreenNode / VNG Cloud vServer — HCM03-1C, `s-general-*` flavor family (not the `s2-general-*` AZ used in the cost tables)
 > **Parent analysis:** [`dagster-scaling-analysis.md`](./dagster-scaling-analysis.md) (the full VKS target + PROD topology)

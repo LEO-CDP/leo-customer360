@@ -1,5 +1,7 @@
 # Customer 360 — vServer → VKS (Managed Kubernetes) Technical Analysis
 
+> **Historical note (2026-10-19):** Dagster now runs on the VKS cluster (`deployments/customer360-backend/`); the backend vServer described below was retired. Kept as the original analysis.
+
 > **Status:** research / decision-support · **Date:** 2026-08-26 · **Scope:** UAT + PROD
 > **Platform:** GreenNode / VNG Cloud, zone **HCM03-1C** (object storage in HCM04)
 > **Companion:** [`vks-cost-analysis.md`](./vks-cost-analysis.md)
