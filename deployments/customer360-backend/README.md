@@ -60,13 +60,11 @@ Order (each step is reversible by pointing back at `10.100.1.4:3000`):
    the GitHub Environment variables `DAGSTER_HOST` / `DAGSTER_PORT` to the same so CD keeps it.
 4. `../load_balancer/deploy.sh uat apply` and (if the `/dagster` block is on) `../proxy/deploy-caddy.sh uat`; both
    overlays already point at `10.100.1.11:30300`.
-5. Stop the vServer Dagster containers (`customer360-backend`, `-daemon`, `-redis`); never run both daemons at once.
+5. Stop and remove the vServer Dagster containers (`customer360-backend`, `-daemon`, `-redis`); never run both daemons at once. (Done for uat: the backend vServer was retired.)
 
-**CI/CD.** `deploy-all.sh`'s `backend` step (and so `cd.yml`) deploys to the vServer unless `BACKEND_ON_VKS=1`; set
-that as a GitHub Environment variable (uat/prod) once the VKS deploy is verified. It also needs the existing
-`VKS_KUBECONFIG` and `GHCR_PULL_TOKEN` secrets and a node labelled `c360.pool=dagster`. Do not run the vServer daemon and
-the VKS pod at once: both tick the same `dagster` DB (duplicate schedule/sensor runs). Not yet adapted:
-`../../.github/workflows/admin-uat.yml` (`restart-backend`, `redeploy-apps`) and `vm-prewarm.yml` still target the vServer.
+**CI/CD.** `deploy-all.sh`'s `backend` step (and so `cd.yml`) deploys to VKS. It needs the existing
+`VKS_KUBECONFIG` and `GHCR_PULL_TOKEN` secrets and a node labelled `c360.pool=dagster`. `admin-uat.yml`
+(`restart-backend`) restarts the VKS Deployment; the old vServer paths and `vm-prewarm.yml` entry are removed.
 
 ## Capacity (vServer parity)
 

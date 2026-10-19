@@ -12,15 +12,6 @@ name_prefix = "c360-api-uat"
 otel_enabled = "true"
 
 servers = {
-  "backend" = {
-    flavor_name = "s-general-4x8" # 4 vCPU / 8 GB - jump host + customer360-backend (Dagster). UAT Mode-1 target (deployment.md); up from 2x4 to stop code-server heartbeat deaths / run-worker OOM+swap that hung runs. In-place (0 destroy), reboots box.
-    # 50, matching the LIVE volume: it was grown from 20 in the console out-of-band. Do not
-    # lower this back — vngcloud cannot shrink a boot volume, so an apply that tries returns
-    # 400 "Volume size or volume type must be changed" and blocks every other change in the
-    # same run. Growing further still needs the console + growpart; Terraform only records it.
-    root_disk_size = 50
-    name           = "backend" # -> c360-api-uat-backend
-  }
   "api" = {
     # Kept at 1x2 for now. A resize to s-general-2x4 (2 vCPU / 4 GB) is available and is an in-place
     # terraform change (0 destroy) but reboots the box + costs more — revisit if 2 GB gets tight

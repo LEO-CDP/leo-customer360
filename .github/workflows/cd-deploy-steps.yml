@@ -163,9 +163,8 @@ jobs:
           DOCS_INTERNAL_AUTH_SECRET: ${{ secrets.DOCS_INTERNAL_AUTH_SECRET }}   # shared by the frontend /ai proxy and docs-vector-search
           PORTAINER_ADMIN_PASSWORD: ${{ secrets.PORTAINER_ADMIN_PASSWORD }}   # monitoring step: auto-registers Portainer agent envs
           GH_TOKEN: ${{ github.token }}   # lets lib/record_deploy.sh call `gh api` (Deployments ledger)
-          VKS_KUBECONFIG: ${{ secrets.VKS_KUBECONFIG }}   # `event-api` + `promotions` steps (and `backend` when BACKEND_ON_VKS=1): those services run on VKS, not a vServer
-          BACKEND_ON_VKS: ${{ vars.BACKEND_ON_VKS }}   # '1' => the `backend` step deploys Dagster to VKS (deploy-backend-vks.sh); unset/0 => vServer (deploy-backend.sh)
-          DAGSTER_HOST: ${{ vars.DAGSTER_HOST }}   # api step: Dagster GraphQL host (the VKS node IP once cut over); unset => backend vServer
+          VKS_KUBECONFIG: ${{ secrets.VKS_KUBECONFIG }}   # `event-api`, `promotions` and `backend` (Dagster) steps: those services run on VKS, not a vServer
+          DAGSTER_HOST: ${{ vars.DAGSTER_HOST }}   # api step: Dagster GraphQL host (the VKS node IP)
           DAGSTER_PORT: ${{ vars.DAGSTER_PORT }}   # api step: Dagster GraphQL port (30300 = the VKS NodePort); unset => 3000
           # Long-lived token for the cluster's imagePullSecret. NOT GITHUB_TOKEN: that is
           # revoked when this job ends, and the kubelet re-reads the secret on every later

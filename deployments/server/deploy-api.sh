@@ -5,9 +5,8 @@
 #
 # Ships the repo's customer360-api/ and customer360-dao/ to the box over SSH (tar-over-ssh), installs Docker if
 # missing, builds the image, and (re)runs it as a container with --network host on :8008,
-# wired to the PRIVATE customer360 DB and to the backend box's Dagster GraphQL (:3000).
-# Re-runnable. Target box = servers["$API_SERVER_KEY"] (default "api"); the Dagster host is
-# servers["$BACKEND_SERVER_KEY"] (default "backend") private IP. Overrides: BASTION_USER/SSH_KEY.
+# wired to the PRIVATE customer360 DB and to Dagster's GraphQL (DAGSTER_HOST:DAGSTER_PORT, the VKS node + NodePort).
+# Re-runnable. Target box = servers["$API_SERVER_KEY"] (default "api"). Overrides: BASTION_USER/SSH_KEY.
 set -euo pipefail
 cd "$(dirname "$0")"                 # deployments/server
 REPO_ROOT="$(cd ../.. && pwd)"       # repo root (contains customer360-api/)
@@ -21,7 +20,6 @@ esac
 [[ -f .env ]] && { set -a; source ./.env; set +a; }
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/c360-api_ed25519}"
 API_SERVER_KEY="${API_SERVER_KEY:-api}"
-BACKEND_SERVER_KEY="${BACKEND_SERVER_KEY:-backend}"
 . "$(cd "$(dirname "$0")/.." && pwd)/lib/tfvars.sh"   # tfval + srv_ip
 
 # --- resolve server IPs by map key from THIS deployment's outputs ---
@@ -30,8 +28,8 @@ SERVERS_JSON="$(terraform output -json servers 2>/dev/null || true)"
 [[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no servers output."; exit 1; }
 # select an IP field for a given server map key; JSON on stdin (avoids Windows/MSYS temp-path issues)
 API_FIP="$(srv_ip "$API_SERVER_KEY" floating_ip)"
-# DAGSTER_HOST/DAGSTER_PORT point the API at Dagster on VKS (node IP + NodePort); default is the backend vServer.
-DAG_HOST="${DAGSTER_HOST:-$(srv_ip "$BACKEND_SERVER_KEY" fixed_ip)}"
+# DAGSTER_HOST/DAGSTER_PORT point the API at Dagster on VKS (node IP + NodePort). Unset => the API runs without Dagster (127.0.0.1).
+DAG_HOST="${DAGSTER_HOST:-}"
 DAGSTER_PORT="${DAGSTER_PORT:-3000}"
 [[ -n "$API_FIP" ]] || { echo "ERROR: no floating IP for server key '$API_SERVER_KEY'."; exit 1; }
 BASTION="${BASTION_USER:-leocdp360}@$API_FIP"
