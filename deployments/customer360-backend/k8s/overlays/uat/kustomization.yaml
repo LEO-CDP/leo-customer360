@@ -26,3 +26,10 @@ patches:
       - op: add
         path: /spec/template/spec/tolerations
         value: [{ key: c360.pool, operator: Equal, value: dagster, effect: NoSchedule }]
+  # vServers (API container, load balancer, Caddy) reach Dagster through the node: ClusterIP is not routable from
+  # them. nodePort must match DAGSTER_PORT and the load_balancer + proxy overlays (README "Cutover"). The Dagster UI has
+  # no auth, so the node must stay private and its security group must allow 30300 only from the vServer subnet.
+  - target: { kind: Service, name: dagster }
+    patch: |-
+      - { op: add, path: /spec/type, value: NodePort }
+      - { op: add, path: /spec/ports/0/nodePort, value: 30300 }

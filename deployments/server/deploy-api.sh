@@ -30,11 +30,13 @@ SERVERS_JSON="$(terraform output -json servers 2>/dev/null || true)"
 [[ -n "$SERVERS_JSON" ]] || { echo "ERROR: no servers output."; exit 1; }
 # select an IP field for a given server map key; JSON on stdin (avoids Windows/MSYS temp-path issues)
 API_FIP="$(srv_ip "$API_SERVER_KEY" floating_ip)"
-DAG_HOST="$(srv_ip "$BACKEND_SERVER_KEY" fixed_ip)"
+# DAGSTER_HOST/DAGSTER_PORT point the API at Dagster on VKS (node IP + NodePort); default is the backend vServer.
+DAG_HOST="${DAGSTER_HOST:-$(srv_ip "$BACKEND_SERVER_KEY" fixed_ip)}"
+DAGSTER_PORT="${DAGSTER_PORT:-3000}"
 [[ -n "$API_FIP" ]] || { echo "ERROR: no floating IP for server key '$API_SERVER_KEY'."; exit 1; }
 BASTION="${BASTION_USER:-leocdp360}@$API_FIP"
 SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
-echo ">> Target (api): $BASTION   Dagster host (backend): ${DAG_HOST:-<none>}:3000"
+echo ">> Target (api): $BASTION   Dagster host: ${DAG_HOST:-<none>}:$DAGSTER_PORT"
 
 # --- DB connection from the postgres deployment ---
 pg="../postgres"
@@ -196,7 +198,7 @@ if [[ -n "$DOCS_SEARCH_URL" ]]; then echo ">> Docs assistant -> $DOCS_SEARCH_URL
 DOCS_INTERNAL_AUTH_SECRET_B64="$(printf %s "${DOCS_INTERNAL_AUTH_SECRET:-${DOCS_INTERNAL_SECRET:-leoragbot}}" | base64 | tr -d '\r\n')"
 # ssh flattens argv and silently drops empty args (shifting later fields); pass one
 # base64 newline-joined blob so empties survive, split remotely with mapfile.
-ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" "$KC_TOKEN_EXPIRES_MINUTES" "$PRODUCT_IMPORT_S3_BUCKET" "$CONTENT_IMPORT_S3_BUCKET" "$DOCS_SEARCH_URL" "$DOCS_INTERNAL_AUTH_SECRET_B64" | base64 | tr -d '\r\n')"
+ARGV_B64="$(printf '%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$PW_B64" "${DAG_HOST:-127.0.0.1}" "${REDIS_HOST:-}" "${REDIS_PORT:-}" "$REDIS_PW_B64" "$SSO_LOGIN" "$SSO_URL" "$KC_REALM" "$KC_CLIENT" "$KC_SECRET_B64" "$DEPLOY_MODE" "$IMAGE" "$GHCR_USER" "$(printf %s "$GHCR_TOKEN" | base64 | tr -d '\r\n')" "$OTEL_B64" "$EVENT_QUERY_MAX_DAYS" "$EVENT_S3_BUCKET" "$EVENT_RAW_PREFIX" "$EVENT_S3_ENDPOINT_URL" "$EVENT_S3_REGION" "$EVENT_S3_ACCESS_KEY_ID" "$EVENT_S3_SECRET_B64" "$EVENT_S3_FORCE_PATH_STYLE" "$SMTP_B64" "$S3_AUTO_CREATE" "$MASTER_PROFILE_S3_BUCKET" "$SOURCE_GIT_COMMIT_HASH" "$AGENT_SERVICE_URL" "$AGENT_API_TOKEN_B64" "$EXPECTED_GIT_HASH" "$KC_TOKEN_EXPIRES_MINUTES" "$PRODUCT_IMPORT_S3_BUCKET" "$CONTENT_IMPORT_S3_BUCKET" "$DOCS_SEARCH_URL" "$DOCS_INTERNAL_AUTH_SECRET_B64" "$DAGSTER_PORT" | base64 | tr -d '\r\n')"
 ssh "${SSH_OPTS[@]}" "$BASTION" 'bash -s' "$ARGV_B64" < <(declare -f docker_pull_retry; declare -f ensure_s3_bucket; cat <<'REMOTE'
 set -euo pipefail
 mapfile -t A < <(printf %s "${1:-}" | base64 -d)   # fields in order, empties preserved
@@ -227,6 +229,7 @@ PRODUCT_IMPORT_S3_BUCKET="${A[35]:-c360-product-imports}"
 CONTENT_IMPORT_S3_BUCKET="${A[36]:-c360-content-imports}"
 DOCS_SEARCH_URL="${A[37]:-}"
 DOCS_INTERNAL_AUTH_SECRET="$(printf %s "${A[38]:-}" | base64 -d 2>/dev/null || true)"
+DAGSTER_PORT="${A[39]:-3000}"
 [[ "$KC_TOKEN_EXPIRES_MINUTES" =~ ^[0-9]+$ ]] && (( KC_TOKEN_EXPIRES_MINUTES >= 1 && KC_TOKEN_EXPIRES_MINUTES <= 1440 )) || {
   echo "ERROR: received KEYCLOAK_TOKEN_EXPIRES_MINUTES is invalid." >&2
   exit 1
@@ -265,7 +268,7 @@ DB_USER=$DB_USER
 DB_PASSWORD=$DB_PW
 DB_SCHEMA=$DB_NAME
 DAGSTER_GRAPHQL_HOST=$DAG_HOST
-DAGSTER_GRAPHQL_PORT=3000
+DAGSTER_GRAPHQL_PORT=$DAGSTER_PORT
 EVENT_QUERY_MAX_DAYS=$EVENT_QUERY_MAX_DAYS
 EVENT_S3_BUCKET=$EVENT_S3_BUCKET
 EVENT_RAW_PREFIX=$EVENT_RAW_PREFIX
