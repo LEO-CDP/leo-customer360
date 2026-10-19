@@ -21,8 +21,10 @@ on:
           - restart-backend    # restart customer360-backend (Dagster)
           - redeploy-apps      # pull latest images + recreate api/promotions/frontend/backend
           - flush-cache        # FLUSHDB the Redis cache (requires confirm below)
+          - disk-report        # read-only: api-box disk usage (df, docker volumes, journal)
+          - disk-cleanup       # reclaim api-box disk: orphaned jaeger_data, dangling images, build cache (requires confirm below)
       confirm:
-        description: "Confirm destructive actions — type the action name (required for flush-cache)"
+        description: "Confirm destructive actions — type the action name (required for flush-cache and disk-cleanup)"
         required: false
         default: ""
 
