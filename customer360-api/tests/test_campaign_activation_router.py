@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.database import get_db
+from core.utils.dagster_client import DagsterJobTriggerError
 from core.routers.campaign_activation_api import campaign_activation_router
 from core.utils.dagster_client import CampaignActivationDagsterService
 from leo_customer360_dao.models.crm import Campaign
@@ -130,6 +131,30 @@ class CampaignActivationRouterTests(unittest.TestCase):
                 resp = TestClient(self.app).post(f"/admin/campaigns/{self.campaign_id}/activate")
             self.assertEqual(resp.status_code, 409)
             submit.assert_not_called()
+
+    def test_dagster_submission_error_logs_campaign_tenant_and_restart_context(self):
+        campaign = self._approved_campaign()
+        campaign.status = "Completed"
+        campaign.workflow_execution_id = uuid.uuid4()
+        self._override_db(campaign)
+        with self.assertLogs("core.routers.campaign_activation_api", level="ERROR") as logs, patch(
+            "core.routers.campaign_activation_api.dagster_client.campaign_activation.activate",
+            side_effect=DagsterJobTriggerError(
+                "Dagster rejected campaign_activation_job submission: "
+                "unexpected config entries ['restart']; expected campaign_id, tenant_id"
+            ),
+        ):
+            response = TestClient(self.app).post(
+                f"/admin/campaigns/{self.campaign_id}/activate",
+                json={"restart": True},
+            )
+
+        self.assertEqual(response.status_code, 503)
+        message = " ".join(logs.output)
+        self.assertIn(f"campaign_id={self.campaign_id}", message)
+        self.assertIn(f"tenant_id={self.tenant_id}", message)
+        self.assertIn("restart=True", message)
+        self.assertIn("expected campaign_id, tenant_id", message)
 
     def test_completed_campaign_replay_requires_explicit_restart(self):
         campaign = self._approved_campaign()

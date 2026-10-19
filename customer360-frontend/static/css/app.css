@@ -86,6 +86,28 @@ body {
   min-width: 0;
 }
 
+.campaign-workflow-studio-viewport {
+  width: 100%;
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.campaign-workflow-studio-viewport iframe.workflow-studio-frame {
+  display: block;
+  width: max(100%, 1200px);
+  min-width: 0;
+  max-width: none;
+  border: 0;
+}
+
+.campaign-workflow-studio-viewport:focus-visible {
+  outline: 3px solid rgb(99 102 241 / 0.45);
+  outline-offset: -3px;
+}
+
 #campaign-state-modal .campaign-state-restart-confirm {
   display: block;
   width: 100%;

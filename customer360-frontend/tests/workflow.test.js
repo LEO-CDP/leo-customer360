@@ -413,6 +413,19 @@ test("campaign state modal stays centered and keeps lifecycle states scannable",
   }
 });
 
+test("workflow viewport owns overflow and lets the embedded canvas grow on narrow screens", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../static/css/app.css"), "utf8");
+  const template = fs.readFileSync(
+    path.join(__dirname, "../static/templates/campaign/campaign-details.html"),
+    "utf8",
+  );
+  assert.match(template, /id="campaign-details-workflow-studio"[\s\S]{0,260}campaign-workflow-studio-viewport/);
+  assert.match(template, /aria-label="Workflow diagram\. Scroll horizontally or vertically inside this area/);
+  assert.match(css, /\.campaign-workflow-studio-viewport\s*\{[^}]*overflow:\s*auto/s);
+  assert.match(css, /iframe\.workflow-studio-frame\s*\{[^}]*width:\s*max\(100%,\s*1200px\)/s);
+  assert.doesNotMatch(css, /\.campaign-workflow-studio-viewport iframe\.workflow-studio-frame\s*\{[^}]*max-width:\s*100%/s);
+});
+
 test("obsolete details responses do not overwrite a newer refresh or error state", () => {
   const callbacks = [];
   const messages = {};

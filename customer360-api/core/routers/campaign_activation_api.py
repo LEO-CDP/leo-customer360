@@ -63,6 +63,13 @@ def activate_campaign(
     except CampaignActivationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DagsterJobTriggerError as exc:
+        logger.error(
+            "Campaign activation submission failed: campaign_id=%s tenant_id=%s restart=%s dagster_error=%s",
+            campaign_id,
+            tenant_id,
+            payload.restart,
+            str(exc),
+        )
         raise HTTPException(status_code=503, detail=f"Could not submit campaign activation: {exc}") from exc
 
     return CampaignActivationResponse(
