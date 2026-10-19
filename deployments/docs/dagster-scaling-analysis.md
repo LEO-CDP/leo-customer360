@@ -1,5 +1,7 @@
 # Customer 360 — Scaling the Dagster Backend (Orchestrator + Worker Pools)
 
+> **Historical note (2026-10-19):** Dagster now runs on the VKS cluster (`deployments/customer360-backend/`); the backend vServer described below was retired. Kept as the original analysis.
+
 > **Status:** research / decision-support · **Date:** 2026-09-03 · **Scope:** `customer360-backend/` (Dagster) on VKS, UAT + PROD
 > **Platform:** GreenNode / VNG Cloud VKS — see [`vks-target-architecture.svg`](./vks-target-architecture.svg)
 > **Companions:** [`vks-migration-technical-analysis.md`](./vks-migration-technical-analysis.md) · [`vks-cost-analysis.md`](./vks-cost-analysis.md)
