@@ -49,10 +49,18 @@ storage and S3 compute logs, and GraphQL reports every code location `LOADED`.
 
 ## Cutover
 
-Deploying here does **not** move traffic. The vServer Dagster (`10.100.1.4:3000`) is still the upstream
-in `../proxy/overlays/<env>.tfvars` (`dagster_upstream`) and `../load_balancer/overlays/<env>.tfvars`.
-Run both side by side on different `dagster_pg_db` values until verified, then repoint and stop the
-vServer container.
+Deploying here does **not** move traffic. The vServers reach Dagster through the node: the UAT overlay makes the
+`dagster` Service a NodePort (`30300`) on the node labelled `c360.pool=dagster` (`10.100.1.11`). The Dagster UI has
+no auth, so keep that node private and let its security group allow `30300` only from the vServer subnet.
+Order (each step is reversible by pointing back at `10.100.1.4:3000`):
+
+1. `./deploy-backend-vks.sh uat` (applies the NodePort).
+2. From the api box: `curl -s -o /dev/null -w '%{http_code}\n' http://10.100.1.11:30300/server_info` must print 200.
+3. API: `DAGSTER_HOST=10.100.1.11 DAGSTER_PORT=30300 ../server/deploy-api.sh uat` (restarts the api container), and set
+   the GitHub Environment variables `DAGSTER_HOST` / `DAGSTER_PORT` to the same so CD keeps it.
+4. `../load_balancer/deploy.sh uat apply` and (if the `/dagster` block is on) `../proxy/deploy-caddy.sh uat`; both
+   overlays already point at `10.100.1.11:30300`.
+5. Stop the vServer Dagster containers (`customer360-backend`, `-daemon`, `-redis`); never run both daemons at once.
 
 **CI/CD.** `deploy-all.sh`'s `backend` step (and so `cd.yml`) deploys to the vServer unless `BACKEND_ON_VKS=1`; set
 that as a GitHub Environment variable (uat/prod) once the VKS deploy is verified. It also needs the existing

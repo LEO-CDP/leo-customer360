@@ -42,8 +42,8 @@ backends = {
   }
   # --- ops tools stay raw on their own ports (they don't sub-path cleanly; see proxy/README) ---
   "dagster" = {
-    member_ip   = "10.100.1.4" # c360-api-uat-backend (customer360-backend / Dagster)
-    member_port = 3000
+    member_ip   = "10.100.1.11" # VKS node labelled c360.pool=dagster (customer360-backend/README.md "Cutover"); was the backend vServer 10.100.1.4:3000
+    member_port = 30300         # the dagster Service's NodePort
     listen_port = 3000
     health_path = null
   }

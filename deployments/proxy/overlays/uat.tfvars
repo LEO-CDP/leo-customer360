@@ -16,7 +16,7 @@ api_upstream       = "127.0.0.1:8008"  # customer360-api (root_path /c360api; Ca
 keycloak_upstream  = "127.0.0.1:8080"  # Keycloak (serve under /auth -> set KC_HTTP_RELATIVE_PATH=/auth)
 frontend_upstream  = "127.0.0.1:8890"  # customer360-frontend (catch-all "/")
 ads_upstream       = "49.213.73.17:9009" # customer360-promotions (/ads) — VKS Service LoadBalancer, NOT this box
-dagster_upstream   = "10.100.1.4:3000" # backend box (only if you enable the /dagster block)
+dagster_upstream   = "10.100.1.11:30300" # VKS Dagster NodePort (was backend box 10.100.1.4:3000); only if you enable the /dagster block
 netdata_upstream   = "127.0.0.1:4199"  # oauth2-proxy -> Netdata (only if you enable /netdata)
 portainer_upstream = "127.0.0.1:9443"  # Portainer HTTPS (only if you enable /portainer)
 
