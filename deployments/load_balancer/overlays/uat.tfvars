@@ -46,6 +46,7 @@ backends = {
     member_port = 30300         # the dagster Service's NodePort
     listen_port = 3000
     health_path = null
+    ingress_cidr = "10.100.1.0/24" # Dagster UI has no auth: only the subnet (Caddy/api box), not the internet
   }
   "portainer" = {
     member_ip   = "10.100.1.5" # Portainer DIRECT (own login, self-signed TLS)
