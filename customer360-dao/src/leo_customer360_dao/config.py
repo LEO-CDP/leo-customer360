@@ -457,6 +457,12 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("AGENT_API_TOKEN", "agent_api_token"),
     )
+    # Restricted read-only database role that POST /ai/ask-data runs model-written SQL as (created by
+    # customer360-database/migrations/012_ask_data_role.sql). Blank closes the route (503).
+    ask_data_db_role: str = Field(
+        default="customer360_ask_data",
+        validation_alias=AliasChoices("ASK_DATA_DB_ROLE", "ask_data_db_role"),
+    )
 
     # Docs/support RAG service (tools/docs-vector-search) used by /support/ask. Same env names
     # as the admin frontend's docs proxy.
