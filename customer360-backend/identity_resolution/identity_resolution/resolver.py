@@ -993,6 +993,7 @@ class CustomerIdentityResolver:
                  data_source_analytics, source_systems, first_seen_raw_profile_id,
                  is_hashed, persona_name)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
             RETURNING master_profile_id;
         """
         cursor.execute(
@@ -1017,7 +1018,46 @@ class CustomerIdentityResolver:
                 persona_name,
             ),
         )
-        new_master_id = cursor.fetchone()["master_profile_id"]
+        inserted_master = cursor.fetchone()
+        if inserted_master is None:
+            # Another worker may have created the tenant-scoped email/phone
+            # master between matching and insertion. The conflict is handled
+            # without aborting the transaction; link this raw profile to the
+            # existing identity instead of exhausting Dagster retries.
+            cursor.execute(
+                f"""
+                SELECT master_profile_id
+                FROM {self._table('cdp_master_profiles')}
+                WHERE tenant_id = %s
+                  AND (
+                    (%s IS NOT NULL AND email = %s)
+                    OR (%s IS NOT NULL AND phone_number = %s)
+                  )
+                ORDER BY updated_at DESC
+                LIMIT 1;
+                """,
+                (
+                    raw_profile["tenant_id"],
+                    raw_profile.get("email"),
+                    raw_profile.get("email"),
+                    raw_profile.get("phone_number"),
+                    raw_profile.get("phone_number"),
+                ),
+            )
+            existing_master = cursor.fetchone()
+            if existing_master is None:
+                raise RuntimeError(
+                    "Master profile insert conflicted, but no existing email/phone identity was found"
+                )
+            self._link_and_update(
+                cursor,
+                raw_profile,
+                str(existing_master["master_profile_id"]),
+                match_method="ConcurrentIdentityMatch",
+                match_score=1.0,
+            )
+            return existing_master["master_profile_id"]
+        new_master_id = inserted_master["master_profile_id"]
 
         national_id = raw_profile.get("national_id")
         if national_id:

@@ -488,6 +488,35 @@ class TestCreateMasterAndLink:
         assert "SELECT master_profile_id" in query
         assert params == ("t1", "r5")
 
+    def test_reuses_concurrent_tenant_email_or_phone_insert_without_retry_failure(
+        self, mock_cursor, mock_conn
+    ):
+        mock_cursor.fetchone.side_effect = [
+            None,
+            None,
+            {"master_profile_id": "concurrent-master"},
+        ]
+        resolver = make_resolver(mock_conn)
+
+        master_id = resolver._create_master_and_link(
+            mock_cursor,
+            {
+                "raw_profile_id": "r6",
+                "tenant_id": "t1",
+                "domain": "retail",
+                "email": "duplicate@example.com",
+                "phone_number": None,
+            },
+        )
+
+        assert master_id == "concurrent-master"
+        queries = [call.args[0] for call in mock_cursor.execute.call_args_list]
+        assert "ON CONFLICT DO NOTHING" in queries[1]
+        assert "SELECT master_profile_id" in queries[2]
+        assert mock_cursor.execute.call_args_list[3][0][1] == (
+            "t1", "r6", "concurrent-master", 1.0, "ConcurrentIdentityMatch"
+        )
+
 
 class TestMarkAsProcessed:
     def test_sets_status_code_and_processed_at(self, mock_cursor, mock_conn):
