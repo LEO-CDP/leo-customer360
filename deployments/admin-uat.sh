@@ -72,6 +72,11 @@ case "$ACTION" in
     echo "     kubectl -n customer360 rollout restart deploy/promotions"
     ;;
   restart-backend)
+    if [[ "${BACKEND_ON_VKS:-}" == "1" ]]; then
+      echo ">> Restarting Dagster on VKS ..."
+      kubectl -n customer360 rollout restart deploy/dagster && kubectl -n customer360 rollout status deploy/dagster --timeout=6m
+      exit $?
+    fi
     echo ">> Restarting customer360-backend (Dagster) on the backend box ..."
     run_on "$(srv_ip backend)" 'sudo docker restart customer360-backend >/dev/null && sudo docker ps --filter name=customer360-backend --format "   {{.Names}} {{.Status}}"'
     ;;
