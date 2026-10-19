@@ -1342,7 +1342,7 @@
       <table>
         <tr>
           <th>Name</th><th>Engagement</th><th>Churn</th><th>CLV</th><th>Push</th>
-          {{#if hasSimulation}}<th>Outcome</th><th>In flow</th>{{/if}}
+          {{#if hasSimulation}}<th>Simulated outcome</th><th>Virtual time</th>{{/if}}
         </tr>
         {{#each profiles}}
           <tr>
@@ -1367,17 +1367,18 @@
           {{/each}}
         </ul>
       {{else if showBuildGuide}}
-        <div class="empty">Add a message to enable Run campaign.</div>
+        <div class="empty">Add an action, then use Check Flow to validate and simulate the journey.</div>
       {{else}}
-        <div class="empty">No issues. Run the campaign to preview results.</div>
+        <div class="empty">No issues. Select Check Flow to preview simulated outcomes. No messages will be sent.</div>
       {{/if}}
     `,
     workflowReportEmpty: `
-      <div class="empty">Run the campaign to see delivery, engagement and goals.</div>
+      <div class="simulation-notice"><strong>Simulation preview</strong><p>Use Check Flow to validate the journey and estimate outcomes for the loaded audience sample. Nothing is sent, synced, or saved to customer profiles.</p></div>
+      <div class="empty">No simulation yet. Select Check Flow to preview the journey using virtual time.</div>
     `,
     workflowReport: `
-      <h2>Campaign performance</h2>
-      <p class="sub">Simulated results for {{totals.entered}} profiles. {{totals.goal}} reached the goal, {{totals.exited}} exited, {{totals.ended}} ended without an exit.</p>
+      <div class="simulation-notice" role="note"><span class="simulation-badge">SIMULATION ONLY</span><h2>Flow simulation</h2><p>Estimated outcomes, not live campaign performance. No messages sent, audiences synced, or customer profiles changed. Delays advance virtual time.</p></div>
+      <p class="sub">Preview for {{totals.entered}} loaded profiles, not the entire campaign audience. {{totals.goal}} reached a goal node, {{totals.exited}} exited, {{totals.ended}} ended without an exit. Engagement, conversions and revenue are modeled estimates, not measured results or forecasts.</p>
       <div class="kpis">
         {{#each kpis}}
           <div class="kpi"><div class="num">{{value}}</div><small>{{label}}</small></div>
@@ -1388,14 +1389,14 @@
           <div><span>{{label}}</span><i style="width:{{width}}%"></i><span>{{value}}</span></div>
         {{/each}}
       </div>
-      <h2 class="message-report-heading">By message</h2>
+      <h2 class="message-report-heading">Simulated message outcomes</h2>
       {{#each messages}}
         <div class="ncard t-{{type}}">
           <b>{{label}}: {{title}}</b>
           <div class="m">
-            <span>{{reach}} profiles</span><span>{{delivered}} delivered</span>
-            {{#unless isSms}}<span>{{openRate}} opened</span>{{/unless}}
-            <span>{{clickRate}} clicked</span><span>{{conversions}} converted</span><span>&#36;{{revenue}} revenue</span>
+            <span>{{reach}} sample profiles</span><span>{{delivered}} simulated deliveries</span>
+            {{#unless isSms}}<span>{{openRate}} modeled opens</span>{{/unless}}
+            <span>{{clickRate}} modeled clicks</span><span>{{conversions}} simulated conversions</span><span>&#36;{{revenue}} modeled value</span>
           </div>
           <p>{{body}}</p>
         </div>
@@ -1404,7 +1405,8 @@
     workflowShell: `
       <header>
         <h1>{{title}}</h1>
-        <span id="pill" class="pill ok">Ready to run</span>
+        <span id="pill" class="pill ok">Ready to check</span>
+        <span class="simulation-badge" title="Design and local simulation only. Activate the approved campaign from Campaign details for real execution.">Simulation mode</span>
         <select id="recipe" aria-label="Load a recipe">
           <option value="">Load recipe…</option>
           {{#each recipeGroups}}
@@ -1414,7 +1416,7 @@
           {{/each}}
         </select>
         <button id="bClear">Clear canvas</button>
-        <button id="bRun" class="primary">Run campaign</button>
+        <button id="bRun" type="button" class="primary" title="Validate and simulate this flow. No real campaign is started.">Check Flow</button>
       </header>
       <main>
         <aside class="pal" id="pal"></aside>
@@ -1432,7 +1434,7 @@
           <div class="tabs" role="tablist">
             <button role="tab" id="tabSeg" aria-selected="true">Profiles</button>
             <button role="tab" id="tabChk" aria-selected="false">Checks</button>
-            <button role="tab" id="tabRep" aria-selected="false">Report</button>
+            <button role="tab" id="tabRep" aria-selected="false">Simulation</button>
             <button role="tab" id="tabJson" aria-selected="false">JSON</button>
           </div>
           <div class="pane" id="paneSeg"><div id="segTable"></div></div>

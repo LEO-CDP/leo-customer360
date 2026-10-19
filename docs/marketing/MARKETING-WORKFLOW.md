@@ -139,6 +139,14 @@ workflow messages do not use `crm_message_templates`.
 
 ### Execution and simulation limits
 
+The studio's **Check Flow** button validates the graph and runs a local preview;
+it never activates the campaign. The **Simulation** tab labels modeled
+deliveries, engagement, conversions, and value as simulated, not real campaign
+performance. Results cover only loaded sample profiles and use virtual time.
+Actual execution and reporting remain in Campaign details. The existing
+`run()` plugin method and `onRunCampaign` callback names remain compatible;
+their result is still a local simulation, not a delivery receipt.
+
 The backend is a segment-snapshot executor, not a durable, event-driven journey
 scheduler:
 

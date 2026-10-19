@@ -699,7 +699,7 @@
               ? "Add a message"
               : warns
                 ? warns + (warns > 1 ? " warnings" : " warning")
-                : "Ready to run",
+                : "Ready to check",
         );
       $canvas.find(".block").removeClass("is-error is-warn");
       shown.forEach((i) => {
@@ -760,19 +760,19 @@
         });
       });
       const kpis = [
-        { label: "Entered", value: totals.entered },
-        { label: "Open rate", value: pct(totals.opened, totals.received) },
-        { label: "Click rate", value: pct(totals.clicked, totals.received) },
-        { label: "Converted", value: totals.converted },
-        { label: "Goal reached", value: pct(totals.goal, totals.entered) },
-        { label: "Revenue", value: "$" + totals.revenue.toLocaleString() },
+        { label: "Sample profiles", value: totals.entered },
+        { label: "Modeled open rate", value: pct(totals.opened, totals.received) },
+        { label: "Modeled click rate", value: pct(totals.clicked, totals.received) },
+        { label: "Simulated conversions", value: totals.converted },
+        { label: "Reached goal node", value: pct(totals.goal, totals.entered) },
+        { label: "Modeled value (not revenue)", value: "$" + totals.revenue.toLocaleString() },
       ];
       const funnel = [
-        { label: "Entered", value: totals.entered },
-        { label: "Received", value: totals.received },
-        { label: "Opened", value: totals.opened },
-        { label: "Clicked", value: totals.clicked },
-        { label: "Converted", value: totals.converted },
+        { label: "Sample entered", value: totals.entered },
+        { label: "Simulated delivery", value: totals.received },
+        { label: "Modeled opens", value: totals.opened },
+        { label: "Modeled clicks", value: totals.clicked },
+        { label: "Simulated conversions", value: totals.converted },
       ].map((stage) => ({
         ...stage,
         width: totals.entered ? (stage.value / totals.entered) * 100 : 0,
@@ -814,11 +814,12 @@
       Object.entries(lastSim.nodes).forEach(([id, s]) =>
         $canvas
           .find('.block[data-nid="' + id + '"] .hits')
-          .text(s.reach + " profiles"),
+          .text(s.reach + " simulated"),
       );
       renderProfiles();
       renderReport();
       setTab("Rep");
+      toast("Flow checked. Simulation only — no campaign started or messages sent.");
       notifyHost("onRunCampaign", wf, configuredSegmentId, lastSim);
       return lastSim;
     }

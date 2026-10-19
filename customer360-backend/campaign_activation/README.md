@@ -269,3 +269,26 @@ dagster dev -w workspace.yaml
 cd campaign_activation
 ./run_tests.sh
 ```
+
+## Deployment version logging
+
+The Dagster code location emits a searchable version line when it loads, and
+each campaign activation/workflow run repeats the same fingerprint:
+
+```text
+campaign_activation build service=campaign_activation build_date_time=<date-time> git_commit=<commit>
+```
+
+Set these non-secret environment variables in the production Dagster worker
+and code-location environment:
+
+```bash
+BUILD_DATE_TIME=2026-10-19T15:37:00Z
+GIT_COMMIT=ea695a0
+```
+
+`GIT_SHA` is accepted as a fallback for `GIT_COMMIT`. If metadata is not
+provided, the log explicitly reports `build_date_time=unknown git_commit=unknown`
+rather than guessing from the API or another code location. Search the
+Dagster worker/code-location logs for `campaign_activation build` to confirm
+which deployment executed a run.

@@ -36,6 +36,27 @@ function campaignHelpers(jquery, api) {
   return context.window.C360.campaignView;
 }
 
+test("studio check action and result panels clearly identify local simulation", () => {
+  const context = {
+    WorkflowCore: Core,
+    Handlebars: { registerPartial() {}, compile: (markup) => () => markup },
+  };
+  vm.runInNewContext(fs.readFileSync(
+    path.join(__dirname, "../static/js/workflow/workflow-template.js"), "utf8",
+  ), context);
+  const shell = context.WorkflowTemplates.workflowShell();
+  const report = context.WorkflowTemplates.workflowReport();
+  const empty = context.WorkflowTemplates.workflowReportEmpty();
+  assert.match(shell, /id="bRun"[^>]*>Check Flow<\/button>/);
+  assert.match(shell, /Simulation mode/);
+  assert.match(shell, /id="tabRep"[^>]*>Simulation<\/button>/);
+  assert.match(report, /SIMULATION ONLY/);
+  assert.match(report, /not live campaign performance/);
+  assert.match(report, /No messages sent, audiences synced, or customer profiles changed/);
+  assert.match(empty, /Nothing is sent, synced, or saved/);
+  assert.doesNotMatch(report, /<h2>Campaign performance<\/h2>/);
+});
+
 test("campaign profile adapter preserves condition fields, nulls and consent", () => {
   const profile = campaignHelpers().workflowProfile({
     master_profile_id: "profile-1", first_name: "Sam", engagement_score: "80",

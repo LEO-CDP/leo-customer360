@@ -25,6 +25,7 @@ Run from `customer360-backend/`: `dagster dev -w workspace.yaml`.
 
 import os
 import sys
+import logging
 
 # `python_file` workspace loader doesn't add this file's dir to sys.path, so
 # `import campaign_activation` (the nested package) fails without this. Same
@@ -41,7 +42,11 @@ from dagster import (  # noqa: E402
 )
 
 from campaign_activation.activation import activate_campaign  # noqa: E402
+from campaign_activation import version_log_message  # noqa: E402
 from campaign_activation.workflow_runner import run_campaign_workflow  # noqa: E402
+
+logger = logging.getLogger(__name__)
+logger.info("%s code_location_loaded=true", version_log_message())
 
 
 class ActivateCampaignConfig(Config):
@@ -66,8 +71,11 @@ def activate_campaign_op(context: OpExecutionContext, config: ActivateCampaignCo
     """Validate an approved workflow campaign, mark it Running, and submit
     the persisted per-profile workflow."""
     context.log.info(
-        "campaign_activation job: started (campaign_id=%s, tenant_id=%s)",
-        config.campaign_id, config.tenant_id,
+        "%s job=campaign_activation_job started campaign_id=%s tenant_id=%s restart=%s",
+        version_log_message(),
+        config.campaign_id,
+        config.tenant_id,
+        config.restart,
     )
     summary = activate_campaign(
         config.campaign_id,
@@ -87,7 +95,8 @@ def run_campaign_workflow_op(
 ) -> dict:
     """Execute email/SMS/push/tag actions from the persisted workflow graph."""
     context.log.info(
-        "campaign workflow started (run_id=%s, tenant_id=%s, campaign_id=%s, execution_id=%s)",
+        "%s job=campaign_workflow_job started run_id=%s tenant_id=%s campaign_id=%s execution_id=%s",
+        version_log_message(),
         context.run_id,
         config.tenant_id,
         config.campaign_id,
