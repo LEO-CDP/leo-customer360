@@ -9,7 +9,6 @@ name: Prewarm VM image layers
 #
 # VMs targeted (uat only — prod is gated on releases):
 #   api box     → customer360-api, customer360-frontend
-#   backend box → customer360-dagster
 #   docs box    → docs-vector-search
 #   agent box   → customer360-agent
 #
@@ -97,7 +96,6 @@ jobs:
           }
 
           prewarm api     "$(get_ip api)"     "$REGISTRY/customer360-api" "$REGISTRY/customer360-frontend"
-          prewarm backend "$(get_ip backend)" "$REGISTRY/customer360-dagster"
           prewarm docs    "$(get_ip docs)"    "$REGISTRY/docs-vector-search"
           prewarm agent   "$(get_ip agent)"   "$REGISTRY/customer360-agent"
           echo ">> Prewarm complete."
