@@ -20,6 +20,10 @@
 #   restart-backend  Restart customer360-backend (Dagster)
 #   redeploy-apps    Pull latest images + recreate api/promotions/frontend/backend
 #   flush-cache      FLUSHDB the Redis cache (needs CONFIRM=flush-cache)
+#   disk-report      READ-ONLY disk usage of the api box (df, docker system df, volume sizes, journal)
+#   disk-cleanup     Reclaim api-box disk: remove the orphaned jaeger_data volume, dangling images,
+#                    build cache, old journal logs (needs CONFIRM=disk-cleanup). Never prunes named
+#                    volumes in general and never touches jaeger_data2 / redis / pgadmin / portainer data.
 #
 # NOTE: intentionally NO destructive data reset (dev-c360's `reset -v` wipes the
 # DB) — that must never be a click on uat. flush-cache only clears the fail-open
@@ -123,9 +127,33 @@ echo "   DBSIZE before=$b after=$a (fail-open cache — repopulates on demand)"
 RC
     ;;
 
+  # --- api-box disk (the 20 GB root volume has hit 100%) ----------------------
+  disk-report)
+    run_on "$(srv_ip api)" 'bash -s' <<'DR'
+echo "== df /"; df -h / | tail -1
+echo "== docker system df"; sudo docker system df
+echo "== docker volumes (size)"; sudo du -sh /var/lib/docker/volumes/* 2>/dev/null | sort -rh | head -12
+echo "== top dirs under /var"; sudo du -xsh /var/lib/docker /var/log /var/lib/containerd /var/cache 2>/dev/null | sort -rh
+echo "== journal"; sudo journalctl --disk-usage 2>/dev/null || true
+DR
+    ;;
+  disk-cleanup)
+    [ "${CONFIRM:-}" = "disk-cleanup" ] || { echo "ERROR: disk-cleanup deletes data on the api box — re-run with CONFIRM=disk-cleanup (the workflow's 'confirm' input). Run disk-report first."; exit 1; }
+    run_on "$(srv_ip api)" 'bash -s' <<'DC'
+echo "before:"; df -h / | tail -1
+# orphaned pre-v2 Jaeger badger volume; `docker volume rm` refuses while any container references it
+if sudo docker volume inspect jaeger_data >/dev/null 2>&1; then sudo docker volume rm jaeger_data && echo "removed volume jaeger_data" || echo "jaeger_data in use - left alone"; fi
+sudo docker image prune -f | tail -1
+sudo docker builder prune -f | tail -1
+sudo journalctl --vacuum-size=200M 2>&1 | tail -1
+sudo apt-get clean
+echo "after:"; df -h / | tail -1
+DC
+    ;;
+
   *)
     echo "ERROR: unknown/empty action '$ACTION'."
-    echo "Supported: db-status | seed-demo | bootstrap-realm | restart-apps | restart-backend | redeploy-apps | flush-cache"
+    echo "Supported: db-status | seed-demo | bootstrap-realm | restart-apps | restart-backend | redeploy-apps | flush-cache | disk-report | disk-cleanup"
     exit 1
     ;;
 esac
