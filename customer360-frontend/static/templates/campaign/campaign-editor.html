@@ -36,7 +36,7 @@
 					<select id="campaign-field-channel" name="channel" class="campaign-field mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100" aria-describedby="campaign-channel-help">
 						<option value="">Select a workflow channel</option>
 						<option value="email">Email</option>
-						<option value="sms">SMS / notification</option>
+						<option value="notification">Notification</option>
 						<option value="push">Web push</option>
 						<option value="audience_sync">Custom audience sync</option>
 					</select>
@@ -127,7 +127,7 @@
 					<textarea id="campaign-field-constraints" name="budget_time_constraints" rows="3" aria-describedby="campaign-constraints-help" placeholder="Example: Maximum budget, campaign dates, and channels to include or exclude." class="mt-2 block w-full min-w-0 resize-y rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 hover:border-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100"></textarea>
 				</label>
 			</div>
-			<div class="mt-5 rounded-lg bg-slate-50 border border-slate-200 p-4 text-xs text-slate-600">AI plan and agent provenance are read-only in this editor. The customer journey workflow below is for design and local simulation.</div>
+			<div class="mt-5 rounded-lg bg-slate-50 border border-slate-200 p-4 text-xs text-slate-600">AI plan and agent provenance are read-only. Saving pins this workflow to the campaign; activation runs the approved version. Simulation uses virtual time and estimated outcomes. Without a configured provider, delivery and audience sync are logged only.</div>
 			<section class="mt-6 min-w-0 overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-sm" aria-labelledby="campaign-workflow-heading">
 				<div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-indigo-50/80 to-white px-5 py-4">
 					<div class="flex min-w-0 items-start gap-3">

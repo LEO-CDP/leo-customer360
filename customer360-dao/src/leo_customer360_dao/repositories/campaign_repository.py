@@ -17,7 +17,7 @@ from typing import Optional
 from sqlalchemy import asc, and_, desc, func, select, text
 from sqlalchemy.orm import Session
 
-from leo_customer360_dao.models.crm import CRMCampaignPerformanceDaily, VwCampaignPerformanceMetrics
+from leo_customer360_dao.models.crm import Campaign, CRMCampaignPerformanceDaily, VwCampaignPerformanceMetrics
 from leo_customer360_dao.schemas.crm import CampaignFilterParams
 
 # Columns that callers are allowed to sort by (allowlist prevents SQLi via
@@ -78,6 +78,51 @@ class CampaignRepository:
             "total_revenue": revenue,
             "overall_roas": round(overall_roas, 2),
         }
+
+    def get_campaign_report(
+        self, campaign_id: uuid.UUID, start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> dict | None:
+        """Return tenant-owned campaign metrics within an inclusive date window."""
+        if start_date and end_date and end_date < start_date:
+            raise ValueError("End date cannot be before start date.")
+        self._set_tenant_context()
+        campaign = self.session.execute(
+            select(
+                Campaign.campaign_id, Campaign.campaign_code, Campaign.name,
+                Campaign.status, Campaign.channel, Campaign.platform, Campaign.objective,
+            ).where(Campaign.tenant_id == self.tenant_id, Campaign.campaign_id == campaign_id)
+        ).mappings().first()
+        if campaign is None:
+            return None
+        performance = CRMCampaignPerformanceDaily
+        fields = ("spend", "impressions", "clicks", "conversions", "revenue_estimated")
+        statement = select(
+            performance.report_date,
+            *(func.coalesce(func.sum(getattr(performance, field)), 0).label(field) for field in fields),
+        ).where(
+            performance.tenant_id == self.tenant_id, performance.campaign_id == campaign_id,
+        ).group_by(performance.report_date).order_by(performance.report_date)
+        if start_date:
+            statement = statement.where(performance.report_date >= start_date)
+        if end_date:
+            statement = statement.where(performance.report_date <= end_date)
+        daily = [dict(row) for row in self.session.execute(statement).mappings().all()]
+        spend = sum((Decimal(str(row["spend"])) for row in daily), Decimal("0"))
+        revenue = sum((Decimal(str(row["revenue_estimated"])) for row in daily), Decimal("0"))
+        impressions = sum(int(row["impressions"]) for row in daily)
+        clicks = sum(int(row["clicks"]) for row in daily)
+        conversions = sum(int(row["conversions"]) for row in daily)
+        summary = {
+            **dict(campaign), "total_spend": spend, "total_revenue": revenue,
+            "total_impressions": impressions, "total_clicks": clicks,
+            "total_conversions": conversions,
+            "ctr_percentage": round(Decimal(clicks) / impressions * 100, 2) if impressions > 0 else Decimal("0"),
+            "cvr_percentage": round(Decimal(conversions) / clicks * 100, 2) if clicks > 0 else Decimal("0"),
+            "cpa": round(spend / conversions, 0) if conversions > 0 else Decimal("0"),
+            "roas": round(revenue / spend, 2) if spend > 0 else Decimal("0"),
+        }
+        return {"summary": summary, "daily": daily, "start_date": start_date, "end_date": end_date}
 
     def get_filtered_campaigns(
         self, filters: CampaignFilterParams

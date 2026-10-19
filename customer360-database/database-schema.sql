@@ -3671,10 +3671,14 @@ CREATE INDEX IF NOT EXISTS idx_crm_ad_sync_runs_campaign
     ON customer360.crm_ad_sync_runs (tenant_id, campaign_id, platform);
 
 -- --- Per-profile workflow action ledger -------------------------
+ALTER TABLE customer360.crm_campaign
+    ADD COLUMN IF NOT EXISTS workflow_execution_id UUID;
+
 CREATE TABLE IF NOT EXISTS customer360.crm_campaign_workflow_action_runs (
     action_run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
     campaign_id UUID NOT NULL REFERENCES customer360.crm_campaign(campaign_id) ON DELETE CASCADE,
+    execution_id UUID NOT NULL,
     master_profile_id UUID NOT NULL REFERENCES customer360.cdp_master_profiles(master_profile_id) ON DELETE CASCADE,
     node_id TEXT NOT NULL,
     action_type VARCHAR(40) NOT NULL,
@@ -3688,8 +3692,8 @@ CREATE TABLE IF NOT EXISTS customer360.crm_campaign_workflow_action_runs (
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-    CONSTRAINT uq_crm_campaign_workflow_action
-        UNIQUE (campaign_id, master_profile_id, node_id),
+    CONSTRAINT uq_crm_campaign_workflow_action_execution
+        UNIQUE (campaign_id, master_profile_id, node_id, execution_id),
     CONSTRAINT chk_crm_campaign_workflow_action_status
         CHECK (status IN ('Running', 'Sent', 'Applied', 'Skipped', 'Failed')),
     CONSTRAINT chk_crm_campaign_workflow_action_type
@@ -3698,7 +3702,45 @@ CREATE TABLE IF NOT EXISTS customer360.crm_campaign_workflow_action_runs (
         CHECK (attempt_count > 0)
 );
 
-COMMENT ON TABLE customer360.crm_campaign_workflow_action_runs IS 'Idempotent per-profile ledger for actions executed by the persisted customer journey workflow.';
+-- Backfill existing action history into one legacy execution per campaign before
+-- replacing the old campaign-wide idempotency key.
+ALTER TABLE customer360.crm_campaign_workflow_action_runs
+    ADD COLUMN IF NOT EXISTS execution_id UUID;
+
+UPDATE customer360.crm_campaign c
+SET workflow_execution_id = gen_random_uuid()
+WHERE c.workflow_execution_id IS NULL
+  AND EXISTS (
+      SELECT 1 FROM customer360.crm_campaign_workflow_action_runs r
+      WHERE r.tenant_id = c.tenant_id AND r.campaign_id = c.campaign_id
+  );
+
+UPDATE customer360.crm_campaign_workflow_action_runs r
+SET execution_id = c.workflow_execution_id
+FROM customer360.crm_campaign c
+WHERE r.tenant_id = c.tenant_id
+  AND r.campaign_id = c.campaign_id
+  AND r.execution_id IS NULL;
+
+ALTER TABLE customer360.crm_campaign_workflow_action_runs
+    ALTER COLUMN execution_id SET NOT NULL;
+ALTER TABLE customer360.crm_campaign_workflow_action_runs
+    DROP CONSTRAINT IF EXISTS uq_crm_campaign_workflow_action;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'uq_crm_campaign_workflow_action_execution'
+          AND conrelid = 'customer360.crm_campaign_workflow_action_runs'::regclass
+    ) THEN
+        ALTER TABLE customer360.crm_campaign_workflow_action_runs
+            ADD CONSTRAINT uq_crm_campaign_workflow_action_execution
+            UNIQUE (campaign_id, master_profile_id, node_id, execution_id);
+    END IF;
+END $$;
+
+COMMENT ON TABLE customer360.crm_campaign_workflow_action_runs IS 'Idempotent per-execution/profile/node ledger for actions executed by the persisted customer journey workflow.';
 
 CREATE INDEX IF NOT EXISTS idx_crm_campaign_workflow_action_tenant
     ON customer360.crm_campaign_workflow_action_runs (tenant_id, campaign_id, status);
@@ -4288,7 +4330,9 @@ END $$;
 
 ALTER TABLE customer360.crm_campaign
     ADD COLUMN IF NOT EXISTS workflow_id UUID,
-    ADD COLUMN IF NOT EXISTS workflow_version INT;
+    ADD COLUMN IF NOT EXISTS workflow_version INT,
+    ADD COLUMN IF NOT EXISTS workflow_execution_id UUID,
+    ADD COLUMN IF NOT EXISTS planning_constraints TEXT;
 
 DO $$
 BEGIN
@@ -4330,6 +4374,16 @@ CREATE TABLE IF NOT EXISTS customer360.crm_flow_node (
     CHECK (node_type <> 'update_profile' OR (config ? 'action' AND config ? 'tag')),
     CHECK (node_type <> 'run_data_synch_job' OR (config ? 'platform' AND config ? 'audience_name'))
 );
+
+-- Refresh the legacy SMS-only constraint when applying this schema to an existing database.
+-- NOT VALID preserves immutable historical projections while checking every new node.
+ALTER TABLE customer360.crm_flow_node
+    DROP CONSTRAINT IF EXISTS crm_flow_node_node_type_check;
+ALTER TABLE customer360.crm_flow_node
+    ADD CONSTRAINT crm_flow_node_node_type_check CHECK (node_type IN (
+        'trigger', 'condition', 'wait', 'wait_event', 'exit',
+        'email', 'notification', 'push', 'update_profile', 'run_data_synch_job'
+    )) NOT VALID;
 
 CREATE TABLE IF NOT EXISTS customer360.crm_flow_edge (
     flow_id UUID NOT NULL,
@@ -4460,6 +4514,15 @@ DECLARE
     v_status TEXT;
     v_agent BOOLEAN := p_actor = 'agent';
 BEGIN
+    IF p_actor IS NULL OR p_actor NOT IN ('user', 'agent') THEN
+        RAISE EXCEPTION 'workflow actor must be user or agent';
+    END IF;
+    IF p_name IS NULL OR btrim(p_name) = '' THEN
+        RAISE EXCEPTION 'workflow name is required';
+    END IF;
+    IF COALESCE((p_workflow ->> 'schema_version')::int, 2) <> 2 THEN
+        RAISE EXCEPTION 'workflow schema_version must be 2';
+    END IF;
     IF jsonb_typeof(p_workflow -> 'root') IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'workflow must contain a root object';
     END IF;
@@ -4593,7 +4656,7 @@ DECLARE
     v_creator UUID;
     v_result TEXT;
 BEGIN
-    IF p_decision NOT IN ('approve', 'reject') THEN
+    IF p_decision IS NULL OR p_decision NOT IN ('approve', 'reject') THEN
         RAISE EXCEPTION 'decision must be approve or reject, not %', p_decision;
     END IF;
     IF p_reviewer IS NULL THEN

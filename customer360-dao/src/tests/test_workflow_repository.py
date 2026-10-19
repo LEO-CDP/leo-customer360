@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session
 
 from leo_customer360_dao.config import settings
@@ -79,6 +79,50 @@ class WorkflowRepositoryTests(unittest.TestCase):
         ).one()
         self.assertEqual(nodes.total, 12)
         self.assertEqual(nodes.messages, 3)
+
+    def test_notification_and_audience_sync_round_trip(self):
+        workflow = {
+            "schema_version": 2,
+            "root": {
+                "id": "n1", "type": "trigger", "config": {"event": "signup"},
+                "children": [{
+                    "id": "n2", "type": "notification",
+                    "config": {"provider": "whatsapp", "body": "Hello {{first_name}}"},
+                    "children": [{
+                        "id": "n3", "type": "run_data_synch_job",
+                        "config": {"platform": "meta_ads", "audience_name": "UAT"},
+                        "children": [],
+                    }],
+                }],
+            },
+        }
+        saved = self.repository.save("Notification and audience sync", workflow)
+        self.assertEqual(self.repository.load_workflow(saved.flow_id, saved.version), workflow)
+        self.assertEqual(FlowEngine(self.repository.load_definition(saved.flow_id)).problems(), [])
+
+    def test_sql_rejects_invalid_actor_name_and_schema_version(self):
+        for actor, name, schema_version in (
+            (None, "UAT", 2),
+            ("unknown", "UAT", 2),
+            ("user", " ", 2),
+            ("user", "UAT", 3),
+        ):
+            with self.subTest(actor=actor, name=name, schema_version=schema_version):
+                with self.assertRaises(DBAPIError), self.session.begin_nested():
+                    self.session.execute(
+                        text(
+                            "SELECT flow_id, version FROM customer360.crm_save_flow("
+                            "CAST(:tenant AS uuid), NULL::uuid, :name, CAST(:workflow AS jsonb), "
+                            "CAST(:actor AS text), NULL::uuid, NULL::varchar, '{}'::jsonb)"
+                        ),
+                        {
+                            "tenant": str(self.tenant_id), "name": name, "actor": actor,
+                            "workflow": json.dumps({
+                                "schema_version": schema_version,
+                                "root": {"id": "n1", "type": "trigger", "config": {"event": "signup"}},
+                            }),
+                        },
+                    )
 
     def test_each_save_creates_a_new_version_and_old_versions_stay_readable(self):
         first = self.recipes["welcome"]["workflow"]

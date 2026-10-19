@@ -1,16 +1,23 @@
 """Tests for tenant-scoped campaign workflow save/load endpoints."""
 
 import uuid
+import json
+import shutil
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from fastapi import FastAPI, Request
+import pytest
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 
 from core.database import get_db
 from core.repositories.campaign_draft_repository import CampaignDraftActorNotFoundError
 from core.repositories.campaign_workflow_repository import CampaignWorkflowRepository
 from core.routers.workflow_api import review_router, router
+from core.routers.workflow_api import _raise_http_error
 from leo_customer360_dao.schemas.workflow import CampaignWorkflowSaveRequest
 from leo_customer360_dao.workflow import FlowNotFound, NodeDef, WorkflowRuleViolation
 from leo_customer360_dao.workflow.repository import SavedFlow
@@ -378,6 +385,37 @@ def test_repository_rolls_back_campaign_when_workflow_save_fails():
     assert db.rollbacks == 1
 
 
+def test_edit_with_stale_identity_is_rejected_before_saving_workflow():
+    db = FakeSession(is_tenant_member=False)
+    repository = CampaignWorkflowRepository(db, TENANT_ID, USER_ID)
+    with patch(
+        "core.repositories.campaign_workflow_repository.WorkflowRepository"
+    ) as workflows, pytest.raises(CampaignDraftActorNotFoundError, match="sign in again"):
+        repository.update(CAMPAIGN_ID, _request_model())
+    workflows.assert_not_called()
+    assert db.commits == 0
+
+
+def test_edit_without_signed_in_user_is_rejected_before_saving_workflow():
+    db = FakeSession()
+    with patch(
+        "core.repositories.campaign_workflow_repository.WorkflowRepository"
+    ) as workflows, pytest.raises(CampaignDraftActorNotFoundError):
+        CampaignWorkflowRepository(db, TENANT_ID).update(CAMPAIGN_ID, _request_model())
+    workflows.assert_not_called()
+
+
+@pytest.mark.parametrize("constraint", ["crm_flow_version_creator_fk", "crm_flow_version_reviewer_fk"])
+def test_stale_workflow_actor_foreign_key_returns_sign_in_error(constraint):
+    original = SimpleNamespace(diag=SimpleNamespace(constraint_name=constraint), pgcode="23503")
+    db = SimpleNamespace(rollback=Mock())
+    with pytest.raises(HTTPException) as caught:
+        _raise_http_error(IntegrityError("statement", {}, original), db)
+    assert caught.value.status_code == 401
+    assert "Sign out and sign in again" in caught.value.detail
+    db.rollback.assert_called_once()
+
+
 def test_repository_updates_workflow_and_campaign_in_one_transaction():
     db = FakeSession()
     campaign = SimpleNamespace(
@@ -427,3 +465,90 @@ def test_repository_updates_workflow_and_campaign_in_one_transaction():
     assert updated.objective == "Conversions"
     assert db.commits == 1
     assert db.rollbacks == 0
+
+
+def test_notification_requires_non_empty_body():
+    workflow = _request_model().workflow
+    workflow.root.children = [
+        NodeDef(id="n2", type="notification", config={"provider": "sms", "body": " "}),
+    ]
+    with pytest.raises(ValueError, match="requires a message"):
+        CampaignWorkflowRepository._validate_workflow(workflow, SEGMENT_ID)
+
+
+def test_running_campaign_cannot_be_edited():
+    from core.repositories.campaign_draft_repository import CampaignDraftConflictError
+
+    campaign = SimpleNamespace(status="Running")
+    with patch(
+        "core.repositories.campaign_draft_repository.CampaignDraftRepository.get_campaign",
+        return_value=campaign,
+    ), pytest.raises(CampaignDraftConflictError, match="running campaign"):
+        CampaignWorkflowRepository(FakeSession(), TENANT_ID, USER_ID).update(
+            CAMPAIGN_ID, _request_model(),
+        )
+
+
+def test_actual_frontend_recipes_validate_and_execute_in_the_dao():
+    """Check the production studio payloads against API and runtime contracts."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the frontend-to-runtime contract test")
+    from leo_customer360_dao.models.identity import CdpMasterProfile
+    from leo_customer360_dao.workflow import FlowDefinition, FlowEngine
+
+    root = Path(__file__).resolve().parents[2]
+    script = """
+const fs = require('node:fs'), vm = require('node:vm');
+const base = './customer360-frontend/static/js/workflow/';
+const Core = require(base + 'workflow-core.js');
+const context = { WorkflowCore: Core, Handlebars: {
+  registerPartial() {}, compile() { return () => ''; }
+}};
+vm.runInNewContext(fs.readFileSync(base + 'workflow-template.js', 'utf8'), context);
+const recipes = Object.values(context.WorkflowTemplates.RECIPES);
+for (const recipe of recipes) {
+  recipe.workflow.root.config.segment_id = process.argv[1];
+  const errors = Core.validate(recipe.workflow).filter(issue => issue.level === 'error');
+  if (errors.length) throw new Error(recipe.name + ': ' + JSON.stringify(errors));
+}
+console.log(JSON.stringify(recipes));
+"""
+    result = subprocess.run(
+        [node, "-e", script, str(SEGMENT_ID)], cwd=root,
+        capture_output=True, text=True, check=True, timeout=30,
+    )
+    recipes = json.loads(result.stdout)
+    assert len(recipes) >= 26
+    for recipe in recipes:
+        definition = FlowDefinition.model_validate(recipe["workflow"])
+        CampaignWorkflowRepository._validate_workflow(definition, SEGMENT_ID)
+        for score in (0, 60, 100):
+            profile = CdpMasterProfile(
+                master_profile_id=uuid.uuid4(), tenant_id=TENANT_ID, first_name="UAT",
+                engagement_score=score, communication_preferences={},
+            )
+            journey = FlowEngine(definition).run(profile)
+            assert journey.end != "error", (recipe["name"], journey.error)
+
+
+@pytest.mark.parametrize(
+    ("constraint", "message"),
+    [
+        ("uq_crm_campaign_code", "Campaign code already exists for this tenant."),
+        ("crm_flow_tenant_name_key", "workflow name already exists"),
+        ("some_unmapped_constraint", "conflicts with existing data"),
+    ],
+)
+def test_campaign_integrity_conflicts_return_safe_actionable_detail(constraint, message):
+    diagnostic = SimpleNamespace(constraint_name=constraint, sqlstate="23505")
+    original = SimpleNamespace(diag=diagnostic, pgcode="23505")
+    error = IntegrityError("statement", {}, original)
+    db = SimpleNamespace(rollback=Mock())
+
+    with pytest.raises(HTTPException) as caught:
+        _raise_http_error(error, db)
+
+    assert caught.value.status_code == 409
+    assert message in caught.value.detail
+    db.rollback.assert_called_once()

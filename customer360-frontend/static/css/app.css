@@ -63,6 +63,74 @@ body {
   color: var(--c360-text);
 }
 
+#campaign-state-modal {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  width: min(36rem, calc(100vw - 2rem));
+  max-width: none;
+  max-height: calc(100dvh - 2rem);
+  margin: 0;
+  transform: translate(-50%, -50%);
+}
+
+#campaign-state-modal::backdrop {
+  background: rgb(15 23 42 / 0.56);
+  backdrop-filter: blur(3px);
+}
+
+#campaign-state-modal #campaign-state-form {
+  min-width: 0;
+}
+
+#campaign-state-modal #campaign-state-action-description > span {
+  min-width: 0;
+}
+
+#campaign-state-modal .campaign-state-restart-confirm {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+#campaign-state-modal .campaign-state-restart-confirm > span {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+}
+
+#campaign-state-modal .campaign-state-restart-confirm > span > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#campaign-state-modal .campaign-state-restart-confirm:has(#campaign-state-restart-ack:checked) {
+  border-color: #d97706;
+  background-color: #fffbeb;
+  box-shadow: 0 0 0 3px rgb(245 158 11 / 0.14);
+}
+
+#campaign-state-modal .campaign-state-restart-confirm:has(#campaign-state-restart-ack:focus-visible) {
+  outline: 3px solid rgb(245 158 11 / 0.3);
+  outline-offset: 2px;
+}
+
+#campaign-state-modal .campaign-state-restart-checkbox {
+  accent-color: #d97706;
+}
+
+@media (max-width: 28rem) {
+  #campaign-state-modal {
+    width: calc(100vw - 1.5rem);
+  }
+
+  #campaign-state-modal .campaign-state-restart-confirm {
+    padding: 0.75rem;
+  }
+}
+
 #app {
   background: linear-gradient(180deg, var(--c360-bg) 0%, color-mix(in srgb, var(--c360-bg) 88%, #ffffff 12%) 100%);
 }

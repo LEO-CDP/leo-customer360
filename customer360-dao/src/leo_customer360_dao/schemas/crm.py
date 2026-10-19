@@ -654,10 +654,15 @@ class CampaignDispatchLogRead(BaseModel):
     updated_at: Optional[datetime] = None
 
 
+class CampaignActivationRequest(BaseModel):
+    """Explicitly replay a completed campaign when ``restart`` is true."""
+
+    restart: bool = False
+
+
 class CampaignActivationResponse(BaseModel):
     """Result of ``POST /admin/campaigns/{id}/activate`` -- the submitted
-    campaign_activation Dagster run that will validate + snapshot + hand off to
-    the email send."""
+    campaign_activation Dagster run that validates and submits the workflow."""
 
     campaign_id: uuid.UUID
     run_id: str
@@ -816,6 +821,26 @@ class CampaignMetricItem(BaseModel):
     cvr_percentage: Decimal
     cpa: Decimal
     roas: Decimal
+
+
+class CampaignDailyReportItem(BaseModel):
+    """One day's campaign metrics, aggregated across performance rows."""
+
+    report_date: date
+    spend: Decimal
+    impressions: int
+    clicks: int
+    conversions: int
+    revenue_estimated: Decimal
+
+
+class CampaignReportResponse(BaseModel):
+    """Campaign metrics and daily series for the requested inclusive date range."""
+
+    summary: CampaignMetricItem
+    daily: list[CampaignDailyReportItem]
+    start_date: date | None = None
+    end_date: date | None = None
 
 
 class CampaignKPIResponse(BaseModel):

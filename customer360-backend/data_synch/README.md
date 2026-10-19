@@ -16,6 +16,11 @@ Customer Match, and TikTok Ads.
   should be added as an explicit connector policy rather than inferred here.
 - Retries reuse the same tenant/campaign/segment/platform/audience idempotency
   key and preserve the external audience ID.
+- Workflow submissions add their execution ID to that key, preserving separate
+  audit rows for full campaign replays. A replay reuses the latest known external
+  audience ID for the same tenant/campaign/platform/audience name.
+- Jobs for the same target are serialized with a session advisory lock to avoid
+  overlapping uploads and audit-row races.
 
 Run config:
 
@@ -32,8 +37,15 @@ ops:
       batch_size: 1000
 ```
 
-The tenant must have an active `crm_connector_config` row with
-`connector_type = 'ADS'`. Provider-specific non-secret settings belong in
+Live uploads require an active `crm_connector_config` row with
+`connector_type = 'ADS'`. Without one, the job logs that the provider is not
+configured and completes a dry run with zero uploads. The response includes
+`dry_run = true` and `reason = provider_not_configured`; the audit row stores
+the same reason in `metadata` and sets `dry_run = true`. No adapter is called.
+An explicitly requested dry run also avoids provider lookup entirely.
+Invalid settings on an existing connector still fail explicitly.
+
+Provider-specific non-secret settings belong in
 `config`; access tokens and developer tokens belong in `credentials`.
 
 Meta requires `ad_account_id` and `access_token`. Google Ads requires

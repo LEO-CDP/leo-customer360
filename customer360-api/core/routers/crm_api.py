@@ -12,10 +12,11 @@ import uuid
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from core.auth import require_tenant
 from leo_customer360_dao.models.crm import Account, Campaign, CampaignMember, Contact, Industry, Lead, LeadSource, Opportunity
 from core.repositories.crm_repository import CrmRepository
 from core.routers._generic import build_crud_router
@@ -31,6 +32,7 @@ from leo_customer360_dao.schemas.crm import (
     CampaignMemberUpdate,
     CampaignMetricItem,
     CampaignRead,
+    CampaignReportResponse,
     CampaignUpdate,
     ContactCreate,
     ContactRead,
@@ -89,6 +91,7 @@ campaigns_router = build_crud_router(
     tags=["CRM - Campaigns"],
     read_hook=_attach_campaign_content_items,
     update_validator=_block_edit_of_approved_campaign,
+    cache_reads=False,
 )
 
 campaign_members_router = build_crud_router(
@@ -101,6 +104,26 @@ campaign_members_router = build_crud_router(
     prefix="/campaign-members",
     tags=["CRM - Campaigns"],
 )
+
+@campaigns_router.get("/{campaign_id}/report", response_model=CampaignReportResponse)
+def get_campaign_report(
+    campaign_id: uuid.UUID,
+    request: Request,
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Return a campaign report scoped to the authenticated tenant and dates."""
+    tenant_id = uuid.UUID(require_tenant(request))
+    try:
+        report = CrmRepository(db, tenant_id).get_campaign_report(
+            campaign_id, start_date, end_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if report is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return report
 
 leads_router = build_crud_router(
     model=Lead,

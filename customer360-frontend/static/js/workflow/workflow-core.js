@@ -356,13 +356,15 @@
       );
       return issues;
     }
+    if (wf.schema_version !== 2)
+      add(null, "error", "SCHEMA_VERSION", "Workflow schema_version must be 2.");
     const seen = {};
     let sends = 0,
       goals = 0;
     walk(wf.root, (n, parent) => {
       const def = NODES[n.type];
       const kids = n.children || [];
-      if (!n.id)
+      if (typeof n.id !== "string" || !n.id.trim())
         add(
           n,
           "error",
@@ -430,7 +432,9 @@
               ".",
             "Set config." + k + " to a valid option.",
           );
-        if (f.type === "number" && (isNaN(+v) || +v < (f.min || 0)))
+        if (["text", "longtext"].includes(f.type) && !empty && typeof v !== "string")
+          add(n, "error", "BAD_CONFIG", def.label + ": " + k + " must be a string.");
+        if (f.type === "number" && (!Number.isFinite(+v) || +v < (f.min || 0)))
           add(
             n,
             "error",
@@ -439,6 +443,13 @@
             "Set config." + k + " to a positive number.",
           );
       });
+      for (const key of ["subject", "title", "body"]) {
+        if (typeof cfg[key] !== "string") continue;
+        for (const match of cfg[key].matchAll(/\{\{\s*(\w+)\s*\}\}/g)) {
+          if (!TEMPLATE_VARS.includes(match[1]))
+            add(n, "error", "UNKNOWN_PLACEHOLDER", "Unknown placeholder {{" + match[1] + "}} in " + key + ".");
+        }
+      }
       if (n.type === "condition" && cfg.field) {
         const isTag = cfg.field === "segmentation_tags";
         if (isTag !== (cfg.op === "has" || cfg.op === "hasnt"))
@@ -451,7 +462,7 @@
               : "Numeric fields support ge, lt, eq.",
             "Change config.op.",
           );
-        else if (!isTag && isNaN(+cfg.value))
+        else if (!isTag && !Number.isFinite(+cfg.value))
           add(
             n,
             "error",
@@ -507,15 +518,15 @@
         else if (kids.length === 1 && used[kids[0].branch])
           add(
             n,
-            "warn",
+            "error",
             "MISSING_BRANCH",
             'The "' +
               def.branches.filter((b) => !used[b])[0] +
-              '" branch is empty, so those customers stop here.',
+              '" branch is required before this workflow can run.',
             "Add a child for the missing branch.",
           );
       }
-      if (def.channel || n.type === "run_data_synch_job") {
+      if (def.channel || ["update_profile", "run_data_synch_job"].includes(n.type)) {
         sends++;
         if (def.channel && kids.some((k) => NODES[k.type] && NODES[k.type].channel))
           add(
@@ -544,8 +555,8 @@
         null,
         "error",
         "NO_ACTION",
-        "No message is sent.",
-        "Add Send email, Send notification or Send web push.",
+        "No action is configured.",
+        "Add a message, profile update or custom audience sync.",
       );
     if (!goals)
       add(
@@ -639,11 +650,13 @@
       const has = tags.has(String(c.value));
       return c.op === "hasnt" ? !has : has;
     }
+    if (p[c.field] == null) return false;
     const a = Number(p[c.field]),
       b = Number(c.value);
     return c.op === "ge" ? a >= b : c.op === "lt" ? a < b : a === b;
   }
-  function messageOutcome(channel, p, r) {
+  function messageOutcome(channel, p, r, provider) {
+    if (channel === "notification" && provider === "mobile_native") channel = "push";
     if (channel === "email") {
       const delivered = p.email !== 0 && r() < 0.97;
       const opened = delivered && r() < 0.14 + p.engagement_score / 200;
@@ -712,7 +725,7 @@
       let n = wf.root,
         guard = 0;
       totals.entered++;
-      while (n && guard++ < 60) {
+      while (n && guard++ < 100) {
         const def = NODES[n.type],
           s = stat(n.id),
           kids = n.children || [];
@@ -733,7 +746,7 @@
           s.out[b] = (s.out[b] || 0) + 1;
           next = kids.find((k) => k.branch === b);
         } else if (def.channel) {
-          const o = messageOutcome(def.channel, p, r);
+          const o = messageOutcome(def.channel, p, r, n.config.provider);
           if (o.delivered) {
             s.delivered++;
             st.received = true;

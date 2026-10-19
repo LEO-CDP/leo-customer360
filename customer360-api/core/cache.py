@@ -114,8 +114,10 @@ def invalidate_prefix(prefix: str) -> None:
         logger.warning("Redis SCAN/DELETE failed for prefix=%s.", prefix, exc_info=True)
 
 
-def cache_response(prefix: str, ttl: Optional[int] = None) -> Callable:
+def cache_response(prefix: str, ttl: Optional[int] = None, *, enabled: bool = True) -> Callable:
     """Decorator: caches a GET route's JSON-encoded result in Redis.
+
+    ``enabled=False`` bypasses reads/writes for externally updated state.
 
     Must be applied UNDER the router decorator (i.e. listed after
     ``@router.get(...)`` in source order) so FastAPI registers the caching
@@ -127,6 +129,8 @@ def cache_response(prefix: str, ttl: Optional[int] = None) -> Callable:
     """
 
     def decorator(func: Callable) -> Callable:
+        if not enabled:
+            return func
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             bound = inspect.signature(func).bind_partial(*args, **kwargs)

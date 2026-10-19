@@ -38,6 +38,10 @@ class CrmRepository:
         """Return campaign KPI analytics."""
         return self.analytics.get_kpi_summary()
 
+    def get_campaign_report(self, campaign_id, start_date=None, end_date=None):
+        """Return the tenant-scoped date-filtered report for one campaign."""
+        return self.analytics.get_campaign_report(campaign_id, start_date, end_date)
+
     def get_filtered_campaigns(self, filters):
         """Return filtered campaign metrics and their total count."""
         return self.analytics.get_filtered_campaigns(filters)

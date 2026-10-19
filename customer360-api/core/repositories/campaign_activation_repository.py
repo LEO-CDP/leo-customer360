@@ -7,7 +7,17 @@ from sqlalchemy import select
 
 from leo_customer360_dao.crud.email_provider import get_active_config as default_get_active_config, upsert_config as default_upsert_config
 from leo_customer360_dao.models.crm import Campaign, CampaignDispatchLog, ConnectorConfig
+from leo_customer360_dao.models.segmentation import CdpSegment
 from leo_customer360_dao.schemas.crm import EmailProviderConfigRead
+from leo_customer360_dao.workflow import FlowNotFound, WorkflowRepository
+
+
+class CampaignActivationNotFound(LookupError):
+    """The requested campaign is not owned by the active tenant."""
+
+
+class CampaignActivationConflict(ValueError):
+    """The campaign is not ready for activation."""
 
 
 class CampaignActivationRepository:
@@ -25,9 +35,45 @@ class CampaignActivationRepository:
         campaign = self.session.get(Campaign, campaign_id)
         return campaign if campaign is not None and str(campaign.tenant_id) == tenant_id else None
 
-    def activate(self, campaign_id: uuid.UUID, tenant_id: str):
-        """Submit the approved campaign activation job."""
-        return self.dagster.campaign_activation.activate(str(campaign_id), tenant_id)
+    def activate(self, campaign_id: uuid.UUID, tenant_id: str, *, restart: bool = False):
+        """Validate the pinned approval and audience before submitting the job."""
+        campaign = self.get_campaign(campaign_id, tenant_id)
+        if campaign is None:
+            raise CampaignActivationNotFound(f"Campaign '{campaign_id}' not found")
+        if campaign.approval_status != "Approved":
+            raise CampaignActivationConflict(
+                f"Campaign is not Approved (approval_status={campaign.approval_status!r})"
+            )
+        if campaign.status == "Running":
+            raise CampaignActivationConflict(f"Campaign is already {campaign.status}")
+        if campaign.status == "Completed" and not restart:
+            raise CampaignActivationConflict("Completed campaigns require an explicit restart.")
+        if restart and campaign.status != "Completed":
+            raise CampaignActivationConflict("Only completed campaigns can be explicitly restarted.")
+        if not campaign.segment_id or not campaign.workflow_id or campaign.workflow_version is None:
+            raise CampaignActivationConflict(
+                "Campaign needs a segment_id and a pinned workflow_id and workflow_version."
+            )
+        try:
+            version = WorkflowRepository(self.session, tenant_id).version_info(
+                campaign.workflow_id, campaign.workflow_version,
+            )
+        except FlowNotFound as exc:
+            raise CampaignActivationConflict("Pinned workflow version was not found") from exc
+        if version["approval_status"] != "Approved":
+            raise CampaignActivationConflict("Pinned workflow version must be Approved")
+        segment = self.session.get(CdpSegment, campaign.segment_id)
+        if (
+            segment is None or str(segment.tenant_id) != tenant_id
+            or not segment.is_active or segment.status_code != 1 or not segment.segment_tag
+        ):
+            raise CampaignActivationConflict("Campaign audience must be active and computed")
+        return self.dagster.campaign_activation.activate(
+            str(campaign_id), tenant_id, restart=restart,
+            expected_execution_id=(
+                str(campaign.workflow_execution_id) if campaign.workflow_execution_id else None
+            ),
+        )
 
     def list_dispatch_logs(self, campaign_id: uuid.UUID, tenant_id: str, status: Optional[str], limit: int):
         """Query a tenant-scoped campaign dispatch ledger."""

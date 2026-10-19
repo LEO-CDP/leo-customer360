@@ -37,6 +37,7 @@ def build_crud_router(
     create_hook: Optional[Callable[[Any], None]] = None,
     update_hook: Optional[Callable[[Any], None]] = None,
     read_hook: Optional[Callable[[Session, Any], None]] = None,
+    cache_reads: bool = True,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=tags)  # type: ignore[arg-type]
     crud = CRUDBase(model)
@@ -55,7 +56,7 @@ def build_crud_router(
 
     @router.get("", response_model=list[read_schema], include_in_schema=False)
     @router.get("/", response_model=list[read_schema])
-    @cache_response(f"{cache_prefix}/list", ttl=settings.cache_ttl_seconds)
+    @cache_response(f"{cache_prefix}/list", ttl=settings.cache_ttl_seconds, enabled=cache_reads)
     def list_items(
         skip: int = 0,
         limit: int = Query(default=settings.api_default_page_size, le=settings.api_max_page_size),
@@ -66,7 +67,7 @@ def build_crud_router(
         return get_crud(db).list(db, skip=skip, limit=limit, **filters)
 
     @router.get("/count")
-    @cache_response(f"{cache_prefix}/count", ttl=settings.cache_ttl_seconds)
+    @cache_response(f"{cache_prefix}/count", ttl=settings.cache_ttl_seconds, enabled=cache_reads)
     def count_items(
         tenant_id: Optional[uuid.UUID] = None,
         db: Session = Depends(get_db),
@@ -75,7 +76,7 @@ def build_crud_router(
         return {"count": get_crud(db).count(db, **filters)}
 
     @router.get("/{item_id}", response_model=read_schema)
-    @cache_response(f"{cache_prefix}/item", ttl=settings.cache_ttl_seconds)
+    @cache_response(f"{cache_prefix}/item", ttl=settings.cache_ttl_seconds, enabled=cache_reads)
     def get_item(item_id: pk_type, db: Session = Depends(get_db)):  # type: ignore[valid-type]
         obj = get_crud(db).get(db, item_id)
         if obj is None:

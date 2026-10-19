@@ -13,6 +13,7 @@ from core.repositories.campaign_draft_repository import (
     FIELD_UNSET,
     SEGMENT_UNSET,
     CampaignDraftActorNotFoundError,
+    CampaignDraftConflictError,
     CampaignDraftRepository,
 )
 from core.repositories.segment_repository import SegmentRepository
@@ -162,9 +163,9 @@ class CampaignWorkflowRepository:
                     raise CampaignWorkflowValidationError(
                         f"Email node {node.id} requires a subject and body."
                     )
-            elif node.type == "sms":
+            elif node.type == "notification":
                 if not isinstance(config.get("body"), str) or not config["body"].strip():
-                    raise CampaignWorkflowValidationError(f"SMS node {node.id} requires a message.")
+                    raise CampaignWorkflowValidationError(f"Notification node {node.id} requires a message.")
             elif node.type == "push":
                 if any(not isinstance(config.get(key), str) or not config[key].strip() for key in ("title", "body")):
                     raise CampaignWorkflowValidationError(
@@ -303,6 +304,7 @@ class CampaignWorkflowRepository:
             raise
 
     def update(self, campaign_id: uuid.UUID, payload: CampaignWorkflowSaveRequest) -> Campaign:
+        self._require_owner()
         self._validate_tenant(payload)
         self._validate_campaign_fields(payload)
         from core.repositories.campaign_draft_repository import (
@@ -316,6 +318,8 @@ class CampaignWorkflowRepository:
             campaign = drafts.get_campaign(self.tenant_id, campaign_id)
         except CampaignDraftNotFoundError as exc:
             raise CampaignWorkflowNotFound(str(exc)) from exc
+        if getattr(campaign, "status", None) == "Running":
+            raise CampaignDraftConflictError("A running campaign cannot be edited.")
 
         values = payload.campaign.model_dump(exclude_unset=True)
         selected_segment_id = (

@@ -555,10 +555,7 @@ class EmailEngineDagsterService(DagsterService):
 
 
 class CampaignActivationDagsterService(DagsterService):
-    """customer360-backend/campaign_activation -- real campaign orchestration
-   : validates an Approved campaign, snapshots its segment, marks
-    it Running, then submits the email_engine run that dispatches it (see
-    customer360-backend/campaign_activation/dagster_defs.py)."""
+    """Submit campaign activation and workflow execution to Dagster."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -567,12 +564,23 @@ class CampaignActivationDagsterService(DagsterService):
             repository_name=settings.dagster_campaign_activation_repository_name,
         )
 
-    def activate(self, campaign_id: str, tenant_id: str) -> str:
-        """Triggers a campaign_activation run for one Approved campaign."""
+    def activate(
+        self, campaign_id: str, tenant_id: str, *, restart: bool = False,
+        expected_execution_id: str | None = None,
+    ) -> str:
+        """Triggers a campaign activation, optionally replaying a completed campaign."""
         run_config = {
-            "ops": {"activate_campaign_op": {"config": {"campaign_id": campaign_id, "tenant_id": tenant_id}}}
+            "ops": {"activate_campaign_op": {"config": {
+                "campaign_id": campaign_id,
+                "tenant_id": tenant_id,
+                "restart": restart,
+                "expected_execution_id": expected_execution_id,
+            }}}
         }
-        return self.submit(run_config=run_config, tags={"campaign_id": campaign_id, "tenant_id": tenant_id})
+        return self.submit(
+            run_config=run_config,
+            tags={"campaign_id": campaign_id, "tenant_id": tenant_id, "restart": str(restart).lower()},
+        )
 
 
 class NotificationEngineDagsterService(DagsterService):

@@ -12,6 +12,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import uuid
@@ -27,6 +28,7 @@ from psycopg2.extras import RealDictCursor
 load_dotenv()
 
 DB_SCHEMA = os.environ.get("DB_SCHEMA", "customer360")
+logger = logging.getLogger(__name__)
 SUPPORTED_PLATFORMS = frozenset({"meta_ads", "google_ads", "tiktok_ads"})
 PLATFORM_ALIASES = {
     "facebook": "meta_ads",
@@ -419,7 +421,9 @@ def _set_tenant_context(cursor, tenant_id: str) -> None:
     cursor.execute("SET app.tenant_id = %s", (tenant_id,))
 
 
-def _load_provider_config(cursor, tenant_id: str, platform: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _load_provider_config(
+    cursor, tenant_id: str, platform: str,
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
     aliases = [key for key, value in PLATFORM_ALIASES.items() if value == platform]
     cursor.execute(
         f"""
@@ -437,7 +441,7 @@ def _load_provider_config(cursor, tenant_id: str, platform: str) -> tuple[dict[s
     )
     row = cursor.fetchone()
     if not row:
-        raise AudienceSyncError(f"No active ADS connector configured for {platform}")
+        return None
     return dict(row.get("config") or {}), dict(row.get("credentials") or {})
 
 
@@ -460,6 +464,7 @@ def run_data_synch_job(
     platform: str,
     segment_id: str | None = None,
     audience_name: str | None = None,
+    execution_id: str | None = None,
     dry_run: bool = False,
     batch_size: int = 1000,
     provider_factory: Callable[..., AudienceProvider] = build_provider,
@@ -473,6 +478,8 @@ def run_data_synch_job(
     """
     tenant_id = str(uuid.UUID(str(tenant_id)))
     campaign_id = str(uuid.UUID(str(campaign_id)))
+    if execution_id is not None:
+        execution_id = str(uuid.UUID(str(execution_id)))
     requested_segment = str(uuid.UUID(str(segment_id))) if segment_id else None
     platform_code = normalize_platform(platform)
     if not 1 <= batch_size <= 100_000:
@@ -514,6 +521,12 @@ def run_data_synch_job(
             if not name:
                 raise AudienceSyncError("Audience name is required")
             idempotency_key = f"{campaign_id}:{selected_segment}:{platform_code}:{name.lower()}"
+            if execution_id:
+                idempotency_key += f":{execution_id}"
+            cursor.execute(
+                "SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+                (f"audience-sync:{tenant_id}:{campaign_id}:{platform_code}:{name.lower()}",),
+            )
             cursor.execute(
                 f"""
                 SELECT sync_run_id, external_audience_id, attempt_count
@@ -561,11 +574,40 @@ def run_data_synch_job(
                 )
                 run_id = str(cursor.fetchone()["sync_run_id"])
                 external_audience_id = None
+                if execution_id:
+                    cursor.execute(
+                        f"""
+                        SELECT external_audience_id
+                        FROM {DB_SCHEMA}.crm_ad_sync_runs
+                        WHERE tenant_id = %(tenant_id)s AND campaign_id = %(campaign_id)s
+                          AND platform = %(platform)s AND lower(audience_name) = %(name)s
+                          AND external_audience_id IS NOT NULL
+                        ORDER BY updated_at DESC
+                        LIMIT 1
+                        """,
+                        {
+                            "tenant_id": tenant_id, "campaign_id": campaign_id,
+                            "platform": platform_code, "name": name.lower(),
+                        },
+                    )
+                    existing_audience = cursor.fetchone()
+                    if existing_audience:
+                        external_audience_id = existing_audience["external_audience_id"]
             conn.commit()
 
-            config, credentials = (
+            provider_config = (
                 _load_provider_config(cursor, tenant_id, platform_code) if not dry_run else ({}, {})
             )
+            missing_provider = provider_config is None
+            if provider_config is None:
+                logger.info(
+                    "Audience sync provider not configured; logging only: campaign=%s platform=%s",
+                    campaign_id, platform_code,
+                )
+                dry_run = True
+                config, credentials = {}, {}
+            else:
+                config, credentials = provider_config
             default_country_code = config.get("default_country_code")
             cursor.execute(
                 f"""
@@ -618,7 +660,11 @@ def run_data_synch_job(
         if dry_run:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 _set_tenant_context(cursor, tenant_id)
-                _update_run(cursor, run_id, "Completed")
+                reason = "provider_not_configured" if missing_provider else "dry_run"
+                _update_run(
+                    cursor, run_id, "Completed", dry_run=True,
+                    metadata=json.dumps({"reason": reason}),
+                )
                 conn.commit()
             return {
                 "sync_run_id": run_id,
@@ -630,6 +676,7 @@ def run_data_synch_job(
                 "eligible_count": len(members),
                 "uploaded_count": 0,
                 "dry_run": True,
+                "reason": reason,
             }
 
         if not members:
@@ -690,6 +737,7 @@ def run_data_synch_job(
                     conn.commit()
             except Exception:
                 conn.rollback()
+                logger.exception("Could not mark audience-sync run %s failed", run_id)
         raise
     finally:
         conn.close()

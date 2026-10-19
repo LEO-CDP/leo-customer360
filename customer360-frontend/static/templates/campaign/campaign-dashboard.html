@@ -193,13 +193,19 @@
       <select id="campaign-filter-status" aria-label="Filter by Status" class="text-sm border border-slate-300 bg-slate-50/50 rounded-xl px-4 py-2.5 text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 focus:bg-white transition-all cursor-pointer shadow-sm">
         <option value="">All Status</option>
         <option value="Active">Active</option>
+        <option value="Running">Running</option>
         <option value="Paused">Paused</option>
         <option value="Draft">Draft</option>
         <option value="Completed">Completed</option>
+        <option value="Failed">Failed</option>
       </select>
 
       <select id="campaign-filter-channel" aria-label="Filter by Channel" class="text-sm border border-slate-300 bg-slate-50/50 rounded-xl px-4 py-2.5 text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 focus:bg-white transition-all cursor-pointer shadow-sm">
         <option value="">All Channels</option>
+        <option value="email">Workflow email</option>
+        <option value="notification">Notification</option>
+        <option value="push">Web push</option>
+        <option value="audience_sync">Custom audience sync</option>
         <option value="Paid Search">Paid Search</option>
         <option value="Paid Social">Paid Social</option>
         <option value="Push Notification">Push Notification</option>
@@ -209,6 +215,15 @@
 
       <select id="campaign-filter-platform" aria-label="Filter by Platform" class="text-sm border border-slate-300 bg-slate-50/50 rounded-xl px-4 py-2.5 text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 focus:bg-white transition-all cursor-pointer shadow-sm">
         <option value="">All Platforms</option>
+        <option value="email">Email provider</option>
+        <option value="sms">SMS provider</option>
+        <option value="zalo_oa">Zalo OA</option>
+        <option value="whatsapp">WhatsApp</option>
+        <option value="mobile_native">Mobile native push</option>
+        <option value="push">Web push provider</option>
+        <option value="meta_ads">Meta Ads audience</option>
+        <option value="google_ads">Google Ads audience</option>
+        <option value="tiktok_ads">TikTok Ads audience</option>
         <option value="Google">Google</option>
         <option value="Meta">Meta</option>
         <option value="TikTok">TikTok</option>

@@ -1,5 +1,6 @@
 """Campaign endpoints that save and load their linked customer journey."""
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -31,6 +32,7 @@ from leo_customer360_dao.workflow import FlowNotFound, WorkflowRepository, Workf
 
 router = APIRouter(prefix="/campaigns", tags=["Campaign Workflows"])
 review_router = APIRouter(prefix="/workflows", tags=["Campaign Workflows"])
+logger = logging.getLogger(__name__)
 
 
 def _repository(request: Request, db: Session) -> CampaignWorkflowRepository:
@@ -55,9 +57,40 @@ def _raise_http_error(error: Exception, db: Session) -> None:
         raise HTTPException(status_code=422, detail=str(error)) from error
     if isinstance(error, IntegrityError):
         db.rollback()
+        original = getattr(error, "orig", None)
+        diagnostic = getattr(original, "diag", None)
+        constraint = getattr(diagnostic, "constraint_name", None)
+        if constraint in {"crm_flow_version_creator_fk", "crm_flow_version_reviewer_fk"}:
+            logger.warning(
+                "Workflow identity is not a member of the active tenant: constraint=%s",
+                constraint,
+            )
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "Your signed-in user no longer exists in the active tenant. "
+                    "Sign out and sign in again before saving or reviewing this workflow."
+                ),
+            ) from error
+        detail = {
+            "uq_crm_campaign_code": (
+                "Campaign code already exists for this tenant. Choose a different campaign code."
+            ),
+            "crm_flow_tenant_name_key": (
+                "A workflow with this campaign's workflow name already exists. Refresh and contact support."
+            ),
+            "crm_campaign_workflow_version_fk": (
+                "The pinned workflow version conflicts with the campaign tenant or workflow. Refresh and retry."
+            ),
+        }.get(constraint, "The campaign or workflow conflicts with existing data.")
+        logger.warning(
+            "Campaign/workflow integrity conflict: constraint=%s sqlstate=%s",
+            constraint or "unknown",
+            getattr(original, "pgcode", None) or getattr(diagnostic, "sqlstate", None) or "unknown",
+        )
         raise HTTPException(
             status_code=409,
-            detail="The campaign or workflow conflicts with existing data.",
+            detail=detail,
         ) from error
     raise error
 

@@ -219,9 +219,9 @@ class ActivationNode(BaseNode):
 
     def problems(self) -> list[str]:
         problems = [
-            f"{self.id}: {key} must be a string"
+            f"{self.id}: {key} must be a non-empty string"
             for key in self.required_config
-            if not isinstance(self.config.get(key), str)
+            if not isinstance(self.config.get(key), str) or not self.config[key].strip()
         ]
         for key in ("subject", "title", "body"):
             text = self.config.get(key)
@@ -261,6 +261,10 @@ class ActivationNode(BaseNode):
             return NodeResult(note=f"{self.channel} skipped: no consent or contact")
         receipt = ctx.services.gateways[self.channel].send(self.build(ctx))
         ctx.deliveries.append((self.channel, receipt.status))
+        if receipt.status == "failed":
+            raise RuntimeError(
+                f"{self.channel} delivery failed at node {self.id}: {receipt.detail}"
+            )
         return NodeResult(
             note=f"{self.channel} {receipt.status}" + (f" ({receipt.detail})" if receipt.detail else "")
         )
@@ -285,7 +289,7 @@ class SendNotificationNode(ActivationNode):
     def problems(self) -> list[str]:
         problems = super().problems()
         provider = self.config.get("provider", "sms")
-        if provider not in NOTIFICATION_PROVIDERS:
+        if not isinstance(provider, str) or provider not in NOTIFICATION_PROVIDERS:
             problems.append(
                 f"{self.id}: provider must be one of {', '.join(sorted(NOTIFICATION_PROVIDERS))}"
             )
@@ -362,7 +366,7 @@ class DataSyncNode(BaseNode):
         platform = self.config.get("platform")
         audience_name = self.config.get("audience_name")
         problems = []
-        if platform not in AUDIENCE_PLATFORMS:
+        if not isinstance(platform, str) or platform not in AUDIENCE_PLATFORMS:
             problems.append(f"{self.id}: platform must be one of {', '.join(sorted(AUDIENCE_PLATFORMS))}")
         if not isinstance(audience_name, str) or not audience_name.strip():
             problems.append(f"{self.id}: audience_name is required")

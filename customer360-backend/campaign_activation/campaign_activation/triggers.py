@@ -22,6 +22,8 @@ class CampaignWorkflowTriggerError(Exception):
 def trigger_campaign_workflow_job(
     campaign_id: str,
     tenant_id: str,
+    *,
+    execution_id: str,
     log: Callable[[str], None] = print,
 ) -> str:
     """Submit the per-profile workflow execution job."""
@@ -36,11 +38,17 @@ def trigger_campaign_workflow_job(
                         "config": {
                             "tenant_id": tenant_id,
                             "campaign_id": campaign_id,
+                            "execution_id": execution_id,
                         }
                     }
                 }
             },
-            tags={"tenant_id": tenant_id, "campaign_id": campaign_id, "workflow_run": "true"},
+            tags={
+                "tenant_id": tenant_id,
+                "campaign_id": campaign_id,
+                "execution_id": execution_id,
+                "workflow_run": "true",
+            },
         )
     except Exception as exc:  # noqa: BLE001 - submission failures become activation failures.
         raise CampaignWorkflowTriggerError(

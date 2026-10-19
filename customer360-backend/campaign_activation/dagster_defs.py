@@ -45,11 +45,12 @@ from campaign_activation.workflow_runner import run_campaign_workflow  # noqa: E
 
 
 class ActivateCampaignConfig(Config):
-    """Op config identifying the campaign to activate. Both required -- an
-    activation is always scoped to one Approved campaign within one tenant."""
+    """Tenant-scoped approved campaign activation, with opt-in completed replay."""
 
     campaign_id: str
     tenant_id: str
+    restart: bool = False
+    expected_execution_id: str | None = None
 
 
 class CampaignWorkflowConfig(Config):
@@ -57,6 +58,7 @@ class CampaignWorkflowConfig(Config):
 
     tenant_id: str
     campaign_id: str
+    execution_id: str | None = None
 
 
 @op(retry_policy=RetryPolicy(max_retries=2, delay=10))
@@ -67,7 +69,13 @@ def activate_campaign_op(context: OpExecutionContext, config: ActivateCampaignCo
         "campaign_activation job: started (campaign_id=%s, tenant_id=%s)",
         config.campaign_id, config.tenant_id,
     )
-    summary = activate_campaign(config.campaign_id, config.tenant_id, log=context.log.info)
+    summary = activate_campaign(
+        config.campaign_id,
+        config.tenant_id,
+        restart=config.restart,
+        expected_execution_id=config.expected_execution_id,
+        log=context.log.info,
+    )
     context.log.info("campaign_activation job: done (%s)", summary)
     return summary
 
@@ -79,15 +87,17 @@ def run_campaign_workflow_op(
 ) -> dict:
     """Execute email/SMS/push/tag actions from the persisted workflow graph."""
     context.log.info(
-        "campaign workflow started (run_id=%s, tenant_id=%s, campaign_id=%s)",
+        "campaign workflow started (run_id=%s, tenant_id=%s, campaign_id=%s, execution_id=%s)",
         context.run_id,
         config.tenant_id,
         config.campaign_id,
+        config.execution_id,
     )
     summary = run_campaign_workflow(
         tenant_id=config.tenant_id,
         campaign_id=config.campaign_id,
         run_id=context.run_id,
+        execution_id=config.execution_id,
     )
     context.log.info("campaign workflow completed (%s)", summary)
     return summary

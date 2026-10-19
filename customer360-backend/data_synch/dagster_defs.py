@@ -47,6 +47,7 @@ class DataSynchConfig(Config):
     platform: str
     segment_id: str | None = None
     audience_name: str | None = None
+    execution_id: str | None = None
     dry_run: bool = False
     batch_size: int = 1000
 
@@ -71,6 +72,7 @@ def run_data_synch_op(
         platform=config.platform,
         segment_id=config.segment_id,
         audience_name=config.audience_name,
+        execution_id=config.execution_id,
         dry_run=config.dry_run,
         batch_size=config.batch_size,
     )

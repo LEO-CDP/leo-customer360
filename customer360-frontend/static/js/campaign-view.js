@@ -27,7 +27,7 @@ window.C360 = window.C360 || {};
   var PLATFORM_ICONS = {
     Google: "🔍", Meta: "📘", TikTok: "🎵",
     google_ads: "🔍", meta_ads: "📘", tiktok_ads: "🎵",
-    email: "✉️", sms: "💬", push: "🔔",
+    email: "✉️", sms: "💬", notification: "💬", push: "🔔",
     Zalo: "💬", Adjust: "📱", YouTube: "▶️"
   };
 
@@ -38,6 +38,7 @@ window.C360 = window.C360 || {};
     "Email":             "✉️",
     email:               "✉️",
     sms:                 "💬",
+    notification:        "💬",
     push:                "🔔",
     audience_sync:       "🎯",
     "Video":             "▶️"
@@ -45,13 +46,19 @@ window.C360 = window.C360 || {};
 
   var CAMPAIGN_CHANNELS = [
     { value: "email", label: "Email" },
-    { value: "sms", label: "SMS / notification" },
+    { value: "notification", label: "Notification" },
     { value: "push", label: "Web push" },
     { value: "audience_sync", label: "Custom audience sync" }
   ];
 
   var CAMPAIGN_PLATFORMS = {
     email: [{ value: "email", label: "Email provider" }],
+    notification: [
+      { value: "sms", label: "SMS provider" },
+      { value: "zalo_oa", label: "Zalo OA" },
+      { value: "whatsapp", label: "WhatsApp" },
+      { value: "mobile_native", label: "Mobile native push" }
+    ],
     sms: [
       { value: "sms", label: "SMS provider" },
       { value: "zalo_zns", label: "Zalo ZNS (legacy)" }
@@ -76,6 +83,8 @@ window.C360 = window.C360 || {};
 
   var STATUS_BADGE = {
     Active:    "bg-emerald-100 text-emerald-700",
+    Running:   "bg-emerald-100 text-emerald-700",
+    Failed:    "bg-rose-100 text-rose-700",
     Paused:    "bg-amber-100 text-amber-700",
     Draft:     "bg-slate-100 text-slate-600",
     Completed: "bg-indigo-100 text-indigo-700"
@@ -98,6 +107,126 @@ window.C360 = window.C360 || {};
   var campaignWorkflowState = { segment: null, ready: false, workflow: null };
   var campaignWorkflowGeneration = 0;
   var campaignSegmentRequest = 0;
+  var campaignDetailState = { campaign: null, workflow: null, history: [], actions: [], busy: false };
+  var campaignStateReturnFocus = null;
+  var campaignDetailGeneration = 0;
+  var campaignReportRequest = 0;
+
+  function campaignStateActions(campaign, workflow, admin) {
+    var actions = [];
+    var approval = campaignApprovalStatus(campaign);
+    var status = String(campaign.status || "").toLowerCase();
+    var base = "/campaigns/" + encodeURIComponent(campaign.campaign_id);
+    function add(key, label, path, description, payload, reason) {
+      actions.push({ key: key, label: label, path: path, description: description, payload: payload || {}, reason: !!reason });
+    }
+    if (status === "running") return actions;
+    if (approval === "Draft") add("submit", "Submit for approval", base + "/submit-for-approval", "Moves campaign approval from Draft to InReview. A tenant admin must review it.");
+    if (admin && workflowApprovalStatus(workflow) === "InReview" && workflow.workflow_id && workflow.workflow_version != null) {
+      var review = "/workflows/" + encodeURIComponent(workflow.workflow_id) + "/versions/" + encodeURIComponent(workflow.workflow_version) + "/review";
+      add("approve-workflow", "Approve workflow", review, "Approves only this pinned workflow version. The initiating user cannot review their own agent proposal.", { decision: "approve" }, true);
+      add("reject-workflow", "Reject workflow", review, "Rejects this workflow version. Save a revised version before seeking approval again.", { decision: "reject" }, true);
+    }
+    if (admin && approval === "InReview") {
+      if (isWorkflowApproved(workflow)) add("approve", "Approve campaign", base + "/approve", "Moves campaign approval from InReview to Approved. Delivery does not start until you choose Start campaign.");
+      add("reject", "Reject campaign", base + "/reject", "Moves campaign approval from InReview to Rejected. Edit and save the campaign to return it to review.", {}, true);
+    }
+    if (admin && approval === "Approved" && isWorkflowApproved(workflow) &&
+        campaign.segment_id && workflow.workflow_id && workflow.workflow_version != null &&
+        status === "completed") {
+      add("restart", "Restart campaign", "/admin/campaigns/" + encodeURIComponent(campaign.campaign_id) + "/activate",
+        "Starts a full replay for the current segment. Previously successful messages may be sent again. Configure providers and review consent before restarting; there is no restart limit.",
+        { restart: true });
+    } else if (admin && approval === "Approved" && isWorkflowApproved(workflow) &&
+        status !== "running" && campaign.segment_id && workflow.workflow_id && workflow.workflow_version != null) {
+      add("start", "Start campaign", "/admin/campaigns/" + encodeURIComponent(campaign.campaign_id) + "/activate",
+        "Submits the pinned workflow to Dagster. A failed execution retries within its existing idempotency scope; previously successful actions are not replayed.");
+    }
+    return actions;
+  }
+
+  function updateCampaignStateAction() {
+    var action = campaignDetailState.actions.find(function (item) { return item.key === $("#campaign-state-action").val(); });
+    $("#campaign-state-action-description span").text(action ? action.description : "No transition is available. Review the current states and your permissions. Rejected campaigns or workflows need an edit and a new review. A completed campaign can be fully replayed by an admin.");
+    $("#campaign-state-reason-field").toggleClass("hidden", !action || !action.reason);
+    $("#campaign-state-restart-confirm").toggleClass("hidden", !action || !action.payload.restart);
+    $("#campaign-state-confirm").prop(
+      "disabled",
+      !action || campaignDetailState.busy ||
+        (action.payload.restart && !$("#campaign-state-restart-ack").prop("checked"))
+    ).text(action ? action.label : "No action available");
+    setCampaignMessage("#campaign-state-error", "");
+  }
+
+  function openCampaignStateModal(actionKey) {
+    var modal = document.getElementById("campaign-state-modal");
+    if (!modal || !campaignDetailState.campaign || campaignDetailState.busy) return;
+    campaignStateReturnFocus = document.activeElement;
+    $("#campaign-state-modal-name").text(campaignDetailState.campaign.name || "Campaign");
+    $("#campaign-state-modal-approval").text(campaignApprovalStatus(campaignDetailState.campaign));
+    $("#campaign-state-modal-workflow").text(
+      (campaignDetailState.workflow && campaignDetailState.workflow.workflow_version != null
+        ? "v" + campaignDetailState.workflow.workflow_version + " · "
+        : "") + (workflowApprovalStatus(campaignDetailState.workflow) || "Not saved")
+    );
+    $("#campaign-state-modal-execution").text(campaignDetailState.campaign.status || "Draft");
+    var $select = $("#campaign-state-action").empty();
+    campaignDetailState.actions.forEach(function (action) {
+      $("<option>").val(action.key).text(action.label).appendTo($select);
+    });
+    if (actionKey) $select.val(actionKey);
+    $select.prop("disabled", !campaignDetailState.actions.length);
+    $("#campaign-state-reason").val("");
+    $("#campaign-state-restart-ack").prop("checked", false);
+    updateCampaignStateAction();
+    if (!modal.open) modal.showModal();
+    $select.trigger("focus");
+  }
+
+  function closeCampaignStateModal() {
+    if (campaignDetailState.busy) return;
+    var modal = document.getElementById("campaign-state-modal");
+    if (modal && modal.open) modal.close();
+    if (campaignStateReturnFocus && campaignStateReturnFocus.isConnected) campaignStateReturnFocus.focus();
+  }
+
+  function submitCampaignState(event) {
+    event.preventDefault();
+    if (campaignDetailState.busy) return;
+    var action = campaignDetailState.actions.find(function (item) { return item.key === $("#campaign-state-action").val(); });
+    if (!action) return;
+    if (action.payload.restart && !$("#campaign-state-restart-ack").prop("checked")) {
+      setCampaignMessage("#campaign-state-error", "Confirm that you understand this will replay successful campaign actions.");
+      return;
+    }
+    var reason = String($("#campaign-state-reason").val() || "").trim();
+    if (action.reason && reason.length > 2000) {
+      setCampaignMessage("#campaign-state-error", "Review reason must be at most 2,000 characters.");
+      return;
+    }
+    var payload = $.extend({}, action.payload);
+    if (action.reason && reason) payload.reason = reason;
+    var campaignId = campaignDetailState.campaign.campaign_id;
+    campaignDetailState.busy = true;
+    $("#campaign-state-form").attr("aria-busy", "true").find("button, select, textarea, input").prop("disabled", true);
+    $("#campaign-state-confirm").text("Processing...");
+    setCampaignMessage("#campaign-state-error", "");
+    api(action.path, payload, "POST")
+      .done(function (response) {
+        campaignDetailState.busy = false;
+        closeCampaignStateModal();
+        loadCampaignDetails(campaignId, action.label + " succeeded." + (response.run_id ? " Dagster run ID: " + response.run_id : ""));
+      })
+      .fail(function (xhr) {
+        setCampaignMessage("#campaign-state-error", campaignError(xhr) + " Refresh campaign details if its state changed.");
+        $("#campaign-state-error").trigger("focus");
+      })
+      .always(function () {
+        campaignDetailState.busy = false;
+        $("#campaign-state-form").attr("aria-busy", "false").find("button, select, textarea, input").prop("disabled", false);
+        $("#campaign-state-confirm").text(action.label);
+      });
+  }
 
   // ---- helpers ----
 
@@ -325,17 +454,13 @@ window.C360 = window.C360 || {};
     $("#campaign-details-action-hint").toggleClass("hidden", !message).text(message || "");
   }
 
-  function setCampaignActionBusy(selector, busy, busyText, idleText) {
-    var $button = $(selector);
-    $button.prop("disabled", busy).toggleClass("opacity-60 cursor-wait", busy);
-    $button.find("span").last().text(busy ? busyText : idleText);
-  }
-
   function campaignStatusPresentation(status) {
     var key = String(status || "Draft").trim().toLowerCase();
     var presentations = {
       draft: { label: "Draft", icon: "bi-file-earmark-text", classes: "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200" },
       active: { label: "Active", icon: "bi-play-circle-fill", classes: "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200" },
+      running: { label: "Running", icon: "bi-play-circle-fill", classes: "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200" },
+      failed: { label: "Failed", icon: "bi-exclamation-circle-fill", classes: "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200" },
       paused: { label: "Paused", icon: "bi-pause-circle-fill", classes: "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200" },
       completed: { label: "Completed", icon: "bi-check-circle-fill", classes: "bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200" },
       cancelled: { label: "Cancelled", icon: "bi-x-circle-fill", classes: "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200" }
@@ -360,8 +485,9 @@ window.C360 = window.C360 || {};
   }
 
   function workflowProfileValue(value) {
+    if (value == null || value === "") return null;
     var number = Number(value);
-    return Number.isFinite(number) ? number : 0;
+    return Number.isFinite(number) ? number : null;
   }
 
   function workflowProfile(profile, index) {
@@ -371,6 +497,7 @@ window.C360 = window.C360 || {};
     var pushTokens = profile.push_tokens && typeof profile.push_tokens === "object"
       ? profile.push_tokens
       : {};
+    var preferences = profile.communication_preferences || {};
     var lastActivity = profile.last_activity_at ? Date.parse(profile.last_activity_at) : NaN;
     var recency = Number.isFinite(lastActivity)
       ? Math.max(0, Math.floor((Date.now() - lastActivity) / 86400000))
@@ -381,12 +508,17 @@ window.C360 = window.C360 || {};
     return {
       id: index + 1,
       name: displayName,
-      score: workflowProfileValue(profile.engagement_score),
+      engagement_score: workflowProfileValue(profile.engagement_score),
+      churn_probability: workflowProfileValue(profile.churn_probability),
+      lead_conversion_probability: workflowProfileValue(profile.lead_conversion_probability),
+      historical_clv: workflowProfileValue(profile.historical_clv),
+      latest_nps_score: workflowProfileValue(profile.latest_nps_score),
+      average_csat: workflowProfileValue(profile.average_csat),
       cart: workflowProfileValue(attributes.cart_value),
       recency: recency,
-      push: Object.keys(pushTokens).length ? 1 : 0,
-      sms: profile.phone_number ? 1 : 0,
-      email: profile.email ? 1 : 0,
+      push: Object.keys(pushTokens).length && preferences.push_opt_in === true ? 1 : 0,
+      sms: profile.phone_number && preferences.sms_opt_in === true ? 1 : 0,
+      email: profile.email && preferences.email_opt_in === true ? 1 : 0,
       tags: Array.isArray(profile.segmentation_tags) ? profile.segmentation_tags.slice() : []
     };
   }
@@ -771,6 +903,13 @@ window.C360 = window.C360 || {};
     var workflow;
     try {
       workflow = studioApi.getWorkflow();
+      var problems = studioApi.validate().filter(function (issue) {
+        return issue.level === "error";
+      });
+      if (problems.length) {
+        setCampaignMessage("#campaign-editor-error", problems.map(function (issue) { return issue.msg; }).join("; "));
+        return;
+      }
     } catch (error) {
       setCampaignMessage("#campaign-editor-error", "The customer journey workflow is not ready: " + error.message);
       return;
@@ -878,16 +1017,67 @@ window.C360 = window.C360 || {};
   }
 
   function renderDetailHistory(history) {
+    campaignDetailState.history = history || [];
     var $history = $("#campaign-details-history").empty();
-    (history || []).forEach(function (entry) {
-      var label = entry.type === "review" ? String(entry.decision || "review") : String(entry.action || "audit");
-      var detail = entry.reason || entry.after_data || entry.before_data || "";
-      $("<li>").addClass("border-l-2 border-indigo-200 pl-4 text-sm text-slate-700").append($("<div>").addClass("font-semibold text-slate-900").text(label), $("<div>").addClass("mt-1 whitespace-pre-wrap text-xs text-slate-500").text(typeof detail === "string" ? detail : JSON.stringify(detail)), $("<time>").addClass("mt-1 block text-xs text-slate-400").text(entry.created_at || "")).appendTo($history);
+    var filter = $("#campaign-history-filter").val() || "all";
+    var entries = campaignDetailState.history.slice().sort(function (a, b) {
+      return (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
+    }).filter(function (entry) {
+      return filter === "all" || (filter === "review" ? entry.type === "review" : campaignHistoryTransitions(entry).length > 0);
     });
-    if (!$history.children().length) $("<li>").addClass("text-sm text-slate-500").text("No history recorded.").appendTo($history);
+    entries.forEach(function (entry) {
+      var $item = $("<li>").addClass("rounded-xl border border-slate-200 border-l-4 border-l-indigo-400 bg-slate-50/50 p-4 text-sm text-slate-700");
+      var label = entry.type === "review" ? "Campaign " + String(entry.decision || "review").toLowerCase() : String(entry.action || "Campaign updated").replace(/_/g, " ");
+      $("<h3>").addClass("font-semibold text-slate-900").text(label).appendTo($item);
+      campaignHistoryTransitions(entry).forEach(function (transition) {
+        $("<p>").addClass("mt-2 text-sm font-medium text-indigo-800").text(transition).appendTo($item);
+      });
+      if (entry.reason) $("<p>").addClass("mt-2 whitespace-pre-wrap text-sm").text(entry.reason).appendTo($item);
+      var actor = entry.reviewer_id || entry.user_id;
+      $("<p>").addClass("mt-2 break-all text-xs text-slate-500").text(actor ? "Actor: " + actor : "Actor not recorded").appendTo($item);
+      var at = new Date(entry.created_at);
+      $("<time>").attr("datetime", entry.created_at || "").addClass("mt-1 block text-xs text-slate-500").text(entry.created_at && !isNaN(at.getTime()) ? at.toLocaleString() : "Time not recorded").appendTo($item);
+      if (entry.before_data || entry.after_data) {
+        $("<details>").addClass("mt-3 text-xs").append(
+          $("<summary>").addClass("cursor-pointer font-semibold text-slate-600").text("Audit details"),
+          $("<pre>").addClass("mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-white p-3").text(JSON.stringify({ before: entry.before_data, after: entry.after_data }, null, 2))
+        ).appendTo($item);
+      }
+      $item.appendTo($history);
+    });
+    $("#campaign-history-count").text(entries.length + " of " + campaignDetailState.history.length + " recorded events");
+    if (!entries.length) $("<li>").addClass("rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500").text(filter === "all" ? "No campaign history has been recorded yet." : "No recorded events match this filter.").appendTo($history);
   }
 
-  function renderCampaignReport(campaign, response, isAggregateFallback) {
+  function campaignHistoryTransitions(entry) {
+    if (entry.type === "review") {
+      var decision = String(entry.decision || "").toLowerCase();
+      if (decision === "approve") return ["Campaign approval: InReview \u2192 Approved"];
+      if (decision === "reject") return ["Campaign approval: InReview \u2192 Rejected"];
+      return [];
+    }
+    var before = entry.before_data || {};
+    var after = entry.after_data || {};
+    return [["approval_status", "Campaign approval"], ["status", "Execution"], ["workflow_version", "Workflow version"]].filter(function (field) {
+      return Object.prototype.hasOwnProperty.call(after, field[0]) && before[field[0]] !== after[field[0]];
+    }).map(function (field) {
+      return field[1] + ": " + (before[field[0]] == null ? "Not recorded" : before[field[0]]) + " \u2192 " + after[field[0]];
+    });
+  }
+
+  function refreshCampaignHistory() {
+    if (!campaignDetailState.campaign) return;
+    var id = campaignDetailState.campaign.campaign_id;
+    $("#btn-campaign-history-refresh").prop("disabled", true).text("Refreshing...");
+    setCampaignMessage("#campaign-history-error", "");
+    api("/campaigns/" + encodeURIComponent(id) + "/history")
+      .done(function (history) {
+        if (campaignDetailState.campaign && campaignDetailState.campaign.campaign_id === id) renderDetailHistory(history);
+      })
+      .fail(function (xhr) { setCampaignMessage("#campaign-history-error", campaignError(xhr)); })
+      .always(function () { $("#btn-campaign-history-refresh").prop("disabled", false).text("Refresh history"); });
+  }
+  function renderCampaignReport(campaign, response) {
     var summary = response.summary || response.metrics || response;
     var row = summary.campaign_id ? summary : (response.items || []).filter(function (item) { return item.campaign_id === campaign.campaign_id; })[0] || {};
     $("#campaign-report-spend").text(fmtVnd(row.total_spend));
@@ -898,30 +1088,80 @@ window.C360 = window.C360 || {};
     (response.daily || response.daily_metrics || []).forEach(function (item) {
       $("<tr>").append($("<td>").addClass("py-3 pr-4 text-slate-700").text(item.report_date || "-"), $("<td>").addClass("py-3 pr-4").text(fmtVnd(item.spend)), $("<td>").addClass("py-3 pr-4").text(fmt.int(item.impressions || 0)), $("<td>").addClass("py-3 pr-4").text(fmt.int(item.clicks || 0)), $("<td>").addClass("py-3 pr-4").text(fmt.int(item.conversions || 0)), $("<td>").addClass("py-3").text(fmtVnd(item.revenue_estimated))).appendTo($daily);
     });
-    if (!$daily.children().length && row.campaign_id) {
-      $("<tr>").append($("<td>").addClass("py-3 pr-4 text-slate-700").text("Lifetime aggregate"), $("<td>").addClass("py-3 pr-4").text(fmtVnd(row.total_spend)), $("<td>").addClass("py-3 pr-4").text(fmt.int(row.total_impressions || 0)), $("<td>").addClass("py-3 pr-4").text(fmt.int(row.total_clicks || 0)), $("<td>").addClass("py-3 pr-4").text(fmt.int(row.total_conversions || 0)), $("<td>").addClass("py-3").text(fmtVnd(row.total_revenue))).appendTo($daily);
-    }
+    if (!$daily.children().length) $("<tr>").append($("<td>").attr("colspan", 6).addClass("py-6 text-center text-slate-500").text("No performance data recorded for this date range.")).appendTo($daily);
     var warning = row.campaign_id && !row.total_conversions ? "No conversions are recorded. CPA must not be interpreted as positive performance." : "";
-    if (isAggregateFallback && ($("#campaign-report-start").val() || $("#campaign-report-end").val())) warning = "Daily date filtering is unavailable until the single-campaign report API is enabled. Showing lifetime aggregate data.";
     $("#campaign-report-warning").toggleClass("hidden", !warning).text(warning);
   }
 
   function loadCampaignReport(campaign) {
+    var request = ++campaignReportRequest;
+    var generation = campaignDetailGeneration;
     var params = {};
     if ($("#campaign-report-start").val()) params.start_date = $("#campaign-report-start").val();
     if ($("#campaign-report-end").val()) params.end_date = $("#campaign-report-end").val();
+    if (params.start_date && params.end_date && params.end_date < params.start_date) {
+      setCampaignMessage("#campaign-details-error", "End date cannot be before start date.");
+      return;
+    }
     api("/campaigns/" + encodeURIComponent(campaign.campaign_id) + "/report", params).done(function (response) {
-      renderCampaignReport(campaign, response, false);
+      if (request !== campaignReportRequest || generation !== campaignDetailGeneration) return;
+      renderCampaignReport(campaign, response);
     }).fail(function (xhr) {
-      if (!xhr || xhr.status !== 404) {
-        setCampaignMessage("#campaign-details-error", campaignError(xhr));
+      if (request !== campaignReportRequest || generation !== campaignDetailGeneration) return;
+      setCampaignMessage("#campaign-details-error", campaignError(xhr));
+    });
+  }
+
+  function applyCampaignWorkflowStudio($studio, options) {
+    var studio = $studio.data("workflowStudio");
+    studio.setSegment(options.segments[0]);
+    var result = studio.setWorkflow(options.workflow);
+    if (!result.ok) {
+      throw new Error(
+        "Could not refresh the saved workflow: " +
+        result.issues.map(function (issue) { return issue.msg; }).join("; ")
+      );
+    }
+  }
+
+  function mountCampaignWorkflowStudio($studio, options) {
+    var studio = $studio.data("workflowStudio");
+    if (studio) {
+      if (!$studio.data("workflowStudioReady")) {
+        $studio.data("workflowStudioPendingOptions", options);
         return;
       }
-      var fallbackParams = { tenant_id: tenantId(), search: campaign.campaign_code || campaign.name, page: 1, page_size: 100 };
-      api("/campaigns/analytics", fallbackParams).done(function (response) {
-        renderCampaignReport(campaign, response, true);
-      }).fail(function (fallbackXhr) { setCampaignMessage("#campaign-details-error", campaignError(fallbackXhr)); });
+      applyCampaignWorkflowStudio($studio, options);
+      return;
+    }
+    $studio.removeData("workflowStudioPendingOptions");
+    $studio.data("workflowStudioReady", false);
+    var mount = {};
+    $studio.data("workflowStudioMount", mount);
+    var mountedOptions = $.extend({}, options, {
+      onReady: function () {
+        if ($studio.data("workflowStudioMount") !== mount) return;
+        $studio.data("workflowStudioReady", true);
+        var pendingOptions = $studio.data("workflowStudioPendingOptions");
+        if (!pendingOptions) return;
+        $studio.removeData("workflowStudioPendingOptions");
+        try {
+          applyCampaignWorkflowStudio($studio, pendingOptions);
+        } catch (error) {
+          $studio.removeData("workflowStudio").removeData("workflowStudioMount").empty();
+          renderCampaignWorkflowError($studio, error.message);
+        }
+      },
     });
+    $studio.workflowStudio(mountedOptions);
+  }
+
+  function renderCampaignWorkflowError($studio, message) {
+    $("<div>")
+      .attr("role", "alert")
+      .addClass("rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700")
+      .text(message)
+      .appendTo($studio);
   }
 
   var experimentSegments = [];
@@ -1065,7 +1305,10 @@ window.C360 = window.C360 || {};
     }).fail(function (xhr) { showExperimentError(campaignError(xhr)); });
   }
 
-  function loadCampaignDetails(campaignId) {
+  function loadCampaignDetails(campaignId, successMessage) {
+    var generation = ++campaignDetailGeneration;
+    var selectedPanel = $(".campaign-details-tab[aria-selected='true']").data("panel") || "overview";
+    campaignDetailState.campaign = null;
     setCampaignMessage("#campaign-details-error", "");
     setCampaignMessage("#campaign-details-success", "");
     $("#campaign-details-loading").removeClass("hidden");
@@ -1076,28 +1319,34 @@ window.C360 = window.C360 || {};
       api("/campaigns/" + encodeURIComponent(campaignId) + "/workflow")
     )
       .done(function (campaignResult, historyResult, workflowResult) {
+        if (generation !== campaignDetailGeneration) return;
         var campaign = campaignResult[0];
         renderDetailMetadata(campaign);
         var savedWorkflow = workflowResult[0];
         var workflow = savedWorkflow && savedWorkflow.workflow;
         var segmentId = campaign.segment_id ||
           (workflow && workflow.root && workflow.root.config && workflow.root.config.segment_id);
-        var $workflowStudio = $("#campaign-details-workflow-studio").empty();
+        var $workflowStudio = $("#campaign-details-workflow-studio");
+        var existingWorkflowStudio = $workflowStudio.data("workflowStudio");
+        $("#campaign-details-workflow-studio").attr("aria-busy", "false");
         $("#campaign-details-workflow-version").empty();
         if (!workflow) {
+          if (existingWorkflowStudio) $workflowStudio.removeData("workflowStudio").removeData("workflowStudioMount");
+          $workflowStudio.empty();
           $("<div>")
             .attr("role", "status")
             .addClass("rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500")
             .text("No customer journey workflow has been saved for this campaign yet.")
             .appendTo($workflowStudio);
         } else if (!workflow.root || !segmentId) {
-          $("<div>")
-            .attr("role", "alert")
-            .addClass("rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700")
-            .text("The saved customer journey workflow is missing its audience or has an invalid structure.")
-            .appendTo($workflowStudio);
+          if (existingWorkflowStudio) $workflowStudio.removeData("workflowStudio").removeData("workflowStudioMount");
+          $workflowStudio.empty();
+          renderCampaignWorkflowError(
+            $workflowStudio,
+            "The saved customer journey workflow is missing its audience or has an invalid structure."
+          );
         } else {
-          $workflowStudio.workflowStudio({
+          var studioOptions = {
             title: campaign.name || "Customer Engagement Workflow",
             workflow: workflow,
             segmentId: String(segmentId),
@@ -1110,8 +1359,14 @@ window.C360 = window.C360 || {};
             readOnly: true,
             loadProfiles: function () {
               return [];
-            }
-          });
+            },
+          };
+          try {
+            mountCampaignWorkflowStudio($workflowStudio, studioOptions);
+          } catch (error) {
+            $workflowStudio.removeData("workflowStudio").removeData("workflowStudioMount").empty();
+            renderCampaignWorkflowError($workflowStudio, error.message);
+          }
           var workflowVersionLabel = "Version " + savedWorkflow.workflow_version;
           if (savedWorkflow.approval_status) {
             workflowVersionLabel += " | " + savedWorkflow.approval_status;
@@ -1130,36 +1385,18 @@ window.C360 = window.C360 || {};
         var workflowStatus = workflowApprovalStatus(savedWorkflow);
         var workflowApproved = isWorkflowApproved(savedWorkflow);
         var isAdmin = canReviewCampaign();
-        var canReview = isAdmin && approvalStatus === "InReview";
-        var canStart = isAdmin &&
-          approvalStatus === "Approved" &&
-          workflowApproved &&
-          String(campaign.status || "").toLowerCase() !== "running" &&
-          String(campaign.status || "").toLowerCase() !== "completed";
+        campaignDetailState.campaign = campaign;
+        campaignDetailState.workflow = savedWorkflow;
+        campaignDetailState.actions = campaignStateActions(campaign, savedWorkflow, isAdmin);
+        $("#campaign-state-approval").text(approvalStatus);
+        $("#campaign-state-workflow").text((savedWorkflow.workflow_version != null ? "v" + savedWorkflow.workflow_version + " - " : "") + (workflowStatus || "Not saved"));
+        $("#campaign-state-execution").text(campaign.status || "Draft");
         $("#campaign-details-approval").text(approvalStatus).attr("class", "text-xs font-semibold rounded-md px-2.5 py-1.5 bg-indigo-50 text-indigo-700");
-        $("#btn-campaign-details-submit").toggleClass("hidden", approvalStatus !== "Draft");
-        $("#btn-campaign-details-approve-workflow").toggleClass("hidden", !(
-          isAdmin &&
-          workflowStatus === "InReview" &&
-          savedWorkflow &&
-          savedWorkflow.workflow_id &&
-          savedWorkflow.workflow_version != null
-        ));
-        $("#btn-campaign-details-reject-workflow").toggleClass("hidden", !(
-          isAdmin &&
-          workflowStatus === "InReview" &&
-          savedWorkflow &&
-          savedWorkflow.workflow_id &&
-          savedWorkflow.workflow_version != null
-        ));
-        $("#btn-campaign-details-approve").toggleClass("hidden", !canReview || !workflowApproved);
-        $("#btn-campaign-details-reject").toggleClass("hidden", !canReview);
-        $("#btn-campaign-details-start").toggleClass("hidden", !canStart);
         if (approvalStatus === "Draft") {
           setCampaignActionHint("Save the campaign, then submit it for approval. A tenant admin must approve it before it can run.");
         } else if (workflowStatus === "InReview") {
           setCampaignActionHint("The workflow is waiting for admin review. Approve the workflow first, then approve the campaign.");
-        } else if (isAdmin && workflowStatus === "Approved") {
+        } else if (isAdmin && workflowStatus === "Approved" && approvalStatus === "InReview") {
           setCampaignActionHint("Workflow approved. Continue with campaign approval when the campaign is InReview.");
         } else if (approvalStatus === "InReview") {
           setCampaignActionHint("The campaign is waiting for admin approval. Starting it is available only after approval.");
@@ -1167,63 +1404,31 @@ window.C360 = window.C360 || {};
           setCampaignActionHint("The campaign is approved, but its pinned workflow is not approved yet.");
         } else if (approvalStatus === "Approved" && String(campaign.status || "").toLowerCase() === "running") {
           setCampaignActionHint("Dagster is running this campaign. Monitor the run in the Dagster UI.");
+        } else if (approvalStatus === "Rejected" || workflowStatus === "Rejected") {
+          setCampaignActionHint("A review was rejected. Read the decision in history, then edit and save a revised campaign or workflow before review.");
+        } else if (String(campaign.status || "").toLowerCase() === "completed") {
+          setCampaignActionHint("Campaign execution is complete. Admins can use Manage state to fully replay it; messages may be sent again. Check audience-sync child runs separately.");
+        } else if (approvalStatus === "Approved" && workflowApproved) {
+          setCampaignActionHint("Campaign and pinned workflow are approved. Open Manage state to start or retry execution.");
         } else {
           setCampaignActionHint("");
         }
         $("#campaign-details-loading").addClass("hidden");
         $("#campaign-details-content").removeClass("hidden");
+        activateCampaignDetailsTab(selectedPanel);
+        if (successMessage) setCampaignMessage("#campaign-details-success", successMessage);
+        $("#btn-campaign-details-edit").toggleClass("hidden", String(campaign.status || "").toLowerCase() === "running");
         $("#campaign-experiment-form").attr("data-campaign-id", campaignId);
         $("#btn-campaign-details-edit").off("click.c360campaign").on("click.c360campaign", function () { C360.router.navigate("/campaigns/" + encodeURIComponent(campaignId) + "/edit"); });
         $("#btn-campaign-report-refresh").off("click.c360campaign").on("click.c360campaign", function () { loadCampaignReport(campaign); });
-        $("#btn-campaign-details-submit").off("click.c360campaign").on("click.c360campaign", function () {
-          if (!window.confirm("Submit this campaign for admin approval?")) return;
-          setCampaignActionBusy("#btn-campaign-details-submit", true, "Submitting...", "Submit for approval");
-          api("/campaigns/" + encodeURIComponent(campaignId) + "/submit-for-approval", {}, "POST")
-            .done(function () { loadCampaignDetails(campaignId); setCampaignMessage("#campaign-details-success", "Campaign submitted for approval."); })
-            .fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); })
-            .always(function () { setCampaignActionBusy("#btn-campaign-details-submit", false, "Submitting...", "Submit for approval"); });
-        });
-        $("#btn-campaign-details-approve-workflow").off("click.c360campaign").on("click.c360campaign", function () {
-          if (!window.confirm("Approve this workflow version?")) return;
-          setCampaignActionBusy("#btn-campaign-details-approve-workflow", true, "Approving...", "Approve workflow");
-          api("/workflows/" + encodeURIComponent(savedWorkflow.workflow_id) + "/versions/" + encodeURIComponent(savedWorkflow.workflow_version) + "/review", { decision: "approve" }, "POST")
-            .done(function () { loadCampaignDetails(campaignId); })
-            .fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); })
-            .always(function () { setCampaignActionBusy("#btn-campaign-details-approve-workflow", false, "Approving...", "Approve workflow"); });
-        });
-        $("#btn-campaign-details-reject-workflow").off("click.c360campaign").on("click.c360campaign", function () {
-          var reason = window.prompt("Reason for rejecting the workflow:");
-          if (reason === null) return;
-          setCampaignActionBusy("#btn-campaign-details-reject-workflow", true, "Rejecting...", "Reject workflow");
-          api("/workflows/" + encodeURIComponent(savedWorkflow.workflow_id) + "/versions/" + encodeURIComponent(savedWorkflow.workflow_version) + "/review", { decision: "reject", reason: reason }, "POST")
-            .done(function () { loadCampaignDetails(campaignId); })
-            .fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); })
-            .always(function () { setCampaignActionBusy("#btn-campaign-details-reject-workflow", false, "Rejecting...", "Reject workflow"); });
-        });
-        $("#btn-campaign-details-approve").off("click.c360campaign").on("click.c360campaign", function () {
-          if (!window.confirm("Approve this campaign for activation?")) return;
-          setCampaignActionBusy("#btn-campaign-details-approve", true, "Approving...", "Approve campaign");
-          api("/campaigns/" + encodeURIComponent(campaignId) + "/approve", {}, "POST")
-            .done(function () { loadCampaignDetails(campaignId); })
-            .fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); })
-            .always(function () { setCampaignActionBusy("#btn-campaign-details-approve", false, "Approving...", "Approve campaign"); });
-        });
-        $("#btn-campaign-details-reject").off("click.c360campaign").on("click.c360campaign", function () { var reason = window.prompt("Reason for rejection:"); if (reason === null) return; api("/campaigns/" + encodeURIComponent(campaignId) + "/reject", { reason: reason }, "POST").done(function () { loadCampaignDetails(campaignId); }).fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); }); });
-        $("#btn-campaign-details-start").off("click.c360campaign").on("click.c360campaign", function () {
-          if (!window.confirm("Start this campaign now? Dagster will execute the saved workflow for the selected audience.")) return;
-          setCampaignActionBusy("#btn-campaign-details-start", true, "Starting...", "Start campaign");
-          api("/admin/campaigns/" + encodeURIComponent(campaignId) + "/activate", {}, "POST")
-            .done(function (response) {
-              loadCampaignDetails(campaignId);
-              setCampaignMessage("#campaign-details-success", "Campaign submitted to Dagster. Run ID: " + response.run_id);
-            })
-            .fail(function (xhr) { setCampaignMessage("#campaign-details-error", campaignError(xhr)); })
-            .always(function () { setCampaignActionBusy("#btn-campaign-details-start", false, "Starting...", "Start campaign"); });
-        });
         loadCampaignReport(campaign);
         loadExperimentSegments(function () { resetExperimentForm(); loadCampaignExperiments(campaignId); });
       })
-      .fail(function (xhr) { $("#campaign-details-loading").addClass("hidden"); setCampaignMessage("#campaign-details-error", campaignError(xhr)); });
+      .fail(function (xhr) {
+        if (generation !== campaignDetailGeneration) return;
+        $("#campaign-details-loading").addClass("hidden");
+        setCampaignMessage("#campaign-details-error", campaignError(xhr));
+      });
   }
 
   function activateCampaignDetailsTab(panel) {
@@ -1231,6 +1436,7 @@ window.C360 = window.C360 || {};
       var selected = $(this).data("panel") === panel;
       $(this)
         .attr("aria-selected", selected ? "true" : "false")
+        .attr("tabindex", selected ? "0" : "-1")
         .toggleClass("border-indigo-600 text-indigo-700", selected)
         .toggleClass("border-transparent text-slate-500", !selected);
     });
@@ -1239,8 +1445,48 @@ window.C360 = window.C360 || {};
   }
 
   function bindWorkspaceEvents() {
+    campaignDetailGeneration += 1;
+    campaignDetailState.campaign = null;
     var $doc = $(document);
     $doc.off(".c360campaignworkspace");
+    $doc.on("click.c360campaignworkspace", "#btn-campaign-manage-state", function () { openCampaignStateModal(); });
+    $doc.on("click.c360campaignworkspace", "#btn-campaign-details-refresh", function () {
+      if (campaignDetailState.campaign && !campaignDetailState.busy) loadCampaignDetails(campaignDetailState.campaign.campaign_id);
+    });
+    $("#campaign-details-tab-history").text("State history").attr("data-assistant-label", "State history");
+    $doc.on("click.c360campaignworkspace", "[data-campaign-state-close]", closeCampaignStateModal);
+    $doc.on("keydown.c360campaignworkspace", "#campaign-state-modal", function (event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeCampaignStateModal();
+      }
+    });
+    $("#campaign-state-modal").off("cancel.c360campaign").on("cancel.c360campaign", function (event) {
+      event.preventDefault();
+      closeCampaignStateModal();
+    });
+    $doc.on("change.c360campaignworkspace", "#campaign-state-action", updateCampaignStateAction);
+    $doc.on("change.c360campaignworkspace", "#campaign-state-restart-ack", updateCampaignStateAction);
+    $doc.on("submit.c360campaignworkspace", "#campaign-state-form", submitCampaignState);
+    $doc.on("click.c360campaignworkspace", "#btn-campaign-state-history", function () {
+      activateCampaignDetailsTab("history");
+      $("#campaign-details-tab-history").trigger("focus");
+    });
+    $doc.on("click.c360campaignworkspace", "#btn-campaign-history-refresh", refreshCampaignHistory);
+    $doc.on("change.c360campaignworkspace", "#campaign-history-filter", function () { renderDetailHistory(campaignDetailState.history); });
+    $doc.on("keydown.c360campaignworkspace", ".campaign-details-tab", function (event) {
+      var $tabs = $(".campaign-details-tab");
+      var index = $tabs.index(this);
+      if (event.key === "ArrowRight") index = (index + 1) % $tabs.length;
+      else if (event.key === "ArrowLeft") index = (index + $tabs.length - 1) % $tabs.length;
+      else if (event.key === "Home") index = 0;
+      else if (event.key === "End") index = $tabs.length - 1;
+      else return;
+      event.preventDefault();
+      var $tab = $tabs.eq(index);
+      activateCampaignDetailsTab($tab.data("panel"));
+      $tab.trigger("focus");
+    });
     $doc.on("click.c360campaignworkspace", "#btn-campaign-create", function () { C360.router.navigate("/campaigns/new/edit"); });
     $doc.on("click.c360campaignworkspace", "#btn-campaign-editor-back, #btn-campaign-editor-cancel, #btn-campaign-details-back", function () { C360.router.navigate("/campaigns"); });
     $doc.on("submit.c360campaignworkspace", "#campaign-editor-form", saveCampaignEditor);

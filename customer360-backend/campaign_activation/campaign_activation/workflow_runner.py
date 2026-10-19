@@ -29,7 +29,7 @@ from leo_customer360_dao.workflow.services import ChannelGateway, EventSource, P
 from leo_customer360_dao.workflow.models import DeliveryReceipt, OutboundMessage
 
 from .db import DB_SCHEMA, connect
-from .rls import set_tenant_context
+from .rls import lock_campaign_execution, set_tenant_context
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +38,15 @@ class CampaignWorkflowError(RuntimeError):
     """Raised when a campaign workflow cannot be executed safely."""
 
 
-def _workflow_sync_targets(workflow: dict[str, Any]) -> list[dict[str, str]]:
+def _workflow_sync_targets(
+    workflow: dict[str, Any], reached_node_ids: set[str],
+) -> list[dict[str, str]]:
     targets: dict[tuple[str, str], dict[str, str]] = {}
 
     def visit(node: Any) -> None:
         if not isinstance(node, dict):
             return
-        if node.get("type") == "run_data_synch_job":
+        if node.get("type") == "run_data_synch_job" and node.get("id") in reached_node_ids:
             config = node.get("config") or {}
             platform = str(config.get("platform") or "").strip().lower()
             audience_name = str(config.get("audience_name") or "").strip()[:255]
@@ -66,6 +68,8 @@ def _submit_audience_sync_jobs(
     campaign_id: str,
     segment_id: str,
     workflow: dict[str, Any],
+    reached_node_ids: set[str],
+    execution_id: str,
     log: Any,
 ) -> list[str]:
     """Activate each persisted audience-sync action once for this workflow run."""
@@ -74,7 +78,7 @@ def _submit_audience_sync_jobs(
     job_name = os.environ.get("DAGSTER_DATA_SYNCH_JOB_NAME", "data_synch_job")
     location = os.environ.get("DAGSTER_DATA_SYNCH_LOCATION_NAME", "data_synch")
     run_ids = []
-    for target in _workflow_sync_targets(workflow):
+    for target in _workflow_sync_targets(workflow, reached_node_ids):
         try:
             client = DagsterGraphQLClient(host, port_number=port)
             run_id = client.submit_job_execution(
@@ -91,6 +95,7 @@ def _submit_audience_sync_jobs(
                                 "audience_name": target["audience_name"],
                                 "dry_run": False,
                                 "batch_size": 1000,
+                                "execution_id": execution_id,
                             }
                         }
                     }
@@ -100,6 +105,7 @@ def _submit_audience_sync_jobs(
                     "campaign_id": campaign_id,
                     "platform": target["platform"],
                     "sync_type": "workflow_action",
+                    "execution_id": execution_id,
                 },
             )
         except Exception as exc:  # noqa: BLE001 - fail the workflow run on action submission failure.
@@ -124,35 +130,46 @@ class Connector:
 class WorkflowLedger:
     """Persist per-profile/node idempotency around provider calls."""
 
-    def __init__(self, connection, tenant_id: str, campaign_id: str, run_id: str | None):
+    def __init__(
+        self,
+        connection,
+        tenant_id: str,
+        campaign_id: str,
+        run_id: str | None,
+        execution_id: uuid.UUID,
+    ):
         self.connection = connection
         self.tenant_id = tenant_id
         self.campaign_id = campaign_id
         self.run_id = run_id
+        self.execution_id = execution_id
 
     def begin(self, profile_id: uuid.UUID, node_id: str, action_type: str, channel: str) -> bool:
         with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
             set_tenant_context(cursor, self.tenant_id)
             cursor.execute(
                 "SELECT pg_try_advisory_lock(hashtextextended(%s, 0)) AS acquired",
-                (f"{self.campaign_id}:{profile_id}:{node_id}",),
+                (f"{self.campaign_id}:{self.execution_id}:{profile_id}:{node_id}",),
             )
             if not cursor.fetchone()["acquired"]:
-                self.connection.commit()
-                return False
+                raise CampaignWorkflowError(f"Workflow action {node_id} is already executing")
             cursor.execute(
                 f"""
                 SELECT status
                 FROM {DB_SCHEMA}.crm_campaign_workflow_action_runs
                 WHERE campaign_id = %(campaign_id)s
+                  AND tenant_id = %(tenant_id)s
                   AND master_profile_id = %(profile_id)s
                   AND node_id = %(node_id)s
+                  AND execution_id = %(execution_id)s
                 FOR UPDATE
                 """,
                 {
                     "campaign_id": self.campaign_id,
+                    "tenant_id": self.tenant_id,
                     "profile_id": str(profile_id),
                     "node_id": node_id,
+                    "execution_id": str(self.execution_id),
                 },
             )
             row = cursor.fetchone()
@@ -161,7 +178,7 @@ class WorkflowLedger:
                 with self.connection.cursor() as cursor:
                     cursor.execute(
                         "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
-                        (f"{self.campaign_id}:{profile_id}:{node_id}",),
+                        (f"{self.campaign_id}:{self.execution_id}:{profile_id}:{node_id}",),
                     )
                 self.connection.commit()
                 return False
@@ -172,13 +189,17 @@ class WorkflowLedger:
                     SET status = 'Running', attempt_count = attempt_count + 1,
                         error_message = NULL, run_id = %(run_id)s, updated_at = now()
                     WHERE campaign_id = %(campaign_id)s
+                      AND tenant_id = %(tenant_id)s
                       AND master_profile_id = %(profile_id)s
                       AND node_id = %(node_id)s
+                      AND execution_id = %(execution_id)s
                     """,
                     {
                         "campaign_id": self.campaign_id,
+                        "tenant_id": self.tenant_id,
                         "profile_id": str(profile_id),
                         "node_id": node_id,
+                        "execution_id": str(self.execution_id),
                         "run_id": self.run_id,
                     },
                 )
@@ -186,14 +207,16 @@ class WorkflowLedger:
                 cursor.execute(
                     f"""
                     INSERT INTO {DB_SCHEMA}.crm_campaign_workflow_action_runs
-                        (tenant_id, campaign_id, master_profile_id, node_id,
+                        (tenant_id, campaign_id, execution_id, master_profile_id, node_id,
                          action_type, channel, run_id)
-                    VALUES (%(tenant_id)s, %(campaign_id)s, %(profile_id)s, %(node_id)s,
+                    VALUES (%(tenant_id)s, %(campaign_id)s, %(execution_id)s,
+                            %(profile_id)s, %(node_id)s,
                             %(action_type)s, %(channel)s, %(run_id)s)
                     """,
                     {
                         "tenant_id": self.tenant_id,
                         "campaign_id": self.campaign_id,
+                        "execution_id": str(self.execution_id),
                         "profile_id": str(profile_id),
                         "node_id": node_id,
                         "action_type": action_type,
@@ -223,8 +246,10 @@ class WorkflowLedger:
                     provider_message_id = %(provider_message_id)s,
                     error_message = %(error)s, updated_at = now()
                 WHERE campaign_id = %(campaign_id)s
+                  AND tenant_id = %(tenant_id)s
                   AND master_profile_id = %(profile_id)s
                   AND node_id = %(node_id)s
+                  AND execution_id = %(execution_id)s
                 """,
                 {
                     "status": status,
@@ -232,15 +257,17 @@ class WorkflowLedger:
                     "provider_message_id": provider_message_id,
                     "error": error,
                     "campaign_id": self.campaign_id,
+                    "tenant_id": self.tenant_id,
                     "profile_id": str(profile_id),
                     "node_id": node_id,
+                    "execution_id": str(self.execution_id),
                 },
             )
         self.connection.commit()
         with self.connection.cursor() as cursor:
             cursor.execute(
                 "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
-                (f"{self.campaign_id}:{profile_id}:{node_id}",),
+                (f"{self.campaign_id}:{self.execution_id}:{profile_id}:{node_id}",),
             )
         self.connection.commit()
 
@@ -250,6 +277,7 @@ class WorkflowGateway(ChannelGateway):
 
     channel = "unknown"
     action_type = "unknown"
+    provider_name = "unconfigured"
 
     def __init__(self, ledger: WorkflowLedger):
         self.ledger = ledger
@@ -263,8 +291,15 @@ class WorkflowGateway(ChannelGateway):
         try:
             receipt = self._send(message)
         except Exception as exc:  # provider failures are recorded per action
+            logger.error(
+                "Workflow delivery failed: channel=%s node=%s error_type=%s; see action ledger",
+                self.channel, message.node_id, type(exc).__name__,
+            )
             self.ledger.finish(message.profile_id, message.node_id, "Failed", error=str(exc)[:2000])
-            return DeliveryReceipt(status="failed", detail=str(exc)[:500])
+            return DeliveryReceipt(
+                status="failed",
+                detail=f"provider call failed ({type(exc).__name__}); see action ledger",
+            )
         ledger_status = {
             "sent": "Sent",
             "skipped": "Skipped",
@@ -282,6 +317,11 @@ class WorkflowGateway(ChannelGateway):
     def _send(self, message: OutboundMessage) -> DeliveryReceipt:
         raise NotImplementedError
 
+    def _unconfigured(self, message: OutboundMessage) -> DeliveryReceipt:
+        detail = f"{self.channel} provider {message.provider or ''} not configured".strip()
+        logger.info("Workflow action skipped: node=%s %s", message.node_id, detail)
+        return DeliveryReceipt(status="skipped", detail=detail)
+
 
 class MockWorkflowGateway(WorkflowGateway):
     provider_name = "workflow_mock"
@@ -294,13 +334,16 @@ class EmailWorkflowGateway(WorkflowGateway):
     channel = "email"
     action_type = "email"
 
-    def __init__(self, ledger: WorkflowLedger, connector: Connector):
+    def __init__(self, ledger: WorkflowLedger, connector: Connector | None):
         super().__init__(ledger)
         self.connector = connector
-        self.provider_name = connector.provider or "mock"
+        self.provider_name = connector.provider if connector else "unconfigured"
 
     def _send(self, message: OutboundMessage) -> DeliveryReceipt:
+        if self.connector is None:
+            return self._unconfigured(message)
         if self.provider_name == "mock":
+            logger.info("Workflow mock action: channel=email node=%s", message.node_id)
             return DeliveryReceipt(status="sent", provider_id=f"workflow-email-mock-{uuid.uuid4()}")
         if self.provider_name != "smtp":
             raise CampaignWorkflowError(f"Unsupported email workflow provider {self.provider_name!r}")
@@ -318,8 +361,9 @@ class EmailWorkflowGateway(WorkflowGateway):
         with smtplib.SMTP(host, port, timeout=30) as server:
             if use_tls:
                 server.starttls(context=ssl.create_default_context())
-            if config.get("smtp_username") and config.get("smtp_password"):
-                server.login(str(config["smtp_username"]), str(config["smtp_password"]))
+            password = config.get("password") or config.get("smtp_password")
+            if config.get("smtp_username") and password:
+                server.login(str(config["smtp_username"]), str(password))
             server.send_message(email)
         return DeliveryReceipt(status="sent", provider_id=f"smtp-{uuid.uuid4()}")
 
@@ -327,16 +371,19 @@ class EmailWorkflowGateway(WorkflowGateway):
 class WebhookWorkflowGateway(WorkflowGateway):
     """SMS/web-push gateway for configured webhook or OneSignal providers."""
 
-    def __init__(self, ledger: WorkflowLedger, channel: str, connector: Connector, tokens: dict[str, list[str]]):
+    def __init__(self, ledger: WorkflowLedger, channel: str, connector: Connector | None, tokens: dict[str, list[str]]):
         super().__init__(ledger)
         self.channel = channel
         self.action_type = channel
         self.connector = connector
         self.tokens = tokens
-        self.provider_name = connector.provider or "mock"
+        self.provider_name = connector.provider if connector else "unconfigured"
 
     def _send(self, message: OutboundMessage) -> DeliveryReceipt:
+        if self.connector is None:
+            return self._unconfigured(message)
         if self.provider_name == "mock":
+            logger.info("Workflow mock action: channel=%s node=%s", self.channel, message.node_id)
             return DeliveryReceipt(status="sent", provider_id=f"workflow-{self.channel}-mock-{uuid.uuid4()}")
         config = {**self.connector.config, **self.connector.credentials}
         if self.provider_name == "onesignal" and self.channel == "push":
@@ -383,7 +430,7 @@ class NotificationWorkflowGateway(WorkflowGateway):
     def __init__(
         self,
         ledger: WorkflowLedger,
-        connectors: dict[str, Connector],
+        connectors: dict[str, Connector | None],
         tokens: dict[str, list[str]],
     ):
         super().__init__(ledger)
@@ -397,9 +444,10 @@ class NotificationWorkflowGateway(WorkflowGateway):
         provider = message.provider or "sms"
         connector = self.connectors.get(provider)
         if connector is None:
-            raise CampaignWorkflowError(f"Notification provider {provider!r} is not configured")
-        provider_name = connector.provider or "mock"
+            return self._unconfigured(message)
+        provider_name = connector.provider
         if provider_name == "mock":
+            logger.info("Workflow mock action: channel=notification provider=%s node=%s", provider, message.node_id)
             return DeliveryReceipt(
                 status="sent",
                 provider_id=f"workflow-{provider}-mock-{uuid.uuid4()}",
@@ -497,7 +545,7 @@ class DatabaseEventSource(EventSource):
     def occurs(self, profile, event: str, start_hours: float, limit_hours: float) -> float | None:
         start = self.started_at + timedelta(hours=start_hours)
         end = start + timedelta(hours=limit_hours)
-        with self.connection.cursor() as cursor:
+        with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
             set_tenant_context(cursor, self.tenant_id)
             cursor.execute(
                 f"""
@@ -532,7 +580,7 @@ def _load_connector(
     tenant_id: str,
     connector_type: str,
     provider: str | None = None,
-) -> Connector:
+) -> Connector | None:
     provider_clause = ""
     params = {"tenant_id": tenant_id, "connector_type": connector_type}
     if provider:
@@ -552,10 +600,12 @@ def _load_connector(
         params,
     )
     row = cursor.fetchone()
+    if row is None:
+        return None
     return Connector(
-        provider=str((row or {}).get("provider") or "mock").lower(),
-        config=dict((row or {}).get("config") or {}),
-        credentials=dict((row or {}).get("credentials") or {}),
+        provider=str(row["provider"]).lower(),
+        config=dict(row.get("config") or {}),
+        credentials=dict(row.get("credentials") or {}),
     )
 
 
@@ -563,7 +613,9 @@ def _profile_from_row(row: dict[str, Any]) -> CdpMasterProfile:
     return CdpMasterProfile(**dict(row))
 
 
-def _set_campaign_status(connection, tenant_id: str, campaign_id: str, status: str) -> None:
+def _set_campaign_status(
+    connection, tenant_id: str, campaign_id: str, status: str, *, execution_id: str,
+) -> None:
     with connection.cursor() as cursor:
         set_tenant_context(cursor, tenant_id)
         cursor.execute(
@@ -572,8 +624,13 @@ def _set_campaign_status(connection, tenant_id: str, campaign_id: str, status: s
             SET status = %(status)s
             WHERE tenant_id = %(tenant_id)s
               AND campaign_id = %(campaign_id)s
+              AND workflow_execution_id = %(execution_id)s
+              AND status IN ('Running', 'Failed')
             """,
-            {"status": status, "tenant_id": tenant_id, "campaign_id": campaign_id},
+            {
+                "status": status, "tenant_id": tenant_id, "campaign_id": campaign_id,
+                "execution_id": execution_id,
+            },
         )
     connection.commit()
 
@@ -588,7 +645,7 @@ def _iter_profile_rows(connection, tenant_id: str, segment_tag: str, batch_size:
                 SELECT p.master_profile_id, p.tenant_id, p.full_name, p.first_name, p.last_name,
                        p.email, p.phone_number, p.push_tokens, p.communication_preferences,
                        p.segmentation_tags, p.domain, p.engagement_score,
-                       p.churn_probability, p.lead_conversion_probability, p.historical_clv,
+                       p.churn_probability, p.lead_conversion_probability, p.historical_clv, p.predictive_clv,
                        p.latest_nps_score, p.average_csat, p.overall_sentiment_score,
                        p.profile_completeness_score, p.identity_confidence_score,
                        p.status_code
@@ -622,9 +679,16 @@ def run_campaign_workflow(
     tenant_id: str,
     campaign_id: str,
     run_id: str | None = None,
+    execution_id: str | None = None,
     batch_size: int = 500,
 ) -> dict[str, Any]:
     """Execute an approved campaign workflow for its tenant-owned segment."""
+    tenant_id = str(uuid.UUID(str(tenant_id)))
+    campaign_id = str(uuid.UUID(str(campaign_id)))
+    if execution_id is not None:
+        execution_id = str(uuid.UUID(str(execution_id)))
+    if not 1 <= batch_size <= 100_000:
+        raise ValueError("batch_size must be between 1 and 100000")
     conn = connect()
     started_at = datetime.now(timezone.utc)
     summary = {
@@ -633,34 +697,63 @@ def run_campaign_workflow(
         "profiles": 0,
         "errors": 0,
         "sent": 0,
+        "skipped": 0,
         "applied": 0,
         "data_sync_run_ids": [],
     }
+    summary["execution_id"] = None
+    campaign_loaded = False
     try:
+        lock_campaign_execution(conn, tenant_id, campaign_id, wait=True)
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             set_tenant_context(cursor, tenant_id)
             cursor.execute(
                 f"""
                 SELECT c.campaign_id, c.approval_status, c.segment_id,
+                       c.workflow_execution_id,
                        c.workflow_id, c.workflow_version, v.approval_status AS workflow_approval_status,
                        s.segment_tag,
                        {DB_SCHEMA}.crm_load_flow(c.tenant_id, c.workflow_id, c.workflow_version) AS workflow
                 FROM {DB_SCHEMA}.crm_campaign c
                 JOIN {DB_SCHEMA}.cdp_segments s
                   ON s.tenant_id = c.tenant_id AND s.segment_id = c.segment_id
+                 AND s.is_active AND s.status_code = 1
                 LEFT JOIN {DB_SCHEMA}.crm_flow_version v
                   ON v.tenant_id = c.tenant_id
                  AND v.flow_id = c.workflow_id
                  AND v.version = c.workflow_version
                 WHERE c.tenant_id = %(tenant_id)s
                   AND c.campaign_id = %(campaign_id)s
-                  AND c.status = 'Running'
+                  AND c.status IN ('Running', 'Failed')
                 """,
                 {"tenant_id": tenant_id, "campaign_id": campaign_id},
             )
             campaign = cursor.fetchone()
             if not campaign:
                 raise CampaignWorkflowError("Campaign not found for tenant")
+            persisted_execution_id = campaign.get("workflow_execution_id")
+            if persisted_execution_id is not None:
+                persisted_execution_id = uuid.UUID(str(persisted_execution_id))
+                if execution_id and uuid.UUID(str(execution_id)) != persisted_execution_id:
+                    raise CampaignWorkflowError("Workflow execution ID is stale")
+                current_execution_id = persisted_execution_id
+            else:
+                current_execution_id = uuid.UUID(str(execution_id)) if execution_id else uuid.uuid4()
+                cursor.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.crm_campaign
+                    SET workflow_execution_id = %(execution_id)s
+                    WHERE tenant_id = %(tenant_id)s AND campaign_id = %(campaign_id)s
+                      AND workflow_execution_id IS NULL
+                    """,
+                    {
+                        "execution_id": str(current_execution_id),
+                        "tenant_id": tenant_id, "campaign_id": campaign_id,
+                    },
+                )
+                conn.commit()
+            campaign_loaded = True
+            summary["execution_id"] = str(current_execution_id)
             if campaign["approval_status"] != "Approved":
                 raise CampaignWorkflowError("Campaign must be Approved before workflow execution")
             if campaign["workflow_approval_status"] != "Approved":
@@ -668,6 +761,8 @@ def run_campaign_workflow(
             if not campaign["workflow"]:
                 raise CampaignWorkflowError("Campaign has no persisted workflow")
             definition = FlowDefinition.model_validate(campaign["workflow"])
+            if str(definition.root.config.get("segment_id") or "") != str(campaign["segment_id"]):
+                raise CampaignWorkflowError("Workflow audience must match the campaign audience")
             problems = FlowEngine(definition).problems()
             if problems:
                 raise CampaignWorkflowError("Workflow is invalid: " + "; ".join(problems))
@@ -680,7 +775,7 @@ def run_campaign_workflow(
                 "mobile_native": _load_connector(connector_cursor, tenant_id, "PUSH"),
             }
             push_connector = _load_connector(connector_cursor, tenant_id, "PUSH")
-        ledger = WorkflowLedger(conn, tenant_id, campaign_id, run_id)
+        ledger = WorkflowLedger(conn, tenant_id, campaign_id, run_id, current_execution_id)
         token_map: dict[str, list[str]] = {}
         services = Services(
             gateways={
@@ -692,19 +787,28 @@ def run_campaign_workflow(
             profile_writer=WorkflowProfileWriter(conn, tenant_id),
         )
         engine = FlowEngine(definition, services=services)
+        reached_sync_nodes: set[str] = set()
         for row in _iter_profile_rows(conn, tenant_id, campaign["segment_tag"], batch_size):
+            token_map.clear()
             token_map[str(row["master_profile_id"])] = list((row.get("push_tokens") or {}).values())
             summary["profiles"] += 1
             result = engine.run(_profile_from_row(row))
             if result.end == "error":
                 summary["errors"] += 1
+                conn.rollback()
             summary["sent"] += sum(status == "sent" for _, status in result.deliveries)
+            summary["skipped"] += sum(status == "skipped" for _, status in result.deliveries)
             summary["applied"] += sum(step.node_type == "update_profile" for step in result.steps)
+            reached_sync_nodes.update(
+                step.node_id for step in result.steps if step.node_type == "run_data_synch_job"
+            )
         summary["data_sync_run_ids"] = _submit_audience_sync_jobs(
             tenant_id=tenant_id,
             campaign_id=campaign_id,
             segment_id=str(campaign["segment_id"]),
             workflow=campaign["workflow"],
+            reached_node_ids=reached_sync_nodes,
+            execution_id=str(current_execution_id),
             log=logger.info,
         )
         _set_campaign_status(
@@ -712,14 +816,20 @@ def run_campaign_workflow(
             tenant_id,
             campaign_id,
             "Failed" if summary["errors"] else "Completed",
+            execution_id=str(current_execution_id),
         )
         return summary
     except Exception:
-        try:
-            _set_campaign_status(conn, tenant_id, campaign_id, "Failed")
-        except Exception:
-            conn.rollback()
-            logger.exception("Could not mark failed campaign workflow %s", campaign_id)
+        conn.rollback()
+        if campaign_loaded:
+            try:
+                _set_campaign_status(
+                    conn, tenant_id, campaign_id, "Failed",
+                    execution_id=str(current_execution_id),
+                )
+            except Exception:
+                conn.rollback()
+                logger.exception("Could not mark failed campaign workflow %s", campaign_id)
         raise
     finally:
         conn.close()

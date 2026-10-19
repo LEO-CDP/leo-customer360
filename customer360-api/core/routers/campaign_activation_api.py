@@ -14,14 +14,19 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from core.auth import require_tenant, require_tenant_admin
 from leo_customer360_dao.crud.email_provider import get_active_config, upsert_config
 from core.database import get_db
-from core.repositories.campaign_activation_repository import CampaignActivationRepository
+from core.repositories.campaign_activation_repository import (
+    CampaignActivationConflict,
+    CampaignActivationNotFound,
+    CampaignActivationRepository,
+)
 from leo_customer360_dao.schemas.crm import (
+    CampaignActivationRequest,
     CampaignActivationResponse,
     CampaignDispatchLogRead,
     EmailProviderConfigRead,
@@ -40,28 +45,23 @@ def _to_provider_read(config) -> EmailProviderConfigRead:
 
 
 @campaign_activation_router.post("/campaigns/{campaign_id}/activate", response_model=CampaignActivationResponse)
-def activate_campaign(campaign_id: uuid.UUID, request: Request, db: Session = Depends(get_db)):
+def activate_campaign(
+    campaign_id: uuid.UUID,
+    request: Request,
+    payload: CampaignActivationRequest = Body(default=CampaignActivationRequest()),
+    db: Session = Depends(get_db),
+):
     """Validate the human-approval gate, then submit the activation run."""
     tenant_id = require_tenant(request)
     require_tenant_admin(request, "campaign activation")
 
     repo = CampaignActivationRepository(db, dagster_client)
-    campaign = repo.get_campaign(campaign_id, tenant_id)
-    if campaign is None:
-        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
-
-    if (campaign.approval_status or "").strip() != "Approved":
-        raise HTTPException(status_code=409, detail=f"Campaign is not Approved (approval_status={campaign.approval_status!r})",)
-
-    workflow_id = getattr(campaign, "workflow_id", None)
-    if not getattr(campaign, "segment_id", None) or not workflow_id:
-        raise HTTPException(
-            status_code=409,
-            detail="Campaign needs a segment_id and a pinned workflow_id.",
-        )
-
     try:
-        run_id = repo.activate(campaign_id, tenant_id)
+        run_id = repo.activate(campaign_id, tenant_id, restart=payload.restart)
+    except CampaignActivationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CampaignActivationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DagsterJobTriggerError as exc:
         raise HTTPException(status_code=503, detail=f"Could not submit campaign activation: {exc}") from exc
 

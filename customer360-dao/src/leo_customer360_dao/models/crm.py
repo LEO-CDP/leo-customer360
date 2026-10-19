@@ -62,6 +62,7 @@ class Campaign(Base):
     )
     workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
     workflow_version: Mapped[Optional[int]] = mapped_column(Integer)
+    workflow_execution_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
     approval_status: Mapped[Optional[str]] = mapped_column(String(50), server_default="Draft")
     approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("sys_user.user_id"))
     approved_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))

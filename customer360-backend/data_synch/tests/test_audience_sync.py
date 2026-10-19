@@ -166,3 +166,71 @@ def test_dry_run_does_not_load_connector_or_call_provider(monkeypatch):
     assert result["dry_run"] is True
     assert result["uploaded_count"] == 0
     assert provider_called is False
+
+
+def test_missing_ads_connector_logs_dry_run_without_calling_provider(monkeypatch, caplog):
+    connection = FakeConnection()
+    monkeypatch.setattr(audience_sync, "_connect", lambda: connection)
+    monkeypatch.setattr(audience_sync, "_load_provider_config", lambda *_: None)
+    provider = FakeProvider()
+
+    with caplog.at_level("INFO"):
+        result = audience_sync.run_data_synch_job(
+            tenant_id=TENANT_ID, campaign_id=CAMPAIGN_ID, platform="meta_ads",
+            provider_factory=lambda *_: provider,
+        )
+
+    assert result["dry_run"] is True
+    assert result["reason"] == "provider_not_configured"
+    assert result["uploaded_count"] == 0
+    assert provider.calls == []
+    assert "not configured" in caplog.text
+    assert "Person@example.com" not in caplog.text
+    assert any(
+        params.get("metadata") == '{"reason": "provider_not_configured"}'
+        for _, params in connection.cursor_instance.statements
+        if isinstance(params, dict)
+    )
+
+
+def test_campaign_replays_use_separate_audience_audit_keys(monkeypatch):
+    keys = []
+    for execution_id in (str(uuid.uuid4()), str(uuid.uuid4())):
+        connection = FakeConnection()
+        monkeypatch.setattr(audience_sync, "_connect", lambda: connection)
+        audience_sync.run_data_synch_job(
+            tenant_id=TENANT_ID, campaign_id=CAMPAIGN_ID, platform="meta_ads",
+            execution_id=execution_id, dry_run=True,
+        )
+        inserts = [
+            params for statement, params in connection.cursor_instance.statements
+            if "INSERT INTO customer360.crm_ad_sync_runs" in statement
+        ]
+        assert len(inserts) == 1
+        assert inserts[0]["idempotency_key"].endswith(f":{execution_id}")
+        keys.append(inserts[0]["idempotency_key"])
+    assert keys[0] != keys[1]
+
+
+def test_replay_reuses_existing_external_audience_without_overwriting_prior_run(monkeypatch):
+    class ExistingAudienceCursor(FakeCursor):
+        def execute(self, statement, params=None):
+            super().execute(statement, params)
+            if "AND external_audience_id IS NOT NULL" in str(statement):
+                self.result = {"external_audience_id": "existing-audience"}
+
+    connection = FakeConnection()
+    connection.cursor_instance = ExistingAudienceCursor()
+    provider = FakeProvider()
+    monkeypatch.setattr(audience_sync, "_connect", lambda: connection)
+    result = audience_sync.run_data_synch_job(
+        tenant_id=TENANT_ID, campaign_id=CAMPAIGN_ID, platform="meta_ads",
+        execution_id=str(uuid.uuid4()), provider_factory=lambda *_: provider,
+    )
+    assert result["uploaded_count"] == 1
+    assert provider.calls[0][2] == "existing-audience"
+    inserts = [
+        sql for sql, _ in connection.cursor_instance.statements
+        if "INSERT INTO customer360.crm_ad_sync_runs" in sql
+    ]
+    assert len(inserts) == 1

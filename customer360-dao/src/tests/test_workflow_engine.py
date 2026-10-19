@@ -365,6 +365,35 @@ class ProductionValidationTests(unittest.TestCase):
         result = FlowEngine(flow).run(profile)
         self.assertEqual(result.deliveries, [("notification", "sent")])
 
+    def test_failed_delivery_stops_profile_before_downstream_actions(self):
+        from unittest.mock import Mock
+        from leo_customer360_dao.workflow.models import DeliveryReceipt
+        from leo_customer360_dao.workflow.services import Services
+
+        gateway = Mock()
+        gateway.send.return_value = DeliveryReceipt(status="failed", detail="Provider unavailable")
+        writer = Mock()
+        email = _node("n2", "email", {"subject": "Hi", "body": "Hello"}, [
+            _node("n3", "update_profile", {"action": "add_tag", "tag": "delivered"}),
+        ])
+        services = Services(gateways={"email": gateway}, profile_writer=writer)
+
+        result = FlowEngine(self._flow(extra=email), services=services).run(_profile())
+
+        self.assertEqual(result.end, "error")
+        self.assertEqual(result.deliveries, [("email", "failed")])
+        self.assertIn("Provider unavailable", result.error)
+        writer.apply.assert_not_called()
+
+    def test_blank_messages_and_non_string_providers_are_validation_problems(self):
+        for node in (
+            _node("n2", "email", {"subject": " ", "body": ""}),
+            _node("n2", "notification", {"provider": [], "body": "Hello"}),
+            _node("n2", "run_data_synch_job", {"platform": [], "audience_name": "UAT"}),
+        ):
+            with self.subTest(node=node):
+                self.assertTrue(FlowEngine(self._flow(extra=node)).problems())
+
 
 if __name__ == "__main__":
     unittest.main()
