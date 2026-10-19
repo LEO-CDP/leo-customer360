@@ -210,6 +210,13 @@ requiring it to be the flow's published live version.
 
 ### Approval and state-management UI
 
+Keycloak `platform_admin` is root-equivalent in both frontend controls and
+server authorization, including System Users root-role assignment. Roles are
+read from top-level, realm, and client role arrays. This does not bypass tenant
+scoping, valid local user membership, or the prohibition on reviewing one's
+own agent proposal. Other administrator roles retain their existing tenant
+permissions and are not implicitly promoted to root.
+
 The campaign details page separates campaign approval, pinned-workflow approval,
 and operational execution into three visible state summaries. **Manage state**
 opens an accessible modal containing only the next actions available for the

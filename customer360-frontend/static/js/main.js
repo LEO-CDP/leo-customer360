@@ -53,11 +53,10 @@ const TIME_CHECK_API_HEALTH = 60000;
     $("#settings-user-status").text("-");
     $("#settings-user-last-login").text("-");
 
-    // The dev root pseudo-user has no backing sys_user row -- nothing to
-    // view/edit beyond what's already shown above.
-    $("#settings-profile-edit").toggleClass("hidden", !!user.isRoot);
+    var hasProfile = !!user.userId;
+    $("#settings-profile-edit").toggleClass("hidden", !hasProfile);
     $("#settings-profile-error").addClass("hidden").text("");
-    if (user.isRoot) return;
+    if (!hasProfile) return;
 
     C360.config.api("/users/me").done(function (profile) {
       $("#settings-user-status").text(profile.status || "-");

@@ -39,6 +39,7 @@ IDENTITY_CACHE_TTL_SECONDS = 200
 DEFAULT_TOKEN_EXPIRES_MINUTES = 60
 CLOCK_SKEW_LEEWAY_SECONDS = 60
 TENANT_ADMIN_ROLES = {"platform_admin", "super_admin", "system_admin", "tenant_admin", "admin", "root"}
+ROOT_EQUIVALENT_ROLES = {"platform_admin", "root"}
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
 
 # Failed-auth rate limiter, keyed by client IP.
@@ -385,7 +386,9 @@ def get_current_roles(request: Request) -> list[str]:
     if not isinstance(payload, dict):
         return []
 
-    roles: list[str] = list(payload.get("roles") or [])
+    roles: list[str] = []
+    if isinstance(payload.get("roles"), list):
+        roles.extend(payload["roles"])
 
     realm_access = payload.get("realm_access")
     if isinstance(realm_access, dict) and isinstance(realm_access.get("roles"), list):
@@ -397,20 +400,28 @@ def get_current_roles(request: Request) -> list[str]:
             if isinstance(client, dict) and isinstance(client.get("roles"), list):
                 roles.extend(client["roles"])
 
-    return roles
+    return sorted({role.strip().lower() for role in roles if isinstance(role, str) and role.strip()})
+
+
+def is_root_user(request: Request) -> bool:
+    """Treat the verified platform_admin role exactly like root."""
+    return bool(ROOT_EQUIVALENT_ROLES.intersection(get_current_roles(request)))
 
 
 def require_admin(request: Request) -> None:
-    """Require the admin role when SSO is enabled."""
+    """Require admin or a root-equivalent role when SSO is enabled."""
     if not SSO_LOGIN:
         return
 
+    if not isinstance(getattr(request.state, "user", None), dict):
+        raise HTTPException(status_code=401, detail="Authentication required")
     roles = get_current_roles(request)
-    if not roles and getattr(request.state, "user", None) is None:
-        return
 
-    if not {"admin", "root"} & {r.lower() for r in roles}:
-        raise HTTPException(status_code=403, detail="This action requires the 'admin' or 'root' role.")
+    if not (ROOT_EQUIVALENT_ROLES | {"admin"}).intersection(roles):
+        raise HTTPException(
+            status_code=403,
+            detail="This action requires the admin, root, or platform_admin role.",
+        )
 
 
 def require_tenant(request: Request) -> str:

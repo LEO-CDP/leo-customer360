@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from core.auth import get_current_roles, require_user_management_admin
+from core.auth import is_root_user, require_user_management_admin
 from core.database import SessionLocal
 from core.repositories.user_repository import UserRepository
 from leo_customer360_dao.schemas.user import (
@@ -41,8 +41,7 @@ def _validate_role_assignment(
     requested_roles: list[str],
 ) -> None:
     """Protect the root role and prevent a root user from self-demoting."""
-    caller_roles = {role.lower() for role in get_current_roles(request)}
-    is_root = "root" in caller_roles
+    is_root = is_root_user(request)
     current_roles = {role.lower() for role in repository.get_role_codes_for_user(tenant_id, user_id)}
 
     if "root" in requested_roles and not is_root:

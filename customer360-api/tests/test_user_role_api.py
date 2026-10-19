@@ -118,6 +118,16 @@ def test_non_root_admin_cannot_assign_root():
     assert "Only a root user" in response.json()["detail"]
 
 
+def test_platform_admin_can_assign_root_like_root():
+    with patch("core.routers.user_api.UserRepository", FakeUserRepository):
+        response = TestClient(_build_app()).put(
+            f"/users/{USER_ID}/roles",
+            headers={"X-Roles": "platform_admin"},
+            json={"roles": ["root", "admin"]},
+        )
+    assert response.status_code == 200, response.text
+
+
 def test_root_can_assign_root_and_admin_roles():
     FakeUserRepository.assigned_roles = []
     with patch("core.routers.user_api.UserRepository", FakeUserRepository):

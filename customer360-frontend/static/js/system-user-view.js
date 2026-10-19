@@ -29,7 +29,9 @@ window.C360 = window.C360 || {};
     var user = C360.config.currentUser();
     var roles = user.roles || [];
     return !!user.isRoot || roles.some(function (role) {
-      return String(role).toLowerCase() === "root";
+      return ["root", "platform_admin"].indexOf(
+        String(role).trim().toLowerCase()
+      ) !== -1;
     });
   }
 

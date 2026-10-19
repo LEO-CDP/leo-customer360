@@ -306,22 +306,32 @@ window.C360 = window.C360 || {};
     return selected;
   }
 
+  function rootEquivalent(roles) {
+    return roles.some(function (role) {
+      return ["root", "platform_admin"].indexOf(role.toLowerCase()) !== -1;
+    });
+  }
+
   function currentUserFromConfig() {
     if (CONFIG.devUser) {
       var du = CONFIG.devUser;
+      var devRoles = parseTenantOptions(
+        Array.isArray(du.roles) ? du.roles.filter(function (role) { return typeof role === "string"; }) : []
+      );
       return {
         username: du.username || "Developer",
         email: du.email || "-",
         fullName: du.full_name || "",
-        roles: du.roles && du.roles.length ? du.roles : ["user"],
+        roles: devRoles.length ? devRoles : ["user"],
         authMode: du.is_root ? "Dev Root Credentials" : "Dev Credentials",
-        isRoot: !!du.is_root,
+        isRoot: !!du.is_root || rootEquivalent(devRoles),
         userId: du.user_id || null
       };
     }
 
     var payload = decodeJwtPayload(CONFIG.accessToken);
     var roles = [];
+    if (payload && Array.isArray(payload.roles)) roles = roles.concat(payload.roles);
     if (payload && payload.realm_access && Array.isArray(payload.realm_access.roles)) {
       roles = roles.concat(payload.realm_access.roles);
     }
@@ -333,14 +343,14 @@ window.C360 = window.C360 || {};
         }
       });
     }
-    roles = parseTenantOptions(roles);
+    roles = parseTenantOptions(roles.filter(function (role) { return typeof role === "string"; }));
     return {
       username: payload ? (payload.preferred_username || payload.name || payload.email || payload.sub || "Authenticated User") : "Developer",
       email: payload ? (payload.email || "-") : "-",
       fullName: payload ? (payload.name || "") : "",
       roles: roles.length ? roles : [CONFIG.accessToken ? "user" : "developer"],
       authMode: CONFIG.accessToken ? "SSO Token" : "Dev Header",
-      isRoot: false,
+      isRoot: rootEquivalent(roles),
       userId: CONFIG.userId || null
     };
   }

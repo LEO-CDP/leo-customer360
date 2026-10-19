@@ -10,11 +10,11 @@ import time
 import unittest
 from unittest.mock import patch
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 
-from core.auth import auth_middleware
+from core.auth import auth_middleware, get_current_roles, is_root_user, require_admin
 from conftest import FakeDBSession, FakeQueryResult, FakeRedis
 
 
@@ -79,6 +79,59 @@ def _build_app_with_root_path():
 
 
 class AuthMiddlewareTests(unittest.TestCase):
+    def test_root_equivalence_across_keycloak_claim_locations(self):
+        for payload in (
+            {"roles": ["platform_admin"]},
+            {"realm_access": {"roles": ["platform_admin"]}},
+            {"resource_access": {"c360": {"roles": ["platform_admin"]}}},
+            {"roles": [None, 12, " PLATFORM_ADMIN "]},
+        ):
+            request = Request({"type": "http", "headers": []})
+            request.state.user = payload
+            self.assertTrue(is_root_user(request))
+            with patch("core.auth.SSO_LOGIN", True):
+                require_admin(request)
+
+    def test_non_root_roles_are_not_promoted_to_root(self):
+        for role in ("admin", "tenant_admin", "super_admin", "system_admin", "viewer"):
+            request = Request({"type": "http", "headers": []})
+            request.state.user = {"roles": [role]}
+            self.assertFalse(is_root_user(request))
+
+    def test_admin_keeps_existing_access_and_unauthenticated_is_rejected(self):
+        request = Request({"type": "http", "headers": []})
+        with patch("core.auth.SSO_LOGIN", True):
+            with self.assertRaises(HTTPException) as caught:
+                require_admin(request)
+            self.assertEqual(caught.exception.status_code, 401)
+            request.state.user = {"roles": ["admin"]}
+            require_admin(request)
+            request.state.user = {"roles": ["viewer"]}
+            with self.assertRaises(HTTPException) as caught:
+                require_admin(request)
+            self.assertEqual(caught.exception.status_code, 403)
+
+    def test_malformed_roles_are_not_accepted_as_roles(self):
+        request = Request({"type": "http", "headers": []})
+        request.state.user = {"roles": "platform_admin", "realm_access": {"roles": [None, {}]}}
+        self.assertEqual(get_current_roles(request), [])
+        self.assertFalse(is_root_user(request))
+
+    def test_platform_admin_is_root_equivalent_for_admin_actions(self):
+        request = Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/secure",
+            "headers": [],
+            "query_string": b"",
+            "server": ("localhost", 80),
+            "client": ("127.0.0.1", 1),
+            "scheme": "http",
+        })
+        request.state.user = {"roles": ["platform_admin"]}
+        with patch("core.auth.SSO_LOGIN", True):
+            require_admin(request)
+
     def test_rejects_requests_without_bearer_token(self):
         client = TestClient(_build_app())
 
@@ -580,4 +633,3 @@ class AuthMiddlewareSysUserInfoProvisioningTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
