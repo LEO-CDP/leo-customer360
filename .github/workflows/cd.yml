@@ -34,8 +34,7 @@ name: CD
 #                          │                                    dependency on api running —
 #                          │                                    the browser calls the API,
 #                          │                                    not this container)
-#                          ├─► backend  : backend (Dagster)      (own VM; or VKS when the
-#                          │                                    BACKEND_ON_VKS variable is 1)
+#                          ├─► backend  : backend (Dagster)      (VKS cluster)
 #                          ├─► vks      : promotions → event-api (VKS cluster)
 #                          └─► agent    : agent                  (own VM)
 # Groups touch disjoint hosts (or independent containers on the same host), so they run
@@ -61,10 +60,8 @@ name: CD
 #                    the 'event-api' and 'promotions' steps: unlike the vServer path (which pulls inside the
 #                    job), Kubernetes stores this and re-reads it on every later image pull,
 #                    so the job's own GITHUB_TOKEN would expire and break scale-ups.
-#   (var) BACKEND_ON_VKS  set to 1 on an Environment (uat/prod) to deploy the 'backend' step (Dagster) to
-#                    VKS via customer360-backend/deploy-backend-vks.sh instead of the backend vServer. It then also
-#                    needs VKS_KUBECONFIG + GHCR_PULL_TOKEN (below) and a node labelled c360.pool=dagster
-#                    (check-capacity.sh fails the step otherwise). Unset/0 keeps the vServer path.
+#   The `backend` step (Dagster) deploys to VKS via customer360-backend/deploy-backend-vks.sh; it needs
+#   VKS_KUBECONFIG + GHCR_PULL_TOKEN (below) and a node labelled c360.pool=dagster (check-capacity.sh).
 #   VKS_KUBECONFIG   full kubeconfig for the GreenNode VKS cluster — REQUIRED by the
 #                    'event-api' and 'promotions' steps, which deploy their services as Kubernetes
 #                    Deployments (autoscaled pods) instead of onto a vServer. Download it

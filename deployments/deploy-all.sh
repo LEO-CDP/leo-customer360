@@ -212,12 +212,9 @@ run_one() {  # <id> <action>
     # Optional (not in the default set): the docs-only refresh docs-vector-index.yml dispatches.
     docs-index)    oneshot_step_arg server deploy-docs-search.sh reindex "$2" ;;
     monitoring)    ssh_step monitoring     deploy-monitoring.sh deploy "$2" ;;
-    # BACKEND_ON_VKS=1 (CI: the BACKEND_ON_VKS repo/environment variable) deploys Dagster to the VKS
-    # cluster as a Deployment instead of a docker container on the backend vServer. Default stays the
-    # vServer until cutover (customer360-backend/README.md "Cutover"); ssh_step here because the VKS
+    # Dagster runs on VKS as a Deployment (the backend vServer is retired); ssh_step because the VKS
     # script has its own `destroy`.
-    backend)       if [ "${BACKEND_ON_VKS:-0}" = 1 ]; then ssh_step customer360-backend deploy-backend-vks.sh deploy "$2"
-                   else ssh_step_env_only server deploy-backend.sh "$2"; fi ;;
+    backend)       ssh_step customer360-backend deploy-backend-vks.sh deploy "$2" ;;
     api)           ssh_step_env_only server deploy-api.sh     "$2" ;;
     sso-realm)     realm_step "$2" ;;
     seed)          oneshot_step server     seed_data.sh       "$2" ;;

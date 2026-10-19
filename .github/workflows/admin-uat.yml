@@ -89,7 +89,6 @@ jobs:
       - name: Run admin action
         working-directory: deployments
         env:
-          BACKEND_ON_VKS: ${{ vars.BACKEND_ON_VKS }}       # 1 -> restart-backend/redeploy-apps act on Dagster on VKS
           VKS_KUBECONFIG: ${{ secrets.VKS_KUBECONFIG }}
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}          # GHCR pulls for redeploy-apps

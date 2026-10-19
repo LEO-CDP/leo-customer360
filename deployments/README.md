@@ -60,7 +60,7 @@ no-op when there is no drift.
 | 4 | DB bootstrap | `db-schema` | `postgres/run-sql.sh` | `server` (bastion) + `postgres` |
 | 5 | Data-plane | `cache` | `cache/deploy.sh` | `server` |
 | 6 | Data-plane | `sso` | `sso/deploy-sso.sh` | `server` + `db-schema` (`db_keycloak`) |
-| 7 | Data-plane | `backend` | `server/deploy-backend.sh` | `server` + `db-schema` |
+| 7 | Data-plane | `backend` | `customer360-backend/deploy-backend-vks.sh` (VKS) | `server` + `db-schema` |
 | 8 | Front door | `load-balancer` | `load_balancer/deploy.sh` | `server` |
 | 9 | Front door | `proxy` (Caddy) | `proxy/deploy-caddy.sh` | `load-balancer` (`:80`/`:443` → box) + **DNS** |
 | 10 | SSO + apps | `sso-realm` | `sso/bootstrap-realm.py` | `sso` + public HTTPS (writes `KEYCLOAK_CLIENT_SECRET` → `sso/.env`) |
@@ -131,7 +131,7 @@ each environment **pull that same immutable image by tag** — instead of rebuil
 [`cd-process.svg`](./cd-process.svg) (vector source of the image above).
 
 > **Status:** the app deploy scripts now **pull the CI-built image from GHCR by default**
-> (`server/deploy-api.sh`, `server/deploy-backend.sh`, `customer360-promotions/deploy-promotions.sh`,
+> (`server/deploy-api.sh`, `customer360-promotions/deploy-promotions.sh`,
 > `frontend/deploy-frontend.sh` → `docker pull` + `docker run`, via the shared
 > [`lib/ghcr.sh`](./lib/ghcr.sh)). Set `BUILD_LOCAL=1` to fall back to shipping source and
 > building on the VM. The [`CD`](../.github/workflows/cd.yml) workflow runs these
@@ -147,8 +147,6 @@ under the service directory. The `BUILD_LOCAL=1` fallback follows the same rule:
 
 - `server/deploy-api.sh` ships `customer360-api/` and `customer360-dao/`, then
   builds with `customer360-api/Dockerfile` from `/opt/c360`.
-- `server/deploy-backend.sh` ships `customer360-backend/` and `customer360-dao/`,
-  then builds with `customer360-backend/Dockerfile` from `/opt/c360`.
 
 This avoids requiring an unpublished package on the VM or in CI. Once a DAO
 release is published to the configured Python package index, the bare
