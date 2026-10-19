@@ -131,6 +131,8 @@ tracing / Grafana Tempo / an OTel Collector) by changing one endpoint — no re-
 | **UAT** | **OFF** (`OTEL_SDK_DISABLED=true`) — the api box is a shared 1 vCPU / 2 GB host, so zero overhead until profiling | 100% when on | on-demand (`jaeger_enabled=false`) |
 | **PROD** | **ON** | 10% head sampling | always-on (`jaeger_enabled=true`) |
 
+> uat defaults to 10% head sampling when tracing is on (was 100%, which overran the 300m Jaeger cap); `jaeger_ttl` (uat 6h) bounds the badger store. Use `OTEL_SAMPLER_ARG=1.0` for a short profiling run.
+
 Override per deploy with `OTEL_ENABLED` / `OTEL_ENDPOINT` / `OTEL_SAMPLER_ARG` (read by
 `../lib/otel.sh`). Toggle the backend with `jaeger_enabled` in the overlay.
 

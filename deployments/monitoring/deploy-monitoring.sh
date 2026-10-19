@@ -76,6 +76,7 @@ J_UI_BIND="$(tfval jaeger_ui_bind "$ovl")";          J_UI_BIND="${J_UI_BIND:-127
 J_OTLP_HTTP="$(tfval jaeger_otlp_http_port "$ovl")"; J_OTLP_HTTP="${J_OTLP_HTTP:-4318}"
 J_OTLP_GRPC="$(tfval jaeger_otlp_grpc_port "$ovl")"; J_OTLP_GRPC="${J_OTLP_GRPC:-4317}"
 J_MEM="$(tfval jaeger_mem "$ovl")";                  J_MEM="${J_MEM:-300m}"
+J_TTL="$(tfval jaeger_ttl "$ovl")";                  J_TTL="${J_TTL:-24h}"   # badger span retention
 # pgadmin — web Postgres admin/monitoring UI (dpage/pgadmin4). Own login (email+password), NOT
 # gated by default (pgadmin_sso=false); TUNNEL-ONLY (loopback) since it serves cleartext HTTP.
 # Default OFF (heaviest of the four ~150-250 MB; flip on to inspect the DB — see README).

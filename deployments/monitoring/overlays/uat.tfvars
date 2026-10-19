@@ -55,6 +55,7 @@ jaeger_ui_bind        = "127.0.0.1"   # loopback only; view via `ssh -L 16686:lo
 jaeger_otlp_http_port = 4318
 jaeger_otlp_grpc_port = 4317
 jaeger_mem            = "300m"         # docker --memory cap (protect the shared box)
+jaeger_ttl            = "6h"           # badger span retention (default 24h); short so the 20 GB api-box disk and the 300m cap are not outgrown
 # Gate the Jaeger UI behind oauth2-proxy / Keycloak (Jaeger has no native auth). Served over
 # TLS at https://<domain>/jaeger via Caddy (deployments/proxy) -> oauth2-proxy on
 # :jaeger_proxy_port -> Jaeger. (No dedicated LB port; the old :16686 listener was retired.)
