@@ -215,7 +215,7 @@ echo ">> Applying manifests (overlay: $ENV) ..."
 "${KUBECTL[@]}" apply -k "$GEN"
 
 echo ">> Waiting for the rollout ..."
-"${KUBECTL[@]}" -n "$NAMESPACE" rollout status deploy/dagster --timeout=6m || {
+"${KUBECTL[@]}" -n "$NAMESPACE" rollout status deploy/dagster --timeout=12m || {
   echo "   ROLLOUT FAILED. Likely causes: Postgres login/DB (see the [render-instance] lines), vStorage key,"
   echo "   or OOMKilled on the small UAT nodes. Logs:"
   "${KUBECTL[@]}" -n "$NAMESPACE" logs deploy/dagster --tail=40 || true
@@ -245,10 +245,9 @@ for e in d["workspaceOrError"].get("locationEntries", []):
     if not ok: bad.append(e["name"])
 sys.exit(1 if bad or not d["workspaceOrError"].get("locationEntries") else 0)
 PY
-echo ">> Done. customer360-backend (Dagster) is running on VKS. UI is ClusterIP only:"
-echo "   kubectl -n $NAMESPACE port-forward svc/dagster $DAGSTER_PORT:$DAGSTER_PORT"
-echo "   NEXT: the API reaches it in-cluster at dagster:$DAGSTER_PORT. The vServer Dagster (10.100.1.4:3000) and the LB/Caddy"
-echo "   'dagster' upstream still point at the old box until you cut over (../proxy, ../load_balancer overlays)."
+echo ">> Done. customer360-backend (Dagster) is running on VKS. The Service is a NodePort (private node IP, no auth on the UI):"
+echo "   in-cluster: dagster:$DAGSTER_PORT    node: <node-ip>:30300    local: kubectl -n $NAMESPACE port-forward svc/dagster $DAGSTER_PORT:$DAGSTER_PORT"
+echo "   Cutover consumers (API DAGSTER_HOST/PORT, ../load_balancer, ../proxy) are described in README.md \"Cutover\"."
 
 . "$ROOT/lib/record_deploy.sh"
 record_deployment "$ENV" "$SERVICE" "$IMAGE" success
