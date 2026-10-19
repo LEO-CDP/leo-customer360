@@ -92,7 +92,7 @@ pgadmin_proxy_port = 4050                       # (unused while pgadmin_sso = fa
 # Portainer API (needs PORTAINER_ADMIN_PASSWORD in .env; else it prints the one-click UI step).
 # "tracking" is gone: customer360-event-api moved to the VKS cluster, so it has no vServer to
 # run a Portainer agent on — inspect those pods with kubectl (or the VKS console) instead.
-portainer_agent_server_keys = "backend,docs,agent"   # backend (10.100.1.4) + docs (10.100.1.7) + customer360-agent box. 9001 from the api box is already open on the shared secgroup.
+portainer_agent_server_keys = "docs,agent"   # docs (10.100.1.7) + customer360-agent box (the backend box was retired; Dagster runs on VKS). 9001 from the api box is already open on the shared secgroup.
 portainer_agent_image       = "portainer/agent:lts"
 portainer_agent_port        = 9001
 
