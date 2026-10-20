@@ -20,7 +20,7 @@ from email.utils import formataddr
 from typing import Any
 from urllib.request import Request, urlopen
 
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor
 from dagster_graphql import DagsterGraphQLClient
 
 from leo_customer360_dao.models.identity import CdpMasterProfile
@@ -145,54 +145,26 @@ class WorkflowLedger:
         self.execution_id = execution_id
 
     def begin(self, profile_id: uuid.UUID, node_id: str, action_type: str, channel: str) -> bool:
+        lock_key = f"{self.campaign_id}:{self.execution_id}:{profile_id}:{node_id}"
         with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
             set_tenant_context(cursor, self.tenant_id)
             cursor.execute(
                 "SELECT pg_try_advisory_lock(hashtextextended(%s, 0)) AS acquired",
-                (f"{self.campaign_id}:{self.execution_id}:{profile_id}:{node_id}",),
+                (lock_key,),
             )
             if not cursor.fetchone()["acquired"]:
                 raise CampaignWorkflowError(f"Workflow action {node_id} is already executing")
-            cursor.execute(
-                f"""
-                SELECT status
-                FROM {DB_SCHEMA}.crm_campaign_workflow_action_runs
-                WHERE campaign_id = %(campaign_id)s
-                  AND tenant_id = %(tenant_id)s
-                  AND master_profile_id = %(profile_id)s
-                  AND node_id = %(node_id)s
-                  AND execution_id = %(execution_id)s
-                FOR UPDATE
-                """,
-                {
-                    "campaign_id": self.campaign_id,
-                    "tenant_id": self.tenant_id,
-                    "profile_id": str(profile_id),
-                    "node_id": node_id,
-                    "execution_id": str(self.execution_id),
-                },
-            )
-            row = cursor.fetchone()
-            if row and row["status"] in {"Sent", "Applied", "Skipped"}:
-                self.connection.commit()
-                with self.connection.cursor() as cursor:
-                    cursor.execute(
-                        "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
-                        (f"{self.campaign_id}:{self.execution_id}:{profile_id}:{node_id}",),
-                    )
-                self.connection.commit()
-                return False
-            if row:
+            try:
                 cursor.execute(
                     f"""
-                    UPDATE {DB_SCHEMA}.crm_campaign_workflow_action_runs
-                    SET status = 'Running', attempt_count = attempt_count + 1,
-                        error_message = NULL, run_id = %(run_id)s, updated_at = now()
+                    SELECT status
+                    FROM {DB_SCHEMA}.crm_campaign_workflow_action_runs
                     WHERE campaign_id = %(campaign_id)s
                       AND tenant_id = %(tenant_id)s
                       AND master_profile_id = %(profile_id)s
                       AND node_id = %(node_id)s
                       AND execution_id = %(execution_id)s
+                    FOR UPDATE
                     """,
                     {
                         "campaign_id": self.campaign_id,
@@ -200,32 +172,69 @@ class WorkflowLedger:
                         "profile_id": str(profile_id),
                         "node_id": node_id,
                         "execution_id": str(self.execution_id),
-                        "run_id": self.run_id,
                     },
                 )
-            else:
-                cursor.execute(
-                    f"""
-                    INSERT INTO {DB_SCHEMA}.crm_campaign_workflow_action_runs
-                        (tenant_id, campaign_id, execution_id, master_profile_id, node_id,
-                         action_type, channel, run_id)
-                    VALUES (%(tenant_id)s, %(campaign_id)s, %(execution_id)s,
-                            %(profile_id)s, %(node_id)s,
-                            %(action_type)s, %(channel)s, %(run_id)s)
-                    """,
-                    {
-                        "tenant_id": self.tenant_id,
-                        "campaign_id": self.campaign_id,
-                        "execution_id": str(self.execution_id),
-                        "profile_id": str(profile_id),
-                        "node_id": node_id,
-                        "action_type": action_type,
-                        "channel": channel,
-                        "run_id": self.run_id,
-                    },
-                )
-            self.connection.commit()
-            return True
+                row = cursor.fetchone()
+                if row and row["status"] in {"Sent", "Applied", "Skipped"}:
+                    self.connection.commit()
+                    self._unlock(lock_key)
+                    return False
+                if row:
+                    cursor.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.crm_campaign_workflow_action_runs
+                        SET status = 'Running', attempt_count = attempt_count + 1,
+                            error_message = NULL, run_id = %(run_id)s, updated_at = now()
+                        WHERE campaign_id = %(campaign_id)s
+                          AND tenant_id = %(tenant_id)s
+                          AND master_profile_id = %(profile_id)s
+                          AND node_id = %(node_id)s
+                          AND execution_id = %(execution_id)s
+                        """,
+                        {
+                            "campaign_id": self.campaign_id,
+                            "tenant_id": self.tenant_id,
+                            "profile_id": str(profile_id),
+                            "node_id": node_id,
+                            "execution_id": str(self.execution_id),
+                            "run_id": self.run_id,
+                        },
+                    )
+                else:
+                    cursor.execute(
+                        f"""
+                        INSERT INTO {DB_SCHEMA}.crm_campaign_workflow_action_runs
+                            (tenant_id, campaign_id, execution_id, master_profile_id, node_id,
+                             action_type, channel, run_id)
+                        VALUES (%(tenant_id)s, %(campaign_id)s, %(execution_id)s,
+                                %(profile_id)s, %(node_id)s,
+                                %(action_type)s, %(channel)s, %(run_id)s)
+                        """,
+                        {
+                            "tenant_id": self.tenant_id,
+                            "campaign_id": self.campaign_id,
+                            "execution_id": str(self.execution_id),
+                            "profile_id": str(profile_id),
+                            "node_id": node_id,
+                            "action_type": action_type,
+                            "channel": channel,
+                            "run_id": self.run_id,
+                        },
+                    )
+                self.connection.commit()
+                return True
+            except Exception:
+                self.connection.rollback()
+                self._unlock(lock_key)
+                raise
+
+    def _unlock(self, lock_key: str) -> None:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
+                (lock_key,),
+            )
+        self.connection.commit()
 
     def finish(
         self,
@@ -236,40 +245,71 @@ class WorkflowLedger:
         provider: str | None = None,
         provider_message_id: str | None = None,
         error: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
-        with self.connection.cursor() as cursor:
-            set_tenant_context(cursor, self.tenant_id)
-            cursor.execute(
-                f"""
-                UPDATE {DB_SCHEMA}.crm_campaign_workflow_action_runs
-                SET status = %(status)s, provider = %(provider)s,
-                    provider_message_id = %(provider_message_id)s,
-                    error_message = %(error)s, updated_at = now()
-                WHERE campaign_id = %(campaign_id)s
-                  AND tenant_id = %(tenant_id)s
-                  AND master_profile_id = %(profile_id)s
-                  AND node_id = %(node_id)s
-                  AND execution_id = %(execution_id)s
-                """,
-                {
-                    "status": status,
-                    "provider": provider,
-                    "provider_message_id": provider_message_id,
-                    "error": error,
-                    "campaign_id": self.campaign_id,
-                    "tenant_id": self.tenant_id,
-                    "profile_id": str(profile_id),
-                    "node_id": node_id,
-                    "execution_id": str(self.execution_id),
-                },
-            )
-        self.connection.commit()
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
-                (f"{self.campaign_id}:{self.execution_id}:{profile_id}:{node_id}",),
-            )
-        self.connection.commit()
+        lock_key = f"{self.campaign_id}:{self.execution_id}:{profile_id}:{node_id}"
+        try:
+            with self.connection.cursor() as cursor:
+                set_tenant_context(cursor, self.tenant_id)
+                if metadata is not None:
+                    cursor.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.crm_campaign_workflow_action_runs
+                        SET status = %(status)s, provider = %(provider)s,
+                            provider_message_id = %(provider_message_id)s,
+                            error_message = %(error)s,
+                            metadata = COALESCE(metadata, '{{}}'::jsonb) || %(metadata)s,
+                            updated_at = now()
+                        WHERE campaign_id = %(campaign_id)s
+                          AND tenant_id = %(tenant_id)s
+                          AND master_profile_id = %(profile_id)s
+                          AND node_id = %(node_id)s
+                          AND execution_id = %(execution_id)s
+                        """,
+                        {
+                            "status": status,
+                            "provider": provider,
+                            "provider_message_id": provider_message_id,
+                            "error": error,
+                            "metadata": Json(metadata),
+                            "campaign_id": self.campaign_id,
+                            "tenant_id": self.tenant_id,
+                            "profile_id": str(profile_id),
+                            "node_id": node_id,
+                            "execution_id": str(self.execution_id),
+                        },
+                    )
+                else:
+                    cursor.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.crm_campaign_workflow_action_runs
+                        SET status = %(status)s, provider = %(provider)s,
+                            provider_message_id = %(provider_message_id)s,
+                            error_message = %(error)s, updated_at = now()
+                        WHERE campaign_id = %(campaign_id)s
+                          AND tenant_id = %(tenant_id)s
+                          AND master_profile_id = %(profile_id)s
+                          AND node_id = %(node_id)s
+                          AND execution_id = %(execution_id)s
+                        """,
+                        {
+                            "status": status,
+                            "provider": provider,
+                            "provider_message_id": provider_message_id,
+                            "error": error,
+                            "campaign_id": self.campaign_id,
+                            "tenant_id": self.tenant_id,
+                            "profile_id": str(profile_id),
+                            "node_id": node_id,
+                            "execution_id": str(self.execution_id),
+                        },
+                    )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        finally:
+            self._unlock(lock_key)
 
 
 class WorkflowGateway(ChannelGateway):
@@ -295,7 +335,13 @@ class WorkflowGateway(ChannelGateway):
                 "Workflow delivery failed: channel=%s node=%s error_type=%s; see action ledger",
                 self.channel, message.node_id, type(exc).__name__,
             )
-            self.ledger.finish(message.profile_id, message.node_id, "Failed", error=str(exc)[:2000])
+            self.ledger.finish(
+                message.profile_id,
+                message.node_id,
+                "Failed",
+                provider=self._provider_name(message),
+                error=str(exc)[:2000],
+            )
             return DeliveryReceipt(
                 status="failed",
                 detail=f"provider call failed ({type(exc).__name__}); see action ledger",
@@ -311,6 +357,7 @@ class WorkflowGateway(ChannelGateway):
             provider=self._provider_name(message),
             provider_message_id=receipt.provider_id,
             error=receipt.detail if ledger_status == "Failed" else None,
+            metadata={"skip_reason": receipt.detail} if ledger_status == "Skipped" and receipt.detail else None,
         )
         return receipt
 
@@ -390,8 +437,12 @@ class WebhookWorkflowGateway(WorkflowGateway):
             target_ids = self.tokens.get(str(message.profile_id), [])
             if not target_ids:
                 return DeliveryReceipt(status="skipped", detail="no push token")
+            app_id = str(config.get("app_id") or "").strip()
+            api_key = str(config.get("api_key") or "").strip()
+            if not app_id or not api_key:
+                raise CampaignWorkflowError("push onesignal connector is missing app_id or api_key")
             payload = {
-                "app_id": config["app_id"],
+                "app_id": app_id,
                 "include_subscription_ids": target_ids,
                 "headings": {"en": message.subject or ""},
                 "contents": {"en": message.body or ""},
@@ -400,13 +451,13 @@ class WebhookWorkflowGateway(WorkflowGateway):
                 str(config.get("api_url") or "https://onesignal.com/api/v1/notifications"),
                 data=json.dumps(payload).encode(),
                 headers={
-                    "Authorization": f"Basic {config['api_key']}",
+                    "Authorization": f"Basic {api_key}",
                     "Content-Type": "application/json",
                 },
                 method="POST",
             )
         else:
-            url = str(config.get("webhook_url") or "")
+            url = str(config.get("webhook_url") or "").strip()
             if not url:
                 raise CampaignWorkflowError(f"{self.channel} connector is missing webhook_url")
             payload = {"to": message.to, "subject": message.subject, "body": message.body}
@@ -457,23 +508,27 @@ class NotificationWorkflowGateway(WorkflowGateway):
             target_ids = self.tokens.get(str(message.profile_id), [])
             if not target_ids:
                 return DeliveryReceipt(status="skipped", detail="no mobile token")
+            app_id = str(config.get("app_id") or "").strip()
+            api_key = str(config.get("api_key") or "").strip()
+            if not app_id or not api_key:
+                raise CampaignWorkflowError("mobile_native connector is missing app_id or api_key")
             payload = {
-                "app_id": config["app_id"],
+                "app_id": app_id,
                 "include_subscription_ids": target_ids,
                 "headings": {"en": message.subject or ""},
-                "contents": {"en": message.body},
+                "contents": {"en": message.body or ""},
             }
             request = Request(
                 str(config.get("api_url") or "https://onesignal.com/api/v1/notifications"),
                 data=json.dumps(payload).encode(),
                 headers={
-                    "Authorization": f"Basic {config['api_key']}",
+                    "Authorization": f"Basic {api_key}",
                     "Content-Type": "application/json",
                 },
                 method="POST",
             )
         else:
-            webhook_url = str(config.get("webhook_url") or "")
+            webhook_url = str(config.get("webhook_url") or "").strip()
             if not webhook_url:
                 raise CampaignWorkflowError(
                     f"{provider} notification connector is missing webhook_url"
@@ -500,38 +555,65 @@ class NotificationWorkflowGateway(WorkflowGateway):
 
 
 class WorkflowProfileWriter(ProfileWriter):
-    def __init__(self, connection, tenant_id: str):
+    def __init__(self, connection, tenant_id: str, ledger: WorkflowLedger | None = None):
         self.connection = connection
         self.tenant_id = tenant_id
+        self.ledger = ledger
+        self.current_node_id: str | None = None
 
     def apply(self, profile: CdpMasterProfile, action: str, tag: str) -> None:
-        with self.connection.cursor() as cursor:
-            set_tenant_context(cursor, self.tenant_id)
-            if action == "add_tag":
-                cursor.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.cdp_master_profiles
-                    SET segmentation_tags = ARRAY(
-                        SELECT DISTINCT value
-                        FROM unnest(COALESCE(segmentation_tags, ARRAY[]::text[]) || ARRAY[%(tag)s]::text[]) AS value
-                    ), updated_at = now()
-                    WHERE tenant_id = %(tenant_id)s AND master_profile_id = %(profile_id)s
-                    """,
-                    {"tag": tag, "tenant_id": self.tenant_id, "profile_id": str(profile.master_profile_id)},
+        node_id = self.current_node_id or f"update_profile:{action}:{tag}"
+        if self.ledger is not None:
+            if not self.ledger.begin(profile.master_profile_id, node_id, "update_profile", "profile"):
+                return
+        try:
+            with self.connection.cursor() as cursor:
+                set_tenant_context(cursor, self.tenant_id)
+                if action == "add_tag":
+                    cursor.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.cdp_master_profiles
+                        SET segmentation_tags = ARRAY(
+                            SELECT DISTINCT value
+                            FROM unnest(COALESCE(segmentation_tags, ARRAY[]::text[]) || ARRAY[%(tag)s]::text[]) AS value
+                        ), updated_at = now()
+                        WHERE tenant_id = %(tenant_id)s AND master_profile_id = %(profile_id)s
+                        """,
+                        {"tag": tag, "tenant_id": self.tenant_id, "profile_id": str(profile.master_profile_id)},
+                    )
+                elif action == "remove_tag":
+                    cursor.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.cdp_master_profiles
+                        SET segmentation_tags = array_remove(COALESCE(segmentation_tags, ARRAY[]::text[]), %(tag)s),
+                            updated_at = now()
+                        WHERE tenant_id = %(tenant_id)s AND master_profile_id = %(profile_id)s
+                        """,
+                        {"tag": tag, "tenant_id": self.tenant_id, "profile_id": str(profile.master_profile_id)},
+                    )
+                else:
+                    raise CampaignWorkflowError(f"Unsupported profile action {action!r}")
+            self.connection.commit()
+        except Exception as exc:
+            self.connection.rollback()
+            if self.ledger is not None:
+                self.ledger.finish(
+                    profile.master_profile_id,
+                    node_id,
+                    "Failed",
+                    provider="cdp_master_profiles",
+                    error=str(exc)[:2000],
+                    metadata={"action": action, "tag": tag},
                 )
-            elif action == "remove_tag":
-                cursor.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.cdp_master_profiles
-                    SET segmentation_tags = array_remove(COALESCE(segmentation_tags, ARRAY[]::text[]), %(tag)s),
-                        updated_at = now()
-                    WHERE tenant_id = %(tenant_id)s AND master_profile_id = %(profile_id)s
-                    """,
-                    {"tag": tag, "tenant_id": self.tenant_id, "profile_id": str(profile.master_profile_id)},
-                )
-            else:
-                raise CampaignWorkflowError(f"Unsupported profile action {action!r}")
-        self.connection.commit()
+            raise
+        if self.ledger is not None:
+            self.ledger.finish(
+                profile.master_profile_id,
+                node_id,
+                "Applied",
+                provider="cdp_master_profiles",
+                metadata={"action": action, "tag": tag},
+            )
 
 
 class DatabaseEventSource(EventSource):
@@ -615,24 +697,93 @@ def _profile_from_row(row: dict[str, Any]) -> CdpMasterProfile:
 
 def _set_campaign_status(
     connection, tenant_id: str, campaign_id: str, status: str, *, execution_id: str,
-) -> None:
-    with connection.cursor() as cursor:
+) -> bool:
+    with connection.cursor(cursor_factory=RealDictCursor) as cursor:
         set_tenant_context(cursor, tenant_id)
         cursor.execute(
             f"""
             UPDATE {DB_SCHEMA}.crm_campaign
-            SET status = %(status)s
+            SET status = %(status)s, updated_at = now()
             WHERE tenant_id = %(tenant_id)s
               AND campaign_id = %(campaign_id)s
               AND workflow_execution_id = %(execution_id)s
               AND status IN ('Running', 'Failed')
+            RETURNING status
             """,
             {
                 "status": status, "tenant_id": tenant_id, "campaign_id": campaign_id,
                 "execution_id": execution_id,
             },
         )
+        updated = cursor.fetchone()
     connection.commit()
+    return bool(updated)
+
+
+def _record_workflow_audit_event(
+    connection,
+    *,
+    tenant_id: str,
+    campaign_id: str,
+    status: str,
+    execution_id: str,
+    run_id: str | None = None,
+    summary: dict[str, Any] | None = None,
+    error_message: str | None = None,
+) -> None:
+    """Record a runtime execution summary in sys_audit_log for campaign history observability."""
+    action = "WORKFLOW_COMPLETED" if status == "Completed" else "WORKFLOW_FAILED"
+    after_data: dict[str, Any] = {
+        "status": status,
+        "workflow_execution_id": execution_id,
+    }
+    if summary:
+        after_data.update({
+            "profiles": summary.get("profiles", 0),
+            "sent": summary.get("sent", 0),
+            "skipped": summary.get("skipped", 0),
+            "applied": summary.get("applied", 0),
+            "errors": summary.get("errors", 0),
+            "end_counts": summary.get("end_counts", {}),
+            "node_counts": summary.get("node_counts", {}),
+            "data_sync_run_ids": summary.get("data_sync_run_ids", []),
+        })
+    try:
+        with connection.cursor() as cursor:
+            set_tenant_context(cursor, tenant_id)
+            cursor.execute(
+                f"""
+                INSERT INTO {DB_SCHEMA}.sys_audit_log
+                    (tenant_id, action, resource_type, resource_id, service_name,
+                     before_data, after_data, success, error_message, metadata,
+                     created_at)
+                VALUES (%(tenant_id)s, %(action)s, 'crm_campaign', %(campaign_id)s,
+                        'campaign_activation', %(before_data)s, %(after_data)s,
+                        %(success)s, %(error_message)s, %(metadata)s,
+                        timezone('UTC', now()))
+                """,
+                {
+                    "tenant_id": tenant_id,
+                    "action": action,
+                    "campaign_id": str(campaign_id),
+                    "before_data": Json({
+                        "status": "Running",
+                        "workflow_execution_id": execution_id,
+                    }),
+                    "after_data": Json(after_data),
+                    "success": status == "Completed",
+                    "error_message": error_message[:2000] if error_message else None,
+                    "metadata": Json({
+                        "execution_id": execution_id,
+                        "run_id": run_id,
+                        "duration_seconds": summary.get("duration_seconds") if summary else None,
+                    }),
+                },
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        logger.debug("Could not persist workflow audit log for campaign %s", campaign_id, exc_info=True)
 
 
 def _iter_profile_rows(connection, tenant_id: str, segment_tag: str, batch_size: int):
@@ -691,17 +842,28 @@ def run_campaign_workflow(
         raise ValueError("batch_size must be between 1 and 100000")
     conn = connect()
     started_at = datetime.now(timezone.utc)
-    summary = {
+    summary: dict[str, Any] = {
         "campaign_id": campaign_id,
         "tenant_id": tenant_id,
+        "status": "Running",
+        "run_id": run_id,
+        "execution_id": None,
+        "workflow_id": None,
+        "workflow_version": None,
+        "segment_id": None,
+        "segment_tag": None,
         "profiles": 0,
         "errors": 0,
         "sent": 0,
         "skipped": 0,
         "applied": 0,
+        "end_counts": {"goal": 0, "exit": 0, "ended": 0, "error": 0},
+        "node_counts": {},
         "data_sync_run_ids": [],
+        "started_at": started_at.isoformat(),
+        "finished_at": None,
+        "duration_seconds": 0.0,
     }
-    summary["execution_id"] = None
     campaign_loaded = False
     try:
         lock_campaign_execution(conn, tenant_id, campaign_id, wait=True)
@@ -754,6 +916,10 @@ def run_campaign_workflow(
                 conn.commit()
             campaign_loaded = True
             summary["execution_id"] = str(current_execution_id)
+            summary["workflow_id"] = str(campaign["workflow_id"]) if campaign.get("workflow_id") else None
+            summary["workflow_version"] = campaign.get("workflow_version")
+            summary["segment_id"] = str(campaign["segment_id"]) if campaign.get("segment_id") else None
+            summary["segment_tag"] = campaign.get("segment_tag")
             if campaign["approval_status"] != "Approved":
                 raise CampaignWorkflowError("Campaign must be Approved before workflow execution")
             if campaign["workflow_approval_status"] != "Approved":
@@ -776,6 +942,7 @@ def run_campaign_workflow(
             }
             push_connector = _load_connector(connector_cursor, tenant_id, "PUSH")
         ledger = WorkflowLedger(conn, tenant_id, campaign_id, run_id, current_execution_id)
+        profile_writer = WorkflowProfileWriter(conn, tenant_id, ledger=ledger)
         token_map: dict[str, list[str]] = {}
         services = Services(
             gateways={
@@ -784,15 +951,37 @@ def run_campaign_workflow(
                 "push": WebhookWorkflowGateway(ledger, "push", push_connector, token_map),
             },
             events=DatabaseEventSource(conn, tenant_id, started_at),
-            profile_writer=WorkflowProfileWriter(conn, tenant_id),
+            profile_writer=profile_writer,
         )
         engine = FlowEngine(definition, services=services)
+        for node_id, node_obj in engine.nodes.items():
+            if node_obj.type == "update_profile":
+                orig_execute = node_obj.execute
+
+                def _make_tracked_execute(nid: str, fn):
+                    def _tracked(ctx):
+                        profile_writer.current_node_id = nid
+                        try:
+                            return fn(ctx)
+                        finally:
+                            profile_writer.current_node_id = None
+                    return _tracked
+
+                node_obj.execute = _make_tracked_execute(node_id, orig_execute)  # type: ignore[method-assign]
         reached_sync_nodes: set[str] = set()
         for row in _iter_profile_rows(conn, tenant_id, campaign["segment_tag"], batch_size):
             token_map.clear()
-            token_map[str(row["master_profile_id"])] = list((row.get("push_tokens") or {}).values())
+            raw_tokens = row.get("push_tokens") or {}
+            token_map[str(row["master_profile_id"])] = [
+                str(tok).strip()
+                for tok in (raw_tokens.values() if isinstance(raw_tokens, dict) else raw_tokens)
+                if tok and str(tok).strip()
+            ]
             summary["profiles"] += 1
             result = engine.run(_profile_from_row(row))
+            summary["end_counts"][result.end] = summary["end_counts"].get(result.end, 0) + 1
+            for step in result.steps:
+                summary["node_counts"][step.node_id] = summary["node_counts"].get(step.node_id, 0) + 1
             if result.end == "error":
                 summary["errors"] += 1
                 conn.rollback()
@@ -811,21 +1000,71 @@ def run_campaign_workflow(
             execution_id=str(current_execution_id),
             log=logger.info,
         )
+        finished_at = datetime.now(timezone.utc)
+        final_status = "Failed" if summary["errors"] else "Completed"
+        summary["status"] = final_status
+        summary["finished_at"] = finished_at.isoformat()
+        summary["duration_seconds"] = round((finished_at - started_at).total_seconds(), 3)
         _set_campaign_status(
             conn,
             tenant_id,
             campaign_id,
-            "Failed" if summary["errors"] else "Completed",
+            final_status,
             execution_id=str(current_execution_id),
         )
+        _record_workflow_audit_event(
+            conn,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+            status=final_status,
+            execution_id=str(current_execution_id),
+            run_id=run_id,
+            summary=summary,
+            error_message=(
+                f"{summary['errors']} profile journey(s) failed during execution"
+                if summary["errors"]
+                else None
+            ),
+        )
+        logger.info(
+            "campaign_workflow finished: campaign_id=%s tenant_id=%s execution_id=%s "
+            "status=%s profiles=%d sent=%d skipped=%d applied=%d errors=%d duration_s=%.3f",
+            campaign_id,
+            tenant_id,
+            current_execution_id,
+            final_status,
+            summary["profiles"],
+            summary["sent"],
+            summary["skipped"],
+            summary["applied"],
+            summary["errors"],
+            summary["duration_seconds"],
+        )
         return summary
-    except Exception:
+    except Exception as exc:
         conn.rollback()
         if campaign_loaded:
+            finished_at = datetime.now(timezone.utc)
+            summary["status"] = "Failed"
+            summary["finished_at"] = finished_at.isoformat()
+            summary["duration_seconds"] = round((finished_at - started_at).total_seconds(), 3)
             try:
                 _set_campaign_status(
-                    conn, tenant_id, campaign_id, "Failed",
+                    conn,
+                    tenant_id,
+                    campaign_id,
+                    "Failed",
                     execution_id=str(current_execution_id),
+                )
+                _record_workflow_audit_event(
+                    conn,
+                    tenant_id=tenant_id,
+                    campaign_id=campaign_id,
+                    status="Failed",
+                    execution_id=str(current_execution_id),
+                    run_id=run_id,
+                    summary=summary,
+                    error_message=str(exc),
                 )
             except Exception:
                 conn.rollback()

@@ -7,10 +7,10 @@ node.
 """
 
 import logging
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 import uuid
 
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor
 
 from .db import DB_SCHEMA, connect
 from .rls import lock_campaign_execution, set_tenant_context
@@ -21,6 +21,43 @@ logger = logging.getLogger(__name__)
 
 class CampaignActivationError(Exception):
     """Raised when a workflow campaign cannot be activated safely."""
+
+
+def _record_campaign_audit_event(
+    cur,
+    *,
+    tenant_id: str,
+    campaign_id: str,
+    action: str,
+    before_data: dict[str, Any] | None = None,
+    after_data: dict[str, Any] | None = None,
+    success: bool = True,
+    error_message: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Persist a runtime state transition into sys_audit_log for campaign observability."""
+    cur.execute(
+        f"""
+        INSERT INTO {DB_SCHEMA}.sys_audit_log
+            (tenant_id, action, resource_type, resource_id, service_name,
+             before_data, after_data, success, error_message, metadata,
+             created_at)
+        VALUES (%(tenant_id)s, %(action)s, 'crm_campaign', %(campaign_id)s,
+                'campaign_activation', %(before_data)s, %(after_data)s,
+                %(success)s, %(error_message)s, %(metadata)s,
+                timezone('UTC', now()))
+        """,
+        {
+            "tenant_id": tenant_id,
+            "action": action,
+            "campaign_id": str(campaign_id),
+            "before_data": Json(before_data) if before_data is not None else None,
+            "after_data": Json(after_data) if after_data is not None else None,
+            "success": success,
+            "error_message": error_message[:2000] if error_message else None,
+            "metadata": Json(metadata or {}),
+        },
+    )
 
 
 def _load_campaign(cur, tenant_id: str, campaign_id: str) -> Optional[dict]:
@@ -53,6 +90,18 @@ def activate_campaign(
     log: Callable[[str], None] = logger.info,
 ) -> dict:
     """Start, resume a failed execution, or explicitly replay a completed campaign."""
+    try:
+        campaign_id = str(uuid.UUID(str(campaign_id)))
+        tenant_id = str(uuid.UUID(str(tenant_id)))
+        if expected_execution_id is not None:
+            expected_execution_id = str(uuid.UUID(str(expected_execution_id)))
+    except (ValueError, TypeError, AttributeError):
+        # Preserve string IDs for synthetic unit-test fixtures while normalizing valid UUIDs.
+        campaign_id = str(campaign_id).strip()
+        tenant_id = str(tenant_id).strip()
+        if not campaign_id or not tenant_id:
+            raise ValueError("campaign_id and tenant_id must be non-empty")
+
     conn = connect()
     try:
         if not lock_campaign_execution(conn, tenant_id, campaign_id):
@@ -63,6 +112,11 @@ def activate_campaign(
             if campaign is None:
                 raise CampaignActivationError(f"campaign {campaign_id} not found for tenant {tenant_id}")
             campaign_status = campaign.get("status")
+            previous_execution_id = (
+                str(campaign["workflow_execution_id"])
+                if campaign.get("workflow_execution_id") is not None
+                else None
+            )
             if campaign_status == "Running":
                 raise CampaignActivationError(
                     f"campaign {campaign_id} is already {campaign['status']}"
@@ -72,7 +126,7 @@ def activate_campaign(
                     f"campaign {campaign_id} is Completed; explicit restart is required"
                 )
             if restart and campaign_status == "Completed" and (
-                str(campaign.get("workflow_execution_id")) != str(expected_execution_id)
+                previous_execution_id != (str(expected_execution_id) if expected_execution_id is not None else None)
             ):
                 raise CampaignActivationError("Campaign execution changed; refresh before restarting")
             if restart and campaign_status not in {"Completed", "Failed"}:
@@ -121,7 +175,8 @@ def activate_campaign(
             cur.execute(
                 f"""
                 UPDATE {DB_SCHEMA}.crm_campaign
-                SET status = 'Running', workflow_execution_id = %(execution_id)s
+                SET status = 'Running', workflow_execution_id = %(execution_id)s,
+                    updated_at = now()
                 WHERE campaign_id = %(campaign_id)s
                   AND tenant_id = %(tenant_id)s
                 """,
@@ -131,24 +186,69 @@ def activate_campaign(
                     "execution_id": str(execution_id),
                 },
             )
+            _record_campaign_audit_event(
+                cur,
+                tenant_id=tenant_id,
+                campaign_id=campaign_id,
+                action="WORKFLOW_RESTARTED" if (campaign_status == "Completed" and restart) else "WORKFLOW_ACTIVATED",
+                before_data={
+                    "status": campaign_status,
+                    "workflow_execution_id": previous_execution_id,
+                },
+                after_data={
+                    "status": "Running",
+                    "workflow_execution_id": str(execution_id),
+                    "workflow_version": campaign.get("workflow_version"),
+                },
+                metadata={
+                    "restart": bool(restart),
+                    "segment_id": str(campaign["segment_id"]),
+                    "workflow_id": str(campaign["workflow_id"]),
+                    "workflow_version": campaign.get("workflow_version"),
+                },
+            )
         conn.commit()
 
-        log(f"campaign_activation: campaign {campaign_id} marked Running")
+        log(
+            f"campaign_activation: campaign {campaign_id} marked Running "
+            f"(execution_id={execution_id}, restart={restart})"
+        )
         try:
             workflow_run_id = trigger_campaign_workflow_job(
                 campaign_id, tenant_id, execution_id=str(execution_id), log=log
             )
-        except Exception:
+        except Exception as exc:
             with conn.cursor() as cur:
                 set_tenant_context(cur, tenant_id)
                 cur.execute(
                     f"""
                     UPDATE {DB_SCHEMA}.crm_campaign
-                    SET status = 'Failed'
+                    SET status = 'Failed', updated_at = now()
                     WHERE campaign_id = %(campaign_id)s
                       AND tenant_id = %(tenant_id)s
+                      AND workflow_execution_id = %(execution_id)s
                     """,
-                    {"campaign_id": campaign_id, "tenant_id": tenant_id},
+                    {
+                        "campaign_id": campaign_id,
+                        "tenant_id": tenant_id,
+                        "execution_id": str(execution_id),
+                    },
+                )
+                _record_campaign_audit_event(
+                    cur,
+                    tenant_id=tenant_id,
+                    campaign_id=campaign_id,
+                    action="WORKFLOW_SUBMISSION_FAILED",
+                    before_data={
+                        "status": "Running",
+                        "workflow_execution_id": str(execution_id),
+                    },
+                    after_data={
+                        "status": "Failed",
+                        "workflow_execution_id": str(execution_id),
+                    },
+                    success=False,
+                    error_message=str(exc),
                 )
             conn.commit()
             raise

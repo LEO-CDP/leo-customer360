@@ -139,3 +139,94 @@ def test_queued_restart_cannot_replay_an_execution_that_already_changed(monkeypa
         )
     trigger.assert_not_called()
     conn.commit.assert_not_called()
+
+
+def test_lock_contention_raises_and_closes_connection(monkeypatch):
+    conn = MagicMock()
+    trigger = MagicMock()
+    monkeypatch.setattr(activation, "connect", lambda: conn)
+    monkeypatch.setattr(activation, "lock_campaign_execution", lambda *_: False)
+    monkeypatch.setattr(activation, "trigger_campaign_workflow_job", trigger)
+
+    with pytest.raises(CampaignActivationError, match="already executing"):
+        activate_campaign("c1", "t1", log=lambda *_: None)
+
+    trigger.assert_not_called()
+    conn.commit.assert_not_called()
+    conn.close.assert_called_once()
+
+
+def test_activation_allocates_execution_id_when_initially_none(monkeypatch):
+    initial = {**APPROVED, "workflow_execution_id": None}
+    conn, cur, trigger = _wire(monkeypatch, [initial, {"segment_tag": "vip"}])
+
+    out = activate_campaign("c1", "t1", log=lambda *_: None)
+
+    assert out["status"] == "Running"
+    assert out["execution_id"] is not None
+    trigger.assert_called_once_with(
+        "c1", "t1", execution_id=out["execution_id"], log=trigger.call_args.kwargs["log"]
+    )
+    audit_calls = [
+        c for c in cur.execute.call_args_list
+        if "INSERT INTO customer360.sys_audit_log" in str(c.args[0])
+    ]
+    assert len(audit_calls) == 1
+    assert audit_calls[0].args[1]["action"] == "WORKFLOW_ACTIVATED"
+    assert audit_calls[0].args[1]["before_data"].adapted == {
+        "status": "Draft",
+        "workflow_execution_id": None,
+    }
+    assert audit_calls[0].args[1]["after_data"].adapted["status"] == "Running"
+    assert audit_calls[0].args[1]["after_data"].adapted["workflow_execution_id"] == out["execution_id"]
+
+
+def test_completed_restart_when_both_execution_ids_are_none_succeeds(monkeypatch):
+    completed = {**APPROVED, "status": "Completed", "workflow_execution_id": None}
+    conn, cur, trigger = _wire(monkeypatch, [completed, {"segment_tag": "vip"}])
+
+    out = activate_campaign("c1", "t1", restart=True, expected_execution_id=None, log=lambda *_: None)
+
+    assert out["status"] == "Running"
+    assert out["execution_id"] is not None
+    trigger.assert_called_once()
+    audit_calls = [
+        c for c in cur.execute.call_args_list
+        if "INSERT INTO customer360.sys_audit_log" in str(c.args[0])
+    ]
+    assert len(audit_calls) == 1
+    assert audit_calls[0].args[1]["action"] == "WORKFLOW_RESTARTED"
+
+
+def test_submission_failure_scopes_rollback_to_current_execution_and_audits(monkeypatch):
+    conn, cur, trigger = _wire(monkeypatch, [dict(APPROVED), {"segment_tag": "vip"}])
+    trigger.side_effect = RuntimeError("Dagster connection refused")
+
+    with pytest.raises(RuntimeError, match="Dagster connection refused"):
+        activate_campaign("c1", "t1", log=lambda *_: None)
+
+    fail_updates = [
+        c for c in cur.execute.call_args_list
+        if "SET status = 'Failed'" in str(c.args[0])
+    ]
+    assert len(fail_updates) == 1
+    assert "workflow_execution_id = %(execution_id)s" in str(fail_updates[0].args[0])
+    assert fail_updates[0].args[1]["execution_id"] == APPROVED["workflow_execution_id"]
+    audit_calls = [
+        c for c in cur.execute.call_args_list
+        if "INSERT INTO customer360.sys_audit_log" in str(c.args[0])
+    ]
+    assert [c.args[1]["action"] for c in audit_calls] == [
+        "WORKFLOW_ACTIVATED",
+        "WORKFLOW_SUBMISSION_FAILED",
+    ]
+    assert audit_calls[1].args[1]["success"] is False
+    assert "Dagster connection refused" in audit_calls[1].args[1]["error_message"]
+
+
+def test_empty_identifiers_raise_value_error():
+    with pytest.raises(ValueError, match="must be non-empty"):
+        activate_campaign("   ", "t1", log=lambda *_: None)
+    with pytest.raises(ValueError, match="must be non-empty"):
+        activate_campaign("c1", "", log=lambda *_: None)
+

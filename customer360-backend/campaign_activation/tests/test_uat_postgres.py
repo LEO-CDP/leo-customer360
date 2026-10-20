@@ -248,15 +248,43 @@ def test_postgres_activation_runtime_and_unlimited_replay_without_delivery(postg
     with connection.cursor() as cursor:
         cursor.execute(
             """
-            SELECT execution_id, status, attempt_count
+            SELECT execution_id, action_type, status, attempt_count
             FROM customer360.crm_campaign_workflow_action_runs
             WHERE tenant_id = %s AND campaign_id = %s
+            ORDER BY created_at, action_type
             """,
             (tenant_id, campaign_id),
         )
         rows = cursor.fetchall()
-    assert len(rows) == 3
-    assert all(row[1:] == ("Skipped", 1) for row in rows)
+    assert len(rows) == 6
+    email_rows = [row for row in rows if row[1] == "email"]
+    profile_rows = [row for row in rows if row[1] == "update_profile"]
+    assert len(email_rows) == 3
+    assert len(profile_rows) == 3
+    assert all(row[2:] == ("Skipped", 1) for row in email_rows)
+    assert all(row[2:] == ("Applied", 1) for row in profile_rows)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT action, before_data, after_data, success
+            FROM customer360.sys_audit_log
+            WHERE tenant_id = %s AND resource_type = 'crm_campaign' AND resource_id = %s
+            ORDER BY created_at
+            """,
+            (tenant_id, campaign_id),
+        )
+        audit_rows = cursor.fetchall()
+    actions = [row[0] for row in audit_rows]
+    assert actions == [
+        "WORKFLOW_COMPLETED",
+        "WORKFLOW_RESTARTED",
+        "WORKFLOW_COMPLETED",
+        "WORKFLOW_RESTARTED",
+        "WORKFLOW_COMPLETED",
+    ]
+    assert all(row[3] is True for row in audit_rows)
+    completed_audits = [row for row in audit_rows if row[0] == "WORKFLOW_COMPLETED"]
+    assert all(row[2]["profiles"] == 1 and row[2]["applied"] == 1 for row in completed_audits)
 
 
 def test_postgres_audience_replays_log_separate_dry_runs_without_a_provider(postgres, monkeypatch):

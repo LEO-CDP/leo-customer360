@@ -4,6 +4,38 @@
 Every campaign must have a selected segment and a pinned, approved persisted
 workflow.
 
+## Service map
+
+The service is a Dagster code location, not an HTTP service. The API validates
+the caller and campaign, then submits a Dagster activation run. The activation
+op updates campaign state and submits a separate workflow run. The workflow
+runner loads profiles, evaluates the saved workflow graph, and records action
+outcomes.
+
+```mermaid
+flowchart LR
+    UI[Campaign details] --> API[Campaign activation API]
+    API -->|tenant/admin + readiness checks| ACT[campaign_activation_job]
+    ACT -->|lock + validate + set Running| DB[(PostgreSQL)]
+    ACT -->|submit with execution_id| WF[campaign_workflow_job]
+    WF -->|load pinned workflow + profiles| DB
+    WF -->|evaluate graph| ENG[DAO FlowEngine]
+    ENG -->|email / notification / push| PROVIDERS[Configured tenant connectors]
+    ENG -->|tag updates + action ledger| DB
+    WF -->|reached sync nodes only| SYNC[data_synch_job]
+    SYNC -->|audience sync audit| DB
+    WF -->|summary + final campaign status| DB
+```
+
+The campaign workflow, state, and action ledgers are defined in the canonical
+[`database-schema.sql`](../../customer360-database/database-schema.sql). The
+workflow graph is versioned in `crm_flow_version`; campaign metadata pins one
+version through `crm_campaign.workflow_id` and `workflow_version`. A flow's
+published version is not a substitute for the campaign's pinned version.
+For product use cases, the three state dimensions, and business-level
+transition diagrams, see
+[`MARKETING-WORKFLOW.md`](../../docs/marketing/MARKETING-WORKFLOW.md).
+
 ## Trigger
 
 The API entry point is:
@@ -40,6 +72,62 @@ replay gets a new `workflow_execution_id`; there is no restart-count limit.
 No template-based or channel-dispatch fallback is selected by
 `activate_campaign`.
 
+## State model and retry semantics
+
+Campaign approval, workflow-version approval, and operational execution are
+separate states. Approval is a prerequisite, not an execution status.
+
+| State dimension | States / transition | Owner |
+| --- | --- | --- |
+| Campaign approval | `Draft → InReview → Approved` or `Rejected`; edited rejected/approved drafts return for review | Campaign draft API and human reviewers |
+| Pinned workflow version | User-authored versions are approved by persistence rules; agent-authored versions start `InReview` and require a different human reviewer | Workflow API and human reviewer |
+| Campaign execution | `Ready → Running → Completed` or `Failed`; a failed run retries, a completed run can be replayed | Activation and workflow runner |
+
+```mermaid
+stateDiagram-v2
+    state "Campaign approval" as Approval {
+        [*] --> Draft
+        Draft --> InReview: submit for review
+        InReview --> Approved: admin approves
+        InReview --> Rejected: admin rejects
+        Rejected --> InReview: edit and resubmit
+        Approved --> InReview: governed edit and resubmit
+    }
+    state "Pinned workflow version" as Workflow {
+        [*] --> WorkflowApproved: user-authored
+        [*] --> WorkflowInReview: agent-authored
+        WorkflowInReview --> WorkflowApproved: different human approves
+        WorkflowInReview --> WorkflowRejected: human rejects
+        WorkflowRejected --> WorkflowInReview: save revised version
+    }
+    state "Operational execution" as Execution {
+        [*] --> Ready
+        Ready --> Running: activation accepted
+        Running --> Completed: profile pass has no journey errors
+        Running --> Failed: submission or workflow error
+        Failed --> Running: retry with same execution_id
+        Completed --> Running: explicit replay with new execution_id
+    }
+    Approval --> Execution: campaign Approved
+    Workflow --> Execution: pinned version Approved
+```
+
+`Running` campaigns cannot be activated again. A failed campaign retry reuses
+its `workflow_execution_id`, so successful and skipped per-profile actions in
+that execution are not repeated. The API/UI offers explicit restart for a
+completed campaign: the request includes the execution ID observed by the
+caller, and activation allocates a new ID, preserving prior action history.
+The API repository enforces this completed-only replay rule. The backend
+activation function also accepts an explicit restart flag for `Failed` status
+as a same-ID retry, but normal clients retry failed campaigns without that
+flag.
+
+The activation run and profile workflow run are separate Dagster runs. A
+successful activation run means the child workflow was submitted, not that
+profile actions completed. The workflow op can return `status = Failed` and
+profile errors while the Dagster op itself succeeds; use the campaign status
+and returned `errors` as the business outcome, not only the Dagster run color.
+
 ## Workflow execution
 
 `campaign_workflow_job` runs `run_campaign_workflow_op`, implemented by
@@ -73,6 +161,12 @@ The runner loads `Running` campaigns, or `Failed` campaigns during a retry. It t
 The workflow graph is the execution contract. The engine does not substitute
 campaign-level templates or dispatch a whole segment outside the graph.
 
+The runner selects active profiles whose current `segmentation_tags` contain
+the selected segment's `segment_tag`, using UUID keyset pages. It does not
+persist a frozen audience snapshot or guarantee that all pages observe one
+database snapshot for the entire campaign. Segment membership can therefore
+change while a long-running worker processes profiles.
+
 ## Frontend-to-runtime contract
 
 The editor saves workflow schema version 2 JSON from
@@ -87,6 +181,30 @@ The action node types map to runtime behavior as follows:
 | Update profile / tag | `update_profile` | Add/remove the configured tag in `cdp_master_profiles` |
 | Sync custom audience | `run_data_synch_job` | Submit a campaign-scoped audience sync action |
 
+### Profile fields available to conditions
+
+`condition` nodes read profile values from `CdpMasterProfile`. Numeric fields
+support `ge`, `lt`, and `eq`; `segmentation_tags` supports `has` and `hasnt`.
+Missing numeric values never match and follow the `no` branch.
+
+| Field | Meaning |
+| --- | --- |
+| `engagement_score` | Interaction/engagement score (0–100) |
+| `churn_probability` | Churn probability (0–1) |
+| `lead_conversion_probability` | Lead/conversion probability (0–1) |
+| `historical_clv` | Realized customer lifetime value |
+| `predictive_clv` | Predicted future customer lifetime value |
+| `latest_nps_score` | Latest NPS score (0–10) |
+| `average_csat` | Average customer satisfaction score |
+| `overall_sentiment_score` | NLP sentiment score (-1–1) |
+| `profile_completeness_score` | Profile completeness score (0–100) |
+| `identity_confidence_score` | Identity resolution confidence (0–1) |
+| `segmentation_tags` | Membership tags, queried with `has` / `hasnt` |
+
+`status_code` is intentionally excluded: the runner already filters to active
+profiles before evaluating the workflow, so exposing this operational field
+would not represent a useful marketing decision.
+
 The workflow studio build guide exposes the same action set. Its action
 controls are in `workflow-studio.js` and `workflow-template.js`.
 
@@ -100,7 +218,7 @@ is aligned with the workflow:
 
 ## Action execution and idempotency
 
-Per-profile email, notification, and push actions use
+Per-profile email, notification, push, and `update_profile` (tag) actions use
 `crm_campaign_workflow_action_runs`, keyed by:
 
 ```text
@@ -111,10 +229,78 @@ The execution ID is stable across retries of a failed campaign execution, so
 already-sent/applied/skipped actions are not repeated on those retries and
 failed actions can be retried. An explicit replay of a `Completed` campaign
 creates a new execution ID and therefore re-executes every reachable message
-action for the current segment, including actions sent in previous executions.
-This may send duplicate messages. Every replay is retained as separate action
-ledger rows; the number of replays is not capped. Provider IDs and errors are
-recorded per execution.
+and profile action for the current segment, including actions sent in previous
+executions. This may send duplicate messages. Every replay is retained as
+separate action ledger rows; the number of replays is not capped. Provider IDs,
+errors, and action metadata (`skip_reason`, tag changes) are recorded per
+execution.
+
+`WorkflowLedger` takes a PostgreSQL advisory lock around each per-profile/node
+action. Completed `Sent`, `Applied`, and `Skipped` rows are not repeated within
+the same execution; `Failed` rows are retried with an incremented
+`attempt_count`. The campaign-scoped session advisory lock also serializes
+workers for one campaign. Provider acceptance followed by a process crash
+before ledger completion remains an uncertain external outcome; this is not
+an exactly-once delivery guarantee.
+
+## Runtime state observability
+
+Runtime transitions (`WORKFLOW_ACTIVATED`, `WORKFLOW_RESTARTED`,
+`WORKFLOW_SUBMISSION_FAILED`, `WORKFLOW_COMPLETED`, and `WORKFLOW_FAILED`) are
+written to `sys_audit_log` under `resource_type = 'crm_campaign'` with
+`before_data`/`after_data` snapshots so the Campaign Details history view
+can display runtime execution transitions alongside human review decisions.
+Activation audit writes are part of activation persistence. The workflow
+runner's final summary audit is best-effort: a logging-table failure is rolled
+back and logged without replacing the campaign result.
+
+Both `activate_campaign_op` and `run_campaign_workflow_op` emit structured
+Dagster `Output` metadata (`execution_id`, `workflow_run_id`, `profiles`,
+`sent`, `skipped`, `applied`, `errors`, `duration_seconds`, `end_counts`,
+`node_counts`, and `data_sync_run_ids`) for inspection in the Dagster UI. The
+workflow result also includes start/finish timestamps and campaign, workflow,
+and segment identifiers. `end_counts` distinguish `goal`, `exit`, `ended`, and
+`error` journeys; `node_counts` count profile visits to each node. These are
+execution counts, not unique-profile or provider-delivery metrics. In
+particular, `applied` counts visits to `update_profile` nodes, not a guaranteed
+number of distinct profile rows changed on retries.
+
+### Operational checks
+
+Use the campaign and execution IDs as correlation keys across the API
+response, Dagster tags/output metadata, audit log, and action ledger. The
+activation response's `run_id` identifies the activation run; the
+`workflow_run_id` returned by `activate_campaign` identifies its child run.
+
+```sql
+SELECT campaign_id, tenant_id, status, approval_status, workflow_id,
+       workflow_version, workflow_execution_id, updated_at
+FROM customer360.crm_campaign
+WHERE tenant_id = :tenant_id AND campaign_id = :campaign_id;
+```
+
+```sql
+SELECT execution_id, master_profile_id, node_id, action_type, channel,
+       status, attempt_count, provider, provider_message_id, error_message,
+       metadata, run_id, updated_at
+FROM customer360.crm_campaign_workflow_action_runs
+WHERE tenant_id = :tenant_id AND campaign_id = :campaign_id
+ORDER BY updated_at DESC, master_profile_id, node_id;
+```
+
+```sql
+SELECT action, before_data, after_data, success, error_message, metadata, created_at
+FROM customer360.sys_audit_log
+WHERE tenant_id = :tenant_id
+  AND resource_type = 'crm_campaign'
+  AND resource_id = :campaign_id
+ORDER BY created_at DESC;
+```
+
+Campaign `Completed` means the profile workflow pass finished without journey
+errors. Audience-sync child runs are asynchronous; inspect each
+`data_sync_run_id` in Dagster and `crm_ad_sync_runs` before considering an
+external audience upload complete.
 
 Audience-sync nodes are campaign-scoped rather than one provider request per
 profile. Only nodes reached by at least one profile are submitted; unvisited
@@ -127,8 +313,8 @@ before declaring the audience upload complete.
 
 Provider failures mark the action `Failed` and the profile journey as an error;
 other profiles continue, and the campaign finishes `Failed`. Retrying uses the
-existing action ledger. A failed profile database transaction is rolled back
-before processing the next profile. Concurrent activation requests are
+existing action ledger. Previously committed actions are not undone when a
+later node fails. Concurrent activation requests are
 serialized on the campaign row. A `Running` campaign cannot be activated again;
 a `Completed` campaign can be replayed only with the explicit restart flag.
 The workflow editor also refuses edits to a running campaign.
@@ -168,16 +354,18 @@ fail explicitly rather than silently falling back to a dry run.
 SMTP reads the password written by the provider configuration API from
 `credentials.password`; legacy `smtp_password` is also accepted.
 
-## UAT execution model
+## Runtime boundaries and UAT execution model
 
-This runner is a segment-snapshot executor, not a real-time journey scheduler:
-activation enrolls the selected segment immediately. The trigger event describes
-the journey but does not subscribe to future events. Wait nodes advance virtual
-time without sleeping. Wait-for-event nodes query events already available in
-the corresponding journey window; they do not suspend and resume later. The
-browser simulation uses estimated engagement outcomes, not actual delivery
-receipts. Test real-time event enrollment and durable delays only after those
-capabilities are implemented.
+This runner is a segment-based batch executor, not a real-time journey
+scheduler. The worker queries active profiles matching the selected segment
+tag in UUID keyset pages; it does not materialize a frozen membership snapshot
+or hold one repeatable-read snapshot across all pages. The trigger event
+describes the journey but does not subscribe to future events. Wait nodes
+advance virtual time without sleeping. Wait-for-event nodes query events
+already available in the corresponding journey window; they do not suspend
+and resume later. The browser simulation uses estimated engagement outcomes,
+not actual delivery receipts. Real-time event enrollment and durable delays
+are not implemented.
 
 ## Persistence and development database
 
@@ -267,7 +455,7 @@ cd customer360-backend
 dagster dev -w workspace.yaml
 
 cd campaign_activation
-./run_tests.sh
+bash run_tests.sh
 ```
 
 ## Deployment version logging
@@ -287,8 +475,8 @@ BUILD_DATE_TIME=2026-10-19T15:37:00Z
 GIT_COMMIT=ea695a0
 ```
 
-`GIT_SHA` is accepted as a fallback for `GIT_COMMIT`. If metadata is not
-provided, the log explicitly reports `build_date_time=unknown git_commit=unknown`
-rather than guessing from the API or another code location. Search the
-Dagster worker/code-location logs for `campaign_activation build` to confirm
-which deployment executed a run.
+`GIT_SHA` is accepted as a fallback for `GIT_COMMIT`. If
+`BUILD_DATE_TIME` is missing or set to `unknown`, the code location uses its
+UTC startup time. If commit metadata is missing, the log reports
+`git_commit=unknown`. Search the Dagster worker/code-location logs for
+`campaign_activation build` to confirm which deployment executed a run.

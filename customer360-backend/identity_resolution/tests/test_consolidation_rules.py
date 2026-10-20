@@ -393,10 +393,10 @@ class TestConsolidationInLinkUpdate:
 
         resolver._link_and_update(mock_cursor, raw_profile, "master-1", rules=rules)
 
-        assert mock_cursor.execute.call_count == 5
-        _, update_params = mock_cursor.execute.call_args_list[3][0]
+        assert mock_cursor.execute.call_count == 6
+        _, update_params = mock_cursor.execute.call_args_list[4][0]
         assert update_params[:3] == ("New Name", "old@example.com", "old-phone")
-        _, upsert_params = mock_cursor.execute.call_args_list[4][0]
+        _, upsert_params = mock_cursor.execute.call_args_list[5][0]
         assert upsert_params[0] == "t1"
         assert upsert_params[1] == "master-1"
         assert upsert_params[2] == "banking"
@@ -483,7 +483,7 @@ class TestConsolidationInLinkUpdate:
 
         resolver._link_and_update(mock_cursor, raw_profile, "master-1", rules=rules)
 
-        select_query = mock_cursor.execute.call_args_list[1][0][0]
+        select_query = mock_cursor.execute.call_args_list[2][0][0]
         assert "risk_review_status" in select_query
 
     def test_link_and_update_ignores_unsafe_column_name_in_config(self, mock_cursor, mock_conn):
@@ -526,5 +526,62 @@ class TestConsolidationInLinkUpdate:
 
         resolver._link_and_update(mock_cursor, raw_profile, "master-1", rules=rules)
 
-        select_query = mock_cursor.execute.call_args_list[1][0][0]
+        select_query = mock_cursor.execute.call_args_list[2][0][0]
         assert "DROP TABLE" not in select_query
+
+    def test_link_and_update_skips_conflicting_identity_fields_with_consolidation_rules(
+        self, mock_cursor, mock_conn, caplog
+    ):
+        resolver = make_resolver(mock_conn)
+        raw_profile = {
+            "raw_profile_id": "r1",
+            "tenant_id": "t1",
+            "domain": "banking",
+            "source_system": "CoreBanking",
+            "created_at": datetime(2026, 7, 2, tzinfo=timezone.utc),
+            "full_name": "Updated Name",
+            "email": "taken@example.com",
+            "phone_number": "+84901234567",
+            "national_id": None,
+            "device_id": None,
+            "advertising_id": None,
+            "cookie_id": None,
+            "external_customer_id": None,
+            "push_token": None,
+        }
+        rules = [
+            IdentityRule("full_name", "exact", consolidation_rule="overwrite"),
+            IdentityRule("email", "exact", consolidation_rule="overwrite"),
+            IdentityRule("phone_number", "exact", consolidation_rule="overwrite"),
+        ]
+        mock_cursor.fetchall.return_value = [
+            {
+                "master_profile_id": "other-master-1",
+                "email": "taken@example.com",
+                "phone_number": None,
+            },
+            {
+                "master_profile_id": "other-master-2",
+                "email": None,
+                "phone_number": "+84901234567",
+            },
+        ]
+        mock_cursor.fetchone.return_value = {
+            "full_name": "Old Name",
+            "email": "current@example.com",
+            "phone_number": "+84900000000",
+            "source_systems": ["WebTracking"],
+            "updated_at": datetime(2026, 7, 1, tzinfo=timezone.utc),
+        }
+
+        resolver._link_and_update(mock_cursor, raw_profile, "master-1", rules=rules)
+
+        update_query, update_params = mock_cursor.execute.call_args_list[4][0]
+        assert "full_name = %s" in update_query
+        assert "email = %s" not in update_query
+        assert "phone_number = %s" not in update_query
+        assert update_params[0] == "Updated Name"
+        assert "other-master-1" in caplog.text
+        assert "other-master-2" in caplog.text
+        assert "taken@example.com" not in caplog.text
+        assert "+84901234567" not in caplog.text

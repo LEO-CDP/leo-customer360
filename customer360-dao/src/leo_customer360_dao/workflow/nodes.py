@@ -29,7 +29,6 @@ NUMERIC_PROFILE_FIELDS = {
     "overall_sentiment_score",
     "profile_completeness_score",
     "identity_confidence_score",
-    "status_code",
 }
 _PLACEHOLDER = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 

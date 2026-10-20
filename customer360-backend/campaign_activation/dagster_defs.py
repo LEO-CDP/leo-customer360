@@ -35,7 +35,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dagster import (  # noqa: E402
     Config,
     Definitions,
+    MetadataValue,
     OpExecutionContext,
+    Output,
     RetryPolicy,
     job,
     op,
@@ -67,7 +69,7 @@ class CampaignWorkflowConfig(Config):
 
 
 @op(retry_policy=RetryPolicy(max_retries=2, delay=10))
-def activate_campaign_op(context: OpExecutionContext, config: ActivateCampaignConfig) -> dict:
+def activate_campaign_op(context: OpExecutionContext, config: ActivateCampaignConfig) -> Output[dict]:
     """Validate an approved workflow campaign, mark it Running, and submit
     the persisted per-profile workflow."""
     context.log.info(
@@ -85,14 +87,24 @@ def activate_campaign_op(context: OpExecutionContext, config: ActivateCampaignCo
         log=context.log.info,
     )
     context.log.info("campaign_activation job: done (%s)", summary)
-    return summary
+    return Output(
+        summary,
+        metadata={
+            "campaign_id": MetadataValue.text(str(summary.get("campaign_id") or config.campaign_id)),
+            "tenant_id": MetadataValue.text(str(summary.get("tenant_id") or config.tenant_id)),
+            "status": MetadataValue.text(str(summary.get("status") or "Running")),
+            "execution_id": MetadataValue.text(str(summary.get("execution_id") or "")),
+            "workflow_run_id": MetadataValue.text(str(summary.get("workflow_run_id") or "")),
+            "restart": MetadataValue.bool(bool(config.restart)),
+        },
+    )
 
 
 @op(retry_policy=RetryPolicy(max_retries=2, delay=30))
 def run_campaign_workflow_op(
     context: OpExecutionContext,
     config: CampaignWorkflowConfig,
-) -> dict:
+) -> Output[dict]:
     """Execute email/SMS/push/tag actions from the persisted workflow graph."""
     context.log.info(
         "%s job=campaign_workflow_job started run_id=%s tenant_id=%s campaign_id=%s execution_id=%s",
@@ -109,7 +121,24 @@ def run_campaign_workflow_op(
         execution_id=config.execution_id,
     )
     context.log.info("campaign workflow completed (%s)", summary)
-    return summary
+    return Output(
+        summary,
+        metadata={
+            "campaign_id": MetadataValue.text(str(summary.get("campaign_id") or config.campaign_id)),
+            "tenant_id": MetadataValue.text(str(summary.get("tenant_id") or config.tenant_id)),
+            "status": MetadataValue.text(str(summary.get("status") or "Completed")),
+            "execution_id": MetadataValue.text(str(summary.get("execution_id") or config.execution_id or "")),
+            "profiles": MetadataValue.int(int(summary.get("profiles") or 0)),
+            "sent": MetadataValue.int(int(summary.get("sent") or 0)),
+            "skipped": MetadataValue.int(int(summary.get("skipped") or 0)),
+            "applied": MetadataValue.int(int(summary.get("applied") or 0)),
+            "errors": MetadataValue.int(int(summary.get("errors") or 0)),
+            "duration_seconds": MetadataValue.float(float(summary.get("duration_seconds") or 0.0)),
+            "end_counts": MetadataValue.json(summary.get("end_counts") or {}),
+            "node_counts": MetadataValue.json(summary.get("node_counts") or {}),
+            "data_sync_run_ids": MetadataValue.json(summary.get("data_sync_run_ids") or []),
+        },
+    )
 
 
 @job(name="campaign_activation_job")

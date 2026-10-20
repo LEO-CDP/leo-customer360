@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 # names are an unreliable/false-positive-prone match signal on their own.
 SCALAR_MERGE_FIELDS = ("full_name", "email", "phone_number")
 
+# Tenant-unique scalar identity columns on cdp_master_profiles
+# (backed by ux_cdp_mp_tenant_email and ux_cdp_mp_tenant_phone).
+UNIQUE_IDENTITY_FIELDS = ("email", "phone_number")
+
 # Base cdp_master_profiles columns needed to evaluate merge precedence;
 # extended dynamically with any extra verified_field/timestamp_field named by
 # active consolidation_config (see _collect_master_state_columns).
@@ -549,6 +553,55 @@ class CustomerIdentityResolver:
     # MATCH CONDITION BUILDING
     # =========================================================================
 
+    def _find_identity_conflicts(
+        self,
+        cursor,
+        raw_profile: Dict[str, Any],
+        target_master_id: Optional[str] = None,
+    ) -> Dict[str, str]:
+        """Return unique identity fields owned by another master in the same tenant."""
+        if not any(raw_profile.get(field) for field in UNIQUE_IDENTITY_FIELDS):
+            return {}
+
+        where_clauses = ["tenant_id = %s"]
+        params: List[Any] = [raw_profile["tenant_id"]]
+        if target_master_id is not None:
+            where_clauses.append("master_profile_id <> %s")
+            params.append(target_master_id)
+
+        where_clauses.append(
+            "("
+            "  (%s IS NOT NULL AND email = %s)"
+            "  OR (%s IS NOT NULL AND phone_number = %s)"
+            ")"
+        )
+        params.extend(
+            [
+                raw_profile.get("email"),
+                raw_profile.get("email"),
+                raw_profile.get("phone_number"),
+                raw_profile.get("phone_number"),
+            ]
+        )
+
+        cursor.execute(
+            f"""
+            SELECT master_profile_id, email, phone_number
+            FROM {self._table('cdp_master_profiles')}
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY updated_at DESC;
+            """,
+            tuple(params),
+        )
+        conflicts: Dict[str, str] = {}
+        for row in cursor.fetchall() or []:
+            conflicting_master_id = str(row["master_profile_id"])
+            for field in UNIQUE_IDENTITY_FIELDS:
+                value = raw_profile.get(field)
+                if value and row.get(field) == value and field not in conflicts:
+                    conflicts[field] = conflicting_master_id
+        return conflicts
+
     def _build_match_condition(
         self,
         rule: IdentityRule,
@@ -581,6 +634,13 @@ class CustomerIdentityResolver:
                 [source_system, raw_value],
                 code,
             )
+
+        if code not in DOMAIN_ATTRIBUTE_FIELDS and not _SAFE_IDENTIFIER_RE.match(code):
+            logger.warning(
+                "Ignoring unsafe attribute_internal_code '%s' in matching rule.",
+                code,
+            )
+            return None
 
         # Exact match (scalar or domain attribute)
         if rule.match_rule == "exact":
@@ -782,6 +842,22 @@ class CustomerIdentityResolver:
             ),
         )
 
+        identity_conflicts = self._find_identity_conflicts(
+            cursor,
+            raw_profile,
+            target_master_id=master_id,
+        )
+        if identity_conflicts:
+            logger.warning(
+                "Skipping conflicting identity attribute updates: tenant_id=%s "
+                "raw_profile_id=%s target_master_profile_id=%s "
+                "conflicting_master_by_attribute=%s",
+                raw_profile["tenant_id"],
+                raw_profile["raw_profile_id"],
+                master_id,
+                identity_conflicts,
+            )
+
         source_system = raw_profile.get("source_system")
         rule_map = {rule.attribute_code: rule for rule in rules or []}
         has_consolidation_metadata = any(
@@ -808,6 +884,8 @@ class CustomerIdentityResolver:
             set_clauses = []
             params = []
             for field in SCALAR_MERGE_FIELDS:
+                if field in identity_conflicts:
+                    continue
                 merged_value = self._resolve_scalar_consolidation(
                     field,
                     current_master.get(field),
@@ -824,8 +902,9 @@ class CustomerIdentityResolver:
                 set_clauses.append(f"{field} = %s")
                 params.append(merged_value)
         else:
-            set_clauses = [f"{field} = COALESCE({field}, %s)" for field in SCALAR_MERGE_FIELDS]
-            params = [raw_profile.get(field) for field in SCALAR_MERGE_FIELDS]
+            merge_fields = [field for field in SCALAR_MERGE_FIELDS if field not in identity_conflicts]
+            set_clauses = [f"{field} = COALESCE({field}, %s)" for field in merge_fields]
+            params = [raw_profile.get(field) for field in merge_fields]
 
         # Always preserve the explicitly-provided domain on the master row so
         # that profiles stay correctly classified across retail/banking/
@@ -941,7 +1020,12 @@ class CustomerIdentityResolver:
                 domain_attr_updates,
             )
 
-    def _create_master_and_link(self, cursor, raw_profile: Dict[str, Any]) -> str:
+    def _create_master_and_link(
+        self,
+        cursor,
+        raw_profile: Dict[str, Any],
+        rules: Optional[List[IdentityRule]] = None,
+    ) -> str:
         """Create and link a master profile when no match was found.
 
         A raw profile can remain in staging after a previous partially completed
@@ -1047,32 +1131,47 @@ class CustomerIdentityResolver:
             existing_master = cursor.fetchone()
             if existing_master is None:
                 raise RuntimeError(
-                    "Master profile insert conflicted, but no existing email/phone identity was found"
+                    "Master profile insert conflicted, but no existing email/phone identity was found "
+                    f"(tenant_id={raw_profile['tenant_id']}, raw_profile_id={raw_profile['raw_profile_id']})"
                 )
+            existing_master_id = str(existing_master["master_profile_id"])
+            logger.info(
+                "Linking raw profile to existing tenant identity after insert conflict: "
+                "tenant_id=%s raw_profile_id=%s master_profile_id=%s",
+                raw_profile["tenant_id"],
+                raw_profile["raw_profile_id"],
+                existing_master_id,
+            )
             self._link_and_update(
                 cursor,
                 raw_profile,
-                str(existing_master["master_profile_id"]),
+                existing_master_id,
                 match_method="ConcurrentIdentityMatch",
                 match_score=1.0,
+                rules=rules,
             )
             return existing_master["master_profile_id"]
         new_master_id = inserted_master["master_profile_id"]
 
-        national_id = raw_profile.get("national_id")
-        if national_id:
+        incoming_domain_values: Dict[str, Any] = {}
+        for field in DOMAIN_ATTRIBUTE_FIELDS:
+            field_value = self._lookup_field(raw_profile, field)
+            if self._has_value(field_value):
+                incoming_domain_values[field] = field_value
+        if incoming_domain_values:
             self._upsert_domain_attributes(
                 cursor,
                 str(raw_profile["tenant_id"]),
                 str(new_master_id),
                 raw_profile.get("domain", "retail"),
-                {"national_id": national_id},
+                incoming_domain_values,
             )
 
         link_query = f"""
             INSERT INTO {self._table('cdp_profile_links')}
                 (tenant_id, raw_profile_id, master_profile_id, match_score, match_method)
-            VALUES (%s, %s, %s, %s, %s);
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, raw_profile_id) DO NOTHING;
         """
         cursor.execute(
             link_query,
@@ -1146,6 +1245,9 @@ class CustomerIdentityResolver:
         Returns:
             The number of raw profiles processed in this batch.
         """
+        current_tenant_id = None
+        current_raw_profile_id = None
+        current_master_profile_id = None
         try:
             self.last_resolved_profiles_by_tenant = {}
             with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -1165,9 +1267,13 @@ class CustomerIdentityResolver:
                     logger.info("Processing batch of %d profiles for tenant %s.", len(raw_profiles), tenant_id)
 
                     for profile in raw_profiles:
+                        current_tenant_id = tenant_id
+                        current_raw_profile_id = profile["raw_profile_id"]
+                        current_master_profile_id = None
                         matched = self._find_master_profile(cursor, profile, rules, return_details=True)
 
                         if matched:
+                            current_master_profile_id = matched["master_profile_id"]
                             self._link_and_update(
                                 cursor,
                                 profile,
@@ -1178,7 +1284,8 @@ class CustomerIdentityResolver:
                             )
                             matched_id = matched["master_profile_id"]
                         else:
-                            matched_id = self._create_master_and_link(cursor, profile)
+                            matched_id = self._create_master_and_link(cursor, profile, rules=rules)
+                            current_master_profile_id = matched_id
 
                         self.last_resolved_profiles_by_tenant.setdefault(
                             str(tenant_id), set()
@@ -1202,5 +1309,11 @@ class CustomerIdentityResolver:
 
         except Exception:
             self.conn.rollback()
-            logger.exception("Error during identity resolution.")
+            logger.exception(
+                "Error during identity resolution for tenant_id=%s raw_profile_id=%s "
+                "master_profile_id=%s.",
+                current_tenant_id,
+                current_raw_profile_id,
+                current_master_profile_id,
+            )
             raise

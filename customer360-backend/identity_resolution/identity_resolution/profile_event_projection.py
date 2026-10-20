@@ -208,7 +208,15 @@ class MasterProfileEventProjector:
             for line in reader:
                 if not line.strip():
                     continue
-                envelope = json.loads(line)
+                try:
+                    envelope = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Skipping malformed JSON event line in bucket=%s key=%s",
+                        bucket,
+                        object_key,
+                    )
+                    continue
                 if isinstance(envelope, dict):
                     yield envelope
         except ClientError as exc:

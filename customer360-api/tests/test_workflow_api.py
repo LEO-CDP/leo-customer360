@@ -345,13 +345,29 @@ def test_create_refuses_user_outside_the_active_tenant():
     assert db.added == []
 
 
-def test_repository_accepts_real_master_profile_condition_fields():
+@pytest.mark.parametrize(
+    ("field", "operator", "value"),
+    [
+        ("engagement_score", "ge", "60"),
+        ("churn_probability", "lt", "0.4"),
+        ("lead_conversion_probability", "ge", "0.7"),
+        ("historical_clv", "ge", "1000"),
+        ("latest_nps_score", "ge", "8"),
+        ("average_csat", "ge", "4"),
+        ("predictive_clv", "ge", "2500"),
+        ("overall_sentiment_score", "lt", "-0.2"),
+        ("profile_completeness_score", "ge", "80"),
+        ("identity_confidence_score", "ge", "0.9"),
+        ("segmentation_tags", "has", "vip"),
+    ],
+)
+def test_repository_accepts_supported_master_profile_condition_fields(field, operator, value):
     workflow = _request_model().workflow
     workflow.root.children = [
         NodeDef(
             id="n2",
             type="condition",
-            config={"field": "engagement_score", "op": "ge", "value": "60"},
+            config={"field": field, "op": operator, "value": value},
             children=[
                 NodeDef(id="n3", type="exit", config={"kind": "goal"}, branch="yes"),
                 NodeDef(id="n4", type="exit", config={"kind": "exit"}, branch="no"),
@@ -360,6 +376,24 @@ def test_repository_accepts_real_master_profile_condition_fields():
     ]
 
     CampaignWorkflowRepository._validate_workflow(workflow, SEGMENT_ID)
+
+
+def test_repository_rejects_operational_status_as_a_marketing_condition():
+    workflow = _request_model().workflow
+    workflow.root.children = [
+        NodeDef(
+            id="n2",
+            type="condition",
+            config={"field": "status_code", "op": "eq", "value": "1"},
+            children=[
+                NodeDef(id="n3", type="exit", config={"kind": "goal"}, branch="yes"),
+                NodeDef(id="n4", type="exit", config={"kind": "exit"}, branch="no"),
+            ],
+        )
+    ]
+
+    with pytest.raises(ValueError, match="supported profile field"):
+        CampaignWorkflowRepository._validate_workflow(workflow, SEGMENT_ID)
 
 
 def test_repository_rolls_back_campaign_when_workflow_save_fails():

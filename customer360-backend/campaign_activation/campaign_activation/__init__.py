@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 
 SERVICE_NAME = "campaign_activation"
 BUILD_DATE_TIME = os.environ.get("BUILD_DATE_TIME", "unknown")
+if BUILD_DATE_TIME == "unknown":
+    BUILD_DATE_TIME = datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
+        "+00:00", "Z"
+    )
 GIT_COMMIT = os.environ.get("GIT_COMMIT") or os.environ.get("GIT_SHA", "unknown")
 
 logger = logging.getLogger(__name__)

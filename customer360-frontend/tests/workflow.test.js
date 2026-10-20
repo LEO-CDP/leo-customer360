@@ -61,7 +61,10 @@ test("campaign profile adapter preserves condition fields, nulls and consent", (
   const profile = campaignHelpers().workflowProfile({
     master_profile_id: "profile-1", first_name: "Sam", engagement_score: "80",
     churn_probability: "0.2", lead_conversion_probability: "0.8",
-    historical_clv: "1000", latest_nps_score: null, average_csat: "4.5",
+    historical_clv: "1000", predictive_clv: "2400",
+    latest_nps_score: null, average_csat: "4.5",
+    overall_sentiment_score: "-0.25", profile_completeness_score: "82",
+    identity_confidence_score: "0.93",
     email: "private@example.com", phone_number: "123",
     push_tokens: { device: "token" },
     communication_preferences: { email_opt_in: true, push_opt_in: true },
@@ -71,13 +74,45 @@ test("campaign profile adapter preserves condition fields, nulls and consent", (
   assert.equal(profile.engagement_score, 80);
   assert.equal(profile.churn_probability, 0.2);
   assert.equal(profile.historical_clv, 1000);
+  assert.equal(profile.predictive_clv, 2400);
   assert.equal(profile.lead_conversion_probability, 0.8);
   assert.equal(profile.latest_nps_score, null);
   assert.equal(profile.average_csat, 4.5);
+  assert.equal(profile.overall_sentiment_score, -0.25);
+  assert.equal(profile.profile_completeness_score, 82);
+  assert.equal(profile.identity_confidence_score, 0.93);
   assert.equal(profile.email, 1);
   assert.equal(profile.sms, 0);
   assert.equal(profile.push, 1);
   assert.deepEqual(Array.from(profile.tags), ["vip"]);
+});
+
+test("condition catalog exposes profile scoring fields and valid simulated values", () => {
+  const condition = Core.catalog().find((item) => item.type === "condition");
+  const fields = condition.config.field.options;
+  for (const field of [
+    "engagement_score",
+    "churn_probability",
+    "lead_conversion_probability",
+    "historical_clv",
+    "predictive_clv",
+    "latest_nps_score",
+    "average_csat",
+    "overall_sentiment_score",
+    "profile_completeness_score",
+    "identity_confidence_score",
+    "segmentation_tags",
+  ]) {
+    assert.ok(fields.includes(field), `condition field ${field} should be selectable`);
+  }
+
+  const samples = Core.sampleProfiles(32);
+  for (const profile of samples) {
+    assert.ok(Number.isFinite(profile.predictive_clv));
+    assert.ok(profile.overall_sentiment_score >= -1 && profile.overall_sentiment_score <= 1);
+    assert.ok(profile.profile_completeness_score >= 0 && profile.profile_completeness_score <= 100);
+    assert.ok(profile.identity_confidence_score >= 0 && profile.identity_confidence_score <= 1);
+  }
 });
 
 test("campaign metadata exposes the runtime notification providers", () => {

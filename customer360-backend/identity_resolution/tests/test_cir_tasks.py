@@ -68,3 +68,50 @@ def test_identity_resolution_tasks_projects_each_tenant_once(monkeypatch):
         call("tenant-1", {"master-1", "master-2"}),
         call("tenant-2", {"master-3"}),
     ]
+
+
+def test_recompute_persona_archetype_match_count_rolls_back_and_closes_on_missing_row(
+    monkeypatch, mock_conn, mock_cursor
+):
+    mock_cursor.fetchone.return_value = None
+    monkeypatch.setattr(cir_tasks.psycopg2, "connect", lambda **_kwargs: mock_conn)
+
+    try:
+        cir_tasks.recompute_persona_archetype_match_count("tenant-1", "arch-1")
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "arch-1" in str(exc)
+
+    mock_conn.rollback.assert_called_once()
+    mock_conn.close.assert_called_once()
+
+
+def test_recompute_persona_archetype_match_count_supports_dict_and_tuple_rows(
+    monkeypatch, mock_conn, mock_cursor
+):
+    mock_cursor.fetchone.return_value = {"matched_profile_count": 9}
+    monkeypatch.setattr(cir_tasks.psycopg2, "connect", lambda **_kwargs: mock_conn)
+
+    count = cir_tasks.recompute_persona_archetype_match_count("tenant-1", "arch-1")
+
+    assert count == 9
+    mock_conn.commit.assert_called_once()
+    mock_conn.close.assert_called_once()
+
+
+def test_recompute_master_profile_persona_rolls_back_when_profile_missing(
+    monkeypatch, mock_conn
+):
+    engine = MagicMock()
+    engine.resolve_persona.return_value = None
+    monkeypatch.setattr(cir_tasks.psycopg2, "connect", lambda **_kwargs: mock_conn)
+    monkeypatch.setattr(cir_tasks, "PersonaResolutionEngine", lambda **_kwargs: engine)
+
+    try:
+        cir_tasks.recompute_master_profile_persona("tenant-1", "master-404")
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "master-404" in str(exc)
+
+    mock_conn.rollback.assert_called_once()
+    mock_conn.close.assert_called_once()

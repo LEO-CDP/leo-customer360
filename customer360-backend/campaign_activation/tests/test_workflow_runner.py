@@ -379,3 +379,355 @@ def test_sync_submission_does_not_contact_dagster_for_unvisited_nodes(monkeypatc
         execution_id=str(uuid.uuid4()),
     ) == []
     client.assert_not_called()
+
+
+def test_sync_submission_submits_and_handles_graphql_error(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.submit_job_execution.return_value = "sync-run-42"
+    monkeypatch.setattr(workflow_runner, "DagsterGraphQLClient", MagicMock(return_value=fake_client))
+    workflow = {"root": {
+        "id": "sync", "type": "run_data_synch_job",
+        "config": {"platform": "meta_ads", "audience_name": "VIP Audience"},
+    }}
+
+    runs = workflow_runner._submit_audience_sync_jobs(
+        tenant_id="t1", campaign_id="c1", segment_id="s1",
+        workflow=workflow, reached_node_ids={"sync"},
+        execution_id="exec-1", log=lambda *_: None,
+    )
+    assert runs == ["sync-run-42"]
+    kwargs = fake_client.submit_job_execution.call_args.kwargs
+    assert kwargs["run_config"]["ops"]["run_data_synch_op"]["config"]["platform"] == "meta_ads"
+    assert kwargs["tags"]["execution_id"] == "exec-1"
+
+    fake_client.submit_job_execution.side_effect = RuntimeError("Dagster down")
+    with pytest.raises(workflow_runner.CampaignWorkflowError, match="could not submit audience-sync action"):
+        workflow_runner._submit_audience_sync_jobs(
+            tenant_id="t1", campaign_id="c1", segment_id="s1",
+            workflow=workflow, reached_node_ids={"sync"},
+            execution_id="exec-1", log=lambda *_: None,
+        )
+
+
+def test_ledger_begin_unlocks_and_rolls_back_when_query_raises():
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.execute.side_effect = [
+        None,  # set_tenant_context
+        None,  # pg_try_advisory_lock
+        RuntimeError("db error during select"),
+        None,  # pg_advisory_unlock
+    ]
+    cursor.fetchone.return_value = {"acquired": True}
+    ledger = workflow_runner.WorkflowLedger(
+        connection, "tenant", "campaign", "run-1", uuid.uuid4()
+    )
+
+    with pytest.raises(RuntimeError, match="db error during select"):
+        ledger.begin(uuid.uuid4(), "node-1", "email", "email")
+
+    connection.rollback.assert_called_once()
+    assert any("pg_advisory_unlock" in str(c.args[0]) for c in cursor.execute.call_args_list)
+
+
+def test_ledger_finish_always_unlocks_on_update_error():
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.execute.side_effect = [
+        None,  # set_tenant_context
+        RuntimeError("db error during update"),
+        None,  # pg_advisory_unlock
+    ]
+    ledger = workflow_runner.WorkflowLedger(
+        connection, "tenant", "campaign", "run-1", uuid.uuid4()
+    )
+
+    with pytest.raises(RuntimeError, match="db error during update"):
+        ledger.finish(uuid.uuid4(), "node-1", "Sent", provider="smtp")
+
+    connection.rollback.assert_called_once()
+    assert any("pg_advisory_unlock" in str(c.args[0]) for c in cursor.execute.call_args_list)
+
+
+def test_ledger_begin_updates_existing_failed_row():
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchone.side_effect = [{"acquired": True}, {"status": "Failed"}]
+    ledger = workflow_runner.WorkflowLedger(
+        connection, "tenant", "campaign", "run-2", uuid.uuid4()
+    )
+
+    assert ledger.begin(uuid.uuid4(), "node-1", "email", "email") is True
+    updates = [
+        c for c in cursor.execute.call_args_list
+        if "SET status = 'Running', attempt_count = attempt_count + 1" in str(c.args[0])
+    ]
+    assert len(updates) == 1
+
+
+def test_webhook_and_onesignal_push_gateway_variants(monkeypatch):
+    ledger = FakeLedger()
+    msg = _message("push")
+    tokens = {str(msg.profile_id): ["sub-token-1"]}
+
+    # Missing OneSignal credentials raises CampaignWorkflowError (recorded as failed in ledger)
+    bad_os = WebhookWorkflowGateway(
+        ledger, "push", Connector("onesignal", {"app_id": "app-1"}, {}), tokens
+    )
+    receipt = bad_os.send(msg)
+    assert receipt.status == "failed"
+    assert "missing app_id or api_key" in ledger.finished[-1][3]["error"]
+
+    # Missing push token skips without network
+    no_tok = WebhookWorkflowGateway(
+        ledger, "push", Connector("onesignal", {"app_id": "app-1"}, {"api_key": "k"}), {}
+    )
+    receipt = no_tok.send(msg)
+    assert receipt.status == "skipped"
+    assert receipt.detail == "no push token"
+    assert ledger.finished[-1][3]["metadata"] == {"skip_reason": "no push token"}
+
+    # Valid OneSignal push call
+    fake_resp = MagicMock()
+    fake_resp.__enter__.return_value.read.return_value = b'{"id":"os-123"}'
+    monkeypatch.setattr(workflow_runner, "urlopen", MagicMock(return_value=fake_resp))
+    good_os = WebhookWorkflowGateway(
+        ledger, "push", Connector("onesignal", {"app_id": "app-1"}, {"api_key": "k"}), tokens
+    )
+    receipt = good_os.send(msg)
+    assert receipt.status == "sent"
+    assert receipt.provider_id.startswith("onesignal-")
+
+    # Webhook push without webhook_url fails
+    bad_wh = WebhookWorkflowGateway(ledger, "push", Connector("webhook", {}, {}), tokens)
+    assert bad_wh.send(msg).status == "failed"
+
+    # Webhook push with webhook_url succeeds
+    good_wh = WebhookWorkflowGateway(
+        ledger, "push", Connector("webhook", {"webhook_url": "https://example.test/push"}, {}), tokens
+    )
+    assert good_wh.send(msg).status == "sent"
+
+
+def test_notification_gateway_mobile_native_and_webhook_variants(monkeypatch):
+    ledger = FakeLedger()
+    msg = _message("notification").model_copy(update={"provider": "mobile_native"})
+    tokens = {str(msg.profile_id): ["mob-token-1"]}
+
+    # Missing mobile token skips
+    gw_no_tok = NotificationWorkflowGateway(
+        ledger,
+        {"mobile_native": Connector("onesignal", {"app_id": "a"}, {"api_key": "k"})},
+        {},
+    )
+    receipt = gw_no_tok.send(msg)
+    assert receipt.status == "skipped"
+    assert receipt.detail == "no mobile token"
+
+    # Missing mobile_native app_id/api_key fails cleanly
+    gw_bad_cfg = NotificationWorkflowGateway(
+        ledger,
+        {"mobile_native": Connector("onesignal", {}, {})},
+        tokens,
+    )
+    receipt = gw_bad_cfg.send(msg)
+    assert receipt.status == "failed"
+    assert "missing app_id or api_key" in ledger.finished[-1][3]["error"]
+
+    # Valid mobile_native HTTP call and valid webhook SMS call
+    fake_resp = MagicMock()
+    fake_resp.__enter__.return_value.read.return_value = b'{"ok":true}'
+    monkeypatch.setattr(workflow_runner, "urlopen", MagicMock(return_value=fake_resp))
+    gw_valid = NotificationWorkflowGateway(
+        ledger,
+        {
+            "mobile_native": Connector("onesignal", {"app_id": "a"}, {"api_key": "k"}),
+            "sms": Connector("webhook", {"webhook_url": "https://example.test/sms"}, {}),
+            "whatsapp": Connector("webhook", {}, {}),
+        },
+        tokens,
+    )
+    assert gw_valid.send(msg).status == "sent"
+    assert gw_valid.send(_message("notification").model_copy(update={"provider": "sms"})).status == "sent"
+    assert gw_valid.send(_message("notification").model_copy(update={"provider": "whatsapp"})).status == "failed"
+
+
+def test_workflow_profile_writer_records_ledger_for_add_remove_and_error():
+    connection = MagicMock()
+    ledger = FakeLedger()
+    writer = workflow_runner.WorkflowProfileWriter(connection, "tenant-1", ledger=ledger)
+    profile = workflow_runner._profile_from_row({
+        "master_profile_id": uuid.uuid4(),
+        "tenant_id": uuid.uuid4(),
+    })
+
+    writer.current_node_id = "tag-add"
+    writer.apply(profile, "add_tag", "vip")
+    assert ledger.started[-1] == (profile.master_profile_id, "tag-add", "update_profile", "profile")
+    assert ledger.finished[-1][2] == "Applied"
+    assert ledger.finished[-1][3]["metadata"] == {"action": "add_tag", "tag": "vip"}
+
+    writer.current_node_id = "tag-rm"
+    writer.apply(profile, "remove_tag", "vip")
+    assert ledger.finished[-1][2] == "Applied"
+    assert ledger.finished[-1][3]["metadata"] == {"action": "remove_tag", "tag": "vip"}
+
+    with pytest.raises(workflow_runner.CampaignWorkflowError, match="Unsupported profile action"):
+        writer.apply(profile, "invalid_action", "vip")
+    assert ledger.finished[-1][2] == "Failed"
+
+
+def test_iter_profile_rows_paginates_until_short_batch():
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    id1, id2, id3 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    cursor.fetchall.side_effect = [
+        [{"master_profile_id": id1}, {"master_profile_id": id2}],
+        [{"master_profile_id": id3}],
+    ]
+
+    rows = list(workflow_runner._iter_profile_rows(connection, "tenant-1", "vip", batch_size=2))
+    assert [r["master_profile_id"] for r in rows] == [id1, id2, id3]
+    assert cursor.execute.call_count == 4  # 2 batches * (set_tenant_context + SELECT)
+
+
+def test_profile_query_selects_all_condition_score_fields():
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchall.return_value = []
+
+    assert list(workflow_runner._iter_profile_rows(connection, "tenant-1", "vip", 10)) == []
+
+    select_sql = next(
+        call.args[0]
+        for call in cursor.execute.call_args_list
+        if "SELECT p.master_profile_id" in str(call.args[0])
+    )
+    for field in (
+        "engagement_score",
+        "churn_probability",
+        "lead_conversion_probability",
+        "historical_clv",
+        "predictive_clv",
+        "latest_nps_score",
+        "average_csat",
+        "overall_sentiment_score",
+        "profile_completeness_score",
+        "identity_confidence_score",
+        "segmentation_tags",
+    ):
+        assert f"p.{field}" in select_sql
+
+
+@pytest.mark.parametrize(
+    "override, match",
+    [
+        ({"approval_status": "InReview"}, "Campaign must be Approved"),
+        ({"workflow_approval_status": "Rejected"}, "Pinned workflow version must be Approved"),
+        ({"workflow": None}, "no persisted workflow"),
+        (
+            {
+                "workflow": {
+                    "schema_version": 2,
+                    "root": {
+                        "id": "trigger",
+                        "type": "trigger",
+                        "config": {"event": "signup", "segment_id": str(uuid.uuid4())},
+                        "children": [],
+                    },
+                }
+            },
+            "Workflow audience must match",
+        ),
+        (
+            {
+                "workflow": {
+                    "schema_version": 2,
+                    "root": {
+                        "id": "trigger",
+                        "type": "trigger",
+                        "config": {"event": "unknown_event", "segment_id": " MATCH "},
+                        "children": [],
+                    },
+                }
+            },
+            "Workflow is invalid",
+        ),
+    ],
+)
+def test_runner_validates_loaded_campaign_and_marks_failed(monkeypatch, override, match):
+    action = {"id": "email", "type": "email", "config": {"subject": "Hi", "body": "Hello"}}
+    connection, tenant_id, campaign_id, _, status = _workflow_run(monkeypatch, action, [])
+    cursor = connection.cursor.return_value.__enter__.return_value
+    row = dict(cursor.fetchone.return_value)
+    if override.get("workflow") and override["workflow"]["root"]["config"].get("segment_id") == " MATCH ":
+        override = {
+            "workflow": {
+                **override["workflow"],
+                "root": {
+                    **override["workflow"]["root"],
+                    "config": {"event": "unknown_event", "segment_id": row["segment_id"]},
+                },
+            }
+        }
+    row.update(override)
+    cursor.fetchone.return_value = row
+
+    with pytest.raises(workflow_runner.CampaignWorkflowError, match=match):
+        workflow_runner.run_campaign_workflow(tenant_id=tenant_id, campaign_id=campaign_id)
+
+    status.assert_called_once()
+    assert status.call_args.args[3] == "Failed"
+
+
+def test_runner_returns_observability_telemetry_in_summary(monkeypatch):
+    action = {
+        "id": "cond",
+        "type": "condition",
+        "config": {"field": "engagement_score", "op": "ge", "value": 50},
+        "children": [
+            {
+                "id": "tag-vip",
+                "type": "update_profile",
+                "branch": "yes",
+                "config": {"action": "add_tag", "tag": "engaged"},
+                "children": [
+                    {"id": "goal-1", "type": "exit", "config": {"kind": "goal"}},
+                ],
+            },
+            {
+                "id": "exit-1",
+                "type": "exit",
+                "branch": "no",
+                "config": {"kind": "exit"},
+            },
+        ],
+    }
+    profiles = [
+        {"master_profile_id": uuid.uuid4(), "engagement_score": 80},
+        {"master_profile_id": uuid.uuid4(), "engagement_score": 20},
+    ]
+    _, tenant_id, campaign_id, _, _ = _workflow_run(monkeypatch, action, profiles)
+    ledger = FakeLedger()
+    monkeypatch.setattr(workflow_runner, "WorkflowLedger", lambda *_: ledger)
+
+    summary = workflow_runner.run_campaign_workflow(
+        tenant_id=tenant_id, campaign_id=campaign_id, run_id="dagster-run-99"
+    )
+
+    assert summary["status"] == "Completed"
+    assert summary["run_id"] == "dagster-run-99"
+    assert summary["profiles"] == 2
+    assert summary["applied"] == 1
+    assert summary["end_counts"] == {"goal": 1, "exit": 1, "ended": 0, "error": 0}
+    assert summary["node_counts"] == {
+        "trigger": 2,
+        "cond": 2,
+        "tag-vip": 1,
+        "goal-1": 1,
+        "exit-1": 1,
+    }
+    assert summary["started_at"] is not None
+    assert summary["finished_at"] is not None
+    assert summary["duration_seconds"] >= 0.0
+    assert any(item[1] == "tag-vip" and item[2] == "update_profile" for item in ledger.started)

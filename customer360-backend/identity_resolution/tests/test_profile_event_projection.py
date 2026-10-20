@@ -106,3 +106,46 @@ def test_projector_merges_raw_events_and_orders_latest_first():
     assert master_profile_id == UUID(MASTER_ID)
     assert [event["event_id"] for event in events] == ["new", "old"]
     assert all(event["master_profile_id"] == MASTER_ID for event in events)
+
+
+def test_projector_skips_malformed_jsonl_lines_and_continues(caplog):
+    class _MalformedS3(_S3):
+        def get_object(self, **_kwargs):
+            valid_event = {
+                "event_id": "ok-1",
+                "data_source_id": SOURCE_ID,
+                "event_time": "2026-09-20T05:30:18Z",
+                "identity": {"anonymous_id": "anon-1"},
+                "payload": {"event_name": "click", "anonymous_id": "anon-1"},
+            }
+            body = f"{{not-valid-json\n{json.dumps(valid_event)}\n".encode()
+            return {"Body": BytesIO(gzip.compress(body))}
+
+    store = _Store()
+    store.s3 = _MalformedS3()
+    connection = _Connection(
+        [
+            {
+                "raw_profile_id": "raw-1",
+                "master_profile_id": MASTER_ID,
+                "data_source_id": SOURCE_ID,
+                "external_customer_id": "anon-1",
+                "email": None,
+                "phone_number": None,
+                "device_id": None,
+                "advertising_id": None,
+                "cookie_id": None,
+                "session_id": None,
+                "event_payload": {},
+            }
+        ]
+    )
+
+    MasterProfileEventProjector(connection, store=store).project_profiles(
+        TENANT_ID, {MASTER_ID}
+    )
+
+    assert len(store.writes) == 1
+    _, _, events = store.writes[0]
+    assert [event["event_id"] for event in events] == ["ok-1"]
+    assert "Skipping malformed JSON event line" in caplog.text

@@ -4,6 +4,114 @@ This document describes the campaign behavior that is implemented in the
 repository today. The campaign is a workflow-owned execution record. It is
 not a template-owned email campaign.
 
+## Product and architecture overview
+
+Marketing teams define a campaign audience, design a versioned customer
+journey, obtain the required human approvals, and then explicitly start the
+journey. The execution engine applies the saved graph to active profiles in
+the selected segment. Each profile may take a different branch, receive
+different channel actions, or reach an audience-sync action.
+
+```mermaid
+flowchart LR
+    MARKETER[Marketer] -->|select audience + design journey| UI[Campaign editor]
+    UI -->|save campaign and workflow version atomically| API[Campaign workflow API]
+    REVIEWER[Human reviewer] -->|approve workflow / campaign| API
+    ADMIN[Tenant admin] -->|explicit Start| ACTAPI[Campaign activation API]
+    ACTAPI -->|tenant/admin + readiness checks| ACT[campaign_activation_job]
+    ACT -->|set Running + execution_id| DB[(PostgreSQL)]
+    ACT -->|submit child run| RUN[campaign_workflow_job]
+    RUN -->|load pinned graph + active profiles| DB
+    RUN --> ENGINE[Per-profile FlowEngine]
+    ENGINE -->|consented messages| CHANNELS[Email / notification / push]
+    ENGINE -->|tag mutation + action ledger| DB
+    ENGINE -->|reached nodes only| ADS[data_synch_job]
+    ADS -->|suppression + hashing + provider upload| ADPLATFORMS[Meta / Google Ads / TikTok]
+    RUN -->|status + counts + audit| DB
+    DB -->|refresh / state history| UI
+```
+
+Three state dimensions must not be conflated:
+
+1. **Campaign approval** answers whether the campaign plan is approved.
+2. **Workflow-version approval** answers whether the exact pinned graph is
+   approved.
+3. **Operational execution status** answers whether that campaign execution is
+   queued/running, completed, or failed.
+
+The campaign is executable only when both approval dimensions are `Approved`,
+the segment is active and computed, and the workflow root uses the same
+segment. Approval never sends messages. Starting the campaign is a separate,
+explicit tenant-admin action.
+
+### State transitions
+
+```mermaid
+stateDiagram-v2
+    state "Campaign approval_status" as CampaignApproval {
+        [*] --> Draft
+        Draft --> InReview: submit for review
+        InReview --> Approved: admin approves
+        InReview --> Rejected: admin rejects
+        Rejected --> InReview: edit and resubmit
+        Approved --> InReview: governed edit and resubmit
+    }
+    state "Pinned crm_flow_version.approval_status" as VersionApproval {
+        [*] --> UserApproved: user-authored version
+        [*] --> InReview: agent-authored version
+        InReview --> VersionApproved: different human approves
+        InReview --> VersionRejected: human rejects
+        VersionRejected --> InReview: save revised version
+    }
+    state "crm_campaign.status / workflow_execution_id" as Execution {
+        [*] --> Ready: approval and audience gates pass
+        Ready --> Running: Start; persist execution_id; submit child run
+        Running --> Completed: all profile journeys finish without errors
+        Running --> Failed: submission or workflow-level failure
+        Running --> Failed: one or more profile journeys fail
+        Failed --> Running: retry with the same execution_id
+        Completed --> Running: explicit replay with a new execution_id
+    }
+```
+
+`Ready` is a conceptual state, not a persisted `crm_campaign.status` value.
+Both approval states and audience readiness must be satisfied before entering
+operational `Running`.
+
+| Transition | Guard / side effect | Where to inspect |
+| --- | --- | --- |
+| Draft → InReview | Submit campaign after required fields and workflow are saved | Campaign approval state and history |
+| InReview → Approved / Rejected | Tenant-admin review; agent workflow proposals also need an independent human workflow-version review | Campaign and workflow history |
+| Ready → Running | Activation validates tenant, approvals, segment, and pinned workflow; creates or reuses `workflow_execution_id`; submits child Dagster run | Activation Dagster run, campaign state, `WORKFLOW_ACTIVATED` audit |
+| Running → Completed | Profile pass ends with zero journey errors; messages may still have been skipped and audience-sync child jobs may still be processing | Campaign status, workflow run summary, action and audience-sync ledgers |
+| Running → Failed | Submission failure, workflow exception, or one or more profile journey errors | Campaign status, `WORKFLOW_*_FAILED` audit, failed action rows, Dagster logs |
+| Failed → Running | Retry reuses the same execution ID; completed actions are not repeated, failed actions may retry | Same execution's action-ledger rows and attempt counts |
+| Completed → Running | Explicit tenant-admin replay, guarded by the observed execution ID; allocates a new execution ID | New execution rows and `WORKFLOW_RESTARTED` audit |
+
+The activation API only exposes a completed-campaign replay. A failed campaign
+is retried with Start, preserving the same execution ID. A replay traverses
+current segment membership and current branch conditions, so it is a new pass,
+not a resume checkpoint, and successful messages may be sent again.
+
+### Business use cases
+
+- **Consent-aware onboarding:** enroll an approved segment, send a welcome
+  message, branch on engagement, then add a profile tag for later analysis.
+- **Engagement-based retention:** branch using engagement or churn scores,
+  send different content on each path, and end a path at a goal or exit node.
+- **Event-informed follow-up:** query already-ingested linked events during a
+  wait-for-event window and choose the happened/timeout branch. This is a
+  batch-time check, not a future event subscription.
+- **Paid-media audience refresh:** when at least one profile reaches a sync
+  node, submit a campaign-scoped audience sync. The child job exports the
+  selected segment subject to its own eligibility and suppression checks.
+- **Controlled replay:** after reviewing status, audience, provider setup, and
+  consent, an admin may replay a completed campaign. The replay is retained as
+  a distinct execution and may create duplicate deliveries.
+
+These use cases describe current graph capabilities; the platform does not
+currently provide real-time journey enrollment or durable scheduled waits.
+
 ## Main campaign lifecycle
 
 The only executable campaign path is:
@@ -130,9 +238,19 @@ Supported condition fields are real `cdp_master_profiles` fields:
 - `churn_probability`
 - `lead_conversion_probability`
 - `historical_clv`
+- `predictive_clv`
 - `latest_nps_score`
 - `average_csat`
+- `overall_sentiment_score`
+- `profile_completeness_score`
+- `identity_confidence_score`
 - `segmentation_tags`
+
+Numeric fields support `ge`, `lt`, and `eq`. Tag membership supports `has` and
+`hasnt`. A null numeric value never matches and takes the condition's `no`
+branch. The editor, campaign API validator, DAO engine, profile query, and
+browser profile adapter use this same field contract. `status_code` is not a
+marketing condition: active profiles are selected before graph execution.
 
 Message templates support the runtime variable `{{first_name}}`. Campaign
 workflow messages do not use `crm_message_templates`.
@@ -147,11 +265,14 @@ Actual execution and reporting remain in Campaign details. The existing
 `run()` plugin method and `onRunCampaign` callback names remain compatible;
 their result is still a local simulation, not a delivery receipt.
 
-The backend is a segment-snapshot executor, not a durable, event-driven journey
-scheduler:
+The backend is a segment-based batch executor, not a frozen-audience or
+durable, event-driven journey scheduler:
 
-- Activation enrolls active members of the selected segment immediately. The
-  trigger event does not subscribe to or filter future customer events.
+- At workflow start, the runner queries active profiles whose current
+  segmentation tags contain the selected segment tag, in UUID keyset pages.
+  It does not materialize an immutable membership snapshot or guarantee a
+  single database snapshot across every page. The trigger event describes the
+  journey but does not subscribe to or filter future customer events.
 - Wait nodes advance virtual elapsed time without sleeping or scheduling a
   later task. Messages after a wait can therefore be sent during the same run.
 - Event waits query linked raw events between the run start plus the current
@@ -163,9 +284,10 @@ scheduler:
   fields, treats missing values as non-matches, and applies explicit consent
   when calculating message reachability.
 
-UAT can verify snapshot execution, graph traversal, persistence, and logging-only
-actions. Real-time enrollment, durable delays, and future-event resumption are
-not implemented and must not be accepted as working scheduling features.
+UAT can verify segment-based batch execution, graph traversal, persistence, and
+logging-only actions. Real-time enrollment, durable delays, and future-event
+resumption are not implemented and must not be accepted as working scheduling
+features.
 
 ## Save and review APIs
 
@@ -243,9 +365,13 @@ The **State history** tab shows newest-first campaign audit/review events,
 recorded state transitions, actor IDs, local timestamps, and review reasons.
 Filters select all activity, recorded state changes, or approval decisions;
 raw before/after values remain available in expandable audit details.
-History has its own refresh/error state. Runtime status updates and workflow
-reviews are not guaranteed to appear in the campaign-history API; the UI does
-not invent missing events or treat current state as historical evidence.
+Runtime execution transitions are written to `sys_audit_log` and can appear in
+campaign history. Activation transitions are recorded with activation state
+changes; the workflow runner's final summary audit is best-effort and does not
+replace the campaign result if audit persistence fails. Workflow-version
+review events are not campaign review rows and may not appear in this campaign
+history feed. History has its own refresh/error state; the UI does not invent
+missing events or treat current state as historical evidence.
 
 ## Activation API
 
@@ -462,7 +588,8 @@ inside a rolled-back transaction does not mean the deployment has been upgraded.
 
 ## Idempotency and failure behavior
 
-Per-profile message action idempotency is keyed by:
+Per-profile email, notification, push, and profile-tag action idempotency is
+keyed by:
 
 ```text
 campaign_id + workflow_execution_id + master_profile_id + node_id
@@ -474,22 +601,23 @@ workflow workers from interleaving profile changes or completion status. Queued
 restarts are checked against the execution ID observed at request time so an
 obsolete request cannot start a second replay after the first finishes.
 Rows already `Sent`, `Applied`, or `Skipped` are not retried within the same execution; failed
-attempts increment the attempt count. Consequently, configuring a provider
-later does not replay logging-only skips until an explicit completed-campaign
-replay creates a new execution. A replay re-evaluates current branches and may
-send to the current audience again; it is not a per-profile resume checkpoint.
-Profile tag updates currently write directly rather than using this ledger;
-add/remove operations may execute again during a retry or replay.
+attempts increment the attempt count. Tag updates are recorded as `Applied`
+with action/tag metadata, and are also retried only if their ledger row is not
+already complete. Consequently, configuring a provider later does not replay
+logging-only skips until an explicit completed-campaign replay creates a new
+execution. A replay re-evaluates current branches and current segment
+membership; it is a new pass, not a per-profile resume checkpoint.
 
 This is not an exactly-once delivery guarantee: a process crash after provider
 acceptance but before ledger completion can leave an uncertain outcome.
 
 A failed delivery stops downstream nodes for that profile, increments the
 profile error count, and makes the campaign `Failed`; other profiles continue.
-Failed profile transactions are rolled back before processing the next profile.
-Previously committed actions are not undone. Per-profile errors are returned in
-the workflow summary and may coexist with a successful Dagster op result;
-inspect campaign status and `errors`, not only Dagster's run color.
+Previously committed actions are not undone. Per-profile errors are returned
+in the workflow summary and may coexist with a successful Dagster op result;
+inspect campaign status and `errors`, not only Dagster's run color. Profile
+actions and ledger updates commit as they execute, so a later failure does not
+atomically roll back earlier side effects for that profile.
 Workflow-level exceptions are raised to Dagster and mark a loaded campaign
 `Failed`. Missing/completed campaigns are not changed to `Failed` merely because
 another execution was attempted.

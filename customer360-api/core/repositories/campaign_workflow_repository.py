@@ -104,8 +104,12 @@ class CampaignWorkflowRepository:
                     "churn_probability",
                     "lead_conversion_probability",
                     "historical_clv",
+                    "predictive_clv",
                     "latest_nps_score",
                     "average_csat",
+                    "overall_sentiment_score",
+                    "profile_completeness_score",
+                    "identity_confidence_score",
                     "segmentation_tags",
                 }:
                     raise CampaignWorkflowValidationError(

@@ -30,6 +30,7 @@ def _profile(
     segmentation_tags=None,
     communication_preferences=None,
     push_token=True,
+    **profile_fields,
 ):
     return CdpMasterProfile(
         master_profile_id=uuid.uuid4(),
@@ -42,6 +43,7 @@ def _profile(
         communication_preferences=communication_preferences
         or {"email_opt_in": True, "sms_opt_in": True, "push_opt_in": True},
         push_tokens={"push": "test-token"} if push_token else {},
+        **profile_fields,
     )
 
 
@@ -199,6 +201,75 @@ class RenderTests(unittest.TestCase):
 
 
 class RunSemanticsTests(unittest.TestCase):
+    def test_conditions_evaluate_customer_score_fields_from_master_profile(self):
+        score_values = {
+            "engagement_score": (80, "ge", 60),
+            "churn_probability": (0.2, "lt", 0.4),
+            "lead_conversion_probability": (0.8, "ge", 0.7),
+            "historical_clv": (1500, "ge", 1000),
+            "predictive_clv": (3000, "ge", 2500),
+            "latest_nps_score": (9, "ge", 8),
+            "average_csat": (4.5, "ge", 4),
+            "overall_sentiment_score": (0.6, "ge", 0.2),
+            "profile_completeness_score": (90, "ge", 80),
+            "identity_confidence_score": (0.95, "ge", 0.9),
+        }
+        for field, (actual, operator, threshold) in score_values.items():
+            with self.subTest(field=field):
+                flow = FlowDefinition.model_validate(
+                    {
+                        "schema_version": 2,
+                        "root": _node(
+                            "n1",
+                            "trigger",
+                            {"event": "signup"},
+                            [
+                                _node(
+                                    "n2",
+                                    "condition",
+                                    {"field": field, "op": operator, "value": threshold},
+                                    [
+                                        _node("n3", "exit", {"kind": "goal"}, branch="yes"),
+                                        _node("n4", "exit", {"kind": "exit"}, branch="no"),
+                                    ],
+                                )
+                            ],
+                        ),
+                    }
+                )
+                engine = FlowEngine(flow)
+                self.assertEqual(engine.problems(), [])
+                result = engine.run(_profile(**{field: actual}))
+                self.assertEqual(result.end, "goal")
+                self.assertEqual(result.steps[1].branch, "yes")
+
+    def test_operational_profile_status_is_not_a_marketing_condition(self):
+        flow = FlowDefinition.model_validate(
+            {
+                "schema_version": 2,
+                "root": _node(
+                    "n1",
+                    "trigger",
+                    {"event": "signup"},
+                    [
+                        _node(
+                            "n2",
+                            "condition",
+                            {"field": "status_code", "op": "eq", "value": 1},
+                            [
+                                _node("n3", "exit", {"kind": "goal"}, branch="yes"),
+                                _node("n4", "exit", {"kind": "exit"}, branch="no"),
+                            ],
+                        )
+                    ],
+                ),
+            }
+        )
+        self.assertIn(
+            "n2: unknown numeric field 'status_code'",
+            FlowEngine(flow).problems(),
+        )
+
     def test_missing_channel_consent_skips_message(self):
         flow = FlowDefinition.model_validate(
             {

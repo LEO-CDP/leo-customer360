@@ -217,6 +217,21 @@ class TestFindMasterProfile:
         assert result is None
         mock_cursor.execute.assert_not_called()
 
+    def test_unsafe_attribute_code_in_rule_is_skipped(self, mock_cursor, mock_conn, caplog):
+        resolver = make_resolver(mock_conn)
+        raw_profile = {
+            "raw_profile_id": "r1",
+            "tenant_id": "t1",
+            "email; DROP TABLE cdp_master_profiles;--": "a@b.com",
+        }
+        rules = [IdentityRule("email; DROP TABLE cdp_master_profiles;--", "exact")]
+
+        result = resolver._find_master_profile(mock_cursor, raw_profile, rules)
+
+        assert result is None
+        mock_cursor.execute.assert_not_called()
+        assert "Ignoring unsafe attribute_internal_code" in caplog.text
+
     def test_exact_domain_attribute_match_uses_domain_profiles_exists(self, mock_cursor, mock_conn):
         mock_cursor.fetchone.return_value = {"master_profile_id": "master-domain-1"}
         resolver = make_resolver(mock_conn)
@@ -283,13 +298,16 @@ class TestLinkAndUpdate:
 
         resolver._link_and_update(mock_cursor, raw_profile, "master-1")
 
-        assert mock_cursor.execute.call_count == 4
+        assert mock_cursor.execute.call_count == 5
         link_query, link_params = mock_cursor.execute.call_args_list[0][0]
         assert "INSERT INTO customer360.cdp_profile_links" in link_query
         assert "ON CONFLICT (tenant_id, raw_profile_id) DO NOTHING" in link_query
         assert link_params == ("t1", "r1", "master-1", 1.0, "DynamicMatch")
 
-        update_query, update_params = mock_cursor.execute.call_args_list[1][0]
+        conflict_query, conflict_params = mock_cursor.execute.call_args_list[1][0]
+        assert "SELECT master_profile_id, email, phone_number" in conflict_query
+        assert conflict_params == ("t1", "master-1", "a@example.com", "a@example.com", None, None)
+        update_query, update_params = mock_cursor.execute.call_args_list[2][0]
         assert "UPDATE customer360.cdp_master_profiles" in update_query
         assert "COALESCE(full_name, %s)" in update_query
         assert "device_ids = CASE WHEN %s = ANY(COALESCE(device_ids, ARRAY[]::TEXT[]))" in update_query
@@ -304,16 +322,45 @@ class TestLinkAndUpdate:
         # Plaintext full_name here (not a SHA-256 hex digest) -> not flagged hashed, no persona_name.
         assert update_params[-4:] == (False, None, "master-1", "t1")
 
-        domain_select_query, domain_select_params = mock_cursor.execute.call_args_list[2][0]
+        domain_select_query, domain_select_params = mock_cursor.execute.call_args_list[3][0]
         assert "SELECT dp.domain_attributes" in domain_select_query
         assert domain_select_params == ("t1", "master-1", "banking")
 
-        upsert_query, upsert_params = mock_cursor.execute.call_args_list[3][0]
+        upsert_query, upsert_params = mock_cursor.execute.call_args_list[4][0]
         assert "INSERT INTO customer360.cdp_domain_profiles" in upsert_query
         assert upsert_params[0] == "t1"
         assert upsert_params[1] == "master-1"
         assert upsert_params[2] == "banking"
         assert upsert_params[3].adapted == {"national_id": "079123456789"}
+
+    def test_skips_and_logs_identity_attribute_owned_by_another_master(
+        self, mock_cursor, mock_conn, caplog
+    ):
+        resolver = make_resolver(mock_conn)
+        mock_cursor.fetchall.return_value = [
+            {
+                "master_profile_id": "email-owner",
+                "email": "duplicate@example.com",
+                "phone_number": None,
+            }
+        ]
+        raw_profile = {
+            "raw_profile_id": "raw-1",
+            "tenant_id": "tenant-1",
+            "email": "duplicate@example.com",
+            "phone_number": "5551112222",
+        }
+
+        resolver._link_and_update(mock_cursor, raw_profile, "matched-master")
+
+        update_query, _ = mock_cursor.execute.call_args_list[2][0]
+        assert "email = COALESCE(email, %s)" not in update_query
+        assert "phone_number = COALESCE(phone_number, %s)" in update_query
+        assert "tenant_id=tenant-1" in caplog.text
+        assert "raw_profile_id=raw-1" in caplog.text
+        assert "matched-master" in caplog.text
+        assert "email-owner" in caplog.text
+        assert "duplicate@example.com" not in caplog.text
 
     def test_refreshes_master_source_analytics_from_linked_raw_profiles(self, mock_cursor, mock_conn):
         resolver = make_resolver(mock_conn)
@@ -517,6 +564,95 @@ class TestCreateMasterAndLink:
             "t1", "r6", "concurrent-master", 1.0, "ConcurrentIdentityMatch"
         )
 
+    def test_creates_master_upserts_domain_attributes_from_event_payload(
+        self, mock_cursor, mock_conn
+    ):
+        mock_cursor.fetchone.side_effect = [None, {"master_profile_id": "new-master-4"}]
+        resolver = make_resolver(mock_conn)
+        raw_profile = {
+            "raw_profile_id": "r7",
+            "tenant_id": "t1",
+            "domain": "banking",
+            "full_name": "Pham Thi D",
+            "email": "d@example.com",
+            "phone_number": None,
+            "national_id": "079000111222",
+            "event_payload": {"kyc_status": "verified"},
+        }
+
+        resolver._create_master_and_link(mock_cursor, raw_profile)
+
+        upsert_query, upsert_params = mock_cursor.execute.call_args_list[2][0]
+        assert "INSERT INTO customer360.cdp_domain_profiles" in upsert_query
+        assert upsert_params[3].adapted == {
+            "national_id": "079000111222",
+            "kyc_status": "verified",
+        }
+        link_query, _ = mock_cursor.execute.call_args_list[3][0]
+        assert "ON CONFLICT (tenant_id, raw_profile_id) DO NOTHING" in link_query
+
+    def test_concurrent_insert_conflict_passes_rules_to_link_and_update(
+        self, mock_cursor, mock_conn, caplog
+    ):
+        mock_cursor.fetchone.side_effect = [
+            None,
+            None,
+            {"master_profile_id": "concurrent-master"},
+            {
+                "full_name": "Existing Name",
+                "email": "duplicate@example.com",
+                "phone_number": None,
+                "source_systems": ["core_banking"],
+                "updated_at": None,
+            },
+            {},
+        ]
+        mock_cursor.fetchall.return_value = []
+        resolver = make_resolver(mock_conn)
+        rules = [IdentityRule("full_name", "exact", consolidation_rule="overwrite")]
+
+        with caplog.at_level("INFO"):
+            master_id = resolver._create_master_and_link(
+                mock_cursor,
+                {
+                    "raw_profile_id": "r8",
+                    "tenant_id": "t1",
+                    "domain": "retail",
+                    "full_name": "Updated Name",
+                    "email": "duplicate@example.com",
+                    "phone_number": None,
+                },
+                rules=rules,
+            )
+
+        assert master_id == "concurrent-master"
+        assert "Linking raw profile to existing tenant identity after insert conflict" in caplog.text
+        update_query, update_params = mock_cursor.execute.call_args_list[7][0]
+        assert "UPDATE customer360.cdp_master_profiles" in update_query
+        assert update_params[0] == "Updated Name"
+
+    def test_concurrent_insert_conflict_raises_with_context_when_no_master_found(
+        self, mock_cursor, mock_conn
+    ):
+        mock_cursor.fetchone.side_effect = [None, None, None]
+        resolver = make_resolver(mock_conn)
+
+        try:
+            resolver._create_master_and_link(
+                mock_cursor,
+                {
+                    "raw_profile_id": "r9",
+                    "tenant_id": "t1",
+                    "domain": "retail",
+                    "email": "missing@example.com",
+                    "phone_number": None,
+                },
+            )
+            assert False, "expected RuntimeError"
+        except RuntimeError as exc:
+            assert "tenant_id=t1" in str(exc)
+            assert "raw_profile_id=r9" in str(exc)
+
 
 class TestMarkAsProcessed:
     def test_sets_status_code_and_processed_at(self, mock_cursor, mock_conn):
@@ -586,7 +722,7 @@ class TestRunResolutionBatch:
                 "push_token": None,
             },
         ]
-        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles]
+        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles, []]
         # fetchone is called by: _find_master_profile(r1) -> match,
         # _find_master_profile(r2) -> no match, _create_master_and_link(r2) -> new id
         mock_cursor.fetchone.side_effect = [
@@ -644,7 +780,7 @@ class TestPersonaEngineWiring:
                 "push_token": None,
             }
         ]
-        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles]
+        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles, []]
         mock_cursor.fetchone.side_effect = [{"master_profile_id": "existing-master"}]
         resolver = CustomerIdentityResolver(mock_conn, schema="customer360", batch_size=10)
         resolver.persona_engine = MagicMock()
@@ -677,7 +813,7 @@ class TestPersonaEngineWiring:
                 "push_token": None,
             }
         ]
-        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles]
+        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles, []]
         # fetchone: _find_master_profile -> no match, _create_master_and_link -> new id
         mock_cursor.fetchone.side_effect = [None, {"master_profile_id": "brand-new-master"}]
         resolver = CustomerIdentityResolver(mock_conn, schema="customer360", batch_size=10)
@@ -710,7 +846,7 @@ class TestPersonaEngineWiring:
                 "push_token": None,
             }
         ]
-        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles]
+        mock_cursor.fetchall.side_effect = [rules, [{"tenant_id": "t1"}], profiles, []]
         mock_cursor.fetchone.side_effect = [{"master_profile_id": "existing-master"}]
         resolver = CustomerIdentityResolver(mock_conn, schema="customer360", batch_size=10)
         resolver.persona_engine = MagicMock()
@@ -726,7 +862,5 @@ class TestPersonaEngineWiring:
         # wiring point exists; persona_engine.py's own tests assert it never
         # actually raises in practice.
         resolver.persona_engine.resolve_persona.assert_called_once()
-        mock_conn.rollback.assert_called_once()
-
         mock_conn.rollback.assert_called_once()
         mock_conn.commit.assert_not_called()

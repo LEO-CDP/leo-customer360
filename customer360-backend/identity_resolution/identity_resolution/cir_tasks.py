@@ -180,7 +180,7 @@ def recompute_persona_archetype_match_count(tenant_id: str, persona_archetype_id
                     f"Persona archetype '{persona_archetype_id}' not found for tenant '{tenant_id}'"
                 )
         conn.commit()
-        matched_profile_count = int(row[0])
+        matched_profile_count = int(row["matched_profile_count"] if isinstance(row, Mapping) else row[0])
         logger.info(
             "Recomputed persona archetype %s (tenant %s): matched_profile_count=%d",
             persona_archetype_id,
@@ -188,6 +188,9 @@ def recompute_persona_archetype_match_count(tenant_id: str, persona_archetype_id
             matched_profile_count,
         )
         return matched_profile_count
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
