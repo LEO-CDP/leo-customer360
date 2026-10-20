@@ -1,6 +1,6 @@
 # Caddy reverse proxy for the Customer 360 platform — single public host, path-routed,
 # TLS terminated here (auto Let's Encrypt). Runs on the api box (--network host), so
-# 127.0.0.1:<port> reaches the co-located containers and 10.100.1.4 reaches the backend box.
+# 127.0.0.1:<port> reaches the co-located containers; other upstreams come from the overlay (Dagster = the VKS node NodePort).
 #
 # Values are injected as env by deploy-caddy.sh ({$VAR} is substituted at load).
 # Order matters: specific handle/handle_path blocks match first; the bare `handle`
