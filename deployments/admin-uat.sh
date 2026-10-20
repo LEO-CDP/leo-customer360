@@ -132,7 +132,12 @@ RC
     run_on "$(srv_ip api)" 'bash -s' <<'DR'
 echo "== df /"; df -h / | tail -1
 echo "== docker system df"; sudo docker system df
-echo "== docker volumes (size)"; sudo du -sh /var/lib/docker/volumes/* 2>/dev/null | sort -rh | head -12
+echo "== docker volumes (size, in-use by N containers)"
+# the glob must expand as root: /var/lib/docker is not readable by the ssh user
+sudo sh -c 'du -sm /var/lib/docker/volumes/*/_data 2>/dev/null' | sort -rn | head -30 | while read -r mb path; do
+  v="${path#/var/lib/docker/volumes/}"; v="${v%/_data}"
+  printf '%6s MB  used-by=%s  %s\n' "$mb" "$(sudo docker ps -a -q --filter volume="$v" | wc -l)" "$v"
+done
 echo "== top dirs under /var"; sudo du -xsh /var/lib/docker /var/log /var/lib/containerd /var/cache 2>/dev/null | sort -rh
 echo "== journal"; sudo journalctl --disk-usage 2>/dev/null || true
 DR
