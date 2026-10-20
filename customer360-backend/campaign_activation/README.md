@@ -331,9 +331,18 @@ allowing downstream actions to run as if delivery had completed.
 Provider connectors are loaded from active tenant rows in
 `crm_connector_config`:
 
-- `EMAIL`: SMTP or test mock;
+- `EMAIL`: SMTP or test mock; when no active tenant EMAIL connector exists,
+  an explicitly configured `EMAIL_DISPATCH_ADAPTER` of `smtp` or `mock` is
+  used as the environment fallback;
 - `SMS`: configured webhook or test mock;
 - `PUSH`: OneSignal or test mock.
+
+An active tenant EMAIL connector takes precedence over environment fallback.
+For local development, set `EMAIL_DISPATCH_ADAPTER=smtp` with
+`SMTP_HOST=127.0.0.1`, `SMTP_PORT=1025`, empty credentials, and
+`SMTP_USE_TLS=false` to route unconfigured-tenant workflow email to Mailpit.
+If neither a database connector nor an explicit environment adapter exists,
+email actions remain skipped.
 
 Workflow delivery requires explicit consent:
 
@@ -343,16 +352,20 @@ Workflow delivery requires explicit consent:
 
 Missing consent is skipped. Raw profile data is not written to logs.
 
-When no active connector exists, message actions log the node/channel and
-record `Skipped`, not `Sent`; no provider request is made. Missing ADS connectors
-produce a logging-only audience dry run with `uploaded_count = 0`,
+When no active connector or explicit email environment fallback exists,
+message actions log the node/channel and record `Skipped`, not `Sent`; no
+provider request is made. A configured `EMAIL_DISPATCH_ADAPTER=smtp` fallback
+sends email through `SMTP_*`, and `EMAIL_DISPATCH_ADAPTER=mock` creates a
+synthetic successful receipt. Missing SMS/PUSH connectors remain skips.
+Missing ADS connectors produce a logging-only audience dry run with `uploaded_count = 0`,
 `dry_run = true`, and audit metadata `reason = provider_not_configured`.
 Explicitly configured `mock` message connectors remain available for tests and
 are distinguished from absent connectors. Malformed configured providers still
 fail explicitly rather than silently falling back to a dry run.
 
-SMTP reads the password written by the provider configuration API from
-`credentials.password`; legacy `smtp_password` is also accepted.
+Database-backed SMTP reads the password written by the provider configuration
+API from `credentials.password`; legacy `smtp_password` is also accepted.
+Environment fallback reads `SMTP_PASSWORD` and the other `SMTP_*` values.
 
 ## Runtime boundaries and UAT execution model
 

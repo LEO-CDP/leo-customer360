@@ -4,7 +4,7 @@
 # Customer 360 Platform - local DEV bootstrap
 #
 # Starts the development stack in dev-docker-compose.yml (postgres + redis +
-# keycloak + customer360-agent + minio + tracking-api) and the local
+# keycloak + customer360-agent + minio + Mailpit + tracking-api) and the local
 # docs-vector-search service so
 # customer360-api and
 # customer360-backend/identity_resolution (CIR) can be run directly on the host
@@ -15,15 +15,15 @@
 # What it does, in order:
 #   1. Ensures '.env' exists (created from '.env.example' if missing) and
 #      contains every key currently in '.env.example'.
-#   2. Starts (or resets) postgres/redis/keycloak/customer360-agent/minio via
-#      `docker compose -f dev-docker-compose.yml`.
+#   2. Starts (or resets) postgres/redis/keycloak/customer360-agent/minio/
+#      Mailpit via `docker compose -f dev-docker-compose.yml`.
 #   3. Waits for PostgreSQL, applies every SQL file in
 #      customer360-database/migrations in lexical order, then builds the
 #      docs-vector-search index against the local PostgreSQL service
 #      and starts the AI service on DOCS_SEARCH_HOST_PORT.
-#   4. Waits for postgres/redis/keycloak/customer360-agent/minio/tracking-api/docs-vector-search containers to
-#      report healthy, then waits for the one-shot `minio-init` bucket-bootstrap
-#      job to complete.
+#   4. Waits for postgres/redis/keycloak/customer360-agent/minio/Mailpit/
+#      tracking-api/docs-vector-search containers to report healthy, then waits
+#      for the one-shot `minio-init` bucket-bootstrap job to complete.
 #   5. Checks whether the Keycloak 'leocdp' realm exists yet; there is no
 #      automated realm/client seed script in this repo, so it prints manual
 #      setup instructions (DOCKER-COMPOSE-GUIDE.md section 9) when missing.
@@ -42,10 +42,11 @@
 #   ./dev-c360.sh upgrade           Local DEV upgrade: refresh images/containers
 #                                    with current repo code and restart core
 #                                    host services (non-destructive).
-#   ./dev-c360.sh restart           Restart docs-vector-search, customer360-agent,
+#   ./dev-c360.sh restart           Ensure Mailpit is up, then restart
+#                                    docs-vector-search, customer360-agent,
 #                                    customer360-api, customer360-backend, and customer360-frontend.
 #   ./dev-c360.sh reset             DESTRUCTIVE: `docker compose down -v`
-#                                    (drops the postgres/redis/minio volumes
+#                                    (drops the postgres/redis/minio/Mailpit volumes
 #                                    -- this also wipes Keycloak's
 #                                    db_keycloak and the MinIO dev bucket)
 #                                    then starts fresh and reseeds.
@@ -75,6 +76,7 @@ POSTGRES_CONTAINER="customer360-postgres"
 REDIS_CONTAINER="customer360-redis"
 KEYCLOAK_CONTAINER="customer360-keycloak"
 MINIO_CONTAINER="customer360-minio"
+MAILPIT_CONTAINER="customer360-mailpit"
 MINIO_INIT_CONTAINER="customer360-minio-init"
 TRACKING_CONTAINER="customer360-event-api"
 AGENT_CONTAINER="customer360-agent"
@@ -487,6 +489,9 @@ wait_for_docs_healthy() {
 }
 
 if [ "$ACTION" = "restart" ]; then
+  echo "📨 Ensuring Mailpit is running for local SMTP capture..."
+  "${DC_CMD[@]}" up -d mailpit
+  wait_for_healthy "$MAILPIT_CONTAINER"
   restart_docs_service
   wait_for_docs_healthy
   echo "🔁 Restarting customer360-agent..."
@@ -511,7 +516,7 @@ fi
 # 2) Start / reset postgres + redis + keycloak
 # =============================================================================
 if [ "$ACTION" = "reset" ]; then
-  echo "⚠️  This will run '${DC[*]} -f ${COMPOSE_FILE} down -v', PERMANENTLY DELETING the customer360-pgdata, customer360-redisdata and customer360-miniodata volumes (all Postgres + Redis + MinIO data, including Keycloak's db_keycloak)."
+  echo "⚠️  This will run '${DC[*]} -f ${COMPOSE_FILE} down -v', PERMANENTLY DELETING the customer360-pgdata, customer360-redisdata, customer360-miniodata and customer360-mailpitdata volumes (all Postgres + Redis + MinIO data, captured email, and Keycloak's db_keycloak)."
   if [ "$SKIP_CONFIRM" != "true" ]; then
     read -r -p "Type 'yes' to confirm: " CONFIRM_ANSWER
     if [ "$CONFIRM_ANSWER" != "yes" ]; then
@@ -530,7 +535,7 @@ if [ "$ACTION" = "upgrade" ]; then
   echo "   - Rebuilding and force-recreating containers without deleting volumes..."
   "${DC_CMD[@]}" up -d --build --force-recreate
 else
-  echo "🚀 Starting postgres + redis + keycloak + customer360-agent + minio (${COMPOSE_FILE})..."
+  echo "🚀 Starting postgres + redis + keycloak + customer360-agent + minio + Mailpit (${COMPOSE_FILE})..."
   "${DC_CMD[@]}" up -d --build
 fi
 
@@ -644,6 +649,7 @@ if [ "$ACTION" = "reset" ]; then
 fi
 apply_database_migrations
 wait_for_healthy "$REDIS_CONTAINER"
+wait_for_healthy "$MAILPIT_CONTAINER"
 wait_for_healthy "$MINIO_CONTAINER"
 wait_for_healthy "$TRACKING_CONTAINER"
 wait_for_healthy "$AGENT_CONTAINER"
@@ -783,11 +789,12 @@ get_host_service_status() {
 restart_host_services
 
 print_final_service_table() {
-  local postgres_status redis_status minio_status tracking_status docs_status
+  local postgres_status redis_status minio_status mailpit_status tracking_status docs_status
   local backend_status api_status frontend_status agent_status
   postgres_status="$(docker inspect -f '{{.State.Health.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || echo "unknown")"
   redis_status="$(docker inspect -f '{{.State.Health.Status}}' "$REDIS_CONTAINER" 2>/dev/null || echo "unknown")"
   minio_status="$(docker inspect -f '{{.State.Health.Status}}' "$MINIO_CONTAINER" 2>/dev/null || echo "unknown")"
+  mailpit_status="$(docker inspect -f '{{.State.Health.Status}}' "$MAILPIT_CONTAINER" 2>/dev/null || echo "unknown")"
   tracking_status="$(docker inspect -f '{{.State.Health.Status}}' "$TRACKING_CONTAINER" 2>/dev/null || echo "unknown")"
   agent_status="$(docker inspect -f '{{.State.Health.Status}}' "$AGENT_CONTAINER" 2>/dev/null || echo "unknown")"
   docs_status="$(docker inspect -f '{{.State.Health.Status}}' "$DOCS_SEARCH_CONTAINER" 2>/dev/null || echo "unknown")"
@@ -802,6 +809,7 @@ print_final_service_table() {
   printf '%-12s | %-10s | %-25s\n' "postgres" "$postgres_status" "localhost:${POSTGRES_HOST_PORT:-5432}"
   printf '%-12s | %-10s | %-25s\n' "redis" "$redis_status" "localhost:${REDIS_HOST_PORT:-6580}"
   printf '%-12s | %-10s | %-25s\n' "minio" "$minio_status" "localhost:${MINIO_API_HOST_PORT:-9000} (console ${MINIO_CONSOLE_HOST_PORT:-9001})"
+  printf '%-12s | %-10s | %-25s\n' "mailpit" "$mailpit_status" "localhost:${MAILPIT_UI_HOST_PORT:-8025} (SMTP ${MAILPIT_SMTP_HOST_PORT:-1025})"
   printf '%-12s | %-10s | %-25s\n' "tracking-api" "$tracking_status" "localhost:${C360_TRACKING_API_PORT:-8010}"
   printf '%-12s | %-10s | %-25s\n' "ai-agent" "$agent_status" "localhost:${C360_AGENT_PORT:-8009}"
   printf '%-12s | %-10s | %-25s\n' "docs-ai" "$docs_status" "localhost:${DOCS_SEARCH_HOST_PORT} (/health)"

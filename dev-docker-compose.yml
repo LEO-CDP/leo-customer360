@@ -20,6 +20,10 @@ name: customer360
 # intentionally NOT part of docker-compose.yml -- production uses the real
 # S3 bucket instead.
 #
+# Also starts Mailpit, DEV ONLY, for safe local SMTP capture. Host-run email
+# services use 127.0.0.1:${MAILPIT_SMTP_HOST_PORT:-1025}; inspect captured
+# messages at http://127.0.0.1:${MAILPIT_UI_HOST_PORT:-8025}.
+#
 # Config: copy .env.example -> .env in this directory before first run.
 #
 # NOTE: this file intentionally shares the same project `name`, container
@@ -53,6 +57,8 @@ volumes:
     name: customer360-redisdata
   customer360-miniodata:
     name: customer360-miniodata
+  customer360-mailpitdata:
+    name: customer360-mailpitdata
 
 services:
   # ---------------------------------------------------------------------------
@@ -122,7 +128,37 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # 3) Keycloak DB init - ensures the dedicated db_keycloak database exists
+  # 3) Mailpit - DEV ONLY SMTP capture for host-run email services.
+  # ---------------------------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:${MAILPIT_VERSION:-v1.27}
+    container_name: customer360-mailpit
+    restart: unless-stopped
+    <<: *default-hardening
+    environment:
+      MP_MAX_MESSAGES: ${MAILPIT_MAX_MESSAGES:-5000}
+      MP_DATABASE: /data/mailpit.db
+      TZ: ${MAILPIT_TIMEZONE:-UTC}
+    ports:
+      - "${MAILPIT_HOST_BIND:-127.0.0.1}:${MAILPIT_SMTP_HOST_PORT:-1025}:1025"
+      - "${MAILPIT_HOST_BIND:-127.0.0.1}:${MAILPIT_UI_HOST_PORT:-8025}:8025"
+    volumes:
+      - customer360-mailpitdata:/data
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # 4) Keycloak DB init - ensures the dedicated db_keycloak database exists
   #    before Keycloak starts against the shared PostgreSQL instance.
   # ---------------------------------------------------------------------------
   keycloak-db-init:
@@ -147,7 +183,7 @@ services:
         psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360} -tc "SELECT 1 FROM pg_database WHERE datname = 'db_keycloak'" | grep -q 1 || psql -h postgres -U ${DB_USER:-postgres} -d ${DB_NAME:-customer360} -c "CREATE DATABASE db_keycloak"
 
   # ---------------------------------------------------------------------------
-  # 4) Keycloak - local SSO provider for Customer 360 API testing.
+  # 5) Keycloak - local SSO provider for Customer 360 API testing.
   #    Uses the same PostgreSQL instance but a dedicated database named
   #    db_keycloak.
   # ---------------------------------------------------------------------------
@@ -198,7 +234,7 @@ services:
       start_period: 60s
 
   # ---------------------------------------------------------------------------
-  # 5) Customer 360 AI Agent - host-run customer360-api calls localhost:8009.
+  # 6) Customer 360 AI Agent - host-run customer360-api calls localhost:8009.
   # ---------------------------------------------------------------------------
   agent:
     build:
@@ -239,7 +275,7 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # 6) MinIO - local S3-compatible object storage, DEV ONLY. Lets you test
+  # 7) MinIO - local S3-compatible object storage, DEV ONLY. Lets you test
   #    file-based event ingestion (e.g. importing events from CSV/JSON dropped
   #    into a bucket, see docs/api-plans/PLAN-EVENTS-API-IMPROVEMENT.md "Import from S3")
   #    against a real S3 API without touching production S3. NOT present in
@@ -288,7 +324,7 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # 6) MinIO bucket bootstrap - one-shot: creates the default dev bucket
+  # 8) MinIO bucket bootstrap - one-shot: creates the default dev bucket
   #    (MINIO_BUCKET) used for testing file-based event ingestion, so it
   #    exists as soon as the stack comes up.
   # ---------------------------------------------------------------------------
@@ -315,7 +351,7 @@ services:
         echo "Bucket $$MINIO_BUCKET ready."
 
   # ---------------------------------------------------------------------------
-  # 7) CDP event data tracking API - DEV uses the in-network customer360-minio
+  # 9) CDP event data tracking API - DEV uses the in-network customer360-minio
   #    S3-compatible service; per-data-source buckets are created on ingest.
   # ---------------------------------------------------------------------------
   tracking-api:

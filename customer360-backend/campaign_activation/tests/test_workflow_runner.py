@@ -159,6 +159,98 @@ def test_smtp_uses_password_saved_by_provider_api(monkeypatch):
     server.login.assert_called_once_with("mailer", "test-password")
 
 
+def test_email_env_smtp_fallback_uses_mailpit_settings(monkeypatch):
+    cursor = MagicMock()
+    cursor.fetchone.return_value = None
+    for key, value in {
+        "EMAIL_DISPATCH_ADAPTER": "smtp",
+        "SMTP_HOST": "127.0.0.1",
+        "SMTP_PORT": "1025",
+        "SMTP_USERNAME": "",
+        "SMTP_PASSWORD": "",
+        "SMTP_USE_TLS": "false",
+        "EMAIL_FROM_ADDRESS": "uat@example.test",
+        "EMAIL_FROM_NAME": "Mailpit UAT",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    connector = workflow_runner._load_email_connector(cursor, "tenant-1")
+
+    assert connector is not None
+    assert connector.provider == "smtp"
+    assert connector.config == {
+        "smtp_host": "127.0.0.1",
+        "smtp_port": 1025,
+        "smtp_username": None,
+        "smtp_use_tls": False,
+        "from_address": "uat@example.test",
+        "from_name": "Mailpit UAT",
+    }
+    assert connector.credentials == {"password": None}
+
+    server = MagicMock()
+    smtp = MagicMock()
+    smtp.return_value.__enter__.return_value = server
+    monkeypatch.setattr(workflow_runner.smtplib, "SMTP", smtp)
+    gateway = EmailWorkflowGateway(FakeLedger(), connector)
+
+    assert gateway.send(_message()).status == "sent"
+    smtp.assert_called_once_with("127.0.0.1", 1025, timeout=30)
+    server.starttls.assert_not_called()
+    server.login.assert_not_called()
+    server.send_message.assert_called_once()
+
+
+def test_active_tenant_email_connector_takes_precedence_over_env(monkeypatch):
+    cursor = MagicMock()
+    cursor.fetchone.return_value = {
+        "provider": "smtp",
+        "config": {"smtp_host": "tenant-smtp.example", "smtp_port": 2525},
+        "credentials": {"password": "tenant-secret"},
+    }
+    monkeypatch.setenv("EMAIL_DISPATCH_ADAPTER", "smtp")
+    monkeypatch.setenv("SMTP_HOST", "127.0.0.1")
+    monkeypatch.setenv("SMTP_PORT", "1025")
+
+    connector = workflow_runner._load_email_connector(cursor, "tenant-1")
+
+    assert connector is not None
+    assert connector.config["smtp_host"] == "tenant-smtp.example"
+    assert connector.config["smtp_port"] == 2525
+    assert connector.credentials["password"] == "tenant-secret"
+
+
+def test_missing_tenant_email_connector_without_env_fallback_remains_unconfigured(monkeypatch):
+    cursor = MagicMock()
+    cursor.fetchone.return_value = None
+    monkeypatch.delenv("EMAIL_DISPATCH_ADAPTER", raising=False)
+
+    assert workflow_runner._load_email_connector(cursor, "tenant-1") is None
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"EMAIL_DISPATCH_ADAPTER": "unsupported"},
+        {"EMAIL_DISPATCH_ADAPTER": "smtp", "SMTP_HOST": ""},
+        {"EMAIL_DISPATCH_ADAPTER": "smtp", "SMTP_HOST": "127.0.0.1", "SMTP_PORT": "not-a-port"},
+        {"EMAIL_DISPATCH_ADAPTER": "smtp", "SMTP_HOST": "127.0.0.1", "SMTP_PORT": "1025", "SMTP_USE_TLS": "sometimes"},
+    ],
+)
+def test_email_env_fallback_rejects_invalid_smtp_configuration(monkeypatch, environment):
+    cursor = MagicMock()
+    cursor.fetchone.return_value = None
+    monkeypatch.delenv("EMAIL_DISPATCH_ADAPTER", raising=False)
+    monkeypatch.delenv("SMTP_HOST", raising=False)
+    monkeypatch.delenv("SMTP_PORT", raising=False)
+    monkeypatch.delenv("SMTP_USE_TLS", raising=False)
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+
+    with pytest.raises(workflow_runner.CampaignWorkflowError):
+        workflow_runner._load_email_connector(cursor, "tenant-1")
+
+
 def test_database_event_source_uses_dictionary_cursor():
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
@@ -172,6 +264,7 @@ def test_database_event_source_uses_dictionary_cursor():
 
 def _workflow_run(monkeypatch, action, profiles):
     connection = MagicMock()
+    monkeypatch.delenv("EMAIL_DISPATCH_ADAPTER", raising=False)
     tenant_id, campaign_id, segment_id = (str(uuid.uuid4()) for _ in range(3))
     workflow = {
         "schema_version": 2,

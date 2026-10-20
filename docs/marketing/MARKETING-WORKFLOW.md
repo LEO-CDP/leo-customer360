@@ -49,28 +49,39 @@ explicit tenant-admin action.
 ```mermaid
 stateDiagram-v2
     state "Campaign approval_status" as CampaignApproval {
-        [*] --> Draft
-        Draft --> InReview: submit for review
-        InReview --> Approved: admin approves
-        InReview --> Rejected: admin rejects
-        Rejected --> InReview: edit and resubmit
-        Approved --> InReview: governed edit and resubmit
+        state "Draft" as CampaignDraft
+        state "InReview" as CampaignInReview
+        state "Approved" as CampaignApproved
+        state "Rejected" as CampaignRejected
+        [*] --> CampaignDraft
+        CampaignDraft --> CampaignInReview: submit for review
+        CampaignInReview --> CampaignApproved: admin approves
+        CampaignInReview --> CampaignRejected: admin rejects
+        CampaignRejected --> CampaignInReview: edit and resubmit
+        CampaignApproved --> CampaignInReview: governed edit and resubmit
     }
     state "Pinned crm_flow_version.approval_status" as VersionApproval {
-        [*] --> UserApproved: user-authored version
-        [*] --> InReview: agent-authored version
-        InReview --> VersionApproved: different human approves
-        InReview --> VersionRejected: human rejects
-        VersionRejected --> InReview: save revised version
+        state "Approved" as UserAuthoredApproved
+        state "InReview" as WorkflowInReview
+        state "Approved" as WorkflowApproved
+        state "Rejected" as WorkflowRejected
+        [*] --> UserAuthoredApproved: user-authored version
+        [*] --> WorkflowInReview: agent-authored version
+        WorkflowInReview --> WorkflowApproved: different human approves
+        WorkflowInReview --> WorkflowRejected: human rejects
+        WorkflowRejected --> WorkflowInReview: save revised version
     }
     state "crm_campaign.status / workflow_execution_id" as Execution {
-        [*] --> Ready: approval and audience gates pass
-        Ready --> Running: Start; persist execution_id; submit child run
-        Running --> Completed: all profile journeys finish without errors
-        Running --> Failed: submission or workflow-level failure
-        Running --> Failed: one or more profile journeys fail
-        Failed --> Running: retry with the same execution_id
-        Completed --> Running: explicit replay with a new execution_id
+        state "Ready (gates passed)" as ExecutionReady
+        state "Running" as ExecutionRunning
+        state "Completed" as ExecutionCompleted
+        state "Failed" as ExecutionFailed
+        [*] --> ExecutionReady
+        ExecutionReady --> ExecutionRunning: Start, persist execution_id, submit child run
+        ExecutionRunning --> ExecutionCompleted: profile journeys finish without errors
+        ExecutionRunning --> ExecutionFailed: submission, workflow, or profile error
+        ExecutionFailed --> ExecutionRunning: retry with the same execution_id
+        ExecutionCompleted --> ExecutionRunning: explicit replay with a new execution_id
     }
 ```
 
@@ -113,6 +124,8 @@ These use cases describe current graph capabilities; the platform does not
 currently provide real-time journey enrollment or durable scheduled waits.
 
 ## Main campaign lifecycle
+
+![marketing-workflow-en](images/marketing-workflow-en.png)
 
 The only executable campaign path is:
 
@@ -465,7 +478,10 @@ than leaving it permanently `Running`.
     `execution_id`, and `data_sync_run_ids`, alongside campaign and tenant IDs.
 
 Email, notification, and push connectors are resolved from active tenant
-`crm_connector_config` rows. Missing explicit channel consent is skipped:
+`crm_connector_config` rows first. If there is no active tenant EMAIL row, an
+explicit `EMAIL_DISPATCH_ADAPTER` of `smtp` or `mock` supplies the email
+fallback; an unset adapter leaves email unconfigured. SMS, chat, and push have
+no environment fallback. Missing explicit channel consent is skipped:
 
 - `communication_preferences.email_opt_in == true`
 - `communication_preferences.sms_opt_in == true`
@@ -501,7 +517,9 @@ configuration includes an explicit provider.
 
 | Configuration | Behavior | Evidence |
 | --- | --- | --- |
-| No active EMAIL/SMS/CHAT/PUSH connector for a reached message action | Log the node/channel and return skipped; make no network call | Action ledger `Skipped`; summary `sent` is not incremented |
+| No active tenant EMAIL connector, with no explicit `EMAIL_DISPATCH_ADAPTER` fallback | Log the node and return skipped; make no network call | Action ledger `Skipped`; summary `sent` is not incremented |
+| No active tenant EMAIL connector, with `EMAIL_DISPATCH_ADAPTER=smtp` | Use the configured `SMTP_*` environment fallback (local DEV uses Mailpit) | Action ledger records SMTP provider and outcome |
+| No active SMS/CHAT/PUSH connector | Log the node/channel and return skipped; make no network call | Action ledger `Skipped`; summary `sent` is not incremented |
 | No active ADS connector for a submitted audience export | Complete a logging-only dry run; do not call an adapter | `dry_run = true`, `uploaded_count = 0`, `reason = provider_not_configured`; reason also stored in audit metadata |
 | Explicitly configured message connector with provider `mock` | Simulate a successful send without a network call | Mock provider ID and action ledger `Sent` |
 | Configured provider fails or has invalid settings | Report failure explicitly; do not disguise it as a dry run | Failed action/run and error evidence |

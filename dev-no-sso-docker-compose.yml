@@ -3,6 +3,7 @@ name: customer360
 # =============================================================================
 # this is clone of dev-docker-compose.yml, but without the SSO service 
 # (for local development of the API without SSO, if SSO_LOGIN=false in .env)
+# Mailpit is included in both variants for local SMTP capture.
 # =============================================================================
 
 x-logging: &default-logging
@@ -28,6 +29,8 @@ volumes:
     name: customer360-redisdata
   customer360-miniodata:
     name: customer360-miniodata
+  customer360-mailpitdata:
+    name: customer360-mailpitdata
 
 services:
   # ---------------------------------------------------------------------------
@@ -97,7 +100,37 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # 3) Customer 360 AI Agent - host-run customer360-api calls localhost:8009.
+  # 3) Mailpit - DEV ONLY SMTP capture for host-run email services.
+  # ---------------------------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:${MAILPIT_VERSION:-v1.27}
+    container_name: customer360-mailpit
+    restart: unless-stopped
+    <<: *default-hardening
+    environment:
+      MP_MAX_MESSAGES: ${MAILPIT_MAX_MESSAGES:-5000}
+      MP_DATABASE: /data/mailpit.db
+      TZ: ${MAILPIT_TIMEZONE:-UTC}
+    ports:
+      - "${MAILPIT_HOST_BIND:-127.0.0.1}:${MAILPIT_SMTP_HOST_PORT:-1025}:1025"
+      - "${MAILPIT_HOST_BIND:-127.0.0.1}:${MAILPIT_UI_HOST_PORT:-8025}:8025"
+    volumes:
+      - customer360-mailpitdata:/data
+    networks:
+      - customer360-network
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # 4) Customer 360 AI Agent - host-run customer360-api calls localhost:8009.
   # ---------------------------------------------------------------------------
   agent:
     build:
@@ -139,7 +172,7 @@ services:
 
 
   # ---------------------------------------------------------------------------
-  # 4) MinIO - local S3-compatible object storage, DEV ONLY. Lets you test
+  # 5) MinIO - local S3-compatible object storage, DEV ONLY. Lets you test
   #    file-based event ingestion (e.g. importing events from CSV/JSON dropped
   #    into a bucket, see docs/api-plans/PLAN-EVENTS-API-IMPROVEMENT.md "Import from S3")
   #    against a real S3 API without touching production S3. NOT present in
@@ -183,7 +216,7 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # 4) MinIO bucket bootstrap - one-shot: creates the default dev bucket
+  # 6) MinIO bucket bootstrap - one-shot: creates the default dev bucket
   #    (MINIO_BUCKET) used for testing file-based event ingestion, so it
   #    exists as soon as the stack comes up.
   # ---------------------------------------------------------------------------
@@ -210,7 +243,7 @@ services:
         echo "Bucket $$MINIO_BUCKET ready."
 
   # ---------------------------------------------------------------------------
-  # 5) CDP event data tracking API - DEV uses the in-network customer360-minio.
+  # 7) CDP event data tracking API - DEV uses the in-network customer360-minio.
   # ---------------------------------------------------------------------------
   tracking-api:
     build:

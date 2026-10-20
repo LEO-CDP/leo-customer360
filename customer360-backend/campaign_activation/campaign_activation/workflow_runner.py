@@ -691,6 +691,53 @@ def _load_connector(
     )
 
 
+def _load_email_connector(cursor, tenant_id: str) -> Connector | None:
+    """Prefer the tenant EMAIL connector, then use an explicitly selected env adapter."""
+    connector = _load_connector(cursor, tenant_id, "EMAIL")
+    if connector is not None:
+        return connector
+
+    provider = os.environ.get("EMAIL_DISPATCH_ADAPTER", "").strip().lower()
+    if not provider:
+        return None
+    if provider == "mock":
+        return Connector(provider="mock", config={}, credentials={})
+    if provider != "smtp":
+        raise CampaignWorkflowError(
+            f"Unsupported EMAIL_DISPATCH_ADAPTER {provider!r}; expected smtp or mock"
+        )
+
+    host = os.environ.get("SMTP_HOST", "").strip()
+    if not host:
+        raise CampaignWorkflowError(
+            "EMAIL_DISPATCH_ADAPTER=smtp requires SMTP_HOST when no tenant EMAIL connector is active"
+        )
+    raw_port = os.environ.get("SMTP_PORT", "587").strip()
+    try:
+        port = int(raw_port)
+    except ValueError as exc:
+        raise CampaignWorkflowError("SMTP_PORT must be an integer") from exc
+    if not 1 <= port <= 65535:
+        raise CampaignWorkflowError("SMTP_PORT must be between 1 and 65535")
+
+    raw_tls = os.environ.get("SMTP_USE_TLS", "true").strip().lower()
+    if raw_tls not in {"1", "true", "yes", "0", "false", "no"}:
+        raise CampaignWorkflowError("SMTP_USE_TLS must be a boolean value")
+
+    return Connector(
+        provider="smtp",
+        config={
+            "smtp_host": host,
+            "smtp_port": port,
+            "smtp_username": os.environ.get("SMTP_USERNAME") or None,
+            "smtp_use_tls": raw_tls in {"1", "true", "yes"},
+            "from_address": os.environ.get("EMAIL_FROM_ADDRESS") or "no-reply@leocdp.local",
+            "from_name": os.environ.get("EMAIL_FROM_NAME") or "LEO CDP",
+        },
+        credentials={"password": os.environ.get("SMTP_PASSWORD") or None},
+    )
+
+
 def _profile_from_row(row: dict[str, Any]) -> CdpMasterProfile:
     return CdpMasterProfile(**dict(row))
 
@@ -933,7 +980,7 @@ def run_campaign_workflow(
             if problems:
                 raise CampaignWorkflowError("Workflow is invalid: " + "; ".join(problems))
         with conn.cursor(cursor_factory=RealDictCursor) as connector_cursor:
-            email_connector = _load_connector(connector_cursor, tenant_id, "EMAIL")
+            email_connector = _load_email_connector(connector_cursor, tenant_id)
             notification_connectors = {
                 "sms": _load_connector(connector_cursor, tenant_id, "SMS"),
                 "zalo_oa": _load_connector(connector_cursor, tenant_id, "CHAT", "ZALO"),

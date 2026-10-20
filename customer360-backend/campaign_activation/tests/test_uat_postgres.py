@@ -151,6 +151,7 @@ def test_postgres_campaign_execution_lock_excludes_other_workers(postgres):
 
 def test_postgres_activation_runtime_and_unlimited_replay_without_delivery(postgres, monkeypatch):
     connection, tenant_id, campaign_id, profile_id, _ = postgres
+    monkeypatch.delenv("EMAIL_DISPATCH_ADAPTER", raising=False)
     segment_id, execution_id = str(uuid.uuid4()), str(uuid.uuid4())
     workflow = {
         "schema_version": 2,
