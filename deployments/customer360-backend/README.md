@@ -2,7 +2,7 @@
 
 `customer360-backend` is the Dagster orchestrator (webserver + daemon + all code locations,
 `dagster dev`, :3000). It used to run as one docker container on the vServer jobs box
-(`../server/deploy-backend.sh`). This directory runs it on VKS as a **singleton Deployment**,
+(retired; `server/deploy-backend.sh` is removed). This directory runs it on VKS as a **singleton Deployment**,
 using the same layout as [`../customer360-promotions`](../customer360-promotions/README.md).
 
 Plan and phases: [`../docs/dagster-vks-adaptation-plan.md`](../docs/dagster-vks-adaptation-plan.md).
@@ -52,7 +52,7 @@ storage and S3 compute logs, and GraphQL reports every code location `LOADED`.
 Deploying here does **not** move traffic. The vServers reach Dagster through the node: the UAT overlay makes the
 `dagster` Service a NodePort (`30300`) on the node labelled `c360.pool=dagster` (`10.100.1.11`). The Dagster UI has
 no auth, so keep that node private and let its security group allow `30300` only from the vServer subnet.
-Order (each step is reversible by pointing back at `10.100.1.4:3000`):
+Order (the vServer fallback `10.100.1.4:3000` no longer exists; rolling back means redeploying an older image tag):
 
 1. `./deploy-backend-vks.sh uat` (applies the NodePort).
 2. From the api box: `curl -s -o /dev/null -w '%{http_code}\n' http://10.100.1.11:30300/server_info` must print 200.

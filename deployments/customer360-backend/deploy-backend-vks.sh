@@ -3,8 +3,7 @@
 # Kubernetes cluster as a singleton Deployment.
 #   ./deploy-backend-vks.sh <uat|prod> [deploy|destroy]
 #
-# Replaces the vServer model (../server/deploy-backend.sh: one docker container on the jobs
-# box). Same inputs, read from the SAME Terraform state that script used:
+# Replaces the retired vServer model (one docker container on the jobs box). Same inputs, read from the SAME Terraform state that script used:
 #   * Postgres (../postgres): the shared managed DB + the dedicated `dagster` metadata DB.
 #     REQUIRED — the image's renderer refuses to start without it.
 #   * vStorage (../storage): compute logs bucket + the S3 key. Required when

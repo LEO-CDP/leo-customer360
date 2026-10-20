@@ -43,7 +43,7 @@ API_UP="$(tfval api_upstream "$ovl")";       API_UP="${API_UP:-127.0.0.1:8008}"
 KC_UP="$(tfval keycloak_upstream "$ovl")";   KC_UP="${KC_UP:-127.0.0.1:8080}"
 FE_UP="$(tfval frontend_upstream "$ovl")";   FE_UP="${FE_UP:-127.0.0.1:8890}"
 ADS_UP="$(tfval ads_upstream "$ovl")";       ADS_UP="${ADS_UP:-127.0.0.1:9009}"
-DAG_UP="$(tfval dagster_upstream "$ovl")";   DAG_UP="${DAG_UP:-10.100.1.4:3000}"
+DAG_UP="$(tfval dagster_upstream "$ovl")";   DAG_UP="${DAG_UP:?dagster_upstream missing in $ovl (the VKS Dagster NodePort, e.g. <node-ip>:30300)}"
 NET_UP="$(tfval netdata_upstream "$ovl")";   NET_UP="${NET_UP:-127.0.0.1:4199}"
 PORT_UP="$(tfval portainer_upstream "$ovl")";PORT_UP="${PORT_UP:-127.0.0.1:9443}"
 JAE_UP="$(tfval jaeger_upstream "$ovl")";     JAE_UP="${JAE_UP:-127.0.0.1:4686}"   # -> oauth2-jaeger (SSO) -> Jaeger

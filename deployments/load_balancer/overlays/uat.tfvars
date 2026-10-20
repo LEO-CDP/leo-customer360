@@ -23,7 +23,7 @@ zone_id = "HCM03-1C" # only AZ enabled for this account
 
 # After the beta.leocdp.com cutover the app is fronted by Caddy (deployments/proxy):
 # the LB does dumb :80/:443 TCP passthrough -> Caddy. Ops tools stay on their own ports.
-# member_ip = each box PRIVATE ip (see `terraform output servers`): api 10.100.1.5, backend 10.100.1.4.
+# member_ip = each box PRIVATE ip (see `terraform output servers`): api 10.100.1.5 (Dagster = the VKS node NodePort).
 backends = {
   # HTTPS front door: Caddy (deployments/proxy) terminates TLS + path-routes
   #   beta.leocdp.com/ -> frontend · /c360api -> api · /auth -> keycloak · /ads -> ads
