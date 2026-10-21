@@ -273,3 +273,160 @@ def test_agent_type_pipeline_returns_expected_result(model_type, expected_result
     assert output.tenant_id == UUID(TENANT_ID)
     assert output.segment_id == UUID(SEGMENT_ID)
     assert output.result == expected_result
+
+
+def test_contracts_and_pipeline_edge_cases(monkeypatch):
+    with pytest.raises(ValidationError, match="object keys must be strings"):
+        AgentPipelineInput.model_validate(_input(input_data={"nested": {1: "bad"}}))
+
+    with pytest.raises(ValidationError, match="JSON-compatible"):
+        AgentPipelineInput.model_validate(
+            _input(input_data={"bad_obj": object()})
+        )
+
+    with pytest.raises(ValidationError, match="completed_at must be UTC"):
+        AgentPipelineOutput.model_validate(
+            {
+                "run_id": "r1",
+                "tenant_id": TENANT_ID,
+                "segment_id": SEGMENT_ID,
+                "agent_code": "test_agent",
+                "model_type": "classification",
+                "result": {"label": "ok"},
+                "completed_at": datetime(2026, 10, 5, 12, 0),
+            }
+        )
+
+    with pytest.raises(
+        ValidationError,
+        match="generative_llm result must include text, structured_output, or summary",
+    ):
+        PIPELINE_HANDLERS["generative_llm"].result_model.model_validate({})
+
+    clf_handler = ClassificationPipeline()
+    wrong_payload = AgentPipelineInput.model_validate(_input(model_type="regression"))
+    with pytest.raises(ValueError, match="cannot handle regression"):
+        clf_handler(wrong_payload)
+
+    assert execute_agent_pipeline_batch([], run_id="r1") == []
+
+    p1 = _input(
+        model_type="ranking_recommendation",
+        candidate_content_item_ids=[SEGMENT_ID],
+    )
+    p2_diff_candidates = _input(
+        model_type="ranking_recommendation",
+        candidate_content_item_ids=[TENANT_ID],
+    )
+    with pytest.raises(ValueError, match="share candidate_content_item_ids"):
+        execute_agent_pipeline_batch([p1, p2_diff_candidates], run_id="r1")
+
+    p2_diff_config = _input(
+        model_type="ranking_recommendation",
+        candidate_content_item_ids=[SEGMENT_ID],
+        configuration={"limit": 2},
+    )
+    with pytest.raises(ValueError, match="share configuration"):
+        execute_agent_pipeline_batch([p1, p2_diff_config], run_id="r1")
+
+    with pytest.raises(ValueError, match="one model_type"):
+        execute_agent_pipeline_batch(
+            [_input(model_type="classification"), _input(model_type="regression")],
+            run_id="r1",
+        )
+
+    monkeypatch.setattr(clf_handler, "process_batch", lambda _p: [])
+    monkeypatch.setitem(pipelines.PIPELINE_HANDLERS, "classification", clf_handler)
+    with pytest.raises(RuntimeError, match="returned 0 results for 1 inputs"):
+        execute_agent_pipeline_batch([_input()], run_id="r1")
+
+
+def test_dagster_defs_jobs_ops_and_sensor(monkeypatch):
+    from unittest.mock import MagicMock
+    from dagster import DagsterInstance, RunRequest, build_sensor_context
+    from ai_agents_runners import dagster_defs
+    from ai_agents_runners.runner import WorkflowRunSummary
+
+    assert dagster_defs.defs.get_job_def("ai_agents_master_job") is not None
+    assert dagster_defs.defs.get_job_def("agent_type_pipeline_job") is not None
+    assert dagster_defs.defs.get_job_def("personalization_job") is not None
+    assert (
+        dagster_defs.defs.resolve_sensor_def("ai_agent_workflow_schedule_sensor")
+        is not None
+    )
+
+    fake_summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=TENANT_ID,
+        segment_id=SEGMENT_ID,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(),
+        executed_steps=1,
+    )
+    fake_task = MagicMock()
+    fake_task.run.return_value = fake_summary
+    fake_task.execute.return_value = fake_summary
+    monkeypatch.setattr(dagster_defs, "AgentWorkflowMasterTask", lambda: fake_task)
+
+    master_res = dagster_defs.ai_agents_master_job.execute_in_process(
+        run_config={
+            "ops": {
+                "run_agent_workflow_master_op": {
+                    "config": {
+                        "trigger": "cron",
+                        "tenant_id": TENANT_ID,
+                        "segment_id": SEGMENT_ID,
+                        "scheduled_at": "2026-10-05T12:00:00Z",
+                    }
+                }
+            }
+        }
+    )
+    assert master_res.success
+    assert master_res.output_for_node("run_agent_workflow_master_op") == fake_summary.as_dict()
+
+    fake_task.run.side_effect = RuntimeError("workflow boom")
+    failed_res = dagster_defs.ai_agents_master_job.execute_in_process(
+        raise_on_error=False
+    )
+    assert not failed_res.success
+
+    fake_output = AgentPipelineOutput.model_validate(
+        {
+            "run_id": "r1",
+            "tenant_id": TENANT_ID,
+            "segment_id": SEGMENT_ID,
+            "agent_code": "test_agent",
+            "model_type": "classification",
+            "result": {"label": "vip"},
+            "completed_at": datetime.now(timezone.utc),
+        }
+    )
+    monkeypatch.setattr(
+        dagster_defs, "execute_agent_pipeline", lambda _p, *, run_id: fake_output
+    )
+    pipeline_res = dagster_defs.agent_type_pipeline_job.execute_in_process(
+        run_config={
+            "ops": {
+                "run_agent_type_pipeline_op": {
+                    "config": {"payload": _input()}
+                }
+            }
+        }
+    )
+    assert pipeline_res.success
+    assert pipeline_res.output_for_node("run_agent_type_pipeline_op")["result"] == {
+        "label": "vip"
+    }
+
+    monkeypatch.setattr(dagster_defs.time, "sleep", lambda _s: None)
+    pers_res = dagster_defs.personalization_job.execute_in_process()
+    assert pers_res.success
+
+    with DagsterInstance.ephemeral() as instance:
+        context = build_sensor_context(instance=instance)
+        run_req = dagster_defs.ai_agent_workflow_schedule_sensor(context)
+    assert isinstance(run_req, RunRequest)
+    assert run_req.run_key.startswith("ai-agent-workflow-")
+

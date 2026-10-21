@@ -39,6 +39,7 @@ from core.routers.assistant_api import all_assistant_routers
 from core.routers.persona_api import all_persona_routers
 from core.routers.relations_api import all_relations_routers
 from core.routers.reporting_api import router as reporting_router
+from core.routers.audience_tag_api import all_audience_tag_routers
 from core.routers.segment_api import all_segment_routers
 from core.routers.support_api import all_support_routers
 from core.routers.user_api import all_user_routers
@@ -83,6 +84,7 @@ API_ROUTER_GROUPS = (
     all_workflow_routers,
     all_campaign_experiment_routers,
     all_zalo_routers,
+    all_audience_tag_routers,
     all_segment_routers,
     all_persona_routers,
     all_analytics_routers,

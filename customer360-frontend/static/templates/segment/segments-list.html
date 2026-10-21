@@ -52,14 +52,23 @@
         <option value="populated">Has members</option>
       </select>
 
+      <select id="segments-sort-filter" aria-label="Sort segments" class="text-xs border border-slate-200/80 bg-slate-50/50 hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all rounded-xl px-3 py-2 text-slate-700 shadow-sm outline-none cursor-pointer">
+        <option value="created_desc" selected>Sort: Created On (Newest)</option>
+        <option value="created_asc">Sort: Created On (Oldest)</option>
+        <option value="members_desc">Sort: Matched Profiles (High-Low)</option>
+        <option value="members_asc">Sort: Matched Profiles (Low-High)</option>
+        <option value="name_asc">Sort: Segment Name (A-Z)</option>
+        <option value="name_desc">Sort: Segment Name (Z-A)</option>
+      </select>
+
       <button id="btn-segments-clear-filters" type="button" title="Clear segment filters" aria-label="Clear segment filters" class="inline-flex items-center justify-center h-8 w-8 border border-slate-200/80 bg-white rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors shadow-sm">
         <i class="bi bi-arrow-counterclockwise text-sm leading-none" aria-hidden="true"></i>
       </button>
 
-      <!-- Refresh segments with member data -->
+      <!-- Recompute segments with member data -->
       <button id="btn-segments-refresh" type="button" title="Recompute all segment memberships" class="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 text-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold hover:bg-slate-100 transition-colors shadow-sm">
         <i class="bi bi-arrow-clockwise text-sm text-slate-400" aria-hidden="true"></i>
-        <span>Refresh</span>
+        <span>Recompute segments</span>
       </button>
 
       <!-- Create new segment -->

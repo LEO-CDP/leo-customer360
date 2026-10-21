@@ -28,6 +28,10 @@ window.C360 = window.C360 || {};
   var queryBuilderReady = false;
   var segmentAttributes = [];
   var attributeLoadSequence = 0;
+  var audienceTagsCatalog = [];
+  var audienceTagsByTagName = {};
+  var audienceTagsLoaded = false;
+  var segmentFormAudienceTags = [];
   var workflowController = new C360.AgentWorkflowController({ api: api });
 
   function sqlQuote(value) {
@@ -93,6 +97,27 @@ window.C360 = window.C360 || {};
       values = [rule.value];
     }
     var value;
+    var isArrayField = field === "audience_tags" || String(filter.data_type || "").toUpperCase() === "ARRAY";
+    if (isArrayField) {
+      if (operator === "is_null" || operator === "is_empty") {
+        return "(" + field + " IS NULL OR cardinality(" + field + ") = 0)";
+      }
+      if (operator === "is_not_null" || operator === "is_not_empty") {
+        return "(" + field + " IS NOT NULL AND cardinality(" + field + ") > 0)";
+      }
+      values = values.filter(function (item) {
+        return item !== null && typeof item !== "undefined" && String(item).trim() !== "";
+      });
+      if (!values.length) throw new Error("Select at least one IAB audience tag for this rule.");
+      var quotedTags = values.map(function (item) { return sqlQuote($.trim(String(item))); }).join(", ");
+      var arrayExpr = "ARRAY[" + quotedTags + "]::text[]";
+      if (operator === "in") return field + " && " + arrayExpr;
+      if (operator === "equal") return field + " @> " + arrayExpr;
+      if (operator === "not_in" || operator === "not_equal") {
+        return "NOT (COALESCE(" + field + ", ARRAY[]::text[]) && " + arrayExpr + ")";
+      }
+      throw new Error("Unsupported array rule operator.");
+    }
     if (operator === "is_null") return field + " IS NULL";
     if (operator === "is_not_null") return field + " IS NOT NULL";
     if (operator === "is_empty") return field + " = ''";
@@ -128,10 +153,76 @@ window.C360 = window.C360 || {};
     }).join(" " + String(group.condition || "AND").toUpperCase() + " ") + ")";
   }
 
-  function queryBuilderFilters(attributes) {
+  function ensureAudienceTagsCatalog() {
+    if (audienceTagsLoaded && audienceTagsCatalog.length) {
+      return $.Deferred().resolve(audienceTagsCatalog).promise();
+    }
+    return api("/audience-tags/", { limit: 2000, seed_if_empty: true, has_parent: true }).then(
+      function (items) {
+        audienceTagsCatalog = Array.isArray(items) ? items : [];
+        audienceTagsByTagName = {};
+        audienceTagsCatalog.forEach(function (item) {
+          if (item && item.tag_name) audienceTagsByTagName[item.tag_name] = item;
+        });
+        audienceTagsLoaded = true;
+        return audienceTagsCatalog;
+      },
+      function () {
+        return audienceTagsCatalog;
+      }
+    );
+  }
+
+  function buildAudienceTagSelectValues(extraRules) {
+    var valuesMap = {};
+    audienceTagsCatalog.forEach(function (item) {
+      if (!item || !item.tag_name) return;
+      var condensed = String(item.condensed_name || item.tag_name).replace(/\s*\|\s*$/, "");
+      valuesMap[item.tag_name] = condensed + " (" + item.tag_name + ")";
+    });
+    segmentFormAudienceTags.forEach(function (tagName) {
+      if (tagName && !valuesMap[tagName]) valuesMap[tagName] = tagName;
+    });
+    function collectRuleTags(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node.rules)) {
+        node.rules.forEach(collectRuleTags);
+        return;
+      }
+      if ((node.id === "audience_tags" || node.field === "audience_tags") && node.value) {
+        var list = Array.isArray(node.value) ? node.value : String(node.value).split(",");
+        list.forEach(function (raw) {
+          var t = $.trim(String(raw || ""));
+          if (t && !valuesMap[t]) valuesMap[t] = t;
+        });
+      }
+    }
+    collectRuleTags(extraRules);
+    if (!Object.keys(valuesMap).length) {
+      valuesMap["demographic"] = "Demographic (demographic)";
+    }
+    return valuesMap;
+  }
+
+  function queryBuilderFilters(attributes, extraRules) {
     return attributes.filter(function (attribute) {
+      if (attribute && attribute.field === "audience_tags") return true;
       return $.fn.queryBuilder.catalogType(attribute.data_type).category !== "array";
     }).map(function (attribute) {
+      if (attribute.field === "audience_tags") {
+        return {
+          id: "audience_tags",
+          field: "audience_tags",
+          label: attribute.name || "IAB Audience Tags (audience_tags)",
+          type: "string",
+          input: "select",
+          multiple: true,
+          data_type: "ARRAY",
+          values: buildAudienceTagSelectValues(extraRules),
+          operators: ["in", "not_in", "equal", "not_equal", "is_null", "is_not_null"],
+          optgroup: attribute.attribute_group || "MARKETING"
+        };
+      }
       var typeInfo = $.fn.queryBuilder.catalogType(attribute.data_type);
       var operators;
       if (typeInfo.category === "integer" || typeInfo.category === "number") {
@@ -178,9 +269,196 @@ window.C360 = window.C360 || {};
     return $.extend({}, rules, {
       rules: (rules.rules || []).map(function (rule) {
         if (rule && rule.rules) return normalizeSegmentRules(rule);
-        return $.extend({}, rule, { id: rule && (rule.id || rule.field) });
+        var id = rule && (rule.id || rule.field);
+        var normalizedRule = $.extend({}, rule, { id: id });
+        if (id === "audience_tags" && typeof normalizedRule.value === "string") {
+          normalizedRule.value = normalizedRule.value.split(",").map(function (v) { return $.trim(v); }).filter(Boolean);
+        }
+        return normalizedRule;
       })
     });
+  }
+
+  function renderSegmentFormSelectedAudienceTags() {
+    var $container = $("#segment-form-selected-audience-tags");
+    var $count = $("#segment-form-audience-tags-count");
+    $count.text(segmentFormAudienceTags.length + " selected");
+    if (!$container.length) return;
+    $container.empty();
+    if (!segmentFormAudienceTags.length) {
+      $container.append(
+        $('<span class="text-xs italic text-slate-400">No IAB audience tags selected — choose options below to assign to this segment or filter profiles.</span>')
+      );
+      return;
+    }
+    segmentFormAudienceTags.forEach(function (tagName) {
+      var meta = audienceTagsByTagName[tagName];
+      var label = meta
+        ? (meta.tier_6 || meta.tier_5 || meta.tier_4 || meta.tier_3 || meta.tier_2 || meta.tier_1 || tagName)
+        : tagName;
+      var $pill = $(
+        '<span class="inline-flex items-center gap-1.5 rounded-lg bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-800 ring-1 ring-inset ring-teal-600/20"></span>'
+      ).attr("title", meta && meta.condensed_name ? meta.condensed_name + " (" + tagName + ")" : tagName);
+      $pill.append($('<span class="font-semibold"></span>').text(label));
+      $pill.append($('<span class="font-mono text-[10px] text-teal-600"></span>').text(tagName));
+      var $remove = $(
+        '<button type="button" class="btn-segment-remove-audience-tag ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-teal-600 hover:bg-teal-200 hover:text-teal-900" aria-label="Remove tag">&times;</button>'
+      ).attr("data-tag-name", tagName);
+      $pill.append($remove);
+      $container.append($pill);
+    });
+  }
+
+  function renderSegmentFormAudienceTagOptions() {
+    var $list = $("#segment-form-audience-tag-options");
+    if (!$list.length) return;
+    var tier1 = String($("#segment-form-audience-tier1-filter").val() || "").trim();
+    var q = String($("#segment-form-audience-tag-search").val() || "").trim().toLowerCase();
+    var selectedSet = {};
+    segmentFormAudienceTags.forEach(function (t) { selectedSet[t] = true; });
+
+    var filtered = audienceTagsCatalog.filter(function (item) {
+      if (tier1 && item.tier_1 !== tier1) return false;
+      if (!q) return true;
+      var haystack = [
+        item.tag_name,
+        item.condensed_name,
+        item.unique_id,
+        item.tier_1,
+        item.tier_2,
+        item.tier_3,
+        item.tier_4,
+        item.tier_5,
+        item.tier_6
+      ].filter(Boolean).join(" ").toLowerCase();
+      return haystack.indexOf(q) !== -1;
+    });
+
+    $list.empty();
+    if (!filtered.length) {
+      $list.append(
+        $('<div class="px-3 py-3 text-slate-400 text-center"></div>').text(
+          audienceTagsCatalog.length
+            ? "No matching IAB taxonomy tags found."
+            : "No IAB taxonomy tags found in database."
+        )
+      );
+      return;
+    }
+
+    filtered.slice(0, 120).forEach(function (item) {
+      var isSelected = !!selectedSet[item.tag_name];
+      var cleanCondensed = String(item.condensed_name || item.tag_name).replace(/\s*\|\s*$/, "");
+      var $row = $(
+        '<button type="button" class="btn-segment-toggle-audience-tag w-full flex items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-teal-50/70"></button>'
+      )
+        .attr("data-tag-name", item.tag_name)
+        .toggleClass("bg-teal-50/60", isSelected);
+
+      var $left = $('<div class="min-w-0 flex-1"></div>');
+      var $top = $('<div class="flex flex-wrap items-center gap-1.5"></div>');
+      $top.append($('<span class="font-medium text-slate-800"></span>').text(cleanCondensed));
+      $top.append(
+        $('<span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600"></span>').text(
+          item.tier_1 || "IAB"
+        )
+      );
+      $left.append($top);
+      $left.append(
+        $('<div class="font-mono text-[11px] text-slate-400 truncate"></div>').text(
+          item.tag_name + (item.unique_id ? " · ID #" + item.unique_id : "")
+        )
+      );
+
+      var $badge = $(
+        '<span class="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold"></span>'
+      )
+        .toggleClass("bg-teal-600 text-white", isSelected)
+        .toggleClass("bg-slate-100 text-slate-600", !isSelected)
+        .text(isSelected ? "✓ Selected" : "+ Select");
+
+      $row.append($left, $badge);
+      $list.append($row);
+    });
+  }
+
+  function addSegmentFormAudienceTag(tagName) {
+    var cleaned = $.trim(String(tagName || ""));
+    if (!cleaned) return;
+    if (segmentFormAudienceTags.indexOf(cleaned) === -1) {
+      segmentFormAudienceTags.push(cleaned);
+    }
+    renderSegmentFormSelectedAudienceTags();
+    renderSegmentFormAudienceTagOptions();
+  }
+
+  function removeSegmentFormAudienceTag(tagName) {
+    var cleaned = $.trim(String(tagName || ""));
+    segmentFormAudienceTags = segmentFormAudienceTags.filter(function (item) {
+      return item !== cleaned;
+    });
+    renderSegmentFormSelectedAudienceTags();
+    renderSegmentFormAudienceTagOptions();
+  }
+
+  function toggleSegmentFormAudienceTag(tagName) {
+    var cleaned = $.trim(String(tagName || ""));
+    if (!cleaned) return;
+    if (segmentFormAudienceTags.indexOf(cleaned) !== -1) {
+      removeSegmentFormAudienceTag(cleaned);
+    } else {
+      addSegmentFormAudienceTag(cleaned);
+    }
+  }
+
+  function applySelectedAudienceTagsToQueryBuilder() {
+    var $error = $("#segment-form-error");
+    $error.addClass("hidden").text("");
+    if (!segmentFormAudienceTags.length) {
+      $error.removeClass("hidden").text("Select at least one IAB audience tag above before adding it to Audience Rules.");
+      return;
+    }
+    if (!queryBuilderReady) {
+      $error.removeClass("hidden").text("The rule builder is still loading.");
+      return;
+    }
+    var $builder = $("#segment-query-builder");
+    var currentRules = null;
+    try {
+      currentRules = $builder.queryBuilder("getRules", { allow_invalid: true });
+    } catch (e) {
+      currentRules = null;
+    }
+    var rulesList = (currentRules && Array.isArray(currentRules.rules)) ? currentRules.rules.slice() : [];
+    rulesList = rulesList.filter(function (r) {
+      return r && (r.id || r.field || (r.rules && r.rules.length));
+    });
+    var updated = false;
+    rulesList = rulesList.map(function (r) {
+      if (r && (r.id === "audience_tags" || r.field === "audience_tags")) {
+        updated = true;
+        return {
+          id: "audience_tags",
+          field: "audience_tags",
+          operator: "in",
+          value: segmentFormAudienceTags.slice()
+        };
+      }
+      return r;
+    });
+    if (!updated) {
+      rulesList.push({
+        id: "audience_tags",
+        field: "audience_tags",
+        operator: "in",
+        value: segmentFormAudienceTags.slice()
+      });
+    }
+    var nextRules = {
+      condition: (currentRules && currentRules.condition) || "AND",
+      rules: rulesList
+    };
+    $builder.queryBuilder("setRules", normalizeSegmentRules(nextRules));
   }
 
   function loadSegmentAttributes(domain, rules) {
@@ -191,10 +469,30 @@ window.C360 = window.C360 || {};
     $builder.empty();
     queryBuilderReady = false;
     var params = domain && domain !== "all" ? { domain: domain } : {};
-    return api("/segments/segmentable-profile-attributes", params)
-      .done(function (attributes) {
+    return $.when(
+      api("/segments/segmentable-profile-attributes", params),
+      ensureAudienceTagsCatalog()
+    )
+      .done(function (attributesRes) {
         if (loadSequence !== attributeLoadSequence) return;
-        segmentAttributes = attributes || [];
+        var attributes = Array.isArray(attributesRes && attributesRes[0]) ? attributesRes[0] : (attributesRes || []);
+        segmentAttributes = (attributes || []).slice();
+        var hasAudienceTagsAttr = segmentAttributes.some(function (attr) {
+          return attr && attr.field === "audience_tags";
+        });
+        if (!hasAudienceTagsAttr) {
+          segmentAttributes.push({
+            field: "audience_tags",
+            name: "IAB Audience Tags",
+            description: "Standardized IAB Audience Taxonomy tag_name array on cdp_master_profiles",
+            attribute_group: "MARKETING",
+            data_type: "ARRAY",
+            domain_scope: "all",
+            is_pii: false
+          });
+        }
+        renderSegmentFormSelectedAudienceTags();
+        renderSegmentFormAudienceTagOptions();
         $("#segment-form-attribute-count").text(segmentAttributes.length + " attributes available");
         if (typeof $builder.queryBuilder !== "function") {
           $("#segment-form-error").removeClass("hidden").text("jQuery QueryBuilder could not be loaded.");
@@ -207,7 +505,7 @@ window.C360 = window.C360 || {};
         }
         try {
           $builder.queryBuilder({
-            filters: queryBuilderFilters(segmentAttributes),
+            filters: queryBuilderFilters(segmentAttributes, rules),
             allow_empty: true,
             plugins: ["tw-tooltip-errors"]
           });
@@ -243,7 +541,7 @@ window.C360 = window.C360 || {};
     }
   }
 
-  function openSegmentForm(segment) {
+  function openSegmentForm(segment, focusAudienceTags) {
     editingSegmentId = segment ? segment.segment_id : null;
     $("#segment-form-title").text(segment ? "Edit segment" : "Create segment");
     $("#segment-form-save-label").text(segment ? "Save changes" : "Create segment");
@@ -252,12 +550,24 @@ window.C360 = window.C360 || {};
     $("#segment-form-tag").val(segment ? segment.segment_tag : "");
     $("#segment-form-description").val(segment ? (segment.description || "") : "");
     $("#segment-form-domain").val(segment ? (segment.domain || "all") : "all");
+    segmentFormAudienceTags = (segment && Array.isArray(segment.audience_tags))
+      ? segment.audience_tags.slice()
+      : [];
+    $("#segment-form-audience-tier1-filter").val("");
+    $("#segment-form-audience-tag-search").val("");
+    renderSegmentFormSelectedAudienceTags();
     rulesFromAi = false;
     $("#segment-form-ai-text").val("");
     $("#segment-form-ai-result").addClass("hidden");
     resetAiState();
     $("#segment-form-modal").removeClass("hidden");
     loadSegmentAttributes(segment ? segment.domain : "all", segment ? segment.json_rules : null);
+    if (focusAudienceTags === true) {
+      setTimeout(function () {
+        var $search = $("#segment-form-audience-tag-search");
+        if ($search.length) $search.trigger("focus");
+      }, 60);
+    }
   }
 
   // Sync the AI state into the UI; call after every state change.
@@ -424,16 +734,34 @@ window.C360 = window.C360 || {};
     }
     try {
       var rules = $("#segment-query-builder").queryBuilder("getRules", { allow_invalid: true });
-      if (!rules || !rules.valid) throw new Error("Complete every audience rule before saving.");
+      var hasRuleNodes = !!(rules && Array.isArray(rules.rules) && rules.rules.length);
+      if (hasRuleNodes && !rules.valid) {
+        if (!segmentFormAudienceTags.length) {
+          throw new Error("Complete every audience rule before saving.");
+        }
+        rules = { condition: (rules && rules.condition) || "AND", rules: [] };
+        hasRuleNodes = false;
+      }
+      if (!hasRuleNodes && !segmentFormAudienceTags.length) {
+        throw new Error("Add at least one audience rule or select IAB audience tags.");
+      }
       var filtersById = {};
       segmentAttributes.forEach(function (attribute) { filtersById[attribute.field] = attribute; });
-      var sqlRules = rulesSql(rules, filtersById);
+      var sqlRules = hasRuleNodes ? rulesSql(rules, filtersById) : "";
+      if (segmentFormAudienceTags.length && !/\baudience_tags\b/i.test(sqlRules)) {
+        var quotedTags = segmentFormAudienceTags.map(function (item) {
+          return sqlQuote($.trim(String(item)));
+        }).join(", ");
+        var audienceTagsSql = "(audience_tags && ARRAY[" + quotedTags + "]::text[])";
+        sqlRules = sqlRules ? "(" + sqlRules + " AND " + audienceTagsSql + ")" : audienceTagsSql;
+      }
       var payload = {
         segment_name: name,
         segment_tag: tag,
+        audience_tags: segmentFormAudienceTags.slice(),
         domain: $("#segment-form-domain").val() || "all",
         description: $.trim($("#segment-form-description").val()) || null,
-        json_rules: rules,
+        json_rules: rules || { condition: "AND", rules: [] },
         sql_rules: sqlRules,
         processed_by: rulesFromAi ? "ai_agent" : "human",
         is_active: true
@@ -480,6 +808,40 @@ window.C360 = window.C360 || {};
     });
   }
 
+  function segmentCreatedTimestamp(segment) {
+    if (!segment || !segment.created_at) return 0;
+    var parsed = Date.parse(segment.created_at);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+
+  function sortSegmentsList(items) {
+    var mode = String($("#segments-sort-filter").val() || "created_desc");
+    return (items || []).slice().sort(function (a, b) {
+      if (mode === "created_asc" || mode === "created_desc") {
+        var timeA = segmentCreatedTimestamp(a);
+        var timeB = segmentCreatedTimestamp(b);
+        if (timeA !== timeB) {
+          return mode === "created_asc" ? timeA - timeB : timeB - timeA;
+        }
+      } else if (mode === "members_desc" || mode === "members_asc") {
+        var countA = Number(a && a.member_count) || 0;
+        var countB = Number(b && b.member_count) || 0;
+        if (countA !== countB) {
+          return mode === "members_asc" ? countA - countB : countB - countA;
+        }
+      } else if (mode === "name_asc" || mode === "name_desc") {
+        var nameCmp = String((a && a.segment_name) || "").localeCompare(String((b && b.segment_name) || ""));
+        if (nameCmp !== 0) {
+          return mode === "name_asc" ? nameCmp : -nameCmp;
+        }
+      }
+      // Fallback tie-breaker: Created On descending, then segment_name ascending
+      var fallbackTime = segmentCreatedTimestamp(b) - segmentCreatedTimestamp(a);
+      if (fallbackTime !== 0) return fallbackTime;
+      return String((a && a.segment_name) || "").localeCompare(String((b && b.segment_name) || ""));
+    });
+  }
+
   // Shared data-table component instance backing the segments list (see
   // static/js/data-table-view.js + list-view.js for the same pattern).
   var listDtv = C360.DataTableView.create({
@@ -500,13 +862,18 @@ window.C360 = window.C360 || {};
     resourceLabel: "segment",
     clientSide: true,
     clientSideLimit: 500,
+    clientSort: function (items) {
+      return sortSegmentsList(items);
+    },
     clientFilters: {
       q: function (vm, value) {
         var needle = String(value || "").toLowerCase().trim();
         if (!needle) return true;
+        var tagsText = Array.isArray(vm.audience_tags) ? vm.audience_tags.join(" ").toLowerCase() : "";
         return (vm.segment_name || "").toLowerCase().indexOf(needle) !== -1 ||
           (vm.segment_tag || "").toLowerCase().indexOf(needle) !== -1 ||
-          (vm.description || "").toLowerCase().indexOf(needle) !== -1;
+          (vm.description || "").toLowerCase().indexOf(needle) !== -1 ||
+          tagsText.indexOf(needle) !== -1;
       },
       domain: function (vm, value) { return vm.domain === value; },
       status: function (vm, value) {
@@ -519,8 +886,10 @@ window.C360 = window.C360 || {};
       }
     },
     fetch: function (params) {
-      return api("/segments/", params).done(function (segments) {
-        (segments || []).forEach(function (segment) { segmentsById[segment.segment_id] = segment; });
+      return api("/segments/", params).then(function (segments) {
+        var sorted = sortSegmentsList(segments || []);
+        sorted.forEach(function (segment) { segmentsById[segment.segment_id] = segment; });
+        return sorted;
       });
     },
     onRowClick: function (id) { C360.router.navigate("/segments/" + id); },
@@ -572,6 +941,21 @@ window.C360 = window.C360 || {};
 
   function segmentDetailVm(s) {
     var displaySql = s.final_generated_sql || s.sql_rules || "";
+    var audienceTags = Array.isArray(s.audience_tags) ? s.audience_tags : [];
+    var audienceTagItems = audienceTags.map(function (tagName) {
+      var meta = audienceTagsByTagName[tagName];
+      var condensed = meta && meta.condensed_name ? String(meta.condensed_name).replace(/\s*\|\s*$/, "") : "";
+      var parts = String(tagName || "").split("/").filter(Boolean);
+      var lastPart = parts.length ? parts[parts.length - 1].replace(/-/g, " ") : tagName;
+      var shortLabel = meta
+        ? (meta.tier_6 || meta.tier_5 || meta.tier_4 || meta.tier_3 || meta.tier_2 || meta.tier_1 || lastPart)
+        : fmt.titleCase(lastPart);
+      return {
+        tag_name: tagName,
+        shortLabel: shortLabel,
+        displayLabel: condensed || tagName
+      };
+    });
     return $.extend({}, s, {
       domainLabel: fmt.domainLabel(s.domain),
       processedByLabel: processedByLabel(s.processed_by) + (s.processed_by === "ai_agent" ? "" : " (SQL Query Builder)"),
@@ -584,7 +968,10 @@ window.C360 = window.C360 || {};
       updatedLabel: fmt.dateTime(s.updated_at),
       display_sql: fmt.formatSqlForDisplay(displaySql),
       hasSqlRules: !!displaySql,
-      hasJsonRules: !!(s.json_rules && Object.keys(s.json_rules).length)
+      hasJsonRules: !!(s.json_rules && Object.keys(s.json_rules).length),
+      hasAudienceTags: audienceTags.length > 0,
+      audienceTagsCount: audienceTags.length,
+      audienceTagItems: audienceTagItems
     });
   }
 
@@ -644,8 +1031,12 @@ window.C360 = window.C360 || {};
     $("#segment-detail-content").empty();
     $("#segment-detail-loading").removeClass("hidden");
 
-    api("/segments/" + segmentId)
-      .done(function (segment) {
+    $.when(
+      api("/segments/" + segmentId),
+      ensureAudienceTagsCatalog()
+    )
+      .done(function (segmentRes) {
+        var segment = Array.isArray(segmentRes) ? segmentRes[0] : segmentRes;
         segmentsById[segment.segment_id] = segment;
         $("#segment-detail-loading").addClass("hidden");
         $("#segment-detail-content").html(C360.templates.render("segment-details", segmentDetailVm(segment)));
@@ -785,6 +1176,7 @@ window.C360 = window.C360 || {};
       "#segments-owner-filter",
       "#segments-members-filter"
     ].forEach(function (selector) { $(selector).val(""); });
+    $("#segments-sort-filter").val("created_desc");
     listDtv.clearFilters();
   }
 
@@ -823,6 +1215,9 @@ window.C360 = window.C360 || {};
     listDtv.bindSelect("#segments-status-filter", "status");
     listDtv.bindSelect("#segments-owner-filter", "owner");
     listDtv.bindSelect("#segments-members-filter", "members");
+    $(document).on("change", "#segments-sort-filter", function () {
+      loadList(false, false);
+    });
     // Matched-profiles rows share the ".profile-row" click delegation
     // already bound once by C360.profileListView.bindEvents() (both tables render
     // the same profile columns/rowVm) -- only "load more" needs re-binding
@@ -844,8 +1239,53 @@ window.C360 = window.C360 || {};
         $text.text("Copy SQL");
       }, 1500);
     });
-    $(document).on("click", "#btn-segments-create", function () { openSegmentForm(null); });
-    $(document).on("click", "#btn-segment-detail-edit", function () { openSegmentForm(segmentsById[currentSegmentId]); });
+    $(document).on("click", "#btn-segments-create", function () { openSegmentForm(null, false); });
+    $(document).on("click", "#btn-segment-detail-edit", function () { openSegmentForm(segmentsById[currentSegmentId], false); });
+    $(document).on("click", "#btn-segment-detail-manage-tags", function () { openSegmentForm(segmentsById[currentSegmentId], true); });
+    $(document).on("click", ".btn-segment-toggle-audience-tag", function () {
+      toggleSegmentFormAudienceTag($(this).attr("data-tag-name"));
+    });
+    $(document).on("click", ".btn-segment-remove-audience-tag", function () {
+      removeSegmentFormAudienceTag($(this).attr("data-tag-name"));
+    });
+    $(document).on("click", "#btn-segment-audience-tags-clear", function () {
+      segmentFormAudienceTags = [];
+      renderSegmentFormSelectedAudienceTags();
+      renderSegmentFormAudienceTagOptions();
+    });
+    $(document).on("input", "#segment-form-audience-tag-search", function () {
+      renderSegmentFormAudienceTagOptions();
+    });
+    $(document).on("change", "#segment-form-audience-tier1-filter", function () {
+      renderSegmentFormAudienceTagOptions();
+    });
+    $(document).on("click", "#btn-segment-add-custom-audience-tag", function () {
+      var val = $.trim($("#segment-form-audience-tag-search").val());
+      if (!val) return;
+      addSegmentFormAudienceTag(val);
+      $("#segment-form-audience-tag-search").val("");
+      renderSegmentFormAudienceTagOptions();
+    });
+    $(document).on("click", "#btn-segment-apply-audience-tags-rule", applySelectedAudienceTagsToQueryBuilder);
+    $(document).on("click", ".btn-segment-detail-remove-audience-tag", function () {
+      var segment = segmentsById[currentSegmentId];
+      if (!segment || !currentSegmentId) return;
+      var tagToRemove = $.trim(String($(this).attr("data-tag-name") || ""));
+      if (!tagToRemove) return;
+      var nextTags = (segment.audience_tags || []).filter(function (t) { return t !== tagToRemove; });
+      api("/segments/" + encodeURIComponent(currentSegmentId) + "/audience-tags", {
+        audience_tags: nextTags,
+        recompute_profiles: true
+      }, "POST")
+        .done(function (updated) {
+          segmentsById[currentSegmentId] = updated || segment;
+          showToast("Removed IAB tag '" + tagToRemove + "' from segment", "success");
+          loadDetail(currentSegmentId);
+        })
+        .fail(function (xhr) {
+          showApiError("updating segment IAB audience tags", xhr);
+        });
+    });
     $(document).on("click", "#btn-segment-form-save", submitSegmentForm);
     $(document).on("click", "#btn-segment-form-ai", generateRulesFromText);
     $(document).on("click", "#btn-segment-form-ai-reset", resetAiState);

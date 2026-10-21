@@ -105,6 +105,68 @@ def recompute_segment_membership(db: Session, segment: CdpSegment) -> CdpSegment
         {"tenant_id": tenant_id, "matched_ids": matched_ids, "tag": segment.segment_tag},
     )
 
+    segment_audience_tags = [
+        tag.strip()
+        for tag in (getattr(segment, "audience_tags", None) or [])
+        if isinstance(tag, str) and tag.strip()
+    ]
+    if segment_audience_tags:
+        db.execute(
+            text(
+                f"""
+                UPDATE {schema}.cdp_master_profiles
+                SET audience_tags = ARRAY(
+                        SELECT DISTINCT u.tag
+                        FROM unnest(COALESCE(audience_tags, ARRAY[]::text[]) || (:audience_tags)::text[]) AS u(tag)
+                        WHERE u.tag IS NOT NULL AND btrim(u.tag) <> ''
+                        ORDER BY u.tag
+                    ),
+                    updated_at = now()
+                WHERE tenant_id = :tenant_id
+                  AND master_profile_id = ANY((:matched_ids)::uuid[])
+                  AND NOT (COALESCE(audience_tags, ARRAY[]::text[]) @> (:audience_tags)::text[])
+                """
+            ),
+            {
+                "tenant_id": tenant_id,
+                "matched_ids": matched_ids,
+                "audience_tags": segment_audience_tags,
+            },
+        )
+        db.execute(
+            text(
+                f"""
+                UPDATE {schema}.cdp_master_profiles AS mp
+                SET audience_tags = ARRAY(
+                        SELECT DISTINCT u.tag
+                        FROM unnest(COALESCE(mp.audience_tags, ARRAY[]::text[])) AS u(tag)
+                        WHERE NOT (u.tag = ANY((:audience_tags)::text[]))
+                           OR EXISTS (
+                               SELECT 1
+                               FROM {schema}.cdp_segments AS s
+                               WHERE s.tenant_id = :tenant_id
+                                 AND s.is_active = TRUE
+                                 AND s.status_code = 1
+                                 AND s.segment_tag != :segment_tag
+                                 AND s.segment_tag = ANY(COALESCE(mp.segmentation_tags, ARRAY[]::text[]))
+                                 AND u.tag = ANY(COALESCE(s.audience_tags, ARRAY[]::text[]))
+                           )
+                        ORDER BY u.tag
+                    ),
+                    updated_at = now()
+                WHERE mp.tenant_id = :tenant_id
+                  AND mp.master_profile_id != ALL((:matched_ids)::uuid[])
+                  AND COALESCE(mp.audience_tags, ARRAY[]::text[]) && (:audience_tags)::text[]
+                """
+            ),
+            {
+                "tenant_id": tenant_id,
+                "matched_ids": matched_ids,
+                "audience_tags": segment_audience_tags,
+                "segment_tag": segment.segment_tag,
+            },
+        )
+
     segment.member_count = len(matched_ids)
     segment.last_computed_at = datetime.now(timezone.utc)
     db.add(segment)

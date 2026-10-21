@@ -390,11 +390,6 @@ class AgentWorkflowMasterTask:
                     )
                     profile_embeddings: Sequence[list[float] | None]
                     if uses_vectors:
-                        self._ensure_content_embeddings(
-                            tenant_id=tenant_id,
-                            candidate_ids=step["candidate_content_item_ids"],
-                            model_key=model_key,
-                        )
                         semantic_query = step["configuration"].get("semantic_query", "")
                         if semantic_query is None:
                             semantic_query = ""
@@ -405,6 +400,11 @@ class AgentWorkflowMasterTask:
                             raise ValueError(
                                 "configuration.semantic_query must be text of at most 2000 characters"
                             )
+                        self._ensure_content_embeddings(
+                            tenant_id=tenant_id,
+                            candidate_ids=step["candidate_content_item_ids"],
+                            model_key=model_key,
+                        )
                     for batch_start in range(
                         0, len(profiles), MAX_RANKING_PROFILES_PER_BATCH
                     ):

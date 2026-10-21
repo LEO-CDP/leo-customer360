@@ -63,7 +63,11 @@ COPY customer360-backend /app
 COPY customer360-seeding/dev-backend-seeding /opt/customer360-seeding
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
+ARG BUILD_DATE_TIME=unknown
+ARG GIT_COMMIT_HASH=unknown
 ENV DAGSTER_HOME=/dagster_home
+ENV BUILD_DATE_TIME=${BUILD_DATE_TIME} \
+    GIT_COMMIT_HASH=${GIT_COMMIT_HASH}
 RUN mkdir -p /dagster_home
 # The instance config ($DAGSTER_HOME/dagster.yaml) is NOT baked — entrypoint.sh
 # renders it at start against the pre-provisioned Dagster PostgreSQL database.

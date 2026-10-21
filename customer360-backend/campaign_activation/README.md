@@ -485,11 +485,12 @@ and code-location environment:
 
 ```bash
 BUILD_DATE_TIME=2026-10-19T15:37:00Z
-GIT_COMMIT=ea695a0
+GIT_COMMIT_HASH=ea695a0
 ```
 
-`GIT_SHA` is accepted as a fallback for `GIT_COMMIT`. If
-`BUILD_DATE_TIME` is missing or set to `unknown`, the code location uses its
-UTC startup time. If commit metadata is missing, the log reports
-`git_commit=unknown`. Search the Dagster worker/code-location logs for
-`campaign_activation build` to confirm which deployment executed a run.
+The Docker image build receives these values from CI and sets them in the
+container environment. If `BUILD_DATE_TIME` is missing or set to `unknown`,
+the code location uses its UTC startup time. If commit metadata is missing,
+the log reports `git_commit=unknown`. Search the Dagster worker/code-location
+logs for `campaign_activation build` to confirm which deployment executed a
+run.

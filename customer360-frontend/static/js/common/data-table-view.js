@@ -191,14 +191,19 @@ window.C360 = window.C360 || {};
 
     function applyClientFilters(items) {
       var activeKeys = Object.keys(state.filters).filter(function (k) { return !!state.filters[k]; });
-      if (!activeKeys.length) return items;
-      return items.filter(function (item) {
-        var vm = rowVm(item);
-        return activeKeys.every(function (key) {
-          var matcher = o.clientFilters && o.clientFilters[key];
-          return matcher ? matcher(vm, state.filters[key], item) : true;
-        });
-      });
+      var filtered = !activeKeys.length
+        ? items
+        : items.filter(function (item) {
+            var vm = rowVm(item);
+            return activeKeys.every(function (key) {
+              var matcher = o.clientFilters && o.clientFilters[key];
+              return matcher ? matcher(vm, state.filters[key], item) : true;
+            });
+          });
+      if (typeof o.clientSort === "function") {
+        return o.clientSort(filtered.slice(), state.filters);
+      }
+      return filtered;
     }
 
     function resetClientCache() {

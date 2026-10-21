@@ -7,12 +7,12 @@ import os
 from datetime import datetime, timezone
 
 SERVICE_NAME = "campaign_activation"
-BUILD_DATE_TIME = os.environ.get("BUILD_DATE_TIME", "unknown")
+BUILD_DATE_TIME = os.getenv("BUILD_DATE_TIME", "unknown")
 if BUILD_DATE_TIME == "unknown":
     BUILD_DATE_TIME = datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
         "+00:00", "Z"
     )
-GIT_COMMIT = os.environ.get("GIT_COMMIT") or os.environ.get("GIT_SHA", "unknown")
+GIT_COMMIT_HASH = os.getenv("GIT_COMMIT_HASH", "unknown")
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ def version_info() -> dict[str, str]:
     return {
         "service": SERVICE_NAME,
         "build_date_time": BUILD_DATE_TIME,
-        "git_commit": GIT_COMMIT,
+        "git_commit": GIT_COMMIT_HASH,
     }
 
 

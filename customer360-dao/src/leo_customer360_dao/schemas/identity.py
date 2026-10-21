@@ -8,7 +8,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from leo_customer360_dao.schemas.segmentation import normalize_audience_tag_list
 
 
 class MasterProfileBase(BaseModel):
@@ -40,6 +41,7 @@ class MasterProfileBase(BaseModel):
     current_persona_id: Optional[uuid.UUID] = None
     persona_name: Optional[str] = None
     segmentation_tags: Optional[list[str]] = None
+    audience_tags: Optional[list[str]] = None
     communication_preferences: Optional[dict] = None
     attributes: Optional[dict] = None
     data_source_analytics: Optional[dict[str, dict[str, Any]]] = None
@@ -71,6 +73,13 @@ class MasterProfileBase(BaseModel):
     identity_confidence_score: Optional[Decimal] = None
     model_versions: Optional[dict] = None
     scores_updated_at: Optional[datetime] = None
+
+    @field_validator("audience_tags")
+    @classmethod
+    def _validate_audience_tags(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        if v is None:
+            return None
+        return normalize_audience_tag_list(v)
 
 
 class MasterProfileCreate(MasterProfileBase):
@@ -105,6 +114,7 @@ class MasterProfileUpdate(BaseModel):
     current_persona_id: Optional[uuid.UUID] = None
     persona_name: Optional[str] = None
     segmentation_tags: Optional[list[str]] = None
+    audience_tags: Optional[list[str]] = None
     communication_preferences: Optional[dict] = None
     attributes: Optional[dict] = None
     data_source_analytics: Optional[dict[str, dict[str, Any]]] = None
@@ -132,6 +142,13 @@ class MasterProfileUpdate(BaseModel):
     model_versions: Optional[dict] = None
     scores_updated_at: Optional[datetime] = None
     status_code: Optional[int] = None
+
+    @field_validator("audience_tags")
+    @classmethod
+    def _validate_audience_tags(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        if v is None:
+            return None
+        return normalize_audience_tag_list(v)
 
 
 class MasterProfileRead(MasterProfileBase):

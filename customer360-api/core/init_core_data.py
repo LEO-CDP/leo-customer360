@@ -267,6 +267,22 @@ def seed_root_admin_user(db: Session, *, tenant_id: uuid.UUID = DEFAULT_TENANT_I
         return False
 
 
+def seed_default_audience_tags(
+    db: Session,
+    *,
+    file_path: str | Path | None = None,
+    taxonomy_version: str = "1.1",
+) -> int:
+    """Parse ``audience_taxonomy1.1.tsv`` and upsert all rows into ``cdp_audience_tags`` by ``tag_name``."""
+    from core.repositories.audience_tag_repository import AudienceTagRepository
+
+    result = AudienceTagRepository(db).import_from_tsv_file(
+        file_path=file_path,
+        taxonomy_version=taxonomy_version,
+    )
+    return result.upserted_count
+
+
 def init_core_data() -> None:
     """Runs all startup-time seed/init steps for the API.
 

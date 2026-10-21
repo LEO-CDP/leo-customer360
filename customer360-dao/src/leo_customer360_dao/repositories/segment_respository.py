@@ -137,6 +137,39 @@ class SegmentRepository:
             "last_computed_at": segment.last_computed_at,
         }
 
+    def assign_audience_tags(
+        self,
+        segment_id: uuid.UUID,
+        audience_tags: list[str],
+        *,
+        recompute_profiles: bool = True,
+    ) -> CdpSegment:
+        """Validate selected IAB ``tag_name`` values against ``cdp_audience_tags``,
+        save them to ``cdp_segments.audience_tags``, update ``sql_rules`` /
+        ``final_generated_sql``, and optionally recompute matching
+        ``cdp_master_profiles`` rows."""
+        from leo_customer360_dao.repositories.audience_tag_repository import AudienceTagRepository
+
+        segment = self.get_segment(segment_id)
+        if segment is None:
+            raise ValueError(f"CdpSegment '{segment_id}' not found")
+
+        tag_repo = AudienceTagRepository(self.session)
+        validated_tags = tag_repo.validate_tag_names(audience_tags)
+        updates: dict[str, Any] = {"audience_tags": validated_tags}
+        if hasattr(self, "compose_sql_rules_with_audience_tags") and hasattr(self, "final_generated_sql"):
+            composed = self.compose_sql_rules_with_audience_tags(segment.sql_rules, validated_tags)
+            updates["sql_rules"] = composed
+            updates["final_generated_sql"] = (
+                self.final_generated_sql(composed, segment.tenant_id, validated_tags)
+                if composed
+                else None
+            )
+        segment = self._crud.update(self.session, segment, updates)
+        if recompute_profiles and segment.sql_rules:
+            recompute_segment_membership(self.session, segment)
+        return segment
+
     def get_segmentable_attributes(self, domain: Optional[str] = None) -> list[dict]:
         """Return the catalog of attributes that are valid to reference in a
         segment's SQL rules (Audience Builder field picker).

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 def test_version_info_uses_non_secret_deployment_environment(monkeypatch):
     monkeypatch.setenv("BUILD_DATE_TIME", "2026-10-19T15:37:00Z")
-    monkeypatch.setenv("GIT_COMMIT", "abc1234")
+    monkeypatch.setenv("GIT_COMMIT_HASH", "abc1234")
 
     import campaign_activation
 
@@ -24,8 +24,7 @@ def test_version_info_uses_non_secret_deployment_environment(monkeypatch):
 
 def test_version_info_falls_back_without_build_metadata(monkeypatch):
     monkeypatch.delenv("BUILD_DATE_TIME", raising=False)
-    monkeypatch.delenv("GIT_COMMIT", raising=False)
-    monkeypatch.delenv("GIT_SHA", raising=False)
+    monkeypatch.delenv("GIT_COMMIT_HASH", raising=False)
 
     import campaign_activation
 

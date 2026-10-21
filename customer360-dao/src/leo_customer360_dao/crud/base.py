@@ -66,6 +66,10 @@ class CRUDBase(Generic[ModelType]):
         stmt = self._apply_filters(stmt, filters)
         if sort_by:
             stmt = self._apply_sort(stmt, sort_by)
+        else:
+            mapper = inspect(self.model)
+            if "created_at" in mapper.columns:
+                stmt = stmt.order_by(getattr(self.model, "created_at").desc().nullslast())
         stmt = stmt.offset(skip).limit(limit)
         return list(db.execute(stmt).scalars().all())
 

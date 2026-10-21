@@ -429,3 +429,345 @@ def test_hybrid_workflow_embeds_candidates_and_profile_queries(monkeypatch):
     assert execute_values_calls[0][1][0][4] == "Type: product. Domain: retail. Title: Book. Summary: A travel guide Keywords: books."
     assert execute_values_calls[0][1][0][5] == "1"
     assert execute_values_calls[1][1][0][8:11] == (0.95, 0.7, "hybrid")
+
+
+def test_workflow_run_summary_as_dict_and_connect_and_helpers(monkeypatch):
+    summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        segment_id="22222222-2222-2222-2222-222222222222",
+        selected_steps=1,
+        skipped_steps=0,
+        plan=({"agent_code": "a"},),
+        executed_steps=1,
+        profile_runs_processed=2,
+        recommendations_written=3,
+        unsupported_steps=0,
+    )
+    assert summary.as_dict()["recommendations_written"] == 3
+    assert summary.as_dict()["plan"] == [{"agent_code": "a"}]
+
+    monkeypatch.setattr(runner.psycopg2, "connect", lambda **kwargs: kwargs)
+    conn_kwargs = runner._connect()
+    assert conn_kwargs["dbname"] == runner.DB_NAME
+
+    assert runner._schedule_matches(None, datetime.now(timezone.utc)) is False
+    assert runner._schedule_matches("not-a-cron", datetime.now(timezone.utc)) is False
+
+    assert runner._candidate_content_ids_from_db(None) == []
+    with pytest.raises(ValueError, match="JSON array"):
+        runner._candidate_content_ids_from_db("{bad-json")
+    with pytest.raises(ValueError, match="must be returned as an array"):
+        runner._candidate_content_ids_from_db({"not": "a-list"})
+    with pytest.raises(ValueError, match="invalid candidate content ID"):
+        runner._candidate_content_ids_from_db(["not-a-uuid"])
+
+
+def test_default_pipeline_executors_and_embed_fallback(monkeypatch):
+    import ai_agents_runners.agent_pipeline as ap
+    import ai_agents_runners.agent_pipeline.embeddings as emb
+
+    monkeypatch.setattr(ap, "execute_agent_pipeline", lambda p, *, run_id: (p, run_id))
+    monkeypatch.setattr(
+        ap, "execute_agent_pipeline_batch", lambda p, *, run_id: [(p, run_id)]
+    )
+    assert runner._execute_agent_pipeline({"a": 1}, "r1") == ({"a": 1}, "r1")
+    assert runner._execute_agent_pipeline_batch([{"a": 1}], "r1") == [([{"a": 1}], "r1")]
+
+    task = AgentWorkflowMasterTask(connection_factory=lambda: FakeConnection([]))
+    assert task._pipeline_batch_executor is runner._execute_agent_pipeline_batch
+
+    monkeypatch.setattr(emb, "embed_texts", lambda texts, *, task: [[0.5] * 384])
+    assert task._embed(["text"], task="query") == [[0.5] * 384]
+
+
+def test_run_validates_trigger_and_required_tenant_id():
+    task = AgentWorkflowMasterTask(connection_factory=lambda: FakeConnection([]))
+    with pytest.raises(ValueError, match="trigger must be either 'api' or 'cron'"):
+        task.run(trigger="invalid")
+    with pytest.raises(ValueError, match="tenant_id is required"):
+        task.run(trigger="api", tenant_id=None)
+
+
+def test_execute_handles_unsupported_steps_and_candidate_validation():
+    tenant_id = "11111111-1111-1111-1111-111111111111"
+    segment_id = "22222222-2222-2222-2222-222222222222"
+    task = AgentWorkflowMasterTask(connection_factory=lambda: FakeConnection([]))
+
+    unsupported_summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(
+            {
+                "tenant_id": tenant_id,
+                "segment_id": segment_id,
+                "agent_code": "clf",
+                "model_type": "classification",
+                "execution_order": 1,
+                "configuration": {},
+                "candidate_content_item_ids": [],
+                "trigger_event": {},
+            },
+        ),
+    )
+    res = task.execute(unsupported_summary, run_id="run-1")
+    assert res.unsupported_steps == 1
+    assert res.executed_steps == 0
+
+    empty_candidates_summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(
+            {
+                "tenant_id": tenant_id,
+                "segment_id": segment_id,
+                "agent_code": "rec",
+                "model_type": "ranking_recommendation",
+                "execution_order": 1,
+                "configuration": {},
+                "candidate_content_item_ids": [],
+                "trigger_event": {},
+            },
+        ),
+    )
+    with pytest.raises(ValueError, match="no selected content items"):
+        task.execute(empty_candidates_summary, run_id="run-1")
+
+    too_many_candidates_summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(
+            {
+                "tenant_id": tenant_id,
+                "segment_id": segment_id,
+                "agent_code": "rec",
+                "model_type": "ranking_recommendation",
+                "execution_order": 1,
+                "configuration": {},
+                "candidate_content_item_ids": [str(UUID(int=i + 1)) for i in range(1001)],
+                "trigger_event": {},
+            },
+        ),
+    )
+    with pytest.raises(ValueError, match="at most 1000"):
+        task.execute(too_many_candidates_summary, run_id="run-1")
+
+
+def test_execute_edge_cases_no_profiles_zero_recommendations_and_batch_errors(monkeypatch):
+    tenant_id = "11111111-1111-1111-1111-111111111111"
+    segment_id = "22222222-2222-2222-2222-222222222222"
+    candidate_id = "33333333-3333-3333-3333-333333333333"
+    profile = {
+        "master_profile_id": "44444444-4444-4444-4444-444444444444",
+        "domain": "retail",
+        "segmentation_tags": [],
+    }
+
+    # 1. Empty profiles in segment
+    task_empty = AgentWorkflowMasterTask(
+        connection_factory=lambda: FakeConnection([]),
+        pipeline_batch_executor=lambda payloads, _run_id: [],
+    )
+    summary_base = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(
+            {
+                "tenant_id": tenant_id,
+                "segment_id": segment_id,
+                "agent_code": "rec",
+                "model_type": "ranking_recommendation",
+                "execution_order": 1,
+                "configuration": {},
+                "candidate_content_item_ids": [candidate_id],
+                "trigger_event": {},
+            },
+        ),
+    )
+    res_empty = task_empty.execute(summary_base, run_id="run-empty")
+    assert res_empty.profile_runs_processed == 0
+
+    # 2. Profiles processed > 0 but 0 recommendations returned (domain mismatch skip)
+    conns = [[profile], [], []]
+    idx = 0
+
+    def conn_factory():
+        nonlocal idx
+        c = FakeConnection(conns[min(idx, len(conns) - 1)])
+        idx += 1
+        return c
+
+    task_zero_recs = AgentWorkflowMasterTask(
+        connection_factory=conn_factory,
+        pipeline_batch_executor=lambda payloads, _r: [
+            SimpleNamespace(result={"ranked_items": []}) for _ in payloads
+        ],
+    )
+    res_zero = task_zero_recs.execute(summary_base, run_id="run-zero")
+    assert res_zero.profile_runs_processed == 1
+    assert res_zero.recommendations_written == 0
+
+    # 3. Batch executor returns wrong output length
+    idx = 0
+    task_mismatch = AgentWorkflowMasterTask(
+        connection_factory=conn_factory,
+        pipeline_batch_executor=lambda _p, _r: [],
+    )
+    with pytest.raises(RuntimeError, match="different number of results"):
+        task_mismatch.execute(summary_base, run_id="run-mismatch")
+
+    # 4. Batch executor raises ValueError and _finish_recommendation_run also raises
+    def failing_finish_conn():
+        raise RuntimeError("db lost during finish")
+
+    task_batch_val_err = AgentWorkflowMasterTask(
+        connection_factory=lambda: FakeConnection([profile]),
+        pipeline_batch_executor=lambda _p, _r: (_ for _ in ()).throw(
+            ValueError("bad batch")
+        ),
+    )
+    monkeypatch.setattr(
+        task_batch_val_err,
+        "_finish_recommendation_run",
+        lambda **_k: (_ for _ in ()).throw(RuntimeError("finish failed")),
+    )
+    with pytest.raises(ValueError, match="profile_batch_start=0"):
+        task_batch_val_err.execute(summary_base, run_id="run-batch-err")
+
+
+def test_vector_step_validation_and_ensure_content_embeddings_edge_cases(monkeypatch):
+    monkeypatch.setenv("DOCS_EMBEDDING_PROVIDER", "gemini")
+    monkeypatch.setenv("DOCS_GEMINI_EMBEDDING_DIMENSIONS", "384")
+    tenant_id = "11111111-1111-1111-1111-111111111111"
+    segment_id = "22222222-2222-2222-2222-222222222222"
+    candidate_id = "33333333-3333-3333-3333-333333333333"
+    profile = {
+        "master_profile_id": "44444444-4444-4444-4444-444444444444",
+        "domain": "retail",
+        "segmentation_tags": [],
+    }
+
+    # Invalid semantic_query
+    task = AgentWorkflowMasterTask(
+        connection_factory=lambda: FakeConnection([profile]),
+        embedding_function=lambda texts, *, task: [[0.1] * 384 for _ in texts],
+    )
+    bad_query_summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(
+            {
+                "tenant_id": tenant_id,
+                "segment_id": segment_id,
+                "agent_code": "rec",
+                "model_type": "ranking_recommendation",
+                "execution_order": 1,
+                "configuration": {
+                    "strategy": "semantic",
+                    "semantic_query": 123,
+                },
+                "candidate_content_item_ids": [candidate_id],
+                "trigger_event": {},
+            },
+        ),
+    )
+    with pytest.raises(ValueError, match="semantic_query"):
+        task.execute(bad_query_summary, run_id="run-bad-sq")
+
+    # Query vector count mismatch & semantic_query=None
+    candidate_row = {
+        "content_item_id": candidate_id,
+        "domain": "retail",
+        "item_type": "product",
+        "title": "Book",
+        "summary": "A travel guide",
+        "segment_tags": ["books"],
+        "embedding_text": "Type: product. Domain: retail. Title: Book. Summary: A travel guide Keywords: books.",
+        "embedding_model": "gemini:gemini-embedding-001:384",
+        "embedding_version": "1",
+        "embedding_dimensions": 384,
+    }
+    conns = [[profile], [], [candidate_row], []]
+    idx = 0
+
+    def conn_factory():
+        nonlocal idx
+        c = FakeConnection(conns[min(idx, len(conns) - 1)])
+        idx += 1
+        return c
+
+    task_query_mismatch = AgentWorkflowMasterTask(
+        connection_factory=conn_factory,
+        embedding_function=lambda _texts, *, task: [],
+    )
+    none_sq_summary = WorkflowRunSummary(
+        trigger="api",
+        tenant_id=tenant_id,
+        segment_id=segment_id,
+        selected_steps=1,
+        skipped_steps=0,
+        plan=(
+            {
+                "tenant_id": tenant_id,
+                "segment_id": segment_id,
+                "agent_code": "rec",
+                "model_type": "ranking_recommendation",
+                "execution_order": 1,
+                "configuration": {
+                    "strategy": "semantic",
+                    "semantic_query": None,
+                },
+                "candidate_content_item_ids": [candidate_id],
+                "trigger_event": {},
+            },
+        ),
+    )
+    with pytest.raises(ValueError, match="query vector per profile"):
+        task_query_mismatch.execute(none_sq_summary, run_id="run-q-mismatch")
+
+    # _ensure_content_embeddings edge cases: missing row, bad dim, document vector count mismatch
+    with pytest.raises(ValueError, match="missing, inactive, or outside"):
+        task._ensure_content_embeddings(
+            tenant_id=tenant_id,
+            candidate_ids=[candidate_id, "55555555-5555-5555-5555-555555555555"],
+            model_key="gemini:m:384",
+        )
+
+    task_one_row = AgentWorkflowMasterTask(
+        connection_factory=lambda: FakeConnection([candidate_row]),
+        embedding_function=lambda _t, *, task: [],
+    )
+    with pytest.raises(ValueError, match="384 or 768"):
+        task_one_row._ensure_content_embeddings(
+            tenant_id=tenant_id,
+            candidate_ids=[candidate_id],
+            model_key="gemini:m:512",
+        )
+
+    stale_row = {**candidate_row, "embedding_version": "0"}
+    task_doc_mismatch = AgentWorkflowMasterTask(
+        connection_factory=lambda: FakeConnection([stale_row]),
+        embedding_function=lambda _t, *, task: [],
+    )
+    with pytest.raises(ValueError, match="vector per content item"):
+        task_doc_mismatch._ensure_content_embeddings(
+            tenant_id=tenant_id,
+            candidate_ids=[candidate_id],
+            model_key="gemini:gemini-embedding-001:384",
+        )
+

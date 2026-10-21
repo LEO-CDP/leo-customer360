@@ -31,6 +31,7 @@ from core.repositories.segment_repository import SegmentRepository
 from core.routers._generic import build_crud_router, insert_before_item_routes
 from leo_customer360_dao.schemas.identity import MasterProfileRead
 from leo_customer360_dao.schemas.segmentation import (
+    SegmentAudienceTagsRequest,
     SegmentCreate,
     SegmentDraftRequest,
     SegmentDraftResult,
@@ -97,6 +98,24 @@ def _segment_integrity_error_detail(exc: IntegrityError) -> Optional[str]:
     """Returns a client-safe conflict message for known segment constraints."""
     return SegmentRepository.integrity_error_detail(exc)
 
+def _validate_segment_create(db: Session, payload: dict[str, Any]) -> None:
+    validate_domain_value(db, payload.get("domain"), allow_all=True)
+    audience_tags = payload.get("audience_tags") or []
+    if audience_tags and db is not None and hasattr(db, "execute"):
+        from core.repositories.audience_tag_repository import AudienceTagRepository
+
+        AudienceTagRepository(db).validate_tag_names(audience_tags)
+
+
+def _validate_segment_update(db: Session, _obj: CdpSegment, payload: dict[str, Any]) -> None:
+    validate_domain_value(db, payload.get("domain"), allow_all=True)
+    audience_tags = payload.get("audience_tags") or []
+    if audience_tags and db is not None and hasattr(db, "execute"):
+        from core.repositories.audience_tag_repository import AudienceTagRepository
+
+        AudienceTagRepository(db).validate_tag_names(audience_tags)
+
+
 segments_router = build_crud_router(
     model=CdpSegment,
     pk_field="segment_id",
@@ -107,8 +126,8 @@ segments_router = build_crud_router(
     prefix="/segments",
     tags=["Segmentation"],
     crud_factory=lambda db: SegmentRepository(db).crud,
-    create_validator=lambda db, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
-    update_validator=lambda db, obj, payload: validate_domain_value(db, payload.get("domain"), allow_all=True),
+    create_validator=_validate_segment_create,
+    update_validator=_validate_segment_update,
     create_transform=_transform_segment_create,
     update_transform=_transform_segment_update,
     integrity_error_detail=_segment_integrity_error_detail,
@@ -278,6 +297,32 @@ def count_segment_matched_profiles(segment_id: uuid.UUID, db: Session = Depends(
         return {"count": count}
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@segments_router.post("/{segment_id}/audience-tags", response_model=SegmentRead)
+def assign_segment_audience_tags(
+    segment_id: uuid.UUID,
+    payload: SegmentAudienceTagsRequest,
+    db: Session = Depends(get_db),
+):
+    """Assign standardized IAB ``audience_tags`` (from ``cdp_audience_tags.tag_name``)
+    to a segment and optionally recompute matching ``cdp_master_profiles.audience_tags``."""
+    repo = SegmentRepository(db)
+    _get_segment_or_404(repo, segment_id)
+    try:
+        updated = repo.assign_audience_tags(
+            segment_id,
+            payload.audience_tags,
+            recompute_profiles=payload.recompute_profiles,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    invalidate_prefix("cdp_segments")
+    invalidate_prefix("segments/matched_profiles")
+    invalidate_prefix("segments/matched_profiles_count")
+    invalidate_prefix("master_profiles")
+    return updated
 
 
 @segments_router.post("/{segment_id}/recompute")

@@ -12,7 +12,12 @@ from ai_agents_runners.agent_pipeline.agent_types.ranking_recommendation import 
     CANDIDATE_DIAGNOSTICS_SQL,
     RANK_CANDIDATE_CONTENT_SQL,
     SUPPORTED_RECOMMENDATION_EMBEDDING_DIMENSIONS,
+    CandidateDiagnostics,
+    ProfileRankingOutcome,
+    RankingExecutionState,
     RankingRecommendationPipeline,
+    _ProfileRankingInput,
+    _RankingSettings,
     _vector_literal,
     _weight,
 )
@@ -891,3 +896,319 @@ def test_semantic_diagnostics_require_matching_vector_dimensions(monkeypatch):
         TENANT_ID,
         [CONTENT_ITEM_1, CONTENT_ITEM_2],
     )
+
+
+def test_process_batch_empty_payloads_returns_empty_list():
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    assert pipeline.process_batch([]) == []
+    assert pipeline.last_state is None
+
+
+def test_process_batch_validates_candidate_limit_and_homogeneity():
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    first = AgentPipelineInput.model_validate(_input())
+
+    over_limit = first.model_copy(
+        update={
+            "candidate_content_item_ids": [
+                UUID(int=index + 1) for index in range(1001)
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="candidate_content_item_ids must not exceed"):
+        pipeline.process_batch([over_limit])
+
+    wrong_model = first.model_copy(update={"model_type": "classification"})
+    with pytest.raises(ValueError, match="cannot handle classification"):
+        pipeline.process_batch([wrong_model])
+
+    mismatched_tenant = first.model_copy(
+        update={"tenant_id": UUID("99999999-9999-9999-9999-999999999999")}
+    )
+    with pytest.raises(ValueError, match="must share tenant"):
+        pipeline.process_batch([first, mismatched_tenant])
+
+
+def test_process_batch_rejects_mixed_embedding_models_and_includes_profile_id_in_errors():
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    p1 = AgentPipelineInput.model_validate(
+        _input(
+            input_data={
+                "master_profile_id": "55555555-5555-5555-5555-555555555555",
+                "domain": "retail",
+                "segmentation_tags": ["vip"],
+                "profile_embedding": [0.1] * 384,
+                "embedding_model": "gemini:model-a:384",
+            },
+            configuration={"strategy": "semantic"},
+        )
+    )
+    p2 = AgentPipelineInput.model_validate(
+        _input(
+            input_data={
+                "master_profile_id": "66666666-6666-6666-6666-666666666666",
+                "domain": "retail",
+                "segmentation_tags": ["vip"],
+                "profile_embedding": [0.1] * 384,
+                "embedding_model": "gemini:model-b:384",
+            },
+            configuration={"strategy": "semantic"},
+        )
+    )
+    with pytest.raises(ValueError, match="must use one embedding model"):
+        pipeline.process_batch([p1, p2])
+
+    bad_profile = AgentPipelineInput.model_validate(
+        _input(
+            input_data={
+                "master_profile_id": "77777777-7777-7777-7777-777777777777",
+                "domain": "   ",
+            }
+        )
+    )
+    with pytest.raises(
+        ValueError,
+        match="profile=77777777-7777-7777-7777-777777777777, .*domain",
+    ):
+        pipeline.process_batch([bad_profile])
+
+
+def test_vector_strategies_reject_missing_model_name_segment(monkeypatch):
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: pytest.fail("database should not be queried")
+    )
+    monkeypatch.setitem(PIPELINE_HANDLERS, "ranking_recommendation", pipeline)
+
+    for bad_key in ("gemini::384", "gemini:384", "openai:   :384"):
+        with pytest.raises(ValueError, match="provider:model:dimensions"):
+            execute_agent_pipeline(
+                _input(
+                    input_data={
+                        "domain": "retail",
+                        "segmentation_tags": [],
+                        "profile_embedding": [0.1] * 384,
+                        "embedding_model": bad_key,
+                    },
+                    configuration={"strategy": "semantic"},
+                ),
+                run_id="dagster-run-1",
+            )
+
+
+def test_ranking_result_contract_rejects_duplicate_item_ids_and_duplicate_ranks():
+    valid_item = {
+        "item_id": CONTENT_ITEM_1,
+        "rank": 1,
+        "score": 0.9,
+        "strategy": "tags",
+        "semantic_score": 0.0,
+        "tag_score": 0.9,
+        "matched_tags": ["loyal"],
+        "reason": "segment_tag_overlap",
+        "item_type": "product",
+        "title": "Product 1",
+        "summary": "Summary",
+        "image_url": None,
+        "cta_label": "View",
+        "cta_url": "/p/1",
+        "published_at": None,
+    }
+    duplicate_id_item = {**valid_item, "rank": 2}
+    with pytest.raises(ValidationError, match="duplicate item_id"):
+        PIPELINE_HANDLERS["ranking_recommendation"].result_model.model_validate(
+            {"ranked_items": [valid_item, duplicate_id_item]}
+        )
+
+    duplicate_rank_item = {**valid_item, "item_id": CONTENT_ITEM_2, "rank": 1}
+    with pytest.raises(ValidationError, match="duplicate rank"):
+        PIPELINE_HANDLERS["ranking_recommendation"].result_model.model_validate(
+            {"ranked_items": [valid_item, duplicate_rank_item]}
+        )
+
+
+def test_group_ranked_candidates_rejects_invalid_profile_index_and_rank():
+    row_bad_index = _candidate(
+        CONTENT_ITEM_1, score=0.5, matched_tags=[], published_at=None, profile_index=2
+    )
+    with pytest.raises(RuntimeError, match="invalid profile_index"):
+        RankingRecommendationPipeline._group_ranked_candidates(
+            rows=[row_bad_index], profile_count=1
+        )
+
+    row_bool_index = _candidate(
+        CONTENT_ITEM_1,
+        score=0.5,
+        matched_tags=[],
+        published_at=None,
+        profile_index=True,  # type: ignore[arg-type]
+    )
+    with pytest.raises(RuntimeError, match="invalid profile_index"):
+        RankingRecommendationPipeline._group_ranked_candidates(
+            rows=[row_bool_index], profile_count=2
+        )
+
+    row_bad_rank = _candidate(
+        CONTENT_ITEM_1,
+        score=0.5,
+        matched_tags=[],
+        published_at=None,
+        profile_index=0,
+        rank=0,
+    )
+    with pytest.raises(RuntimeError, match="invalid rank"):
+        RankingRecommendationPipeline._group_ranked_candidates(
+            rows=[row_bad_rank], profile_count=1
+        )
+
+
+def test_candidate_diagnostics_and_no_candidates_helper_edge_cases():
+    diag = CandidateDiagnostics(
+        tenant_candidates=2,
+        active_candidates=2,
+        domain_candidates=0,
+        rankable_candidates=0,
+    )
+    assert CandidateDiagnostics.from_mapping(diag) is diag
+    assert len(diag) == 4
+    assert list(iter(diag)) == [
+        "tenant_candidates",
+        "active_candidates",
+        "domain_candidates",
+        "rankable_candidates",
+    ]
+    assert diag["tenant_candidates"] == 2
+    assert diag.is_domain_mismatch_only is True
+    assert diag.failure_reason() == "selected candidates do not match the profile domain"
+
+    connection = FakeConnection([], diagnostics=None)
+    pipeline = RankingRecommendationPipeline(connection_factory=lambda: connection)
+    profile = _ProfileRankingInput(
+        profile_index=0,
+        domain="retail",
+        segmentation_tags=[],
+        profile_embedding=None,
+        embedding_model="",
+        profile_id="prof-1",
+    )
+    settings = _RankingSettings(
+        strategy="tags",
+        top_k=8,
+        semantic_weight=0.0,
+        tag_weight=1.0,
+        minimum_score=0.0,
+        embedding_model="",
+        dimensions=384,
+    )
+    with pytest.raises(RuntimeError, match="diagnostics returned no row"):
+        pipeline._raise_no_candidates(
+            tenant_id=UUID(TENANT_ID),
+            candidate_ids=[UUID(CONTENT_ITEM_1)],
+            profile=profile,
+            settings=settings,
+            counts=None,
+        )
+
+
+def test_state_observability_tracks_completed_short_circuited_and_failed_runs():
+    observed_states: list[RankingExecutionState] = []
+    newer = datetime(2026, 10, 5, tzinfo=timezone.utc)
+    connection = FakeConnection(
+        [
+            _candidate(
+                CONTENT_ITEM_1,
+                score=1.0,
+                matched_tags=["loyal"],
+                published_at=newer,
+                profile_index=0,
+                rank=1,
+            ),
+        ],
+        diagnostics={
+            "tenant_candidates": 2,
+            "active_candidates": 2,
+            "domain_candidates": 0,
+            "rankable_candidates": 0,
+        },
+    )
+    pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: connection,
+        state_observer=observed_states.append,
+    )
+
+    short_circuit_payload = AgentPipelineInput.model_validate(
+        _input(
+            candidate_content_item_ids=[],
+            configuration={"strategy": "invalid_strategy"},
+            input_data={"domain": "   ", "segmentation_tags": "not-a-list"},
+        )
+    )
+    assert pipeline.process(short_circuit_payload) == {"ranked_items": []}
+    assert pipeline.last_state is not None
+    assert pipeline.last_state.phase == "short_circuited"
+    assert pipeline.last_state.strategy == "tags"
+    assert pipeline.last_state.domain_counts == {"unknown": 1}
+    assert pipeline.last_state.as_dict()["profile_outcomes"][0]["status"] == "short_circuited"
+
+    p_ranked = AgentPipelineInput.model_validate(
+        _input(
+            input_data={
+                "master_profile_id": "55555555-5555-5555-5555-555555555555",
+                "domain": "retail",
+                "segmentation_tags": ["loyal"],
+            }
+        )
+    )
+    p_domain_skip = AgentPipelineInput.model_validate(
+        _input(
+            input_data={
+                "master_profile_id": "66666666-6666-6666-6666-666666666666",
+                "domain": "finance",
+                "segmentation_tags": ["vip"],
+            }
+        )
+    )
+    batch_results = pipeline.process_batch([p_ranked, p_domain_skip])
+    assert len(batch_results) == 2
+    completed_state = pipeline.last_state
+    assert completed_state is not None
+    assert completed_state.phase == "completed"
+    assert completed_state.profiles_ranked_count == 1
+    assert completed_state.profiles_skipped_domain_count == 1
+    assert completed_state.total_ranked_items == 1
+    assert completed_state.reason_counts == {"segment_tag_overlap": 1}
+    assert completed_state.domain_counts == {"finance": 1, "retail": 1}
+    completed_dict = completed_state.as_dict()
+    assert completed_dict["error"] is None
+    assert [o["status"] for o in completed_dict["profile_outcomes"]] == [
+        "ranked",
+        "skipped_domain_mismatch",
+    ]
+    assert isinstance(completed_state.profile_outcomes[0], ProfileRankingOutcome)
+
+    fail_connection = FakeConnection(
+        [],
+        diagnostics={
+            "tenant_candidates": 2,
+            "active_candidates": 2,
+            "domain_candidates": 2,
+            "rankable_candidates": 2,
+        },
+    )
+    fail_pipeline = RankingRecommendationPipeline(
+        connection_factory=lambda: fail_connection,
+        state_observer=observed_states.append,
+    )
+    with pytest.raises(ValueError, match="minimum_score"):
+        fail_pipeline.process(p_ranked)
+    assert fail_pipeline.last_state is not None
+    assert fail_pipeline.last_state.phase == "failed"
+    assert fail_pipeline.last_state.error is not None
+    assert "minimum_score" in fail_pipeline.last_state.error
+    assert len(observed_states) == 3
+

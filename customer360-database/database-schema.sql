@@ -773,6 +773,9 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_master_profiles (
     acquisition_campaign TEXT,
     -- Computed labels for fast Audience Builder queries (e.g., 'gen_z', 'frequent_buyer').
     segmentation_tags TEXT[],
+    -- Standardized IAB Audience Taxonomy 1.1 tag names (from customer360.cdp_audience_tags.tag_name)
+    -- mapped onto profiles when segments with selected audience_tags are built/recomputed.
+    audience_tags TEXT[],
     -- Schemaless payload for flexible traits extracted dynamically.
     -- Format: {"occupation": "engineer", "income_segment": "high", "preferred_category": "electronics"}
     attributes JSONB DEFAULT '{}'::JSONB,
@@ -2832,6 +2835,58 @@ CREATE TRIGGER trg_invalidate_product_item_embedding
     FOR EACH ROW EXECUTE FUNCTION customer360.invalidate_product_item_embedding();
 
 -- ============================================================================
+-- cdp_audience_tags: IAB Audience Taxonomy 1.1 catalog
+-- ============================================================================
+-- Standardized contextual and audience segmentation taxonomy (IAB Audience
+-- Taxonomy 1.1) used for audience analytics, segment builder, personalization,
+-- and programmatic advertising. Keyed by tag_name (slugified tier path, e.g.
+-- 'demographic/age-range/18-20') so TSV uploads and API writes can upsert
+-- idempotently on tag_name.
+CREATE TABLE IF NOT EXISTS customer360.cdp_audience_tags (
+    tag_name TEXT PRIMARY KEY CHECK (btrim(tag_name) <> ''),
+    unique_id TEXT NOT NULL CHECK (btrim(unique_id) <> ''),
+    parent_id TEXT,
+    taxonomy_version TEXT NOT NULL DEFAULT '1.1' CHECK (btrim(taxonomy_version) <> ''),
+    condensed_name TEXT NOT NULL CHECK (btrim(condensed_name) <> ''),
+    tier_1 TEXT NOT NULL CHECK (btrim(tier_1) <> ''),
+    tier_2 TEXT,
+    tier_3 TEXT,
+    tier_4 TEXT,
+    tier_5 TEXT,
+    tier_6 TEXT,
+    extension_notes TEXT,
+    status_code SMALLINT NOT NULL DEFAULT 1, -- 1: active, 0: inactive, -1: delete
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_cdp_audience_tags_version_unique_id
+        UNIQUE (taxonomy_version, unique_id)
+);
+
+COMMENT ON TABLE customer360.cdp_audience_tags IS
+    'IAB Audience Taxonomy 1.1 catalog keyed by tag_name (slugified tier path). Used to map first-party cdp_master_profiles and cdp_segments to standardized contextual and audience segmentation taxonomies for analytics, personalization, and programmatic advertising.';
+COMMENT ON COLUMN customer360.cdp_audience_tags.tag_name IS
+    'Primary key: deterministic slugified tier path (e.g. demographic/age-range/18-20) referenced by cdp_segments.audience_tags and cdp_master_profiles.audience_tags.';
+COMMENT ON COLUMN customer360.cdp_audience_tags.unique_id IS
+    'IAB Audience Taxonomy Unique ID from the official TSV specification.';
+COMMENT ON COLUMN customer360.cdp_audience_tags.parent_id IS
+    'Parent IAB Unique ID in the taxonomy hierarchy (NULL for Tier 1 root nodes).';
+COMMENT ON COLUMN customer360.cdp_audience_tags.condensed_name IS
+    'IAB Condensed Name (1st, 2nd, Last Tier) from the taxonomy TSV.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_audience_tags_unique_id
+    ON customer360.cdp_audience_tags (unique_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_audience_tags_parent_id
+    ON customer360.cdp_audience_tags (parent_id)
+    WHERE parent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_cdp_audience_tags_tiers
+    ON customer360.cdp_audience_tags (tier_1, tier_2, tier_3);
+CREATE INDEX IF NOT EXISTS idx_cdp_audience_tags_status
+    ON customer360.cdp_audience_tags (status_code);
+CREATE INDEX IF NOT EXISTS idx_cdp_mp_audience_tags
+    ON customer360.cdp_master_profiles USING GIN (audience_tags);
+
+-- ============================================================================
 -- cdp_segments: segmentation tag metadata (Audience Builder)
 -- ============================================================================
 -- One row per named audience/segment tag (the same tag strings that end up in
@@ -2855,6 +2910,9 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_segments (
     -- Unique short tag written into cdp_master_profiles.segmentation_tags for
     -- every profile that matches this segment (e.g. 'gen_z_shopper').
     segment_tag TEXT NOT NULL,
+    -- Standardized IAB Audience Taxonomy tag names (customer360.cdp_audience_tags.tag_name)
+    -- selected for this segment and synced to cdp_master_profiles.audience_tags on recompute.
+    audience_tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
     segment_name TEXT NOT NULL,
     description TEXT,
 
@@ -2883,10 +2941,11 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_segments (
     CONSTRAINT uq_cdp_segments_tenant_tag UNIQUE (tenant_id, segment_tag)
 );
 
-COMMENT ON TABLE customer360.cdp_segments IS 'Segmentation/Audience Builder metadata: one row per named segment tag (mirrored into cdp_master_profiles.segmentation_tags), storing its jQuery QueryBuilder rule tree (json_rules), translated SQL fragment (sql_rules), the full executable query (final_generated_sql), and whether it was authored by a human or an ai_agent.';
+COMMENT ON TABLE customer360.cdp_segments IS 'Segmentation/Audience Builder metadata: one row per named segment tag (mirrored into cdp_master_profiles.segmentation_tags and cdp_master_profiles.audience_tags), storing its jQuery QueryBuilder rule tree (json_rules), translated SQL fragment (sql_rules), the full executable query (final_generated_sql), and whether it was authored by a human or an ai_agent.';
 
 CREATE INDEX IF NOT EXISTS idx_cdp_segments_tenant ON customer360.cdp_segments (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_cdp_segments_json_rules ON customer360.cdp_segments USING GIN (json_rules);
+CREATE INDEX IF NOT EXISTS idx_cdp_segments_audience_tags ON customer360.cdp_segments USING GIN (audience_tags);
 
 -- ============================================================================
 -- cdp_agent_workflow: ordered many-to-many segment/agent configuration

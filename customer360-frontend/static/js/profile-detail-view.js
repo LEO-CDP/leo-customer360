@@ -12,6 +12,10 @@ window.C360 = window.C360 || {};
   var currentProfile = null;
   var currentDomainProfiles = [];
   var currentContentType = "";
+  var audienceTagsCatalog = [];
+  var audienceTagsByTagName = {};
+  var audienceTagsLoaded = false;
+  var profileEditAudienceTags = [];
   var timelineLimit = 100;
   var timelineDataSourceId = "";
   var timelineDataSourcesLoadedForTenant = null;
@@ -796,6 +800,21 @@ window.C360 = window.C360 || {};
 
       hasTags: (profile.segmentation_tags || []).length > 0,
       segmentationTags: profile.segmentation_tags || [],
+      hasAudienceTags: (profile.audience_tags || []).length > 0,
+      audienceTags: profile.audience_tags || [],
+      audienceTagsCount: (profile.audience_tags || []).length,
+      audienceTagItems: (profile.audience_tags || []).map(function (tagName) {
+        var meta = audienceTagsByTagName[tagName];
+        var condensed = meta && meta.condensed_name ? String(meta.condensed_name).replace(/\s*\|\s*$/, "") : "";
+        var parts = String(tagName || "").split("/").filter(Boolean);
+        var lastPart = parts.length ? parts[parts.length - 1].replace(/-/g, " ") : tagName;
+        var shortLabel = meta ? (meta.tier_6 || meta.tier_5 || meta.tier_4 || meta.tier_3 || meta.tier_2 || meta.tier_1 || lastPart) : fmt.titleCase(lastPart);
+        return {
+          tag_name: tagName,
+          shortLabel: shortLabel,
+          displayLabel: condensed || tagName,
+        };
+      }),
       hasInterests: (topInterests || []).length > 0,
       topInterests: topInterests || [],
 
@@ -1283,6 +1302,7 @@ window.C360 = window.C360 || {};
       loadPersona(masterProfileId),
       loadPersonaHistory(masterProfileId),
       loadDomainProfiles(masterProfileId),
+      ensureAudienceTagsCatalog(),
     )
       .done(
         function (
@@ -1340,7 +1360,163 @@ window.C360 = window.C360 || {};
     return value === null || value === undefined ? "" : String(value);
   }
 
-  function openMasterProfileEditor() {
+  function ensureAudienceTagsCatalog() {
+    if (audienceTagsLoaded && audienceTagsCatalog.length) {
+      return $.Deferred().resolve(audienceTagsCatalog).promise();
+    }
+    return api("/audience-tags/", { limit: 2000, seed_if_empty: true, has_parent: true }).then(
+      function (items) {
+        audienceTagsCatalog = Array.isArray(items) ? items : [];
+        audienceTagsByTagName = {};
+        audienceTagsCatalog.forEach(function (item) {
+          if (item && item.tag_name) audienceTagsByTagName[item.tag_name] = item;
+        });
+        audienceTagsLoaded = true;
+        return audienceTagsCatalog;
+      },
+      function () {
+        return audienceTagsCatalog;
+      }
+    );
+  }
+
+  function renderProfileEditSelectedAudienceTags() {
+    var $container = $("#profile-edit-selected-audience-tags");
+    var $count = $("#profile-edit-audience-tags-count");
+    $count.text(profileEditAudienceTags.length + " selected");
+    if (!$container.length) return;
+    $container.empty();
+    if (!profileEditAudienceTags.length) {
+      $container.append(
+        $('<span class="text-xs italic text-slate-400">No IAB audience tags selected — choose from the options below.</span>')
+      );
+      return;
+    }
+    profileEditAudienceTags.forEach(function (tagName) {
+      var meta = audienceTagsByTagName[tagName];
+      var label = meta
+        ? (meta.tier_6 || meta.tier_5 || meta.tier_4 || meta.tier_3 || meta.tier_2 || meta.tier_1 || tagName)
+        : tagName;
+      var $pill = $(
+        '<span class="inline-flex items-center gap-1.5 rounded-lg bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-800 ring-1 ring-inset ring-teal-600/20"></span>'
+      );
+      $pill.attr("title", (meta && meta.condensed_name ? meta.condensed_name + " (" + tagName + ")" : tagName));
+      $pill.append($('<span class="font-semibold"></span>').text(label));
+      $pill.append($('<span class="font-mono text-[10px] text-teal-600"></span>').text(tagName));
+      var $remove = $(
+        '<button type="button" class="btn-profile-remove-audience-tag ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-teal-600 hover:bg-teal-200 hover:text-teal-900" aria-label="Remove tag">&times;</button>'
+      ).attr("data-tag-name", tagName);
+      $pill.append($remove);
+      $container.append($pill);
+    });
+  }
+
+  function renderProfileEditAudienceTagOptions() {
+    var $list = $("#profile-edit-audience-tag-options");
+    if (!$list.length) return;
+    var tier1 = String($("#profile-edit-audience-tier1-filter").val() || "").trim();
+    var q = String($("#profile-edit-audience-tag-search").val() || "").trim().toLowerCase();
+    var selectedSet = {};
+    profileEditAudienceTags.forEach(function (t) { selectedSet[t] = true; });
+
+    var filtered = audienceTagsCatalog.filter(function (item) {
+      if (tier1 && item.tier_1 !== tier1) return false;
+      if (!q) return true;
+      var haystack = [
+        item.tag_name,
+        item.condensed_name,
+        item.unique_id,
+        item.tier_1,
+        item.tier_2,
+        item.tier_3,
+        item.tier_4,
+        item.tier_5,
+        item.tier_6,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.indexOf(q) !== -1;
+    });
+
+    $list.empty();
+    if (!filtered.length) {
+      $list.append(
+        $('<div class="px-3 py-3 text-slate-400 text-center"></div>').text(
+          audienceTagsCatalog.length
+            ? "No matching IAB taxonomy tags found."
+            : "No IAB taxonomy tags loaded in database yet."
+        )
+      );
+      return;
+    }
+
+    filtered.slice(0, 120).forEach(function (item) {
+      var isSelected = !!selectedSet[item.tag_name];
+      var cleanCondensed = String(item.condensed_name || item.tag_name).replace(/\s*\|\s*$/, "");
+      var $row = $(
+        '<button type="button" class="btn-profile-toggle-audience-tag w-full flex items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-teal-50/70"></button>'
+      )
+        .attr("data-tag-name", item.tag_name)
+        .toggleClass("bg-teal-50/60", isSelected);
+
+      var $left = $('<div class="min-w-0 flex-1"></div>');
+      var $top = $('<div class="flex flex-wrap items-center gap-1.5"></div>');
+      $top.append($('<span class="font-medium text-slate-800"></span>').text(cleanCondensed));
+      $top.append(
+        $('<span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600"></span>').text(
+          item.tier_1 || "IAB"
+        )
+      );
+      $left.append($top);
+      $left.append(
+        $('<div class="font-mono text-[11px] text-slate-400 truncate"></div>').text(
+          item.tag_name + (item.unique_id ? " · ID #" + item.unique_id : "")
+        )
+      );
+
+      var $badge = $(
+        '<span class="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold"></span>'
+      )
+        .toggleClass("bg-teal-600 text-white", isSelected)
+        .toggleClass("bg-slate-100 text-slate-600", !isSelected)
+        .text(isSelected ? "✓ Selected" : "+ Add");
+
+      $row.append($left, $badge);
+      $list.append($row);
+    });
+  }
+
+  function addProfileEditAudienceTag(tagName) {
+    var cleaned = $.trim(String(tagName || ""));
+    if (!cleaned) return;
+    if (profileEditAudienceTags.indexOf(cleaned) === -1) {
+      profileEditAudienceTags.push(cleaned);
+    }
+    renderProfileEditSelectedAudienceTags();
+    renderProfileEditAudienceTagOptions();
+  }
+
+  function removeProfileEditAudienceTag(tagName) {
+    var cleaned = $.trim(String(tagName || ""));
+    profileEditAudienceTags = profileEditAudienceTags.filter(function (item) {
+      return item !== cleaned;
+    });
+    renderProfileEditSelectedAudienceTags();
+    renderProfileEditAudienceTagOptions();
+  }
+
+  function toggleProfileEditAudienceTag(tagName) {
+    var cleaned = $.trim(String(tagName || ""));
+    if (!cleaned) return;
+    if (profileEditAudienceTags.indexOf(cleaned) !== -1) {
+      removeProfileEditAudienceTag(cleaned);
+    } else {
+      addProfileEditAudienceTag(cleaned);
+    }
+  }
+
+  function openMasterProfileEditor(focusAudienceTags) {
     if (!currentProfile) return;
     var currentDomainProfile = (currentDomainProfiles || []).find(function (domainProfile) {
       return domainProfile.domain_code === currentProfile.domain;
@@ -1384,8 +1560,24 @@ window.C360 = window.C360 || {};
       }
       $("#master-profile-edit-form [name='" + name + "']").val(value);
     });
+    profileEditAudienceTags = Array.isArray(currentProfile.audience_tags)
+      ? currentProfile.audience_tags.slice()
+      : [];
+    $("#profile-edit-audience-tier1-filter").val("");
+    $("#profile-edit-audience-tag-search").val("");
+    renderProfileEditSelectedAudienceTags();
+    ensureAudienceTagsCatalog().always(function () {
+      renderProfileEditSelectedAudienceTags();
+      renderProfileEditAudienceTagOptions();
+    });
     $("#master-profile-edit-error").addClass("hidden").text("");
     $("#master-profile-edit-modal").removeClass("hidden");
+    if (focusAudienceTags === true) {
+      setTimeout(function () {
+        var $search = $("#profile-edit-audience-tag-search");
+        if ($search.length) $search.trigger("focus");
+      }, 60);
+    }
   }
 
   function closeMasterProfileEditor() {
@@ -1403,6 +1595,7 @@ window.C360 = window.C360 || {};
         payload[this.name] = value || null;
       }
     });
+    payload.audience_tags = profileEditAudienceTags.slice();
     var $button = $(".btn-save-master-profile");
     var $error = $("#master-profile-edit-error");
     $button.prop("disabled", true).text("Saving...");
@@ -1411,12 +1604,11 @@ window.C360 = window.C360 || {};
       .done(function (updatedProfile) {
         showToast("Master profile updated successfully.", "info");
         closeMasterProfileEditor();
+        reload();
         var runId = updatedProfile && updatedProfile.persona_recompute_run_id;
-        if (!runId) {
-          showPersonaRefreshReadyToast("Profile update is complete. Reload to see the latest data.");
-          return;
+        if (runId) {
+          pollMasterProfilePersonaRefresh(runId, 1);
         }
-        pollMasterProfilePersonaRefresh(runId, 1);
       })
       .fail(function (xhr) {
         var detail = (xhr.responseJSON && xhr.responseJSON.detail) || "Could not save profile.";
@@ -1480,11 +1672,64 @@ window.C360 = window.C360 || {};
 
   function bindEvents() {
     $(document).off("click.masterProfileEdit", ".btn-edit-master-profile");
-    $(document).on("click.masterProfileEdit", ".btn-edit-master-profile", openMasterProfileEditor);
+    $(document).on("click.masterProfileEdit", ".btn-edit-master-profile", function () {
+      openMasterProfileEditor(false);
+    });
+    $(document).off("click.masterProfileEdit", ".btn-edit-master-profile-audience-tags");
+    $(document).on("click.masterProfileEdit", ".btn-edit-master-profile-audience-tags", function () {
+      openMasterProfileEditor(true);
+    });
     $(document).off("click.masterProfileEdit", ".btn-close-master-profile-edit");
     $(document).on("click.masterProfileEdit", ".btn-close-master-profile-edit", closeMasterProfileEditor);
     $(document).off("submit.masterProfileEdit", "#master-profile-edit-form");
     $(document).on("submit.masterProfileEdit", "#master-profile-edit-form", saveMasterProfile);
+
+    $(document).off("click.profileAudienceTags", ".btn-profile-toggle-audience-tag");
+    $(document).on("click.profileAudienceTags", ".btn-profile-toggle-audience-tag", function () {
+      toggleProfileEditAudienceTag($(this).attr("data-tag-name"));
+    });
+    $(document).off("click.profileAudienceTags", ".btn-profile-remove-audience-tag");
+    $(document).on("click.profileAudienceTags", ".btn-profile-remove-audience-tag", function () {
+      removeProfileEditAudienceTag($(this).attr("data-tag-name"));
+    });
+    $(document).off("click.profileAudienceTags", "#btn-profile-edit-audience-tags-clear");
+    $(document).on("click.profileAudienceTags", "#btn-profile-edit-audience-tags-clear", function () {
+      profileEditAudienceTags = [];
+      renderProfileEditSelectedAudienceTags();
+      renderProfileEditAudienceTagOptions();
+    });
+    $(document).off("input.profileAudienceTags", "#profile-edit-audience-tag-search");
+    $(document).on("input.profileAudienceTags", "#profile-edit-audience-tag-search", function () {
+      renderProfileEditAudienceTagOptions();
+    });
+    $(document).off("change.profileAudienceTags", "#profile-edit-audience-tier1-filter");
+    $(document).on("change.profileAudienceTags", "#profile-edit-audience-tier1-filter", function () {
+      renderProfileEditAudienceTagOptions();
+    });
+    $(document).off("click.profileAudienceTags", "#btn-profile-add-custom-audience-tag");
+    $(document).on("click.profileAudienceTags", "#btn-profile-add-custom-audience-tag", function () {
+      var val = $.trim($("#profile-edit-audience-tag-search").val());
+      if (!val) return;
+      addProfileEditAudienceTag(val);
+      $("#profile-edit-audience-tag-search").val("");
+      renderProfileEditAudienceTagOptions();
+    });
+    $(document).off("click.profileAudienceTags", ".btn-profile-detail-remove-audience-tag");
+    $(document).on("click.profileAudienceTags", ".btn-profile-detail-remove-audience-tag", function () {
+      if (!currentProfile || !currentProfileId) return;
+      var tagToRemove = $.trim(String($(this).attr("data-tag-name") || ""));
+      if (!tagToRemove) return;
+      var nextTags = (currentProfile.audience_tags || []).filter(function (t) { return t !== tagToRemove; });
+      api("/master-profiles/" + currentProfileId, { audience_tags: nextTags }, "PATCH")
+        .done(function () {
+          currentProfile.audience_tags = nextTags;
+          showToast("Removed IAB tag '" + tagToRemove + "'", "info");
+          reload();
+        })
+        .fail(function (xhr) {
+          showApiError("removing IAB audience tag", xhr);
+        });
+    });
 
     $(document).on("click", ".btn-copy-id", function () {
       var val = $(this).data("value");

@@ -31,6 +31,7 @@ SELECT
     mp.churn_probability,
     mp.churn_risk_tier,
     mp.segmentation_tags,
+    mp.audience_tags,
     -- persona_embedding now lives on the SHARED cdp_persona_archetypes row
     -- (identity *understanding*, computed by PersonaResolutionEngine) that
     -- this profile's active cdp_customer_personas match points at -- not on
@@ -86,6 +87,7 @@ SELECT
     mp.churn_probability,
     mp.churn_risk_tier,
     mp.segmentation_tags,
+    mp.audience_tags,
     -- persona_embedding now lives on the SHARED cdp_persona_archetypes row --
     -- see the matching note in mv_customer_transactions above.
     pa.persona_embedding,

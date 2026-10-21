@@ -130,9 +130,18 @@ def _list_tenant_ids(cursor) -> list[str]:
     return [str(row["tenant_id"] if isinstance(row, dict) else row[0]) for row in cursor.fetchall()]
 
 
-def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_fragment: str, segment_id: str) -> int:
+def _recompute_one_segment(
+    conn,
+    *,
+    tenant_id: str,
+    segment_tag: str,
+    where_fragment: str,
+    segment_id: str,
+    audience_tags: Optional[list[str]] = None,
+) -> int:
     """Re-runs where_fragment against cdp_master_profiles for one tenant,
-    syncs segment_tag into/out of segmentation_tags, and writes back
+    syncs segment_tag into/out of segmentation_tags (and audience_tags into/out
+    of cdp_master_profiles.audience_tags), and writes back
     member_count/last_computed_at onto the cdp_segments row. Returns the
     matched member count."""
     with conn.cursor() as cur:
@@ -199,6 +208,70 @@ def _recompute_one_segment(conn, *, tenant_id: str, segment_tag: str, where_frag
             tag=sql.Literal(segment_tag),
         )
         cur.execute(remove_tag_query)
+
+        cleaned_audience_tags = [
+            tag.strip()
+            for tag in (audience_tags or [])
+            if isinstance(tag, str) and tag.strip()
+        ]
+        if cleaned_audience_tags:
+            add_audience_tags_query = sql.SQL(
+                """
+                UPDATE {schema}.cdp_master_profiles AS profiles
+                SET audience_tags = ARRAY(
+                        SELECT DISTINCT u.tag
+                        FROM unnest(COALESCE(profiles.audience_tags, ARRAY[]::text[]) || {audience_tags}::text[]) AS u(tag)
+                        WHERE u.tag IS NOT NULL AND btrim(u.tag) <> ''
+                        ORDER BY u.tag
+                    ),
+                    updated_at = now()
+                FROM _c360_segment_matches AS matches
+                WHERE profiles.tenant_id = {tenant_id}
+                  AND profiles.master_profile_id = matches.master_profile_id
+                  AND NOT (COALESCE(profiles.audience_tags, ARRAY[]::text[]) @> {audience_tags}::text[])
+                """
+            ).format(
+                schema=sql.Identifier(DB_SCHEMA),
+                tenant_id=sql.Literal(tenant_id),
+                audience_tags=sql.Literal(cleaned_audience_tags),
+            )
+            cur.execute(add_audience_tags_query)
+
+            remove_audience_tags_query = sql.SQL(
+                """
+                UPDATE {schema}.cdp_master_profiles AS profiles
+                SET audience_tags = ARRAY(
+                        SELECT DISTINCT u.tag
+                        FROM unnest(COALESCE(profiles.audience_tags, ARRAY[]::text[])) AS u(tag)
+                        WHERE NOT (u.tag = ANY({audience_tags}::text[]))
+                           OR EXISTS (
+                               SELECT 1
+                               FROM {schema}.cdp_segments AS s
+                               WHERE s.tenant_id = {tenant_id}
+                                 AND s.is_active = TRUE
+                                 AND s.status_code = 1
+                                 AND s.segment_id != {segment_id}
+                                 AND s.segment_tag = ANY(COALESCE(profiles.segmentation_tags, ARRAY[]::text[]))
+                                 AND u.tag = ANY(COALESCE(s.audience_tags, ARRAY[]::text[]))
+                           )
+                        ORDER BY u.tag
+                    ),
+                    updated_at = now()
+                WHERE profiles.tenant_id = {tenant_id}
+                  AND COALESCE(profiles.audience_tags, ARRAY[]::text[]) && {audience_tags}::text[]
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM _c360_segment_matches AS matches
+                      WHERE matches.master_profile_id = profiles.master_profile_id
+                  )
+                """
+            ).format(
+                schema=sql.Identifier(DB_SCHEMA),
+                tenant_id=sql.Literal(tenant_id),
+                segment_id=sql.Literal(segment_id),
+                audience_tags=sql.Literal(cleaned_audience_tags),
+            )
+            cur.execute(remove_audience_tags_query)
 
         cur.execute(
             "SELECT COUNT(*) FROM _c360_segment_matches"
@@ -298,7 +371,7 @@ def recompute_all_active_segments(
             for current_tenant_id in tenant_ids:
                 set_tenant_context(cur, current_tenant_id)
                 query = f"""
-                    SELECT segment_id, tenant_id, segment_tag, sql_rules
+                    SELECT segment_id, tenant_id, segment_tag, audience_tags, sql_rules
                     FROM {DB_SCHEMA}.cdp_segments
                     WHERE is_active = true
                       AND status_code = 1
@@ -324,13 +397,15 @@ def recompute_all_active_segments(
                 )
                 continue
 
-            member_count = _recompute_one_segment(
-                conn,
-                tenant_id=str(segment["tenant_id"]),
-                segment_tag=segment["segment_tag"],
-                where_fragment=sql_rules,
-                segment_id=str(segment["segment_id"]),
-            )
+            recompute_kwargs: dict[str, Any] = {
+                "tenant_id": str(segment["tenant_id"]),
+                "segment_tag": segment["segment_tag"],
+                "where_fragment": sql_rules,
+                "segment_id": str(segment["segment_id"]),
+            }
+            if segment.get("audience_tags"):
+                recompute_kwargs["audience_tags"] = segment["audience_tags"]
+            member_count = _recompute_one_segment(conn, **recompute_kwargs)
             segments_processed += 1
             total_members += member_count
             (log or logger.info)(

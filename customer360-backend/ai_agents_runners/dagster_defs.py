@@ -122,7 +122,7 @@ def personalization_job() -> None:
     job=ai_agents_master_job,
     minimum_interval_seconds=WORKFLOW_POLL_SECONDS,
 )
-def ai_agent_workflow_schedule_sensor(context):
+def ai_agent_workflow_schedule_sensor(_context):
     """Polls workflow cron definitions and submits one bounded master run."""
     now = datetime.now(timezone.utc)
     return RunRequest(

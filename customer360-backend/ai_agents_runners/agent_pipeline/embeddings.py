@@ -14,6 +14,11 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_LOCAL_EMBEDDING_MODEL = (
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
+MULTILINGUAL_E5_BASE_MODEL = DEFAULT_LOCAL_EMBEDDING_MODEL
+
 
 def _provider() -> str:
     value = os.environ.get("DOCS_EMBEDDING_PROVIDER", "openai").strip().lower()
@@ -35,7 +40,7 @@ def embedding_model_key(*, dimensions: int | None = None) -> str:
         ),
         "local": os.environ.get(
             "DOCS_LOCAL_EMBEDDING_MODEL",
-            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            DEFAULT_LOCAL_EMBEDDING_MODEL,
         ),
     }[provider]
     resolved_dimensions = embedding_dimensions(dimensions)
@@ -44,7 +49,11 @@ def embedding_model_key(*, dimensions: int | None = None) -> str:
 
 def embedding_dimensions(override: int | None = None) -> int:
     if override is not None:
-        if not 1 <= override <= 2000:
+        if (
+            isinstance(override, bool)
+            or not isinstance(override, int)
+            or not 1 <= override <= 2000
+        ):
             raise ValueError("Embedding dimensions must be between 1 and 2000")
         return override
 
@@ -143,10 +152,13 @@ def _gemini_embeddings(
     embeddings = data.get("embeddings")
     if not isinstance(embeddings, list) or len(embeddings) != len(texts):
         raise ValueError("Gemini embeddings response did not contain one vector per text")
-    vectors = [item.get("values") if isinstance(item, dict) else None for item in embeddings]
-    if any(not isinstance(vector, list) for vector in vectors):
-        raise ValueError("Gemini embeddings response contained an invalid vector")
-    return [[float(value) for value in vector] for vector in vectors]
+    vectors: list[list[float]] = []
+    for item in embeddings:
+        raw_vector = item.get("values") if isinstance(item, dict) else None
+        if not isinstance(raw_vector, list):
+            raise ValueError("Gemini embeddings response contained an invalid vector")
+        vectors.append(_coerce_float_vector(raw_vector, provider="Gemini"))
+    return vectors
 
 
 def _openai_embeddings(
@@ -163,9 +175,11 @@ def _openai_embeddings(
     model = os.environ.get(
         "DOCS_OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
     )
-    payload: dict[str, Any] = {"model": model, "input": texts}
-    if dimensions > 0:
-        payload["dimensions"] = dimensions
+    payload: dict[str, Any] = {
+        "model": model,
+        "input": texts,
+        "dimensions": dimensions,
+    }
     if "e5" in model.lower():
         prefix = "query: " if task == "query" else "passage: "
         payload["input"] = [prefix + value for value in texts]
@@ -183,11 +197,36 @@ def _openai_embeddings(
     items = data.get("data")
     if not isinstance(items, list):
         raise ValueError("OpenAI-compatible embeddings response is missing data")
-    items.sort(key=lambda item: item.get("index", 0))
-    vectors = [item.get("embedding") if isinstance(item, dict) else None for item in items]
-    if len(vectors) != len(texts) or any(not isinstance(vector, list) for vector in vectors):
+    if len(items) != len(texts) or any(not isinstance(item, dict) for item in items):
         raise ValueError("OpenAI-compatible embeddings response did not match input count")
-    return [[float(value) for value in vector] for vector in vectors]
+    dict_items: list[dict[str, Any]] = [item for item in items if isinstance(item, dict)]
+    if any(
+        isinstance(item.get("index", 0), bool)
+        or not isinstance(item.get("index", 0), int)
+        for item in dict_items
+    ):
+        raise ValueError("OpenAI-compatible embeddings response contained an invalid index")
+    dict_items.sort(key=lambda item: int(item.get("index", 0)))
+    vectors: list[list[float]] = []
+    for item in dict_items:
+        raw_vector = item.get("embedding")
+        if not isinstance(raw_vector, list):
+            raise ValueError(
+                "OpenAI-compatible embeddings response did not match input count"
+            )
+        vectors.append(
+            _coerce_float_vector(raw_vector, provider="OpenAI-compatible")
+        )
+    return vectors
+
+
+def _coerce_float_vector(raw_vector: list[Any], *, provider: str) -> list[float]:
+    vector: list[float] = []
+    for value in raw_vector:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{provider} embeddings response contained a non-numeric value")
+        vector.append(float(value))
+    return vector
 
 
 @lru_cache(maxsize=1)
@@ -202,9 +241,9 @@ def _local_embedder(model: str):
 
 
 def _local_embeddings(texts: list[str], *, task: str) -> list[list[float]]:
-    model = os.environ.get(
-        "DOCS_LOCAL_EMBEDDING_MODEL",
-        MULTILINGUAL_E5_BASE_MODEL,
+    model = (
+        os.environ.get("DOCS_LOCAL_EMBEDDING_MODEL")
+        or DEFAULT_LOCAL_EMBEDDING_MODEL
     )
     if "e5" in model.lower():
         prefix = "query: " if task == "query" else "passage: "

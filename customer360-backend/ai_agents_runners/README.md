@@ -41,6 +41,14 @@ The final Dagster error log also includes the Dagster run ID, trigger, tenant,
 and segment so the corresponding database run record and worker logs can be
 located quickly.
 
+`RankingRecommendationPipeline` also exposes structured state observability for
+each execution (`pipeline.last_state` and an optional `state_observer` callback
+receiving `RankingExecutionState`). Each snapshot records the execution phase
+(`short_circuited`, `completed`, or `failed`), effective strategy and weights,
+candidate/profile counts, SQL rows returned, ranked vs. domain-skipped profile
+counts, reason-code distribution, per-profile `ProfileRankingOutcome` entries
+with `CandidateDiagnostics`, and execution latency (`duration_ms`).
+
 Ranking settings live in each workflow step's existing `configuration` JSON:
 
 ```json

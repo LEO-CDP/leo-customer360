@@ -73,10 +73,71 @@ class SegmentRepository(DaoSegmentRepository):
             index += 1
         return depth == 0 and quote is None
 
+    @staticmethod
+    def _audience_tags_sql_condition(audience_tags: list[str]) -> Optional[str]:
+        """Build the PostgreSQL array overlap condition for ``audience_tags``."""
+        cleaned = [
+            tag.strip()
+            for tag in (audience_tags or [])
+            if isinstance(tag, str) and tag.strip()
+        ]
+        if not cleaned:
+            return None
+        quoted = ", ".join("'" + tag.replace("'", "''") + "'" for tag in cleaned)
+        return f"audience_tags && ARRAY[{quoted}]::text[]"
+
+    @staticmethod
+    def _strip_auto_audience_tags_condition(sql_rules: str) -> str:
+        """Remove any previously auto-appended ``audience_tags && ARRAY[...]::text[]`` suffix."""
+        pattern = re.compile(
+            r"^\((?P<base>.+)\)\s+AND\s+\(audience_tags\s+&&\s+ARRAY\[[^\]]*\]::text\[\]\)$",
+            re.IGNORECASE | re.DOTALL,
+        )
+        match = pattern.match(sql_rules.strip())
+        if match:
+            return match.group("base").strip()
+        solo_pattern = re.compile(
+            r"^\(?audience_tags\s+&&\s+ARRAY\[[^\]]*\]::text\[\]\)?$",
+            re.IGNORECASE | re.DOTALL,
+        )
+        if solo_pattern.match(sql_rules.strip()):
+            return ""
+        return sql_rules.strip()
+
     @classmethod
-    def final_generated_sql(cls, sql_rules: str, tenant_id: uuid.UUID) -> str:
+    def compose_sql_rules_with_audience_tags(
+        cls,
+        sql_rules: Optional[str],
+        audience_tags: Optional[list[str]],
+    ) -> Optional[str]:
+        """Ensure selected ``audience_tags`` are included in ``sql_rules``."""
+        base_sql = cls._strip_auto_audience_tags_condition(sql_rules or "") if sql_rules else ""
+        tags_cond = cls._audience_tags_sql_condition(audience_tags or [])
+        if not base_sql and not tags_cond:
+            return sql_rules
+        if not tags_cond:
+            return base_sql or None
+        if not base_sql:
+            return f"({tags_cond})"
+        if re.search(r"\baudience_tags\b", base_sql, re.IGNORECASE):
+            return base_sql
+        wrapped_base = base_sql if cls._has_wrapping_parentheses(base_sql) else f"({base_sql})"
+        return f"{wrapped_base} AND ({tags_cond})"
+
+    @classmethod
+    def final_generated_sql(
+        cls,
+        sql_rules: str,
+        tenant_id: uuid.UUID,
+        audience_tags: Optional[list[str]] = None,
+    ) -> str:
         """Build the persisted tenant-scoped SQL representation for a segment."""
-        where_clause = sql_rules.strip() if cls._has_wrapping_parentheses(sql_rules) else f"({sql_rules.strip()})"
+        effective_rules = cls.compose_sql_rules_with_audience_tags(sql_rules, audience_tags) or sql_rules
+        where_clause = (
+            effective_rules.strip()
+            if cls._has_wrapping_parentheses(effective_rules)
+            else f"({effective_rules.strip()})"
+        )
         return (
             f"SELECT master_profile_id FROM {settings.db_schema}.cdp_master_profiles "
             f"WHERE tenant_id = '{tenant_id}'::uuid AND {where_clause}"
@@ -85,20 +146,62 @@ class SegmentRepository(DaoSegmentRepository):
     @classmethod
     def transform_create(cls, payload: dict[str, Any]) -> dict[str, Any]:
         """Normalize create rules and calculate their generated SQL."""
+        audience_tags: list[str] = []
+        if "audience_tags" in payload and payload["audience_tags"] is not None:
+            audience_tags = [
+                tag.strip() for tag in payload["audience_tags"] if isinstance(tag, str) and tag.strip()
+            ]
+            payload["audience_tags"] = audience_tags
         sql_rules = payload.get("sql_rules")
         if sql_rules:
-            payload["sql_rules"] = cls.normalize_relative_intervals(sql_rules)
-            payload["final_generated_sql"] = cls.final_generated_sql(payload["sql_rules"], payload["tenant_id"])
+            normalized = cls.normalize_relative_intervals(sql_rules)
+            composed = cls.compose_sql_rules_with_audience_tags(normalized, audience_tags) or normalized
+            payload["sql_rules"] = composed
+            payload["final_generated_sql"] = cls.final_generated_sql(
+                composed, payload["tenant_id"], audience_tags
+            )
+        elif audience_tags:
+            composed = cls.compose_sql_rules_with_audience_tags("", audience_tags)
+            if composed:
+                payload["sql_rules"] = composed
+                payload["final_generated_sql"] = cls.final_generated_sql(
+                    composed, payload["tenant_id"], audience_tags
+                )
         return payload
 
     @classmethod
     def transform_update(cls, segment: CdpSegment, payload: dict[str, Any]) -> dict[str, Any]:
         """Normalize changed rules and keep generated SQL synchronized."""
-        if "sql_rules" in payload:
-            if payload["sql_rules"]:
-                payload["sql_rules"] = cls.normalize_relative_intervals(payload["sql_rules"])
-                payload["final_generated_sql"] = cls.final_generated_sql(payload["sql_rules"], segment.tenant_id)
+        if "audience_tags" in payload and payload["audience_tags"] is not None:
+            payload["audience_tags"] = [
+                tag.strip() for tag in payload["audience_tags"] if isinstance(tag, str) and tag.strip()
+            ]
+        effective_tags = (
+            payload["audience_tags"]
+            if "audience_tags" in payload and payload["audience_tags"] is not None
+            else list(getattr(segment, "audience_tags", None) or [])
+        )
+        if "sql_rules" in payload or "audience_tags" in payload:
+            raw_sql = payload["sql_rules"] if "sql_rules" in payload else getattr(segment, "sql_rules", None)
+            if raw_sql:
+                normalized = cls.normalize_relative_intervals(raw_sql)
+                composed = cls.compose_sql_rules_with_audience_tags(normalized, effective_tags)
+                payload["sql_rules"] = composed
+                payload["final_generated_sql"] = (
+                    cls.final_generated_sql(composed, segment.tenant_id, effective_tags)
+                    if composed
+                    else None
+                )
+            elif effective_tags:
+                composed = cls.compose_sql_rules_with_audience_tags("", effective_tags)
+                payload["sql_rules"] = composed
+                payload["final_generated_sql"] = (
+                    cls.final_generated_sql(composed, segment.tenant_id, effective_tags)
+                    if composed
+                    else None
+                )
             else:
+                payload["sql_rules"] = None
                 payload["final_generated_sql"] = None
         return payload
 

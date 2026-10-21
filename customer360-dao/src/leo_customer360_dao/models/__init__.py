@@ -41,7 +41,7 @@ from leo_customer360_dao.models.identity import (
     CdpAiAgent,
 )
 from leo_customer360_dao.models.relations import CdpRelation, CustomerContact, RelationType, Transaction
-from leo_customer360_dao.models.segmentation import CdpSegment
+from leo_customer360_dao.models.segmentation import CdpAudienceTag, CdpSegment
 from leo_customer360_dao.models.system import (
     SysAssistantMessage,
     SysAuditLog,
@@ -91,6 +91,7 @@ __all__ = [
     "CdpRawProfileStage",
     "CdpRelation",
     "CdpAiAgent",
+    "CdpAudienceTag",
     "CdpSegment",
     "CustomerContact",
     "Transaction",

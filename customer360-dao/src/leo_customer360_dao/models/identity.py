@@ -85,6 +85,7 @@ class CdpMasterProfile(Base):
     # Human-readable, non-PII label required whenever is_hashed = TRUE (see persona.py).
     persona_name: Mapped[Optional[str]] = mapped_column(Text)
     segmentation_tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
+    audience_tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text))
     communication_preferences: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     attributes: Mapped[Optional[dict]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     data_source_analytics: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))

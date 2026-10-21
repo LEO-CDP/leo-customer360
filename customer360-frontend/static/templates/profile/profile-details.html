@@ -41,11 +41,11 @@
 </div>
 
 <div id="master-profile-edit-modal" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/40 px-4 py-8" role="dialog" aria-modal="true" aria-labelledby="master-profile-edit-title">
-  <div class="mx-auto max-w-2xl rounded-2xl bg-white shadow-2xl">
+  <div class="mx-auto max-w-3xl rounded-2xl bg-white shadow-2xl">
     <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
       <div>
         <h2 id="master-profile-edit-title" class="text-lg font-semibold text-slate-900">Edit Personal Information</h2>
-        <p class="mt-1 text-xs text-slate-500">Update the customer identity shown across Customer 360.</p>
+        <p class="mt-1 text-xs text-slate-500">Update the customer identity and standardized IAB audience tags shown across Customer 360.</p>
       </div>
       <button type="button" class="btn-close-master-profile-edit rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Close edit profile">&times;</button>
     </div>
@@ -67,6 +67,44 @@
       <label class="text-sm font-medium text-slate-700 sm:col-span-2">Address<input name="address" type="text" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
       <label class="text-sm font-medium text-slate-700">Lifecycle stage<select name="lifecycle_stage" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="">Not set</option><option value="prospect">Prospect</option><option value="lead">Lead</option><option value="customer">Customer</option><option value="vip">VIP</option><option value="dormant">Dormant</option><option value="churn_risk">Churn risk</option></select></label>
       <label class="text-sm font-medium text-slate-700">Preferred channel<input name="preferred_channel" type="text" class="master-profile-edit-field mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
+
+      <!-- IAB Audience Taxonomy Tags (cdp_master_profiles.audience_tags) -->
+      <div id="master-profile-edit-audience-tags-section" class="sm:col-span-2 rounded-xl border border-teal-200/80 bg-teal-50/30 p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-semibold text-slate-900">IAB Audience Taxonomy Tags</span>
+              <span class="font-mono text-[11px] text-teal-700 bg-teal-100/80 px-2 py-0.5 rounded-md">cdp_master_profiles.audience_tags</span>
+              <span id="profile-edit-audience-tags-count" class="inline-flex items-center rounded-full bg-teal-600 px-2 py-0.5 text-[11px] font-semibold text-white">0 selected</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">Search and select standardized IAB 1.1 <code class="font-mono text-[11px]">tag_name</code> values for analytics, personalization, and programmatic targeting.</p>
+          </div>
+          <button id="btn-profile-edit-audience-tags-clear" type="button" class="text-xs font-semibold text-slate-500 hover:text-rose-600 transition-colors">Clear all</button>
+        </div>
+
+        <!-- Selected audience_tags pills -->
+        <div id="profile-edit-selected-audience-tags" class="flex flex-wrap gap-1.5 min-h-[36px] p-2.5 rounded-lg border border-slate-200 bg-white mb-3"></div>
+
+        <!-- Filter & search bar -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
+          <select id="profile-edit-audience-tier1-filter" class="text-xs border border-slate-300 bg-white rounded-lg px-3 py-2 text-slate-700 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600">
+            <option value="">All IAB Categories (Tier 1)</option>
+            <option value="Demographic">Demographic</option>
+            <option value="Interest">Interest</option>
+            <option value="Purchase Intent*">Purchase Intent*</option>
+          </select>
+          <div class="sm:col-span-2 flex gap-1.5">
+            <input id="profile-edit-audience-tag-search" type="search" autocomplete="off" placeholder="Search IAB tag_name, tier, or ID (e.g. demographic/age-range/25-29)..." class="flex-1 text-xs border border-slate-300 bg-white rounded-lg px-3 py-2 text-slate-700 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600" />
+            <button id="btn-profile-add-custom-audience-tag" type="button" class="shrink-0 rounded-lg border border-teal-300 bg-white px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-50" title="Add typed tag_name">+ Add tag</button>
+          </div>
+        </div>
+
+        <!-- Database options list -->
+        <div id="profile-edit-audience-tag-options" class="max-h-44 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100 text-xs">
+          <div class="px-3 py-3 text-slate-400 text-center">Loading IAB Audience Taxonomy options...</div>
+        </div>
+      </div>
+
       <div id="master-profile-edit-error" class="hidden sm:col-span-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></div>
       <div class="flex justify-end gap-2 border-t border-slate-100 pt-4 sm:col-span-2">
         <button type="button" class="btn-close-master-profile-edit rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>

@@ -166,6 +166,42 @@
         </div>
       </div>
     </div>
+
+    <!-- IAB Audience Taxonomy Tags (cdp_segments.audience_tags) -->
+    <div class="mt-6 pt-5 border-t border-slate-100">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
+            IAB Audience Taxonomy Tags <span class="normal-case font-mono text-[10px] text-slate-400 ml-1">(audience_tags)</span>
+          </span>
+          <span class="inline-flex items-center rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-700 ring-1 ring-inset ring-teal-600/15">{{audienceTagsCount}}</span>
+        </div>
+        <button
+          id="btn-segment-detail-manage-tags"
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50/70 px-2.5 py-1 text-xs font-semibold text-teal-700 hover:bg-teal-100 transition-colors"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+          <span>Manage IAB Tags</span>
+        </button>
+      </div>
+
+      <div id="segment-detail-audience-tags-list" class="flex flex-wrap gap-2">
+        {{#if hasAudienceTags}}
+          {{#each audienceTagItems}}
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-600/15 hover:bg-teal-100/80 transition-colors" title="{{displayLabel}} ({{tag_name}})">
+            <span class="font-semibold">{{shortLabel}}</span>
+            <span class="font-mono text-[10px] text-teal-600/80">{{tag_name}}</span>
+            <button type="button" class="btn-segment-detail-remove-audience-tag ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-teal-500 hover:bg-teal-200/70 hover:text-teal-900 transition-colors" data-tag-name="{{tag_name}}" title="Remove {{tag_name}}" aria-label="Remove {{tag_name}}">&times;</button>
+          </span>
+          {{/each}}
+        {{else}}
+          <div class="flex items-center gap-2 px-3 py-2 w-full rounded-lg border border-dashed border-slate-200 bg-slate-50 text-slate-400 text-xs italic">
+            No IAB audience tags assigned to this segment yet — click &ldquo;Manage IAB Tags&rdquo; to select tags from cdp_audience_tags.
+          </div>
+        {{/if}}
+      </div>
+    </div>
   </div>
 
   <!-- 2. Segment workspaces: vertical tabs on desktop, horizontally scrollable
