@@ -24,6 +24,19 @@ def test_audience_tags_table_and_profile_segment_columns():
 
     assert "audience_tags TEXT[]," in schema
     assert "audience_tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]," in schema
+    profile_column_ddl = "ALTER TABLE customer360.cdp_master_profiles\n    ADD COLUMN IF NOT EXISTS audience_tags TEXT[];"
+    segment_column_ddl = (
+        "ALTER TABLE customer360.cdp_segments\n"
+        "    ADD COLUMN IF NOT EXISTS audience_tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
+    )
+    assert profile_column_ddl in schema
+    assert profile_column_ddl.index("ADD COLUMN IF NOT EXISTS") < schema.index(
+        "CREATE INDEX IF NOT EXISTS idx_cdp_mp_audience_tags"
+    )
+    assert segment_column_ddl in schema
+    assert segment_column_ddl.index("ADD COLUMN IF NOT EXISTS") < schema.index(
+        "CREATE INDEX IF NOT EXISTS idx_cdp_segments_audience_tags"
+    )
     assert "ADD COLUMN IF NOT EXISTS audience_tags TEXT[];" in migration
     assert "ADD COLUMN IF NOT EXISTS audience_tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];" in migration
     assert "'audience_tags'" in init_core

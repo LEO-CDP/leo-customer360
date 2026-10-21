@@ -2883,6 +2883,10 @@ CREATE INDEX IF NOT EXISTS idx_cdp_audience_tags_tiers
     ON customer360.cdp_audience_tags (tier_1, tier_2, tier_3);
 CREATE INDEX IF NOT EXISTS idx_cdp_audience_tags_status
     ON customer360.cdp_audience_tags (status_code);
+
+-- CREATE TABLE IF NOT EXISTS does not update an existing master-profile table.
+ALTER TABLE customer360.cdp_master_profiles
+    ADD COLUMN IF NOT EXISTS audience_tags TEXT[];
 CREATE INDEX IF NOT EXISTS idx_cdp_mp_audience_tags
     ON customer360.cdp_master_profiles USING GIN (audience_tags);
 
@@ -2940,6 +2944,10 @@ CREATE TABLE IF NOT EXISTS customer360.cdp_segments (
 
     CONSTRAINT uq_cdp_segments_tenant_tag UNIQUE (tenant_id, segment_tag)
 );
+
+-- CREATE TABLE IF NOT EXISTS does not update an existing segments table.
+ALTER TABLE customer360.cdp_segments
+    ADD COLUMN IF NOT EXISTS audience_tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
 
 COMMENT ON TABLE customer360.cdp_segments IS 'Segmentation/Audience Builder metadata: one row per named segment tag (mirrored into cdp_master_profiles.segmentation_tags and cdp_master_profiles.audience_tags), storing its jQuery QueryBuilder rule tree (json_rules), translated SQL fragment (sql_rules), the full executable query (final_generated_sql), and whether it was authored by a human or an ai_agent.';
 
