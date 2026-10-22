@@ -255,6 +255,7 @@ class ValidatedRules:
 # --------------------------------------------------------------------- catalog
 @dataclass(frozen=True)
 class _Filter:
+    id: str
     field: str
     label: str
     category: str
@@ -268,7 +269,8 @@ class _Filter:
 
 def _filter_for(entry: Mapping[str, Any]) -> Optional[_Filter]:
     field_name = str(entry.get("field") or "").strip()
-    if not field_name:
+    filter_id = str(entry.get("id") or field_name).strip()
+    if not field_name or not filter_id:
         return None
     dt = str(entry.get("data_type") or "TEXT").strip().upper()
     if dt in _INTEGER:
@@ -289,19 +291,20 @@ def _filter_for(entry: Mapping[str, Any]) -> Optional[_Filter]:
         category, qb_type, qb_input = "string", "string", "text"
 
     operators = _OPERATORS_BY_CATEGORY[category]
-    date_input = dt == "DATE" or field_name in _DATE_INPUT_FIELDS
+    date_input = dt == "DATE" or (filter_id == field_name and field_name in _DATE_INPUT_FIELDS)
     if date_input:
         qb_type, qb_input = "date", "date"
-    if field_name == "status_code":  # rendered as a select: 1 = Active, 0 = Inactive
+    if filter_id == "status_code":  # rendered as a select: 1 = Active, 0 = Inactive
         category, qb_type, qb_input = "integer", "integer", "select"
         operators = ("equal", "not_equal", "is_null", "is_not_null")
 
     allowed = tuple(str(v) for v in (entry.get("allowed_values") or ()) if str(v).strip())
-    if field_name == "status_code" and not allowed:
+    if filter_id == "status_code" and not allowed:
         allowed = ("1", "0")
     return _Filter(
+        id=filter_id,
         field=field_name,
-        label=str(entry.get("name") or field_name),
+        label=str(entry.get("name") or filter_id),
         category=category,
         qb_type=qb_type,
         qb_input=qb_input,
@@ -313,7 +316,7 @@ def _filter_for(entry: Mapping[str, Any]) -> Optional[_Filter]:
 
 
 class _Catalog:
-    """Lookup by canonical field, display name, or bare domain-attribute key."""
+    """Lookup by canonical id/field, display name, or bare domain-attribute key."""
 
     def __init__(self, entries: Iterable[Mapping[str, Any]]) -> None:
         self._by_key: Dict[str, _Filter] = {}
@@ -322,12 +325,13 @@ class _Catalog:
             f = _filter_for(entry)
             if f is None:
                 continue
+            self._register(f.id, f)
             self._register(f.field, f)
             self._register(f.label, f)
             domain_key = _DOMAIN_KEY.search(f.field)
             if domain_key:
                 self._register(domain_key.group(1), f)
-            self._display.append(domain_key.group(1) if domain_key else f.field)
+            self._display.append(domain_key.group(1) if domain_key else f.id)
 
     def _register(self, key: str, f: _Filter) -> None:
         self._by_key.setdefault(key.strip().lower(), f)
@@ -534,7 +538,7 @@ def validate_rules(json_rules: Mapping[str, Any], catalog: Iterable[Mapping[str,
                 question="This audience definition has too many criteria. Could you narrow it down?",
             )
 
-        raw_field = node.get("field") or node.get("id")
+        raw_field = node.get("id") or node.get("field")
         if not raw_field:
             raise MalformedRules(
                 "Rule has no field.",
@@ -543,14 +547,14 @@ def validate_rules(json_rules: Mapping[str, Any], catalog: Iterable[Mapping[str,
         f = cat.resolve(str(raw_field))
         if f.field in _FORBIDDEN_FIELDS:
             raise ForbiddenField(f.field)
-        used.append(f.field)
+        used.append(f.id)
 
         operator = str(node.get("operator") or "equal").strip().lower()
         if operator not in f.operators:
             raise UnknownOperator(operator, f.label, f.operators)
 
         leaf = {
-            "id": f.field,
+            "id": f.id,
             "field": f.field,
             "type": f.qb_type,
             "input": f.qb_input,

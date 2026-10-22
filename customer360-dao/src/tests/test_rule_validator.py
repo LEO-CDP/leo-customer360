@@ -261,6 +261,26 @@ class VietnameseQuestionTests(unittest.TestCase):
 
 
 class ShapeTests(unittest.TestCase):
+    def test_derived_attributes_resolve_with_distinct_id_and_field(self):
+        derived_catalog = CATALOG + [
+            {"id": "age_years", "field": "date_of_birth", "name": "Age (years)", "data_type": "INTEGER"},
+            {"id": "days_since_last_activity", "field": "last_activity_at", "name": "Days since last activity", "data_type": "INTEGER"},
+            {"id": "days_as_customer", "field": "customer_since", "name": "Days as customer", "data_type": "INTEGER"},
+        ]
+        out = validate_rules(
+            tree(
+                leaf("age_years", "between", [30, 44]),
+                leaf("days_since_last_activity", "greater", 90),
+                leaf("days_as_customer", "less_or_equal", 30),
+            ),
+            derived_catalog,
+        )
+        r0, r1, r2 = out.json_rules["rules"]
+        self.assertEqual((r0["id"], r0["field"], r0["operator"], r0["value"]), ("age_years", "date_of_birth", "between", [30, 44]))
+        self.assertEqual((r1["id"], r1["field"], r1["operator"], r1["value"]), ("days_since_last_activity", "last_activity_at", "greater", 90))
+        self.assertEqual((r2["id"], r2["field"], r2["operator"], r2["value"]), ("days_as_customer", "customer_since", "less_or_equal", 30))
+        self.assertEqual(out.fields_used, ["age_years", "days_since_last_activity", "days_as_customer"])
+
     def test_nested_groups_and_names_resolve_to_canonical_ids(self):
         out = validate_rules(tree(
             leaf("Gender", "equal", "female"),

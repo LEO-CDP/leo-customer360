@@ -83,9 +83,158 @@ window.C360 = window.C360 || {};
     return sqlQuote(value);
   }
 
+  var DERIVED_ATTRIBUTES = {
+    age_years: {
+      id: "age_years",
+      field: "date_of_birth",
+      name: "Age (years)",
+      description: "Calculated from Date of Birth each time the segment is recomputed.",
+      attribute_group: "DYNAMIC (RELATIVE TO TODAY)",
+      data_type: "INTEGER",
+      domain_scope: "all",
+      is_pii: false,
+      source_type: "date",
+      min: 0,
+      max: 120
+    },
+    days_since_last_activity: {
+      id: "days_since_last_activity",
+      field: "last_activity_at",
+      name: "Days since last activity",
+      description: "Number of days elapsed since Last Activity At, calculated dynamically.",
+      attribute_group: "DYNAMIC (RELATIVE TO TODAY)",
+      data_type: "INTEGER",
+      domain_scope: "all",
+      is_pii: false,
+      source_type: "timestamp",
+      min: 0,
+      max: 36500
+    },
+    days_as_customer: {
+      id: "days_as_customer",
+      field: "customer_since",
+      name: "Days as customer",
+      description: "Number of days since Customer Since date, calculated dynamically.",
+      attribute_group: "DYNAMIC (RELATIVE TO TODAY)",
+      data_type: "INTEGER",
+      domain_scope: "all",
+      is_pii: false,
+      source_type: "date",
+      min: 0,
+      max: 36500
+    }
+  };
+
+  function parseNonNegativeInt(val, label) {
+    var num = Number(val);
+    if (typeof val === "boolean" || String(val == null ? "" : val).trim() === "" || !isFinite(num) || !Number.isInteger(num) || num < 0) {
+      throw new Error("Enter a valid non-negative integer for " + (label || "this rule") + ".");
+    }
+    return num;
+  }
+
+  function derivedRuleSql(rule, derivedSpec) {
+    var col = derivedSpec.field;
+    var operator = rule.operator;
+    var todayExpr = "(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date";
+    if (operator === "is_null") return col + " IS NULL";
+    if (operator === "is_not_null") return col + " IS NOT NULL";
+
+    var values = Array.isArray(rule.value) ? rule.value : [rule.value];
+    if (derivedSpec.id === "age_years") {
+      if (operator === "in" || operator === "not_in") {
+        values = values.filter(function (item) { return item !== null && typeof item !== "undefined" && String(item).trim() !== ""; });
+        if (!values.length) throw new Error("Enter at least one value for " + derivedSpec.name + ".");
+        var ageParts = values.map(function (item) {
+          return derivedRuleSql({ operator: "equal", value: item }, derivedSpec);
+        });
+        return operator === "in" ? "(" + ageParts.join(" OR ") + ")" : "NOT (" + ageParts.join(" OR ") + ")";
+      }
+      if (operator === "between" || operator === "not_between") {
+        if (values.length < 2) throw new Error("Enter two age values for a range rule.");
+        var a = parseNonNegativeInt(values[0], derivedSpec.name);
+        var b = parseNonNegativeInt(values[1], derivedSpec.name);
+        if (a > b) { var tmpAge = a; a = b; b = tmpAge; }
+        if (operator === "between") {
+          return "(" + col + " <= (" + todayExpr + " - INTERVAL '" + a + " years') AND " +
+            col + " > (" + todayExpr + " - INTERVAL '" + (b + 1) + " years'))";
+        }
+        return "(" + col + " > (" + todayExpr + " - INTERVAL '" + a + " years') OR " +
+          col + " <= (" + todayExpr + " - INTERVAL '" + (b + 1) + " years'))";
+      }
+      var nAge = parseNonNegativeInt(values[0], derivedSpec.name);
+      if (operator === "greater_or_equal") return col + " <= (" + todayExpr + " - INTERVAL '" + nAge + " years')";
+      if (operator === "greater") return col + " <= (" + todayExpr + " - INTERVAL '" + (nAge + 1) + " years')";
+      if (operator === "less") return col + " > (" + todayExpr + " - INTERVAL '" + nAge + " years')";
+      if (operator === "less_or_equal") return col + " > (" + todayExpr + " - INTERVAL '" + (nAge + 1) + " years')";
+      if (operator === "equal") {
+        return "(" + col + " <= (" + todayExpr + " - INTERVAL '" + nAge + " years') AND " +
+          col + " > (" + todayExpr + " - INTERVAL '" + (nAge + 1) + " years'))";
+      }
+      if (operator === "not_equal") {
+        return "(" + col + " > (" + todayExpr + " - INTERVAL '" + nAge + " years') OR " +
+          col + " <= (" + todayExpr + " - INTERVAL '" + (nAge + 1) + " years'))";
+      }
+      throw new Error("Unsupported operator for " + derivedSpec.name + ".");
+    }
+
+    var baseExpr = derivedSpec.source_type === "timestamp" ? "now()" : todayExpr;
+    if (operator === "in" || operator === "not_in") {
+      values = values.filter(function (item) { return item !== null && typeof item !== "undefined" && String(item).trim() !== ""; });
+      if (!values.length) throw new Error("Enter at least one value for " + derivedSpec.name + ".");
+      if (derivedSpec.source_type === "date") {
+        var dateExprs = values.map(function (item) {
+          var nVal = parseNonNegativeInt(item, derivedSpec.name);
+          return "(" + todayExpr + " - INTERVAL '" + nVal + " days')";
+        });
+        return col + (operator === "in" ? " IN (" : " NOT IN (") + dateExprs.join(", ") + ")";
+      }
+      var orParts = values.map(function (item) {
+        return derivedRuleSql({ operator: "equal", value: item }, derivedSpec);
+      });
+      return operator === "in" ? "(" + orParts.join(" OR ") + ")" : "NOT (" + orParts.join(" OR ") + ")";
+    }
+    if (operator === "between" || operator === "not_between") {
+      if (values.length < 2) throw new Error("Enter two day values for a range rule.");
+      var dLow = parseNonNegativeInt(values[0], derivedSpec.name);
+      var dHigh = parseNonNegativeInt(values[1], derivedSpec.name);
+      if (dLow > dHigh) { var tmpDay = dLow; dLow = dHigh; dHigh = tmpDay; }
+      if (operator === "between") {
+        return "(" + col + " <= (" + baseExpr + " - INTERVAL '" + dLow + " days') AND " +
+          col + " >= (" + baseExpr + " - INTERVAL '" + dHigh + " days'))";
+      }
+      return "(" + col + " > (" + baseExpr + " - INTERVAL '" + dLow + " days') OR " +
+        col + " < (" + baseExpr + " - INTERVAL '" + dHigh + " days'))";
+    }
+    var nDays = parseNonNegativeInt(values[0], derivedSpec.name);
+    if (operator === "greater") return col + " < (" + baseExpr + " - INTERVAL '" + nDays + " days')";
+    if (operator === "greater_or_equal") return col + " <= (" + baseExpr + " - INTERVAL '" + nDays + " days')";
+    if (operator === "less") return col + " > (" + baseExpr + " - INTERVAL '" + nDays + " days')";
+    if (operator === "less_or_equal") return col + " >= (" + baseExpr + " - INTERVAL '" + nDays + " days')";
+    if (operator === "equal") {
+      if (derivedSpec.source_type === "date") {
+        return col + " = (" + todayExpr + " - INTERVAL '" + nDays + " days')";
+      }
+      return "(" + col + " <= (" + baseExpr + " - INTERVAL '" + nDays + " days') AND " +
+        col + " > (" + baseExpr + " - INTERVAL '" + (nDays + 1) + " days'))";
+    }
+    if (operator === "not_equal") {
+      if (derivedSpec.source_type === "date") {
+        return col + " <> (" + todayExpr + " - INTERVAL '" + nDays + " days')";
+      }
+      return "(" + col + " > (" + baseExpr + " - INTERVAL '" + nDays + " days') OR " +
+        col + " <= (" + baseExpr + " - INTERVAL '" + (nDays + 1) + " days'))";
+    }
+    throw new Error("Unsupported operator for " + derivedSpec.name + ".");
+  }
+
   function ruleSql(rule, filtersById) {
-    if (!rule || !rule.id || !filtersById[rule.id]) throw new Error("Choose a valid profile attribute for every rule.");
-    var filter = filtersById[rule.id];
+    var ruleKey = rule && (rule.id || rule.field);
+    if (!rule || !ruleKey || !filtersById[ruleKey]) throw new Error("Choose a valid profile attribute for every rule.");
+    if (DERIVED_ATTRIBUTES[ruleKey]) {
+      return derivedRuleSql(rule, DERIVED_ATTRIBUTES[ruleKey]);
+    }
+    var filter = filtersById[ruleKey];
     var field = filter.field;
     var operator = rule.operator;
     var values;
@@ -236,16 +385,28 @@ window.C360 = window.C360 || {};
       } else {
         operators = ["equal", "not_equal", "contains", "begins_with", "ends_with", "is_empty", "is_not_empty", "is_null", "is_not_null", "in", "not_in"];
       }
+      var filterId = attribute.id || attribute.field;
       var filter = $.extend({}, typeInfo, {
-        id: attribute.field,
-        label: attribute.name || attribute.field,
+        id: filterId,
+        field: attribute.field,
+        label: attribute.name || filterId,
         data_type: attribute.data_type || "TEXT",
         value_separator: ",",
         operators: operators,
         optgroup: attribute.attribute_group
       });
-      var isDateField = String(attribute.data_type || "").trim().toUpperCase() === "DATE" ||
-        attribute.field === "last_activity_at";
+      if (DERIVED_ATTRIBUTES[filterId]) {
+        var dSpec = DERIVED_ATTRIBUTES[filterId];
+        filter.validation = $.extend({}, filter.validation, {
+          min: dSpec.min,
+          max: dSpec.max,
+          step: 1
+        });
+      }
+      var isDateField = filterId === attribute.field && (
+        String(attribute.data_type || "").trim().toUpperCase() === "DATE" ||
+        attribute.field === "last_activity_at"
+      );
       if (isDateField) {
         filter.type = "date";
         filter.input = "date";
@@ -254,7 +415,7 @@ window.C360 = window.C360 || {};
           format: "YYYY-MM-DD"
         });
       }
-      if (attribute.field === "status_code") {
+      if (filterId === "status_code") {
         filter.type = "integer";
         filter.input = "select";
         filter.values = { 1: "Active", 0: "Inactive" };
@@ -264,18 +425,147 @@ window.C360 = window.C360 || {};
     });
   }
 
+  var FIELD_TO_DERIVED_ID = {
+    date_of_birth: "age_years",
+    last_activity_at: "days_since_last_activity",
+    customer_since: "days_as_customer"
+  };
+
+  var INVERT_OPERATOR = {
+    less: "greater",
+    less_or_equal: "greater_or_equal",
+    greater: "less",
+    greater_or_equal: "less_or_equal",
+    equal: "equal",
+    not_equal: "not_equal"
+  };
+
+  function convertLeafRule(rule) {
+    if (!rule || typeof rule !== "object") return rule;
+    var rawId = String(rule.id || rule.field || "").trim();
+    var rawField = String(rule.field || rawId).trim();
+    if (DERIVED_ATTRIBUTES[rawId]) {
+      var dSpec = DERIVED_ATTRIBUTES[rawId];
+      var dVal = rule.value;
+      if (Array.isArray(dVal)) {
+        dVal = dVal.map(function (v) { return parseInt(v, 10); });
+      } else if (dVal !== null && typeof dVal !== "undefined" && String(dVal).trim() !== "") {
+        dVal = parseInt(dVal, 10);
+      }
+      return $.extend({}, rule, {
+        id: rawId,
+        field: dSpec.field,
+        type: "integer",
+        input: "number",
+        value: dVal
+      });
+    }
+    if (typeof rule.value === "string" && FIELD_TO_DERIVED_ID[rawField]) {
+      var m = $.trim(rule.value).match(/^[+-]\s*(\d+)\s+(days?|years?)$/i);
+      if (m) {
+        var derivedId = FIELD_TO_DERIVED_ID[rawField];
+        var spec = DERIVED_ATTRIBUTES[derivedId];
+        var amount = parseInt(m[1], 10);
+        var unit = m[2].toLowerCase();
+        var op = String(rule.operator || "equal").toLowerCase();
+        var invOp = INVERT_OPERATOR[op] || op;
+        if (derivedId === "age_years") {
+          var years = unit.indexOf("year") === 0 ? amount : Math.round(amount / 365.25);
+          if (invOp === "greater") invOp = "greater_or_equal";
+          else if (invOp === "less_or_equal") { invOp = "less"; years = Math.max(0, years - 1); }
+          return {
+            id: derivedId,
+            field: spec.field,
+            type: "integer",
+            input: "number",
+            operator: invOp,
+            value: years
+          };
+        }
+        var days = unit.indexOf("year") === 0 ? amount * 365 : amount;
+        return {
+          id: derivedId,
+          field: spec.field,
+          type: "integer",
+          input: "number",
+          operator: invOp,
+          value: days
+        };
+      }
+    }
+    var id = rule.id || rule.field;
+    var normalizedRule = $.extend({}, rule, { id: id, field: rule.field || id });
+    if (id === "audience_tags" && typeof normalizedRule.value === "string") {
+      normalizedRule.value = normalizedRule.value.split(",").map(function (v) { return $.trim(v); }).filter(Boolean);
+    }
+    return normalizedRule;
+  }
+
   function normalizeSegmentRules(rules) {
     if (!rules || typeof rules !== "object") return rules;
-    return $.extend({}, rules, {
-      rules: (rules.rules || []).map(function (rule) {
-        if (rule && rule.rules) return normalizeSegmentRules(rule);
-        var id = rule && (rule.id || rule.field);
-        var normalizedRule = $.extend({}, rule, { id: id });
-        if (id === "audience_tags" && typeof normalizedRule.value === "string") {
-          normalizedRule.value = normalizedRule.value.split(",").map(function (v) { return $.trim(v); }).filter(Boolean);
+    var condition = String(rules.condition || "AND").toUpperCase();
+    var converted = (rules.rules || []).map(function (rule) {
+      if (rule && rule.rules) return normalizeSegmentRules(rule);
+      return convertLeafRule(rule);
+    });
+    if (condition === "AND") {
+      var byDerived = {};
+      converted.forEach(function (item, idx) {
+        if (item && !item.rules && DERIVED_ATTRIBUTES[item.id]) {
+          if (!byDerived[item.id]) byDerived[item.id] = [];
+          byDerived[item.id].push({ idx: idx, rule: item });
         }
-        return normalizedRule;
-      })
+      });
+      var toRemove = {};
+      var replacements = {};
+      Object.keys(byDerived).forEach(function (dId) {
+        var pair = byDerived[dId];
+        if (pair.length !== 2) return;
+        var ops = {};
+        ops[pair[0].rule.operator] = pair[0].rule.value;
+        ops[pair[1].rule.operator] = pair[1].rule.value;
+        var low = null;
+        var high = null;
+        if (dId === "age_years") {
+          if (ops.greater_or_equal !== undefined && ops.less !== undefined) {
+            low = parseInt(ops.greater_or_equal, 10);
+            high = parseInt(ops.less, 10) - 1;
+          } else if (ops.greater_or_equal !== undefined && ops.less_or_equal !== undefined) {
+            low = parseInt(ops.greater_or_equal, 10);
+            high = parseInt(ops.less_or_equal, 10);
+          }
+        } else {
+          var lowOp = ops.greater_or_equal !== undefined ? "greater_or_equal" : (ops.greater !== undefined ? "greater" : null);
+          var highOp = ops.less_or_equal !== undefined ? "less_or_equal" : (ops.less !== undefined ? "less" : null);
+          if (lowOp && highOp) {
+            low = parseInt(ops[lowOp], 10);
+            high = parseInt(ops[highOp], 10);
+          }
+        }
+        if (low !== null && high !== null && !isNaN(low) && !isNaN(high) && low <= high) {
+          var spec = DERIVED_ATTRIBUTES[dId];
+          replacements[pair[0].idx] = {
+            id: dId,
+            field: spec.field,
+            type: "integer",
+            input: "number",
+            operator: "between",
+            value: [low, high]
+          };
+          toRemove[pair[1].idx] = true;
+        }
+      });
+      if (Object.keys(replacements).length) {
+        converted = converted.reduce(function (acc, item, idx) {
+          if (toRemove[idx]) return acc;
+          acc.push(replacements[idx] || item);
+          return acc;
+        }, []);
+      }
+    }
+    return $.extend({}, rules, {
+      condition: condition,
+      rules: converted
     });
   }
 
@@ -482,6 +772,7 @@ window.C360 = window.C360 || {};
         });
         if (!hasAudienceTagsAttr) {
           segmentAttributes.push({
+            id: "audience_tags",
             field: "audience_tags",
             name: "IAB Audience Tags",
             description: "Standardized IAB Audience Taxonomy tag_name array on cdp_master_profiles",
@@ -491,6 +782,15 @@ window.C360 = window.C360 || {};
             is_pii: false
           });
         }
+        Object.keys(DERIVED_ATTRIBUTES).forEach(function (derivedId) {
+          var dSpec = DERIVED_ATTRIBUTES[derivedId];
+          var exists = segmentAttributes.some(function (attr) {
+            return attr && (attr.id || attr.field) === derivedId;
+          });
+          if (!exists) {
+            segmentAttributes.push($.extend({}, dSpec));
+          }
+        });
         renderSegmentFormSelectedAudienceTags();
         renderSegmentFormAudienceTagOptions();
         $("#segment-form-attribute-count").text(segmentAttributes.length + " attributes available");
@@ -733,20 +1033,22 @@ window.C360 = window.C360 || {};
       return;
     }
     try {
-      var rules = $("#segment-query-builder").queryBuilder("getRules", { allow_invalid: true });
+      var rules = $("#segment-query-builder").queryBuilder("getRules", { allow_invalid: true, skip_empty: true });
       var hasRuleNodes = !!(rules && Array.isArray(rules.rules) && rules.rules.length);
       if (hasRuleNodes && !rules.valid) {
-        if (!segmentFormAudienceTags.length) {
-          throw new Error("Complete every audience rule before saving.");
-        }
-        rules = { condition: (rules && rules.condition) || "AND", rules: [] };
-        hasRuleNodes = false;
+        throw new Error("Complete every audience rule before saving.");
       }
       if (!hasRuleNodes && !segmentFormAudienceTags.length) {
         throw new Error("Add at least one audience rule or select IAB audience tags.");
       }
       var filtersById = {};
-      segmentAttributes.forEach(function (attribute) { filtersById[attribute.field] = attribute; });
+      segmentAttributes.forEach(function (attribute) {
+        var key = attribute.id || attribute.field;
+        filtersById[key] = attribute;
+        if (attribute.field && !filtersById[attribute.field]) {
+          filtersById[attribute.field] = attribute;
+        }
+      });
       var sqlRules = hasRuleNodes ? rulesSql(rules, filtersById) : "";
       if (segmentFormAudienceTags.length && !/\baudience_tags\b/i.test(sqlRules)) {
         var quotedTags = segmentFormAudienceTags.map(function (item) {

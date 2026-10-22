@@ -29,6 +29,7 @@ from core.database import SessionLocal
 from leo_customer360_dao.models.segmentation import CdpSegment
 from leo_customer360_dao.models.system import SysUser, SysUserInfo
 from core.repositories.metadata_repository import DEFAULT_TENANT_ID
+from leo_customer360_dao.schemas.segmentation import build_audience_tag_name, normalize_audience_tag_list
 from leo_customer360_dao.utils.security import hash_password
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,8 @@ def _load_segment_data() -> dict[str, list[dict[str, Any]]]:
         "TRAVEL_SEGMENTS",
         "EDUCATION_SEGMENTS",
         "REAL_ESTATE_SEGMENTS",
+        "BANKING_SEGMENTS",
+        "MEDIA_SEGMENTS",
     }
     if not required_groups.issubset(data) or any(not isinstance(data[group], list) for group in required_groups):
         raise ValueError("Default segment data has an invalid group structure")
@@ -70,6 +73,8 @@ ECOMMERCE_SEGMENTS = _SEGMENT_DATA["ECOMMERCE_SEGMENTS"]
 TRAVEL_SEGMENTS = _SEGMENT_DATA["TRAVEL_SEGMENTS"]
 EDUCATION_SEGMENTS = _SEGMENT_DATA["EDUCATION_SEGMENTS"]
 REAL_ESTATE_SEGMENTS = _SEGMENT_DATA["REAL_ESTATE_SEGMENTS"]
+BANKING_SEGMENTS = _SEGMENT_DATA["BANKING_SEGMENTS"]
+MEDIA_SEGMENTS = _SEGMENT_DATA["MEDIA_SEGMENTS"]
 
 
 def _with_domain(segments: Sequence[dict[str, Any]], domain: str) -> list[dict[str, Any]]:
@@ -84,14 +89,47 @@ DEFAULT_SEGMENTS: list[dict[str, Any]] = [
     *_with_domain(TRAVEL_SEGMENTS, "travel"),
     *_with_domain(EDUCATION_SEGMENTS, "education"),
     *_with_domain(REAL_ESTATE_SEGMENTS, "real_estate"),
+    *_with_domain(BANKING_SEGMENTS, "banking"),
+    *_with_domain(MEDIA_SEGMENTS, "media"),
 ]
 
 
-def _final_generated_sql(sql_rules: str) -> str:
+def _normalize_seed_audience_tags(raw_tags: Sequence[str] | None) -> list[str]:
+    """Normalize seed ``audience_tags`` to canonical IAB ``tag_name`` slugs."""
+    if not raw_tags:
+        return []
+    converted = [
+        build_audience_tag_name(tag.split("|")) if isinstance(tag, str) and "|" in tag else tag
+        for tag in raw_tags
+        if isinstance(tag, str) and tag.strip()
+    ]
+    return normalize_audience_tag_list(converted)
+
+
+def _final_generated_sql(
+    sql_rules: str,
+    tenant_id: uuid.UUID | None = None,
+    audience_tags: Sequence[str] | None = None,
+) -> str:
     """Build the tenant-scoped SQL persisted with each default segment."""
+    from core.repositories.segment_repository import SegmentRepository
+
+    normalized_tags = _normalize_seed_audience_tags(audience_tags)
+    normalized_sql = SegmentRepository.normalize_relative_intervals(sql_rules)
+    effective_rules = (
+        SegmentRepository.compose_sql_rules_with_audience_tags(normalized_sql, normalized_tags)
+        or normalized_sql
+    )
+    if tenant_id is not None:
+        return SegmentRepository.final_generated_sql(effective_rules, tenant_id, normalized_tags)
+    where_clause = (
+        effective_rules.strip()
+        if SegmentRepository._has_wrapping_parentheses(effective_rules)
+        else f"({effective_rules.strip()})"
+    )
     return (
         f"SELECT master_profile_id FROM {settings.db_schema}.cdp_master_profiles "
-        f"WHERE tenant_id = :tenant_id AND ({sql_rules})"
+        f"WHERE tenant_id = :tenant_id AND {where_clause}"
     )
 
 
@@ -130,20 +168,22 @@ def seed_default_segments_with_breakdown(
         if not missing_segments:
             continue
 
-        rows_to_insert = [
-            {
+        from core.repositories.segment_repository import SegmentRepository
+
+        rows_to_insert = []
+        for seg in missing_segments:
+            raw_payload = {
                 "tenant_id": tenant_id,
                 "domain": seg["domain"],
                 "segment_tag": seg["segment_tag"],
+                "audience_tags": _normalize_seed_audience_tags(seg.get("audience_tags")),
                 "segment_name": seg["segment_name"],
                 "description": seg["description"],
                 "json_rules": seg["json_rules"],
                 "sql_rules": seg["sql_rules"],
-                "final_generated_sql": _final_generated_sql(seg["sql_rules"]),
                 "processed_by": "human",
             }
-            for seg in missing_segments
-        ]
+            rows_to_insert.append(SegmentRepository.transform_create(raw_payload))
 
         try:
             result = db.execute(

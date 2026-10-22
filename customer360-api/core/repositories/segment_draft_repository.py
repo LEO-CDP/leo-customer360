@@ -110,7 +110,11 @@ def _model_rules(tree: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
     def walk(node: dict[str, Any]) -> dict[str, Any]:
         if "rules" in node:
             return {"condition": node["condition"], "rules": [walk(c) for c in node["rules"]]}
-        return {"field": node["field"], "operator": node["operator"], "value": node.get("value")}
+        return {
+            "field": node.get("id") or node.get("field"),
+            "operator": node["operator"],
+            "value": node.get("value"),
+        }
 
     return walk(tree)
 
@@ -182,7 +186,14 @@ class SegmentDraftRepository:
     @staticmethod
     def model_view(catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Per attribute: visible keys plus form hints. Expects :meth:`load_catalog` rows."""
-        return [{**{k: row.get(k) for k in _MODEL_VISIBLE_KEYS}, **form_hints(row)} for row in catalog]
+        return [
+            {
+                **{k: row.get(k) for k in _MODEL_VISIBLE_KEYS},
+                "field": row.get("id") or row.get("field"),
+                **(form_hints(row) or {}),
+            }
+            for row in catalog
+        ]
 
     # ----------------------------------------------------------------- draft
     def draft_from_description(
@@ -259,7 +270,7 @@ class SegmentDraftRepository:
         except AIProviderError as exc:
             raise SegmentDraftGenerationError(str(exc)) from exc
 
-        base = {"interpretation": generated.explanation, "domain": domain}
+        base: dict[str, Any] = {"interpretation": generated.explanation, "domain": domain}
 
         if not generated.json_rules.get("rules"):
             # Model declined; its explanation is the reason or the question.

@@ -42,9 +42,9 @@ class _ScalarResult:
 
 class SeedDefaultSegmentsTests(unittest.TestCase):
     def test_default_segments_have_valid_domains(self):
-        allowed_domains = {"all", "retail", "travel", "education", "real_estate"}
+        allowed_domains = {"all", "retail", "travel", "education", "real_estate", "banking", "media"}
 
-        self.assertGreaterEqual(len(DEFAULT_SEGMENTS), 25)
+        self.assertEqual(len(DEFAULT_SEGMENTS), 53)
         for segment in DEFAULT_SEGMENTS:
             self.assertIn("domain", segment)
             self.assertIn(segment["domain"], allowed_domains)
@@ -179,6 +179,36 @@ class SeedDefaultSegmentsTests(unittest.TestCase):
         self.assertIn("cdp_master_profiles", sql)
         self.assertIn("tenant_id = :tenant_id", sql)
         self.assertIn("churn_risk_tier IN ('high', 'critical')", sql)
+
+    def test_seed_uses_transform_create_for_sql_rules_and_final_generated_sql(self):
+        from core.repositories.segment_repository import SegmentRepository
+
+        tenant_id = uuid.uuid4()
+        age_seg = next(s for s in DEFAULT_SEGMENTS if s["segment_tag"] == "age_30_44")
+        seeded = SegmentRepository.transform_create(
+            {
+                "tenant_id": tenant_id,
+                "domain": age_seg["domain"],
+                "segment_tag": age_seg["segment_tag"],
+                "audience_tags": age_seg.get("audience_tags", []),
+                "segment_name": age_seg["segment_name"],
+                "description": age_seg["description"],
+                "json_rules": age_seg["json_rules"],
+                "sql_rules": age_seg["sql_rules"],
+                "processed_by": "human",
+            }
+        )
+        self.assertEqual(
+            seeded["audience_tags"],
+            [
+                "demographic/age-range/30-34",
+                "demographic/age-range/35-39",
+                "demographic/age-range/40-44",
+            ],
+        )
+        self.assertIn("audience_tags && ARRAY[", seeded["sql_rules"])
+        self.assertIn(f"WHERE tenant_id = '{tenant_id}'::uuid AND (", seeded["final_generated_sql"])
+        self.assertIn("audience_tags && ARRAY[", seeded["final_generated_sql"])
 
 
 class InitCoreDataTests(unittest.TestCase):

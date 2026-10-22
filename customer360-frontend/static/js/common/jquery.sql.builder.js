@@ -1096,9 +1096,15 @@ QueryBuilder.prototype.deleteGroup = function(group) {
 QueryBuilder.prototype.updateGroupCondition = function(group, previousCondition) {
     group.$el.find('>' + QueryBuilder.selectors.group_condition).each(function() {
         var $this = $(this);
-        $this.prop('checked', $this.val() === group.condition);
-        $this.parent().toggleClass('active bg-blue-600 text-white', $this.val() === group.condition);
-        $this.parent().toggleClass('bg-white text-gray-700', $this.val() !== group.condition);
+        var $label = $this.parent();
+        var selected = $this.val() === group.condition;
+        $this.prop('checked', selected);
+        $label
+            .toggleClass('active', selected)
+            .removeClass('border-blue-600 border-blue-300 bg-blue-600 text-white hover:bg-blue-700 hover:text-white bg-white text-slate-700 hover:bg-blue-50 hover:text-blue-900')
+            .addClass(selected
+                ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700 hover:text-white'
+                : 'border-blue-300 bg-white text-slate-700 hover:bg-blue-50 hover:text-blue-900');
     });
 
     /**
@@ -2747,7 +2753,7 @@ QueryBuilder.templates.group = ({ group_id, level, conditions, icons, settings, 
   <div class="rules-group-header flex flex-wrap justify-between items-center mb-3">
     <div class="inline-flex rounded-md shadow-sm group-conditions">
       ${conditions.map((condition, i) => `
-        <label class="cursor-pointer inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium border border-blue-600 bg-white text-blue-600 hover:bg-blue-50 transition-colors ${i === 0 ? 'rounded-l-md' : ''} ${i === conditions.length - 1 ? 'rounded-r-md' : ''} [&:not(:first-child)]:-ml-px">
+        <label class="cursor-pointer inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium border border-blue-300 bg-white text-slate-700 hover:bg-blue-50 hover:text-blue-900 focus-within:z-10 focus-within:ring-2 focus-within:ring-blue-500 transition-colors ${i === 0 ? 'rounded-l-md' : ''} ${i === conditions.length - 1 ? 'rounded-r-md' : ''} [&:not(:first-child)]:-ml-px">
           <input type="radio" class="sr-only" name="${group_id}_cond" value="${condition}"> ${translate("conditions", condition)}
         </label>
       `).join('\n')}

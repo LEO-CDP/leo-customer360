@@ -153,6 +153,11 @@ class SegmentRepository(DaoSegmentRepository):
             ]
             payload["audience_tags"] = audience_tags
         sql_rules = payload.get("sql_rules")
+        if not sql_rules and payload.get("json_rules"):
+            try:
+                sql_rules = cls.compile_json_rules_sql(payload["json_rules"])
+            except ValueError:
+                sql_rules = None
         if sql_rules:
             normalized = cls.normalize_relative_intervals(sql_rules)
             composed = cls.compose_sql_rules_with_audience_tags(normalized, audience_tags) or normalized
@@ -181,8 +186,15 @@ class SegmentRepository(DaoSegmentRepository):
             if "audience_tags" in payload and payload["audience_tags"] is not None
             else list(getattr(segment, "audience_tags", None) or [])
         )
-        if "sql_rules" in payload or "audience_tags" in payload:
+        if "sql_rules" in payload or "audience_tags" in payload or "json_rules" in payload:
             raw_sql = payload["sql_rules"] if "sql_rules" in payload else getattr(segment, "sql_rules", None)
+            if "sql_rules" not in payload and "json_rules" in payload and payload["json_rules"]:
+                try:
+                    compiled = cls.compile_json_rules_sql(payload["json_rules"])
+                    if compiled:
+                        raw_sql = compiled
+                except ValueError:
+                    pass
             if raw_sql:
                 normalized = cls.normalize_relative_intervals(raw_sql)
                 composed = cls.compose_sql_rules_with_audience_tags(normalized, effective_tags)

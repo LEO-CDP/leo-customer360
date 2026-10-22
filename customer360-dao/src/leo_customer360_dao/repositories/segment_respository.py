@@ -10,8 +10,9 @@ Uses the same synchronous SQLAlchemy Session as the rest of the API
 (see core/database.py).
 """
 
+import re
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import Boolean, Date, DateTime, Integer, Numeric, SmallInteger, Text, and_, func, or_, select, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -170,6 +171,324 @@ class SegmentRepository:
             recompute_segment_membership(self.session, segment)
         return segment
 
+    # ------------------------------------------------------------------
+    # Derived relative-date attributes & legacy rule conversion
+    # ------------------------------------------------------------------
+    DERIVED_ATTRIBUTES: dict[str, dict[str, Any]] = {
+        "age_years": {
+            "id": "age_years",
+            "field": "date_of_birth",
+            "name": "Age (years)",
+            "description": "Calculated from Date of Birth each time the segment is recomputed.",
+            "attribute_group": "DYNAMIC (RELATIVE TO TODAY)",
+            "data_type": "INTEGER",
+            "domain_scope": "all",
+            "is_pii": False,
+            "unit": "years",
+            "source_type": "date",
+            "min": 0,
+            "max": 120,
+        },
+        "days_since_last_activity": {
+            "id": "days_since_last_activity",
+            "field": "last_activity_at",
+            "name": "Days since last activity",
+            "description": "Number of days elapsed since Last Activity At, calculated dynamically.",
+            "attribute_group": "DYNAMIC (RELATIVE TO TODAY)",
+            "data_type": "INTEGER",
+            "domain_scope": "all",
+            "is_pii": False,
+            "unit": "days",
+            "source_type": "timestamp",
+            "min": 0,
+            "max": 36500,
+        },
+        "days_as_customer": {
+            "id": "days_as_customer",
+            "field": "customer_since",
+            "name": "Days as customer",
+            "description": "Number of days since Customer Since date, calculated dynamically.",
+            "attribute_group": "DYNAMIC (RELATIVE TO TODAY)",
+            "data_type": "INTEGER",
+            "domain_scope": "all",
+            "is_pii": False,
+            "unit": "days",
+            "source_type": "date",
+            "min": 0,
+            "max": 36500,
+        },
+    }
+
+    @classmethod
+    def compile_derived_rule_sql(
+        cls,
+        rule_id: str,
+        operator: str,
+        value: Any,
+        tz: str = "Asia/Ho_Chi_Minh",
+    ) -> str:
+        """Compile a derived relative-date rule into an index-friendly SQL predicate."""
+        spec = cls.DERIVED_ATTRIBUTES.get(rule_id)
+        if not spec:
+            raise ValueError(f"Unknown derived attribute: {rule_id}")
+
+        col = spec["field"]
+        safe_tz = re.sub(r"[^A-Za-z0-9_+/\-]", "", tz or "Asia/Ho_Chi_Minh") or "Asia/Ho_Chi_Minh"
+        today_expr = f"(now() AT TIME ZONE '{safe_tz}')::date"
+
+        if operator == "is_null":
+            return f"{col} IS NULL"
+        if operator == "is_not_null":
+            return f"{col} IS NOT NULL"
+
+        def _parse_int(v: Any) -> int:
+            if isinstance(v, bool):
+                raise ValueError(f"Invalid integer value for {rule_id}: {v!r}")
+            n = int(float(str(v).strip()))
+            if n < 0:
+                raise ValueError(f"Value for {rule_id} must be non-negative: {n}")
+            return n
+
+        if rule_id == "age_years":
+            if operator in ("in", "not_in"):
+                vals = value if isinstance(value, (list, tuple)) else [v.strip() for v in str(value or "").split(",")]
+                vals = [v for v in vals if v is not None and str(v).strip() != ""]
+                if not vals:
+                    raise ValueError(f"Operator {operator} requires at least one value for {rule_id}")
+                or_parts = [cls.compile_derived_rule_sql(rule_id, "equal", v, tz=tz) for v in vals]
+                return f"({' OR '.join(or_parts)})" if operator == "in" else f"NOT ({' OR '.join(or_parts)})"
+            if operator in ("between", "not_between"):
+                if not isinstance(value, (list, tuple)) or len(value) < 2:
+                    raise ValueError("Age 'between' requires two integer values.")
+                a, b = _parse_int(value[0]), _parse_int(value[1])
+                if a > b:
+                    a, b = b, a
+                if operator == "between":
+                    return (
+                        f"({col} <= ({today_expr} - INTERVAL '{a} years') "
+                        f"AND {col} > ({today_expr} - INTERVAL '{b + 1} years'))"
+                    )
+                return (
+                    f"({col} > ({today_expr} - INTERVAL '{a} years') "
+                    f"OR {col} <= ({today_expr} - INTERVAL '{b + 1} years'))"
+                )
+            n = _parse_int(value[0] if isinstance(value, (list, tuple)) else value)
+            if operator == "greater_or_equal":
+                return f"{col} <= ({today_expr} - INTERVAL '{n} years')"
+            if operator == "greater":
+                return f"{col} <= ({today_expr} - INTERVAL '{n + 1} years')"
+            if operator == "less":
+                return f"{col} > ({today_expr} - INTERVAL '{n} years')"
+            if operator == "less_or_equal":
+                return f"{col} > ({today_expr} - INTERVAL '{n + 1} years')"
+            if operator == "equal":
+                return (
+                    f"({col} <= ({today_expr} - INTERVAL '{n} years') "
+                    f"AND {col} > ({today_expr} - INTERVAL '{n + 1} years'))"
+                )
+            if operator == "not_equal":
+                return (
+                    f"({col} > ({today_expr} - INTERVAL '{n} years') "
+                    f"OR {col} <= ({today_expr} - INTERVAL '{n + 1} years'))"
+                )
+            raise ValueError(f"Unsupported operator {operator!r} for {rule_id}")
+
+        base_expr = "now()" if spec["source_type"] == "timestamp" else today_expr
+        if operator in ("in", "not_in"):
+            vals = value if isinstance(value, (list, tuple)) else [v.strip() for v in str(value or "").split(",")]
+            vals = [v for v in vals if v is not None and str(v).strip() != ""]
+            if not vals:
+                raise ValueError(f"Operator {operator} requires at least one value for {rule_id}")
+            if spec["source_type"] == "date":
+                date_exprs = [f"({today_expr} - INTERVAL '{_parse_int(v)} days')" for v in vals]
+                return f"{col} {'IN' if operator == 'in' else 'NOT IN'} ({', '.join(date_exprs)})"
+            or_parts = [cls.compile_derived_rule_sql(rule_id, "equal", v, tz=tz) for v in vals]
+            return f"({' OR '.join(or_parts)})" if operator == "in" else f"NOT ({' OR '.join(or_parts)})"
+        if operator in ("between", "not_between"):
+            if not isinstance(value, (list, tuple)) or len(value) < 2:
+                raise ValueError(f"{rule_id} 'between' requires two integer values.")
+            a, b = _parse_int(value[0]), _parse_int(value[1])
+            if a > b:
+                a, b = b, a
+            if operator == "between":
+                return (
+                    f"({col} <= ({base_expr} - INTERVAL '{a} days') "
+                    f"AND {col} >= ({base_expr} - INTERVAL '{b} days'))"
+                )
+            return (
+                f"({col} > ({base_expr} - INTERVAL '{a} days') "
+                f"OR {col} < ({base_expr} - INTERVAL '{b} days'))"
+            )
+
+        n = _parse_int(value[0] if isinstance(value, (list, tuple)) else value)
+        if operator == "greater":
+            return f"{col} < ({base_expr} - INTERVAL '{n} days')"
+        if operator == "greater_or_equal":
+            return f"{col} <= ({base_expr} - INTERVAL '{n} days')"
+        if operator == "less":
+            return f"{col} > ({base_expr} - INTERVAL '{n} days')"
+        if operator == "less_or_equal":
+            return f"{col} >= ({base_expr} - INTERVAL '{n} days')"
+        if operator == "equal":
+            if spec["source_type"] == "date":
+                return f"{col} = ({today_expr} - INTERVAL '{n} days')"
+            return (
+                f"({col} <= ({base_expr} - INTERVAL '{n} days') "
+                f"AND {col} > ({base_expr} - INTERVAL '{n + 1} days'))"
+            )
+        if operator == "not_equal":
+            if spec["source_type"] == "date":
+                return f"{col} <> ({today_expr} - INTERVAL '{n} days')"
+            return (
+                f"({col} > ({base_expr} - INTERVAL '{n} days') "
+                f"OR {col} <= ({base_expr} - INTERVAL '{n + 1} days'))"
+            )
+        raise ValueError(f"Unsupported operator {operator!r} for {rule_id}")
+
+    @classmethod
+    def compile_json_rules_sql(
+        cls,
+        json_rules: Optional[dict[str, Any]],
+        tz: str = "Asia/Ho_Chi_Minh",
+    ) -> Optional[str]:
+        """Compile a QueryBuilder ``json_rules`` tree into a SQL WHERE fragment."""
+        if not json_rules or not isinstance(json_rules, dict) or not json_rules.get("rules"):
+            return None
+
+        def _sql_quote(v: Any) -> str:
+            return "'" + str("" if v is None else v).replace("'", "''") + "'"
+
+        def _sql_scalar(v: Any, rule_type: Optional[str], field_name: str = "") -> str:
+            if isinstance(v, bool):
+                return "TRUE" if v else "FALSE"
+            if isinstance(v, (int, float)):
+                return str(v)
+            rtype = str(rule_type or "").lower()
+            if not rtype and field_name:
+                if field_name.startswith("CAST(") and " AS INTEGER)" in field_name:
+                    rtype = "integer"
+                elif field_name.startswith("CAST(") and " AS NUMERIC)" in field_name:
+                    rtype = "numeric"
+                elif field_name.startswith("CAST(") and " AS BOOLEAN)" in field_name:
+                    rtype = "boolean"
+                else:
+                    col = CdpMasterProfile.__table__.columns.get(field_name)
+                    if col is not None:
+                        if isinstance(col.type, Boolean):
+                            rtype = "boolean"
+                        elif isinstance(col.type, (SmallInteger, Integer)):
+                            rtype = "integer"
+                        elif isinstance(col.type, Numeric):
+                            rtype = "numeric"
+                        elif isinstance(col.type, JSONB):
+                            rtype = "jsonb"
+            if rtype == "boolean":
+                token = str(v).strip().lower()
+                return "TRUE" if token in ("true", "1", "yes") else "FALSE"
+            if rtype in ("integer", "smallint", "bigint", "int"):
+                return str(int(float(str(v).strip())))
+            if rtype in ("double", "number", "numeric", "decimal", "float", "real"):
+                return str(float(str(v).strip()))
+            if rtype in ("json", "jsonb"):
+                return _sql_quote(v) + ("::jsonb" if rtype == "jsonb" else "::json")
+            return _sql_quote(v)
+
+        def _compile_leaf(rule: dict[str, Any]) -> str:
+            rule_id = str(rule.get("id") or rule.get("field") or "").strip()
+            field = str(rule.get("field") or rule_id).strip()
+            operator = str(rule.get("operator") or "equal").strip().lower()
+            value = rule.get("value")
+
+            if rule_id in cls.DERIVED_ATTRIBUTES:
+                return cls.compile_derived_rule_sql(rule_id, operator, value, tz=tz)
+
+            if not field or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$|^CAST\(dp\.domain_attributes->>'[A-Za-z0-9_]+' AS [A-Z]+\)$|^dp\.domain_attributes->>'[A-Za-z0-9_]+'$", field):
+                raise ValueError(f"Unsupported field in json_rules: {field!r}")
+
+            if field == "audience_tags":
+                if operator in ("is_null", "is_empty"):
+                    return f"({field} IS NULL OR cardinality({field}) = 0)"
+                if operator in ("is_not_null", "is_not_empty"):
+                    return f"({field} IS NOT NULL AND cardinality({field}) > 0)"
+                vals = value if isinstance(value, (list, tuple)) else [value]
+                cleaned = [_sql_quote(str(x).strip()) for x in vals if x is not None and str(x).strip()]
+                if not cleaned:
+                    raise ValueError("audience_tags rule requires at least one tag")
+                arr_expr = f"ARRAY[{', '.join(cleaned)}]::text[]"
+                if operator == "in":
+                    return f"{field} && {arr_expr}"
+                if operator == "equal":
+                    return f"{field} @> {arr_expr}"
+                if operator in ("not_in", "not_equal"):
+                    return f"NOT (COALESCE({field}, ARRAY[]::text[]) && {arr_expr})"
+                raise ValueError(f"Unsupported audience_tags operator: {operator!r}")
+
+            if operator == "is_null":
+                return f"{field} IS NULL"
+            if operator == "is_not_null":
+                return f"{field} IS NOT NULL"
+            if operator == "is_empty":
+                return f"{field} = ''"
+            if operator == "is_not_empty":
+                return f"{field} <> ''"
+
+            rtype = rule.get("type")
+            if operator in ("in", "not_in"):
+                vals = value if isinstance(value, (list, tuple)) else [v.strip() for v in str(value or "").split(",")]
+                vals = [v for v in vals if v is not None and str(v).strip() != ""]
+                if not vals:
+                    raise ValueError(f"Operator {operator} requires at least one value")
+                joined = ", ".join(_sql_scalar(v, rtype, field) for v in vals)
+                return f"{field} {'IN' if operator == 'in' else 'NOT IN'} ({joined})"
+
+            if operator in ("between", "not_between"):
+                if not isinstance(value, (list, tuple)) or len(value) < 2:
+                    raise ValueError(f"Operator {operator} requires two values")
+                v0 = _sql_scalar(value[0], rtype, field)
+                v1 = _sql_scalar(value[1], rtype, field)
+                return f"{field} {'BETWEEN' if operator == 'between' else 'NOT BETWEEN'} {v0} AND {v1}"
+
+            scalar = value[0] if isinstance(value, (list, tuple)) and value else value
+            op_map = {
+                "equal": "=",
+                "not_equal": "<>",
+                "less": "<",
+                "less_or_equal": "<=",
+                "greater": ">",
+                "greater_or_equal": ">=",
+            }
+            if operator in op_map:
+                return f"{field} {op_map[operator]} {_sql_scalar(scalar, rtype, field)}"
+            if operator == "begins_with":
+                return f"{field} LIKE {_sql_quote(str(scalar) + '%')}"
+            if operator == "contains":
+                return f"{field} LIKE {_sql_quote('%' + str(scalar) + '%')}"
+            if operator == "ends_with":
+                return f"{field} LIKE {_sql_quote('%' + str(scalar))}"
+            raise ValueError(f"Unsupported operator {operator!r}")
+
+        def _compile_group(group: dict[str, Any], is_root: bool = False) -> str:
+            cond = str(group.get("condition") or "AND").upper()
+            if cond not in ("AND", "OR"):
+                cond = "AND"
+            parts: list[str] = []
+            for item in group.get("rules") or []:
+                if not isinstance(item, dict):
+                    continue
+                if "rules" in item:
+                    sub = _compile_group(item, is_root=False)
+                    if sub:
+                        parts.append(sub)
+                else:
+                    parts.append(_compile_leaf(item))
+            if not parts:
+                return ""
+            joined = f" {cond} ".join(parts)
+            return joined if is_root and len(parts) == 1 else f"({joined})"
+
+        compiled = _compile_group(json_rules, is_root=True)
+        return compiled or None
+
     def get_segmentable_attributes(self, domain: Optional[str] = None) -> list[dict]:
         """Return the catalog of attributes that are valid to reference in a
         segment's SQL rules (Audience Builder field picker).
@@ -239,11 +558,14 @@ class SegmentRepository:
             return attribute.master_profile_column or attribute.attribute_internal_code
 
         result = []
+        present_fields: set[str] = set()
         for attribute in attributes:
             data_type = _master_profile_data_type(attribute)
+            field_ref = _segmentable_field(attribute, data_type)
+            present_fields.add(field_ref)
             result.append(
                 {
-                    "field": _segmentable_field(attribute, data_type),
+                    "field": field_ref,
                     "name": attribute.name,
                     "description": attribute.description,
                     "attribute_group": attribute.attribute_group,
@@ -252,4 +574,18 @@ class SegmentRepository:
                     "is_pii": attribute.is_pii,
                 }
             )
+        for derived_id, spec in self.DERIVED_ATTRIBUTES.items():
+            if spec["field"] in present_fields:
+                result.append(
+                    {
+                        "id": derived_id,
+                        "field": spec["field"],
+                        "name": spec["name"],
+                        "description": spec["description"],
+                        "attribute_group": spec["attribute_group"],
+                        "data_type": spec["data_type"],
+                        "domain_scope": spec["domain_scope"],
+                        "is_pii": spec["is_pii"],
+                    }
+                )
         return result

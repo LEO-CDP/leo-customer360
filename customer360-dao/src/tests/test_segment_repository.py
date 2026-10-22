@@ -95,6 +95,7 @@ def test_get_segmentable_attributes_has_deterministic_ui_order():
     result = repository.get_segmentable_attributes()
 
     assert result[0]["field"] == "customer_since"
+    assert any(item.get("id") == "days_as_customer" and item["field"] == "customer_since" for item in result)
     sql, params = session.executed[0]
     order_by = sql[sql.index("ORDER BY ") :]
     assert "lower(" in order_by and "attribute_group" in order_by
@@ -102,6 +103,26 @@ def test_get_segmentable_attributes_has_deterministic_ui_order():
     assert "name" in order_by
     assert "attribute_internal_code" in order_by
     assert params is None
+
+
+def test_compile_derived_rules_and_json_rules_sql():
+    age_sql = SegmentRepository.compile_derived_rule_sql("age_years", "between", [30, 44])
+    assert age_sql == (
+        "(date_of_birth <= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 years') "
+        "AND date_of_birth > ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '45 years'))"
+    )
+    dormant_sql = SegmentRepository.compile_derived_rule_sql("days_since_last_activity", "greater", 90)
+    assert dormant_sql == "last_activity_at < (now() - INTERVAL '90 days')"
+    new_cust_sql = SegmentRepository.compile_derived_rule_sql("days_as_customer", "less_or_equal", 30)
+    assert new_cust_sql == "customer_since >= ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '30 days')"
+
+    tree = {
+        "condition": "AND",
+        "rules": [
+            {"id": "age_years", "field": "date_of_birth", "type": "integer", "input": "number", "operator": "between", "value": [30, 44]}
+        ],
+    }
+    assert SegmentRepository.compile_json_rules_sql(tree) == age_sql
 
 
 def test_get_segmentable_attributes_uses_master_column_type():
