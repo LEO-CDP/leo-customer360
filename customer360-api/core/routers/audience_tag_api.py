@@ -167,7 +167,7 @@ def seed_default_audience_taxonomy(
     taxonomy_version: str = Query(default="1.1", min_length=1),
     db: Session = Depends(get_db),
 ) -> AudienceTagImportResult:
-    """Upsert the bundled ``customer360-seeding/data-dictionary/audience_taxonomy1.1.tsv`` into ``cdp_audience_tags``."""
+    """Upsert the bundled ``core/all_base_data/audience_taxonomy1.1.tsv`` into ``cdp_audience_tags``."""
     try:
         result = AudienceTagRepository(db).import_from_tsv_file(taxonomy_version=taxonomy_version)
     except FileNotFoundError as exc:

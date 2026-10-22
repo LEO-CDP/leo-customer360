@@ -2,10 +2,9 @@
 
 """Startup-time seed/init data for the Customer 360 API.
 
-Currently seeds a small set of default segmentation tags (``cdp_segments``)
-for every tenant that doesn't have any yet, so a fresh install already has a
-usable Audience Builder starting point instead of an empty segment list. It
-also ensures the development root user has the canonical ``root`` RBAC role.
+Seeds default segmentation tags (``cdp_segments``) for every tenant that
+doesn't have any yet, upserts the bundled IAB audience taxonomy, and ensures
+the development root user has the canonical ``root`` RBAC role.
 
 Called once from ``app.py``'s startup eve-nt. Safe to call on every app
 startup: it's idempotent (skips tenants that already have >= 1 segment, and
@@ -297,6 +296,9 @@ def init_core_data() -> None:
         inserted = seed_default_segments(db)
         if inserted:
             logger.info("Seeded %d default cdp_segments row(s) across tenant(s).", inserted)
+        upserted = seed_default_audience_tags(db)
+        if upserted:
+            logger.info("Upserted %d default cdp_audience_tags row(s).", upserted)
         if seed_root_admin_user(db):
             logger.info("Seeded root admin sys_user '%s' for tenant %s.", settings.default_root_username, DEFAULT_TENANT_ID)
     except Exception:

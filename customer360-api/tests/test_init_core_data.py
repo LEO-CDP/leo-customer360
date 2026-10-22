@@ -193,9 +193,15 @@ class InitCoreDataTests(unittest.TestCase):
             ]
         )
 
-        with patch("core.init_core_data.SessionLocal", return_value=session):
+        with (
+            patch("core.init_core_data.SessionLocal", return_value=session),
+            patch("core.init_core_data.seed_default_segments", return_value=0),
+            patch("core.init_core_data.seed_default_audience_tags", return_value=1558) as seed_audience_tags,
+            patch("core.init_core_data.seed_root_admin_user", return_value=False),
+        ):
             init_core_data()
 
+        seed_audience_tags.assert_called_once_with(session)
         self.assertTrue(session.closed)
 
     def test_init_core_data_swallows_unexpected_seeding_errors(self):

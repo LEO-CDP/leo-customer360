@@ -14,9 +14,8 @@ from leo_customer360_dao.schemas.segmentation import AudienceTagCreate, build_au
 MAX_AUDIENCE_TAXONOMY_TSV_BYTES = 10 * 1024 * 1024
 MAX_AUDIENCE_TAXONOMY_TSV_ROWS = 20_000
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_AUDIENCE_TAXONOMY_TSV_PATH = (
-    _REPO_ROOT / "customer360-seeding" / "data-dictionary" / "audience_taxonomy1.1.tsv"
+    Path(__file__).resolve().parents[1] / "all_base_data" / "audience_taxonomy1.1.tsv"
 )
 
 _UNIQUE_ID_HEADERS = ("Unique ID", "unique_id", "Unique_ID")
