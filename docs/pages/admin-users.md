@@ -5,53 +5,51 @@ page: "/admin/users"
 
 # System users page
 
-This page lists the staff accounts that can sign in to this workspace and the active tenant roles assigned to them. It is opened from the Admin tab in the top navigation. Each row is one staff user; the Add/Edit modal manages profile data and role assignments.
+> **Vietnamese version:** [`admin-users-vi.md`](admin-users-vi.md)
+
+This page lists the staff accounts (`sys_user`) that can sign in to this workspace and the active tenant RBAC roles assigned to them. Open it from the **Admin** tab in the top navigation. Each row represents one staff user; the **Add/Edit System User** modal manages profile details and tenant role assignments.
 
 ## What you can do here
-- **Search**: "Search username, email, name…" filters the list as you type. Assigned role labels are also included in the search.
+- **Search**: "Search username, email, name…" filters the list as you type (including role labels, job titles, and departments).
 - **Filter by status**: All status, Active, Inactive.
-- **Add System User**: opens the create form, including the role selector.
-- **Read the table**: User (full name and username), Role, Email, Job Title, Department, Status and Last Login.
-- **Edit a user**: use the Edit action; rows do not open a detail page. Root users can manage every role, including `root`.
+- **Add System User**: opens the create form, including the multi-select role control.
+- **Read the table**: User (full name and username), Role, Email, Job Title, Department, Status, and Last Login.
+- **Edit a user**: use the **Edit** action on a row; rows do not open a detail page. Root users can manage every role, including `root`.
 
 ### The add/edit form
-- **Fields**: Username, Full Name, Email, Phone, Job Title, Department, Password, Confirm Password, Status and Assigned roles.
-- **Password**: required when creating a user (at least 8 characters, entered twice); it is not shown when editing.
-- **Status options**: Active, Inactive.
-- **Assigned roles**: a multi-select control that replaces the user's active tenant RBAC assignments. The API validates every selection and only a root user can assign the `root` role.
-- **Save**: Save User for a new user or Save Changes when editing; Cancel closes. Deactivate is available when editing. The Username cannot be changed after creation.
+- **Fields**: Username, Full Name, Email, Phone, Job Title, Department, Password, Confirm Password, Status, and Assigned roles.
+- **Password**: required when creating a user (at least 8 characters, entered twice); hidden when editing.
+- **Status options**: Active (`1`), Inactive (`0`).
+- **Assigned roles**: a multi-select control (`PUT /api/v1/users/{user_id}/roles`) that replaces the user's active tenant RBAC assignments. Only a `root` user can assign the `root` role.
+- **Save**: **Save User** for a new user or **Save Changes** when editing; **Cancel** closes. **Deactivate** is available when editing. The **Username** cannot be changed after creation.
 
 ## Available roles
-
-The selector contains these ten canonical roles:
 
 | Role | Purpose |
 |---|---|
 | `root` | Root / Super Admin; unrestricted platform administration and tenant RBAC control |
-| `admin` | Application administration, users, security policies, billing and global settings |
-| `operator` | Daily operations, monitoring, backups and service maintenance |
-| `developer` | Engineering access to development environments, APIs and deployments |
-| `auditor` | Read-only logs, histories and security evidence |
+| `admin` | Application administration, users, security policies, billing, and global settings |
+| `operator` | Daily operations, monitoring, backups, and service maintenance |
+| `developer` | Engineering access to development environments, APIs, and deployments |
+| `auditor` | Read-only logs, histories, and security evidence |
 | `partner` | Restricted access to shared partner data and dashboards |
-| `billing` | Billing / Accountant access to subscriptions, invoices and payments |
-| `editor` | Editor / Manager access to create, edit, publish and manage business content |
+| `billing` | Billing / Accountant access to subscriptions, invoices, and payments |
+| `editor` | Editor / Manager access to create, edit, publish, and manage business content |
 | `contributor` | Contributor / Author access to create and edit owned work |
-| `viewer` | Read-only dashboards, reports and data access |
+| `viewer` | Read-only dashboards, reports, and data access |
 
 ## Permission and session rules
 
-- System User Management requires a root or tenant-admin role.
-- `root` is the super-admin role and is the only role allowed to assign `root` to another user.
-- A root user cannot remove their own final `root` role from the UI or API.
-- Role changes affect newly issued development tokens. Sign out and sign in again after changing your own roles so the frontend and API receive the updated role claims.
-- Tenant isolation is enforced by the API; roles from another tenant are never returned or assignable.
+- System User Management requires a `root` or tenant-admin (`admin`) role.
+- `root` is the only role allowed to assign `root` to another user, and a `root` user cannot remove their own final `root` role.
+- Role changes affect newly issued tokens. Sign out and sign in again after changing your own roles.
+- Tenant isolation is enforced by the API and PostgreSQL RLS.
 
 ## Common questions
-- **How do I add a staff user?** Add System User, set a username and password, then save.
-- **How do I give someone a role?** Open Add System User or Edit, select one or more roles, then save. Root is required to assign the root role.
-- **How do I remove someone's access?** Open the user with Edit and press Deactivate, or remove their assigned roles.
-- **Why can't I change a username?** It is fixed once the user is created.
-- **Where do I see a user's role?** Use the Role column in the table or open Edit and read Assigned roles.
-- **Why does a user show No role assigned?** The user has no active role assignment visible in the current tenant.
-- **Where do I see when someone last signed in?** The Last Login column.
-- **Can I reset a password here?** No; the password is only set when creating a user.
+- **How do I add a staff user?** Select **Add System User**, set a username, password, and roles, then save.
+- **How do I give someone a role?** Open **Add System User** or **Edit**, select roles in **Assigned roles**, then save.
+- **How do I remove someone's access?** Open the user with **Edit** and select **Deactivate**, or remove their assigned roles.
+- **Why can't I change a username or reset a password?** Username is fixed after creation, and the password field is only shown when creating a user.
+- **Why does a user show No role assigned?** The user has no active role assignment in the current tenant.
+
+

@@ -9,7 +9,8 @@ It brings fragmented customer data into a unified, tenant-aware customer model a
 > **Collect → Resolve → Unify → Understand → Activate**
 
 - **Repository:** https://github.com/LEO-CDP/leo-customer360
-- **Documentation:** https://leo-cdp.github.io/leo-customer360/
+- **Documentation Site:** https://leo-cdp.github.io/leo-customer360/
+- **Repository Docs Hub:** [`docs/README.md`](docs/README.md) · **Vietnamese README:** [`README-vn.md`](README-vn.md)
 
 ---
 
@@ -25,38 +26,41 @@ The difficult problem is answering:
 
 LEO Customer 360 addresses the foundation of that problem through:
 
-- **Identity Resolution** — connect records belonging to the same real-world customer
-- **Golden Customer Records** — maintain a unified customer profile
-- **Identity Graph** — preserve relationships between identities, profiles, and business entities
-- **Behavioral Data** — ingest and aggregate customer events
-- **Segmentation** — create reusable customer audiences
-- **Analytics** — expose customer and operational metrics
-- **AI-ready Data** — provide structured customer context and vector-storage infrastructure for downstream ML/AI systems
-- **Activation** — support approval-checked email and Zalo campaign dispatch, plus a separate promotions API
+- **Identity Resolution** — connect records belonging to the same real-world customer using metadata-driven matching and survivorship rules
+- **Golden Customer Records** — maintain a unified, tenant-isolated customer profile (`cdp_master_profiles`) with domain extensions (`cdp_domain_profiles`)
+- **Persona Resolution** — compute versioned customer personas (`cdp_customer_personas`) and shared archetypes (`cdp_persona_archetypes`) with explainable feature breakdowns
+- **Identity Graph** — preserve relationships between raw identities, master profiles, and business entities
+- **Behavioral Data Lake** — ingest high-throughput events via Redis Streams into immutable S3/MinIO `.jsonl.gz` partitions without touching PostgreSQL on the hot path
+- **Segmentation & IAB Taxonomy** — build segments with visual QueryBuilder or natural-language AI drafts, and map standardized IAB Audience Taxonomy 1.1 tags
+- **Governed Campaign Activation & Ad Sync** — execute human-approved multi-step campaign workflows across Email, Zalo ZNS, SMS, Web Push, and hashed custom-audience exports to Meta Ads, Google Ads Customer Match, and TikTok Ads
 
 ---
 
 # Architecture
 
-LEO Customer 360 follows a modular architecture built around PostgreSQL, object storage, and independently deployable application services.
+LEO Customer 360 follows a modular architecture built around PostgreSQL 16, Redis, S3-compatible object storage, and eight independently deployable `customer360-*` components.
 
 ```text
-Sources ── behavioral events ──> customer360-event-api ──> Redis Streams
-                                                              │
-                                                              ▼
-                                                      S3-compatible storage
-                                                              │
-                                                              ▼
-                                                    Dagster analytics jobs
-
-Sources ── profiles / CRM data ──> PostgreSQL <──> identity resolution
-                                        │
-                                        ├──> Customer 360 API and admin UI
-                                        ├──> segmentation and analytics
-                                        └──> campaign and promotions services
+Web / Mobile SDK / Webhooks ──> customer360-event-api (:8010) ──> Redis Streams
+                                                                       │
+                                                                       ▼
+                                                            S3 / MinIO (.jsonl.gz)
+                                                                       │
+                                                                       ▼
+Sources / CRM / S3 Sync ──────> PostgreSQL 16 <──> customer360-backend (Dagster)
+                                (customer360)      ├── analytics (S3 -> staging)
+                                      │            ├── identity_resolution (CIR + personas)
+                                      │            ├── segmentation (SQL rules + IAB tags)
+                                      │            ├── data_synch (Meta/Google/TikTok Ads)
+                                      │            ├── campaign_activation (FlowEngine)
+                                      │            ├── email_engine & notification_engine (ZNS)
+                                      │            └── ai_agents_runners
+                                      ├──> customer360-api (:8008, REST + /mcp) <──> customer360-agent (:8009)
+                                      ├──> customer360-frontend (:8890, Admin UI)
+                                      └──> customer360-promotions (:9009, leo_ads schema)
 ```
 
-PostgreSQL 16 stores operational customer, identity, CRM, and application data. The tracking API validates event batches, durably enqueues them in Redis Streams, and writes immutable event objects to S3-compatible storage (MinIO in local development); it does not write tracking events directly to PostgreSQL. Dagster jobs process backend workflows, while FastAPI services expose APIs and the browser-based admin UI.
+PostgreSQL 16 stores operational customer, identity, persona, segmentation, CRM, workflow, and application data protected by Row-Level Security (RLS). [`customer360-event-api`](customer360-event-api/README.md) validates event batches, durably enqueues them in Redis Streams, and writes immutable `.jsonl.gz` objects to S3-compatible storage (MinIO in local development); it has zero database dependencies on the request path. Dagster orchestrates backend data pipelines in [`customer360-backend`](customer360-backend/README.md), while FastAPI services expose REST/MCP contracts and the browser-based Admin UI.
 
 ---
 
@@ -64,22 +68,23 @@ PostgreSQL 16 stores operational customer, identity, CRM, and application data. 
 
 | Capability | Description | Status |
 |---|---|---|
-| **Customer 360** | Unified master profiles and customer data | ✅ Available |
-| **Identity Resolution** | Metadata-driven profile matching and consolidation | ✅ Available |
-| **Identity Graph** | Relationships between identities and customer entities | ✅ Available |
-| **Event Tracking** | Validated event ingestion, Redis queueing, and S3-compatible storage | ✅ Available |
-| **Segmentation** | Segment membership computation and synchronization | ✅ Available |
-| **Analytics** | Tracking-log aggregation and operational reporting | ✅ Available |
-| **REST / MCP APIs** | Customer, identity, CRM, reporting, administration, and MCP interfaces | ✅ Available |
-| **Multi-tenancy** | Tenant-aware API access and authorization | ✅ Available |
-| **Authentication** | Local development bearer-token login and Keycloak SSO mode | ✅ Available |
-| **Admin UI** | Browser-based Customer 360 administration | ✅ Available |
-| **Promotions API** | Tenant-scoped placements, sponsored content, and recommendations | ✅ Available |
-| **Campaign Activation** | Approval-checked email and Zalo campaign dispatch workflows | ✅ Available |
-| **AI Campaign Planning** | Separate service that proposes email and Zalo campaign drafts | ✅ Initial service |
-| **Vector Search** | pgvector schema and database support; customer search workflows are not included | 🧩 Infrastructure |
-| **Customer Scoring** | Model registry and data structures; production scoring pipelines are not included | 🧩 Infrastructure |
-| **Personalization** | Broader production personalization workflows | 🚧 Roadmap |
+| **Customer 360** | Unified master profiles (`cdp_master_profiles`), domain profiles, and 360° timelines | ✅ Available |
+| **Identity Resolution (CIR)** | Metadata-driven exact/fuzzy matching, survivorship rules, merge history, and S3 event projections | ✅ Available |
+| **Persona Resolution Engine** | Explainable persona scoring, versioned assignments, and lookalike centroid archetypes | ✅ Available |
+| **Identity Graph** | Relationships between raw identities, master profiles, and customer entities | ✅ Available |
+| **Event Tracking & Web SDK** | Cross-domain Web SDK (`leo.proxy.js` + `leo.observer.js`), Redis Streams handoff, and S3/MinIO storage | ✅ Available |
+| **Segmentation & IAB Tags** | Visual QueryBuilder, AI natural-language rule drafting, scheduled recompute, and IAB Audience Taxonomy 1.1 mapping | ✅ Available |
+| **Analytics** | S3 tracking-log aggregation, raw-profile staging extraction, and device/channel reporting | ✅ Available |
+| **REST & MCP APIs** | Authenticated Customer 360 REST endpoints and tenant-scoped Model Context Protocol (`/mcp`) tools | ✅ Available |
+| **Multi-tenancy & Security** | End-to-end `tenant_id` isolation enforced by API guards and PostgreSQL Row-Level Security (RLS) | ✅ Available |
+| **Authentication & RBAC** | Local bearer-token login, Keycloak SSO integration, and role-based access control | ✅ Available |
+| **Admin UI** | Browser-based Customer 360 administration, visual workflow editor, and built-in docs assistant | ✅ Available |
+| **Campaign Workflow Activation** | Human-approved (`Draft → InReview → Approved`) multi-step workflow execution across Email, Zalo ZNS, SMS, and Push | ✅ Available |
+| **Ad Audience Synchronization** | Privacy-safe (SHA-256 hashed) segment exports to Meta Custom Audiences, Google Customer Match, and TikTok Ads | ✅ Available |
+| **AI Campaign Planning** | Dedicated `customer360-agent` service (LiteLLM + versioned prompt store) for Email & Zalo ZNS campaign drafts | ✅ Available |
+| **Promotions API** | Tenant-scoped placements, creatives, sponsored content, and recommendations (`leo_ads` schema) | ✅ Available |
+| **Vector Search & Embeddings** | `pgvector` schema for content and persona archetypes (`Vector(768)`) | ✅ Available |
+| **Customer Scoring Catalog** | Feature/agent catalog (`cdp_ai_feature_catalog`, `cdp_ai_agents`) and score columns; automated ML training pipelines are roadmap items | 🧩 Foundation |
 
 ---
 
@@ -373,23 +378,31 @@ When `SSO_LOGIN=true`, use the Keycloak sign-in flow rather than the development
 
 # Documentation
 
-The complete documentation is available at:
+The complete documentation is available online and inside this repository:
 
-**https://leo-cdp.github.io/leo-customer360/**
+- **Online Documentation Site:** https://leo-cdp.github.io/leo-customer360/
+- **Repository Documentation Index:** [`docs/README.md`](docs/README.md)
+- **Vietnamese Overview:** [`README-vn.md`](README-vn.md)
 
-Recommended starting points:
+### Component Guides
 
-- Architecture
-- Customer 360 data model
-- Identity Resolution
-- API documentation
-- Event Tracking API
-- Dagster backend
-- Docker Compose
-- Kubernetes deployment
-- Frontend administration
-- Database schema
-- Testing and troubleshooting
+- [`customer360-database/README.md`](customer360-database/README.md) — PostgreSQL 16 schema, initialization order, migrations, and [Full Schema Diagram](customer360-database/full-schema-diagram.md)
+- [`customer360-dao/README.md`](customer360-dao/README.md) — Shared models, schemas, tenant-aware repositories, RLS helpers, and `FlowEngine`
+- [`customer360-event-api/README.md`](customer360-event-api/README.md) — Event envelope, Redis Streams, S3/MinIO storage, Web SDK, and [UAT Performance Report](customer360-event-api/tests/reports/PERF_REPORT.md)
+- [`customer360-backend/README.md`](customer360-backend/README.md) — Dagster workspace, bounded batch controls, Redis leases, and 8 code locations
+- [`customer360-api/README.md`](customer360-api/README.md) — REST & MCP surface, authentication, tenant isolation, and caching
+- [`customer360-agent/README.md`](customer360-agent/README.md) — AI campaign planning service, LiteLLM provider config, and versioned prompts
+- [`customer360-promotions/README.md`](customer360-promotions/README.md) — Ad placements, creatives, sponsored content, and recommendations
+- [`customer360-frontend/README.md`](customer360-frontend/README.md) — Browser admin UI, workflow editor, and session handling
+- [`deployments/README.md`](deployments/README.md) & [`k8s/README.md`](k8s/README.md) — VM, Terraform, reverse proxy, and Kubernetes deployment runbooks
+
+### Topic Guides in `docs/`
+
+- [System Architecture & Technical Documentation](docs/architecture/TECHNICAL-DOCUMENTATION.md)
+- [Data Source Types (Web SDK, Connectors, Webhooks, S3 Batch, Mobile SDK)](docs/data-sources/data-source-types.md)
+- [Customer Identity Resolution Readiness & Slides](docs/identity-resolution/CIR-improvement.md)
+- [Marketing Workflow & Governance Specification](docs/marketing/MARKETING-WORKFLOW.md)
+- [Docker Compose & Operations Guide](docs/operations/DOCKER-COMPOSE-GUIDE.md)
 
 ---
 
@@ -399,46 +412,41 @@ LEO Customer 360 is evolving toward a broader AI-first Customer Data Platform.
 
 ## Foundation
 
-- [x] Customer 360 golden records
-- [x] Identity Resolution
-- [x] Identity graph
-- [x] Tenant-aware API
-- [x] Event ingestion
-- [x] Segmentation
-- [x] Analytics infrastructure
-- [x] Admin UI
+- [x] Customer 360 golden records (`cdp_master_profiles` & `cdp_domain_profiles`)
+- [x] Metadata-driven Identity Resolution & merge history
+- [x] Explainable Persona Resolution Engine (`cdp_persona_archetypes` & `cdp_customer_personas`)
+- [x] Identity graph & profile links
+- [x] Tenant-aware REST & MCP APIs with PostgreSQL RLS
+- [x] High-throughput Event Ingestion (Redis Streams → S3/MinIO `.jsonl.gz`)
+- [x] Segmentation with AI natural-language drafting & IAB Audience Taxonomy 1.1
+- [x] S3 Event Lake analytics & per-profile event projections
+- [x] Admin UI & visual workflow builder
 
 ## Intelligence
 
-- [ ] Production scoring pipelines
-- [ ] CLV modeling
-- [ ] Churn prediction
-- [ ] Lead scoring
-- [ ] Propensity modeling
-- [ ] Real-time customer state
-- [ ] Advanced customer journey intelligence
+- [ ] Automated ML model training & inference pipelines
+- [ ] Production CLV, churn, and lead-scoring runners
+- [ ] Real-time streaming customer state & feature store
+- [ ] Advanced multi-touch attribution & journey analytics
 
 ## AI
 
-- [x] AI-assisted email and Zalo campaign draft planning
-- [ ] AI customer analyst
-- [ ] Natural-language Customer 360 search
-- [ ] Text-to-SQL analytics
-- [ ] Semantic customer discovery
-- [ ] Customer embeddings
-- [ ] AI-powered segmentation
-- [ ] AI recommendation engine
-- [ ] End-to-end autonomous marketing workflows
+- [x] AI-assisted Email and Zalo ZNS campaign draft planning (`customer360-agent`)
+- [x] AI-assisted natural-language segment rule builder
+- [x] Built-in documentation RAG assistant
+- [ ] Conversational AI customer analyst & text-to-SQL analytics
+- [ ] Automated customer embedding generation & lookalike discovery
+- [ ] Autonomous closed-loop optimization agents
 
 ## Activation
 
-- [x] Approval-checked email and Zalo campaign dispatch
-- [ ] Cross-channel campaign orchestration
-- [ ] Marketing automation
-- [ ] Personalization engine
-- [ ] Next-best-action
-- [ ] Multi-channel activation
-- [ ] Experimentation and optimization
+- [x] Approval-checked campaign workflow execution (`campaign_activation`)
+- [x] Email delivery with signed open/click tracking (`email_engine`)
+- [x] Zalo OA / ZNS delivery & S3 opt-out projection (`notification_engine`)
+- [x] SHA-256 hashed audience sync to Meta, Google Ads, and TikTok (`data_synch`)
+- [x] Promotions & ad-serving API (`customer360-promotions`)
+- [ ] Real-time event-triggered journey enrollment & durable wait timers
+- [ ] Automated A/B/n experimentation and bandit optimization
 
 ---
 
