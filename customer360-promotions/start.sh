@@ -355,6 +355,36 @@ init_database_schema() {
 }
 
 ###############################################################################
+# Apply ad personalisation schema additions
+#
+# Unlike db-schema-init.sql (run only when the leo_ads schema is missing), this
+# script is idempotent and runs on every seeding run, so databases that already
+# exist pick up the personalisation tables, columns and partitions too.
+###############################################################################
+
+apply_personalization_schema() {
+    local personalization_sql="$SQL_DIR/personalization-schema.sql"
+
+    if [ ! -f "$personalization_sql" ]; then
+        log "${RED}[SEED] Personalisation schema script not found${NC} | ${personalization_sql}"
+        return 1
+    fi
+
+    log "[SEED] Applying personalisation schema (idempotent)"
+    log "[SEED] SQL | ${personalization_sql}"
+
+    if ! run_sql_file "$personalization_sql"; then
+        log "${RED}[SEED] Failed to apply personalisation schema${NC}"
+        log "${RED}[SEED] Check log${NC} | ${LOG_FILE}"
+        return 1
+    fi
+
+    log "${GREEN}[SEED] Personalisation schema applied successfully${NC}"
+
+    return 0
+}
+
+###############################################################################
 # Seed demo data
 ###############################################################################
 
@@ -415,6 +445,14 @@ seed_database() {
         fi
     else
         log "${GREEN}[SEED] leo_ads schema already exists${NC} | skipping schema initialization"
+    fi
+
+    ###########################################################################
+    # Step 1b: Apply personalisation schema additions (idempotent, every run)
+    ###########################################################################
+
+    if ! apply_personalization_schema; then
+        return 1
     fi
 
     ###########################################################################

@@ -55,6 +55,28 @@ VALUES (
 )
 ON CONFLICT (tenant_key) DO NOTHING;
 
+-- Link the demo ad tenant to the platform's default tenant
+-- (customer360.sys_tenant, created by init-core-database.sql and used as
+-- DEMO_TENANT_ID by the seeding scripts) so the admin API can resolve it from a
+-- caller's token. Guarded so this file still runs on a database that has not
+-- had personalization-schema.sql applied yet.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'leo_ads'
+          AND table_name = 'tenant'
+          AND column_name = 'customer360_tenant_id'
+    ) THEN
+        UPDATE leo_ads.tenant
+        SET customer360_tenant_id = '11111111-1111-1111-1111-111111111111'::uuid
+        WHERE tenant_key = 'demo'
+          AND customer360_tenant_id IS NULL;
+    END IF;
+END
+$$;
+
 
 -- ============================================================================
 -- 2. ADVERTISERS
@@ -2323,6 +2345,131 @@ ON CONFLICT DO NOTHING;
 
 
 -- ============================================================================
+-- 14B. PERSONALISATION DEMO CATALOGUE (specs/003-ad-personalization-engine)
+--
+-- Two advertisers (A and B), six campaigns (awareness, traffic and conversions
+-- for each) and one eligible ad per campaign on the `homepage_top` placement,
+-- plus five ads that are deliberately NOT servable so the quickstart can show
+-- eligibility at work:
+--
+--   pers_x_paused              ad status is paused
+--   pers_x_expired_window      placement validity window already closed (set in 15B)
+--   pers_x_campaign_ended      its campaign's end date has passed
+--   pers_x_targeting_excluded  targeting rule allows only the US; a request that
+--                              reports another country is excluded (an unknown
+--                              country is NOT excluded)
+--   pers_x_frequency_cap       frequency cap of 1: served once, then withheld
+--
+-- Every key is prefixed `pers` so the block is easy to find and remove. Safe to
+-- run repeatedly.
+-- ============================================================================
+
+INSERT INTO leo_ads.placement (
+    tenant_id, placement_key, name, status,
+    min_width_px, max_width_px, min_height_px, max_height_px, responsive, metadata
+)
+SELECT
+    t.tenant_id, 'homepage_top', 'Homepage Top (personalisation demo)', 'active',
+    300, 300, 250, 250, false, '{"position":"homepage_top","demo":"personalisation"}'::jsonb
+FROM leo_ads.tenant t
+WHERE t.tenant_key = 'demo'
+ON CONFLICT (tenant_id, placement_key) DO NOTHING;
+
+INSERT INTO leo_ads.advertiser (tenant_id, advertiser_key, name, title, description, metadata)
+SELECT t.tenant_id, x.advertiser_key, x.name, x.name, x.description, '{"demo":"personalisation"}'::jsonb
+FROM leo_ads.tenant t
+CROSS JOIN (
+    VALUES
+    ('pers-adv-a', 'Demo Advertiser A', 'Outdoor gear (personalisation demo)'),
+    ('pers-adv-b', 'Demo Advertiser B', 'Travel (personalisation demo)')
+) AS x(advertiser_key, name, description)
+WHERE t.tenant_key = 'demo'
+ON CONFLICT (tenant_id, advertiser_key) DO NOTHING;
+
+INSERT INTO leo_ads.campaign (
+    tenant_id, advertiser_id, campaign_key, name, objective, status, starts_at, ends_at, metadata
+)
+SELECT
+    t.tenant_id, a.advertiser_id, x.campaign_key, x.name, x.objective, x.status,
+    now() - x.started_ago, now() - x.ended_ago, '{"demo":"personalisation"}'::jsonb
+FROM leo_ads.tenant t
+CROSS JOIN (
+    VALUES
+    ('pers-cmp-awareness-a',  'A awareness',        'awareness',   'active', 'pers-adv-a', interval '1 day',  interval '-30 days'),
+    ('pers-cmp-traffic-a',    'A traffic',          'traffic',     'active', 'pers-adv-a', interval '1 day',  interval '-30 days'),
+    ('pers-cmp-conversions-a','A conversions',      'conversions', 'active', 'pers-adv-a', interval '1 day',  interval '-30 days'),
+    ('pers-cmp-awareness-b',  'B awareness',        'awareness',   'active', 'pers-adv-b', interval '1 day',  interval '-30 days'),
+    ('pers-cmp-traffic-b',    'B traffic',          'traffic',     'active', 'pers-adv-b', interval '1 day',  interval '-30 days'),
+    ('pers-cmp-conversions-b','B conversions',      'conversions', 'active', 'pers-adv-b', interval '1 day',  interval '-30 days'),
+    -- Ended ten days ago (starts_at must not be after ends_at).
+    ('pers-cmp-ended',        'A ended campaign',   'awareness',   'active', 'pers-adv-a', interval '20 days', interval '1 day')
+) AS x(campaign_key, name, objective, status, advertiser_key, started_ago, ended_ago)
+JOIN leo_ads.advertiser a ON a.tenant_id = t.tenant_id AND a.advertiser_key = x.advertiser_key
+WHERE t.tenant_key = 'demo'
+ON CONFLICT (tenant_id, campaign_key) DO NOTHING;
+
+INSERT INTO leo_ads.creative (
+    tenant_id, advertiser_id, creative_key, ad_type, format_code, headline, cta, image_url
+)
+SELECT
+    t.tenant_id, a.advertiser_id, x.creative_key, x.ad_type, x.format_code, x.headline, 'Learn more',
+    'https://placehold.co/300x250?text=' || x.creative_key
+FROM leo_ads.tenant t
+CROSS JOIN (
+    VALUES
+    ('pers-cr-a-banner', 'display', 'single_banner', 'Outdoor gear, up to 30% off', 'pers-adv-a'),
+    ('pers-cr-a-native', 'native',  'native_card',   'Plan your next hike',        'pers-adv-a'),
+    ('pers-cr-b-banner', 'display', 'single_banner', 'Flights from Melbourne',     'pers-adv-b'),
+    ('pers-cr-b-native', 'native',  'native_card',   'Weekend city breaks',        'pers-adv-b')
+) AS x(creative_key, ad_type, format_code, headline, advertiser_key)
+JOIN leo_ads.advertiser a ON a.tenant_id = t.tenant_id AND a.advertiser_key = x.advertiser_key
+WHERE t.tenant_key = 'demo'
+ON CONFLICT (tenant_id, creative_key, version_no) DO NOTHING;
+
+INSERT INTO leo_ads.ad (
+    tenant_id, ad_key, campaign_id, creative_id, placement_id,
+    status, score_weight, frequency_cap, metadata
+)
+SELECT
+    t.tenant_id, x.ad_key, c.campaign_id, cr.creative_id, p.placement_id,
+    x.status, 1.0, x.frequency_cap, x.metadata::jsonb
+FROM leo_ads.tenant t
+JOIN (
+    VALUES
+    -- Eligible: one per campaign. Tags feed visitor affinity.
+    ('pers_a_awareness_banner',   'pers-cmp-awareness-a',  'pers-cr-a-banner', 'active', NULL::int, '{"tags":["outdoor","brand"]}'),
+    ('pers_a_traffic_native',     'pers-cmp-traffic-a',    'pers-cr-a-native', 'active', NULL::int, '{"tags":["outdoor","guides"]}'),
+    ('pers_a_conversions_banner', 'pers-cmp-conversions-a','pers-cr-a-banner', 'active', NULL::int, '{"tags":["outdoor","deals"]}'),
+    ('pers_b_awareness_native',   'pers-cmp-awareness-b',  'pers-cr-b-native', 'active', NULL::int, '{"tags":["travel","brand"]}'),
+    ('pers_b_traffic_banner',     'pers-cmp-traffic-b',    'pers-cr-b-banner', 'active', NULL::int, '{"tags":["travel","guides"]}'),
+    ('pers_b_conversions_native', 'pers-cmp-conversions-b','pers-cr-b-native', 'active', NULL::int, '{"tags":["travel","deals"]}'),
+    -- Deliberately ineligible (see the header comment).
+    ('pers_x_paused',             'pers-cmp-awareness-a',  'pers-cr-a-banner', 'paused', NULL::int, '{"tags":["outdoor"]}'),
+    ('pers_x_expired_window',     'pers-cmp-awareness-a',  'pers-cr-a-banner', 'active', NULL::int, '{"tags":["outdoor"]}'),
+    ('pers_x_campaign_ended',     'pers-cmp-ended',        'pers-cr-a-banner', 'active', NULL::int, '{"tags":["outdoor"]}'),
+    ('pers_x_targeting_excluded', 'pers-cmp-awareness-b',  'pers-cr-b-banner', 'active', NULL::int, '{"tags":["travel"]}'),
+    ('pers_x_frequency_cap',      'pers-cmp-traffic-b',    'pers-cr-b-banner', 'active', 1,         '{"tags":["travel"]}')
+) AS x(ad_key, campaign_key, creative_key, status, frequency_cap, metadata) ON TRUE
+JOIN leo_ads.campaign c  ON c.tenant_id = t.tenant_id AND c.campaign_key = x.campaign_key
+JOIN leo_ads.creative cr ON cr.tenant_id = t.tenant_id AND cr.creative_key = x.creative_key
+JOIN leo_ads.placement p ON p.tenant_id = t.tenant_id AND p.placement_key = 'homepage_top'
+WHERE t.tenant_key = 'demo'
+ON CONFLICT (tenant_id, ad_key) DO NOTHING;
+
+-- The targeting rule has no natural key, so guard the insert.
+INSERT INTO leo_ads.targeting_rule (tenant_id, ad_id, countries, priority)
+SELECT a.tenant_id, a.ad_id, ARRAY['US'], 0
+FROM leo_ads.ad a
+JOIN leo_ads.tenant t ON t.tenant_id = a.tenant_id
+WHERE t.tenant_key = 'demo'
+  AND a.ad_key = 'pers_x_targeting_excluded'
+  AND NOT EXISTS (
+      SELECT 1 FROM leo_ads.targeting_rule r
+      WHERE r.ad_id = a.ad_id AND r.countries = ARRAY['US']
+  );
+
+
+-- ============================================================================
 -- 15. PRECOMPUTED SERVING INDEX
 --
 -- This table represents what would normally be materialized into Redis.
@@ -2356,6 +2503,23 @@ SET
     valid_from = EXCLUDED.valid_from,
     valid_to = EXCLUDED.valid_to,
     is_active = EXCLUDED.is_active;
+
+
+-- ============================================================================
+-- 15B. PERSONALISATION DEMO: CLOSE ONE VALIDITY WINDOW
+--
+-- Section 15 resets every window to "now to +30 days" on each run, so the ad
+-- that must have an already-expired window is adjusted here, after it.
+-- ============================================================================
+
+UPDATE leo_ads.placement_ad pa
+SET valid_from = now() - interval '2 days',
+    valid_to   = now() - interval '1 hour'
+FROM leo_ads.ad a
+JOIN leo_ads.tenant t ON t.tenant_id = a.tenant_id
+WHERE pa.ad_id = a.ad_id
+  AND t.tenant_key = 'demo'
+  AND a.ad_key = 'pers_x_expired_window';
 
 
 -- ============================================================================

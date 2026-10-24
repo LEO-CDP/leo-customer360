@@ -18,6 +18,7 @@ from leo_customer360_dao.config import settings
 from core.database import engine
 from core.init_core_data import init_core_data
 from core.utils.s3_buckets import ensure_import_buckets
+from core.routers.ad_personalization_api import all_ad_personalization_routers
 from core.routers.analytics_api import all_analytics_routers
 from core.routers.ask_data_api import all_ask_data_routers
 from core.routers.auth_api import all_auth_routers
@@ -87,6 +88,7 @@ API_ROUTER_GROUPS = (
     all_segment_routers,
     all_persona_routers,
     all_analytics_routers,
+    all_ad_personalization_routers,
     all_ask_data_routers,
 )
 

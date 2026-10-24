@@ -11,6 +11,8 @@
 #      deploy-promotions.sh because customer360-promotions moved to Kubernetes and there is no
 #      longer a VM with psql on it to bootstrap from -- but this script already reaches
 #      the private vDB through the bastion.
+#      customer360-promotions/sql-scripts/personalization-schema.sql (ad personalisation
+#      tables; idempotent) runs straight after it, before any sample data.
 #   ./run-sql.sh <uat|prod>
 #
 # PROMOTIONS_SEED_SAMPLE=true also loads customer360-promotions/sql-scripts/sample-data-init.sql
@@ -105,6 +107,11 @@ fi
 PROMOTIONS_SEED_SAMPLE="${PROMOTIONS_SEED_SAMPLE:-$([[ "$ENV" == "uat" ]] && echo true || echo false)}"
 if [[ -f "$PROMOTIONS_SQL_DIR/db-schema-init.sql" ]]; then
   FILES+=("$PROMOTIONS_SQL_DIR/db-schema-init.sql")
+  # Ad personalisation additions (specs/003-ad-personalization-engine): idempotent,
+  # applied after the base schema and before any sample data.
+  if [[ -f "$PROMOTIONS_SQL_DIR/personalization-schema.sql" ]]; then
+    FILES+=("$PROMOTIONS_SQL_DIR/personalization-schema.sql")
+  fi
   if [[ "$PROMOTIONS_SEED_SAMPLE" == "true" && -f "$PROMOTIONS_SQL_DIR/sample-data-init.sql" ]]; then
     FILES+=("$PROMOTIONS_SQL_DIR/sample-data-init.sql")
   fi

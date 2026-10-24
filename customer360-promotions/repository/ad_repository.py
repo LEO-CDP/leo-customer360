@@ -20,7 +20,7 @@ Performance notes:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable, Optional
 
 from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
@@ -317,6 +317,226 @@ class AdRepository:
         finally:
             session.close()
 
+    # ------------------------------------------------------------------
+    # Personalisation: candidates and payloads
+    # ------------------------------------------------------------------
+
+    # Everything eligibility and scoring need, plus every column the payload
+    # builder (_build_serving_ad) reads, so a candidate row can be turned into a
+    # serving payload without another query.
+    _CANDIDATE_SELECT = """
+        SELECT a.tenant_id, a.ad_id, a.ad_key, a.placement_id, a.campaign_id,
+               a.score_weight, a.frequency_cap, a.metadata AS ad_metadata,
+               cr.creative_id, cr.creative_key, cr.ad_type, cr.format_code,
+               cr.headline, cr.subheadline, cr.body, cr.cta, cr.image_url,
+               cr.content_payload, cr.advertiser_id,
+               cr.status AS creative_status,
+               cr.starts_at AS creative_starts_at,
+               cr.ends_at AS creative_ends_at,
+               c.campaign_key,
+               c.status AS campaign_status,
+               c.starts_at AS campaign_starts_at,
+               c.ends_at AS campaign_ends_at,
+               c.objective AS campaign_objective,
+               pa.is_active AS serving_index_active,
+               pa.valid_from AS serving_index_valid_from,
+               pa.valid_to AS serving_index_valid_to
+        FROM leo_ads.ad a
+        JOIN leo_ads.creative cr ON cr.creative_id = a.creative_id
+        LEFT JOIN leo_ads.campaign c ON c.campaign_id = a.campaign_id
+        LEFT JOIN leo_ads.placement_ad pa
+               ON pa.ad_id = a.ad_id AND pa.placement_id = a.placement_id
+        JOIN leo_ads.tenant t ON t.tenant_id = a.tenant_id
+    """
+
+    def get_candidate_ads(
+        self,
+        tenant_key: str,
+        placement_ref: str,
+        max_candidates: int = 100,
+    ) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]]]:
+        """
+        Every active ad that could serve for a placement, with what is needed to
+        decide eligibility and rank them. No eligibility is applied here.
+
+        Selection mirrors get_serving_ads: ``placement_ref`` is a placement key (or
+        legacy demo id), else an ad key; if the placement has no active ads, the
+        tenant's active ads are used. Candidates come back in the default order
+        (score_weight descending, then ad_id), each with its targeting ``rules``.
+
+        Returns ``(placement, candidates)``; the placement is None when the
+        reference matched nothing.
+        """
+
+        limit = max(1, min(max_candidates, 200))
+        session = self._session()
+
+        try:
+            placement = session.execute(
+                text(
+                    """
+                    SELECT p.tenant_id, p.placement_id, p.placement_key,
+                           p.responsive, p.max_width_px, p.max_height_px,
+                           p.metadata
+                    FROM leo_ads.placement p
+                    JOIN leo_ads.tenant t ON t.tenant_id = p.tenant_id
+                    WHERE t.tenant_key = :tenant_key
+                      AND p.status = 'active'
+                      AND (
+                          p.placement_key = :ref
+                          OR p.metadata ->> 'demoPlacementId' = :ref
+                      )
+                    LIMIT 1
+                    """
+                ),
+                {"tenant_key": tenant_key, "ref": placement_ref},
+            ).mappings().first()
+
+            if placement is not None:
+                ad_filter = "a.placement_id = :placement_id"
+                params: dict[str, Any] = {"placement_id": placement["placement_id"]}
+            else:
+                ad_filter = "a.ad_key = :ad_key"
+                params = {"ad_key": placement_ref}
+
+            order = "ORDER BY a.score_weight DESC, a.ad_id ASC LIMIT :limit"
+            base_params = {"tenant_key": tenant_key, "limit": limit}
+
+            rows = session.execute(
+                text(
+                    f"""
+                    {self._CANDIDATE_SELECT}
+                    WHERE t.tenant_key = :tenant_key
+                      AND a.status = 'active'
+                      AND {ad_filter}
+                    {order}
+                    """
+                ),
+                {**params, **base_params},
+            ).mappings().all()
+
+            if not rows and placement is not None:
+                rows = session.execute(
+                    text(
+                        f"""
+                        {self._CANDIDATE_SELECT}
+                        WHERE t.tenant_key = :tenant_key
+                          AND a.status = 'active'
+                          AND a.tenant_id = :tenant_id
+                        {order}
+                        """
+                    ),
+                    {**base_params, "tenant_id": placement["tenant_id"]},
+                ).mappings().all()
+
+            if not rows:
+                return (dict(placement) if placement is not None else None), []
+
+            if placement is None:
+                # Single-ad lookup by ad_key: resolve its own placement so we can
+                # still report sensible dimensions and responsiveness.
+                placement = session.execute(
+                    text(
+                        """
+                        SELECT tenant_id, placement_id, placement_key, responsive,
+                               max_width_px, max_height_px, metadata
+                        FROM leo_ads.placement
+                        WHERE placement_id = :placement_id
+                        """
+                    ),
+                    {"placement_id": rows[0]["placement_id"]},
+                ).mappings().first()
+
+            tenant_id = rows[0]["tenant_id"]
+            rules_by_ad = self._load_rules(session, tenant_id, [r["ad_id"] for r in rows])
+            candidates = [
+                {**dict(row), "rules": rules_by_ad.get(row["ad_id"], [])} for row in rows
+            ]
+            return (dict(placement) if placement is not None else None), candidates
+
+        finally:
+            session.close()
+
+    @staticmethod
+    def _load_rules(
+        session: Session, tenant_id: int, ad_ids: list[int]
+    ) -> dict[int, list[dict[str, Any]]]:
+        """Targeting rules for the given ads, grouped by ad (tenant-scoped)."""
+
+        rows = session.execute(
+            text(
+                """
+                SELECT ad_id, countries, regions, device_types, os_types,
+                       browser_types, languages, context_keywords,
+                       exclude_predicates, priority
+                FROM leo_ads.targeting_rule
+                WHERE tenant_id = :tenant_id AND ad_id = ANY(:ad_ids)
+                ORDER BY priority DESC, targeting_rule_id ASC
+                """
+            ),
+            {"tenant_id": tenant_id, "ad_ids": list(ad_ids)},
+        ).mappings().all()
+
+        grouped: dict[int, list[dict[str, Any]]] = {}
+        for row in rows:
+            grouped.setdefault(row["ad_id"], []).append(dict(row))
+        return grouped
+
+    def build_serving_payloads(
+        self,
+        placement: Optional[dict[str, Any]],
+        ads: list[dict[str, Any]],
+        placement_ref: str,
+        click_id_for: Optional[Callable[[dict[str, Any]], Optional[str]]] = None,
+    ) -> list[dict[str, Any]]:
+        """Turn candidate rows into the ads.data.json-shaped serving payloads.
+
+        ``click_id_for`` maps a candidate row to the click id issued with that ad
+        for this request (see personalization/conversions.issue_click_id).
+        """
+
+        if not ads:
+            return []
+
+        session = self._session()
+        try:
+            return [
+                self._build_serving_ad(
+                    session, placement, ad, placement_ref,
+                    click_id=click_id_for(ad) if click_id_for else None,
+                )
+                for ad in ads
+            ]
+        finally:
+            session.close()
+
+    def get_ads_by_keys(
+        self, tenant_id: int, ad_keys: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Resolve ad keys to their catalogue ids for one tenant (event ingestion)."""
+
+        if not ad_keys:
+            return {}
+
+        session = self._session()
+        try:
+            rows = session.execute(
+                text(
+                    """
+                    SELECT a.ad_key, a.ad_id, a.campaign_id, a.creative_id, a.placement_id,
+                           a.metadata AS ad_metadata, cr.advertiser_id, cr.ad_type,
+                           cr.format_code, cr.content_payload
+                    FROM leo_ads.ad a
+                    JOIN leo_ads.creative cr ON cr.creative_id = a.creative_id
+                    WHERE a.tenant_id = :tenant_id AND a.ad_key = ANY(:ad_keys)
+                    """
+                ),
+                {"tenant_id": tenant_id, "ad_keys": list(ad_keys)},
+            ).mappings().all()
+            return {row["ad_key"]: dict(row) for row in rows}
+        finally:
+            session.close()
+
     @staticmethod
     def _placement_dimensions(placement: Any) -> dict[str, Any]:
         if placement is None or placement["responsive"]:
@@ -334,6 +554,7 @@ class AdRepository:
         placement: Any,
         ad: Any,
         placement_ref: str,
+        click_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Fetch the remaining creative-linked rows for a single ad and
@@ -397,6 +618,10 @@ class AdRepository:
         tracking = {
             f"{row['event_type']}Url": row["endpoint_url"] for row in tracking_rows
         }
+        if click_id:
+            # Reported back on the click event and passed to the advertiser, so a
+            # later conversion postback can be attributed to this click.
+            tracking["clickId"] = click_id
 
         advertiser_dict = (
             {
@@ -449,6 +674,7 @@ class AdRepository:
                     "type": destination["destination_type_code"],
                     "url": destination["url"],
                     "finalUrl": destination["final_url"],
+                    **({"clickId": click_id} if click_id else {}),
                 }
                 if destination is not None
                 else None

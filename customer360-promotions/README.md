@@ -195,33 +195,57 @@ Retrieve an active placement by its external key.
 ### Ad Serving
 
 **GET** `/serve/{placement_ref}`
-Assemble a full ad-serving payload for a placement or ad.
+Assemble the ads for a placement (or a single ad), applying eligibility and, when it applies to the visitor, ranking them for that visitor. Full contract: `specs/003-ad-personalization-engine/contracts/data-plane.openapi.yaml`.
 
 **Parameters:**
 - `placement_ref` (str, path): Placement key or ad key
-- `tenant` (str, query): Tenant key (default: "demo")
-- `limit` (int, query): Max ads to return (default: 5)
+- `tenant` (str, query): Tenant key (default: "demo"); an unknown tenant returns 200 with no ads
+- `limit` (int, query): Max ads to return, 1 to 20 (default: 5)
+- `leovid` (str, query, optional): The widget's visitor id. Omit it for default ranking
+- `session` (str, query, optional): Browser session id (accepted; not used for ranking)
+- `site` (str, query, optional): Opaque site key, to resolve site-level settings
+- `consent` (`granted` | `denied` | `unknown`, query, default `unknown`): Consent state the site reports. `granted` and `denied` apply to this request and are also recorded; `unknown` defers to the stored record and the tenant's consent mode
+- `ctx` (str, query, optional): Comma-separated page keywords, matched against targeting `context_keywords`
+- `lang` (str, query, optional): Language, for targeting
+
+Country comes from a CDN header (`X-Country-Code`, `CloudFront-Viewer-Country`, `CF-IPCountry`); device, operating system and browser come from the `User-Agent`. An attribute that is unknown never excludes an ad.
 
 **Response:**
 ```json
 {
-  "ads": [
-    {
-      "ad_id": 1,
-      "ad_key": "ad_1001",
-      "creative_id": 500,
-      "campaign_id": 100,
-      "placement_id": 10,
-      "status": "active",
-      "score_weight": 2.0,
-      "frequency_cap": 3,
-      "metadata": {}
-    }
-  ]
+  "request_id": "7f3c2b1e-5d4a-4a7e-9b18-0c6d2f4e8a11",
+  "personalisation": { "applied": true, "group": "personalised", "reason": null },
+  "ads": [ { "adId": "ad_1001", "adFormat": "single_banner", "creative": { "headline": "…" } } ]
 }
 ```
 
-**Note:** This is a development/test endpoint; production usage should implement proper tenant authentication via JWT/OAuth.
+- `ads` keeps the existing serving payload (creative, rendering, tracking, advertiser, destination); each ad's tracking also carries a `clickId`.
+- `request_id` ties later events and the stored serving decision to this response.
+- `group` is one of `personalised`, `holdout`, `default_no_history`, `default_no_consent`, `default_disabled`, `default_fallback`. Everything except `personalised` serves the eligible ads in default order. `default_fallback` means personalisation could not finish inside its time budget (`reason` says why); it is never an error.
+
+**Eligibility** (applies to every group): the ad and its creative must be active and inside their validity windows, the campaign must be active and inside its dates, the placement validity window must be open, no targeting rule may exclude the request on a known mismatch, and the visitor must be under the ad's `frequency_cap`. The switch `c360_PROMOTION_ELIGIBILITY_ENFORCED` turns all of this off (see `docs/ad-personalization.md`).
+
+**Note:** This is a public, unauthenticated endpoint by design (widgets call it from visitors' browsers); the tenant is a query parameter and every query is tenant-scoped.
+
+**POST** `/events`
+Report visitor interactions in batches of up to 50: `impression`, `view` (with `dwell_ms`, at least `c360_PROMOTION_VIEW_MIN_DWELL_MS`), `click`, `dismiss` and `conversion`. Body: `tenant`, optional `leovid`, `session_id`, `site`, and `events[]` (`event_type`, `request_id`, `ad_key`, `event_time`, optional `event_id`, `dwell_ms`, `click_id`, `page_url`).
+- `202` with `{"accepted": n, "rejected": [{"index", "reason"}]}`. A bad event is rejected with a reason and never fails the batch. Reasons: `unknown_ad`, `below_view_threshold`, `duplicate`, `bot`, `orphan_click`, `invalid_event_type`, `invalid_request_id`, `invalid_time`.
+- Events flagged `bot`, `orphan_click` or a repeated click are stored with that flag (as evidence) and excluded from profiles and statistics.
+- Only the page address (no query string or fragment) is stored.
+- `400` more than 50 events, `404` unknown tenant, `422` malformed body, `429` and `503` with `Retry-After` (visitor over their limit; intake buffer full).
+- A visitor who may not be profiled (personalisation off for the scope, no consent) has their events stored **without** a visitor key.
+
+**POST** `/conversions`
+Signed server-to-server conversion postback. Headers `X-Tenant-Key`, `X-Timestamp` (within `c360_PROMOTION_CONVERSION_REPLAY_WINDOW_SECONDS`) and `X-Signature` (hex HMAC-SHA-256 of the raw body with the tenant's conversion secret). `202` accepted, `401` bad, missing or stale signature, `409` repeated `event_id`, `422` cannot be attributed to a known click (`click_id`) or request (`request_id`). Disabled until `c360_PROMOTION_CONVERSION_SECRETS` has a secret for the tenant.
+
+**PUT** `/consent`
+Record a visitor's choice: `{"tenant", "leovid", "status": "granted" | "denied", "source"}`. `204`, idempotent. A denial takes effect immediately for ranking and clears the visitor's fresh state.
+
+**Visitor ids.** `leovid` is never stored. The server derives a keyed hash (HMAC-SHA-256, per-tenant secret from `c360_PROMOTION_VISITOR_KEY_MASTER_SECRET`, truncated to 16 bytes) and stores only that. Outside development the secret must be set or personalisation stays off.
+
+**New tables** (`sql-scripts/personalization-schema.sql`, applied by `start.sh`): `personalization_setting`, `consent_record`, `consent_history`, `visitor_behaviour_profile`, `ad_stat_hourly`, `cohort_pattern`, `serving_decision` (daily partitions) and `erasure_request`; `ad_event` gains a `flags` column and monthly partitions. Hot visitor state lives in Redis (rebuildable, fails open). Batch jobs that fill these (profiles, statistics, cohorts, identity links, erasure, partitions) are Dagster jobs in `customer360-backend/ad_personalization`.
+
+**Settings** (all `c360_PROMOTION_*`, listed with defaults in `.env.example`): `PERSONALIZATION_TIME_BUDGET_MS`, `VIEW_MIN_DWELL_MS`, `COHORT_MIN_SIZE`, `AFFINITY_HALF_LIFE_DAYS`, `AFFINITY_WEIGHT_CLIP_MIN/MAX`, `BETA_PRIOR_STRENGTH`, `EVENT_BATCH_MAX`, `EVENT_BUFFER_MAX`, `EVENT_RATE_LIMIT_PER_MINUTE`, `CONSENT_RATE_LIMIT_PER_MINUTE`, `NEW_AD_MIN_SHARE`, `NEW_AD_IMPRESSION_THRESHOLD`, `LOW_HISTORY_EVENT_THRESHOLD`, `CONVERSION_REPLAY_WINDOW_SECONDS`, `CONVERSION_SECRETS`, `VISITOR_KEY_MASTER_SECRET`, `ELIGIBILITY_ENFORCED`. Operating guide: `docs/ad-personalization.md`.
 
 ---
 
@@ -281,7 +305,7 @@ Represents the business/buying configuration. One campaign may fund multiple ads
 - `budget_amount` (Decimal): Total budget
 - `currency` (String): ISO 4217 code (e.g., 'USD')
 - `daily_budget_amount` (Decimal, nullable): Daily cap
-- `status` (String): `'draft' | 'approved' | 'running' | 'paused' | 'ended' | 'archived'`
+- `status` (String): `'draft' | 'active' | 'paused' | 'completed' | 'archived'` (only `active` campaigns serve)
 - `starts_at`, `ends_at` (DateTime, nullable): Campaign date range
 - `metadata` (JSONB): Campaign-specific config (targeting rules, bid strategy, etc.)
 

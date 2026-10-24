@@ -110,6 +110,12 @@
         <div id="analytics-content"></div>
       </section>
 
+      <!-- Ad personalisation: decision explanations and the hold-out comparison.
+         Rendered entirely by static/js/ad-personalization-view.js -->
+      <section id="view-ad-personalization" class="hidden">
+        <div id="ad-personalization-content" class="space-y-4"></div>
+      </section>
+
       <!-- Master Profiles list. Shell markup from static/templates/profiles-list.html,
          rows rendered by the shared C360.DataTableView component (see
          static/js/data-table-view.js) from static/js/list-view.js's column config. -->
@@ -250,6 +256,7 @@
   <script src="{{ static_base }}/js/profile-detail-view.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/overview-view.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/analytics.js?cb={{ cache_bust }}"></script>
+  <script src="{{ static_base }}/js/ad-personalization-view.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/ai-agent-workflow.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/segments-view.js?cb={{ cache_bust }}"></script>
   <script src="{{ static_base }}/js/campaign-view.js?cb={{ cache_bust }}"></script>

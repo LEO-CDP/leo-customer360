@@ -92,10 +92,30 @@ fi
 ###############################################################################
 echo -e "${YELLOW}Running c360 PROMOTION API API unit tests...${NC}"
 
+PYTEST_STATUS=0
+
 if [ -z "$TEST_FILES" ]; then
-    # PostgreSQL available - run all tests
-    "$VENV_PYTHON" -m pytest tests/ -v "$@"
+    # PostgreSQL available - run all tests (includes tests/personalization/)
+    "$VENV_PYTHON" -m pytest tests/ -v "$@" || PYTEST_STATUS=$?
 else
-    # Only model tests (SQLite-compatible)
-    "$VENV_PYTHON" -m pytest $TEST_FILES -v "$@"
+    # Model tests (SQLite-compatible) plus the personalization tests: its pure-logic
+    # tests need no database and its database tests skip themselves when PostgreSQL
+    # is unreachable.
+    "$VENV_PYTHON" -m pytest $TEST_FILES tests/personalization -v "$@" || PYTEST_STATUS=$?
+fi
+
+###############################################################################
+# Widget (ads.loader.js) tests: Node's built-in runner, no dependencies
+###############################################################################
+NODE_STATUS=0
+
+if command -v node &> /dev/null; then
+    echo -e "${YELLOW}Running widget loader tests...${NC}"
+    node --test tests/widget/ads.loader.test.js || NODE_STATUS=$?
+else
+    echo -e "${YELLOW}⚠ node not found - skipping tests/widget/ads.loader.test.js${NC}"
+fi
+
+if [ "$PYTEST_STATUS" -ne 0 ] || [ "$NODE_STATUS" -ne 0 ]; then
+    exit 1
 fi

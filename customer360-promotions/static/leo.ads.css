@@ -87,6 +87,34 @@
   margin-inline: auto;
 }
 
+/* Dismiss control added by ads.loader.js (reports a `dismiss` event, then hides the ad). */
+.leo-ad-container {
+  position: relative;
+}
+
+.leo-ad-dismiss {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 3;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--leo-ad-border);
+  border-radius: 50%;
+  background: var(--leo-ad-bg);
+  color: var(--leo-ad-subtext);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.leo-ad-dismiss:hover,
+.leo-ad-dismiss:focus-visible {
+  color: var(--leo-ad-text);
+  outline: 2px solid var(--leo-ad-accent);
+}
+
 .ad-widget-item {
   position: relative;
   display: block;

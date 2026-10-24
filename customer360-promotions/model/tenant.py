@@ -7,8 +7,11 @@ only needs it so SQLAlchemy can resolve those foreign keys, tenant management
 itself is out of scope for this service.
 """
 
+import uuid
+from typing import Optional
+
 from sqlalchemy import BigInteger, DateTime, String, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from model.base import Base
@@ -26,6 +29,12 @@ class Tenant(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     settings: Mapped[dict] = mapped_column(
         "settings", JSONB, nullable=False, default=dict
+    )
+    # Link to the platform tenant (customer360.sys_tenant.tenant_id). Lets the
+    # admin API resolve this ad tenant from a caller's token. Nullable and
+    # unique where set; added by sql-scripts/personalization-schema.sql.
+    customer360_tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
     )
     created_at: Mapped["DateTime"] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
