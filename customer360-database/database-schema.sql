@@ -4053,6 +4053,164 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_cdp_content_items_tenant_id
 CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_message_templates_tenant_id
     ON customer360.crm_message_templates (tenant_id, template_id);
 
+-- =========================================================================
+-- CUSTOMER VALUE / CLV VALUATION SNAPSHOTS
+-- =========================================================================
+-- One reproducible valuation snapshot per tenant, profile, business domain,
+-- as-of date, and model version. Shared fields cover common lifecycle and
+-- economics features; JSONB fields hold domain-specific features and outputs.
+CREATE TABLE IF NOT EXISTS customer360.cdp_customer_valuation (
+    valuation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    tenant_id UUID NOT NULL
+        REFERENCES customer360.sys_tenant (tenant_id) ON DELETE CASCADE,
+    master_profile_id UUID NOT NULL,
+    domain_code VARCHAR(50) NOT NULL
+        REFERENCES customer360.sys_domain (domain_code)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+
+    CONSTRAINT fk_cdp_customer_valuation_tenant_profile
+        FOREIGN KEY (tenant_id, master_profile_id)
+        REFERENCES customer360.cdp_master_profiles (tenant_id, master_profile_id)
+        ON DELETE CASCADE,
+
+    as_of_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    currency CHAR(3) NOT NULL,
+    model_name VARCHAR(100) NOT NULL DEFAULT 'discounted_contribution_clv',
+    model_version VARCHAR(50) NOT NULL DEFAULT '1.0.0',
+    feature_version VARCHAR(50) NOT NULL DEFAULT '1.0.0',
+
+    -- Shared lifecycle and transaction/engagement features.
+    customer_tenure_days INTEGER
+        CHECK (customer_tenure_days IS NULL OR customer_tenure_days >= 0),
+    days_since_last_transaction INTEGER
+        CHECK (days_since_last_transaction IS NULL OR days_since_last_transaction >= 0),
+    days_since_last_engagement INTEGER
+        CHECK (days_since_last_engagement IS NULL OR days_since_last_engagement >= 0),
+    active_months_12m SMALLINT
+        CHECK (active_months_12m IS NULL OR active_months_12m BETWEEN 0 AND 12),
+    active_days_30d INTEGER
+        CHECK (active_days_30d IS NULL OR active_days_30d >= 0),
+    transactions_30d BIGINT
+        CHECK (transactions_30d IS NULL OR transactions_30d >= 0),
+    transactions_90d BIGINT
+        CHECK (transactions_90d IS NULL OR transactions_90d >= 0),
+    transactions_12m BIGINT
+        CHECK (transactions_12m IS NULL OR transactions_12m >= 0),
+    sessions_30d BIGINT
+        CHECK (sessions_30d IS NULL OR sessions_30d >= 0),
+    engagement_events_30d BIGINT
+        CHECK (engagement_events_30d IS NULL OR engagement_events_30d >= 0),
+    product_views_30d BIGINT
+        CHECK (product_views_30d IS NULL OR product_views_30d >= 0),
+    add_to_cart_30d BIGINT
+        CHECK (add_to_cart_30d IS NULL OR add_to_cart_30d >= 0),
+
+    -- Historical economics. Contribution profit may be negative.
+    historical_revenue_12m NUMERIC(20, 4)
+        CHECK (historical_revenue_12m IS NULL OR historical_revenue_12m >= 0),
+    recurring_revenue_12m NUMERIC(20, 4)
+        CHECK (recurring_revenue_12m IS NULL OR recurring_revenue_12m >= 0),
+    average_transaction_value_12m NUMERIC(20, 4)
+        CHECK (average_transaction_value_12m IS NULL OR average_transaction_value_12m >= 0),
+    historical_gross_profit NUMERIC(20, 4),
+    historical_contribution_profit_12m NUMERIC(20, 4),
+    acquisition_cost NUMERIC(20, 4)
+        CHECK (acquisition_cost IS NULL OR acquisition_cost >= 0),
+
+    -- Canonical forecast inputs.
+    retention_probability_12m NUMERIC(7, 6)
+        CHECK (retention_probability_12m IS NULL OR retention_probability_12m BETWEEN 0 AND 1),
+    churn_probability_12m NUMERIC(7, 6)
+        CHECK (churn_probability_12m IS NULL OR churn_probability_12m BETWEEN 0 AND 1),
+    expected_transactions_per_year NUMERIC(18, 6)
+        CHECK (expected_transactions_per_year IS NULL OR expected_transactions_per_year >= 0),
+    expected_value_per_transaction NUMERIC(20, 4)
+        CHECK (expected_value_per_transaction IS NULL OR expected_value_per_transaction >= 0),
+    gross_margin_rate NUMERIC(7, 6)
+        CHECK (gross_margin_rate IS NULL OR gross_margin_rate BETWEEN 0 AND 1),
+    expected_annual_revenue NUMERIC(20, 4)
+        CHECK (expected_annual_revenue IS NULL OR expected_annual_revenue >= 0),
+    expected_annual_contribution_profit NUMERIC(20, 4),
+    expected_annual_service_cost NUMERIC(20, 4)
+        CHECK (expected_annual_service_cost IS NULL OR expected_annual_service_cost >= 0),
+    expected_annual_marketing_cost NUMERIC(20, 4)
+        CHECK (expected_annual_marketing_cost IS NULL OR expected_annual_marketing_cost >= 0),
+    discount_rate NUMERIC(7, 6)
+        CHECK (discount_rate IS NULL OR discount_rate >= 0),
+    annual_value_growth_rate NUMERIC(7, 6) NOT NULL DEFAULT 0
+        CHECK (annual_value_growth_rate > -1),
+    forecast_horizon_years SMALLINT NOT NULL DEFAULT 5
+        CHECK (forecast_horizon_years BETWEEN 1 AND 30),
+
+    -- Domain-specific aggregates, derived location, assumptions, and features.
+    domain_features JSONB NOT NULL DEFAULT '{}'::jsonb,
+    location_features JSONB NOT NULL DEFAULT '{}'::jsonb,
+    model_assumptions JSONB NOT NULL DEFAULT '{}'::jsonb,
+    feature_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+    -- Discounted contribution-value outputs.
+    predicted_clv_12m NUMERIC(20, 4),
+    predicted_clv_36m NUMERIC(20, 4),
+    predicted_clv_horizon_before_cac NUMERIC(20, 4),
+    predicted_clv_horizon_after_cac NUMERIC(20, 4),
+    predicted_revenue_horizon NUMERIC(20, 4),
+    predicted_contribution_profit_horizon NUMERIC(20, 4),
+    model_confidence NUMERIC(7, 6)
+        CHECK (model_confidence IS NULL OR model_confidence BETWEEN 0 AND 1),
+    data_quality_score NUMERIC(5, 2)
+        CHECK (data_quality_score IS NULL OR data_quality_score BETWEEN 0 AND 100),
+    clv_segment VARCHAR(50),
+
+    -- Optional upstream scores and campaign-value estimate.
+    purchase_intent_score NUMERIC(7, 4)
+        CHECK (purchase_intent_score IS NULL OR purchase_intent_score BETWEEN 0 AND 100),
+    churn_risk_score NUMERIC(7, 4)
+        CHECK (churn_risk_score IS NULL OR churn_risk_score BETWEEN 0 AND 100),
+    next_best_product_score NUMERIC(7, 4)
+        CHECK (next_best_product_score IS NULL OR next_best_product_score BETWEEN 0 AND 100),
+    incremental_campaign_value NUMERIC(20, 4),
+    profile_quality_score NUMERIC(5, 2)
+        CHECK (profile_quality_score IS NULL OR profile_quality_score BETWEEN 0 AND 100),
+    explanation JSONB NOT NULL DEFAULT '{}'::jsonb,
+    insights TEXT,
+    actions JSONB NOT NULL DEFAULT '[]'::jsonb
+        CHECK (jsonb_typeof(actions) = 'array'),
+
+    calculation_status VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+        CHECK (calculation_status IN ('PENDING', 'COMPUTED', 'INSUFFICIENT_DATA', 'FAILED')),
+    last_error TEXT,
+    calculated_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_cdp_customer_valuation_snapshot UNIQUE
+        (tenant_id, master_profile_id, domain_code, as_of_date, model_name, model_version)
+);
+
+COMMENT ON TABLE customer360.cdp_customer_valuation IS
+'Cross-industry customer lifetime value feature snapshot and model-output table. One row per tenant/profile/domain/as-of-date/model/version.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.domain_features IS
+'Industry-specific aggregate features and expected annual economics. Avoid raw PII and unnecessary sensitive data.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.location_features IS
+'Privacy-minimized derived location features; avoid precise raw location unless justified and authorized.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.data_quality_score IS
+'Input completeness score (0-100), not statistical model confidence or prediction accuracy.';
+COMMENT ON COLUMN customer360.cdp_customer_valuation.actions IS
+'JSON array of LLM-recommended action candidates. Review before activating campaigns.';
+
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_tenant_domain_profile
+    ON customer360.cdp_customer_valuation (tenant_id, domain_code, master_profile_id);
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_clv_rank
+    ON customer360.cdp_customer_valuation
+        (tenant_id, domain_code, predicted_clv_horizon_after_cac DESC NULLS LAST)
+    WHERE calculation_status = 'COMPUTED';
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_pending
+    ON customer360.cdp_customer_valuation (tenant_id, created_at)
+    WHERE calculation_status = 'PENDING';
+CREATE INDEX IF NOT EXISTS idx_cdp_customer_valuation_domain_features
+    ON customer360.cdp_customer_valuation USING GIN (domain_features);
+
 CREATE TABLE IF NOT EXISTS customer360.cdp_profile_recommendation_runs (
     tenant_id UUID NOT NULL REFERENCES customer360.sys_tenant(tenant_id) ON DELETE CASCADE,
     segment_id UUID NOT NULL,
@@ -4862,6 +5020,7 @@ DECLARE
         'crm_suppression_list',
         'sys_data_source',
         'sys_user_role',
+        'cdp_customer_valuation',
         'graph_edges',
         'crm_flow',
         'crm_flow_version',

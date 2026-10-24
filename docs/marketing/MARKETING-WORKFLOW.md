@@ -4,6 +4,47 @@ This document describes the campaign behavior that is implemented in the
 repository today. The campaign is a workflow-owned execution record. It is
 not a template-owned email campaign.
 
+## Supported Marketing Domains
+
+Campaigns use the tenant's active business-domain catalog. The API validates
+domain values against `customer360.sys_domain` through
+[`domains.py`](../../customer360-api/core/utils/domains.py), and the metadata
+endpoint returns only domains enabled for the requested tenant. The catalog is
+therefore tenant-scoped at runtime; do not assume that every tenant exposes
+every seeded domain.
+
+The current core seed catalog supports:
+
+| Code | Business domain |
+| --- | --- |
+| `retail` | Retail & E-Commerce |
+| `banking` | Banking & Financial Services |
+| `insurance` | Insurance |
+| `healthcare` | Healthcare |
+| `telecom` | Telecommunications |
+| `travel` | Travel & Hospitality |
+| `real_estate` | Real Estate |
+| `education` | Education |
+| `manufacturing` | Manufacturing |
+| `media` | Media & Entertainment |
+| `hospitality` | Hospitality & Food Service |
+
+These values are seeded in
+[`init-core-database.sql`](../../customer360-database/init-core-database.sql)
+and filtered through `sys_tenant_domain`. Profile identity resolution,
+segmentation, content, and persona APIs use the same active-domain catalog.
+The special value `all` is accepted by APIs that support cross-domain filters;
+it is not a row in `sys_domain`.
+
+Business domains are separate from campaign delivery channels. The workflow
+engine currently supports email, web push, and notification providers for SMS,
+Zalo OA, WhatsApp, and mobile-native push. Reached custom-audience actions
+support Meta Ads, Google Ads, and TikTok Ads. These channel/provider
+capabilities are configured per tenant and are skipped explicitly when the
+required connector or consent is unavailable.
+
+
+
 ## Product and architecture overview
 
 Marketing teams define a campaign audience, design a versioned customer
