@@ -25,39 +25,52 @@ SET domain_name = EXCLUDED.domain_name,
     is_active = TRUE,
     updated_at = NOW();
 
-INSERT INTO customer360.sys_tenant_domain (
-    tenant_id,
-    domain_id,
-    is_default,
-    is_active
-)
-SELECT
-    tenant_id,
-    domain_id,
-    FALSE,
-    TRUE
-FROM customer360.sys_tenant
-CROSS JOIN customer360.sys_domain
-WHERE sys_domain.domain_code = '_'
-ON CONFLICT (tenant_id, domain_id) DO UPDATE
-SET is_active = TRUE;
+DO $$
+DECLARE
+    current_tenant_id UUID;
+BEGIN
+    FOR current_tenant_id IN
+        SELECT tenant_id FROM customer360.sys_tenant ORDER BY tenant_id
+    LOOP
+        -- sys_tenant_domain is FORCE RLS-protected. Scope each tenant
+        -- operation explicitly instead of relying on a superuser bypass.
+        PERFORM set_config('app.tenant_id', current_tenant_id::text, true);
+
+        INSERT INTO customer360.sys_tenant_domain (
+            tenant_id,
+            domain_id,
+            is_default,
+            is_active
+        )
+        SELECT
+            current_tenant_id,
+            domain_id,
+            FALSE,
+            TRUE
+        FROM customer360.sys_domain
+        WHERE domain_code = '_'
+        ON CONFLICT (tenant_id, domain_id) DO UPDATE
+        SET is_active = TRUE;
+
+        UPDATE customer360.cdp_master_profiles
+        SET domain = '_',
+            updated_at = NOW()
+        WHERE tenant_id = current_tenant_id
+          AND (domain IS NULL OR BTRIM(domain) = '' OR domain = 'unknown');
+
+        UPDATE customer360.cdp_raw_profiles_stage
+        SET domain = '_'
+        WHERE tenant_id = current_tenant_id
+          AND (domain IS NULL OR BTRIM(domain) = '' OR domain = 'unknown');
+    END LOOP;
+
+    -- Do not leak a tenant context to statements after this migration.
+    PERFORM set_config('app.tenant_id', '', true);
+END;
+$$;
 
 ALTER TABLE customer360.cdp_master_profiles
     ALTER COLUMN domain SET DEFAULT '_';
 
 ALTER TABLE customer360.cdp_raw_profiles_stage
     ALTER COLUMN domain SET DEFAULT '_';
-
--- Repair legacy profile rows produced before the neutral fallback existed.
-UPDATE customer360.cdp_master_profiles
-SET domain = '_',
-    updated_at = NOW()
-WHERE domain IS NULL
-   OR BTRIM(domain) = ''
-   OR domain = 'unknown';
-
-UPDATE customer360.cdp_raw_profiles_stage
-SET domain = '_'
-WHERE domain IS NULL
-   OR BTRIM(domain) = ''
-   OR domain = 'unknown';
